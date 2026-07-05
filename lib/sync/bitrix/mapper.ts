@@ -1,8 +1,11 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 05/07/2026
 // Tradução de um DEAL/LEAD cru do Bitrix para o formato do núcleo `records`,
 // usando o field map (lib/config/bitrix-field-map) e os lookups. Campos
 // auxiliares com prefixo `_` não são colunas — servem ao orquestrador do sync
 // (owner/responsável, lead relacionado, data de referência do lead time).
+// v1.1 (05/07/2026): mapLead passa a capturar custom_fields.email (multifield
+//   EMAIL do Bitrix) — necessário para o match de lead relacionado por e-mail
+//   das vendas do site (Fase 3).
 import {
   DEAL_CORE,
   DEAL_CUSTOM,
@@ -164,6 +167,15 @@ export async function mapDeal(
   };
 }
 
+// EMAIL é um multifield do Bitrix: array de {VALUE, VALUE_TYPE, ...}. Usamos o
+// primeiro e-mail — é o que a Fase 3 (sync de Sheets) usa para casar a venda
+// do site com o lead de origem.
+function firstEmail(v: unknown): string | null {
+  if (!Array.isArray(v) || v.length === 0) return null;
+  const first = v[0] as { VALUE?: unknown } | undefined;
+  return strOrNull(first?.VALUE);
+}
+
 export async function mapLead(
   raw: Raw,
   lookups: BitrixLookups
@@ -178,6 +190,7 @@ export async function mapLead(
       "lead"
     );
   }
+  custom_fields.email = firstEmail(raw["EMAIL"]);
 
   return {
     record_type: "lead",
