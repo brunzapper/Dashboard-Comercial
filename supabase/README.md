@@ -18,6 +18,17 @@ Environment Variables da Vercel.
 As migrations individuais ficam em [`migrations/`](./migrations) (0001…0011), caso
 prefira aplicar/versionar uma a uma.
 
+## Como aplicar a Fase 2 (Sync Bitrix)
+
+Depois da Fase 1, cole o [`apply/fase-2.sql`](./apply/fase-2.sql) (migração `0012`:
+Responsáveis, Operações e Lead relacionado) e execute. Também idempotente.
+
+Para o sync do Bitrix funcionar, configure na Vercel as env `BITRIX_WEBHOOK_URL`
+(webhook de ENTRADA / API REST) e `SYNC_SECRET`. Depois, na página **Registros** (logado
+como admin), use **Backfill inicial** (importa leads + deals do ano) e **Reconciliar**
+(últimos N dias). Os responsáveis são criados automaticamente a partir do Bitrix; o admin
+depois cura a lista (ativa/desativa) e monta as Operações. Não há webhook de saída por ora.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
