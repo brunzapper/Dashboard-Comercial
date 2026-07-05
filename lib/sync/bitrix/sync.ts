@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 05/07/2026
 // Orquestração do sync Bitrix → records: upsert com CONFLITO POR CAMPO
 // (campos editados manualmente após o último sync não são sobrescritos),
 // auditoria (origin 'sync_bitrix'), e resolução de owner (RLS), responsável
@@ -8,12 +8,27 @@
 // Convenção de field_modified_at: chave = nome da coluna do núcleo
 // (ex.: 'stage', 'mrr', 'responsible_id', 'related_lead_id') ou a chave do
 // custom_field (ex.: 'tier'). A edição manual (Fase 4) grava o timestamp ali.
+//
+// v1.1 (05/07/2026): isProtected/valuesDiffer/primaryOperationId/leadTimeDays
+//   extraídos para lib/sync/shared.ts (reutilizados pelo adapter de Sheets,
+//   Fase 3) — SyncResult também passa a vir de lá.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
 import { BitrixLookups } from "./lookups";
 import { mapDeal, mapLead, type MappedRecord } from "./mapper";
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
+import {
+  emptyResult,
+  isProtected,
+  leadTimeDays,
+  primaryOperationId,
+  valuesDiffer,
+  type ExistingRecord,
+  type SyncResult,
+} from "@/lib/sync/shared";
+
+export type { SyncResult };
 
 const CORE_SYNC_FIELDS = [
   "title",
@@ -31,44 +46,6 @@ const CORE_SYNC_FIELDS = [
   "source_created_at",
   "source_modified_at",
 ] as const;
-
-interface ExistingRecord {
-  id: string;
-  custom_fields: Record<string, unknown> | null;
-  field_modified_at: Record<string, string> | null;
-  last_synced_at: string | null;
-  responsible_id: string | null;
-  operation_id: string | null;
-  related_lead_id: string | null;
-  [key: string]: unknown;
-}
-
-export interface SyncResult {
-  inserted: number;
-  updated: number;
-  skipped: number;
-  errors: number;
-}
-
-function emptyResult(): SyncResult {
-  return { inserted: 0, updated: 0, skipped: 0, errors: 0 };
-}
-
-// Campo protegido = editado manualmente DEPOIS do último sync.
-function isProtected(field: string, existing: ExistingRecord): boolean {
-  const ts = existing.field_modified_at?.[field];
-  if (!ts) return false;
-  if (!existing.last_synced_at) return true;
-  return new Date(ts) > new Date(existing.last_synced_at);
-}
-
-function valuesDiffer(a: unknown, b: unknown): boolean {
-  if (a == null && b == null) return false;
-  if (typeof a === "number" || typeof b === "number") {
-    return Number(a) !== Number(b);
-  }
-  return String(a ?? "") !== String(b ?? "");
-}
 
 async function resolveOwnerUserId(
   db: SupabaseClient,
@@ -106,20 +83,6 @@ async function resolveResponsibleId(
   return (created?.id as string | undefined) ?? null;
 }
 
-async function primaryOperationId(
-  db: SupabaseClient,
-  responsibleId: string | null
-): Promise<string | null> {
-  if (!responsibleId) return null;
-  const { data } = await db
-    .from("responsible_operations")
-    .select("operation_id")
-    .eq("responsible_id", responsibleId)
-    .eq("priority", 1)
-    .maybeSingle();
-  return (data?.operation_id as string | undefined) ?? null;
-}
-
 // Lead relacionado: por LEAD_ID nativo; senão, pelo nome (mais recente).
 async function resolveRelatedLead(
   db: SupabaseClient,
@@ -155,14 +118,6 @@ async function resolveRelatedLead(
   }
 
   return null;
-}
-
-function leadTimeDays(refDate: string | null, leadCreated: string | null): number | null {
-  if (!refDate || !leadCreated) return null;
-  const ref = new Date(refDate).getTime();
-  const created = new Date(leadCreated).getTime();
-  if (Number.isNaN(ref) || Number.isNaN(created)) return null;
-  return Math.round((ref - created) / 86400000);
 }
 
 /** Insere ou atualiza um registro mapeado, respeitando conflito por campo. */

@@ -29,6 +29,22 @@ como admin), use **Backfill inicial** (importa leads + deals do ano) e **Reconci
 (últimos N dias). Os responsáveis são criados automaticamente a partir do Bitrix; o admin
 depois cura a lista (ativa/desativa) e monta as Operações. Não há webhook de saída por ora.
 
+## Como aplicar a Fase 3 (Sync Estudo de Fechamentos)
+
+Depois da Fase 2, cole o [`apply/fase-3.sql`](./apply/fase-3.sql) (migração `0013`:
+índice funcional para localizar o lead relacionado por e-mail) e execute.
+
+Esta fase é **receptora** (push): o Apps Script da planilha "Estudo de Fechamentos"
+(`integrations/apps-script/push_estudo_fechamentos.gs`) envia as linhas da aba "Site" a
+cada hora para `POST /api/sync/sheets`, protegido pela mesma `SYNC_SECRET`. Não há botão
+manual — a listagem em **Registros** vai mostrar essas vendas assim que o Apps Script
+rodar pela primeira vez (`installHourlyTrigger()`).
+
+**Recomendado:** depois de aplicar esta fase, rode **Reconciliar** de novo no Bitrix — o
+mapper de leads passou a capturar e-mail (necessário para casar vendas do site com o lead
+de origem), então um novo sync garante que os leads já importados fiquem com e-mail
+preenchido.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
