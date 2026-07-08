@@ -93,6 +93,41 @@ export function WidgetChart({
   const showLegend = metrics.length > 1;
 
   if (visualType === "kpi") {
+    // KPI com meta/razão (Fase 6B)
+    if (data.kpi) {
+      const k = data.kpi;
+      if (k.mode === "ratio") {
+        return (
+          <div className="flex h-full flex-col justify-center p-1">
+            <span className="text-3xl font-semibold tabular-nums">
+              {k.value == null ? "—" : fmt(k.value)}
+            </span>
+            <span className="text-muted-foreground text-xs">{k.label}</span>
+          </div>
+        );
+      }
+      const pct = k.pct == null ? null : Math.round(k.pct * 100);
+      return (
+        <div className="flex h-full flex-col justify-center gap-1 p-1">
+          <span className="text-3xl font-semibold tabular-nums">
+            {fmt(k.realizado)}
+          </span>
+          <span className="text-muted-foreground text-xs">{k.label}</span>
+          {k.meta != null ? (
+            <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 text-xs">
+              <span>Meta: {fmt(k.meta)}</span>
+              {pct != null ? (
+                <span className={pct >= 100 ? "text-chart-2" : ""}>{pct}%</span>
+              ) : null}
+              {k.falta != null && k.falta > 0 ? <span>Falta: {fmt(k.falta)}</span> : null}
+            </div>
+          ) : (
+            <span className="text-muted-foreground text-xs">Sem meta configurada</span>
+          )}
+        </div>
+      );
+    }
+
     const row = rows[0] ?? {};
     return (
       <div className="flex h-full flex-wrap items-center gap-x-8 gap-y-3 p-1">

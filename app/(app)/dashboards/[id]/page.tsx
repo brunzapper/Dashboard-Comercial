@@ -35,7 +35,7 @@ export default async function DashboardPage({
     supabase
       .from("widgets")
       .select(
-        "id, dashboard_id, title, visual_type, source, dimensions, metrics, filters, grid_position, sort_order"
+        "id, dashboard_id, title, visual_type, source, dimensions, metrics, filters, settings, grid_position, sort_order"
       )
       .eq("dashboard_id", id)
       .order("sort_order", { ascending: true }),
@@ -62,6 +62,7 @@ export default async function DashboardPage({
             metrics: w.metrics ?? [],
             filters: w.filters ?? [],
             visual_type: w.visual_type,
+            settings: w.settings,
           },
           available
         );
