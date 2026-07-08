@@ -45,6 +45,17 @@ mapper de leads passou a capturar e-mail (necessário para casar vendas do site 
 de origem), então um novo sync garante que os leads já importados fiquem com e-mail
 preenchido.
 
+## Como aplicar a Fase 6A (Construtor de dashboards)
+
+Cole o [`apply/fase-6.sql`](./apply/fase-6.sql) (migração `0015`: estende o RPC
+`run_widget_query` para aceitar `responsible_id`/`operation_id`/`related_lead_id` como
+dimensões/filtros e `lead_time_days` como métrica). É `create or replace`, idempotente.
+
+Depois, no app: a **home** vira a lista de dashboards. Crie um dashboard, clique nele e use
+**Adicionar widget** (fonte → dimensões → métricas → filtros → visual). "Editar layout"
+liga o arraste/redimensionar (grid). Metas, operações aninhadas e os presets chegam na
+Fase 6B.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
