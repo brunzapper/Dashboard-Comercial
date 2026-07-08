@@ -54,12 +54,36 @@ export interface WidgetFilter {
   value?: unknown;
 }
 
+// Extras de KPI (Fase 6B): comparação com meta e razões (TM, valor/conta).
+export interface KpiSettings {
+  mode?: "meta" | "ratio";
+  metric?: string; // modo meta: 'mrr' | 'clientes'
+  scope?: "global" | "operation" | "responsible";
+  operationId?: string | null;
+  responsibleId?: string | null;
+  period?: "month" | "year";
+  numerator?: Metric; // modo razão
+  denominator?: Metric;
+  label?: string;
+}
+
 export interface WidgetConfig {
   source: "records";
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
   visual_type: VisualType;
+  settings?: KpiSettings;
+}
+
+export interface KpiResult {
+  mode: "meta" | "ratio";
+  label: string;
+  realizado?: number;
+  meta?: number | null;
+  pct?: number | null;
+  falta?: number | null;
+  value?: number | null;
 }
 
 export interface GridPosition {
@@ -78,6 +102,7 @@ export interface Widget {
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
+  settings?: KpiSettings;
   grid_position: GridPosition | Record<string, never>;
   sort_order: number;
 }
@@ -95,4 +120,5 @@ export interface WidgetData {
   rows: Record<string, unknown>[]; // chaves dim_1.., metric_1..
   dimensions: { key: string; label: string }[];
   metrics: { key: string; label: string }[];
+  kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
 }

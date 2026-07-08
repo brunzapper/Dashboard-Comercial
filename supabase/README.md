@@ -53,8 +53,21 @@ dimensões/filtros e `lead_time_days` como métrica). É `create or replace`, id
 
 Depois, no app: a **home** vira a lista de dashboards. Crie um dashboard, clique nele e use
 **Adicionar widget** (fonte → dimensões → métricas → filtros → visual). "Editar layout"
-liga o arraste/redimensionar (grid). Metas, operações aninhadas e os presets chegam na
-Fase 6B.
+liga o arraste/redimensionar (grid).
+
+## Como aplicar a Fase 6B (Metas + operações aninhadas + presets)
+
+Cole o [`apply/fase-6b.sql`](./apply/fase-6b.sql) (migração `0016`): tabela `goals` (metas),
+`operations.parent_operation_id` (aninhamento), `widgets.settings` e a função
+`operation_subtree`. Idempotente; semeia "Operação 1"/"Operação 2" só se não houver operações.
+
+No app (como admin):
+- **Operações** / **Responsáveis** / **Metas** aparecem na navegação. Configure as operações
+  (com aninhamento), mapeie responsáveis→operações (prioridade 1 = padrão) e defina metas
+  (global/operação/responsável — elas se comunicam por roll-up na leitura).
+- Na **home**, botão **"Gerar presets"** cria os 4 dashboards de exemplo (incluindo
+  "Performance comercial do mês") e os campos de apoio (forecast, implementação, etc.).
+  É idempotente (pula o que já existe).
 
 ## Criar o primeiro usuário admin (bootstrap)
 

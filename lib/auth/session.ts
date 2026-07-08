@@ -74,3 +74,12 @@ export async function requirePermission(
   }
   return session;
 }
+
+/** Exige um papel específico (ex.: 'admin'). */
+export async function requireRole(role: string): Promise<SessionInfo> {
+  const session = await requireSession();
+  if (!session.roles.includes(role)) {
+    redirect("/");
+  }
+  return session;
+}

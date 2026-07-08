@@ -7,9 +7,11 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
 import type {
   Dimension,
   GridPosition,
+  KpiSettings,
   Metric,
   VisualType,
   WidgetFilter,
@@ -26,6 +28,7 @@ export interface WidgetInput {
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
+  settings?: KpiSettings;
   grid_position?: GridPosition;
 }
 
@@ -85,6 +88,7 @@ export async function createWidget(
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
+      settings: input.settings ?? {},
       grid_position: input.grid_position ?? { x: 0, y: 100, w: 6, h: 8 },
     })
     .select("id")
@@ -110,6 +114,7 @@ export async function updateWidget(
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
+      settings: input.settings ?? {},
     })
     .eq("id", widgetId);
   if (error) return { ok: false, message: error.message };
@@ -126,6 +131,85 @@ export async function deleteWidget(
   const supabase = await createClient();
   await supabase.from("widgets").delete().eq("id", widgetId);
   revalidatePath(`/dashboards/${dashboardId}`);
+}
+
+// Gera os dashboards preset (idempotente): cria campos de apoio que faltam e
+// os dashboards que ainda não existem para este usuário. Só admin.
+export async function generatePresets(): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.roles.includes("admin")) {
+    return { ok: false, message: "Apenas administradores podem gerar presets." };
+  }
+  const supabase = await createClient();
+
+  // 1) Campos de apoio (pula os que já existem)
+  const { data: existingFields } = await supabase
+    .from("field_definitions")
+    .select("field_key");
+  const have = new Set((existingFields ?? []).map((f) => f.field_key as string));
+  const toCreate = PRESET_FIELDS.filter((f) => !have.has(f.field_key));
+  if (toCreate.length > 0) {
+    await supabase.from("field_definitions").insert(
+      toCreate.map((f, i) => ({
+        field_key: f.field_key,
+        label: f.label,
+        data_type: f.data_type,
+        options: f.options,
+        visible_to_roles: f.visible_to_roles,
+        editable_by_roles: f.editable_by_roles,
+        is_local: f.is_local,
+        sort_order: 100 + i,
+      }))
+    );
+  }
+
+  // 2) Dashboards (pula os que já existem por nome, deste usuário)
+  const { data: existingDash } = await supabase
+    .from("dashboards")
+    .select("name")
+    .eq("owner_user_id", session.user.id);
+  const haveDash = new Set((existingDash ?? []).map((d) => d.name as string));
+
+  let created = 0;
+  for (const preset of PRESETS) {
+    if (haveDash.has(preset.name)) continue;
+    const { data: dash, error } = await supabase
+      .from("dashboards")
+      .insert({
+        name: preset.name,
+        owner_user_id: session.user.id,
+        visible_to_roles: preset.visible_to_roles,
+        is_shared: preset.visible_to_roles.length > 0,
+      })
+      .select("id")
+      .maybeSingle();
+    if (error || !dash?.id) continue;
+    await supabase.from("widgets").insert(
+      preset.widgets.map((w, i) => ({
+        dashboard_id: dash.id as string,
+        title: w.title,
+        visual_type: w.visual_type,
+        source: "records",
+        dimensions: w.dimensions,
+        metrics: w.metrics,
+        filters: w.filters,
+        settings: w.settings ?? {},
+        grid_position: w.grid_position,
+        sort_order: i,
+      }))
+    );
+    created += 1;
+  }
+
+  revalidatePath("/");
+  return {
+    ok: true,
+    message:
+      created > 0
+        ? `${created} dashboard(s) preset criado(s).`
+        : "Presets já existiam (nada a criar).",
+  };
 }
 
 export async function saveLayout(

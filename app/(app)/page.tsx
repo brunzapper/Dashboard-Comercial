@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { NewDashboardForm } from "@/components/dashboards/new-dashboard-form";
+import { GeneratePresetsButton } from "@/components/dashboards/generate-presets-button";
 import { deleteDashboard } from "@/app/(app)/dashboards/actions";
 
 interface DashboardRow {
@@ -26,6 +27,7 @@ interface DashboardRow {
 export default async function HomePage() {
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
+  const isAdmin = session?.roles.includes("admin") ?? false;
 
   const supabase = await createClient();
   const { data } = await supabase
@@ -43,6 +45,7 @@ export default async function HomePage() {
         </p>
       </div>
 
+      {isAdmin ? <GeneratePresetsButton /> : null}
       {canCreate ? <NewDashboardForm /> : null}
 
       {dashboards.length === 0 ? (
