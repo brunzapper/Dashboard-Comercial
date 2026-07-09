@@ -106,6 +106,16 @@ No app (como admin):
 - Depois de aplicar, rode um **Backfill** no Bitrix para (re)catalogar as colunas com nome
   visual e preencher `applies_to`.
 
+## Como aplicar a Fase 8b (Rótulos visuais + visibilidade)
+
+Cole o [`apply/fase-8b.sql`](./apply/fase-8b.sql) (migração `0022`) e execute. Idempotente.
+Ele corrige **imediatamente** o nome das colunas do Bitrix (usa os nomes visuais do
+arquivo de integração no lugar do nome da API que o schema às vezes devolve) e liga a
+visibilidade (`show_in_builder`) desses campos — sem precisar rodar um sync. Os próximos
+syncs preservam esses nomes/visibilidade (via `FIELD_LABELS` em
+`lib/sync/bitrix/catalog.ts`). Depois disso, em **Campos**, você pode ocultar qualquer
+coluna que não queira ver nos seletores/tabelas.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

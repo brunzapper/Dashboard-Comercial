@@ -1,6 +1,9 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 09/07/2026
 // v1.1 (09/07/2026): Fase 8 — grava applies_to (record_type de origem) e usa o
 //   label curado (bitrix-field-map) como fallback do título do schema.
+// v1.2 (09/07/2026): Fase 8b — FIELD_LABELS é AUTORITATIVO (vence o título do
+//   schema, que às vezes volta como o próprio fieldId) e define os campos que
+//   nascem visíveis (show_in_builder) — tanto curados quanto descobertos.
 // Descoberta dinâmica de colunas do Bitrix (Fase 7). Usa o schema de
 // crm.deal.fields / crm.lead.fields (carregado em BitrixLookups) para:
 //   1) catalogar TODOS os campos como field_definitions (syncFieldCatalog) —
@@ -14,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEAL_CORE,
   DEAL_CUSTOM,
+  FIELD_LABELS,
   LEAD_CORE,
   LEAD_CUSTOM,
   type BitrixFieldType,
@@ -133,15 +137,15 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
 
   const rows: CatalogRow[] = [];
 
-  // Curados: chave curada, ligados por padrão (já eram usáveis). O rótulo vem do
-  // schema do Bitrix; se ausente, cai para o `label` do mapa (Fase 8) e só então
-  // para a chave — garante nome visível mesmo sem sync recente do schema.
+  // Curados: chave curada, sempre visíveis. O rótulo é AUTORITATIVO via
+  // FIELD_LABELS (nome do arquivo de integração); só cai para o título do schema
+  // ou a chave quando o campo não estiver na lista.
   for (const [fieldId, def] of Object.entries(curated)) {
     if (coreIds.has(fieldId)) continue;
     const meta = metaById.get(fieldId);
     rows.push({
       field_key: def.key,
-      label: meta?.title ?? def.label ?? def.key,
+      label: FIELD_LABELS[fieldId] ?? meta?.title ?? def.key,
       data_type: meta ? toDataType(meta.type) : "texto",
       options: meta?.items?.map((i) => i.VALUE) ?? [],
       source_system: "bitrix",
@@ -151,18 +155,22 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
     });
   }
 
-  // Descobertos: chave bitrix_<id>, DESLIGADOS por padrão.
+  // Descobertos: chave bitrix_<id>. Nascem VISÍVEIS quando estão na lista
+  // FIELD_LABELS (campos que o cliente quer ver, com nome visual); o resto
+  // continua oculto por padrão. show_in_builder só é gravado no INSERT
+  // (syncFieldCatalog), então a curadoria posterior do admin é preservada.
   for (const meta of metas) {
     if (coreIds.has(meta.fieldId)) continue;
     if (curated[meta.fieldId]) continue;
+    const listed = FIELD_LABELS[meta.fieldId] != null;
     rows.push({
       field_key: bitrixKey(meta.fieldId),
-      label: meta.title,
+      label: FIELD_LABELS[meta.fieldId] ?? meta.title,
       data_type: toDataType(meta.type),
       options: meta.type === "enumeration" ? meta.items?.map((i) => i.VALUE) ?? [] : [],
       source_system: "bitrix",
       source_field_id: meta.fieldId,
-      show_in_builder: false,
+      show_in_builder: listed,
       applies_to: [recordType],
     });
   }
