@@ -203,45 +203,50 @@ export async function syncFieldCatalog(
   if (rows.length === 0) return;
 
   const keys = rows.map((r) => r.field_key);
+  // Lê os toggles do admin dos campos já existentes para PRESERVÁ-LOS no upsert
+  // (show_in_builder/visible_to_roles/editable_by_roles/is_local/formula/sort_order).
   const { data: existing } = await db
     .from("field_definitions")
-    .select("field_key")
-    .in("field_key", keys);
-  const existingSet = new Set((existing ?? []).map((r) => r.field_key as string));
-
-  const toInsert = rows.filter((r) => !existingSet.has(r.field_key));
-  if (toInsert.length > 0) {
-    await db.from("field_definitions").insert(
-      toInsert.map((r) => ({
-        field_key: r.field_key,
-        label: r.label,
-        data_type: r.data_type,
-        options: r.options,
-        source_system: r.source_system,
-        source_field_id: r.source_field_id,
-        show_in_builder: r.show_in_builder,
-        applies_to: r.applies_to,
-        visible_to_roles: [],
-        editable_by_roles: [],
-        is_local: false,
-      }))
-    );
-  }
-
-  const toUpdate = rows.filter((r) => existingSet.has(r.field_key));
-  await Promise.all(
-    toUpdate.map((r) =>
-      db
-        .from("field_definitions")
-        .update({
-          label: r.label,
-          data_type: r.data_type,
-          options: r.options,
-          source_system: r.source_system,
-          source_field_id: r.source_field_id,
-          applies_to: r.applies_to,
-        })
-        .eq("field_key", r.field_key)
+    .select(
+      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order"
     )
+    .in("field_key", keys);
+  const existingByKey = new Map(
+    (existing ?? []).map((r) => [r.field_key as string, r])
   );
+
+  // Um único upsert (em vez de ~400 updates concorrentes): sempre atualiza
+  // label/data_type/options/source_*/applies_to; nos existentes carrega os
+  // toggles atuais, nos novos aplica os defaults.
+  const payload = rows.map((r) => {
+    const ex = existingByKey.get(r.field_key) as
+      | {
+          show_in_builder?: boolean;
+          visible_to_roles?: string[];
+          editable_by_roles?: string[];
+          is_local?: boolean;
+          formula?: unknown;
+          sort_order?: number;
+        }
+      | undefined;
+    return {
+      field_key: r.field_key,
+      label: r.label,
+      data_type: r.data_type,
+      options: r.options,
+      source_system: r.source_system,
+      source_field_id: r.source_field_id,
+      applies_to: r.applies_to,
+      show_in_builder: ex ? ex.show_in_builder ?? r.show_in_builder : r.show_in_builder,
+      visible_to_roles: ex ? ex.visible_to_roles ?? [] : [],
+      editable_by_roles: ex ? ex.editable_by_roles ?? [] : [],
+      is_local: ex ? ex.is_local ?? false : false,
+      formula: ex ? ex.formula ?? null : null,
+      sort_order: ex ? ex.sort_order ?? 0 : 0,
+    };
+  });
+
+  await db
+    .from("field_definitions")
+    .upsert(payload, { onConflict: "field_key" });
 }
