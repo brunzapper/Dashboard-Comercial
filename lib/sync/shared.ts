@@ -1,19 +1,68 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — SyncResult ganha quebra por entidade (byEntity) e
+//   amostras de erro (errorSamples); helpers recordOutcome/recordError param de
+//   engolir a mensagem do erro — o painel de Sync mostra leads vs deals e o que
+//   falhou, para diagnosticar "só leads importando".
 // Utilidades comuns a QUALQUER fonte de sync (Bitrix, Sheets, ...): resultado
 // padrão, conflito por campo (edição manual protege contra sobrescrita) e
 // resolução de operação primária de um responsável. Extraído de
 // lib/sync/bitrix/sync.ts para evitar duplicar a regra entre fontes.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export interface SyncResult {
+export interface EntityCounts {
   inserted: number;
   updated: number;
   skipped: number;
   errors: number;
 }
 
+export interface SyncResult {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  // Quebra por entidade (ex.: 'lead', 'negocio', 'venda_site').
+  byEntity: Record<string, EntityCounts>;
+  // Primeiras mensagens de erro (para diagnóstico no painel de Sync).
+  errorSamples: string[];
+}
+
+const MAX_ERROR_SAMPLES = 10;
+
 export function emptyResult(): SyncResult {
-  return { inserted: 0, updated: 0, skipped: 0, errors: 0 };
+  return { inserted: 0, updated: 0, skipped: 0, errors: 0, byEntity: {}, errorSamples: [] };
+}
+
+function entityCounts(result: SyncResult, entity: string): EntityCounts {
+  return (result.byEntity[entity] ??= {
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+  });
+}
+
+/** Contabiliza um insert/update/skip por entidade + no total. */
+export function recordOutcome(
+  result: SyncResult,
+  entity: string,
+  outcome: "inserted" | "updated" | "skipped"
+): void {
+  result[outcome] += 1;
+  entityCounts(result, entity)[outcome] += 1;
+}
+
+/** Contabiliza um erro por entidade + no total, guardando a mensagem. */
+export function recordError(
+  result: SyncResult,
+  entity: string,
+  message: string
+): void {
+  result.errors += 1;
+  entityCounts(result, entity).errors += 1;
+  if (result.errorSamples.length < MAX_ERROR_SAMPLES) {
+    result.errorSamples.push(`[${entity}] ${message}`);
+  }
 }
 
 export interface ExistingRecord {

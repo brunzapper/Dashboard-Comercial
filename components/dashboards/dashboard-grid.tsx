@@ -84,6 +84,7 @@ export function DashboardGrid({
             data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
             available={available}
             dashboardId={dashboardId}
+            siblings={widgets}
             canEdit={canEdit}
             editMode={editMode}
           />

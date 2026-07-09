@@ -1,6 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Card de um widget no grid: cabeçalho (título + editar/excluir + alça de
-// arraste no modo edição) e o chart.
+// arraste no modo edição) e o chart. v1.1: widget 'filtro' renderiza o controle
+// de período (PeriodControls) no lugar do chart.
 "use client";
 
 import { useTransition } from "react";
@@ -11,6 +12,7 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { Widget, WidgetData } from "@/lib/widgets/types";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
+import { PeriodControls } from "./period-controls";
 import { WidgetBuilder } from "./widget-builder";
 
 export function WidgetCard({
@@ -18,6 +20,7 @@ export function WidgetCard({
   data,
   available,
   dashboardId,
+  siblings,
   canEdit,
   editMode,
 }: {
@@ -25,10 +28,12 @@ export function WidgetCard({
   data: WidgetData;
   available: AvailableField[];
   dashboardId: string;
+  siblings: Widget[];
   canEdit: boolean;
   editMode: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+  const isFilter = widget.visual_type === "filtro";
 
   return (
     <div className="bg-card flex h-full flex-col overflow-hidden rounded-lg border">
@@ -47,6 +52,7 @@ export function WidgetCard({
               dashboardId={dashboardId}
               available={available}
               widget={widget}
+              siblings={siblings}
               trigger={
                 <Button variant="ghost" size="icon" aria-label="Editar widget">
                   <Pencil className="size-4" />
@@ -70,7 +76,20 @@ export function WidgetCard({
         ) : null}
       </div>
       <div className="min-h-0 flex-1 p-2">
-        <WidgetChart visualType={widget.visual_type} data={data} />
+        {isFilter ? (
+          <div className="flex h-full items-center p-1">
+            <PeriodControls
+              keys={{
+                preset: `pf_${widget.id}`,
+                de: `pfd_${widget.id}`,
+                ate: `pfa_${widget.id}`,
+              }}
+              defaults={{ preset: widget.settings?.defaultPreset ?? "" }}
+            />
+          </div>
+        ) : (
+          <WidgetChart visualType={widget.visual_type} data={data} />
+        )}
       </div>
     </div>
   );

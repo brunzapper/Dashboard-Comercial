@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 1.2 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — grava applies_to (record_type de origem) e usa o
+//   label curado (bitrix-field-map) como fallback do título do schema.
+// v1.2 (09/07/2026): Fase 8b — FIELD_LABELS é AUTORITATIVO (vence o título do
+//   schema, que às vezes volta como o próprio fieldId) e define os campos que
+//   nascem visíveis (show_in_builder) — tanto curados quanto descobertos.
 // Descoberta dinâmica de colunas do Bitrix (Fase 7). Usa o schema de
 // crm.deal.fields / crm.lead.fields (carregado em BitrixLookups) para:
 //   1) catalogar TODOS os campos como field_definitions (syncFieldCatalog) —
@@ -12,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEAL_CORE,
   DEAL_CUSTOM,
+  FIELD_LABELS,
   LEAD_CORE,
   LEAD_CUSTOM,
   type BitrixFieldType,
@@ -120,6 +126,7 @@ interface CatalogRow {
   source_system: "bitrix";
   source_field_id: string;
   show_in_builder: boolean; // usado só no INSERT
+  applies_to: string[]; // record_type(s) a que a coluna pertence
 }
 
 function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
@@ -127,6 +134,7 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
   const curated = curatedOf(entity);
   const metas = entity === "deal" ? lookups.dealFieldMetas() : lookups.leadFieldMetas();
   const metaById = new Map(metas.map((m) => [m.fieldId, m]));
+  const recordType = entity === "deal" ? "negocio" : "lead";
 
   const rows: CatalogRow[] = [];
 
@@ -136,27 +144,33 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
     const meta = metaById.get(fieldId);
     rows.push({
       field_key: def.key,
-      label: meta?.title ?? def.key,
+      label: FIELD_LABELS[fieldId] ?? meta?.title ?? def.key,
       data_type: meta ? toDataType(meta.type) : "texto",
       options: meta?.items?.map((i) => i.VALUE) ?? [],
       source_system: "bitrix",
       source_field_id: fieldId,
       show_in_builder: true,
+      applies_to: [recordType],
     });
   }
 
-  // Descobertos: chave bitrix_<id>, DESLIGADOS por padrão.
+  // Descobertos: chave bitrix_<id>. Nascem VISÍVEIS quando estão na lista
+  // FIELD_LABELS (campos que o cliente quer ver, com nome visual); o resto
+  // continua oculto por padrão. show_in_builder só é gravado no INSERT
+  // (syncFieldCatalog), então a curadoria posterior do admin é preservada.
   for (const meta of metas) {
     if (coreIds.has(meta.fieldId)) continue;
     if (curated[meta.fieldId]) continue;
+    const listed = FIELD_LABELS[meta.fieldId] != null;
     rows.push({
       field_key: bitrixKey(meta.fieldId),
-      label: meta.title,
+      label: FIELD_LABELS[meta.fieldId] ?? meta.title,
       data_type: toDataType(meta.type),
       options: meta.type === "enumeration" ? meta.items?.map((i) => i.VALUE) ?? [] : [],
       source_system: "bitrix",
       source_field_id: meta.fieldId,
-      show_in_builder: false,
+      show_in_builder: listed,
+      applies_to: [recordType],
     });
   }
 
@@ -176,49 +190,62 @@ export async function syncFieldCatalog(
   const all = [...catalogRowsFor(lookups, "deal"), ...catalogRowsFor(lookups, "lead")];
 
   // Dedup por field_key (ex.: grupo_origem/utm_* aparecem em deal e lead).
+  // Ao encontrar o mesmo field_key nas duas entidades, une os applies_to
+  // (a coluna passa a valer para lead E negócio).
   const byKey = new Map<string, CatalogRow>();
-  for (const r of all) if (!byKey.has(r.field_key)) byKey.set(r.field_key, r);
+  for (const r of all) {
+    const ex = byKey.get(r.field_key);
+    if (!ex) byKey.set(r.field_key, { ...r });
+    else ex.applies_to = Array.from(new Set([...ex.applies_to, ...r.applies_to]));
+  }
   const rows = Array.from(byKey.values());
   if (rows.length === 0) return;
 
   const keys = rows.map((r) => r.field_key);
+  // Lê os toggles do admin dos campos já existentes para PRESERVÁ-LOS no upsert
+  // (show_in_builder/visible_to_roles/editable_by_roles/is_local/formula/sort_order).
   const { data: existing } = await db
     .from("field_definitions")
-    .select("field_key")
-    .in("field_key", keys);
-  const existingSet = new Set((existing ?? []).map((r) => r.field_key as string));
-
-  const toInsert = rows.filter((r) => !existingSet.has(r.field_key));
-  if (toInsert.length > 0) {
-    await db.from("field_definitions").insert(
-      toInsert.map((r) => ({
-        field_key: r.field_key,
-        label: r.label,
-        data_type: r.data_type,
-        options: r.options,
-        source_system: r.source_system,
-        source_field_id: r.source_field_id,
-        show_in_builder: r.show_in_builder,
-        visible_to_roles: [],
-        editable_by_roles: [],
-        is_local: false,
-      }))
-    );
-  }
-
-  const toUpdate = rows.filter((r) => existingSet.has(r.field_key));
-  await Promise.all(
-    toUpdate.map((r) =>
-      db
-        .from("field_definitions")
-        .update({
-          label: r.label,
-          data_type: r.data_type,
-          options: r.options,
-          source_system: r.source_system,
-          source_field_id: r.source_field_id,
-        })
-        .eq("field_key", r.field_key)
+    .select(
+      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order"
     )
+    .in("field_key", keys);
+  const existingByKey = new Map(
+    (existing ?? []).map((r) => [r.field_key as string, r])
   );
+
+  // Um único upsert (em vez de ~400 updates concorrentes): sempre atualiza
+  // label/data_type/options/source_*/applies_to; nos existentes carrega os
+  // toggles atuais, nos novos aplica os defaults.
+  const payload = rows.map((r) => {
+    const ex = existingByKey.get(r.field_key) as
+      | {
+          show_in_builder?: boolean;
+          visible_to_roles?: string[];
+          editable_by_roles?: string[];
+          is_local?: boolean;
+          formula?: unknown;
+          sort_order?: number;
+        }
+      | undefined;
+    return {
+      field_key: r.field_key,
+      label: r.label,
+      data_type: r.data_type,
+      options: r.options,
+      source_system: r.source_system,
+      source_field_id: r.source_field_id,
+      applies_to: r.applies_to,
+      show_in_builder: ex ? ex.show_in_builder ?? r.show_in_builder : r.show_in_builder,
+      visible_to_roles: ex ? ex.visible_to_roles ?? [] : [],
+      editable_by_roles: ex ? ex.editable_by_roles ?? [] : [],
+      is_local: ex ? ex.is_local ?? false : false,
+      formula: ex ? ex.formula ?? null : null,
+      sort_order: ex ? ex.sort_order ?? 0 : 0,
+    };
+  });
+
+  await db
+    .from("field_definitions")
+    .upsert(payload, { onConflict: "field_key" });
 }

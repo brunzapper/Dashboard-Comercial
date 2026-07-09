@@ -8,13 +8,15 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
+import type { SourceKey } from "@/lib/sources";
 import type {
+  DashboardSettings,
   Dimension,
   GridPosition,
-  KpiSettings,
   Metric,
   VisualType,
   WidgetFilter,
+  WidgetSettings,
 } from "@/lib/widgets/types";
 
 export interface ActionState {
@@ -25,10 +27,12 @@ export interface ActionState {
 export interface WidgetInput {
   title: string | null;
   visual_type: VisualType;
+  sources?: SourceKey[];
+  splitBySource?: boolean;
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
-  settings?: KpiSettings;
+  settings?: WidgetSettings;
   grid_position?: GridPosition;
 }
 
@@ -69,6 +73,24 @@ export async function deleteDashboard(formData: FormData): Promise<void> {
   revalidatePath("/");
 }
 
+// Config por dashboard (settings jsonb): hoje só a barra de período global.
+// RLS restringe update a owner/admin.
+export async function updateDashboardSettings(
+  dashboardId: string,
+  settings: DashboardSettings
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ settings })
+    .eq("id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // ---------------- Widgets ----------------
 
 export async function createWidget(
@@ -85,6 +107,8 @@ export async function createWidget(
       title: input.title,
       visual_type: input.visual_type,
       source: "records",
+      sources: input.sources ?? [],
+      split_by_source: input.splitBySource ?? false,
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
@@ -111,6 +135,8 @@ export async function updateWidget(
     .update({
       title: input.title,
       visual_type: input.visual_type,
+      sources: input.sources ?? [],
+      split_by_source: input.splitBySource ?? false,
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,

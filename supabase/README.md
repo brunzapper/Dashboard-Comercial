@@ -69,28 +69,64 @@ No app (como admin):
   "Performance comercial do mês") e os campos de apoio (forecast, implementação, etc.).
   É idempotente (pula o que já existe).
 
-## Como aplicar a Fase 7 (Colunas dinâmicas do Bitrix + campos calculados)
+## Como aplicar a Fase 7 (Filtro de período interativo)
 
-Cole o [`apply/fase-7.sql`](./apply/fase-7.sql) (migração `0017`): estende
-`field_definitions` com `source_system`, `source_field_id`, `show_in_builder` e
-`formula`, e aceita os tipos `booleano` e `calculado`. Idempotente.
+Cole o [`apply/fase-7.sql`](./apply/fase-7.sql) (migração `0017`) e execute. Idempotente.
+Ele libera o `visual_type` `'filtro'` nos widgets (widget de filtro de período que
+controla outros widgets) e adiciona `dashboards.settings` (jsonb) para guardar a config
+da barra de período global de cada dashboard (ligada/desligada, período e campo padrão).
 
-O que muda no app depois disso:
+No app, dentro de um dashboard:
+- A **barra de período** no topo filtra o dashboard inteiro. Quem edita pode, pela
+  engrenagem da barra, definir o período/campo padrão ou ocultá-la.
+- **Adicionar widget → "Filtro de período"** cria um filtro que pode ser **vinculado a
+  gráficos/tabelas específicos** (aba "Vincular a"). Sem vínculo, ele age sobre o
+  dashboard todo; com vínculo, só os widgets escolhidos respondem a ele (têm prioridade
+  sobre a barra global).
 
-- **Descoberta automática:** ao rodar **Backfill**/**Reconciliar**, o sistema lê o
-  schema do Bitrix (`crm.deal.fields`/`crm.lead.fields`) e cataloga **todas** as
-  colunas de Negócios e Leads como campos em **Campos**. Colunas novas criadas no
-  Bitrix entram sozinhas no próximo sync. Elas nascem **desligadas** (`show_in_builder`
-  = falso) — os valores já são importados para `records.custom_fields`, mas a coluna
-  só aparece nos seletores/tabela quando um admin a habilita em **Campos**.
-- **Config dos seletores:** em **Campos**, o botão de olho (Exibir) de cada campo
-  controla se ele aparece nos dropdowns do construtor de dashboards e nas colunas da
-  tela de Registros.
-- **Campos calculados:** em **Campos**, tipo **Calculado** abre um construtor de
-  fórmula (coluna/constante + operadores + − × ÷ e parênteses). O resultado é
-  materializado por registro em cada sync/edição; o campo fica disponível como
-  métrica numérica (soma/média) nos dashboards. Recalcula automaticamente todos os
-  registros ao criar/editar a fórmula.
+## Como aplicar a Fase 8 (Separação de fontes + correspondências)
+
+Cole o [`apply/fase-8.sql`](./apply/fase-8.sql) (migrações `0018`–`0021`) e execute.
+Idempotente. Ele adiciona:
+- `field_definitions.applies_to` (a quais fontes/`record_type` a coluna pertence) e
+  cataloga os campos da planilha "Estudo de Fechamentos" (Produtos, Assentos, Campanha, E-mail).
+- `field_correspondences` + `field_correspondence_members`: correspondências GLOBAIS de
+  colunas (um "campo unificado" liga colunas equivalentes entre Estudo, Leads e Deals).
+- `run_widget_query` passa a aceitar campos `unified:<key>` (coalesce das colunas
+  correspondidas) via o novo parâmetro `p_correspondences`.
+- `widgets.sources` / `widgets.split_by_source`: seleção de fontes por widget e o modo
+  "quebrar por fonte".
+
+No app (como admin):
+- **Registros** ganha abas por fonte (Leads / Deals / Estudo de Fechamentos), cada uma com
+  as colunas relevantes daquela fonte.
+- **Campos** ganha a seção **Correspondências de colunas** (CRUD global).
+- No **construtor de widget**: escolha as fontes, ligue "Combinar / Quebrar por fonte" e use
+  os campos unificados nas dimensões/métricas/filtros.
+- Depois de aplicar, rode um **Backfill** no Bitrix para (re)catalogar as colunas com nome
+  visual e preencher `applies_to`.
+
+## Como aplicar a Fase 8b (Rótulos visuais + visibilidade)
+
+Cole o [`apply/fase-8b.sql`](./apply/fase-8b.sql) (migração `0022`) e execute. Idempotente.
+Ele corrige **imediatamente** o nome das colunas do Bitrix (usa os nomes visuais do
+arquivo de integração no lugar do nome da API que o schema às vezes devolve) e liga a
+visibilidade (`show_in_builder`) desses campos — sem precisar rodar um sync. Os próximos
+syncs preservam esses nomes/visibilidade (via `FIELD_LABELS` em
+`lib/sync/bitrix/catalog.ts`). Depois disso, em **Campos**, você pode ocultar qualquer
+coluna que não queira ver nos seletores/tabelas.
+
+## Como aplicar a Fase 9 (Sync incremental e retomável)
+
+Cole o [`apply/fase-9.sql`](./apply/fase-9.sql) (migração `0023`: tabela `sync_jobs`) e
+execute. Idempotente. Ela guarda o estado dos jobs de **Backfill/Reconciliar** para que
+rodem em pedaços pequenos (1 página do Bitrix por requisição), com **barra de progresso** e
+**retomável** — resolve o travamento em períodos longos no plano gratuito da Vercel.
+
+Depois de aplicar, em **Registros** (como admin) o painel de Sincronização passa a mostrar
+o progresso por fase; o **Backfill** ganha o campo de dias (padrão 365, janela corrida) e o
+**Reconciliar** continua puxando só o que mudou (por `DATE_MODIFY`). Se a aba for fechada no
+meio, ao reabrir a página o job em andamento é detectado e pode ser retomado.
 
 ## Criar o primeiro usuário admin (bootstrap)
 
