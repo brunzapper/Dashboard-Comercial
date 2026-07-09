@@ -1,8 +1,11 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Resolução de IDs → nomes/labels do Bitrix, com cache. Stages/status,
 // categorias (pipelines) e labels de enumeration são carregados uma vez por
 // execução; nomes de usuários (user.get) usam cache persistente em
 // bitrix_lookup_cache (para atravessar invocações serverless).
+// v1.1 (09/07/2026): Fase 7 — guarda o metadata COMPLETO de crm.deal.fields /
+//   crm.lead.fields (título, tipo, items) e expõe dealFieldMetas()/leadFieldMetas()
+//   para a descoberta dinâmica de colunas (lib/sync/bitrix/catalog.ts).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
@@ -18,7 +21,37 @@ interface CategoryRow {
 }
 interface FieldDef {
   type: string;
+  title?: string;
+  listLabel?: string;
+  formLabel?: string;
+  isMultiple?: boolean;
+  isReadOnly?: boolean;
   items?: { ID: string; VALUE: string }[];
+}
+
+// Metadata normalizado de um campo do Bitrix (deal/lead), consumido pela
+// descoberta de colunas.
+export interface BitrixFieldMeta {
+  fieldId: string;
+  title: string;
+  type: string;
+  isMultiple: boolean;
+  items?: { ID: string; VALUE: string }[];
+}
+
+function toFieldMetas(fields: Record<string, FieldDef>): BitrixFieldMeta[] {
+  const out: BitrixFieldMeta[] = [];
+  for (const [fieldId, def] of Object.entries(fields ?? {})) {
+    if (!def || typeof def !== "object") continue;
+    out.push({
+      fieldId,
+      title: def.title || def.listLabel || def.formLabel || fieldId,
+      type: def.type,
+      isMultiple: Boolean(def.isMultiple),
+      items: def.items,
+    });
+  }
+  return out;
 }
 
 export class BitrixLookups {
@@ -26,6 +59,8 @@ export class BitrixLookups {
   private categories = new Map<string, string>();
   private dealEnums = new Map<string, Map<string, string>>();
   private leadEnums = new Map<string, Map<string, string>>();
+  private dealFieldMetasCache: BitrixFieldMeta[] = [];
+  private leadFieldMetasCache: BitrixFieldMeta[] = [];
   private users = new Map<string, string>();
   private loaded = false;
 
@@ -50,12 +85,24 @@ export class BitrixLookups {
       await this.client.call<Record<string, FieldDef>>("crm.deal.fields")
     ).result;
     this.dealEnums = this.buildEnumMap(dealFields);
+    this.dealFieldMetasCache = toFieldMetas(dealFields);
     const leadFields = (
       await this.client.call<Record<string, FieldDef>>("crm.lead.fields")
     ).result;
     this.leadEnums = this.buildEnumMap(leadFields);
+    this.leadFieldMetasCache = toFieldMetas(leadFields);
 
     this.loaded = true;
+  }
+
+  /** Todos os campos de negócios do Bitrix (schema), para descoberta. */
+  dealFieldMetas(): BitrixFieldMeta[] {
+    return this.dealFieldMetasCache;
+  }
+
+  /** Todos os campos de leads do Bitrix (schema), para descoberta. */
+  leadFieldMetas(): BitrixFieldMeta[] {
+    return this.leadFieldMetasCache;
   }
 
   private buildEnumMap(

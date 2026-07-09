@@ -77,6 +77,15 @@ function CustomFieldInput({
       />
     );
   }
+  if (field.data_type === "booleano") {
+    return (
+      <select name={name} defaultValue={value} className={selectClass}>
+        <option value="">—</option>
+        <option value="true">Sim</option>
+        <option value="false">Não</option>
+      </select>
+    );
+  }
   return <Input name={name} defaultValue={value} />;
 }
 
@@ -106,11 +115,16 @@ export function RecordEditSheet({
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
-  const editableFields = fields.filter((f) =>
-    f.editable_by_roles.some((r) => userRoles.includes(r))
+  // Campos calculados nunca são editáveis (o valor é derivado da fórmula).
+  const editableFields = fields.filter(
+    (f) =>
+      f.data_type !== "calculado" &&
+      f.editable_by_roles.some((r) => userRoles.includes(r))
   );
   const readOnlyFields = fields.filter(
-    (f) => !f.editable_by_roles.some((r) => userRoles.includes(r))
+    (f) =>
+      f.data_type === "calculado" ||
+      !f.editable_by_roles.some((r) => userRoles.includes(r))
   );
 
   return (
