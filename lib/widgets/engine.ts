@@ -19,6 +19,7 @@ import {
   type AvailableField,
   type FkKind,
 } from "./fields";
+import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { resolveGoal } from "@/lib/metas/resolve";
 
 // Resolve tokens de período (@month_start, @year_start, ...) para datas ISO,
@@ -109,7 +110,8 @@ async function fetchFkLabels(
 async function runKpi(
   supabase: SupabaseClient,
   config: WidgetConfig,
-  filters: WidgetFilter[]
+  filters: WidgetFilter[],
+  period?: DashboardPeriod | null
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
   const empty = { rows: [], dimensions: [], metrics: [] };
@@ -132,8 +134,20 @@ async function runKpi(
   const metric = s.metric ?? "mrr";
   const [realizado] = await aggregate(supabase, [metricForMeta(metric)], filters);
   const now = new Date();
-  const year = now.getFullYear();
-  const month = s.period === "year" ? null : now.getMonth() + 1;
+  let year = now.getFullYear();
+  let month: number | null = s.period === "year" ? null : now.getMonth() + 1;
+  // Com período global ativo, a meta acompanha o período: meta do mês quando o
+  // intervalo cabe num único mês; senão, meta anual do ano da data inicial.
+  if (period?.from) {
+    const from = new Date(`${period.from}T00:00:00`);
+    const to = period.to ? new Date(`${period.to}T00:00:00`) : null;
+    year = from.getFullYear();
+    const sameMonth =
+      to != null &&
+      to.getFullYear() === from.getFullYear() &&
+      to.getMonth() === from.getMonth();
+    month = sameMonth ? from.getMonth() + 1 : null;
+  }
   const goal = await resolveGoal(supabase, {
     scope: s.scope ?? "global",
     operationId: s.operationId ?? null,
@@ -159,12 +173,14 @@ async function runKpi(
 export async function runWidget(
   supabase: SupabaseClient,
   config: WidgetConfig,
-  available: AvailableField[]
+  available: AvailableField[],
+  period?: DashboardPeriod | null
 ): Promise<WidgetData> {
-  const filters = resolveFilters(config.filters ?? []);
+  let filters = resolveFilters(config.filters ?? []);
+  if (period) filters = applyPeriodToFilters(filters, period);
 
   if (config.visual_type === "kpi" && config.settings?.mode) {
-    return runKpi(supabase, config, filters);
+    return runKpi(supabase, config, filters, period);
   }
 
   const { data, error } = await supabase.rpc("run_widget_query", {
