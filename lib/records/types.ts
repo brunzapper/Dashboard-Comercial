@@ -1,7 +1,18 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
+// v1.1 (09/07/2026): Fase 7 — DataType ganha 'booleano' (campos Y/N do Bitrix)
+//   e 'calculado' (campo com fórmula); FieldDefinition ganha source_system,
+//   source_field_id, show_in_builder e formula.
+import type { Formula } from "./formulas";
 
-export type DataType = "texto" | "numero" | "data" | "selecao" | "moeda";
+export type DataType =
+  | "texto"
+  | "numero"
+  | "data"
+  | "selecao"
+  | "moeda"
+  | "booleano"
+  | "calculado";
 
 export const DATA_TYPE_LABELS: Record<DataType, string> = {
   texto: "Texto",
@@ -9,7 +20,12 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
   data: "Data",
   selecao: "Seleção",
   moeda: "Moeda",
+  booleano: "Booleano",
+  calculado: "Calculado",
 };
+
+// Tipos numéricos: podem ser métrica (soma/média) e operando de fórmula.
+export const NUMERIC_DATA_TYPES: DataType[] = ["numero", "moeda", "calculado"];
 
 export interface FieldDefinition {
   id: string;
@@ -21,6 +37,11 @@ export interface FieldDefinition {
   editable_by_roles: string[];
   is_local: boolean;
   sort_order: number;
+  // Fase 7 (podem vir null em linhas antigas até o próximo select/migração):
+  source_system?: string | null;
+  source_field_id?: string | null;
+  show_in_builder?: boolean;
+  formula?: Formula | null;
 }
 
 export interface RecordRow {

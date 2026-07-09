@@ -12,12 +12,21 @@
 // v1.1 (05/07/2026): isProtected/valuesDiffer/primaryOperationId/leadTimeDays
 //   extraídos para lib/sync/shared.ts (reutilizados pelo adapter de Sheets,
 //   Fase 3) — SyncResult também passa a vir de lá.
+// v1.2 (09/07/2026): Fase 7 — descobre/cataloga colunas do Bitrix
+//   (syncFieldCatalog) e mapeia TODAS via buildCustomMapping; upsertRecord
+//   materializa os campos calculados (computeFormulaFields) em custom_fields.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
 import { BitrixLookups } from "./lookups";
 import { mapDeal, mapLead, type MappedRecord } from "./mapper";
+import { buildCustomMapping, syncFieldCatalog, type CustomMapEntry } from "./catalog";
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
+import {
+  computeFormulaFields,
+  loadFormulaDefs,
+  type FormulaFieldDef,
+} from "@/lib/records/formulas";
 import {
   emptyResult,
   isProtected,
@@ -120,16 +129,23 @@ async function resolveRelatedLead(
   return null;
 }
 
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Insere ou atualiza um registro mapeado, respeitando conflito por campo. */
 export async function upsertRecord(
   db: SupabaseClient,
   mapped: MappedRecord,
-  lookups: BitrixLookups
+  lookups: BitrixLookups,
+  formulaDefs: FormulaFieldDef[] = []
 ): Promise<"inserted" | "updated"> {
   const { data: existingRow } = await db
     .from("records")
     .select(
-      "id, custom_fields, field_modified_at, last_synced_at, responsible_id, operation_id, related_lead_id, " +
+      "id, custom_fields, field_modified_at, last_synced_at, responsible_id, operation_id, related_lead_id, lead_time_days, " +
         CORE_SYNC_FIELDS.join(", ")
     )
     .eq("source_system", mapped.source_system)
@@ -153,6 +169,15 @@ export async function upsertRecord(
   const now = new Date().toISOString();
 
   if (!existing) {
+    const custom_fields = { ...mapped.custom_fields };
+    if (formulaDefs.length > 0) {
+      const calc = computeFormulaFields(
+        { value: mapped.value, mrr: mapped.mrr, lead_time_days: computedLeadTime },
+        custom_fields,
+        formulaDefs
+      );
+      Object.assign(custom_fields, calc);
+    }
     const row: Record<string, unknown> = {
       record_type: mapped.record_type,
       source_system: mapped.source_system,
@@ -162,7 +187,7 @@ export async function upsertRecord(
       operation_id: operationId,
       related_lead_id: relatedLead?.id ?? null,
       lead_time_days: computedLeadTime,
-      custom_fields: mapped.custom_fields,
+      custom_fields,
       field_modified_at: {},
       last_synced_at: now,
     };
@@ -219,6 +244,24 @@ export async function upsertRecord(
     updates.lead_time_days = computedLeadTime;
   }
 
+  // Campos calculados: sempre recomputados a partir dos valores efetivos.
+  if (formulaDefs.length > 0) {
+    const eff = (col: string) => (col in updates ? updates[col] : existing[col]);
+    const calc = computeFormulaFields(
+      {
+        value: numOrNull(eff("value")),
+        mrr: numOrNull(eff("mrr")),
+        lead_time_days: numOrNull(
+          "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days
+        ),
+      },
+      mergedCustom,
+      formulaDefs
+    );
+    Object.assign(mergedCustom, calc);
+    updates.custom_fields = mergedCustom;
+  }
+
   const { error } = await db.from("records").update(updates).eq("id", existing.id);
   if (error) throw new Error(`update ${mapped.source_id}: ${error.message}`);
 
@@ -236,10 +279,17 @@ interface DealFilter {
   [key: string]: unknown;
 }
 
+interface SyncContext {
+  dealMapping: CustomMapEntry[];
+  leadMapping: CustomMapEntry[];
+  formulaDefs: FormulaFieldDef[];
+}
+
 async function fetchAndSyncDeals(
   db: SupabaseClient,
   client: BitrixClient,
   lookups: BitrixLookups,
+  ctx: SyncContext,
   categoryId: string,
   extraFilter: DealFilter,
   result: SyncResult
@@ -250,8 +300,8 @@ async function fetchAndSyncDeals(
   });
   for (const raw of deals) {
     try {
-      const mapped = await mapDeal(raw, lookups);
-      const outcome = await upsertRecord(db, mapped, lookups);
+      const mapped = await mapDeal(raw, lookups, ctx.dealMapping);
+      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
       result[outcome] += 1;
     } catch {
       result.errors += 1;
@@ -263,6 +313,7 @@ async function fetchAndSyncLeads(
   db: SupabaseClient,
   client: BitrixClient,
   lookups: BitrixLookups,
+  ctx: SyncContext,
   extraFilter: DealFilter,
   result: SyncResult
 ): Promise<void> {
@@ -272,13 +323,26 @@ async function fetchAndSyncLeads(
   });
   for (const raw of leads) {
     try {
-      const mapped = await mapLead(raw, lookups);
-      const outcome = await upsertRecord(db, mapped, lookups);
+      const mapped = await mapLead(raw, lookups, ctx.leadMapping);
+      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
       result[outcome] += 1;
     } catch {
       result.errors += 1;
     }
   }
+}
+
+// Cataloga colunas do Bitrix e monta o contexto de sync (mapas + fórmulas).
+async function buildSyncContext(
+  db: SupabaseClient,
+  lookups: BitrixLookups
+): Promise<SyncContext> {
+  await syncFieldCatalog(db, lookups);
+  return {
+    dealMapping: buildCustomMapping(lookups, "deal"),
+    leadMapping: buildCustomMapping(lookups, "lead"),
+    formulaDefs: await loadFormulaDefs(db),
+  };
 }
 
 function enterpriseCategoryId(lookups: BitrixLookups): string | null {
@@ -295,12 +359,13 @@ export async function runBackfill(
 ): Promise<SyncResult> {
   const lookups = new BitrixLookups(client, db);
   await lookups.preload();
+  const ctx = await buildSyncContext(db, lookups);
   const result = emptyResult();
 
   const yearStart = `${new Date().getFullYear()}-01-01T00:00:00`;
 
   // Leads (todos — cobre históricos para o lead time).
-  await fetchAndSyncLeads(db, client, lookups, {}, result);
+  await fetchAndSyncLeads(db, client, lookups, ctx, {}, result);
 
   // Deals dos dois pipelines, criados/modificados no ano ou ainda abertos.
   const categories: string[] = [DEAL_PIPELINES.vendasCategoryId];
@@ -309,12 +374,13 @@ export async function runBackfill(
 
   for (const cat of categories) {
     // Abertos (qualquer data)
-    await fetchAndSyncDeals(db, client, lookups, cat, { CLOSED: "N" }, result);
+    await fetchAndSyncDeals(db, client, lookups, ctx, cat, { CLOSED: "N" }, result);
     // Fechados no ano
     await fetchAndSyncDeals(
       db,
       client,
       lookups,
+      ctx,
       cat,
       { CLOSED: "Y", ">=DATE_MODIFY": yearStart },
       result
@@ -335,13 +401,14 @@ export async function runReconcile(
 ): Promise<SyncResult> {
   const lookups = new BitrixLookups(client, db);
   await lookups.preload();
+  const ctx = await buildSyncContext(db, lookups);
   const result = emptyResult();
 
   const since = new Date(Date.now() - days * 86400000)
     .toISOString()
     .slice(0, 19);
 
-  await fetchAndSyncLeads(db, client, lookups, { ">=DATE_MODIFY": since }, result);
+  await fetchAndSyncLeads(db, client, lookups, ctx, { ">=DATE_MODIFY": since }, result);
 
   const categories: string[] = [DEAL_PIPELINES.vendasCategoryId];
   const entId = enterpriseCategoryId(lookups);
@@ -351,6 +418,7 @@ export async function runReconcile(
       db,
       client,
       lookups,
+      ctx,
       cat,
       { ">=DATE_MODIFY": since },
       result

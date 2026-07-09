@@ -13,7 +13,7 @@ export default async function CamposPage() {
   const { data } = await supabase
     .from("field_definitions")
     .select(
-      "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, sort_order"
+      "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, sort_order"
     )
     .order("sort_order", { ascending: true })
     .order("label", { ascending: true });
@@ -25,8 +25,10 @@ export default async function CamposPage() {
       <div>
         <h1 className="text-2xl font-semibold">Campos</h1>
         <p className="text-muted-foreground text-sm">
-          Crie colunas personalizadas (texto, número, moeda, data, seleção) e
-          defina quem vê e quem edita cada uma.
+          Crie colunas personalizadas (texto, número, moeda, data, seleção,
+          booleano ou calculado) e defina quem vê e quem edita cada uma. As
+          colunas descobertas no Bitrix aparecem aqui automaticamente; use o
+          botão &quot;Exibir&quot; para escolher quais vão para os seletores.
         </p>
       </div>
       <FieldsManager fields={fields} />

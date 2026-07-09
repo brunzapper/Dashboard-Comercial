@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 05/07/2026
+// Versão: 1.2 | Data: 09/07/2026
 // Tradução de um DEAL/LEAD cru do Bitrix para o formato do núcleo `records`,
 // usando o field map (lib/config/bitrix-field-map) e os lookups. Campos
 // auxiliares com prefixo `_` não são colunas — servem ao orquestrador do sync
@@ -6,14 +6,15 @@
 // v1.1 (05/07/2026): mapLead passa a capturar custom_fields.email (multifield
 //   EMAIL do Bitrix) — necessário para o match de lead relacionado por e-mail
 //   das vendas do site (Fase 3).
+// v1.2 (09/07/2026): Fase 7 — mapDeal/mapLead recebem o mapa dinâmico de
+//   colunas (lib/sync/bitrix/catalog) e extraem TODOS os campos do Bitrix para
+//   custom_fields (não só os curados de DEAL_CUSTOM/LEAD_CUSTOM).
 import {
   DEAL_CORE,
-  DEAL_CUSTOM,
   LEAD_CORE,
-  LEAD_CUSTOM,
   type BitrixFieldType,
-  type CustomFieldMap,
 } from "@/lib/config/bitrix-field-map";
+import type { CustomMapEntry } from "./catalog";
 import { BitrixLookups } from "./lookups";
 
 export interface MappedRecord {
@@ -89,13 +90,12 @@ function mapSemantic(v: unknown): string | null {
 
 async function resolveCustom(
   ufKey: string,
-  def: CustomFieldMap,
+  type: BitrixFieldType,
   val: unknown,
   lookups: BitrixLookups,
   entity: "deal" | "lead"
 ): Promise<unknown> {
   if (val == null || val === "") return null;
-  const type: BitrixFieldType = def.type;
 
   const enumLabel = (id: unknown) =>
     entity === "deal"
@@ -120,24 +120,37 @@ async function resolveCustom(
     case "datetime":
       return dateOrNull(val);
     default:
+      // Multifields (arrays) sem tipo conhecido não viram texto útil.
+      if (Array.isArray(val)) return null;
       return strOrNull(val);
   }
 }
 
-export async function mapDeal(
+async function resolveMapping(
   raw: Raw,
-  lookups: BitrixLookups
-): Promise<MappedRecord> {
+  mapping: CustomMapEntry[],
+  lookups: BitrixLookups,
+  entity: "deal" | "lead"
+): Promise<Record<string, unknown>> {
   const custom_fields: Record<string, unknown> = {};
-  for (const [ufKey, def] of Object.entries(DEAL_CUSTOM)) {
-    custom_fields[def.key] = await resolveCustom(
-      ufKey,
-      def,
-      raw[ufKey],
+  for (const entry of mapping) {
+    custom_fields[entry.key] = await resolveCustom(
+      entry.fieldId,
+      entry.type,
+      raw[entry.fieldId],
       lookups,
-      "deal"
+      entity
     );
   }
+  return custom_fields;
+}
+
+export async function mapDeal(
+  raw: Raw,
+  lookups: BitrixLookups,
+  mapping: CustomMapEntry[]
+): Promise<MappedRecord> {
+  const custom_fields = await resolveMapping(raw, mapping, lookups, "deal");
 
   return {
     record_type: "negocio",
@@ -178,18 +191,10 @@ function firstEmail(v: unknown): string | null {
 
 export async function mapLead(
   raw: Raw,
-  lookups: BitrixLookups
+  lookups: BitrixLookups,
+  mapping: CustomMapEntry[]
 ): Promise<MappedRecord> {
-  const custom_fields: Record<string, unknown> = {};
-  for (const [ufKey, def] of Object.entries(LEAD_CUSTOM)) {
-    custom_fields[def.key] = await resolveCustom(
-      ufKey,
-      def,
-      raw[ufKey],
-      lookups,
-      "lead"
-    );
-  }
+  const custom_fields = await resolveMapping(raw, mapping, lookups, "lead");
   custom_fields.email = firstEmail(raw["EMAIL"]);
 
   return {
