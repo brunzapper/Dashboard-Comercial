@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Sync da planilha "Estudo de Fechamentos" (aba Site) → records. Fonte PUSH
 // (o Apps Script empurra a cada hora via /api/sync/sheets) — por isso não
 // implementa o contrato SyncAdapter (backfill/reconcile) de lib/sync/adapter;
@@ -8,9 +8,16 @@
 // Reaproveita o conflito por campo (isProtected/valuesDiffer) e a resolução
 // de operação primária de lib/sync/shared — o MESMO princípio do sync do
 // Bitrix (lib/sync/bitrix/sync.ts).
+// v1.1 (09/07/2026): Fase 7 — materializa campos calculados (computeFormulaFields)
+//   em custom_fields, igual ao sync do Bitrix.
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  computeFormulaFields,
+  loadFormulaDefs,
+  type FormulaFieldDef,
+} from "@/lib/records/formulas";
 import {
   emptyResult,
   isProtected,
@@ -47,6 +54,12 @@ function strOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();
   return s === "" ? null : s;
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function sourceIdFor(name: string, createdAt: string): string {
@@ -101,14 +114,15 @@ async function resolveRelatedLeadByEmail(
 
 async function upsertSheetRow(
   db: SupabaseClient,
-  row: SheetSiteRow
+  row: SheetSiteRow,
+  formulaDefs: FormulaFieldDef[]
 ): Promise<"inserted" | "updated"> {
   const sourceId = sourceIdFor(row.name, row.created_at);
 
   const { data: existingRow } = await db
     .from("records")
     .select(
-      "id, custom_fields, field_modified_at, last_synced_at, responsible_id, operation_id, related_lead_id, " +
+      "id, custom_fields, field_modified_at, last_synced_at, responsible_id, operation_id, related_lead_id, lead_time_days, " +
         CORE_SYNC_FIELDS.join(", ")
     )
     .eq("source_system", "sheet_site")
@@ -139,6 +153,16 @@ async function upsertSheetRow(
   const now = new Date().toISOString();
 
   if (!existing) {
+    if (formulaDefs.length > 0) {
+      Object.assign(
+        custom_fields,
+        computeFormulaFields(
+          { value: numOrNull(row.contract), mrr: numOrNull(row.mrr), lead_time_days: computedLeadTime },
+          custom_fields,
+          formulaDefs
+        )
+      );
+    }
     const { error } = await db.from("records").insert({
       record_type: "venda_site",
       source_system: "sheet_site",
@@ -213,6 +237,26 @@ async function upsertSheetRow(
     updates.lead_time_days = computedLeadTime;
   }
 
+  // Campos calculados: sempre recomputados a partir dos valores efetivos.
+  if (formulaDefs.length > 0) {
+    const eff = (col: string) => (col in updates ? updates[col] : existing[col]);
+    Object.assign(
+      mergedCustom,
+      computeFormulaFields(
+        {
+          value: numOrNull(eff("value")),
+          mrr: numOrNull(eff("mrr")),
+          lead_time_days: numOrNull(
+            "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days
+          ),
+        },
+        mergedCustom,
+        formulaDefs
+      )
+    );
+    updates.custom_fields = mergedCustom;
+  }
+
   const { error } = await db.from("records").update(updates).eq("id", existing.id);
   if (error) throw new Error(`update ${sourceId}: ${error.message}`);
 
@@ -229,13 +273,14 @@ export async function syncEstudoFechamentosRows(
   rows: SheetSiteRow[]
 ): Promise<SyncResult> {
   const result = emptyResult();
+  const formulaDefs = await loadFormulaDefs(db);
   for (const row of rows) {
     if (!row.name || !row.created_at) {
       result.skipped += 1;
       continue;
     }
     try {
-      const outcome = await upsertSheetRow(db, row);
+      const outcome = await upsertSheetRow(db, row, formulaDefs);
       result[outcome] += 1;
     } catch {
       result.errors += 1;

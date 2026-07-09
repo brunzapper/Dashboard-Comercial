@@ -1,7 +1,9 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
+// v1.1 (09/07/2026): Fase 7 — recomputa os campos calculados do registro após a
+//   edição manual (dependem de value/mrr/lead_time_days e de custom numéricos).
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -9,7 +11,14 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
+import { computeFormulaFields, loadFormulaDefs } from "@/lib/records/formulas";
 import type { DataType } from "@/lib/records/types";
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 export interface EditActionState {
   ok?: boolean;
@@ -25,6 +34,9 @@ function coerce(dataType: DataType, raw: FormDataEntryValue | null): unknown {
     const n = Number(s.replace(/\./g, "").replace(",", "."));
     return Number.isNaN(Number(s)) ? (Number.isNaN(n) ? null : n) : Number(s);
   }
+  if (dataType === "booleano") {
+    return s === "true" ? true : s === "false" ? false : null;
+  }
   return s;
 }
 
@@ -38,6 +50,9 @@ interface ExistingForEdit {
   related_lead_id: string | null;
   source_created_at: string | null;
   closed_at: string | null;
+  value: number | null;
+  mrr: number | null;
+  lead_time_days: number | null;
 }
 
 export async function updateRecord(
@@ -58,7 +73,7 @@ export async function updateRecord(
   const { data: existingRow } = await supabase
     .from("records")
     .select(
-      "id, record_type, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at"
+      "id, record_type, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days"
     )
     .eq("id", recordId)
     .maybeSingle();
@@ -90,6 +105,8 @@ export async function updateRecord(
   // Campos personalizados editáveis pelo papel do usuário
   let customChanged = false;
   for (const def of defs ?? []) {
+    // Calculados são derivados — nunca editados manualmente.
+    if ((def.data_type as DataType) === "calculado") continue;
     const editable = ((def.editable_by_roles as string[]) ?? []).some((r) =>
       roles.includes(r)
     );
@@ -133,6 +150,30 @@ export async function updateRecord(
     updates.lead_time_days = leadCreated
       ? leadTimeDays(refDate, leadCreated)
       : null;
+  }
+
+  // Recomputa os campos calculados a partir dos valores efetivos do registro.
+  const formulaDefs = await loadFormulaDefs(supabase);
+  if (formulaDefs.length > 0) {
+    const effLeadTime =
+      "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days;
+    const calc = computeFormulaFields(
+      {
+        value: numOrNull(existing.value),
+        mrr: numOrNull(existing.mrr),
+        lead_time_days: numOrNull(effLeadTime),
+      },
+      custom,
+      formulaDefs
+    );
+    let calcChanged = false;
+    for (const [k, v] of Object.entries(calc)) {
+      if (String(custom[k] ?? "") !== String(v ?? "")) {
+        custom[k] = v;
+        calcChanged = true;
+      }
+    }
+    if (calcChanged) updates.custom_fields = custom;
   }
 
   if (Object.keys(updates).length === 0) {

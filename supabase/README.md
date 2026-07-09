@@ -69,6 +69,29 @@ No app (como admin):
   "Performance comercial do mês") e os campos de apoio (forecast, implementação, etc.).
   É idempotente (pula o que já existe).
 
+## Como aplicar a Fase 7 (Colunas dinâmicas do Bitrix + campos calculados)
+
+Cole o [`apply/fase-7.sql`](./apply/fase-7.sql) (migração `0017`): estende
+`field_definitions` com `source_system`, `source_field_id`, `show_in_builder` e
+`formula`, e aceita os tipos `booleano` e `calculado`. Idempotente.
+
+O que muda no app depois disso:
+
+- **Descoberta automática:** ao rodar **Backfill**/**Reconciliar**, o sistema lê o
+  schema do Bitrix (`crm.deal.fields`/`crm.lead.fields`) e cataloga **todas** as
+  colunas de Negócios e Leads como campos em **Campos**. Colunas novas criadas no
+  Bitrix entram sozinhas no próximo sync. Elas nascem **desligadas** (`show_in_builder`
+  = falso) — os valores já são importados para `records.custom_fields`, mas a coluna
+  só aparece nos seletores/tabela quando um admin a habilita em **Campos**.
+- **Config dos seletores:** em **Campos**, o botão de olho (Exibir) de cada campo
+  controla se ele aparece nos dropdowns do construtor de dashboards e nas colunas da
+  tela de Registros.
+- **Campos calculados:** em **Campos**, tipo **Calculado** abre um construtor de
+  fórmula (coluna/constante + operadores + − × ÷ e parênteses). O resultado é
+  materializado por registro em cada sync/edição; o campo fica disponível como
+  métrica numérica (soma/média) nos dashboards. Recalcula automaticamente todos os
+  registros ao criar/editar a fórmula.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

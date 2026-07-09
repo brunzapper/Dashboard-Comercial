@@ -1,21 +1,71 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Server Actions da tela de Campos (field_definitions). Gravação com o client
 // do usuário — a RLS exige `manage_field_definitions` (admin). É a infra de
 // "criar campos personalizados": tipo, opções de dropdown, visibilidade e
 // editabilidade por papel.
+// v1.1 (09/07/2026): Fase 7 — suporta tipos 'booleano'/'calculado', o toggle
+//   show_in_builder e a fórmula (validada) dos campos calculados; ao salvar um
+//   calculado, recalcula os registros existentes.
 "use server";
 
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
+import { validateFormula, type Formula } from "@/lib/records/formulas";
+import { recalcAllFormulaFields } from "@/lib/records/recalc";
+import { CORE_FIELDS } from "@/lib/widgets/fields";
 
 export interface FieldActionState {
   ok?: boolean;
   message?: string;
 }
 
-const DATA_TYPES = ["texto", "numero", "data", "selecao", "moeda"] as const;
+const DATA_TYPES = [
+  "texto",
+  "numero",
+  "data",
+  "selecao",
+  "moeda",
+  "booleano",
+  "calculado",
+] as const;
+
+// Referências numéricas que podem ser operandos de uma fórmula: colunas do
+// núcleo numéricas + campos personalizados numéricos que NÃO sejam calculados
+// (evita dependência circular).
+async function allowedFormulaRefs(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  excludeFieldKey?: string
+): Promise<Set<string>> {
+  const refs = new Set<string>(
+    CORE_FIELDS.filter((f) => f.isNumeric).map((f) => f.field)
+  );
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("field_key, data_type");
+  for (const d of data ?? []) {
+    const key = d.field_key as string;
+    const dt = d.data_type as DataType;
+    if (key === excludeFieldKey) continue;
+    if (NUMERIC_DATA_TYPES.includes(dt) && dt !== "calculado") {
+      refs.add(`custom:${key}`);
+    }
+  }
+  return refs;
+}
+
+function parseFormula(raw: string): Formula | null {
+  if (!raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Formula;
+    if (!parsed || !Array.isArray(parsed.tokens)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function slugify(label: string): string {
   return label
@@ -55,8 +105,10 @@ function readForm(formData: FormData) {
   const visible = parseRoles(formData, "visible_to_roles");
   const editable = parseRoles(formData, "editable_by_roles");
   const isLocal = formData.get("is_local") === "on";
+  const showInBuilder = formData.get("show_in_builder") === "on";
   const sortOrder = Number(formData.get("sort_order") ?? 0) || 0;
-  return { label, dataType, options, visible, editable, isLocal, sortOrder };
+  const formula = parseFormula(String(formData.get("formula") ?? ""));
+  return { label, dataType, options, visible, editable, isLocal, showInBuilder, sortOrder, formula };
 }
 
 export async function createField(
@@ -75,6 +127,14 @@ export async function createField(
   if (!fieldKey) return { ok: false, message: "Rótulo inválido para gerar a chave." };
 
   const supabase = await createClient();
+
+  if (f.dataType === "calculado") {
+    if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
+    const allowed = await allowedFormulaRefs(supabase, fieldKey);
+    const v = validateFormula(f.formula, allowed);
+    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+  }
+
   const { error } = await supabase.from("field_definitions").insert({
     field_key: fieldKey,
     label: f.label,
@@ -83,6 +143,8 @@ export async function createField(
     visible_to_roles: f.visible,
     editable_by_roles: f.editable,
     is_local: f.isLocal,
+    show_in_builder: f.showInBuilder,
+    formula: f.dataType === "calculado" ? f.formula : null,
     sort_order: f.sortOrder,
   });
   if (error) {
@@ -92,7 +154,9 @@ export async function createField(
         : error.message;
     return { ok: false, message: msg };
   }
+  if (f.dataType === "calculado") await recalcAllFormulaFields();
   revalidatePath("/campos");
+  revalidatePath("/registros");
   return { ok: true, message: `Campo "${f.label}" criado.` };
 }
 
@@ -109,6 +173,21 @@ export async function updateField(
   if (!f.label) return { ok: false, message: "Informe o rótulo do campo." };
 
   const supabase = await createClient();
+
+  const { data: existing } = await supabase
+    .from("field_definitions")
+    .select("field_key")
+    .eq("id", id)
+    .maybeSingle();
+  const fieldKey = (existing?.field_key as string | undefined) ?? undefined;
+
+  if (f.dataType === "calculado") {
+    if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
+    const allowed = await allowedFormulaRefs(supabase, fieldKey);
+    const v = validateFormula(f.formula, allowed);
+    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+  }
+
   const { error } = await supabase
     .from("field_definitions")
     .update({
@@ -118,12 +197,30 @@ export async function updateField(
       visible_to_roles: f.visible,
       editable_by_roles: f.editable,
       is_local: f.isLocal,
+      show_in_builder: f.showInBuilder,
+      formula: f.dataType === "calculado" ? f.formula : null,
       sort_order: f.sortOrder,
     })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
+  if (f.dataType === "calculado") await recalcAllFormulaFields();
   revalidatePath("/campos");
+  revalidatePath("/registros");
   return { ok: true, message: `Campo "${f.label}" atualizado.` };
+}
+
+// Liga/desliga rapidamente se o campo aparece nos seletores (dropdowns do
+// construtor + colunas da tabela de Registros). Usado pela config em /campos.
+export async function toggleShowInBuilder(formData: FormData): Promise<void> {
+  const err = await ensureCanManage();
+  if (err) return;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const next = String(formData.get("show_in_builder") ?? "") === "true";
+  const supabase = await createClient();
+  await supabase.from("field_definitions").update({ show_in_builder: next }).eq("id", id);
+  revalidatePath("/campos");
+  revalidatePath("/registros");
 }
 
 export async function deleteField(formData: FormData): Promise<void> {

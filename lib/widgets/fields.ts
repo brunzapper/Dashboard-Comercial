@@ -1,9 +1,11 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Campos disponíveis no construtor de widgets: colunas do núcleo (com rótulos
 // PT) + campos personalizados (custom:<key>). Marca quais são numéricos
 // (métricas), quais são datas (aceitam transform) e quais são FK (resolver
 // rótulo id→nome no engine).
-import type { FieldDefinition } from "@/lib/records/types";
+// v1.1 (09/07/2026): Fase 7 — 'calculado' conta como numérico (métrica); a
+//   filtragem por show_in_builder é feita por quem carrega os field_definitions.
+import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import type { Aggregation, Transform } from "./types";
 
 export type FkKind = "responsible" | "operation" | "lead";
@@ -45,7 +47,7 @@ export function buildAvailableFields(
   const custom = customFields.map((f) => ({
     field: `custom:${f.field_key}`,
     label: f.label,
-    isNumeric: f.data_type === "numero" || f.data_type === "moeda",
+    isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
     isDate: f.data_type === "data",
   }));
   return [...CORE_FIELDS, ...custom];

@@ -1,5 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
 // Formulário de criação/edição de um campo personalizado (field_definition).
+// v1.1 (09/07/2026): Fase 7 — tipo "Calculado" abre o construtor de fórmula e o
+//   toggle "Exibir nos seletores" (show_in_builder).
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
@@ -26,6 +28,7 @@ import {
   updateField,
   type FieldActionState,
 } from "@/app/(app)/campos/actions";
+import { FormulaBuilder, type RefOption } from "./formula-builder";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const initial: FieldActionState = {};
@@ -57,9 +60,11 @@ function RoleChecks({
 
 export function FieldForm({
   field,
+  numericRefs,
   onDone,
 }: {
   field?: FieldDefinition;
+  numericRefs: RefOption[];
   onDone?: () => void;
 }) {
   const isEdit = Boolean(field);
@@ -67,6 +72,11 @@ export function FieldForm({
   const [state, formAction, pending] = useActionState(action, initial);
   const [dataType, setDataType] = useState<DataType>(
     field?.data_type ?? "texto"
+  );
+
+  // Ao editar um campo calculado, ele não pode ser operando de si mesmo.
+  const operandRefs = numericRefs.filter(
+    (r) => r.ref !== `custom:${field?.field_key}`
   );
 
   useEffect(() => {
@@ -124,6 +134,17 @@ export function FieldForm({
         </div>
       ) : null}
 
+      {dataType === "calculado" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label>Fórmula</Label>
+          <FormulaBuilder refs={operandRefs} initial={field?.formula ?? null} />
+          <p className="text-muted-foreground text-xs">
+            Opere entre colunas numéricas (+ − × ÷) e constantes. O resultado é
+            calculado por registro a cada sincronização/edição.
+          </p>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-1.5">
         <Label>Visível para os papéis</Label>
         <RoleChecks name="visible_to_roles" selected={field?.visible_to_roles ?? []} />
@@ -133,6 +154,16 @@ export function FieldForm({
         <Label>Editável pelos papéis</Label>
         <RoleChecks name="editable_by_roles" selected={field?.editable_by_roles ?? []} />
       </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="show_in_builder"
+          defaultChecked={field?.show_in_builder ?? true}
+          className="size-4 accent-primary"
+        />
+        Exibir nos seletores (dropdowns do construtor e colunas de Registros)
+      </label>
 
       <div className="flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm">
