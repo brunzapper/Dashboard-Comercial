@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — recebe a `source` (aba) e mostra só as colunas do
+//   núcleo adequadas: Pipeline só em Deals; MRR em Deals/Estudo (não em Leads).
+//   A coluna "Tipo" saiu (redundante dentro de uma aba de fonte).
 // Tabela de registros com colunas do núcleo + campos personalizados visíveis;
 // cada linha abre o painel de edição (RecordEditSheet).
 "use client";
@@ -11,13 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-  RECORD_TYPE_LABELS,
-  type FieldDefinition,
-  type OptionItem,
-  type RecordRow,
-} from "@/lib/records/types";
+import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
+import type { SourceKey } from "@/lib/sources";
 import { RecordEditSheet } from "./record-edit-sheet";
 
 function money(v: number | null): string {
@@ -26,6 +24,7 @@ function money(v: number | null): string {
 }
 
 export function RecordsTable({
+  source,
   records,
   fields,
   responsibles,
@@ -34,6 +33,7 @@ export function RecordsTable({
   userRoles,
   canEditValues,
 }: {
+  source: SourceKey;
   records: RecordRow[];
   fields: FieldDefinition[];
   responsibles: OptionItem[];
@@ -43,6 +43,8 @@ export function RecordsTable({
   canEditValues: boolean;
 }) {
   const responsibleMap = new Map(responsibles.map((r) => [r.id, r.label]));
+  const showPipeline = source === "deals";
+  const showMrr = source === "deals" || source === "estudo";
 
   if (records.length === 0) {
     return (
@@ -53,15 +55,15 @@ export function RecordsTable({
   }
 
   return (
-    <div className="rounded-lg border">
+    <div className="rounded-lg border overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Título</TableHead>
-            <TableHead>Tipo</TableHead>
+            {showPipeline ? <TableHead>Pipeline</TableHead> : null}
             <TableHead>Etapa</TableHead>
             <TableHead>Responsável</TableHead>
-            <TableHead className="text-right">MRR</TableHead>
+            {showMrr ? <TableHead className="text-right">MRR</TableHead> : null}
             <TableHead className="text-right">Valor</TableHead>
             {fields.map((f) => (
               <TableHead key={f.id}>{f.label}</TableHead>
@@ -75,18 +77,18 @@ export function RecordsTable({
               <TableCell className="max-w-[220px] truncate font-medium">
                 {r.title ?? "—"}
               </TableCell>
-              <TableCell>
-                <Badge variant="secondary">
-                  {RECORD_TYPE_LABELS[r.record_type]}
-                </Badge>
-              </TableCell>
+              {showPipeline ? (
+                <TableCell>{r.pipeline ?? "—"}</TableCell>
+              ) : null}
               <TableCell>{r.stage ?? "—"}</TableCell>
               <TableCell>
                 {r.responsible_id
                   ? responsibleMap.get(r.responsible_id) ?? "—"
                   : "—"}
               </TableCell>
-              <TableCell className="text-right">{money(r.mrr)}</TableCell>
+              {showMrr ? (
+                <TableCell className="text-right">{money(r.mrr)}</TableCell>
+              ) : null}
               <TableCell className="text-right">{money(r.value)}</TableCell>
               {fields.map((f) => (
                 <TableCell key={f.id} className="max-w-[160px] truncate">

@@ -15,6 +15,8 @@
 // v1.2 (09/07/2026): Fase 7 — descobre/cataloga colunas do Bitrix
 //   (syncFieldCatalog) e mapeia TODAS via buildCustomMapping; upsertRecord
 //   materializa os campos calculados (computeFormulaFields) em custom_fields.
+// v1.3 (09/07/2026): Fase 8 — contabiliza resultado por entidade (lead/negócio)
+//   e captura a mensagem do erro (recordOutcome/recordError) em vez de engolir.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
@@ -32,6 +34,8 @@ import {
   isProtected,
   leadTimeDays,
   primaryOperationId,
+  recordError,
+  recordOutcome,
   valuesDiffer,
   type ExistingRecord,
   type SyncResult,
@@ -302,9 +306,9 @@ async function fetchAndSyncDeals(
     try {
       const mapped = await mapDeal(raw, lookups, ctx.dealMapping);
       const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
-      result[outcome] += 1;
-    } catch {
-      result.errors += 1;
+      recordOutcome(result, "negocio", outcome);
+    } catch (e) {
+      recordError(result, "negocio", (e as Error).message);
     }
   }
 }
@@ -325,9 +329,9 @@ async function fetchAndSyncLeads(
     try {
       const mapped = await mapLead(raw, lookups, ctx.leadMapping);
       const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
-      result[outcome] += 1;
-    } catch {
-      result.errors += 1;
+      recordOutcome(result, "lead", outcome);
+    } catch (e) {
+      recordError(result, "lead", (e as Error).message);
     }
   }
 }

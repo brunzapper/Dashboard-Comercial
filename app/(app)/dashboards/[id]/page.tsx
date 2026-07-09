@@ -13,6 +13,10 @@ import type { FieldDefinition } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { runWidget } from "@/lib/widgets/engine";
 import {
+  buildCorrespondenceMap,
+  loadCorrespondences,
+} from "@/lib/correspondences";
+import {
   DEFAULT_PERIOD_FIELD,
   resolvePeriodSelection,
   type DashboardPeriod,
@@ -51,25 +55,31 @@ export default async function DashboardPage({
   const isAdmin = session?.roles.includes("admin") ?? false;
   const canEdit = isOwner || isAdmin;
 
-  const [{ data: widgetsData }, { data: fieldsData }] = await Promise.all([
-    supabase
-      .from("widgets")
-      .select(
-        "id, dashboard_id, title, visual_type, source, dimensions, metrics, filters, settings, grid_position, sort_order"
-      )
-      .eq("dashboard_id", id)
-      .order("sort_order", { ascending: true }),
-    supabase
-      .from("field_definitions")
-      .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order"
-      )
-      .eq("show_in_builder", true)
-      .order("sort_order", { ascending: true }),
-  ]);
+  const [{ data: widgetsData }, { data: fieldsData }, correspondences] =
+    await Promise.all([
+      supabase
+        .from("widgets")
+        .select(
+          "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+        )
+        .eq("dashboard_id", id)
+        .order("sort_order", { ascending: true }),
+      supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
+        )
+        .eq("show_in_builder", true)
+        .order("sort_order", { ascending: true }),
+      loadCorrespondences(supabase),
+    ]);
 
   const widgets = (widgetsData ?? []) as Widget[];
-  const available = buildAvailableFields((fieldsData ?? []) as FieldDefinition[]);
+  const available = buildAvailableFields(
+    (fieldsData ?? []) as FieldDefinition[],
+    correspondences
+  );
+  const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
 
@@ -130,6 +140,8 @@ export default async function DashboardPage({
           supabase,
           {
             source: "records",
+            sources: w.sources ?? [],
+            splitBySource: w.split_by_source ?? false,
             dimensions: w.dimensions ?? [],
             metrics: w.metrics ?? [],
             filters: w.filters ?? [],
@@ -137,7 +149,8 @@ export default async function DashboardPage({
             settings: w.settings,
           },
           available,
-          periodByWidget[w.id]
+          periodByWidget[w.id],
+          correspondencesMap
         );
       } catch {
         dataById[w.id] = { rows: [], dimensions: [], metrics: [] };

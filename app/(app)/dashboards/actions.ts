@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
+import type { SourceKey } from "@/lib/sources";
 import type {
   DashboardSettings,
   Dimension,
@@ -26,6 +27,8 @@ export interface ActionState {
 export interface WidgetInput {
   title: string | null;
   visual_type: VisualType;
+  sources?: SourceKey[];
+  splitBySource?: boolean;
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
@@ -104,6 +107,8 @@ export async function createWidget(
       title: input.title,
       visual_type: input.visual_type,
       source: "records",
+      sources: input.sources ?? [],
+      split_by_source: input.splitBySource ?? false,
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
@@ -130,6 +135,8 @@ export async function updateWidget(
     .update({
       title: input.title,
       visual_type: input.visual_type,
+      sources: input.sources ?? [],
+      split_by_source: input.splitBySource ?? false,
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,

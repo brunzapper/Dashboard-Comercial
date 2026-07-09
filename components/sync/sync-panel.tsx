@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — mostra a quebra por entidade (leads vs deals) e as
+//   amostras de erro do sync, para diagnosticar "só leads importando".
 // Painel de sincronização (admin) na página de Registros: botões de
 // Reconciliação (com campo de dias) e Backfill inicial, com status do último
 // sync. Sem webhook de saída por ora — a atualização é sob demanda.
@@ -24,19 +26,50 @@ import {
 
 const initial: SyncActionState = {};
 
+const ENTITY_LABELS: Record<string, string> = {
+  lead: "Leads",
+  negocio: "Deals",
+  venda_site: "Estudo de Fechamentos",
+};
+
 function ResultLine({ state }: { state: SyncActionState }) {
   if (!state.message) return null;
   const r = state.result;
+  const entities = r ? Object.entries(r.byEntity ?? {}) : [];
   return (
-    <p
-      className={state.ok ? "text-muted-foreground text-sm" : "text-destructive text-sm"}
-      role="status"
-    >
-      {state.message}
-      {r
-        ? ` (novos: ${r.inserted}, atualizados: ${r.updated}, erros: ${r.errors})`
-        : ""}
-    </p>
+    <div className="flex flex-col gap-1" role="status">
+      <p className={state.ok ? "text-muted-foreground text-sm" : "text-destructive text-sm"}>
+        {state.message}
+        {r
+          ? ` (novos: ${r.inserted}, atualizados: ${r.updated}, erros: ${r.errors})`
+          : ""}
+      </p>
+      {entities.length > 0 ? (
+        <ul className="text-muted-foreground text-xs">
+          {entities.map(([entity, c]) => (
+            <li key={entity}>
+              {ENTITY_LABELS[entity] ?? entity}: {c.inserted} novo(s), {c.updated}{" "}
+              atualizado(s)
+              {c.errors > 0 ? `, ${c.errors} erro(s)` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {r && r.errorSamples && r.errorSamples.length > 0 ? (
+        <details className="text-xs">
+          <summary className="text-destructive cursor-pointer">
+            Ver erros ({r.errorSamples.length})
+          </summary>
+          <ul className="text-muted-foreground mt-1 flex flex-col gap-0.5">
+            {r.errorSamples.map((msg, i) => (
+              <li key={i} className="font-mono break-all">
+                {msg}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
   );
 }
 

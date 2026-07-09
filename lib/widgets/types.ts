@@ -1,5 +1,8 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — WidgetConfig/Widget ganham `sources` (fontes
+//   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
+import type { SourceKey } from "@/lib/sources";
 
 export type VisualType =
   | "tabela"
@@ -100,6 +103,9 @@ export interface DashboardSettings {
 
 export interface WidgetConfig {
   source: "records";
+  // Fase 8: fontes selecionadas (vazio/ausente = todas) e modo "quebrar por fonte".
+  sources?: SourceKey[];
+  splitBySource?: boolean;
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
@@ -130,6 +136,8 @@ export interface Widget {
   title: string | null;
   visual_type: VisualType;
   source: string;
+  sources?: SourceKey[];
+  split_by_source?: boolean;
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];

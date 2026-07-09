@@ -1,15 +1,26 @@
-// Versão: 1.2 | Data: 05/07/2026
+// Versão: 1.3 | Data: 09/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
 // v1.2 (05/07/2026): Fase 4 — listagem/filtros/edição (antes só o SyncPanel).
+// v1.3 (09/07/2026): Fase 8 — abas por fonte (Leads/Deals/Estudo). Cada aba
+//   filtra por record_type e mostra só as colunas daquela fonte (applies_to).
 import Link from "next/link";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
-import { Button } from "@/components/ui/button";
+import {
+  SOURCE_KEYS,
+  SOURCE_LABELS,
+  SOURCE_RECORD_TYPE,
+  fieldAppliesToSource,
+  isSourceKey,
+  type SourceKey,
+} from "@/lib/sources";
+import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordsTable } from "@/components/registros/records-table";
+import { Button } from "@/components/ui/button";
 
 const PAGE_SIZE = 50;
 const RECORD_COLS =
@@ -25,7 +36,9 @@ export default async function RegistrosPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const tipo = str(sp.tipo);
+  const fonteRaw = str(sp.fonte);
+  const fonte: SourceKey = isSourceKey(fonteRaw) ? fonteRaw : "leads";
+  const recordType = SOURCE_RECORD_TYPE[fonte];
   const etapa = str(sp.etapa);
   const responsavel = str(sp.responsavel);
   const de = str(sp.de);
@@ -46,9 +59,9 @@ export default async function RegistrosPage({
   let query = supabase
     .from("records")
     .select(RECORD_COLS, { count: "exact" })
+    .eq("record_type", recordType)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .range(from, to);
-  if (tipo) query = query.eq("record_type", tipo);
   if (etapa) query = query.ilike("stage", `%${etapa}%`);
   if (responsavel) query = query.eq("responsible_id", responsavel);
   if (de) query = query.gte("source_created_at", de);
@@ -66,7 +79,7 @@ export default async function RegistrosPage({
       supabase
         .from("field_definitions")
         .select(
-          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order"
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
         )
         .eq("show_in_builder", true)
         .order("sort_order", { ascending: true }),
@@ -82,7 +95,10 @@ export default async function RegistrosPage({
         .order("name"),
     ]);
 
-  const fields = (fieldsData ?? []) as FieldDefinition[];
+  const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Só as colunas que pertencem à fonte da aba (applies_to) — campos locais/app
+  // (applies_to vazio) aparecem em todas.
+  const fields = allFields.filter((f) => fieldAppliesToSource(f.applies_to, fonte));
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,
@@ -120,15 +136,27 @@ export default async function RegistrosPage({
     lastSyncedAt = (data?.last_synced_at as string | undefined) ?? null;
   }
 
-  function pageHref(target: number): string {
+  function buildParams(): URLSearchParams {
     const params = new URLSearchParams();
-    if (tipo) params.set("tipo", tipo);
+    params.set("fonte", fonte);
     if (etapa) params.set("etapa", etapa);
     if (responsavel) params.set("responsavel", responsavel);
     if (de) params.set("de", de);
     if (ate) params.set("ate", ate);
     if (busca) params.set("busca", busca);
+    return params;
+  }
+
+  function pageHref(target: number): string {
+    const params = buildParams();
     params.set("page", String(target));
+    return `/registros?${params.toString()}`;
+  }
+
+  // Aba de cada fonte, preservando os filtros atuais (mas voltando à página 1).
+  function tabHref(target: SourceKey): string {
+    const params = buildParams();
+    params.set("fonte", target);
     return `/registros?${params.toString()}`;
   }
 
@@ -144,9 +172,31 @@ export default async function RegistrosPage({
 
       {isAdmin ? <SyncPanel lastSyncedAt={lastSyncedAt} /> : null}
 
+      {/* Abas por fonte */}
+      <div className="flex flex-wrap gap-1 border-b">
+        {SOURCE_KEYS.map((key) => {
+          const active = key === fonte;
+          return (
+            <Link
+              key={key}
+              href={tabHref(key)}
+              className={cn(
+                "-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                active
+                  ? "border-primary text-foreground"
+                  : "text-muted-foreground border-transparent hover:text-foreground"
+              )}
+            >
+              {SOURCE_LABELS[key]}
+            </Link>
+          );
+        })}
+      </div>
+
       <FiltersBar responsibles={responsibles} />
 
       <RecordsTable
+        source={fonte}
         records={records}
         fields={fields}
         responsibles={responsibles}

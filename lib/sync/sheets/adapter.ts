@@ -10,6 +10,8 @@
 // Bitrix (lib/sync/bitrix/sync.ts).
 // v1.1 (09/07/2026): Fase 7 — materializa campos calculados (computeFormulaFields)
 //   em custom_fields, igual ao sync do Bitrix.
+// v1.2 (09/07/2026): Fase 8 — resultado por entidade (venda_site) + amostras de
+//   erro (recordOutcome/recordError).
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -24,6 +26,8 @@ import {
   leadTimeDays,
   normalizeName,
   primaryOperationId,
+  recordError,
+  recordOutcome,
   valuesDiffer,
   type ExistingRecord,
   type SyncResult,
@@ -276,14 +280,14 @@ export async function syncEstudoFechamentosRows(
   const formulaDefs = await loadFormulaDefs(db);
   for (const row of rows) {
     if (!row.name || !row.created_at) {
-      result.skipped += 1;
+      recordOutcome(result, "venda_site", "skipped");
       continue;
     }
     try {
       const outcome = await upsertSheetRow(db, row, formulaDefs);
-      result[outcome] += 1;
-    } catch {
-      result.errors += 1;
+      recordOutcome(result, "venda_site", outcome);
+    } catch (e) {
+      recordError(result, "venda_site", (e as Error).message);
     }
   }
   return result;
