@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { Widget, WidgetData } from "@/lib/widgets/types";
 import { DashboardGrid } from "./dashboard-grid";
+import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
 
 export function DashboardClient({
@@ -55,6 +56,8 @@ export function DashboardClient({
           </div>
         ) : null}
       </div>
+
+      <PeriodFilter available={available} />
 
       <DashboardGrid
         widgets={widgets}
