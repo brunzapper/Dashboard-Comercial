@@ -116,6 +116,18 @@ syncs preservam esses nomes/visibilidade (via `FIELD_LABELS` em
 `lib/sync/bitrix/catalog.ts`). Depois disso, em **Campos**, você pode ocultar qualquer
 coluna que não queira ver nos seletores/tabelas.
 
+## Como aplicar a Fase 9 (Sync incremental e retomável)
+
+Cole o [`apply/fase-9.sql`](./apply/fase-9.sql) (migração `0023`: tabela `sync_jobs`) e
+execute. Idempotente. Ela guarda o estado dos jobs de **Backfill/Reconciliar** para que
+rodem em pedaços pequenos (1 página do Bitrix por requisição), com **barra de progresso** e
+**retomável** — resolve o travamento em períodos longos no plano gratuito da Vercel.
+
+Depois de aplicar, em **Registros** (como admin) o painel de Sincronização passa a mostrar
+o progresso por fase; o **Backfill** ganha o campo de dias (padrão 365, janela corrida) e o
+**Reconciliar** continua puxando só o que mudou (por `DATE_MODIFY`). Se a aba for fechada no
+meio, ao reabrir a página o job em andamento é detectado e pode ser retomado.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

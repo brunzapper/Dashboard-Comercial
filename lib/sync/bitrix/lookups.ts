@@ -39,6 +39,38 @@ export interface BitrixFieldMeta {
   items?: { ID: string; VALUE: string }[];
 }
 
+// Maps de resolução (status/categoria/enum) serializados para persistir na linha
+// do job — permite reidratar sem re-bater em crm.status.list / crm.deal.fields a
+// cada passo do sync retomável (ver serializeContext/hydrate).
+export interface SerializedLookups {
+  statuses: Record<string, string>;
+  categories: Record<string, string>;
+  dealEnums: Record<string, Record<string, string>>;
+  leadEnums: Record<string, Record<string, string>>;
+}
+
+function mapToObj(m: Map<string, string>): Record<string, string> {
+  return Object.fromEntries(m);
+}
+
+function enumMapToObj(
+  m: Map<string, Map<string, string>>
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [k, inner] of m) out[k] = mapToObj(inner);
+  return out;
+}
+
+function objToEnumMap(
+  o: Record<string, Record<string, string>>
+): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const [k, inner] of Object.entries(o ?? {})) {
+    out.set(k, new Map(Object.entries(inner ?? {})));
+  }
+  return out;
+}
+
 function toFieldMetas(fields: Record<string, FieldDef>): BitrixFieldMeta[] {
   const out: BitrixFieldMeta[] = [];
   for (const [fieldId, def] of Object.entries(fields ?? {})) {
@@ -93,6 +125,41 @@ export class BitrixLookups {
     this.leadFieldMetasCache = toFieldMetas(leadFields);
 
     this.loaded = true;
+  }
+
+  /**
+   * Serializa os maps de resolução (status/categoria/enum) para persistir na
+   * linha do job. NÃO inclui o schema de campos (dealFieldMetas) — este só é
+   * usado na fase de "preparar" (buildCustomMapping/catalog), não no mapeamento
+   * de cada página.
+   */
+  serializeContext(): SerializedLookups {
+    return {
+      statuses: mapToObj(this.statuses),
+      categories: mapToObj(this.categories),
+      dealEnums: enumMapToObj(this.dealEnums),
+      leadEnums: enumMapToObj(this.leadEnums),
+    };
+  }
+
+  /**
+   * Reconstrói um BitrixLookups a partir do contexto persistido (sem tocar no
+   * Bitrix). userName continua funcionando (client + cache em bitrix_lookup_cache).
+   * O schema de campos (dealFieldMetas/leadFieldMetas) fica vazio — não é preciso
+   * para o mapeamento de páginas.
+   */
+  static hydrate(
+    client: BitrixClient,
+    db: SupabaseClient | undefined,
+    ctx: SerializedLookups
+  ): BitrixLookups {
+    const l = new BitrixLookups(client, db);
+    l.statuses = new Map(Object.entries(ctx.statuses ?? {}));
+    l.categories = new Map(Object.entries(ctx.categories ?? {}));
+    l.dealEnums = objToEnumMap(ctx.dealEnums ?? {});
+    l.leadEnums = objToEnumMap(ctx.leadEnums ?? {});
+    l.loaded = true;
+    return l;
   }
 
   /** Todos os campos de negócios do Bitrix (schema), para descoberta. */

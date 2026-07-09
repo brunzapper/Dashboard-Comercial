@@ -22,6 +22,10 @@ import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordsTable } from "@/components/registros/records-table";
 import { Button } from "@/components/ui/button";
 
+// Rede de segurança p/ as Server Actions de sync desta página (o desenho já
+// mantém cada passo pequeno; no plano gratuito o teto real é ~60s).
+export const maxDuration = 60;
+
 const PAGE_SIZE = 50;
 const RECORD_COLS =
   "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at";
