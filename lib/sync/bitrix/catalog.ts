@@ -90,7 +90,9 @@ function curatedOf(entity: Entity): Record<string, CustomFieldMap> {
 /**
  * Mapa fonte→custom_fields para o mapper. Chaves curadas primeiro (garantidas
  * mesmo que o campo não apareça no schema), depois os descobertos, excluindo os
- * ids que já são colunas do núcleo.
+ * ids que já são colunas do núcleo. Uma entrada curada tem precedência sobre a
+ * exclusão do núcleo — é uma decisão explícita de expor o campo (ex.: a Data da
+ * assinatura, que também é usada como referência do lead time).
  */
 export function buildCustomMapping(
   lookups: BitrixLookups,
@@ -102,7 +104,6 @@ export function buildCustomMapping(
 
   const byId = new Map<string, CustomMapEntry>();
   for (const [fieldId, def] of Object.entries(curated)) {
-    if (coreIds.has(fieldId)) continue;
     byId.set(fieldId, { fieldId, key: def.key, type: def.type });
   }
   for (const meta of metas) {
@@ -137,11 +138,9 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
 
   const rows: CatalogRow[] = [];
 
-  // Curados: chave curada, sempre visíveis. O rótulo é AUTORITATIVO via
-  // FIELD_LABELS (nome do arquivo de integração); só cai para o título do schema
-  // ou a chave quando o campo não estiver na lista.
+  // Curados: chave curada, ligados por padrão (já eram usáveis). Têm precedência
+  // sobre a exclusão do núcleo (ex.: Data da assinatura).
   for (const [fieldId, def] of Object.entries(curated)) {
-    if (coreIds.has(fieldId)) continue;
     const meta = metaById.get(fieldId);
     rows.push({
       field_key: def.key,

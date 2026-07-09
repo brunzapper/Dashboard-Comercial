@@ -51,6 +51,9 @@ export const DEAL_CORE = {
 } as const;
 
 export const DEAL_CUSTOM: Record<string, CustomFieldMap> = {
+  // Data da assinatura: também é usada como referência do lead time
+  // (DEAL_CORE.signatureDate). Exposta aqui como coluna própria disponível.
+  UF_CRM_1729887608434: { key: "data_assinatura", type: "date" },
   UF_CRM_1729888316385: { key: "temperatura_cliente", type: "enumeration" },
   UF_CRM_1730223822320: { key: "tier", type: "enumeration" },
   UF_CRM_1729887525503: { key: "licencas_contratadas", type: "double" },
