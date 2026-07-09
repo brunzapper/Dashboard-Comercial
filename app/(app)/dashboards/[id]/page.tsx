@@ -1,8 +1,10 @@
-// Versão: 1.1 | Data: 08/07/2026
+// Versão: 2.0 | Data: 09/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
-// v1.1 (08/07/2026): filtro de período global via searchParams (?periodo/de/
-// ate/campo) aplicado por cima dos filtros de cada widget.
+// v2.0 (09/07/2026): período resolvido POR widget. Uma barra global
+// (?periodo/de/ate/campo + dashboards.settings.periodBar) atinge os widgets não
+// cobertos; cada widget de filtro (visual_type 'filtro') controla seus alvos
+// (?pf_<id>/pfd_<id>/pfa_<id>) e tem prioridade sobre a barra global.
 import { notFound } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -10,8 +12,16 @@ import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { runWidget } from "@/lib/widgets/engine";
-import { DEFAULT_PERIOD_FIELD, resolvePeriod } from "@/lib/widgets/period";
-import type { Widget, WidgetData } from "@/lib/widgets/types";
+import {
+  DEFAULT_PERIOD_FIELD,
+  resolvePeriodSelection,
+  type DashboardPeriod,
+} from "@/lib/widgets/period";
+import type {
+  DashboardSettings,
+  Widget,
+  WidgetData,
+} from "@/lib/widgets/types";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 
 function str(v: string | string[] | undefined): string {
@@ -32,7 +42,7 @@ export default async function DashboardPage({
 
   const { data: dash } = await supabase
     .from("dashboards")
-    .select("id, name, owner_user_id")
+    .select("id, name, owner_user_id, settings")
     .eq("id", id)
     .maybeSingle();
   if (!dash) notFound();
@@ -60,22 +70,61 @@ export default async function DashboardPage({
 
   const widgets = (widgetsData ?? []) as Widget[];
   const available = buildAvailableFields((fieldsData ?? []) as FieldDefinition[]);
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const periodBar = dashSettings.periodBar;
 
-  // Período global do dashboard (searchParams). Só aceita campo de data válido.
-  const campoRaw = str(sp.campo);
-  const campo = available.some((a) => a.field === campoRaw && a.isDate)
-    ? campoRaw
-    : DEFAULT_PERIOD_FIELD;
-  const period = resolvePeriod({
-    periodo: str(sp.periodo),
-    de: str(sp.de),
-    ate: str(sp.ate),
-    campo,
-  });
+  const isDateField = (f: string) =>
+    available.some((a) => a.field === f && a.isDate);
 
+  const dataWidgets = widgets.filter((w) => w.visual_type !== "filtro");
+  const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
+
+  // 1) Período da barra global (só se a barra estiver visível).
+  let globalPeriod: DashboardPeriod | null = null;
+  if (periodBar?.enabled !== false) {
+    const campoRaw = str(sp.campo);
+    const field = isDateField(campoRaw)
+      ? campoRaw
+      : periodBar?.field && isDateField(periodBar.field)
+        ? periodBar.field
+        : DEFAULT_PERIOD_FIELD;
+    globalPeriod = resolvePeriodSelection(
+      { preset: str(sp.periodo), de: str(sp.de), ate: str(sp.ate) },
+      field,
+      { preset: periodBar?.defaultPreset ?? "" }
+    );
+  }
+
+  // 2) Precedência: cada widget começa com o período global; um widget de
+  //    filtro sobrescreve o período dos seus alvos (ou de todos, se sem alvos).
+  const periodByWidget: Record<string, DashboardPeriod | null> = {};
+  for (const w of dataWidgets) periodByWidget[w.id] = globalPeriod;
+
+  for (const fw of filterWidgets) {
+    const s = fw.settings ?? {};
+    const field = s.field && isDateField(s.field) ? s.field : DEFAULT_PERIOD_FIELD;
+    const p = resolvePeriodSelection(
+      {
+        preset: str(sp[`pf_${fw.id}`]),
+        de: str(sp[`pfd_${fw.id}`]),
+        ate: str(sp[`pfa_${fw.id}`]),
+      },
+      field,
+      { preset: s.defaultPreset ?? "" }
+    );
+    const targets =
+      s.targets && s.targets.length > 0
+        ? s.targets
+        : dataWidgets.map((w) => w.id);
+    for (const t of targets) {
+      if (t in periodByWidget) periodByWidget[t] = p;
+    }
+  }
+
+  // 3) Computa cada widget de dados. Filtros não geram dados.
   const dataById: Record<string, WidgetData> = {};
   await Promise.all(
-    widgets.map(async (w) => {
+    dataWidgets.map(async (w) => {
       try {
         dataById[w.id] = await runWidget(
           supabase,
@@ -88,7 +137,7 @@ export default async function DashboardPage({
             settings: w.settings,
           },
           available,
-          period
+          periodByWidget[w.id]
         );
       } catch {
         dataById[w.id] = { rows: [], dimensions: [], metrics: [] };
@@ -104,6 +153,7 @@ export default async function DashboardPage({
       dataById={dataById}
       available={available}
       canEdit={canEdit}
+      periodBar={periodBar}
     />
   );
 }

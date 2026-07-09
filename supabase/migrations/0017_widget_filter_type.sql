@@ -1,11 +1,3 @@
--- ============================================================================
--- Versão: 1.0 | Data: 09/07/2026
--- BLOCO ÚNICO — FASE 7 — colar no SQL Editor do Supabase APÓS a Fase 6B.
--- Filtro de período interativo: widget 'filtro' + dashboards.settings.
--- Idempotente.
--- ============================================================================
-
--- >>>>>>>>>>>>>>>>>>>> migrations/0017_widget_filter_type.sql <<<<<<<<<<<<<<<<<<<<
 -- Versão: 1.0 | Data: 09/07/2026
 -- Fase 7: filtro de período interativo nos dashboards.
 --  1) widgets.visual_type passa a aceitar 'filtro' (widget de filtro de período
@@ -15,6 +7,8 @@
 -- Idempotente.
 
 -- ===================== widgets: novo visual_type 'filtro' =====================
+-- O CHECK de 0008 é inline (nome auto = widgets_visual_type_check). Recria com
+-- 'filtro' incluído.
 alter table public.widgets
   drop constraint if exists widgets_visual_type_check;
 

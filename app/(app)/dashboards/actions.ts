@@ -9,12 +9,13 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
 import type {
+  DashboardSettings,
   Dimension,
   GridPosition,
-  KpiSettings,
   Metric,
   VisualType,
   WidgetFilter,
+  WidgetSettings,
 } from "@/lib/widgets/types";
 
 export interface ActionState {
@@ -28,7 +29,7 @@ export interface WidgetInput {
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
-  settings?: KpiSettings;
+  settings?: WidgetSettings;
   grid_position?: GridPosition;
 }
 
@@ -67,6 +68,24 @@ export async function deleteDashboard(formData: FormData): Promise<void> {
   const supabase = await createClient();
   await supabase.from("dashboards").delete().eq("id", id);
   revalidatePath("/");
+}
+
+// Config por dashboard (settings jsonb): hoje só a barra de período global.
+// RLS restringe update a owner/admin.
+export async function updateDashboardSettings(
+  dashboardId: string,
+  settings: DashboardSettings
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ settings })
+    .eq("id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
 }
 
 // ---------------- Widgets ----------------

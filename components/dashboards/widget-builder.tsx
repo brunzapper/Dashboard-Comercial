@@ -7,6 +7,7 @@ import { useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,12 +20,18 @@ import {
 } from "@/components/ui/sheet";
 import type { AvailableField } from "@/lib/widgets/fields";
 import {
+  DEFAULT_PERIOD_FIELD,
+  PERIOD_PRESETS,
+  type PeriodPresetKey,
+} from "@/lib/widgets/period";
+import {
   AGG_LABELS,
   TRANSFORM_LABELS,
   VISUAL_TYPE_LABELS,
   type Aggregation,
   type Dimension,
   type FilterOp,
+  type FilterSettings,
   type Metric,
   type Transform,
   type VisualType,
@@ -55,11 +62,13 @@ export function WidgetBuilder({
   dashboardId,
   available,
   widget,
+  siblings = [],
   trigger,
 }: {
   dashboardId: string;
   available: AvailableField[];
   widget?: Widget;
+  siblings?: Widget[];
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -78,6 +87,28 @@ export function WidgetBuilder({
   );
   const [filters, setFilters] = useState<WidgetFilter[]>(widget?.filters ?? []);
 
+  // Config do widget de filtro de período (visual_type 'filtro').
+  const dateFields = available.filter((f) => f.isDate);
+  const [filterField, setFilterField] = useState(
+    widget?.settings?.field ?? DEFAULT_PERIOD_FIELD
+  );
+  const [filterTargets, setFilterTargets] = useState<string[]>(
+    widget?.settings?.targets ?? []
+  );
+  const [filterPreset, setFilterPreset] = useState(
+    widget?.settings?.defaultPreset ?? ""
+  );
+  // Widgets que este filtro pode controlar (exclui a si mesmo e outros filtros).
+  const targetable = siblings.filter(
+    (s) => s.id !== widget?.id && s.visual_type !== "filtro"
+  );
+
+  function toggleTarget(id: string) {
+    setFilterTargets((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  }
+
   const numericFields = available.filter((f) => f.isNumeric);
 
   function isDate(field: string): boolean {
@@ -86,6 +117,33 @@ export function WidgetBuilder({
 
   function save() {
     setError(null);
+
+    // Widget de filtro: sem dimensões/métricas/filtros; config vai em settings.
+    if (visualType === "filtro") {
+      const settings: FilterSettings = {
+        kind: "period",
+        field: filterField,
+        targets: filterTargets,
+        defaultPreset: filterPreset,
+      };
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings,
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, input);
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
     const cleanFilters = filters
       .filter((f) => f.field)
       .map((f) => {
@@ -110,6 +168,8 @@ export function WidgetBuilder({
       dimensions: dimensions.filter((d) => d.field),
       metrics: metrics.filter((m) => m.field),
       filters: cleanFilters,
+      // Preserva settings existentes (ex.: KPI meta/razão) ao editar.
+      settings: widget?.settings ?? {},
     };
     startTransition(async () => {
       const res = widget
@@ -155,7 +215,73 @@ export function WidgetBuilder({
             </select>
           </div>
 
+          {/* Config do widget de filtro de período */}
+          {visualType === "filtro" ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Campo de data</Label>
+                <select
+                  className={selectClass + " px-3"}
+                  value={filterField}
+                  onChange={(e) => setFilterField(e.target.value)}
+                >
+                  {dateFields.map((f) => (
+                    <option key={f.field} value={f.field}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label>Período padrão</Label>
+                <select
+                  className={selectClass + " px-3"}
+                  value={filterPreset}
+                  onChange={(e) => setFilterPreset(e.target.value)}
+                >
+                  <option value="">Todo o período</option>
+                  {(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => (
+                    <option key={k} value={k}>
+                      {PERIOD_PRESETS[k]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Vincular a</Label>
+                <p className="text-muted-foreground text-xs">
+                  Escolha quais widgets este filtro controla. Sem seleção, ele
+                  controla o dashboard inteiro.
+                </p>
+                {targetable.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Nenhum outro widget para vincular ainda.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2 rounded-md border p-3">
+                    {targetable.map((s) => (
+                      <label
+                        key={s.id}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={filterTargets.includes(s.id)}
+                          onCheckedChange={() => toggleTarget(s.id)}
+                        />
+                        {s.title ?? "Sem título"}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+
           {/* Dimensões */}
+          {visualType !== "filtro" ? (
+          <>
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <Label>Dimensões (agrupar por)</Label>
@@ -343,6 +469,8 @@ export function WidgetBuilder({
               </div>
             ))}
           </div>
+          </>
+          ) : null}
 
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
 
