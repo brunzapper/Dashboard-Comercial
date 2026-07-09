@@ -1,5 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
-// Construtor de widget (Sheet): fonte→dimensões→métricas→filtros→visual.
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — bloco "Fontes" (multi-seleção) + toggle "Quebrar
+//   por fonte"; os campos unificados (correspondências) já vêm em `available`.
+// Construtor de widget (Sheet): fontes→dimensões→métricas→filtros→visual.
 // Monta um WidgetConfig e salva via create/updateWidget.
 "use client";
 
@@ -10,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SOURCE_KEYS, SOURCE_LABELS, type SourceKey } from "@/lib/sources";
 import {
   Sheet,
   SheetContent,
@@ -86,6 +89,16 @@ export function WidgetBuilder({
     widget?.metrics ?? [{ field: "*", agg: "count" }]
   );
   const [filters, setFilters] = useState<WidgetFilter[]>(widget?.filters ?? []);
+  const [sources, setSources] = useState<SourceKey[]>(widget?.sources ?? []);
+  const [splitBySource, setSplitBySource] = useState<boolean>(
+    widget?.split_by_source ?? false
+  );
+
+  function toggleSource(key: SourceKey) {
+    setSources((prev) =>
+      prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
+    );
+  }
 
   // Config do widget de filtro de período (visual_type 'filtro').
   const dateFields = available.filter((f) => f.isDate);
@@ -165,6 +178,8 @@ export function WidgetBuilder({
     const input = {
       title: title.trim() || null,
       visual_type: visualType,
+      sources,
+      splitBySource,
       dimensions: dimensions.filter((d) => d.field),
       metrics: metrics.filter((m) => m.field),
       filters: cleanFilters,
@@ -190,7 +205,7 @@ export function WidgetBuilder({
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>
           <SheetDescription>
-            Fonte: registros. Escolha dimensões, métricas, filtros e o visual.
+            Escolha as fontes, dimensões, métricas, filtros e o visual.
           </SheetDescription>
         </SheetHeader>
 
@@ -279,9 +294,36 @@ export function WidgetBuilder({
             </>
           ) : null}
 
-          {/* Dimensões */}
+          {/* Fontes + modo de combinação */}
           {visualType !== "filtro" ? (
           <>
+          <div className="flex flex-col gap-2">
+            <Label>Fontes</Label>
+            <p className="text-muted-foreground text-xs">
+              Sem seleção = todas as fontes. Colunas correspondidas (↔) somam
+              entre as fontes escolhidas.
+            </p>
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              {SOURCE_KEYS.map((key) => (
+                <label key={key} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={sources.includes(key)}
+                    onCheckedChange={() => toggleSource(key)}
+                  />
+                  {SOURCE_LABELS[key]}
+                </label>
+              ))}
+            </div>
+            <label className="mt-1 flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={splitBySource}
+                onCheckedChange={(v) => setSplitBySource(v === true)}
+              />
+              Quebrar por fonte (uma série por fonte)
+            </label>
+          </div>
+
+          {/* Dimensões */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <Label>Dimensões (agrupar por)</Label>

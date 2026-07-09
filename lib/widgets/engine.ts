@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — filtra por fontes (record_type in ...), quebra por
+//   fonte (dimensão record_type rotulada) e passa p_correspondences ao RPC para
+//   os campos unificados (unified:<key>).
 // Executa a config de um widget via o RPC run_widget_query (client do usuário
 // → RLS) e resolve os rótulos das dimensões FK (responsible/operation/lead:
 // id→nome). Razões/derivados (TM, valor/conta) e comparação com meta ficam na
@@ -8,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AGG_LABELS,
   TRANSFORM_LABELS,
+  type Dimension,
   type Metric,
   type WidgetConfig,
   type WidgetData,
@@ -21,6 +25,12 @@ import {
 } from "./fields";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { resolveGoal } from "@/lib/metas/resolve";
+import {
+  RECORD_TYPE_SOURCE,
+  SOURCE_LABELS,
+  SOURCE_RECORD_TYPE,
+  type SourceKey,
+} from "@/lib/sources";
 
 // Resolve tokens de período (@month_start, @year_start, ...) para datas ISO,
 // deixando os presets "do mês/ano" relativos ao momento da consulta.
@@ -60,16 +70,25 @@ function metricForMeta(metric: string): Metric {
   return { field: metric, agg: "sum" };
 }
 
+// Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
+function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
+  if (!sources || sources.length === 0) return [];
+  const rts = sources.map((s) => SOURCE_RECORD_TYPE[s]);
+  return [{ field: "record_type", op: "in", value: rts }];
+}
+
 async function aggregate(
   supabase: SupabaseClient,
   metrics: Metric[],
-  filters: WidgetFilter[]
+  filters: WidgetFilter[],
+  correspondencesMap: Record<string, string[]> = {}
 ): Promise<number[]> {
   const { data, error } = await supabase.rpc("run_widget_query", {
     p_source: "records",
     p_dimensions: [],
     p_metrics: metrics,
     p_filters: filters,
+    p_correspondences: correspondencesMap,
   });
   if (error) throw new Error(error.message);
   const row = (Array.isArray(data) ? data : [])[0] ?? {};
@@ -111,6 +130,7 @@ async function runKpi(
   supabase: SupabaseClient,
   config: WidgetConfig,
   filters: WidgetFilter[],
+  correspondencesMap: Record<string, string[]>,
   period?: DashboardPeriod | null
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
@@ -119,7 +139,7 @@ async function runKpi(
   if (s.mode === "ratio") {
     const num = s.numerator ?? { field: "mrr", agg: "sum" };
     const den = s.denominator ?? { field: "*", agg: "count" };
-    const [n, d] = await aggregate(supabase, [num, den], filters);
+    const [n, d] = await aggregate(supabase, [num, den], filters, correspondencesMap);
     return {
       ...empty,
       kpi: {
@@ -132,7 +152,7 @@ async function runKpi(
 
   // modo meta
   const metric = s.metric ?? "mrr";
-  const [realizado] = await aggregate(supabase, [metricForMeta(metric)], filters);
+  const [realizado] = await aggregate(supabase, [metricForMeta(metric)], filters, correspondencesMap);
   const now = new Date();
   let year = now.getFullYear();
   let month: number | null = s.period === "year" ? null : now.getMonth() + 1;
@@ -174,31 +194,50 @@ export async function runWidget(
   supabase: SupabaseClient,
   config: WidgetConfig,
   available: AvailableField[],
-  period?: DashboardPeriod | null
+  period?: DashboardPeriod | null,
+  correspondencesMap: Record<string, string[]> = {}
 ): Promise<WidgetData> {
   let filters = resolveFilters(config.filters ?? []);
   if (period) filters = applyPeriodToFilters(filters, period);
+  // Fonte(s) selecionada(s) viram um filtro record_type in (...).
+  filters = [...sourceFilters(config.sources), ...filters];
 
   if (config.visual_type === "kpi" && config.settings?.mode) {
-    return runKpi(supabase, config, filters, period);
+    return runKpi(supabase, config, filters, correspondencesMap, period);
   }
+
+  // "Quebrar por fonte": record_type entra como dimensão líder (série por fonte).
+  const dims: Dimension[] = config.splitBySource
+    ? [{ field: "record_type" }, ...config.dimensions]
+    : config.dimensions;
 
   const { data, error } = await supabase.rpc("run_widget_query", {
     p_source: config.source,
-    p_dimensions: config.dimensions,
+    p_dimensions: dims,
     p_metrics: config.metrics,
     p_filters: filters,
+    p_correspondences: correspondencesMap,
   });
   if (error) throw new Error(error.message);
 
   const rows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
 
-  // Resolve rótulos das dimensões FK.
-  for (let i = 0; i < config.dimensions.length; i++) {
-    const dim = config.dimensions[i];
+  // Resolve rótulos das dimensões: FK (id→nome) e a fonte (record_type→label).
+  for (let i = 0; i < dims.length; i++) {
+    const dim = dims[i];
+    const key = `dim_${i + 1}`;
+    if (dim.field === "record_type") {
+      for (const r of rows) {
+        const v = r[key];
+        if (v != null) {
+          const src = RECORD_TYPE_SOURCE[String(v)];
+          r[key] = src ? SOURCE_LABELS[src] : String(v);
+        }
+      }
+      continue;
+    }
     const fk = fieldFk(dim.field, available);
     if (!fk) continue;
-    const key = `dim_${i + 1}`;
     const ids = Array.from(
       new Set(rows.map((r) => r[key]).filter(Boolean) as string[])
     );
@@ -210,8 +249,8 @@ export async function runWidget(
     }
   }
 
-  const dimensions = config.dimensions.map((d, i) => {
-    const base = fieldLabel(d.field, available);
+  const dimensions = dims.map((d, i) => {
+    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`

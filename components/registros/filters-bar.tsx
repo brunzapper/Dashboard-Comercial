@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — o seletor "Tipo" saiu (virou aba de fonte); a
+//   barra preserva o parâmetro `fonte` ao filtrar/limpar.
 // Barra de filtros da listagem de registros. Reflete/atualiza a URL
 // (searchParams) — o server refaz a query a cada mudança.
 "use client";
@@ -9,7 +11,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RECORD_TYPE_LABELS, type OptionItem } from "@/lib/records/types";
+import type { OptionItem } from "@/lib/records/types";
 
 const selectClass =
   "border-input flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
@@ -18,7 +20,7 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [tipo, setTipo] = useState(sp.get("tipo") ?? "");
+  const fonte = sp.get("fonte") ?? "";
   const [etapa, setEtapa] = useState(sp.get("etapa") ?? "");
   const [responsavel, setResponsavel] = useState(sp.get("responsavel") ?? "");
   const [de, setDe] = useState(sp.get("de") ?? "");
@@ -28,7 +30,7 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   function apply(e: React.FormEvent) {
     e.preventDefault();
     const params = new URLSearchParams();
-    if (tipo) params.set("tipo", tipo);
+    if (fonte) params.set("fonte", fonte);
     if (etapa) params.set("etapa", etapa);
     if (responsavel) params.set("responsavel", responsavel);
     if (de) params.set("de", de);
@@ -38,13 +40,12 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   }
 
   function clear() {
-    setTipo("");
     setEtapa("");
     setResponsavel("");
     setDe("");
     setAte("");
     setBusca("");
-    router.push("/registros");
+    router.push(fonte ? `/registros?fonte=${fonte}` : "/registros");
   }
 
   return (
@@ -52,24 +53,6 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
       onSubmit={apply}
       className="grid grid-cols-1 gap-3 rounded-lg border p-4 sm:grid-cols-2 lg:grid-cols-3"
     >
-      <div className="flex flex-col gap-1.5">
-        <Label>Tipo</Label>
-        <select
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value)}
-          className={selectClass}
-        >
-          <option value="">Todos</option>
-          {(Object.keys(RECORD_TYPE_LABELS) as (keyof typeof RECORD_TYPE_LABELS)[]).map(
-            (t) => (
-              <option key={t} value={t}>
-                {RECORD_TYPE_LABELS[t]}
-              </option>
-            )
-          )}
-        </select>
-      </div>
-
       <div className="flex flex-col gap-1.5">
         <Label>Responsável</Label>
         <select

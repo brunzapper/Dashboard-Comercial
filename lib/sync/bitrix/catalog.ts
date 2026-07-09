@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 1.1 | Data: 09/07/2026
+// v1.1 (09/07/2026): Fase 8 — grava applies_to (record_type de origem) e usa o
+//   label curado (bitrix-field-map) como fallback do título do schema.
 // Descoberta dinâmica de colunas do Bitrix (Fase 7). Usa o schema de
 // crm.deal.fields / crm.lead.fields (carregado em BitrixLookups) para:
 //   1) catalogar TODOS os campos como field_definitions (syncFieldCatalog) —
@@ -119,6 +121,7 @@ interface CatalogRow {
   source_system: "bitrix";
   source_field_id: string;
   show_in_builder: boolean; // usado só no INSERT
+  applies_to: string[]; // record_type(s) a que a coluna pertence
 }
 
 function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
@@ -126,21 +129,25 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
   const curated = curatedOf(entity);
   const metas = entity === "deal" ? lookups.dealFieldMetas() : lookups.leadFieldMetas();
   const metaById = new Map(metas.map((m) => [m.fieldId, m]));
+  const recordType = entity === "deal" ? "negocio" : "lead";
 
   const rows: CatalogRow[] = [];
 
-  // Curados: chave curada, ligados por padrão (já eram usáveis).
+  // Curados: chave curada, ligados por padrão (já eram usáveis). O rótulo vem do
+  // schema do Bitrix; se ausente, cai para o `label` do mapa (Fase 8) e só então
+  // para a chave — garante nome visível mesmo sem sync recente do schema.
   for (const [fieldId, def] of Object.entries(curated)) {
     if (coreIds.has(fieldId)) continue;
     const meta = metaById.get(fieldId);
     rows.push({
       field_key: def.key,
-      label: meta?.title ?? def.key,
+      label: meta?.title ?? def.label ?? def.key,
       data_type: meta ? toDataType(meta.type) : "texto",
       options: meta?.items?.map((i) => i.VALUE) ?? [],
       source_system: "bitrix",
       source_field_id: fieldId,
       show_in_builder: true,
+      applies_to: [recordType],
     });
   }
 
@@ -156,6 +163,7 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
       source_system: "bitrix",
       source_field_id: meta.fieldId,
       show_in_builder: false,
+      applies_to: [recordType],
     });
   }
 
@@ -175,8 +183,14 @@ export async function syncFieldCatalog(
   const all = [...catalogRowsFor(lookups, "deal"), ...catalogRowsFor(lookups, "lead")];
 
   // Dedup por field_key (ex.: grupo_origem/utm_* aparecem em deal e lead).
+  // Ao encontrar o mesmo field_key nas duas entidades, une os applies_to
+  // (a coluna passa a valer para lead E negócio).
   const byKey = new Map<string, CatalogRow>();
-  for (const r of all) if (!byKey.has(r.field_key)) byKey.set(r.field_key, r);
+  for (const r of all) {
+    const ex = byKey.get(r.field_key);
+    if (!ex) byKey.set(r.field_key, { ...r });
+    else ex.applies_to = Array.from(new Set([...ex.applies_to, ...r.applies_to]));
+  }
   const rows = Array.from(byKey.values());
   if (rows.length === 0) return;
 
@@ -198,6 +212,7 @@ export async function syncFieldCatalog(
         source_system: r.source_system,
         source_field_id: r.source_field_id,
         show_in_builder: r.show_in_builder,
+        applies_to: r.applies_to,
         visible_to_roles: [],
         editable_by_roles: [],
         is_local: false,
@@ -216,6 +231,7 @@ export async function syncFieldCatalog(
           options: r.options,
           source_system: r.source_system,
           source_field_id: r.source_field_id,
+          applies_to: r.applies_to,
         })
         .eq("field_key", r.field_key)
     )

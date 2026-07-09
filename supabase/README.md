@@ -84,6 +84,28 @@ No app, dentro de um dashboard:
   dashboard todo; com vínculo, só os widgets escolhidos respondem a ele (têm prioridade
   sobre a barra global).
 
+## Como aplicar a Fase 8 (Separação de fontes + correspondências)
+
+Cole o [`apply/fase-8.sql`](./apply/fase-8.sql) (migrações `0018`–`0021`) e execute.
+Idempotente. Ele adiciona:
+- `field_definitions.applies_to` (a quais fontes/`record_type` a coluna pertence) e
+  cataloga os campos da planilha "Estudo de Fechamentos" (Produtos, Assentos, Campanha, E-mail).
+- `field_correspondences` + `field_correspondence_members`: correspondências GLOBAIS de
+  colunas (um "campo unificado" liga colunas equivalentes entre Estudo, Leads e Deals).
+- `run_widget_query` passa a aceitar campos `unified:<key>` (coalesce das colunas
+  correspondidas) via o novo parâmetro `p_correspondences`.
+- `widgets.sources` / `widgets.split_by_source`: seleção de fontes por widget e o modo
+  "quebrar por fonte".
+
+No app (como admin):
+- **Registros** ganha abas por fonte (Leads / Deals / Estudo de Fechamentos), cada uma com
+  as colunas relevantes daquela fonte.
+- **Campos** ganha a seção **Correspondências de colunas** (CRUD global).
+- No **construtor de widget**: escolha as fontes, ligue "Combinar / Quebrar por fonte" e use
+  os campos unificados nas dimensões/métricas/filtros.
+- Depois de aplicar, rode um **Backfill** no Bitrix para (re)catalogar as colunas com nome
+  visual e preencher `applies_to`.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

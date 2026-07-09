@@ -1,8 +1,9 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 09/07/2026
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
 // v1.1 (09/07/2026): Fase 7 — DataType ganha 'booleano' (campos Y/N do Bitrix)
 //   e 'calculado' (campo com fórmula); FieldDefinition ganha source_system,
 //   source_field_id, show_in_builder e formula.
+// v1.2 (09/07/2026): Fase 8 — FieldDefinition ganha applies_to (fonte/record_type).
 import type { Formula } from "./formulas";
 
 export type DataType =
@@ -42,6 +43,8 @@ export interface FieldDefinition {
   source_field_id?: string | null;
   show_in_builder?: boolean;
   formula?: Formula | null;
+  // Fase 8: a quais record_type (fonte) a coluna pertence. Vazio/ausente = todas.
+  applies_to?: string[];
 }
 
 export interface RecordRow {
