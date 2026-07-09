@@ -69,6 +69,21 @@ No app (como admin):
   "Performance comercial do mês") e os campos de apoio (forecast, implementação, etc.).
   É idempotente (pula o que já existe).
 
+## Como aplicar a Fase 7 (Filtro de período interativo)
+
+Cole o [`apply/fase-7.sql`](./apply/fase-7.sql) (migração `0017`) e execute. Idempotente.
+Ele libera o `visual_type` `'filtro'` nos widgets (widget de filtro de período que
+controla outros widgets) e adiciona `dashboards.settings` (jsonb) para guardar a config
+da barra de período global de cada dashboard (ligada/desligada, período e campo padrão).
+
+No app, dentro de um dashboard:
+- A **barra de período** no topo filtra o dashboard inteiro. Quem edita pode, pela
+  engrenagem da barra, definir o período/campo padrão ou ocultá-la.
+- **Adicionar widget → "Filtro de período"** cria um filtro que pode ser **vinculado a
+  gráficos/tabelas específicos** (aba "Vincular a"). Sem vínculo, ele age sobre o
+  dashboard todo; com vínculo, só os widgets escolhidos respondem a ele (têm prioridade
+  sobre a barra global).
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

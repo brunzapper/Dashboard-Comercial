@@ -1,7 +1,14 @@
 // Versão: 1.0 | Data: 05/07/2026
 // Tipos do construtor de dashboards (Fase 6A).
 
-export type VisualType = "tabela" | "barra" | "linha" | "pizza" | "kpi" | "funil";
+export type VisualType =
+  | "tabela"
+  | "barra"
+  | "linha"
+  | "pizza"
+  | "kpi"
+  | "funil"
+  | "filtro";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
@@ -10,6 +17,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   linha: "Linha",
   pizza: "Pizza",
   funil: "Funil",
+  filtro: "Filtro de período",
 };
 
 export type Aggregation = "sum" | "count" | "avg";
@@ -67,13 +75,36 @@ export interface KpiSettings {
   label?: string;
 }
 
+// Config do widget de filtro de período (visual_type 'filtro'), guardada em
+// widgets.settings. `defaultPreset` guarda uma chave de PERIOD_PRESETS (ou "").
+export interface FilterSettings {
+  kind?: "period";
+  targets?: string[]; // ids dos widgets controlados; vazio = dashboard inteiro
+  field?: string; // campo de data alvo (default closed_at)
+  defaultPreset?: string; // preset inicial (chave de PERIOD_PRESETS) ou ""
+  defaultDe?: string; // range personalizado inicial (ISO YYYY-MM-DD)
+  defaultAte?: string;
+}
+
+// settings de um widget é jsonb frouxo: KPI (meta/razão) e/ou filtro convivem.
+export type WidgetSettings = KpiSettings & FilterSettings;
+
+// Config por dashboard, guardada em dashboards.settings.
+export interface DashboardSettings {
+  periodBar?: {
+    enabled?: boolean; // default true (barra global visível)
+    defaultPreset?: string; // preset inicial da barra global
+    field?: string; // campo de data padrão da barra global
+  };
+}
+
 export interface WidgetConfig {
   source: "records";
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
   visual_type: VisualType;
-  settings?: KpiSettings;
+  settings?: WidgetSettings;
 }
 
 export interface KpiResult {
@@ -102,7 +133,7 @@ export interface Widget {
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
-  settings?: KpiSettings;
+  settings?: WidgetSettings;
   grid_position: GridPosition | Record<string, never>;
   sort_order: number;
 }
