@@ -94,16 +94,22 @@ export function WidgetBuilder({
   siblings = [],
   trigger,
   canManageFields = false,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   dashboardId: string;
   available: AvailableField[];
   widget?: Widget;
   siblings?: Widget[];
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
   canManageFields?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = onOpenChange ?? setUncontrolledOpen;
   const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -427,7 +433,7 @@ export function WidgetBuilder({
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>{trigger}</SheetTrigger>
+      {trigger ? <SheetTrigger asChild>{trigger}</SheetTrigger> : null}
       <SheetContent className="overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>

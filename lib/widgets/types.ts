@@ -8,6 +8,7 @@ import type { Formula } from "@/lib/records/formulas";
 export type VisualType =
   | "tabela"
   | "barra"
+  | "barra_horizontal"
   | "linha"
   | "pizza"
   | "kpi"
@@ -22,6 +23,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   tabela: "Tabela",
   tabela_editavel: "Tabela editável",
   barra: "Barra",
+  barra_horizontal: "Barra horizontal",
   linha: "Linha",
   pizza: "Pizza",
   funil: "Funil",
@@ -130,13 +132,53 @@ export interface CalcSettings {
   formula?: Formula;
 }
 
+// Aparência de um widget (Fase 10): camada opcional lida na renderização, com
+// fallback total para o comportamento atual (paleta do design system) quando
+// ausente. Aninhada em WidgetSettings.appearance p/ não colidir com as demais
+// chaves (KPI/filtro/matriz/lista). Nada aqui altera a forma dos dados.
+export type GridLines = "none" | "horizontal" | "vertical" | "both";
+export type AxisSide = "left" | "right";
+export type TableSortDir = "asc" | "desc" | "alpha" | "color";
+
+export interface AppearanceSettings {
+  // --- gráficos (barra / barra_horizontal / linha) ---
+  chartBackground?: string; // fundo do gráfico
+  gridLines?: GridLines; // linhas de grade
+  fillMode?: "solid" | "gradient"; // sólido ou gradiente sutil entre colunas
+  seriesColors?: Record<string, string>; // metricKey -> cor (toda a série)
+  columnColors?: Record<number, string>; // índice da categoria -> cor (série única)
+  seriesAxis?: Record<string, AxisSide>; // metricKey -> eixo esq/dir (combo)
+  dataLabels?: { show?: boolean; position?: "inside" | "top"; color?: string };
+  legend?: { show?: boolean; color?: string }; // legenda do gráfico (séries)
+  // --- pizza ---
+  palette?: string; // chave de paleta nomeada (PALETTES)
+  sliceColors?: Record<number, string>; // fatia -> cor (sobrepõe a paleta)
+  // --- tabela ---
+  table?: {
+    gridLines?: GridLines;
+    headerBg?: string;
+    headerColor?: string;
+    bodyBg?: string;
+    bodyColor?: string;
+    borderColor?: string;
+    columnColors?: Record<string, string>; // colKey -> cor
+    rowColors?: Record<number, string>; // índice da linha -> cor
+    cellColors?: Record<string, string>; // "rowIndex:colKey" -> cor
+    columnOrder?: string[]; // ordem das colunas (reordenação)
+    sort?: { column: string; dir: TableSortDir };
+  };
+  // --- kpi ---
+  kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior
+}
+
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista
-// de tabela, a matriz editável e a métrica calculada convivem no mesmo objeto.
+// de tabela, a matriz editável, a métrica calculada e a aparência (Fase 10)
+// convivem no mesmo objeto.
 export type WidgetSettings = KpiSettings &
   FilterSettings &
   RecordListSettings &
   MatrixSettings &
-  CalcSettings;
+  CalcSettings & { appearance?: AppearanceSettings };
 
 // Config por dashboard, guardada em dashboards.settings.
 export interface DashboardSettings {
@@ -144,6 +186,14 @@ export interface DashboardSettings {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global
     field?: string; // campo de data padrão da barra global
+  };
+  // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil.
+  background?: {
+    mode: "solid" | "gradient";
+    color?: string; // modo sólido
+    from?: string; // modo gradiente
+    to?: string;
+    angle?: number; // graus (default 135)
   };
 }
 

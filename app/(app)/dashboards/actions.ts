@@ -118,6 +118,34 @@ export async function saveLastPeriod(
   );
 }
 
+// Preferências GLOBAIS do usuário (user_settings), não por dashboard. Hoje só a
+// barra lateral fixada. Read-modify-write para preservar chaves futuras. RLS
+// garante que cada usuário só toca a própria linha. Fire-and-forget no cliente.
+export interface UserAppSettings {
+  sidebarPinned?: boolean;
+}
+
+export async function updateUserSettings(
+  patch: UserAppSettings
+): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const current = (data?.settings as UserAppSettings | null) ?? {};
+  await supabase.from("user_settings").upsert(
+    {
+      user_id: session.user.id,
+      settings: { ...current, ...patch },
+    },
+    { onConflict: "user_id" }
+  );
+}
+
 // ---------------- Widgets ----------------
 
 export async function createWidget(

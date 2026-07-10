@@ -5,9 +5,11 @@
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
+import { AppShell } from "@/components/layout/app-shell";
 
 // Cada item pode exigir uma `permission` e/ou um `role`; sem nenhum, é visível a todos.
 const NAV: (NavItem & { permission?: string; role?: string })[] = [
@@ -44,25 +46,41 @@ export default async function AppLayout({
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
     .join(", ");
 
+  // Preferência global do usuário: barra lateral fixada (default = oculta).
+  const supabase = await createClient();
+  const { data: userSettings } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const initialPinned =
+    (userSettings?.settings as { sidebarPinned?: boolean } | null)
+      ?.sidebarPinned ?? false;
+
+  // Conteúdo da barra montado no server (itens já filtrados por papel);
+  // o AppShell (client) controla ocultar/fixar/tela cheia.
+  const sidebarContent = (
+    <>
+      <div className="mb-6 px-3 pr-8">
+        <p className="text-sm font-semibold">Dashboard Comercial</p>
+        <p className="text-muted-foreground text-xs">Zapper</p>
+      </div>
+      <SidebarNav items={items} />
+      <div className="mt-auto border-t pt-3">
+        <div className="px-3 pb-2">
+          <p className="truncate text-xs font-medium">{user.email}</p>
+          <p className="text-muted-foreground text-xs">
+            {roleLabel || "Sem papel atribuído"}
+          </p>
+        </div>
+        <LogoutButton />
+      </div>
+    </>
+  );
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="bg-sidebar text-sidebar-foreground flex w-60 shrink-0 flex-col border-r p-4">
-        <div className="mb-6 px-3">
-          <p className="text-sm font-semibold">Dashboard Comercial</p>
-          <p className="text-muted-foreground text-xs">Zapper</p>
-        </div>
-        <SidebarNav items={items} />
-        <div className="mt-auto border-t pt-3">
-          <div className="px-3 pb-2">
-            <p className="truncate text-xs font-medium">{user.email}</p>
-            <p className="text-muted-foreground text-xs">
-              {roleLabel || "Sem papel atribuído"}
-            </p>
-          </div>
-          <LogoutButton />
-        </div>
-      </aside>
-      <main className="flex-1 overflow-auto p-6">{children}</main>
-    </div>
+    <AppShell initialPinned={initialPinned} sidebar={sidebarContent}>
+      {children}
+    </AppShell>
   );
 }

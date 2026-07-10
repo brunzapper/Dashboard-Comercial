@@ -1,8 +1,9 @@
-// Versão: 1.0 | Data: 05/07/2026
-// Renderiza um WidgetData conforme o visual_type (Recharts v3). Paleta
-// categórica = tokens --chart-1..5 do design system (tema claro/escuro),
-// atribuídos em ordem fixa; categorias além de 5 (pizza/funil) viram "Outros".
-// Regras dataviz: um eixo só, legenda p/ ≥2 séries, KPI = número herói.
+// Versão: 2.0 | Data: 10/07/2026
+// Renderiza um WidgetData conforme o visual_type (Recharts v3). v2.0 (Fase 10):
+// aceita AppearanceSettings (cores por série/coluna, gradiente sutil, fundo,
+// linhas de grade, eixo duplo esq/dir, rótulos de dados, legenda, paleta de
+// pizza, e cores/ordem/ordenação de tabela). Sem `appearance` = comportamento
+// anterior (paleta --chart-1..5, um eixo, legenda p/ ≥2 séries).
 "use client";
 
 import {
@@ -32,16 +33,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { VisualType, WidgetData } from "@/lib/widgets/types";
-
-const CHART_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-];
-const MAX_CATEGORIES = 5;
+import type { AppearanceSettings, VisualType, WidgetData } from "@/lib/widgets/types";
+import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
+import {
+  gridFlags,
+  orderedColumns,
+  sortRows,
+  topWithOther,
+} from "@/lib/widgets/appearance";
 
 function fmt(v: unknown): string {
   const n = Number(v);
@@ -54,6 +53,12 @@ const axisProps = {
   stroke: "var(--border)",
 } as const;
 
+// Opacidade decrescente p/ o modo gradiente (variação sutil entre colunas).
+function gradientOpacity(i: number, n: number): number {
+  if (n <= 1) return 1;
+  return 1 - (i / (n - 1)) * 0.45;
+}
+
 function EmptyState() {
   return (
     <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
@@ -62,38 +67,43 @@ function EmptyState() {
   );
 }
 
-// Reduz categorias a top-N por valor + "Outros".
-function topWithOther(
-  rows: Record<string, unknown>[],
-  dimKey: string,
-  metricKey: string
-) {
-  const mapped = rows.map((r) => ({
-    name: String(r[dimKey] ?? "—"),
-    value: Number(r[metricKey]) || 0,
-  }));
-  if (mapped.length <= MAX_CATEGORIES) return mapped;
-  const sorted = [...mapped].sort((a, b) => b.value - a.value);
-  const top = sorted.slice(0, MAX_CATEGORIES - 1);
-  const other = sorted
-    .slice(MAX_CATEGORIES - 1)
-    .reduce((s, x) => s + x.value, 0);
-  return [...top, { name: "Outros", value: other }];
-}
-
 export function WidgetChart({
   visualType,
   data,
+  appearance,
 }: {
   visualType: VisualType;
   data: WidgetData;
+  appearance?: AppearanceSettings;
 }) {
   const { rows, dimensions, metrics } = data;
   const dimKey = dimensions[0]?.key;
-  const showLegend = metrics.length > 1;
+  const ap = appearance ?? {};
+  const showLegend = ap.legend?.show ?? metrics.length > 1;
+  const legendStyle = {
+    fontSize: 11,
+    ...(ap.legend?.color ? { color: ap.legend.color } : {}),
+  };
+  const grid = gridFlags(ap.gridLines);
+  const bg = ap.chartBackground;
+
+  // Eixo duplo: só se ≥2 métricas e alguma marcada como "direita".
+  const hasRightAxis =
+    metrics.length >= 2 &&
+    metrics.some((m) => ap.seriesAxis?.[m.key] === "right");
+  const axisOf = (key: string) => ap.seriesAxis?.[key] ?? "left";
+
+  function withBg(chart: React.ReactNode) {
+    return (
+      <div className="h-full w-full" style={bg ? { background: bg } : undefined}>
+        <ResponsiveContainer width="100%" height="100%">
+          {chart as React.ReactElement}
+        </ResponsiveContainer>
+      </div>
+    );
+  }
 
   if (visualType === "kpi") {
-    // KPI com meta/razão (Fase 6B)
     if (data.kpi) {
       const k = data.kpi;
       if (k.mode === "ratio") {
@@ -144,38 +154,7 @@ export function WidgetChart({
   }
 
   if (visualType === "tabela") {
-    return (
-      <div className="h-full overflow-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {dimensions.map((d) => (
-                <TableHead key={d.key}>{d.label}</TableHead>
-              ))}
-              {metrics.map((m) => (
-                <TableHead key={m.key} className="text-right">
-                  {m.label}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r, i) => (
-              <TableRow key={i}>
-                {dimensions.map((d) => (
-                  <TableCell key={d.key}>{String(r[d.key] ?? "—")}</TableCell>
-                ))}
-                {metrics.map((m) => (
-                  <TableCell key={m.key} className="text-right tabular-nums">
-                    {fmt(r[m.key])}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    );
+    return <AppearanceTable data={data} appearance={ap} />;
   }
 
   if (rows.length === 0 || !dimKey) return <EmptyState />;
@@ -184,97 +163,271 @@ export function WidgetChart({
     const metricKey = metrics[0]?.key;
     if (!metricKey) return <EmptyState />;
     const pieData = topWithOther(rows, dimKey, metricKey);
+    const sliceFill = (i: number) =>
+      ap.sliceColors?.[i] ?? paletteColor(ap.palette, i);
+    const sliceOpacity = (i: number) =>
+      ap.fillMode === "gradient" ? gradientOpacity(i, pieData.length) : 1;
 
     if (visualType === "funil") {
-      return (
-        <ResponsiveContainer width="100%" height="100%">
-          <FunnelChart>
-            <Tooltip formatter={(v) => fmt(v)} />
-            <Funnel dataKey="value" data={pieData} isAnimationActive={false}>
-              <LabelList
-                position="right"
-                dataKey="name"
-                stroke="none"
-                fill="var(--foreground)"
-                fontSize={11}
-              />
-              {pieData.map((_, i) => (
-                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-              ))}
-            </Funnel>
-          </FunnelChart>
-        </ResponsiveContainer>
+      return withBg(
+        <FunnelChart>
+          <Tooltip formatter={(v) => fmt(v)} />
+          <Funnel dataKey="value" data={pieData} isAnimationActive={false}>
+            <LabelList
+              position="right"
+              dataKey="name"
+              stroke="none"
+              fill="var(--foreground)"
+              fontSize={11}
+            />
+            {pieData.map((_, i) => (
+              <Cell key={i} fill={sliceFill(i)} fillOpacity={sliceOpacity(i)} />
+            ))}
+          </Funnel>
+        </FunnelChart>
       );
     }
 
-    return (
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Tooltip formatter={(v) => fmt(v)} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Pie
-            data={pieData}
-            dataKey="value"
-            nameKey="name"
-            innerRadius="45%"
-            outerRadius="75%"
-            paddingAngle={2}
-            isAnimationActive={false}
-          >
-            {pieData.map((_, i) => (
-              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-            ))}
-          </Pie>
-        </PieChart>
-      </ResponsiveContainer>
+    return withBg(
+      <PieChart>
+        <Tooltip formatter={(v) => fmt(v)} />
+        <Legend wrapperStyle={legendStyle} />
+        <Pie
+          data={pieData}
+          dataKey="value"
+          nameKey="name"
+          innerRadius="45%"
+          outerRadius="75%"
+          paddingAngle={2}
+          isAnimationActive={false}
+        >
+          {pieData.map((_, i) => (
+            <Cell key={i} fill={sliceFill(i)} fillOpacity={sliceOpacity(i)} />
+          ))}
+        </Pie>
+      </PieChart>
     );
   }
 
   if (visualType === "linha") {
-    return (
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          <XAxis dataKey={dimKey} {...axisProps} />
-          <YAxis {...axisProps} width={48} />
-          <Tooltip formatter={(v) => fmt(v)} />
-          {showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
-          {metrics.map((m, i) => (
-            <Line
-              key={m.key}
-              type="monotone"
-              dataKey={m.key}
-              name={m.label}
-              stroke={CHART_COLORS[i % CHART_COLORS.length]}
-              strokeWidth={2}
-              dot={false}
-              isAnimationActive={false}
-            />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
+    return withBg(
+      <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+        <CartesianGrid
+          strokeDasharray="3 3"
+          stroke="var(--border)"
+          horizontal={grid.horizontal}
+          vertical={grid.vertical}
+        />
+        <XAxis dataKey={dimKey} {...axisProps} />
+        <YAxis yAxisId="left" {...axisProps} width={48} />
+        {hasRightAxis ? (
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            {...axisProps}
+            width={48}
+          />
+        ) : null}
+        <Tooltip formatter={(v) => fmt(v)} />
+        {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
+        {metrics.map((m, i) => (
+          <Line
+            key={m.key}
+            yAxisId={axisOf(m.key)}
+            type="monotone"
+            dataKey={m.key}
+            name={m.label}
+            stroke={resolveSeriesColor(ap, m.key, i)}
+            strokeWidth={2}
+            dot={false}
+            isAnimationActive={false}
+          />
+        ))}
+      </LineChart>
     );
   }
 
-  // barra (default)
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis dataKey={dimKey} {...axisProps} />
-        <YAxis {...axisProps} width={48} />
-        <Tooltip formatter={(v) => fmt(v)} cursor={{ fill: "var(--muted)" }} />
-        {showLegend ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
-        {metrics.map((m, i) => (
+  // barra + barra_horizontal
+  const horizontal = visualType === "barra_horizontal";
+  const singleSeries = metrics.length === 1;
+
+  return withBg(
+    <BarChart
+      data={rows}
+      layout={horizontal ? "vertical" : "horizontal"}
+      margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
+    >
+      <CartesianGrid
+        strokeDasharray="3 3"
+        stroke="var(--border)"
+        horizontal={grid.horizontal}
+        vertical={grid.vertical}
+      />
+      {horizontal ? (
+        <>
+          <XAxis type="number" {...axisProps} />
+          <YAxis type="category" dataKey={dimKey} {...axisProps} width={90} />
+        </>
+      ) : (
+        <>
+          <XAxis dataKey={dimKey} {...axisProps} />
+          <YAxis yAxisId="left" {...axisProps} width={48} />
+          {hasRightAxis ? (
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              {...axisProps}
+              width={48}
+            />
+          ) : null}
+        </>
+      )}
+      <Tooltip formatter={(v) => fmt(v)} cursor={{ fill: "var(--muted)" }} />
+      {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
+      {metrics.map((m, i) => {
+        const base = resolveSeriesColor(ap, m.key, i);
+        const perColumn =
+          singleSeries &&
+          (ap.fillMode === "gradient" ||
+            (ap.columnColors && Object.keys(ap.columnColors).length > 0));
+        return (
           <Bar
             key={m.key}
+            {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
             dataKey={m.key}
             name={m.label}
-            fill={CHART_COLORS[i % CHART_COLORS.length]}
-            radius={[4, 4, 0, 0]}
-          />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
+            fill={base}
+            radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+            isAnimationActive={false}
+          >
+            {perColumn
+              ? rows.map((_, idx) => (
+                  <Cell
+                    key={idx}
+                    fill={ap.columnColors?.[idx] ?? base}
+                    fillOpacity={
+                      ap.fillMode === "gradient"
+                        ? gradientOpacity(idx, rows.length)
+                        : 1
+                    }
+                  />
+                ))
+              : null}
+            {ap.dataLabels?.show ? (
+              <LabelList
+                dataKey={m.key}
+                position={
+                  ap.dataLabels.position === "inside"
+                    ? "inside"
+                    : horizontal
+                      ? "right"
+                      : "top"
+                }
+                fill={ap.dataLabels.color ?? "var(--foreground)"}
+                fontSize={11}
+                formatter={(v: unknown) => fmt(v)}
+              />
+            ) : null}
+          </Bar>
+        );
+      })}
+    </BarChart>
+  );
+}
+
+// ---------------- Tabela agregada com aparência ----------------
+function AppearanceTable({
+  data,
+  appearance,
+}: {
+  data: WidgetData;
+  appearance: AppearanceSettings;
+}) {
+  const t = appearance.table ?? {};
+  const metricKeys = new Set(data.metrics.map((m) => m.key));
+  const allCols = [
+    ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
+    ...data.metrics.map((m) => ({ key: m.key, label: m.label })),
+  ];
+  const cols = orderedColumns(
+    allCols.map((c) => c.key),
+    t.columnOrder
+  ).map((key) => allCols.find((c) => c.key === key)!);
+
+  const colorForCol = (key: string) => t.columnColors?.[key];
+  const rows = sortRows(data.rows, t.sort, (r) => {
+    const col = t.sort?.column ?? "";
+    return String(colorForCol(col) ?? r[col] ?? "");
+  });
+
+  const gl = t.gridLines ?? "both";
+  const vertical = gl === "vertical" || gl === "both";
+  const horizontal = gl === "horizontal" || gl === "both";
+  const borderColor = t.borderColor;
+  const rowBorder = horizontal ? "" : "border-b-0";
+  const cellBorder = (last: boolean) =>
+    vertical && !last
+      ? { borderRight: `1px solid ${borderColor ?? "var(--border)"}` }
+      : {};
+
+  return (
+    <div className="h-full overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow
+            className={rowBorder}
+            style={{
+              background: t.headerBg,
+              color: t.headerColor,
+              ...(borderColor ? { borderColor } : {}),
+            }}
+          >
+            {cols.map((c, ci) => (
+              <TableHead
+                key={c.key}
+                className={metricKeys.has(c.key) ? "text-right" : undefined}
+                style={{
+                  color: t.headerColor ?? colorForCol(c.key),
+                  ...cellBorder(ci === cols.length - 1),
+                }}
+              >
+                {c.label}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow
+              key={i}
+              className={rowBorder}
+              style={{
+                background: t.rowColors?.[i] ?? t.bodyBg,
+                color: t.bodyColor,
+                ...(borderColor ? { borderColor } : {}),
+              }}
+            >
+              {cols.map((c, ci) => {
+                const isMetric = metricKeys.has(c.key);
+                const cellColor =
+                  t.cellColors?.[`${i}:${c.key}`] ?? colorForCol(c.key);
+                return (
+                  <TableCell
+                    key={c.key}
+                    className={isMetric ? "text-right tabular-nums" : undefined}
+                    style={{
+                      color: cellColor ?? t.bodyColor,
+                      ...cellBorder(ci === cols.length - 1),
+                    }}
+                  >
+                    {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
