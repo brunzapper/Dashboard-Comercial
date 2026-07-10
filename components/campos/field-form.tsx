@@ -7,16 +7,10 @@
 import { useActionState, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import {
   DATA_TYPE_LABELS,
@@ -31,6 +25,9 @@ import {
 import { FormulaBuilder, type RefOption } from "./formula-builder";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
+const DATA_TYPE_OPTIONS: ComboboxOption[] = (
+  Object.keys(DATA_TYPE_LABELS) as DataType[]
+).map((t) => ({ value: t, label: DATA_TYPE_LABELS[t] }));
 const initial: FieldActionState = {};
 
 function RoleChecks({
@@ -105,20 +102,15 @@ export function FieldForm({
 
       <div className="flex flex-col gap-1.5">
         <Label>Tipo</Label>
-        {/* Select controla a UI; input hidden envia o valor no form */}
-        <Select value={dataType} onValueChange={(v) => setDataType(v as DataType)}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(DATA_TYPE_LABELS) as DataType[]).map((t) => (
-              <SelectItem key={t} value={t}>
-                {DATA_TYPE_LABELS[t]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <input type="hidden" name="data_type" value={dataType} />
+        <Combobox
+          name="data_type"
+          options={DATA_TYPE_OPTIONS}
+          value={dataType}
+          onValueChange={(v) => setDataType(v as DataType)}
+          searchable={false}
+          className="w-full"
+          aria-label="Tipo"
+        />
       </div>
 
       {dataType === "selecao" ? (

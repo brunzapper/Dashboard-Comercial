@@ -3,10 +3,11 @@
 // excluir. Aninhamento = parent_operation_id.
 "use client";
 
-import { useActionState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,12 +32,11 @@ export interface OperationRow {
   parent_operation_id: string | null;
 }
 
-const selectClass =
-  "border-input h-9 rounded-md border bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
 const initial: OpState = {};
 
 export function OperationsManager({ operations }: { operations: OperationRow[] }) {
   const [state, formAction, pending] = useActionState(createOperation, initial);
+  const [parentId, setParentId] = useState("");
   const [, startTransition] = useTransition();
 
   return (
@@ -51,14 +51,19 @@ export function OperationsManager({ operations }: { operations: OperationRow[] }
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="parent">Operação-pai (opcional)</Label>
-          <select id="parent" name="parent_operation_id" className={selectClass}>
-            <option value="">— nenhuma (top-level) —</option>
-            {operations.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
+          <Combobox
+            id="parent"
+            name="parent_operation_id"
+            options={[
+              { value: "", label: "— nenhuma (top-level) —" },
+              ...operations.map((o) => ({ value: o.id, label: o.name })),
+            ]}
+            value={parentId}
+            onValueChange={setParentId}
+            placeholder="— nenhuma (top-level) —"
+            className="min-w-56"
+            aria-label="Operação-pai"
+          />
         </div>
         <Button type="submit" disabled={pending}>
           <Plus className="size-4" /> Criar
@@ -94,26 +99,25 @@ export function OperationsManager({ operations }: { operations: OperationRow[] }
                 <TableRow key={o.id}>
                   <TableCell className="font-medium">{o.name}</TableCell>
                   <TableCell>
-                    <select
-                      className={selectClass}
-                      defaultValue={o.parent_operation_id ?? ""}
-                      onChange={(e) =>
+                    <Combobox
+                      options={[
+                        { value: "", label: "— nenhuma —" },
+                        ...operations
+                          .filter((p) => p.id !== o.id)
+                          .map((p) => ({ value: p.id, label: p.name })),
+                      ]}
+                      value={o.parent_operation_id ?? ""}
+                      onValueChange={(v) =>
                         startTransition(async () => {
                           await updateOperation(o.id, {
-                            parent_operation_id: e.target.value || null,
+                            parent_operation_id: v || null,
                           });
                         })
                       }
-                    >
-                      <option value="">— nenhuma —</option>
-                      {operations
-                        .filter((p) => p.id !== o.id)
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                    </select>
+                      placeholder="— nenhuma —"
+                      className="min-w-48"
+                      aria-label="Operação-pai"
+                    />
                   </TableCell>
                   <TableCell>
                     <input

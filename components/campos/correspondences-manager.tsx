@@ -8,6 +8,7 @@ import { useActionState, useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -45,8 +46,9 @@ export interface RefOption {
   label: string;
 }
 
-const selectClass =
-  "border-input flex h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+const DATA_TYPE_OPTIONS: ComboboxOption[] = (
+  Object.keys(DATA_TYPE_LABELS) as DataType[]
+).map((t) => ({ value: t, label: DATA_TYPE_LABELS[t] }));
 
 const initial: CorrespondenceActionState = {};
 
@@ -75,6 +77,7 @@ function CorrespondenceForm({
     const src = RECORD_TYPE_SOURCE[m.record_type];
     if (src) defaultRef[src] = m.field_ref;
   }
+  const [refs, setRefs] = useState<Record<SourceKey, string>>(defaultRef);
 
   useEffect(() => {
     if (state.ok && onDone) onDone();
@@ -104,19 +107,15 @@ function CorrespondenceForm({
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="data_type">Tipo</Label>
-        <select
+        <Combobox
           id="data_type"
           name="data_type"
+          options={DATA_TYPE_OPTIONS}
           value={dataType}
-          onChange={(e) => setDataType(e.target.value as DataType)}
-          className={selectClass + " px-3"}
-        >
-          {(Object.keys(DATA_TYPE_LABELS) as DataType[]).map((t) => (
-            <option key={t} value={t}>
-              {DATA_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </select>
+          onValueChange={(t) => setDataType(t as DataType)}
+          searchable={false}
+          aria-label="Tipo"
+        />
       </div>
 
       <div className="flex flex-col gap-2">
@@ -128,18 +127,20 @@ function CorrespondenceForm({
         {SOURCE_KEYS.map((key) => (
           <div key={key} className="flex flex-col gap-1">
             <span className="text-sm font-medium">{SOURCE_LABELS[key]}</span>
-            <select
+            <Combobox
               name={`member_${key}`}
-              defaultValue={defaultRef[key]}
-              className={selectClass}
-            >
-              <option value="">— nenhuma —</option>
-              {candidatesBySource[key].map((c) => (
-                <option key={c.ref} value={c.ref}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "— nenhuma —" },
+                ...candidatesBySource[key].map((c) => ({
+                  value: c.ref,
+                  label: c.label,
+                })),
+              ]}
+              value={refs[key]}
+              onValueChange={(ref) => setRefs((prev) => ({ ...prev, [key]: ref }))}
+              placeholder="— nenhuma —"
+              aria-label={SOURCE_LABELS[key]}
+            />
           </div>
         ))}
       </div>

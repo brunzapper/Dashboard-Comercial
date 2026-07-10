@@ -24,6 +24,7 @@ export interface AvailableField {
 
 // Campos do núcleo expostos no builder.
 export const CORE_FIELDS: AvailableField[] = [
+  { field: "title", label: "Nome (título)", isNumeric: false, isDate: false },
   { field: "record_type", label: "Tipo de registro", isNumeric: false, isDate: false },
   { field: "source_system", label: "Fonte", isNumeric: false, isDate: false },
   { field: "pipeline", label: "Pipeline", isNumeric: false, isDate: false },

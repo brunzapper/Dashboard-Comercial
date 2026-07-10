@@ -8,7 +8,9 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
+import { useNavPending } from "./pending-context";
 import type { AvailableField } from "@/lib/widgets/fields";
 import {
   PERIOD_ALL,
@@ -16,10 +18,8 @@ import {
   hasSelection,
   type PeriodPresetKey,
   type PeriodSelection,
+  type SavedPeriod,
 } from "@/lib/widgets/period";
-
-const selectClass =
-  "border-input flex h-9 rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
 
 const CUSTOM = "__custom__";
 
@@ -36,6 +36,8 @@ export interface PeriodControlsProps {
     defaultValue: string;
     options: AvailableField[];
   };
+  // Persiste a seleção resultante (só a barra global usa — salva por usuário).
+  persist?: (sel: SavedPeriod) => void;
   className?: string;
 }
 
@@ -43,11 +45,13 @@ export function PeriodControls({
   keys,
   defaults,
   fieldControl,
+  persist,
   className,
 }: PeriodControlsProps) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+  const { run } = useNavPending();
 
   const urlSel: PeriodSelection = {
     preset: sp.get(keys.preset) ?? "",
@@ -65,6 +69,15 @@ export function PeriodControls({
 
   const hasDefault = defaults ? hasSelection(defaults) : false;
 
+  const modeOptions: ComboboxOption[] = [
+    { value: "", label: "Todo o período" },
+    ...(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => ({
+      value: k,
+      label: PERIOD_PRESETS[k],
+    })),
+    { value: CUSTOM, label: "Personalizado" },
+  ];
+
   function navigate(next: Record<string, string>) {
     const params = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(next)) {
@@ -78,7 +91,23 @@ export function PeriodControls({
       params.delete(fieldControl.paramKey);
     }
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // Persiste o último período consultado (barra global; salvo por usuário).
+    if (persist) {
+      persist({
+        periodo: params.get(keys.preset) ?? "",
+        de: params.get(keys.de) ?? "",
+        ate: params.get(keys.ate) ?? "",
+        // O campo é removido da URL quando igual ao default; persiste o efetivo.
+        campo: fieldControl
+          ? (params.get(fieldControl.paramKey) ?? fieldControl.defaultValue)
+          : undefined,
+      });
+    }
+    // Envolve em transition (contexto): a barra/os widgets exibem "Carregando…"
+    // enquanto o servidor recomputa os dados após a mudança de período.
+    run(() => {
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    });
   }
 
   function onModeChange(value: string) {
@@ -102,20 +131,14 @@ export function PeriodControls({
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className ?? ""}`}>
-      <select
+      <Combobox
+        options={modeOptions}
         value={mode}
-        onChange={(e) => onModeChange(e.target.value)}
-        className={selectClass}
+        onValueChange={onModeChange}
+        searchable={false}
+        className="w-auto min-w-40"
         aria-label="Período"
-      >
-        <option value="">Todo o período</option>
-        {(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => (
-          <option key={k} value={k}>
-            {PERIOD_PRESETS[k]}
-          </option>
-        ))}
-        <option value={CUSTOM}>Personalizado</option>
-      </select>
+      />
 
       {mode === CUSTOM ? (
         <>
@@ -138,18 +161,16 @@ export function PeriodControls({
       ) : null}
 
       {fieldControl ? (
-        <select
+        <Combobox
+          options={fieldControl.options.map((f) => ({
+            value: f.field,
+            label: f.label,
+          }))}
           value={fieldControl.value}
-          onChange={(e) => navigate({ [fieldControl.paramKey]: e.target.value })}
-          className={selectClass}
+          onValueChange={(v) => navigate({ [fieldControl.paramKey]: v })}
+          className="w-auto min-w-44"
           aria-label="Campo de data"
-        >
-          {fieldControl.options.map((f) => (
-            <option key={f.field} value={f.field}>
-              {f.label}
-            </option>
-          ))}
-        </select>
+        />
       ) : null}
     </div>
   );

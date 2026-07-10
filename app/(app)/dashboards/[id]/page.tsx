@@ -20,6 +20,8 @@ import {
   DEFAULT_PERIOD_FIELD,
   resolvePeriodSelection,
   type DashboardPeriod,
+  type PeriodSelection,
+  type SavedPeriod,
 } from "@/lib/widgets/period";
 import type {
   DashboardSettings,
@@ -54,25 +56,44 @@ export default async function DashboardPage({
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;
   const canEdit = isOwner || isAdmin;
+  const canManageFields =
+    session?.permissions.includes("manage_field_definitions") ?? false;
 
-  const [{ data: widgetsData }, { data: fieldsData }, correspondences] =
-    await Promise.all([
-      supabase
-        .from("widgets")
-        .select(
-          "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
-        )
-        .eq("dashboard_id", id)
-        .order("sort_order", { ascending: true }),
-      supabase
-        .from("field_definitions")
-        .select(
-          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
-        )
-        .eq("show_in_builder", true)
-        .order("sort_order", { ascending: true }),
-      loadCorrespondences(supabase),
-    ]);
+  const [
+    { data: widgetsData },
+    { data: fieldsData },
+    correspondences,
+    { data: prefData },
+  ] = await Promise.all([
+    supabase
+      .from("widgets")
+      .select(
+        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+      )
+      .eq("dashboard_id", id)
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("field_definitions")
+      .select(
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
+      )
+      .eq("show_in_builder", true)
+      .order("sort_order", { ascending: true }),
+    loadCorrespondences(supabase),
+    session
+      ? supabase
+          .from("user_preferences")
+          .select("settings")
+          .eq("user_id", session.user.id)
+          .eq("dashboard_id", id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  // Último período consultado pelo usuário neste dashboard (se houver).
+  const savedPeriod =
+    ((prefData?.settings as { lastPeriod?: SavedPeriod } | null)?.lastPeriod ??
+      {}) as SavedPeriod;
 
   const widgets = (widgetsData ?? []) as Widget[];
   const available = buildAvailableFields(
@@ -89,19 +110,37 @@ export default async function DashboardPage({
   const dataWidgets = widgets.filter((w) => w.visual_type !== "filtro");
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
 
+  // Campo de data padrão quando a URL não traz `campo`: preferência do usuário
+  // (último consultado) > config do dashboard > default.
+  const defaultPeriodField =
+    savedPeriod.campo && isDateField(savedPeriod.campo)
+      ? savedPeriod.campo
+      : periodBar?.field && isDateField(periodBar.field)
+        ? periodBar.field
+        : DEFAULT_PERIOD_FIELD;
+
+  // Defaults do período quando a URL está vazia: usa o último período salvo do
+  // usuário se houver; senão o preset padrão do dashboard.
+  const savedHasContent = Boolean(
+    savedPeriod.periodo || savedPeriod.de || savedPeriod.ate
+  );
+  const periodDefaults: PeriodSelection = savedHasContent
+    ? {
+        preset: savedPeriod.periodo ?? "",
+        de: savedPeriod.de ?? "",
+        ate: savedPeriod.ate ?? "",
+      }
+    : { preset: periodBar?.defaultPreset ?? "" };
+
   // 1) Período da barra global (só se a barra estiver visível).
   let globalPeriod: DashboardPeriod | null = null;
   if (periodBar?.enabled !== false) {
     const campoRaw = str(sp.campo);
-    const field = isDateField(campoRaw)
-      ? campoRaw
-      : periodBar?.field && isDateField(periodBar.field)
-        ? periodBar.field
-        : DEFAULT_PERIOD_FIELD;
+    const field = isDateField(campoRaw) ? campoRaw : defaultPeriodField;
     globalPeriod = resolvePeriodSelection(
       { preset: str(sp.periodo), de: str(sp.de), ate: str(sp.ate) },
       field,
-      { preset: periodBar?.defaultPreset ?? "" }
+      periodDefaults
     );
   }
 
@@ -166,7 +205,10 @@ export default async function DashboardPage({
       dataById={dataById}
       available={available}
       canEdit={canEdit}
+      canManageFields={canManageFields}
       periodBar={periodBar}
+      periodDefaults={periodDefaults}
+      periodDefaultField={defaultPeriodField}
     />
   );
 }

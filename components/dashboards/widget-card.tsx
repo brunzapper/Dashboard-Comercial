@@ -22,6 +22,7 @@ export function WidgetCard({
   dashboardId,
   siblings,
   canEdit,
+  canManageFields = false,
   editMode,
 }: {
   widget: Widget;
@@ -30,6 +31,7 @@ export function WidgetCard({
   dashboardId: string;
   siblings: Widget[];
   canEdit: boolean;
+  canManageFields?: boolean;
   editMode: boolean;
 }) {
   const [pending, startTransition] = useTransition();
@@ -53,6 +55,7 @@ export function WidgetCard({
               available={available}
               widget={widget}
               siblings={siblings}
+              canManageFields={canManageFields}
               trigger={
                 <Button variant="ghost" size="icon" aria-label="Editar widget">
                   <Pencil className="size-4" />

@@ -10,6 +10,7 @@ import { useState, useTransition } from "react";
 import { CalendarDays, Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import {
   Popover,
@@ -21,13 +22,15 @@ import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
   type PeriodPresetKey,
+  type PeriodSelection,
+  type SavedPeriod,
 } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
-import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  saveLastPeriod,
+  updateDashboardSettings,
+} from "@/app/(app)/dashboards/actions";
 import { PeriodControls } from "./period-controls";
-
-const selectClass =
-  "border-input flex h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
 
 type PeriodBar = NonNullable<DashboardSettings["periodBar"]>;
 
@@ -36,16 +39,23 @@ export function PeriodFilter({
   canEdit,
   dashboardId,
   periodBar,
+  periodDefaults,
+  periodDefaultField,
 }: {
   available: AvailableField[];
   canEdit: boolean;
   dashboardId: string;
   periodBar?: PeriodBar;
+  periodDefaults?: PeriodSelection;
+  periodDefaultField?: string;
 }) {
   const sp = useSearchParams();
   const dateFields = available.filter((f) => f.isDate);
 
-  const defaultField = periodBar?.field || DEFAULT_PERIOD_FIELD;
+  // Default (URL vazia): usa o que o servidor resolveu (último período do
+  // usuário > config do dashboard > default), garantindo que UI e dados batam.
+  const defaultField =
+    periodDefaultField || periodBar?.field || DEFAULT_PERIOD_FIELD;
   const field = sp.get("campo") || defaultField;
 
   return (
@@ -53,7 +63,11 @@ export function PeriodFilter({
       <CalendarDays className="text-muted-foreground size-4 shrink-0" />
       <PeriodControls
         keys={{ preset: "periodo", de: "de", ate: "ate" }}
-        defaults={{ preset: periodBar?.defaultPreset ?? "" }}
+        defaults={periodDefaults ?? { preset: periodBar?.defaultPreset ?? "" }}
+        persist={(sel: SavedPeriod) => {
+          // Salva o último período consultado deste usuário/dashboard.
+          void saveLastPeriod(dashboardId, sel);
+        }}
         fieldControl={{
           paramKey: "campo",
           value: field,
@@ -87,6 +101,18 @@ function PeriodBarConfig({
   const [preset, setPreset] = useState(periodBar?.defaultPreset ?? "");
   const [field, setField] = useState(periodBar?.field ?? DEFAULT_PERIOD_FIELD);
 
+  const presetOptions: ComboboxOption[] = [
+    { value: "", label: "Todo o período" },
+    ...(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => ({
+      value: k,
+      label: PERIOD_PRESETS[k],
+    })),
+  ];
+  const fieldOptions: ComboboxOption[] = dateFields.map((f) => ({
+    value: f.field,
+    label: f.label,
+  }));
+
   function persist(next: PeriodBar) {
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, { periodBar: next });
@@ -109,32 +135,22 @@ function PeriodBarConfig({
       <PopoverContent align="end" className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label>Período padrão</Label>
-          <select
+          <Combobox
+            options={presetOptions}
             value={preset}
-            onChange={(e) => setPreset(e.target.value)}
-            className={selectClass}
-          >
-            <option value="">Todo o período</option>
-            {(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => (
-              <option key={k} value={k}>
-                {PERIOD_PRESETS[k]}
-              </option>
-            ))}
-          </select>
+            onValueChange={setPreset}
+            searchable={false}
+            aria-label="Período padrão"
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label>Campo de data padrão</Label>
-          <select
+          <Combobox
+            options={fieldOptions}
             value={field}
-            onChange={(e) => setField(e.target.value)}
-            className={selectClass}
-          >
-            {dateFields.map((f) => (
-              <option key={f.field} value={f.field}>
-                {f.label}
-              </option>
-            ))}
-          </select>
+            onValueChange={setField}
+            aria-label="Campo de data padrão"
+          />
         </div>
         <div className="flex items-center justify-between gap-2">
           <Button

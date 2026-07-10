@@ -6,12 +6,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FieldForm } from "@/components/campos/field-form";
 import { SOURCE_KEYS, SOURCE_LABELS, type SourceKey } from "@/lib/sources";
 import {
   Sheet,
@@ -46,9 +49,6 @@ import {
   updateWidget,
 } from "@/app/(app)/dashboards/actions";
 
-const selectClass =
-  "border-input flex h-9 w-full rounded-md border bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
-
 const FILTER_OPS: { op: FilterOp; label: string }[] = [
   { op: "eq", label: "=" },
   { op: "neq", label: "≠" },
@@ -61,22 +61,51 @@ const FILTER_OPS: { op: FilterOp; label: string }[] = [
   { op: "not_null", label: "não vazio" },
 ];
 
+const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
+  value: o.op,
+  label: o.label,
+}));
+
+// Agrupa os campos do catálogo por origem para os seletores pesquisáveis.
+function fieldGroup(field: string): string {
+  if (field.startsWith("custom:")) return "Personalizados";
+  if (field.startsWith("unified:")) return "Unificados";
+  return "Núcleo";
+}
+function toFieldOptions(fields: AvailableField[]): ComboboxOption[] {
+  return fields.map((f) => ({
+    value: f.field,
+    label: f.label,
+    group: fieldGroup(f.field),
+  }));
+}
+
 export function WidgetBuilder({
   dashboardId,
   available,
   widget,
   siblings = [],
   trigger,
+  canManageFields = false,
 }: {
   dashboardId: string;
   available: AvailableField[];
   widget?: Widget;
   siblings?: Widget[];
   trigger: React.ReactNode;
+  canManageFields?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Operandos numéricos para fórmula ao criar um campo aqui: colunas numéricas
+  // do catálogo, exceto as unificadas (não são operandos válidos).
+  const fieldFormNumericRefs = available
+    .filter((f) => f.isNumeric && !f.field.startsWith("unified:"))
+    .map((f) => ({ ref: f.field, label: f.label }));
 
   const [title, setTitle] = useState(widget?.title ?? "");
   const [visualType, setVisualType] = useState<VisualType>(
@@ -123,6 +152,32 @@ export function WidgetBuilder({
   }
 
   const numericFields = available.filter((f) => f.isNumeric);
+
+  const availableOptions = toFieldOptions(available);
+  const metricOptions: ComboboxOption[] = [
+    { value: "*", label: "Contagem de registros" },
+    ...toFieldOptions(numericFields),
+  ];
+  const visualOptions: ComboboxOption[] = (
+    Object.keys(VISUAL_TYPE_LABELS) as VisualType[]
+  ).map((v) => ({ value: v, label: VISUAL_TYPE_LABELS[v] }));
+  const transformOptions: ComboboxOption[] = (
+    Object.keys(TRANSFORM_LABELS) as Transform[]
+  ).map((t) => ({ value: t, label: TRANSFORM_LABELS[t] }));
+  const aggOptions: ComboboxOption[] = (
+    Object.keys(AGG_LABELS) as Aggregation[]
+  ).map((a) => ({ value: a, label: AGG_LABELS[a] }));
+  const presetOptions: ComboboxOption[] = [
+    { value: "", label: "Todo o período" },
+    ...(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => ({
+      value: k,
+      label: PERIOD_PRESETS[k],
+    })),
+  ];
+  const dateFieldOptions: ComboboxOption[] = dateFields.map((f) => ({
+    value: f.field,
+    label: f.label,
+  }));
 
   function isDate(field: string): boolean {
     return available.find((a) => a.field === field)?.isDate ?? false;
@@ -217,17 +272,12 @@ export function WidgetBuilder({
 
           <div className="flex flex-col gap-1.5">
             <Label>Visual</Label>
-            <select
-              className={selectClass + " px-3"}
+            <Combobox
+              options={visualOptions}
               value={visualType}
-              onChange={(e) => setVisualType(e.target.value as VisualType)}
-            >
-              {(Object.keys(VISUAL_TYPE_LABELS) as VisualType[]).map((v) => (
-                <option key={v} value={v}>
-                  {VISUAL_TYPE_LABELS[v]}
-                </option>
-              ))}
-            </select>
+              onValueChange={(v) => setVisualType(v as VisualType)}
+              aria-label="Visual"
+            />
           </div>
 
           {/* Config do widget de filtro de período */}
@@ -235,33 +285,22 @@ export function WidgetBuilder({
             <>
               <div className="flex flex-col gap-1.5">
                 <Label>Campo de data</Label>
-                <select
-                  className={selectClass + " px-3"}
+                <Combobox
+                  options={dateFieldOptions}
                   value={filterField}
-                  onChange={(e) => setFilterField(e.target.value)}
-                >
-                  {dateFields.map((f) => (
-                    <option key={f.field} value={f.field}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setFilterField}
+                  aria-label="Campo de data"
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label>Período padrão</Label>
-                <select
-                  className={selectClass + " px-3"}
+                <Combobox
+                  options={presetOptions}
                   value={filterPreset}
-                  onChange={(e) => setFilterPreset(e.target.value)}
-                >
-                  <option value="">Todo o período</option>
-                  {(Object.keys(PERIOD_PRESETS) as PeriodPresetKey[]).map((k) => (
-                    <option key={k} value={k}>
-                      {PERIOD_PRESETS[k]}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setFilterPreset}
+                  aria-label="Período padrão"
+                />
               </div>
 
               <div className="flex flex-col gap-2">
@@ -323,6 +362,23 @@ export function WidgetBuilder({
             </label>
           </div>
 
+          {/* Criar coluna direto no editor (admins) */}
+          {canManageFields ? (
+            <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2">
+              <span className="text-muted-foreground text-xs">
+                Falta uma coluna? Crie sem sair do editor.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFieldSheetOpen(true)}
+              >
+                <Plus className="size-4" /> Novo campo
+              </Button>
+            </div>
+          ) : null}
+
           {/* Dimensões */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -338,38 +394,31 @@ export function WidgetBuilder({
             </div>
             {dimensions.map((d, i) => (
               <div key={i} className="flex items-center gap-2">
-                <select
-                  className={selectClass}
+                <Combobox
+                  className="flex-1"
+                  options={availableOptions}
                   value={d.field}
-                  onChange={(e) => {
+                  placeholder="— campo —"
+                  onValueChange={(field) => {
                     const next = [...dimensions];
-                    next[i] = { ...d, field: e.target.value };
+                    next[i] = { ...d, field };
                     setDimensions(next);
                   }}
-                >
-                  <option value="">— campo —</option>
-                  {available.map((a) => (
-                    <option key={a.field} value={a.field}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
+                  aria-label="Campo da dimensão"
+                />
                 {isDate(d.field) ? (
-                  <select
-                    className={selectClass + " w-32"}
+                  <Combobox
+                    className="w-32 shrink-0"
+                    searchable={false}
+                    options={transformOptions}
                     value={d.transform ?? "none"}
-                    onChange={(e) => {
+                    onValueChange={(t) => {
                       const next = [...dimensions];
-                      next[i] = { ...d, transform: e.target.value as Transform };
+                      next[i] = { ...d, transform: t as Transform };
                       setDimensions(next);
                     }}
-                  >
-                    {(Object.keys(TRANSFORM_LABELS) as Transform[]).map((t) => (
-                      <option key={t} value={t}>
-                        {TRANSFORM_LABELS[t]}
-                      </option>
-                    ))}
-                  </select>
+                    aria-label="Transformação de data"
+                  />
                 ) : null}
                 <Button
                   type="button"
@@ -398,39 +447,30 @@ export function WidgetBuilder({
             </div>
             {metrics.map((m, i) => (
               <div key={i} className="flex items-center gap-2">
-                <select
-                  className={selectClass}
+                <Combobox
+                  className="flex-1"
+                  options={metricOptions}
                   value={m.field}
-                  onChange={(e) => {
+                  onValueChange={(field) => {
                     const next = [...metrics];
-                    const field = e.target.value;
                     next[i] = { ...m, field, agg: field === "*" ? "count" : m.agg };
                     setMetrics(next);
                   }}
-                >
-                  <option value="*">Contagem de registros</option>
-                  {numericFields.map((a) => (
-                    <option key={a.field} value={a.field}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className={selectClass + " w-28"}
+                  aria-label="Campo da métrica"
+                />
+                <Combobox
+                  className="w-28 shrink-0"
+                  searchable={false}
+                  options={aggOptions}
                   value={m.agg}
                   disabled={m.field === "*"}
-                  onChange={(e) => {
+                  onValueChange={(a) => {
                     const next = [...metrics];
-                    next[i] = { ...m, agg: e.target.value as Aggregation };
+                    next[i] = { ...m, agg: a as Aggregation };
                     setMetrics(next);
                   }}
-                >
-                  {(Object.keys(AGG_LABELS) as Aggregation[]).map((a) => (
-                    <option key={a} value={a}>
-                      {AGG_LABELS[a]}
-                    </option>
-                  ))}
-                </select>
+                  aria-label="Agregação"
+                />
                 <Button
                   type="button"
                   variant="ghost"
@@ -458,37 +498,30 @@ export function WidgetBuilder({
             </div>
             {filters.map((f, i) => (
               <div key={i} className="flex items-center gap-2">
-                <select
-                  className={selectClass}
+                <Combobox
+                  className="flex-1"
+                  options={availableOptions}
                   value={f.field}
-                  onChange={(e) => {
+                  placeholder="— campo —"
+                  onValueChange={(field) => {
                     const next = [...filters];
-                    next[i] = { ...f, field: e.target.value };
+                    next[i] = { ...f, field };
                     setFilters(next);
                   }}
-                >
-                  <option value="">— campo —</option>
-                  {available.map((a) => (
-                    <option key={a.field} value={a.field}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className={selectClass + " w-28"}
+                  aria-label="Campo do filtro"
+                />
+                <Combobox
+                  className="w-28 shrink-0"
+                  searchable={false}
+                  options={FILTER_OP_OPTIONS}
                   value={f.op}
-                  onChange={(e) => {
+                  onValueChange={(op) => {
                     const next = [...filters];
-                    next[i] = { ...f, op: e.target.value as FilterOp };
+                    next[i] = { ...f, op: op as FilterOp };
                     setFilters(next);
                   }}
-                >
-                  {FILTER_OPS.map((o) => (
-                    <option key={o.op} value={o.op}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                  aria-label="Operador do filtro"
+                />
                 {f.op !== "is_null" && f.op !== "not_null" ? (
                   <Input
                     value={String(f.value ?? "")}
@@ -521,6 +554,32 @@ export function WidgetBuilder({
           </Button>
         </div>
       </SheetContent>
+
+      {/* Criar campo sem sair do editor: reusa o FieldForm de /campos; ao salvar,
+          router.refresh() recomputa `available` (novo campo entra nos seletores). */}
+      {canManageFields ? (
+        <Sheet open={fieldSheetOpen} onOpenChange={setFieldSheetOpen}>
+          <SheetContent className="overflow-y-auto">
+            <SheetHeader>
+              <SheetTitle>Novo campo</SheetTitle>
+              <SheetDescription>
+                A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos
+                a lista automaticamente ao salvar.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-4">
+              <FieldForm
+                key={fieldSheetOpen ? "open" : "closed"}
+                numericRefs={fieldFormNumericRefs}
+                onDone={() => {
+                  setFieldSheetOpen(false);
+                  router.refresh();
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </Sheet>
   );
 }
