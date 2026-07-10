@@ -89,8 +89,22 @@ export interface FilterSettings {
   defaultAte?: string;
 }
 
-// settings de um widget é jsonb frouxo: KPI (meta/razão) e/ou filtro convivem.
-export type WidgetSettings = KpiSettings & FilterSettings;
+// Config do widget de Tabela no modo "registros individuais" (Fase 1): a tabela
+// lista 1 linha por registro (sem agregação) e colunas marcadas como editáveis
+// gravam de volta no registro (via updateRecordField, respeitando permissões).
+export interface RecordListColumn {
+  field: string; // 'title' | 'stage' | 'custom:<key>' | ...
+  editable?: boolean; // só faz efeito em campos personalizados (custom:*)
+}
+export interface RecordListSettings {
+  rowMode?: "records"; // presença => modo lista no widget 'tabela'
+  columns?: RecordListColumn[]; // colunas ordenadas a exibir
+  limit?: number; // teto de linhas (default 100)
+}
+
+// settings de um widget é jsonb frouxo: KPI (meta/razão), filtro e o modo lista
+// de tabela convivem no mesmo objeto.
+export type WidgetSettings = KpiSettings & FilterSettings & RecordListSettings;
 
 // Config por dashboard, guardada em dashboards.settings.
 export interface DashboardSettings {

@@ -39,6 +39,7 @@ import {
   type FilterOp,
   type FilterSettings,
   type Metric,
+  type RecordListColumn,
   type Transform,
   type VisualType,
   type Widget,
@@ -122,6 +123,33 @@ export function WidgetBuilder({
   const [splitBySource, setSplitBySource] = useState<boolean>(
     widget?.split_by_source ?? false
   );
+
+  // Modo "registros individuais" (Fase 1): tabela lista 1 linha por registro e
+  // colunas personalizadas marcadas como editáveis gravam de volta no registro.
+  const [recordsMode, setRecordsMode] = useState<boolean>(
+    widget?.settings?.rowMode === "records"
+  );
+  const [columns, setColumns] = useState<RecordListColumn[]>(
+    widget?.settings?.columns ?? []
+  );
+  const isRecordList = visualType === "tabela" && recordsMode;
+
+  function setColumnField(i: number, field: string) {
+    setColumns((prev) => {
+      const next = [...prev];
+      // Editável só faz sentido em campos personalizados.
+      const editable = field.startsWith("custom:") ? next[i]?.editable : false;
+      next[i] = { field, editable };
+      return next;
+    });
+  }
+  function setColumnEditable(i: number, editable: boolean) {
+    setColumns((prev) => {
+      const next = [...prev];
+      next[i] = { ...next[i], editable };
+      return next;
+    });
+  }
 
   function toggleSource(key: SourceKey) {
     setSources((prev) =>
@@ -230,6 +258,20 @@ export function WidgetBuilder({
         }
         return { field: f.field, op: f.op, value: f.value };
       });
+    // Preserva settings existentes (ex.: KPI meta/razão) e liga/desliga o modo
+    // lista de registros (Fase 1) conforme o toggle.
+    let settings = { ...(widget?.settings ?? {}) };
+    if (isRecordList) {
+      settings = {
+        ...settings,
+        rowMode: "records",
+        columns: columns.filter((c) => c.field),
+      };
+    } else {
+      delete settings.rowMode;
+      delete settings.columns;
+    }
+
     const input = {
       title: title.trim() || null,
       visual_type: visualType,
@@ -238,8 +280,7 @@ export function WidgetBuilder({
       dimensions: dimensions.filter((d) => d.field),
       metrics: metrics.filter((m) => m.field),
       filters: cleanFilters,
-      // Preserva settings existentes (ex.: KPI meta/razão) ao editar.
-      settings: widget?.settings ?? {},
+      settings,
     };
     startTransition(async () => {
       const res = widget
@@ -362,6 +403,17 @@ export function WidgetBuilder({
             </label>
           </div>
 
+          {/* Modo lista de registros (só para Tabela) */}
+          {visualType === "tabela" ? (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={recordsMode}
+                onCheckedChange={(v) => setRecordsMode(v === true)}
+              />
+              Linhas = registros individuais (permite editar valores)
+            </label>
+          ) : null}
+
           {/* Criar coluna direto no editor (admins) */}
           {canManageFields ? (
             <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2">
@@ -379,6 +431,8 @@ export function WidgetBuilder({
             </div>
           ) : null}
 
+          {!isRecordList ? (
+          <>
           {/* Dimensões */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
@@ -482,6 +536,57 @@ export function WidgetBuilder({
               </div>
             ))}
           </div>
+          </>
+          ) : null}
+
+          {/* Colunas (modo lista de registros) */}
+          {isRecordList ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <Label>Colunas</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setColumns([...columns, { field: "" }])}
+                >
+                  <Plus className="size-4" /> Adicionar
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Marque “editável” para gravar o valor no registro (só campos
+                personalizados; respeita as permissões de cada campo).
+              </p>
+              {columns.map((c, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Combobox
+                    className="flex-1"
+                    options={availableOptions}
+                    value={c.field}
+                    placeholder="— campo —"
+                    onValueChange={(field) => setColumnField(i, field)}
+                    aria-label="Campo da coluna"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs whitespace-nowrap">
+                    <Checkbox
+                      checked={c.editable === true}
+                      disabled={!c.field.startsWith("custom:")}
+                      onCheckedChange={(v) => setColumnEditable(i, v === true)}
+                    />
+                    editável
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setColumns(columns.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {/* Filtros */}
           <div className="flex flex-col gap-2">

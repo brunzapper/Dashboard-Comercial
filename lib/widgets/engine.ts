@@ -56,7 +56,7 @@ function resolveToken(v: unknown): unknown {
   }
 }
 
-function resolveFilters(filters: WidgetFilter[]): WidgetFilter[] {
+export function resolveFilters(filters: WidgetFilter[]): WidgetFilter[] {
   return filters.map((f) => ({
     ...f,
     value: Array.isArray(f.value)
@@ -71,7 +71,7 @@ function metricForMeta(metric: string): Metric {
 }
 
 // Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
-function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
+export function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
   if (!sources || sources.length === 0) return [];
   const rts = sources.map((s) => SOURCE_RECORD_TYPE[s]);
   return [{ field: "record_type", op: "in", value: rts }];

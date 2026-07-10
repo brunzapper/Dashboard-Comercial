@@ -8,16 +8,23 @@ import { useTransition } from "react";
 import { GripVertical, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { Widget, WidgetData } from "@/lib/widgets/types";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
+import { RecordListTable } from "./charts/record-list-table";
 import { PeriodControls } from "./period-controls";
 import { WidgetBuilder } from "./widget-builder";
 
 export function WidgetCard({
   widget,
   data,
+  recordList,
+  fields,
+  fkLabels,
+  userRoles,
+  canEditValues,
   available,
   dashboardId,
   siblings,
@@ -27,6 +34,11 @@ export function WidgetCard({
 }: {
   widget: Widget;
   data: WidgetData;
+  recordList: RecordRow[];
+  fields: FieldDefinition[];
+  fkLabels: Record<string, string>;
+  userRoles: string[];
+  canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
   siblings: Widget[];
@@ -36,6 +48,8 @@ export function WidgetCard({
 }) {
   const [pending, startTransition] = useTransition();
   const isFilter = widget.visual_type === "filtro";
+  const isRecordList =
+    widget.visual_type === "tabela" && widget.settings?.rowMode === "records";
 
   return (
     <div className="bg-card flex h-full flex-col overflow-hidden rounded-lg border">
@@ -90,6 +104,16 @@ export function WidgetCard({
               defaults={{ preset: widget.settings?.defaultPreset ?? "" }}
             />
           </div>
+        ) : isRecordList ? (
+          <RecordListTable
+            records={recordList}
+            columns={widget.settings?.columns ?? []}
+            fields={fields}
+            available={available}
+            userRoles={userRoles}
+            canEditValues={canEditValues}
+            fkLabels={fkLabels}
+          />
         ) : (
           <WidgetChart visualType={widget.visual_type} data={data} />
         )}

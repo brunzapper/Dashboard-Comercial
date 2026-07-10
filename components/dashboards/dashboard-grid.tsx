@@ -12,6 +12,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { cn } from "@/lib/utils";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { GridPosition, Widget, WidgetData } from "@/lib/widgets/types";
 import { saveLayout } from "@/app/(app)/dashboards/actions";
@@ -29,6 +30,11 @@ function posOf(w: Widget, i: number): GridPosition {
 export function DashboardGrid({
   widgets,
   dataById,
+  recordListById,
+  fields,
+  fkLabels,
+  userRoles,
+  canEditValues,
   available,
   dashboardId,
   canEdit,
@@ -37,6 +43,11 @@ export function DashboardGrid({
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
+  recordListById: Record<string, RecordRow[]>;
+  fields: FieldDefinition[];
+  fkLabels: Record<string, string>;
+  userRoles: string[];
+  canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
   canEdit: boolean;
@@ -99,6 +110,11 @@ export function DashboardGrid({
             <WidgetCard
               widget={w}
               data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
+              recordList={recordListById[w.id] ?? []}
+              fields={fields}
+              fkLabels={fkLabels}
+              userRoles={userRoles}
+              canEditValues={canEditValues}
               available={available}
               dashboardId={dashboardId}
               siblings={widgets}
