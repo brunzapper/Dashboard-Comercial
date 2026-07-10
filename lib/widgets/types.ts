@@ -3,6 +3,7 @@
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
 import type { SourceKey } from "@/lib/sources";
+import type { Formula } from "@/lib/records/formulas";
 
 export type VisualType =
   | "tabela"
@@ -12,10 +13,12 @@ export type VisualType =
   | "kpi"
   | "funil"
   | "filtro"
-  | "tabela_editavel";
+  | "tabela_editavel"
+  | "calculado";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
+  calculado: "Métrica calculada",
   tabela: "Tabela",
   tabela_editavel: "Tabela editável",
   barra: "Barra",
@@ -120,12 +123,20 @@ export interface MatrixSettings {
   };
 }
 
+// Config do widget "Métrica calculada" (Fase 3): uma fórmula avaliada com um
+// contexto de dashboard. Os refs podem apontar para células/linhas/colunas de
+// tabelas editáveis (table:*) e para agregações de registros (agg:*).
+export interface CalcSettings {
+  formula?: Formula;
+}
+
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista
-// de tabela e a matriz editável convivem no mesmo objeto.
+// de tabela, a matriz editável e a métrica calculada convivem no mesmo objeto.
 export type WidgetSettings = KpiSettings &
   FilterSettings &
   RecordListSettings &
-  MatrixSettings;
+  MatrixSettings &
+  CalcSettings;
 
 // Config por dashboard, guardada em dashboards.settings.
 export interface DashboardSettings {

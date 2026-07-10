@@ -15,6 +15,10 @@ import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
 import { loadMatrixCells } from "@/lib/widgets/matrix";
 import {
+  runCalculatedWidget,
+  type MatrixWidgetInfo,
+} from "@/lib/widgets/formula-metric";
+import {
   buildCorrespondenceMap,
   loadCorrespondences,
 } from "@/lib/correspondences";
@@ -183,14 +187,16 @@ export default async function DashboardPage({
     w.visual_type === "tabela" && w.settings?.rowMode === "records";
   // Widget "Tabela editável" (Fase 2): dados vêm de dashboard_table_cells.
   const isMatrixWidget = (w: Widget) => w.visual_type === "tabela_editavel";
+  // Widget "Métrica calculada" (Fase 3): valor vem da fórmula (contexto do dash).
+  const isCalcWidget = (w: Widget) => w.visual_type === "calculado";
 
-  // 3) Computa cada widget de dados. Filtros e tabela editável não passam pelo
-  //    engine de agregação.
+  // 3) Computa cada widget de dados. Filtros, tabela editável e calculado não
+  //    passam pelo engine de agregação padrão.
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
-      if (isMatrixWidget(w)) return; // dados carregados por loadMatrixCells abaixo
+      if (isMatrixWidget(w) || isCalcWidget(w)) return; // computados abaixo
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],
@@ -262,6 +268,38 @@ export default async function DashboardPage({
   const matrixWidgetIds = dataWidgets.filter(isMatrixWidget).map((w) => w.id);
   const matrixCellsById = await loadMatrixCells(supabase, matrixWidgetIds);
 
+  // Métricas calculadas: resolve a fórmula com o contexto do dashboard (tabelas
+  // editáveis + agregações de registros).
+  const calcById: Record<string, number | null> = {};
+  const calcWidgets = dataWidgets.filter(isCalcWidget);
+  if (calcWidgets.length > 0) {
+    const matrices: Record<string, MatrixWidgetInfo> = {};
+    for (const w of widgets) {
+      if (w.visual_type !== "tabela_editavel" || !w.settings?.matrix) continue;
+      matrices[w.id] = {
+        rows: w.settings.matrix.rows,
+        cols: w.settings.matrix.cols,
+        cells: matrixCellsById[w.id] ?? {},
+      };
+    }
+    await Promise.all(
+      calcWidgets.map(async (w) => {
+        try {
+          calcById[w.id] = await runCalculatedWidget(supabase, {
+            formula: w.settings?.formula,
+            sources: w.sources ?? [],
+            filters: w.filters ?? [],
+            period: periodByWidget[w.id],
+            correspondencesMap,
+            matrices,
+          });
+        } catch {
+          calcById[w.id] = null;
+        }
+      })
+    );
+  }
+
   return (
     <DashboardClient
       dashboardId={dash.id as string}
@@ -270,6 +308,7 @@ export default async function DashboardPage({
       dataById={dataById}
       recordListById={recordListById}
       matrixCellsById={matrixCellsById}
+      calcById={calcById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
       userRoles={userRoles}
