@@ -206,6 +206,23 @@ export async function updateRecord(
   return { ok: true, message: "Registro atualizado." };
 }
 
+/**
+ * Grava um único campo personalizado de um registro (edição inline na tabela).
+ * Reaproveita `updateRecord` construindo um FormData com só aquele campo — toda a
+ * lógica de permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log
+ * e revalidatePath vem de graça.
+ */
+export async function updateRecordField(
+  recordId: string,
+  fieldKey: string,
+  rawValue: string
+): Promise<EditActionState> {
+  const fd = new FormData();
+  fd.set("record_id", recordId);
+  fd.set(`custom__${fieldKey}`, rawValue);
+  return updateRecord({}, fd);
+}
+
 export interface LeadOption {
   id: string;
   label: string;

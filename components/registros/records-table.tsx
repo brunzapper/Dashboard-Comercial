@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
+import { EditableCell } from "./editable-cell";
 import { RecordEditSheet } from "./record-edit-sheet";
 
 function money(v: number | null): string {
@@ -91,10 +92,13 @@ export function RecordsTable({
               ) : null}
               <TableCell className="text-right">{money(r.value)}</TableCell>
               {fields.map((f) => (
-                <TableCell key={f.id} className="max-w-[160px] truncate">
-                  {r.custom_fields?.[f.field_key] != null
-                    ? String(r.custom_fields[f.field_key])
-                    : "—"}
+                <TableCell key={f.id} className="max-w-[180px]">
+                  <EditableCell
+                    record={r}
+                    field={f}
+                    userRoles={userRoles}
+                    canEditValues={canEditValues}
+                  />
                 </TableCell>
               ))}
               <TableCell className="text-right">
