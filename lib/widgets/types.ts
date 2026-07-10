@@ -138,7 +138,15 @@ export interface CalcSettings {
 // chaves (KPI/filtro/matriz/lista). Nada aqui altera a forma dos dados.
 export type GridLines = "none" | "horizontal" | "vertical" | "both";
 export type AxisSide = "left" | "right";
-export type TableSortDir = "asc" | "desc" | "alpha" | "color";
+// Ordenação: crescente/decrescente (auto por tipo: texto=alfabético,
+// número/data=numérico/cronológico) ou por cor (ordem definida em colorOrder).
+export type TableSortDir = "asc" | "desc" | "color";
+
+// Par de cores de um alvo (coluna/linha/célula/categoria): texto e preenchimento.
+export interface ColorPair {
+  text?: string;
+  fill?: string;
+}
 
 export interface AppearanceSettings {
   // --- gráficos (barra / barra_horizontal / linha) ---
@@ -146,7 +154,11 @@ export interface AppearanceSettings {
   gridLines?: GridLines; // linhas de grade
   fillMode?: "solid" | "gradient"; // sólido ou gradiente sutil entre colunas
   seriesColors?: Record<string, string>; // metricKey -> cor (toda a série)
-  columnColors?: Record<number, string>; // índice da categoria -> cor (série única)
+  // Cor por categoria (barra, série única), chaveada pelo NOME da categoria
+  // (sobrevive à reordenação): fill = barra, text = rótulo de dados.
+  categoryColors?: Record<string, ColorPair>;
+  categoryOrder?: string[]; // ordem manual das categorias (eixo X)
+  categorySort?: { dir: TableSortDir; colorOrder?: string[] };
   seriesAxis?: Record<string, AxisSide>; // metricKey -> eixo esq/dir (combo)
   dataLabels?: { show?: boolean; position?: "inside" | "top"; color?: string };
   legend?: { show?: boolean; color?: string }; // legenda do gráfico (séries)
@@ -161,11 +173,12 @@ export interface AppearanceSettings {
     bodyBg?: string;
     bodyColor?: string;
     borderColor?: string;
-    columnColors?: Record<string, string>; // colKey -> cor
-    rowColors?: Record<number, string>; // índice da linha -> cor
-    cellColors?: Record<string, string>; // "rowIndex:colKey" -> cor
+    colColors?: Record<string, ColorPair>; // colKey -> {texto, preenchimento}
+    rowColors?: Record<string, ColorPair>; // rowKey -> {texto, preenchimento}
+    cellColors?: Record<string, ColorPair>; // "rowKey:colKey" -> {texto, preench.}
     columnOrder?: string[]; // ordem das colunas (reordenação)
-    sort?: { column: string; dir: TableSortDir };
+    rowOrder?: string[]; // ordem manual das linhas (por rowKey)
+    sort?: { column: string; dir: TableSortDir; colorOrder?: string[] };
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior

@@ -70,19 +70,3 @@ export function resolveSeriesColor(
     CHART_COLORS[index % CHART_COLORS.length]
   );
 }
-
-// Cor de uma coluna individual (série única): override explícito > gradiente
-// (variação sobre a cor base da série) > cor base.
-export function resolveColumnColor(
-  appearance: AppearanceSettings | undefined,
-  index: number,
-  count: number,
-  baseColor: string
-): string {
-  const override = appearance?.columnColors?.[index];
-  if (override) return override;
-  if (appearance?.fillMode === "gradient") {
-    return gradientVariation(baseColor, index, count);
-  }
-  return baseColor;
-}

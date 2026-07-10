@@ -37,6 +37,7 @@ import { EditableMatrix } from "./charts/editable-matrix";
 import { PeriodControls } from "./period-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
+import { useWidgetAppearance } from "./appearance-editing";
 
 export function WidgetCard({
   widget,
@@ -75,6 +76,10 @@ export function WidgetCard({
   const [builderOpen, setBuilderOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { ap: appearance, save: saveAppearance } = useWidgetAppearance(
+    widget,
+    dashboardId
+  );
 
   const isFilter = widget.visual_type === "filtro";
   const isRecordList =
@@ -82,7 +87,6 @@ export function WidgetCard({
   const isMatrix = widget.visual_type === "tabela_editavel";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
-  const appearance = widget.settings?.appearance;
   const kpi = isKpi ? appearance?.kpi : undefined;
   // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/matriz/calc).
   const canStyle = !isFilter && !isMatrix && !isCalc;
@@ -170,6 +174,8 @@ export function WidgetCard({
             canEditValues={canEditValues}
             fkLabels={fkLabels}
             appearance={appearance}
+            canEdit={canEdit}
+            onAppearanceChange={saveAppearance}
           />
         ) : isMatrix ? (
           <EditableMatrix
@@ -193,6 +199,8 @@ export function WidgetCard({
             visualType={widget.visual_type}
             data={data}
             appearance={appearance}
+            canEdit={canEdit}
+            onAppearanceChange={saveAppearance}
           />
         )}
       </div>

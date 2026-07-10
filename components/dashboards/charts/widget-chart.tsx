@@ -1,11 +1,12 @@
-// Versão: 2.0 | Data: 10/07/2026
-// Renderiza um WidgetData conforme o visual_type (Recharts v3). v2.0 (Fase 10):
-// aceita AppearanceSettings (cores por série/coluna, gradiente sutil, fundo,
-// linhas de grade, eixo duplo esq/dir, rótulos de dados, legenda, paleta de
-// pizza, e cores/ordem/ordenação de tabela). Sem `appearance` = comportamento
-// anterior (paleta --chart-1..5, um eixo, legenda p/ ≥2 séries).
+// Versão: 3.0 | Data: 10/07/2026
+// Renderiza um WidgetData conforme o visual_type (Recharts v3). v3.0 (Fase 10.1):
+// além da aparência (cores, grade, eixos, legenda, gradiente), suporta edição
+// IN-LOCO em tabelas e gráficos (reordenar por arraste, ordenar e colorir via
+// duplo-clique) quando canEdit. Sem `appearance` = comportamento original.
 "use client";
 
+import { useState } from "react";
+import { GripVertical } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -33,14 +34,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AppearanceSettings, VisualType, WidgetData } from "@/lib/widgets/types";
+import { cn } from "@/lib/utils";
+import type {
+  AppearanceSettings,
+  ColorPair,
+  VisualType,
+  WidgetData,
+} from "@/lib/widgets/types";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
 import {
+  applyManualOrder,
+  distinctFills,
   gridFlags,
-  orderedColumns,
+  reorderKeys,
+  rowKeyOf,
   sortRows,
   topWithOther,
 } from "@/lib/widgets/appearance";
+import {
+  CategoryEditor,
+  ColorOrderDialog,
+  ColorPopover,
+  ContextMenu,
+  type ColorScope,
+} from "../appearance-editing";
+
+// noop p/ quando não há edição (canEdit=false).
+const NOOP = () => {};
 
 function fmt(v: unknown): string {
   const n = Number(v);
@@ -71,14 +91,20 @@ export function WidgetChart({
   visualType,
   data,
   appearance,
+  canEdit = false,
+  onAppearanceChange,
 }: {
   visualType: VisualType;
   data: WidgetData;
   appearance?: AppearanceSettings;
+  canEdit?: boolean;
+  onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
   const { rows, dimensions, metrics } = data;
   const dimKey = dimensions[0]?.key;
   const ap = appearance ?? {};
+  const change = onAppearanceChange ?? NOOP;
+  const editable = canEdit && Boolean(onAppearanceChange);
   const showLegend = ap.legend?.show ?? metrics.length > 1;
   const legendStyle = {
     fontSize: 11,
@@ -154,7 +180,14 @@ export function WidgetChart({
   }
 
   if (visualType === "tabela") {
-    return <AppearanceTable data={data} appearance={ap} />;
+    return (
+      <AppearanceTable
+        data={data}
+        appearance={ap}
+        editable={editable}
+        onChange={change}
+      />
+    );
   }
 
   if (rows.length === 0 || !dimKey) return <EmptyState />;
@@ -209,9 +242,36 @@ export function WidgetChart({
     );
   }
 
+  // --- categorias (barra/linha): ordem manual ou ordenação, e chips editáveis ---
+  const catName = (r: Record<string, unknown>) => String(r[dimKey] ?? "—");
+  const chartRows = ap.categorySort
+    ? sortRows(
+        rows,
+        {
+          column: dimKey,
+          dir: ap.categorySort.dir,
+          colorOrder: ap.categorySort.colorOrder,
+        },
+        (r) => ap.categoryColors?.[catName(r)]?.fill
+      )
+    : ap.categoryOrder
+      ? applyManualOrder(rows, ap.categoryOrder, catName)
+      : rows;
+  const catNames = chartRows.map(catName);
+
+  function wrapCat(chartEl: React.ReactNode) {
+    if (!editable) return withBg(chartEl);
+    return (
+      <div className="group flex h-full flex-col">
+        <CategoryEditor names={catNames} appearance={ap} onChange={change} />
+        <div className="min-h-0 flex-1">{withBg(chartEl)}</div>
+      </div>
+    );
+  }
+
   if (visualType === "linha") {
-    return withBg(
-      <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+    return wrapCat(
+      <LineChart data={chartRows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
         <CartesianGrid
           strokeDasharray="3 3"
           stroke="var(--border)"
@@ -250,10 +310,11 @@ export function WidgetChart({
   // barra + barra_horizontal
   const horizontal = visualType === "barra_horizontal";
   const singleSeries = metrics.length === 1;
+  const hasCatColors = Object.keys(ap.categoryColors ?? {}).length > 0;
 
-  return withBg(
+  return wrapCat(
     <BarChart
-      data={rows}
+      data={chartRows}
       layout={horizontal ? "vertical" : "horizontal"}
       margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
     >
@@ -287,9 +348,7 @@ export function WidgetChart({
       {metrics.map((m, i) => {
         const base = resolveSeriesColor(ap, m.key, i);
         const perColumn =
-          singleSeries &&
-          (ap.fillMode === "gradient" ||
-            (ap.columnColors && Object.keys(ap.columnColors).length > 0));
+          singleSeries && (ap.fillMode === "gradient" || hasCatColors);
         return (
           <Bar
             key={m.key}
@@ -301,13 +360,13 @@ export function WidgetChart({
             isAnimationActive={false}
           >
             {perColumn
-              ? rows.map((_, idx) => (
+              ? chartRows.map((r, idx) => (
                   <Cell
                     key={idx}
-                    fill={ap.columnColors?.[idx] ?? base}
+                    fill={ap.categoryColors?.[catName(r)]?.fill ?? base}
                     fillOpacity={
                       ap.fillMode === "gradient"
-                        ? gradientOpacity(idx, rows.length)
+                        ? gradientOpacity(idx, chartRows.length)
                         : 1
                     }
                   />
@@ -335,30 +394,45 @@ export function WidgetChart({
   );
 }
 
-// ---------------- Tabela agregada com aparência ----------------
+// ---------------- Tabela agregada com aparência + edição in-loco ----------------
+type TableMenu =
+  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[] }
+  | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
+  | { kind: "colorOrder"; x: number; y: number; column: string };
+
 function AppearanceTable({
   data,
   appearance,
+  editable,
+  onChange,
 }: {
   data: WidgetData;
   appearance: AppearanceSettings;
+  editable: boolean;
+  onChange: (a: AppearanceSettings) => void;
 }) {
   const t = appearance.table ?? {};
+  const [dragCol, setDragCol] = useState<string | null>(null);
+  const [dragRow, setDragRow] = useState<string | null>(null);
+  const [menu, setMenu] = useState<TableMenu | null>(null);
+
   const metricKeys = new Set(data.metrics.map((m) => m.key));
+  const dimKeys = data.dimensions.map((d) => d.key);
   const allCols = [
     ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
     ...data.metrics.map((m) => ({ key: m.key, label: m.label })),
   ];
-  const cols = orderedColumns(
-    allCols.map((c) => c.key),
-    t.columnOrder
-  ).map((key) => allCols.find((c) => c.key === key)!);
+  const cols = applyManualOrder(allCols, t.columnOrder, (c) => c.key);
+  const rowKey = (r: Record<string, unknown>) => rowKeyOf(r, dimKeys);
 
-  const colorForCol = (key: string) => t.columnColors?.[key];
-  const rows = sortRows(data.rows, t.sort, (r) => {
-    const col = t.sort?.column ?? "";
-    return String(colorForCol(col) ?? r[col] ?? "");
-  });
+  // Ordenação (sort) tem precedência sobre a ordem manual de linhas.
+  const rows = t.sort?.column
+    ? sortRows(data.rows, t.sort, (r) => t.rowColors?.[rowKey(r)]?.fill)
+    : applyManualOrder(data.rows, t.rowOrder, rowKey);
+
+  const distinctRowFills = distinctFills(
+    rows.map((r) => t.rowColors?.[rowKey(r)]?.fill)
+  );
 
   const gl = t.gridLines ?? "both";
   const vertical = gl === "vertical" || gl === "both";
@@ -369,6 +443,48 @@ function AppearanceTable({
     vertical && !last
       ? { borderRight: `1px solid ${borderColor ?? "var(--border)"}` }
       : {};
+
+  const setTable = (patch: Partial<NonNullable<AppearanceSettings["table"]>>) =>
+    onChange({ ...appearance, table: { ...t, ...patch } });
+
+  function setColor(m: { scope: ColorScope; column: string; rowKey?: string }, cp: ColorPair) {
+    const clear = !cp.fill && !cp.text;
+    if (m.scope === "col") {
+      const map = { ...(t.colColors ?? {}) };
+      if (clear) delete map[m.column];
+      else map[m.column] = cp;
+      setTable({ colColors: map });
+    } else if (m.scope === "row" && m.rowKey) {
+      const map = { ...(t.rowColors ?? {}) };
+      if (clear) delete map[m.rowKey];
+      else map[m.rowKey] = cp;
+      setTable({ rowColors: map });
+    } else if (m.scope === "cell" && m.rowKey) {
+      const map = { ...(t.cellColors ?? {}) };
+      const k = `${m.rowKey}:${m.column}`;
+      if (clear) delete map[k];
+      else map[k] = cp;
+      setTable({ cellColors: map });
+    }
+  }
+
+  function colorValue(m: { scope: ColorScope; column: string; rowKey?: string }): ColorPair {
+    if (m.scope === "col") return t.colColors?.[m.column] ?? {};
+    if (m.scope === "row" && m.rowKey) return t.rowColors?.[m.rowKey] ?? {};
+    if (m.scope === "cell" && m.rowKey)
+      return t.cellColors?.[`${m.rowKey}:${m.column}`] ?? {};
+    return {};
+  }
+
+  function openCtx(
+    e: React.MouseEvent,
+    column: string,
+    scopes: ColorScope[],
+    rk?: string
+  ) {
+    if (!editable) return;
+    setMenu({ kind: "ctx", x: e.clientX, y: e.clientY, column, rowKey: rk, scopes });
+  }
 
   return (
     <div className="h-full overflow-auto">
@@ -382,52 +498,185 @@ function AppearanceTable({
               ...(borderColor ? { borderColor } : {}),
             }}
           >
+            {editable ? <TableHead className="w-6 px-1" /> : null}
             {cols.map((c, ci) => (
               <TableHead
                 key={c.key}
-                className={metricKeys.has(c.key) ? "text-right" : undefined}
+                className={cn(
+                  "group",
+                  metricKeys.has(c.key) ? "text-right" : undefined,
+                  editable && "cursor-move"
+                )}
+                draggable={editable}
+                onDragStart={editable ? () => setDragCol(c.key) : undefined}
+                onDragOver={editable ? (e) => e.preventDefault() : undefined}
+                onDrop={
+                  editable
+                    ? () => {
+                        if (dragCol)
+                          setTable({
+                            columnOrder: reorderKeys(
+                              cols.map((x) => x.key),
+                              dragCol,
+                              c.key
+                            ),
+                          });
+                        setDragCol(null);
+                      }
+                    : undefined
+                }
+                onDoubleClick={(e) => openCtx(e, c.key, ["col"])}
                 style={{
-                  color: t.headerColor ?? colorForCol(c.key),
+                  background: t.colColors?.[c.key]?.fill,
+                  color: t.colColors?.[c.key]?.text ?? t.headerColor,
                   ...cellBorder(ci === cols.length - 1),
                 }}
               >
-                {c.label}
+                <span className="inline-flex items-center gap-1">
+                  {editable ? (
+                    <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                  ) : null}
+                  {c.label}
+                </span>
               </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r, i) => (
-            <TableRow
-              key={i}
-              className={rowBorder}
-              style={{
-                background: t.rowColors?.[i] ?? t.bodyBg,
-                color: t.bodyColor,
-                ...(borderColor ? { borderColor } : {}),
-              }}
-            >
-              {cols.map((c, ci) => {
-                const isMetric = metricKeys.has(c.key);
-                const cellColor =
-                  t.cellColors?.[`${i}:${c.key}`] ?? colorForCol(c.key);
-                return (
+          {rows.map((r) => {
+            const rk = rowKey(r);
+            const rowCp = t.rowColors?.[rk];
+            return (
+              <TableRow
+                key={rk}
+                className={rowBorder}
+                style={{
+                  background: rowCp?.fill ?? t.bodyBg,
+                  color: rowCp?.text ?? t.bodyColor,
+                  ...(borderColor ? { borderColor } : {}),
+                }}
+              >
+                {editable ? (
                   <TableCell
-                    key={c.key}
-                    className={isMetric ? "text-right tabular-nums" : undefined}
-                    style={{
-                      color: cellColor ?? t.bodyColor,
-                      ...cellBorder(ci === cols.length - 1),
+                    className="group w-6 cursor-move px-1"
+                    draggable
+                    onDragStart={() => setDragRow(rk)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (dragRow)
+                        setTable({
+                          rowOrder: reorderKeys(
+                            rows.map(rowKey),
+                            dragRow,
+                            rk
+                          ),
+                          sort: undefined,
+                        });
+                      setDragRow(null);
                     }}
+                    title="Arraste para reordenar a linha"
                   >
-                    {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
+                    <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
                   </TableCell>
-                );
-              })}
-            </TableRow>
-          ))}
+                ) : null}
+                {cols.map((c, ci) => {
+                  const isMetric = metricKeys.has(c.key);
+                  const cellCp = t.cellColors?.[`${rk}:${c.key}`];
+                  const colCp = t.colColors?.[c.key];
+                  return (
+                    <TableCell
+                      key={c.key}
+                      className={isMetric ? "text-right tabular-nums" : undefined}
+                      onDoubleClick={(e) =>
+                        openCtx(e, c.key, ["row", "col", "cell"], rk)
+                      }
+                      style={{
+                        background: cellCp?.fill ?? colCp?.fill,
+                        color:
+                          cellCp?.text ??
+                          rowCp?.text ??
+                          colCp?.text ??
+                          t.bodyColor,
+                        ...cellBorder(ci === cols.length - 1),
+                      }}
+                    >
+                      {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
+
+      {menu?.kind === "ctx" ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          ordering={{
+            onAsc: () => {
+              setTable({ sort: { column: menu.column, dir: "asc" }, rowOrder: undefined });
+              setMenu(null);
+            },
+            onDesc: () => {
+              setTable({ sort: { column: menu.column, dir: "desc" }, rowOrder: undefined });
+              setMenu(null);
+            },
+            onByColor:
+              distinctRowFills.length >= 2
+                ? () => setMenu({ kind: "colorOrder", x: menu.x, y: menu.y, column: menu.column })
+                : undefined,
+          }}
+          coloring={{
+            scopes: menu.scopes,
+            onScope: (scope) =>
+              setMenu({
+                kind: "color",
+                x: menu.x,
+                y: menu.y,
+                scope,
+                column: menu.column,
+                rowKey: menu.rowKey,
+              }),
+          }}
+        />
+      ) : null}
+
+      {menu?.kind === "color" ? (
+        <ColorPopover
+          x={menu.x}
+          y={menu.y}
+          title={
+            menu.scope === "row"
+              ? "Cor da linha"
+              : menu.scope === "col"
+                ? "Cor da coluna"
+                : "Cor da célula"
+          }
+          value={colorValue(menu)}
+          onChange={(cp) => setColor(menu, cp)}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
+
+      {menu?.kind === "colorOrder" ? (
+        <ColorOrderDialog
+          x={menu.x}
+          y={menu.y}
+          colors={distinctRowFills}
+          value={t.sort?.colorOrder}
+          onApply={(order) => {
+            setTable({
+              sort: { column: menu.column, dir: "color", colorOrder: order },
+              rowOrder: undefined,
+            });
+            setMenu(null);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

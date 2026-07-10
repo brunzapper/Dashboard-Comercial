@@ -16,10 +16,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -103,15 +105,17 @@ export function DashboardMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Editor de fundo (Popover ancorado pelo próprio botão via trigger oculto). */}
-      <Popover open={bgOpen} onOpenChange={setBgOpen}>
-        <PopoverTrigger asChild>
-          <span className="sr-only" aria-hidden />
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-80">
-          <div className="flex flex-col gap-3">
+      {/* Editor de fundo num Sheet (painel lateral) — robusto, não some ao
+          mover o mouse como o Popover ancorado anterior. */}
+      <Sheet open={bgOpen} onOpenChange={setBgOpen}>
+        <SheetContent className="overflow-y-auto sm:max-w-sm">
+          <SheetHeader>
+            <SheetTitle>Aparência do dashboard</SheetTitle>
+            <SheetDescription>Fundo da área do dashboard.</SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-3 px-4 pb-8">
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">Fundo do dashboard</Label>
+              <Label className="text-xs">Fundo</Label>
               <Select value={mode} onValueChange={(v) => setMode(v as BgMode)}>
                 <SelectTrigger className="h-8">
                   <SelectValue />
@@ -156,8 +160,8 @@ export function DashboardMenu({
               Aplicar
             </Button>
           </div>
-        </PopoverContent>
-      </Popover>
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

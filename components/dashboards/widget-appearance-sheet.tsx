@@ -1,13 +1,13 @@
-// Versão: 1.0 | Data: 10/07/2026
-// Fase 10: editor de APARÊNCIA de um widget (Sheet), aberto pelo menu "⋮" do
-// card. Controles condicionais ao visual_type; monta AppearanceSettings e salva
-// reusando updateWidget (preserva as demais chaves de settings). Não altera
-// dimensões/métricas/filtros — só a camada visual.
+// Versão: 2.0 | Data: 10/07/2026
+// Editor de APARÊNCIA de um widget (Sheet), aberto pelo menu "⋮" do card.
+// v2.0 (Fase 10.1): a reordenação, a ordenação e as cores por coluna/linha/
+// célula/categoria passaram a ser feitas IN-LOCO (direto na tabela/gráfico). Este
+// painel mantém os ajustes globais: fundo, grade, preenchimento, cores de série,
+// eixos, rótulos, legenda, paleta de pizza, cores globais da tabela e o card KPI.
 "use client";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { GripVertical } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,46 +27,23 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ColorField } from "./appearance-controls";
-import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import { type AvailableField } from "@/lib/widgets/fields";
 import { topWithOther } from "@/lib/widgets/appearance";
 import { PALETTES } from "@/lib/widgets/palettes";
 import type {
   AppearanceSettings,
   AxisSide,
   GridLines,
-  TableSortDir,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
 import type { WidgetInput } from "@/app/(app)/dashboards/actions";
 import { updateWidget } from "@/app/(app)/dashboards/actions";
 
-interface Col {
-  key: string;
-  label: string;
-}
-
-function widgetColumns(
-  widget: Widget,
-  data: WidgetData,
-  available: AvailableField[]
-): Col[] {
-  if (widget.settings?.rowMode === "records") {
-    return (widget.settings.columns ?? [])
-      .filter((c) => c.field)
-      .map((c) => ({ key: c.field, label: fieldLabel(c.field, available) }));
-  }
-  return [
-    ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
-    ...data.metrics.map((m) => ({ key: m.key, label: m.label })),
-  ];
-}
-
 export function WidgetAppearanceSheet({
   dashboardId,
   widget,
   data,
-  available,
   open,
   onOpenChange,
 }: {
@@ -92,34 +69,15 @@ export function WidgetAppearanceSheet({
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
-  const categories =
-    isBar && metrics.length === 1 && dimKey
-      ? data.rows.slice(0, 16).map((r, i) => ({
-          i,
-          name: String(r[dimKey] ?? "—"),
-        }))
-      : [];
   const slices =
     isPie && dimKey && metrics[0]
       ? topWithOther(data.rows, dimKey, metrics[0].key)
       : [];
-  const cols = isTable ? widgetColumns(widget, data, available) : [];
-  const orderedCols = (() => {
-    const order = ap.table?.columnOrder;
-    if (!order) return cols;
-    const byKey = new Map(cols.map((c) => [c.key, c]));
-    const inOrder = order
-      .map((k) => byKey.get(k))
-      .filter((c): c is Col => Boolean(c));
-    const rest = cols.filter((c) => !order.includes(c.key));
-    return [...inOrder, ...rest];
-  })();
 
-  // Helpers de patch imutável.
   const patch = (p: Partial<AppearanceSettings>) =>
     setAp((prev) => ({ ...prev, ...p }));
   const patchRecord = (
-    field: "seriesColors" | "columnColors" | "sliceColors" | "seriesAxis",
+    field: "seriesColors" | "sliceColors" | "seriesAxis",
     key: string | number,
     value: string | AxisSide | undefined
   ) =>
@@ -131,30 +89,6 @@ export function WidgetAppearanceSheet({
     });
   const patchTable = (p: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     setAp((prev) => ({ ...prev, table: { ...prev.table, ...p } }));
-  const patchTableColor = (
-    field: "columnColors" | "rowColors" | "cellColors",
-    key: string | number,
-    value: string | undefined
-  ) =>
-    setAp((prev) => {
-      const t = prev.table ?? {};
-      const next = { ...(t[field] as Record<string, unknown> | undefined) };
-      if (value == null || value === "") delete next[key];
-      else next[key] = value;
-      return { ...prev, table: { ...t, [field]: next } };
-    });
-
-  // Reordenação de colunas por drag (HTML5 nativo).
-  const [dragKey, setDragKey] = useState<string | null>(null);
-  function reorder(target: string) {
-    if (!dragKey || dragKey === target) return;
-    const keys = orderedCols.map((c) => c.key);
-    const from = keys.indexOf(dragKey);
-    const to = keys.indexOf(target);
-    if (from < 0 || to < 0) return;
-    keys.splice(to, 0, keys.splice(from, 1)[0]);
-    patchTable({ columnOrder: keys });
-  }
 
   function save() {
     const input: WidgetInput = {
@@ -180,7 +114,9 @@ export function WidgetAppearanceSheet({
         <SheetHeader>
           <SheetTitle>Aparência</SheetTitle>
           <SheetDescription>
-            {widget.title ?? "Widget"} — ajustes visuais (não altera os dados).
+            {widget.title ?? "Widget"} — ajustes visuais. Reordenar, ordenar e
+            colorir colunas/linhas é feito direto na tabela/gráfico
+            (arraste/duplo-clique).
           </SheetDescription>
         </SheetHeader>
 
@@ -198,10 +134,7 @@ export function WidgetAppearanceSheet({
                 label="Linhas de grade"
                 value={ap.gridLines ?? "default"}
                 onChange={(v) =>
-                  patch({
-                    gridLines:
-                      v === "default" ? undefined : (v as GridLines),
-                  })
+                  patch({ gridLines: v === "default" ? undefined : (v as GridLines) })
                 }
                 options={[
                   { value: "default", label: "Padrão" },
@@ -215,9 +148,7 @@ export function WidgetAppearanceSheet({
                 <SelectRow
                   label="Preenchimento das barras"
                   value={ap.fillMode ?? "solid"}
-                  onChange={(v) =>
-                    patch({ fillMode: v as "solid" | "gradient" })
-                  }
+                  onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
                   options={[
                     { value: "solid", label: "Sólido" },
                     { value: "gradient", label: "Gradiente (sutil)" },
@@ -232,27 +163,15 @@ export function WidgetAppearanceSheet({
                     label={m.label}
                     value={ap.seriesColors?.[m.key]}
                     onChange={(v) => patchRecord("seriesColors", m.key, v)}
-                    onClear={() =>
-                      patchRecord("seriesColors", m.key, undefined)
-                    }
+                    onClear={() => patchRecord("seriesColors", m.key, undefined)}
                   />
                 ))}
-                {categories.length > 0 ? (
+                {isBar ? (
                   <p className="text-muted-foreground text-xs">
-                    Cores por coluna (série única):
+                    Dica: para colorir barras individuais, dê duplo-clique na
+                    categoria (chips acima do gráfico).
                   </p>
                 ) : null}
-                {categories.map((c) => (
-                  <ColorField
-                    key={c.i}
-                    label={c.name}
-                    value={ap.columnColors?.[c.i]}
-                    onChange={(v) => patchRecord("columnColors", c.i, v)}
-                    onClear={() =>
-                      patchRecord("columnColors", c.i, undefined)
-                    }
-                  />
-                ))}
               </Section>
 
               {metrics.length >= 2 ? (
@@ -262,9 +181,7 @@ export function WidgetAppearanceSheet({
                       key={m.key}
                       label={m.label}
                       value={ap.seriesAxis?.[m.key] ?? "left"}
-                      onChange={(v) =>
-                        patchRecord("seriesAxis", m.key, v as AxisSide)
-                      }
+                      onChange={(v) => patchRecord("seriesAxis", m.key, v as AxisSide)}
                       options={[
                         { value: "left", label: "Esquerda" },
                         { value: "right", label: "Direita" },
@@ -279,11 +196,7 @@ export function WidgetAppearanceSheet({
                   <CheckRow
                     label="Exibir valores"
                     checked={ap.dataLabels?.show ?? false}
-                    onChange={(c) =>
-                      patch({
-                        dataLabels: { ...ap.dataLabels, show: c },
-                      })
-                    }
+                    onChange={(c) => patch({ dataLabels: { ...ap.dataLabels, show: c } })}
                   />
                   {ap.dataLabels?.show ? (
                     <>
@@ -307,9 +220,7 @@ export function WidgetAppearanceSheet({
                         label="Cor do rótulo"
                         value={ap.dataLabels?.color}
                         onChange={(v) =>
-                          patch({
-                            dataLabels: { ...ap.dataLabels, color: v },
-                          })
+                          patch({ dataLabels: { ...ap.dataLabels, color: v } })
                         }
                       />
                     </>
@@ -321,9 +232,7 @@ export function WidgetAppearanceSheet({
                 <CheckRow
                   label="Exibir legenda"
                   checked={ap.legend?.show ?? metrics.length > 1}
-                  onChange={(c) =>
-                    patch({ legend: { ...ap.legend, show: c } })
-                  }
+                  onChange={(c) => patch({ legend: { ...ap.legend, show: c } })}
                 />
                 <ColorField
                   label="Cor do texto da legenda"
@@ -369,10 +278,10 @@ export function WidgetAppearanceSheet({
             </>
           ) : null}
 
-          {/* ---------- Tabela ---------- */}
+          {/* ---------- Tabela (cores globais + grade) ---------- */}
           {isTable ? (
             <>
-              <Section title="Cores">
+              <Section title="Cores globais">
                 <ColorField
                   label="Fundo do cabeçalho"
                   value={ap.table?.headerBg}
@@ -415,87 +324,10 @@ export function WidgetAppearanceSheet({
                   { value: "none", label: "Nenhuma" },
                 ]}
               />
-
-              <Section title="Colunas (arraste para reordenar)">
-                {orderedCols.map((c) => (
-                  <div
-                    key={c.key}
-                    draggable
-                    onDragStart={() => setDragKey(c.key)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      reorder(c.key);
-                      setDragKey(null);
-                    }}
-                    className="flex items-center gap-2 rounded-md border px-2 py-1"
-                  >
-                    <GripVertical className="text-muted-foreground size-4 cursor-move" />
-                    <span className="flex-1 truncate text-xs">{c.label}</span>
-                    <input
-                      type="color"
-                      aria-label={`Cor da coluna ${c.label}`}
-                      value={ap.table?.columnColors?.[c.key] ?? "#000000"}
-                      onChange={(e) =>
-                        patchTableColor("columnColors", c.key, e.target.value)
-                      }
-                      className="border-input h-6 w-8 cursor-pointer rounded border p-0.5"
-                    />
-                    {ap.table?.columnColors?.[c.key] ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          patchTableColor("columnColors", c.key, undefined)
-                        }
-                        className="text-muted-foreground text-xs underline"
-                      >
-                        x
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </Section>
-
-              <Section title="Ordenar por">
-                <SelectRow
-                  label="Coluna"
-                  value={ap.table?.sort?.column ?? "none"}
-                  onChange={(v) =>
-                    patchTable({
-                      sort:
-                        v === "none"
-                          ? undefined
-                          : {
-                              column: v,
-                              dir: ap.table?.sort?.dir ?? "asc",
-                            },
-                    })
-                  }
-                  options={[
-                    { value: "none", label: "Sem ordenação" },
-                    ...cols.map((c) => ({ value: c.key, label: c.label })),
-                  ]}
-                />
-                {ap.table?.sort?.column ? (
-                  <SelectRow
-                    label="Direção"
-                    value={ap.table.sort.dir}
-                    onChange={(v) =>
-                      patchTable({
-                        sort: {
-                          column: ap.table!.sort!.column,
-                          dir: v as TableSortDir,
-                        },
-                      })
-                    }
-                    options={[
-                      { value: "asc", label: "Crescente" },
-                      { value: "desc", label: "Decrescente" },
-                      { value: "alpha", label: "Alfabética" },
-                      { value: "color", label: "Por cor" },
-                    ]}
-                  />
-                ) : null}
-              </Section>
+              <p className="text-muted-foreground text-xs">
+                Reordenar colunas/linhas, ordenar e colorir coluna/linha/célula:
+                arraste a alça ou dê duplo-clique direto na tabela.
+              </p>
             </>
           ) : null}
 
@@ -512,17 +344,13 @@ export function WidgetAppearanceSheet({
                 label="Borda"
                 value={ap.kpi?.border}
                 onChange={(v) => patch({ kpi: { ...ap.kpi, border: v } })}
-                onClear={() =>
-                  patch({ kpi: { ...ap.kpi, border: undefined } })
-                }
+                onClear={() => patch({ kpi: { ...ap.kpi, border: undefined } })}
               />
               <ColorField
                 label="Cor de destaque (abinha)"
                 value={ap.kpi?.accent}
                 onChange={(v) => patch({ kpi: { ...ap.kpi, accent: v } })}
-                onClear={() =>
-                  patch({ kpi: { ...ap.kpi, accent: undefined } })
-                }
+                onClear={() => patch({ kpi: { ...ap.kpi, accent: undefined } })}
               />
             </Section>
           ) : null}
@@ -592,10 +420,7 @@ function CheckRow({
 }) {
   return (
     <label className="flex items-center gap-2 text-xs">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(c) => onChange(c === true)}
-      />
+      <Checkbox checked={checked} onCheckedChange={(c) => onChange(c === true)} />
       {label}
     </label>
   );
