@@ -14,6 +14,7 @@ import type { Widget, WidgetData } from "@/lib/widgets/types";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
 import { RecordListTable } from "./charts/record-list-table";
+import { EditableMatrix } from "./charts/editable-matrix";
 import { PeriodControls } from "./period-controls";
 import { WidgetBuilder } from "./widget-builder";
 
@@ -21,6 +22,7 @@ export function WidgetCard({
   widget,
   data,
   recordList,
+  matrixCells,
   fields,
   fkLabels,
   userRoles,
@@ -35,6 +37,7 @@ export function WidgetCard({
   widget: Widget;
   data: WidgetData;
   recordList: RecordRow[];
+  matrixCells: Record<string, unknown>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   userRoles: string[];
@@ -50,6 +53,7 @@ export function WidgetCard({
   const isFilter = widget.visual_type === "filtro";
   const isRecordList =
     widget.visual_type === "tabela" && widget.settings?.rowMode === "records";
+  const isMatrix = widget.visual_type === "tabela_editavel";
 
   return (
     <div className="bg-card flex h-full flex-col overflow-hidden rounded-lg border">
@@ -113,6 +117,13 @@ export function WidgetCard({
             userRoles={userRoles}
             canEditValues={canEditValues}
             fkLabels={fkLabels}
+          />
+        ) : isMatrix ? (
+          <EditableMatrix
+            dashboardId={dashboardId}
+            widgetId={widget.id}
+            matrix={widget.settings?.matrix}
+            cells={matrixCells}
           />
         ) : (
           <WidgetChart visualType={widget.visual_type} data={data} />

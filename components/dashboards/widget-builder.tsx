@@ -38,6 +38,7 @@ import {
   type Dimension,
   type FilterOp,
   type FilterSettings,
+  type MatrixAxis,
   type Metric,
   type RecordListColumn,
   type Transform,
@@ -151,6 +152,30 @@ export function WidgetBuilder({
     });
   }
 
+  // Estrutura da "Tabela editável" (visual_type 'tabela_editavel'). key estável
+  // (gerado no add) + label livre; renomear não órfã as células gravadas.
+  const [matrixRows, setMatrixRows] = useState<MatrixAxis[]>(
+    widget?.settings?.matrix?.rows ?? []
+  );
+  const [matrixCols, setMatrixCols] = useState<MatrixAxis[]>(
+    widget?.settings?.matrix?.cols ?? []
+  );
+  const [matrixCellType, setMatrixCellType] = useState<"numero" | "texto">(
+    widget?.settings?.matrix?.cellType ?? "numero"
+  );
+  const newAxis = (): MatrixAxis => ({ key: crypto.randomUUID(), label: "" });
+  function setAxisLabel(
+    setter: React.Dispatch<React.SetStateAction<MatrixAxis[]>>,
+    i: number,
+    label: string
+  ) {
+    setter((prev) => {
+      const next = [...prev];
+      next[i] = { ...next[i], label };
+      return next;
+    });
+  }
+
   function toggleSource(key: SourceKey) {
     setSources((prev) =>
       prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
@@ -229,6 +254,36 @@ export function WidgetBuilder({
         metrics: [],
         filters: [],
         settings,
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, input);
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Tabela editável: só a estrutura (matrix) vai em settings; sem dados de
+    // registros. Os valores das células vivem em dashboard_table_cells.
+    if (visualType === "tabela_editavel") {
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          matrix: {
+            rows: matrixRows.filter((r) => r.label.trim()),
+            cols: matrixCols.filter((c) => c.label.trim()),
+            cellType: matrixCellType,
+          },
+        },
       };
       startTransition(async () => {
         const res = widget
@@ -374,8 +429,101 @@ export function WidgetBuilder({
             </>
           ) : null}
 
+          {/* Estrutura da Tabela editável */}
+          {visualType === "tabela_editavel" ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Tipo de célula</Label>
+                <Combobox
+                  searchable={false}
+                  options={[
+                    { value: "numero", label: "Número" },
+                    { value: "texto", label: "Texto" },
+                  ]}
+                  value={matrixCellType}
+                  onValueChange={(v) =>
+                    setMatrixCellType(v as "numero" | "texto")
+                  }
+                  aria-label="Tipo de célula"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Linhas</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMatrixRows([...matrixRows, newAxis()])}
+                  >
+                    <Plus className="size-4" /> Adicionar
+                  </Button>
+                </div>
+                {matrixRows.map((r, i) => (
+                  <div key={r.key} className="flex items-center gap-2">
+                    <Input
+                      className="flex-1"
+                      value={r.label}
+                      placeholder="Nome da linha"
+                      onChange={(e) =>
+                        setAxisLabel(setMatrixRows, i, e.target.value)
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setMatrixRows(matrixRows.filter((_, j) => j !== i))
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Colunas</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMatrixCols([...matrixCols, newAxis()])}
+                  >
+                    <Plus className="size-4" /> Adicionar
+                  </Button>
+                </div>
+                {matrixCols.map((c, i) => (
+                  <div key={c.key} className="flex items-center gap-2">
+                    <Input
+                      className="flex-1"
+                      value={c.label}
+                      placeholder="Nome da coluna"
+                      onChange={(e) =>
+                        setAxisLabel(setMatrixCols, i, e.target.value)
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setMatrixCols(matrixCols.filter((_, j) => j !== i))
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
           {/* Fontes + modo de combinação */}
-          {visualType !== "filtro" ? (
+          {visualType !== "filtro" && visualType !== "tabela_editavel" ? (
           <>
           <div className="flex flex-col gap-2">
             <Label>Fontes</Label>

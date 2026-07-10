@@ -31,6 +31,7 @@ export function DashboardGrid({
   widgets,
   dataById,
   recordListById,
+  matrixCellsById,
   fields,
   fkLabels,
   userRoles,
@@ -44,6 +45,7 @@ export function DashboardGrid({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  matrixCellsById: Record<string, Record<string, unknown>>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   userRoles: string[];
@@ -111,6 +113,7 @@ export function DashboardGrid({
               widget={w}
               data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
               recordList={recordListById[w.id] ?? []}
+              matrixCells={matrixCellsById[w.id] ?? {}}
               fields={fields}
               fkLabels={fkLabels}
               userRoles={userRoles}

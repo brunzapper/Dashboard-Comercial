@@ -11,11 +11,13 @@ export type VisualType =
   | "pizza"
   | "kpi"
   | "funil"
-  | "filtro";
+  | "filtro"
+  | "tabela_editavel";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
   tabela: "Tabela",
+  tabela_editavel: "Tabela editável",
   barra: "Barra",
   linha: "Linha",
   pizza: "Pizza",
@@ -102,9 +104,28 @@ export interface RecordListSettings {
   limit?: number; // teto de linhas (default 100)
 }
 
-// settings de um widget é jsonb frouxo: KPI (meta/razão), filtro e o modo lista
-// de tabela convivem no mesmo objeto.
-export type WidgetSettings = KpiSettings & FilterSettings & RecordListSettings;
+// Config do widget "Tabela editável" (Fase 2): grade com linhas/colunas
+// nomeadas, cujos valores (dashboard-scoped) vivem em dashboard_table_cells.
+// Cada eixo tem `key` estável (gerado na criação) + `label` livre — renomear o
+// label não órfã as células nem quebra referências de fórmula (que usam `key`).
+export interface MatrixAxis {
+  key: string;
+  label: string;
+}
+export interface MatrixSettings {
+  matrix?: {
+    rows: MatrixAxis[];
+    cols: MatrixAxis[];
+    cellType?: "numero" | "texto"; // default 'numero'
+  };
+}
+
+// settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista
+// de tabela e a matriz editável convivem no mesmo objeto.
+export type WidgetSettings = KpiSettings &
+  FilterSettings &
+  RecordListSettings &
+  MatrixSettings;
 
 // Config por dashboard, guardada em dashboards.settings.
 export interface DashboardSettings {

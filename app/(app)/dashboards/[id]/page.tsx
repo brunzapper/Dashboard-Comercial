@@ -13,6 +13,7 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
+import { loadMatrixCells } from "@/lib/widgets/matrix";
 import {
   buildCorrespondenceMap,
   loadCorrespondences,
@@ -180,12 +181,16 @@ export default async function DashboardPage({
   // registro em vez de agregar.
   const isListWidget = (w: Widget) =>
     w.visual_type === "tabela" && w.settings?.rowMode === "records";
+  // Widget "Tabela editável" (Fase 2): dados vêm de dashboard_table_cells.
+  const isMatrixWidget = (w: Widget) => w.visual_type === "tabela_editavel";
 
-  // 3) Computa cada widget de dados. Filtros não geram dados.
+  // 3) Computa cada widget de dados. Filtros e tabela editável não passam pelo
+  //    engine de agregação.
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
+      if (isMatrixWidget(w)) return; // dados carregados por loadMatrixCells abaixo
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],
@@ -253,6 +258,10 @@ export default async function DashboardPage({
       fkLabels[l.id as string] = (l.title as string) ?? "—";
   }
 
+  // Valores das células dos widgets "Tabela editável".
+  const matrixWidgetIds = dataWidgets.filter(isMatrixWidget).map((w) => w.id);
+  const matrixCellsById = await loadMatrixCells(supabase, matrixWidgetIds);
+
   return (
     <DashboardClient
       dashboardId={dash.id as string}
@@ -260,6 +269,7 @@ export default async function DashboardPage({
       widgets={widgets}
       dataById={dataById}
       recordListById={recordListById}
+      matrixCellsById={matrixCellsById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
       userRoles={userRoles}

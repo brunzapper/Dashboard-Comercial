@@ -175,6 +175,47 @@ export async function updateWidget(
   return { ok: true };
 }
 
+// Grava uma célula de um widget "Tabela editável" (Fase 2). Editável por
+// qualquer visualizador do dashboard — a RLS de dashboard_table_cells reforça.
+// value vazio (null/"") apaga a célula; senão faz upsert. router.refresh() no
+// cliente recomputa o widget; revalida por garantia para outros caminhos.
+export async function saveTableCell(
+  dashboardId: string,
+  widgetId: string,
+  rowKey: string,
+  colKey: string,
+  value: number | string | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+
+  const empty = value == null || value === "";
+  if (empty) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", rowKey)
+      .eq("col_key", colKey);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: rowKey,
+        col_key: colKey,
+        value,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 export async function deleteWidget(
   widgetId: string,
   dashboardId: string

@@ -25,6 +25,7 @@ export function DashboardClient({
   widgets,
   dataById,
   recordListById,
+  matrixCellsById,
   fields,
   fkLabels,
   userRoles,
@@ -41,6 +42,7 @@ export function DashboardClient({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  matrixCellsById: Record<string, Record<string, unknown>>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   userRoles: string[];
@@ -120,6 +122,7 @@ export function DashboardClient({
           widgets={widgets}
           dataById={dataById}
           recordListById={recordListById}
+          matrixCellsById={matrixCellsById}
           fields={fields}
           fkLabels={fkLabels}
           userRoles={userRoles}
