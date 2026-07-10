@@ -15,6 +15,11 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldForm } from "@/components/campos/field-form";
+import {
+  FormulaBuilder,
+  type RefOption,
+} from "@/components/campos/formula-builder";
+import { validateFormula, type Formula } from "@/lib/records/formulas";
 import { SOURCE_KEYS, SOURCE_LABELS, type SourceKey } from "@/lib/sources";
 import {
   Sheet,
@@ -176,6 +181,11 @@ export function WidgetBuilder({
     });
   }
 
+  // Fórmula da "Métrica calculada" (visual_type 'calculado').
+  const [formula, setFormula] = useState<Formula>(
+    widget?.settings?.formula ?? { tokens: [] }
+  );
+
   function toggleSource(key: SourceKey) {
     setSources((prev) =>
       prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]
@@ -205,6 +215,41 @@ export function WidgetBuilder({
   }
 
   const numericFields = available.filter((f) => f.isNumeric);
+
+  // Refs disponíveis para a Métrica calculada: agregações de registros +
+  // células/linhas/colunas das Tabelas editáveis do dashboard (siblings).
+  const calcRefs: RefOption[] = [
+    { ref: "agg:count:*", label: "Contagem de registros", group: "Registros" },
+    ...numericFields.flatMap((f) => [
+      { ref: `agg:sum:${f.field}`, label: `Σ ${f.label}`, group: "Registros" },
+      { ref: `agg:avg:${f.field}`, label: `Média ${f.label}`, group: "Registros" },
+    ]),
+  ];
+  for (const mw of siblings) {
+    if (mw.visual_type !== "tabela_editavel") continue;
+    const m = mw.settings?.matrix;
+    if (!m) continue;
+    const g = `Tabela: ${mw.title ?? "Sem título"}`;
+    for (const c of m.cols) {
+      calcRefs.push(
+        { ref: `table:${mw.id}:col:${c.key}:sum`, label: `Σ coluna ${c.label}`, group: g },
+        { ref: `table:${mw.id}:col:${c.key}:avg`, label: `Média coluna ${c.label}`, group: g }
+      );
+    }
+    for (const r of m.rows) {
+      calcRefs.push(
+        { ref: `table:${mw.id}:row:${r.key}:sum`, label: `Σ linha ${r.label}`, group: g },
+        { ref: `table:${mw.id}:row:${r.key}:avg`, label: `Média linha ${r.label}`, group: g }
+      );
+    }
+    for (const r of m.rows)
+      for (const c of m.cols)
+        calcRefs.push({
+          ref: `table:${mw.id}:cell:${r.key}:${c.key}`,
+          label: `Célula ${r.label} × ${c.label}`,
+          group: g,
+        });
+  }
 
   const availableOptions = toFieldOptions(available);
   const metricOptions: ComboboxOption[] = [
@@ -284,6 +329,37 @@ export function WidgetBuilder({
             cellType: matrixCellType,
           },
         },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, input);
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Métrica calculada: valida a fórmula (refs vêm do próprio seletor, mas
+    // conferimos estrutura/parênteses) e grava em settings.formula.
+    if (visualType === "calculado") {
+      if (formula.tokens.length > 0) {
+        const allowed = new Set(calcRefs.map((r) => r.ref));
+        const v = validateFormula(formula, allowed);
+        if (!v.ok) {
+          setError(v.error ?? "Fórmula inválida.");
+          return;
+        }
+      }
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: { ...(widget?.settings ?? {}), formula },
       };
       startTransition(async () => {
         const res = widget
@@ -522,8 +598,26 @@ export function WidgetBuilder({
             </>
           ) : null}
 
+          {/* Métrica calculada: fórmula sobre tabelas editáveis + agregações */}
+          {visualType === "calculado" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label>Fórmula</Label>
+              <FormulaBuilder
+                refs={calcRefs}
+                initial={widget?.settings?.formula ?? null}
+                onChange={setFormula}
+              />
+              <p className="text-muted-foreground text-xs">
+                Combine células/linhas/colunas de Tabelas editáveis e agregações
+                dos registros (+ − × ÷ e constantes).
+              </p>
+            </div>
+          ) : null}
+
           {/* Fontes + modo de combinação */}
-          {visualType !== "filtro" && visualType !== "tabela_editavel" ? (
+          {visualType !== "filtro" &&
+          visualType !== "tabela_editavel" &&
+          visualType !== "calculado" ? (
           <>
           <div className="flex flex-col gap-2">
             <Label>Fontes</Label>

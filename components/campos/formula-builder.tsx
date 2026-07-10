@@ -5,7 +5,7 @@
 // servidor (lib/records/formulas.validateFormula) no submit.
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import type { Formula, FormulaToken } from "@/lib/records/formulas";
 export interface RefOption {
   ref: string;
   label: string;
+  group?: string; // agrupa as opções no seletor (ex.: por tabela / "Registros")
 }
 
 const OPS: { op: "+" | "-" | "*" | "/"; glyph: string }[] = [
@@ -43,12 +44,22 @@ function tokenLabel(t: FormulaToken, refs: RefOption[]): string {
 export function FormulaBuilder({
   refs,
   initial,
+  onChange,
 }: {
   refs: RefOption[];
   initial?: Formula | null;
+  // Modo controlado (dashboards): emite a fórmula a cada mudança de tokens. O
+  // <input hidden> continua para os forms nativos (campos calculados).
+  onChange?: (formula: Formula) => void;
 }) {
   const [tokens, setTokens] = useState<FormulaToken[]>(initial?.tokens ?? []);
   const [constValue, setConstValue] = useState("");
+
+  useEffect(() => {
+    onChange?.({ tokens });
+    // onChange é passado inline pelo pai; dependemos só de tokens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens]);
 
   const push = (t: FormulaToken) => setTokens((prev) => [...prev, t]);
   const removeAt = (i: number) =>
@@ -120,7 +131,11 @@ export function FormulaBuilder({
       {/* Adicionar coluna */}
       <div className="flex flex-col gap-1.5">
         <Combobox
-          options={refs.map((r) => ({ value: r.ref, label: r.label }))}
+          options={refs.map((r) => ({
+            value: r.ref,
+            label: r.label,
+            group: r.group,
+          }))}
           value=""
           onValueChange={(ref) => push({ kind: "field", ref })}
           placeholder="Adicionar coluna…"

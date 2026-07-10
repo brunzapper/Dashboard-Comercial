@@ -77,7 +77,7 @@ export function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
   return [{ field: "record_type", op: "in", value: rts }];
 }
 
-async function aggregate(
+export async function aggregate(
   supabase: SupabaseClient,
   metrics: Metric[],
   filters: WidgetFilter[],

@@ -23,6 +23,7 @@ export function WidgetCard({
   data,
   recordList,
   matrixCells,
+  calcValue,
   fields,
   fkLabels,
   userRoles,
@@ -38,6 +39,7 @@ export function WidgetCard({
   data: WidgetData;
   recordList: RecordRow[];
   matrixCells: Record<string, unknown>;
+  calcValue: number | null;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   userRoles: string[];
@@ -54,6 +56,7 @@ export function WidgetCard({
   const isRecordList =
     widget.visual_type === "tabela" && widget.settings?.rowMode === "records";
   const isMatrix = widget.visual_type === "tabela_editavel";
+  const isCalc = widget.visual_type === "calculado";
 
   return (
     <div className="bg-card flex h-full flex-col overflow-hidden rounded-lg border">
@@ -125,6 +128,16 @@ export function WidgetCard({
             matrix={widget.settings?.matrix}
             cells={matrixCells}
           />
+        ) : isCalc ? (
+          <div className="flex h-full flex-col justify-center p-1">
+            <span className="text-3xl font-semibold tabular-nums">
+              {calcValue == null
+                ? "—"
+                : calcValue.toLocaleString("pt-BR", {
+                    maximumFractionDigits: 2,
+                  })}
+            </span>
+          </div>
         ) : (
           <WidgetChart visualType={widget.visual_type} data={data} />
         )}
