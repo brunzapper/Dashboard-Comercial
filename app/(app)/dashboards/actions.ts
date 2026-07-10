@@ -244,6 +244,28 @@ export async function saveTableCell(
   return { ok: true };
 }
 
+// Atualiza só a coluna `settings` de um widget (usado pelas edições de aparência
+// in-loco: reordenar/ordenar/colorir direto na tabela ou no gráfico). O cliente
+// envia o settings completo já mesclado ({ ...widget.settings, appearance }).
+// RLS restringe a owner/admin (widgets_write). router.refresh() no cliente
+// recomputa; não revalidamos aqui p/ manter a edição fluida.
+export async function saveWidgetSettings(
+  widgetId: string,
+  dashboardId: string,
+  settings: WidgetSettings
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("widgets")
+    .update({ settings })
+    .eq("id", widgetId)
+    .eq("dashboard_id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
 export async function deleteWidget(
   widgetId: string,
   dashboardId: string

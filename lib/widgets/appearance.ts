@@ -60,45 +60,100 @@ export function gridFlags(g: GridLines | undefined): {
   }
 }
 
-// Ordena as chaves de coluna de uma tabela conforme columnOrder (colunas fora da
-// ordem preservam a ordem original ao final).
+// Ordena itens genéricos conforme uma ordem manual de chaves; itens fora da
+// ordem preservam a ordem original ao final. Usado p/ colunas, linhas e
+// categorias (columnOrder/rowOrder/categoryOrder).
+export function applyManualOrder<T>(
+  items: T[],
+  order: string[] | undefined,
+  keyOf: (item: T) => string
+): T[] {
+  if (!order || order.length === 0) return items;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  const inOrder = items
+    .filter((it) => rank.has(keyOf(it)))
+    .sort((a, b) => rank.get(keyOf(a))! - rank.get(keyOf(b))!);
+  const rest = items.filter((it) => !rank.has(keyOf(it)));
+  return [...inOrder, ...rest];
+}
+
+// Compat: ordena chaves de coluna conforme columnOrder.
 export function orderedColumns<T extends string>(
   cols: T[],
   order: string[] | undefined
 ): T[] {
-  if (!order || order.length === 0) return cols;
-  const set = new Set(cols as string[]);
-  const inOrder = order.filter((c): c is T => set.has(c));
-  const rest = cols.filter((c) => !inOrder.includes(c));
-  return [...inOrder, ...rest];
+  return applyManualOrder(cols, order, (c) => c);
 }
 
-// Ordena linhas por uma coluna, conforme dir. `colorOf` mapeia o valor da célula
-// (linha) para uma cor efetiva (usado por dir === "color").
+// Chave estável de uma linha: valores das dimensões juntos (tabela agregada) ou
+// o id do registro (lista). Usada p/ cores por linha/célula e reordenação.
+export function rowKeyOf(
+  row: Record<string, unknown>,
+  keys: string[]
+): string {
+  return keys.map((k) => String(row[k] ?? "")).join("¦");
+}
+
+// Ordena linhas por uma coluna. asc/desc auto-detecta numérico (inclui datas
+// ISO, comparáveis como string) vs texto (locale). `dir === "color"` ordena
+// pela posição da cor de preenchimento da linha em colorOrder (via `fillOf`).
 export function sortRows(
   rows: Record<string, unknown>[],
   sort: NonNullable<AppearanceSettings["table"]>["sort"] | undefined,
-  colorOf?: (row: Record<string, unknown>) => string
+  fillOf?: (row: Record<string, unknown>) => string | undefined
 ): Record<string, unknown>[] {
   if (!sort || !sort.column) return rows;
-  const { column, dir } = sort;
+  const { column, dir, colorOrder } = sort;
   const copy = [...rows];
+  if (dir === "color") {
+    const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
+    const rankOf = (r: Record<string, unknown>) => {
+      const c = fillOf?.(r);
+      return c && rank.has(c) ? rank.get(c)! : Number.MAX_SAFE_INTEGER;
+    };
+    copy.sort((a, b) => rankOf(a) - rankOf(b));
+    return copy;
+  }
   copy.sort((a, b) => {
-    if (dir === "color" && colorOf) {
-      return colorOf(a).localeCompare(colorOf(b));
-    }
     const av = a[column];
     const bv = b[column];
-    if (dir === "alpha") {
-      return String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
-    }
     const an = Number(av);
     const bn = Number(bv);
-    const bothNum = !Number.isNaN(an) && !Number.isNaN(bn);
+    const bothNum =
+      av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn);
     const cmp = bothNum
       ? an - bn
       : String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
     return dir === "desc" ? -cmp : cmp;
   });
   return copy;
+}
+
+// Move dragKey para a posição de targetKey dentro da ordem atual de chaves,
+// retornando a nova ordem completa (usado pelas alças de arraste).
+export function reorderKeys(
+  currentOrder: string[],
+  dragKey: string,
+  targetKey: string
+): string[] {
+  if (dragKey === targetKey) return currentOrder;
+  const next = [...currentOrder];
+  const from = next.indexOf(dragKey);
+  const to = next.indexOf(targetKey);
+  if (from < 0 || to < 0) return currentOrder;
+  next.splice(to, 0, next.splice(from, 1)[0]);
+  return next;
+}
+
+// Cores de preenchimento distintas presentes (p/ montar a janela "Por cor").
+export function distinctFills(fills: (string | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const f of fills) {
+    if (f && !seen.has(f)) {
+      seen.add(f);
+      out.push(f);
+    }
+  }
+  return out;
 }
