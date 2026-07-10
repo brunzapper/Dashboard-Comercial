@@ -316,6 +316,7 @@ export default async function DashboardPage({
       available={available}
       canEdit={canEdit}
       canManageFields={canManageFields}
+      settings={dashSettings}
       periodBar={periodBar}
       periodDefaults={periodDefaults}
       periodDefaultField={defaultPeriodField}

@@ -1,0 +1,163 @@
+// Versão: 1.0 | Data: 10/07/2026
+// Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
+// (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
+// dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
+"use client";
+
+import { useState, useTransition } from "react";
+import { Maximize, MoreVertical, Palette } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { useAppChrome } from "@/components/layout/app-shell";
+import { ColorField } from "./appearance-controls";
+import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
+import type { DashboardSettings } from "@/lib/widgets/types";
+import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+
+type BgMode = "none" | "solid" | "gradient";
+
+export function DashboardMenu({
+  dashboardId,
+  settings,
+}: {
+  dashboardId: string;
+  settings: DashboardSettings;
+}) {
+  const { toggleFullscreen } = useAppChrome();
+  const [bgOpen, setBgOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const bg = settings.background;
+  const [mode, setMode] = useState<BgMode>(bg?.mode ?? "none");
+  const [solid, setSolid] = useState(bg?.color ?? "#0b1220");
+  const [from, setFrom] = useState(bg?.from ?? "#0b1220");
+  const [to, setTo] = useState(bg?.to ?? "#1e293b");
+  const [angle, setAngle] = useState(bg?.angle ?? 135);
+
+  function save() {
+    const nextBg: DashboardSettings["background"] | undefined =
+      mode === "none"
+        ? undefined
+        : mode === "solid"
+          ? { mode: "solid", color: solid }
+          : { mode: "gradient", from, to, angle };
+    startTransition(async () => {
+      await updateDashboardSettings(dashboardId, {
+        ...settings,
+        background: nextBg,
+      });
+      setBgOpen(false);
+    });
+  }
+
+  const preview =
+    mode === "none"
+      ? undefined
+      : dashboardBackgroundCss(
+          mode === "solid"
+            ? { mode: "solid", color: solid }
+            : { mode: "gradient", from, to, angle }
+        );
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon" aria-label="Mais opções">
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => toggleFullscreen()}>
+            <Maximize className="size-4" /> Modo tela cheia
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setBgOpen(true);
+            }}
+          >
+            <Palette className="size-4" /> Aparência do dashboard
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Editor de fundo (Popover ancorado pelo próprio botão via trigger oculto). */}
+      <Popover open={bgOpen} onOpenChange={setBgOpen}>
+        <PopoverTrigger asChild>
+          <span className="sr-only" aria-hidden />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Fundo do dashboard</Label>
+              <Select value={mode} onValueChange={(v) => setMode(v as BgMode)}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Padrão (tema)</SelectItem>
+                  <SelectItem value="solid">Cor sólida</SelectItem>
+                  <SelectItem value="gradient">Gradiente</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {mode === "solid" ? (
+              <ColorField label="Cor" value={solid} onChange={setSolid} />
+            ) : null}
+
+            {mode === "gradient" ? (
+              <>
+                <ColorField label="De" value={from} onChange={setFrom} />
+                <ColorField label="Até" value={to} onChange={setTo} />
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs">Ângulo: {angle}°</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={angle}
+                    onChange={(e) => setAngle(Number(e.target.value))}
+                  />
+                </div>
+              </>
+            ) : null}
+
+            {preview ? (
+              <div
+                className="h-10 rounded-md border"
+                style={{ background: preview }}
+              />
+            ) : null}
+
+            <Button size="sm" onClick={save} disabled={pending}>
+              Aplicar
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </>
+  );
+}

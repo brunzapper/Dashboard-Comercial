@@ -13,8 +13,10 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings, Widget, WidgetData } from "@/lib/widgets/types";
+import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
+import { DashboardMenu } from "./dashboard-menu";
 import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
@@ -34,6 +36,7 @@ export function DashboardClient({
   available,
   canEdit,
   canManageFields = false,
+  settings,
   periodBar,
   periodDefaults,
   periodDefaultField,
@@ -52,6 +55,7 @@ export function DashboardClient({
   available: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
+  settings: DashboardSettings;
   periodBar?: DashboardSettings["periodBar"];
   periodDefaults?: PeriodSelection;
   periodDefaultField?: string;
@@ -60,6 +64,7 @@ export function DashboardClient({
   const [pending, startTransition] = useTransition();
 
   const barEnabled = periodBar?.enabled !== false;
+  const backgroundCss = dashboardBackgroundCss(settings.background);
 
   function showBar() {
     startTransition(async () => {
@@ -94,6 +99,7 @@ export function DashboardClient({
                 </Button>
               }
             />
+            <DashboardMenu dashboardId={dashboardId} settings={settings} />
           </div>
         ) : null}
       </div>
@@ -120,22 +126,27 @@ export function DashboardClient({
           </Button>
         ) : null}
 
-        <DashboardGrid
-          widgets={widgets}
-          dataById={dataById}
-          recordListById={recordListById}
-          matrixCellsById={matrixCellsById}
-          calcById={calcById}
-          fields={fields}
-          fkLabels={fkLabels}
-          userRoles={userRoles}
-          canEditValues={canEditValues}
-          available={available}
-          dashboardId={dashboardId}
-          canEdit={canEdit}
-          canManageFields={canManageFields}
-          editMode={editMode}
-        />
+        <div
+          className={backgroundCss ? "rounded-lg p-3" : undefined}
+          style={backgroundCss ? { background: backgroundCss } : undefined}
+        >
+          <DashboardGrid
+            widgets={widgets}
+            dataById={dataById}
+            recordListById={recordListById}
+            matrixCellsById={matrixCellsById}
+            calcById={calcById}
+            fields={fields}
+            fkLabels={fkLabels}
+            userRoles={userRoles}
+            canEditValues={canEditValues}
+            available={available}
+            dashboardId={dashboardId}
+            canEdit={canEdit}
+            canManageFields={canManageFields}
+            editMode={editMode}
+          />
+        </div>
       </DashboardPendingProvider>
     </div>
   );
