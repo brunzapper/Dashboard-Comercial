@@ -45,6 +45,14 @@ export interface PeriodSelection {
   ate?: string;
 }
 
+/** Último período consultado, salvo por usuário/dashboard (inclui o campo). */
+export interface SavedPeriod {
+  periodo?: string;
+  de?: string;
+  ate?: string;
+  campo?: string;
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function iso(d: Date): string {

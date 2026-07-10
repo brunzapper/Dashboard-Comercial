@@ -7,6 +7,7 @@ import { useActionState, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,8 +27,6 @@ import { updateRecord, type EditActionState } from "@/lib/records/actions";
 import { LeadCombobox } from "./lead-combobox";
 
 const initial: EditActionState = {};
-const selectClass =
-  "border-input flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:opacity-50";
 
 function fmtMoney(v: number | null): string {
   if (v == null) return "—";
@@ -49,17 +48,22 @@ function CustomFieldInput({
 }) {
   const name = `custom__${field.field_key}`;
   const value = customValue(record, field.field_key);
+  const [selValue, setSelValue] = useState(value);
 
   if (field.data_type === "selecao") {
     return (
-      <select name={name} defaultValue={value} className={selectClass}>
-        <option value="">—</option>
-        {field.options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
+      <Combobox
+        name={name}
+        options={[
+          { value: "", label: "—" },
+          ...field.options.map((opt) => ({ value: opt, label: opt })),
+        ]}
+        value={selValue}
+        onValueChange={setSelValue}
+        placeholder="—"
+        className="w-full"
+        aria-label={field.label}
+      />
     );
   }
   if (field.data_type === "data") {
@@ -79,11 +83,20 @@ function CustomFieldInput({
   }
   if (field.data_type === "booleano") {
     return (
-      <select name={name} defaultValue={value} className={selectClass}>
-        <option value="">—</option>
-        <option value="true">Sim</option>
-        <option value="false">Não</option>
-      </select>
+      <Combobox
+        name={name}
+        options={[
+          { value: "", label: "—" },
+          { value: "true", label: "Sim" },
+          { value: "false", label: "Não" },
+        ]}
+        value={selValue}
+        onValueChange={setSelValue}
+        searchable={false}
+        placeholder="—"
+        className="w-full"
+        aria-label={field.label}
+      />
     );
   }
   return <Input name={name} defaultValue={value} />;
@@ -108,6 +121,8 @@ export function RecordEditSheet({
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(updateRecord, initial);
+  const [responsibleId, setResponsibleId] = useState(record.responsible_id ?? "");
+  const [operationId, setOperationId] = useState(record.operation_id ?? "");
 
   useEffect(() => {
     // Fecha o painel quando a Server Action conclui com sucesso.
@@ -166,34 +181,34 @@ export function RecordEditSheet({
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label>Responsável</Label>
-                <select
+                <Combobox
                   name="responsible_id"
-                  defaultValue={record.responsible_id ?? ""}
-                  className={selectClass}
-                >
-                  <option value="">— nenhum —</option>
-                  {responsibles.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: "— nenhum —" },
+                    ...responsibles.map((r) => ({ value: r.id, label: r.label })),
+                  ]}
+                  value={responsibleId}
+                  onValueChange={setResponsibleId}
+                  placeholder="— nenhum —"
+                  className="w-full"
+                  aria-label="Responsável"
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label>Operação</Label>
-                <select
+                <Combobox
                   name="operation_id"
-                  defaultValue={record.operation_id ?? ""}
-                  className={selectClass}
-                >
-                  <option value="">— nenhuma —</option>
-                  {operations.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: "— nenhuma —" },
+                    ...operations.map((o) => ({ value: o.id, label: o.label })),
+                  ]}
+                  value={operationId}
+                  onValueChange={setOperationId}
+                  placeholder="— nenhuma —"
+                  className="w-full"
+                  aria-label="Operação"
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">

@@ -94,6 +94,7 @@ export class BitrixLookups {
   private dealFieldMetasCache: BitrixFieldMeta[] = [];
   private leadFieldMetasCache: BitrixFieldMeta[] = [];
   private users = new Map<string, string>();
+  private companies = new Map<string, string>();
   private loaded = false;
 
   constructor(
@@ -247,6 +248,46 @@ export class BitrixLookups {
     if (this.db) {
       await this.db.from("bitrix_lookup_cache").upsert({
         lookup_type: "user",
+        source_id: id,
+        label: name,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return name;
+  }
+
+  // COMPANY_ID → nome da empresa (crm.company.get). Mesmo padrão de userName:
+  // cache em memória + cache persistente (bitrix_lookup_cache) para atravessar
+  // invocações serverless e evitar re-bater no Bitrix a cada deal.
+  async companyName(companyId?: string | null): Promise<string | null> {
+    if (companyId == null || companyId === "" || companyId === "0") return null;
+    const id = String(companyId);
+
+    const cached = this.companies.get(id);
+    if (cached) return cached;
+
+    if (this.db) {
+      const { data } = await this.db
+        .from("bitrix_lookup_cache")
+        .select("label")
+        .eq("lookup_type", "company")
+        .eq("source_id", id)
+        .maybeSingle();
+      if (data?.label) {
+        this.companies.set(id, data.label);
+        return data.label;
+      }
+    }
+
+    const resp = await this.client.call<{ TITLE?: string }>("crm.company.get", {
+      ID: id,
+    });
+    const name = resp.result?.TITLE?.trim() || id;
+
+    this.companies.set(id, name);
+    if (this.db) {
+      await this.db.from("bitrix_lookup_cache").upsert({
+        lookup_type: "company",
         source_id: id,
         label: name,
         updated_at: new Date().toISOString(),

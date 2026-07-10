@@ -9,12 +9,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { OptionItem } from "@/lib/records/types";
-
-const selectClass =
-  "border-input flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
 
 export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   const router = useRouter();
@@ -55,18 +53,17 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
     >
       <div className="flex flex-col gap-1.5">
         <Label>Responsável</Label>
-        <select
+        <Combobox
+          options={[
+            { value: "", label: "Todos" },
+            ...responsibles.map((r) => ({ value: r.id, label: r.label })),
+          ]}
           value={responsavel}
-          onChange={(e) => setResponsavel(e.target.value)}
-          className={selectClass}
-        >
-          <option value="">Todos</option>
-          {responsibles.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+          onValueChange={setResponsavel}
+          placeholder="Todos"
+          className="w-full"
+          aria-label="Responsável"
+        />
       </div>
 
       <div className="flex flex-col gap-1.5">

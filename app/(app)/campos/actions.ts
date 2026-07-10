@@ -157,6 +157,7 @@ export async function createField(
   if (f.dataType === "calculado") await recalcAllFormulaFields();
   revalidatePath("/campos");
   revalidatePath("/registros");
+  revalidatePath("/dashboards/[id]", "page");
   return { ok: true, message: `Campo "${f.label}" criado.` };
 }
 
@@ -206,6 +207,7 @@ export async function updateField(
   if (f.dataType === "calculado") await recalcAllFormulaFields();
   revalidatePath("/campos");
   revalidatePath("/registros");
+  revalidatePath("/dashboards/[id]", "page");
   return { ok: true, message: `Campo "${f.label}" atualizado.` };
 }
 

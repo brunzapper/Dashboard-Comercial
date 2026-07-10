@@ -110,6 +110,8 @@ async function resolveCustom(
       return enumLabel(val);
     case "employee":
       return lookups.userName(val as string);
+    case "company":
+      return lookups.companyName(val as string);
     case "money":
       return parseMoney(val);
     case "double":

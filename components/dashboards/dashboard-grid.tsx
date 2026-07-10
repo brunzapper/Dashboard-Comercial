@@ -4,15 +4,18 @@
 "use client";
 
 import { useRef } from "react";
+import { Loader2 } from "lucide-react";
 import RGL, { WidthProvider } from "react-grid-layout/legacy";
 import type { Layout } from "react-grid-layout/legacy";
 
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
+import { cn } from "@/lib/utils";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { GridPosition, Widget, WidgetData } from "@/lib/widgets/types";
 import { saveLayout } from "@/app/(app)/dashboards/actions";
+import { useNavPending } from "./pending-context";
 import { WidgetCard } from "./widget-card";
 
 const GridLayout = WidthProvider(RGL);
@@ -29,6 +32,7 @@ export function DashboardGrid({
   available,
   dashboardId,
   canEdit,
+  canManageFields = false,
   editMode,
 }: {
   widgets: Widget[];
@@ -36,9 +40,11 @@ export function DashboardGrid({
   available: AvailableField[];
   dashboardId: string;
   canEdit: boolean;
+  canManageFields?: boolean;
   editMode: boolean;
 }) {
   const mounted = useRef(false);
+  const { pending } = useNavPending();
 
   const layout: Layout = widgets.map((w, i) => {
     const p = posOf(w, i);
@@ -66,30 +72,43 @@ export function DashboardGrid({
   }
 
   return (
-    <GridLayout
-      className="layout"
-      layout={layout}
-      cols={12}
-      rowHeight={30}
-      margin={[12, 12]}
-      isDraggable={editMode}
-      isResizable={editMode}
-      draggableHandle=".widget-drag"
-      onLayoutChange={onLayoutChange}
-    >
-      {widgets.map((w) => (
-        <div key={w.id}>
-          <WidgetCard
-            widget={w}
-            data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
-            available={available}
-            dashboardId={dashboardId}
-            siblings={widgets}
-            canEdit={canEdit}
-            editMode={editMode}
-          />
+    <div className="relative">
+      {/* Overlay de recarregamento: aparece enquanto o servidor recomputa os
+          widgets após uma mudança de período/filtro. */}
+      {pending ? (
+        <div className="bg-background/50 absolute inset-0 z-20 flex items-start justify-center rounded-lg backdrop-blur-[1px]">
+          <div className="bg-background text-muted-foreground mt-6 flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm shadow-sm">
+            <Loader2 className="size-4 animate-spin" />
+            Carregando…
+          </div>
         </div>
-      ))}
-    </GridLayout>
+      ) : null}
+      <GridLayout
+        className={cn("layout transition-opacity", pending && "opacity-60")}
+        layout={layout}
+        cols={12}
+        rowHeight={30}
+        margin={[12, 12]}
+        isDraggable={editMode}
+        isResizable={editMode}
+        draggableHandle=".widget-drag"
+        onLayoutChange={onLayoutChange}
+      >
+        {widgets.map((w) => (
+          <div key={w.id}>
+            <WidgetCard
+              widget={w}
+              data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
+              available={available}
+              dashboardId={dashboardId}
+              siblings={widgets}
+              canEdit={canEdit}
+              canManageFields={canManageFields}
+              editMode={editMode}
+            />
+          </div>
+        ))}
+      </GridLayout>
+    </div>
   );
 }

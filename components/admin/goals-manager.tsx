@@ -7,6 +7,7 @@ import { useActionState, useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -40,8 +41,19 @@ const MONTHS = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 const METRIC_LABELS: Record<string, string> = { mrr: "MRR", clientes: "Clientes" };
-const selectClass =
-  "border-input h-9 rounded-md border bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+const MONTH_OPTIONS: ComboboxOption[] = [
+  { value: "", label: "Anual" },
+  ...MONTHS.map((m, i) => ({ value: String(i + 1), label: m })),
+];
+const SCOPE_OPTIONS: ComboboxOption[] = [
+  { value: "global", label: "Global" },
+  { value: "operation", label: "Operação" },
+  { value: "responsible", label: "Responsável" },
+];
+const METRIC_OPTIONS: ComboboxOption[] = [
+  { value: "mrr", label: "MRR" },
+  { value: "clientes", label: "Clientes" },
+];
 const initial: GoalState = {};
 
 function periodLabel(g: GoalRow): string {
@@ -64,6 +76,10 @@ export function GoalsManager({
 }) {
   const [state, formAction, pending] = useActionState(createGoal, initial);
   const [scope, setScope] = useState("global");
+  const [month, setMonth] = useState("");
+  const [operationId, setOperationId] = useState("");
+  const [responsibleId, setResponsibleId] = useState("");
+  const [metric, setMetric] = useState("mrr");
   const [, startTransition] = useTransition();
   const year = new Date().getFullYear();
 
@@ -79,60 +95,69 @@ export function GoalsManager({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label>Mês</Label>
-          <select name="period_month" className={selectClass} defaultValue="">
-            <option value="">Anual</option>
-            {MONTHS.map((m, i) => (
-              <option key={i} value={i + 1}>
-                {m}
-              </option>
-            ))}
-          </select>
+          <Combobox
+            name="period_month"
+            options={MONTH_OPTIONS}
+            value={month}
+            onValueChange={setMonth}
+            searchable={false}
+            placeholder="Anual"
+            aria-label="Mês"
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label>Escopo</Label>
-          <select
+          <Combobox
             name="scope"
-            className={selectClass}
+            options={SCOPE_OPTIONS}
             value={scope}
-            onChange={(e) => setScope(e.target.value)}
-          >
-            <option value="global">Global</option>
-            <option value="operation">Operação</option>
-            <option value="responsible">Responsável</option>
-          </select>
+            onValueChange={setScope}
+            searchable={false}
+            aria-label="Escopo"
+          />
         </div>
         {scope === "operation" ? (
           <div className="flex flex-col gap-1.5">
             <Label>Operação</Label>
-            <select name="operation_id" className={selectClass}>
-              <option value="">—</option>
-              {operations.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              name="operation_id"
+              options={[
+                { value: "", label: "—" },
+                ...operations.map((o) => ({ value: o.id, label: o.label })),
+              ]}
+              value={operationId}
+              onValueChange={setOperationId}
+              placeholder="—"
+              aria-label="Operação"
+            />
           </div>
         ) : null}
         {scope === "responsible" ? (
           <div className="flex flex-col gap-1.5">
             <Label>Responsável</Label>
-            <select name="responsible_id" className={selectClass}>
-              <option value="">—</option>
-              {responsibles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              name="responsible_id"
+              options={[
+                { value: "", label: "—" },
+                ...responsibles.map((r) => ({ value: r.id, label: r.label })),
+              ]}
+              value={responsibleId}
+              onValueChange={setResponsibleId}
+              placeholder="—"
+              aria-label="Responsável"
+            />
           </div>
         ) : null}
         <div className="flex flex-col gap-1.5">
           <Label>Métrica</Label>
-          <select name="metric" className={selectClass}>
-            <option value="mrr">MRR</option>
-            <option value="clientes">Clientes</option>
-          </select>
+          <Combobox
+            name="metric"
+            options={METRIC_OPTIONS}
+            value={metric}
+            onValueChange={setMetric}
+            searchable={false}
+            aria-label="Métrica"
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label>Alvo</Label>

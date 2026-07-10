@@ -8,6 +8,7 @@ import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -43,9 +44,6 @@ export interface ResponsibleRow {
   active: boolean;
   ops: ResponsibleOp[];
 }
-
-const selectClass =
-  "border-input h-9 rounded-md border bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
 
 export function ResponsiblesManager({
   responsibles,
@@ -164,18 +162,17 @@ export function ResponsiblesManager({
             <div className="flex items-end gap-2 border-t pt-4">
               <div className="flex flex-1 flex-col gap-1.5">
                 <Label>Operação</Label>
-                <select
-                  className={selectClass}
+                <Combobox
+                  options={[
+                    { value: "", label: "— selecionar —" },
+                    ...operations.map((o) => ({ value: o.id, label: o.label })),
+                  ]}
                   value={opId}
-                  onChange={(e) => setOpId(e.target.value)}
-                >
-                  <option value="">— selecionar —</option>
-                  {operations.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setOpId}
+                  placeholder="— selecionar —"
+                  className="w-full"
+                  aria-label="Operação"
+                />
               </div>
               <div className="flex w-20 flex-col gap-1.5">
                 <Label>Prioridade</Label>

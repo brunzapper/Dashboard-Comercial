@@ -10,9 +10,11 @@ import { Check, Clock, Pencil, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { AvailableField } from "@/lib/widgets/fields";
+import type { PeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings, Widget, WidgetData } from "@/lib/widgets/types";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
+import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
 
@@ -23,7 +25,10 @@ export function DashboardClient({
   dataById,
   available,
   canEdit,
+  canManageFields = false,
   periodBar,
+  periodDefaults,
+  periodDefaultField,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -31,7 +36,10 @@ export function DashboardClient({
   dataById: Record<string, WidgetData>;
   available: AvailableField[];
   canEdit: boolean;
+  canManageFields?: boolean;
   periodBar?: DashboardSettings["periodBar"];
+  periodDefaults?: PeriodSelection;
+  periodDefaultField?: string;
 }) {
   const [editMode, setEditMode] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -64,6 +72,7 @@ export function DashboardClient({
               dashboardId={dashboardId}
               available={available}
               siblings={widgets}
+              canManageFields={canManageFields}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
@@ -74,33 +83,38 @@ export function DashboardClient({
         ) : null}
       </div>
 
-      {barEnabled ? (
-        <PeriodFilter
-          available={available}
-          canEdit={canEdit}
-          dashboardId={dashboardId}
-          periodBar={periodBar}
-        />
-      ) : canEdit ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-start"
-          disabled={pending}
-          onClick={showBar}
-        >
-          <Clock className="size-4" /> Mostrar barra de período
-        </Button>
-      ) : null}
+      <DashboardPendingProvider>
+        {barEnabled ? (
+          <PeriodFilter
+            available={available}
+            canEdit={canEdit}
+            dashboardId={dashboardId}
+            periodBar={periodBar}
+            periodDefaults={periodDefaults}
+            periodDefaultField={periodDefaultField}
+          />
+        ) : canEdit ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-start"
+            disabled={pending}
+            onClick={showBar}
+          >
+            <Clock className="size-4" /> Mostrar barra de período
+          </Button>
+        ) : null}
 
-      <DashboardGrid
-        widgets={widgets}
-        dataById={dataById}
-        available={available}
-        dashboardId={dashboardId}
-        canEdit={canEdit}
-        editMode={editMode}
-      />
+        <DashboardGrid
+          widgets={widgets}
+          dataById={dataById}
+          available={available}
+          dashboardId={dashboardId}
+          canEdit={canEdit}
+          canManageFields={canManageFields}
+          editMode={editMode}
+        />
+      </DashboardPendingProvider>
     </div>
   );
 }

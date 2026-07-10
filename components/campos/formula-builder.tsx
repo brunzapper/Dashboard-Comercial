@@ -9,14 +9,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
 
 export interface RefOption {
@@ -125,24 +119,15 @@ export function FormulaBuilder({
 
       {/* Adicionar coluna */}
       <div className="flex flex-col gap-1.5">
-        <Select value="" onValueChange={(ref) => push({ kind: "field", ref })}>
-          <SelectTrigger>
-            <SelectValue placeholder="Adicionar coluna…" />
-          </SelectTrigger>
-          <SelectContent>
-            {refs.length === 0 ? (
-              <SelectItem value="__none" disabled>
-                Nenhuma coluna numérica disponível
-              </SelectItem>
-            ) : (
-              refs.map((r) => (
-                <SelectItem key={r.ref} value={r.ref}>
-                  {r.label}
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
+        <Combobox
+          options={refs.map((r) => ({ value: r.ref, label: r.label }))}
+          value=""
+          onValueChange={(ref) => push({ kind: "field", ref })}
+          placeholder="Adicionar coluna…"
+          emptyText="Nenhuma coluna numérica disponível"
+          className="w-full"
+          aria-label="Adicionar coluna"
+        />
       </div>
 
       {/* Adicionar constante */}

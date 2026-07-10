@@ -20,7 +20,8 @@ export type BitrixFieldType =
   | "datetime"
   | "boolean"
   | "enumeration"
-  | "employee";
+  | "employee"
+  | "company"; // COMPANY_ID → nome da empresa (resolvido via crm.company.get)
 
 export interface CustomFieldMap {
   key: string; // chave dentro de records.custom_fields
@@ -51,6 +52,10 @@ export const DEAL_CORE = {
 } as const;
 
 export const DEAL_CUSTOM: Record<string, CustomFieldMap> = {
+  // Empresa: o Bitrix entrega COMPANY_ID (link), não o nome. Resolvido para o
+  // nome via crm.company.get (BitrixLookups.companyName). Mesma chave `empresa`
+  // usada nos leads (COMPANY_TITLE) → coluna única entre as fontes.
+  COMPANY_ID: { key: "empresa", type: "company" },
   // Data da assinatura: também é usada como referência do lead time
   // (DEAL_CORE.signatureDate). Exposta aqui como coluna própria disponível.
   UF_CRM_1729887608434: { key: "data_assinatura", type: "date" },
@@ -89,6 +94,9 @@ export const LEAD_CORE = {
 } as const;
 
 export const LEAD_CUSTOM: Record<string, CustomFieldMap> = {
+  // Empresa do lead: COMPANY_TITLE já é o nome. Mesma chave `empresa` dos deals
+  // (curada tem precedência sobre a exclusão de core-id no catálogo).
+  COMPANY_TITLE: { key: "empresa", type: "string" },
   UF_CRM_1713984862: { key: "sales_qualified_lead", type: "boolean" },
   UF_CRM_1728913702: { key: "lead_score", type: "enumeration" },
   UF_CRM_1728913647652: { key: "grupo_origem", type: "enumeration" },
@@ -129,6 +137,7 @@ export const FIELD_LABELS: Record<string, string> = {
   SOURCE_DESCRIPTION: "Informações da fonte",
   DATE_MODIFY: "Última atualização em",
   COMPANY_TITLE: "Nome da Empresa",
+  COMPANY_ID: "Empresa",
   POST: "Posição",
   ADDRESS: "Endereço",
   ADDRESS_2: "Rua, nº da casa",

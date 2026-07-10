@@ -9,6 +9,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
 import type { SourceKey } from "@/lib/sources";
+import type { SavedPeriod } from "@/lib/widgets/period";
 import type {
   DashboardSettings,
   Dimension,
@@ -89,6 +90,32 @@ export async function updateDashboardSettings(
   if (error) return { ok: false, message: error.message };
   revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
+}
+
+// Salva o último período consultado do usuário NESTE dashboard (user_preferences).
+// Chamado (fire-and-forget) quando a barra de período navega. Não revalida —
+// só persiste para reidratar o default na próxima visita.
+export async function saveLastPeriod(
+  dashboardId: string,
+  period: SavedPeriod
+): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  // Remove chaves vazias para não poluir o jsonb.
+  const clean: SavedPeriod = {};
+  if (period.periodo) clean.periodo = period.periodo;
+  if (period.de) clean.de = period.de;
+  if (period.ate) clean.ate = period.ate;
+  if (period.campo) clean.campo = period.campo;
+  await supabase.from("user_preferences").upsert(
+    {
+      user_id: session.user.id,
+      dashboard_id: dashboardId,
+      settings: { lastPeriod: clean },
+    },
+    { onConflict: "user_id,dashboard_id" }
+  );
 }
 
 // ---------------- Widgets ----------------
