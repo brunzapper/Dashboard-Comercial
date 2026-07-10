@@ -9,9 +9,11 @@ import { notFound } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import type { FieldDefinition } from "@/lib/records/types";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { runWidget } from "@/lib/widgets/engine";
+import { runRecordList } from "@/lib/widgets/record-list";
+import { loadMatrixCells } from "@/lib/widgets/matrix";
 import {
   buildCorrespondenceMap,
   loadCorrespondences,
@@ -58,6 +60,11 @@ export default async function DashboardPage({
   const canEdit = isOwner || isAdmin;
   const canManageFields =
     session?.permissions.includes("manage_field_definitions") ?? false;
+  // Para as tabelas em modo "registros individuais" (Fase 1): quem pode editar
+  // valores e com quais papéis (o servidor reforça por campo em updateRecordField).
+  const canEditValues =
+    session?.permissions.includes("edit_record_values") ?? false;
+  const userRoles = session?.roles ?? [];
 
   const [
     { data: widgetsData },
@@ -170,23 +177,46 @@ export default async function DashboardPage({
     }
   }
 
-  // 3) Computa cada widget de dados. Filtros não geram dados.
+  // Widget de Tabela em modo "registros individuais" (Fase 1): lista 1 linha por
+  // registro em vez de agregar.
+  const isListWidget = (w: Widget) =>
+    w.visual_type === "tabela" && w.settings?.rowMode === "records";
+  // Widget "Tabela editável" (Fase 2): dados vêm de dashboard_table_cells.
+  const isMatrixWidget = (w: Widget) => w.visual_type === "tabela_editavel";
+
+  // 3) Computa cada widget de dados. Filtros e tabela editável não passam pelo
+  //    engine de agregação.
   const dataById: Record<string, WidgetData> = {};
+  const recordListById: Record<string, RecordRow[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
+      if (isMatrixWidget(w)) return; // dados carregados por loadMatrixCells abaixo
+      const config = {
+        source: "records" as const,
+        sources: w.sources ?? [],
+        splitBySource: w.split_by_source ?? false,
+        dimensions: w.dimensions ?? [],
+        metrics: w.metrics ?? [],
+        filters: w.filters ?? [],
+        visual_type: w.visual_type,
+        settings: w.settings,
+      };
+      if (isListWidget(w)) {
+        try {
+          recordListById[w.id] = await runRecordList(
+            supabase,
+            config,
+            periodByWidget[w.id]
+          );
+        } catch {
+          recordListById[w.id] = [];
+        }
+        return;
+      }
       try {
         dataById[w.id] = await runWidget(
           supabase,
-          {
-            source: "records",
-            sources: w.sources ?? [],
-            splitBySource: w.split_by_source ?? false,
-            dimensions: w.dimensions ?? [],
-            metrics: w.metrics ?? [],
-            filters: w.filters ?? [],
-            visual_type: w.visual_type,
-            settings: w.settings,
-          },
+          config,
           available,
           periodByWidget[w.id],
           correspondencesMap
@@ -197,12 +227,53 @@ export default async function DashboardPage({
     })
   );
 
+  // Rótulos das colunas FK presentes nas tabelas de registros (id→nome).
+  const fkLabels: Record<string, string> = {};
+  const listRows = Object.values(recordListById).flat();
+  if (listRows.length > 0) {
+    const respIds = new Set<string>();
+    const opIds = new Set<string>();
+    const leadIds = new Set<string>();
+    for (const r of listRows) {
+      if (r.responsible_id) respIds.add(r.responsible_id);
+      if (r.operation_id) opIds.add(r.operation_id);
+      if (r.related_lead_id) leadIds.add(r.related_lead_id);
+    }
+    const [resp, ops, leads] = await Promise.all([
+      respIds.size
+        ? supabase.from("responsibles").select("id, display_name").in("id", [...respIds])
+        : Promise.resolve({ data: [] }),
+      opIds.size
+        ? supabase.from("operations").select("id, name").in("id", [...opIds])
+        : Promise.resolve({ data: [] }),
+      leadIds.size
+        ? supabase.from("records").select("id, title").in("id", [...leadIds])
+        : Promise.resolve({ data: [] }),
+    ]);
+    for (const r of resp.data ?? [])
+      fkLabels[r.id as string] = (r.display_name as string) ?? "—";
+    for (const o of ops.data ?? [])
+      fkLabels[o.id as string] = (o.name as string) ?? "—";
+    for (const l of leads.data ?? [])
+      fkLabels[l.id as string] = (l.title as string) ?? "—";
+  }
+
+  // Valores das células dos widgets "Tabela editável".
+  const matrixWidgetIds = dataWidgets.filter(isMatrixWidget).map((w) => w.id);
+  const matrixCellsById = await loadMatrixCells(supabase, matrixWidgetIds);
+
   return (
     <DashboardClient
       dashboardId={dash.id as string}
       dashboardName={dash.name as string}
       widgets={widgets}
       dataById={dataById}
+      recordListById={recordListById}
+      matrixCellsById={matrixCellsById}
+      fields={(fieldsData ?? []) as FieldDefinition[]}
+      fkLabels={fkLabels}
+      userRoles={userRoles}
+      canEditValues={canEditValues}
       available={available}
       canEdit={canEdit}
       canManageFields={canManageFields}

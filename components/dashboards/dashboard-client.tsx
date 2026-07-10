@@ -9,6 +9,7 @@ import { useState, useTransition } from "react";
 import { Check, Clock, Pencil, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings, Widget, WidgetData } from "@/lib/widgets/types";
@@ -23,6 +24,12 @@ export function DashboardClient({
   dashboardName,
   widgets,
   dataById,
+  recordListById,
+  matrixCellsById,
+  fields,
+  fkLabels,
+  userRoles,
+  canEditValues,
   available,
   canEdit,
   canManageFields = false,
@@ -34,6 +41,12 @@ export function DashboardClient({
   dashboardName: string;
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
+  recordListById: Record<string, RecordRow[]>;
+  matrixCellsById: Record<string, Record<string, unknown>>;
+  fields: FieldDefinition[];
+  fkLabels: Record<string, string>;
+  userRoles: string[];
+  canEditValues: boolean;
   available: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
@@ -108,6 +121,12 @@ export function DashboardClient({
         <DashboardGrid
           widgets={widgets}
           dataById={dataById}
+          recordListById={recordListById}
+          matrixCellsById={matrixCellsById}
+          fields={fields}
+          fkLabels={fkLabels}
+          userRoles={userRoles}
+          canEditValues={canEditValues}
           available={available}
           dashboardId={dashboardId}
           canEdit={canEdit}

@@ -31,11 +31,15 @@ export function EditableCell({
   field,
   userRoles,
   canEditValues,
+  onSaved,
 }: {
   record: RecordRow;
   field: FieldDefinition;
   userRoles: string[];
   canEditValues: boolean;
+  // Chamado após uma gravação bem-sucedida. Em Registros a própria action
+  // revalida a página; no dashboard o pai usa isto para router.refresh().
+  onSaved?: () => void;
 }) {
   const serverValue = customValue(record, field.field_key);
   const [value, setValue] = useState(serverValue);
@@ -70,6 +74,7 @@ export function EditableCell({
       const res = await updateRecordField(record.id, field.field_key, raw);
       if (res.ok) {
         savedRef.current = raw;
+        onSaved?.();
       } else {
         setValue(savedRef.current);
         setError(true);
