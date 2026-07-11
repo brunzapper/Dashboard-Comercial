@@ -244,6 +244,85 @@ export async function saveTableCell(
   return { ok: true };
 }
 
+// Coage o valor cru (string do input) para o tipo do campo antes de gravar em
+// entity_custom_values. Espelha a coerção de lib/records/actions.ts (numero/moeda,
+// booleano, e texto/data/seleção como string). '' → null (apaga a célula).
+function coerceEntityValue(
+  dataType: string,
+  raw: string
+): number | string | boolean | null {
+  const s = raw.trim();
+  if (s === "") return null;
+  if (dataType === "numero" || dataType === "moeda") {
+    const n = Number(s.replace(/\./g, "").replace(",", "."));
+    return Number.isNaN(Number(s)) ? (Number.isNaN(n) ? null : n) : Number(s);
+  }
+  if (dataType === "booleano") {
+    return s === "true" ? true : s === "false" ? false : null;
+  }
+  return s; // texto, data (ISO), seleção
+}
+
+// Grava um valor de campo personalizado ligado a uma ENTIDADE (responsável ou
+// operação), usado pelas tabelas de dashboard em modo lista por entidade. Valida
+// a permissão global (edit_record_values) e a editabilidade do campo por papel
+// (editable_by_roles); campos calculados nunca são graváveis. value vazio apaga.
+export async function updateEntityField(
+  entityType: "responsible" | "operation",
+  entityId: string,
+  fieldKey: string,
+  rawValue: string
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("edit_record_values")) {
+    return { ok: false, message: "Você não tem permissão para editar valores." };
+  }
+  const supabase = await createClient();
+
+  // Confere o campo: existe, não é calculado e é editável pelo papel do usuário.
+  const { data: def } = await supabase
+    .from("field_definitions")
+    .select("data_type, editable_by_roles")
+    .eq("field_key", fieldKey)
+    .maybeSingle();
+  if (!def) return { ok: false, message: "Campo não encontrado." };
+  if ((def.data_type as string) === "calculado") {
+    return { ok: false, message: "Campo calculado não é editável." };
+  }
+  const editable = ((def.editable_by_roles as string[]) ?? []).some((r) =>
+    session.roles.includes(r)
+  );
+  if (!editable) {
+    return { ok: false, message: "Você não pode editar este campo." };
+  }
+
+  const value = coerceEntityValue(def.data_type as string, rawValue);
+  if (value == null) {
+    const { error } = await supabase
+      .from("entity_custom_values")
+      .delete()
+      .eq("entity_type", entityType)
+      .eq("entity_id", entityId)
+      .eq("field_key", fieldKey);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("entity_custom_values").upsert(
+      {
+        entity_type: entityType,
+        entity_id: entityId,
+        field_key: fieldKey,
+        value,
+        updated_by: session.user.id,
+      },
+      { onConflict: "entity_type,entity_id,field_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath("/dashboards/[id]", "page");
+  return { ok: true };
+}
+
 // Atualiza só a coluna `settings` de um widget (usado pelas edições de aparência
 // in-loco: reordenar/ordenar/colorir direto na tabela ou no gráfico). O cliente
 // envia o settings completo já mesclado ({ ...widget.settings, appearance }).

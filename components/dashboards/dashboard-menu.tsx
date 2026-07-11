@@ -34,6 +34,12 @@ import { useAppChrome } from "@/components/layout/app-shell";
 import { ColorField } from "./appearance-controls";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import type { DashboardSettings } from "@/lib/widgets/types";
+import {
+  DATE_FORMATS,
+  DATE_FORMAT_LABELS,
+  DEFAULT_DATE_FORMAT,
+  type DateFormat,
+} from "@/lib/widgets/format";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 
 type BgMode = "none" | "solid" | "gradient";
@@ -55,6 +61,9 @@ export function DashboardMenu({
   const [from, setFrom] = useState(bg?.from ?? "#0b1220");
   const [to, setTo] = useState(bg?.to ?? "#1e293b");
   const [angle, setAngle] = useState(bg?.angle ?? 135);
+  const [dateFmt, setDateFmt] = useState<DateFormat>(
+    settings.dateFormat ?? DEFAULT_DATE_FORMAT
+  );
 
   function save() {
     const nextBg: DashboardSettings["background"] | undefined =
@@ -67,6 +76,7 @@ export function DashboardMenu({
       await updateDashboardSettings(dashboardId, {
         ...settings,
         background: nextBg,
+        dateFormat: dateFmt,
       });
       setBgOpen(false);
     });
@@ -155,6 +165,29 @@ export function DashboardMenu({
                 style={{ background: preview }}
               />
             ) : null}
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Formato de data padrão</Label>
+              <Select
+                value={dateFmt}
+                onValueChange={(v) => setDateFmt(v as DateFormat)}
+              >
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DATE_FORMATS.map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {DATE_FORMAT_LABELS[f]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                Aplicado a todas as datas das tabelas. Cada coluna pode
+                sobrescrever (duplo-clique no cabeçalho na edição de layout).
+              </p>
+            </div>
 
             <Button size="sm" onClick={save} disabled={pending}>
               Aplicar

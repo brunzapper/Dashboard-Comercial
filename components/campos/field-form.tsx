@@ -62,7 +62,8 @@ export function FieldForm({
 }: {
   field?: FieldDefinition;
   numericRefs: RefOption[];
-  onDone?: () => void;
+  // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
+  onDone?: (created?: FieldActionState["field"]) => void;
 }) {
   const isEdit = Boolean(field);
   const action = isEdit ? updateField : createField;
@@ -77,8 +78,8 @@ export function FieldForm({
   );
 
   useEffect(() => {
-    if (state.ok && onDone) onDone();
-  }, [state.ok, onDone]);
+    if (state.ok && onDone) onDone(state.field);
+  }, [state.ok, state.field, onDone]);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">

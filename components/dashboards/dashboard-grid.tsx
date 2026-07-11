@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { GridPosition, Widget, WidgetData } from "@/lib/widgets/types";
+import type { DateFormat } from "@/lib/widgets/format";
+import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { saveLayout } from "@/app/(app)/dashboards/actions";
 import { useNavPending } from "./pending-context";
 import { WidgetCard } from "./widget-card";
@@ -31,7 +33,7 @@ export function DashboardGrid({
   widgets,
   dataById,
   recordListById,
-  matrixCellsById,
+  entityListById,
   calcById,
   fields,
   fkLabels,
@@ -39,6 +41,7 @@ export function DashboardGrid({
   canEditValues,
   available,
   dashboardId,
+  dateFormat,
   canEdit,
   canManageFields = false,
   editMode,
@@ -46,7 +49,7 @@ export function DashboardGrid({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
-  matrixCellsById: Record<string, Record<string, unknown>>;
+  entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
@@ -54,6 +57,7 @@ export function DashboardGrid({
   canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
+  dateFormat?: DateFormat;
   canEdit: boolean;
   canManageFields?: boolean;
   editMode: boolean;
@@ -115,7 +119,7 @@ export function DashboardGrid({
               widget={w}
               data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
               recordList={recordListById[w.id] ?? []}
-              matrixCells={matrixCellsById[w.id] ?? {}}
+              entityList={entityListById[w.id] ?? []}
               calcValue={calcById[w.id] ?? null}
               fields={fields}
               fkLabels={fkLabels}
@@ -123,6 +127,7 @@ export function DashboardGrid({
               canEditValues={canEditValues}
               available={available}
               dashboardId={dashboardId}
+              dateFormat={dateFormat}
               siblings={widgets}
               canEdit={canEdit}
               canManageFields={canManageFields}

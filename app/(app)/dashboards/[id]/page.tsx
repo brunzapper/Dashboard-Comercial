@@ -13,11 +13,12 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
-import { loadMatrixCells } from "@/lib/widgets/matrix";
 import {
-  runCalculatedWidget,
-  type MatrixWidgetInfo,
-} from "@/lib/widgets/formula-metric";
+  runEntityList,
+  type EntityListRow,
+  type EntityRowSource,
+} from "@/lib/widgets/entity-list";
+import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
 import {
   buildCorrespondenceMap,
   loadCorrespondences,
@@ -241,8 +242,6 @@ export default async function DashboardPage({
   // registro em vez de agregar.
   const isListWidget = (w: Widget) =>
     w.visual_type === "tabela" && w.settings?.rowMode === "records";
-  // Widget "Tabela editável" (Fase 2): dados vêm de dashboard_table_cells.
-  const isMatrixWidget = (w: Widget) => w.visual_type === "tabela_editavel";
   // Widget "Métrica calculada" (Fase 3): valor vem da fórmula (contexto do dash).
   const isCalcWidget = (w: Widget) => w.visual_type === "calculado";
 
@@ -250,9 +249,10 @@ export default async function DashboardPage({
   //    passam pelo engine de agregação padrão.
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
+  const entityListById: Record<string, EntityListRow[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
-      if (isMatrixWidget(w) || isCalcWidget(w)) return; // computados abaixo
+      if (isCalcWidget(w)) return; // computado abaixo
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],
@@ -264,6 +264,20 @@ export default async function DashboardPage({
         settings: w.settings,
       };
       if (isListWidget(w)) {
+        const rowSource = w.settings?.rowSource ?? "records";
+        // Fonte das linhas: entidade (responsáveis/operações) x registros.
+        if (rowSource === "responsibles" || rowSource === "operations") {
+          try {
+            entityListById[w.id] = await runEntityList(
+              supabase,
+              rowSource as EntityRowSource,
+              w.settings?.limit
+            );
+          } catch {
+            entityListById[w.id] = [];
+          }
+          return;
+        }
         try {
           recordListById[w.id] = await runRecordList(
             supabase,
@@ -320,24 +334,11 @@ export default async function DashboardPage({
       fkLabels[l.id as string] = (l.title as string) ?? "—";
   }
 
-  // Valores das células dos widgets "Tabela editável".
-  const matrixWidgetIds = dataWidgets.filter(isMatrixWidget).map((w) => w.id);
-  const matrixCellsById = await loadMatrixCells(supabase, matrixWidgetIds);
-
-  // Métricas calculadas: resolve a fórmula com o contexto do dashboard (tabelas
-  // editáveis + agregações de registros).
+  // Métricas calculadas: resolve a fórmula com o contexto do dashboard
+  // (agregações de registros).
   const calcById: Record<string, number | null> = {};
   const calcWidgets = dataWidgets.filter(isCalcWidget);
   if (calcWidgets.length > 0) {
-    const matrices: Record<string, MatrixWidgetInfo> = {};
-    for (const w of widgets) {
-      if (w.visual_type !== "tabela_editavel" || !w.settings?.matrix) continue;
-      matrices[w.id] = {
-        rows: w.settings.matrix.rows,
-        cols: w.settings.matrix.cols,
-        cells: matrixCellsById[w.id] ?? {},
-      };
-    }
     await Promise.all(
       calcWidgets.map(async (w) => {
         try {
@@ -347,7 +348,6 @@ export default async function DashboardPage({
             filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
             correspondencesMap,
-            matrices,
           });
         } catch {
           calcById[w.id] = null;
@@ -363,7 +363,7 @@ export default async function DashboardPage({
       widgets={widgets}
       dataById={dataById}
       recordListById={recordListById}
-      matrixCellsById={matrixCellsById}
+      entityListById={entityListById}
       calcById={calcById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
@@ -373,6 +373,7 @@ export default async function DashboardPage({
       canEdit={canEdit}
       canManageFields={canManageFields}
       settings={dashSettings}
+      dateFormat={dashSettings.dateFormat}
       periodBar={periodBar}
       periodDefaults={periodDefaults}
       periodDefaultField={defaultPeriodField}

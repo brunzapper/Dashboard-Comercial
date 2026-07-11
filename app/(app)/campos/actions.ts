@@ -20,6 +20,9 @@ import { CORE_FIELDS } from "@/lib/widgets/fields";
 export interface FieldActionState {
   ok?: boolean;
   message?: string;
+  // Preenchido no createField bem-sucedido — permite que quem criou o campo (ex.:
+  // o editor de widget) já o insira na configuração atual sem readicionar à mão.
+  field?: { field_key: string; data_type: DataType };
 }
 
 const DATA_TYPES = [
@@ -160,7 +163,11 @@ export async function createField(
   revalidatePath("/campos");
   revalidatePath("/registros");
   revalidatePath("/dashboards/[id]", "page");
-  return { ok: true, message: `Campo "${f.label}" criado.` };
+  return {
+    ok: true,
+    message: `Campo "${f.label}" criado.`,
+    field: { field_key: fieldKey, data_type: f.dataType as DataType },
+  };
 }
 
 export async function updateField(

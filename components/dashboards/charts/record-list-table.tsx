@@ -1,9 +1,11 @@
-// Versão: 2.0 | Data: 10/07/2026
-// Widget de Tabela em modo "registros individuais". Uma linha por registro;
-// colunas do núcleo read-only, colunas personalizadas editáveis via EditableCell.
-// v2.0 (Fase 10.1): edição de aparência IN-LOCO (reordenar colunas/linhas por
-// arraste, ordenar e colorir via duplo-clique) quando canEdit. Células editáveis
-// mantêm o comportamento de edição (menu só no cabeçalho e em células não-editáveis).
+// Versão: 3.0 | Data: 11/07/2026
+// Widget de Tabela em modo "registros individuais" (Fonte das linhas = Registros).
+// Uma linha por registro; colunas do núcleo read-only, colunas personalizadas
+// NÃO calculadas editáveis por padrão (respeitando editable_by_roles do campo).
+// v3.0 (11/07/2026): datas formatadas (dd/mm/aaaa | dd/mm/aa | mm/aa) com padrão
+//   global do dashboard + override por coluna; edição de custom por padrão (sem a
+//   antiga caixa "editável"); duplo-clique numa data abre calendário; largura de
+//   coluna e altura de linha redimensionáveis na edição de layout.
 "use client";
 
 import { useState } from "react";
@@ -27,6 +29,11 @@ import {
   distinctFills,
   reorderKeys,
 } from "@/lib/widgets/appearance";
+import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  type DateFormat,
+} from "@/lib/widgets/format";
 import type {
   AppearanceSettings,
   ColorPair,
@@ -36,6 +43,7 @@ import {
   ColorOrderDialog,
   ColorPopover,
   ContextMenu,
+  ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
 
@@ -53,13 +61,14 @@ function money(v: unknown): string {
 function coreDisplay(
   field: string,
   record: RecordRow,
-  fkLabels: Record<string, string>
+  fkLabels: Record<string, string>,
+  dateFmt: DateFormat
 ): string {
   const v = (record as unknown as Record<string, unknown>)[field];
   if (FK_FIELDS.has(field)) return v ? (fkLabels[String(v)] ?? "—") : "—";
   if (MONEY_FIELDS.has(field)) return money(v);
   if (field === "closed") return v ? "Sim" : "Não";
-  if (DATE_FIELDS.has(field)) return v ? String(v).slice(0, 10) : "—";
+  if (DATE_FIELDS.has(field)) return v ? formatDateValue(v, dateFmt) : "—";
   return v == null || v === "" ? "—" : String(v);
 }
 
@@ -69,7 +78,7 @@ function rawValue(field: string, record: RecordRow): unknown {
 }
 
 type Menu =
-  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[] }
+  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[]; isDate: boolean }
   | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
   | { kind: "colorOrder"; x: number; y: number; column: string };
 
@@ -82,6 +91,7 @@ export function RecordListTable({
   canEditValues,
   fkLabels,
   appearance,
+  dateFormat,
   canEdit = false,
   onAppearanceChange,
 }: {
@@ -93,6 +103,7 @@ export function RecordListTable({
   canEditValues: boolean;
   fkLabels: Record<string, string>;
   appearance?: AppearanceSettings;
+  dateFormat?: DateFormat;
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
@@ -102,6 +113,7 @@ export function RecordListTable({
   const t = ap.table ?? {};
   const editable = canEdit && Boolean(onAppearanceChange);
   const change = onAppearanceChange ?? (() => {});
+  const dashFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
 
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragRow, setDragRow] = useState<string | null>(null);
@@ -110,6 +122,16 @@ export function RecordListTable({
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const cols = applyManualOrder(baseCols, t.columnOrder, (c) => c.field);
+
+  // Descobre se a coluna é de data (núcleo ou custom) e o formato efetivo dela.
+  const isDateCol = (field: string): boolean => {
+    if (DATE_FIELDS.has(field)) return true;
+    if (field.startsWith("custom:"))
+      return fieldByKey.get(field.slice(7))?.data_type === "data";
+    return false;
+  };
+  const fmtOf = (field: string): DateFormat =>
+    t.dateFormats?.[field] ?? dashFmt;
 
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
   let rows = records;
@@ -146,6 +168,11 @@ export function RecordListTable({
     vertical && !last
       ? { borderRight: `1px solid ${t.borderColor ?? "var(--border)"}` }
       : {};
+  // Largura de coluna (px) definida pela edição de layout.
+  const widthStyle = (field: string): React.CSSProperties => {
+    const w = t.colWidths?.[field];
+    return w ? { width: w, minWidth: w, maxWidth: w } : {};
+  };
 
   const setTable = (patch: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     change({ ...ap, table: { ...t, ...patch } });
@@ -175,6 +202,15 @@ export function RecordListTable({
     if (m.scope === "row" && m.rowKey) return t.rowColors?.[m.rowKey] ?? {};
     if (m.scope === "cell" && m.rowKey) return t.cellColors?.[`${m.rowKey}:${m.column}`] ?? {};
     return {};
+  }
+  function setColDateFormat(column: string, f: DateFormat) {
+    setTable({ dateFormats: { ...(t.dateFormats ?? {}), [column]: f } });
+  }
+  function setColWidth(column: string, w: number) {
+    setTable({ colWidths: { ...(t.colWidths ?? {}), [column]: w } });
+  }
+  function setRowHeight(rowKey: string, h: number) {
+    setTable({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
   }
 
   if (cols.length === 0) {
@@ -208,7 +244,7 @@ export function RecordListTable({
             {cols.map((c, ci) => (
               <TableHead
                 key={c.field}
-                className={cn("group whitespace-nowrap", editable && "cursor-move")}
+                className={cn("group relative whitespace-nowrap", editable && "cursor-move")}
                 draggable={editable}
                 onDragStart={editable ? () => setDragCol(c.field) : undefined}
                 onDragOver={editable ? (e) => e.preventDefault() : undefined}
@@ -236,6 +272,7 @@ export function RecordListTable({
                           y: e.clientY,
                           column: c.field,
                           scopes: ["col"],
+                          isDate: isDateCol(c.field),
                         })
                     : undefined
                 }
@@ -243,6 +280,7 @@ export function RecordListTable({
                   background: t.colColors?.[c.field]?.fill,
                   color: t.colColors?.[c.field]?.text ?? t.headerColor,
                   ...cellBorder(ci === cols.length - 1),
+                  ...widthStyle(c.field),
                 }}
               >
                 <span className="inline-flex items-center gap-1">
@@ -251,6 +289,9 @@ export function RecordListTable({
                   ) : null}
                   {fieldLabel(c.field, available)}
                 </span>
+                {editable ? (
+                  <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />
+                ) : null}
               </TableHead>
             ))}
           </TableRow>
@@ -258,6 +299,7 @@ export function RecordListTable({
         <TableBody>
           {rows.map((r) => {
             const rowCp = t.rowColors?.[r.id];
+            const h = t.rowHeights?.[r.id];
             return (
               <TableRow
                 key={r.id}
@@ -266,11 +308,12 @@ export function RecordListTable({
                   background: rowCp?.fill ?? t.bodyBg,
                   color: rowCp?.text ?? t.bodyColor,
                   ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+                  ...(h ? { height: h } : {}),
                 }}
               >
                 {editable ? (
                   <TableCell
-                    className="group w-6 cursor-move px-1"
+                    className="group relative w-6 cursor-move px-1"
                     draggable
                     onDragStart={() => setDragRow(r.id)}
                     onDragOver={(e) => e.preventDefault()}
@@ -285,18 +328,23 @@ export function RecordListTable({
                     title="Arraste para reordenar a linha"
                   >
                     <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
+                    <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
                   </TableCell>
                 ) : null}
                 {cols.map((c, ci) => {
                   const isCustom = c.field.startsWith("custom:");
                   const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
-                  const isEditableCell = Boolean(isCustom && field && c.editable);
+                  // Custom não calculado é editável por padrão (permissão por papel
+                  // é reforçada dentro da EditableCell / server action).
+                  const isEditableCell = Boolean(
+                    isCustom && field && field.data_type !== "calculado"
+                  );
                   const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
                   const colCp = t.colColors?.[c.field];
                   return (
                     <TableCell
                       key={c.field}
-                      className="max-w-[200px] align-top"
+                      className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
                       onDoubleClick={
                         editable && !isEditableCell
                           ? (e) =>
@@ -307,6 +355,7 @@ export function RecordListTable({
                                 column: c.field,
                                 rowKey: r.id,
                                 scopes: ["row", "col", "cell"],
+                                isDate: isDateCol(c.field),
                               })
                           : undefined
                       }
@@ -314,6 +363,7 @@ export function RecordListTable({
                         background: cellCp?.fill ?? colCp?.fill,
                         color: cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
                         ...cellBorder(ci === cols.length - 1),
+                        ...widthStyle(c.field),
                       }}
                     >
                       {isEditableCell && field ? (
@@ -322,17 +372,20 @@ export function RecordListTable({
                           field={field}
                           userRoles={userRoles}
                           canEditValues={canEditValues}
+                          dateFormat={fmtOf(c.field)}
                           onSaved={refresh}
                         />
                       ) : isCustom ? (
                         <span className="block truncate">
                           {field && r.custom_fields?.[field.field_key] != null
-                            ? String(r.custom_fields[field.field_key])
+                            ? field.data_type === "data"
+                              ? formatDateValue(r.custom_fields[field.field_key], fmtOf(c.field))
+                              : String(r.custom_fields[field.field_key])
                             : "—"}
                         </span>
                       ) : (
                         <span className="block truncate">
-                          {coreDisplay(c.field, r, fkLabels)}
+                          {coreDisplay(c.field, r, fkLabels, fmtOf(c.field))}
                         </span>
                       )}
                     </TableCell>
@@ -375,6 +428,17 @@ export function RecordListTable({
                 rowKey: menu.rowKey,
               }),
           }}
+          dateFormat={
+            menu.isDate
+              ? {
+                  value: t.dateFormats?.[menu.column],
+                  onSelect: (f) => {
+                    setColDateFormat(menu.column, f);
+                    setMenu(null);
+                  },
+                }
+              : undefined
+          }
         />
       ) : null}
 
