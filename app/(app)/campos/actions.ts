@@ -106,9 +106,10 @@ function readForm(formData: FormData) {
   const editable = parseRoles(formData, "editable_by_roles");
   const isLocal = formData.get("is_local") === "on";
   const showInBuilder = formData.get("show_in_builder") === "on";
+  const writeBack = formData.get("write_back") === "on";
   const sortOrder = Number(formData.get("sort_order") ?? 0) || 0;
   const formula = parseFormula(String(formData.get("formula") ?? ""));
-  return { label, dataType, options, visible, editable, isLocal, showInBuilder, sortOrder, formula };
+  return { label, dataType, options, visible, editable, isLocal, showInBuilder, writeBack, sortOrder, formula };
 }
 
 export async function createField(
@@ -144,6 +145,7 @@ export async function createField(
     editable_by_roles: f.editable,
     is_local: f.isLocal,
     show_in_builder: f.showInBuilder,
+    write_back: f.writeBack,
     formula: f.dataType === "calculado" ? f.formula : null,
     sort_order: f.sortOrder,
   });
@@ -199,6 +201,7 @@ export async function updateField(
       editable_by_roles: f.editable,
       is_local: f.isLocal,
       show_in_builder: f.showInBuilder,
+      write_back: f.writeBack,
       formula: f.dataType === "calculado" ? f.formula : null,
       sort_order: f.sortOrder,
     })

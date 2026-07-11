@@ -10,6 +10,11 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import {
+  enqueueWriteBacks,
+  type WriteBackChange,
+} from "@/lib/sync/bitrix/writeback";
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
 import { computeFormulaFields, loadFormulaDefs } from "@/lib/records/formulas";
 import type { DataType } from "@/lib/records/types";
@@ -43,6 +48,8 @@ function coerce(dataType: DataType, raw: FormDataEntryValue | null): unknown {
 interface ExistingForEdit {
   id: string;
   record_type: string;
+  source_system: string | null;
+  source_id: string | null;
   custom_fields: Record<string, unknown> | null;
   field_modified_at: Record<string, string> | null;
   responsible_id: string | null;
@@ -73,7 +80,7 @@ export async function updateRecord(
   const { data: existingRow } = await supabase
     .from("records")
     .select(
-      "id, record_type, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days"
+      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days"
     )
     .eq("id", recordId)
     .maybeSingle();
@@ -82,7 +89,9 @@ export async function updateRecord(
 
   const { data: defs } = await supabase
     .from("field_definitions")
-    .select("field_key, data_type, editable_by_roles");
+    .select(
+      "field_key, label, data_type, editable_by_roles, source_system, source_field_id, write_back"
+    );
 
   const now = new Date().toISOString();
   const updates: Record<string, unknown> = {};
@@ -200,6 +209,55 @@ export async function updateRecord(
         origin: "app" as const,
       }))
     );
+  }
+
+  // Write-back (fila em background): enfileira as mudanças de campos marcados
+  // (write_back) de volta ao Bitrix. A edição local JÁ foi salva; a fila é
+  // best-effort (drenada pelo tick) e nunca falha a edição. Relações e campos
+  // sem source_field_id do Bitrix são ignorados (não estão em defByKey/bitrix).
+  if (existing.source_system === "bitrix" && existing.source_id) {
+    const entity =
+      existing.record_type === "negocio"
+        ? "deal"
+        : existing.record_type === "lead"
+          ? "lead"
+          : null;
+    if (entity) {
+      const defByKey = new Map(
+        (defs ?? []).map((d) => [d.field_key as string, d])
+      );
+      const changes: WriteBackChange[] = [];
+      for (const a of audits) {
+        const d = defByKey.get(a.field);
+        if (
+          !d ||
+          !d.write_back ||
+          !d.source_field_id ||
+          d.source_system !== "bitrix"
+        ) {
+          continue;
+        }
+        changes.push({
+          fieldKey: a.field,
+          sourceFieldId: d.source_field_id as string,
+          label: (d.label as string) ?? null,
+          newValue: a.new_value ?? null,
+        });
+      }
+      if (changes.length > 0) {
+        try {
+          await enqueueWriteBacks(createServiceClient(), {
+            recordId,
+            entity,
+            sourceId: existing.source_id,
+            createdBy: session.user.id,
+            changes,
+          });
+        } catch {
+          // best-effort: nunca falha a edição local por causa da fila.
+        }
+      }
+    }
   }
 
   revalidatePath("/registros");

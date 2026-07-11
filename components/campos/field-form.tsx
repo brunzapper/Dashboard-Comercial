@@ -157,6 +157,18 @@ export function FieldForm({
         Exibir nos seletores (dropdowns do construtor e colunas de Registros)
       </label>
 
+      {isEdit && field?.source_system === "bitrix" && field?.source_field_id ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="write_back"
+            defaultChecked={field?.write_back ?? false}
+            className="size-4 accent-primary"
+          />
+          Sincronizar de volta para o Bitrix ao editar este campo
+        </label>
+      ) : null}
+
       <div className="flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm">
           <input

@@ -1,13 +1,13 @@
-// Versão: 2.0 | Data: 09/07/2026
-// v2.0 (09/07/2026): Fase 9 — sync incremental e retomável. O painel dirige o
-//   loop: startSyncJob → stepSyncJob (1 página por chamada) até terminar, com
-//   barra de progresso por fase. Cada requisição é pequena (cabe no timeout do
-//   plano gratuito). Ao reabrir a página, um job em andamento é detectado e pode
-//   ser retomado. Backfill ganhou o campo de dias (janela corrida).
+// Versão: 3.0 | Data: 11/07/2026
+// v3.0 (11/07/2026): sync automático — o painel NÃO dirige mais o loop. Os botões
+//   apenas ENFILEIRAM o job (startSyncJob); quem avança o job é o tick agendado
+//   (/api/sync/tick), no servidor. O painel só observa o progresso por polling
+//   (getSyncJobById), então navegar ou fechar a aba não interrompe a sincronização.
+// v2.0 (09/07/2026): Fase 9 — sync incremental e retomável (loop no navegador).
 // v1.1 (09/07/2026): Fase 8 — quebra por entidade (leads vs deals) + amostras de erro.
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,8 @@ import {
 } from "@/components/ui/card";
 import {
   getActiveSyncJob,
+  getSyncJobById,
   startSyncJob,
-  stepSyncJob,
   type StepProgress,
 } from "@/app/(app)/registros/sync-actions";
 import type { SyncResult } from "@/lib/sync/shared";
@@ -33,11 +33,7 @@ const ENTITY_LABELS: Record<string, string> = {
   venda_site: "Estudo de Fechamentos",
 };
 
-const STEP_PAUSE_MS = 400;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const POLL_MS = 4000;
 
 function TotalsLine({ result }: { result: SyncResult }) {
   const entities = Object.entries(result.byEntity ?? {});
@@ -110,63 +106,70 @@ function ProgressView({ progress }: { progress: StepProgress }) {
 
 export function SyncPanel({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   const [progress, setProgress] = useState<StepProgress | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [resumable, setResumable] = useState<StepProgress | null>(null);
-  const runningRef = useRef(false);
+  const [busy, setBusy] = useState(false);
 
-  const drive = useCallback(async (jobId: string) => {
-    if (runningRef.current) return;
-    runningRef.current = true;
-    setRunning(true);
-    setError(null);
-    setResumable(null);
-    try {
-      let p: StepProgress | null = null;
-      do {
-        p = await stepSyncJob(jobId);
-        setProgress(p);
-        if (p.status === "error") {
-          setError(p.error ?? "Falha no sync.");
-          break;
-        }
-        if (!p.done) await sleep(STEP_PAUSE_MS);
-      } while (!p.done);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      runningRef.current = false;
-      setRunning(false);
-    }
-  }, []);
+  const running =
+    progress != null && (progress.status === "running" || !progress.done);
 
-  const start = useCallback(
-    async (kind: "reconcile" | "backfill", days: number) => {
-      if (runningRef.current) return;
-      setProgress(null);
-      setError(null);
-      try {
-        const { jobId } = await startSyncJob(kind, days);
-        await drive(jobId);
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    },
-    [drive]
-  );
-
-  // Ao montar: detecta um job em andamento (para retomar após refresh).
+  // Ao montar: detecta um job em andamento (manual ou automático) para observar.
   useEffect(() => {
     let active = true;
     getActiveSyncJob()
       .then((j) => {
-        if (active && j && j.status === "running") setResumable(j);
+        if (active && j && j.status === "running") {
+          setProgress(j);
+          setJobId(j.jobId);
+        }
       })
       .catch(() => {});
     return () => {
       active = false;
     };
   }, []);
+
+  // Observa o job por polling até ele sair de "running" (o tick server-side o
+  // avança). Sem loop dirigido pelo navegador — navegar/fechar a aba não para.
+  useEffect(() => {
+    if (!jobId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const p = await getSyncJobById(jobId);
+        if (!active || !p) return;
+        setProgress(p);
+        if (p.status === "error") setError(p.error ?? "Falha no sync.");
+        if (p.done) clearInterval(id);
+      } catch {
+        /* ignora falhas transitórias de polling */
+      }
+    };
+    const id = setInterval(poll, POLL_MS);
+    poll();
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [jobId]);
+
+  const start = useCallback(
+    async (kind: "reconcile" | "backfill", days: number) => {
+      if (running || busy) return;
+      setBusy(true);
+      setError(null);
+      setProgress(null);
+      try {
+        const { jobId: id } = await startSyncJob(kind, days);
+        setJobId(id);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [running, busy]
+  );
 
   const lastSync = lastSyncedAt
     ? new Date(lastSyncedAt).toLocaleString("pt-BR")
@@ -183,22 +186,12 @@ export function SyncPanel({ lastSyncedAt }: { lastSyncedAt: string | null }) {
       <CardHeader>
         <CardTitle>Sincronização (Bitrix)</CardTitle>
         <CardDescription>
-          Último sync: {lastSync}. Roda em pedaços (retomável) — janelas grandes só
-          significam mais passos.
+          Último sync: {lastSync}. Roda em segundo plano no servidor (a cada hora,
+          automaticamente) — ao disparar manualmente aqui, você pode sair desta tela
+          que a sincronização continua.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {resumable ? (
-          <div className="border-primary/40 bg-primary/5 flex flex-wrap items-center gap-3 rounded-md border p-3">
-            <span className="text-sm">
-              Há um sync em andamento ({resumable.kind === "backfill" ? "Backfill" : "Reconciliar"}).
-            </span>
-            <Button size="sm" onClick={() => drive(resumable.jobId)} disabled={running}>
-              Retomar
-            </Button>
-          </div>
-        ) : null}
-
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -218,8 +211,8 @@ export function SyncPanel({ lastSyncedAt }: { lastSyncedAt: string | null }) {
               className="w-28"
             />
           </div>
-          <Button type="submit" disabled={running}>
-            {running ? "Sincronizando..." : "Reconciliar"}
+          <Button type="submit" disabled={running || busy}>
+            {running ? "Sincronizando..." : busy ? "Enfileirando..." : "Reconciliar"}
           </Button>
         </form>
 
@@ -242,8 +235,8 @@ export function SyncPanel({ lastSyncedAt }: { lastSyncedAt: string | null }) {
               className="w-28"
             />
           </div>
-          <Button type="submit" variant="outline" disabled={running}>
-            {running ? "Importando..." : "Backfill inicial"}
+          <Button type="submit" variant="outline" disabled={running || busy}>
+            {running ? "Importando..." : busy ? "Enfileirando..." : "Backfill inicial"}
           </Button>
           <span className="text-muted-foreground text-xs">
             Importa deals abertos + fechados na janela (Vendas + Enterprise) e todos os leads.

@@ -12,18 +12,12 @@ import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
 
 // Cada item pode exigir uma `permission` e/ou um `role`; sem nenhum, é visível a todos.
+// Operações/Responsáveis/Metas/Usuários viraram sub-abas de "Configurações"
+// (app/(app)/configuracoes) — o item pai é inserido abaixo conforme o acesso.
 const NAV: (NavItem & { permission?: string; role?: string })[] = [
   { href: "/", label: "Dashboards" },
   { href: "/registros", label: "Registros" },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
-  { href: "/admin/operacoes", label: "Operações", role: "admin" },
-  { href: "/admin/responsaveis", label: "Responsáveis", role: "admin" },
-  { href: "/admin/metas", label: "Metas", role: "admin" },
-  {
-    href: "/admin/usuarios",
-    label: "Usuários",
-    permission: "manage_users_roles",
-  },
 ];
 
 export default async function AppLayout({
@@ -42,6 +36,13 @@ export default async function AppLayout({
       (!item.permission || permissions.includes(item.permission)) &&
       (!item.role || roles.includes(item.role))
   );
+
+  // "Configurações" agrupa as telas admin (Operações/Responsáveis/Metas/Usuários)
+  // + o Log de write-back. Aparece para quem alcança QUALQUER sub-aba: admin
+  // (as três primeiras) ou quem gerencia usuários.
+  if (roles.includes("admin") || permissions.includes("manage_users_roles")) {
+    items.push({ href: "/configuracoes", label: "Configurações" });
+  }
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
     .join(", ");

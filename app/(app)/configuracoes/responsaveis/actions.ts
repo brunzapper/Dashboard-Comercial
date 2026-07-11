@@ -20,7 +20,7 @@ export async function setResponsibleActive(
   if (!(await ensureAdmin())) return;
   const supabase = await createClient();
   await supabase.from("responsibles").update({ active }).eq("id", id);
-  revalidatePath("/admin/responsaveis");
+  revalidatePath("/configuracoes/responsaveis");
 }
 
 export async function addResponsibleOperation(
@@ -37,7 +37,7 @@ export async function addResponsibleOperation(
       { responsible_id: responsibleId, operation_id: operationId, priority },
       { onConflict: "responsible_id,operation_id" }
     );
-  revalidatePath("/admin/responsaveis");
+  revalidatePath("/configuracoes/responsaveis");
 }
 
 export async function removeResponsibleOperation(
@@ -51,5 +51,5 @@ export async function removeResponsibleOperation(
     .delete()
     .eq("responsible_id", responsibleId)
     .eq("operation_id", operationId);
-  revalidatePath("/admin/responsaveis");
+  revalidatePath("/configuracoes/responsaveis");
 }

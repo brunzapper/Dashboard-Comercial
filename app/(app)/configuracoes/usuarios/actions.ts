@@ -86,7 +86,7 @@ export async function createUser(
       );
   }
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return { success: `Usuário ${email} criado.` };
 }
 
@@ -122,7 +122,7 @@ export async function setUserRole(
     if (error) return { error: "Não foi possível remover o papel." };
   }
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return {};
 }
 
@@ -144,7 +144,7 @@ export async function resetUserPassword(
   });
   if (error) return { error: "Não foi possível redefinir a senha." };
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return { success: "Senha redefinida." };
 }
 
@@ -166,7 +166,7 @@ export async function setUserDisabled(
   });
   if (error) return { error: "Não foi possível atualizar o status do usuário." };
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return {};
 }
 
@@ -183,7 +183,7 @@ export async function deleteUser(userId: string): Promise<ActionResult> {
   const { error } = await service.auth.admin.deleteUser(userId);
   if (error) return { error: "Não foi possível excluir o usuário." };
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return {};
 }
 
@@ -209,6 +209,6 @@ export async function setBitrixMapping(
   );
   if (error) return { error: "Não foi possível salvar o mapeamento." };
 
-  revalidatePath("/admin/usuarios");
+  revalidatePath("/configuracoes/usuarios");
   return {};
 }

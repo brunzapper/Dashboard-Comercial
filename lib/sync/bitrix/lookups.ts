@@ -36,6 +36,7 @@ export interface BitrixFieldMeta {
   title: string;
   type: string;
   isMultiple: boolean;
+  isReadOnly: boolean;
   items?: { ID: string; VALUE: string }[];
 }
 
@@ -89,6 +90,7 @@ function toFieldMetas(fields: Record<string, FieldDef>): BitrixFieldMeta[] {
       title: def.title || def.listLabel || def.formLabel || fieldId,
       type: def.type,
       isMultiple: Boolean(def.isMultiple),
+      isReadOnly: Boolean(def.isReadOnly),
       items: def.items,
     });
   }

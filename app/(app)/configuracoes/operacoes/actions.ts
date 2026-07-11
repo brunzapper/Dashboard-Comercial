@@ -35,7 +35,7 @@ export async function createOperation(
     .from("operations")
     .insert({ name, parent_operation_id: parent });
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/admin/operacoes");
+  revalidatePath("/configuracoes/operacoes");
   return { ok: true, message: `Operação "${name}" criada.` };
 }
 
@@ -48,7 +48,7 @@ export async function updateOperation(
   if (patch.parent_operation_id === id) return; // evita pai = ele mesmo
   const supabase = await createClient();
   await supabase.from("operations").update(patch).eq("id", id);
-  revalidatePath("/admin/operacoes");
+  revalidatePath("/configuracoes/operacoes");
 }
 
 export async function deleteOperation(id: string): Promise<void> {
@@ -56,5 +56,5 @@ export async function deleteOperation(id: string): Promise<void> {
   if (err) return;
   const supabase = await createClient();
   await supabase.from("operations").delete().eq("id", id);
-  revalidatePath("/admin/operacoes");
+  revalidatePath("/configuracoes/operacoes");
 }
