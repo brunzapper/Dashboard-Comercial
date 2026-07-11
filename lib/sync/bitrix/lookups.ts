@@ -43,7 +43,16 @@ export interface BitrixFieldMeta {
 // do job — permite reidratar sem re-bater em crm.status.list / crm.deal.fields a
 // cada passo do sync retomável (ver serializeContext/hydrate).
 export interface SerializedLookups {
-  statuses: Record<string, string>;
+  // Mapas de nomes de etapa/status SEPARADOS por entidade. crm.status.list
+  // devolve status de leads (ENTITY_ID="STATUS") e etapas de deals
+  // (ENTITY_ID="DEAL_STAGE"…) juntos, compartilhando códigos como "NEW"; manter
+  // tudo num mapa único fazia um sobrescrever o outro (deal recebia o nome da
+  // etapa do lead). Ver preload()/statusName().
+  leadStatuses: Record<string, string>;
+  dealStages: Record<string, string>;
+  // Compat: formato antigo (mapa único) — usado só como fallback ao reidratar
+  // jobs em andamento durante o deploy da correção.
+  statuses?: Record<string, string>;
   categories: Record<string, string>;
   dealEnums: Record<string, Record<string, string>>;
   leadEnums: Record<string, Record<string, string>>;
@@ -87,7 +96,10 @@ function toFieldMetas(fields: Record<string, FieldDef>): BitrixFieldMeta[] {
 }
 
 export class BitrixLookups {
-  private statuses = new Map<string, string>();
+  // Nomes de status/etapa por entidade (ver SerializedLookups). Manter separados
+  // evita a colisão de código (ex.: "NEW") entre status de lead e etapa de deal.
+  private leadStatuses = new Map<string, string>();
+  private dealStages = new Map<string, string>();
   private categories = new Map<string, string>();
   private dealEnums = new Map<string, Map<string, string>>();
   private leadEnums = new Map<string, Map<string, string>>();
@@ -105,8 +117,14 @@ export class BitrixLookups {
   async preload(): Promise<void> {
     if (this.loaded) return;
 
+    // Particiona por ENTITY_ID: leads usam "STATUS"; etapas de deal usam
+    // "DEAL_STAGE" (pipeline padrão) ou "DEAL_STAGE_<categoryId>" (demais).
     const statuses = await this.client.listAll<StatusRow>("crm.status.list");
-    for (const s of statuses) this.statuses.set(String(s.STATUS_ID), s.NAME);
+    for (const s of statuses) {
+      const key = String(s.STATUS_ID);
+      if (s.ENTITY_ID?.startsWith("DEAL_STAGE")) this.dealStages.set(key, s.NAME);
+      else if (s.ENTITY_ID === "STATUS") this.leadStatuses.set(key, s.NAME);
+    }
 
     this.categories.set("0", "Vendas"); // default (pode não vir na lista)
     const cats = await this.client.listAll<CategoryRow>(
@@ -136,7 +154,8 @@ export class BitrixLookups {
    */
   serializeContext(): SerializedLookups {
     return {
-      statuses: mapToObj(this.statuses),
+      leadStatuses: mapToObj(this.leadStatuses),
+      dealStages: mapToObj(this.dealStages),
       categories: mapToObj(this.categories),
       dealEnums: enumMapToObj(this.dealEnums),
       leadEnums: enumMapToObj(this.leadEnums),
@@ -155,7 +174,16 @@ export class BitrixLookups {
     ctx: SerializedLookups
   ): BitrixLookups {
     const l = new BitrixLookups(client, db);
-    l.statuses = new Map(Object.entries(ctx.statuses ?? {}));
+    // Formato novo (mapas por entidade). Fallback tolerante para o formato antigo
+    // (mapa único `statuses`): sem ENTITY_ID não dá para separar, então usa o mesmo
+    // mapa nos dois — jobs assim precisam de re-sync de qualquer forma.
+    const legacy = ctx.statuses ? new Map(Object.entries(ctx.statuses)) : null;
+    l.leadStatuses = ctx.leadStatuses
+      ? new Map(Object.entries(ctx.leadStatuses))
+      : (legacy ?? new Map());
+    l.dealStages = ctx.dealStages
+      ? new Map(Object.entries(ctx.dealStages))
+      : (legacy ?? new Map());
     l.categories = new Map(Object.entries(ctx.categories ?? {}));
     l.dealEnums = objToEnumMap(ctx.dealEnums ?? {});
     l.leadEnums = objToEnumMap(ctx.leadEnums ?? {});
@@ -187,9 +215,14 @@ export class BitrixLookups {
     return map;
   }
 
-  statusName(statusId?: string | null): string | null {
+  statusName(
+    statusId: string | null | undefined,
+    entity: "deal" | "lead"
+  ): string | null {
     if (statusId == null || statusId === "") return null;
-    return this.statuses.get(String(statusId)) ?? String(statusId);
+    const key = String(statusId);
+    const map = entity === "deal" ? this.dealStages : this.leadStatuses;
+    return map.get(key) ?? key;
   }
 
   categoryName(categoryId?: string | null): string | null {
