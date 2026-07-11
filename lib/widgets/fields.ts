@@ -9,7 +9,10 @@
 //   (unified:<key>) vindos das correspondências globais.
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import type { Correspondence } from "@/lib/correspondences";
-import { isEditableCoreColumn } from "@/lib/config/core-writeback";
+import {
+  isEditableCoreColumn,
+  isEditableRelation,
+} from "@/lib/config/core-writeback";
 import type { Aggregation, Transform } from "./types";
 
 export type FkKind = "responsible" | "operation" | "lead";
@@ -62,8 +65,10 @@ export function buildAvailableFields(
 ): AvailableField[] {
   const core = CORE_FIELDS.map((f) => ({
     ...f,
-    // Colunas do núcleo suportadas para edição inline + write-back (mesmo conjunto).
-    editableCapable: isEditableCoreColumn(f.field),
+    // Colunas do núcleo editáveis inline: as colunas suportadas (write-back) OU as
+    // relações editáveis (responsável — local, sem write-back). `writable` (a caixa
+    // "Gravar no Bitrix") continua só para as colunas mapeadas ao Bitrix.
+    editableCapable: isEditableCoreColumn(f.field) || isEditableRelation(f.field),
     writable: isEditableCoreColumn(f.field),
   }));
   const custom = customFields.map((f) => ({

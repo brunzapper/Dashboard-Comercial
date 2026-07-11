@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { DataType } from "@/lib/records/types";
@@ -17,19 +18,15 @@ import {
   formatDateValue,
   type DateFormat,
 } from "@/lib/widgets/format";
+import { CURRENCY_OPTIONS, formatMoney } from "@/lib/widgets/currency";
 import { updateRecordField } from "@/lib/records/actions";
-
-function money(v: string): string {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return v || "—";
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
 export function CoreEditableCell({
   recordId,
   field,
   dataType,
   value: serverValue,
+  currency,
   writeBack = false,
   dateFormat = DEFAULT_DATE_FORMAT,
   onSaved,
@@ -38,6 +35,7 @@ export function CoreEditableCell({
   field: string; // nome da coluna do núcleo
   dataType: DataType;
   value: string; // valor atual (string)
+  currency?: string | null; // moeda do registro (formata value/mrr)
   writeBack?: boolean;
   dateFormat?: DateFormat;
   onSaved?: () => void;
@@ -71,6 +69,22 @@ export function CoreEditableCell({
         setError(true);
       }
     });
+  }
+
+  // Moeda (coluna `currency`): select de códigos ISO em vez de texto livre, para
+  // corrigir a moeda do valor rapidamente. O write-back envia CURRENCY_ID ao Bitrix.
+  if (field === "currency") {
+    return (
+      <Combobox
+        options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
+        value={value}
+        onValueChange={commit}
+        placeholder="—"
+        disabled={pending}
+        className={cn("w-full", error && "border-destructive")}
+        aria-label="Moeda"
+      />
+    );
   }
 
   if (dataType === "booleano") {
@@ -141,7 +155,7 @@ export function CoreEditableCell({
         disabled={pending}
         aria-label={field}
         aria-invalid={error}
-        title={dataType === "moeda" ? money(value) : undefined}
+        title={dataType === "moeda" ? formatMoney(value, currency) : undefined}
         className={cn("text-right", error && "border-destructive")}
       />
     );

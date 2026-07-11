@@ -59,7 +59,7 @@ export default async function DashboardPage({
 
   const { data: dash } = await supabase
     .from("dashboards")
-    .select("id, name, owner_user_id, settings")
+    .select("id, name, owner_user_id, visible_to_roles, settings")
     .eq("id", id)
     .maybeSingle();
   if (!dash) notFound();
@@ -336,6 +336,29 @@ export default async function DashboardPage({
       fkLabels[l.id as string] = (l.title as string) ?? "—";
   }
 
+  // Opções do SELECT de responsável editável nas tabelas de registros individuais:
+  // só carrega se algum widget-lista expõe a coluna responsible_id como editável.
+  let responsibleOptions: { value: string; label: string }[] = [];
+  const needsResponsibleSelect = dataWidgets.some(
+    (w) =>
+      isListWidget(w) &&
+      (w.settings?.rowSource ?? "records") === "records" &&
+      (w.settings?.columns ?? []).some(
+        (c) => c.field === "responsible_id" && c.editable
+      )
+  );
+  if (needsResponsibleSelect) {
+    const { data: respRows } = await supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .eq("active", true)
+      .order("display_name");
+    responsibleOptions = (respRows ?? []).map((r) => ({
+      value: r.id as string,
+      label: (r.display_name as string) ?? "—",
+    }));
+  }
+
   // Opções de dropdown dos controles "Filtro por campo": responsáveis/operações
   // ativos (value = id, corrige o filtro que não casava com texto livre) e as
   // etapas distintas da(s) fonte(s) de cada widget (value = texto da etapa).
@@ -448,12 +471,14 @@ export default async function DashboardPage({
       calcById={calcById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
+      responsibleOptions={responsibleOptions}
       userRoles={userRoles}
       canEditValues={canEditValues}
       available={available}
       canEdit={canEdit}
       canManageFields={canManageFields}
       settings={dashSettings}
+      visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
       dateFormat={dashSettings.dateFormat}
       periodBar={periodBar}
       periodDefaults={periodDefaults}

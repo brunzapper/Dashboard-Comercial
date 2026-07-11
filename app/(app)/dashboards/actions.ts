@@ -92,6 +92,26 @@ export async function updateDashboardSettings(
   return { ok: true };
 }
 
+// Atualiza a visibilidade (papéis) de um dashboard já criado. `is_shared` é
+// derivado (compartilhado quando há ao menos um papel). RLS restringe a owner/admin.
+export async function updateDashboardVisibility(
+  dashboardId: string,
+  roles: string[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const clean = roles.map(String).filter(Boolean);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ visible_to_roles: clean, is_shared: clean.length > 0 })
+    .eq("id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // Salva o último período consultado do usuário NESTE dashboard (user_preferences).
 // Chamado (fire-and-forget) quando a barra de período navega. Não revalida —
 // só persiste para reidratar o default na próxima visita.

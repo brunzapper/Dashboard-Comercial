@@ -5,7 +5,7 @@
 // Monta um WidgetConfig e salva via create/updateWidget.
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -29,7 +29,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { DATE_TRANSFORMS, type AvailableField } from "@/lib/widgets/fields";
+import {
+  DATE_TRANSFORMS,
+  fieldLabel,
+  type AvailableField,
+} from "@/lib/widgets/fields";
 import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
@@ -77,6 +81,8 @@ export function WidgetBuilder({
   siblings = [],
   trigger,
   canManageFields = false,
+  tabs = [],
+  activeTabId,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -86,6 +92,8 @@ export function WidgetBuilder({
   siblings?: Widget[];
   trigger?: React.ReactNode;
   canManageFields?: boolean;
+  tabs?: { id: string; name: string; color?: string }[];
+  activeTabId?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -96,6 +104,46 @@ export function WidgetBuilder({
   const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Largura do painel de config, redimensionável arrastando a borda esquerda
+  // (como as colunas/linhas das tabelas). Persistida no localStorage (chrome do
+  // painel, não dado do widget). Default ~ sm:max-w-lg (512px).
+  const PANEL_KEY = "widget-builder-width";
+  const [panelWidth, setPanelWidth] = useState(512);
+  useEffect(() => {
+    const saved = Number(
+      typeof window !== "undefined" ? window.localStorage.getItem(PANEL_KEY) : ""
+    );
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (Number.isFinite(saved) && saved >= 360) setPanelWidth(saved);
+  }, []);
+  const resizeRef = useRef<{ x: number; w: number } | null>(null);
+  function onPanelResizeDown(e: React.PointerEvent) {
+    e.preventDefault();
+    resizeRef.current = { x: e.clientX, w: panelWidth };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPanelResizeMove(e: React.PointerEvent) {
+    const d = resizeRef.current;
+    if (!d) return;
+    // Painel abre à direita: arrastar para a ESQUERDA (delta negativo) aumenta.
+    const next = Math.min(
+      typeof window !== "undefined" ? window.innerWidth * 0.95 : 1200,
+      Math.max(360, Math.round(d.w - (e.clientX - d.x)))
+    );
+    setPanelWidth(next);
+  }
+  function onPanelResizeUp(e: React.PointerEvent) {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* noop */
+    }
+    if (typeof window !== "undefined")
+      window.localStorage.setItem(PANEL_KEY, String(panelWidth));
+  }
 
   // Operandos numéricos para fórmula ao criar um campo aqui: colunas numéricas
   // do catálogo, exceto as unificadas (não são operandos válidos).
@@ -115,6 +163,7 @@ export function WidgetBuilder({
     (widget?.settings?.columns?.length ?? 0) > 0
       ? widget!.settings!.columns!.map((c) => ({
           field: c.field,
+          label: c.label,
           transform: c.transform ?? "none",
           weekMode: c.weekMode,
         }))
@@ -185,6 +234,12 @@ export function WidgetBuilder({
   // Fórmula da "Métrica calculada" (visual_type 'calculado').
   const [formula, setFormula] = useState<Formula>(
     widget?.settings?.formula ?? { tokens: [] }
+  );
+
+  // Aba (id) a que o widget pertence. Novo widget nasce na aba ativa; ao editar,
+  // mantém a sua. Só relevante quando o dashboard tem abas configuradas.
+  const [tabId, setTabId] = useState<string>(
+    widget?.settings?.tab ?? activeTabId ?? ""
   );
 
   function toggleSource(key: SourceKey) {
@@ -319,6 +374,9 @@ export function WidgetBuilder({
   function save() {
     setError(null);
 
+    // Aba do widget (dashboards com abas): mesclada em settings de todos os tipos.
+    const tabPatch = tabId ? { tab: tabId } : {};
+
     // Widget de filtro: sem dimensões/métricas/filtros; config vai em settings.
     if (visualType === "filtro") {
       const settings: FilterSettings = {
@@ -333,7 +391,7 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings,
+        settings: { ...settings, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -361,7 +419,7 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings,
+        settings: { ...settings, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -392,7 +450,7 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings: { ...(widget?.settings ?? {}), formula },
+        settings: { ...(widget?.settings ?? {}), formula, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -421,6 +479,7 @@ export function WidgetBuilder({
             const canEditCol = af?.editableCapable ?? false;
             const editable = canEditCol ? effEditable(d.field) : false;
             const col: RecordListColumn = { field: d.field, editable };
+            if (d.label?.trim()) col.label = d.label.trim();
             if (editable && af?.writable && columnFlags[d.field]?.writeBack)
               col.writeBack = true;
             // Formato/agrupamento por período (só colunas de data).
@@ -477,7 +536,7 @@ export function WidgetBuilder({
       dimensions: dimensions.filter((d) => d.field),
       metrics: metrics.filter((m) => m.field),
       filters: cleanFilters,
-      settings,
+      settings: { ...settings, ...tabPatch },
     };
     startTransition(async () => {
       const res = widget
@@ -494,7 +553,22 @@ export function WidgetBuilder({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       {trigger ? <SheetTrigger asChild>{trigger}</SheetTrigger> : null}
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
+      <SheetContent
+        className="overflow-y-auto sm:max-w-none"
+        style={{ width: panelWidth, maxWidth: "95vw" }}
+      >
+        {/* Alça de redimensionamento (borda esquerda do painel). */}
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Redimensionar painel"
+          title="Arraste para redimensionar o painel"
+          onPointerDown={onPanelResizeDown}
+          onPointerMove={onPanelResizeMove}
+          onPointerUp={onPanelResizeUp}
+          onPointerCancel={onPanelResizeUp}
+          className="hover:bg-primary/40 absolute top-0 left-0 z-20 h-full w-1.5 cursor-col-resize"
+        />
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>
           <SheetDescription>
@@ -507,6 +581,19 @@ export function WidgetBuilder({
             <Label>Título</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
+
+          {tabs.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <Label>Aba</Label>
+              <Combobox
+                searchable={false}
+                options={tabs.map((t) => ({ value: t.id, label: t.name }))}
+                value={tabId || tabs[0].id}
+                onValueChange={setTabId}
+                aria-label="Aba do widget"
+              />
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-1.5">
             <Label>Visual</Label>
@@ -903,6 +990,19 @@ export function WidgetBuilder({
                   <Trash2 className="size-4" />
                 </Button>
               </div>
+              {d.field ? (
+                <Input
+                  className="h-8 text-sm"
+                  placeholder={`Nome exibido (padrão: ${fieldLabel(d.field, available)})`}
+                  value={d.label ?? ""}
+                  onChange={(e) => {
+                    const next = [...dimensions];
+                    next[i] = { ...d, label: e.target.value };
+                    setDimensions(next);
+                  }}
+                  aria-label="Nome exibido da dimensão"
+                />
+              ) : null}
               {isRecordList &&
               isDate(d.field) &&
               d.transform &&
@@ -1009,7 +1109,8 @@ export function WidgetBuilder({
               </Button>
             </div>
             {metrics.map((m, i) => (
-              <div key={i} className="flex items-center gap-2">
+              <div key={i} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
                 <Combobox
                   className="flex-1"
                   options={metricOptions}
@@ -1042,6 +1143,20 @@ export function WidgetBuilder({
                 >
                   <Trash2 className="size-4" />
                 </Button>
+                </div>
+                {m.field && m.field !== "*" ? (
+                  <Input
+                    className="h-8 text-sm"
+                    placeholder={`Nome exibido (padrão: ${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)})`}
+                    value={m.label ?? ""}
+                    onChange={(e) => {
+                      const next = [...metrics];
+                      next[i] = { ...m, label: e.target.value };
+                      setMetrics(next);
+                    }}
+                    aria-label="Nome exibido da métrica"
+                  />
+                ) : null}
               </div>
             ))}
           </div>

@@ -282,12 +282,13 @@ export async function runWidget(
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`
         : "";
-    return { key: `dim_${i + 1}`, label: `${base}${suffix}` };
+    // Nome exibido editável (estético) tem precedência sobre o rótulo padrão.
+    return { key: `dim_${i + 1}`, label: d.label?.trim() || `${base}${suffix}` };
   });
 
   const metrics = config.metrics.map((m, i) => ({
     key: `metric_${i + 1}`,
-    label: `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
+    label: m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
   }));
 
   return { rows, dimensions, metrics };

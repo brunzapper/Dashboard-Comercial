@@ -24,15 +24,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
 import { CoreEditableCell } from "@/components/registros/core-editable-cell";
+import { RelationEditableCell } from "@/components/registros/relation-editable-cell";
 import {
   NUMERIC_DATA_TYPES,
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import { formatMoney } from "@/lib/widgets/currency";
 import {
   EDITABLE_CORE_COLUMNS,
   isEditableCoreColumn,
+  isEditableRelation,
 } from "@/lib/config/core-writeback";
 import { AGG_LABELS, DATE_AGG_LABELS } from "@/lib/widgets/types";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
@@ -65,11 +68,11 @@ const FK_FIELDS = new Set(["responsible_id", "operation_id", "related_lead_id"])
 const MONEY_FIELDS = new Set(["value", "mrr"]);
 const DATE_FIELDS = new Set(["closed_at", "opened_at", "source_created_at"]);
 
-function money(v: unknown): string {
-  if (v == null || v === "") return "—";
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Valor monetário na moeda do registro (quando informada); sem moeda cai em BRL.
+// Usado tanto para células por registro (com r.currency) quanto para subtotais
+// agregados (sem moeda — podem misturar registros de moedas diferentes).
+function money(v: unknown, currency?: string | null): string {
+  return formatMoney(v, currency);
 }
 
 function median(nums: number[]): number {
@@ -104,7 +107,7 @@ function coreDisplay(
 ): string {
   const v = (record as unknown as Record<string, unknown>)[field];
   if (FK_FIELDS.has(field)) return v ? (fkLabels[String(v)] ?? "—") : "—";
-  if (MONEY_FIELDS.has(field)) return money(v);
+  if (MONEY_FIELDS.has(field)) return money(v, record.currency);
   if (field === "closed") return v ? "Sim" : "Não";
   if (DATE_FIELDS.has(field)) return v ? formatDateValue(v, dateFmt) : "—";
   return v == null || v === "" ? "—" : String(v);
@@ -129,6 +132,7 @@ export function RecordListTable({
   userRoles,
   canEditValues,
   fkLabels,
+  responsibleOptions = [],
   appearance,
   dateFormat,
   canEdit = false,
@@ -142,6 +146,8 @@ export function RecordListTable({
   userRoles: string[];
   canEditValues: boolean;
   fkLabels: Record<string, string>;
+  // Responsáveis ativos (id→nome) para o SELECT da coluna responsible_id editável.
+  responsibleOptions?: { value: string; label: string }[];
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
   canEdit?: boolean;
@@ -169,12 +175,15 @@ export function RecordListTable({
   // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
   const metricList = metrics.filter((m) => m.field);
   const metricLabel = (m: Metric) =>
-    `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
+    m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
+  // Rótulo (estético) do cabeçalho de uma coluna: nome exibido > rótulo do campo.
+  const colLabel = (c: RecordListColumn) =>
+    c.label?.trim() || fieldLabel(c.field, available);
   const metricCellText = (m: Metric, r: RecordRow): string => {
     if (m.field === "*") return "";
     const n = Number(rawValue(m.field, r));
     if (!Number.isFinite(n)) return "—";
-    return MONEY_FIELDS.has(m.field) ? money(n) : n.toLocaleString("pt-BR");
+    return MONEY_FIELDS.has(m.field) ? money(n, r.currency) : n.toLocaleString("pt-BR");
   };
   const metricAgg = (m: Metric, rs: RecordRow[]): number => {
     if (m.agg === "count") {
@@ -533,7 +542,16 @@ export function RecordListTable({
           const coreEditable = Boolean(
             !isCustom && c.editable && isEditableCoreColumn(c.field)
           );
-          const isEditableCell = customEditable || coreEditable;
+          // Relação editável (responsável): SELECT das entidades elegíveis. Só
+          // quando há opções carregadas (do contrário cai no texto read-only).
+          const relationEditable = Boolean(
+            !isCustom &&
+              c.editable &&
+              isEditableRelation(c.field) &&
+              canEditValues &&
+              responsibleOptions.length > 0
+          );
+          const isEditableCell = customEditable || coreEditable || relationEditable;
           const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
           const colCp = t.colColors?.[c.field];
           return (
@@ -573,12 +591,21 @@ export function RecordListTable({
                   writeBack={c.writeBack}
                   forceEditable
                 />
+              ) : relationEditable ? (
+                <RelationEditableCell
+                  recordId={r.id}
+                  field={c.field}
+                  value={String(rawValue(c.field, r) ?? "")}
+                  options={responsibleOptions}
+                  onSaved={refresh}
+                />
               ) : coreEditable ? (
                 <CoreEditableCell
                   recordId={r.id}
                   field={c.field}
                   dataType={EDITABLE_CORE_COLUMNS[c.field]}
                   value={coreString(c.field, r)}
+                  currency={r.currency}
                   writeBack={c.writeBack}
                   dateFormat={fmtOf(c.field)}
                   onSaved={refresh}
@@ -661,11 +688,11 @@ export function RecordListTable({
       (current - 1) * PAGE_SIZE,
       current * PAGE_SIZE
     );
-    const periodLabel = fieldLabel(groupCol.field, available);
+    const periodLabel = colLabel(groupCol);
     const metricHead = (m: Metric) =>
       m.field === "*"
         ? "Contagem de registros"
-        : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`;
+        : m.label?.trim() || `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`;
 
     return (
       <div className="flex h-full flex-col">
@@ -798,7 +825,7 @@ export function RecordListTable({
                   {editable ? (
                     <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                   ) : null}
-                  {fieldLabel(c.field, available)}
+                  {colLabel(c)}
                 </span>
                 {editable ? (
                   <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />

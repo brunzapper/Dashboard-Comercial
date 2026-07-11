@@ -16,13 +16,9 @@ import {
 } from "@/components/ui/table";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
+import { formatMoney } from "@/lib/widgets/currency";
 import { EditableCell } from "./editable-cell";
 import { RecordEditSheet } from "./record-edit-sheet";
-
-function money(v: number | null): string {
-  if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
 export function RecordsTable({
   source,
@@ -66,6 +62,7 @@ export function RecordsTable({
             <TableHead>Responsável</TableHead>
             {showMrr ? <TableHead className="text-right">MRR</TableHead> : null}
             <TableHead className="text-right">Valor</TableHead>
+            <TableHead>Moeda</TableHead>
             {fields.map((f) => (
               <TableHead key={f.id}>{f.label}</TableHead>
             ))}
@@ -88,9 +85,14 @@ export function RecordsTable({
                   : "—"}
               </TableCell>
               {showMrr ? (
-                <TableCell className="text-right">{money(r.mrr)}</TableCell>
+                <TableCell className="text-right">
+                  {formatMoney(r.mrr, r.currency)}
+                </TableCell>
               ) : null}
-              <TableCell className="text-right">{money(r.value)}</TableCell>
+              <TableCell className="text-right">
+                {formatMoney(r.value, r.currency)}
+              </TableCell>
+              <TableCell>{r.currency ?? "—"}</TableCell>
               {fields.map((f) => (
                 <TableCell key={f.id} className="max-w-[180px]">
                   <EditableCell

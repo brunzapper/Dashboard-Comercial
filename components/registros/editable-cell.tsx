@@ -18,17 +18,12 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
+import { formatMoney } from "@/lib/widgets/currency";
 
 function customValue(record: RecordRow, key: string): string {
   const v = record.custom_fields?.[key];
   if (v == null) return "";
   return String(v);
-}
-
-function money(v: string): string {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return v;
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export function EditableCell({
@@ -91,7 +86,7 @@ export function EditableCell({
   if (!editable) {
     const display =
       field.data_type === "moeda"
-        ? money(serverValue)
+        ? formatMoney(serverValue, record.currency)
         : field.data_type === "data"
           ? formatDateValue(serverValue, dateFormat)
           : serverValue;

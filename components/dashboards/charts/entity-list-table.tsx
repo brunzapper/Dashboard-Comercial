@@ -320,7 +320,7 @@ export function EntityListTable({
                   ...widthStyle(c.field),
                 }}
               >
-                {fieldLabel(c.field, available)}
+                {c.label?.trim() || fieldLabel(c.field, available)}
                 {editable ? (
                   <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />
                 ) : null}

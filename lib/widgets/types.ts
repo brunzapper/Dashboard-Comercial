@@ -100,6 +100,9 @@ export type FilterOp =
 
 export interface Dimension {
   field: string;
+  // Nome exibido (estético) desta dimensão no dashboard. Não altera o campo real
+  // no banco; ausente = rótulo padrão do campo. Ver lib/widgets/engine.ts.
+  label?: string;
   transform?: Transform;
   // Só para transform 'week_month': "restricted" (recorta na virada do mês) ou
   // "full" (semana cheia seg→dom, pega dias do mês vizinho). Default restricted.
@@ -108,6 +111,8 @@ export interface Dimension {
 export interface Metric {
   field: string;
   agg: Aggregation;
+  // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
+  label?: string;
 }
 export interface WidgetFilter {
   field: string;
@@ -167,6 +172,8 @@ export type FieldFilterOptions = Record<
 // gravam de volta no registro (via updateRecordField, respeitando permissões).
 export interface RecordListColumn {
   field: string; // 'title' | 'stage' | 'custom:<key>' | ...
+  // Nome exibido (estético) do cabeçalho desta coluna; ausente = rótulo do campo.
+  label?: string;
   // Edição inline no dashboard (dono/admin decide por coluna). Ausente = padrão
   // legado (custom não calculado editável). Vale p/ custom E colunas do núcleo.
   editable?: boolean;
@@ -284,7 +291,12 @@ export type WidgetSettings = KpiSettings &
   FilterSettings &
   FieldFilterSettings &
   RecordListSettings &
-  CalcSettings & { appearance?: AppearanceSettings };
+  CalcSettings & {
+    appearance?: AppearanceSettings;
+    // Id da aba (DashboardSettings.tabs) a que este widget pertence. Ausente = aba
+    // padrão (a primeira). Ver components/dashboards/dashboard-client.tsx.
+    tab?: string;
+  };
 
 // Config por dashboard, guardada em dashboards.settings.
 export interface DashboardSettings {
@@ -304,6 +316,19 @@ export interface DashboardSettings {
     to?: string;
     angle?: number; // graus (default 135)
   };
+  // Área de trabalho (grid): densidade (colunas/altura da linha) e tamanho fixo
+  // opcional da área (largura/altura em px, ajustáveis arrastando a alça). Ausente
+  // = padrão (12 colunas, linha 30px, altura automática ajustada aos widgets).
+  canvas?: {
+    cols?: number;
+    rowHeight?: number;
+    width?: number;
+    height?: number;
+  };
+  // Abas do dashboard: cada aba tem nome e cor de fundo do "chip" do nome. Os
+  // widgets são associados por `WidgetSettings.tab` (id). Ausente/vazio = uma tela
+  // única (todos os widgets numa aba padrão implícita).
+  tabs?: { id: string; name: string; color?: string }[];
 }
 
 export interface WidgetConfig {
