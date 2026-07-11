@@ -30,10 +30,12 @@ import {
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { Widget, WidgetData } from "@/lib/widgets/types";
+import type { DateFormat } from "@/lib/widgets/format";
+import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
 import { RecordListTable } from "./charts/record-list-table";
-import { EditableMatrix } from "./charts/editable-matrix";
+import { EntityListTable } from "./charts/entity-list-table";
 import { PeriodControls } from "./period-controls";
 import { TableFilterBar } from "./table-filter-bar";
 import { FieldFilterControls } from "./field-filter-controls";
@@ -45,7 +47,7 @@ export function WidgetCard({
   widget,
   data,
   recordList,
-  matrixCells,
+  entityList,
   calcValue,
   fields,
   fkLabels,
@@ -53,6 +55,7 @@ export function WidgetCard({
   canEditValues,
   available,
   dashboardId,
+  dateFormat,
   siblings,
   canEdit,
   canManageFields = false,
@@ -61,7 +64,7 @@ export function WidgetCard({
   widget: Widget;
   data: WidgetData;
   recordList: RecordRow[];
-  matrixCells: Record<string, unknown>;
+  entityList: EntityListRow[];
   calcValue: number | null;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
@@ -69,6 +72,7 @@ export function WidgetCard({
   canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
+  dateFormat?: DateFormat;
   siblings: Widget[];
   canEdit: boolean;
   canManageFields?: boolean;
@@ -87,14 +91,15 @@ export function WidgetCard({
   const isFieldFilter = widget.visual_type === "filtro_campo";
   const isTable = widget.visual_type === "tabela";
   const isRecordList = isTable && widget.settings?.rowMode === "records";
-  const isMatrix = widget.visual_type === "tabela_editavel";
+  const rowSource = widget.settings?.rowSource ?? "records";
+  const isEntityList = isRecordList && rowSource !== "records";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const kpi = isKpi ? appearance?.kpi : undefined;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
-  // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/matriz/calc).
-  const canStyle = !isFilter && !isFieldFilter && !isMatrix && !isCalc;
+  // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/calc).
+  const canStyle = !isFilter && !isFieldFilter && !isCalc;
 
   return (
     <div
@@ -183,6 +188,20 @@ export function WidgetCard({
               searchFields={widget.settings?.searchFields}
               available={available}
             />
+          ) : isEntityList ? (
+            <EntityListTable
+              rows={entityList}
+              columns={widget.settings?.columns ?? []}
+              rowSource={rowSource as "responsibles" | "operations"}
+              fields={fields}
+              available={available}
+              userRoles={userRoles}
+              canEditValues={canEditValues}
+              appearance={appearance}
+              dateFormat={dateFormat}
+              canEdit={canEdit}
+              onAppearanceChange={saveAppearance}
+            />
           ) : isRecordList ? (
             <RecordListTable
               records={recordList}
@@ -193,15 +212,9 @@ export function WidgetCard({
               canEditValues={canEditValues}
               fkLabels={fkLabels}
               appearance={appearance}
+              dateFormat={dateFormat}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
-            />
-          ) : isMatrix ? (
-            <EditableMatrix
-              dashboardId={dashboardId}
-              widgetId={widget.id}
-              matrix={widget.settings?.matrix}
-              cells={matrixCells}
             />
           ) : isCalc ? (
             <div className="flex h-full flex-col justify-center p-1">
@@ -218,6 +231,7 @@ export function WidgetCard({
               visualType={widget.visual_type}
               data={data}
               appearance={appearance}
+              dateFormat={dateFormat}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

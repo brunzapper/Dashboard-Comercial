@@ -17,7 +17,14 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownAZ, ArrowUpAZ, GripVertical, Palette } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  CalendarDays,
+  Check,
+  GripVertical,
+  Palette,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,6 +34,11 @@ import type {
   ColorPair,
   Widget,
 } from "@/lib/widgets/types";
+import {
+  DATE_FORMATS,
+  DATE_FORMAT_LABELS,
+  type DateFormat,
+} from "@/lib/widgets/format";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 
 // -------- hook de estado + persistência --------
@@ -127,6 +139,7 @@ export function ContextMenu({
   onClose,
   ordering,
   coloring,
+  dateFormat,
 }: {
   x: number;
   y: number;
@@ -139,6 +152,12 @@ export function ContextMenu({
   coloring?: {
     scopes: ColorScope[];
     onScope: (scope: ColorScope) => void;
+  };
+  // Só aparece quando a coluna clicada é de data: escolhe o formato da coluna
+  // (override do padrão global do dashboard).
+  dateFormat?: {
+    value?: DateFormat;
+    onSelect: (f: DateFormat) => void;
   };
 }) {
   const scopeLabel: Record<ColorScope, string> = {
@@ -171,6 +190,21 @@ export function ContextMenu({
           {coloring.scopes.map((s) => (
             <MenuBtn key={s} onClick={() => coloring.onScope(s)}>
               <Palette /> {scopeLabel[s]}
+            </MenuBtn>
+          ))}
+        </>
+      ) : null}
+      {dateFormat ? (
+        <>
+          {ordering || coloring ? <div className="bg-border my-1 h-px" /> : null}
+          <p className="text-muted-foreground px-2 pb-1 text-xs">
+            Formato de data
+          </p>
+          {DATE_FORMATS.map((f) => (
+            <MenuBtn key={f} onClick={() => dateFormat.onSelect(f)}>
+              <CalendarDays />
+              <span className="flex-1">{DATE_FORMAT_LABELS[f]}</span>
+              {dateFormat.value === f ? <Check className="size-3.5" /> : null}
             </MenuBtn>
           ))}
         </>
@@ -449,6 +483,73 @@ export function ColorOrderDialog({
         </Button>
       </div>
     </FloatingPanel>
+  );
+}
+
+// -------- alça de redimensionamento (largura de coluna / altura de linha) --------
+// Faixa fina posicionada na borda da célula. Aparece ao passar o mouse (mesmo com
+// as linhas de grade ocultas) durante a edição de layout. Arrastar altera o
+// tamanho: `getStart` lê o tamanho atual no início; `onResize` recebe o novo (px).
+export function ResizeHandle({
+  axis,
+  onResize,
+  minSize = 40,
+}: {
+  axis: "col" | "row";
+  onResize: (size: number) => void;
+  minSize?: number;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const dragRef = useRef<{ pos: number; size: number } | null>(null);
+
+  function onPointerDown(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Mede a célula/linha que contém a alça como tamanho inicial.
+    const cell = ref.current?.parentElement as HTMLElement | null;
+    const size = cell
+      ? axis === "col"
+        ? cell.offsetWidth
+        : cell.offsetHeight
+      : minSize;
+    dragRef.current = { pos: axis === "col" ? e.clientX : e.clientY, size };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    const delta = (axis === "col" ? e.clientX : e.clientY) - d.pos;
+    onResize(Math.max(minSize, Math.round(d.size + delta)));
+  }
+  function endDrag(e: React.PointerEvent) {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture pode já ter sido liberada
+    }
+  }
+
+  return (
+    <span
+      ref={ref}
+      role="separator"
+      aria-orientation={axis === "col" ? "vertical" : "horizontal"}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onDoubleClick={(e) => e.stopPropagation()}
+      title={axis === "col" ? "Arraste para largura" : "Arraste para altura"}
+      className={cn(
+        "absolute z-10 opacity-0 transition-opacity hover:opacity-100",
+        "before:absolute before:bg-primary/60 before:content-['']",
+        axis === "col"
+          ? "top-0 right-0 h-full w-2 cursor-col-resize before:top-0 before:right-0 before:h-full before:w-0.5"
+          : "bottom-0 left-0 h-2 w-full cursor-row-resize before:bottom-0 before:left-0 before:h-0.5 before:w-full"
+      )}
+    />
   );
 }
 

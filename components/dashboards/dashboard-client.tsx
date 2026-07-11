@@ -13,6 +13,8 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings, Widget, WidgetData } from "@/lib/widgets/types";
+import type { DateFormat } from "@/lib/widgets/format";
+import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
@@ -27,7 +29,7 @@ export function DashboardClient({
   widgets,
   dataById,
   recordListById,
-  matrixCellsById,
+  entityListById,
   calcById,
   fields,
   fkLabels,
@@ -37,6 +39,7 @@ export function DashboardClient({
   canEdit,
   canManageFields = false,
   settings,
+  dateFormat,
   periodBar,
   periodDefaults,
   periodDefaultField,
@@ -46,7 +49,7 @@ export function DashboardClient({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
-  matrixCellsById: Record<string, Record<string, unknown>>;
+  entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
@@ -56,6 +59,7 @@ export function DashboardClient({
   canEdit: boolean;
   canManageFields?: boolean;
   settings: DashboardSettings;
+  dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
   periodDefaults?: PeriodSelection;
   periodDefaultField?: string;
@@ -134,7 +138,7 @@ export function DashboardClient({
             widgets={widgets}
             dataById={dataById}
             recordListById={recordListById}
-            matrixCellsById={matrixCellsById}
+            entityListById={entityListById}
             calcById={calcById}
             fields={fields}
             fkLabels={fkLabels}
@@ -142,6 +146,7 @@ export function DashboardClient({
             canEditValues={canEditValues}
             available={available}
             dashboardId={dashboardId}
+            dateFormat={dateFormat}
             canEdit={canEdit}
             canManageFields={canManageFields}
             editMode={editMode}

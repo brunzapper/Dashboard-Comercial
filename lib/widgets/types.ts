@@ -4,6 +4,7 @@
 // Tipos do construtor de dashboards (Fase 6A).
 import type { SourceKey } from "@/lib/sources";
 import type { Formula } from "@/lib/records/formulas";
+import type { DateFormat } from "./format";
 
 export type VisualType =
   | "tabela"
@@ -15,14 +16,12 @@ export type VisualType =
   | "funil"
   | "filtro"
   | "filtro_campo"
-  | "tabela_editavel"
   | "calculado";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
   calculado: "Métrica calculada",
   tabela: "Tabela",
-  tabela_editavel: "Tabela editável",
   barra: "Barra",
   barra_horizontal: "Barra horizontal",
   linha: "Linha",
@@ -119,31 +118,20 @@ export interface FieldFilterSettings {
 // gravam de volta no registro (via updateRecordField, respeitando permissões).
 export interface RecordListColumn {
   field: string; // 'title' | 'stage' | 'custom:<key>' | ...
-  editable?: boolean; // só faz efeito em campos personalizados (custom:*)
 }
+// Fonte das linhas do modo lista: registros (default), responsáveis ou operações.
+// Campos personalizados não calculados editáveis gravam de volta na entidade
+// listada (registro → records.custom_fields; responsável/operação →
+// entity_custom_values).
+export type RowSource = "records" | "responsibles" | "operations";
 export interface RecordListSettings {
   rowMode?: "records"; // presença => modo lista no widget 'tabela'
+  rowSource?: RowSource; // fonte das linhas (default 'records')
   columns?: RecordListColumn[]; // colunas ordenadas a exibir
   limit?: number; // teto de linhas explícito (sem isto = sem limite)
   // Barra de busca/filtro embutida na tabela (registros e agregada), aplicada
   // pelo servidor. Ausente/true = visível; false = oculta ("ocultável na config").
   showFilterBar?: boolean;
-}
-
-// Config do widget "Tabela editável" (Fase 2): grade com linhas/colunas
-// nomeadas, cujos valores (dashboard-scoped) vivem em dashboard_table_cells.
-// Cada eixo tem `key` estável (gerado na criação) + `label` livre — renomear o
-// label não órfã as células nem quebra referências de fórmula (que usam `key`).
-export interface MatrixAxis {
-  key: string;
-  label: string;
-}
-export interface MatrixSettings {
-  matrix?: {
-    rows: MatrixAxis[];
-    cols: MatrixAxis[];
-    cellType?: "numero" | "texto"; // default 'numero'
-  };
 }
 
 // Config do widget "Métrica calculada" (Fase 3): uma fórmula avaliada com um
@@ -199,6 +187,13 @@ export interface AppearanceSettings {
     cellColors?: Record<string, ColorPair>; // "rowKey:colKey" -> {texto, preench.}
     columnOrder?: string[]; // ordem das colunas (reordenação)
     rowOrder?: string[]; // ordem manual das linhas (por rowKey)
+    // Formato de data por coluna (override do padrão global do dashboard).
+    // Chave = colKey (c.field no record-list; dim_<n> na tabela agregada).
+    dateFormats?: Record<string, DateFormat>;
+    // Redimensionamento in-loco (edição de layout): largura por coluna (px) e
+    // altura por linha (px). Chaves = colKey / rowKey.
+    colWidths?: Record<string, number>;
+    rowHeights?: Record<string, number>;
     sort?: { column: string; dir: TableSortDir; colorOrder?: string[] };
     // Orientação da tabela agregada: "rows" (default) = dimensões/métricas como
     // colunas no topo, 1 linha por grupo; "columns" = transposta (rótulos descem
@@ -219,7 +214,6 @@ export type WidgetSettings = KpiSettings &
   FilterSettings &
   FieldFilterSettings &
   RecordListSettings &
-  MatrixSettings &
   CalcSettings & { appearance?: AppearanceSettings };
 
 // Config por dashboard, guardada em dashboards.settings.
@@ -229,6 +223,9 @@ export interface DashboardSettings {
     defaultPreset?: string; // preset inicial da barra global
     field?: string; // campo de data padrão da barra global
   };
+  // Formato padrão das datas exibidas nas tabelas deste dashboard (pode ser
+  // sobrescrito por coluna em AppearanceSettings.table.dateFormats).
+  dateFormat?: DateFormat;
   // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil.
   background?: {
     mode: "solid" | "gradient";

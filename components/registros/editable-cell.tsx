@@ -12,6 +12,11 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  type DateFormat,
+} from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
 
 function customValue(record: RecordRow, key: string): string {
@@ -31,12 +36,16 @@ export function EditableCell({
   field,
   userRoles,
   canEditValues,
+  dateFormat = DEFAULT_DATE_FORMAT,
   onSaved,
 }: {
   record: RecordRow;
   field: FieldDefinition;
   userRoles: string[];
   canEditValues: boolean;
+  // Formato de exibição das datas (só afeta a leitura; a edição usa o calendário
+  // nativo em ISO). Default = dd/mm/aaaa.
+  dateFormat?: DateFormat;
   // Chamado após uma gravação bem-sucedida. Em Registros a própria action
   // revalida a página; no dashboard o pai usa isto para router.refresh().
   onSaved?: () => void;
@@ -46,6 +55,8 @@ export function EditableCell({
   const savedRef = useRef(serverValue);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState(false);
+  // Data: por padrão mostra o texto formatado; duplo-clique abre o calendário.
+  const [editingDate, setEditingDate] = useState(false);
 
   // Reconcilia com o servidor quando novos dados chegam (após revalidatePath):
   // adota o valor do servidor sem sobrescrever uma edição ainda em andamento
@@ -62,7 +73,12 @@ export function EditableCell({
     field.editable_by_roles.some((r) => userRoles.includes(r));
 
   if (!editable) {
-    const display = field.data_type === "moeda" ? money(serverValue) : serverValue;
+    const display =
+      field.data_type === "moeda"
+        ? money(serverValue)
+        : field.data_type === "data"
+          ? formatDateValue(serverValue, dateFormat)
+          : serverValue;
     return <span className="block truncate">{display || "—"}</span>;
   }
 
@@ -112,12 +128,40 @@ export function EditableCell({
   }
 
   if (field.data_type === "data") {
+    // Fora de edição: texto formatado; duplo-clique abre o calendário nativo.
+    if (!editingDate) {
+      return (
+        <button
+          type="button"
+          onDoubleClick={() => setEditingDate(true)}
+          title="Duplo-clique para escolher a data"
+          className={cn(
+            "block w-full truncate text-left",
+            error && "text-destructive"
+          )}
+          aria-label={field.label}
+        >
+          {formatDateValue(value, dateFormat) || "—"}
+        </button>
+      );
+    }
     return (
       <Input
         type="date"
+        autoFocus
         value={value.slice(0, 10)}
         onChange={(e) => setValue(e.target.value)}
-        onBlur={(e) => commit(e.target.value)}
+        onBlur={(e) => {
+          commit(e.target.value);
+          setEditingDate(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setValue(savedRef.current);
+            setEditingDate(false);
+          }
+        }}
         disabled={pending}
         aria-label={field.label}
         aria-invalid={error}

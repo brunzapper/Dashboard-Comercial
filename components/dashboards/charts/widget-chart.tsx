@@ -52,10 +52,17 @@ import {
   topWithOther,
 } from "@/lib/widgets/appearance";
 import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  looksLikeDate,
+  type DateFormat,
+} from "@/lib/widgets/format";
+import {
   CategoryEditor,
   ColorOrderDialog,
   ColorPopover,
   ContextMenu,
+  ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
 
@@ -91,12 +98,14 @@ export function WidgetChart({
   visualType,
   data,
   appearance,
+  dateFormat,
   canEdit = false,
   onAppearanceChange,
 }: {
   visualType: VisualType;
   data: WidgetData;
   appearance?: AppearanceSettings;
+  dateFormat?: DateFormat;
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
@@ -185,6 +194,7 @@ export function WidgetChart({
         data={data}
         appearance={ap}
         editable={editable}
+        dateFormat={dateFormat ?? DEFAULT_DATE_FORMAT}
         onChange={change}
       />
     );
@@ -396,7 +406,7 @@ export function WidgetChart({
 
 // ---------------- Tabela agregada com aparência + edição in-loco ----------------
 type TableMenu =
-  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[] }
+  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[]; isDate: boolean }
   | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
   | { kind: "colorOrder"; x: number; y: number; column: string };
 
@@ -404,11 +414,13 @@ function AppearanceTable({
   data,
   appearance,
   editable,
+  dateFormat,
   onChange,
 }: {
   data: WidgetData;
   appearance: AppearanceSettings;
   editable: boolean;
+  dateFormat: DateFormat;
   onChange: (a: AppearanceSettings) => void;
 }) {
   const t = appearance.table ?? {};
@@ -478,6 +490,29 @@ function AppearanceTable({
     return {};
   }
 
+  // Datas: uma coluna (dimensão) é "de data" se algum valor parece ISO. Formato
+  // efetivo = override por coluna (t.dateFormats) ou padrão do dashboard.
+  const dateCols = new Set<string>();
+  for (const c of allCols) {
+    if (metricKeys.has(c.key)) continue;
+    if (data.rows.some((r) => looksLikeDate(r[c.key]))) dateCols.add(c.key);
+  }
+  const fmtOf = (key: string): DateFormat => t.dateFormats?.[key] ?? dateFormat;
+  const dimDisplay = (v: unknown, key: string): string =>
+    dateCols.has(key) && looksLikeDate(v)
+      ? formatDateValue(v, fmtOf(key))
+      : String(v ?? "—");
+  const widthStyle = (key: string): React.CSSProperties => {
+    const w = t.colWidths?.[key];
+    return w ? { width: w, minWidth: w, maxWidth: w } : {};
+  };
+  const setColWidth = (key: string, w: number) =>
+    setTable({ colWidths: { ...(t.colWidths ?? {}), [key]: w } });
+  const setRowHeight = (key: string, h: number) =>
+    setTable({ rowHeights: { ...(t.rowHeights ?? {}), [key]: h } });
+  const setColDateFormat = (key: string, f: DateFormat) =>
+    setTable({ dateFormats: { ...(t.dateFormats ?? {}), [key]: f } });
+
   function openCtx(
     e: React.MouseEvent,
     column: string,
@@ -485,7 +520,15 @@ function AppearanceTable({
     rk?: string
   ) {
     if (!editable) return;
-    setMenu({ kind: "ctx", x: e.clientX, y: e.clientY, column, rowKey: rk, scopes });
+    setMenu({
+      kind: "ctx",
+      x: e.clientX,
+      y: e.clientY,
+      column,
+      rowKey: rk,
+      scopes,
+      isDate: dateCols.has(column),
+    });
   }
 
   // --- Orientação / agrupamento (Parte 2/3) ---
@@ -525,6 +568,7 @@ function AppearanceTable({
   const renderDataRow = (r: Record<string, unknown>) => {
     const rk = rowKey(r);
     const rowCp = t.rowColors?.[rk];
+    const rh = t.rowHeights?.[rk];
     return (
       <TableRow
         key={rk}
@@ -533,11 +577,12 @@ function AppearanceTable({
           background: rowCp?.fill ?? t.bodyBg,
           color: rowCp?.text ?? t.bodyColor,
           ...(borderColor ? { borderColor } : {}),
+          ...(rh ? { height: rh } : {}),
         }}
       >
         {editable ? (
           <TableCell
-            className="group w-6 cursor-move px-1"
+            className="group relative w-6 cursor-move px-1"
             draggable
             onDragStart={() => setDragRow(rk)}
             onDragOver={(e) => e.preventDefault()}
@@ -552,6 +597,7 @@ function AppearanceTable({
             title="Arraste para reordenar a linha"
           >
             <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
+            <ResizeHandle axis="row" onResize={(hh) => setRowHeight(rk, hh)} />
           </TableCell>
         ) : null}
         {cols.map((c, ci) => {
@@ -568,9 +614,10 @@ function AppearanceTable({
                 color:
                   cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
                 ...cellBorder(ci === cols.length - 1),
+                ...widthStyle(c.key),
               }}
             >
-              {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
+              {isMetric ? fmt(r[c.key]) : dimDisplay(r[c.key], c.key)}
             </TableCell>
           );
         })}
@@ -639,7 +686,7 @@ function AppearanceTable({
     const metricCols = cols.filter((c) => metricKeys.has(c.key));
     const cornerLabel = dimCols.map((c) => c.label).join(" · ") || "";
     const groupHeader = (r: Record<string, unknown>) =>
-      dimCols.map((c) => String(r[c.key] ?? "—")).join(" · ");
+      dimCols.map((c) => dimDisplay(r[c.key], c.key)).join(" · ");
     return (
       <div className="h-full overflow-auto">
         <Table>
@@ -717,7 +764,7 @@ function AppearanceTable({
               <TableHead
                 key={c.key}
                 className={cn(
-                  "group",
+                  "group relative",
                   metricKeys.has(c.key) ? "text-right" : undefined,
                   editable && "cursor-move"
                 )}
@@ -744,6 +791,7 @@ function AppearanceTable({
                   background: t.colColors?.[c.key]?.fill,
                   color: t.colColors?.[c.key]?.text ?? t.headerColor,
                   ...cellBorder(ci === cols.length - 1),
+                  ...widthStyle(c.key),
                 }}
               >
                 <span className="inline-flex items-center gap-1">
@@ -752,6 +800,9 @@ function AppearanceTable({
                   ) : null}
                   {c.label}
                 </span>
+                {editable ? (
+                  <ResizeHandle axis="col" onResize={(w) => setColWidth(c.key, w)} />
+                ) : null}
               </TableHead>
             ))}
           </TableRow>
@@ -814,6 +865,17 @@ function AppearanceTable({
                 rowKey: menu.rowKey,
               }),
           }}
+          dateFormat={
+            menu.isDate
+              ? {
+                  value: t.dateFormats?.[menu.column],
+                  onSelect: (f) => {
+                    setColDateFormat(menu.column, f);
+                    setMenu(null);
+                  },
+                }
+              : undefined
+          }
         />
       ) : null}
 

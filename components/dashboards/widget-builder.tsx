@@ -45,9 +45,8 @@ import {
   type FieldFilterSettings,
   type FilterOp,
   type FilterSettings,
-  type MatrixAxis,
   type Metric,
-  type RecordListColumn,
+  type RowSource,
   type Transform,
   type VisualType,
   type Widget,
@@ -105,9 +104,15 @@ export function WidgetBuilder({
   const [visualType, setVisualType] = useState<VisualType>(
     widget?.visual_type ?? "barra"
   );
-  const [dimensions, setDimensions] = useState<Dimension[]>(
-    widget?.dimensions ?? []
-  );
+  // No modo lista, as colunas exibidas são as Dimensões. Para widgets de lista
+  // já existentes (que guardavam settings.columns), semeia as Dimensões a partir
+  // delas para não "perder" as colunas ao abrir o editor.
+  const initialDimensions: Dimension[] =
+    widget?.settings?.rowMode === "records" &&
+    (widget?.settings?.columns?.length ?? 0) > 0
+      ? widget!.settings!.columns!.map((c) => ({ field: c.field, transform: "none" }))
+      : (widget?.dimensions ?? []);
+  const [dimensions, setDimensions] = useState<Dimension[]>(initialDimensions);
   const [metrics, setMetrics] = useState<Metric[]>(
     widget?.metrics ?? [{ field: "*", agg: "count" }]
   );
@@ -126,60 +131,21 @@ export function WidgetBuilder({
     widget?.settings?.appearance?.table?.groupBy ?? ""
   );
 
-  // Modo "registros individuais" (Fase 1): tabela lista 1 linha por registro e
-  // colunas personalizadas marcadas como editáveis gravam de volta no registro.
+  // Modo "registros individuais" (Fase 1): tabela lista 1 linha por entidade.
+  // As colunas vêm das Dimensões (painel unificado); campos personalizados não
+  // calculados ficam editáveis por padrão (respeitando editable_by_roles) e
+  // gravam de volta na entidade listada (registro/responsável/operação).
   const [recordsMode, setRecordsMode] = useState<boolean>(
     widget?.settings?.rowMode === "records"
   );
-  const [columns, setColumns] = useState<RecordListColumn[]>(
-    widget?.settings?.columns ?? []
+  const [rowSource, setRowSource] = useState<RowSource>(
+    widget?.settings?.rowSource ?? "records"
   );
   const isRecordList = visualType === "tabela" && recordsMode;
   // Barra de busca/filtro embutida nas tabelas (ocultável). Default = visível.
   const [showFilterBar, setShowFilterBar] = useState<boolean>(
     widget?.settings?.showFilterBar !== false
   );
-
-  function setColumnField(i: number, field: string) {
-    setColumns((prev) => {
-      const next = [...prev];
-      // Editável só faz sentido em campos personalizados.
-      const editable = field.startsWith("custom:") ? next[i]?.editable : false;
-      next[i] = { field, editable };
-      return next;
-    });
-  }
-  function setColumnEditable(i: number, editable: boolean) {
-    setColumns((prev) => {
-      const next = [...prev];
-      next[i] = { ...next[i], editable };
-      return next;
-    });
-  }
-
-  // Estrutura da "Tabela editável" (visual_type 'tabela_editavel'). key estável
-  // (gerado no add) + label livre; renomear não órfã as células gravadas.
-  const [matrixRows, setMatrixRows] = useState<MatrixAxis[]>(
-    widget?.settings?.matrix?.rows ?? []
-  );
-  const [matrixCols, setMatrixCols] = useState<MatrixAxis[]>(
-    widget?.settings?.matrix?.cols ?? []
-  );
-  const [matrixCellType, setMatrixCellType] = useState<"numero" | "texto">(
-    widget?.settings?.matrix?.cellType ?? "numero"
-  );
-  const newAxis = (): MatrixAxis => ({ key: crypto.randomUUID(), label: "" });
-  function setAxisLabel(
-    setter: React.Dispatch<React.SetStateAction<MatrixAxis[]>>,
-    i: number,
-    label: string
-  ) {
-    setter((prev) => {
-      const next = [...prev];
-      next[i] = { ...next[i], label };
-      return next;
-    });
-  }
 
   // Fórmula da "Métrica calculada" (visual_type 'calculado').
   const [formula, setFormula] = useState<Formula>(
@@ -247,8 +213,7 @@ export function WidgetBuilder({
 
   const numericFields = available.filter((f) => f.isNumeric);
 
-  // Refs disponíveis para a Métrica calculada: agregações de registros +
-  // células/linhas/colunas das Tabelas editáveis do dashboard (siblings).
+  // Refs disponíveis para a Métrica calculada: agregações de registros.
   const calcRefs: RefOption[] = [
     { ref: "agg:count:*", label: "Contagem de registros", group: "Registros" },
     ...numericFields.flatMap((f) => [
@@ -256,31 +221,6 @@ export function WidgetBuilder({
       { ref: `agg:avg:${f.field}`, label: `Média ${f.label}`, group: "Registros" },
     ]),
   ];
-  for (const mw of siblings) {
-    if (mw.visual_type !== "tabela_editavel") continue;
-    const m = mw.settings?.matrix;
-    if (!m) continue;
-    const g = `Tabela: ${mw.title ?? "Sem título"}`;
-    for (const c of m.cols) {
-      calcRefs.push(
-        { ref: `table:${mw.id}:col:${c.key}:sum`, label: `Σ coluna ${c.label}`, group: g },
-        { ref: `table:${mw.id}:col:${c.key}:avg`, label: `Média coluna ${c.label}`, group: g }
-      );
-    }
-    for (const r of m.rows) {
-      calcRefs.push(
-        { ref: `table:${mw.id}:row:${r.key}:sum`, label: `Σ linha ${r.label}`, group: g },
-        { ref: `table:${mw.id}:row:${r.key}:avg`, label: `Média linha ${r.label}`, group: g }
-      );
-    }
-    for (const r of m.rows)
-      for (const c of m.cols)
-        calcRefs.push({
-          ref: `table:${mw.id}:cell:${r.key}:${c.key}`,
-          label: `Célula ${r.label} × ${c.label}`,
-          group: g,
-        });
-  }
 
   const availableOptions = toFieldOptions(available);
   const metricOptions: ComboboxOption[] = [
@@ -388,36 +328,6 @@ export function WidgetBuilder({
       return;
     }
 
-    // Tabela editável: só a estrutura (matrix) vai em settings; sem dados de
-    // registros. Os valores das células vivem em dashboard_table_cells.
-    if (visualType === "tabela_editavel") {
-      const input = {
-        title: title.trim() || null,
-        visual_type: visualType,
-        sources: [],
-        splitBySource: false,
-        dimensions: [],
-        metrics: [],
-        filters: [],
-        settings: {
-          ...(widget?.settings ?? {}),
-          matrix: {
-            rows: matrixRows.filter((r) => r.label.trim()),
-            cols: matrixCols.filter((c) => c.label.trim()),
-            cellType: matrixCellType,
-          },
-        },
-      };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, input);
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
-      return;
-    }
-
     // Métrica calculada: valida a fórmula (refs vêm do próprio seletor, mas
     // conferimos estrutura/parênteses) e grava em settings.formula.
     if (visualType === "calculado") {
@@ -451,16 +361,19 @@ export function WidgetBuilder({
 
     const cleanFilters = cleanFilterRows(filters);
     // Preserva settings existentes (ex.: KPI meta/razão) e liga/desliga o modo
-    // lista de registros (Fase 1) conforme o toggle.
+    // lista de registros (Fase 1) conforme o toggle. No modo lista, as colunas
+    // exibidas são as próprias Dimensões (painel unificado), na ordem escolhida.
     let settings = { ...(widget?.settings ?? {}) };
     if (isRecordList) {
       settings = {
         ...settings,
         rowMode: "records",
-        columns: columns.filter((c) => c.field),
+        rowSource,
+        columns: dimensions.filter((d) => d.field).map((d) => ({ field: d.field })),
       };
     } else {
       delete settings.rowMode;
+      delete settings.rowSource;
       delete settings.columns;
     }
 
@@ -742,100 +655,7 @@ export function WidgetBuilder({
             </>
           ) : null}
 
-          {/* Estrutura da Tabela editável */}
-          {visualType === "tabela_editavel" ? (
-            <>
-              <div className="flex flex-col gap-1.5">
-                <Label>Tipo de célula</Label>
-                <Combobox
-                  searchable={false}
-                  options={[
-                    { value: "numero", label: "Número" },
-                    { value: "texto", label: "Texto" },
-                  ]}
-                  value={matrixCellType}
-                  onValueChange={(v) =>
-                    setMatrixCellType(v as "numero" | "texto")
-                  }
-                  aria-label="Tipo de célula"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <Label>Linhas</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMatrixRows([...matrixRows, newAxis()])}
-                  >
-                    <Plus className="size-4" /> Adicionar
-                  </Button>
-                </div>
-                {matrixRows.map((r, i) => (
-                  <div key={r.key} className="flex items-center gap-2">
-                    <Input
-                      className="flex-1"
-                      value={r.label}
-                      placeholder="Nome da linha"
-                      onChange={(e) =>
-                        setAxisLabel(setMatrixRows, i, e.target.value)
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setMatrixRows(matrixRows.filter((_, j) => j !== i))
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <Label>Colunas</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMatrixCols([...matrixCols, newAxis()])}
-                  >
-                    <Plus className="size-4" /> Adicionar
-                  </Button>
-                </div>
-                {matrixCols.map((c, i) => (
-                  <div key={c.key} className="flex items-center gap-2">
-                    <Input
-                      className="flex-1"
-                      value={c.label}
-                      placeholder="Nome da coluna"
-                      onChange={(e) =>
-                        setAxisLabel(setMatrixCols, i, e.target.value)
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setMatrixCols(matrixCols.filter((_, j) => j !== i))
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : null}
-
-          {/* Métrica calculada: fórmula sobre tabelas editáveis + agregações */}
+          {/* Métrica calculada: fórmula sobre agregações dos registros */}
           {visualType === "calculado" ? (
             <div className="flex flex-col gap-1.5">
               <Label>Fórmula</Label>
@@ -845,8 +665,7 @@ export function WidgetBuilder({
                 onChange={setFormula}
               />
               <p className="text-muted-foreground text-xs">
-                Combine células/linhas/colunas de Tabelas editáveis e agregações
-                dos registros (+ − × ÷ e constantes).
+                Combine agregações dos registros (+ − × ÷ e constantes).
               </p>
             </div>
           ) : null}
@@ -854,7 +673,6 @@ export function WidgetBuilder({
           {/* Fontes + modo de combinação */}
           {visualType !== "filtro" &&
           visualType !== "filtro_campo" &&
-          visualType !== "tabela_editavel" &&
           visualType !== "calculado" ? (
           <>
           <div className="flex flex-col gap-2">
@@ -893,6 +711,27 @@ export function WidgetBuilder({
                 />
                 Linhas = registros individuais (permite editar valores)
               </label>
+              {isRecordList ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Fonte das linhas</Label>
+                  <Combobox
+                    searchable={false}
+                    options={[
+                      { value: "records", label: "Registros" },
+                      { value: "responsibles", label: "Responsáveis" },
+                      { value: "operations", label: "Operações" },
+                    ]}
+                    value={rowSource}
+                    onValueChange={(v) => setRowSource(v as RowSource)}
+                    aria-label="Fonte das linhas"
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    As colunas são as Dimensões abaixo (na ordem). Campos
+                    personalizados não calculados ficam editáveis (se o papel
+                    permitir) e gravam na entidade listada.
+                  </p>
+                </div>
+              ) : null}
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={showFilterBar}
@@ -920,12 +759,12 @@ export function WidgetBuilder({
             </div>
           ) : null}
 
-          {!isRecordList ? (
-          <>
-          {/* Dimensões */}
+          {/* Dimensões (no modo lista, definem também as colunas exibidas) */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <Label>Dimensões (agrupar por)</Label>
+              <Label>
+                {isRecordList ? "Dimensões (colunas da tabela)" : "Dimensões (agrupar por)"}
+              </Label>
               <Button
                 type="button"
                 variant="ghost"
@@ -1059,57 +898,6 @@ export function WidgetBuilder({
               </div>
             ))}
           </div>
-          </>
-          ) : null}
-
-          {/* Colunas (modo lista de registros) */}
-          {isRecordList ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Label>Colunas</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setColumns([...columns, { field: "" }])}
-                >
-                  <Plus className="size-4" /> Adicionar
-                </Button>
-              </div>
-              <p className="text-muted-foreground text-xs">
-                Marque “editável” para gravar o valor no registro (só campos
-                personalizados; respeita as permissões de cada campo).
-              </p>
-              {columns.map((c, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Combobox
-                    className="flex-1"
-                    options={availableOptions}
-                    value={c.field}
-                    placeholder="— campo —"
-                    onValueChange={(field) => setColumnField(i, field)}
-                    aria-label="Campo da coluna"
-                  />
-                  <label className="flex items-center gap-1.5 text-xs whitespace-nowrap">
-                    <Checkbox
-                      checked={c.editable === true}
-                      disabled={!c.field.startsWith("custom:")}
-                      onCheckedChange={(v) => setColumnEditable(i, v === true)}
-                    />
-                    editável
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setColumns(columns.filter((_, j) => j !== i))}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
 
           {/* Filtros */}
           <div className="flex flex-col gap-2">
@@ -1199,8 +987,18 @@ export function WidgetBuilder({
               <FieldForm
                 key={fieldSheetOpen ? "open" : "closed"}
                 numericRefs={fieldFormNumericRefs}
-                onDone={() => {
+                onDone={(created) => {
                   setFieldSheetOpen(false);
+                  // O campo recém-criado já entra como coluna/dimensão do widget
+                  // em edição (o usuário criou justamente para usar aqui).
+                  if (created?.field_key) {
+                    const ref = `custom:${created.field_key}`;
+                    setDimensions((prev) =>
+                      prev.some((d) => d.field === ref)
+                        ? prev
+                        : [...prev, { field: ref, transform: "none" }]
+                    );
+                  }
                   router.refresh();
                 }}
               />
