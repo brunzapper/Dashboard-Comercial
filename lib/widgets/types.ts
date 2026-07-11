@@ -179,6 +179,13 @@ export interface AppearanceSettings {
     columnOrder?: string[]; // ordem das colunas (reordenação)
     rowOrder?: string[]; // ordem manual das linhas (por rowKey)
     sort?: { column: string; dir: TableSortDir; colorOrder?: string[] };
+    // Orientação da tabela agregada: "rows" (default) = dimensões/métricas como
+    // colunas no topo, 1 linha por grupo; "columns" = transposta (rótulos descem
+    // pela esquerda e cada grupo vira uma coluna).
+    orientation?: "rows" | "columns";
+    // Agrupamento estilo Excel: `key` de uma dimensão pela qual as linhas são
+    // agrupadas em seções recolhíveis com subtotais (só na orientação "rows").
+    groupBy?: string;
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior

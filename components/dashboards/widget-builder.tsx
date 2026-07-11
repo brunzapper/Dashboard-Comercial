@@ -136,6 +136,15 @@ export function WidgetBuilder({
     widget?.split_by_source ?? false
   );
 
+  // Aparência de tabela editada já no builder (Parte 2/3): orientação (normal x
+  // transposta) e "Agrupar por" (dimensão que vira seções recolhíveis c/ subtotais).
+  const [tableOrientation, setTableOrientation] = useState<"rows" | "columns">(
+    widget?.settings?.appearance?.table?.orientation ?? "rows"
+  );
+  const [tableGroupBy, setTableGroupBy] = useState<string>(
+    widget?.settings?.appearance?.table?.groupBy ?? ""
+  );
+
   // Modo "registros individuais" (Fase 1): tabela lista 1 linha por registro e
   // colunas personalizadas marcadas como editáveis gravam de volta no registro.
   const [recordsMode, setRecordsMode] = useState<boolean>(
@@ -287,6 +296,25 @@ export function WidgetBuilder({
     return available.find((a) => a.field === field)?.isDate ?? false;
   }
 
+  // Opções de orientação e "Agrupar por" da tabela agregada (Parte 2/3). As keys
+  // do groupBy espelham as que o engine gera em runtime (`dim_<n>`), respeitando
+  // o deslocamento quando "Quebrar por fonte" injeta record_type como dim_1.
+  const orientationOptions: ComboboxOption[] = [
+    { value: "rows", label: "Cabeçalho acima (resultados em linhas)" },
+    { value: "columns", label: "Cabeçalho à esquerda (transposta)" },
+  ];
+  const groupByOffset = splitBySource ? 1 : 0;
+  const groupByOptions: ComboboxOption[] = [
+    { value: "", label: "— nenhum —" },
+    ...(splitBySource ? [{ value: "dim_1", label: "Fonte" }] : []),
+    ...dimensions
+      .filter((d) => d.field)
+      .map((d, i) => ({
+        value: `dim_${groupByOffset + i + 1}`,
+        label: available.find((a) => a.field === d.field)?.label ?? d.field,
+      })),
+  ];
+
   function save() {
     setError(null);
 
@@ -407,6 +435,21 @@ export function WidgetBuilder({
     } else {
       delete settings.rowMode;
       delete settings.columns;
+    }
+
+    // Orientação/agrupamento da tabela agregada (Parte 2/3): grava em
+    // appearance.table preservando as demais chaves de aparência. Só faz sentido
+    // na Tabela agregada; nos outros tipos, limpa para não deixar lixo.
+    if (visualType === "tabela" && !isRecordList) {
+      const table = { ...(settings.appearance?.table ?? {}) };
+      table.orientation = tableOrientation;
+      // Transposta não combina com agrupamento nesta entrega.
+      if (tableGroupBy && tableOrientation !== "columns") table.groupBy = tableGroupBy;
+      else delete table.groupBy;
+      settings = {
+        ...settings,
+        appearance: { ...(settings.appearance ?? {}), table },
+      };
     }
 
     const input = {
@@ -733,6 +776,40 @@ export function WidgetBuilder({
               </div>
             ))}
           </div>
+
+          {/* Orientação + Agrupar por (só Tabela agregada) */}
+          {visualType === "tabela" ? (
+            <div className="flex flex-col gap-3 rounded-md border p-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Orientação</Label>
+                <Combobox
+                  searchable={false}
+                  options={orientationOptions}
+                  value={tableOrientation}
+                  onValueChange={(v) =>
+                    setTableOrientation(v as "rows" | "columns")
+                  }
+                  aria-label="Orientação da tabela"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Agrupar por</Label>
+                <Combobox
+                  searchable={false}
+                  options={groupByOptions}
+                  value={tableGroupBy}
+                  placeholder="— nenhum —"
+                  disabled={tableOrientation === "columns"}
+                  onValueChange={setTableGroupBy}
+                  aria-label="Agrupar por"
+                />
+                <p className="text-muted-foreground text-xs">
+                  Agrupa as linhas por uma dimensão em seções recolhíveis com
+                  subtotais. Indisponível na orientação transposta.
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           {/* Métricas */}
           <div className="flex flex-col gap-2">

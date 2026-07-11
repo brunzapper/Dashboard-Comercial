@@ -6,7 +6,7 @@
 "use client";
 
 import { useState } from "react";
-import { GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -415,6 +415,8 @@ function AppearanceTable({
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<TableMenu | null>(null);
+  // Grupos recolhidos no modo "Agrupar por" (efêmero; default = todos expandidos).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const metricKeys = new Set(data.metrics.map((m) => m.key));
   const dimKeys = data.dimensions.map((d) => d.key);
@@ -486,6 +488,218 @@ function AppearanceTable({
     setMenu({ kind: "ctx", x: e.clientX, y: e.clientY, column, rowKey: rk, scopes });
   }
 
+  // --- Orientação / agrupamento (Parte 2/3) ---
+  const orientation = t.orientation === "columns" ? "columns" : "rows";
+  // "Agrupar por" só se aplica na orientação normal e se a key ainda existir
+  // (pode ter ficado órfã se as dimensões mudaram).
+  const groupByKey =
+    orientation === "rows" && t.groupBy && dimKeys.includes(t.groupBy)
+      ? t.groupBy
+      : null;
+  const groupLabelOf = (v: unknown) =>
+    v == null || v === "" ? "—" : String(v);
+  // Subtotal de uma métrica sobre um conjunto de linhas (soma; exato p/ count/sum,
+  // aproximado p/ avg/min/max — ver plano).
+  const sumMetric = (rs: Record<string, unknown>[], key: string) =>
+    rs.reduce((s, r) => {
+      const n = Number(r[key]);
+      return Number.isNaN(n) ? s : s + n;
+    }, 0);
+  // Grupos preservando a ordem de `rows`.
+  const groups: { label: string; rows: Record<string, unknown>[] }[] = [];
+  if (groupByKey) {
+    const idx = new Map<string, number>();
+    for (const r of rows) {
+      const label = groupLabelOf(r[groupByKey]);
+      let i = idx.get(label);
+      if (i == null) {
+        i = groups.length;
+        idx.set(label, i);
+        groups.push({ label, rows: [] });
+      }
+      groups[i].rows.push(r);
+    }
+  }
+
+  // Renderiza uma linha de dados (reutilizada nos modos plano e agrupado).
+  const renderDataRow = (r: Record<string, unknown>) => {
+    const rk = rowKey(r);
+    const rowCp = t.rowColors?.[rk];
+    return (
+      <TableRow
+        key={rk}
+        className={rowBorder}
+        style={{
+          background: rowCp?.fill ?? t.bodyBg,
+          color: rowCp?.text ?? t.bodyColor,
+          ...(borderColor ? { borderColor } : {}),
+        }}
+      >
+        {editable ? (
+          <TableCell
+            className="group w-6 cursor-move px-1"
+            draggable
+            onDragStart={() => setDragRow(rk)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => {
+              if (dragRow)
+                setTable({
+                  rowOrder: reorderKeys(rows.map(rowKey), dragRow, rk),
+                  sort: undefined,
+                });
+              setDragRow(null);
+            }}
+            title="Arraste para reordenar a linha"
+          >
+            <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
+          </TableCell>
+        ) : null}
+        {cols.map((c, ci) => {
+          const isMetric = metricKeys.has(c.key);
+          const cellCp = t.cellColors?.[`${rk}:${c.key}`];
+          const colCp = t.colColors?.[c.key];
+          return (
+            <TableCell
+              key={c.key}
+              className={isMetric ? "text-right tabular-nums" : undefined}
+              onDoubleClick={(e) => openCtx(e, c.key, ["row", "col", "cell"], rk)}
+              style={{
+                background: cellCp?.fill ?? colCp?.fill,
+                color:
+                  cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
+                ...cellBorder(ci === cols.length - 1),
+              }}
+            >
+              {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    );
+  };
+
+  // Linha de subtotais de um grupo (cabeçalho recolhível) ou total geral.
+  const renderSubtotalRow = (
+    label: string,
+    rs: Record<string, unknown>[],
+    opts?: { collapsible?: boolean; isCollapsed?: boolean; onToggle?: () => void }
+  ) => (
+    <TableRow
+      key={`__grp:${label}`}
+      className={cn(rowBorder, "font-medium")}
+      style={{
+        background: t.headerBg ?? "var(--muted)",
+        color: t.headerColor,
+        ...(borderColor ? { borderColor } : {}),
+      }}
+    >
+      {editable ? <TableCell className="w-6 px-1" /> : null}
+      {cols.map((c, ci) => {
+        const isMetric = metricKeys.has(c.key);
+        const isFirst = ci === 0;
+        return (
+          <TableCell
+            key={c.key}
+            className={isMetric ? "text-right tabular-nums" : undefined}
+            style={cellBorder(ci === cols.length - 1)}
+          >
+            {isFirst ? (
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-1",
+                  opts?.collapsible ? "cursor-pointer" : "cursor-default"
+                )}
+                onClick={opts?.onToggle}
+                disabled={!opts?.collapsible}
+              >
+                {opts?.collapsible ? (
+                  opts.isCollapsed ? (
+                    <ChevronRight className="size-3.5 shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-3.5 shrink-0" />
+                  )
+                ) : null}
+                {label}
+              </button>
+            ) : isMetric ? (
+              fmt(sumMetric(rs, c.key))
+            ) : null}
+          </TableCell>
+        );
+      })}
+    </TableRow>
+  );
+
+  // --- Modo transposto: dimensão(ões) no canto sup. esq., cada grupo vira uma
+  // coluna, métricas descem como linhas à esquerda. Interações de cor/arraste
+  // ficam desativadas nesta visão (ver plano). ---
+  if (orientation === "columns") {
+    const dimCols = cols.filter((c) => !metricKeys.has(c.key));
+    const metricCols = cols.filter((c) => metricKeys.has(c.key));
+    const cornerLabel = dimCols.map((c) => c.label).join(" · ") || "";
+    const groupHeader = (r: Record<string, unknown>) =>
+      dimCols.map((c) => String(r[c.key] ?? "—")).join(" · ");
+    return (
+      <div className="h-full overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow
+              className={rowBorder}
+              style={{
+                background: t.headerBg,
+                color: t.headerColor,
+                ...(borderColor ? { borderColor } : {}),
+              }}
+            >
+              <TableHead style={cellBorder(rows.length === 0)}>
+                {cornerLabel}
+              </TableHead>
+              {rows.map((r, ri) => (
+                <TableHead
+                  key={rowKey(r)}
+                  className="text-right"
+                  style={cellBorder(ri === rows.length - 1)}
+                >
+                  {groupHeader(r)}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {metricCols.map((c) => (
+              <TableRow
+                key={c.key}
+                className={rowBorder}
+                style={{
+                  background: t.bodyBg,
+                  color: t.bodyColor,
+                  ...(borderColor ? { borderColor } : {}),
+                }}
+              >
+                <TableHead
+                  className="font-medium"
+                  style={cellBorder(rows.length === 0)}
+                >
+                  {c.label}
+                </TableHead>
+                {rows.map((r, ri) => (
+                  <TableCell
+                    key={rowKey(r)}
+                    className="text-right tabular-nums"
+                    style={cellBorder(ri === rows.length - 1)}
+                  >
+                    {fmt(r[c.key])}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-auto">
       <Table>
@@ -543,70 +757,29 @@ function AppearanceTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => {
-            const rk = rowKey(r);
-            const rowCp = t.rowColors?.[rk];
-            return (
-              <TableRow
-                key={rk}
-                className={rowBorder}
-                style={{
-                  background: rowCp?.fill ?? t.bodyBg,
-                  color: rowCp?.text ?? t.bodyColor,
-                  ...(borderColor ? { borderColor } : {}),
-                }}
-              >
-                {editable ? (
-                  <TableCell
-                    className="group w-6 cursor-move px-1"
-                    draggable
-                    onDragStart={() => setDragRow(rk)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragRow)
-                        setTable({
-                          rowOrder: reorderKeys(
-                            rows.map(rowKey),
-                            dragRow,
-                            rk
-                          ),
-                          sort: undefined,
-                        });
-                      setDragRow(null);
-                    }}
-                    title="Arraste para reordenar a linha"
-                  >
-                    <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
-                  </TableCell>
-                ) : null}
-                {cols.map((c, ci) => {
-                  const isMetric = metricKeys.has(c.key);
-                  const cellCp = t.cellColors?.[`${rk}:${c.key}`];
-                  const colCp = t.colColors?.[c.key];
-                  return (
-                    <TableCell
-                      key={c.key}
-                      className={isMetric ? "text-right tabular-nums" : undefined}
-                      onDoubleClick={(e) =>
-                        openCtx(e, c.key, ["row", "col", "cell"], rk)
-                      }
-                      style={{
-                        background: cellCp?.fill ?? colCp?.fill,
-                        color:
-                          cellCp?.text ??
-                          rowCp?.text ??
-                          colCp?.text ??
-                          t.bodyColor,
-                        ...cellBorder(ci === cols.length - 1),
-                      }}
-                    >
-                      {isMetric ? fmt(r[c.key]) : String(r[c.key] ?? "—")}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            );
-          })}
+          {groupByKey
+            ? groups.flatMap((g) => {
+                const isCollapsed = collapsed.has(g.label);
+                const rowsOut = [
+                  renderSubtotalRow(g.label, g.rows, {
+                    collapsible: true,
+                    isCollapsed,
+                    onToggle: () =>
+                      setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(g.label)) next.delete(g.label);
+                        else next.add(g.label);
+                        return next;
+                      }),
+                  }),
+                ];
+                if (!isCollapsed) rowsOut.push(...g.rows.map(renderDataRow));
+                return rowsOut;
+              })
+            : rows.map(renderDataRow)}
+          {groupByKey && groups.length > 0
+            ? renderSubtotalRow("Total geral", rows)
+            : null}
         </TableBody>
       </Table>
 
