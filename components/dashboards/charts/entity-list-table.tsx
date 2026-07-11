@@ -265,6 +265,12 @@ export function EntityListTable({
     const w = t.colWidths?.[field];
     return w ? { width: w, minWidth: w, maxWidth: w } : {};
   };
+  // Classe do conteúdo interno da célula: cortar (…) ou quebrar linha.
+  const cellText = t.cellText ?? "clip";
+  const cellSpanClass =
+    cellText === "wrap"
+      ? "block whitespace-normal break-words"
+      : "block truncate";
 
   const setTable = (patch: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     change({ ...ap, table: { ...t, ...patch } });
@@ -337,7 +343,7 @@ export function EntityListTable({
                 }}
               >
                 <TableCell className="relative align-top font-medium" style={cellBorder(0)}>
-                  <span className="block truncate">{r.label}</span>
+                  <span className={cellSpanClass}>{r.label}</span>
                   {editable ? (
                     <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
                   ) : null}
@@ -354,6 +360,7 @@ export function EntityListTable({
                         color: t.colColors?.[c.field]?.text ?? t.bodyColor,
                         ...cellBorder(ci + 1),
                         ...widthStyle(c.field),
+                        ...(cellText === "clip" ? { overflow: "hidden" } : {}),
                       }}
                     >
                       {field ? (
@@ -368,7 +375,7 @@ export function EntityListTable({
                           onSaved={() => router.refresh()}
                         />
                       ) : (
-                        <span className="block truncate">—</span>
+                        <span className={cellSpanClass}>—</span>
                       )}
                     </TableCell>
                   );

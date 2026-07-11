@@ -260,13 +260,18 @@ export function WidgetBuilder({
     { value: "columns", label: "Cabeçalho à esquerda (transposta)" },
   ];
   const groupByOffset = splitBySource ? 1 : 0;
+  // No modo registros as dimensões SÃO as colunas da tabela, então o "Agrupar por"
+  // é chaveado pelo próprio campo (`d.field`). No modo agregado, espelha as keys de
+  // runtime do engine (`dim_<n>`), com deslocamento quando "Quebrar por fonte".
   const groupByOptions: ComboboxOption[] = [
     { value: "", label: "— nenhum —" },
-    ...(splitBySource ? [{ value: "dim_1", label: "Fonte" }] : []),
+    ...(!isRecordList && splitBySource
+      ? [{ value: "dim_1", label: "Fonte" }]
+      : []),
     ...dimensions
       .filter((d) => d.field)
       .map((d, i) => ({
-        value: `dim_${groupByOffset + i + 1}`,
+        value: isRecordList ? d.field : `dim_${groupByOffset + i + 1}`,
         label: available.find((a) => a.field === d.field)?.label ?? d.field,
       })),
   ];
@@ -383,15 +388,24 @@ export function WidgetBuilder({
       else settings.showFilterBar = false;
     }
 
-    // Orientação/agrupamento da tabela agregada (Parte 2/3): grava em
-    // appearance.table preservando as demais chaves de aparência. Só faz sentido
-    // na Tabela agregada; nos outros tipos, limpa para não deixar lixo.
-    if (visualType === "tabela" && !isRecordList) {
+    // Orientação/agrupamento da tabela: grava em appearance.table preservando as
+    // demais chaves de aparência. Orientação só existe na Tabela agregada; o
+    // agrupamento vale nos dois modos (agregada por dimensão `dim_<n>`, registros
+    // por coluna `c.field`). Nos outros tipos, limpa para não deixar lixo.
+    if (visualType === "tabela") {
       const table = { ...(settings.appearance?.table ?? {}) };
-      table.orientation = tableOrientation;
-      // Transposta não combina com agrupamento nesta entrega.
-      if (tableGroupBy && tableOrientation !== "columns") table.groupBy = tableGroupBy;
-      else delete table.groupBy;
+      if (isRecordList) {
+        // Modo registros: sem orientação transposta.
+        delete table.orientation;
+        if (tableGroupBy) table.groupBy = tableGroupBy;
+        else delete table.groupBy;
+      } else {
+        table.orientation = tableOrientation;
+        // Transposta não combina com agrupamento nesta entrega.
+        if (tableGroupBy && tableOrientation !== "columns")
+          table.groupBy = tableGroupBy;
+        else delete table.groupBy;
+      }
       settings = {
         ...settings,
         appearance: { ...(settings.appearance ?? {}), table },
@@ -763,7 +777,7 @@ export function WidgetBuilder({
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <Label>
-                {isRecordList ? "Dimensões (colunas da tabela)" : "Dimensões (agrupar por)"}
+                {isRecordList ? "Dimensões (colunas da tabela)" : "Dimensões"}
               </Label>
               <Button
                 type="button"
@@ -814,21 +828,23 @@ export function WidgetBuilder({
             ))}
           </div>
 
-          {/* Orientação + Agrupar por (só Tabela agregada) */}
+          {/* Orientação (só Tabela agregada) + Agrupar por (ambos os modos) */}
           {visualType === "tabela" ? (
             <div className="flex flex-col gap-3 rounded-md border p-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Orientação</Label>
-                <Combobox
-                  searchable={false}
-                  options={orientationOptions}
-                  value={tableOrientation}
-                  onValueChange={(v) =>
-                    setTableOrientation(v as "rows" | "columns")
-                  }
-                  aria-label="Orientação da tabela"
-                />
-              </div>
+              {!isRecordList ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Orientação</Label>
+                  <Combobox
+                    searchable={false}
+                    options={orientationOptions}
+                    value={tableOrientation}
+                    onValueChange={(v) =>
+                      setTableOrientation(v as "rows" | "columns")
+                    }
+                    aria-label="Orientação da tabela"
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <Label>Agrupar por</Label>
                 <Combobox
@@ -836,13 +852,17 @@ export function WidgetBuilder({
                   options={groupByOptions}
                   value={tableGroupBy}
                   placeholder="— nenhum —"
-                  disabled={tableOrientation === "columns"}
+                  disabled={!isRecordList && tableOrientation === "columns"}
                   onValueChange={setTableGroupBy}
                   aria-label="Agrupar por"
                 />
                 <p className="text-muted-foreground text-xs">
-                  Agrupa as linhas por uma dimensão em seções recolhíveis com
-                  subtotais. Indisponível na orientação transposta.
+                  Agrupa as linhas por uma{" "}
+                  {isRecordList ? "coluna" : "dimensão"} em seções recolhíveis
+                  com subtotais.
+                  {!isRecordList
+                    ? " Indisponível na orientação transposta."
+                    : ""}
                 </p>
               </div>
             </div>

@@ -96,6 +96,7 @@ export function WidgetCard({
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const kpi = isKpi ? appearance?.kpi : undefined;
+  const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
   // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/calc).
@@ -104,22 +105,27 @@ export function WidgetCard({
   return (
     <div
       className="bg-card flex h-full flex-col overflow-hidden rounded-lg border"
-      style={
-        kpi
-          ? { background: kpi.bg, borderColor: kpi.border }
-          : undefined
-      }
+      style={{
+        background: kpi?.bg,
+        borderColor: title?.border ?? kpi?.border,
+      }}
     >
       {kpi?.accent ? (
         <div style={{ height: 3, background: kpi.accent }} />
       ) : null}
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+      <div
+        className="flex items-center gap-2 border-b px-3 py-2"
+        style={{ background: title?.bg }}
+      >
         {editMode ? (
           <span className="widget-drag text-muted-foreground cursor-move">
             <GripVertical className="size-4" />
           </span>
         ) : null}
-        <span className="flex-1 truncate text-sm font-medium">
+        <span
+          className="flex-1 truncate text-sm font-medium"
+          style={{ color: title?.color }}
+        >
           {widget.title ?? "Sem título"}
         </span>
         {canEdit ? (

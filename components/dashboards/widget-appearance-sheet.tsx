@@ -121,6 +121,28 @@ export function WidgetAppearanceSheet({
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4 pb-8">
+          {/* ---------- Título e borda (todos os tipos) ---------- */}
+          <Section title="Título e borda">
+            <ColorField
+              label="Cor do texto do título"
+              value={ap.title?.color}
+              onChange={(v) => patch({ title: { ...ap.title, color: v } })}
+              onClear={() => patch({ title: { ...ap.title, color: undefined } })}
+            />
+            <ColorField
+              label="Fundo da barra de título"
+              value={ap.title?.bg}
+              onChange={(v) => patch({ title: { ...ap.title, bg: v } })}
+              onClear={() => patch({ title: { ...ap.title, bg: undefined } })}
+            />
+            <ColorField
+              label="Cor da borda / contorno"
+              value={ap.title?.border}
+              onChange={(v) => patch({ title: { ...ap.title, border: v } })}
+              onClear={() => patch({ title: { ...ap.title, border: undefined } })}
+            />
+          </Section>
+
           {/* ---------- Gráficos (barra/linha) ---------- */}
           {isChart ? (
             <>
@@ -322,6 +344,17 @@ export function WidgetAppearanceSheet({
                   { value: "horizontal", label: "Horizontais" },
                   { value: "vertical", label: "Verticais" },
                   { value: "none", label: "Nenhuma" },
+                ]}
+              />
+              <SelectRow
+                label="Texto que excede a célula"
+                value={ap.table?.cellText ?? "clip"}
+                onChange={(v) =>
+                  patchTable({ cellText: v as "clip" | "wrap" })
+                }
+                options={[
+                  { value: "clip", label: "Cortar (…)" },
+                  { value: "wrap", label: "Quebrar linha" },
                 ]}
               />
               <p className="text-muted-foreground text-xs">
