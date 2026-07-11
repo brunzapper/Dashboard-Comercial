@@ -347,8 +347,9 @@ export async function updateRecord(
 }
 
 export interface UpdateFieldOptions {
-  // 'custom' (padrão) grava em custom_fields; 'core' grava numa coluna do núcleo.
-  kind?: "custom" | "core";
+  // 'custom' (padrão) grava em custom_fields; 'core' grava numa coluna do núcleo;
+  // 'relation' grava uma coluna FK (responsável/operação/lead), sempre local.
+  kind?: "custom" | "core" | "relation";
   // Dashboard: esta coluna deve gravar de volta no Bitrix.
   writeBack?: boolean;
   // Registros: campos de Sync sempre gravam no Bitrix (e ficam editáveis).
@@ -373,8 +374,17 @@ export async function updateRecordField(
 ): Promise<EditActionState> {
   const fd = new FormData();
   fd.set("record_id", recordId);
-  const key = opts.kind === "core" ? `core__${fieldKey}` : `custom__${fieldKey}`;
-  fd.set(key, rawValue);
+  // 'relation' usa a própria chave da coluna FK (responsible_id/…), que o laço
+  // RELATIONS de updateRecord já entende; 'core'/'custom' usam os prefixos.
+  if (opts.kind === "relation") {
+    if (!(RELATIONS as readonly string[]).includes(fieldKey)) {
+      return { ok: false, message: "Relação inválida." };
+    }
+    fd.set(fieldKey, rawValue);
+  } else {
+    const key = opts.kind === "core" ? `core__${fieldKey}` : `custom__${fieldKey}`;
+    fd.set(key, rawValue);
+  }
   if (opts.writeBack) fd.set(`write_back__${fieldKey}`, "1");
   if (opts.forceSyncWriteBack) fd.set("force_sync_write_back", "1");
   if (opts.allowEdit) fd.set("allow_edit", "1");

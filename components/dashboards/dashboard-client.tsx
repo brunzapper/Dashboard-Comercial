@@ -5,10 +5,11 @@
 // e filtro como widget (siblings ao builder).
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Check, Clock, Pencil, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
@@ -24,6 +25,7 @@ import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
 import { DashboardMenu } from "./dashboard-menu";
+import { DashboardTabs } from "./dashboard-tabs";
 import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
@@ -38,12 +40,14 @@ export function DashboardClient({
   calcById,
   fields,
   fkLabels,
+  responsibleOptions,
   userRoles,
   canEditValues,
   available,
   canEdit,
   canManageFields = false,
   settings,
+  visibleToRoles,
   dateFormat,
   periodBar,
   periodDefaults,
@@ -59,12 +63,14 @@ export function DashboardClient({
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
   settings: DashboardSettings;
+  visibleToRoles: string[];
   dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
   periodDefaults?: PeriodSelection;
@@ -76,11 +82,77 @@ export function DashboardClient({
 
   const barEnabled = periodBar?.enabled !== false;
   const backgroundCss = dashboardBackgroundCss(settings.background);
+  const canvas = settings.canvas;
+
+  // Abas: id efetivo de um widget = settings.tab ?? primeira aba. Sem abas
+  // configuradas, o dashboard é uma tela única (todos os widgets visíveis).
+  const tabs = settings.tabs ?? [];
+  const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id ?? "");
+  const firstTabId = tabs[0]?.id ?? "";
+  const tabIds = new Set(tabs.map((t) => t.id));
+  // Aba efetiva: a do widget quando ainda existe; senão (sem aba ou aba excluída)
+  // cai na primeira aba, para nenhum widget "sumir".
+  const widgetTab = (w: Widget) => {
+    const t = w.settings?.tab;
+    return t && tabIds.has(t) ? t : firstTabId;
+  };
+  const visibleWidgets =
+    tabs.length === 0 ? widgets : widgets.filter((w) => widgetTab(w) === activeTabId);
 
   function showBar() {
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
+        ...settings,
         periodBar: { ...periodBar, enabled: true },
+      });
+    });
+  }
+
+  function saveTabs(next: DashboardSettings["tabs"]) {
+    startTransition(async () => {
+      await updateDashboardSettings(dashboardId, { ...settings, tabs: next });
+    });
+  }
+
+  // Alça de redimensionamento da área de trabalho (canto inferior-direito, modo
+  // edição): arrasta para definir largura/altura fixas; persiste em settings.canvas.
+  const dragRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const areaRef = useRef<HTMLDivElement | null>(null);
+  function onResizeDown(e: React.PointerEvent) {
+    e.preventDefault();
+    const el = areaRef.current;
+    if (!el) return;
+    dragRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      w: canvas?.width ?? el.offsetWidth,
+      h: canvas?.height ?? el.offsetHeight,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onResizeMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    const el = areaRef.current;
+    if (!d || !el) return;
+    el.style.width = `${Math.max(280, Math.round(d.w + (e.clientX - d.x)))}px`;
+    el.style.height = `${Math.max(200, Math.round(d.h + (e.clientY - d.y)))}px`;
+  }
+  function onResizeUp(e: React.PointerEvent) {
+    const d = dragRef.current;
+    const el = areaRef.current;
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* noop */
+    }
+    if (!d || !el) return;
+    const width = Math.max(280, el.offsetWidth);
+    const height = Math.max(200, el.offsetHeight);
+    startTransition(async () => {
+      await updateDashboardSettings(dashboardId, {
+        ...settings,
+        canvas: { ...settings.canvas, width, height },
       });
     });
   }
@@ -104,16 +176,32 @@ export function DashboardClient({
               available={available}
               siblings={widgets}
               canManageFields={canManageFields}
+              tabs={tabs}
+              activeTabId={activeTabId}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
                 </Button>
               }
             />
-            <DashboardMenu dashboardId={dashboardId} settings={settings} />
+            <DashboardMenu
+              dashboardId={dashboardId}
+              settings={settings}
+              visibleToRoles={visibleToRoles}
+            />
           </div>
         ) : null}
       </div>
+
+      {tabs.length > 0 || (canEdit && editMode) ? (
+        <DashboardTabs
+          tabs={tabs}
+          activeId={activeTabId}
+          onSelect={setActiveTabId}
+          editMode={canEdit && editMode}
+          onChange={saveTabs}
+        />
+      ) : null}
 
       <DashboardPendingProvider>
         {barEnabled ? (
@@ -138,27 +226,48 @@ export function DashboardClient({
         ) : null}
 
         <div
-          className={backgroundCss ? "rounded-lg p-3" : undefined}
-          style={backgroundCss ? { background: backgroundCss } : undefined}
+          ref={areaRef}
+          className={cn("relative", backgroundCss && "rounded-lg p-3")}
+          style={{
+            ...(backgroundCss ? { background: backgroundCss } : {}),
+            ...(canvas?.width ? { width: canvas.width, maxWidth: "100%" } : {}),
+            ...(canvas?.height ? { height: canvas.height, overflow: "auto" } : {}),
+          }}
         >
           <DashboardGrid
-            widgets={widgets}
+            widgets={visibleWidgets}
             dataById={dataById}
             recordListById={recordListById}
             entityListById={entityListById}
             calcById={calcById}
             fields={fields}
             fkLabels={fkLabels}
+            responsibleOptions={responsibleOptions}
             userRoles={userRoles}
             canEditValues={canEditValues}
             available={available}
             dashboardId={dashboardId}
             dateFormat={dateFormat}
+            cols={canvas?.cols}
+            rowHeight={canvas?.rowHeight}
+            tabs={tabs}
             canEdit={canEdit}
             canManageFields={canManageFields}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
           />
+          {canEdit && editMode ? (
+            <span
+              role="separator"
+              aria-label="Redimensionar área de trabalho"
+              title="Arraste para redimensionar a área"
+              onPointerDown={onResizeDown}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeUp}
+              onPointerCancel={onResizeUp}
+              className="border-primary/60 bg-background absolute right-0 bottom-0 z-10 size-4 cursor-nwse-resize rounded-tl border-t border-l"
+            />
+          ) : null}
         </div>
       </DashboardPendingProvider>
     </div>

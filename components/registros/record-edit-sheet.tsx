@@ -24,14 +24,10 @@ import {
   type RecordRow,
 } from "@/lib/records/types";
 import { updateRecord, type EditActionState } from "@/lib/records/actions";
+import { CURRENCY_OPTIONS, formatMoney } from "@/lib/widgets/currency";
 import { LeadCombobox } from "./lead-combobox";
 
 const initial: EditActionState = {};
-
-function fmtMoney(v: number | null): string {
-  if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
 function customValue(record: RecordRow, key: string): string {
   const v = record.custom_fields?.[key];
@@ -123,6 +119,7 @@ export function RecordEditSheet({
   const [state, formAction, pending] = useActionState(updateRecord, initial);
   const [responsibleId, setResponsibleId] = useState(record.responsible_id ?? "");
   const [operationId, setOperationId] = useState(record.operation_id ?? "");
+  const [currencyCode, setCurrencyCode] = useState(record.currency ?? "");
 
   useEffect(() => {
     // Fecha o painel quando a Server Action conclui com sucesso.
@@ -196,6 +193,18 @@ export function RecordEditSheet({
                   defaultValue={record.mrr ?? ""}
                 />
               </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Moeda</Label>
+                <Combobox
+                  name="core__currency"
+                  options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
+                  value={currencyCode}
+                  onValueChange={setCurrencyCode}
+                  placeholder="—"
+                  className="w-full"
+                  aria-label="Moeda"
+                />
+              </div>
               <div className="text-muted-foreground col-span-2 text-xs">
                 Lead time (dias): {record.lead_time_days ?? "—"}
               </div>
@@ -205,9 +214,11 @@ export function RecordEditSheet({
               <span className="text-muted-foreground">Etapa</span>
               <span>{record.stage ?? "—"}</span>
               <span className="text-muted-foreground">MRR</span>
-              <span>{fmtMoney(record.mrr)}</span>
+              <span>{formatMoney(record.mrr, record.currency)}</span>
               <span className="text-muted-foreground">Valor</span>
-              <span>{fmtMoney(record.value)}</span>
+              <span>{formatMoney(record.value, record.currency)}</span>
+              <span className="text-muted-foreground">Moeda</span>
+              <span>{record.currency ?? "—"}</span>
               <span className="text-muted-foreground">Canal</span>
               <span>{record.channel ?? "—"}</span>
               <span className="text-muted-foreground">Lead time (dias)</span>

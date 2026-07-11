@@ -55,12 +55,14 @@ export function WidgetCard({
   calcValue,
   fields,
   fkLabels,
+  responsibleOptions,
   userRoles,
   canEditValues,
   available,
   dashboardId,
   dateFormat,
   siblings,
+  tabs,
   canEdit,
   canManageFields = false,
   editMode,
@@ -73,12 +75,14 @@ export function WidgetCard({
   calcValue: number | null;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
   dateFormat?: DateFormat;
   siblings: Widget[];
+  tabs?: { id: string; name: string; color?: string }[];
   canEdit: boolean;
   canManageFields?: boolean;
   editMode: boolean;
@@ -225,6 +229,7 @@ export function WidgetCard({
               userRoles={userRoles}
               canEditValues={canEditValues}
               fkLabels={fkLabels}
+              responsibleOptions={responsibleOptions}
               appearance={appearance}
               dateFormat={dateFormat}
               canEdit={canEdit}
@@ -261,6 +266,7 @@ export function WidgetCard({
             widget={widget}
             siblings={siblings}
             canManageFields={canManageFields}
+            tabs={tabs}
             open={builderOpen}
             onOpenChange={setBuilderOpen}
           />

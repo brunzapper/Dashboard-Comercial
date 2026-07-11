@@ -5,9 +5,11 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Maximize, MoreVertical, Palette } from "lucide-react";
+import { LayoutGrid, Maximize, MoreVertical, Palette, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,20 +42,58 @@ import {
   DEFAULT_DATE_FORMAT,
   type DateFormat,
 } from "@/lib/widgets/format";
-import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  updateDashboardSettings,
+  updateDashboardVisibility,
+} from "@/app/(app)/dashboards/actions";
 
 type BgMode = "none" | "solid" | "gradient";
+
+const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 
 export function DashboardMenu({
   dashboardId,
   settings,
+  visibleToRoles,
 }: {
   dashboardId: string;
   settings: DashboardSettings;
+  visibleToRoles: string[];
 }) {
   const { toggleFullscreen } = useAppChrome();
   const [bgOpen, setBgOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // Compartilhamento (visibilidade por papel).
+  const [roles, setRoles] = useState<string[]>(visibleToRoles);
+  const toggleRole = (r: string) =>
+    setRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
+  function saveShare() {
+    startTransition(async () => {
+      await updateDashboardVisibility(dashboardId, roles);
+      setShareOpen(false);
+    });
+  }
+
+  // Área de trabalho (grid): nº de colunas e altura da linha + largura/altura da área.
+  const canvas = settings.canvas ?? {};
+  const [cols, setCols] = useState<number>(canvas.cols ?? 12);
+  const [rowHeight, setRowHeight] = useState<number>(canvas.rowHeight ?? 30);
+  function saveCanvas() {
+    startTransition(async () => {
+      await updateDashboardSettings(dashboardId, {
+        ...settings,
+        canvas: {
+          ...settings.canvas,
+          cols: Math.min(48, Math.max(1, Math.round(cols) || 12)),
+          rowHeight: Math.min(200, Math.max(10, Math.round(rowHeight) || 30)),
+        },
+      });
+      setCanvasOpen(false);
+    });
+  }
 
   const bg = settings.background;
   const [mode, setMode] = useState<BgMode>(bg?.mode ?? "none");
@@ -111,6 +151,24 @@ export function DashboardMenu({
             }}
           >
             <Palette className="size-4" /> Aparência do dashboard
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setCanvasOpen(true);
+            }}
+          >
+            <LayoutGrid className="size-4" /> Área de trabalho
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setRoles(visibleToRoles);
+              setShareOpen(true);
+            }}
+          >
+            <Users className="size-4" /> Compartilhamento
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -190,6 +248,76 @@ export function DashboardMenu({
             </div>
 
             <Button size="sm" onClick={save} disabled={pending}>
+              Aplicar
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Compartilhamento: visibilidade por papel (edita visible_to_roles). */}
+      <Sheet open={shareOpen} onOpenChange={setShareOpen}>
+        <SheetContent className="overflow-y-auto sm:max-w-sm">
+          <SheetHeader>
+            <SheetTitle>Compartilhamento</SheetTitle>
+            <SheetDescription>
+              Quem vê este dashboard (além de você). Sem papéis = pessoal.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-3 px-4 pb-8">
+            <div className="flex flex-col gap-2">
+              {ROLE_KEYS.map((role) => (
+                <label key={role} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={roles.includes(role)}
+                    onChange={() => toggleRole(role)}
+                  />
+                  {ROLE_LABELS[role]}
+                </label>
+              ))}
+            </div>
+            <Button size="sm" onClick={saveShare} disabled={pending}>
+              Aplicar
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Área de trabalho: densidade do grid (colunas + altura da linha). A
+          largura/altura da área é ajustada arrastando a alça no modo edição. */}
+      <Sheet open={canvasOpen} onOpenChange={setCanvasOpen}>
+        <SheetContent className="overflow-y-auto sm:max-w-sm">
+          <SheetHeader>
+            <SheetTitle>Área de trabalho</SheetTitle>
+            <SheetDescription>
+              Densidade do grid. Arraste a alça no canto (modo edição) para mudar o
+              tamanho da área.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-3 px-4 pb-8">
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Colunas do grid: {cols}</Label>
+              <input
+                type="range"
+                min={1}
+                max={48}
+                value={cols}
+                onChange={(e) => setCols(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Altura da linha (px)</Label>
+              <Input
+                type="number"
+                min={10}
+                max={200}
+                value={rowHeight}
+                onChange={(e) => setRowHeight(Number(e.target.value))}
+                className="h-8"
+              />
+            </div>
+            <Button size="sm" onClick={saveCanvas} disabled={pending}>
               Aplicar
             </Button>
           </div>

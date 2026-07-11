@@ -42,11 +42,15 @@ export function DashboardGrid({
   calcById,
   fields,
   fkLabels,
+  responsibleOptions,
   userRoles,
   canEditValues,
   available,
   dashboardId,
   dateFormat,
+  cols,
+  rowHeight,
+  tabs,
   canEdit,
   canManageFields = false,
   editMode,
@@ -59,11 +63,15 @@ export function DashboardGrid({
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
   dashboardId: string;
   dateFormat?: DateFormat;
+  cols?: number;
+  rowHeight?: number;
+  tabs?: { id: string; name: string; color?: string }[];
   canEdit: boolean;
   canManageFields?: boolean;
   editMode: boolean;
@@ -112,8 +120,8 @@ export function DashboardGrid({
       <GridLayout
         className={cn("layout transition-opacity", pending && "opacity-60")}
         layout={layout}
-        cols={12}
-        rowHeight={30}
+        cols={cols ?? 12}
+        rowHeight={rowHeight ?? 30}
         margin={[12, 12]}
         isDraggable={editMode}
         isResizable={editMode}
@@ -130,12 +138,14 @@ export function DashboardGrid({
               calcValue={calcById[w.id] ?? null}
               fields={fields}
               fkLabels={fkLabels}
+              responsibleOptions={responsibleOptions}
               userRoles={userRoles}
               canEditValues={canEditValues}
               available={available}
               dashboardId={dashboardId}
               dateFormat={dateFormat}
               siblings={widgets}
+              tabs={tabs}
               canEdit={canEdit}
               canManageFields={canManageFields}
               editMode={editMode}

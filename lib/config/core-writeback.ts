@@ -52,6 +52,15 @@ export function isEditableCoreColumn(field: string): boolean {
   return Object.prototype.hasOwnProperty.call(EDITABLE_CORE_COLUMNS, field);
 }
 
+// Relações editáveis inline (registros individuais): editam uma coluna FK de
+// `records` via um SELECT das entidades elegíveis. Ficam LOCAIS (sem write-back
+// ao Bitrix — não há mapa de conversão nome→id para relações). Hoje: responsável.
+export const EDITABLE_RELATION_FIELDS = new Set<string>(["responsible_id"]);
+
+export function isEditableRelation(field: string): boolean {
+  return EDITABLE_RELATION_FIELDS.has(field);
+}
+
 // source_field_id do Bitrix p/ uma coluna do núcleo, conforme a entidade.
 export function coreWriteBackFieldId(
   field: string,
