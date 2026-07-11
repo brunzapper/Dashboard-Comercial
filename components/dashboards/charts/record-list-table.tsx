@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
@@ -118,6 +119,7 @@ export function RecordListTable({
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [page, setPage] = useState(1);
 
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
@@ -159,6 +161,13 @@ export function RecordListTable({
   }
 
   const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
+
+  // Paginação no cliente: sem teto de registros, apenas 100 por página. A fatia é
+  // feita DEPOIS de sort/ordem manual, então a página reflete o conjunto inteiro.
+  const PAGE_SIZE = 100;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const current = Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
+  const pageRows = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
   const gl = t.gridLines ?? "both";
   const vertical = gl === "vertical" || gl === "both";
@@ -229,7 +238,8 @@ export function RecordListTable({
   }
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-auto">
       <Table>
         <TableHeader>
           <TableRow
@@ -297,7 +307,7 @@ export function RecordListTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => {
+          {pageRows.map((r) => {
             const rowCp = t.rowColors?.[r.id];
             const h = t.rowHeights?.[r.id];
             return (
@@ -396,6 +406,33 @@ export function RecordListTable({
           })}
         </TableBody>
       </Table>
+      </div>
+
+      {totalPages > 1 ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
+          <span className="text-muted-foreground">
+            Página {current} de {totalPages}
+          </span>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={current <= 1}
+              onClick={() => setPage(current - 1)}
+            >
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={current >= totalPages}
+              onClick={() => setPage(current + 1)}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {menu?.kind === "ctx" ? (
         <ContextMenu

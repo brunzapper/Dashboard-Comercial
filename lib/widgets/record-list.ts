@@ -101,10 +101,27 @@ export async function runRecordList(
 
   // Sem limite por padrão (o usuário pediu p/ remover o teto); só aplica quando
   // o widget define settings.limit explicitamente.
-  let tq = q.order("source_created_at", { ascending: false, nullsFirst: false });
+  const tq = q.order("source_created_at", { ascending: false, nullsFirst: false });
   const limit = config.settings?.limit;
-  if (typeof limit === "number" && limit > 0) tq = tq.limit(limit);
-  const { data, error } = await tq;
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as RecordRow[];
+  if (typeof limit === "number" && limit > 0) {
+    const { data, error } = await tq.limit(limit);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as RecordRow[];
+  }
+
+  // Busca paginada p/ driblar o teto server-side do PostgREST ("Max Rows"), que
+  // trunca respostas sem .range() (ex.: 100 ou 1000 linhas). Avança pelo total
+  // REALMENTE lido (não por um passo fixo) e para só quando o lote vem vazio —
+  // assim funciona seja o cap 100, 1000 ou qualquer outro, mesmo < BATCH.
+  const BATCH = 1000;
+  const all: RecordRow[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await tq.range(from, from + BATCH - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as unknown as RecordRow[];
+    if (chunk.length === 0) break;
+    all.push(...chunk);
+    from += chunk.length;
+  }
+  return all;
 }
