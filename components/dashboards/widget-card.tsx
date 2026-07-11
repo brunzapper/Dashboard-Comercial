@@ -35,6 +35,8 @@ import { WidgetChart } from "./charts/widget-chart";
 import { RecordListTable } from "./charts/record-list-table";
 import { EditableMatrix } from "./charts/editable-matrix";
 import { PeriodControls } from "./period-controls";
+import { TableFilterBar } from "./table-filter-bar";
+import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
 import { useWidgetAppearance } from "./appearance-editing";
@@ -82,14 +84,17 @@ export function WidgetCard({
   );
 
   const isFilter = widget.visual_type === "filtro";
-  const isRecordList =
-    widget.visual_type === "tabela" && widget.settings?.rowMode === "records";
+  const isFieldFilter = widget.visual_type === "filtro_campo";
+  const isTable = widget.visual_type === "tabela";
+  const isRecordList = isTable && widget.settings?.rowMode === "records";
   const isMatrix = widget.visual_type === "tabela_editavel";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const kpi = isKpi ? appearance?.kpi : undefined;
+  // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
+  const showTableBar = isTable && widget.settings?.showFilterBar !== false;
   // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/matriz/calc).
-  const canStyle = !isFilter && !isMatrix && !isCalc;
+  const canStyle = !isFilter && !isFieldFilter && !isMatrix && !isCalc;
 
   return (
     <div
@@ -152,57 +157,72 @@ export function WidgetCard({
           </DropdownMenu>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 p-2">
-        {isFilter ? (
-          <div className="flex h-full items-center p-1">
-            <PeriodControls
-              keys={{
-                preset: `pf_${widget.id}`,
-                de: `pfd_${widget.id}`,
-                ate: `pfa_${widget.id}`,
-              }}
-              defaults={{ preset: widget.settings?.defaultPreset ?? "" }}
-            />
-          </div>
-        ) : isRecordList ? (
-          <RecordListTable
-            records={recordList}
-            columns={widget.settings?.columns ?? []}
-            fields={fields}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
+        {showTableBar ? (
+          <TableFilterBar
+            paramKey={`tf_${widget.id}`}
             available={available}
-            userRoles={userRoles}
-            canEditValues={canEditValues}
-            fkLabels={fkLabels}
-            appearance={appearance}
-            canEdit={canEdit}
-            onAppearanceChange={saveAppearance}
           />
-        ) : isMatrix ? (
-          <EditableMatrix
-            dashboardId={dashboardId}
-            widgetId={widget.id}
-            matrix={widget.settings?.matrix}
-            cells={matrixCells}
-          />
-        ) : isCalc ? (
-          <div className="flex h-full flex-col justify-center p-1">
-            <span className="text-3xl font-semibold tabular-nums">
-              {calcValue == null
-                ? "—"
-                : calcValue.toLocaleString("pt-BR", {
-                    maximumFractionDigits: 2,
-                  })}
-            </span>
-          </div>
-        ) : (
-          <WidgetChart
-            visualType={widget.visual_type}
-            data={data}
-            appearance={appearance}
-            canEdit={canEdit}
-            onAppearanceChange={saveAppearance}
-          />
-        )}
+        ) : null}
+        <div className="min-h-0 flex-1">
+          {isFilter ? (
+            <div className="flex h-full items-center p-1">
+              <PeriodControls
+                keys={{
+                  preset: `pf_${widget.id}`,
+                  de: `pfd_${widget.id}`,
+                  ate: `pfa_${widget.id}`,
+                }}
+                defaults={{ preset: widget.settings?.defaultPreset ?? "" }}
+              />
+            </div>
+          ) : isFieldFilter ? (
+            <FieldFilterControls
+              paramKey={`ff_${widget.id}`}
+              fields={widget.settings?.fields ?? []}
+              searchFields={widget.settings?.searchFields}
+              available={available}
+            />
+          ) : isRecordList ? (
+            <RecordListTable
+              records={recordList}
+              columns={widget.settings?.columns ?? []}
+              fields={fields}
+              available={available}
+              userRoles={userRoles}
+              canEditValues={canEditValues}
+              fkLabels={fkLabels}
+              appearance={appearance}
+              canEdit={canEdit}
+              onAppearanceChange={saveAppearance}
+            />
+          ) : isMatrix ? (
+            <EditableMatrix
+              dashboardId={dashboardId}
+              widgetId={widget.id}
+              matrix={widget.settings?.matrix}
+              cells={matrixCells}
+            />
+          ) : isCalc ? (
+            <div className="flex h-full flex-col justify-center p-1">
+              <span className="text-3xl font-semibold tabular-nums">
+                {calcValue == null
+                  ? "—"
+                  : calcValue.toLocaleString("pt-BR", {
+                      maximumFractionDigits: 2,
+                    })}
+              </span>
+            </div>
+          ) : (
+            <WidgetChart
+              visualType={widget.visual_type}
+              data={data}
+              appearance={appearance}
+              canEdit={canEdit}
+              onAppearanceChange={saveAppearance}
+            />
+          )}
+        </div>
       </div>
 
       {canEdit ? (
