@@ -23,7 +23,7 @@ import {
   createGoal,
   deleteGoal,
   type GoalState,
-} from "@/app/(app)/admin/metas/actions";
+} from "@/app/(app)/configuracoes/metas/actions";
 
 export interface GoalRow {
   id: string;

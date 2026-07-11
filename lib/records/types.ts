@@ -45,6 +45,9 @@ export interface FieldDefinition {
   formula?: Formula | null;
   // Fase 8: a quais record_type (fonte) a coluna pertence. Vazio/ausente = todas.
   applies_to?: string[];
+  // Write-back: quando true, editar este campo enfileira a mudança de volta ao
+  // Bitrix (só faz sentido em campos de origem Bitrix, com source_field_id).
+  write_back?: boolean;
 }
 
 export interface RecordRow {

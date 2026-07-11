@@ -74,7 +74,7 @@ export async function createGoal(
     ? await supabase.from("goals").update({ target }).eq("id", existing.id)
     : await supabase.from("goals").insert(row);
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/admin/metas");
+  revalidatePath("/configuracoes/metas");
   return { ok: true, message: "Meta salva." };
 }
 
@@ -83,5 +83,5 @@ export async function deleteGoal(id: string): Promise<void> {
   if (err) return;
   const supabase = await createClient();
   await supabase.from("goals").delete().eq("id", id);
-  revalidatePath("/admin/metas");
+  revalidatePath("/configuracoes/metas");
 }

@@ -54,7 +54,7 @@ import {
   setUserDisabled,
   setUserRole,
   type ActionResult,
-} from "@/app/(app)/admin/usuarios/actions";
+} from "@/app/(app)/configuracoes/usuarios/actions";
 
 export interface UserRow {
   id: string;

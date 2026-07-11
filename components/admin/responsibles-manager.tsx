@@ -30,7 +30,7 @@ import {
   addResponsibleOperation,
   removeResponsibleOperation,
   setResponsibleActive,
-} from "@/app/(app)/admin/responsaveis/actions";
+} from "@/app/(app)/configuracoes/responsaveis/actions";
 
 export interface ResponsibleOp {
   operation_id: string;

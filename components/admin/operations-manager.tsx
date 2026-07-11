@@ -23,7 +23,7 @@ import {
   deleteOperation,
   updateOperation,
   type OpState,
-} from "@/app/(app)/admin/operacoes/actions";
+} from "@/app/(app)/configuracoes/operacoes/actions";
 
 export interface OperationRow {
   id: string;

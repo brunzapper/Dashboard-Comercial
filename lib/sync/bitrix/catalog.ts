@@ -207,7 +207,7 @@ export async function syncFieldCatalog(
   const { data: existing } = await db
     .from("field_definitions")
     .select(
-      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order"
+      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back"
     )
     .in("field_key", keys);
   const existingByKey = new Map(
@@ -226,6 +226,7 @@ export async function syncFieldCatalog(
           is_local?: boolean;
           formula?: unknown;
           sort_order?: number;
+          write_back?: boolean;
         }
       | undefined;
     return {
@@ -242,6 +243,7 @@ export async function syncFieldCatalog(
       is_local: ex ? ex.is_local ?? false : false,
       formula: ex ? ex.formula ?? null : null,
       sort_order: ex ? ex.sort_order ?? 0 : 0,
+      write_back: ex ? ex.write_back ?? false : false,
     };
   });
 
