@@ -130,17 +130,18 @@ export function RecordEditSheet({
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
+  // Campos de Sync (vindos do Bitrix): nos Registros ficam SEMPRE editáveis para
+  // quem tem permissão (canEditValues), independentemente de editable_by_roles.
+  const isBitrixSync = (f: FieldDefinition) =>
+    f.source_system === "bitrix" && Boolean(f.source_field_id);
   // Campos calculados nunca são editáveis (o valor é derivado da fórmula).
   const editableFields = fields.filter(
     (f) =>
       f.data_type !== "calculado" &&
-      f.editable_by_roles.some((r) => userRoles.includes(r))
+      (f.editable_by_roles.some((r) => userRoles.includes(r)) ||
+        (canEditValues && isBitrixSync(f)))
   );
-  const readOnlyFields = fields.filter(
-    (f) =>
-      f.data_type === "calculado" ||
-      !f.editable_by_roles.some((r) => userRoles.includes(r))
-  );
+  const readOnlyFields = fields.filter((f) => !editableFields.includes(f));
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -162,20 +163,57 @@ export function RecordEditSheet({
 
         <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
           <input type="hidden" name="record_id" value={record.id} />
+          {/* Edições dos Registros gravam sempre no Bitrix (campos de Sync). */}
+          <input type="hidden" name="force_sync_write_back" value="1" />
 
-          {/* Núcleo (read-only — vem do sync) */}
-          <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
-            <span className="text-muted-foreground">Etapa</span>
-            <span>{record.stage ?? "—"}</span>
-            <span className="text-muted-foreground">MRR</span>
-            <span>{fmtMoney(record.mrr)}</span>
-            <span className="text-muted-foreground">Valor</span>
-            <span>{fmtMoney(record.value)}</span>
-            <span className="text-muted-foreground">Canal</span>
-            <span>{record.channel ?? "—"}</span>
-            <span className="text-muted-foreground">Lead time (dias)</span>
-            <span>{record.lead_time_days ?? "—"}</span>
-          </div>
+          {/* Núcleo (campos de Sync): editáveis p/ quem tem permissão — as
+              alterações gravam sempre de volta no Bitrix (force_sync_write_back). */}
+          {canEditValues ? (
+            <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Etapa</Label>
+                <Input name="core__stage" defaultValue={record.stage ?? ""} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Canal</Label>
+                <Input name="core__channel" defaultValue={record.channel ?? ""} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Valor</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  name="core__value"
+                  defaultValue={record.value ?? ""}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>MRR</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  name="core__mrr"
+                  defaultValue={record.mrr ?? ""}
+                />
+              </div>
+              <div className="text-muted-foreground col-span-2 text-xs">
+                Lead time (dias): {record.lead_time_days ?? "—"}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
+              <span className="text-muted-foreground">Etapa</span>
+              <span>{record.stage ?? "—"}</span>
+              <span className="text-muted-foreground">MRR</span>
+              <span>{fmtMoney(record.mrr)}</span>
+              <span className="text-muted-foreground">Valor</span>
+              <span>{fmtMoney(record.value)}</span>
+              <span className="text-muted-foreground">Canal</span>
+              <span>{record.channel ?? "—"}</span>
+              <span className="text-muted-foreground">Lead time (dias)</span>
+              <span>{record.lead_time_days ?? "—"}</span>
+            </div>
+          )}
 
           {canEditValues ? (
             <div className="flex flex-col gap-4">

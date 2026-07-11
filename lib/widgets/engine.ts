@@ -23,6 +23,7 @@ import {
   type AvailableField,
   type FkKind,
 } from "./fields";
+import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { resolveGoal } from "@/lib/metas/resolve";
 import {
@@ -222,10 +223,36 @@ export async function runWidget(
 
   const rows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
 
-  // Resolve rótulos das dimensões: FK (id→nome) e a fonte (record_type→label).
+  // Transforms de data "por nome" (mês/semana): o RPC devolve um bucket ISO. Antes
+  // de rotular, reordena cronologicamente pelo bucket cru (as linhas do RPC não
+  // têm ORDER BY) usando as dimensões de rótulo na ordem em que aparecem.
+  const labelDimKeys = dims
+    .map((d, i) => ({ i, d }))
+    .filter(({ d }) => isLabelTransform(d.transform))
+    .map(({ i }) => `dim_${i + 1}`);
+  if (labelDimKeys.length > 0) {
+    rows.sort((a, b) => {
+      for (const key of labelDimKeys) {
+        const av = String(a[key] ?? "");
+        const bv = String(b[key] ?? "");
+        if (av !== bv) return av < bv ? -1 : 1;
+      }
+      return 0;
+    });
+  }
+
+  // Resolve rótulos das dimensões: FK (id→nome), fonte (record_type→label) e os
+  // transforms de data "por nome" (bucket ISO → Janeiro / 1ª semana de Janeiro).
   for (let i = 0; i < dims.length; i++) {
     const dim = dims[i];
     const key = `dim_${i + 1}`;
+    if (isLabelTransform(dim.transform)) {
+      for (const r of rows) {
+        if (r[key] != null)
+          r[key] = formatBucketLabel(dim.transform!, r[key], dim.weekMode);
+      }
+      continue;
+    }
     if (dim.field === "record_type") {
       for (const r of rows) {
         const v = r[key];

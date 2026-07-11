@@ -1,0 +1,165 @@
+// Versão: 1.0 | Data: 11/07/2026
+// Célula editável inline para COLUNAS DO NÚCLEO de records (title, stage, value,
+// mrr, closed, closed_at, ...). Espelha a EditableCell (campos personalizados),
+// mas grava numa coluna própria via updateRecordField(kind:"core"). O tipo vem de
+// EDITABLE_CORE_COLUMNS. Usada só no widget de "registros individuais" quando a
+// coluna é marcada como Editável (dono/admin do dashboard).
+"use client";
+
+import { useEffect, useRef, useState, useTransition } from "react";
+
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import type { DataType } from "@/lib/records/types";
+import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  type DateFormat,
+} from "@/lib/widgets/format";
+import { updateRecordField } from "@/lib/records/actions";
+
+function money(v: string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return v || "—";
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+export function CoreEditableCell({
+  recordId,
+  field,
+  dataType,
+  value: serverValue,
+  writeBack = false,
+  dateFormat = DEFAULT_DATE_FORMAT,
+  onSaved,
+}: {
+  recordId: string;
+  field: string; // nome da coluna do núcleo
+  dataType: DataType;
+  value: string; // valor atual (string)
+  writeBack?: boolean;
+  dateFormat?: DateFormat;
+  onSaved?: () => void;
+}) {
+  const [value, setValue] = useState(serverValue);
+  const savedRef = useRef(serverValue);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState(false);
+  const [editingDate, setEditingDate] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValue(serverValue);
+    savedRef.current = serverValue;
+  }, [serverValue]);
+
+  function commit(raw: string) {
+    if (raw === savedRef.current) return;
+    setValue(raw);
+    setError(false);
+    startTransition(async () => {
+      const res = await updateRecordField(recordId, field, raw, {
+        kind: "core",
+        writeBack,
+      });
+      if (res.ok) {
+        savedRef.current = raw;
+        onSaved?.();
+      } else {
+        setValue(savedRef.current);
+        setError(true);
+      }
+    });
+  }
+
+  if (dataType === "booleano") {
+    return (
+      <Checkbox
+        checked={value === "true"}
+        onCheckedChange={(c) => commit(c === true ? "true" : "false")}
+        disabled={pending}
+        aria-label={field}
+        aria-invalid={error}
+      />
+    );
+  }
+
+  if (dataType === "data") {
+    if (!editingDate) {
+      return (
+        <button
+          type="button"
+          onDoubleClick={() => setEditingDate(true)}
+          title="Duplo-clique para escolher a data"
+          className={cn(
+            "block w-full truncate text-left",
+            error && "text-destructive"
+          )}
+          aria-label={field}
+        >
+          {formatDateValue(value, dateFormat) || "—"}
+        </button>
+      );
+    }
+    return (
+      <Input
+        type="date"
+        autoFocus
+        value={value.slice(0, 10)}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={(e) => {
+          commit(e.target.value);
+          setEditingDate(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setValue(savedRef.current);
+            setEditingDate(false);
+          }
+        }}
+        disabled={pending}
+        aria-label={field}
+        aria-invalid={error}
+        className={cn(error && "border-destructive")}
+      />
+    );
+  }
+
+  if (dataType === "numero" || dataType === "moeda") {
+    return (
+      <Input
+        type="number"
+        step={dataType === "moeda" ? "0.01" : "any"}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        disabled={pending}
+        aria-label={field}
+        aria-invalid={error}
+        title={dataType === "moeda" ? money(value) : undefined}
+        className={cn("text-right", error && "border-destructive")}
+      />
+    );
+  }
+
+  // texto (title, stage, currency, channel, sale_type, pipeline, ...)
+  return (
+    <Input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
+      disabled={pending}
+      aria-label={field}
+      aria-invalid={error}
+      className={cn(error && "border-destructive")}
+    />
+  );
+}

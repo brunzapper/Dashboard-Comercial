@@ -9,6 +9,7 @@
 //   (unified:<key>) vindos das correspondências globais.
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import type { Correspondence } from "@/lib/correspondences";
+import { isEditableCoreColumn } from "@/lib/config/core-writeback";
 import type { Aggregation, Transform } from "./types";
 
 export type FkKind = "responsible" | "operation" | "lead";
@@ -20,6 +21,12 @@ export interface AvailableField {
   isDate: boolean; // aceita transform (dia/mês/...)
   fk?: FkKind;
   unified?: boolean; // campo vindo de uma correspondência
+  // Pode ser editável inline na tabela de registros (custom não calculado, ou
+  // coluna do núcleo suportada). O toggle "Editável" do builder só aparece p/ estes.
+  editableCapable?: boolean;
+  // Editar esta coluna pode gravar de volta no Bitrix (custom de Sync, ou coluna
+  // do núcleo mapeada). Habilita o toggle "Gravar no Bitrix".
+  writable?: boolean;
 }
 
 // Campos do núcleo expostos no builder.
@@ -53,11 +60,20 @@ export function buildAvailableFields(
   customFields: FieldDefinition[],
   correspondences: Correspondence[] = []
 ): AvailableField[] {
+  const core = CORE_FIELDS.map((f) => ({
+    ...f,
+    // Colunas do núcleo suportadas para edição inline + write-back (mesmo conjunto).
+    editableCapable: isEditableCoreColumn(f.field),
+    writable: isEditableCoreColumn(f.field),
+  }));
   const custom = customFields.map((f) => ({
     field: `custom:${f.field_key}`,
     label: f.label,
     isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
     isDate: f.data_type === "data",
+    editableCapable: f.data_type !== "calculado",
+    // Campo de Sync do Bitrix (custom com source_field_id) → grava de volta.
+    writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
   }));
   const unified = correspondences.map((c) => ({
     field: `unified:${c.key}`,
@@ -66,7 +82,7 @@ export function buildAvailableFields(
     isDate: c.data_type === "data",
     unified: true,
   }));
-  return [...CORE_FIELDS, ...custom, ...unified];
+  return [...core, ...custom, ...unified];
 }
 
 export function fieldLabel(
@@ -91,4 +107,8 @@ export const DATE_TRANSFORMS: Transform[] = [
   "month",
   "quarter",
   "year",
+  "month_name",
+  "month_year",
+  "week_year",
+  "week_month",
 ];

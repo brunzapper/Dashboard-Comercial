@@ -14,7 +14,12 @@ import "react-resizable/css/styles.css";
 import { cn } from "@/lib/utils";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
-import type { GridPosition, Widget, WidgetData } from "@/lib/widgets/types";
+import type {
+  FieldFilterOptions,
+  GridPosition,
+  Widget,
+  WidgetData,
+} from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { saveLayout } from "@/app/(app)/dashboards/actions";
@@ -45,6 +50,7 @@ export function DashboardGrid({
   canEdit,
   canManageFields = false,
   editMode,
+  filterOptionsById,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -61,6 +67,7 @@ export function DashboardGrid({
   canEdit: boolean;
   canManageFields?: boolean;
   editMode: boolean;
+  filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
   const mounted = useRef(false);
   const { pending } = useNavPending();
@@ -132,6 +139,7 @@ export function DashboardGrid({
               canEdit={canEdit}
               canManageFields={canManageFields}
               editMode={editMode}
+              filterOptions={filterOptionsById?.[w.id]}
             />
           </div>
         ))}

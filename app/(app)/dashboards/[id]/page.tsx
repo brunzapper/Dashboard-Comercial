@@ -32,10 +32,12 @@ import {
 } from "@/lib/widgets/period";
 import type {
   DashboardSettings,
+  FieldFilterOptions,
   Widget,
   WidgetData,
   WidgetFilter,
 } from "@/lib/widgets/types";
+import { SOURCE_RECORD_TYPE, type SourceKey } from "@/lib/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 
@@ -89,7 +91,7 @@ export default async function DashboardPage({
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back"
       )
       .eq("show_in_builder", true)
       .order("sort_order", { ascending: true }),
@@ -334,6 +336,85 @@ export default async function DashboardPage({
       fkLabels[l.id as string] = (l.title as string) ?? "—";
   }
 
+  // Opções de dropdown dos controles "Filtro por campo": responsáveis/operações
+  // ativos (value = id, corrige o filtro que não casava com texto livre) e as
+  // etapas distintas da(s) fonte(s) de cada widget (value = texto da etapa).
+  const filterOptionsById: Record<string, FieldFilterOptions> = {};
+  if (fieldFilterWidgets.length > 0) {
+    const exposed = new Set<string>();
+    for (const fw of fieldFilterWidgets)
+      for (const f of fw.settings?.fields ?? []) exposed.add(f.field);
+    const needResp = exposed.has("responsible_id");
+    const needOps = exposed.has("operation_id");
+    const needStage = exposed.has("stage");
+
+    const [respRes, opsRes, stageRes] = await Promise.all([
+      needResp
+        ? supabase
+            .from("responsibles")
+            .select("id, display_name")
+            .eq("active", true)
+            .order("display_name")
+        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+      needOps
+        ? supabase
+            .from("operations")
+            .select("id, name")
+            .eq("active", true)
+            .order("name")
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      needStage
+        ? supabase.rpc("run_widget_query", {
+            p_source: "records",
+            p_dimensions: [{ field: "record_type" }, { field: "stage" }],
+            p_metrics: [],
+            p_filters: [],
+            p_correspondences: {},
+          })
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const responsibleOptions = (respRes.data ?? []).map((r) => ({
+      value: r.id as string,
+      label: (r.display_name as string) ?? "—",
+    }));
+    const operationOptions = (opsRes.data ?? []).map((o) => ({
+      value: o.id as string,
+      label: (o.name as string) ?? "—",
+    }));
+    // Etapas por record_type (a partir dos pares distintos do RPC).
+    const stagesByRt: Record<string, Set<string>> = {};
+    for (const row of (Array.isArray(stageRes.data)
+      ? stageRes.data
+      : []) as Record<string, unknown>[]) {
+      const rt = String(row.dim_1 ?? "");
+      const st = row.dim_2 == null ? "" : String(row.dim_2);
+      if (!rt || !st) continue;
+      (stagesByRt[rt] ??= new Set()).add(st);
+    }
+
+    for (const fw of fieldFilterWidgets) {
+      const map: FieldFilterOptions = {};
+      const fwFields = fw.settings?.fields ?? [];
+      const has = (f: string) => fwFields.some((e) => e.field === f);
+      if (has("responsible_id")) map.responsible_id = responsibleOptions;
+      if (has("operation_id")) map.operation_id = operationOptions;
+      if (has("stage")) {
+        const srcs = (fw.sources ?? []) as SourceKey[];
+        const rts =
+          srcs.length > 0
+            ? srcs.map((s) => SOURCE_RECORD_TYPE[s] as string)
+            : Object.keys(stagesByRt);
+        const set = new Set<string>();
+        for (const rt of rts) for (const s of stagesByRt[rt] ?? []) set.add(s);
+        map.stage = [...set]
+          .sort((a, b) => a.localeCompare(b, "pt-BR"))
+          .map((s) => ({ value: s, label: s }));
+      }
+      if (Object.keys(map).length > 0) filterOptionsById[fw.id] = map;
+    }
+  }
+
   // Métricas calculadas: resolve a fórmula com o contexto do dashboard
   // (agregações de registros).
   const calcById: Record<string, number | null> = {};
@@ -377,6 +458,7 @@ export default async function DashboardPage({
       periodBar={periodBar}
       periodDefaults={periodDefaults}
       periodDefaultField={defaultPeriodField}
+      filterOptionsById={filterOptionsById}
     />
   );
 }

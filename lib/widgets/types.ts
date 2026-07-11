@@ -38,7 +38,18 @@ export const AGG_LABELS: Record<Aggregation, string> = {
   avg: "Média",
 };
 
-export type Transform = "none" | "day" | "week" | "month" | "quarter" | "year";
+export type Transform =
+  | "none"
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  // Transforms "por nome" (rótulo textual, agrupam por mês/semana no período):
+  | "month_name" // Janeiro
+  | "month_year" // Janeiro/26
+  | "week_year" // 5ª semana
+  | "week_month"; // 1ª semana de Janeiro
 export const TRANSFORM_LABELS: Record<Transform, string> = {
   none: "—",
   day: "Dia",
@@ -46,6 +57,10 @@ export const TRANSFORM_LABELS: Record<Transform, string> = {
   month: "Mês",
   quarter: "Trimestre",
   year: "Ano",
+  month_name: "Nome do mês",
+  month_year: "Mês/ano",
+  week_year: "Semana do ano",
+  week_month: "Semana do mês",
 };
 
 export type FilterOp =
@@ -63,6 +78,9 @@ export type FilterOp =
 export interface Dimension {
   field: string;
   transform?: Transform;
+  // Só para transform 'week_month': "restricted" (recorta na virada do mês) ou
+  // "full" (semana cheia seg→dom, pega dias do mês vizinho). Default restricted.
+  weekMode?: "full" | "restricted";
 }
 export interface Metric {
   field: string;
@@ -113,11 +131,25 @@ export interface FieldFilterSettings {
   excludedTargets?: string[]; // ids de widgets desmarcados (padrão = todos p/ fonte)
 }
 
+// Opções de dropdown dos controles do "Filtro por campo", por campo. O servidor
+// resolve responsáveis/operações ativos (value = id) e as etapas da(s) fonte(s)
+// (value = texto) e entrega ao controle, que troca o <Input> livre por um select.
+export type FieldFilterOptions = Record<
+  string,
+  { value: string; label: string }[]
+>;
+
 // Config do widget de Tabela no modo "registros individuais" (Fase 1): a tabela
 // lista 1 linha por registro (sem agregação) e colunas marcadas como editáveis
 // gravam de volta no registro (via updateRecordField, respeitando permissões).
 export interface RecordListColumn {
   field: string; // 'title' | 'stage' | 'custom:<key>' | ...
+  // Edição inline no dashboard (dono/admin decide por coluna). Ausente = padrão
+  // legado (custom não calculado editável). Vale p/ custom E colunas do núcleo.
+  editable?: boolean;
+  // Ao editar esta coluna, também enfileira write-back p/ o Bitrix (campos com
+  // origem Bitrix: custom com source_field_id ou coluna do núcleo mapeada).
+  writeBack?: boolean;
 }
 // Fonte das linhas do modo lista: registros (default), responsáveis ou operações.
 // Campos personalizados não calculados editáveis gravam de volta na entidade

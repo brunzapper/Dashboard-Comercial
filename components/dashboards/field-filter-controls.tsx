@@ -11,11 +11,17 @@ import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AvailableField } from "@/lib/widgets/fields";
 import { fieldLabel } from "@/lib/widgets/fields";
-import type { FieldFilterEntry, FilterOp, WidgetFilter } from "@/lib/widgets/types";
+import type {
+  FieldFilterEntry,
+  FieldFilterOptions,
+  FilterOp,
+  WidgetFilter,
+} from "@/lib/widgets/types";
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
 import { useNavPending } from "./pending-context";
@@ -70,11 +76,14 @@ export function FieldFilterControls({
   fields,
   searchFields,
   available,
+  options,
 }: {
   paramKey: string;
   fields: FieldFilterEntry[];
   searchFields?: string[];
   available: AvailableField[];
+  // Opções de dropdown por campo (responsável/operação/etapa). Ausente = <Input>.
+  options?: FieldFilterOptions;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -140,6 +149,55 @@ export function FieldFilterControls({
               />
               {label} {op === "is_null" ? "(vazio)" : "(preenchido)"}
             </label>
+          );
+        }
+        const opts = options?.[entry.field];
+        // Campo com opções (responsável/operação/etapa): dropdown fechado. Para o
+        // operador "em (lista)" vira multi-seleção por checkbox (valores em CSV,
+        // que buildFilters já divide); os demais operadores usam um select único.
+        if (opts && opts.length > 0) {
+          if (op === "in") {
+            const chosen = new Set(
+              (values[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+            );
+            const toggle = (v: string) => {
+              const next = new Set(chosen);
+              if (next.has(v)) next.delete(v);
+              else next.add(v);
+              setValue(i, [...next].join(","));
+            };
+            return (
+              <div key={i} className="flex flex-col gap-1">
+                <Label className="text-xs">{label}</Label>
+                <div className="flex max-h-40 flex-col gap-1 overflow-auto rounded-md border p-2">
+                  {opts.map((o) => (
+                    <label
+                      key={o.value}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={chosen.has(o.value)}
+                        onCheckedChange={() => toggle(o.value)}
+                      />
+                      <span className="truncate">{o.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={i} className="flex flex-col gap-1">
+              <Label className="text-xs">{label}</Label>
+              <Combobox
+                options={[{ value: "", label: "— todos —" }, ...opts]}
+                value={values[i] ?? ""}
+                onValueChange={(v) => setValue(i, v)}
+                placeholder="— todos —"
+                className="h-8 text-sm"
+                aria-label={label}
+              />
+            </div>
           );
         }
         return (

@@ -29,7 +29,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
-import type { Widget, WidgetData } from "@/lib/widgets/types";
+import type {
+  FieldFilterOptions,
+  Widget,
+  WidgetData,
+} from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
@@ -60,6 +64,7 @@ export function WidgetCard({
   canEdit,
   canManageFields = false,
   editMode,
+  filterOptions,
 }: {
   widget: Widget;
   data: WidgetData;
@@ -77,6 +82,7 @@ export function WidgetCard({
   canEdit: boolean;
   canManageFields?: boolean;
   editMode: boolean;
+  filterOptions?: FieldFilterOptions;
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -193,6 +199,7 @@ export function WidgetCard({
               fields={widget.settings?.fields ?? []}
               searchFields={widget.settings?.searchFields}
               available={available}
+              options={filterOptions}
             />
           ) : isEntityList ? (
             <EntityListTable
@@ -212,6 +219,7 @@ export function WidgetCard({
             <RecordListTable
               records={recordList}
               columns={widget.settings?.columns ?? []}
+              metrics={widget.metrics ?? []}
               fields={fields}
               available={available}
               userRoles={userRoles}

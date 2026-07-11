@@ -46,6 +46,7 @@ import {
   type FilterOp,
   type FilterSettings,
   type Metric,
+  type RecordListColumn,
   type RowSource,
   type Transform,
   type VisualType,
@@ -146,6 +147,28 @@ export function WidgetBuilder({
   const [showFilterBar, setShowFilterBar] = useState<boolean>(
     widget?.settings?.showFilterBar !== false
   );
+
+  // Flags por coluna no modo lista: editável + gravar no Bitrix. Semeadas das
+  // colunas existentes (RecordListColumn.editable/writeBack).
+  const [columnFlags, setColumnFlags] = useState<
+    Record<string, { editable?: boolean; writeBack?: boolean }>
+  >(() => {
+    const m: Record<string, { editable?: boolean; writeBack?: boolean }> = {};
+    for (const c of widget?.settings?.columns ?? [])
+      m[c.field] = { editable: c.editable, writeBack: c.writeBack };
+    return m;
+  });
+  const setColumnFlag = (
+    field: string,
+    patch: { editable?: boolean; writeBack?: boolean }
+  ) =>
+    setColumnFlags((prev) => ({ ...prev, [field]: { ...prev[field], ...patch } }));
+  // Editabilidade "legada": widgets antigos deixavam custom não calculado editável.
+  const legacyEditable = (field: string) =>
+    field.startsWith("custom:") &&
+    (available.find((a) => a.field === field)?.editableCapable ?? false);
+  const effEditable = (field: string): boolean =>
+    columnFlags[field]?.editable ?? legacyEditable(field);
 
   // Fórmula da "Métrica calculada" (visual_type 'calculado').
   const [formula, setFormula] = useState<Formula>(
@@ -374,7 +397,17 @@ export function WidgetBuilder({
         ...settings,
         rowMode: "records",
         rowSource,
-        columns: dimensions.filter((d) => d.field).map((d) => ({ field: d.field })),
+        columns: dimensions
+          .filter((d) => d.field)
+          .map((d) => {
+            const af = available.find((a) => a.field === d.field);
+            const canEditCol = af?.editableCapable ?? false;
+            const editable = canEditCol ? effEditable(d.field) : false;
+            const col: RecordListColumn = { field: d.field, editable };
+            if (editable && af?.writable && columnFlags[d.field]?.writeBack)
+              col.writeBack = true;
+            return col;
+          }),
       };
     } else {
       delete settings.rowMode;
@@ -788,8 +821,12 @@ export function WidgetBuilder({
                 <Plus className="size-4" /> Adicionar
               </Button>
             </div>
-            {dimensions.map((d, i) => (
-              <div key={i} className="flex items-center gap-2">
+            {dimensions.map((d, i) => {
+              const af = available.find((a) => a.field === d.field);
+              const editable = effEditable(d.field);
+              return (
+              <div key={i} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
                 <Combobox
                   className="flex-1"
                   options={availableOptions}
@@ -816,6 +853,23 @@ export function WidgetBuilder({
                     aria-label="Transformação de data"
                   />
                 ) : null}
+                {isDate(d.field) && d.transform === "week_month" ? (
+                  <Combobox
+                    className="w-28 shrink-0"
+                    searchable={false}
+                    options={[
+                      { value: "restricted", label: "Restrita" },
+                      { value: "full", label: "Cheia" },
+                    ]}
+                    value={d.weekMode ?? "restricted"}
+                    onValueChange={(wm) => {
+                      const next = [...dimensions];
+                      next[i] = { ...d, weekMode: wm as "full" | "restricted" };
+                      setDimensions(next);
+                    }}
+                    aria-label="Modo da semana do mês"
+                  />
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -825,7 +879,33 @@ export function WidgetBuilder({
                   <Trash2 className="size-4" />
                 </Button>
               </div>
-            ))}
+              {isRecordList && d.field && af?.editableCapable ? (
+                <div className="text-muted-foreground flex items-center gap-4 pl-1 text-xs">
+                  <label className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={editable}
+                      onCheckedChange={(c) =>
+                        setColumnFlag(d.field, { editable: c === true })
+                      }
+                    />
+                    Editável
+                  </label>
+                  {editable && af?.writable ? (
+                    <label className="flex items-center gap-1.5">
+                      <Checkbox
+                        checked={columnFlags[d.field]?.writeBack ?? false}
+                        onCheckedChange={(c) =>
+                          setColumnFlag(d.field, { writeBack: c === true })
+                        }
+                      />
+                      Gravar no Bitrix
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
+              </div>
+            );
+            })}
           </div>
 
           {/* Orientação (só Tabela agregada) + Agrupar por (ambos os modos) */}
