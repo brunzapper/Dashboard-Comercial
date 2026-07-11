@@ -33,7 +33,9 @@ import type {
   DashboardSettings,
   Widget,
   WidgetData,
+  WidgetFilter,
 } from "@/lib/widgets/types";
+import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 
 function str(v: string | string[] | undefined): string {
@@ -118,8 +120,14 @@ export default async function DashboardPage({
   const isDateField = (f: string) =>
     available.some((a) => a.field === f && a.isDate);
 
-  const dataWidgets = widgets.filter((w) => w.visual_type !== "filtro");
+  // Widgets de dados (excluem os controles: filtro de período e filtro por campo).
+  const dataWidgets = widgets.filter(
+    (w) => w.visual_type !== "filtro" && w.visual_type !== "filtro_campo"
+  );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
+  const fieldFilterWidgets = widgets.filter(
+    (w) => w.visual_type === "filtro_campo"
+  );
 
   // Campo de data padrão quando a URL não traz `campo`: preferência do usuário
   // (último consultado) > config do dashboard > default.
@@ -181,6 +189,54 @@ export default async function DashboardPage({
     }
   }
 
+  // 2b) Filtros de VISUALIZAÇÃO (aplicados no dashboard já renderizado):
+  //   - barra embutida de cada tabela (?tf_<id>): filtra o próprio widget;
+  //   - widget "Filtro por campo" (?ff_<id>): filtra todos os widgets de dados
+  //     cujas fontes se sobrepõem às do filtro (campo unificado = todas as
+  //     fontes), menos os alvos desmarcados (settings.excludedTargets).
+  // Cada conjunto vira WidgetFilter[] mesclado em config.filters (semântica AND).
+  const viewFiltersByWidget: Record<string, WidgetFilter[]> = {};
+  const addViewFilters = (id: string, fs: WidgetFilter[]) => {
+    if (fs.length === 0) return;
+    viewFiltersByWidget[id] = [...(viewFiltersByWidget[id] ?? []), ...fs];
+  };
+
+  // Barra embutida: só nos widgets de Tabela (agregada ou registros).
+  for (const w of dataWidgets) {
+    if (w.visual_type !== "tabela") continue;
+    const raw = str(sp[`tf_${w.id}`]);
+    if (!raw) continue;
+    addViewFilters(
+      w.id,
+      viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields)
+    );
+  }
+
+  // Sobreposição de fontes (vazio = todas as fontes).
+  const sourcesOverlap = (a: string[], b: string[]) => {
+    if (a.length === 0 || b.length === 0) return true;
+    return a.some((s) => b.includes(s));
+  };
+
+  for (const fw of fieldFilterWidgets) {
+    const raw = str(sp[`ff_${fw.id}`]);
+    if (!raw) continue;
+    const fs = viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields);
+    if (fs.length === 0) continue;
+    const excluded = new Set(fw.settings?.excludedTargets ?? []);
+    const fwSources = (fw.sources ?? []) as string[];
+    // Filtro sobre campo unificado (multi-fonte) atinge todas as fontes.
+    const unified = fs.some((f) =>
+      f.field.split("|").some((p) => p.startsWith("unified:"))
+    );
+    for (const w of dataWidgets) {
+      if (excluded.has(w.id)) continue;
+      if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
+        continue;
+      addViewFilters(w.id, fs);
+    }
+  }
+
   // Widget de Tabela em modo "registros individuais" (Fase 1): lista 1 linha por
   // registro em vez de agregar.
   const isListWidget = (w: Widget) =>
@@ -203,7 +259,7 @@ export default async function DashboardPage({
         splitBySource: w.split_by_source ?? false,
         dimensions: w.dimensions ?? [],
         metrics: w.metrics ?? [],
-        filters: w.filters ?? [],
+        filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
         visual_type: w.visual_type,
         settings: w.settings,
       };
@@ -288,7 +344,7 @@ export default async function DashboardPage({
           calcById[w.id] = await runCalculatedWidget(supabase, {
             formula: w.settings?.formula,
             sources: w.sources ?? [],
-            filters: w.filters ?? [],
+            filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
             correspondencesMap,
             matrices,

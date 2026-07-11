@@ -41,6 +41,8 @@ import {
   VISUAL_TYPE_LABELS,
   type Aggregation,
   type Dimension,
+  type FieldFilterEntry,
+  type FieldFilterSettings,
   type FilterOp,
   type FilterSettings,
   type MatrixAxis,
@@ -52,40 +54,19 @@ import {
   type WidgetFilter,
 } from "@/lib/widgets/types";
 import {
+  cleanFilters as cleanFilterRows,
+  FILTER_OPS,
+  toFieldOptions,
+} from "@/lib/widgets/filter-ops";
+import {
   createWidget,
   updateWidget,
 } from "@/app/(app)/dashboards/actions";
-
-const FILTER_OPS: { op: FilterOp; label: string }[] = [
-  { op: "eq", label: "=" },
-  { op: "neq", label: "≠" },
-  { op: "gt", label: ">" },
-  { op: "gte", label: "≥" },
-  { op: "lt", label: "<" },
-  { op: "lte", label: "≤" },
-  { op: "in", label: "em (lista)" },
-  { op: "is_null", label: "é vazio" },
-  { op: "not_null", label: "não vazio" },
-];
 
 const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
   label: o.label,
 }));
-
-// Agrupa os campos do catálogo por origem para os seletores pesquisáveis.
-function fieldGroup(field: string): string {
-  if (field.startsWith("custom:")) return "Personalizados";
-  if (field.startsWith("unified:")) return "Unificados";
-  return "Núcleo";
-}
-function toFieldOptions(fields: AvailableField[]): ComboboxOption[] {
-  return fields.map((f) => ({
-    value: f.field,
-    label: f.label,
-    group: fieldGroup(f.field),
-  }));
-}
 
 export function WidgetBuilder({
   dashboardId,
@@ -154,6 +135,10 @@ export function WidgetBuilder({
     widget?.settings?.columns ?? []
   );
   const isRecordList = visualType === "tabela" && recordsMode;
+  // Barra de busca/filtro embutida nas tabelas (ocultável). Default = visível.
+  const [showFilterBar, setShowFilterBar] = useState<boolean>(
+    widget?.settings?.showFilterBar !== false
+  );
 
   function setColumnField(i: number, field: string) {
     setColumns((prev) => {
@@ -218,13 +203,44 @@ export function WidgetBuilder({
   const [filterPreset, setFilterPreset] = useState(
     widget?.settings?.defaultPreset ?? ""
   );
-  // Widgets que este filtro pode controlar (exclui a si mesmo e outros filtros).
+  // Widgets que este filtro pode controlar (exclui a si mesmo e os controles).
   const targetable = siblings.filter(
-    (s) => s.id !== widget?.id && s.visual_type !== "filtro"
+    (s) =>
+      s.id !== widget?.id &&
+      s.visual_type !== "filtro" &&
+      s.visual_type !== "filtro_campo"
   );
 
   function toggleTarget(id: string) {
     setFilterTargets((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  }
+
+  // Config do widget de "Filtro por campo" (visual_type 'filtro_campo').
+  const [filterFields, setFilterFields] = useState<FieldFilterEntry[]>(
+    widget?.settings?.fields ?? []
+  );
+  const [searchFieldRows, setSearchFieldRows] = useState<string[]>(
+    widget?.settings?.searchFields ?? ["title"]
+  );
+  const [excludedTargets, setExcludedTargets] = useState<string[]>(
+    widget?.settings?.excludedTargets ?? []
+  );
+  // Widgets de dados que este filtro pode atingir (mesmas fontes; vazio = todas).
+  const dataSiblings = siblings.filter(
+    (s) =>
+      s.id !== widget?.id &&
+      s.visual_type !== "filtro" &&
+      s.visual_type !== "filtro_campo"
+  );
+  const affectedSiblings = dataSiblings.filter((s) => {
+    const b = s.sources ?? [];
+    if (sources.length === 0 || b.length === 0) return true;
+    return sources.some((x) => b.includes(x));
+  });
+  function toggleExcluded(id: string) {
+    setExcludedTargets((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
   }
@@ -344,6 +360,34 @@ export function WidgetBuilder({
       return;
     }
 
+    // Filtro por campo: filtra widgets-alvo por campo/valor e/ou busca. Guarda
+    // `sources` (escopo), os campos expostos, os campos de busca e os alvos
+    // desmarcados. Sem dimensões/métricas/filtros próprios.
+    if (visualType === "filtro_campo") {
+      const settings: FieldFilterSettings = {
+        fields: filterFields.filter((f) => f.field),
+        searchFields: searchFieldRows.filter(Boolean),
+        excludedTargets,
+      };
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings,
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, input);
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
     // Tabela editável: só a estrutura (matrix) vai em settings; sem dados de
     // registros. Os valores das células vivem em dashboard_table_cells.
     if (visualType === "tabela_editavel") {
@@ -405,24 +449,7 @@ export function WidgetBuilder({
       return;
     }
 
-    const cleanFilters = filters
-      .filter((f) => f.field)
-      .map((f) => {
-        if (f.op === "in") {
-          return {
-            field: f.field,
-            op: f.op,
-            value: String(f.value ?? "")
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean),
-          };
-        }
-        if (f.op === "is_null" || f.op === "not_null") {
-          return { field: f.field, op: f.op };
-        }
-        return { field: f.field, op: f.op, value: f.value };
-      });
+    const cleanFilters = cleanFilterRows(filters);
     // Preserva settings existentes (ex.: KPI meta/razão) e liga/desliga o modo
     // lista de registros (Fase 1) conforme o toggle.
     let settings = { ...(widget?.settings ?? {}) };
@@ -435,6 +462,12 @@ export function WidgetBuilder({
     } else {
       delete settings.rowMode;
       delete settings.columns;
+    }
+
+    // Barra de busca/filtro embutida: só nas tabelas; guarda quando oculta.
+    if (visualType === "tabela") {
+      if (showFilterBar) delete settings.showFilterBar;
+      else settings.showFilterBar = false;
     }
 
     // Orientação/agrupamento da tabela agregada (Parte 2/3): grava em
@@ -544,6 +577,161 @@ export function WidgetBuilder({
                         <Checkbox
                           checked={filterTargets.includes(s.id)}
                           onCheckedChange={() => toggleTarget(s.id)}
+                        />
+                        {s.title ?? "Sem título"}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          {/* Config do widget de "Filtro por campo" */}
+          {visualType === "filtro_campo" ? (
+            <>
+              <div className="flex flex-col gap-2">
+                <Label>Fontes</Label>
+                <p className="text-muted-foreground text-xs">
+                  Sem seleção = todas as fontes. Este filtro atinge os widgets
+                  cujas fontes se sobrepõem às escolhidas aqui.
+                </p>
+                <div className="flex flex-col gap-2 rounded-md border p-3">
+                  {SOURCE_KEYS.map((key) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={sources.includes(key)}
+                        onCheckedChange={() => toggleSource(key)}
+                      />
+                      {SOURCE_LABELS[key]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Campos de busca (texto)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSearchFieldRows([...searchFieldRows, ""])}
+                  >
+                    <Plus className="size-4" /> Adicionar
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Colunas varridas pela caixa de busca (OR entre elas).
+                </p>
+                {searchFieldRows.map((sf, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Combobox
+                      className="flex-1"
+                      options={availableOptions}
+                      value={sf}
+                      placeholder="— campo —"
+                      onValueChange={(field) => {
+                        const next = [...searchFieldRows];
+                        next[i] = field;
+                        setSearchFieldRows(next);
+                      }}
+                      aria-label="Campo de busca"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setSearchFieldRows(
+                          searchFieldRows.filter((_, j) => j !== i)
+                        )
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Campos filtráveis</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setFilterFields([...filterFields, { field: "", op: "eq" }])
+                    }
+                  >
+                    <Plus className="size-4" /> Adicionar
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Cada campo vira um controle no widget; o valor é digitado na
+                  visualização.
+                </p>
+                {filterFields.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Combobox
+                      className="flex-1"
+                      options={availableOptions}
+                      value={f.field}
+                      placeholder="— campo —"
+                      onValueChange={(field) => {
+                        const next = [...filterFields];
+                        next[i] = { ...f, field };
+                        setFilterFields(next);
+                      }}
+                      aria-label="Campo filtrável"
+                    />
+                    <Combobox
+                      className="w-28 shrink-0"
+                      searchable={false}
+                      options={FILTER_OP_OPTIONS}
+                      value={f.op ?? "eq"}
+                      onValueChange={(op) => {
+                        const next = [...filterFields];
+                        next[i] = { ...f, op: op as FilterOp };
+                        setFilterFields(next);
+                      }}
+                      aria-label="Operador"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setFilterFields(filterFields.filter((_, j) => j !== i))
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Aplicar a</Label>
+                <p className="text-muted-foreground text-xs">
+                  Por padrão atinge todos os widgets com fonte sobreposta.
+                  Desmarque os que não devem reagir.
+                </p>
+                {affectedSiblings.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Nenhum widget de dados compatível ainda.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2 rounded-md border p-3">
+                    {affectedSiblings.map((s) => (
+                      <label
+                        key={s.id}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={!excludedTargets.includes(s.id)}
+                          onCheckedChange={() => toggleExcluded(s.id)}
                         />
                         {s.title ?? "Sem título"}
                       </label>
@@ -665,6 +853,7 @@ export function WidgetBuilder({
 
           {/* Fontes + modo de combinação */}
           {visualType !== "filtro" &&
+          visualType !== "filtro_campo" &&
           visualType !== "tabela_editavel" &&
           visualType !== "calculado" ? (
           <>
@@ -696,13 +885,22 @@ export function WidgetBuilder({
 
           {/* Modo lista de registros (só para Tabela) */}
           {visualType === "tabela" ? (
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={recordsMode}
-                onCheckedChange={(v) => setRecordsMode(v === true)}
-              />
-              Linhas = registros individuais (permite editar valores)
-            </label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={recordsMode}
+                  onCheckedChange={(v) => setRecordsMode(v === true)}
+                />
+                Linhas = registros individuais (permite editar valores)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={showFilterBar}
+                  onCheckedChange={(v) => setShowFilterBar(v === true)}
+                />
+                Mostrar barra de busca/filtro na tabela
+              </label>
+            </div>
           ) : null}
 
           {/* Criar coluna direto no editor (admins) */}

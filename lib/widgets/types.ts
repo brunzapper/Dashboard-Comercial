@@ -14,6 +14,7 @@ export type VisualType =
   | "kpi"
   | "funil"
   | "filtro"
+  | "filtro_campo"
   | "tabela_editavel"
   | "calculado";
 
@@ -28,6 +29,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   pizza: "Pizza",
   funil: "Funil",
   filtro: "Filtro de período",
+  filtro_campo: "Filtro por campo",
 };
 
 export type Aggregation = "sum" | "count" | "avg";
@@ -55,6 +57,7 @@ export type FilterOp =
   | "lt"
   | "lte"
   | "in"
+  | "ilike"
   | "is_null"
   | "not_null";
 
@@ -96,6 +99,21 @@ export interface FilterSettings {
   defaultAte?: string;
 }
 
+// Config do widget de "Filtro por campo" (visual_type 'filtro_campo'): filtra
+// widgets-alvo por campo/valor e/ou busca textual. Diferente do filtro de
+// período, o alvo padrão são TODOS os widgets de dados cujas fontes se
+// sobrepõem às deste filtro; `excludedTargets` guarda os desmarcados na edição.
+export interface FieldFilterEntry {
+  field: string; // campo exposto para filtrar ('stage' | 'custom:xxx' | ...)
+  op?: FilterOp; // operador (default 'eq'); 'ilike' faz busca parcial
+  label?: string; // rótulo opcional (fallback = rótulo do campo)
+}
+export interface FieldFilterSettings {
+  fields?: FieldFilterEntry[]; // campos que o widget expõe como controles
+  searchFields?: string[]; // colunas de texto da busca livre (default ['title'])
+  excludedTargets?: string[]; // ids de widgets desmarcados (padrão = todos p/ fonte)
+}
+
 // Config do widget de Tabela no modo "registros individuais" (Fase 1): a tabela
 // lista 1 linha por registro (sem agregação) e colunas marcadas como editáveis
 // gravam de volta no registro (via updateRecordField, respeitando permissões).
@@ -106,7 +124,10 @@ export interface RecordListColumn {
 export interface RecordListSettings {
   rowMode?: "records"; // presença => modo lista no widget 'tabela'
   columns?: RecordListColumn[]; // colunas ordenadas a exibir
-  limit?: number; // teto de linhas (default 100)
+  limit?: number; // teto de linhas explícito (sem isto = sem limite)
+  // Barra de busca/filtro embutida na tabela (registros e agregada), aplicada
+  // pelo servidor. Ausente/true = visível; false = oculta ("ocultável na config").
+  showFilterBar?: boolean;
 }
 
 // Config do widget "Tabela editável" (Fase 2): grade com linhas/colunas
@@ -196,6 +217,7 @@ export interface AppearanceSettings {
 // convivem no mesmo objeto.
 export type WidgetSettings = KpiSettings &
   FilterSettings &
+  FieldFilterSettings &
   RecordListSettings &
   MatrixSettings &
   CalcSettings & { appearance?: AppearanceSettings };

@@ -10,9 +10,8 @@ import type { RecordRow } from "@/lib/records/types";
 import { resolveFilters, sourceFilters } from "./engine";
 import { CORE_FIELDS } from "./fields";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import { SEARCH_FIELD_SEP } from "./view-filters";
 import type { WidgetConfig, WidgetFilter } from "./types";
-
-const DEFAULT_LIMIT = 100;
 
 // Mesmas colunas carregadas na página de Registros — satisfaz RecordRow.
 const RECORD_COLS =
@@ -48,6 +47,25 @@ export async function runRecordList(
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
   for (const f of filters as WidgetFilter[]) {
+    // Busca textual (ilike): o field pode unir vários campos com '|' → OR entre
+    // colunas. O valor é o termo cru; aqui envolvemos com curingas.
+    if (f.op === "ilike") {
+      const term = String(f.value ?? "").trim();
+      if (!term) continue;
+      const cols = f.field
+        .split(SEARCH_FIELD_SEP)
+        .map(filterColumn)
+        .filter((c): c is string => Boolean(c));
+      if (cols.length === 0) continue;
+      // Curingas/valor seguros para a sintaxe de .or() do PostgREST (sem vírgula/parênteses).
+      const safe = term.replace(/[,()]/g, " ").trim();
+      if (cols.length === 1) {
+        q = q.ilike(cols[0], `%${safe}%`);
+      } else {
+        q = q.or(cols.map((c) => `${c}.ilike.*${safe}*`).join(","));
+      }
+      continue;
+    }
     const col = filterColumn(f.field);
     if (!col) continue;
     switch (f.op) {
@@ -81,10 +99,12 @@ export async function runRecordList(
     }
   }
 
-  const limit = config.settings?.limit ?? DEFAULT_LIMIT;
-  const { data, error } = await q
-    .order("source_created_at", { ascending: false, nullsFirst: false })
-    .limit(limit);
+  // Sem limite por padrão (o usuário pediu p/ remover o teto); só aplica quando
+  // o widget define settings.limit explicitamente.
+  let tq = q.order("source_created_at", { ascending: false, nullsFirst: false });
+  const limit = config.settings?.limit;
+  if (typeof limit === "number" && limit > 0) tq = tq.limit(limit);
+  const { data, error } = await tq;
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as RecordRow[];
 }
