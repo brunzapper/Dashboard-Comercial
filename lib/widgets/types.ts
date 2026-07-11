@@ -177,6 +177,9 @@ export interface AppearanceSettings {
   // --- tabela ---
   table?: {
     gridLines?: GridLines;
+    // Comportamento do texto que excede a largura/altura da célula (redimensionada):
+    // "clip" (padrão) = corta com reticências em 1 linha; "wrap" = quebra em várias linhas.
+    cellText?: "clip" | "wrap";
     headerBg?: string;
     headerColor?: string;
     bodyBg?: string;
@@ -205,6 +208,12 @@ export interface AppearanceSettings {
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior
+  // --- título / borda do card (todos os tipos estilizáveis) ---
+  title?: {
+    color?: string; // cor do texto do título
+    bg?: string; // fundo da barra de título
+    border?: string; // cor da borda/contorno externo do card
+  };
 }
 
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista

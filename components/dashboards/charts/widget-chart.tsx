@@ -502,10 +502,18 @@ function AppearanceTable({
     dateCols.has(key) && looksLikeDate(v)
       ? formatDateValue(v, fmtOf(key))
       : String(v ?? "—");
+  // Largura de coluna: fixa quando redimensionada; senão um teto para o texto não
+  // empurrar/sobrepor as vizinhas (o recorte/quebra é feito no span interno).
   const widthStyle = (key: string): React.CSSProperties => {
     const w = t.colWidths?.[key];
-    return w ? { width: w, minWidth: w, maxWidth: w } : {};
+    return w ? { width: w, minWidth: w, maxWidth: w } : { maxWidth: 240 };
   };
+  // Classe do conteúdo interno da célula: cortar (…) ou quebrar linha.
+  const cellText = t.cellText ?? "clip";
+  const cellSpanClass =
+    cellText === "wrap"
+      ? "block whitespace-normal break-words"
+      : "block truncate";
   const setColWidth = (key: string, w: number) =>
     setTable({ colWidths: { ...(t.colWidths ?? {}), [key]: w } });
   const setRowHeight = (key: string, h: number) =>
@@ -615,9 +623,12 @@ function AppearanceTable({
                   cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
                 ...cellBorder(ci === cols.length - 1),
                 ...widthStyle(c.key),
+                ...(cellText === "clip" ? { overflow: "hidden" } : {}),
               }}
             >
-              {isMetric ? fmt(r[c.key]) : dimDisplay(r[c.key], c.key)}
+              <span className={cellSpanClass}>
+                {isMetric ? fmt(r[c.key]) : dimDisplay(r[c.key], c.key)}
+              </span>
             </TableCell>
           );
         })}
@@ -792,13 +803,14 @@ function AppearanceTable({
                   color: t.colColors?.[c.key]?.text ?? t.headerColor,
                   ...cellBorder(ci === cols.length - 1),
                   ...widthStyle(c.key),
+                  ...(cellText === "clip" ? { overflow: "hidden" } : {}),
                 }}
               >
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   {editable ? (
                     <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                   ) : null}
-                  {c.label}
+                  <span className={cellSpanClass}>{c.label}</span>
                 </span>
                 {editable ? (
                   <ResizeHandle axis="col" onResize={(w) => setColWidth(c.key, w)} />

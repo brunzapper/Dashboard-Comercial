@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
 import {
   Table,
@@ -23,7 +23,11 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
-import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  NUMERIC_DATA_TYPES,
+  type FieldDefinition,
+  type RecordRow,
+} from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
   applyManualOrder,
@@ -120,6 +124,7 @@ export function RecordListTable({
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [page, setPage] = useState(1);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
@@ -162,12 +167,89 @@ export function RecordListTable({
 
   const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
 
-  // Paginação no cliente: sem teto de registros, apenas 100 por página. A fatia é
-  // feita DEPOIS de sort/ordem manual, então a página reflete o conjunto inteiro.
+  // --- Agrupar por (modo registros): agrupa por uma coluna em seções recolhíveis
+  // com subtotais das colunas numéricas. Chaveado pelo `c.field` da coluna. ---
+  const groupByField =
+    t.groupBy && cols.some((c) => c.field === t.groupBy) ? t.groupBy : null;
+
+  const isNumericCol = (field: string): boolean => {
+    if (MONEY_FIELDS.has(field)) return true;
+    if (field.startsWith("custom:")) {
+      const dt = fieldByKey.get(field.slice(7))?.data_type;
+      return dt ? NUMERIC_DATA_TYPES.includes(dt) : false;
+    }
+    return false;
+  };
+  const numFmt = (field: string, n: number): string =>
+    MONEY_FIELDS.has(field) ? money(n) : n.toLocaleString("pt-BR");
+  const sumCol = (field: string, rs: RecordRow[]): number => {
+    let s = 0;
+    for (const r of rs) {
+      const n = Number(rawValue(field, r));
+      if (Number.isFinite(n)) s += n;
+    }
+    return s;
+  };
+  // Rótulo de exibição de um valor (para o cabeçalho do grupo).
+  const displayValue = (field: string, r: RecordRow): string => {
+    if (field.startsWith("custom:")) {
+      const f = fieldByKey.get(field.slice(7));
+      const v = r.custom_fields?.[field.slice(7)];
+      if (v == null || v === "") return "—";
+      return f?.data_type === "data"
+        ? formatDateValue(v, fmtOf(field))
+        : String(v);
+    }
+    return coreDisplay(field, r, fkLabels, fmtOf(field));
+  };
+
+  type Group = { key: string; label: string; rows: RecordRow[] };
+  type Item =
+    | { kind: "group"; group: Group }
+    | { kind: "data"; row: RecordRow }
+    | { kind: "grand" };
+  let displayItems: Item[];
+  if (groupByField) {
+    const byKey = new Map<string, Group>();
+    const groups: Group[] = [];
+    for (const r of rows) {
+      const gk = String(rawValue(groupByField, r) ?? "");
+      let g = byKey.get(gk);
+      if (!g) {
+        g = { key: gk, label: displayValue(groupByField, r), rows: [] };
+        byKey.set(gk, g);
+        groups.push(g);
+      }
+      g.rows.push(r);
+    }
+    displayItems = [];
+    for (const g of groups) {
+      displayItems.push({ kind: "group", group: g });
+      if (!collapsed.has(g.key))
+        for (const r of g.rows) displayItems.push({ kind: "data", row: r });
+    }
+    displayItems.push({ kind: "grand" });
+  } else {
+    displayItems = rows.map((r) => ({ kind: "data", row: r }));
+  }
+
+  // Paginação no cliente: sem teto de registros, apenas 100 itens por página. A
+  // fatia é feita DEPOIS de sort/ordem manual/agrupamento, então a página reflete
+  // o conjunto inteiro.
   const PAGE_SIZE = 100;
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
   const current = Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
-  const pageRows = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const pageItems = displayItems.slice(
+    (current - 1) * PAGE_SIZE,
+    current * PAGE_SIZE
+  );
+
+  // Classe do conteúdo interno da célula: cortar (…) ou quebrar linha.
+  const cellText = t.cellText ?? "clip";
+  const cellSpanClass =
+    cellText === "wrap"
+      ? "block whitespace-normal break-words"
+      : "block truncate";
 
   const gl = t.gridLines ?? "both";
   const vertical = gl === "vertical" || gl === "both";
@@ -221,6 +303,165 @@ export function RecordListTable({
   function setRowHeight(rowKey: string, h: number) {
     setTable({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
   }
+  const toggleCollapse = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  // Linha de cabeçalho de grupo (com subtotais) — espelha a tabela agregada.
+  const renderSummaryRow = (
+    keyId: string,
+    label: string,
+    rs: RecordRow[],
+    opts?: { collapsible?: boolean; isCollapsed?: boolean; onToggle?: () => void }
+  ) => (
+    <TableRow
+      key={`__grp:${keyId}`}
+      className={cn(rowBorder, "font-medium")}
+      style={{
+        background: t.headerBg ?? "var(--muted)",
+        color: t.headerColor,
+        ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+      }}
+    >
+      {editable ? <TableCell className="w-6 px-1" /> : null}
+      {cols.map((c, ci) => {
+        const numeric = isNumericCol(c.field);
+        return (
+          <TableCell
+            key={c.field}
+            className={numeric ? "text-right tabular-nums" : undefined}
+            style={cellBorder(ci === cols.length - 1)}
+          >
+            {ci === 0 ? (
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-1",
+                  opts?.collapsible ? "cursor-pointer" : "cursor-default"
+                )}
+                onClick={opts?.onToggle}
+                disabled={!opts?.collapsible}
+              >
+                {opts?.collapsible ? (
+                  opts.isCollapsed ? (
+                    <ChevronRight className="size-3.5 shrink-0" />
+                  ) : (
+                    <ChevronDown className="size-3.5 shrink-0" />
+                  )
+                ) : null}
+                {label}
+              </button>
+            ) : numeric ? (
+              numFmt(c.field, sumCol(c.field, rs))
+            ) : null}
+          </TableCell>
+        );
+      })}
+    </TableRow>
+  );
+
+  const renderDataRow = (r: RecordRow) => {
+    const rowCp = t.rowColors?.[r.id];
+    const h = t.rowHeights?.[r.id];
+    return (
+      <TableRow
+        key={r.id}
+        className={rowBorder}
+        style={{
+          background: rowCp?.fill ?? t.bodyBg,
+          color: rowCp?.text ?? t.bodyColor,
+          ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+          ...(h ? { height: h } : {}),
+        }}
+      >
+        {editable ? (
+          <TableCell
+            className="group relative w-6 cursor-move px-1"
+            draggable
+            onDragStart={() => setDragRow(r.id)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => {
+              if (dragRow)
+                setTable({
+                  rowOrder: reorderKeys(rows.map((x) => x.id), dragRow, r.id),
+                  sort: undefined,
+                });
+              setDragRow(null);
+            }}
+            title="Arraste para reordenar a linha"
+          >
+            <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
+            <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
+          </TableCell>
+        ) : null}
+        {cols.map((c, ci) => {
+          const isCustom = c.field.startsWith("custom:");
+          const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
+          // Custom não calculado é editável por padrão (permissão por papel
+          // é reforçada dentro da EditableCell / server action).
+          const isEditableCell = Boolean(
+            isCustom && field && field.data_type !== "calculado"
+          );
+          const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
+          const colCp = t.colColors?.[c.field];
+          return (
+            <TableCell
+              key={c.field}
+              className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
+              onDoubleClick={
+                editable && !isEditableCell
+                  ? (e) =>
+                      setMenu({
+                        kind: "ctx",
+                        x: e.clientX,
+                        y: e.clientY,
+                        column: c.field,
+                        rowKey: r.id,
+                        scopes: ["row", "col", "cell"],
+                        isDate: isDateCol(c.field),
+                      })
+                  : undefined
+              }
+              style={{
+                background: cellCp?.fill ?? colCp?.fill,
+                color: cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
+                ...cellBorder(ci === cols.length - 1),
+                ...widthStyle(c.field),
+                ...(cellText === "clip" ? { overflow: "hidden" } : {}),
+              }}
+            >
+              {isEditableCell && field ? (
+                <EditableCell
+                  record={r}
+                  field={field}
+                  userRoles={userRoles}
+                  canEditValues={canEditValues}
+                  dateFormat={fmtOf(c.field)}
+                  onSaved={refresh}
+                />
+              ) : isCustom ? (
+                <span className={cellSpanClass}>
+                  {field && r.custom_fields?.[field.field_key] != null
+                    ? field.data_type === "data"
+                      ? formatDateValue(r.custom_fields[field.field_key], fmtOf(c.field))
+                      : String(r.custom_fields[field.field_key])
+                    : "—"}
+                </span>
+              ) : (
+                <span className={cellSpanClass}>
+                  {coreDisplay(c.field, r, fkLabels, fmtOf(c.field))}
+                </span>
+              )}
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    );
+  };
 
   if (cols.length === 0) {
     return (
@@ -307,103 +548,22 @@ export function RecordListTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {pageRows.map((r) => {
-            const rowCp = t.rowColors?.[r.id];
-            const h = t.rowHeights?.[r.id];
-            return (
-              <TableRow
-                key={r.id}
-                className={rowBorder}
-                style={{
-                  background: rowCp?.fill ?? t.bodyBg,
-                  color: rowCp?.text ?? t.bodyColor,
-                  ...(t.borderColor ? { borderColor: t.borderColor } : {}),
-                  ...(h ? { height: h } : {}),
-                }}
-              >
-                {editable ? (
-                  <TableCell
-                    className="group relative w-6 cursor-move px-1"
-                    draggable
-                    onDragStart={() => setDragRow(r.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragRow)
-                        setTable({
-                          rowOrder: reorderKeys(rows.map((x) => x.id), dragRow, r.id),
-                          sort: undefined,
-                        });
-                      setDragRow(null);
-                    }}
-                    title="Arraste para reordenar a linha"
-                  >
-                    <GripVertical className="size-3 opacity-0 transition-opacity group-hover:opacity-60" />
-                    <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
-                  </TableCell>
-                ) : null}
-                {cols.map((c, ci) => {
-                  const isCustom = c.field.startsWith("custom:");
-                  const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
-                  // Custom não calculado é editável por padrão (permissão por papel
-                  // é reforçada dentro da EditableCell / server action).
-                  const isEditableCell = Boolean(
-                    isCustom && field && field.data_type !== "calculado"
-                  );
-                  const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
-                  const colCp = t.colColors?.[c.field];
-                  return (
-                    <TableCell
-                      key={c.field}
-                      className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
-                      onDoubleClick={
-                        editable && !isEditableCell
-                          ? (e) =>
-                              setMenu({
-                                kind: "ctx",
-                                x: e.clientX,
-                                y: e.clientY,
-                                column: c.field,
-                                rowKey: r.id,
-                                scopes: ["row", "col", "cell"],
-                                isDate: isDateCol(c.field),
-                              })
-                          : undefined
-                      }
-                      style={{
-                        background: cellCp?.fill ?? colCp?.fill,
-                        color: cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
-                        ...cellBorder(ci === cols.length - 1),
-                        ...widthStyle(c.field),
-                      }}
-                    >
-                      {isEditableCell && field ? (
-                        <EditableCell
-                          record={r}
-                          field={field}
-                          userRoles={userRoles}
-                          canEditValues={canEditValues}
-                          dateFormat={fmtOf(c.field)}
-                          onSaved={refresh}
-                        />
-                      ) : isCustom ? (
-                        <span className="block truncate">
-                          {field && r.custom_fields?.[field.field_key] != null
-                            ? field.data_type === "data"
-                              ? formatDateValue(r.custom_fields[field.field_key], fmtOf(c.field))
-                              : String(r.custom_fields[field.field_key])
-                            : "—"}
-                        </span>
-                      ) : (
-                        <span className="block truncate">
-                          {coreDisplay(c.field, r, fkLabels, fmtOf(c.field))}
-                        </span>
-                      )}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            );
-          })}
+          {pageItems.map((item) =>
+            item.kind === "group"
+              ? renderSummaryRow(
+                  item.group.key,
+                  `${item.group.label} (${item.group.rows.length})`,
+                  item.group.rows,
+                  {
+                    collapsible: true,
+                    isCollapsed: collapsed.has(item.group.key),
+                    onToggle: () => toggleCollapse(item.group.key),
+                  }
+                )
+              : item.kind === "grand"
+                ? renderSummaryRow("__grand", "Total geral", rows)
+                : renderDataRow(item.row)
+          )}
         </TableBody>
       </Table>
       </div>
