@@ -29,7 +29,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import type { AvailableField } from "@/lib/widgets/fields";
+import { DATE_TRANSFORMS, type AvailableField } from "@/lib/widgets/fields";
 import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
@@ -37,9 +37,11 @@ import {
 } from "@/lib/widgets/period";
 import {
   AGG_LABELS,
+  DATE_AGG_LABELS,
   TRANSFORM_LABELS,
   VISUAL_TYPE_LABELS,
   type Aggregation,
+  type DateAgg,
   type Dimension,
   type FieldFilterEntry,
   type FieldFilterSettings,
@@ -111,7 +113,11 @@ export function WidgetBuilder({
   const initialDimensions: Dimension[] =
     widget?.settings?.rowMode === "records" &&
     (widget?.settings?.columns?.length ?? 0) > 0
-      ? widget!.settings!.columns!.map((c) => ({ field: c.field, transform: "none" }))
+      ? widget!.settings!.columns!.map((c) => ({
+          field: c.field,
+          transform: c.transform ?? "none",
+          weekMode: c.weekMode,
+        }))
       : (widget?.dimensions ?? []);
   const [dimensions, setDimensions] = useState<Dimension[]>(initialDimensions);
   const [metrics, setMetrics] = useState<Metric[]>(
@@ -163,6 +169,12 @@ export function WidgetBuilder({
     patch: { editable?: boolean; writeBack?: boolean }
   ) =>
     setColumnFlags((prev) => ({ ...prev, [field]: { ...prev[field], ...patch } }));
+  // Agregação por período (só p/ colunas de data no modo registros).
+  const [columnAgg, setColumnAgg] = useState<Record<string, DateAgg>>(() => {
+    const m: Record<string, DateAgg> = {};
+    for (const c of widget?.settings?.columns ?? []) if (c.agg) m[c.field] = c.agg;
+    return m;
+  });
   // Editabilidade "legada": widgets antigos deixavam custom não calculado editável.
   const legacyEditable = (field: string) =>
     field.startsWith("custom:") &&
@@ -253,9 +265,14 @@ export function WidgetBuilder({
   const visualOptions: ComboboxOption[] = (
     Object.keys(VISUAL_TYPE_LABELS) as VisualType[]
   ).map((v) => ({ value: v, label: VISUAL_TYPE_LABELS[v] }));
-  const transformOptions: ComboboxOption[] = (
-    Object.keys(TRANSFORM_LABELS) as Transform[]
-  ).map((t) => ({ value: t, label: TRANSFORM_LABELS[t] }));
+  // Só os formatos de data curados aparecem (day/week/month legados ficam fora).
+  const transformOptions: ComboboxOption[] = DATE_TRANSFORMS.map((t) => ({
+    value: t,
+    label: TRANSFORM_LABELS[t],
+  }));
+  const dateAggOptions: ComboboxOption[] = (
+    Object.keys(DATE_AGG_LABELS) as DateAgg[]
+  ).map((a) => ({ value: a, label: DATE_AGG_LABELS[a] }));
   const aggOptions: ComboboxOption[] = (
     Object.keys(AGG_LABELS) as Aggregation[]
   ).map((a) => ({ value: a, label: AGG_LABELS[a] }));
@@ -406,6 +423,13 @@ export function WidgetBuilder({
             const col: RecordListColumn = { field: d.field, editable };
             if (editable && af?.writable && columnFlags[d.field]?.writeBack)
               col.writeBack = true;
+            // Formato/agrupamento por período (só colunas de data).
+            if (af?.isDate && d.transform && d.transform !== "none") {
+              col.transform = d.transform;
+              if (d.transform === "week_month") col.weekMode = d.weekMode;
+              const agg = columnAgg[d.field] ?? "individual";
+              if (agg !== "individual") col.agg = agg;
+            }
             return col;
           }),
       };
@@ -879,6 +903,29 @@ export function WidgetBuilder({
                   <Trash2 className="size-4" />
                 </Button>
               </div>
+              {isRecordList &&
+              isDate(d.field) &&
+              d.transform &&
+              d.transform !== "none" ? (
+                <div className="flex items-center gap-2 pl-1">
+                  <Label className="text-muted-foreground w-28 shrink-0 text-xs">
+                    Agrupar período
+                  </Label>
+                  <Combobox
+                    className="h-8 flex-1 text-sm"
+                    searchable={false}
+                    options={dateAggOptions}
+                    value={columnAgg[d.field] ?? "individual"}
+                    onValueChange={(a) =>
+                      setColumnAgg((prev) => ({
+                        ...prev,
+                        [d.field]: a as DateAgg,
+                      }))
+                    }
+                    aria-label="Agregação por período"
+                  />
+                </div>
+              ) : null}
               {isRecordList && d.field && af?.editableCapable ? (
                 <div className="text-muted-foreground flex items-center gap-4 pl-1 text-xs">
                   <label className="flex items-center gap-1.5">

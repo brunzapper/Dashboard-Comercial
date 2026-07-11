@@ -100,15 +100,15 @@ export function fieldFk(
 }
 
 export const AGGREGATIONS: Aggregation[] = ["sum", "count", "avg"];
+// Lista exibida na UI (o RPC ainda aceita os legados day/week/month). Ordem:
+// dia da semana, semanas, mês por nome, mês/ano, trimestre, ano.
 export const DATE_TRANSFORMS: Transform[] = [
   "none",
-  "day",
-  "week",
-  "month",
-  "quarter",
-  "year",
-  "month_name",
-  "month_year",
+  "weekday",
   "week_year",
   "week_month",
+  "month_name",
+  "month_year",
+  "quarter",
+  "year",
 ];

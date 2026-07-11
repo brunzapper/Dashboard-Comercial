@@ -40,27 +40,50 @@ export const AGG_LABELS: Record<Aggregation, string> = {
 
 export type Transform =
   | "none"
-  | "day"
-  | "week"
-  | "month"
-  | "quarter"
-  | "year"
+  | "weekday" // Segunda-feira…
+  | "quarter" // T1/26
+  | "year" // 2026
   // Transforms "por nome" (rótulo textual, agrupam por mês/semana no período):
   | "month_name" // Janeiro
   | "month_year" // Janeiro/26
   | "week_year" // 5ª semana
-  | "week_month"; // 1ª semana de Janeiro
+  | "week_month" // 1ª semana de Janeiro
+  // Legados (aceitos pelo RPC / widgets antigos; fora da lista da UI):
+  | "day"
+  | "week"
+  | "month";
 export const TRANSFORM_LABELS: Record<Transform, string> = {
   none: "—",
-  day: "Dia",
-  week: "Semana",
-  month: "Mês",
+  weekday: "Dia da semana",
   quarter: "Trimestre",
   year: "Ano",
   month_name: "Nome do mês",
   month_year: "Mês/ano",
   week_year: "Semana do ano",
   week_month: "Semana do mês",
+  day: "Dia",
+  week: "Semana",
+  month: "Mês",
+};
+
+// Agregação por período no widget de "registros individuais": como uma coluna de
+// data expõe as métricas do widget. "individual" mantém 1 linha por registro; as
+// demais colapsam em 1 linha por período (Janeiro, Fevereiro…). Mediana/moda são
+// calculadas no cliente (o SQL não faz), o que é ok pois o widget tem os registros.
+export type DateAgg =
+  | "individual"
+  | "sum"
+  | "count"
+  | "avg"
+  | "median"
+  | "mode";
+export const DATE_AGG_LABELS: Record<DateAgg, string> = {
+  individual: "Individual (por registro)",
+  sum: "Soma",
+  count: "Contagem",
+  avg: "Média",
+  median: "Mediana",
+  mode: "Moda",
 };
 
 export type FilterOp =
@@ -150,6 +173,12 @@ export interface RecordListColumn {
   // Ao editar esta coluna, também enfileira write-back p/ o Bitrix (campos com
   // origem Bitrix: custom com source_field_id ou coluna do núcleo mapeada).
   writeBack?: boolean;
+  // Só p/ colunas de data: formato de exibição (nome do mês, ano, dia da semana…).
+  transform?: Transform;
+  weekMode?: "full" | "restricted"; // só p/ transform 'week_month'
+  // Só p/ colunas de data: agrega o widget por período (ver DateAgg). Default
+  // 'individual' (1 linha por registro). As demais colapsam por período.
+  agg?: DateAgg;
 }
 // Fonte das linhas do modo lista: registros (default), responsáveis ou operações.
 // Campos personalizados não calculados editáveis gravam de volta na entidade

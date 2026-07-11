@@ -34,7 +34,8 @@ import {
   EDITABLE_CORE_COLUMNS,
   isEditableCoreColumn,
 } from "@/lib/config/core-writeback";
-import { AGG_LABELS } from "@/lib/widgets/types";
+import { AGG_LABELS, DATE_AGG_LABELS } from "@/lib/widgets/types";
+import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import {
   applyManualOrder,
   distinctFills,
@@ -48,6 +49,7 @@ import {
 import type {
   AppearanceSettings,
   ColorPair,
+  DateAgg,
   Metric,
   RecordListColumn,
 } from "@/lib/widgets/types";
@@ -68,6 +70,30 @@ function money(v: unknown): string {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// Moda: valor mais frequente (empate → o menor). Só faz sentido p/ números aqui.
+function mode(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const count = new Map<number, number>();
+  let best = nums[0];
+  let bestCount = 0;
+  for (const n of nums) {
+    const c = (count.get(n) ?? 0) + 1;
+    count.set(n, c);
+    if (c > bestCount || (c === bestCount && n < best)) {
+      best = n;
+      bestCount = c;
+    }
+  }
+  return best;
 }
 
 function coreDisplay(
@@ -177,6 +203,46 @@ export function RecordListTable({
     if (field === "closed") return rawValue(field, r) ? "true" : "false";
     const v = rawValue(field, r);
     return v == null ? "" : String(v);
+  };
+
+  // Rótulo de uma coluna de data com formato (transform): "Janeiro", "T1/26"…
+  const columnDateLabel = (c: RecordListColumn, r: RecordRow): string => {
+    const raw = rawValue(c.field, r);
+    if (raw == null || raw === "") return "—";
+    return bucketRecordDate(raw, c.transform!, c.weekMode).label;
+  };
+
+  // Coluna de agrupamento por período: a 1ª coluna de data com agg != individual.
+  const groupCol = cols.find(
+    (c) => c.transform && c.agg && c.agg !== "individual"
+  );
+
+  // Agregação de uma métrica sobre um conjunto de registros, conforme a função
+  // escolhida na coluna de data (soma/contagem/média/mediana/moda).
+  const aggMetric = (fn: DateAgg, m: Metric, rs: RecordRow[]): number => {
+    if (fn === "count" || m.field === "*") return rs.length;
+    const nums = rs
+      .map((r) => Number(rawValue(m.field, r)))
+      .filter((n) => Number.isFinite(n));
+    switch (fn) {
+      case "sum":
+        return nums.reduce((s, n) => s + n, 0);
+      case "avg":
+        return nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+      case "median":
+        return median(nums);
+      case "mode":
+        return mode(nums);
+      default:
+        return 0;
+    }
+  };
+  const aggMetricText = (fn: DateAgg, m: Metric, rs: RecordRow[]): string => {
+    const v = aggMetric(fn, m, rs);
+    if (fn === "count" || m.field === "*") return v.toLocaleString("pt-BR");
+    return MONEY_FIELDS.has(m.field)
+      ? money(v)
+      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
   };
 
   // Descobre se a coluna é de data (núcleo ou custom) e o formato efetivo dela.
@@ -517,6 +583,8 @@ export function RecordListTable({
                   dateFormat={fmtOf(c.field)}
                   onSaved={refresh}
                 />
+              ) : c.transform ? (
+                <span className={cellSpanClass}>{columnDateLabel(c, r)}</span>
               ) : isCustom ? (
                 <span className={cellSpanClass}>
                   {field && r.custom_fields?.[field.field_key] != null
@@ -557,6 +625,115 @@ export function RecordListTable({
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-sm">
         Nenhum registro para os filtros atuais.
+      </div>
+    );
+  }
+
+  // === Agregação por período: colapsa em 1 linha por período (Janeiro, T1/26…) e
+  // mostra só a coluna de período + as métricas, agregadas pela função escolhida.
+  if (groupCol) {
+    const fn = groupCol.agg as DateAgg;
+    const groupMetrics: Metric[] =
+      metricList.length > 0 ? metricList : [{ field: "*", agg: "count" }];
+    const byKey = new Map<
+      string,
+      { label: string; sort: number; rows: RecordRow[] }
+    >();
+    for (const r of records) {
+      const b = bucketRecordDate(
+        rawValue(groupCol.field, r),
+        groupCol.transform!,
+        groupCol.weekMode
+      );
+      let g = byKey.get(b.key);
+      if (!g) {
+        g = { label: b.label, sort: b.sort, rows: [] };
+        byKey.set(b.key, g);
+      }
+      g.rows.push(r);
+    }
+    const groups = [...byKey.entries()]
+      .map(([key, g]) => ({ key, ...g }))
+      .sort((a, b) => a.sort - b.sort);
+    const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
+    const current = Math.min(page, totalPages);
+    const pageGroups = groups.slice(
+      (current - 1) * PAGE_SIZE,
+      current * PAGE_SIZE
+    );
+    const periodLabel = fieldLabel(groupCol.field, available);
+    const metricHead = (m: Metric) =>
+      m.field === "*"
+        ? "Contagem de registros"
+        : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`;
+
+    return (
+      <div className="flex h-full flex-col">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow style={{ background: t.headerBg, color: t.headerColor }}>
+                <TableHead className="whitespace-nowrap">{periodLabel}</TableHead>
+                {groupMetrics.map((m, mi) => (
+                  <TableHead
+                    key={mi}
+                    className="text-right whitespace-nowrap"
+                  >
+                    {metricHead(m)}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pageGroups.map((g) => (
+                <TableRow key={g.key}>
+                  <TableCell className="font-medium">{g.label}</TableCell>
+                  {groupMetrics.map((m, mi) => (
+                    <TableCell key={mi} className="text-right tabular-nums">
+                      {aggMetricText(fn, m, g.rows)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+              <TableRow
+                className="font-medium"
+                style={{ background: t.headerBg ?? "var(--muted)" }}
+              >
+                <TableCell>Total geral</TableCell>
+                {groupMetrics.map((m, mi) => (
+                  <TableCell key={mi} className="text-right tabular-nums">
+                    {aggMetricText(fn, m, records)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+        {totalPages > 1 ? (
+          <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
+            <span className="text-muted-foreground">
+              Página {current} de {totalPages}
+            </span>
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={current <= 1}
+                onClick={() => setPage(current - 1)}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={current >= totalPages}
+                onClick={() => setPage(current + 1)}
+              >
+                Próxima
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
