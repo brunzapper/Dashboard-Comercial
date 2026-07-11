@@ -38,6 +38,9 @@ export function EditableCell({
   canEditValues,
   dateFormat = DEFAULT_DATE_FORMAT,
   onSaved,
+  writeBack = false,
+  forceSyncWriteBack = false,
+  forceEditable = false,
 }: {
   record: RecordRow;
   field: FieldDefinition;
@@ -49,6 +52,13 @@ export function EditableCell({
   // Chamado após uma gravação bem-sucedida. Em Registros a própria action
   // revalida a página; no dashboard o pai usa isto para router.refresh().
   onSaved?: () => void;
+  // Dashboard: esta coluna grava de volta no Bitrix ao editar.
+  writeBack?: boolean;
+  // Registros: campos de Sync sempre editáveis + gravam no Bitrix.
+  forceSyncWriteBack?: boolean;
+  // Dashboard: coluna marcada como editável — libera edição p/ quem tem permissão
+  // mesmo sem editable_by_roles.
+  forceEditable?: boolean;
 }) {
   const serverValue = customValue(record, field.field_key);
   const [value, setValue] = useState(serverValue);
@@ -67,10 +77,16 @@ export function EditableCell({
     savedRef.current = serverValue;
   }, [serverValue]);
 
+  // Campos de Sync (Bitrix): nos Registros (forceSyncWriteBack) ficam sempre
+  // editáveis para quem tem permissão, independentemente de editable_by_roles.
+  const isBitrixSync =
+    field.source_system === "bitrix" && Boolean(field.source_field_id);
   const editable =
     canEditValues &&
     field.data_type !== "calculado" &&
-    field.editable_by_roles.some((r) => userRoles.includes(r));
+    (field.editable_by_roles.some((r) => userRoles.includes(r)) ||
+      (forceSyncWriteBack && isBitrixSync) ||
+      forceEditable);
 
   if (!editable) {
     const display =
@@ -87,7 +103,12 @@ export function EditableCell({
     setValue(raw);
     setError(false);
     startTransition(async () => {
-      const res = await updateRecordField(record.id, field.field_key, raw);
+      const res = await updateRecordField(record.id, field.field_key, raw, {
+        kind: "custom",
+        writeBack,
+        forceSyncWriteBack,
+        allowEdit: forceEditable,
+      });
       if (res.ok) {
         savedRef.current = raw;
         onSaved?.();

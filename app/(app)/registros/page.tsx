@@ -4,6 +4,7 @@
 // v1.3 (09/07/2026): Fase 8 — abas por fonte (Leads/Deals/Estudo). Cada aba
 //   filtra por record_type e mostra só as colunas daquela fonte (applies_to).
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -55,6 +56,10 @@ export default async function RegistrosPage({
   const canEditValues = session?.permissions.includes("edit_record_values") ?? false;
   const userRoles = session?.roles ?? [];
 
+  // Só Gestores e Administradores visualizam a página Registros.
+  const canViewRegistros = isAdmin || userRoles.includes("gestor");
+  if (!canViewRegistros) redirect("/");
+
   const supabase = await createClient();
 
   // Filtros + paginação (RLS decide o que o usuário vê).
@@ -83,7 +88,7 @@ export default async function RegistrosPage({
       supabase
         .from("field_definitions")
         .select(
-          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to"
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back"
         )
         .eq("show_in_builder", true)
         .order("sort_order", { ascending: true }),

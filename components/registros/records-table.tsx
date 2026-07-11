@@ -98,6 +98,7 @@ export function RecordsTable({
                     field={f}
                     userRoles={userRoles}
                     canEditValues={canEditValues}
+                    forceSyncWriteBack
                   />
                 </TableCell>
               ))}

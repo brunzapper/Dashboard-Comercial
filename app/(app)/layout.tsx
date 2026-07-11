@@ -11,12 +11,13 @@ import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
 
-// Cada item pode exigir uma `permission` e/ou um `role`; sem nenhum, é visível a todos.
-// Operações/Responsáveis/Metas/Usuários viraram sub-abas de "Configurações"
-// (app/(app)/configuracoes) — o item pai é inserido abaixo conforme o acesso.
-const NAV: (NavItem & { permission?: string; role?: string })[] = [
+// Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
+// sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
+// sub-abas de "Configurações" — o item pai é inserido abaixo conforme o acesso.
+// Registros só é visível a Gestores/Administradores.
+const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
   { href: "/", label: "Dashboards" },
-  { href: "/registros", label: "Registros" },
+  { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
 ];
 
@@ -34,7 +35,8 @@ export default async function AppLayout({
   const items = NAV.filter(
     (item) =>
       (!item.permission || permissions.includes(item.permission)) &&
-      (!item.role || roles.includes(item.role))
+      (!item.role || roles.includes(item.role)) &&
+      (!item.roles || item.roles.some((r) => roles.includes(r)))
   );
 
   // "Configurações" agrupa as telas admin (Operações/Responsáveis/Metas/Usuários)

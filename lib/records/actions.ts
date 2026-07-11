@@ -18,6 +18,10 @@ import {
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
 import { computeFormulaFields, loadFormulaDefs } from "@/lib/records/formulas";
 import type { DataType } from "@/lib/records/types";
+import {
+  EDITABLE_CORE_COLUMNS,
+  coreWriteBackFieldId,
+} from "@/lib/config/core-writeback";
 
 function numOrNull(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -60,6 +64,45 @@ interface ExistingForEdit {
   value: number | null;
   mrr: number | null;
   lead_time_days: number | null;
+  // Colunas do núcleo editáveis (comparação/audit/write-back).
+  title: string | null;
+  stage: string | null;
+  currency: string | null;
+  channel: string | null;
+  sale_type: string | null;
+  closed: boolean | null;
+  opened_at: string | null;
+  pipeline: string | null;
+}
+
+// Coerção de um valor cru (string do form) p/ o tipo de uma coluna do núcleo.
+function coerceCore(dataType: DataType, raw: FormDataEntryValue | null): unknown {
+  const s = raw == null ? "" : String(raw).trim();
+  if (s === "") return null;
+  if (dataType === "numero" || dataType === "moeda") {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (dataType === "booleano") {
+    return s === "true" ? true : s === "false" ? false : null;
+  }
+  if (dataType === "data") return s.slice(0, 10);
+  return s;
+}
+
+// Igualdade "normalizada" p/ decidir se uma coluna do núcleo mudou (datas comparam
+// só o dia; números por valor; resto por texto).
+function coreEquals(dataType: DataType, oldVal: unknown, newVal: unknown): boolean {
+  if (dataType === "data") {
+    return String(oldVal ?? "").slice(0, 10) === String(newVal ?? "").slice(0, 10);
+  }
+  if (dataType === "numero" || dataType === "moeda") {
+    const a = oldVal == null || oldVal === "" ? null : Number(oldVal);
+    const b = newVal == null || newVal === "" ? null : Number(newVal);
+    return a === b;
+  }
+  if (dataType === "booleano") return Boolean(oldVal) === Boolean(newVal);
+  return String(oldVal ?? "") === String(newVal ?? "");
 }
 
 export async function updateRecord(
@@ -75,12 +118,21 @@ export async function updateRecord(
   const recordId = String(formData.get("record_id") ?? "");
   if (!recordId) return { ok: false, message: "Registro não identificado." };
 
+  // Contexto de write-back: `force_sync_write_back` (edições dos Registros gravam
+  // sempre no Bitrix); `write_back__<campo>` (dashboard marca a coluna p/ gravar).
+  const forceSync = String(formData.get("force_sync_write_back") ?? "") === "1";
+  const wbOverride = (key: string) =>
+    String(formData.get(`write_back__${key}`) ?? "") === "1";
+  // `allow_edit`: a coluna foi marcada como editável no dashboard (pelo dono/admin),
+  // liberando a edição para quem tem edit_record_values mesmo sem editable_by_roles.
+  const allowEdit = String(formData.get("allow_edit") ?? "") === "1";
+
   const supabase = await createClient();
 
   const { data: existingRow } = await supabase
     .from("records")
     .select(
-      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days"
+      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days, title, stage, currency, channel, sale_type, closed, opened_at, pipeline"
     )
     .eq("id", recordId)
     .maybeSingle();
@@ -111,14 +163,32 @@ export async function updateRecord(
     }
   }
 
-  // Campos personalizados editáveis pelo papel do usuário
+  // Colunas do núcleo editáveis (dashboard marca por coluna; Registros libera os
+  // campos de Sync). A permissão global edit_record_values já foi conferida acima.
+  for (const [col, dtype] of Object.entries(EDITABLE_CORE_COLUMNS)) {
+    const key = `core__${col}`;
+    if (!formData.has(key)) continue;
+    const val = coerceCore(dtype, formData.get(key));
+    const old = (existing as unknown as Record<string, unknown>)[col] ?? null;
+    if (!coreEquals(dtype, old, val)) {
+      updates[col] = val;
+      fmod[col] = now;
+      audits.push({ field: col, old_value: old, new_value: val });
+    }
+  }
+
+  // Campos personalizados editáveis pelo papel do usuário (ou campos de Sync com
+  // force_sync_write_back — "sempre editáveis nos Registros" para quem tem a permissão).
   let customChanged = false;
   for (const def of defs ?? []) {
     // Calculados são derivados — nunca editados manualmente.
     if ((def.data_type as DataType) === "calculado") continue;
-    const editable = ((def.editable_by_roles as string[]) ?? []).some((r) =>
+    const isBitrixSync =
+      def.source_system === "bitrix" && Boolean(def.source_field_id);
+    const roleAllows = ((def.editable_by_roles as string[]) ?? []).some((r) =>
       roles.includes(r)
     );
+    const editable = roleAllows || (forceSync && isBitrixSync) || allowEdit;
     if (!editable) continue;
     const key = `custom__${def.field_key}`;
     if (!formData.has(key)) continue;
@@ -229,20 +299,32 @@ export async function updateRecord(
       const changes: WriteBackChange[] = [];
       for (const a of audits) {
         const d = defByKey.get(a.field);
-        if (
-          !d ||
-          !d.write_back ||
-          !d.source_field_id ||
-          d.source_system !== "bitrix"
-        ) {
+        if (d) {
+          // Campo personalizado de Sync: grava se marcado (write_back), forçado
+          // pelos Registros (forceSync) ou pela coluna do dashboard (override).
+          const isBitrix =
+            d.source_system === "bitrix" && Boolean(d.source_field_id);
+          if (!isBitrix) continue;
+          if (!(d.write_back || forceSync || wbOverride(a.field))) continue;
+          changes.push({
+            fieldKey: a.field,
+            sourceFieldId: d.source_field_id as string,
+            label: (d.label as string) ?? null,
+            newValue: a.new_value ?? null,
+          });
           continue;
         }
-        changes.push({
-          fieldKey: a.field,
-          sourceFieldId: d.source_field_id as string,
-          label: (d.label as string) ?? null,
-          newValue: a.new_value ?? null,
-        });
+        // Coluna do núcleo mapeada p/ o Bitrix: grava quando forçado (Registros)
+        // ou marcado na coluna do dashboard. Relações não têm mapa → ignoradas.
+        const sfid = coreWriteBackFieldId(a.field, entity);
+        if (sfid && (forceSync || wbOverride(a.field))) {
+          changes.push({
+            fieldKey: a.field,
+            sourceFieldId: sfid,
+            label: a.field,
+            newValue: a.new_value ?? null,
+          });
+        }
       }
       if (changes.length > 0) {
         try {
@@ -264,20 +346,38 @@ export async function updateRecord(
   return { ok: true, message: "Registro atualizado." };
 }
 
+export interface UpdateFieldOptions {
+  // 'custom' (padrão) grava em custom_fields; 'core' grava numa coluna do núcleo.
+  kind?: "custom" | "core";
+  // Dashboard: esta coluna deve gravar de volta no Bitrix.
+  writeBack?: boolean;
+  // Registros: campos de Sync sempre gravam no Bitrix (e ficam editáveis).
+  forceSyncWriteBack?: boolean;
+  // Dashboard: coluna marcada como editável libera a edição p/ quem tem permissão
+  // mesmo sem editable_by_roles (só relevante para campos personalizados).
+  allowEdit?: boolean;
+}
+
 /**
- * Grava um único campo personalizado de um registro (edição inline na tabela).
- * Reaproveita `updateRecord` construindo um FormData com só aquele campo — toda a
- * lógica de permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log
- * e revalidatePath vem de graça.
+ * Grava um único campo de um registro (edição inline na tabela). Reaproveita
+ * `updateRecord` construindo um FormData com só aquele campo — toda a lógica de
+ * permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log,
+ * write-back e revalidatePath vem de graça. `kind` escolhe custom vs coluna do
+ * núcleo; as flags de write-back viram os campos que `updateRecord` já entende.
  */
 export async function updateRecordField(
   recordId: string,
   fieldKey: string,
-  rawValue: string
+  rawValue: string,
+  opts: UpdateFieldOptions = {}
 ): Promise<EditActionState> {
   const fd = new FormData();
   fd.set("record_id", recordId);
-  fd.set(`custom__${fieldKey}`, rawValue);
+  const key = opts.kind === "core" ? `core__${fieldKey}` : `custom__${fieldKey}`;
+  fd.set(key, rawValue);
+  if (opts.writeBack) fd.set(`write_back__${fieldKey}`, "1");
+  if (opts.forceSyncWriteBack) fd.set("force_sync_write_back", "1");
+  if (opts.allowEdit) fd.set("allow_edit", "1");
   return updateRecord({}, fd);
 }
 

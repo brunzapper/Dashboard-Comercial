@@ -23,12 +23,18 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
+import { CoreEditableCell } from "@/components/registros/core-editable-cell";
 import {
   NUMERIC_DATA_TYPES,
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import {
+  EDITABLE_CORE_COLUMNS,
+  isEditableCoreColumn,
+} from "@/lib/config/core-writeback";
+import { AGG_LABELS } from "@/lib/widgets/types";
 import {
   applyManualOrder,
   distinctFills,
@@ -42,6 +48,7 @@ import {
 import type {
   AppearanceSettings,
   ColorPair,
+  Metric,
   RecordListColumn,
 } from "@/lib/widgets/types";
 import {
@@ -90,6 +97,7 @@ type Menu =
 export function RecordListTable({
   records,
   columns,
+  metrics = [],
   fields,
   available,
   userRoles,
@@ -102,6 +110,7 @@ export function RecordListTable({
 }: {
   records: RecordRow[];
   columns: RecordListColumn[];
+  metrics?: Metric[];
   fields: FieldDefinition[];
   available: AvailableField[];
   userRoles: string[];
@@ -129,6 +138,46 @@ export function RecordListTable({
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const cols = applyManualOrder(baseCols, t.columnOrder, (c) => c.field);
+
+  // Métricas do widget (mesmo comportamento do agregado): uma coluna por métrica,
+  // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
+  const metricList = metrics.filter((m) => m.field);
+  const metricLabel = (m: Metric) =>
+    `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
+  const metricCellText = (m: Metric, r: RecordRow): string => {
+    if (m.field === "*") return "";
+    const n = Number(rawValue(m.field, r));
+    if (!Number.isFinite(n)) return "—";
+    return MONEY_FIELDS.has(m.field) ? money(n) : n.toLocaleString("pt-BR");
+  };
+  const metricAgg = (m: Metric, rs: RecordRow[]): number => {
+    if (m.agg === "count") {
+      if (m.field === "*") return rs.length;
+      return rs.reduce((c, r) => {
+        const v = rawValue(m.field, r);
+        return v != null && v !== "" ? c + 1 : c;
+      }, 0);
+    }
+    const nums = rs
+      .map((r) => Number(rawValue(m.field, r)))
+      .filter((n) => Number.isFinite(n));
+    const sum = nums.reduce((s, n) => s + n, 0);
+    if (m.agg === "avg") return nums.length ? sum / nums.length : 0;
+    return sum;
+  };
+  const metricAggText = (m: Metric, rs: RecordRow[]): string => {
+    const v = metricAgg(m, rs);
+    return MONEY_FIELDS.has(m.field)
+      ? money(v)
+      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  };
+
+  // Valor de uma coluna do núcleo como string (para o editor inline do núcleo).
+  const coreString = (field: string, r: RecordRow): string => {
+    if (field === "closed") return rawValue(field, r) ? "true" : "false";
+    const v = rawValue(field, r);
+    return v == null ? "" : String(v);
+  };
 
   // Descobre se a coluna é de data (núcleo ou custom) e o formato efetivo dela.
   const isDateCol = (field: string): boolean => {
@@ -361,6 +410,11 @@ export function RecordListTable({
           </TableCell>
         );
       })}
+      {metricList.map((m, mi) => (
+        <TableCell key={`metric_${mi}`} className="text-right tabular-nums">
+          {metricAggText(m, rs)}
+        </TableCell>
+      ))}
     </TableRow>
   );
 
@@ -401,11 +455,19 @@ export function RecordListTable({
         {cols.map((c, ci) => {
           const isCustom = c.field.startsWith("custom:");
           const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
-          // Custom não calculado é editável por padrão (permissão por papel
-          // é reforçada dentro da EditableCell / server action).
-          const isEditableCell = Boolean(
+          // Editável quando a coluna foi marcada (c.editable). Compat.: colunas
+          // antigas (editable ausente) mantêm o padrão custom não calculado.
+          const legacyEditable = Boolean(
             isCustom && field && field.data_type !== "calculado"
           );
+          const wantEditable = c.editable ?? legacyEditable;
+          const customEditable = Boolean(
+            isCustom && field && field.data_type !== "calculado" && wantEditable
+          );
+          const coreEditable = Boolean(
+            !isCustom && c.editable && isEditableCoreColumn(c.field)
+          );
+          const isEditableCell = customEditable || coreEditable;
           const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
           const colCp = t.colColors?.[c.field];
           return (
@@ -434,12 +496,24 @@ export function RecordListTable({
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
               }}
             >
-              {isEditableCell && field ? (
+              {customEditable && field ? (
                 <EditableCell
                   record={r}
                   field={field}
                   userRoles={userRoles}
                   canEditValues={canEditValues}
+                  dateFormat={fmtOf(c.field)}
+                  onSaved={refresh}
+                  writeBack={c.writeBack}
+                  forceEditable
+                />
+              ) : coreEditable ? (
+                <CoreEditableCell
+                  recordId={r.id}
+                  field={c.field}
+                  dataType={EDITABLE_CORE_COLUMNS[c.field]}
+                  value={coreString(c.field, r)}
+                  writeBack={c.writeBack}
                   dateFormat={fmtOf(c.field)}
                   onSaved={refresh}
                 />
@@ -459,11 +533,20 @@ export function RecordListTable({
             </TableCell>
           );
         })}
+        {metricList.map((m, mi) => (
+          <TableCell
+            key={`metric_${mi}`}
+            className="text-right tabular-nums"
+            style={{ color: rowCp?.text ?? t.bodyColor }}
+          >
+            {metricCellText(m, r)}
+          </TableCell>
+        ))}
       </TableRow>
     );
   };
 
-  if (cols.length === 0) {
+  if (cols.length === 0 && metricList.length === 0) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-sm">
         Nenhuma coluna configurada. Edite o widget e adicione colunas.
@@ -543,6 +626,14 @@ export function RecordListTable({
                 {editable ? (
                   <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />
                 ) : null}
+              </TableHead>
+            ))}
+            {metricList.map((m, mi) => (
+              <TableHead
+                key={`metric_${mi}`}
+                className="text-right whitespace-nowrap"
+              >
+                {metricLabel(m)}
               </TableHead>
             ))}
           </TableRow>

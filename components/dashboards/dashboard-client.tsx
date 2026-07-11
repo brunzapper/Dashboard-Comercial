@@ -12,7 +12,12 @@ import { Button } from "@/components/ui/button";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
-import type { DashboardSettings, Widget, WidgetData } from "@/lib/widgets/types";
+import type {
+  DashboardSettings,
+  FieldFilterOptions,
+  Widget,
+  WidgetData,
+} from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
@@ -43,6 +48,7 @@ export function DashboardClient({
   periodBar,
   periodDefaults,
   periodDefaultField,
+  filterOptionsById,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -63,6 +69,7 @@ export function DashboardClient({
   periodBar?: DashboardSettings["periodBar"];
   periodDefaults?: PeriodSelection;
   periodDefaultField?: string;
+  filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
   const [editMode, setEditMode] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -150,6 +157,7 @@ export function DashboardClient({
             canEdit={canEdit}
             canManageFields={canManageFields}
             editMode={editMode}
+            filterOptionsById={filterOptionsById}
           />
         </div>
       </DashboardPendingProvider>
