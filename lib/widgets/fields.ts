@@ -10,6 +10,11 @@
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
+  SOURCE_KEYS,
+  SOURCE_LABELS,
+  fieldAppliesToSource,
+} from "@/lib/sources";
+import {
   isEditableCoreColumn,
   isEditableRelation,
   isWriteBackRelation,
@@ -95,7 +100,55 @@ export function buildAvailableFields(
     isMoney: c.data_type === "moeda",
     unified: true,
   }));
-  return [...core, ...custom, ...unified];
+  const match = buildMatchFields(customFields);
+  return [...core, ...custom, ...unified, ...match];
+}
+
+// Colunas do núcleo úteis de puxar do registro CASADO (match:<fonte>:<ref>).
+// Foca em datas/numéricos/texto identificador — evita ruído (FKs/timestamps de
+// sistema). Custom entram por fonte (applies_to).
+const MATCH_CORE_FIELDS = CORE_FIELDS.filter((f) =>
+  [
+    "title",
+    "stage",
+    "channel",
+    "sale_type",
+    "value",
+    "mrr",
+    "lead_time_days",
+    "closed_at",
+    "opened_at",
+    "source_created_at",
+  ].includes(f.field)
+);
+
+// Campos do registro casado, por fonte: `match:<fonte>:<ref>`. Não são editáveis
+// (vêm do outro registro) nem de write-back. Ficam disponíveis em
+// dimensões/métricas/filtros e como colunas do modo lista.
+function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
+  const out: AvailableField[] = [];
+  for (const src of SOURCE_KEYS) {
+    for (const f of MATCH_CORE_FIELDS) {
+      out.push({
+        field: `match:${src}:${f.field}`,
+        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        isNumeric: f.isNumeric,
+        isDate: f.isDate,
+        isMoney: f.isMoney,
+      });
+    }
+    for (const f of customFields) {
+      if (!fieldAppliesToSource(f.applies_to, src)) continue;
+      out.push({
+        field: `match:${src}:custom:${f.field_key}`,
+        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
+        isDate: f.data_type === "data",
+        isMoney: resolveFieldMoney(f).isMoney,
+      });
+    }
+  }
+  return out;
 }
 
 export function fieldLabel(

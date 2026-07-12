@@ -54,6 +54,8 @@ export default async function RegistrosPage({
   const session = await getSessionInfo();
   const isAdmin = session?.roles.includes("admin") ?? false;
   const canEditValues = session?.permissions.includes("edit_record_values") ?? false;
+  const canManageFields =
+    session?.permissions.includes("manage_field_definitions") ?? false;
   const userRoles = session?.roles ?? [];
 
   // Só Gestores e Administradores visualizam a página Registros.
@@ -213,6 +215,7 @@ export default async function RegistrosPage({
         relatedLeadLabels={relatedLeadLabels}
         userRoles={userRoles}
         canEditValues={canEditValues}
+        canManageFields={canManageFields}
       />
 
       {totalPages > 1 ? (

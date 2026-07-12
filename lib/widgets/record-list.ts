@@ -7,6 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
+import { RECORD_TYPE_SOURCE } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { CORE_FIELDS } from "./fields";
 import {
@@ -126,7 +127,9 @@ export async function runRecordList(
   if (typeof limit === "number" && limit > 0) {
     const { data, error } = await tq.limit(limit);
     if (error) throw new Error(error.message);
-    return (data ?? []) as unknown as RecordRow[];
+    const records = (data ?? []) as unknown as RecordRow[];
+    await attachMatches(supabase, records);
+    return records;
   }
 
   // Busca paginada p/ driblar o teto server-side do PostgREST ("Max Rows"), que
@@ -143,5 +146,91 @@ export async function runRecordList(
     all.push(...chunk);
     from += chunk.length;
   }
+  await attachMatches(supabase, all);
   return all;
+}
+
+// Preenche `__match` de cada registro (Fase 2): registro casado por fonte, para
+// resolver colunas `match:<fonte>:<campo>` no modo lista. Espelha a resolução do
+// RPC (migração 0042): prioriza match manual > mais recente; para a fonte leads,
+// cai no `related_lead_id` quando não há match genérico.
+async function attachMatches(
+  supabase: SupabaseClient,
+  records: RecordRow[]
+): Promise<void> {
+  if (records.length === 0) return;
+  const ids = records.map((r) => r.id);
+
+  // Matches que envolvem os registros carregados (qualquer direção).
+  type MatchRow = {
+    record_a_id: string;
+    record_b_id: string;
+    mode: "auto" | "manual";
+    created_at: string;
+  };
+  const matches: MatchRow[] = [];
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const { data } = await supabase
+      .from("record_matches")
+      .select("record_a_id, record_b_id, mode, created_at")
+      .or(
+        `record_a_id.in.(${slice.join(",")}),record_b_id.in.(${slice.join(",")})`
+      );
+    for (const m of (data ?? []) as MatchRow[]) matches.push(m);
+  }
+
+  // Ids dos registros casados + leads relacionados (fallback).
+  const partnerOf = (m: MatchRow, self: string) =>
+    m.record_a_id === self ? m.record_b_id : m.record_a_id;
+  const wanted = new Set<string>();
+  for (const m of matches) {
+    wanted.add(m.record_a_id);
+    wanted.add(m.record_b_id);
+  }
+  for (const r of records) if (r.related_lead_id) wanted.add(r.related_lead_id);
+  for (const id of ids) wanted.delete(id); // já temos os próprios
+
+  const partnerById = new Map<string, RecordRow>();
+  const wantedIds = [...wanted];
+  for (let i = 0; i < wantedIds.length; i += CHUNK) {
+    const slice = wantedIds.slice(i, i + CHUNK);
+    if (slice.length === 0) continue;
+    const { data } = await supabase
+      .from("records")
+      .select(RECORD_COLS)
+      .in("id", slice);
+    for (const p of (data ?? []) as unknown as RecordRow[]) partnerById.set(p.id, p);
+  }
+
+  // Matches por registro (para escolher o melhor por fonte).
+  const byRecord = new Map<string, MatchRow[]>();
+  for (const m of matches) {
+    for (const self of [m.record_a_id, m.record_b_id]) {
+      if (!byRecord.has(self)) byRecord.set(self, []);
+      byRecord.get(self)!.push(m);
+    }
+  }
+  const rank = (m: MatchRow) =>
+    (m.mode === "manual" ? 1 : 0) * 1e13 + Date.parse(m.created_at || "");
+
+  for (const r of records) {
+    const map: Record<string, RecordRow | undefined> = {};
+    const own = (byRecord.get(r.id) ?? [])
+      .slice()
+      .sort((a, b) => rank(b) - rank(a));
+    for (const m of own) {
+      const partner = partnerById.get(partnerOf(m, r.id));
+      if (!partner) continue;
+      const src = RECORD_TYPE_SOURCE[partner.record_type];
+      if (src && !map[src]) map[src] = partner; // melhor (manual/recente) vence
+    }
+    // Fallback do lead gêmeo (só quando não há match genérico p/ leads).
+    if (!map.leads && r.related_lead_id) {
+      const lead = partnerById.get(r.related_lead_id);
+      if (lead) map.leads = lead;
+    }
+    if (Object.keys(map).length > 0) r.__match = map;
+  }
 }
