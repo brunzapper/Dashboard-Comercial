@@ -141,14 +141,29 @@ export function DashboardGrid({
   // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
   // vertical no ancestral rolável (<main>). Refs para não re-renderizar a cada
   // movimento; `panning` só troca o cursor/seleção.
+  //
+  // IMPORTANTE: NÃO usamos setPointerCapture. A captura no canvas roubava o
+  // ponteiro de eventos disparados por outros layers (ex.: ao abrir o Sheet de
+  // "Editar dados"/"Aparência" a partir do menu do widget, um pointerdown caía
+  // no canvas vazio, capturava o ponteiro e impedia o painel de montar). Em vez
+  // disso ouvimos pointermove/up no `window` e só engatamos o pan após um limiar
+  // de arraste (~4px), então um clique simples nunca inicia o pan.
   const panRef = useRef<{
     startX: number;
     startY: number;
     scrollLeft: number;
     scrollTop: number;
     v: HTMLElement;
+    engaged: boolean;
   } | null>(null);
   const [panning, setPanning] = useState(false);
+  // Um AbortController por gesto: os listeners de window são registrados com o
+  // `signal` e removidos de uma vez por `abort()` (no fim do gesto ou ao
+  // desmontar). Evita recriar/rastrear identidades de handler.
+  const panAbortRef = useRef<AbortController | null>(null);
+
+  // Segurança: encerra o gesto (remove os listeners) se desmontar no meio.
+  useEffect(() => () => panAbortRef.current?.abort(), []);
 
   // Enquanto arrasta: cursor "fechado" e sem seleção de texto em toda a página.
   // O cleanup restaura mesmo se o componente desmontar no meio do gesto.
@@ -208,8 +223,10 @@ export function DashboardGrid({
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
 
-  // Botão esquerdo no espaço vazio inicia o pan. Só mouse/caneta (o toque mantém
-  // a rolagem nativa); sobre um widget (`.react-grid-item`) não pega.
+  // Botão esquerdo no espaço vazio arma o pan (a rolagem só engata após o limiar
+  // em onWindowPanMove). Só mouse/caneta (o toque mantém a rolagem nativa); sobre
+  // um widget (`.react-grid-item`) não pega. Sem setPointerCapture — os listeners
+  // no window garantem receber move/up mesmo se o ponteiro sair do canvas.
   function onCanvasPointerDown(e: React.PointerEvent) {
     if (e.pointerType === "touch" || e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
@@ -222,27 +239,35 @@ export function DashboardGrid({
       scrollLeft: sc.scrollLeft,
       scrollTop: v.scrollTop,
       v,
+      engaged: false,
     };
-    setPanning(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onCanvasPointerMove(e: React.PointerEvent) {
-    const p = panRef.current;
-    if (!p) return;
-    if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - (e.clientX - p.startX);
-    p.v.scrollTop = p.scrollTop - (e.clientY - p.startY);
-  }
-
-  function onCanvasPointerUp(e: React.PointerEvent) {
-    if (!panRef.current) return;
-    panRef.current = null;
-    setPanning(false);
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // capture pode já ter sido liberada
-    }
+    const ac = new AbortController();
+    panAbortRef.current = ac;
+    const { signal } = ac;
+    const end = () => {
+      panRef.current = null;
+      setPanning(false);
+      ac.abort();
+    };
+    window.addEventListener(
+      "pointermove",
+      (ev) => {
+        const p = panRef.current;
+        if (!p) return;
+        const dx = ev.clientX - p.startX;
+        const dy = ev.clientY - p.startY;
+        if (!p.engaged) {
+          if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return; // ainda é um clique
+          p.engaged = true;
+          setPanning(true);
+        }
+        if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - dx;
+        p.v.scrollTop = p.scrollTop - dy;
+      },
+      { signal }
+    );
+    window.addEventListener("pointerup", end, { signal });
+    window.addEventListener("pointercancel", end, { signal });
   }
 
   // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
@@ -408,9 +433,6 @@ export function DashboardGrid({
             ref={canvasRef}
             onContextMenu={onCanvasContextMenu}
             onPointerDown={onCanvasPointerDown}
-            onPointerMove={onCanvasPointerMove}
-            onPointerUp={onCanvasPointerUp}
-            onPointerCancel={onCanvasPointerUp}
             className={cn(
               "relative",
               panning ? "cursor-grabbing" : "cursor-grab",
