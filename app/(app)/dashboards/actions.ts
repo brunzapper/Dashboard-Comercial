@@ -16,9 +16,14 @@ import type {
   GridPosition,
   Metric,
   VisualType,
+  Widget,
   WidgetFilter,
   WidgetSettings,
 } from "@/lib/widgets/types";
+import {
+  buildDashboardSnapshot,
+  type DashboardSnapshot,
+} from "@/lib/widgets/history";
 
 export interface ActionState {
   ok?: boolean;
@@ -511,5 +516,123 @@ export async function saveLayout(
       .eq("id", it.id)
       .eq("dashboard_id", dashboardId);
   }
+  return { ok: true };
+}
+
+// ---------------- Histórico (Desfazer/Refazer) ----------------
+
+// Lê o estado atual do dashboard (nome + settings + widgets + células das tabelas
+// editáveis) e devolve um snapshot determinístico. Usado pelo cliente para
+// capturar as poucas mudanças que não revalidam as props (ex.: arrastar/
+// redimensionar via saveLayout). Leitura barata; não computa dados de widget.
+export async function captureDashboardSnapshot(
+  dashboardId: string
+): Promise<DashboardSnapshot | null> {
+  const session = await getSessionInfo();
+  if (!session) return null;
+  const supabase = await createClient();
+
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("name, settings")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  if (!dash) return null;
+
+  const { data: widgetsData } = await supabase
+    .from("widgets")
+    .select(
+      "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+    )
+    .eq("dashboard_id", dashboardId)
+    .order("sort_order", { ascending: true });
+  const widgets = (widgetsData ?? []) as Widget[];
+
+  const widgetIds = widgets.map((w) => w.id);
+  const { data: cellsData } = widgetIds.length
+    ? await supabase
+        .from("dashboard_table_cells")
+        .select("widget_id, row_key, col_key, value")
+        .in("widget_id", widgetIds)
+    : { data: [] as { widget_id: string; row_key: string; col_key: string; value: number | string | null }[] };
+
+  return buildDashboardSnapshot(
+    dash.name as string,
+    (dash.settings ?? {}) as DashboardSettings,
+    widgets,
+    cellsData ?? []
+  );
+}
+
+// Grava de volta um snapshot inteiro (Desfazer/Refazer). Reconcilia por linha:
+// atualiza nome/settings do dashboard, faz upsert dos widgets do snapshot (por
+// id — reinsere excluídos com o mesmo id), exclui os widgets que sobraram
+// (desfaz criações) e repõe as células das tabelas editáveis. RLS
+// (dashboards_update / widgets_write) restringe a owner/admin.
+export async function restoreDashboardSnapshot(
+  dashboardId: string,
+  snap: DashboardSnapshot
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+
+  // 1) Dashboard (nome + settings).
+  const { error: dashErr } = await supabase
+    .from("dashboards")
+    .update({ name: snap.name, settings: snap.settings })
+    .eq("id", dashboardId);
+  if (dashErr) return { ok: false, message: dashErr.message };
+
+  // 2) Widgets: upsert dos do snapshot (dashboard_id injetado p/ satisfazer o RLS).
+  const snapIds = snap.widgets.map((w) => w.id);
+  if (snap.widgets.length > 0) {
+    const { error } = await supabase.from("widgets").upsert(
+      snap.widgets.map((w) => ({ ...w, dashboard_id: dashboardId })),
+      { onConflict: "id" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+
+  // 2b) Exclui os widgets que existem hoje mas não no snapshot (desfaz criações).
+  const { data: currentRows } = await supabase
+    .from("widgets")
+    .select("id")
+    .eq("dashboard_id", dashboardId);
+  const toDelete = (currentRows ?? [])
+    .map((r) => r.id as string)
+    .filter((id) => !snapIds.includes(id));
+  if (toDelete.length > 0) {
+    const { error } = await supabase
+      .from("widgets")
+      .delete()
+      .eq("dashboard_id", dashboardId)
+      .in("id", toDelete);
+    if (error) return { ok: false, message: error.message };
+  }
+
+  // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
+  // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
+  if (snapIds.length > 0) {
+    const { error: delErr } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .in("widget_id", snapIds);
+    if (delErr) return { ok: false, message: delErr.message };
+  }
+  if (snap.cells.length > 0) {
+    const { error: insErr } = await supabase.from("dashboard_table_cells").insert(
+      snap.cells.map((c) => ({
+        widget_id: c.widget_id,
+        row_key: c.row_key,
+        col_key: c.col_key,
+        value: c.value,
+        updated_by: session.user.id,
+      }))
+    );
+    if (insErr) return { ok: false, message: insErr.message };
+  }
+
+  revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }

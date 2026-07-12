@@ -40,6 +40,7 @@ import {
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
+import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel } from "./appearance-editing";
 import { WidgetCard } from "./widget-card";
@@ -124,6 +125,7 @@ export function DashboardGrid({
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
   const { pending } = useNavPending();
+  const history = useDashboardHistory();
   const router = useRouter();
   const [, startPaste] = useTransition();
 
@@ -356,6 +358,8 @@ export function DashboardGrid({
   // arrastado (é assim que se ajusta a base de um widget com tamanho dinâmico).
   function persist(next: Layout, resizedItem?: LayoutItem | null) {
     if (!editMode) return;
+    // saveLayout não revalida (edição fluida), então o snapshot vindo da page
+    // não muda sozinho — registra a mudança no histórico após persistir.
     void saveLayout(
       dashboardId,
       next.map((it) => {
@@ -365,7 +369,7 @@ export function DashboardGrid({
         const h = resized ? resizedItem.h : base?.h ?? it.h;
         return { id: it.i, x: it.x, y: it.y, w, h };
       })
-    );
+    ).then(() => history.captureNow());
   }
   function onDragStop(next: Layout) {
     persist(next);
