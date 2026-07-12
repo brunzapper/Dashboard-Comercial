@@ -89,7 +89,17 @@ export function DashboardClient({
 
   // Abas: id efetivo de um widget = settings.tab ?? primeira aba. Sem abas
   // configuradas, o dashboard é uma tela única (todos os widgets visíveis).
-  const tabs = settings.tabs ?? [];
+  // Estado local otimista: cor/nome/adicionar/excluir refletem na hora (a
+  // revalidação do servidor só chega ao recarregar). Ressincroniza quando o
+  // servidor muda de fato (comparação por valor, sem useEffect).
+  const serverTabs = settings.tabs ?? [];
+  const serverKey = JSON.stringify(serverTabs);
+  const [seedKey, setSeedKey] = useState(serverKey);
+  const [tabs, setTabs] = useState(serverTabs);
+  if (seedKey !== serverKey) {
+    setSeedKey(serverKey);
+    setTabs(serverTabs);
+  }
   const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id ?? "");
   const firstTabId = tabs[0]?.id ?? "";
   const tabIds = new Set(tabs.map((t) => t.id));
@@ -112,6 +122,7 @@ export function DashboardClient({
   }
 
   function saveTabs(next: DashboardSettings["tabs"]) {
+    setTabs(next ?? []); // aplica na hora (cor/nome/adicionar/excluir)
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, { ...settings, tabs: next });
     });
