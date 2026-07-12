@@ -336,11 +336,14 @@ export interface DashboardSettings {
     to?: string;
     angle?: number; // graus (default 135)
   };
-  // Área de trabalho (grid): densidade (colunas/altura da linha) e tamanho fixo
-  // opcional da área (largura/altura em px, ajustáveis arrastando a alça). Ausente
-  // = padrão (12 colunas, linha 30px, altura automática ajustada aos widgets).
+  // Área de trabalho (grid): tamanho da área em unidades do grid (colunas/linhas)
+  // e altura da linha. A alça de canto (modo edição) aumenta cols/rows; o canvas
+  // ganha rolagem quando passa da tela, mantendo o tamanho de célula das 12
+  // colunas. Ausente = padrão (12 colunas, linha 30px, altura pelo conteúdo).
+  // `width`/`height` (px) são legados de uma versão anterior e ignorados.
   canvas?: {
     cols?: number;
+    rows?: number;
     rowHeight?: number;
     width?: number;
     height?: number;
