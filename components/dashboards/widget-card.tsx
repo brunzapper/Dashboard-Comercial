@@ -35,6 +35,7 @@ import type {
   WidgetData,
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
+import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
@@ -66,6 +67,7 @@ export function WidgetCard({
   canEdit,
   canManageFields = false,
   currencyOptions,
+  currencyRates = {},
   editMode,
   filterOptions,
 }: {
@@ -76,6 +78,7 @@ export function WidgetCard({
   calcValue: number | null;
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
+  currencyRates?: CurrencyRates;
   fkLabels: Record<string, string>;
   responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
@@ -234,6 +237,7 @@ export function WidgetCard({
               responsibleOptions={responsibleOptions}
               appearance={appearance}
               dateFormat={dateFormat}
+              currencyRates={currencyRates}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

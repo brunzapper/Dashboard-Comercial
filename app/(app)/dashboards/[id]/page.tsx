@@ -11,7 +11,11 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
-import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
+import {
+  currencyOptionsFrom,
+  loadCurrencyRates,
+  loadEnabledCurrencies,
+} from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
 import {
@@ -82,6 +86,7 @@ export default async function DashboardPage({
     correspondences,
     { data: prefData },
     enabledCurrencies,
+    currencyRates,
   ] = await Promise.all([
     supabase
       .from("widgets")
@@ -107,6 +112,7 @@ export default async function DashboardPage({
           .maybeSingle()
       : Promise.resolve({ data: null }),
     loadEnabledCurrencies(supabase),
+    loadCurrencyRates(supabase),
   ]);
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
@@ -482,6 +488,7 @@ export default async function DashboardPage({
       canEdit={canEdit}
       canManageFields={canManageFields}
       currencyOptions={currencyOptions}
+      currencyRates={currencyRates}
       settings={dashSettings}
       visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
       dateFormat={dashSettings.dateFormat}

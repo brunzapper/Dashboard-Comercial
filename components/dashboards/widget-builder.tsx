@@ -71,6 +71,12 @@ import {
   FILTER_OPS,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import type {
+  ConversionBasis,
+  CurrencyDisplay,
+  CurrencyMultiMode,
+  GrandTotalMode,
+} from "@/lib/widgets/currency";
 import {
   createWidget,
   updateWidget,
@@ -80,6 +86,39 @@ const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
   label: o.label,
 }));
+
+// --- Opções de moeda das métricas monetárias (Parte C) ---
+const CONVERSION_BASIS_OPTIONS: ComboboxOption[] = [
+  { value: "record_year", label: "Ano do registro" },
+  { value: "record_quarter", label: "Trimestre do registro" },
+  { value: "period_year", label: "Ano do período" },
+  { value: "period_quarter", label: "Trimestre do período" },
+];
+const CURRENCY_DISPLAY_OPTIONS: ComboboxOption[] = [
+  { value: "original", label: "Só a moeda original" },
+  { value: "converted", label: "Só convertido (R$)" },
+  { value: "reference", label: "US$ original → R$ convertido" },
+];
+const CURRENCY_MULTI_OPTIONS: ComboboxOption[] = [
+  { value: "convert", label: "Converter tudo (R$)" },
+  { value: "separate", label: "Totais por moeda (separados)" },
+  { value: "reference", label: "US$ total → R$ convertido" },
+];
+const GRAND_TOTAL_OPTIONS: ComboboxOption[] = [
+  { value: "converted", label: "Total convertido (R$)" },
+  { value: "dollar", label: "Total em US$" },
+];
+
+function basisValue(b?: ConversionBasis): string {
+  return b ? `${b.source}_${b.granularity}` : "record_year";
+}
+function parseBasis(v: string): ConversionBasis {
+  const [source, granularity] = v.split("_");
+  return {
+    source: source === "period" ? "period" : "record",
+    granularity: granularity === "quarter" ? "quarter" : "year",
+  };
+}
 
 export function WidgetBuilder({
   dashboardId,
@@ -357,6 +396,16 @@ export function WidgetBuilder({
   }
 
   const numericFields = available.filter((f) => f.isNumeric);
+
+  // Métrica monetária (value/mrr ou campo moeda/calc-moeda): habilita as opções
+  // de moeda/conversão da métrica.
+  const isMoneyField = (field: string): boolean =>
+    available.find((a) => a.field === field)?.isMoney ?? false;
+  const updateMetric = (i: number, patch: Partial<Metric>) => {
+    const next = [...metrics];
+    next[i] = { ...metrics[i], ...patch };
+    setMetrics(next);
+  };
 
   // Refs disponíveis para a Métrica calculada: agregações de registros.
   const calcRefs: RefOption[] = [
@@ -1216,6 +1265,72 @@ export function WidgetBuilder({
                     }}
                     aria-label="Nome exibido da métrica"
                   />
+                ) : null}
+                {isMoneyField(m.field) ? (
+                  <div className="grid grid-cols-2 gap-2 rounded-md border p-2">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Base da taxa
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CONVERSION_BASIS_OPTIONS}
+                        value={basisValue(m.conversionBasis)}
+                        onValueChange={(v) =>
+                          updateMetric(i, { conversionBasis: parseBasis(v) })
+                        }
+                        aria-label="Base da taxa de conversão"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Exibição (1 moeda)
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CURRENCY_DISPLAY_OPTIONS}
+                        value={m.currencyDisplay ?? "original"}
+                        onValueChange={(v) =>
+                          updateMetric(i, { currencyDisplay: v as CurrencyDisplay })
+                        }
+                        aria-label="Exibição para moeda única"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Exibição (várias)
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CURRENCY_MULTI_OPTIONS}
+                        value={m.currencyMultiMode ?? "convert"}
+                        onValueChange={(v) =>
+                          updateMetric(i, {
+                            currencyMultiMode: v as CurrencyMultiMode,
+                          })
+                        }
+                        aria-label="Exibição para várias moedas"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Total geral
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={GRAND_TOTAL_OPTIONS}
+                        value={m.grandTotalMode ?? "converted"}
+                        onValueChange={(v) =>
+                          updateMetric(i, { grandTotalMode: v as GrandTotalMode })
+                        }
+                        aria-label="Total geral"
+                      />
+                    </div>
+                  </div>
                 ) : null}
               </div>
             ))}

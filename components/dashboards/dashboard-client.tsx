@@ -20,6 +20,7 @@ import type {
   WidgetData,
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
+import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
@@ -47,6 +48,7 @@ export function DashboardClient({
   canEdit,
   canManageFields = false,
   currencyOptions,
+  currencyRates = {},
   settings,
   visibleToRoles,
   dateFormat,
@@ -71,6 +73,7 @@ export function DashboardClient({
   canEdit: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
+  currencyRates?: CurrencyRates;
   settings: DashboardSettings;
   visibleToRoles: string[];
   dateFormat?: DateFormat;
@@ -258,6 +261,7 @@ export function DashboardClient({
             canEdit={canEdit}
             canManageFields={canManageFields}
             currencyOptions={currencyOptions}
+            currencyRates={currencyRates}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
           />

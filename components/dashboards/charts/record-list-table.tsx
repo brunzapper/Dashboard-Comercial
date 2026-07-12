@@ -31,7 +31,16 @@ import {
   type RecordRow,
 } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
-import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
+import {
+  convertToBRL,
+  formatMoney,
+  formatMoneyDisplay,
+  resolveCurrencyCode,
+  resolveFieldMoney,
+  toReferenceUSD,
+  yearQuarterOf,
+  type CurrencyRates,
+} from "@/lib/widgets/currency";
 import {
   EDITABLE_CORE_COLUMNS,
   isEditableCoreColumn,
@@ -135,6 +144,7 @@ export function RecordListTable({
   responsibleOptions = [],
   appearance,
   dateFormat,
+  currencyRates = {},
   canEdit = false,
   onAppearanceChange,
 }: {
@@ -150,6 +160,7 @@ export function RecordListTable({
   responsibleOptions?: { value: string; label: string }[];
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
+  currencyRates?: CurrencyRates;
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
@@ -179,11 +190,42 @@ export function RecordListTable({
   // Rótulo (estético) do cabeçalho de uma coluna: nome exibido > rótulo do campo.
   const colLabel = (c: RecordListColumn) =>
     c.label?.trim() || fieldLabel(c.field, available);
+  // Métrica monetária (value/mrr ou campo moeda/calc-moeda).
+  const metricIsMoney = (field: string): boolean =>
+    available.find((a) => a.field === field)?.isMoney ?? false;
+  // Moeda de um valor de métrica num registro.
+  const metricCurrency = (field: string, r: RecordRow): string => {
+    if (field.startsWith("custom:")) {
+      const f = fieldByKey.get(field.slice(7));
+      return f ? resolveFieldMoney(f, r.currency).code : resolveCurrencyCode(r.currency);
+    }
+    return resolveCurrencyCode(r.currency);
+  };
+  // Ano/trimestre da taxa a usar p/ um registro (data = fechamento; granularidade
+  // da métrica). No modo lista sempre usamos a data do registro.
+  const recYQ = (r: RecordRow, m: Metric): { year: number; quarter: number } => {
+    const { year, quarter } = yearQuarterOf(r.closed_at);
+    return {
+      year,
+      quarter: m.conversionBasis?.granularity === "quarter" ? quarter : 0,
+    };
+  };
+
   const metricCellText = (m: Metric, r: RecordRow): string => {
     if (m.field === "*") return "";
     const n = Number(rawValue(m.field, r));
     if (!Number.isFinite(n)) return "—";
-    return MONEY_FIELDS.has(m.field) ? money(n, r.currency) : n.toLocaleString("pt-BR");
+    if (!metricIsMoney(m.field)) return n.toLocaleString("pt-BR");
+    const code = metricCurrency(m.field, r);
+    const { year, quarter } = recYQ(r, m);
+    return formatMoneyDisplay(
+      n,
+      code,
+      m.currencyDisplay ?? "original",
+      currencyRates,
+      year,
+      quarter
+    );
   };
   const metricAgg = (m: Metric, rs: RecordRow[]): number => {
     if (m.agg === "count") {
@@ -200,11 +242,59 @@ export function RecordListTable({
     if (m.agg === "avg") return nums.length ? sum / nums.length : 0;
     return sum;
   };
-  const metricAggText = (m: Metric, rs: RecordRow[]): string => {
-    const v = metricAgg(m, rs);
-    return MONEY_FIELDS.has(m.field)
-      ? money(v)
-      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  // Subtotal/total de uma métrica sobre `rs`, aplicando conversão/modos de moeda
+  // quando a métrica é monetária. `isGrand` usa o modo do Total geral.
+  const metricAggText = (m: Metric, rs: RecordRow[], isGrand = false): string => {
+    if (m.agg === "count" || m.field === "*") {
+      return metricAgg(m, rs).toLocaleString("pt-BR");
+    }
+    if (!metricIsMoney(m.field)) {
+      return metricAgg(m, rs).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    }
+    // Agregação monetária: acumula por moeda + convertido (R$) + referência (US$),
+    // convertendo cada registro pela taxa do seu próprio ano/trimestre.
+    const perCur: Record<string, number> = {};
+    let brl = 0;
+    let usd = 0;
+    let count = 0;
+    for (const r of rs) {
+      const raw = Number(rawValue(m.field, r));
+      if (!Number.isFinite(raw)) continue;
+      count += 1;
+      const code = metricCurrency(m.field, r);
+      perCur[code] = (perCur[code] ?? 0) + raw;
+      const { year, quarter } = recYQ(r, m);
+      const b = convertToBRL(raw, code, currencyRates, year, quarter);
+      if (b != null) brl += b;
+      const u = toReferenceUSD(raw, code, currencyRates, year, quarter);
+      if (u != null) usd += u;
+    }
+    const div = (v: number) => (m.agg === "avg" && count > 0 ? v / count : v);
+    if (isGrand) {
+      return m.grandTotalMode === "dollar"
+        ? formatMoney(div(usd), "USD")
+        : formatMoney(div(brl), "BRL");
+    }
+    const codes = Object.keys(perCur);
+    if (codes.length <= 1) {
+      const code = codes[0] ?? "BRL";
+      const disp = m.currencyDisplay ?? "original";
+      if (code === "BRL" || disp === "original") {
+        return formatMoney(div(perCur[code] ?? 0), code);
+      }
+      if (disp === "converted") return formatMoney(div(brl), "BRL");
+      return `${formatMoney(div(usd), "USD")} → ${formatMoney(div(brl), "BRL")}`;
+    }
+    // Várias moedas no grupo.
+    switch (m.currencyMultiMode ?? "convert") {
+      case "separate":
+        return codes.map((c) => formatMoney(div(perCur[c]), c)).join(" · ");
+      case "reference":
+        return `${formatMoney(div(usd), "USD")} → ${formatMoney(div(brl), "BRL")}`;
+      case "convert":
+      default:
+        return formatMoney(div(brl), "BRL");
+    }
   };
 
   // Valor de uma coluna do núcleo como string (para o editor inline do núcleo).
@@ -451,7 +541,12 @@ export function RecordListTable({
     keyId: string,
     label: string,
     rs: RecordRow[],
-    opts?: { collapsible?: boolean; isCollapsed?: boolean; onToggle?: () => void }
+    opts?: {
+      collapsible?: boolean;
+      isCollapsed?: boolean;
+      onToggle?: () => void;
+      isGrand?: boolean;
+    }
   ) => (
     <TableRow
       key={`__grp:${keyId}`}
@@ -498,7 +593,7 @@ export function RecordListTable({
       })}
       {metricList.map((m, mi) => (
         <TableCell key={`metric_${mi}`} className="text-right tabular-nums">
-          {metricAggText(m, rs)}
+          {metricAggText(m, rs, opts?.isGrand)}
         </TableCell>
       ))}
     </TableRow>
@@ -863,7 +958,7 @@ export function RecordListTable({
                   }
                 )
               : item.kind === "grand"
-                ? renderSummaryRow("__grand", "Total geral", rows)
+                ? renderSummaryRow("__grand", "Total geral", rows, { isGrand: true })
                 : renderDataRow(item.row)
           )}
         </TableBody>

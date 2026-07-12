@@ -21,6 +21,7 @@ import type {
   WidgetData,
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
+import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { saveLayout } from "@/app/(app)/dashboards/actions";
 import { useNavPending } from "./pending-context";
@@ -54,6 +55,7 @@ export function DashboardGrid({
   canEdit,
   canManageFields = false,
   currencyOptions,
+  currencyRates = {},
   editMode,
   filterOptionsById,
 }: {
@@ -76,6 +78,7 @@ export function DashboardGrid({
   canEdit: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
+  currencyRates?: CurrencyRates;
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
@@ -140,6 +143,7 @@ export function DashboardGrid({
               calcValue={calcById[w.id] ?? null}
               fields={fields}
               currencyOptions={currencyOptions}
+              currencyRates={currencyRates}
               fkLabels={fkLabels}
               responsibleOptions={responsibleOptions}
               userRoles={userRoles}
