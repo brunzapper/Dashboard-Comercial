@@ -151,27 +151,31 @@ export function DashboardGrid({
     );
   }
 
-  // Alça de canto (2 eixos): arrasta p/ aumentar cols/rows; persiste ao soltar,
-  // preservando as demais settings (rowHeight, background, abas, …).
-  const dragRef = useRef<{ x: number; y: number; cols: number; rows: number } | null>(
-    null
-  );
+  // Alças de borda: a barra inferior arrasta a ALTURA (rows), a barra direita a
+  // LARGURA (cols). Persiste ao soltar, preservando as demais settings (rowHeight,
+  // background, abas, …).
+  const dragRef = useRef<
+    { x: number; y: number; cols: number; rows: number; axis: "row" | "col" } | null
+  >(null);
   const lastRef = useRef<{ cols: number; rows: number } | null>(null);
-  function onHandleDown(e: React.PointerEvent) {
+  function onHandleDown(e: React.PointerEvent, axis: "row" | "col") {
     e.preventDefault();
     e.stopPropagation();
-    dragRef.current = { x: e.clientX, y: e.clientY, cols, rows };
+    dragRef.current = { x: e.clientX, y: e.clientY, cols, rows, axis };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onHandleMove(e: React.PointerEvent) {
     const d = dragRef.current;
     if (!d || cellW <= 0) return;
-    const dc = Math.round((e.clientX - d.x) / (cellW + MX));
-    const dr = Math.round((e.clientY - d.y) / (ROW_H + MY));
-    const next = {
-      cols: Math.min(MAX_COLS, Math.max(contentRight, d.cols + dc)),
-      rows: Math.min(MAX_ROWS, Math.max(contentBottom, d.rows + dr)),
-    };
+    const nextCols =
+      d.axis === "col"
+        ? Math.min(MAX_COLS, Math.max(contentRight, d.cols + Math.round((e.clientX - d.x) / (cellW + MX))))
+        : d.cols;
+    const nextRows =
+      d.axis === "row"
+        ? Math.min(MAX_ROWS, Math.max(contentBottom, d.rows + Math.round((e.clientY - d.y) / (ROW_H + MY))))
+        : d.rows;
+    const next = { cols: nextCols, rows: nextRows };
     lastRef.current = next;
     setDrag(next);
   }
@@ -215,7 +219,14 @@ export function DashboardGrid({
           horizontal; a altura é explícita, então a página cresce normalmente. */}
       <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden">
         {baseWidth > 0 ? (
-          <div className="relative" style={{ width: gridW(cols), height: gridH(rows) }}>
+          <div
+            className={cn(
+              "relative",
+              editMode &&
+                "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]"
+            )}
+            style={{ width: gridW(cols), height: gridH(rows) }}
+          >
             <RGL
               className={cn("layout transition-opacity", pending && "opacity-60")}
               layout={layout}
@@ -261,19 +272,40 @@ export function DashboardGrid({
               ))}
             </RGL>
             {editMode ? (
-              <span
-                role="separator"
-                aria-label="Redimensionar área de trabalho"
-                title="Arraste para aumentar a área"
-                onPointerDown={onHandleDown}
-                onPointerMove={onHandleMove}
-                onPointerUp={onHandleUp}
-                onPointerCancel={onHandleUp}
-                className={cn(
-                  "border-primary/60 bg-background absolute right-0 bottom-0 z-10",
-                  "size-4 cursor-nwse-resize touch-none rounded-tl border-t border-l"
-                )}
-              />
+              <>
+                {/* Barra inferior: arrasta a ALTURA (adiciona linhas vazias). */}
+                <span
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Arraste para aumentar a altura da área"
+                  title="Arraste para aumentar a altura da área"
+                  onPointerDown={(e) => onHandleDown(e, "row")}
+                  onPointerMove={onHandleMove}
+                  onPointerUp={onHandleUp}
+                  onPointerCancel={onHandleUp}
+                  className={cn(
+                    "absolute bottom-0 left-0 z-20 flex h-3 w-full items-center justify-center",
+                    "cursor-ns-resize touch-none rounded-b-md bg-primary/15 hover:bg-primary/30",
+                    "before:h-0.5 before:w-8 before:rounded-full before:bg-primary/60 before:content-['']"
+                  )}
+                />
+                {/* Barra direita: arrasta a LARGURA. */}
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Arraste para aumentar a largura da área"
+                  title="Arraste para aumentar a largura da área"
+                  onPointerDown={(e) => onHandleDown(e, "col")}
+                  onPointerMove={onHandleMove}
+                  onPointerUp={onHandleUp}
+                  onPointerCancel={onHandleUp}
+                  className={cn(
+                    "absolute top-0 right-0 z-20 flex h-full w-3 items-center justify-center",
+                    "cursor-ew-resize touch-none rounded-r-md bg-primary/15 hover:bg-primary/30",
+                    "before:h-8 before:w-0.5 before:rounded-full before:bg-primary/60 before:content-['']"
+                  )}
+                />
+              </>
             ) : null}
           </div>
         ) : null}
