@@ -312,3 +312,93 @@ export function formatMoneyDisplay(
   const left = usd == null ? formatMoney(amount, c) : formatMoney(usd, REFERENCE_CURRENCY);
   return `${left} → ${formatMoney(brl, BASE_CURRENCY)}`;
 }
+
+// ===================== Agregação monetária (compartilhada) ====================
+// Detalhamento de um recorte (grupo/KPI/total) sobre um conjunto de valores: soma
+// por moeda + já convertido para Real + em referência US$ + contagem (p/ média).
+// É a "moeda intermediária" entre o caminho de registros individuais e o agregado:
+// os dois montam este objeto (registro a registro OU a partir de subtotais SQL) e
+// o formatam pelo MESMO `formatMoneyAggregate`, garantindo saída idêntica. JSON puro
+// (trafega server→client no WidgetData).
+export interface MoneyBreakdown {
+  perCurrency: Record<string, number>;
+  brl: number;
+  usd: number;
+  count: number;
+}
+
+// Config de moeda de uma métrica p/ formatar o agregado (subconjunto de Metric /
+// KpiSettings — tipado à parte p/ evitar ciclo de import com types.ts).
+export interface MoneyAggConfig {
+  agg: string; // "sum" | "count" | "avg"
+  currencyDisplay?: CurrencyDisplay;
+  currencyMultiMode?: CurrencyMultiMode;
+  grandTotalMode?: GrandTotalMode;
+}
+
+export function emptyBreakdown(): MoneyBreakdown {
+  return { perCurrency: {}, brl: 0, usd: 0, count: 0 };
+}
+
+/** Funde vários detalhamentos num só (subtotais de grupo / Total geral). */
+export function foldBreakdowns(list: (MoneyBreakdown | undefined)[]): MoneyBreakdown {
+  const out = emptyBreakdown();
+  for (const b of list) {
+    if (!b) continue;
+    for (const [code, amt] of Object.entries(b.perCurrency)) {
+      out.perCurrency[code] = (out.perCurrency[code] ?? 0) + amt;
+    }
+    out.brl += b.brl;
+    out.usd += b.usd;
+    out.count += b.count;
+  }
+  return out;
+}
+
+// Código quando o recorte tem UMA única moeda; senão null. Usado p/ decidir se um
+// gráfico mantém a moeda estrangeira (moeda única) ou converte p/ R$ (misturado).
+export function plotSingleCurrency(b: MoneyBreakdown): string | null {
+  const codes = Object.keys(b.perCurrency);
+  return codes.length === 1 ? codes[0] : null;
+}
+
+/**
+ * Formata um detalhamento agregado conforme os modos de moeda da métrica. Lógica
+ * idêntica ao `metricAggText` da tabela de registros (a fonte da verdade):
+ * - `isGrand` (Total geral): converte tudo (R$) ou soma em US$ separado.
+ * - moeda única: respeita `currencyDisplay` (original / convertido R$ / US$→R$).
+ * - várias moedas: respeita `currencyMultiMode` (separado / referência / converter).
+ * `avg` divide pela contagem. Reusa `formatMoney`.
+ */
+export function formatMoneyAggregate(
+  b: MoneyBreakdown,
+  cfg: MoneyAggConfig,
+  isGrand = false
+): string {
+  const div = (v: number) => (cfg.agg === "avg" && b.count > 0 ? v / b.count : v);
+  if (isGrand) {
+    return cfg.grandTotalMode === "dollar"
+      ? formatMoney(div(b.usd), "USD")
+      : formatMoney(div(b.brl), "BRL");
+  }
+  const codes = Object.keys(b.perCurrency);
+  if (codes.length <= 1) {
+    const code = codes[0] ?? "BRL";
+    const disp = cfg.currencyDisplay ?? "original";
+    if (code === "BRL" || disp === "original") {
+      return formatMoney(div(b.perCurrency[code] ?? 0), code);
+    }
+    if (disp === "converted") return formatMoney(div(b.brl), "BRL");
+    return `${formatMoney(div(b.usd), "USD")} → ${formatMoney(div(b.brl), "BRL")}`;
+  }
+  // Várias moedas no grupo.
+  switch (cfg.currencyMultiMode ?? "convert") {
+    case "separate":
+      return codes.map((c) => formatMoney(div(b.perCurrency[c]), c)).join(" · ");
+    case "reference":
+      return `${formatMoney(div(b.usd), "USD")} → ${formatMoney(div(b.brl), "BRL")}`;
+    case "convert":
+    default:
+      return formatMoney(div(b.brl), "BRL");
+  }
+}

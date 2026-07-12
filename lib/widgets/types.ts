@@ -10,6 +10,7 @@ import type {
   CurrencyDisplay,
   CurrencyMultiMode,
   GrandTotalMode,
+  MoneyBreakdown,
 } from "./currency";
 
 export type VisualType =
@@ -385,6 +386,12 @@ export interface KpiResult {
   pct?: number | null;
   falta?: number | null;
   value?: number | null;
+  // Textos já formatados quando o KPI é monetário (honram a config de moeda do
+  // KPI). Ausentes = número puro (fmt) no cliente. Meta/falta são sempre R$.
+  realizadoText?: string;
+  metaText?: string;
+  faltaText?: string;
+  valueText?: string;
 }
 
 export interface GridPosition {
@@ -418,10 +425,20 @@ export interface Dashboard {
   is_shared: boolean;
 }
 
+// Uma linha de WidgetData: chaves dim_1.., metric_1.. + um mapa opcional de
+// detalhamento monetário por métrica (`__money`), anexado pelo engine para as
+// métricas monetárias. `metric_<n>` continua NUMÉRICO (valor a plotar); a moeda /
+// modos de exibição saem de `__money[metricKey]`. JSON puro (server→client).
+export interface WidgetRow {
+  [key: string]: unknown;
+  __money?: Record<string, MoneyBreakdown>;
+}
+
 /** Resultado já pronto para os charts. */
 export interface WidgetData {
-  rows: Record<string, unknown>[]; // chaves dim_1.., metric_1..
+  rows: WidgetRow[]; // chaves dim_1.., metric_1..
   dimensions: { key: string; label: string }[];
-  metrics: { key: string; label: string }[];
+  // `isMoney` marca as métricas monetárias (têm `__money` nas linhas).
+  metrics: { key: string; label: string; isMoney?: boolean }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
 }
