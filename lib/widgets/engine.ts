@@ -539,6 +539,11 @@ async function runWidgetByPeriod(
   const dateIdx = dims.findIndex((d) => d.dateAgg != null && d.transform);
   const dateDim = dims[dateIdx];
   const fn = dateDim.dateAgg as DateAgg;
+  // TODA dimensão com transform é bucketizada pelo próprio formato (não só a 1ª):
+  // p. ex. duas "Data da assinatura (Nome do mês)" viram ambas "Janeiro". A função
+  // de agregação das métricas (fn) segue a 1ª data (dateDim).
+  const isDateBucket = (d: Dimension) =>
+    d.transform != null && d.transform !== "none";
 
   const records = (await runRecordList(supabase, config, period)) as RecordRow[];
 
@@ -597,8 +602,8 @@ async function runWidgetByPeriod(
   };
 
   type DV = { key: string; label: string; sort: number };
-  const dimValue = (d: Dimension, r: RecordRow, di: number): DV => {
-    if (di === dateIdx) {
+  const dimValue = (d: Dimension, r: RecordRow): DV => {
+    if (isDateBucket(d)) {
       const b = bucketRecordDate(rawValue(d.field, r), d.transform!, d.weekMode);
       return { key: b.key, label: b.label, sort: b.sort };
     }
@@ -609,7 +614,7 @@ async function runWidgetByPeriod(
   // Agrupa: "individual" = 1 grupo por registro; senão pela tupla das dimensões.
   const groups = new Map<string, { dv: DV[]; records: RecordRow[] }>();
   for (const r of records) {
-    const dvs = dims.map((d, di) => dimValue(d, r, di));
+    const dvs = dims.map((d) => dimValue(d, r));
     const gkey = fn === "individual" ? r.id : dvs.map((x) => x.key).join("");
     let g = groups.get(gkey);
     if (!g) {
@@ -621,7 +626,7 @@ async function runWidgetByPeriod(
 
   // Resolve rótulos das dimensões não-data (fonte e FK id→nome).
   for (let di = 0; di < dims.length; di++) {
-    if (di === dateIdx) continue;
+    if (isDateBucket(dims[di])) continue;
     const d = dims[di];
     if (d.field === "record_type") {
       for (const g of groups.values()) {
@@ -643,9 +648,18 @@ async function runWidgetByPeriod(
     }
   }
 
-  const groupList = [...groups.values()].sort(
-    (a, b) => a.dv[dateIdx].sort - b.dv[dateIdx].sort
-  );
+  // Ordena cronologicamente por TODAS as dimensões de data (na ordem em que
+  // aparecem); com uma só data, equivale ao comportamento anterior.
+  const dateIdxs = dims
+    .map((d, i) => (isDateBucket(d) ? i : -1))
+    .filter((i) => i >= 0);
+  const groupList = [...groups.values()].sort((a, b) => {
+    for (const di of dateIdxs) {
+      const diff = a.dv[di].sort - b.dv[di].sort;
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  });
 
   const rows: WidgetRow[] = groupList.map((g) => {
     const row: WidgetRow = {};
