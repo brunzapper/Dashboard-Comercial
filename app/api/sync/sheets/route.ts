@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import { getSyncSecret } from "@/lib/env";
 import { createServiceClient } from "@/lib/supabase/service";
 import { syncEstudoFechamentosRows, type SheetSiteRow } from "@/lib/sync/sheets/adapter";
+import { runAutoMatch } from "@/lib/records/matching-engine";
+import { recalcAllFormulaFields } from "@/lib/records/recalc";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -77,6 +79,14 @@ export async function POST(request: Request) {
 
     const db = createServiceClient();
     const result = await syncEstudoFechamentosRows(db, rows);
+    // Após importar as vendas do site: casa com os leads (auto-match) e refaz o
+    // lead time + campos com match:<fonte> (best-effort — não falha o push).
+    try {
+      await runAutoMatch(db);
+      await recalcAllFormulaFields();
+    } catch {
+      /* ignora: a sincronização das linhas já foi persistida. */
+    }
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     return NextResponse.json(

@@ -7,6 +7,7 @@
 // (lib/sync/bitrix/sync.ts: loadRelatedLeadIndex/resolveRelatedLeadFromIndex).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { RECORD_TYPE_SOURCE } from "@/lib/sources";
 import {
   loadMatchRules,
   matchKey,
@@ -133,6 +134,93 @@ async function runRule(
     inserted += count ?? 0;
   }
   return inserted;
+}
+
+// Registro casado por fonte (SourceKey → registro). Usado para materializar os
+// operandos match:<fonte>:<data> nos campos calculados e recalcular o lead time.
+export type MatchedBySource = Record<string, MatchableRecord>;
+
+/**
+ * Resolve, para um LOTE de registros, o registro casado por fonte — prioriza
+ * match manual > mais recente; para a fonte leads, cai no `related_lead_id`
+ * quando não há match genérico (mesma precedência do RPC 0042). Faz poucas idas
+ * ao banco (independente de N). `cols` define quais colunas carregar do casado.
+ */
+export async function resolveMatchedRecords(
+  db: SupabaseClient,
+  records: { id: string; related_lead_id?: string | null }[],
+  cols: string = MATCHABLE_COLS
+): Promise<Map<string, MatchedBySource>> {
+  const result = new Map<string, MatchedBySource>();
+  if (records.length === 0) return result;
+  const ids = records.map((r) => r.id);
+
+  type MatchRow = {
+    record_a_id: string;
+    record_b_id: string;
+    mode: "auto" | "manual";
+    created_at: string;
+  };
+  const matches: MatchRow[] = [];
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const { data } = await db
+      .from("record_matches")
+      .select("record_a_id, record_b_id, mode, created_at")
+      .or(
+        `record_a_id.in.(${slice.join(",")}),record_b_id.in.(${slice.join(",")})`
+      );
+    for (const m of (data ?? []) as MatchRow[]) matches.push(m);
+  }
+
+  const wanted = new Set<string>();
+  for (const m of matches) {
+    wanted.add(m.record_a_id);
+    wanted.add(m.record_b_id);
+  }
+  for (const r of records) if (r.related_lead_id) wanted.add(r.related_lead_id);
+  for (const id of ids) wanted.delete(id);
+
+  const partnerById = new Map<string, MatchableRecord>();
+  const wl = [...wanted];
+  for (let i = 0; i < wl.length; i += CHUNK) {
+    const slice = wl.slice(i, i + CHUNK);
+    if (slice.length === 0) continue;
+    const { data } = await db.from("records").select(cols).in("id", slice);
+    for (const p of (data ?? []) as unknown as MatchableRecord[])
+      partnerById.set(p.id, p);
+  }
+
+  const byRecord = new Map<string, MatchRow[]>();
+  for (const m of matches) {
+    for (const self of [m.record_a_id, m.record_b_id]) {
+      const arr = byRecord.get(self);
+      if (arr) arr.push(m);
+      else byRecord.set(self, [m]);
+    }
+  }
+  const rank = (m: MatchRow) =>
+    (m.mode === "manual" ? 1 : 0) * 1e13 + Date.parse(m.created_at || "");
+
+  for (const r of records) {
+    const map: MatchedBySource = {};
+    const own = (byRecord.get(r.id) ?? []).slice().sort((a, b) => rank(b) - rank(a));
+    for (const m of own) {
+      const partner = partnerById.get(
+        m.record_a_id === r.id ? m.record_b_id : m.record_a_id
+      );
+      if (!partner) continue;
+      const src = RECORD_TYPE_SOURCE[partner.record_type];
+      if (src && !map[src]) map[src] = partner;
+    }
+    if (!map.leads && r.related_lead_id) {
+      const lead = partnerById.get(r.related_lead_id);
+      if (lead) map.leads = lead;
+    }
+    result.set(r.id, map);
+  }
+  return result;
 }
 
 /** Roda o auto-match de todas as regras habilitadas (ou de uma só, se `ruleId`). */

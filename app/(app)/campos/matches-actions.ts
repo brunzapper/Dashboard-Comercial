@@ -15,6 +15,7 @@ import {
   isSourceKey,
 } from "@/lib/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
+import { recalcAllFormulaFields } from "@/lib/records/recalc";
 
 export interface MatchActionState {
   ok?: boolean;
@@ -102,6 +103,8 @@ export async function createMatchRule(
   try {
     const res = await runAutoMatch(supabase, created?.id as string | undefined);
     matched = res.inserted;
+    // Refaz lead_time_days e campos calculados com match:<fonte> (best-effort).
+    await recalcAllFormulaFields();
   } catch {
     /* ignora: a regra foi salva; o botão "Rodar auto-match" refaz. */
   }
@@ -134,6 +137,8 @@ export async function updateMatchRule(
   try {
     const res = await runAutoMatch(supabase, id);
     matched = res.inserted;
+    // Refaz lead_time_days e campos calculados com match:<fonte> (best-effort).
+    await recalcAllFormulaFields();
   } catch {
     /* ignora */
   }
@@ -165,7 +170,9 @@ export async function runAutoMatchAction(
   const supabase = await createClient();
   try {
     const res = await runAutoMatch(supabase);
+    await recalcAllFormulaFields(); // lead_time + campos com match:<fonte>
     revalidatePath("/campos");
+    revalidatePath("/registros");
     return {
       ok: true,
       message: `Auto-match: ${res.rulesRun} regra(s), ${res.inserted} conexão(ões) gravada(s).`,

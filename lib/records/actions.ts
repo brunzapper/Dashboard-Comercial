@@ -18,9 +18,11 @@ import {
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
 import {
   anyMoneyDef,
+  buildDateContext,
   buildRecordCurrencyContext,
   computeFormulaFields,
   loadCurrencyMaterials,
+  loadCustomDateKeys,
   loadFormulaDefs,
 } from "@/lib/records/formulas";
 import type { DataType } from "@/lib/records/types";
@@ -254,6 +256,17 @@ export async function updateRecord(
           await loadCurrencyMaterials(supabase)
         )
       : undefined;
+    // Contexto de datas (próprias + custom) para aritmética de datas. Operandos
+    // match:<fonte> ficam para o recalc (regra de "pular" em computeFormulaFields).
+    const dateCtx = buildDateContext(
+      {
+        closed_at: existing.closed_at,
+        opened_at: existing.opened_at,
+        source_created_at: existing.source_created_at,
+      },
+      custom,
+      await loadCustomDateKeys(supabase)
+    );
     const calc = computeFormulaFields(
       {
         value: numOrNull(existing.value),
@@ -262,7 +275,8 @@ export async function updateRecord(
       },
       custom,
       formulaDefs,
-      conv
+      conv,
+      dateCtx
     );
     let calcChanged = false;
     for (const [k, v] of Object.entries(calc)) {
