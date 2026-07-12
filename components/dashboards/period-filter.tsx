@@ -41,6 +41,7 @@ export function PeriodFilter({
   available,
   canEdit,
   dashboardId,
+  settings,
   periodBar,
   periodScope,
   activeTabId,
@@ -51,6 +52,7 @@ export function PeriodFilter({
   available: AvailableField[];
   canEdit: boolean;
   dashboardId: string;
+  settings: DashboardSettings;
   periodBar?: PeriodBar;
   periodScope?: PeriodScope;
   activeTabId: string;
@@ -99,6 +101,7 @@ export function PeriodFilter({
       {canEdit ? (
         <PeriodBarConfig
           dashboardId={dashboardId}
+          settings={settings}
           dateFields={dateFields}
           periodBar={periodBar}
           hasTabs={hasTabs}
@@ -111,11 +114,13 @@ export function PeriodFilter({
 // Popover de configuração da barra (editores): período/campo/escopo padrão + ocultar.
 function PeriodBarConfig({
   dashboardId,
+  settings,
   dateFields,
   periodBar,
   hasTabs,
 }: {
   dashboardId: string;
+  settings: DashboardSettings;
   dateFields: AvailableField[];
   periodBar?: PeriodBar;
   hasTabs: boolean;
@@ -146,7 +151,9 @@ function PeriodBarConfig({
 
   function persist(next: PeriodBar) {
     startTransition(async () => {
-      await updateDashboardSettings(dashboardId, { periodBar: next });
+      // `updateDashboardSettings` sobrescreve o jsonb inteiro — enviar o
+      // `settings` completo para não apagar tabs/background/canvas.
+      await updateDashboardSettings(dashboardId, { ...settings, periodBar: next });
       setOpen(false);
     });
   }

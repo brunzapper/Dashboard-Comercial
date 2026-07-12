@@ -37,6 +37,23 @@ import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
 
+// Reconstrói a lista de abas a partir dos widgets quando `settings.tabs` foi
+// perdido (ex.: sobrescrito por uma gravação parcial de settings). Cada widget
+// guarda a aba a que pertence em `settings.tab`; aqui coletamos os ids distintos
+// na ordem de primeira aparição e devolvemos abas com nomes padrão ("Aba N").
+// Nomes/cores originais não são recuperáveis (viviam só em settings.tabs). Sem
+// widgets com aba (tela única), devolve [] — nada é reconstruído.
+function rebuildTabsFromWidgets(
+  widgets: Widget[]
+): NonNullable<DashboardSettings["tabs"]> {
+  const seen: string[] = [];
+  for (const w of widgets) {
+    const t = w.settings?.tab;
+    if (t && !seen.includes(t)) seen.push(t);
+  }
+  return seen.map((id, i) => ({ id, name: `Aba ${i + 1}` }));
+}
+
 export function DashboardClient({
   dashboardId,
   dashboardName,
@@ -105,7 +122,12 @@ export function DashboardClient({
   // Estado local otimista: cor/nome/adicionar/excluir refletem na hora (a
   // revalidação do servidor só chega ao recarregar). Ressincroniza quando o
   // servidor muda de fato (comparação por valor, sem useEffect).
-  const serverTabs = settings.tabs ?? [];
+  // Abas efetivas: as do servidor quando existem; senão, reconstruídas dos
+  // widgets (recuperação após perda de settings.tabs). A reconstrução é
+  // determinística por load; ao editar uma aba, `saveTabs` grava as reais.
+  const serverTabs = settings.tabs?.length
+    ? settings.tabs
+    : rebuildTabsFromWidgets(widgets);
   const serverKey = JSON.stringify(serverTabs);
   const [seedKey, setSeedKey] = useState(serverKey);
   const [tabs, setTabs] = useState(serverTabs);
@@ -251,6 +273,7 @@ export function DashboardClient({
             available={available}
             canEdit={canEdit}
             dashboardId={dashboardId}
+            settings={settings}
             periodBar={periodBar}
             periodScope={periodScope}
             activeTabId={activeTabId}
