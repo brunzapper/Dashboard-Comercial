@@ -46,6 +46,7 @@ import type {
 import { SOURCE_RECORD_TYPE, type SourceKey } from "@/lib/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
+import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 
 function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
@@ -357,7 +358,7 @@ export default async function DashboardPage({
 
   // Opções do SELECT de responsável editável nas tabelas de registros individuais:
   // só carrega se algum widget-lista expõe a coluna responsible_id como editável.
-  let responsibleOptions: { value: string; label: string }[] = [];
+  let responsibleOptions: ResponsibleOption[] = [];
   const needsResponsibleSelect = dataWidgets.some(
     (w) =>
       isListWidget(w) &&
@@ -369,12 +370,15 @@ export default async function DashboardPage({
   if (needsResponsibleSelect) {
     const { data: respRows } = await supabase
       .from("responsibles")
-      .select("id, display_name")
+      .select("id, display_name, bitrix_user_id")
       .eq("active", true)
       .order("display_name");
     responsibleOptions = (respRows ?? []).map((r) => ({
       value: r.id as string,
       label: (r.display_name as string) ?? "—",
+      // Marca os responsáveis com vínculo no Bitrix: são os únicos oferecidos
+      // quando a coluna grava de volta (ASSIGNED_BY_ID).
+      bitrixLinked: Boolean(r.bitrix_user_id),
     }));
   }
 

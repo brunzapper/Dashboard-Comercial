@@ -333,10 +333,32 @@ export async function updateRecord(
           });
           continue;
         }
-        // Coluna do núcleo mapeada p/ o Bitrix: grava quando forçado (Registros)
-        // ou marcado na coluna do dashboard. Relações não têm mapa → ignoradas.
+        // Coluna do núcleo (ou relação responsável) mapeada p/ o Bitrix: grava
+        // quando forçado (Registros) ou marcado na coluna do dashboard.
         const sfid = coreWriteBackFieldId(a.field, entity);
         if (sfid && (forceSync || wbOverride(a.field))) {
+          // Responsável (ASSIGNED_BY_ID): o valor gravado no record é o uuid local
+          // de `responsibles`. O Bitrix espera o id do usuário, então traduzimos
+          // via responsibles.bitrix_user_id. Sem esse vínculo (ou sem responsável),
+          // pulamos — a edição fica local. Demais colunas gravam o valor cru.
+          if (a.field === "responsible_id") {
+            const respUuid = a.new_value == null ? null : String(a.new_value);
+            if (!respUuid) continue;
+            const { data: resp } = await supabase
+              .from("responsibles")
+              .select("bitrix_user_id")
+              .eq("id", respUuid)
+              .maybeSingle();
+            const bitrixUserId = (resp?.bitrix_user_id as string | null) ?? null;
+            if (!bitrixUserId) continue;
+            changes.push({
+              fieldKey: a.field,
+              sourceFieldId: sfid,
+              label: a.field,
+              newValue: bitrixUserId,
+            });
+            continue;
+          }
           changes.push({
             fieldKey: a.field,
             sourceFieldId: sfid,

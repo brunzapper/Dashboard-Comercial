@@ -24,6 +24,7 @@ import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
+import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
 import { DashboardTabs } from "./dashboard-tabs";
 import { DashboardPendingProvider } from "./pending-context";
@@ -66,7 +67,7 @@ export function DashboardClient({
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
-  responsibleOptions?: { value: string; label: string }[];
+  responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];

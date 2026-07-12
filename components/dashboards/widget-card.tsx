@@ -39,7 +39,10 @@ import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { WidgetChart } from "./charts/widget-chart";
-import { RecordListTable } from "./charts/record-list-table";
+import {
+  RecordListTable,
+  type ResponsibleOption,
+} from "./charts/record-list-table";
 import { EntityListTable } from "./charts/entity-list-table";
 import { PeriodControls } from "./period-controls";
 import { TableFilterBar } from "./table-filter-bar";
@@ -82,7 +85,7 @@ export function WidgetCard({
   currencyRates?: CurrencyRates;
   conversionPeriod?: { year: number; quarter: number };
   fkLabels: Record<string, string>;
-  responsibleOptions?: { value: string; label: string }[];
+  responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];

@@ -12,6 +12,7 @@ import type { Correspondence } from "@/lib/correspondences";
 import {
   isEditableCoreColumn,
   isEditableRelation,
+  isWriteBackRelation,
 } from "@/lib/config/core-writeback";
 import { resolveFieldMoney } from "./currency";
 import type { Aggregation, Transform } from "./types";
@@ -70,10 +71,11 @@ export function buildAvailableFields(
   const core = CORE_FIELDS.map((f) => ({
     ...f,
     // Colunas do núcleo editáveis inline: as colunas suportadas (write-back) OU as
-    // relações editáveis (responsável — local, sem write-back). `writable` (a caixa
-    // "Gravar no Bitrix") continua só para as colunas mapeadas ao Bitrix.
+    // relações editáveis (ex.: responsável). `writable` (a caixa "Gravar no Bitrix")
+    // vale para as colunas do núcleo mapeadas ao Bitrix e para as relações com
+    // write-back (responsável → ASSIGNED_BY_ID).
     editableCapable: isEditableCoreColumn(f.field) || isEditableRelation(f.field),
-    writable: isEditableCoreColumn(f.field),
+    writable: isEditableCoreColumn(f.field) || isWriteBackRelation(f.field),
   }));
   const custom = customFields.map((f) => ({
     field: `custom:${f.field_key}`,
