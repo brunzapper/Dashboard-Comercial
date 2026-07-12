@@ -10,6 +10,16 @@ import { Plus, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export interface DashboardTab {
   id: string;
@@ -41,6 +51,7 @@ export function DashboardTabs({
   onChange: (tabs: DashboardTab[]) => void;
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DashboardTab | null>(null);
 
   function addTab() {
     const id =
@@ -111,7 +122,7 @@ export function DashboardTabs({
             {editMode ? (
               <>
                 <label
-                  className="relative inline-flex size-4 cursor-pointer items-center justify-center rounded-full border"
+                  className="relative inline-flex size-4 cursor-pointer items-center justify-center overflow-hidden rounded-full border"
                   title="Cor de fundo do nome"
                   style={{ background: tab.color ?? "transparent" }}
                 >
@@ -125,9 +136,9 @@ export function DashboardTabs({
                 </label>
                 <button
                   type="button"
-                  onClick={() => remove(tab.id)}
+                  onClick={() => setPendingDelete(tab)}
                   title="Excluir aba"
-                  className="hover:text-destructive"
+                  className="hover:text-destructive relative z-10"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -146,6 +157,35 @@ export function DashboardTabs({
           <Plus className="size-3.5" /> Aba
         </button>
       ) : null}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir aba?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir
+              {pendingDelete?.name ? ` "${pendingDelete.name}"` : " esta aba"}?
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (pendingDelete) remove(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
