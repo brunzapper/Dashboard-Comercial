@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 12/07/2026
 // Server Actions da tela de Usuários (admin): provisionamento de contas,
 // atribuição de papéis, reset de senha, desativação/exclusão e mapeamento
 // Bitrix (bitrix_user_map). Sem signup público — só quem tem
 // manage_users_roles opera aqui.
+// v1.1 (12/07/2026): setBitrixMapping também grava responsibles.user_id — fonte
+//   da verdade da visibilidade (RLS de records segue o vínculo vivo responsável).
 //
 // SEGURANÇA: criar/resetar/desativar/excluir usam a service role key
 // (createServiceClient), que BYPASSA a RLS. O guard ensureManageUsers() é a
@@ -208,6 +210,18 @@ export async function setBitrixMapping(
     { onConflict: "bitrix_id" }
   );
   if (error) return { error: "Não foi possível salvar o mapeamento." };
+
+  // Fonte da verdade da visibilidade: responsibles.user_id. A RLS de `records`
+  // segue o vínculo VIVO record.responsible_id -> responsibles.user_id, então o
+  // vínculo do Bitrix precisa refletir aqui. Grava via service role porque
+  // responsibles_write exige 'admin' (a permissão manage_users_roles já foi
+  // conferida em ensureManageUsers). Casa pelo bitrix_user_id do responsável.
+  const service = createServiceClient();
+  const { error: respErr } = await service
+    .from("responsibles")
+    .update({ user_id: userId || null })
+    .eq("bitrix_user_id", bitrixId);
+  if (respErr) return { error: "Não foi possível salvar o vínculo do responsável." };
 
   revalidatePath("/configuracoes/usuarios");
   return {};
