@@ -53,6 +53,25 @@ export interface SavedPeriod {
   campo?: string;
 }
 
+/** Escopo do filtro de período do dashboard (config em periodBar.scope). */
+export type PeriodScope = "global" | "tab";
+
+/**
+ * Nomes dos parâmetros de URL da barra de período, conforme o escopo. Escopo
+ * "global" (ou aba vazia) usa as chaves fixas `periodo/de/ate/campo`
+ * (retrocompatível); "tab" as namespaceia por id da aba (`periodo__<tabId>`…).
+ * Fonte única da convenção, usada por cliente e servidor.
+ */
+export function periodKeys(scope: PeriodScope | undefined, tabId: string) {
+  const suffix = scope === "tab" && tabId ? `__${tabId}` : "";
+  return {
+    preset: `periodo${suffix}`,
+    de: `de${suffix}`,
+    ate: `ate${suffix}`,
+    campo: `campo${suffix}`,
+  };
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function iso(d: Date): string {

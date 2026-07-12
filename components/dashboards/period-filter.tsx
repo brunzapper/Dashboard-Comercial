@@ -1,8 +1,9 @@
-// Versão: 2.0 | Data: 09/07/2026
-// Barra de período global do dashboard: filtra todos os widgets não cobertos
-// por um widget de filtro. Editores configuram (engrenagem) o período/campo
-// padrão e podem ocultá-la (persistido em dashboards.settings). Usa o controle
-// reutilizável PeriodControls (URL: periodo/de/ate/campo).
+// Versão: 3.0 | Data: 12/07/2026
+// Barra de período do dashboard: filtra todos os widgets não cobertos por um
+// widget de filtro. Editores configuram (engrenagem) o período/campo padrão, o
+// escopo (global x por aba) e podem ocultá-la (persistido em dashboards.settings).
+// Usa o controle reutilizável PeriodControls. v3.0: escopo por aba — as chaves de
+// URL passam a ser namespadas por id da aba ativa (periodo__<tabId>…).
 "use client";
 
 import { useSearchParams } from "next/navigation";
@@ -21,7 +22,9 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
+  periodKeys,
   type PeriodPresetKey,
+  type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
@@ -39,37 +42,55 @@ export function PeriodFilter({
   canEdit,
   dashboardId,
   periodBar,
-  periodDefaults,
-  periodDefaultField,
+  periodScope,
+  activeTabId,
+  hasTabs,
+  periodDefaultsByTab,
+  periodDefaultFieldByTab,
 }: {
   available: AvailableField[];
   canEdit: boolean;
   dashboardId: string;
   periodBar?: PeriodBar;
-  periodDefaults?: PeriodSelection;
-  periodDefaultField?: string;
+  periodScope?: PeriodScope;
+  activeTabId: string;
+  hasTabs: boolean;
+  periodDefaultsByTab?: Record<string, PeriodSelection>;
+  periodDefaultFieldByTab?: Record<string, string>;
 }) {
   const sp = useSearchParams();
   const dateFields = available.filter((f) => f.isDate);
 
-  // Default (URL vazia): usa o que o servidor resolveu (último período do
-  // usuário > config do dashboard > default), garantindo que UI e dados batam.
+  // Escopo e "bucket" ativo: no modo por aba a barra opera sobre a aba ativa
+  // (chaves de URL namespadas); no modo global, sobre o bucket único "".
+  const scope: PeriodScope = periodScope === "tab" ? "tab" : "global";
+  const bucket = scope === "tab" ? activeTabId : "";
+  const keys = periodKeys(scope, bucket);
+
+  // Default (URL vazia): usa o que o servidor resolveu para este bucket (último
+  // período do usuário > config do dashboard > default), p/ UI e dados baterem.
+  const periodDefaults = periodDefaultsByTab?.[bucket] ?? {
+    preset: periodBar?.defaultPreset ?? "",
+  };
   const defaultField =
-    periodDefaultField || periodBar?.field || DEFAULT_PERIOD_FIELD;
-  const field = sp.get("campo") || defaultField;
+    periodDefaultFieldByTab?.[bucket] || periodBar?.field || DEFAULT_PERIOD_FIELD;
+  const field = sp.get(keys.campo) || defaultField;
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2">
       <CalendarDays className="text-muted-foreground size-4 shrink-0" />
       <PeriodControls
-        keys={{ preset: "periodo", de: "de", ate: "ate" }}
-        defaults={periodDefaults ?? { preset: periodBar?.defaultPreset ?? "" }}
+        // `key` força o controle a reidratar (estado interno) ao trocar de aba.
+        key={bucket}
+        keys={{ preset: keys.preset, de: keys.de, ate: keys.ate }}
+        defaults={periodDefaults}
         persist={(sel: SavedPeriod) => {
-          // Salva o último período consultado deste usuário/dashboard.
-          void saveLastPeriod(dashboardId, sel);
+          // Salva o último período consultado deste usuário/dashboard (por aba
+          // no modo "tab"; global caso contrário).
+          void saveLastPeriod(dashboardId, sel, scope === "tab" && bucket ? bucket : undefined);
         }}
         fieldControl={{
-          paramKey: "campo",
+          paramKey: keys.campo,
           value: field,
           defaultValue: defaultField,
           options: dateFields,
@@ -80,26 +101,32 @@ export function PeriodFilter({
           dashboardId={dashboardId}
           dateFields={dateFields}
           periodBar={periodBar}
+          hasTabs={hasTabs}
         />
       ) : null}
     </div>
   );
 }
 
-// Popover de configuração da barra (editores): período/campo padrão + ocultar.
+// Popover de configuração da barra (editores): período/campo/escopo padrão + ocultar.
 function PeriodBarConfig({
   dashboardId,
   dateFields,
   periodBar,
+  hasTabs,
 }: {
   dashboardId: string;
   dateFields: AvailableField[];
   periodBar?: PeriodBar;
+  hasTabs: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [preset, setPreset] = useState(periodBar?.defaultPreset ?? "");
   const [field, setField] = useState(periodBar?.field ?? DEFAULT_PERIOD_FIELD);
+  const [scope, setScope] = useState<PeriodScope>(
+    periodBar?.scope === "tab" ? "tab" : "global"
+  );
 
   const presetOptions: ComboboxOption[] = [
     { value: "", label: "Todo o período" },
@@ -112,6 +139,10 @@ function PeriodBarConfig({
     value: f.field,
     label: f.label,
   }));
+  const scopeOptions: ComboboxOption[] = [
+    { value: "global", label: "Global (todas as abas)" },
+    { value: "tab", label: "Por aba" },
+  ];
 
   function persist(next: PeriodBar) {
     startTransition(async () => {
@@ -133,6 +164,18 @@ function PeriodBarConfig({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="flex flex-col gap-3">
+        {hasTabs ? (
+          <div className="flex flex-col gap-1.5">
+            <Label>Escopo do período</Label>
+            <Combobox
+              options={scopeOptions}
+              value={scope}
+              onValueChange={(v) => setScope(v as PeriodScope)}
+              searchable={false}
+              aria-label="Escopo do período"
+            />
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <Label>Período padrão</Label>
           <Combobox
@@ -157,7 +200,7 @@ function PeriodBarConfig({
             variant="outline"
             size="sm"
             disabled={pending}
-            onClick={() => persist({ enabled: false })}
+            onClick={() => persist({ ...periodBar, enabled: false })}
           >
             Ocultar barra
           </Button>
@@ -165,7 +208,7 @@ function PeriodBarConfig({
             size="sm"
             disabled={pending}
             onClick={() =>
-              persist({ enabled: true, defaultPreset: preset, field })
+              persist({ enabled: true, defaultPreset: preset, field, scope })
             }
           >
             Salvar

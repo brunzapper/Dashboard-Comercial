@@ -31,8 +31,10 @@ import {
 } from "@/lib/correspondences";
 import {
   DEFAULT_PERIOD_FIELD,
+  periodKeys,
   resolvePeriodSelection,
   type DashboardPeriod,
+  type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
@@ -118,10 +120,14 @@ export default async function DashboardPage({
   ]);
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
-  // Último período consultado pelo usuário neste dashboard (se houver).
-  const savedPeriod =
-    ((prefData?.settings as { lastPeriod?: SavedPeriod } | null)?.lastPeriod ??
-      {}) as SavedPeriod;
+  // Último período consultado pelo usuário neste dashboard (se houver). No modo
+  // "por aba", cada aba guarda o seu em `lastPeriodByTab` (chave = id da aba).
+  const prefSettings = (prefData?.settings ?? {}) as {
+    lastPeriod?: SavedPeriod;
+    lastPeriodByTab?: Record<string, SavedPeriod>;
+  };
+  const savedPeriod = prefSettings.lastPeriod ?? {};
+  const lastPeriodByTab = prefSettings.lastPeriodByTab ?? {};
 
   const widgets = (widgetsData ?? []) as Widget[];
   const available = buildAvailableFields(
@@ -144,44 +150,84 @@ export default async function DashboardPage({
     (w) => w.visual_type === "filtro_campo"
   );
 
-  // Campo de data padrão quando a URL não traz `campo`: preferência do usuário
-  // (último consultado) > config do dashboard > default.
-  const defaultPeriodField =
-    savedPeriod.campo && isDateField(savedPeriod.campo)
-      ? savedPeriod.campo
-      : periodBar?.field && isDateField(periodBar.field)
-        ? periodBar.field
-        : DEFAULT_PERIOD_FIELD;
+  // Escopo do filtro de período: "global" (um período p/ todo o dashboard) ou
+  // "tab" (cada aba com sua seleção). As abas e a "aba efetiva" de um widget
+  // espelham components/dashboards/dashboard-client.tsx.
+  const scope: PeriodScope = periodBar?.scope === "tab" ? "tab" : "global";
+  const tabs = dashSettings.tabs ?? [];
+  const tabIds = new Set(tabs.map((t) => t.id));
+  const firstTabId = tabs[0]?.id ?? "";
+  const widgetTab = (w: Widget) => {
+    const t = w.settings?.tab;
+    return t && tabIds.has(t) ? t : firstTabId;
+  };
 
-  // Defaults do período quando a URL está vazia: usa o último período salvo do
-  // usuário se houver; senão o preset padrão do dashboard.
-  const savedHasContent = Boolean(
-    savedPeriod.periodo || savedPeriod.de || savedPeriod.ate
-  );
-  const periodDefaults: PeriodSelection = savedHasContent
-    ? {
-        preset: savedPeriod.periodo ?? "",
-        de: savedPeriod.de ?? "",
-        ate: savedPeriod.ate ?? "",
-      }
-    : { preset: periodBar?.defaultPreset ?? "" };
+  // Defaults (campo + período) de um "bucket" quando a URL está vazia:
+  // preferência do usuário (último consultado no bucket) > config do dashboard >
+  // default. Bucket = "" no modo global; id da aba no modo por aba.
+  function resolveDefaults(saved: SavedPeriod): {
+    defaultField: string;
+    periodDefaults: PeriodSelection;
+  } {
+    const defaultField =
+      saved.campo && isDateField(saved.campo)
+        ? saved.campo
+        : periodBar?.field && isDateField(periodBar.field)
+          ? periodBar.field
+          : DEFAULT_PERIOD_FIELD;
+    const hasContent = Boolean(saved.periodo || saved.de || saved.ate);
+    const periodDefaults: PeriodSelection = hasContent
+      ? { preset: saved.periodo ?? "", de: saved.de ?? "", ate: saved.ate ?? "" }
+      : { preset: periodBar?.defaultPreset ?? "" };
+    return { defaultField, periodDefaults };
+  }
 
-  // 1) Período da barra global (só se a barra estiver visível).
-  let globalPeriod: DashboardPeriod | null = null;
-  if (periodBar?.enabled !== false) {
-    const campoRaw = str(sp.campo);
-    const field = isDateField(campoRaw) ? campoRaw : defaultPeriodField;
-    globalPeriod = resolvePeriodSelection(
-      { preset: str(sp.periodo), de: str(sp.de), ate: str(sp.ate) },
+  const savedFor = (bucket: string): SavedPeriod =>
+    scope === "tab" ? (lastPeriodByTab[bucket] ?? {}) : savedPeriod;
+
+  // Resolve o período de um bucket lendo suas próprias chaves de URL (namespadas
+  // por aba no modo "tab"; chaves fixas no modo global).
+  function resolvePeriodForBucket(bucket: string): DashboardPeriod | null {
+    const { defaultField, periodDefaults } = resolveDefaults(savedFor(bucket));
+    const keys = periodKeys(scope, bucket);
+    const campoRaw = str(sp[keys.campo]);
+    const field = isDateField(campoRaw) ? campoRaw : defaultField;
+    return resolvePeriodSelection(
+      { preset: str(sp[keys.preset]), de: str(sp[keys.de]), ate: str(sp[keys.ate]) },
       field,
       periodDefaults
     );
   }
 
-  // 2) Precedência: cada widget começa com o período global; um widget de
-  //    filtro sobrescreve o período dos seus alvos (ou de todos, se sem alvos).
+  // Defaults por bucket, entregues ao cliente para exibir a seleção efetiva de
+  // cada aba (deve bater com o que o servidor resolveu). Bucket "" cobre o modo
+  // global e dashboards sem abas / widgets sem aba.
+  const buckets = scope === "tab" ? [...tabIds, firstTabId] : [""];
+  const periodDefaultsByTab: Record<string, PeriodSelection> = {};
+  const periodDefaultFieldByTab: Record<string, string> = {};
+  for (const b of new Set(buckets)) {
+    const d = resolveDefaults(savedFor(b));
+    periodDefaultsByTab[b] = d.periodDefaults;
+    periodDefaultFieldByTab[b] = d.defaultField;
+  }
+
+  // 1) Período de cada widget (só se a barra estiver visível). No modo global,
+  //    todos compartilham o bucket ""; no modo por aba, cada widget usa o
+  //    período da sua aba efetiva (resolvido e cacheado por bucket).
+  // 2) Precedência: um widget de filtro sobrescreve o período dos seus alvos
+  //    (ou de todos, se sem alvos) — aplicado logo abaixo.
   const periodByWidget: Record<string, DashboardPeriod | null> = {};
-  for (const w of dataWidgets) periodByWidget[w.id] = globalPeriod;
+  if (periodBar?.enabled !== false) {
+    const cache = new Map<string, DashboardPeriod | null>();
+    const periodOf = (bucket: string) => {
+      if (!cache.has(bucket)) cache.set(bucket, resolvePeriodForBucket(bucket));
+      return cache.get(bucket) ?? null;
+    };
+    for (const w of dataWidgets)
+      periodByWidget[w.id] = periodOf(scope === "tab" ? widgetTab(w) : "");
+  } else {
+    for (const w of dataWidgets) periodByWidget[w.id] = null;
+  }
 
   for (const fw of filterWidgets) {
     const s = fw.settings ?? {};
@@ -507,8 +553,9 @@ export default async function DashboardPage({
       visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
       dateFormat={dashSettings.dateFormat}
       periodBar={periodBar}
-      periodDefaults={periodDefaults}
-      periodDefaultField={defaultPeriodField}
+      periodScope={scope}
+      periodDefaultsByTab={periodDefaultsByTab}
+      periodDefaultFieldByTab={periodDefaultFieldByTab}
       filterOptionsById={filterOptionsById}
     />
   );
