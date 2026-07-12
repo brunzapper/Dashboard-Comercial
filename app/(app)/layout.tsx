@@ -40,11 +40,10 @@ export default async function AppLayout({
   );
 
   // "Configurações" agrupa as telas admin (Operações/Responsáveis/Metas/Usuários)
-  // + o Log de write-back. Aparece para quem alcança QUALQUER sub-aba: admin
-  // (as três primeiras) ou quem gerencia usuários.
-  if (roles.includes("admin") || permissions.includes("manage_users_roles")) {
-    items.push({ href: "/configuracoes", label: "Configurações" });
-  }
+  // + Moedas, Log e Conta. As abas admin seguem gated dentro da seção; Moedas
+  // (visualização), Log (sincronizações) e Conta (senha) valem para todo mundo,
+  // então a seção aparece para qualquer autenticado.
+  items.push({ href: "/configuracoes", label: "Configurações" });
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
     .join(", ");

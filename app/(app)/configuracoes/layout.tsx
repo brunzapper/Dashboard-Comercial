@@ -11,21 +11,21 @@ import {
   type SettingsTab,
 } from "@/components/configuracoes/settings-tabs";
 
+// Moedas (só visualização p/ não-admin), Log (sincronizações) e Conta (senha
+// própria) não têm gating: valem para qualquer autenticado. As demais seguem
+// restritas por papel/permissão.
 const ALL_TABS: (SettingsTab & { role?: string; permission?: string })[] = [
   { href: "/configuracoes/operacoes", label: "Operações", role: "admin" },
   { href: "/configuracoes/responsaveis", label: "Responsáveis", role: "admin" },
   { href: "/configuracoes/metas", label: "Metas", role: "admin" },
-  {
-    href: "/configuracoes/moedas",
-    label: "Moedas",
-    permission: "manage_field_definitions",
-  },
+  { href: "/configuracoes/moedas", label: "Moedas" },
   {
     href: "/configuracoes/usuarios",
     label: "Usuários",
     permission: "manage_users_roles",
   },
-  { href: "/configuracoes/log", label: "Log", role: "admin" },
+  { href: "/configuracoes/log", label: "Log" },
+  { href: "/configuracoes/conta", label: "Conta" },
 ];
 
 export function allowedSettingsTabs(

@@ -128,6 +128,17 @@ o progresso por fase; o **Backfill** ganha o campo de dias (padrão 365, janela 
 **Reconciliar** continua puxando só o que mudou (por `DATE_MODIFY`). Se a aba for fechada no
 meio, ao reabrir a página o job em andamento é detectado e pode ser retomado.
 
+## Como aplicar a migration 0038 (Configurações para gestor/vendedor)
+
+Cole o [`migrations/0038_config_read_access.sql`](./migrations/0038_config_read_access.sql)
+no SQL Editor e execute. Idempotente. Ela libera a leitura de `sync_jobs` para
+qualquer autenticado (aba **Configurações → Log**, seção "Sincronizações": mostra
+reconciliações e backfills a gestor/vendedor também) e troca a leitura de
+`bitrix_writeback_queue` de admin para quem tem `view_all_records` (admin + gestor).
+A escrita das duas tabelas continua só via service role. Depois disso, gestor e
+vendedor passam a ver uma **Configurações simplificada** (Moedas em leitura, Log e
+troca da própria senha) — sem mudança de RLS nas moedas, cuja leitura já era pública.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
