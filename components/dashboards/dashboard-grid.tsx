@@ -57,6 +57,20 @@ function posOf(w: Widget, i: number): GridPosition {
   return { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 };
 }
 
+// Sobe do elemento até o ancestral que rola verticalmente (no app é o
+// <main className="flex-1 overflow-auto">). Fallback para o scroller do
+// documento caso, em algum layout, quem role seja a própria janela.
+function verticalScroller(from: HTMLElement): HTMLElement {
+  let el: HTMLElement | null = from;
+  while (el) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight)
+      return el;
+    el = el.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement) ?? document.documentElement;
+}
+
 export function DashboardGrid({
   widgets,
   dataById,
@@ -123,6 +137,34 @@ export function DashboardGrid({
     hasCopy: boolean;
   } | null>(null);
 
+  // Pan ("mãozinha"): arrastar o espaço vazio com o botão esquerdo rola o
+  // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
+  // vertical no ancestral rolável (<main>). Refs para não re-renderizar a cada
+  // movimento; `panning` só troca o cursor/seleção.
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+    v: HTMLElement;
+  } | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  // Enquanto arrasta: cursor "fechado" e sem seleção de texto em toda a página.
+  // O cleanup restaura mesmo se o componente desmontar no meio do gesto.
+  useEffect(() => {
+    if (!panning) return;
+    const { body } = document;
+    const prevCursor = body.style.cursor;
+    const prevSelect = body.style.userSelect;
+    body.style.cursor = "grabbing";
+    body.style.userSelect = "none";
+    return () => {
+      body.style.cursor = prevCursor;
+      body.style.userSelect = prevSelect;
+    };
+  }, [panning]);
+
   const layout: Layout = widgets.map((w, i) => {
     const p = posOf(w, i);
     return { i: w.id, x: p.x, y: p.y, w: p.w, h: p.h };
@@ -165,6 +207,43 @@ export function DashboardGrid({
   const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
+
+  // Botão esquerdo no espaço vazio inicia o pan. Só mouse/caneta (o toque mantém
+  // a rolagem nativa); sobre um widget (`.react-grid-item`) não pega.
+  function onCanvasPointerDown(e: React.PointerEvent) {
+    if (e.pointerType === "touch" || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const v = verticalScroller(sc);
+    panRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: sc.scrollLeft,
+      scrollTop: v.scrollTop,
+      v,
+    };
+    setPanning(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    const p = panRef.current;
+    if (!p) return;
+    if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - (e.clientX - p.startX);
+    p.v.scrollTop = p.scrollTop - (e.clientY - p.startY);
+  }
+
+  function onCanvasPointerUp(e: React.PointerEvent) {
+    if (!panRef.current) return;
+    panRef.current = null;
+    setPanning(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture pode já ter sido liberada
+    }
+  }
 
   // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
   // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
@@ -328,8 +407,13 @@ export function DashboardGrid({
           <div
             ref={canvasRef}
             onContextMenu={onCanvasContextMenu}
+            onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerUp={onCanvasPointerUp}
+            onPointerCancel={onCanvasPointerUp}
             className={cn(
               "relative",
+              panning ? "cursor-grabbing" : "cursor-grab",
               editMode &&
                 "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]"
             )}
@@ -352,7 +436,7 @@ export function DashboardGrid({
               onLayoutChange={onLayoutChange}
             >
               {widgets.map((w) => (
-                <div key={w.id}>
+                <div key={w.id} className="cursor-auto">
                   <WidgetCard
                     widget={w}
                     data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
