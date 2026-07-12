@@ -69,6 +69,10 @@ export interface RecordRow {
   channel: string | null;
   closed: boolean;
   closed_at: string | null;
+  // Datas de abertura/criação na origem (fallback p/ conversão de moeda quando o
+  // registro ainda não tem fechamento). Podem vir ausentes em selects antigos.
+  opened_at?: string | null;
+  source_created_at?: string | null;
   responsible_id: string | null;
   operation_id: string | null;
   related_lead_id: string | null;

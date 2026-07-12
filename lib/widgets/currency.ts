@@ -116,8 +116,11 @@ export function currencyOptionsFrom(
 }
 
 /**
- * Taxa (R$ por 1 unidade) da moeda no ano/trimestre. Usa a taxa do trimestre se
- * preenchida; senão cai na anual. BRL = 1. Retorna null quando não há taxa.
+ * Taxa (R$ por 1 unidade) da moeda no ano/trimestre. Prioridade: trimestre pedido
+ * do ano → anual do ano. Faltando taxa nesse ano, cai para o **ano mais recente**
+ * cadastrado da moeda (anual → trimestre pedido → qualquer trimestre) — assim
+ * nenhum valor fica sem conversão por falta de taxa no ano exato (nem quando só há
+ * taxas trimestrais). BRL = 1. Retorna null só quando a moeda não tem taxa alguma.
  */
 export function resolveRate(
   rates: CurrencyRates,
@@ -127,12 +130,34 @@ export function resolveRate(
 ): number | null {
   const c = resolveCurrencyCode(code);
   if (c === BASE_CURRENCY) return 1;
-  if (quarter && quarter >= 1 && quarter <= 4) {
+  // Ano exato: trimestre pedido → anual.
+  if (quarter >= 1 && quarter <= 4) {
     const q = rates[rateKey(c, year, quarter)];
     if (Number.isFinite(q)) return q;
   }
   const annual = rates[rateKey(c, year, 0)];
-  return Number.isFinite(annual) ? annual : null;
+  if (Number.isFinite(annual)) return annual;
+
+  // Fallback: ano mais recente com qualquer taxa desta moeda.
+  const prefix = `${c}:`;
+  let latestYear = -Infinity;
+  for (const k of Object.keys(rates)) {
+    if (!k.startsWith(prefix)) continue;
+    const y = Number(k.split(":")[1]);
+    if (Number.isFinite(y) && y > latestYear) latestYear = y;
+  }
+  if (latestYear === -Infinity) return null;
+  const lAnnual = rates[rateKey(c, latestYear, 0)];
+  if (Number.isFinite(lAnnual)) return lAnnual;
+  if (quarter >= 1 && quarter <= 4) {
+    const lq = rates[rateKey(c, latestYear, quarter)];
+    if (Number.isFinite(lq)) return lq;
+  }
+  for (let q = 1; q <= 4; q++) {
+    const lq = rates[rateKey(c, latestYear, q)];
+    if (Number.isFinite(lq)) return lq;
+  }
+  return null;
 }
 
 /**

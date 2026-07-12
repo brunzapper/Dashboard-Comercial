@@ -68,6 +68,7 @@ export function WidgetCard({
   canManageFields = false,
   currencyOptions,
   currencyRates = {},
+  conversionPeriod,
   editMode,
   filterOptions,
 }: {
@@ -79,6 +80,7 @@ export function WidgetCard({
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
+  conversionPeriod?: { year: number; quarter: number };
   fkLabels: Record<string, string>;
   responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
@@ -238,6 +240,7 @@ export function WidgetCard({
               appearance={appearance}
               dateFormat={dateFormat}
               currencyRates={currencyRates}
+              conversionPeriod={conversionPeriod}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />
