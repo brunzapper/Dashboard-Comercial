@@ -8,8 +8,9 @@
 //   settings.canvas ({ cols, rows, rowHeight }).
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { ClipboardPaste, Loader2 } from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout } from "react-grid-layout/legacy";
 
@@ -29,8 +30,15 @@ import type {
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
-import { saveLayout, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  createWidget,
+  saveLayout,
+  updateDashboardSettings,
+  type WidgetInput,
+} from "@/app/(app)/dashboards/actions";
+import { readCopiedWidget } from "@/lib/widgets/clipboard";
 import { useNavPending } from "./pending-context";
+import { FloatingPanel } from "./appearance-editing";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -49,6 +57,20 @@ function posOf(w: Widget, i: number): GridPosition {
   return { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 };
 }
 
+// Sobe do elemento até o ancestral que rola verticalmente (no app é o
+// <main className="flex-1 overflow-auto">). Fallback para o scroller do
+// documento caso, em algum layout, quem role seja a própria janela.
+function verticalScroller(from: HTMLElement): HTMLElement {
+  let el: HTMLElement | null = from;
+  while (el) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight)
+      return el;
+    el = el.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement) ?? document.documentElement;
+}
+
 export function DashboardGrid({
   widgets,
   dataById,
@@ -65,6 +87,7 @@ export function DashboardGrid({
   dateFormat,
   settings,
   tabs,
+  activeTabId,
   canEdit,
   canManageFields = false,
   currencyOptions,
@@ -88,6 +111,7 @@ export function DashboardGrid({
   dateFormat?: DateFormat;
   settings: DashboardSettings;
   tabs?: { id: string; name: string; color?: string }[];
+  activeTabId?: string;
   canEdit: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
@@ -98,6 +122,48 @@ export function DashboardGrid({
 }) {
   const mounted = useRef(false);
   const { pending } = useNavPending();
+  const router = useRouter();
+  const [, startPaste] = useTransition();
+
+  // Menu de "Colar widget" no clique-direito do espaço vazio. Guarda a posição
+  // do menu (clientX/Y) e a célula-alvo do grid (gridX/Y). `hasCopy` é lido no
+  // momento da abertura para refletir o localStorage (funciona entre abas).
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [pasteAt, setPasteAt] = useState<{
+    x: number;
+    y: number;
+    gridX: number;
+    gridY: number;
+    hasCopy: boolean;
+  } | null>(null);
+
+  // Pan ("mãozinha"): arrastar o espaço vazio com o botão esquerdo rola o
+  // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
+  // vertical no ancestral rolável (<main>). Refs para não re-renderizar a cada
+  // movimento; `panning` só troca o cursor/seleção.
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+    v: HTMLElement;
+  } | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  // Enquanto arrasta: cursor "fechado" e sem seleção de texto em toda a página.
+  // O cleanup restaura mesmo se o componente desmontar no meio do gesto.
+  useEffect(() => {
+    if (!panning) return;
+    const { body } = document;
+    const prevCursor = body.style.cursor;
+    const prevSelect = body.style.userSelect;
+    body.style.cursor = "grabbing";
+    body.style.userSelect = "none";
+    return () => {
+      body.style.cursor = prevCursor;
+      body.style.userSelect = prevSelect;
+    };
+  }, [panning]);
 
   const layout: Layout = widgets.map((w, i) => {
     const p = posOf(w, i);
@@ -141,6 +207,87 @@ export function DashboardGrid({
   const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
+
+  // Botão esquerdo no espaço vazio inicia o pan. Só mouse/caneta (o toque mantém
+  // a rolagem nativa); sobre um widget (`.react-grid-item`) não pega.
+  function onCanvasPointerDown(e: React.PointerEvent) {
+    if (e.pointerType === "touch" || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    const sc = scrollRef.current;
+    if (!sc) return;
+    const v = verticalScroller(sc);
+    panRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: sc.scrollLeft,
+      scrollTop: v.scrollTop,
+      v,
+    };
+    setPanning(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    const p = panRef.current;
+    if (!p) return;
+    if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - (e.clientX - p.startX);
+    p.v.scrollTop = p.scrollTop - (e.clientY - p.startY);
+  }
+
+  function onCanvasPointerUp(e: React.PointerEvent) {
+    if (!panRef.current) return;
+    panRef.current = null;
+    setPanning(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture pode já ter sido liberada
+    }
+  }
+
+  // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
+  // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
+  // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
+  function onCanvasContextMenu(e: React.MouseEvent) {
+    if (!canEdit) return;
+    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || cellW <= 0) return;
+    e.preventDefault();
+    const gx = Math.max(0, Math.floor((e.clientX - rect.left - MX) / (cellW + MX)));
+    const gy = Math.max(0, Math.floor((e.clientY - rect.top - MY) / (ROW_H + MY)));
+    const copied = readCopiedWidget();
+    const w = copied?.w ?? 6;
+    setPasteAt({
+      x: e.clientX,
+      y: e.clientY,
+      gridX: Math.min(gx, Math.max(0, cols - w)),
+      gridY: gy,
+      hasCopy: !!copied,
+    });
+  }
+
+  function onPaste() {
+    const copied = readCopiedWidget();
+    const at = pasteAt;
+    setPasteAt(null);
+    if (!copied || !at) return;
+    const input: WidgetInput = {
+      title: copied.title,
+      visual_type: copied.visual_type,
+      sources: copied.sources,
+      splitBySource: copied.splitBySource,
+      dimensions: copied.dimensions,
+      metrics: copied.metrics,
+      filters: copied.filters,
+      settings: { ...(copied.settings ?? {}), tab: activeTabId || undefined },
+      grid_position: { x: at.gridX, y: at.gridY, w: copied.w, h: copied.h },
+    };
+    startPaste(async () => {
+      await createWidget(dashboardId, input);
+      router.refresh();
+    });
+  }
 
   function onLayoutChange(next: Layout) {
     if (!mounted.current) {
@@ -198,11 +345,46 @@ export function DashboardGrid({
     });
   }
 
+  // Menu flutuante de "Colar widget" (compartilhado entre o estado vazio e o
+  // grid). Reaproveita FloatingPanel (posiciona no clique, fecha ao clicar fora).
+  const pasteMenu = pasteAt ? (
+    <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48">
+      <button
+        type="button"
+        disabled={!pasteAt.hasCopy}
+        onClick={onPaste}
+        className="hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4"
+      >
+        <ClipboardPaste />
+        <span className="flex-1">Colar widget</span>
+      </button>
+      {!pasteAt.hasCopy ? (
+        <p className="text-muted-foreground px-2 pt-1 text-xs">Nada copiado</p>
+      ) : null}
+    </FloatingPanel>
+  ) : null;
+
   if (widgets.length === 0) {
     return (
-      <div className="text-muted-foreground rounded-lg border p-8 text-center text-sm">
-        Nenhum widget ainda. {canEdit ? "Adicione o primeiro." : ""}
-      </div>
+      <>
+        <div
+          onContextMenu={(e) => {
+            if (!canEdit) return;
+            e.preventDefault();
+            setPasteAt({
+              x: e.clientX,
+              y: e.clientY,
+              gridX: 0,
+              gridY: 0,
+              hasCopy: !!readCopiedWidget(),
+            });
+          }}
+          className="text-muted-foreground rounded-lg border p-8 text-center text-sm"
+        >
+          Nenhum widget ainda. {canEdit ? "Adicione o primeiro." : ""}
+        </div>
+        {pasteMenu}
+      </>
     );
   }
 
@@ -223,8 +405,15 @@ export function DashboardGrid({
       <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden">
         {baseWidth > 0 ? (
           <div
+            ref={canvasRef}
+            onContextMenu={onCanvasContextMenu}
+            onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerUp={onCanvasPointerUp}
+            onPointerCancel={onCanvasPointerUp}
             className={cn(
               "relative",
+              panning ? "cursor-grabbing" : "cursor-grab",
               editMode &&
                 "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]"
             )}
@@ -247,7 +436,7 @@ export function DashboardGrid({
               onLayoutChange={onLayoutChange}
             >
               {widgets.map((w) => (
-                <div key={w.id}>
+                <div key={w.id} className="cursor-auto">
                   <WidgetCard
                     widget={w}
                     data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
@@ -314,6 +503,7 @@ export function DashboardGrid({
           </div>
         ) : null}
       </div>
+      {pasteMenu}
     </div>
   );
 }

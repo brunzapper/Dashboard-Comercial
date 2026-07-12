@@ -221,6 +221,7 @@ export function DashboardClient({
             dateFormat={dateFormat}
             settings={settings}
             tabs={tabs}
+            activeTabId={activeTabId}
             canEdit={canEdit}
             canManageFields={canManageFields}
             currencyOptions={currencyOptions}
