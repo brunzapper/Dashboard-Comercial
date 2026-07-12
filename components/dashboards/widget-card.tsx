@@ -389,6 +389,7 @@ export function WidgetCard({
               data={data}
               appearance={appearance}
               dateFormat={dateFormat}
+              metricsConfig={widget.metrics ?? []}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

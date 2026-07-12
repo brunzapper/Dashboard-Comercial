@@ -34,12 +34,14 @@ import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
   convertToBRL,
   formatMoney,
+  formatMoneyAggregate,
   formatMoneyDisplay,
   resolveCurrencyCode,
   resolveFieldMoney,
   toReferenceUSD,
   yearQuarterOf,
   type CurrencyRates,
+  type MoneyBreakdown,
 } from "@/lib/widgets/currency";
 import {
   EDITABLE_CORE_COLUMNS,
@@ -299,49 +301,22 @@ export function RecordListTable({
       return metricAgg(m, rs).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
     }
     // Agregação monetária: acumula por moeda + convertido (R$) + referência (US$),
-    // convertendo cada registro pela taxa do seu próprio ano/trimestre.
-    const perCur: Record<string, number> = {};
-    let brl = 0;
-    let usd = 0;
-    let count = 0;
+    // convertendo cada registro pela taxa do seu próprio ano/trimestre. A
+    // formatação final é compartilhada com o caminho agregado (formatMoneyAggregate).
+    const bd: MoneyBreakdown = { perCurrency: {}, brl: 0, usd: 0, count: 0 };
     for (const r of rs) {
       const raw = Number(rawValue(m.field, r));
       if (!Number.isFinite(raw)) continue;
-      count += 1;
+      bd.count += 1;
       const code = metricCurrency(m.field, r);
-      perCur[code] = (perCur[code] ?? 0) + raw;
+      bd.perCurrency[code] = (bd.perCurrency[code] ?? 0) + raw;
       const { year, quarter } = recYQ(r, m);
       const b = convertToBRL(raw, code, currencyRates, year, quarter);
-      if (b != null) brl += b;
+      if (b != null) bd.brl += b;
       const u = toReferenceUSD(raw, code, currencyRates, year, quarter);
-      if (u != null) usd += u;
+      if (u != null) bd.usd += u;
     }
-    const div = (v: number) => (m.agg === "avg" && count > 0 ? v / count : v);
-    if (isGrand) {
-      return m.grandTotalMode === "dollar"
-        ? formatMoney(div(usd), "USD")
-        : formatMoney(div(brl), "BRL");
-    }
-    const codes = Object.keys(perCur);
-    if (codes.length <= 1) {
-      const code = codes[0] ?? "BRL";
-      const disp = m.currencyDisplay ?? "original";
-      if (code === "BRL" || disp === "original") {
-        return formatMoney(div(perCur[code] ?? 0), code);
-      }
-      if (disp === "converted") return formatMoney(div(brl), "BRL");
-      return `${formatMoney(div(usd), "USD")} → ${formatMoney(div(brl), "BRL")}`;
-    }
-    // Várias moedas no grupo.
-    switch (m.currencyMultiMode ?? "convert") {
-      case "separate":
-        return codes.map((c) => formatMoney(div(perCur[c]), c)).join(" · ");
-      case "reference":
-        return `${formatMoney(div(usd), "USD")} → ${formatMoney(div(brl), "BRL")}`;
-      case "convert":
-      default:
-        return formatMoney(div(brl), "BRL");
-    }
+    return formatMoneyAggregate(bd, m, isGrand);
   };
 
   // Valor de uma coluna do núcleo como string (para o editor inline do núcleo).

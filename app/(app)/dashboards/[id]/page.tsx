@@ -363,7 +363,10 @@ export default async function DashboardPage({
           config,
           available,
           periodByWidget[w.id],
-          correspondencesMap
+          correspondencesMap,
+          (fieldsData ?? []) as FieldDefinition[],
+          currencyRates,
+          conversionPeriodById[w.id]
         );
       } catch {
         dataById[w.id] = { rows: [], dimensions: [], metrics: [] };

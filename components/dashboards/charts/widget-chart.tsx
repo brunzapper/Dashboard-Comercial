@@ -38,9 +38,17 @@ import { cn } from "@/lib/utils";
 import type {
   AppearanceSettings,
   ColorPair,
+  Metric,
   VisualType,
   WidgetData,
+  WidgetRow,
 } from "@/lib/widgets/types";
+import {
+  foldBreakdowns,
+  formatMoney,
+  formatMoneyAggregate,
+  plotSingleCurrency,
+} from "@/lib/widgets/currency";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
 import {
   applyManualOrder,
@@ -76,6 +84,17 @@ function fmt(v: unknown): string {
   return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 }
 
+// Valor monetário compacto (sem centavos) p/ os eixos dos gráficos.
+function moneyAxis(v: unknown, code: string): string {
+  const n = Number(v);
+  if (v == null || Number.isNaN(n)) return String(v ?? "—");
+  return n.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: code,
+    maximumFractionDigits: 0,
+  });
+}
+
 const axisProps = {
   tick: { fontSize: 11, fill: "var(--muted-foreground)" },
   stroke: "var(--border)",
@@ -100,6 +119,7 @@ export function WidgetChart({
   data,
   appearance,
   dateFormat,
+  metricsConfig = [],
   canEdit = false,
   onAppearanceChange,
 }: {
@@ -107,11 +127,63 @@ export function WidgetChart({
   data: WidgetData;
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
+  // Config de moeda por métrica (alinhada por índice a data.metrics).
+  metricsConfig?: Metric[];
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
   const { rows, dimensions, metrics } = data;
   const dimKey = dimensions[0]?.key;
+
+  // --- Moeda: config por métrica + helpers de formatação (paridade c/ registros) ---
+  const metricByKey: Record<string, Metric> = {};
+  metrics.forEach((m, i) => {
+    if (metricsConfig[i]) metricByKey[m.key] = metricsConfig[i];
+  });
+  const isMoneyKey = (key: string) =>
+    metrics.find((m) => m.key === key)?.isMoney ?? false;
+
+  // Texto de uma célula/valor de métrica honrando os modos de moeda (tabela/KPI).
+  const moneyCellText = (row: WidgetRow, key: string): string => {
+    const bd = row.__money?.[key];
+    const cfg = metricByKey[key];
+    if (isMoneyKey(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
+    return fmt(row[key]);
+  };
+
+  // Moeda de EXIBIÇÃO de uma série no gráfico: mantém a moeda estrangeira única
+  // (exibição "original"); senão R$ (convertido) — coerente com o número plotado
+  // pelo engine.
+  const seriesMoneyCode = (key: string): string => {
+    if ((metricByKey[key]?.currencyDisplay ?? "original") !== "original")
+      return "BRL";
+    let code: string | null = null;
+    for (const r of rows as WidgetRow[]) {
+      const bd = r.__money?.[key];
+      if (!bd) continue;
+      const c = plotSingleCurrency(bd);
+      if (c == null) return "BRL";
+      if (code == null) code = c;
+      else if (code !== c) return "BRL";
+    }
+    return code && code !== "BRL" ? code : "BRL";
+  };
+
+  // Texto de um valor plotado (tooltip/rótulo) na moeda da série; não-money = fmt.
+  const moneyChartText = (v: unknown, key: string): string =>
+    isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : fmt(v);
+
+  // Código único do eixo quando todas as métricas monetárias compartilham a mesma
+  // moeda de exibição; senão null (eixo numérico simples).
+  const moneyKeys = metrics.filter((m) => m.isMoney).map((m) => m.key);
+  const axisMoneyCode = (() => {
+    if (moneyKeys.length === 0) return null;
+    const codes = new Set(moneyKeys.map(seriesMoneyCode));
+    return codes.size === 1 ? [...codes][0]! : null;
+  })();
+  const yTickFormatter = axisMoneyCode
+    ? (v: number) => moneyAxis(v, axisMoneyCode)
+    : undefined;
   const ap = appearance ?? {};
   const change = onAppearanceChange ?? NOOP;
   const editable = canEdit && Boolean(onAppearanceChange);
@@ -146,7 +218,7 @@ export function WidgetChart({
         return (
           <div className="flex h-full flex-col justify-center p-1">
             <span className="text-3xl font-semibold tabular-nums">
-              {k.value == null ? "—" : fmt(k.value)}
+              {k.valueText ?? (k.value == null ? "—" : fmt(k.value))}
             </span>
             <span className="text-muted-foreground text-xs">{k.label}</span>
           </div>
@@ -156,16 +228,18 @@ export function WidgetChart({
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
           <span className="text-3xl font-semibold tabular-nums">
-            {fmt(k.realizado)}
+            {k.realizadoText ?? fmt(k.realizado)}
           </span>
           <span className="text-muted-foreground text-xs">{k.label}</span>
           {k.meta != null ? (
             <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 text-xs">
-              <span>Meta: {fmt(k.meta)}</span>
+              <span>Meta: {k.metaText ?? fmt(k.meta)}</span>
               {pct != null ? (
                 <span className={pct >= 100 ? "text-chart-2" : ""}>{pct}%</span>
               ) : null}
-              {k.falta != null && k.falta > 0 ? <span>Falta: {fmt(k.falta)}</span> : null}
+              {k.falta != null && k.falta > 0 ? (
+                <span>Falta: {k.faltaText ?? fmt(k.falta)}</span>
+              ) : null}
             </div>
           ) : (
             <span className="text-muted-foreground text-xs">Sem meta configurada</span>
@@ -180,7 +254,7 @@ export function WidgetChart({
         {metrics.map((m) => (
           <div key={m.key} className="flex flex-col">
             <span className="text-2xl font-semibold tabular-nums">
-              {fmt(row[m.key])}
+              {moneyCellText(row, m.key)}
             </span>
             <span className="text-muted-foreground text-xs">{m.label}</span>
           </div>
@@ -196,6 +270,7 @@ export function WidgetChart({
         appearance={ap}
         editable={editable}
         dateFormat={dateFormat ?? DEFAULT_DATE_FORMAT}
+        metricByKey={metricByKey}
         onChange={change}
       />
     );
@@ -215,7 +290,7 @@ export function WidgetChart({
     if (visualType === "funil") {
       return withBg(
         <FunnelChart>
-          <Tooltip formatter={(v) => fmt(v)} />
+          <Tooltip formatter={(v) => moneyChartText(v, metricKey)} />
           <Funnel dataKey="value" data={pieData} isAnimationActive={false}>
             <LabelList
               position="right"
@@ -234,7 +309,7 @@ export function WidgetChart({
 
     return withBg(
       <PieChart>
-        <Tooltip formatter={(v) => fmt(v)} />
+        <Tooltip formatter={(v) => moneyChartText(v, metricKey)} />
         <Legend wrapperStyle={legendStyle} />
         <Pie
           data={pieData}
@@ -290,7 +365,12 @@ export function WidgetChart({
           vertical={grid.vertical}
         />
         <XAxis dataKey={dimKey} {...axisProps} />
-        <YAxis yAxisId="left" {...axisProps} width={48} />
+        <YAxis
+          yAxisId="left"
+          {...axisProps}
+          width={48}
+          tickFormatter={yTickFormatter}
+        />
         {hasRightAxis ? (
           <YAxis
             yAxisId="right"
@@ -299,7 +379,11 @@ export function WidgetChart({
             width={48}
           />
         ) : null}
-        <Tooltip formatter={(v) => fmt(v)} />
+        <Tooltip
+          formatter={(v, _n, item) =>
+            moneyChartText(v, String((item as { dataKey?: unknown })?.dataKey ?? ""))
+          }
+        />
         {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
         {metrics.map((m, i) => (
           <Line
@@ -337,13 +421,18 @@ export function WidgetChart({
       />
       {horizontal ? (
         <>
-          <XAxis type="number" {...axisProps} />
+          <XAxis type="number" {...axisProps} tickFormatter={yTickFormatter} />
           <YAxis type="category" dataKey={dimKey} {...axisProps} width={90} />
         </>
       ) : (
         <>
           <XAxis dataKey={dimKey} {...axisProps} />
-          <YAxis yAxisId="left" {...axisProps} width={48} />
+          <YAxis
+            yAxisId="left"
+            {...axisProps}
+            width={48}
+            tickFormatter={yTickFormatter}
+          />
           {hasRightAxis ? (
             <YAxis
               yAxisId="right"
@@ -354,7 +443,12 @@ export function WidgetChart({
           ) : null}
         </>
       )}
-      <Tooltip formatter={(v) => fmt(v)} cursor={{ fill: "var(--muted)" }} />
+      <Tooltip
+        formatter={(v, _n, item) =>
+          moneyChartText(v, String((item as { dataKey?: unknown })?.dataKey ?? ""))
+        }
+        cursor={{ fill: "var(--muted)" }}
+      />
       {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
       {metrics.map((m, i) => {
         const base = resolveSeriesColor(ap, m.key, i);
@@ -395,7 +489,7 @@ export function WidgetChart({
                 }
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
                 fontSize={11}
-                formatter={(v: unknown) => fmt(v)}
+                formatter={(v: unknown) => moneyChartText(v, m.key)}
               />
             ) : null}
           </Bar>
@@ -416,12 +510,14 @@ function AppearanceTable({
   appearance,
   editable,
   dateFormat,
+  metricByKey,
   onChange,
 }: {
   data: WidgetData;
   appearance: AppearanceSettings;
   editable: boolean;
   dateFormat: DateFormat;
+  metricByKey: Record<string, Metric>;
   onChange: (a: AppearanceSettings) => void;
 }) {
   const t = appearance.table ?? {};
@@ -440,7 +536,33 @@ function AppearanceTable({
     });
 
   const metricKeys = new Set(data.metrics.map((m) => m.key));
+  const moneyKeys = new Set(
+    data.metrics.filter((m) => m.isMoney).map((m) => m.key)
+  );
   const dimKeys = data.dimensions.map((d) => d.key);
+
+  // Célula de métrica: monetária honra a config de moeda (via __money); demais
+  // caem no fmt numérico. Mesma formatação do modo registros.
+  const metricCellText = (r: Record<string, unknown>, key: string): string => {
+    const bd = (r as WidgetRow).__money?.[key];
+    const cfg = metricByKey[key];
+    if (moneyKeys.has(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
+    return fmt(r[key]);
+  };
+  // Subtotal/Total geral de uma métrica sobre `rs`: monetária funde os __money e
+  // formata (isGrand usa o modo do Total geral); demais somam numérico.
+  const metricAggCellText = (
+    rs: Record<string, unknown>[],
+    key: string,
+    isGrand: boolean
+  ): string => {
+    const cfg = metricByKey[key];
+    if (moneyKeys.has(key) && cfg) {
+      const folded = foldBreakdowns(rs.map((r) => (r as WidgetRow).__money?.[key]));
+      return formatMoneyAggregate(folded, cfg, isGrand);
+    }
+    return fmt(sumMetric(rs, key));
+  };
   const allCols = [
     ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
     ...data.metrics.map((m) => ({ key: m.key, label: m.label })),
@@ -667,7 +789,7 @@ function AppearanceTable({
               }}
             >
               <span className={cellSpanClass}>
-                {isMetric ? fmt(r[c.key]) : dimDisplay(r[c.key], c.key)}
+                {isMetric ? metricCellText(r, c.key) : dimDisplay(r[c.key], c.key)}
               </span>
             </TableCell>
           );
@@ -686,6 +808,7 @@ function AppearanceTable({
       onToggle?: () => void;
       level?: number;
       keyId?: string;
+      isGrand?: boolean;
     }
   ) => {
     // Chave estável da linha de grupo (inclui o caminho hierárquico) — rowKey nos
@@ -751,7 +874,7 @@ function AppearanceTable({
                 {label}
               </button>
             ) : isMetric ? (
-              fmt(sumMetric(rs, c.key))
+              metricAggCellText(rs, c.key, opts?.isGrand ?? false)
             ) : null}
           </TableCell>
         );
@@ -818,7 +941,7 @@ function AppearanceTable({
                     className="text-right tabular-nums"
                     style={cellBorder(ri === rows.length - 1)}
                   >
-                    {fmt(r[c.key])}
+                    {metricCellText(r, c.key)}
                   </TableCell>
                 ))}
               </TableRow>
@@ -905,7 +1028,7 @@ function AppearanceTable({
               )
             : rows.map(renderDataRow)}
           {groupLevels.length > 0 && rows.length > 0
-            ? renderSubtotalRow("Total geral", rows)
+            ? renderSubtotalRow("Total geral", rows, { isGrand: true })
             : null}
         </TableBody>
       </Table>
