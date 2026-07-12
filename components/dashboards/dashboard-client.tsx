@@ -9,6 +9,7 @@ import { useState, useTransition } from "react";
 import { Check, Clock, Pencil, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodSelection } from "@/lib/widgets/period";
@@ -22,7 +23,7 @@ import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
-import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import { renameDashboard, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
@@ -115,6 +116,21 @@ export function DashboardClient({
   const visibleWidgets =
     tabs.length === 0 ? widgets : widgets.filter((w) => widgetTab(w) === activeTabId);
 
+  // Renomear o dashboard (inline no título). Estado otimista: aplica o nome na
+  // hora e persiste no servidor. Nome vazio mantém o atual.
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(dashboardName);
+  if (!renaming && name !== dashboardName) setName(dashboardName);
+  function commitName(value: string) {
+    setRenaming(false);
+    const next = value.trim();
+    if (!next || next === name) return;
+    setName(next);
+    startTransition(async () => {
+      await renameDashboard(dashboardId, next);
+    });
+  }
+
   function showBar() {
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
@@ -134,7 +150,40 @@ export function DashboardClient({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{dashboardName}</h1>
+        {renaming ? (
+          <Input
+            autoFocus
+            defaultValue={name}
+            className="h-9 max-w-xs text-2xl font-semibold"
+            onBlur={(e) => commitName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") setRenaming(false);
+            }}
+            aria-label="Nome do dashboard"
+          />
+        ) : (
+          <div className="flex items-center gap-1">
+            <h1
+              className="text-2xl font-semibold"
+              onDoubleClick={() => canEdit && setRenaming(true)}
+            >
+              {name}
+            </h1>
+            {canEdit ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground size-7"
+                onClick={() => setRenaming(true)}
+                title="Renomear dashboard"
+                aria-label="Renomear dashboard"
+              >
+                <Pencil className="size-4" />
+              </Button>
+            ) : null}
+          </div>
+        )}
         {canEdit ? (
           <div className="flex items-center gap-2">
             <Button
