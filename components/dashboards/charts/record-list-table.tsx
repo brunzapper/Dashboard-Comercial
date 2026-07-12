@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
 import { CoreEditableCell } from "@/components/registros/core-editable-cell";
 import { RelationEditableCell } from "@/components/registros/relation-editable-cell";
+import { LeadEditableCell } from "@/components/registros/lead-editable-cell";
 import {
   NUMERIC_DATA_TYPES,
   type FieldDefinition,
@@ -769,11 +770,22 @@ export function RecordListTable({
           const relationEditable = Boolean(
             !isCustom &&
               c.editable &&
+              c.field === "responsible_id" &&
               isEditableRelation(c.field) &&
               canEditValues &&
               responsibleOptions.length > 0
           );
-          const isEditableCell = customEditable || coreEditable || relationEditable;
+          // Lead relacionado editável: combobox PESQUISÁVEL (searchLeads), sem lista
+          // pré-carregada. Grava local (sem write-back).
+          const leadEditable = Boolean(
+            !isCustom &&
+              c.editable &&
+              c.field === "related_lead_id" &&
+              isEditableRelation(c.field) &&
+              canEditValues
+          );
+          const isEditableCell =
+            customEditable || coreEditable || relationEditable || leadEditable;
           const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
           const colCp = t.colColors?.[c.field];
           return (
@@ -826,6 +838,13 @@ export function RecordListTable({
                       : responsibleOptions
                   }
                   writeBack={c.writeBack}
+                  onSaved={refresh}
+                />
+              ) : leadEditable ? (
+                <LeadEditableCell
+                  recordId={r.id}
+                  value={String(rawValue(c.field, r) ?? "")}
+                  label={fkLabels[String(rawValue(c.field, r) ?? "")] ?? null}
                   onSaved={refresh}
                 />
               ) : coreEditable ? (

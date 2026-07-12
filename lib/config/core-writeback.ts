@@ -10,8 +10,9 @@
 // nome→id que o conversor atual não cobre — o item fica 'error' na fila e a
 // edição LOCAL é preservada (melhoria futura). Entre as relações, `responsible_id`
 // grava de volta o dono (ASSIGNED_BY_ID): o uuid local é traduzido p/
-// responsibles.bitrix_user_id no enfileiramento (lib/records/actions.ts). Operação
-// e lead relacionado permanecem locais (sem write-back).
+// responsibles.bitrix_user_id no enfileiramento (lib/records/actions.ts). O lead
+// relacionado é editável inline (combobox de busca), mas permanece LOCAL — assim
+// como a operação, não grava de volta no Bitrix.
 import { DEAL_CORE, LEAD_CORE } from "./bitrix-field-map";
 import type { DataType } from "@/lib/records/types";
 
@@ -58,8 +59,14 @@ export function isEditableCoreColumn(field: string): boolean {
 }
 
 // Relações editáveis inline (registros individuais): editam uma coluna FK de
-// `records` via um SELECT das entidades elegíveis. Hoje: responsável.
-export const EDITABLE_RELATION_FIELDS = new Set<string>(["responsible_id"]);
+// `records` via um SELECT das entidades elegíveis. `responsible_id` usa uma lista
+// fixa (responsáveis ativos); `related_lead_id` usa um combobox pesquisável de
+// leads (searchLeads). Ambos gravam a FK localmente — só o responsável tem
+// write-back no Bitrix (ver WRITEBACK_RELATION_FIELDS).
+export const EDITABLE_RELATION_FIELDS = new Set<string>([
+  "responsible_id",
+  "related_lead_id",
+]);
 
 export function isEditableRelation(field: string): boolean {
   return EDITABLE_RELATION_FIELDS.has(field);

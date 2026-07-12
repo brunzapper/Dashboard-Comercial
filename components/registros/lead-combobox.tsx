@@ -22,10 +22,16 @@ export function LeadCombobox({
   name,
   defaultId,
   defaultLabel,
+  onChange,
+  disabled,
 }: {
-  name: string;
+  name?: string;
   defaultId: string | null;
   defaultLabel: string | null;
+  // Quando informado, é chamado ao escolher/remover um lead (edição inline). Sem
+  // ele, o combobox só atualiza o input escondido `name` (uso em formulário).
+  onChange?: (lead: LeadOption | null) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -47,8 +53,10 @@ export function LeadCombobox({
 
   return (
     <div className="flex flex-col gap-1">
-      {/* valor submetido no form */}
-      <input type="hidden" name={name} value={selected?.id ?? ""} />
+      {/* valor submetido no form (quando usado em formulário) */}
+      {name ? (
+        <input type="hidden" name={name} value={selected?.id ?? ""} />
+      ) : null}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
@@ -56,6 +64,7 @@ export function LeadCombobox({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            disabled={disabled}
             className="justify-between font-normal"
           >
             <span className="truncate">
@@ -82,6 +91,7 @@ export function LeadCombobox({
                     onSelect={() => {
                       setSelected(null);
                       setOpen(false);
+                      onChange?.(null);
                     }}
                   >
                     <span className="text-muted-foreground">Remover vínculo</span>
@@ -94,6 +104,7 @@ export function LeadCombobox({
                     onSelect={() => {
                       setSelected(lead);
                       setOpen(false);
+                      onChange?.(lead);
                     }}
                   >
                     <Check
