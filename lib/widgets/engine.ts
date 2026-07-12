@@ -8,10 +8,12 @@
 // Fase 6B (widget KPI estendido).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { FieldDefinition } from "@/lib/records/types";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import {
   AGG_LABELS,
+  DATE_AGG_LABELS,
   TRANSFORM_LABELS,
+  type DateAgg,
   type Dimension,
   type Metric,
   type WidgetConfig,
@@ -25,6 +27,8 @@ import {
   type AvailableField,
   type FkKind,
 } from "./fields";
+import { bucketRecordDate } from "./date-buckets";
+import { runRecordList } from "./record-list";
 import {
   convertToBRL,
   emptyBreakdown,
@@ -466,6 +470,168 @@ async function runKpi(
   };
 }
 
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function mode(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const count = new Map<number, number>();
+  let best = nums[0];
+  let bestCount = 0;
+  for (const n of nums) {
+    const c = (count.get(n) ?? 0) + 1;
+    count.set(n, c);
+    if (c > bestCount || (c === bestCount && n < best)) {
+      best = n;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+// "Agrupar período": quando uma dimensão de data tem `dateAgg` definido, o widget
+// agregado é computado POR REGISTRO no app (o RPC não faz mediana/moda e o
+// "individual" é 1 ponto por registro). Espelha a agregação do record-list para os
+// números baterem entre os modos; agrupa pelo bucket do formato e agrega as
+// métricas com a função escolhida. Sem conversão de moeda no agregado do grupo
+// (igual ao modo registros); o número monetário é formatado em R$ pelos charts.
+async function runWidgetByPeriod(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  available: AvailableField[],
+  period: DashboardPeriod | null | undefined
+): Promise<WidgetData> {
+  const dims: Dimension[] = config.splitBySource
+    ? [{ field: "record_type" }, ...config.dimensions]
+    : config.dimensions;
+  const dateIdx = dims.findIndex((d) => d.dateAgg != null && d.transform);
+  const dateDim = dims[dateIdx];
+  const fn = dateDim.dateAgg as DateAgg;
+
+  const records = (await runRecordList(supabase, config, period)) as RecordRow[];
+
+  const rawValue = (field: string, r: RecordRow): unknown =>
+    field.startsWith("custom:")
+      ? r.custom_fields?.[field.slice(7)]
+      : (r as unknown as Record<string, unknown>)[field];
+  const isMoney = (field: string) =>
+    available.find((a) => a.field === field)?.isMoney ?? false;
+
+  const aggMetricNum = (m: Metric, rs: RecordRow[]): number => {
+    if (fn === "count" || m.field === "*") return rs.length;
+    const nums = rs
+      .map((r) => Number(rawValue(m.field, r)))
+      .filter((n) => Number.isFinite(n));
+    switch (fn) {
+      case "sum":
+        return nums.reduce((s, n) => s + n, 0);
+      case "avg":
+        return nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+      case "median":
+        return median(nums);
+      case "mode":
+        return mode(nums);
+      default:
+        return 0;
+    }
+  };
+
+  type DV = { key: string; label: string; sort: number };
+  const dimValue = (d: Dimension, r: RecordRow, di: number): DV => {
+    if (di === dateIdx) {
+      const b = bucketRecordDate(rawValue(d.field, r), d.transform!, d.weekMode);
+      return { key: b.key, label: b.label, sort: b.sort };
+    }
+    const v = rawValue(d.field, r);
+    return { key: String(v ?? ""), label: v == null ? "—" : String(v), sort: 0 };
+  };
+
+  // Agrupa: "individual" = 1 grupo por registro; senão pela tupla das dimensões.
+  const groups = new Map<string, { dv: DV[]; records: RecordRow[] }>();
+  for (const r of records) {
+    const dvs = dims.map((d, di) => dimValue(d, r, di));
+    const gkey = fn === "individual" ? r.id : dvs.map((x) => x.key).join("");
+    let g = groups.get(gkey);
+    if (!g) {
+      g = { dv: dvs, records: [] };
+      groups.set(gkey, g);
+    }
+    g.records.push(r);
+  }
+
+  // Resolve rótulos das dimensões não-data (fonte e FK id→nome).
+  for (let di = 0; di < dims.length; di++) {
+    if (di === dateIdx) continue;
+    const d = dims[di];
+    if (d.field === "record_type") {
+      for (const g of groups.values()) {
+        const src = RECORD_TYPE_SOURCE[g.dv[di].key];
+        g.dv[di] = { ...g.dv[di], label: src ? SOURCE_LABELS[src] : g.dv[di].label };
+      }
+      continue;
+    }
+    const fk = fieldFk(d.field, available);
+    if (!fk) continue;
+    const ids = Array.from(
+      new Set([...groups.values()].map((g) => g.dv[di].key).filter(Boolean))
+    );
+    if (ids.length === 0) continue;
+    const labels = await fetchFkLabels(supabase, fk, ids);
+    for (const g of groups.values()) {
+      const id = g.dv[di].key;
+      if (id) g.dv[di] = { ...g.dv[di], label: labels[id] ?? id };
+    }
+  }
+
+  const groupList = [...groups.values()].sort(
+    (a, b) => a.dv[dateIdx].sort - b.dv[dateIdx].sort
+  );
+
+  const rows: WidgetRow[] = groupList.map((g) => {
+    const row: WidgetRow = {};
+    dims.forEach((d, di) => {
+      row[`dim_${di + 1}`] = g.dv[di].label;
+    });
+    config.metrics.forEach((m, mi) => {
+      let val: number;
+      if (fn === "individual") {
+        if (m.field === "*") val = 1;
+        else {
+          const n = Number(rawValue(m.field, g.records[0]));
+          val = Number.isFinite(n) ? n : 0;
+        }
+      } else {
+        val = aggMetricNum(m, g.records);
+      }
+      row[`metric_${mi + 1}`] = val;
+    });
+    return row;
+  });
+
+  const dimensions = dims.map((d, i) => {
+    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
+    const suffix =
+      d.transform && d.transform !== "none"
+        ? ` (${TRANSFORM_LABELS[d.transform]})`
+        : "";
+    return { key: `dim_${i + 1}`, label: d.label?.trim() || `${base}${suffix}` };
+  });
+  const metrics = config.metrics.map((m, i) => ({
+    key: `metric_${i + 1}`,
+    label:
+      m.label?.trim() ||
+      (fn === "individual"
+        ? fieldLabel(m.field, available)
+        : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`),
+    isMoney: isMoney(m.field),
+  }));
+
+  return { rows, dimensions, metrics };
+}
+
 export async function runWidget(
   supabase: SupabaseClient,
   config: WidgetConfig,
@@ -497,6 +663,12 @@ export async function runWidget(
       today,
       period
     );
+  }
+
+  // "Agrupar período" numa dimensão de data → agrega por registro no app (mediana/
+  // moda/individual; soma/contagem/média também, p/ bater com o modo registros).
+  if (config.dimensions.some((d) => d.dateAgg != null && d.transform)) {
+    return runWidgetByPeriod(supabase, config, available, period);
   }
 
   // "Quebrar por fonte": record_type entra como dimensão líder (série por fonte).

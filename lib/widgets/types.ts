@@ -114,6 +114,11 @@ export interface Dimension {
   // Só para transform 'week_month': "restricted" (recorta na virada do mês) ou
   // "full" (semana cheia seg→dom, pega dias do mês vizinho). Default restricted.
   weekMode?: "full" | "restricted";
+  // "Agrupar período" (só dimensão de data com transform): como a data expõe as
+  // métricas do widget agregado. Ausente = comportamento atual (agrega via RPC pela
+  // agregação da métrica). Definido → engine agrega por registro (ver DateAgg):
+  // 'individual' = 1 ponto/linha por registro; demais colapsam por período.
+  dateAgg?: DateAgg;
 }
 export interface Metric {
   field: string;
