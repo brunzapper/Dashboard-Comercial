@@ -1180,10 +1180,7 @@ export function WidgetBuilder({
                   aria-label="Nome exibido da dimensão"
                 />
               ) : null}
-              {isRecordList &&
-              isDate(d.field) &&
-              d.transform &&
-              d.transform !== "none" ? (
+              {isDate(d.field) && d.transform && d.transform !== "none" ? (
                 <div className="flex items-center gap-2 pl-1">
                   <Label className="text-muted-foreground w-28 shrink-0 text-xs">
                     Agrupar período
@@ -1191,14 +1188,34 @@ export function WidgetBuilder({
                   <Combobox
                     className="h-8 flex-1 text-sm"
                     searchable={false}
-                    options={dateAggOptions}
-                    value={columnAgg[d.field] ?? "individual"}
-                    onValueChange={(a) =>
-                      setColumnAgg((prev) => ({
-                        ...prev,
-                        [d.field]: a as DateAgg,
-                      }))
+                    options={
+                      isRecordList
+                        ? dateAggOptions
+                        : [
+                            { value: "", label: "Padrão (agregado)" },
+                            ...dateAggOptions,
+                          ]
                     }
+                    value={
+                      isRecordList
+                        ? columnAgg[d.field] ?? "individual"
+                        : d.dateAgg ?? ""
+                    }
+                    onValueChange={(a) => {
+                      if (isRecordList) {
+                        setColumnAgg((prev) => ({
+                          ...prev,
+                          [d.field]: a as DateAgg,
+                        }));
+                      } else {
+                        const next = [...dimensions];
+                        next[i] = {
+                          ...d,
+                          dateAgg: a ? (a as DateAgg) : undefined,
+                        };
+                        setDimensions(next);
+                      }
+                    }}
                     aria-label="Agregação por período"
                   />
                 </div>
