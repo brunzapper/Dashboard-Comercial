@@ -612,8 +612,18 @@ export function RecordListTable({
         }
         if (x.kind === "metric") {
           return (
-            <TableCell key={x.key} className="text-right tabular-nums" style={border}>
-              {metricAggText(x.m, rs, opts?.isGrand)}
+            <TableCell
+              key={x.key}
+              className="text-right tabular-nums"
+              style={{
+                ...border,
+                ...widthStyle(x.key),
+                ...(cellText === "clip" ? { overflow: "hidden" } : {}),
+              }}
+            >
+              <span className={cellSpanClass}>
+                {metricAggText(x.m, rs, opts?.isGrand)}
+              </span>
             </TableCell>
           );
         }
@@ -676,9 +686,10 @@ export function RecordListTable({
                   color: rowCp?.text ?? t.bodyColor,
                   ...cellBorder(last),
                   ...widthStyle(x.key),
+                  ...(cellText === "clip" ? { overflow: "hidden" } : {}),
                 }}
               >
-                {metricCellText(x.m, r)}
+                <span className={cellSpanClass}>{metricCellText(x.m, r)}</span>
               </TableCell>
             );
           }
@@ -948,7 +959,7 @@ export function RecordListTable({
                   <TableHead
                     key={x.key}
                     className={cn(
-                      "group relative whitespace-nowrap text-right",
+                      "group relative text-right",
                       editable && "cursor-move"
                     )}
                     {...dragProps}
@@ -956,13 +967,14 @@ export function RecordListTable({
                       color: t.headerColor,
                       ...cellBorder(last),
                       ...widthStyle(x.key),
+                      ...(cellText === "clip" ? { overflow: "hidden" } : {}),
                     }}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                       {editable ? (
                         <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                       ) : null}
-                      {metricLabel(x.m)}
+                      <span className={cellSpanClass}>{metricLabel(x.m)}</span>
                     </span>
                     {editable ? (
                       <ResizeHandle axis="col" onResize={(w) => setColWidth(x.key, w)} />
