@@ -46,7 +46,7 @@ import {
   isEditableCoreColumn,
   isEditableRelation,
 } from "@/lib/config/core-writeback";
-import { AGG_LABELS, DATE_AGG_LABELS } from "@/lib/widgets/types";
+import { AGG_LABELS } from "@/lib/widgets/types";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import {
   applyManualOrder,
@@ -55,6 +55,15 @@ import {
   reorderKeys,
 } from "@/lib/widgets/appearance";
 import {
+  buildGroupItems,
+  buildTransposedItems,
+  columnAxis,
+  dedupeFields,
+  type GroupNode,
+  type GroupOpts,
+  type TItem,
+} from "@/lib/widgets/grouping";
+import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
   type DateFormat,
@@ -62,7 +71,6 @@ import {
 import type {
   AppearanceSettings,
   ColorPair,
-  DateAgg,
   Metric,
   RecordListColumn,
 } from "@/lib/widgets/types";
@@ -83,30 +91,6 @@ const DATE_FIELDS = new Set(["closed_at", "opened_at", "source_created_at"]);
 // agregados (sem moeda — podem misturar registros de moedas diferentes).
 function money(v: unknown, currency?: string | null): string {
   return formatMoney(v, currency);
-}
-
-function median(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  const s = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-// Moda: valor mais frequente (empate → o menor). Só faz sentido p/ números aqui.
-function mode(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  const count = new Map<number, number>();
-  let best = nums[0];
-  let bestCount = 0;
-  for (const n of nums) {
-    const c = (count.get(n) ?? 0) + 1;
-    count.set(n, c);
-    if (c > bestCount || (c === bestCount && n < best)) {
-      best = n;
-      bestCount = c;
-    }
-  }
-  return best;
 }
 
 function coreDisplay(
@@ -325,38 +309,13 @@ export function RecordListTable({
     return bucketRecordDate(raw, c.transform!, c.weekMode).label;
   };
 
-  // Coluna de agrupamento por período: a 1ª coluna de data com agg != individual.
-  const groupCol = cols.find(
+  // Colunas de data com "Agrupar período": promovidas a NÍVEIS de grupo — a data
+  // vira cabeçalho no formato (com subtotal da métrica) e os registros ficam
+  // editáveis embaixo, combinando com o "Agrupar por" explícito. `col.agg` só
+  // marca a coluna como nível; o subtotal usa o agg da própria métrica.
+  const periodAggCols = cols.filter(
     (c) => c.transform && c.agg && c.agg !== "individual"
   );
-
-  // Agregação de uma métrica sobre um conjunto de registros, conforme a função
-  // escolhida na coluna de data (soma/contagem/média/mediana/moda).
-  const aggMetric = (fn: DateAgg, m: Metric, rs: RecordRow[]): number => {
-    if (fn === "count" || m.field === "*") return rs.length;
-    const nums = rs
-      .map((r) => Number(rawValue(m.field, r)))
-      .filter((n) => Number.isFinite(n));
-    switch (fn) {
-      case "sum":
-        return nums.reduce((s, n) => s + n, 0);
-      case "avg":
-        return nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
-      case "median":
-        return median(nums);
-      case "mode":
-        return mode(nums);
-      default:
-        return 0;
-    }
-  };
-  const aggMetricText = (fn: DateAgg, m: Metric, rs: RecordRow[]): string => {
-    const v = aggMetric(fn, m, rs);
-    if (fn === "count" || m.field === "*") return v.toLocaleString("pt-BR");
-    return MONEY_FIELDS.has(m.field)
-      ? money(v)
-      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
-  };
 
   // Descobre se a coluna é de data (núcleo ou custom) e o formato efetivo dela.
   const isDateCol = (field: string): boolean => {
@@ -413,10 +372,13 @@ export function RecordListTable({
 
   // --- Agrupar por (modo registros): agrupa as linhas por uma ou mais colunas em
   // seções recolhíveis com subtotais das colunas numéricas. Multinível = hierarquia
-  // (1º nível = grupo principal, demais aninhados). Chaveado pelo `c.field`. ---
-  const groupLevels = groupByLevels(t.groupBy).filter((f) =>
-    cols.some((c) => c.field === f)
-  );
+  // (1º nível = grupo principal, demais aninhados). Chaveado pelo `c.field`.
+  // Colunas de data com "Agrupar período" entram como níveis MAIS EXTERNOS (o
+  // subtotal do período é a manchete), com o "Agrupar por" explícito aninhado. ---
+  const groupLevels = dedupeFields([
+    ...periodAggCols.map((c) => c.field),
+    ...groupByLevels(t.groupBy),
+  ]).filter((f) => cols.some((c) => c.field === f));
 
   const isNumericCol = (field: string): boolean => {
     if (MONEY_FIELDS.has(field)) return true;
@@ -454,51 +416,30 @@ export function RecordListTable({
     return displayValue(field, r);
   };
 
-  type Item =
-    | { kind: "group"; level: number; key: string; label: string; rows: RecordRow[] }
-    | { kind: "data"; row: RecordRow }
-    | { kind: "grand" };
-  // Achata a hierarquia numa lista de itens, respeitando quais grupos estão
-  // expandidos. A chave inclui o caminho (prefixo) para não confundir grupos
-  // homônimos em ramos diferentes.
-  const buildGroupItems = (
-    rs: RecordRow[],
-    levels: string[],
-    depth: number,
-    prefix: string
-  ): Item[] => {
-    if (levels.length === 0) return rs.map((r) => ({ kind: "data" as const, row: r }));
-    const [field, ...rest] = levels;
-    const byKey = new Map<string, { label: string; rows: RecordRow[] }>();
-    const order: string[] = [];
-    const isDate = isDateCol(field);
-    for (const r of rs) {
-      // Data: chaveia/rotula pelo valor FORMATADO (transform ou máscara), fundindo
-      // registros de mesmo formato. Demais colunas: chave por valor bruto (evita
-      // fundir valores distintos que só coincidem no rótulo, ex.: FKs homônimas).
-      const disp = isDate ? groupCellDisplay(field, r) : null;
-      const gk = isDate ? disp! : String(rawValue(field, r) ?? "");
-      let g = byKey.get(gk);
-      if (!g) {
-        g = { label: isDate ? disp! : displayValue(field, r), rows: [] };
-        byKey.set(gk, g);
-        order.push(gk);
-      }
-      g.rows.push(r);
-    }
-    const items: Item[] = [];
-    for (const gk of order) {
-      const g = byKey.get(gk)!;
-      const key = `${prefix}›${gk}`;
-      items.push({ kind: "group", level: depth, key, label: g.label, rows: g.rows });
-      if (expanded.has(key))
-        items.push(...buildGroupItems(g.rows, rest, depth + 1, key));
-    }
-    return items;
+  // Sort cronológico dos níveis de data (transform → semântico via bucketRecordDate;
+  // máscara → AAAAMMDD). Demais colunas: 0 (ordem de inserção preservada).
+  const dateSortKey = (field: string, r: RecordRow): number => {
+    const c = cols.find((col) => col.field === field);
+    const raw = rawValue(field, r);
+    if (c?.transform) return bucketRecordDate(raw, c.transform, c.weekMode).sort;
+    const m = String(raw ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]) : 0;
   };
+  // Acessores de agrupamento: data funde/rotula pelo valor FORMATADO (transform ou
+  // máscara); demais colunas chaveiam por valor bruto (evita fundir valores
+  // distintos que só coincidem no rótulo, ex.: FKs homônimas).
+  const groupOpts: GroupOpts<RecordRow> = {
+    keyOf: (r, field) =>
+      isDateCol(field) ? groupCellDisplay(field, r) : String(rawValue(field, r) ?? ""),
+    labelOf: (r, field) =>
+      isDateCol(field) ? groupCellDisplay(field, r) : displayValue(field, r),
+    sortKeyOf: (r, field) => dateSortKey(field, r),
+    isExpanded: (k) => expanded.has(k),
+  };
+  type Item = GroupNode<RecordRow> | { kind: "grand" };
   let displayItems: Item[];
   if (groupLevels.length > 0) {
-    displayItems = buildGroupItems(rows, groupLevels, 0, "");
+    displayItems = [...buildGroupItems(rows, groupLevels, groupOpts)];
     displayItems.push({ kind: "grand" });
   } else {
     displayItems = rows.map((r) => ({ kind: "data", row: r }));
@@ -885,111 +826,122 @@ export function RecordListTable({
     );
   }
 
-  // === Agregação por período: colapsa em 1 linha por período (Janeiro, T1/26…) e
-  // mostra só a coluna de período + as métricas, agregadas pela função escolhida.
-  if (groupCol) {
-    const fn = groupCol.agg as DateAgg;
-    const groupMetrics: Metric[] =
+  // === Orientação transposta: visão AGREGADA (read-only). Colunas = valores
+  // distintos da 1ª coluna; eixo esquerdo = métricas com os grupos aninhados;
+  // células = subtotais (moeda ciente). Para EDITAR registros, use a comum. ===
+  const orientation = t.orientation === "columns" ? "columns" : "rows";
+  if (orientation === "columns") {
+    const colDimCol = cols[0];
+    const colDimKey = colDimCol.field;
+    const tMetrics: Metric[] =
       metricList.length > 0 ? metricList : [{ field: "*", agg: "count" }];
-    const byKey = new Map<
-      string,
-      { label: string; sort: number; rows: RecordRow[] }
-    >();
-    for (const r of records) {
-      const b = bucketRecordDate(
-        rawValue(groupCol.field, r),
-        groupCol.transform!,
-        groupCol.weekMode
-      );
-      let g = byKey.get(b.key);
-      if (!g) {
-        g = { label: b.label, sort: b.sort, rows: [] };
-        byKey.set(b.key, g);
-      }
-      g.rows.push(r);
-    }
-    const groups = [...byKey.entries()]
-      .map(([key, g]) => ({ key, ...g }))
-      .sort((a, b) => a.sort - b.sort);
-    const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
-    const current = Math.min(page, totalPages);
-    const pageGroups = groups.slice(
-      (current - 1) * PAGE_SIZE,
-      current * PAGE_SIZE
-    );
-    const periodLabel = colLabel(groupCol);
-    const metricHead = (m: Metric) =>
-      m.field === "*"
-        ? "Contagem de registros"
-        : m.label?.trim() || `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`;
+    const tMetricLabel = (m: Metric) =>
+      m.field === "*" ? "Contagem de registros" : metricLabel(m);
+    const tGroupLevels = dedupeFields([
+      ...periodAggCols.map((c) => c.field),
+      ...groupByLevels(t.groupBy),
+    ]).filter((f) => f !== colDimKey && cols.some((c) => c.field === f));
+    const { colVals, rowsForCol } = columnAxis(rows, colDimKey, groupOpts.keyOf);
+    const colHeader = (rep: RecordRow) =>
+      groupOpts.labelOf ? groupOpts.labelOf(rep, colDimKey) : groupOpts.keyOf(rep, colDimKey);
+
+    const metricByKey = new Map(tMetrics.map((m, mi) => [`__m:${mi}`, m]));
+    const tItems: TItem<RecordRow>[] = [];
+    tMetrics.forEach((m, mi) => {
+      const mKey = `__m:${mi}`;
+      tItems.push({
+        metricKey: mKey,
+        level: 0,
+        label: tMetricLabel(m),
+        key: mKey,
+        rows,
+        collapsible: tGroupLevels.length > 0,
+      });
+      if (expanded.has(mKey) && tGroupLevels.length > 0)
+        tItems.push(
+          ...buildTransposedItems(rows, tGroupLevels, { ...groupOpts, metricKey: mKey }, 1, mKey)
+        );
+    });
 
     return (
-      <div className="flex h-full flex-col">
-        <div className="min-h-0 flex-1 overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow style={{ background: t.headerBg, color: t.headerColor }}>
-                <TableHead className="whitespace-nowrap">{periodLabel}</TableHead>
-                {groupMetrics.map((m, mi) => (
+      <div className="h-full overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow
+              className={rowBorder}
+              style={{
+                background: t.headerBg,
+                color: t.headerColor,
+                ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+              }}
+            >
+              <TableHead style={cellBorder(colVals.length === 0)}>
+                {colLabel(colDimCol)}
+              </TableHead>
+              {colVals.map((rep, ci) => (
+                <TableHead
+                  key={groupOpts.keyOf(rep, colDimKey)}
+                  className="text-right whitespace-nowrap"
+                  style={cellBorder(ci === colVals.length - 1)}
+                >
+                  {colHeader(rep)}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {tItems.map((item) => {
+              const isMetric = item.level === 0;
+              const isCollapsed = !expanded.has(item.key);
+              const m = metricByKey.get(item.metricKey)!;
+              return (
+                <TableRow
+                  key={item.key}
+                  className={cn(rowBorder, isMetric && "font-medium")}
+                  style={{
+                    background: isMetric ? t.headerBg ?? "var(--muted)" : t.bodyBg,
+                    color: isMetric ? t.headerColor : t.bodyColor,
+                    ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+                  }}
+                >
                   <TableHead
-                    key={mi}
-                    className="text-right whitespace-nowrap"
+                    className="font-medium"
+                    style={cellBorder(colVals.length === 0)}
                   >
-                    {metricHead(m)}
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1",
+                        item.collapsible ? "cursor-pointer" : "cursor-default"
+                      )}
+                      style={item.level ? { paddingLeft: item.level * 16 } : undefined}
+                      onClick={item.collapsible ? () => toggleExpand(item.key) : undefined}
+                      disabled={!item.collapsible}
+                    >
+                      {item.collapsible ? (
+                        isCollapsed ? (
+                          <ChevronRight className="size-3.5 shrink-0" />
+                        ) : (
+                          <ChevronDown className="size-3.5 shrink-0" />
+                        )
+                      ) : null}
+                      {item.label}
+                    </button>
                   </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pageGroups.map((g) => (
-                <TableRow key={g.key}>
-                  <TableCell className="font-medium">{g.label}</TableCell>
-                  {groupMetrics.map((m, mi) => (
-                    <TableCell key={mi} className="text-right tabular-nums">
-                      {aggMetricText(fn, m, g.rows)}
+                  {colVals.map((rep, ci) => (
+                    <TableCell
+                      key={groupOpts.keyOf(rep, colDimKey)}
+                      className="text-right tabular-nums"
+                      style={cellBorder(ci === colVals.length - 1)}
+                    >
+                      {metricAggText(m, rowsForCol(item.rows, rep))}
                     </TableCell>
                   ))}
                 </TableRow>
-              ))}
-              <TableRow
-                className="font-medium"
-                style={{ background: t.headerBg ?? "var(--muted)" }}
-              >
-                <TableCell>Total geral</TableCell>
-                {groupMetrics.map((m, mi) => (
-                  <TableCell key={mi} className="text-right tabular-nums">
-                    {aggMetricText(fn, m, records)}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-        {totalPages > 1 ? (
-          <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
-            <span className="text-muted-foreground">
-              Página {current} de {totalPages}
-            </span>
-            <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={current <= 1}
-                onClick={() => setPage(current - 1)}
-              >
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={current >= totalPages}
-                onClick={() => setPage(current + 1)}
-              >
-                Próxima
-              </Button>
-            </div>
-          </div>
-        ) : null}
+              );
+            })}
+          </TableBody>
+        </Table>
       </div>
     );
   }
