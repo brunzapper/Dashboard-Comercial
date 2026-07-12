@@ -51,6 +51,7 @@ import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import {
   applyManualOrder,
   distinctFills,
+  groupByLevels,
   reorderKeys,
 } from "@/lib/widgets/appearance";
 import {
@@ -188,7 +189,9 @@ export function RecordListTable({
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [page, setPage] = useState(1);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Grupos EXPANDIDOS no "Agrupar por" (efêmero). Vazio = tudo colapsado, então a
+  // visualização padrão de uma tabela agrupada abre sempre recolhida.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
@@ -441,10 +444,12 @@ export function RecordListTable({
 
   const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
 
-  // --- Agrupar por (modo registros): agrupa por uma coluna em seções recolhíveis
-  // com subtotais das colunas numéricas. Chaveado pelo `c.field` da coluna. ---
-  const groupByField =
-    t.groupBy && cols.some((c) => c.field === t.groupBy) ? t.groupBy : null;
+  // --- Agrupar por (modo registros): agrupa as linhas por uma ou mais colunas em
+  // seções recolhíveis com subtotais das colunas numéricas. Multinível = hierarquia
+  // (1º nível = grupo principal, demais aninhados). Chaveado pelo `c.field`. ---
+  const groupLevels = groupByLevels(t.groupBy).filter((f) =>
+    cols.some((c) => c.field === f)
+  );
 
   const isNumericCol = (field: string): boolean => {
     if (MONEY_FIELDS.has(field)) return true;
@@ -472,31 +477,46 @@ export function RecordListTable({
     return coreDisplay(field, r, fkLabels, fmtOf(field));
   };
 
-  type Group = { key: string; label: string; rows: RecordRow[] };
   type Item =
-    | { kind: "group"; group: Group }
+    | { kind: "group"; level: number; key: string; label: string; rows: RecordRow[] }
     | { kind: "data"; row: RecordRow }
     | { kind: "grand" };
-  let displayItems: Item[];
-  if (groupByField) {
-    const byKey = new Map<string, Group>();
-    const groups: Group[] = [];
-    for (const r of rows) {
-      const gk = String(rawValue(groupByField, r) ?? "");
+  // Achata a hierarquia numa lista de itens, respeitando quais grupos estão
+  // expandidos. A chave inclui o caminho (prefixo) para não confundir grupos
+  // homônimos em ramos diferentes.
+  const buildGroupItems = (
+    rs: RecordRow[],
+    levels: string[],
+    depth: number,
+    prefix: string
+  ): Item[] => {
+    if (levels.length === 0) return rs.map((r) => ({ kind: "data" as const, row: r }));
+    const [field, ...rest] = levels;
+    const byKey = new Map<string, { label: string; rows: RecordRow[] }>();
+    const order: string[] = [];
+    for (const r of rs) {
+      const gk = String(rawValue(field, r) ?? "");
       let g = byKey.get(gk);
       if (!g) {
-        g = { key: gk, label: displayValue(groupByField, r), rows: [] };
+        g = { label: displayValue(field, r), rows: [] };
         byKey.set(gk, g);
-        groups.push(g);
+        order.push(gk);
       }
       g.rows.push(r);
     }
-    displayItems = [];
-    for (const g of groups) {
-      displayItems.push({ kind: "group", group: g });
-      if (!collapsed.has(g.key))
-        for (const r of g.rows) displayItems.push({ kind: "data", row: r });
+    const items: Item[] = [];
+    for (const gk of order) {
+      const g = byKey.get(gk)!;
+      const key = `${prefix}›${gk}`;
+      items.push({ kind: "group", level: depth, key, label: g.label, rows: g.rows });
+      if (expanded.has(key))
+        items.push(...buildGroupItems(g.rows, rest, depth + 1, key));
     }
+    return items;
+  };
+  let displayItems: Item[];
+  if (groupLevels.length > 0) {
+    displayItems = buildGroupItems(rows, groupLevels, 0, "");
     displayItems.push({ kind: "grand" });
   } else {
     displayItems = rows.map((r) => ({ kind: "data", row: r }));
@@ -572,8 +592,8 @@ export function RecordListTable({
   function setRowHeight(rowKey: string, h: number) {
     setTable({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
   }
-  const toggleCollapse = (key: string) =>
-    setCollapsed((prev) => {
+  const toggleExpand = (key: string) =>
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -590,6 +610,7 @@ export function RecordListTable({
       isCollapsed?: boolean;
       onToggle?: () => void;
       isGrand?: boolean;
+      level?: number;
     }
   ) => (
     <TableRow
@@ -614,6 +635,9 @@ export function RecordListTable({
                   "inline-flex items-center gap-1",
                   opts?.collapsible ? "cursor-pointer" : "cursor-default"
                 )}
+                style={
+                  opts?.level ? { paddingLeft: opts.level * 16 } : undefined
+                }
                 onClick={opts?.onToggle}
                 disabled={!opts?.collapsible}
               >
@@ -1052,13 +1076,14 @@ export function RecordListTable({
           {pageItems.map((item) =>
             item.kind === "group"
               ? renderSummaryRow(
-                  item.group.key,
-                  `${item.group.label} (${item.group.rows.length})`,
-                  item.group.rows,
+                  item.key,
+                  `${item.label} (${item.rows.length})`,
+                  item.rows,
                   {
                     collapsible: true,
-                    isCollapsed: collapsed.has(item.group.key),
-                    onToggle: () => toggleCollapse(item.group.key),
+                    isCollapsed: !expanded.has(item.key),
+                    onToggle: () => toggleExpand(item.key),
+                    level: item.level,
                   }
                 )
               : item.kind === "grand"

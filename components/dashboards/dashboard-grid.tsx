@@ -224,18 +224,31 @@ export function DashboardGrid({
   // de ajustar estado no render — sem useEffect.
   if (drag && propCols === drag.cols && propRows === drag.rows) setDrag(null);
 
-  // Largura visível (base das 12 colunas) medida do container de rolagem.
+  // Largura visível (base das 12 colunas) medida do container de rolagem. Usamos
+  // um callback ref (não um useEffect com deps []) porque o container do scroll é
+  // DESMONTADO quando a aba fica sem widgets (early-return do estado vazio). Com o
+  // effect de mount único, ao voltar para uma aba populada o novo nó nunca era
+  // re-medido e `baseWidth` ficava em 0 → grid renderizava vazio. O callback ref
+  // re-liga o ResizeObserver a cada remontagem; a guarda `w > 0` evita zerar
+  // quando o nó é destacado (clientWidth 0).
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const roRef = useRef<ResizeObserver | null>(null);
   const [baseWidth, setBaseWidth] = useState(0);
-  useEffect(() => {
-    const el = scrollRef.current;
+  const setScrollEl = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    roRef.current?.disconnect();
+    roRef.current = null;
     if (!el) return;
-    const update = () => setBaseWidth(el.clientWidth);
-    update();
-    const ro = new ResizeObserver(update);
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) setBaseWidth(w);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    roRef.current = ro;
   }, []);
+  useEffect(() => () => roRef.current?.disconnect(), []);
 
   // Célula constante: 12 colunas preenchem a largura visível (fórmula do RGL:
   // colWidth = (width - MX*(cols+1))/cols), então widgets não mudam de tamanho.
@@ -463,7 +476,7 @@ export function DashboardGrid({
       ) : null}
       {/* Container de rolagem: a largura do grid pode passar da tela → rolagem
           horizontal; a altura é explícita, então a página cresce normalmente. */}
-      <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden">
+      <div ref={setScrollEl} className="overflow-x-auto overflow-y-hidden">
         {baseWidth > 0 ? (
           <div
             ref={canvasRef}

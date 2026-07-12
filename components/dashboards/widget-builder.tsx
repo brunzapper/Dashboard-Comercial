@@ -77,6 +77,7 @@ import type {
   CurrencyMultiMode,
   GrandTotalMode,
 } from "@/lib/widgets/currency";
+import { groupByLevels } from "@/lib/widgets/appearance";
 import {
   createWidget,
   updateWidget,
@@ -277,8 +278,9 @@ export function WidgetBuilder({
   const [tableOrientation, setTableOrientation] = useState<"rows" | "columns">(
     widget?.settings?.appearance?.table?.orientation ?? "rows"
   );
-  const [tableGroupBy, setTableGroupBy] = useState<string>(
-    widget?.settings?.appearance?.table?.groupBy ?? ""
+  // Níveis de "Agrupar por" (hierarquia; 1º = grupo principal, demais aninhados).
+  const [tableGroupBy, setTableGroupBy] = useState<string[]>(
+    groupByLevels(widget?.settings?.appearance?.table?.groupBy)
   );
 
   // Modo "registros individuais" (Fase 1): tabela lista 1 linha por entidade.
@@ -480,7 +482,6 @@ export function WidgetBuilder({
   // é chaveado pelo próprio campo (`d.field`). No modo agregado, espelha as keys de
   // runtime do engine (`dim_<n>`), com deslocamento quando "Quebrar por fonte".
   const groupByOptions: ComboboxOption[] = [
-    { value: "", label: "— nenhum —" },
     ...(!isRecordList && splitBySource
       ? [{ value: "dim_1", label: "Fonte" }]
       : []),
@@ -491,6 +492,22 @@ export function WidgetBuilder({
         label: available.find((a) => a.field === d.field)?.label ?? d.field,
       })),
   ];
+  // Opções disponíveis para um nível: exclui as keys já usadas nos OUTROS níveis
+  // (evita agrupar duas vezes pela mesma dimensão), preservando a do próprio nível.
+  const levelOptions = (idx: number): ComboboxOption[] => {
+    const used = new Set(tableGroupBy.filter((_, i) => i !== idx));
+    return groupByOptions.filter(
+      (o) => o.value === tableGroupBy[idx] || !used.has(o.value)
+    );
+  };
+  // Só permite adicionar mais um nível se ainda há dimensões livres.
+  const canAddGroupLevel =
+    tableGroupBy.filter(Boolean).length < groupByOptions.length;
+  const addGroupLevel = () => setTableGroupBy((prev) => [...prev, ""]);
+  const setGroupLevel = (idx: number, value: string) =>
+    setTableGroupBy((prev) => prev.map((v, i) => (i === idx ? value : v)));
+  const removeGroupLevel = (idx: number) =>
+    setTableGroupBy((prev) => prev.filter((_, i) => i !== idx));
 
   function save() {
     setError(null);
@@ -638,16 +655,18 @@ export function WidgetBuilder({
     // por coluna `c.field`). Nos outros tipos, limpa para não deixar lixo.
     if (visualType === "tabela") {
       const table = { ...(settings.appearance?.table ?? {}) };
+      // Níveis válidos (sem vazios), hierarquia de cima para baixo.
+      const groupLevels = tableGroupBy.filter(Boolean);
       if (isRecordList) {
         // Modo registros: sem orientação transposta.
         delete table.orientation;
-        if (tableGroupBy) table.groupBy = tableGroupBy;
+        if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       } else {
         table.orientation = tableOrientation;
         // Transposta não combina com agrupamento nesta entrega.
-        if (tableGroupBy && tableOrientation !== "columns")
-          table.groupBy = tableGroupBy;
+        if (groupLevels.length > 0 && tableOrientation !== "columns")
+          table.groupBy = groupLevels;
         else delete table.groupBy;
       }
       settings = {
@@ -1230,26 +1249,68 @@ export function WidgetBuilder({
                   />
                 </div>
               ) : null}
-              <div className="flex flex-col gap-1.5">
-                <Label>Agrupar por</Label>
-                <Combobox
-                  searchable={false}
-                  options={groupByOptions}
-                  value={tableGroupBy}
-                  placeholder="— nenhum —"
-                  disabled={!isRecordList && tableOrientation === "columns"}
-                  onValueChange={setTableGroupBy}
-                  aria-label="Agrupar por"
-                />
-                <p className="text-muted-foreground text-xs">
-                  Agrupa as linhas por uma{" "}
-                  {isRecordList ? "coluna" : "dimensão"} em seções recolhíveis
-                  com subtotais.
-                  {!isRecordList
-                    ? " Indisponível na orientação transposta."
-                    : ""}
-                </p>
-              </div>
+              {(() => {
+                const groupDisabled =
+                  !isRecordList && tableOrientation === "columns";
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Agrupar por</Label>
+                    {tableGroupBy.map((level, idx) => (
+                      <div key={idx} className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
+                          {idx + 1}.
+                        </span>
+                        <div className="flex-1">
+                          <Combobox
+                            searchable={false}
+                            options={levelOptions(idx)}
+                            value={level}
+                            placeholder="— selecione —"
+                            disabled={groupDisabled}
+                            onValueChange={(v) => setGroupLevel(idx, v)}
+                            aria-label={`Agrupar por — nível ${idx + 1}`}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-muted-foreground hover:text-destructive size-8 shrink-0"
+                          disabled={groupDisabled}
+                          onClick={() => removeGroupLevel(idx)}
+                          title="Remover nível"
+                          aria-label={`Remover nível ${idx + 1}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      disabled={groupDisabled || !canAddGroupLevel}
+                      onClick={addGroupLevel}
+                    >
+                      <Plus className="size-4" />
+                      {tableGroupBy.length === 0
+                        ? "Agrupar por…"
+                        : "Adicionar nível"}
+                    </Button>
+                    <p className="text-muted-foreground text-xs">
+                      Agrupa as linhas por uma ou mais{" "}
+                      {isRecordList ? "colunas" : "dimensões"} em seções
+                      recolhíveis com subtotais. Vários níveis criam uma
+                      hierarquia (o 1º é o grupo principal, os demais aninham
+                      dentro). Os grupos abrem recolhidos por padrão.
+                      {!isRecordList
+                        ? " Indisponível na orientação transposta."
+                        : ""}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
           ) : null}
 

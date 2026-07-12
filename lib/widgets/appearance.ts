@@ -5,6 +5,14 @@ import type { AppearanceSettings, DashboardSettings, GridLines } from "@/lib/wid
 
 export const MAX_CATEGORIES = 5;
 
+// Normaliza o "Agrupar por" da tabela numa lista ordenada de níveis (hierarquia).
+// Aceita a config antiga (string = 1 nível) e a nova (string[] = multinível),
+// descartando entradas vazias. Compartilhado pelos dois renderizadores de tabela
+// e pela UI do builder.
+export function groupByLevels(gb?: string | string[]): string[] {
+  return Array.isArray(gb) ? gb.filter(Boolean) : gb ? [gb] : [];
+}
+
 // Reduz categorias a top-N por valor + "Outros" (pizza/funil). Compartilhado
 // entre o chart e o editor de aparência p/ que a ordem/índice das fatias case.
 export function topWithOther(
