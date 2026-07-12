@@ -340,6 +340,39 @@ export function emptyBreakdown(): MoneyBreakdown {
   return { perCurrency: {}, brl: 0, usd: 0, count: 0 };
 }
 
+/**
+ * Monta um `MoneyBreakdown` a partir de um conjunto de registros crus, acumulando
+ * o valor de cada um por moeda + convertido (R$) + referência (US$), convertendo
+ * cada registro pela taxa do seu próprio ano/trimestre. É a lógica compartilhada
+ * entre o modo "registros individuais" (record-list-table `metricAggText`) e o
+ * agregado por período (engine `runWidgetByPeriod`), garantindo saída idêntica
+ * quando os dois formatam pelo MESMO `formatMoneyAggregate` — tudo client-side,
+ * sem depender do RPC. `rawValue`/`codeOf`/`yqOf` são resolvidos pelo chamador
+ * (dependem da métrica: campo, moeda efetiva e base da taxa).
+ */
+export function buildRecordBreakdown<T>(
+  records: T[],
+  rawValue: (r: T) => unknown,
+  codeOf: (r: T) => string,
+  yqOf: (r: T) => { year: number; quarter: number },
+  rates: CurrencyRates
+): MoneyBreakdown {
+  const bd = emptyBreakdown();
+  for (const r of records) {
+    const raw = Number(rawValue(r));
+    if (!Number.isFinite(raw)) continue;
+    bd.count += 1;
+    const code = codeOf(r);
+    bd.perCurrency[code] = (bd.perCurrency[code] ?? 0) + raw;
+    const { year, quarter } = yqOf(r);
+    const b = convertToBRL(raw, code, rates, year, quarter);
+    if (b != null) bd.brl += b;
+    const u = toReferenceUSD(raw, code, rates, year, quarter);
+    if (u != null) bd.usd += u;
+  }
+  return bd;
+}
+
 /** Funde vários detalhamentos num só (subtotais de grupo / Total geral). */
 export function foldBreakdowns(list: (MoneyBreakdown | undefined)[]): MoneyBreakdown {
   const out = emptyBreakdown();

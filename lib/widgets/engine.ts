@@ -30,11 +30,13 @@ import {
 import { bucketRecordDate } from "./date-buckets";
 import { runRecordList } from "./record-list";
 import {
+  buildRecordBreakdown,
   convertToBRL,
   emptyBreakdown,
   formatMoney,
   formatMoneyAggregate,
   resolveCurrencyCode,
+  resolveFieldMoney,
   toReferenceUSD,
   yearQuarterOf,
   type CurrencyRates,
@@ -178,25 +180,46 @@ async function buildMoneyBreakdowns(
   const needRecordDate = infos.some(
     (info) => info.metric.conversionBasis?.source !== "period"
   );
-  const auxDims: Dimension[] = [...dims, { field: "currency" }];
-  if (needRecordDate) {
-    auxDims.push({ field: "@rate_date", transform: "year" });
-    auxDims.push({ field: "@rate_date", transform: "quarter" });
-  }
   const auxMetrics: Metric[] = infos.flatMap((info) => [
     { field: info.metric.field, agg: "sum" },
     { field: info.metric.field, agg: "count" },
   ]);
 
-  const { data, error } = await supabase.rpc("run_widget_query", {
-    p_source: "records",
-    p_dimensions: auxDims,
-    p_metrics: auxMetrics,
-    p_filters: filters,
-    p_correspondences: correspondencesMap,
-  });
-  if (error) throw new Error(error.message);
-  const auxRows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
+  // Consulta auxiliar quebrada por moeda (e, quando `useRateDate`, também pela
+  // data-da-taxa sintética `@rate_date`, que exige a migração 0039).
+  const runAux = async (
+    useRateDate: boolean
+  ): Promise<Record<string, unknown>[]> => {
+    const auxDims: Dimension[] = [...dims, { field: "currency" }];
+    if (useRateDate) {
+      auxDims.push({ field: "@rate_date", transform: "year" });
+      auxDims.push({ field: "@rate_date", transform: "quarter" });
+    }
+    const { data, error } = await supabase.rpc("run_widget_query", {
+      p_source: "records",
+      p_dimensions: auxDims,
+      p_metrics: auxMetrics,
+      p_filters: filters,
+      p_correspondences: correspondencesMap,
+    });
+    if (error) throw new Error(error.message);
+    return (Array.isArray(data) ? data : []) as Record<string, unknown>[];
+  };
+
+  // Precisão de taxa por registro depende do `@rate_date` (migração 0039). Quando
+  // o RPC não o conhece (0039 não aplicada), a aux falha e caímos para o
+  // agrupamento SÓ por moeda — a moeda continua sendo formatada/convertida, mas a
+  // taxa passa a ser a do período do dashboard (aproximação), em vez de por
+  // registro. Assim a config de moeda funciona em widgets agregados sem migração.
+  let withRateDate = needRecordDate;
+  let auxRows: Record<string, unknown>[];
+  try {
+    auxRows = await runAux(needRecordDate);
+  } catch (e) {
+    if (!needRecordDate) throw e;
+    auxRows = await runAux(false);
+    withRateDate = false;
+  }
 
   const curKey = `dim_${nLead + 1}`;
   const yearKey = `dim_${nLead + 2}`;
@@ -209,8 +232,8 @@ async function buildMoneyBreakdowns(
     const gk = JSON.stringify(tuple);
     const arr = (out[gk] ??= infos.map(() => emptyBreakdown()));
 
-    const recYear = needRecordDate ? parseRateYear(row[yearKey]) : null;
-    const recQuarter = needRecordDate ? parseRateQuarter(row[quarterKey]) : null;
+    const recYear = withRateDate ? parseRateYear(row[yearKey]) : null;
+    const recQuarter = withRateDate ? parseRateQuarter(row[quarterKey]) : null;
 
     infos.forEach((info, k) => {
       const raw = Number(row[`metric_${2 * k + 1}`]);
@@ -222,7 +245,9 @@ async function buildMoneyBreakdowns(
       const isQuarter = info.metric.conversionBasis?.granularity === "quarter";
       let year: number;
       let quarter: number;
-      if (info.metric.conversionBasis?.source === "period") {
+      if (info.metric.conversionBasis?.source === "period" || !withRateDate) {
+        // Base "período", OU base "registro" sem `@rate_date` disponível: usa a
+        // data-da-taxa do período do dashboard (igual p/ todos os registros).
         year = conversionPeriod.year;
         quarter = isQuarter ? conversionPeriod.quarter : 0;
       } else {
@@ -496,13 +521,17 @@ function mode(nums: number[]): number {
 // agregado é computado POR REGISTRO no app (o RPC não faz mediana/moda e o
 // "individual" é 1 ponto por registro). Espelha a agregação do record-list para os
 // números baterem entre os modos; agrupa pelo bucket do formato e agrega as
-// métricas com a função escolhida. Sem conversão de moeda no agregado do grupo
-// (igual ao modo registros); o número monetário é formatado em R$ pelos charts.
+// métricas com a função escolhida. Como este caminho já tem os registros crus,
+// monta `__money` client-side (igual ao modo registros individuais), formatando a
+// moeda pelos charts sem depender do RPC/migração.
 async function runWidgetByPeriod(
   supabase: SupabaseClient,
   config: WidgetConfig,
   available: AvailableField[],
-  period: DashboardPeriod | null | undefined
+  period: DashboardPeriod | null | undefined,
+  fieldByKey: Map<string, FieldDefinition>,
+  rates: CurrencyRates,
+  conversionPeriod: ConversionYQ
 ): Promise<WidgetData> {
   const dims: Dimension[] = config.splitBySource
     ? [{ field: "record_type" }, ...config.dimensions]
@@ -519,6 +548,34 @@ async function runWidgetByPeriod(
       : (r as unknown as Record<string, unknown>)[field];
   const isMoney = (field: string) =>
     available.find((a) => a.field === field)?.isMoney ?? false;
+
+  // Moeda efetiva de um registro p/ uma métrica: campo 'moeda'/calc-fixo tem moeda
+  // própria; value/mrr e calc-herda usam a moeda do registro (mesma regra do
+  // record-list-table).
+  const metricCurrency = (field: string, r: RecordRow): string => {
+    if (field.startsWith("custom:")) {
+      const f = fieldByKey.get(field.slice(7));
+      return f
+        ? resolveFieldMoney(f, r.currency).code
+        : resolveCurrencyCode(r.currency);
+    }
+    return resolveCurrencyCode(r.currency);
+  };
+  // Ano/trimestre da taxa: base "período" usa o período do dashboard; base
+  // "registro" usa a data do registro (fechamento → abertura → criação).
+  const recYQ = (r: RecordRow, m: Metric): { year: number; quarter: number } => {
+    const isQuarter = m.conversionBasis?.granularity === "quarter";
+    if (m.conversionBasis?.source === "period") {
+      return {
+        year: conversionPeriod.year,
+        quarter: isQuarter ? conversionPeriod.quarter : 0,
+      };
+    }
+    const { year, quarter } = yearQuarterOf(
+      r.closed_at ?? r.opened_at ?? r.source_created_at
+    );
+    return { year, quarter: isQuarter ? quarter : 0 };
+  };
 
   const aggMetricNum = (m: Metric, rs: RecordRow[]): number => {
     if (fn === "count" || m.field === "*") return rs.length;
@@ -595,6 +652,7 @@ async function runWidgetByPeriod(
     dims.forEach((d, di) => {
       row[`dim_${di + 1}`] = g.dv[di].label;
     });
+    const money: Record<string, MoneyBreakdown> = {};
     config.metrics.forEach((m, mi) => {
       let val: number;
       if (fn === "individual") {
@@ -607,7 +665,20 @@ async function runWidgetByPeriod(
         val = aggMetricNum(m, g.records);
       }
       row[`metric_${mi + 1}`] = val;
+      // Métrica monetária: detalhamento por moeda dos registros do grupo, montado
+      // client-side (mesma lógica do modo registros). Os charts formatam pelo
+      // MESMO `formatMoneyAggregate`, dando paridade entre os dois modos.
+      if (m.field !== "*" && isMoney(m.field)) {
+        money[`metric_${mi + 1}`] = buildRecordBreakdown(
+          g.records,
+          (r) => rawValue(m.field, r),
+          (r) => metricCurrency(m.field, r),
+          (r) => recYQ(r, m),
+          rates
+        );
+      }
     });
+    if (Object.keys(money).length > 0) row.__money = money;
     return row;
   });
 
@@ -668,7 +739,15 @@ export async function runWidget(
   // "Agrupar período" numa dimensão de data → agrega por registro no app (mediana/
   // moda/individual; soma/contagem/média também, p/ bater com o modo registros).
   if (config.dimensions.some((d) => d.dateAgg != null && d.transform)) {
-    return runWidgetByPeriod(supabase, config, available, period);
+    return runWidgetByPeriod(
+      supabase,
+      config,
+      available,
+      period,
+      fieldByKey,
+      rates,
+      conversionPeriod
+    );
   }
 
   // "Quebrar por fonte": record_type entra como dimensão líder (série por fonte).
