@@ -481,7 +481,7 @@ export function WidgetBuilder({
   // No modo registros as dimensões SÃO as colunas da tabela, então o "Agrupar por"
   // é chaveado pelo próprio campo (`d.field`). No modo agregado, espelha as keys de
   // runtime do engine (`dim_<n>`), com deslocamento quando "Quebrar por fonte".
-  const groupByOptions: ComboboxOption[] = [
+  const allGroupByOptions: ComboboxOption[] = [
     ...(!isRecordList && splitBySource
       ? [{ value: "dim_1", label: "Fonte" }]
       : []),
@@ -492,6 +492,12 @@ export function WidgetBuilder({
         label: available.find((a) => a.field === d.field)?.label ?? d.field,
       })),
   ];
+  // Na transposta a 1ª dimensão é o eixo de colunas (fica no topo), então ela não
+  // pode virar grupo do eixo esquerdo — some das opções de "Agrupar por".
+  const groupByOptions: ComboboxOption[] =
+    !isRecordList && tableOrientation === "columns"
+      ? allGroupByOptions.slice(1)
+      : allGroupByOptions;
   // Opções disponíveis para um nível: exclui as keys já usadas nos OUTROS níveis
   // (evita agrupar duas vezes pela mesma dimensão), preservando a do próprio nível.
   const levelOptions = (idx: number): ComboboxOption[] => {
@@ -664,9 +670,9 @@ export function WidgetBuilder({
         else delete table.groupBy;
       } else {
         table.orientation = tableOrientation;
-        // Transposta não combina com agrupamento nesta entrega.
-        if (groupLevels.length > 0 && tableOrientation !== "columns")
-          table.groupBy = groupLevels;
+        // Agrupamento vale nas duas orientações. Na transposta a 1ª dimensão vira
+        // as colunas e os níveis abaixo agrupam o eixo esquerdo (ver renderer).
+        if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       }
       settings = {
@@ -1267,7 +1273,7 @@ export function WidgetBuilder({
                 </div>
               ) : null}
               {(() => {
-                const groupDisabled =
+                const transposed =
                   !isRecordList && tableOrientation === "columns";
                 return (
                   <div className="flex flex-col gap-1.5">
@@ -1283,7 +1289,6 @@ export function WidgetBuilder({
                             options={levelOptions(idx)}
                             value={level}
                             placeholder="— selecione —"
-                            disabled={groupDisabled}
                             onValueChange={(v) => setGroupLevel(idx, v)}
                             aria-label={`Agrupar por — nível ${idx + 1}`}
                           />
@@ -1293,7 +1298,6 @@ export function WidgetBuilder({
                           variant="ghost"
                           size="icon"
                           className="text-muted-foreground hover:text-destructive size-8 shrink-0"
-                          disabled={groupDisabled}
                           onClick={() => removeGroupLevel(idx)}
                           title="Remover nível"
                           aria-label={`Remover nível ${idx + 1}`}
@@ -1307,7 +1311,7 @@ export function WidgetBuilder({
                       variant="outline"
                       size="sm"
                       className="self-start"
-                      disabled={groupDisabled || !canAddGroupLevel}
+                      disabled={!canAddGroupLevel}
                       onClick={addGroupLevel}
                     >
                       <Plus className="size-4" />
@@ -1316,14 +1320,23 @@ export function WidgetBuilder({
                         : "Adicionar nível"}
                     </Button>
                     <p className="text-muted-foreground text-xs">
-                      Agrupa as linhas por uma ou mais{" "}
-                      {isRecordList ? "colunas" : "dimensões"} em seções
-                      recolhíveis com subtotais. Vários níveis criam uma
-                      hierarquia (o 1º é o grupo principal, os demais aninham
-                      dentro). Os grupos abrem recolhidos por padrão.
-                      {!isRecordList
-                        ? " Indisponível na orientação transposta."
-                        : ""}
+                      {transposed ? (
+                        <>
+                          Na orientação transposta, a 1ª dimensão fica nas colunas
+                          do topo e as dimensões escolhidas aqui viram grupos
+                          recolhíveis dentro de cada métrica. Recolhido mostra o
+                          total; expandido detalha cada grupo. Vários níveis criam
+                          uma hierarquia (o 1º aninha os demais dentro).
+                        </>
+                      ) : (
+                        <>
+                          Agrupa as linhas por uma ou mais{" "}
+                          {isRecordList ? "colunas" : "dimensões"} em seções
+                          recolhíveis com subtotais. Vários níveis criam uma
+                          hierarquia (o 1º é o grupo principal, os demais aninham
+                          dentro). Os grupos abrem recolhidos por padrão.
+                        </>
+                      )}
                     </p>
                   </div>
                 );
