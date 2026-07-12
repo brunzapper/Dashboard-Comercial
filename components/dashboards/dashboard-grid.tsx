@@ -53,6 +53,7 @@ export function DashboardGrid({
   tabs,
   canEdit,
   canManageFields = false,
+  currencyOptions,
   editMode,
   filterOptionsById,
 }: {
@@ -74,6 +75,7 @@ export function DashboardGrid({
   tabs?: { id: string; name: string; color?: string }[];
   canEdit: boolean;
   canManageFields?: boolean;
+  currencyOptions?: { value: string; label: string }[];
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
@@ -137,6 +139,7 @@ export function DashboardGrid({
               entityList={entityListById[w.id] ?? []}
               calcValue={calcById[w.id] ?? null}
               fields={fields}
+              currencyOptions={currencyOptions}
               fkLabels={fkLabels}
               responsibleOptions={responsibleOptions}
               userRoles={userRoles}

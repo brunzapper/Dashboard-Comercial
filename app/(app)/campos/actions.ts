@@ -112,7 +112,52 @@ function readForm(formData: FormData) {
   const writeBack = formData.get("write_back") === "on";
   const sortOrder = Number(formData.get("sort_order") ?? 0) || 0;
   const formula = parseFormula(String(formData.get("formula") ?? ""));
-  return { label, dataType, options, visible, editable, isLocal, showInBuilder, writeBack, sortOrder, formula };
+  const currencyCodeRaw = String(formData.get("currency_code") ?? "").trim().toUpperCase();
+  const currencyModeRaw = String(formData.get("currency_mode") ?? "").trim();
+  return {
+    label,
+    dataType,
+    options,
+    visible,
+    editable,
+    isLocal,
+    showInBuilder,
+    writeBack,
+    sortOrder,
+    formula,
+    currencyCodeRaw,
+    currencyModeRaw,
+  };
+}
+
+// Resolve os campos de moeda a persistir conforme o tipo:
+//  - 'moeda'     → currency_code (fixo; default BRL), sem currency_mode.
+//  - 'calculado' → currency_mode ('inherit'|'fixed') + currency_code (só p/ fixed).
+//  - demais      → ambos null (não é moeda).
+function resolveCurrencyColumns(f: {
+  dataType: string;
+  currencyCodeRaw: string;
+  currencyModeRaw: string;
+}): { currency_code: string | null; currency_mode: string | null } {
+  if (f.dataType === "moeda") {
+    return {
+      currency_code: /^[A-Z]{3}$/.test(f.currencyCodeRaw) ? f.currencyCodeRaw : "BRL",
+      currency_mode: null,
+    };
+  }
+  if (f.dataType === "calculado") {
+    if (f.currencyModeRaw === "inherit") {
+      return { currency_code: null, currency_mode: "inherit" };
+    }
+    if (f.currencyModeRaw === "fixed") {
+      return {
+        currency_code: /^[A-Z]{3}$/.test(f.currencyCodeRaw) ? f.currencyCodeRaw : "BRL",
+        currency_mode: "fixed",
+      };
+    }
+    return { currency_code: null, currency_mode: null };
+  }
+  return { currency_code: null, currency_mode: null };
 }
 
 export async function createField(
@@ -139,6 +184,7 @@ export async function createField(
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   }
 
+  const currency = resolveCurrencyColumns(f);
   const { error } = await supabase.from("field_definitions").insert({
     field_key: fieldKey,
     label: f.label,
@@ -150,6 +196,8 @@ export async function createField(
     show_in_builder: f.showInBuilder,
     write_back: f.writeBack,
     formula: f.dataType === "calculado" ? f.formula : null,
+    currency_code: currency.currency_code,
+    currency_mode: currency.currency_mode,
     sort_order: f.sortOrder,
   });
   if (error) {
@@ -198,6 +246,7 @@ export async function updateField(
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   }
 
+  const currency = resolveCurrencyColumns(f);
   const { error } = await supabase
     .from("field_definitions")
     .update({
@@ -210,6 +259,8 @@ export async function updateField(
       show_in_builder: f.showInBuilder,
       write_back: f.writeBack,
       formula: f.dataType === "calculado" ? f.formula : null,
+      currency_code: currency.currency_code,
+      currency_mode: currency.currency_mode,
       sort_order: f.sortOrder,
     })
     .eq("id", id);

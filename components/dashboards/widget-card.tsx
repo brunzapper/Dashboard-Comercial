@@ -65,6 +65,7 @@ export function WidgetCard({
   tabs,
   canEdit,
   canManageFields = false,
+  currencyOptions,
   editMode,
   filterOptions,
 }: {
@@ -74,6 +75,7 @@ export function WidgetCard({
   entityList: EntityListRow[];
   calcValue: number | null;
   fields: FieldDefinition[];
+  currencyOptions?: { value: string; label: string }[];
   fkLabels: Record<string, string>;
   responsibleOptions?: { value: string; label: string }[];
   userRoles: string[];
@@ -266,6 +268,8 @@ export function WidgetCard({
             widget={widget}
             siblings={siblings}
             canManageFields={canManageFields}
+            fields={fields}
+            currencyOptions={currencyOptions}
             tabs={tabs}
             open={builderOpen}
             onOpenChange={setBuilderOpen}

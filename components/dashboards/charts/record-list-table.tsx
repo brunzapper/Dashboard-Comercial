@@ -31,7 +31,7 @@ import {
   type RecordRow,
 } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
-import { formatMoney } from "@/lib/widgets/currency";
+import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import {
   EDITABLE_CORE_COLUMNS,
   isEditableCoreColumn,
@@ -264,6 +264,22 @@ export function RecordListTable({
   const fmtOf = (field: string): DateFormat =>
     t.dateFormats?.[field] ?? dashFmt;
 
+  // Texto de exibição de uma coluna personalizada (dimensão): moeda/calc-moeda na
+  // sua moeda (fixa ou herdada do registro), data formatada, demais como texto.
+  const customText = (
+    f: FieldDefinition | undefined,
+    r: RecordRow,
+    colField: string
+  ): string => {
+    if (!f) return "—";
+    const v = r.custom_fields?.[f.field_key];
+    if (v == null || v === "") return "—";
+    const m = resolveFieldMoney(f, r.currency);
+    if (m.isMoney) return formatMoney(v, m.code);
+    if (f.data_type === "data") return formatDateValue(v, fmtOf(colField));
+    return String(v);
+  };
+
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
   let rows = records;
   if (t.sort?.column) {
@@ -317,12 +333,7 @@ export function RecordListTable({
   // Rótulo de exibição de um valor (para o cabeçalho do grupo).
   const displayValue = (field: string, r: RecordRow): string => {
     if (field.startsWith("custom:")) {
-      const f = fieldByKey.get(field.slice(7));
-      const v = r.custom_fields?.[field.slice(7)];
-      if (v == null || v === "") return "—";
-      return f?.data_type === "data"
-        ? formatDateValue(v, fmtOf(field))
-        : String(v);
+      return customText(fieldByKey.get(field.slice(7)), r, field);
     }
     return coreDisplay(field, r, fkLabels, fmtOf(field));
   };
@@ -614,11 +625,7 @@ export function RecordListTable({
                 <span className={cellSpanClass}>{columnDateLabel(c, r)}</span>
               ) : isCustom ? (
                 <span className={cellSpanClass}>
-                  {field && r.custom_fields?.[field.field_key] != null
-                    ? field.data_type === "data"
-                      ? formatDateValue(r.custom_fields[field.field_key], fmtOf(c.field))
-                      : String(r.custom_fields[field.field_key])
-                    : "—"}
+                  {customText(field, r, c.field)}
                 </span>
               ) : (
                 <span className={cellSpanClass}>

@@ -18,7 +18,7 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
-import { formatMoney } from "@/lib/widgets/currency";
+import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 
 function customValue(record: RecordRow, key: string): string {
   const v = record.custom_fields?.[key];
@@ -84,12 +84,14 @@ export function EditableCell({
       forceEditable);
 
   if (!editable) {
-    const display =
-      field.data_type === "moeda"
-        ? formatMoney(serverValue, record.currency)
-        : field.data_type === "data"
-          ? formatDateValue(serverValue, dateFormat)
-          : serverValue;
+    // Moeda por campo: 'moeda' usa a moeda fixa do campo; 'calculado'-moeda usa a
+    // moeda do resultado (herdada do registro ou fixa). Ver resolveFieldMoney.
+    const money = resolveFieldMoney(field, record.currency);
+    const display = money.isMoney
+      ? formatMoney(serverValue, money.code)
+      : field.data_type === "data"
+        ? formatDateValue(serverValue, dateFormat)
+        : serverValue;
     return <span className="block truncate">{display || "—"}</span>;
   }
 

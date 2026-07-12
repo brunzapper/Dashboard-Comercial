@@ -13,6 +13,7 @@ import {
   isEditableCoreColumn,
   isEditableRelation,
 } from "@/lib/config/core-writeback";
+import { resolveFieldMoney } from "./currency";
 import type { Aggregation, Transform } from "./types";
 
 export type FkKind = "responsible" | "operation" | "lead";
@@ -22,6 +23,9 @@ export interface AvailableField {
   label: string;
   isNumeric: boolean; // pode ser métrica sum/avg
   isDate: boolean; // aceita transform (dia/mês/...)
+  // Métrica monetária: value/mrr (moeda do registro) ou campo 'moeda'/'calculado'
+  // -moeda. Habilita as opções de moeda/conversão da métrica no construtor.
+  isMoney?: boolean;
   fk?: FkKind;
   unified?: boolean; // campo vindo de uma correspondência
   // Pode ser editável inline na tabela de registros (custom não calculado, ou
@@ -47,8 +51,8 @@ export const CORE_FIELDS: AvailableField[] = [
   { field: "responsible_id", label: "Responsável", isNumeric: false, isDate: false, fk: "responsible" },
   { field: "operation_id", label: "Operação", isNumeric: false, isDate: false, fk: "operation" },
   { field: "related_lead_id", label: "Lead relacionado", isNumeric: false, isDate: false, fk: "lead" },
-  { field: "value", label: "Valor", isNumeric: true, isDate: false },
-  { field: "mrr", label: "MRR", isNumeric: true, isDate: false },
+  { field: "value", label: "Valor", isNumeric: true, isDate: false, isMoney: true },
+  { field: "mrr", label: "MRR", isNumeric: true, isDate: false, isMoney: true },
   { field: "lead_time_days", label: "Lead time (dias)", isNumeric: true, isDate: false },
   { field: "closed_at", label: "Data de fechamento", isNumeric: false, isDate: true },
   { field: "opened_at", label: "Data de abertura", isNumeric: false, isDate: true },
@@ -76,6 +80,7 @@ export function buildAvailableFields(
     label: f.label,
     isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
     isDate: f.data_type === "data",
+    isMoney: resolveFieldMoney(f).isMoney,
     editableCapable: f.data_type !== "calculado",
     // Campo de Sync do Bitrix (custom com source_field_id) → grava de volta.
     writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
@@ -85,6 +90,7 @@ export function buildAvailableFields(
     label: `↔ ${c.label}`,
     isNumeric: NUMERIC_DATA_TYPES.includes(c.data_type),
     isDate: c.data_type === "data",
+    isMoney: c.data_type === "moeda",
     unified: true,
   }));
   return [...core, ...custom, ...unified];

@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
 import { loadCorrespondences } from "@/lib/correspondences";
+import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
 import {
   SOURCE_KEYS,
   fieldAppliesToSource,
@@ -22,18 +23,20 @@ export default async function CamposPage() {
   await requirePermission("manage_field_definitions");
 
   const supabase = await createClient();
-  const [{ data }, correspondences] = await Promise.all([
+  const [{ data }, correspondences, currencies] = await Promise.all([
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, sort_order, applies_to, write_back"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, currency_code, currency_mode, sort_order, applies_to, write_back"
       )
       .order("sort_order", { ascending: true })
       .order("label", { ascending: true }),
     loadCorrespondences(supabase),
+    loadEnabledCurrencies(supabase),
   ]);
 
   const fields = (data ?? []) as FieldDefinition[];
+  const currencyOptions = currencyOptionsFrom(currencies);
 
   // Candidatos por fonte p/ correspondências: colunas do núcleo + campos
   // personalizados que se aplicam àquela fonte (applies_to).
@@ -65,7 +68,7 @@ export default async function CamposPage() {
             botão &quot;Exibir&quot; para escolher quais vão para os seletores.
           </p>
         </div>
-        <FieldsManager fields={fields} />
+        <FieldsManager fields={fields} currencyOptions={currencyOptions} />
       </div>
 
       <CorrespondencesManager

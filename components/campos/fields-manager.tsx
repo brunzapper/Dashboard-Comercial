@@ -174,7 +174,13 @@ function FieldsSection({
   );
 }
 
-export function FieldsManager({ fields }: { fields: FieldDefinition[] }) {
+export function FieldsManager({
+  fields,
+  currencyOptions,
+}: {
+  fields: FieldDefinition[];
+  currencyOptions?: { value: string; label: string }[];
+}) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FieldDefinition | undefined>(undefined);
   const [query, setQuery] = useState("");
@@ -286,6 +292,7 @@ export function FieldsManager({ fields }: { fields: FieldDefinition[] }) {
               key={editing?.id ?? "new"}
               field={editing}
               numericRefs={numericRefs}
+              currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}
             />
           </div>

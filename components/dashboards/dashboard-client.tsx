@@ -46,6 +46,7 @@ export function DashboardClient({
   available,
   canEdit,
   canManageFields = false,
+  currencyOptions,
   settings,
   visibleToRoles,
   dateFormat,
@@ -69,6 +70,7 @@ export function DashboardClient({
   available: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
+  currencyOptions?: { value: string; label: string }[];
   settings: DashboardSettings;
   visibleToRoles: string[];
   dateFormat?: DateFormat;
@@ -176,6 +178,8 @@ export function DashboardClient({
               available={available}
               siblings={widgets}
               canManageFields={canManageFields}
+              fields={fields}
+              currencyOptions={currencyOptions}
               tabs={tabs}
               activeTabId={activeTabId}
               trigger={
@@ -253,6 +257,7 @@ export function DashboardClient({
             tabs={tabs}
             canEdit={canEdit}
             canManageFields={canManageFields}
+            currencyOptions={currencyOptions}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
           />
