@@ -6,7 +6,7 @@
 // KPI (fundo/borda/abinha de destaque).
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,12 @@ export function WidgetCard({
   conversionPeriod,
   editMode,
   filterOptions,
+  autoSize,
+  cellW = 0,
+  rowH = 0,
+  mx = 0,
+  my = 0,
+  onMeasure,
 }: {
   widget: Widget;
   data: WidgetData;
@@ -98,6 +104,15 @@ export function WidgetCard({
   canManageFields?: boolean;
   editMode: boolean;
   filterOptions?: FieldFilterOptions;
+  // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
+  // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
+  // métricas de célula do grid (p/ converter px → unidades).
+  autoSize?: { width?: boolean; height?: boolean };
+  cellW?: number;
+  rowH?: number;
+  mx?: number;
+  my?: number;
+  onMeasure?: (id: string, wUnits: number, hUnits: number) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -108,6 +123,11 @@ export function WidgetCard({
     widget,
     dashboardId
   );
+
+  // Refs p/ medir o tamanho natural do conteúdo (dimensões dinâmicas).
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const lastMeasureRef = useRef<{ w: number; h: number } | null>(null);
 
   const isFilter = widget.visual_type === "filtro";
   const isFieldFilter = widget.visual_type === "filtro_campo";
@@ -124,8 +144,102 @@ export function WidgetCard({
   // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/calc).
   const canStyle = !isFilter && !isFieldFilter && !isCalc;
 
+  // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
+  // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do
+  // <table> (encolhe com menos linhas); a largura vem da contagem de colunas (a
+  // tabela é w-full, medir largura no DOM criaria loop). Gráficos (sem tamanho
+  // natural) são estimados pela contagem de categorias.
+  useEffect(() => {
+    const wOn = autoSize?.width ?? false;
+    const hOn = autoSize?.height ?? false;
+    if ((!wOn && !hOn) || !onMeasure || cellW <= 0 || rowH <= 0) return;
+
+    const PER_COL_W = 150; // largura aprox. por coluna de tabela
+    const PER_CAT_W = 48; // largura aprox. por categoria (barra/linha/pizza/funil)
+    const PER_CAT_H = 28; // altura aprox. por barra (barra horizontal)
+
+    const isChart =
+      widget.visual_type === "barra" ||
+      widget.visual_type === "barra_horizontal" ||
+      widget.visual_type === "linha" ||
+      widget.visual_type === "pizza" ||
+      widget.visual_type === "funil";
+
+    const columnCount = (): number =>
+      isRecordList
+        ? (widget.settings?.columns?.length ?? 0)
+        : (data.dimensions?.length ?? 0) + (data.metrics?.length ?? 0);
+
+    let raf = 0;
+    const measure = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const card = cardRef.current;
+        const content = contentRef.current;
+        if (!card || !content) return;
+
+        // "Cromo" do card (cabeçalho, paddings, barra de filtro) fora da área útil.
+        const chromeH = Math.max(0, card.offsetHeight - content.clientHeight);
+        const chromeW = Math.max(0, card.offsetWidth - content.clientWidth);
+
+        const table = content.querySelector("table") as HTMLElement | null;
+        let naturalW = 0;
+        let naturalH = 0;
+        if (table) {
+          naturalH = table.offsetHeight;
+          const cols = columnCount();
+          naturalW = cols > 0 ? cols * PER_COL_W : 0;
+        } else if (isChart) {
+          const cats = data.rows?.length ?? 0;
+          if (widget.visual_type === "barra_horizontal")
+            naturalH = cats * PER_CAT_H;
+          else naturalW = cats * PER_CAT_W;
+        }
+
+        const neededW = naturalW > 0 ? chromeW + naturalW : 0;
+        const neededH = naturalH > 0 ? chromeH + naturalH : 0;
+        const toUnits = (px: number, cell: number, margin: number) =>
+          px > 0 ? Math.max(1, Math.ceil((px - margin) / (cell + margin))) : 0;
+
+        const w = wOn ? toUnits(neededW, cellW, mx) : 0;
+        const h = hOn ? toUnits(neededH, rowH, my) : 0;
+        const last = lastMeasureRef.current;
+        if (!last || last.w !== w || last.h !== h) {
+          lastMeasureRef.current = { w, h };
+          onMeasure(widget.id, w, h);
+        }
+      });
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (cardRef.current) ro.observe(cardRef.current);
+    const table = contentRef.current?.querySelector("table");
+    if (table) ro.observe(table);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [
+    autoSize?.width,
+    autoSize?.height,
+    onMeasure,
+    cellW,
+    rowH,
+    mx,
+    my,
+    widget.id,
+    widget.visual_type,
+    widget.settings?.columns?.length,
+    isRecordList,
+    data,
+    recordList,
+    entityList,
+  ]);
+
   return (
     <div
+      ref={cardRef}
       className="bg-card flex h-full flex-col overflow-hidden rounded-lg border"
       style={{
         background: kpi?.bg,
@@ -207,7 +321,7 @@ export function WidgetCard({
             available={available}
           />
         ) : null}
-        <div className="min-h-0 flex-1">
+        <div ref={contentRef} className="min-h-0 flex-1">
           {isFilter ? (
             <div className="flex h-full items-center p-1">
               <PeriodControls
