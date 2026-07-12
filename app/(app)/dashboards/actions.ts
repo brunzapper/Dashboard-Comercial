@@ -112,6 +112,27 @@ export async function updateDashboardVisibility(
   return { ok: true };
 }
 
+// Renomeia um dashboard já criado. Valida nome não-vazio (como createDashboard)
+// para não apagar o título. RLS restringe a owner/admin.
+export async function renameDashboard(
+  dashboardId: string,
+  rawName: string
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const name = String(rawName ?? "").trim();
+  if (!name) return { ok: false, message: "Informe um nome." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ name })
+    .eq("id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // Salva o último período consultado do usuário NESTE dashboard (user_preferences).
 // Chamado (fire-and-forget) quando a barra de período navega. Não revalida —
 // só persiste para reidratar o default na próxima visita.
