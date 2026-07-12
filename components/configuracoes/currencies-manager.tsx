@@ -1,7 +1,12 @@
-// Versão: 1.0 | Data: 12/07/2026
-// Configurações → Moedas (admin): habilita as moedas do sistema e edita as taxas
-// de conversão (R$ por 1 unidade) por ano/trimestre — manual ou pelo PTAX. BRL é
-// a base (taxa 1, não editável). Regra = último a escrever vence.
+// Versão: 2.0 | Data: 12/07/2026
+// Configurações → Moedas: habilita as moedas do sistema e edita as taxas de
+// conversão (R$ por 1 unidade) por ano/trimestre — manual ou pelo PTAX. BRL é a
+// base (taxa 1, não editável).
+// v2.0: as taxas viram rascunho local e só são gravadas ao clicar "Aplicar"
+//   (antes commitava no onBlur). O parser aceita vírgula OU ponto como separador
+//   decimal ("5,85" e "5.85" viram 5.85) — antes removia todo ponto, gravando 585
+//   e "perdendo os centavos" ao recarregar. `readOnly` = visão de não-admin
+//   (gestor/vendedor): tabela só de leitura, sem checkboxes/botões.
 "use client";
 
 import { useState, useTransition } from "react";
@@ -37,17 +42,56 @@ export interface CurrencyRateRow {
 
 const QUARTER_LABELS = ["Anual", "T1", "T2", "T3", "T4"];
 
+/**
+ * Interpreta um valor digitado (pt-BR ou en) como número. Aceita "5,85", "5.85"
+ * e "1.234,56". Regra: quando há vírgula E ponto, o separador mais à direita é o
+ * decimal e o outro é milhar; só vírgula = decimal; só ponto = decimal (taxas são
+ * pequenas, "5.85" é 5,85 e não 585). Vazio/ inválido → null.
+ */
+function parseRate(raw: string): number | null {
+  const s = raw.trim();
+  if (s === "") return null;
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  let normalized: string;
+  if (lastComma !== -1 && lastDot !== -1) {
+    const decimalSep = lastComma > lastDot ? "," : ".";
+    const thousandSep = decimalSep === "," ? "." : ",";
+    normalized = s.split(thousandSep).join("").replace(decimalSep, ".");
+  } else if (lastComma !== -1) {
+    normalized = s.replace(",", ".");
+  } else {
+    normalized = s; // só ponto (ou nenhum): já é decimal
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Exibe a taxa em pt-BR (vírgula decimal, sem milhar) — round-trip com parseRate. */
+function formatRate(n: number): string {
+  return n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+    useGrouping: false,
+  });
+}
+
 export function CurrenciesManager({
   currencies,
   rates,
+  readOnly = false,
 }: {
   currencies: SystemCurrency[];
   rates: CurrencyRateRow[];
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Rascunho por célula: `${code}:${quarter}` -> texto. Só o que o usuário tocou;
+  // as demais células mostram o valor gravado formatado.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
@@ -60,33 +104,62 @@ export function CurrenciesManager({
   const rateOf = (code: string, quarter: number): CurrencyRateRow | undefined =>
     rates.find((r) => r.code === code && r.year === year && r.quarter === quarter);
 
-  function commitRate(code: string, quarter: number, raw: string) {
-    const trimmed = raw.trim().replace(/\./g, "").replace(",", ".");
-    const current = rateOf(code, quarter);
-    if (trimmed === "") {
-      if (!current) return;
-      startTransition(async () => {
-        await upsertCurrencyRate(code, year, quarter, null);
-        router.refresh();
-      });
-      return;
+  const cellKey = (code: string, quarter: number) => `${code}:${quarter}`;
+
+  // Valor exibido: rascunho se tocado; senão a taxa gravada formatada.
+  const displayValue = (code: string, quarter: number): string => {
+    const k = cellKey(code, quarter);
+    if (k in drafts) return drafts[k];
+    const cur = rateOf(code, quarter);
+    return cur ? formatRate(cur.rate) : "";
+  };
+
+  function setDraft(code: string, quarter: number, value: string) {
+    setDrafts((d) => ({ ...d, [cellKey(code, quarter)]: value }));
+  }
+
+  // Grava todas as células alteradas de uma moeda (botão "Aplicar" da linha).
+  function applyRow(code: string) {
+    if (readOnly) return;
+    const ops: { quarter: number; rate: number | null }[] = [];
+    for (let quarter = 0; quarter < QUARTER_LABELS.length; quarter++) {
+      const k = cellKey(code, quarter);
+      if (!(k in drafts)) continue; // não tocado
+      const parsed = parseRate(drafts[k]);
+      const current = rateOf(code, quarter);
+      const currentRate = current ? current.rate : null;
+      if (parsed === currentRate) continue; // sem mudança efetiva
+      ops.push({ quarter, rate: parsed });
     }
-    const n = Number(trimmed);
-    if (!Number.isFinite(n)) return;
-    if (current && current.rate === n) return;
+    if (ops.length === 0) return;
+    setMessage(null);
     startTransition(async () => {
-      await upsertCurrencyRate(code, year, quarter, n);
+      for (const op of ops) {
+        await upsertCurrencyRate(code, year, op.quarter, op.rate);
+      }
+      // Limpa o rascunho da linha (os valores recarregados viram a fonte).
+      setDrafts((d) => {
+        const next = { ...d };
+        for (let q = 0; q < QUARTER_LABELS.length; q++) delete next[cellKey(code, q)];
+        return next;
+      });
       router.refresh();
     });
   }
 
   function refresh(code: string) {
+    if (readOnly) return;
     setMessage(null);
     setRefreshing(code);
     startTransition(async () => {
       const res = await refreshRatesFromPtax(code, year);
       setRefreshing(null);
       setMessage(res.message ?? null);
+      setDrafts((d) => {
+        const next = { ...d };
+        for (let q = 0; q < QUARTER_LABELS.length; q++) delete next[cellKey(code, q)];
+        return next;
+      });
       router.refresh();
     });
   }
@@ -111,7 +184,7 @@ export function CurrenciesManager({
                   type="checkbox"
                   className="size-4 accent-primary"
                   defaultChecked={c.enabled}
-                  disabled={locked || pending}
+                  disabled={locked || pending || readOnly}
                   onChange={(e) =>
                     startTransition(async () => {
                       await toggleCurrencyEnabled(c.code, e.target.checked);
@@ -141,7 +214,10 @@ export function CurrenciesManager({
               searchable={false}
               options={yearOptions}
               value={String(year)}
-              onValueChange={(v) => setYear(Number(v))}
+              onValueChange={(v) => {
+                setYear(Number(v));
+                setDrafts({}); // troca de ano descarta rascunhos
+              }}
               className="w-28"
               aria-label="Ano das taxas"
             />
@@ -150,7 +226,9 @@ export function CurrenciesManager({
 
         {rateCurrencies.length === 0 ? (
           <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
-            Habilite uma moeda estrangeira acima para informar suas taxas.
+            {readOnly
+              ? "Nenhuma moeda estrangeira habilitada."
+              : "Habilite uma moeda estrangeira acima para informar suas taxas."}
           </p>
         ) : (
           <div className="rounded-lg border">
@@ -163,7 +241,7 @@ export function CurrenciesManager({
                       {q}
                     </TableHead>
                   ))}
-                  <TableHead className="text-right">PTAX</TableHead>
+                  {!readOnly ? <TableHead className="text-right">Ações</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -174,42 +252,77 @@ export function CurrenciesManager({
                     </TableCell>
                     {QUARTER_LABELS.map((_, quarter) => {
                       const cur = rateOf(c.code, quarter);
+                      if (readOnly) {
+                        return (
+                          <TableCell
+                            key={quarter}
+                            className="text-right tabular-nums"
+                            title={
+                              cur?.source === "ptax"
+                                ? "Origem: PTAX"
+                                : cur
+                                  ? "Origem: manual"
+                                  : undefined
+                            }
+                          >
+                            {cur ? formatRate(cur.rate) : "—"}
+                          </TableCell>
+                        );
+                      }
                       return (
                         <TableCell key={quarter} className="text-right">
                           <Input
-                            // key inclui o ano p/ resetar ao trocar de ano
-                            key={`${c.code}:${year}:${quarter}`}
                             type="text"
                             inputMode="decimal"
-                            defaultValue={cur ? String(cur.rate) : ""}
+                            value={displayValue(c.code, quarter)}
                             placeholder="—"
-                            title={cur?.source === "ptax" ? "Origem: PTAX" : cur ? "Origem: manual" : undefined}
-                            onBlur={(e) => commitRate(c.code, quarter, e.target.value)}
+                            title={
+                              cur?.source === "ptax"
+                                ? "Origem: PTAX"
+                                : cur
+                                  ? "Origem: manual"
+                                  : undefined
+                            }
+                            onChange={(e) => setDraft(c.code, quarter, e.target.value)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") e.currentTarget.blur();
+                              if (e.key === "Enter") applyRow(c.code);
                             }}
+                            disabled={pending}
                             className="h-8 w-24 text-right tabular-nums"
                             aria-label={`Taxa ${c.code} ${QUARTER_LABELS[quarter]} ${year}`}
                           />
                         </TableCell>
                       );
                     })}
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={pending}
-                        onClick={() => refresh(c.code)}
-                      >
-                        <RefreshCw
-                          className={
-                            refreshing === c.code ? "size-4 animate-spin" : "size-4"
-                          }
-                        />
-                        Atualizar agora
-                      </Button>
-                    </TableCell>
+                    {!readOnly ? (
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => applyRow(c.code)}
+                          >
+                            Aplicar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => refresh(c.code)}
+                            title="Preencher pela média PTAX do Banco Central"
+                          >
+                            <RefreshCw
+                              className={
+                                refreshing === c.code ? "size-4 animate-spin" : "size-4"
+                              }
+                            />
+                            Atualizar agora
+                          </Button>
+                        </div>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>
@@ -221,10 +334,18 @@ export function CurrenciesManager({
             {message}
           </p>
         ) : null}
-        <p className="text-muted-foreground text-xs">
-          A taxa do trimestre, quando preenchida, tem prioridade sobre a anual. O
-          preenchimento manual e o &quot;Atualizar agora&quot; se sobrescrevem.
-        </p>
+        {!readOnly ? (
+          <p className="text-muted-foreground text-xs">
+            Digite a taxa (ex.: 5,85) e clique <strong>Aplicar</strong> para gravar.
+            A taxa do trimestre, quando preenchida, tem prioridade sobre a anual. O
+            preenchimento manual e o &quot;Atualizar agora&quot; se sobrescrevem.
+          </p>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            Taxa em R$ por 1 unidade da moeda. A do trimestre, quando preenchida, tem
+            prioridade sobre a anual. Apenas administradores podem alterar.
+          </p>
+        )}
       </div>
     </div>
   );
