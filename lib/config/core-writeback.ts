@@ -8,8 +8,10 @@
 //
 // Nota: `stage` (crm_status) e `pipeline` (crm_category) exigem resolução
 // nome→id que o conversor atual não cobre — o item fica 'error' na fila e a
-// edição LOCAL é preservada (melhoria futura). Relações (responsável/operação/
-// lead) não entram no write-back (permanecem locais, como já era).
+// edição LOCAL é preservada (melhoria futura). Entre as relações, `responsible_id`
+// grava de volta o dono (ASSIGNED_BY_ID): o uuid local é traduzido p/
+// responsibles.bitrix_user_id no enfileiramento (lib/records/actions.ts). Operação
+// e lead relacionado permanecem locais (sem write-back).
 import { DEAL_CORE, LEAD_CORE } from "./bitrix-field-map";
 import type { DataType } from "@/lib/records/types";
 
@@ -31,6 +33,9 @@ export const CORE_WRITEBACK: Record<string, CoreWriteBackTarget> = {
   closed_at: { deal: DEAL_CORE.closedAt },
   opened_at: { deal: DEAL_CORE.openedAt },
   pipeline: { deal: DEAL_CORE.categoryId },
+  // Responsável (dono): grava ASSIGNED_BY_ID. O valor enfileirado NÃO é o uuid
+  // local de `responsibles`, e sim o `bitrix_user_id` resolvido em actions.ts.
+  responsible_id: { deal: DEAL_CORE.assignedById, lead: LEAD_CORE.assignedById },
 };
 
 // Colunas do núcleo editáveis inline + o tipo p/ coerção/validação (espelha DataType).
@@ -53,12 +58,20 @@ export function isEditableCoreColumn(field: string): boolean {
 }
 
 // Relações editáveis inline (registros individuais): editam uma coluna FK de
-// `records` via um SELECT das entidades elegíveis. Ficam LOCAIS (sem write-back
-// ao Bitrix — não há mapa de conversão nome→id para relações). Hoje: responsável.
+// `records` via um SELECT das entidades elegíveis. Hoje: responsável.
 export const EDITABLE_RELATION_FIELDS = new Set<string>(["responsible_id"]);
 
 export function isEditableRelation(field: string): boolean {
   return EDITABLE_RELATION_FIELDS.has(field);
+}
+
+// Relações que TAMBÉM podem gravar de volta no Bitrix (write-back). Hoje só
+// `responsible_id` (→ ASSIGNED_BY_ID, via bitrix_user_id do responsável).
+// Operação/lead não têm equivalente e permanecem locais.
+export const WRITEBACK_RELATION_FIELDS = new Set<string>(["responsible_id"]);
+
+export function isWriteBackRelation(field: string): boolean {
+  return WRITEBACK_RELATION_FIELDS.has(field);
 }
 
 // source_field_id do Bitrix p/ uma coluna do núcleo, conforme a entidade.

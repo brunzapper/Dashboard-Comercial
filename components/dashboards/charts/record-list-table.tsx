@@ -132,6 +132,15 @@ type Menu =
   | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
   | { kind: "colorOrder"; x: number; y: number; column: string };
 
+// Opção do SELECT de responsável (coluna responsible_id editável). `bitrixLinked`
+// marca os responsáveis com vínculo no Bitrix (bitrix_user_id) — os únicos
+// oferecidos quando a coluna grava de volta no Bitrix (writeBack).
+export type ResponsibleOption = {
+  value: string;
+  label: string;
+  bitrixLinked?: boolean;
+};
+
 export function RecordListTable({
   records,
   columns,
@@ -157,7 +166,7 @@ export function RecordListTable({
   canEditValues: boolean;
   fkLabels: Record<string, string>;
   // Responsáveis ativos (id→nome) para o SELECT da coluna responsible_id editável.
-  responsibleOptions?: { value: string; label: string }[];
+  responsibleOptions?: ResponsibleOption[];
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
   currencyRates?: CurrencyRates;
@@ -751,7 +760,14 @@ export function RecordListTable({
                   recordId={r.id}
                   field={c.field}
                   value={String(rawValue(c.field, r) ?? "")}
-                  options={responsibleOptions}
+                  // Gravando no Bitrix (ASSIGNED_BY_ID) → só responsáveis com
+                  // vínculo no Bitrix. Local (sem write-back) → todos.
+                  options={
+                    c.writeBack
+                      ? responsibleOptions.filter((o) => o.bitrixLinked)
+                      : responsibleOptions
+                  }
+                  writeBack={c.writeBack}
                   onSaved={refresh}
                 />
               ) : coreEditable ? (

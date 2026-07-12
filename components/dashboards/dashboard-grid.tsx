@@ -32,6 +32,7 @@ import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { saveLayout, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { useNavPending } from "./pending-context";
 import { WidgetCard } from "./widget-card";
+import type { ResponsibleOption } from "./charts/record-list-table";
 
 // Margens do grid e limites do canvas (mesmos valores de sempre).
 const MX = 12;
@@ -78,7 +79,7 @@ export function DashboardGrid({
   calcById: Record<string, number | null>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
-  responsibleOptions?: { value: string; label: string }[];
+  responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
