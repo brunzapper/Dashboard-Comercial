@@ -407,8 +407,8 @@ export function WidgetChart({
 
 // ---------------- Tabela agregada com aparência + edição in-loco ----------------
 type TableMenu =
-  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[]; isDate: boolean }
-  | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
+  | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[]; isDate: boolean; group?: boolean }
+  | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string; group?: boolean }
   | { kind: "colorOrder"; x: number; y: number; column: string };
 
 function AppearanceTable({
@@ -470,13 +470,16 @@ function AppearanceTable({
   const setTable = (patch: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     onChange({ ...appearance, table: { ...t, ...patch } });
 
-  function setColor(m: { scope: ColorScope; column: string; rowKey?: string }, cp: ColorPair) {
+  function setColor(m: { scope: ColorScope; column: string; rowKey?: string; group?: boolean }, cp: ColorPair) {
     const clear = !cp.fill && !cp.text;
     if (m.scope === "col") {
-      const map = { ...(t.colColors ?? {}) };
+      // Coluna a partir de uma linha de grupo grava num mapa dedicado, lido só
+      // pelas linhas de grupo — não pinta as linhas de dados.
+      const field = m.group ? "groupColColors" : "colColors";
+      const map = { ...(t[field] ?? {}) };
       if (clear) delete map[m.column];
       else map[m.column] = cp;
-      setTable({ colColors: map });
+      setTable({ [field]: map });
     } else if (m.scope === "row" && m.rowKey) {
       const map = { ...(t.rowColors ?? {}) };
       if (clear) delete map[m.rowKey];
@@ -491,8 +494,9 @@ function AppearanceTable({
     }
   }
 
-  function colorValue(m: { scope: ColorScope; column: string; rowKey?: string }): ColorPair {
-    if (m.scope === "col") return t.colColors?.[m.column] ?? {};
+  function colorValue(m: { scope: ColorScope; column: string; rowKey?: string; group?: boolean }): ColorPair {
+    if (m.scope === "col")
+      return (m.group ? t.groupColColors : t.colColors)?.[m.column] ?? {};
     if (m.scope === "row" && m.rowKey) return t.rowColors?.[m.rowKey] ?? {};
     if (m.scope === "cell" && m.rowKey)
       return t.cellColors?.[`${m.rowKey}:${m.column}`] ?? {};
@@ -534,7 +538,8 @@ function AppearanceTable({
     e: React.MouseEvent,
     column: string,
     scopes: ColorScope[],
-    rk?: string
+    rk?: string,
+    group = false
   ) {
     if (!editable) return;
     setMenu({
@@ -544,7 +549,9 @@ function AppearanceTable({
       column,
       rowKey: rk,
       scopes,
-      isDate: dateCols.has(column),
+      // Linhas de grupo não têm formato de data — só cor.
+      isDate: group ? false : dateCols.has(column),
+      group,
     });
   }
 
@@ -680,13 +687,32 @@ function AppearanceTable({
       level?: number;
       keyId?: string;
     }
-  ) => (
+  ) => {
+    // Chave estável da linha de grupo (inclui o caminho hierárquico) — rowKey nos
+    // mapas de cor, isolada das linhas de dados pelo prefixo `__grp:`.
+    const grpKey = `__grp:${opts?.keyId ?? label}`;
+    const rowCp = t.rowColors?.[grpKey];
+    const cellExtra = (colKey: string) => {
+      const cellCp = t.cellColors?.[`${grpKey}:${colKey}`];
+      const grpColCp = t.groupColColors?.[colKey];
+      return {
+        style: {
+          background: cellCp?.fill ?? grpColCp?.fill,
+          color: cellCp?.text ?? rowCp?.text ?? grpColCp?.text ?? t.headerColor,
+        } as React.CSSProperties,
+        onDoubleClick: editable
+          ? (e: React.MouseEvent) =>
+              openCtx(e, colKey, ["row", "col", "cell"], grpKey, true)
+          : undefined,
+      };
+    };
+    return (
     <TableRow
-      key={`__grp:${opts?.keyId ?? label}`}
+      key={grpKey}
       className={cn(rowBorder, "font-medium")}
       style={{
-        background: t.headerBg ?? "var(--muted)",
-        color: t.headerColor,
+        background: rowCp?.fill ?? t.headerBg ?? "var(--muted)",
+        color: rowCp?.text ?? t.headerColor,
         ...(borderColor ? { borderColor } : {}),
       }}
     >
@@ -694,11 +720,13 @@ function AppearanceTable({
       {cols.map((c, ci) => {
         const isMetric = metricKeys.has(c.key);
         const isFirst = ci === 0;
+        const extra = cellExtra(c.key);
         return (
           <TableCell
             key={c.key}
             className={isMetric ? "text-right tabular-nums" : undefined}
-            style={cellBorder(ci === cols.length - 1)}
+            onDoubleClick={extra.onDoubleClick}
+            style={{ ...cellBorder(ci === cols.length - 1), ...extra.style }}
           >
             {isFirst ? (
               <button
@@ -729,7 +757,8 @@ function AppearanceTable({
         );
       })}
     </TableRow>
-  );
+    );
+  };
 
   // --- Modo transposto: dimensão(ões) no canto sup. esq., cada grupo vira uma
   // coluna, métricas descem como linhas à esquerda. Interações de cor/arraste
@@ -886,20 +915,24 @@ function AppearanceTable({
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
-          ordering={{
-            onAsc: () => {
-              setTable({ sort: { column: menu.column, dir: "asc" }, rowOrder: undefined });
-              setMenu(null);
-            },
-            onDesc: () => {
-              setTable({ sort: { column: menu.column, dir: "desc" }, rowOrder: undefined });
-              setMenu(null);
-            },
-            onByColor:
-              distinctRowFills.length >= 2
-                ? () => setMenu({ kind: "colorOrder", x: menu.x, y: menu.y, column: menu.column })
-                : undefined,
-          }}
+          ordering={
+            menu.group
+              ? undefined
+              : {
+                  onAsc: () => {
+                    setTable({ sort: { column: menu.column, dir: "asc" }, rowOrder: undefined });
+                    setMenu(null);
+                  },
+                  onDesc: () => {
+                    setTable({ sort: { column: menu.column, dir: "desc" }, rowOrder: undefined });
+                    setMenu(null);
+                  },
+                  onByColor:
+                    distinctRowFills.length >= 2
+                      ? () => setMenu({ kind: "colorOrder", x: menu.x, y: menu.y, column: menu.column })
+                      : undefined,
+                }
+          }
           coloring={{
             scopes: menu.scopes,
             onScope: (scope) =>
@@ -910,6 +943,7 @@ function AppearanceTable({
                 scope,
                 column: menu.column,
                 rowKey: menu.rowKey,
+                group: menu.group,
               }),
           }}
           dateFormat={

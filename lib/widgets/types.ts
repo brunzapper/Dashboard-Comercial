@@ -276,6 +276,9 @@ export interface AppearanceSettings {
     colColors?: Record<string, ColorPair>; // colKey -> {texto, preenchimento}
     rowColors?: Record<string, ColorPair>; // rowKey -> {texto, preenchimento}
     cellColors?: Record<string, ColorPair>; // "rowKey:colKey" -> {texto, preench.}
+    // colKey -> {texto, preench.} aplicado SÓ às linhas de grupo (subtotais e
+    // "Total geral") no "Agrupar por"; não afeta as linhas de dados.
+    groupColColors?: Record<string, ColorPair>;
     columnOrder?: string[]; // ordem das colunas (reordenação)
     rowOrder?: string[]; // ordem manual das linhas (por rowKey)
     // Formato de data por coluna (override do padrão global do dashboard).
