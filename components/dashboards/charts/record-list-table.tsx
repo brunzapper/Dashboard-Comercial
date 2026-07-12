@@ -444,6 +444,16 @@ export function RecordListTable({
     return coreDisplay(field, r, fkLabels, fmtOf(field));
   };
 
+  // Exibição de uma coluna de data para agrupamento — idêntica à célula: honra o
+  // transform (mês/tri/ano…) quando definido, senão a máscara. Usada como chave e
+  // rótulo do grupo p/ o cabeçalho bater com a célula e registros de mesmo formato
+  // (ex.: transform "mês" → "Janeiro", ou máscara `mm/aa`) caírem no mesmo grupo.
+  const groupCellDisplay = (field: string, r: RecordRow): string => {
+    const c = cols.find((col) => col.field === field);
+    if (c?.transform) return columnDateLabel(c, r);
+    return displayValue(field, r);
+  };
+
   type Item =
     | { kind: "group"; level: number; key: string; label: string; rows: RecordRow[] }
     | { kind: "data"; row: RecordRow }
@@ -461,11 +471,16 @@ export function RecordListTable({
     const [field, ...rest] = levels;
     const byKey = new Map<string, { label: string; rows: RecordRow[] }>();
     const order: string[] = [];
+    const isDate = isDateCol(field);
     for (const r of rs) {
-      const gk = String(rawValue(field, r) ?? "");
+      // Data: chaveia/rotula pelo valor FORMATADO (transform ou máscara), fundindo
+      // registros de mesmo formato. Demais colunas: chave por valor bruto (evita
+      // fundir valores distintos que só coincidem no rótulo, ex.: FKs homônimas).
+      const disp = isDate ? groupCellDisplay(field, r) : null;
+      const gk = isDate ? disp! : String(rawValue(field, r) ?? "");
       let g = byKey.get(gk);
       if (!g) {
-        g = { label: displayValue(field, r), rows: [] };
+        g = { label: isDate ? disp! : displayValue(field, r), rows: [] };
         byKey.set(gk, g);
         order.push(gk);
       }
