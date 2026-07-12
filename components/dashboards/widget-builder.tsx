@@ -297,6 +297,23 @@ export function WidgetBuilder({
     widget?.settings?.showFilterBar !== false
   );
 
+  // Dimensões dinâmicas (por eixo): o widget cresce p/ caber o conteúdo, sem
+  // encolher abaixo do tamanho configurado. Só p/ tabela + gráficos.
+  const [autoWidth, setAutoWidth] = useState<boolean>(
+    widget?.settings?.autoSize?.width ?? false
+  );
+  const [autoHeight, setAutoHeight] = useState<boolean>(
+    widget?.settings?.autoSize?.height ?? false
+  );
+  // Tipos que suportam dimensão dinâmica: tabela e gráficos (não kpi/calc/filtro).
+  const supportsAutoSize =
+    visualType === "tabela" ||
+    visualType === "barra" ||
+    visualType === "barra_horizontal" ||
+    visualType === "linha" ||
+    visualType === "pizza" ||
+    visualType === "funil";
+
   // Flags por coluna no modo lista: editável + gravar no Bitrix. Semeadas das
   // colunas existentes (RecordListColumn.editable/writeBack).
   const [columnFlags, setColumnFlags] = useState<
@@ -606,6 +623,13 @@ export function WidgetBuilder({
     if (visualType === "tabela") {
       if (showFilterBar) delete settings.showFilterBar;
       else settings.showFilterBar = false;
+    }
+
+    // Dimensões dinâmicas: grava só quando algum eixo está ligado (jsonb limpo).
+    if (supportsAutoSize && (autoWidth || autoHeight)) {
+      settings.autoSize = { width: autoWidth, height: autoHeight };
+    } else {
+      delete settings.autoSize;
     }
 
     // Orientação/agrupamento da tabela: grava em appearance.table preservando as
@@ -1000,6 +1024,32 @@ export function WidgetBuilder({
                   onCheckedChange={(v) => setShowFilterBar(v === true)}
                 />
                 Mostrar barra de busca/filtro na tabela
+              </label>
+            </div>
+          ) : null}
+
+          {/* Dimensões dinâmicas: cresce p/ caber o conteúdo (por eixo) */}
+          {supportsAutoSize ? (
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <Label>Tamanho dinâmico</Label>
+              <p className="text-muted-foreground text-xs">
+                O widget cresce para caber o conteúdo e nunca encolhe abaixo do
+                tamanho atual (o mínimo). Redimensione pela alça para definir esse
+                mínimo.
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={autoWidth}
+                  onCheckedChange={(v) => setAutoWidth(v === true)}
+                />
+                Largura dinâmica (cresce com o conteúdo)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={autoHeight}
+                  onCheckedChange={(v) => setAutoHeight(v === true)}
+                />
+                Altura dinâmica (cresce com o conteúdo)
               </label>
             </div>
           ) : null}

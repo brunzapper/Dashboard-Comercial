@@ -316,6 +316,11 @@ export type WidgetSettings = KpiSettings &
     // Id da aba (DashboardSettings.tabs) a que este widget pertence. Ausente = aba
     // padrão (a primeira). Ver components/dashboards/dashboard-client.tsx.
     tab?: string;
+    // Dimensões dinâmicas: o widget cresce p/ caber o conteúdo, sem encolher
+    // abaixo do tamanho configurado (mínimo). Independente por eixo. Ausente =
+    // desligado. O tamanho inflado é só de renderização, nunca é persistido
+    // (o grid_position gravado segue sendo o mínimo). Ver dashboard-grid.tsx.
+    autoSize?: { width?: boolean; height?: boolean };
   };
 
 // Config por dashboard, guardada em dashboards.settings.

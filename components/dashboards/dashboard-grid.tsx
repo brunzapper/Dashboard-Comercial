@@ -8,11 +8,11 @@
 //   settings.canvas ({ cols, rows, rowHeight }).
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardPaste, Loader2 } from "lucide-react";
 import RGL from "react-grid-layout/legacy";
-import type { Layout } from "react-grid-layout/legacy";
+import type { Layout, LayoutItem } from "react-grid-layout/legacy";
 
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -120,7 +120,6 @@ export function DashboardGrid({
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
-  const mounted = useRef(false);
   const { pending } = useNavPending();
   const router = useRouter();
   const [, startPaste] = useTransition();
@@ -180,9 +179,30 @@ export function DashboardGrid({
     };
   }, [panning]);
 
+  // Dimensões dinâmicas: tamanho medido do conteúdo (unidades do grid), por
+  // widget, reportado pelos cards. Só infla a renderização — o `grid_position`
+  // gravado segue sendo o mínimo (ver onDragStop/onResizeStop).
+  const [measured, setMeasured] = useState<
+    Record<string, { w: number; h: number }>
+  >({});
+  const onMeasure = useCallback((id: string, w: number, h: number) => {
+    setMeasured((prev) =>
+      prev[id]?.w === w && prev[id]?.h === h ? prev : { ...prev, [id]: { w, h } }
+    );
+  }, []);
+
+  // Tamanho base (mínimo) por widget — usado ao persistir, para nunca gravar o
+  // tamanho inflado pelo conteúdo.
+  const baseById = new Map(widgets.map((w, i) => [w.id, posOf(w, i)]));
+
+  // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado.
   const layout: Layout = widgets.map((w, i) => {
     const p = posOf(w, i);
-    return { i: w.id, x: p.x, y: p.y, w: p.w, h: p.h };
+    const a = w.settings?.autoSize;
+    const m = measured[w.id];
+    const ew = a?.width && m ? Math.max(p.w, m.w) : p.w;
+    const eh = a?.height && m ? Math.max(p.h, m.h) : p.h;
+    return { i: w.id, x: p.x, y: p.y, w: ew, h: eh };
   });
 
   // Extensão do conteúdo — pisos para não cortar widgets ao encolher a área.
@@ -314,16 +334,32 @@ export function DashboardGrid({
     });
   }
 
-  function onLayoutChange(next: Layout) {
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
+  // Persistência do layout: só em interações do usuário (arrastar/redimensionar),
+  // e sempre gravando o tamanho BASE (mínimo), nunca o inflado pelo conteúdo. Um
+  // arraste persiste posições; um redimensionamento redefine o mínimo do widget
+  // arrastado (é assim que se ajusta a base de um widget com tamanho dinâmico).
+  function persist(next: Layout, resizedItem?: LayoutItem | null) {
     if (!editMode) return;
     void saveLayout(
       dashboardId,
-      next.map((it) => ({ id: it.i, x: it.x, y: it.y, w: it.w, h: it.h }))
+      next.map((it) => {
+        const base = baseById.get(it.i);
+        const resized = resizedItem && it.i === resizedItem.i;
+        const w = resized ? resizedItem.w : base?.w ?? it.w;
+        const h = resized ? resizedItem.h : base?.h ?? it.h;
+        return { id: it.i, x: it.x, y: it.y, w, h };
+      })
     );
+  }
+  function onDragStop(next: Layout) {
+    persist(next);
+  }
+  function onResizeStop(
+    next: Layout,
+    _old: LayoutItem | null,
+    item: LayoutItem | null
+  ) {
+    persist(next, item);
   }
 
   // Alças de borda: a barra inferior arrasta a ALTURA (rows), a barra direita a
@@ -455,7 +491,8 @@ export function DashboardGrid({
               isDraggable={editMode}
               isResizable={editMode}
               draggableHandle=".widget-drag"
-              onLayoutChange={onLayoutChange}
+              onDragStop={onDragStop}
+              onResizeStop={onResizeStop}
             >
               {widgets.map((w) => (
                 <div key={w.id} className="cursor-auto">
@@ -482,6 +519,12 @@ export function DashboardGrid({
                     canManageFields={canManageFields}
                     editMode={editMode}
                     filterOptions={filterOptionsById?.[w.id]}
+                    autoSize={w.settings?.autoSize}
+                    cellW={cellW}
+                    rowH={ROW_H}
+                    mx={MX}
+                    my={MY}
+                    onMeasure={onMeasure}
                   />
                 </div>
               ))}
