@@ -119,8 +119,14 @@ export function DashboardClient({
   // Renomear o dashboard (inline no título). Estado otimista: aplica o nome na
   // hora e persiste no servidor. Nome vazio mantém o atual.
   const [renaming, setRenaming] = useState(false);
+  const [seedName, setSeedName] = useState(dashboardName);
   const [name, setName] = useState(dashboardName);
-  if (!renaming && name !== dashboardName) setName(dashboardName);
+  // Ressincroniza só quando a prop do servidor muda de fato (evita reverter o
+  // valor otimista a cada render, como o padrão seedKey das abas acima).
+  if (seedName !== dashboardName) {
+    setSeedName(dashboardName);
+    setName(dashboardName);
+  }
   function commitName(value: string) {
     setRenaming(false);
     const next = value.trim();
