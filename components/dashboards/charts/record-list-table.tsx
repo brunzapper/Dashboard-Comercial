@@ -931,7 +931,7 @@ export function RecordListTable({
     });
 
     return (
-      <div className="h-full overflow-auto">
+      <div className="h-full overflow-auto [scrollbar-gutter:stable]">
         <Table>
           <TableHeader>
             <TableRow
@@ -1015,7 +1015,7 @@ export function RecordListTable({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
       <Table>
         <TableHeader>
           <TableRow
