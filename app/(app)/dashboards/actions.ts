@@ -79,8 +79,11 @@ export async function deleteDashboard(formData: FormData): Promise<void> {
   revalidatePath("/");
 }
 
-// Config por dashboard (settings jsonb): hoje só a barra de período global.
-// RLS restringe update a owner/admin.
+// Config por dashboard (settings jsonb). ATENÇÃO: sobrescreve a coluna `settings`
+// INTEIRA — os callers DEVEM enviar o objeto completo (`{ ...settings, ...mudança }`),
+// senão apagam as demais chaves (tabs/background/canvas/periodBar). Não fazemos
+// merge no servidor de propósito: remover uma chave (ex.: background) depende de
+// omiti-la, e um merge a manteria. RLS restringe update a owner/admin.
 export async function updateDashboardSettings(
   dashboardId: string,
   settings: DashboardSettings
