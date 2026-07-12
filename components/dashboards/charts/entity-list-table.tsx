@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { FieldDefinition } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { ENTITY_TYPE_OF } from "@/lib/widgets/entity-list";
 import {
@@ -74,19 +75,15 @@ function EntityEditableCell({
     field.data_type !== "calculado" &&
     field.editable_by_roles.some((r) => userRoles.includes(r));
 
-  function money(v: string): string {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return v;
-    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  }
-
   if (!editable) {
-    const display =
-      field.data_type === "moeda"
-        ? money(serverValue)
-        : field.data_type === "data"
-          ? formatDateValue(serverValue, dateFormat)
-          : serverValue;
+    // Entidades (responsável/operação) não têm moeda de registro; a moeda vem do
+    // próprio campo (fixa p/ 'moeda'; fallback BRL quando 'calculado'-herdar).
+    const fieldMoney = resolveFieldMoney(field, null);
+    const display = fieldMoney.isMoney
+      ? formatMoney(serverValue, fieldMoney.code)
+      : field.data_type === "data"
+        ? formatDateValue(serverValue, dateFormat)
+        : serverValue;
     return <span className="block truncate">{display || "—"}</span>;
   }
 

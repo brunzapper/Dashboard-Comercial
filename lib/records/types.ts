@@ -43,6 +43,11 @@ export interface FieldDefinition {
   source_field_id?: string | null;
   show_in_builder?: boolean;
   formula?: Formula | null;
+  // Moeda por campo (12/07/2026): 'moeda' guarda a moeda fixa em currency_code;
+  // 'calculado' usa currency_mode ('inherit' = moeda do registro | 'fixed' =
+  // currency_code) — ausente/null = número puro (não é moeda).
+  currency_code?: string | null;
+  currency_mode?: "inherit" | "fixed" | null;
   // Fase 8: a quais record_type (fonte) a coluna pertence. Vazio/ausente = todas.
   applies_to?: string[];
   // Write-back: quando true, editar este campo enfileira a mudança de volta ao

@@ -6,6 +6,14 @@
 // + − × ÷ com precedência e parênteses. Null-safe: operando ausente/não-numérico
 // ou divisão por zero => resultado null (não engana com zero).
 
+import {
+  convertCurrency,
+  loadCurrencyRates,
+  resolveCurrencyCode,
+  yearQuarterOf,
+  type CurrencyRates,
+} from "@/lib/widgets/currency";
+
 export type FormulaOp = "+" | "-" | "*" | "/";
 
 export type FormulaToken =
@@ -149,6 +157,10 @@ export function validateFormula(
 export interface FormulaFieldDef {
   field_key: string;
   formula: Formula | null;
+  // Moeda do resultado (12/07/2026): 'inherit' = moeda do registro; 'fixed' =
+  // currency_code; ausente = número puro (sem conversão).
+  currency_mode?: string | null;
+  currency_code?: string | null;
 }
 
 /** Carrega as definições de campos calculados (data_type='calculado'). */
@@ -157,14 +169,80 @@ export async function loadFormulaDefs(
 ): Promise<FormulaFieldDef[]> {
   const { data } = await db
     .from("field_definitions")
-    .select("field_key, formula")
+    .select("field_key, formula, currency_mode, currency_code")
     .eq("data_type", "calculado");
   return (data ?? [])
     .map((r) => ({
       field_key: r.field_key as string,
       formula: (r.formula as Formula | null) ?? null,
+      currency_mode: (r.currency_mode as string | null) ?? null,
+      currency_code: (r.currency_code as string | null) ?? null,
     }))
     .filter((d) => d.formula != null);
+}
+
+// Contexto de conversão de moeda de um registro (para materializar calc-fields).
+export interface FormulaCurrencyContext {
+  recordCurrency: string; // moeda do registro (value/mrr)
+  year: number;
+  quarter: number; // 0 = anual; 1..4
+  rates: CurrencyRates;
+  // Moeda de cada operando monetário: ref → código ISO (só refs monetárias).
+  operandCurrency: Record<string, string>;
+}
+
+// Insumos de câmbio compartilhados: taxas + moeda de cada campo 'moeda'.
+export interface CurrencyMaterials {
+  rates: CurrencyRates;
+  moedaCurrency: Record<string, string>; // 'custom:<key>' → ISO
+}
+
+/** True quando algum calc-field é monetário (precisa de conversão). */
+export function anyMoneyDef(defs: FormulaFieldDef[]): boolean {
+  return defs.some(
+    (d) => d.currency_mode === "inherit" || d.currency_mode === "fixed"
+  );
+}
+
+/** Carrega taxas + a moeda de cada campo personalizado 'moeda'. */
+export async function loadCurrencyMaterials(
+  db: import("@supabase/supabase-js").SupabaseClient
+): Promise<CurrencyMaterials> {
+  const rates = await loadCurrencyRates(db);
+  const { data } = await db
+    .from("field_definitions")
+    .select("field_key, currency_code")
+    .eq("data_type", "moeda");
+  const moedaCurrency: Record<string, string> = {};
+  for (const f of data ?? []) {
+    moedaCurrency[`custom:${f.field_key as string}`] = resolveCurrencyCode(
+      f.currency_code as string | null
+    );
+  }
+  return { rates, moedaCurrency };
+}
+
+/** Monta o contexto de conversão de um registro a partir dos insumos. */
+export function buildRecordCurrencyContext(
+  rec: {
+    currency?: string | null;
+    closed_at?: string | null;
+    opened_at?: string | null;
+    source_created_at?: string | null;
+  },
+  mats: CurrencyMaterials
+): FormulaCurrencyContext {
+  const recCur = resolveCurrencyCode(rec.currency);
+  const { year, quarter } = yearQuarterOf(
+    rec.closed_at ?? rec.opened_at ?? rec.source_created_at
+  );
+  return {
+    recordCurrency: recCur,
+    year,
+    quarter,
+    rates: mats.rates,
+    operandCurrency: { value: recCur, mrr: recCur, ...mats.moedaCurrency },
+  };
 }
 
 /**
@@ -176,18 +254,53 @@ export async function loadFormulaDefs(
 export function computeFormulaFields(
   coreValues: Record<string, number | null>,
   customFields: Record<string, unknown>,
-  formulaDefs: FormulaFieldDef[]
+  formulaDefs: FormulaFieldDef[],
+  conv?: FormulaCurrencyContext
 ): Record<string, number | null> {
-  const ctx: Record<string, number | null> = {};
-  for (const [k, v] of Object.entries(coreValues)) ctx[k] = v;
-  for (const [k, v] of Object.entries(customFields)) ctx[`custom:${k}`] = toNum(v);
+  const baseCtx: Record<string, number | null> = {};
+  for (const [k, v] of Object.entries(coreValues)) baseCtx[k] = v;
+  for (const [k, v] of Object.entries(customFields)) baseCtx[`custom:${k}`] = toNum(v);
 
   const out: Record<string, number | null> = {};
   for (const def of formulaDefs) {
     if (!def.formula) continue;
-    out[def.field_key] = evaluateFormula(def.formula, ctx);
+    // Campo calculado monetário: converte cada operando monetário para a moeda
+    // de destino (herdada do registro ou fixa) antes de avaliar. Assim, ao
+    // envolver moedas diferentes, o cálculo é feito já convertido.
+    const isMoney = def.currency_mode === "inherit" || def.currency_mode === "fixed";
+    if (conv && isMoney) {
+      const target =
+        def.currency_mode === "fixed"
+          ? def.currency_code ?? "BRL"
+          : conv.recordCurrency;
+      out[def.field_key] = evaluateFormula(
+        def.formula,
+        convertOperands(baseCtx, target, conv)
+      );
+    } else {
+      out[def.field_key] = evaluateFormula(def.formula, baseCtx);
+    }
   }
   return out;
+}
+
+// Converte os operandos monetários do contexto para a moeda `target` (ponte via
+// Real). Operandos não-monetários (sem entrada em operandCurrency) passam iguais.
+function convertOperands(
+  baseCtx: Record<string, number | null>,
+  target: string,
+  conv: FormulaCurrencyContext
+): Record<string, number | null> {
+  const ctx: Record<string, number | null> = {};
+  for (const [ref, v] of Object.entries(baseCtx)) {
+    const cur = conv.operandCurrency[ref];
+    if (v == null || !cur) {
+      ctx[ref] = v;
+      continue;
+    }
+    ctx[ref] = convertCurrency(v, cur, target, conv.rates, conv.year, conv.quarter);
+  }
+  return ctx;
 }
 
 /** Texto legível de uma fórmula (para exibição na config). */

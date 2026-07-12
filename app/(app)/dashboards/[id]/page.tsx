@@ -11,6 +11,11 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
+import {
+  currencyOptionsFrom,
+  loadCurrencyRates,
+  loadEnabledCurrencies,
+} from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
 import {
@@ -80,6 +85,8 @@ export default async function DashboardPage({
     { data: fieldsData },
     correspondences,
     { data: prefData },
+    enabledCurrencies,
+    currencyRates,
   ] = await Promise.all([
     supabase
       .from("widgets")
@@ -91,7 +98,7 @@ export default async function DashboardPage({
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, currency_code, currency_mode, sort_order, applies_to, source_system, source_field_id, write_back"
       )
       .eq("show_in_builder", true)
       .order("sort_order", { ascending: true }),
@@ -104,7 +111,10 @@ export default async function DashboardPage({
           .eq("dashboard_id", id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    loadEnabledCurrencies(supabase),
+    loadCurrencyRates(supabase),
   ]);
+  const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
   // Último período consultado pelo usuário neste dashboard (se houver).
   const savedPeriod =
@@ -477,6 +487,8 @@ export default async function DashboardPage({
       available={available}
       canEdit={canEdit}
       canManageFields={canManageFields}
+      currencyOptions={currencyOptions}
+      currencyRates={currencyRates}
       settings={dashSettings}
       visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
       dateFormat={dashSettings.dateFormat}

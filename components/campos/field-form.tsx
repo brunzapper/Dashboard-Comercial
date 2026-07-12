@@ -17,6 +17,7 @@ import {
   type DataType,
   type FieldDefinition,
 } from "@/lib/records/types";
+import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
 import {
   createField,
   updateField,
@@ -28,6 +29,10 @@ const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const DATA_TYPE_OPTIONS: ComboboxOption[] = (
   Object.keys(DATA_TYPE_LABELS) as DataType[]
 ).map((t) => ({ value: t, label: DATA_TYPE_LABELS[t] }));
+// Fallback quando o caller não passa as moedas habilitadas (Real/Dólar).
+const DEFAULT_CURRENCY_OPTIONS: ComboboxOption[] = CURRENCY_OPTIONS.filter(
+  (o) => o.value === "BRL" || o.value === "USD"
+);
 const initial: FieldActionState = {};
 
 function RoleChecks({
@@ -58,10 +63,13 @@ function RoleChecks({
 export function FieldForm({
   field,
   numericRefs,
+  currencyOptions,
   onDone,
 }: {
   field?: FieldDefinition;
   numericRefs: RefOption[];
+  // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
+  currencyOptions?: ComboboxOption[];
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
   onDone?: (created?: FieldActionState["field"]) => void;
 }) {
@@ -71,6 +79,38 @@ export function FieldForm({
   const [dataType, setDataType] = useState<DataType>(
     field?.data_type ?? "texto"
   );
+  const currencyChoices =
+    currencyOptions && currencyOptions.length > 0
+      ? currencyOptions
+      : DEFAULT_CURRENCY_OPTIONS;
+  // Moeda fixa de um campo 'moeda'.
+  const [currencyCode, setCurrencyCode] = useState(
+    field?.currency_code ?? "BRL"
+  );
+  // "Formato do resultado" de um campo 'calculado': número | herdar | fixed:<code>.
+  const [calcCurrency, setCalcCurrency] = useState(
+    field?.currency_mode === "inherit"
+      ? "inherit"
+      : field?.currency_mode === "fixed"
+        ? `fixed:${field?.currency_code ?? "BRL"}`
+        : "number"
+  );
+  const calcMode = calcCurrency.startsWith("fixed:")
+    ? "fixed"
+    : calcCurrency === "inherit"
+      ? "inherit"
+      : "";
+  const calcCode = calcCurrency.startsWith("fixed:")
+    ? calcCurrency.slice("fixed:".length)
+    : "";
+  const calcResultOptions: ComboboxOption[] = [
+    { value: "number", label: "Número (sem moeda)" },
+    { value: "inherit", label: "Moeda — herdar do registro" },
+    ...currencyChoices.map((o) => ({
+      value: `fixed:${o.value}`,
+      label: `Moeda — ${o.label}`,
+    })),
+  ];
 
   // Ao editar um campo calculado, ele não pode ser operando de si mesmo.
   const operandRefs = numericRefs.filter(
@@ -127,6 +167,25 @@ export function FieldForm({
         </div>
       ) : null}
 
+      {dataType === "moeda" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label>Moeda</Label>
+          <Combobox
+            name="currency_code"
+            options={currencyChoices}
+            value={currencyCode}
+            onValueChange={setCurrencyCode}
+            searchable={false}
+            className="w-full"
+            aria-label="Moeda"
+          />
+          <p className="text-muted-foreground text-xs">
+            Moeda em que os valores deste campo são exibidos. Habilite outras
+            moedas em Configurações → Moedas.
+          </p>
+        </div>
+      ) : null}
+
       {dataType === "calculado" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
@@ -134,6 +193,21 @@ export function FieldForm({
           <p className="text-muted-foreground text-xs">
             Opere entre colunas numéricas (+ − × ÷) e constantes. O resultado é
             calculado por registro a cada sincronização/edição.
+          </p>
+          <Label className="mt-1">Formato do resultado</Label>
+          <Combobox
+            options={calcResultOptions}
+            value={calcCurrency}
+            onValueChange={setCalcCurrency}
+            searchable={false}
+            className="w-full"
+            aria-label="Formato do resultado"
+          />
+          <input type="hidden" name="currency_mode" value={calcMode} />
+          <input type="hidden" name="currency_code" value={calcCode} />
+          <p className="text-muted-foreground text-xs">
+            &quot;Herdar do registro&quot; usa a moeda de cada registro; ao
+            envolver moedas diferentes, o cálculo converte para Real.
           </p>
         </div>
       ) : null}

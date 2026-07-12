@@ -16,7 +16,13 @@ import {
   type WriteBackChange,
 } from "@/lib/sync/bitrix/writeback";
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
-import { computeFormulaFields, loadFormulaDefs } from "@/lib/records/formulas";
+import {
+  anyMoneyDef,
+  buildRecordCurrencyContext,
+  computeFormulaFields,
+  loadCurrencyMaterials,
+  loadFormulaDefs,
+} from "@/lib/records/formulas";
 import type { DataType } from "@/lib/records/types";
 import {
   EDITABLE_CORE_COLUMNS,
@@ -236,6 +242,18 @@ export async function updateRecord(
   if (formulaDefs.length > 0) {
     const effLeadTime =
       "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days;
+    // Calc-fields monetários convertem os operandos p/ a moeda de destino.
+    const conv = anyMoneyDef(formulaDefs)
+      ? buildRecordCurrencyContext(
+          {
+            currency: existing.currency,
+            closed_at: existing.closed_at,
+            opened_at: existing.opened_at,
+            source_created_at: existing.source_created_at,
+          },
+          await loadCurrencyMaterials(supabase)
+        )
+      : undefined;
     const calc = computeFormulaFields(
       {
         value: numOrNull(existing.value),
@@ -243,7 +261,8 @@ export async function updateRecord(
         lead_time_days: numOrNull(effLeadTime),
       },
       custom,
-      formulaDefs
+      formulaDefs,
+      conv
     );
     let calcChanged = false;
     for (const [k, v] of Object.entries(calc)) {

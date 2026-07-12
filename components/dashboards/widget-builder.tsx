@@ -7,14 +7,21 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2 } from "lucide-react";
+import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldForm } from "@/components/campos/field-form";
+import type { FieldDefinition } from "@/lib/records/types";
 import {
   FormulaBuilder,
   type RefOption,
@@ -64,6 +71,12 @@ import {
   FILTER_OPS,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import type {
+  ConversionBasis,
+  CurrencyDisplay,
+  CurrencyMultiMode,
+  GrandTotalMode,
+} from "@/lib/widgets/currency";
 import {
   createWidget,
   updateWidget,
@@ -74,6 +87,39 @@ const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   label: o.label,
 }));
 
+// --- Opções de moeda das métricas monetárias (Parte C) ---
+const CONVERSION_BASIS_OPTIONS: ComboboxOption[] = [
+  { value: "record_year", label: "Ano do registro" },
+  { value: "record_quarter", label: "Trimestre do registro" },
+  { value: "period_year", label: "Ano do período" },
+  { value: "period_quarter", label: "Trimestre do período" },
+];
+const CURRENCY_DISPLAY_OPTIONS: ComboboxOption[] = [
+  { value: "original", label: "Só a moeda original" },
+  { value: "converted", label: "Só convertido (R$)" },
+  { value: "reference", label: "US$ original → R$ convertido" },
+];
+const CURRENCY_MULTI_OPTIONS: ComboboxOption[] = [
+  { value: "convert", label: "Converter tudo (R$)" },
+  { value: "separate", label: "Totais por moeda (separados)" },
+  { value: "reference", label: "US$ total → R$ convertido" },
+];
+const GRAND_TOTAL_OPTIONS: ComboboxOption[] = [
+  { value: "converted", label: "Total convertido (R$)" },
+  { value: "dollar", label: "Total em US$" },
+];
+
+function basisValue(b?: ConversionBasis): string {
+  return b ? `${b.source}_${b.granularity}` : "record_year";
+}
+function parseBasis(v: string): ConversionBasis {
+  const [source, granularity] = v.split("_");
+  return {
+    source: source === "period" ? "period" : "record",
+    granularity: granularity === "quarter" ? "quarter" : "year",
+  };
+}
+
 export function WidgetBuilder({
   dashboardId,
   available,
@@ -81,6 +127,8 @@ export function WidgetBuilder({
   siblings = [],
   trigger,
   canManageFields = false,
+  fields = [],
+  currencyOptions,
   tabs = [],
   activeTabId,
   open: controlledOpen,
@@ -92,6 +140,10 @@ export function WidgetBuilder({
   siblings?: Widget[];
   trigger?: React.ReactNode;
   canManageFields?: boolean;
+  // Definições completas dos campos personalizados (p/ o ⋮ "Configurar campo").
+  fields?: FieldDefinition[];
+  // Moedas habilitadas (repassadas ao FieldForm embutido).
+  currencyOptions?: ComboboxOption[];
   tabs?: { id: string; name: string; color?: string }[];
   activeTabId?: string;
   open?: boolean;
@@ -102,8 +154,50 @@ export function WidgetBuilder({
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
   const [fieldSheetOpen, setFieldSheetOpen] = useState(false);
+  // Campo em edição pelo ⋮ "Configurar campo" (null = criação de novo campo).
+  const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Definição personalizada por trás de um `custom:<key>` (p/ o ⋮).
+  const fieldDefOf = (fieldStr: string): FieldDefinition | undefined =>
+    fieldStr.startsWith("custom:")
+      ? fields.find((f) => f.field_key === fieldStr.slice("custom:".length))
+      : undefined;
+
+  // Menu ⋮ ao lado de uma dimensão/métrica: abre a config do campo. Só p/ admins
+  // (canManageFields); item desabilitado em campos do núcleo/unificados (sem def).
+  const renderFieldMenu = (fieldStr: string) => {
+    if (!canManageFields) return null;
+    const def = fieldDefOf(fieldStr);
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Configurar campo"
+          >
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            disabled={!def}
+            onSelect={(e) => {
+              e.preventDefault();
+              if (!def) return;
+              setEditingField(def);
+              setFieldSheetOpen(true);
+            }}
+          >
+            <Pencil className="size-4" /> Configurar campo
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   // Largura do painel de config, redimensionável arrastando a borda esquerda
   // (como as colunas/linhas das tabelas). Persistida no localStorage (chrome do
@@ -302,6 +396,16 @@ export function WidgetBuilder({
   }
 
   const numericFields = available.filter((f) => f.isNumeric);
+
+  // Métrica monetária (value/mrr ou campo moeda/calc-moeda): habilita as opções
+  // de moeda/conversão da métrica.
+  const isMoneyField = (field: string): boolean =>
+    available.find((a) => a.field === field)?.isMoney ?? false;
+  const updateMetric = (i: number, patch: Partial<Metric>) => {
+    const next = [...metrics];
+    next[i] = { ...metrics[i], ...patch };
+    setMetrics(next);
+  };
 
   // Refs disponíveis para a Métrica calculada: agregações de registros.
   const calcRefs: RefOption[] = [
@@ -910,7 +1014,10 @@ export function WidgetBuilder({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setFieldSheetOpen(true)}
+                onClick={() => {
+                  setEditingField(null);
+                  setFieldSheetOpen(true);
+                }}
               >
                 <Plus className="size-4" /> Novo campo
               </Button>
@@ -981,6 +1088,7 @@ export function WidgetBuilder({
                     aria-label="Modo da semana do mês"
                   />
                 ) : null}
+                {d.field ? renderFieldMenu(d.field) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -1135,6 +1243,7 @@ export function WidgetBuilder({
                   }}
                   aria-label="Agregação"
                 />
+                {m.field && m.field !== "*" ? renderFieldMenu(m.field) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -1156,6 +1265,72 @@ export function WidgetBuilder({
                     }}
                     aria-label="Nome exibido da métrica"
                   />
+                ) : null}
+                {isMoneyField(m.field) ? (
+                  <div className="grid grid-cols-2 gap-2 rounded-md border p-2">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Base da taxa
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CONVERSION_BASIS_OPTIONS}
+                        value={basisValue(m.conversionBasis)}
+                        onValueChange={(v) =>
+                          updateMetric(i, { conversionBasis: parseBasis(v) })
+                        }
+                        aria-label="Base da taxa de conversão"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Exibição (1 moeda)
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CURRENCY_DISPLAY_OPTIONS}
+                        value={m.currencyDisplay ?? "original"}
+                        onValueChange={(v) =>
+                          updateMetric(i, { currencyDisplay: v as CurrencyDisplay })
+                        }
+                        aria-label="Exibição para moeda única"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Exibição (várias)
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={CURRENCY_MULTI_OPTIONS}
+                        value={m.currencyMultiMode ?? "convert"}
+                        onValueChange={(v) =>
+                          updateMetric(i, {
+                            currencyMultiMode: v as CurrencyMultiMode,
+                          })
+                        }
+                        aria-label="Exibição para várias moedas"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-muted-foreground text-xs">
+                        Total geral
+                      </Label>
+                      <Combobox
+                        className="h-8 text-sm"
+                        searchable={false}
+                        options={GRAND_TOTAL_OPTIONS}
+                        value={m.grandTotalMode ?? "converted"}
+                        onValueChange={(v) =>
+                          updateMetric(i, { grandTotalMode: v as GrandTotalMode })
+                        }
+                        aria-label="Total geral"
+                      />
+                    </div>
+                  </div>
                 ) : null}
               </div>
             ))}
@@ -1233,27 +1408,40 @@ export function WidgetBuilder({
         </div>
       </SheetContent>
 
-      {/* Criar campo sem sair do editor: reusa o FieldForm de /campos; ao salvar,
-          router.refresh() recomputa `available` (novo campo entra nos seletores). */}
+      {/* Criar/CONFIGURAR campo sem sair do editor: reusa o FieldForm de /campos;
+          ao salvar, router.refresh() recomputa `available`/`fields`. Em modo edição
+          (⋮ "Configurar campo") só fecha e atualiza; em criação, já insere o campo. */}
       {canManageFields ? (
-        <Sheet open={fieldSheetOpen} onOpenChange={setFieldSheetOpen}>
+        <Sheet
+          open={fieldSheetOpen}
+          onOpenChange={(o) => {
+            setFieldSheetOpen(o);
+            if (!o) setEditingField(null);
+          }}
+        >
           <SheetContent className="overflow-y-auto">
             <SheetHeader>
-              <SheetTitle>Novo campo</SheetTitle>
+              <SheetTitle>
+                {editingField ? "Configurar campo" : "Novo campo"}
+              </SheetTitle>
               <SheetDescription>
-                A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos
-                a lista automaticamente ao salvar.
+                {editingField
+                  ? "Edite este campo sem sair do construtor. As mudanças refletem no widget ao salvar."
+                  : "A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos a lista automaticamente ao salvar."}
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-4">
               <FieldForm
-                key={fieldSheetOpen ? "open" : "closed"}
+                key={editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}
+                field={editingField ?? undefined}
                 numericRefs={fieldFormNumericRefs}
+                currencyOptions={currencyOptions}
                 onDone={(created) => {
+                  const wasEditing = Boolean(editingField);
                   setFieldSheetOpen(false);
-                  // O campo recém-criado já entra como coluna/dimensão do widget
-                  // em edição (o usuário criou justamente para usar aqui).
-                  if (created?.field_key) {
+                  setEditingField(null);
+                  // Só na CRIAÇÃO o campo recém-criado entra como dimensão.
+                  if (!wasEditing && created?.field_key) {
                     const ref = `custom:${created.field_key}`;
                     setDimensions((prev) =>
                       prev.some((d) => d.field === ref)

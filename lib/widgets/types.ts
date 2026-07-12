@@ -5,6 +5,12 @@
 import type { SourceKey } from "@/lib/sources";
 import type { Formula } from "@/lib/records/formulas";
 import type { DateFormat } from "./format";
+import type {
+  ConversionBasis,
+  CurrencyDisplay,
+  CurrencyMultiMode,
+  GrandTotalMode,
+} from "./currency";
 
 export type VisualType =
   | "tabela"
@@ -113,6 +119,15 @@ export interface Metric {
   agg: Aggregation;
   // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
   label?: string;
+  // Moeda (12/07/2026): só relevante p/ métrica monetária (value/mrr/campo moeda).
+  // A taxa a usar (ano/trimestre do registro ou do período do dashboard):
+  conversionBasis?: ConversionBasis;
+  // Exibição quando o recorte tem UMA moeda estrangeira:
+  currencyDisplay?: CurrencyDisplay;
+  // Exibição quando o recorte (grupo/KPI/total) tem VÁRIAS moedas:
+  currencyMultiMode?: CurrencyMultiMode;
+  // Como o "Total geral" aparece (convertido em R$ ou total em US$ separado):
+  grandTotalMode?: GrandTotalMode;
 }
 export interface WidgetFilter {
   field: string;
@@ -131,6 +146,11 @@ export interface KpiSettings {
   numerator?: Metric; // modo razão
   denominator?: Metric;
   label?: string;
+  // Moeda do KPI monetário (mesma semântica dos campos de Metric acima).
+  conversionBasis?: ConversionBasis;
+  currencyDisplay?: CurrencyDisplay;
+  currencyMultiMode?: CurrencyMultiMode;
+  grandTotalMode?: GrandTotalMode;
 }
 
 // Config do widget de filtro de período (visual_type 'filtro'), guardada em

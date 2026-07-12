@@ -16,6 +16,11 @@ const ALL_TABS: (SettingsTab & { role?: string; permission?: string })[] = [
   { href: "/configuracoes/responsaveis", label: "Responsáveis", role: "admin" },
   { href: "/configuracoes/metas", label: "Metas", role: "admin" },
   {
+    href: "/configuracoes/moedas",
+    label: "Moedas",
+    permission: "manage_field_definitions",
+  },
+  {
     href: "/configuracoes/usuarios",
     label: "Usuários",
     permission: "manage_users_roles",
