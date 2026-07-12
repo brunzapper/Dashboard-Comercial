@@ -16,7 +16,9 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  buildDateContext,
   computeFormulaFields,
+  loadCustomDateKeys,
   loadFormulaDefs,
   type FormulaFieldDef,
 } from "@/lib/records/formulas";
@@ -119,7 +121,8 @@ async function resolveRelatedLeadByEmail(
 async function upsertSheetRow(
   db: SupabaseClient,
   row: SheetSiteRow,
-  formulaDefs: FormulaFieldDef[]
+  formulaDefs: FormulaFieldDef[],
+  customDateKeys: string[]
 ): Promise<"inserted" | "updated"> {
   const sourceId = sourceIdFor(row.name, row.created_at);
 
@@ -137,6 +140,15 @@ async function upsertSheetRow(
   const responsibleId = await resolveResponsibleByName(db, row.consultor);
   const operationId = await primaryOperationId(db, responsibleId);
   const relatedLead = await resolveRelatedLeadByEmail(db, row.email);
+
+  // Datas próprias do registro (venda do site): a data da venda é a `created_at`
+  // da planilha (source_created_at); não há fechamento/abertura. Usada no
+  // contexto de datas dos campos calculados (aritmética entre datas próprias).
+  const ownDates = {
+    closed_at: null as string | null,
+    opened_at: null as string | null,
+    source_created_at: row.created_at,
+  };
 
   // Lead time: prioriza o lead relacionado encontrado no app; sem match,
   // usa o valor já calculado pelo Apps Script (via Leads Base).
@@ -163,7 +175,9 @@ async function upsertSheetRow(
         computeFormulaFields(
           { value: numOrNull(row.contract), mrr: numOrNull(row.mrr), lead_time_days: computedLeadTime },
           custom_fields,
-          formulaDefs
+          formulaDefs,
+          undefined,
+          buildDateContext(ownDates, custom_fields, customDateKeys)
         )
       );
     }
@@ -255,7 +269,9 @@ async function upsertSheetRow(
           ),
         },
         mergedCustom,
-        formulaDefs
+        formulaDefs,
+        undefined,
+        buildDateContext(ownDates, mergedCustom, customDateKeys)
       )
     );
     updates.custom_fields = mergedCustom;
@@ -278,13 +294,14 @@ export async function syncEstudoFechamentosRows(
 ): Promise<SyncResult> {
   const result = emptyResult();
   const formulaDefs = await loadFormulaDefs(db);
+  const customDateKeys = await loadCustomDateKeys(db);
   for (const row of rows) {
     if (!row.name || !row.created_at) {
       recordOutcome(result, "venda_site", "skipped");
       continue;
     }
     try {
-      const outcome = await upsertSheetRow(db, row, formulaDefs);
+      const outcome = await upsertSheetRow(db, row, formulaDefs, customDateKeys);
       recordOutcome(result, "venda_site", outcome);
     } catch (e) {
       recordError(result, "venda_site", (e as Error).message);

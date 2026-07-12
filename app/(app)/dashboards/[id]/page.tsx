@@ -45,7 +45,12 @@ import type {
   WidgetData,
   WidgetFilter,
 } from "@/lib/widgets/types";
-import { SOURCE_RECORD_TYPE, type SourceKey } from "@/lib/sources";
+import {
+  DEFAULT_PERIOD_FIELD_BY_SOURCE,
+  isSourceKey,
+  SOURCE_RECORD_TYPE,
+  type SourceKey,
+} from "@/lib/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
@@ -142,6 +147,24 @@ export default async function DashboardPage({
   const isDateField = (f: string) =>
     available.some((a) => a.field === f && a.isDate);
 
+  // Mapa "campo de data por fonte" resolvido: defaults por fonte
+  // (DEFAULT_PERIOD_FIELD_BY_SOURCE) sobrescritos pela config (só campos de data
+  // válidos). É o que faz uma seleção de calendário filtrar cada fonte pela sua
+  // coluna — ex.: negócios por assinatura e Estudo por Created At.
+  const resolveFieldBySource = (
+    cfg?: Partial<Record<SourceKey, string>>
+  ): Partial<Record<SourceKey, string>> => {
+    const out: Partial<Record<SourceKey, string>> = {
+      ...DEFAULT_PERIOD_FIELD_BY_SOURCE,
+    };
+    for (const [k, v] of Object.entries(cfg ?? {})) {
+      if (isSourceKey(k) && typeof v === "string" && isDateField(v)) {
+        out[k] = v;
+      }
+    }
+    return out;
+  };
+
   // Widgets de dados (excluem os controles: filtro de período e filtro por campo).
   const dataWidgets = widgets.filter(
     (w) => w.visual_type !== "filtro" && w.visual_type !== "filtro_campo"
@@ -192,12 +215,20 @@ export default async function DashboardPage({
     const { defaultField, periodDefaults } = resolveDefaults(savedFor(bucket));
     const keys = periodKeys(scope, bucket);
     const campoRaw = str(sp[keys.campo]);
-    const field = isDateField(campoRaw) ? campoRaw : defaultField;
-    return resolvePeriodSelection(
+    const userPickedField = isDateField(campoRaw);
+    const field = userPickedField ? campoRaw : defaultField;
+    const p = resolvePeriodSelection(
       { preset: str(sp[keys.preset]), de: str(sp[keys.de]), ate: str(sp[keys.ate]) },
       field,
       periodDefaults
     );
+    if (!p) return null;
+    // Sem escolha explícita de campo na barra, cada fonte filtra pela sua coluna
+    // de data (mapa por fonte). Quando o usuário troca o campo direto na barra,
+    // esse campo único vale p/ todas as fontes (retrocompatível).
+    return userPickedField
+      ? p
+      : { ...p, fieldBySource: resolveFieldBySource(periodBar?.fieldBySource) };
   }
 
   // Defaults por bucket, entregues ao cliente para exibir a seleção efetiva de
@@ -242,12 +273,17 @@ export default async function DashboardPage({
       field,
       { preset: s.defaultPreset ?? "" }
     );
+    // O widget de filtro tem campo fixo; mesmo assim aplica o mapa por fonte
+    // (defaults + config), p/ cada fonte filtrar pela sua coluna de data.
+    const pWithMap: DashboardPeriod | null = p
+      ? { ...p, fieldBySource: resolveFieldBySource(s.fieldBySource) }
+      : p;
     const targets =
       s.targets && s.targets.length > 0
         ? s.targets
         : dataWidgets.map((w) => w.id);
     for (const t of targets) {
-      if (t in periodByWidget) periodByWidget[t] = p;
+      if (t in periodByWidget) periodByWidget[t] = pWithMap;
     }
   }
 

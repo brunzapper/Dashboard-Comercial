@@ -20,6 +20,12 @@ import {
 } from "@/components/ui/popover";
 import type { AvailableField } from "@/lib/widgets/fields";
 import {
+  DEFAULT_PERIOD_FIELD_BY_SOURCE,
+  SOURCE_KEYS,
+  SOURCE_LABELS,
+  type SourceKey,
+} from "@/lib/sources";
+import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
   periodKeys,
@@ -132,6 +138,12 @@ function PeriodBarConfig({
   const [scope, setScope] = useState<PeriodScope>(
     periodBar?.scope === "tab" ? "tab" : "global"
   );
+  // Campo de data por fonte (secundária/terciária/…): a mesma seleção de
+  // calendário filtra cada fonte pela sua coluna. Default por fonte quando não
+  // configurado (ex.: Estudo → Data de criação).
+  const [fieldBySource, setFieldBySource] = useState<
+    Partial<Record<SourceKey, string>>
+  >(() => ({ ...DEFAULT_PERIOD_FIELD_BY_SOURCE, ...(periodBar?.fieldBySource ?? {}) }));
 
   const presetOptions: ComboboxOption[] = [
     { value: "", label: "Todo o período" },
@@ -194,13 +206,35 @@ function PeriodBarConfig({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>Campo de data padrão</Label>
+          <Label>Campo de data primário (visível)</Label>
           <Combobox
             options={fieldOptions}
             value={field}
             onValueChange={setField}
-            aria-label="Campo de data padrão"
+            aria-label="Campo de data primário"
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Campo de data por fonte</Label>
+          <p className="text-muted-foreground text-xs">
+            A mesma seleção do calendário filtra cada fonte pela sua coluna de
+            data (ex.: negócios por assinatura e Estudo por Created At).
+          </p>
+          {SOURCE_KEYS.map((src) => (
+            <div key={src} className="flex items-center gap-2">
+              <span className="text-muted-foreground w-32 shrink-0 text-xs">
+                {SOURCE_LABELS[src]}
+              </span>
+              <Combobox
+                options={fieldOptions}
+                value={fieldBySource[src] ?? DEFAULT_PERIOD_FIELD_BY_SOURCE[src]}
+                onValueChange={(v) =>
+                  setFieldBySource((prev) => ({ ...prev, [src]: v }))
+                }
+                aria-label={`Campo de data — ${SOURCE_LABELS[src]}`}
+              />
+            </div>
+          ))}
         </div>
         <div className="flex items-center justify-between gap-2">
           <Button
@@ -215,7 +249,13 @@ function PeriodBarConfig({
             size="sm"
             disabled={pending}
             onClick={() =>
-              persist({ enabled: true, defaultPreset: preset, field, scope })
+              persist({
+                enabled: true,
+                defaultPreset: preset,
+                field,
+                scope,
+                fieldBySource,
+              })
             }
           >
             Salvar

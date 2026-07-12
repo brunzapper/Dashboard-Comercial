@@ -51,6 +51,7 @@ interface JobContext {
   dealMapping: CustomMapEntry[];
   leadMapping: CustomMapEntry[];
   formulaDefs: FormulaFieldDef[];
+  customDateKeys: string[];
 }
 
 interface JobRow {
@@ -306,6 +307,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         dealMapping: ctx.dealMapping,
         leadMapping: ctx.leadMapping,
         formulaDefs: ctx.formulaDefs,
+        customDateKeys: ctx.customDateKeys,
       };
       await db
         .from("sync_jobs")
@@ -375,7 +377,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
     const relIndex = await loadRelatedLeadIndex(db, mapped);
 
     // Grava a página em lote (muta `totals`).
-    await upsertPage(db, mapped, maps, relIndex, context.formulaDefs, totals, phase.entity);
+    await upsertPage(db, mapped, maps, relIndex, context.formulaDefs, totals, phase.entity, context.customDateKeys);
 
     // Avança o cursor.
     const processedInPhase = start + items.length;

@@ -6,6 +6,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
 import { loadCorrespondences } from "@/lib/correspondences";
+import { loadMatchRules } from "@/lib/matching";
 import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
 import {
   SOURCE_KEYS,
@@ -18,12 +19,13 @@ import {
   CorrespondencesManager,
   type RefOption,
 } from "@/components/campos/correspondences-manager";
+import { MatchesManager } from "@/components/campos/matches-manager";
 
 export default async function CamposPage() {
   await requirePermission("manage_field_definitions");
 
   const supabase = await createClient();
-  const [{ data }, correspondences, currencies] = await Promise.all([
+  const [{ data }, correspondences, matchRules, currencies] = await Promise.all([
     supabase
       .from("field_definitions")
       .select(
@@ -32,6 +34,7 @@ export default async function CamposPage() {
       .order("sort_order", { ascending: true })
       .order("label", { ascending: true }),
     loadCorrespondences(supabase),
+    loadMatchRules(supabase),
     loadEnabledCurrencies(supabase),
   ]);
 
@@ -75,6 +78,8 @@ export default async function CamposPage() {
         correspondences={correspondences}
         candidatesBySource={candidatesBySource}
       />
+
+      <MatchesManager rules={matchRules} candidatesBySource={candidatesBySource} />
     </div>
   );
 }

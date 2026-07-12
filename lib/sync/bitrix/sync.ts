@@ -26,6 +26,8 @@ import { buildCustomMapping, syncFieldCatalog, type CustomMapEntry } from "./cat
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
 import {
   computeFormulaFields,
+  buildDateContext,
+  loadCustomDateKeys,
   loadFormulaDefs,
   type FormulaFieldDef,
 } from "@/lib/records/formulas";
@@ -175,9 +177,22 @@ export function computeRecordUpsert(
   mapped: MappedRecord,
   existing: ExistingRecord | null,
   resolved: ResolvedRefs,
-  formulaDefs: FormulaFieldDef[] = []
+  formulaDefs: FormulaFieldDef[] = [],
+  customDateKeys: string[] = []
 ): { row: Record<string, unknown>; audits: AuditEntry[]; outcome: "inserted" | "updated" } {
   const now = new Date().toISOString();
+  // Datas próprias do registro (do mapper) para o contexto de datas dos campos
+  // calculados. Operandos match:<fonte> ficam para o recalc (regra de "pular").
+  const dateCtxFor = (custom: Record<string, unknown>) =>
+    buildDateContext(
+      {
+        closed_at: (mapped.closed_at as string | null) ?? null,
+        opened_at: (mapped.opened_at as string | null) ?? null,
+        source_created_at: (mapped.source_created_at as string | null) ?? null,
+      },
+      custom,
+      customDateKeys
+    );
 
   if (!existing) {
     const custom_fields = { ...mapped.custom_fields };
@@ -189,7 +204,9 @@ export function computeRecordUpsert(
           lead_time_days: resolved.computedLeadTime,
         },
         custom_fields,
-        formulaDefs
+        formulaDefs,
+        undefined,
+        dateCtxFor(custom_fields)
       );
       Object.assign(custom_fields, calc);
     }
@@ -276,7 +293,9 @@ export function computeRecordUpsert(
         lead_time_days: numOrNull(row.lead_time_days),
       },
       mergedCustom,
-      formulaDefs
+      formulaDefs,
+      undefined,
+      dateCtxFor(mergedCustom)
     );
     Object.assign(mergedCustom, calc);
   }
@@ -294,7 +313,8 @@ export async function upsertRecord(
   db: SupabaseClient,
   mapped: MappedRecord,
   lookups: BitrixLookups,
-  formulaDefs: FormulaFieldDef[] = []
+  formulaDefs: FormulaFieldDef[] = [],
+  customDateKeys: string[] = []
 ): Promise<"inserted" | "updated"> {
   const { data: existingRow } = await db
     .from("records")
@@ -315,7 +335,8 @@ export async function upsertRecord(
     mapped,
     existing,
     { ownerUserId, responsibleId, operationId, relatedLead, computedLeadTime },
-    formulaDefs
+    formulaDefs,
+    customDateKeys
   );
 
   const { error } = await db
@@ -470,7 +491,8 @@ export async function upsertPage(
   relIndex: RelatedLeadIndex,
   formulaDefs: FormulaFieldDef[],
   result: SyncResult,
-  entity: "lead" | "negocio"
+  entity: "lead" | "negocio",
+  customDateKeys: string[] = []
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -508,7 +530,8 @@ export async function upsertPage(
         mapped,
         existing,
         { ownerUserId, responsibleId, operationId, relatedLead, computedLeadTime },
-        formulaDefs
+        formulaDefs,
+        customDateKeys
       );
       rows.push(row);
       allAudits.push(...audits);
@@ -542,6 +565,7 @@ export interface SyncContext {
   dealMapping: CustomMapEntry[];
   leadMapping: CustomMapEntry[];
   formulaDefs: FormulaFieldDef[];
+  customDateKeys: string[];
 }
 
 /** `since` (YYYY-MM-DDTHH:MM:SS) para uma janela corrida de N dias. */
@@ -565,7 +589,7 @@ async function fetchAndSyncDeals(
   for (const raw of deals) {
     try {
       const mapped = await mapDeal(raw, lookups, ctx.dealMapping);
-      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
+      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs, ctx.customDateKeys);
       recordOutcome(result, "negocio", outcome);
     } catch (e) {
       recordError(result, "negocio", (e as Error).message);
@@ -588,7 +612,7 @@ async function fetchAndSyncLeads(
   for (const raw of leads) {
     try {
       const mapped = await mapLead(raw, lookups, ctx.leadMapping);
-      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs);
+      const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs, ctx.customDateKeys);
       recordOutcome(result, "lead", outcome);
     } catch (e) {
       recordError(result, "lead", (e as Error).message);
@@ -606,6 +630,7 @@ export async function buildSyncContext(
     dealMapping: buildCustomMapping(lookups, "deal"),
     leadMapping: buildCustomMapping(lookups, "lead"),
     formulaDefs: await loadFormulaDefs(db),
+    customDateKeys: await loadCustomDateKeys(db),
   };
 }
 

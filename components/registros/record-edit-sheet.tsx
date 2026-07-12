@@ -26,6 +26,7 @@ import {
 import { updateRecord, type EditActionState } from "@/lib/records/actions";
 import { CURRENCY_OPTIONS, formatMoney } from "@/lib/widgets/currency";
 import { LeadCombobox } from "./lead-combobox";
+import { RecordMatchConnect } from "./record-match-connect";
 
 const initial: EditActionState = {};
 
@@ -106,6 +107,7 @@ export function RecordEditSheet({
   relatedLeadLabel,
   userRoles,
   canEditValues,
+  canManageFields,
 }: {
   record: RecordRow;
   fields: FieldDefinition[];
@@ -114,6 +116,7 @@ export function RecordEditSheet({
   relatedLeadLabel: string | null;
   userRoles: string[];
   canEditValues: boolean;
+  canManageFields: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(updateRecord, initial);
@@ -269,6 +272,13 @@ export function RecordEditSheet({
                 />
               </div>
             </div>
+          ) : null}
+
+          {canManageFields ? (
+            <RecordMatchConnect
+              recordId={record.id}
+              recordType={record.record_type}
+            />
           ) : null}
 
           {/* Campos personalizados editáveis */}

@@ -14,6 +14,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
 import { validateFormula, type Formula } from "@/lib/records/formulas";
+import { allDateOperands } from "@/lib/records/date-operands";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 
@@ -57,6 +58,23 @@ async function allowedFormulaRefs(
     }
   }
   return refs;
+}
+
+// Refs de DATA permitidos numa fórmula: datas do próprio registro + custom
+// `data` + datas do registro casado (match:<fonte>:<data>). Mesma origem do
+// construtor (lib/records/date-operands), para UI e validação concordarem.
+async function allowedFormulaDateRefs(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("field_key, label, data_type")
+    .eq("data_type", "data");
+  const customDateFields = (data ?? []).map((d) => ({
+    field_key: d.field_key as string,
+    label: (d.label as string) ?? (d.field_key as string),
+  }));
+  return new Set(allDateOperands(customDateFields).map((o) => o.ref));
 }
 
 function parseFormula(raw: string): Formula | null {
@@ -180,7 +198,8 @@ export async function createField(
   if (f.dataType === "calculado") {
     if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
     const allowed = await allowedFormulaRefs(supabase, fieldKey);
-    const v = validateFormula(f.formula, allowed);
+    const allowedDates = await allowedFormulaDateRefs(supabase);
+    const v = validateFormula(f.formula, allowed, allowedDates);
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   }
 
@@ -242,7 +261,8 @@ export async function updateField(
   if (f.dataType === "calculado") {
     if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
     const allowed = await allowedFormulaRefs(supabase, fieldKey);
-    const v = validateFormula(f.formula, allowed);
+    const allowedDates = await allowedFormulaDateRefs(supabase);
+    const v = validateFormula(f.formula, allowed, allowedDates);
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   }
 

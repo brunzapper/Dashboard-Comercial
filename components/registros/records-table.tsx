@@ -29,6 +29,7 @@ export function RecordsTable({
   relatedLeadLabels,
   userRoles,
   canEditValues,
+  canManageFields,
 }: {
   source: SourceKey;
   records: RecordRow[];
@@ -38,6 +39,7 @@ export function RecordsTable({
   relatedLeadLabels: Record<string, string>;
   userRoles: string[];
   canEditValues: boolean;
+  canManageFields: boolean;
 }) {
   const responsibleMap = new Map(responsibles.map((r) => [r.id, r.label]));
   const showPipeline = source === "deals";
@@ -117,6 +119,7 @@ export function RecordsTable({
                   }
                   userRoles={userRoles}
                   canEditValues={canEditValues}
+                  canManageFields={canManageFields}
                 />
               </TableCell>
             </TableRow>

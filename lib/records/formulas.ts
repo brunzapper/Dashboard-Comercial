@@ -29,10 +29,50 @@ export interface Formula {
 
 const PRECEDENCE: Record<FormulaOp, number> = { "+": 1, "-": 1, "*": 2, "/": 2 };
 
+const DAY_MS = 86_400_000;
+
+// Colunas de data do núcleo aceitas como operandos de data em campos calculados.
+export const CORE_DATE_REFS = [
+  "closed_at",
+  "opened_at",
+  "source_created_at",
+] as const;
+
 function toNum(v: unknown): number | null {
   if (v == null || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// Data (qualquer valor parseável) → epoch ms; null quando ausente/ inválida.
+function toMs(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const t = Date.parse(String(v));
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * Contexto de DATAS (ref → epoch ms) de um registro para o avaliador: datas do
+ * próprio registro + campos personalizados do tipo `data` (por chave). Refs de
+ * `match:<fonte>:<data>` são acrescentados por quem resolve o registro casado
+ * (ver lib/records/recalc.ts).
+ */
+export function buildDateContext(
+  rec: {
+    closed_at?: string | null;
+    opened_at?: string | null;
+    source_created_at?: string | null;
+  },
+  customFields: Record<string, unknown>,
+  customDateKeys: Iterable<string>
+): Record<string, number | null> {
+  const ctx: Record<string, number | null> = {
+    closed_at: toMs(rec.closed_at),
+    opened_at: toMs(rec.opened_at),
+    source_created_at: toMs(rec.source_created_at),
+  };
+  for (const key of customDateKeys) ctx[`custom:${key}`] = toMs(customFields[key]);
+  return ctx;
 }
 
 /** Referências (refs) usadas por uma fórmula — útil para validação/recompute. */
@@ -42,16 +82,24 @@ export function formulaRefs(formula: Formula): string[] {
     .map((t) => t.ref);
 }
 
+// Valor tipado na pilha do avaliador: número puro ou DATA (ms). O tipo permite
+// `data − data → dias` sem confundir com uma subtração numérica comum.
+type Val = { v: number | null; date: boolean };
+
 /**
- * Avalia a fórmula contra um contexto ref→valor. Qualquer operando null/NaN ou
- * divisão por zero propaga null. Fórmula estruturalmente inválida também => null
- * (a validação forte acontece no save, aqui só protegemos a execução).
+ * Avalia a fórmula contra um contexto ref→valor. `dateCtx` (ref → epoch ms)
+ * marca operandos de DATA: `data − data` resulta em DIAS; qualquer outra
+ * combinação envolvendo data resulta em null; número op número inalterado. Um
+ * resultado que sobra como data também vira null (o campo calculado é numérico).
+ * Qualquer operando null/NaN ou divisão por zero propaga null. Retrocompatível:
+ * sem `dateCtx`, comportamento idêntico ao anterior (tudo numérico).
  */
 export function evaluateFormula(
   formula: Formula,
-  ctx: Record<string, number | null>
+  ctx: Record<string, number | null>,
+  dateCtx?: Record<string, number | null>
 ): number | null {
-  const output: (number | null)[] = [];
+  const output: Val[] = [];
   const ops: (FormulaOp | "(")[] = [];
 
   const applyTop = () => {
@@ -59,26 +107,41 @@ export function evaluateFormula(
     if (op === "(" || op === undefined) return;
     const b = output.pop();
     const a = output.pop();
-    if (a == null || b == null) {
-      output.push(null);
+    if (!a || !b || a.v == null || b.v == null) {
+      output.push({ v: null, date: false });
+      return;
+    }
+    // data − data → dias
+    if (op === "-" && a.date && b.date) {
+      const r = Math.round((a.v - b.v) / DAY_MS);
+      output.push({ v: Number.isFinite(r) ? r : null, date: false });
+      return;
+    }
+    // Qualquer outra operação envolvendo data é inválida → null.
+    if (a.date || b.date) {
+      output.push({ v: null, date: false });
       return;
     }
     let r: number | null;
     switch (op) {
-      case "+": r = a + b; break;
-      case "-": r = a - b; break;
-      case "*": r = a * b; break;
-      case "/": r = b === 0 ? null : a / b; break;
+      case "+": r = a.v + b.v; break;
+      case "-": r = a.v - b.v; break;
+      case "*": r = a.v * b.v; break;
+      case "/": r = b.v === 0 ? null : a.v / b.v; break;
       default: r = null;
     }
-    output.push(r != null && Number.isFinite(r) ? r : null);
+    output.push({ v: r != null && Number.isFinite(r) ? r : null, date: false });
   };
 
   for (const t of formula.tokens) {
     if (t.kind === "field") {
-      output.push(ctx[t.ref] ?? null);
+      if (dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, t.ref)) {
+        output.push({ v: dateCtx[t.ref] ?? null, date: true });
+      } else {
+        output.push({ v: ctx[t.ref] ?? null, date: false });
+      }
     } else if (t.kind === "const") {
-      output.push(Number.isFinite(t.value) ? t.value : null);
+      output.push({ v: Number.isFinite(t.value) ? t.value : null, date: false });
     } else if (t.kind === "op") {
       while (
         ops.length > 0 &&
@@ -98,7 +161,8 @@ export function evaluateFormula(
   while (ops.length > 0) applyTop();
 
   if (output.length !== 1) return null;
-  return output[0];
+  const res = output[0];
+  return res.date ? null : res.v;
 }
 
 export interface FormulaValidation {
@@ -113,7 +177,8 @@ export interface FormulaValidation {
  */
 export function validateFormula(
   formula: Formula,
-  allowedRefs: Set<string>
+  allowedRefs: Set<string>,
+  allowedDateRefs?: Set<string>
 ): FormulaValidation {
   const tokens = formula.tokens;
   if (!tokens || tokens.length === 0) {
@@ -124,7 +189,7 @@ export function validateFormula(
   for (const t of tokens) {
     if (expectOperand) {
       if (t.kind === "field") {
-        if (!allowedRefs.has(t.ref)) {
+        if (!allowedRefs.has(t.ref) && !allowedDateRefs?.has(t.ref)) {
           return { ok: false, error: `Coluna inválida na fórmula: ${t.ref}` };
         }
         expectOperand = false;
@@ -161,6 +226,17 @@ export interface FormulaFieldDef {
   // currency_code; ausente = número puro (sem conversão).
   currency_mode?: string | null;
   currency_code?: string | null;
+}
+
+/** Chaves dos campos personalizados do tipo `data` (para o contexto de datas). */
+export async function loadCustomDateKeys(
+  db: import("@supabase/supabase-js").SupabaseClient
+): Promise<string[]> {
+  const { data } = await db
+    .from("field_definitions")
+    .select("field_key")
+    .eq("data_type", "data");
+  return (data ?? []).map((r) => r.field_key as string);
 }
 
 /** Carrega as definições de campos calculados (data_type='calculado'). */
@@ -255,7 +331,8 @@ export function computeFormulaFields(
   coreValues: Record<string, number | null>,
   customFields: Record<string, unknown>,
   formulaDefs: FormulaFieldDef[],
-  conv?: FormulaCurrencyContext
+  conv?: FormulaCurrencyContext,
+  dateCtx?: Record<string, number | null>
 ): Record<string, number | null> {
   const baseCtx: Record<string, number | null> = {};
   for (const [k, v] of Object.entries(coreValues)) baseCtx[k] = v;
@@ -264,6 +341,16 @@ export function computeFormulaFields(
   const out: Record<string, number | null> = {};
   for (const def of formulaDefs) {
     if (!def.formula) continue;
+    // Fórmula que usa um operando `match:` ainda não resolvido no dateCtx é
+    // PULADA (não entra em `out`) — deixa o valor anterior intacto. Assim o sync
+    // incremental não zera campos baseados em registro casado; eles são
+    // materializados no recalc em lote (lib/records/recalc.ts).
+    const hasUnresolvedMatch = formulaRefs(def.formula).some(
+      (r) =>
+        r.startsWith("match:") &&
+        !(dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, r))
+    );
+    if (hasUnresolvedMatch) continue;
     // Campo calculado monetário: converte cada operando monetário para a moeda
     // de destino (herdada do registro ou fixa) antes de avaliar. Assim, ao
     // envolver moedas diferentes, o cálculo é feito já convertido.
@@ -275,10 +362,11 @@ export function computeFormulaFields(
           : conv.recordCurrency;
       out[def.field_key] = evaluateFormula(
         def.formula,
-        convertOperands(baseCtx, target, conv)
+        convertOperands(baseCtx, target, conv),
+        dateCtx
       );
     } else {
-      out[def.field_key] = evaluateFormula(def.formula, baseCtx);
+      out[def.field_key] = evaluateFormula(def.formula, baseCtx, dateCtx);
     }
   }
   return out;

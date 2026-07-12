@@ -107,7 +107,24 @@ function coreDisplay(
   return v == null || v === "" ? "—" : String(v);
 }
 
+// Ref de campo do registro casado: match:<fonte>:<ref> (ref pode conter ':').
+function parseMatchField(field: string): { src: string; ref: string } | null {
+  if (!field.startsWith("match:")) return null;
+  const rest = field.slice(6);
+  const i = rest.indexOf(":");
+  if (i < 0) return null;
+  return { src: rest.slice(0, i), ref: rest.slice(i + 1) };
+}
+
 function rawValue(field: string, record: RecordRow): unknown {
+  const mm = parseMatchField(field);
+  if (mm) {
+    const mrec = record.__match?.[mm.src as keyof NonNullable<RecordRow["__match"]>];
+    if (!mrec) return undefined;
+    return mm.ref.startsWith("custom:")
+      ? mrec.custom_fields?.[mm.ref.slice(7)]
+      : (mrec as unknown as Record<string, unknown>)[mm.ref];
+  }
   if (field.startsWith("custom:")) return record.custom_fields?.[field.slice(7)];
   return (record as unknown as Record<string, unknown>)[field];
 }
@@ -322,7 +339,35 @@ export function RecordListTable({
     if (DATE_FIELDS.has(field)) return true;
     if (field.startsWith("custom:"))
       return fieldByKey.get(field.slice(7))?.data_type === "data";
+    const mm = parseMatchField(field);
+    if (mm) {
+      if (DATE_FIELDS.has(mm.ref)) return true;
+      if (mm.ref.startsWith("custom:"))
+        return fieldByKey.get(mm.ref.slice(7))?.data_type === "data";
+    }
     return false;
+  };
+
+  // Texto de exibição de um campo do registro casado (match:<fonte>:<ref>):
+  // formata data/moeda/texto conforme o tipo do ref subjacente.
+  const matchText = (field: string, r: RecordRow): string => {
+    const mm = parseMatchField(field);
+    if (!mm) return "—";
+    const raw = rawValue(field, r);
+    if (raw == null || raw === "") return "—";
+    const mrec = r.__match?.[mm.src as keyof NonNullable<RecordRow["__match"]>];
+    if (mm.ref.startsWith("custom:")) {
+      const f = fieldByKey.get(mm.ref.slice(7));
+      if (f?.data_type === "data") return formatDateValue(raw, fmtOf(field));
+      if (f) {
+        const cur = resolveFieldMoney(f, mrec?.currency ?? null);
+        if (cur.isMoney) return formatMoney(raw, cur.code);
+      }
+      return String(raw);
+    }
+    if (DATE_FIELDS.has(mm.ref)) return formatDateValue(raw, fmtOf(field));
+    if (MONEY_FIELDS.has(mm.ref)) return formatMoney(raw, mrec?.currency ?? null);
+    return String(raw);
   };
   const fmtOf = (field: string): DateFormat =>
     t.dateFormats?.[field] ?? dashFmt;
@@ -705,6 +750,7 @@ export function RecordListTable({
           }
           const c = x.c;
           const isCustom = c.field.startsWith("custom:");
+          const isMatch = c.field.startsWith("match:");
           const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
           // Editável quando a coluna foi marcada (c.editable). Compat.: colunas
           // antigas (editable ausente) mantêm o padrão custom não calculado.
@@ -795,6 +841,8 @@ export function RecordListTable({
                 />
               ) : c.transform ? (
                 <span className={cellSpanClass}>{columnDateLabel(c, r)}</span>
+              ) : isMatch ? (
+                <span className={cellSpanClass}>{matchText(c.field, r)}</span>
               ) : isCustom ? (
                 <span className={cellSpanClass}>
                   {customText(field, r, c.field)}

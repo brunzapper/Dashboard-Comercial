@@ -80,6 +80,9 @@ export interface RecordRow {
   custom_fields: Record<string, unknown>;
   last_synced_at: string | null;
   locally_modified_at: string | null;
+  // Registros casados por fonte (Fase 2), preenchido no modo lista para resolver
+  // colunas `match:<fonte>:<campo>`. Chave = SourceKey ('leads'|'deals'|'estudo').
+  __match?: Record<string, RecordRow | undefined>;
 }
 
 export const RECORD_TYPE_LABELS: Record<RecordRow["record_type"], string> = {

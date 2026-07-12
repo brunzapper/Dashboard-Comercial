@@ -191,8 +191,11 @@ export function FieldForm({
           <Label>Fórmula</Label>
           <FormulaBuilder refs={operandRefs} initial={field?.formula ?? null} />
           <p className="text-muted-foreground text-xs">
-            Opere entre colunas numéricas (+ − × ÷) e constantes. O resultado é
-            calculado por registro a cada sincronização/edição.
+            Opere entre colunas numéricas e datas (+ − × ÷) e constantes.{" "}
+            <strong>data − data</strong> resulta em dias (ex.: lead time). Você
+            pode usar datas do registro casado (↪) via conexões entre fontes. O
+            resultado é calculado por registro a cada sincronização/edição (os
+            que usam ↪ são atualizados no auto-match/recálculo).
           </p>
           <Label className="mt-1">Formato do resultado</Label>
           <Combobox

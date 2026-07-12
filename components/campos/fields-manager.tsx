@@ -39,6 +39,7 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
+import { allDateOperands } from "@/lib/records/date-operands";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
 import type { RefOption } from "./formula-builder";
@@ -185,18 +186,24 @@ export function FieldsManager({
   const [editing, setEditing] = useState<FieldDefinition | undefined>(undefined);
   const [query, setQuery] = useState("");
 
-  // Operandos numéricos para o construtor de fórmula: colunas do núcleo
-  // numéricas + campos personalizados numéricos que não sejam calculados.
+  // Operandos do construtor de fórmula: colunas numéricas (núcleo + custom não
+  // calculado) e operandos de DATA (datas do próprio registro, custom `data` e
+  // datas do registro casado, match:<fonte>:<data>). Agrupados para o seletor.
+  const customDateFields = fields
+    .filter((f) => f.data_type === "data")
+    .map((f) => ({ field_key: f.field_key, label: f.label }));
   const numericRefs: RefOption[] = [
     ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
       ref: f.field,
       label: f.label,
+      group: "Números",
     })),
     ...fields
       .filter(
         (f) => NUMERIC_DATA_TYPES.includes(f.data_type) && f.data_type !== "calculado"
       )
-      .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label })),
+      .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
+    ...allDateOperands(customDateFields),
   ];
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode

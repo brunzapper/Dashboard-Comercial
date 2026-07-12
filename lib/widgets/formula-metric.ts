@@ -61,7 +61,8 @@ export async function runCalculatedWidget(
   const aggRefs = [...refs].filter((r) => r.startsWith("agg:"));
   if (aggRefs.length > 0) {
     let filters = resolveFilters(input.filters ?? []);
-    if (input.period) filters = applyPeriodToFilters(filters, input.period);
+    if (input.period)
+      filters = applyPeriodToFilters(filters, input.period, input.sources);
     filters = [...sourceFilters(input.sources), ...filters];
     await Promise.all(
       aggRefs.map(async (ref) => {
