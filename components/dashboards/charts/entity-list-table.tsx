@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
   Table,
@@ -23,11 +24,19 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { FieldDefinition } from "@/lib/records/types";
+import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { ENTITY_TYPE_OF } from "@/lib/widgets/entity-list";
+import { bucketRecordDate } from "@/lib/widgets/date-buckets";
+import { groupByLevels } from "@/lib/widgets/appearance";
+import {
+  buildGroupItems,
+  dedupeFields,
+  type GroupNode,
+  type GroupOpts,
+} from "@/lib/widgets/grouping";
 import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
@@ -240,6 +249,15 @@ export function EntityListTable({
   const entityType = ENTITY_TYPE_OF[rowSource];
 
   const [menu, setMenu] = useState<{ x: number; y: number; column: string } | null>(null);
+  // Grupos EXPANDIDOS no "Agrupar por" (efêmero) — abre sempre recolhido.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   // Só colunas personalizadas fazem sentido por entidade; a 1ª coluna é o nome.
@@ -277,6 +295,188 @@ export function EntityListTable({
     setTable({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
   const setColDateFormat = (column: string, f: DateFormat) =>
     setTable({ dateFormats: { ...(t.dateFormats ?? {}), [column]: f } });
+
+  // --- Agrupar por: agrupa as entidades por uma ou mais colunas em seções
+  // recolhíveis. Colunas de data com "Agrupar período" entram como níveis mais
+  // externos; o "Agrupar por" explícito aninha dentro. Folhas = entidades
+  // editáveis (mesmas células). ---
+  const rawOf = (field: string, r: EntityListRow) => r.values[field.slice(7)];
+  const isNumericCol = (field: string): boolean => {
+    const dt = fieldByKey.get(field.slice(7))?.data_type;
+    return dt ? NUMERIC_DATA_TYPES.includes(dt) : false;
+  };
+  const sumCol = (field: string, rs: EntityListRow[]): number => {
+    let s = 0;
+    for (const r of rs) {
+      const n = Number(rawOf(field, r));
+      if (Number.isFinite(n)) s += n;
+    }
+    return s;
+  };
+  // Exibição de um valor de coluna (cabeçalho do grupo) — honra transform de data,
+  // máscara, moeda; senão texto.
+  const colDisplay = (field: string, r: EntityListRow): string => {
+    const f = fieldByKey.get(field.slice(7));
+    const raw = rawOf(field, r);
+    if (raw == null || raw === "") return "—";
+    if (f?.data_type === "data") {
+      const c = cols.find((col) => col.field === field);
+      if (c?.transform) return bucketRecordDate(raw, c.transform, c.weekMode).label;
+      return formatDateValue(raw, fmtOf(field));
+    }
+    if (f) {
+      const m = resolveFieldMoney(f, null);
+      if (m.isMoney) return formatMoney(raw, m.code);
+    }
+    return String(raw);
+  };
+  const dateSortKey = (field: string, r: EntityListRow): number => {
+    const c = cols.find((col) => col.field === field);
+    const raw = rawOf(field, r);
+    if (c?.transform) return bucketRecordDate(raw, c.transform, c.weekMode).sort;
+    const m = String(raw ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]) : 0;
+  };
+  const periodAggCols = cols.filter(
+    (c) => c.transform && c.agg && c.agg !== "individual"
+  );
+  const groupLevels = dedupeFields([
+    ...periodAggCols.map((c) => c.field),
+    ...groupByLevels(t.groupBy),
+  ]).filter((f) => cols.some((c) => c.field === f));
+  const groupOpts: GroupOpts<EntityListRow> = {
+    keyOf: (r, field) =>
+      isDateCol(field) ? colDisplay(field, r) : String(rawOf(field, r) ?? ""),
+    labelOf: (r, field) => colDisplay(field, r),
+    sortKeyOf: (r, field) => dateSortKey(field, r),
+    isExpanded: (k) => expanded.has(k),
+  };
+  type Item = GroupNode<EntityListRow> | { kind: "grand" };
+  const displayItems: Item[] =
+    groupLevels.length > 0
+      ? [...buildGroupItems(rows, groupLevels, groupOpts), { kind: "grand" }]
+      : rows.map((r) => ({ kind: "data", row: r }));
+
+  const numFmt = (field: string, n: number): string => {
+    const f = fieldByKey.get(field.slice(7));
+    if (f) {
+      const m = resolveFieldMoney(f, null);
+      if (m.isMoney) return formatMoney(n, m.code);
+    }
+    return n.toLocaleString("pt-BR");
+  };
+
+  // Linha de dados = 1 entidade (com células editáveis).
+  const renderDataRow = (r: EntityListRow) => {
+    const h = t.rowHeights?.[r.id];
+    return (
+      <TableRow
+        key={r.id}
+        className={rowBorder}
+        style={{
+          background: t.bodyBg,
+          color: t.bodyColor,
+          ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+          ...(h ? { height: h } : {}),
+        }}
+      >
+        <TableCell className="relative align-top font-medium" style={cellBorder(0)}>
+          <span className={cellSpanClass}>{r.label}</span>
+          {editable ? (
+            <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
+          ) : null}
+        </TableCell>
+        {cols.map((c, ci) => {
+          const field = fieldByKey.get(c.field.slice(7));
+          const raw = r.values[c.field.slice(7)];
+          return (
+            <TableCell
+              key={c.field}
+              className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
+              style={{
+                background: t.colColors?.[c.field]?.fill,
+                color: t.colColors?.[c.field]?.text ?? t.bodyColor,
+                ...cellBorder(ci + 1),
+                ...widthStyle(c.field),
+                ...(cellText === "clip" ? { overflow: "hidden" } : {}),
+              }}
+            >
+              {field ? (
+                <EntityEditableCell
+                  entityType={entityType}
+                  entityId={r.id}
+                  field={field}
+                  userRoles={userRoles}
+                  canEditValues={canEditValues}
+                  dateFormat={fmtOf(c.field)}
+                  value={raw == null ? "" : String(raw)}
+                  onSaved={() => router.refresh()}
+                />
+              ) : (
+                <span className={cellSpanClass}>—</span>
+              )}
+            </TableCell>
+          );
+        })}
+      </TableRow>
+    );
+  };
+
+  // Cabeçalho de grupo (recolhível) ou "Total geral": rótulo + contagem + soma das
+  // colunas numéricas.
+  const renderGroupRow = (
+    keyId: string,
+    label: string,
+    rs: EntityListRow[],
+    opts?: {
+      collapsible?: boolean;
+      isCollapsed?: boolean;
+      onToggle?: () => void;
+      level?: number;
+    }
+  ) => (
+    <TableRow
+      key={`__grp:${keyId}`}
+      className={cn(rowBorder, "font-medium")}
+      style={{
+        background: t.headerBg ?? "var(--muted)",
+        color: t.headerColor,
+        ...(t.borderColor ? { borderColor: t.borderColor } : {}),
+      }}
+    >
+      <TableCell style={cellBorder(0)}>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1",
+            opts?.collapsible ? "cursor-pointer" : "cursor-default"
+          )}
+          style={opts?.level ? { paddingLeft: opts.level * 16 } : undefined}
+          onClick={opts?.onToggle}
+          disabled={!opts?.collapsible}
+        >
+          {opts?.collapsible ? (
+            opts.isCollapsed ? (
+              <ChevronRight className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronDown className="size-3.5 shrink-0" />
+            )
+          ) : null}
+          {label}
+          <span className="text-muted-foreground ml-1 text-xs">({rs.length})</span>
+        </button>
+      </TableCell>
+      {cols.map((c, ci) => (
+        <TableCell
+          key={c.field}
+          className={cn(isNumericCol(c.field) && "text-right tabular-nums")}
+          style={cellBorder(ci + 1)}
+        >
+          {isNumericCol(c.field) ? numFmt(c.field, sumCol(c.field, rs)) : null}
+        </TableCell>
+      ))}
+    </TableRow>
+  );
 
   if (rows.length === 0) {
     return (
@@ -326,60 +526,20 @@ export function EntityListTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => {
-            const h = t.rowHeights?.[r.id];
-            return (
-              <TableRow
-                key={r.id}
-                className={rowBorder}
-                style={{
-                  background: t.bodyBg,
-                  color: t.bodyColor,
-                  ...(t.borderColor ? { borderColor: t.borderColor } : {}),
-                  ...(h ? { height: h } : {}),
-                }}
-              >
-                <TableCell className="relative align-top font-medium" style={cellBorder(0)}>
-                  <span className={cellSpanClass}>{r.label}</span>
-                  {editable ? (
-                    <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
-                  ) : null}
-                </TableCell>
-                {cols.map((c, ci) => {
-                  const field = fieldByKey.get(c.field.slice(7));
-                  const raw = r.values[c.field.slice(7)];
-                  return (
-                    <TableCell
-                      key={c.field}
-                      className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
-                      style={{
-                        background: t.colColors?.[c.field]?.fill,
-                        color: t.colColors?.[c.field]?.text ?? t.bodyColor,
-                        ...cellBorder(ci + 1),
-                        ...widthStyle(c.field),
-                        ...(cellText === "clip" ? { overflow: "hidden" } : {}),
-                      }}
-                    >
-                      {field ? (
-                        <EntityEditableCell
-                          entityType={entityType}
-                          entityId={r.id}
-                          field={field}
-                          userRoles={userRoles}
-                          canEditValues={canEditValues}
-                          dateFormat={fmtOf(c.field)}
-                          value={raw == null ? "" : String(raw)}
-                          onSaved={() => router.refresh()}
-                        />
-                      ) : (
-                        <span className={cellSpanClass}>—</span>
-                      )}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            );
-          })}
+          {displayItems.map((item) =>
+            item.kind === "data" ? (
+              renderDataRow(item.row)
+            ) : item.kind === "grand" ? (
+              renderGroupRow("__grand", "Total geral", rows, { level: 0 })
+            ) : (
+              renderGroupRow(item.key, item.label, item.rows, {
+                collapsible: true,
+                isCollapsed: !expanded.has(item.key),
+                onToggle: () => toggleExpand(item.key),
+                level: item.level,
+              })
+            )
+          )}
         </TableBody>
       </Table>
 

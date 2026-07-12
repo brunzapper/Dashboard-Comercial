@@ -294,6 +294,9 @@ export function WidgetBuilder({
     widget?.settings?.rowSource ?? "records"
   );
   const isRecordList = visualType === "tabela" && recordsMode;
+  // Lista de ENTIDADES (responsáveis/operações): sem orientação transposta. Listas
+  // de Registros passam a suportar transposta como a tabela agregada.
+  const isEntityList = isRecordList && rowSource !== "records";
   // Barra de busca/filtro embutida nas tabelas (ocultável). Default = visível.
   const [showFilterBar, setShowFilterBar] = useState<boolean>(
     widget?.settings?.showFilterBar !== false
@@ -495,7 +498,7 @@ export function WidgetBuilder({
   // Na transposta a 1ª dimensão é o eixo de colunas (fica no topo), então ela não
   // pode virar grupo do eixo esquerdo — some das opções de "Agrupar por".
   const groupByOptions: ComboboxOption[] =
-    !isRecordList && tableOrientation === "columns"
+    !isEntityList && tableOrientation === "columns"
       ? allGroupByOptions.slice(1)
       : allGroupByOptions;
   // Opções disponíveis para um nível: exclui as keys já usadas nos OUTROS níveis
@@ -663,15 +666,16 @@ export function WidgetBuilder({
       const table = { ...(settings.appearance?.table ?? {}) };
       // Níveis válidos (sem vazios), hierarquia de cima para baixo.
       const groupLevels = tableGroupBy.filter(Boolean);
-      if (isRecordList) {
-        // Modo registros: sem orientação transposta.
+      if (isEntityList) {
+        // Listas de entidades: sem orientação transposta.
         delete table.orientation;
         if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       } else {
+        // Agregada E lista de Registros: orientação + agrupamento nas duas
+        // orientações. Na transposta a 1ª dimensão vira as colunas e os níveis
+        // abaixo agrupam o eixo esquerdo (ver renderer).
         table.orientation = tableOrientation;
-        // Agrupamento vale nas duas orientações. Na transposta a 1ª dimensão vira
-        // as colunas e os níveis abaixo agrupam o eixo esquerdo (ver renderer).
         if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       }
@@ -1255,10 +1259,10 @@ export function WidgetBuilder({
             })}
           </div>
 
-          {/* Orientação (só Tabela agregada) + Agrupar por (ambos os modos) */}
+          {/* Orientação (agregada + lista de Registros) + Agrupar por (todos) */}
           {visualType === "tabela" ? (
             <div className="flex flex-col gap-3 rounded-md border p-3">
-              {!isRecordList ? (
+              {!isEntityList ? (
                 <div className="flex flex-col gap-1.5">
                   <Label>Orientação</Label>
                   <Combobox
@@ -1274,7 +1278,7 @@ export function WidgetBuilder({
               ) : null}
               {(() => {
                 const transposed =
-                  !isRecordList && tableOrientation === "columns";
+                  !isEntityList && tableOrientation === "columns";
                 return (
                   <div className="flex flex-col gap-1.5">
                     <Label>Agrupar por</Label>
