@@ -685,8 +685,13 @@ function AppearanceTable({
     orientation === "rows"
       ? groupByLevels(t.groupBy).filter((k) => dimKeys.includes(k))
       : [];
-  const groupLabelOf = (v: unknown) =>
-    v == null || v === "" ? "—" : String(v);
+  // Rótulo/chave de um grupo. Colunas de data honram o formato configurado (mesma
+  // formatação da célula via `fmtOf`), para o cabeçalho bater com a célula e as
+  // linhas de mesmo formato (ex.: `mm/aa` → mesmo mês) caírem no mesmo grupo.
+  const groupLabelOf = (v: unknown, key: string): string =>
+    dateCols.has(key) && looksLikeDate(v)
+      ? formatDateValue(v, fmtOf(key))
+      : v == null || v === "" ? "—" : String(v);
   // Subtotal de uma métrica sobre um conjunto de linhas (soma; exato p/ count/sum,
   // aproximado p/ avg/min/max — ver plano).
   const sumMetric = (rs: Record<string, unknown>[], key: string) =>
@@ -712,7 +717,7 @@ function AppearanceTable({
     const byLabel = new Map<string, Record<string, unknown>[]>();
     const order: string[] = [];
     for (const r of rs) {
-      const label = groupLabelOf(r[key]);
+      const label = groupLabelOf(r[key], key);
       let arr = byLabel.get(label);
       if (!arr) {
         arr = [];
@@ -965,20 +970,24 @@ function AppearanceTable({
     }
 
     // Com agrupamento: colunas = valores distintos da 1ª dimensão (na ordem em que
-    // aparecem em `rows`, que já respeita sort/ordem manual).
+    // aparecem em `rows`, que já respeita sort/ordem manual). Colunas de data são
+    // deduplicadas pelo valor FORMATADO (`colGroupKey`), então datas do mesmo mês
+    // (formato `mm/aa`) viram uma única coluna; `colVals` guarda um representante
+    // bruto (o cabeçalho o formata via `dimDisplay`).
+    const colGroupKey = (v: unknown) => groupLabelOf(v, colDimKey);
     const colVals: unknown[] = [];
     const seenCol = new Set<string>();
     for (const r of rows) {
-      const key = String(r[colDimKey] ?? "");
-      if (!seenCol.has(key)) {
-        seenCol.add(key);
+      const gk = colGroupKey(r[colDimKey]);
+      if (!seenCol.has(gk)) {
+        seenCol.add(gk);
         colVals.push(r[colDimKey]);
       }
     }
     const colDimLabel =
       data.dimensions.find((d) => d.key === colDimKey)?.label ?? "";
     const rowsForCol = (rs: Record<string, unknown>[], v: unknown) =>
-      rs.filter((r) => String(r[colDimKey] ?? "") === String(v ?? ""));
+      rs.filter((r) => colGroupKey(r[colDimKey]) === colGroupKey(v));
 
     // Eixo esquerdo achatado, com a MÉTRICA por fora: cada métrica é uma linha
     // recolhível (nível 0) e, quando expandida, desce os grupos das demais
@@ -1004,7 +1013,7 @@ function AppearanceTable({
       const byLabel = new Map<string, Record<string, unknown>[]>();
       const order: string[] = [];
       for (const r of rs) {
-        const label = groupLabelOf(r[key]);
+        const label = groupLabelOf(r[key], key);
         let arr = byLabel.get(label);
         if (!arr) {
           arr = [];
