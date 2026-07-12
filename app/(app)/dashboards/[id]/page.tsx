@@ -47,6 +47,7 @@ import type {
 } from "@/lib/widgets/types";
 import { SOURCE_RECORD_TYPE, type SourceKey } from "@/lib/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
+import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 
@@ -532,10 +533,30 @@ export default async function DashboardPage({
     );
   }
 
+  // Seed do histórico de Desfazer/Refazer: snapshot determinístico do estado
+  // atual (nome + settings + widgets + células das tabelas editáveis). Recomputado
+  // a cada render do RSC, é o que o provider observa para registrar mudanças.
+  const { data: cellsData } = widgets.length
+    ? await supabase
+        .from("dashboard_table_cells")
+        .select("widget_id, row_key, col_key, value")
+        .in(
+          "widget_id",
+          widgets.map((w) => w.id)
+        )
+    : { data: [] as { widget_id: string; row_key: string; col_key: string; value: number | string | null }[] };
+  const historySeed = buildDashboardSnapshot(
+    dash.name as string,
+    dashSettings,
+    widgets,
+    cellsData ?? []
+  );
+
   return (
     <DashboardClient
       dashboardId={dash.id as string}
       dashboardName={dash.name as string}
+      historySeed={historySeed}
       widgets={widgets}
       dataById={dataById}
       recordListById={recordListById}

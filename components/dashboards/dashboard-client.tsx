@@ -6,7 +6,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Clock, Pencil, Plus } from "lucide-react";
+import { Check, Clock, Pencil, Plus, Redo2, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,11 +23,16 @@ import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
+import type { DashboardSnapshot } from "@/lib/widgets/history";
 import { renameDashboard, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
 import { DashboardTabs } from "./dashboard-tabs";
+import {
+  DashboardHistoryProvider,
+  useDashboardHistory,
+} from "./history-context";
 import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
@@ -35,6 +40,7 @@ import { WidgetBuilder } from "./widget-builder";
 export function DashboardClient({
   dashboardId,
   dashboardName,
+  historySeed,
   widgets,
   dataById,
   recordListById,
@@ -62,6 +68,7 @@ export function DashboardClient({
 }: {
   dashboardId: string;
   dashboardName: string;
+  historySeed: DashboardSnapshot;
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
@@ -156,6 +163,7 @@ export function DashboardClient({
   }
 
   return (
+    <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         {renaming ? (
@@ -194,6 +202,7 @@ export function DashboardClient({
         )}
         {canEdit ? (
           <div className="flex items-center gap-2">
+            <HistoryButtons />
             <Button
               variant={editMode ? "default" : "outline"}
               size="sm"
@@ -293,5 +302,39 @@ export function DashboardClient({
         </div>
       </DashboardPendingProvider>
     </div>
+    </DashboardHistoryProvider>
+  );
+}
+
+// Botões Desfazer/Refazer (à esquerda de "Editar layout"). Componente separado
+// para consumir o contexto de dentro do provider. Desabilita nos extremos do
+// histórico e enquanto um restore está em andamento.
+function HistoryButtons() {
+  const { undo, redo, canUndo, canRedo, isRestoring } = useDashboardHistory();
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-8"
+        onClick={undo}
+        disabled={!canUndo || isRestoring}
+        title="Desfazer"
+        aria-label="Desfazer"
+      >
+        <Undo2 className="size-4" />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-8"
+        onClick={redo}
+        disabled={!canRedo || isRestoring}
+        title="Refazer"
+        aria-label="Refazer"
+      >
+        <Redo2 className="size-4" />
+      </Button>
+    </>
   );
 }
