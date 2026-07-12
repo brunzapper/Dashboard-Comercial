@@ -37,21 +37,36 @@ import { DashboardPendingProvider } from "./pending-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
 
+// Id determinístico da aba sintética que abriga os widgets SEM etiqueta
+// (settings.tab ausente) durante a reconstrução. Constante (não uuid) para não
+// colidir com abas reais e manter o resync (seedKey) estável entre renders.
+const RECOVERED_FIRST_TAB_ID = "__recovered_tab_1__";
+
 // Reconstrói a lista de abas a partir dos widgets quando `settings.tabs` foi
 // perdido (ex.: sobrescrito por uma gravação parcial de settings). Cada widget
-// guarda a aba a que pertence em `settings.tab`; aqui coletamos os ids distintos
-// na ordem de primeira aparição e devolvemos abas com nomes padrão ("Aba N").
-// Nomes/cores originais não são recuperáveis (viviam só em settings.tabs). Sem
-// widgets com aba (tela única), devolve [] — nada é reconstruído.
+// guarda a aba em `settings.tab`; widgets SEM `tab` herdam a 1ª aba (ver
+// `widgetTab`: undefined → firstTabId). No fluxo comum "adicionei a 2ª aba num
+// dashboard já cheio", os widgets da 1ª aba ficam sem etiqueta e só os da 2ª são
+// etiquetados — por isso os sem-etiqueta viram uma 1ª aba sintética própria,
+// senão duas abas colapsariam em uma. Nomes/cores originais não são recuperáveis
+// (viviam só em settings.tabs) → nomes padrão "Aba N". Sem nenhum id explícito
+// (tela única), devolve [] — nada é reconstruído.
 function rebuildTabsFromWidgets(
   widgets: Widget[]
 ): NonNullable<DashboardSettings["tabs"]> {
-  const seen: string[] = [];
+  const explicit: string[] = [];
+  let hasUntagged = false;
   for (const w of widgets) {
     const t = w.settings?.tab;
-    if (t && !seen.includes(t)) seen.push(t);
+    if (t) {
+      if (!explicit.includes(t)) explicit.push(t);
+    } else {
+      hasUntagged = true;
+    }
   }
-  return seen.map((id, i) => ({ id, name: `Aba ${i + 1}` }));
+  if (explicit.length === 0) return []; // nunca teve abas (tela única)
+  const ids = hasUntagged ? [RECOVERED_FIRST_TAB_ID, ...explicit] : explicit;
+  return ids.map((id, i) => ({ id, name: `Aba ${i + 1}` }));
 }
 
 export function DashboardClient({
