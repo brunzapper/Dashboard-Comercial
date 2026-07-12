@@ -8,8 +8,9 @@
 //   settings.canvas ({ cols, rows, rowHeight }).
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { ClipboardPaste, Loader2 } from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout } from "react-grid-layout/legacy";
 
@@ -29,8 +30,15 @@ import type {
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
-import { saveLayout, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  createWidget,
+  saveLayout,
+  updateDashboardSettings,
+  type WidgetInput,
+} from "@/app/(app)/dashboards/actions";
+import { readCopiedWidget } from "@/lib/widgets/clipboard";
 import { useNavPending } from "./pending-context";
+import { FloatingPanel } from "./appearance-editing";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -65,6 +73,7 @@ export function DashboardGrid({
   dateFormat,
   settings,
   tabs,
+  activeTabId,
   canEdit,
   canManageFields = false,
   currencyOptions,
@@ -88,6 +97,7 @@ export function DashboardGrid({
   dateFormat?: DateFormat;
   settings: DashboardSettings;
   tabs?: { id: string; name: string; color?: string }[];
+  activeTabId?: string;
   canEdit: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
@@ -98,6 +108,20 @@ export function DashboardGrid({
 }) {
   const mounted = useRef(false);
   const { pending } = useNavPending();
+  const router = useRouter();
+  const [, startPaste] = useTransition();
+
+  // Menu de "Colar widget" no clique-direito do espaço vazio. Guarda a posição
+  // do menu (clientX/Y) e a célula-alvo do grid (gridX/Y). `hasCopy` é lido no
+  // momento da abertura para refletir o localStorage (funciona entre abas).
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [pasteAt, setPasteAt] = useState<{
+    x: number;
+    y: number;
+    gridX: number;
+    gridY: number;
+    hasCopy: boolean;
+  } | null>(null);
 
   const layout: Layout = widgets.map((w, i) => {
     const p = posOf(w, i);
@@ -141,6 +165,50 @@ export function DashboardGrid({
   const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
+
+  // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
+  // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
+  // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
+  function onCanvasContextMenu(e: React.MouseEvent) {
+    if (!canEdit) return;
+    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || cellW <= 0) return;
+    e.preventDefault();
+    const gx = Math.max(0, Math.floor((e.clientX - rect.left - MX) / (cellW + MX)));
+    const gy = Math.max(0, Math.floor((e.clientY - rect.top - MY) / (ROW_H + MY)));
+    const copied = readCopiedWidget();
+    const w = copied?.w ?? 6;
+    setPasteAt({
+      x: e.clientX,
+      y: e.clientY,
+      gridX: Math.min(gx, Math.max(0, cols - w)),
+      gridY: gy,
+      hasCopy: !!copied,
+    });
+  }
+
+  function onPaste() {
+    const copied = readCopiedWidget();
+    const at = pasteAt;
+    setPasteAt(null);
+    if (!copied || !at) return;
+    const input: WidgetInput = {
+      title: copied.title,
+      visual_type: copied.visual_type,
+      sources: copied.sources,
+      splitBySource: copied.splitBySource,
+      dimensions: copied.dimensions,
+      metrics: copied.metrics,
+      filters: copied.filters,
+      settings: { ...(copied.settings ?? {}), tab: activeTabId || undefined },
+      grid_position: { x: at.gridX, y: at.gridY, w: copied.w, h: copied.h },
+    };
+    startPaste(async () => {
+      await createWidget(dashboardId, input);
+      router.refresh();
+    });
+  }
 
   function onLayoutChange(next: Layout) {
     if (!mounted.current) {
@@ -198,11 +266,46 @@ export function DashboardGrid({
     });
   }
 
+  // Menu flutuante de "Colar widget" (compartilhado entre o estado vazio e o
+  // grid). Reaproveita FloatingPanel (posiciona no clique, fecha ao clicar fora).
+  const pasteMenu = pasteAt ? (
+    <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48">
+      <button
+        type="button"
+        disabled={!pasteAt.hasCopy}
+        onClick={onPaste}
+        className="hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4"
+      >
+        <ClipboardPaste />
+        <span className="flex-1">Colar widget</span>
+      </button>
+      {!pasteAt.hasCopy ? (
+        <p className="text-muted-foreground px-2 pt-1 text-xs">Nada copiado</p>
+      ) : null}
+    </FloatingPanel>
+  ) : null;
+
   if (widgets.length === 0) {
     return (
-      <div className="text-muted-foreground rounded-lg border p-8 text-center text-sm">
-        Nenhum widget ainda. {canEdit ? "Adicione o primeiro." : ""}
-      </div>
+      <>
+        <div
+          onContextMenu={(e) => {
+            if (!canEdit) return;
+            e.preventDefault();
+            setPasteAt({
+              x: e.clientX,
+              y: e.clientY,
+              gridX: 0,
+              gridY: 0,
+              hasCopy: !!readCopiedWidget(),
+            });
+          }}
+          className="text-muted-foreground rounded-lg border p-8 text-center text-sm"
+        >
+          Nenhum widget ainda. {canEdit ? "Adicione o primeiro." : ""}
+        </div>
+        {pasteMenu}
+      </>
     );
   }
 
@@ -223,6 +326,8 @@ export function DashboardGrid({
       <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden">
         {baseWidth > 0 ? (
           <div
+            ref={canvasRef}
+            onContextMenu={onCanvasContextMenu}
             className={cn(
               "relative",
               editMode &&
@@ -314,6 +419,7 @@ export function DashboardGrid({
           </div>
         ) : null}
       </div>
+      {pasteMenu}
     </div>
   );
 }

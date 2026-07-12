@@ -7,7 +7,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { GripVertical, MoreVertical, Palette, Pencil, Trash2 } from "lucide-react";
+import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
+import { copyWidget } from "@/lib/widgets/clipboard";
 import { WidgetChart } from "./charts/widget-chart";
 import {
   RecordListTable,
@@ -102,6 +103,7 @@ export function WidgetCard({
   const [builderOpen, setBuilderOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { ap: appearance, save: saveAppearance } = useWidgetAppearance(
     widget,
     dashboardId
@@ -174,6 +176,16 @@ export function WidgetCard({
                   <Palette className="size-4" /> Aparência
                 </DropdownMenuItem>
               ) : null}
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  copyWidget(widget);
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
