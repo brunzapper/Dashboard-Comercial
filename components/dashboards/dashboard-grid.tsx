@@ -1,6 +1,9 @@
-// Versão: 2.0 | Data: 12/07/2026
+// Versão: 2.1 | Data: 12/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.1 (12/07/2026): compactType={null} — sem compactação vertical, então os
+//   widgets ficam livres nos dois eixos (X e Y). Ao soltar sobre outro, empurra
+//   o vizinho (preventCollision no padrão false).
 // v2.0 (12/07/2026): área de trabalho redimensionável. Em vez de WidthProvider
 //   (largura travada = tela ÷ colunas), a largura é calculada mantendo o tamanho
 //   de célula das 12 colunas, e uma alça de canto (modo edição) aumenta cols/rows
@@ -497,6 +500,7 @@ export function DashboardGrid({
               width={gridW(cols)}
               maxRows={rows}
               rowHeight={ROW_H}
+              compactType={null}
               margin={[MX, MY]}
               containerPadding={[MX, MY]}
               autoSize={false}
