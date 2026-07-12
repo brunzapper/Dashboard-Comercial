@@ -145,6 +145,7 @@ export function RecordListTable({
   appearance,
   dateFormat,
   currencyRates = {},
+  conversionPeriod,
   canEdit = false,
   onAppearanceChange,
 }: {
@@ -161,6 +162,8 @@ export function RecordListTable({
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
   currencyRates?: CurrencyRates;
+  // Ano/trimestre do período do widget (p/ métricas com base = "período").
+  conversionPeriod?: { year: number; quarter: number };
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
@@ -201,14 +204,21 @@ export function RecordListTable({
     }
     return resolveCurrencyCode(r.currency);
   };
-  // Ano/trimestre da taxa a usar p/ um registro (data = fechamento; granularidade
-  // da métrica). No modo lista sempre usamos a data do registro.
+  // Ano/trimestre da taxa a usar p/ um registro, respeitando a "Base da taxa" da
+  // métrica: "período" usa o ano/trim do filtro do dashboard (igual p/ todos);
+  // "registro" usa a data do registro (fechamento → abertura → criação → hoje).
   const recYQ = (r: RecordRow, m: Metric): { year: number; quarter: number } => {
-    const { year, quarter } = yearQuarterOf(r.closed_at);
-    return {
-      year,
-      quarter: m.conversionBasis?.granularity === "quarter" ? quarter : 0,
-    };
+    const isQuarter = m.conversionBasis?.granularity === "quarter";
+    if (m.conversionBasis?.source === "period" && conversionPeriod) {
+      return {
+        year: conversionPeriod.year,
+        quarter: isQuarter ? conversionPeriod.quarter : 0,
+      };
+    }
+    const { year, quarter } = yearQuarterOf(
+      r.closed_at ?? r.opened_at ?? r.source_created_at
+    );
+    return { year, quarter: isQuarter ? quarter : 0 };
   };
 
   const metricCellText = (m: Metric, r: RecordRow): string => {

@@ -49,6 +49,7 @@ export function DashboardClient({
   canManageFields = false,
   currencyOptions,
   currencyRates = {},
+  conversionPeriodById = {},
   settings,
   visibleToRoles,
   dateFormat,
@@ -74,6 +75,7 @@ export function DashboardClient({
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
+  conversionPeriodById?: Record<string, { year: number; quarter: number }>;
   settings: DashboardSettings;
   visibleToRoles: string[];
   dateFormat?: DateFormat;
@@ -262,6 +264,7 @@ export function DashboardClient({
             canManageFields={canManageFields}
             currencyOptions={currencyOptions}
             currencyRates={currencyRates}
+            conversionPeriodById={conversionPeriodById}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
           />

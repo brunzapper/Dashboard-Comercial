@@ -56,6 +56,7 @@ export function DashboardGrid({
   canManageFields = false,
   currencyOptions,
   currencyRates = {},
+  conversionPeriodById = {},
   editMode,
   filterOptionsById,
 }: {
@@ -79,6 +80,7 @@ export function DashboardGrid({
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
+  conversionPeriodById?: Record<string, { year: number; quarter: number }>;
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
@@ -144,6 +146,7 @@ export function DashboardGrid({
               fields={fields}
               currencyOptions={currencyOptions}
               currencyRates={currencyRates}
+              conversionPeriod={conversionPeriodById[w.id]}
               fkLabels={fkLabels}
               responsibleOptions={responsibleOptions}
               userRoles={userRoles}

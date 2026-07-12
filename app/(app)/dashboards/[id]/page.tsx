@@ -15,6 +15,7 @@ import {
   currencyOptionsFrom,
   loadCurrencyRates,
   loadEnabledCurrencies,
+  yearQuarterOf,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runRecordList } from "@/lib/widgets/record-list";
@@ -200,6 +201,14 @@ export default async function DashboardPage({
     for (const t of targets) {
       if (t in periodByWidget) periodByWidget[t] = p;
     }
+  }
+
+  // Ano/trimestre do período de cada widget (p/ métricas monetárias com base =
+  // "período"). Sem período ativo, cai no ano/trimestre atual.
+  const conversionPeriodById: Record<string, { year: number; quarter: number }> = {};
+  for (const w of dataWidgets) {
+    const p = periodByWidget[w.id];
+    conversionPeriodById[w.id] = yearQuarterOf(p?.to ?? p?.from ?? null);
   }
 
   // 2b) Filtros de VISUALIZAÇÃO (aplicados no dashboard já renderizado):
@@ -489,6 +498,7 @@ export default async function DashboardPage({
       canManageFields={canManageFields}
       currencyOptions={currencyOptions}
       currencyRates={currencyRates}
+      conversionPeriodById={conversionPeriodById}
       settings={dashSettings}
       visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
       dateFormat={dashSettings.dateFormat}
