@@ -32,16 +32,14 @@ import {
 } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
-  convertToBRL,
+  buildRecordBreakdown,
   formatMoney,
   formatMoneyAggregate,
   formatMoneyDisplay,
   resolveCurrencyCode,
   resolveFieldMoney,
-  toReferenceUSD,
   yearQuarterOf,
   type CurrencyRates,
-  type MoneyBreakdown,
 } from "@/lib/widgets/currency";
 import {
   EDITABLE_CORE_COLUMNS,
@@ -301,21 +299,15 @@ export function RecordListTable({
       return metricAgg(m, rs).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
     }
     // Agregação monetária: acumula por moeda + convertido (R$) + referência (US$),
-    // convertendo cada registro pela taxa do seu próprio ano/trimestre. A
-    // formatação final é compartilhada com o caminho agregado (formatMoneyAggregate).
-    const bd: MoneyBreakdown = { perCurrency: {}, brl: 0, usd: 0, count: 0 };
-    for (const r of rs) {
-      const raw = Number(rawValue(m.field, r));
-      if (!Number.isFinite(raw)) continue;
-      bd.count += 1;
-      const code = metricCurrency(m.field, r);
-      bd.perCurrency[code] = (bd.perCurrency[code] ?? 0) + raw;
-      const { year, quarter } = recYQ(r, m);
-      const b = convertToBRL(raw, code, currencyRates, year, quarter);
-      if (b != null) bd.brl += b;
-      const u = toReferenceUSD(raw, code, currencyRates, year, quarter);
-      if (u != null) bd.usd += u;
-    }
+    // convertendo cada registro pela taxa do seu próprio ano/trimestre. Helper
+    // compartilhado com o caminho agregado (engine), garantindo saída idêntica.
+    const bd = buildRecordBreakdown(
+      rs,
+      (r) => rawValue(m.field, r),
+      (r) => metricCurrency(m.field, r),
+      (r) => recYQ(r, m),
+      currencyRates
+    );
     return formatMoneyAggregate(bd, m, isGrand);
   };
 
