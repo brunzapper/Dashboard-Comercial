@@ -164,7 +164,11 @@ export interface KpiSettings {
 export interface FilterSettings {
   kind?: "period";
   targets?: string[]; // ids dos widgets controlados; vazio = dashboard inteiro
-  field?: string; // campo de data alvo (default closed_at)
+  field?: string; // campo de data PRIMÁRIO (visível/selecionável; default closed_at)
+  // Override do campo de data por fonte (secundária/terciária/…): a mesma
+  // seleção de calendário filtra cada fonte pela sua coluna de data. Ausente
+  // para uma fonte = cai no campo primário (ver DEFAULT_PERIOD_FIELD_BY_SOURCE).
+  fieldBySource?: Partial<Record<SourceKey, string>>;
   defaultPreset?: string; // preset inicial (chave de PERIOD_PRESETS) ou ""
   defaultDe?: string; // range personalizado inicial (ISO YYYY-MM-DD)
   defaultAte?: string;
@@ -340,7 +344,13 @@ export interface DashboardSettings {
   periodBar?: {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global
-    field?: string; // campo de data padrão da barra global
+    field?: string; // campo de data PRIMÁRIO (visível/selecionável na barra)
+    // Override do campo de data por fonte (secundária/terciária/…): a mesma
+    // seleção de calendário filtra cada fonte pela sua coluna de data (ex.:
+    // negócios por `closed_at`/assinatura e Estudo por `source_created_at`).
+    // Ausente para uma fonte = cai no campo primário (ver
+    // DEFAULT_PERIOD_FIELD_BY_SOURCE em lib/sources.ts).
+    fieldBySource?: Partial<Record<SourceKey, string>>;
     // Escopo do filtro de período: "global" (default) = um período para todo o
     // dashboard; "tab" = cada aba tem sua própria seleção (parâmetros de URL
     // namespados por id da aba). Ver components/dashboards/period-filter.tsx.

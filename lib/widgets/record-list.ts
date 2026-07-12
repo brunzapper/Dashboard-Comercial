@@ -9,7 +9,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RecordRow } from "@/lib/records/types";
 import { resolveFilters, sourceFilters } from "./engine";
 import { CORE_FIELDS } from "./fields";
-import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import {
+  applyPeriodToFilters,
+  PERIOD_FIELD_SENTINEL,
+  type DashboardPeriod,
+  type PeriodBetweenValue,
+} from "./period";
 import { SEARCH_FIELD_SEP } from "./view-filters";
 import type { WidgetConfig, WidgetFilter } from "./types";
 
@@ -41,12 +46,27 @@ export async function runRecordList(
   period?: DashboardPeriod | null
 ): Promise<RecordRow[]> {
   let filters = resolveFilters(config.filters ?? []);
-  if (period) filters = applyPeriodToFilters(filters, period);
+  if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   filters = [...sourceFilters(config.sources), ...filters];
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
   for (const f of filters as WidgetFilter[]) {
+    // Período por fonte: filtro sintético `@period` — cada record_type filtra
+    // pela sua própria coluna de data. Vira um OR de grupos AND no PostgREST.
+    if (f.field === PERIOD_FIELD_SENTINEL) {
+      const v = f.value as PeriodBetweenValue | undefined;
+      if (!v?.byType) continue;
+      const groups: string[] = [];
+      for (const [rt, dateCol] of Object.entries(v.byType)) {
+        const conds = [`record_type.eq.${rt}`];
+        if (v.from) conds.push(`${dateCol}.gte.${v.from}`);
+        if (v.to) conds.push(`${dateCol}.lte.${v.to}`);
+        groups.push(`and(${conds.join(",")})`);
+      }
+      if (groups.length > 0) q = q.or(groups.join(","));
+      continue;
+    }
     // Busca textual (ilike): o field pode unir vários campos com '|' → OR entre
     // colunas. O valor é o termo cru; aqui envolvemos com curingas.
     if (f.op === "ilike") {

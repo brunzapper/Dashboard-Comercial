@@ -9,6 +9,11 @@
 // default). Ao aplicar aos filtros de um widget, substitui os filtros de data
 // do próprio widget no mesmo campo.
 import type { WidgetFilter } from "./types";
+import {
+  SOURCE_KEYS,
+  SOURCE_RECORD_TYPE,
+  type SourceKey,
+} from "@/lib/sources";
 
 export const PERIOD_PRESETS = {
   hoje: "Hoje",
@@ -33,9 +38,15 @@ export const PERIOD_ALL = "all";
 
 /** Período ativo do dashboard, já resolvido para datas ISO (YYYY-MM-DD). */
 export interface DashboardPeriod {
-  field: string; // 'closed_at' | 'opened_at' | 'custom:…'
+  field: string; // campo PRIMÁRIO (visível/selecionável): 'closed_at' | 'opened_at' | …
   from: string | null;
   to: string | null;
+  // Campo de data por fonte (já resolvido, com defaults). Quando presente, o
+  // período filtra CADA fonte pela sua coluna de data — ex.: negócios por
+  // `closed_at` e Estudo por `source_created_at` na mesma seleção. Ausente =
+  // usa `field` para todas as fontes (comportamento retrocompatível, também
+  // usado quando o usuário troca o campo direto na barra).
+  fieldBySource?: Partial<Record<SourceKey, string>>;
 }
 
 /** Uma seleção de período crua (vinda da URL ou de um default). */
@@ -157,20 +168,77 @@ export function resolvePeriodSelection(
 // campo.
 const RANGE_OPS = new Set(["eq", "gt", "gte", "lt", "lte"]);
 
+// Campo sintético do filtro de período por fonte: o valor carrega os limites e o
+// mapa record_type → coluna de data. Resolvido pelo RPC (run_widget_query, ramo
+// '@period'/'between') e pelo modo lista (record-list.ts, via PostgREST .or()).
+export const PERIOD_FIELD_SENTINEL = "@period";
+
+/** Valor do filtro sintético `@period`: limites + coluna de data por record_type. */
+export interface PeriodBetweenValue {
+  from: string | null;
+  to: string | null; // já com o limite superior inclusivo do dia (…T23:59:59)
+  byType: Record<string, string>; // record_type → coluna de data
+}
+
+/** Coluna de data que uma fonte usa no período (override por fonte → primário). */
+export function periodFieldForSource(
+  period: DashboardPeriod,
+  source: SourceKey
+): string {
+  return period.fieldBySource?.[source] ?? period.field;
+}
+
+// record_types cobertos por um widget: das fontes selecionadas (vazio = todas).
+function coveredSources(sources?: SourceKey[]): SourceKey[] {
+  return sources && sources.length > 0 ? sources : SOURCE_KEYS;
+}
+
 /**
- * Aplica o período aos filtros de um widget: remove os filtros de intervalo do
- * widget sobre o mesmo campo e anexa os limites. O limite superior inclui o dia
- * inteiro (colunas timestamptz).
+ * Aplica o período aos filtros de um widget. Sem mapa por fonte (ou quando todas
+ * as fontes cobertas resolvem para o MESMO campo), remove os intervalos do widget
+ * sobre esse campo e anexa os limites — comportamento retrocompatível, sem exigir
+ * a migração do RPC. Quando as fontes cobertas usam campos DIFERENTES (ex.: split
+ * negócios+Estudo), empurra um filtro sintético `@period` que o RPC/modo lista
+ * expandem num OR por record_type. O limite superior inclui o dia inteiro.
  */
 export function applyPeriodToFilters(
   filters: WidgetFilter[],
-  period: DashboardPeriod
+  period: DashboardPeriod,
+  sources?: SourceKey[]
 ): WidgetFilter[] {
-  const next = filters.filter(
-    (f) => !(f.field === period.field && RANGE_OPS.has(f.op))
-  );
-  if (period.from) next.push({ field: period.field, op: "gte", value: period.from });
-  if (period.to)
-    next.push({ field: period.field, op: "lte", value: `${period.to}T23:59:59` });
-  return next;
+  const to = period.to ? `${period.to}T23:59:59` : null;
+
+  // Mapa por fonte → campo de data das fontes cobertas por este widget.
+  const covered = coveredSources(sources);
+  const byType: Record<string, string> = {};
+  const distinct = new Set<string>();
+  for (const s of covered) {
+    const col = periodFieldForSource(period, s);
+    byType[SOURCE_RECORD_TYPE[s]] = col;
+    distinct.add(col);
+  }
+
+  // Caminho uniforme: 1 único campo entre as fontes cobertas (ou sem mapa por
+  // fonte). Filtro simples de intervalo — não depende da migração 0040.
+  if (!period.fieldBySource || distinct.size <= 1) {
+    const field = distinct.size === 1 ? [...distinct][0] : period.field;
+    const next = filters.filter(
+      (f) => !(f.field === field && RANGE_OPS.has(f.op))
+    );
+    if (period.from) next.push({ field, op: "gte", value: period.from });
+    if (to) next.push({ field, op: "lte", value: to });
+    return next;
+  }
+
+  // Caminho misto: fontes cobertas usam campos diferentes → filtro sintético.
+  if (!period.from && !to) return filters;
+  const value: PeriodBetweenValue = { from: period.from, to, byType };
+  // `between` é um operador interno (não faz parte de FilterOp/da UI); só o RPC
+  // e o modo lista o reconhecem para o campo sintético `@period`.
+  const synthetic = {
+    field: PERIOD_FIELD_SENTINEL,
+    op: "between",
+    value,
+  } as unknown as WidgetFilter;
+  return [...filters, synthetic];
 }

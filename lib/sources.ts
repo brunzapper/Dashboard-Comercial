@@ -27,6 +27,18 @@ export const RECORD_TYPE_SOURCE: Record<string, SourceKey> = {
   venda_site: "estudo",
 };
 
+// Campo de data usado pelo filtro de período de CADA fonte quando o dashboard
+// não configura um override explícito (periodBar.fieldBySource). Reflete onde
+// cada fonte guarda a data da venda: negócios usam `closed_at` (assinatura/
+// fechamento); leads e Estudo (venda do site) só têm `source_created_at` — a
+// "Created At" da origem. Sem isto, o default global `closed_at` excluiria todo
+// registro de Estudo (closed_at sempre NULL) quando há período ativo.
+export const DEFAULT_PERIOD_FIELD_BY_SOURCE: Record<SourceKey, string> = {
+  leads: "source_created_at",
+  deals: "closed_at",
+  estudo: "source_created_at",
+};
+
 export function isSourceKey(v: string | null | undefined): v is SourceKey {
   return v === "leads" || v === "deals" || v === "estudo";
 }

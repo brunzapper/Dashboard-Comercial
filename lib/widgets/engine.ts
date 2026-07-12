@@ -728,7 +728,7 @@ export async function runWidget(
   conversionPeriod: ConversionYQ = yearQuarterOf(null)
 ): Promise<WidgetData> {
   let filters = resolveFilters(config.filters ?? []);
-  if (period) filters = applyPeriodToFilters(filters, period);
+  if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   // Fonte(s) selecionada(s) viram um filtro record_type in (...).
   filters = [...sourceFilters(config.sources), ...filters];
 
