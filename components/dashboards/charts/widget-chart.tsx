@@ -46,6 +46,7 @@ import {
   applyManualOrder,
   distinctFills,
   gridFlags,
+  groupByLevels,
   reorderKeys,
   rowKeyOf,
   sortRows,
@@ -427,8 +428,16 @@ function AppearanceTable({
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<TableMenu | null>(null);
-  // Grupos recolhidos no modo "Agrupar por" (efêmero; default = todos expandidos).
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Grupos EXPANDIDOS no "Agrupar por" (efêmero). Vazio = tudo colapsado, então a
+  // visualização padrão de uma tabela agrupada abre sempre recolhida.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const metricKeys = new Set(data.metrics.map((m) => m.key));
   const dimKeys = data.dimensions.map((d) => d.key);
@@ -541,12 +550,12 @@ function AppearanceTable({
 
   // --- Orientação / agrupamento (Parte 2/3) ---
   const orientation = t.orientation === "columns" ? "columns" : "rows";
-  // "Agrupar por" só se aplica na orientação normal e se a key ainda existir
-  // (pode ter ficado órfã se as dimensões mudaram).
-  const groupByKey =
-    orientation === "rows" && t.groupBy && dimKeys.includes(t.groupBy)
-      ? t.groupBy
-      : null;
+  // "Agrupar por" só se aplica na orientação normal e às keys que ainda existem
+  // (podem ter ficado órfãs se as dimensões mudaram). Lista ordenada = hierarquia.
+  const groupLevels =
+    orientation === "rows"
+      ? groupByLevels(t.groupBy).filter((k) => dimKeys.includes(k))
+      : [];
   const groupLabelOf = (v: unknown) =>
     v == null || v === "" ? "—" : String(v);
   // Subtotal de uma métrica sobre um conjunto de linhas (soma; exato p/ count/sum,
@@ -556,21 +565,45 @@ function AppearanceTable({
       const n = Number(r[key]);
       return Number.isNaN(n) ? s : s + n;
     }, 0);
-  // Grupos preservando a ordem de `rows`.
-  const groups: { label: string; rows: Record<string, unknown>[] }[] = [];
-  if (groupByKey) {
-    const idx = new Map<string, number>();
-    for (const r of rows) {
-      const label = groupLabelOf(r[groupByKey]);
-      let i = idx.get(label);
-      if (i == null) {
-        i = groups.length;
-        idx.set(label, i);
-        groups.push({ label, rows: [] });
+  // Achata a hierarquia numa lista de itens, respeitando quais grupos estão
+  // expandidos. A chave inclui o caminho (prefixo) p/ não confundir grupos
+  // homônimos em ramos diferentes.
+  type GroupItem =
+    | { kind: "group"; level: number; key: string; label: string; rows: Record<string, unknown>[] }
+    | { kind: "data"; row: Record<string, unknown> };
+  const buildGroupItems = (
+    rs: Record<string, unknown>[],
+    levels: string[],
+    depth: number,
+    prefix: string
+  ): GroupItem[] => {
+    if (levels.length === 0)
+      return rs.map((r) => ({ kind: "data" as const, row: r }));
+    const [key, ...rest] = levels;
+    const byLabel = new Map<string, Record<string, unknown>[]>();
+    const order: string[] = [];
+    for (const r of rs) {
+      const label = groupLabelOf(r[key]);
+      let arr = byLabel.get(label);
+      if (!arr) {
+        arr = [];
+        byLabel.set(label, arr);
+        order.push(label);
       }
-      groups[i].rows.push(r);
+      arr.push(r);
     }
-  }
+    const items: GroupItem[] = [];
+    for (const label of order) {
+      const groupRows = byLabel.get(label)!;
+      const k = `${prefix}›${label}`;
+      items.push({ kind: "group", level: depth, key: k, label, rows: groupRows });
+      if (expanded.has(k))
+        items.push(...buildGroupItems(groupRows, rest, depth + 1, k));
+    }
+    return items;
+  };
+  const groupItems: GroupItem[] =
+    groupLevels.length > 0 ? buildGroupItems(rows, groupLevels, 0, "") : [];
 
   // Renderiza uma linha de dados (reutilizada nos modos plano e agrupado).
   const renderDataRow = (r: Record<string, unknown>) => {
@@ -640,10 +673,16 @@ function AppearanceTable({
   const renderSubtotalRow = (
     label: string,
     rs: Record<string, unknown>[],
-    opts?: { collapsible?: boolean; isCollapsed?: boolean; onToggle?: () => void }
+    opts?: {
+      collapsible?: boolean;
+      isCollapsed?: boolean;
+      onToggle?: () => void;
+      level?: number;
+      keyId?: string;
+    }
   ) => (
     <TableRow
-      key={`__grp:${label}`}
+      key={`__grp:${opts?.keyId ?? label}`}
       className={cn(rowBorder, "font-medium")}
       style={{
         background: t.headerBg ?? "var(--muted)",
@@ -668,6 +707,9 @@ function AppearanceTable({
                   "inline-flex items-center gap-1",
                   opts?.collapsible ? "cursor-pointer" : "cursor-default"
                 )}
+                style={
+                  opts?.level ? { paddingLeft: opts.level * 16 } : undefined
+                }
                 onClick={opts?.onToggle}
                 disabled={!opts?.collapsible}
               >
@@ -820,27 +862,20 @@ function AppearanceTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {groupByKey
-            ? groups.flatMap((g) => {
-                const isCollapsed = collapsed.has(g.label);
-                const rowsOut = [
-                  renderSubtotalRow(g.label, g.rows, {
-                    collapsible: true,
-                    isCollapsed,
-                    onToggle: () =>
-                      setCollapsed((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(g.label)) next.delete(g.label);
-                        else next.add(g.label);
-                        return next;
-                      }),
-                  }),
-                ];
-                if (!isCollapsed) rowsOut.push(...g.rows.map(renderDataRow));
-                return rowsOut;
-              })
+          {groupLevels.length > 0
+            ? groupItems.map((item) =>
+                item.kind === "group"
+                  ? renderSubtotalRow(item.label, item.rows, {
+                      collapsible: true,
+                      isCollapsed: !expanded.has(item.key),
+                      onToggle: () => toggleExpand(item.key),
+                      level: item.level,
+                      keyId: item.key,
+                    })
+                  : renderDataRow(item.row)
+              )
             : rows.map(renderDataRow)}
-          {groupByKey && groups.length > 0
+          {groupLevels.length > 0 && rows.length > 0
             ? renderSubtotalRow("Total geral", rows)
             : null}
         </TableBody>
