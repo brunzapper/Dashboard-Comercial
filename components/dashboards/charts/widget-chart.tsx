@@ -889,9 +889,163 @@ function AppearanceTable({
   if (orientation === "columns") {
     const dimCols = cols.filter((c) => !metricKeys.has(c.key));
     const metricCols = cols.filter((c) => metricKeys.has(c.key));
-    const cornerLabel = dimCols.map((c) => c.label).join(" · ") || "";
-    const groupHeader = (r: Record<string, unknown>) =>
-      dimCols.map((c) => dimDisplay(r[c.key], c.key)).join(" · ");
+    // Com "Agrupar por" na transposta: a 1ª dimensão vira as colunas do topo e as
+    // demais dimensões escolhidas nos níveis viram grupos no eixo esquerdo,
+    // aninhados dentro de cada métrica. `tGroupLevels` exclui a dim de coluna e
+    // keys órfãs (que podem sobrar se as dimensões mudaram).
+    const colDimKey = dimKeys[0];
+    const tGroupLevels = groupByLevels(t.groupBy).filter(
+      (k) => dimKeys.includes(k) && k !== colDimKey
+    );
+
+    if (tGroupLevels.length === 0) {
+      // Sem agrupamento: comportamento antigo — todas as dimensões combinadas no
+      // cabeçalho de coluna, cada linha de dados vira uma coluna.
+      const cornerLabel = dimCols.map((c) => c.label).join(" · ") || "";
+      const groupHeader = (r: Record<string, unknown>) =>
+        dimCols.map((c) => dimDisplay(r[c.key], c.key)).join(" · ");
+      return (
+        <div className="h-full overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow
+                className={rowBorder}
+                style={{
+                  background: t.headerBg,
+                  color: t.headerColor,
+                  ...(borderColor ? { borderColor } : {}),
+                }}
+              >
+                <TableHead style={cellBorder(rows.length === 0)}>
+                  {cornerLabel}
+                </TableHead>
+                {rows.map((r, ri) => (
+                  <TableHead
+                    key={rowKey(r)}
+                    className="text-right"
+                    style={cellBorder(ri === rows.length - 1)}
+                  >
+                    {groupHeader(r)}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {metricCols.map((c) => (
+                <TableRow
+                  key={c.key}
+                  className={rowBorder}
+                  style={{
+                    background: t.bodyBg,
+                    color: t.bodyColor,
+                    ...(borderColor ? { borderColor } : {}),
+                  }}
+                >
+                  <TableHead
+                    className="font-medium"
+                    style={cellBorder(rows.length === 0)}
+                  >
+                    {c.label}
+                  </TableHead>
+                  {rows.map((r, ri) => (
+                    <TableCell
+                      key={rowKey(r)}
+                      className="text-right tabular-nums"
+                      style={cellBorder(ri === rows.length - 1)}
+                    >
+                      {metricCellText(r, c.key)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      );
+    }
+
+    // Com agrupamento: colunas = valores distintos da 1ª dimensão (na ordem em que
+    // aparecem em `rows`, que já respeita sort/ordem manual).
+    const colVals: unknown[] = [];
+    const seenCol = new Set<string>();
+    for (const r of rows) {
+      const key = String(r[colDimKey] ?? "");
+      if (!seenCol.has(key)) {
+        seenCol.add(key);
+        colVals.push(r[colDimKey]);
+      }
+    }
+    const colDimLabel =
+      data.dimensions.find((d) => d.key === colDimKey)?.label ?? "";
+    const rowsForCol = (rs: Record<string, unknown>[], v: unknown) =>
+      rs.filter((r) => String(r[colDimKey] ?? "") === String(v ?? ""));
+
+    // Eixo esquerdo achatado, com a MÉTRICA por fora: cada métrica é uma linha
+    // recolhível (nível 0) e, quando expandida, desce os grupos das demais
+    // dimensões (níveis ≥1). A chave inclui o caminho (prefixo) e a métrica p/
+    // isolar o estado de expansão entre métricas e ramos homônimos.
+    type TItem = {
+      metricKey: string;
+      level: number;
+      label: string;
+      key: string;
+      rows: Record<string, unknown>[];
+      collapsible: boolean;
+    };
+    const buildTItems = (
+      rs: Record<string, unknown>[],
+      levels: string[],
+      depth: number,
+      prefix: string,
+      metricKey: string
+    ): TItem[] => {
+      if (levels.length === 0) return [];
+      const [key, ...rest] = levels;
+      const byLabel = new Map<string, Record<string, unknown>[]>();
+      const order: string[] = [];
+      for (const r of rs) {
+        const label = groupLabelOf(r[key]);
+        let arr = byLabel.get(label);
+        if (!arr) {
+          arr = [];
+          byLabel.set(label, arr);
+          order.push(label);
+        }
+        arr.push(r);
+      }
+      const items: TItem[] = [];
+      for (const label of order) {
+        const groupRows = byLabel.get(label)!;
+        const k = `${prefix}›${label}`;
+        const isLeaf = rest.length === 0;
+        items.push({
+          metricKey,
+          level: depth,
+          label,
+          key: k,
+          rows: groupRows,
+          collapsible: !isLeaf,
+        });
+        if (!isLeaf && expanded.has(k))
+          items.push(...buildTItems(groupRows, rest, depth + 1, k, metricKey));
+      }
+      return items;
+    };
+    const tItems: TItem[] = [];
+    for (const mc of metricCols) {
+      const mKey = `__m:${mc.key}`;
+      tItems.push({
+        metricKey: mc.key,
+        level: 0,
+        label: mc.label,
+        key: mKey,
+        rows,
+        collapsible: true,
+      });
+      if (expanded.has(mKey))
+        tItems.push(...buildTItems(rows, tGroupLevels, 1, mKey, mc.key));
+    }
+
     return (
       <div className="h-full overflow-auto">
         <Table>
@@ -904,48 +1058,82 @@ function AppearanceTable({
                 ...(borderColor ? { borderColor } : {}),
               }}
             >
-              <TableHead style={cellBorder(rows.length === 0)}>
-                {cornerLabel}
+              <TableHead style={cellBorder(colVals.length === 0)}>
+                {colDimLabel}
               </TableHead>
-              {rows.map((r, ri) => (
+              {colVals.map((v, ci) => (
                 <TableHead
-                  key={rowKey(r)}
+                  key={String(v ?? "")}
                   className="text-right"
-                  style={cellBorder(ri === rows.length - 1)}
+                  style={cellBorder(ci === colVals.length - 1)}
                 >
-                  {groupHeader(r)}
+                  {dimDisplay(v, colDimKey)}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {metricCols.map((c) => (
-              <TableRow
-                key={c.key}
-                className={rowBorder}
-                style={{
-                  background: t.bodyBg,
-                  color: t.bodyColor,
-                  ...(borderColor ? { borderColor } : {}),
-                }}
-              >
-                <TableHead
-                  className="font-medium"
-                  style={cellBorder(rows.length === 0)}
+            {tItems.map((item) => {
+              const isMetric = item.level === 0;
+              const isCollapsed = !expanded.has(item.key);
+              return (
+                <TableRow
+                  key={item.key}
+                  className={cn(rowBorder, isMetric && "font-medium")}
+                  style={{
+                    background: isMetric
+                      ? t.headerBg ?? "var(--muted)"
+                      : t.bodyBg,
+                    color: isMetric ? t.headerColor : t.bodyColor,
+                    ...(borderColor ? { borderColor } : {}),
+                  }}
                 >
-                  {c.label}
-                </TableHead>
-                {rows.map((r, ri) => (
-                  <TableCell
-                    key={rowKey(r)}
-                    className="text-right tabular-nums"
-                    style={cellBorder(ri === rows.length - 1)}
+                  <TableHead
+                    className="font-medium"
+                    style={cellBorder(colVals.length === 0)}
                   >
-                    {metricCellText(r, c.key)}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1",
+                        item.collapsible ? "cursor-pointer" : "cursor-default"
+                      )}
+                      style={
+                        item.level ? { paddingLeft: item.level * 16 } : undefined
+                      }
+                      onClick={
+                        item.collapsible
+                          ? () => toggleExpand(item.key)
+                          : undefined
+                      }
+                      disabled={!item.collapsible}
+                    >
+                      {item.collapsible ? (
+                        isCollapsed ? (
+                          <ChevronRight className="size-3.5 shrink-0" />
+                        ) : (
+                          <ChevronDown className="size-3.5 shrink-0" />
+                        )
+                      ) : null}
+                      {item.label}
+                    </button>
+                  </TableHead>
+                  {colVals.map((v, ci) => (
+                    <TableCell
+                      key={String(v ?? "")}
+                      className="text-right tabular-nums"
+                      style={cellBorder(ci === colVals.length - 1)}
+                    >
+                      {metricAggCellText(
+                        rowsForCol(item.rows, v),
+                        item.metricKey,
+                        false
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
