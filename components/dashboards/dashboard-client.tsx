@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
-import type { PeriodSelection } from "@/lib/widgets/period";
+import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
 import type {
   DashboardSettings,
   FieldFilterOptions,
@@ -55,8 +55,9 @@ export function DashboardClient({
   visibleToRoles,
   dateFormat,
   periodBar,
-  periodDefaults,
-  periodDefaultField,
+  periodScope,
+  periodDefaultsByTab,
+  periodDefaultFieldByTab,
   filterOptionsById,
 }: {
   dashboardId: string;
@@ -81,8 +82,9 @@ export function DashboardClient({
   visibleToRoles: string[];
   dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
-  periodDefaults?: PeriodSelection;
-  periodDefaultField?: string;
+  periodScope?: PeriodScope;
+  periodDefaultsByTab?: Record<string, PeriodSelection>;
+  periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
 }) {
   const [editMode, setEditMode] = useState(false);
@@ -241,8 +243,11 @@ export function DashboardClient({
             canEdit={canEdit}
             dashboardId={dashboardId}
             periodBar={periodBar}
-            periodDefaults={periodDefaults}
-            periodDefaultField={periodDefaultField}
+            periodScope={periodScope}
+            activeTabId={activeTabId}
+            hasTabs={tabs.length > 0}
+            periodDefaultsByTab={periodDefaultsByTab}
+            periodDefaultFieldByTab={periodDefaultFieldByTab}
           />
         ) : canEdit ? (
           <Button

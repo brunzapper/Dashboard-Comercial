@@ -335,6 +335,10 @@ export interface DashboardSettings {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global
     field?: string; // campo de data padrão da barra global
+    // Escopo do filtro de período: "global" (default) = um período para todo o
+    // dashboard; "tab" = cada aba tem sua própria seleção (parâmetros de URL
+    // namespados por id da aba). Ver components/dashboards/period-filter.tsx.
+    scope?: "global" | "tab";
   };
   // Formato padrão das datas exibidas nas tabelas deste dashboard (pode ser
   // sobrescrito por coluna em AppearanceSettings.table.dateFormats).

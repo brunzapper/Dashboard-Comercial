@@ -138,7 +138,8 @@ export async function renameDashboard(
 // só persiste para reidratar o default na próxima visita.
 export async function saveLastPeriod(
   dashboardId: string,
-  period: SavedPeriod
+  period: SavedPeriod,
+  tabId?: string
 ): Promise<void> {
   const session = await getSessionInfo();
   if (!session) return;
@@ -149,11 +150,31 @@ export async function saveLastPeriod(
   if (period.de) clean.de = period.de;
   if (period.ate) clean.ate = period.ate;
   if (period.campo) clean.campo = period.campo;
+
+  // Read-modify-write para preservar as demais chaves: no modo global grava em
+  // `lastPeriod`; no modo por aba, em `lastPeriodByTab[tabId]` (sem apagar o
+  // período global nem o das outras abas).
+  const { data } = await supabase
+    .from("user_preferences")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  const current = (data?.settings ?? {}) as {
+    lastPeriod?: SavedPeriod;
+    lastPeriodByTab?: Record<string, SavedPeriod>;
+  };
+  const next: typeof current = { ...current };
+  if (tabId) {
+    next.lastPeriodByTab = { ...(current.lastPeriodByTab ?? {}), [tabId]: clean };
+  } else {
+    next.lastPeriod = clean;
+  }
   await supabase.from("user_preferences").upsert(
     {
       user_id: session.user.id,
       dashboard_id: dashboardId,
-      settings: { lastPeriod: clean },
+      settings: next,
     },
     { onConflict: "user_id,dashboard_id" }
   );
