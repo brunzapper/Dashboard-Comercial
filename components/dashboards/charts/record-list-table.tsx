@@ -190,6 +190,31 @@ export function RecordListTable({
   const metricList = metrics.filter((m) => m.field);
   const metricLabel = (m: Metric) =>
     m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
+
+  // Lista única de colunas (dimensões + métricas) reordenável em conjunto, igual
+  // à tabela agregada: métricas podem ser arrastadas para qualquer posição,
+  // inclusive intercaladas às dimensões. Cada métrica recebe uma chave estável
+  // (prefixo __metric:) para participar do columnOrder sem colidir com o c.field
+  // das dimensões; o índice desambigua métricas idênticas. Métricas ficam fora do
+  // columnOrder salvo em configs antigos, então applyManualOrder as anexa após as
+  // dimensões — preservando o layout atual sem migração.
+  const metricKey = (m: Metric, i: number) => `__metric:${m.field}:${m.agg}:${i}`;
+  type MergedCol =
+    | { kind: "dim"; key: string; c: RecordListColumn }
+    | { kind: "metric"; key: string; m: Metric; mi: number };
+  const mergedCols: MergedCol[] = applyManualOrder(
+    [
+      ...baseCols.map((c) => ({ kind: "dim" as const, key: c.field, c })),
+      ...metricList.map((m, mi) => ({
+        kind: "metric" as const,
+        key: metricKey(m, mi),
+        m,
+        mi,
+      })),
+    ],
+    t.columnOrder,
+    (x) => x.key
+  );
   // Rótulo (estético) do cabeçalho de uma coluna: nome exibido > rótulo do campo.
   const colLabel = (c: RecordListColumn) =>
     c.label?.trim() || fieldLabel(c.field, available);
@@ -568,15 +593,12 @@ export function RecordListTable({
       }}
     >
       {editable ? <TableCell className="w-6 px-1" /> : null}
-      {cols.map((c, ci) => {
-        const numeric = isNumericCol(c.field);
-        return (
-          <TableCell
-            key={c.field}
-            className={numeric ? "text-right tabular-nums" : undefined}
-            style={cellBorder(ci === cols.length - 1)}
-          >
-            {ci === 0 ? (
+      {mergedCols.map((x, ci) => {
+        const border = cellBorder(ci === mergedCols.length - 1);
+        // Primeira coluna (qualquer tipo): rótulo do grupo + chevron de recolher.
+        if (ci === 0) {
+          return (
+            <TableCell key={x.key} style={border}>
               <button
                 type="button"
                 className={cn(
@@ -595,17 +617,27 @@ export function RecordListTable({
                 ) : null}
                 {label}
               </button>
-            ) : numeric ? (
-              numFmt(c.field, sumCol(c.field, rs))
-            ) : null}
+            </TableCell>
+          );
+        }
+        if (x.kind === "metric") {
+          return (
+            <TableCell key={x.key} className="text-right tabular-nums" style={border}>
+              {metricAggText(x.m, rs, opts?.isGrand)}
+            </TableCell>
+          );
+        }
+        const numeric = isNumericCol(x.c.field);
+        return (
+          <TableCell
+            key={x.key}
+            className={numeric ? "text-right tabular-nums" : undefined}
+            style={border}
+          >
+            {numeric ? numFmt(x.c.field, sumCol(x.c.field, rs)) : null}
           </TableCell>
         );
       })}
-      {metricList.map((m, mi) => (
-        <TableCell key={`metric_${mi}`} className="text-right tabular-nums">
-          {metricAggText(m, rs, opts?.isGrand)}
-        </TableCell>
-      ))}
     </TableRow>
   );
 
@@ -643,7 +675,24 @@ export function RecordListTable({
             <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
           </TableCell>
         ) : null}
-        {cols.map((c, ci) => {
+        {mergedCols.map((x, ci) => {
+          const last = ci === mergedCols.length - 1;
+          if (x.kind === "metric") {
+            return (
+              <TableCell
+                key={x.key}
+                className="text-right tabular-nums"
+                style={{
+                  color: rowCp?.text ?? t.bodyColor,
+                  ...cellBorder(last),
+                  ...widthStyle(x.key),
+                }}
+              >
+                {metricCellText(x.m, r)}
+              </TableCell>
+            );
+          }
+          const c = x.c;
           const isCustom = c.field.startsWith("custom:");
           const field = isCustom ? fieldByKey.get(c.field.slice(7)) : undefined;
           // Editável quando a coluna foi marcada (c.editable). Compat.: colunas
@@ -672,7 +721,7 @@ export function RecordListTable({
           const colCp = t.colColors?.[c.field];
           return (
             <TableCell
-              key={c.field}
+              key={x.key}
               className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
               onDoubleClick={
                 editable && !isEditableCell
@@ -691,7 +740,7 @@ export function RecordListTable({
               style={{
                 background: cellCp?.fill ?? colCp?.fill,
                 color: cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
-                ...cellBorder(ci === cols.length - 1),
+                ...cellBorder(last),
                 ...widthStyle(c.field),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
               }}
@@ -740,20 +789,11 @@ export function RecordListTable({
             </TableCell>
           );
         })}
-        {metricList.map((m, mi) => (
-          <TableCell
-            key={`metric_${mi}`}
-            className="text-right tabular-nums"
-            style={{ color: rowCp?.text ?? t.bodyColor }}
-          >
-            {metricCellText(m, r)}
-          </TableCell>
-        ))}
       </TableRow>
     );
   };
 
-  if (cols.length === 0 && metricList.length === 0) {
+  if (mergedCols.length === 0) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-sm">
         Nenhuma coluna configurada. Edite o widget e adicione colunas.
@@ -891,67 +931,93 @@ export function RecordListTable({
             }}
           >
             {editable ? <TableHead className="w-6 px-1" /> : null}
-            {cols.map((c, ci) => (
-              <TableHead
-                key={c.field}
-                className={cn("group relative whitespace-nowrap", editable && "cursor-move")}
-                draggable={editable}
-                onDragStart={editable ? () => setDragCol(c.field) : undefined}
-                onDragOver={editable ? (e) => e.preventDefault() : undefined}
-                onDrop={
-                  editable
-                    ? () => {
-                        if (dragCol)
-                          setTable({
-                            columnOrder: reorderKeys(
-                              cols.map((x) => x.field),
-                              dragCol,
-                              c.field
-                            ),
-                          });
-                        setDragCol(null);
-                      }
-                    : undefined
-                }
-                onDoubleClick={
-                  editable
-                    ? (e) =>
-                        setMenu({
-                          kind: "ctx",
-                          x: e.clientX,
-                          y: e.clientY,
-                          column: c.field,
-                          scopes: ["col"],
-                          isDate: isDateCol(c.field),
-                        })
-                    : undefined
-                }
-                style={{
-                  background: t.colColors?.[c.field]?.fill,
-                  color: t.colColors?.[c.field]?.text ?? t.headerColor,
-                  ...cellBorder(ci === cols.length - 1),
-                  ...widthStyle(c.field),
-                }}
-              >
-                <span className="inline-flex items-center gap-1">
+            {mergedCols.map((x, ci) => {
+              const last = ci === mergedCols.length - 1;
+              // Handlers de arraste compartilhados: reordenam dentro da lista
+              // única (dimensões + métricas) gravando o columnOrder completo.
+              const dragProps = editable
+                ? {
+                    draggable: true,
+                    onDragStart: () => setDragCol(x.key),
+                    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+                    onDrop: () => {
+                      if (dragCol)
+                        setTable({
+                          columnOrder: reorderKeys(
+                            mergedCols.map((mc) => mc.key),
+                            dragCol,
+                            x.key
+                          ),
+                        });
+                      setDragCol(null);
+                    },
+                  }
+                : {};
+              if (x.kind === "metric") {
+                return (
+                  <TableHead
+                    key={x.key}
+                    className={cn(
+                      "group relative whitespace-nowrap text-right",
+                      editable && "cursor-move"
+                    )}
+                    {...dragProps}
+                    style={{
+                      color: t.headerColor,
+                      ...cellBorder(last),
+                      ...widthStyle(x.key),
+                    }}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {editable ? (
+                        <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                      ) : null}
+                      {metricLabel(x.m)}
+                    </span>
+                    {editable ? (
+                      <ResizeHandle axis="col" onResize={(w) => setColWidth(x.key, w)} />
+                    ) : null}
+                  </TableHead>
+                );
+              }
+              const c = x.c;
+              return (
+                <TableHead
+                  key={x.key}
+                  className={cn("group relative whitespace-nowrap", editable && "cursor-move")}
+                  {...dragProps}
+                  onDoubleClick={
+                    editable
+                      ? (e) =>
+                          setMenu({
+                            kind: "ctx",
+                            x: e.clientX,
+                            y: e.clientY,
+                            column: c.field,
+                            scopes: ["col"],
+                            isDate: isDateCol(c.field),
+                          })
+                      : undefined
+                  }
+                  style={{
+                    background: t.colColors?.[c.field]?.fill,
+                    color: t.colColors?.[c.field]?.text ?? t.headerColor,
+                    ...cellBorder(last),
+                    ...widthStyle(c.field),
+                  }}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {editable ? (
+                      <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                    ) : null}
+                    {colLabel(c)}
+                  </span>
                   {editable ? (
-                    <GripVertical className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                    <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />
                   ) : null}
-                  {colLabel(c)}
-                </span>
-                {editable ? (
-                  <ResizeHandle axis="col" onResize={(w) => setColWidth(c.field, w)} />
-                ) : null}
-              </TableHead>
-            ))}
-            {metricList.map((m, mi) => (
-              <TableHead
-                key={`metric_${mi}`}
-                className="text-right whitespace-nowrap"
-              >
-                {metricLabel(m)}
-              </TableHead>
-            ))}
+                </TableHead>
+              );
+            })}
           </TableRow>
         </TableHeader>
         <TableBody>
