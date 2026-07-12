@@ -487,7 +487,7 @@ export function EntityListTable({
   }
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto [scrollbar-gutter:stable]">
       <Table>
         <TableHeader>
           <TableRow

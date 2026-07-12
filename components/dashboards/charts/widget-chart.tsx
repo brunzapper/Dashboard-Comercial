@@ -910,7 +910,7 @@ function AppearanceTable({
       const groupHeader = (r: Record<string, unknown>) =>
         dimCols.map((c) => dimDisplay(r[c.key], c.key)).join(" · ");
       return (
-        <div className="h-full overflow-auto">
+        <div className="h-full overflow-auto [scrollbar-gutter:stable]">
           <Table>
             <TableHeader>
               <TableRow
@@ -1056,7 +1056,7 @@ function AppearanceTable({
     }
 
     return (
-      <div className="h-full overflow-auto">
+      <div className="h-full overflow-auto [scrollbar-gutter:stable]">
         <Table>
           <TableHeader>
             <TableRow
@@ -1150,7 +1150,7 @@ function AppearanceTable({
   }
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto [scrollbar-gutter:stable]">
       <Table>
         <TableHeader>
           <TableRow
