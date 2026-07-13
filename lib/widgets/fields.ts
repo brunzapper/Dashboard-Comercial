@@ -40,7 +40,21 @@ export interface AvailableField {
   // Editar esta coluna pode gravar de volta no Bitrix (custom de Sync, ou coluna
   // do núcleo mapeada). Habilita o toggle "Gravar no Bitrix".
   writable?: boolean;
+  // Campo sintético só de exibição (ex.: "Data atual"): não existe coluna no
+  // banco, então NÃO pode virar dimensão/filtro do RPC. Serve como coluna do
+  // modo lista e operando de fórmula. O builder filtra estes de dimensão/filtro.
+  displayOnly?: boolean;
 }
+
+// Campo sintético "Data atual" (hoje em Brasília). Resolvido no cliente
+// (lib/date/today.ts) — ver record-list-table (coluna) e engine/runKpi (KPI).
+export const TODAY_FIELD: AvailableField = {
+  field: "today",
+  label: "Data atual",
+  isNumeric: false,
+  isDate: true,
+  displayOnly: true,
+};
 
 // Campos do núcleo expostos no builder.
 export const CORE_FIELDS: AvailableField[] = [
@@ -101,7 +115,7 @@ export function buildAvailableFields(
     unified: true,
   }));
   const match = buildMatchFields(customFields);
-  return [...core, ...custom, ...unified, ...match];
+  return [...core, TODAY_FIELD, ...custom, ...unified, ...match];
 }
 
 // Colunas do núcleo úteis de puxar do registro CASADO (match:<fonte>:<ref>).

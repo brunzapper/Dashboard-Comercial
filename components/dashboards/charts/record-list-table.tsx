@@ -69,6 +69,7 @@ import {
   formatDateValue,
   type DateFormat,
 } from "@/lib/widgets/format";
+import { todayBrasiliaIso } from "@/lib/date/today";
 import type {
   AppearanceSettings,
   ColorPair,
@@ -85,7 +86,10 @@ import {
 
 const FK_FIELDS = new Set(["responsible_id", "operation_id", "related_lead_id"]);
 const MONEY_FIELDS = new Set(["value", "mrr"]);
-const DATE_FIELDS = new Set(["closed_at", "opened_at", "source_created_at"]);
+// "today" é sintético (Data atual, Brasília): não vem do registro, é resolvido
+// em rawValue/coreDisplay. Fica no conjunto de datas p/ formatar e permitir
+// override de máscara por coluna.
+const DATE_FIELDS = new Set(["closed_at", "opened_at", "source_created_at", "today"]);
 
 // Valor monetário na moeda do registro (quando informada); sem moeda cai em BRL.
 // Usado tanto para células por registro (com r.currency) quanto para subtotais
@@ -100,7 +104,10 @@ function coreDisplay(
   fkLabels: Record<string, string>,
   dateFmt: DateFormat
 ): string {
-  const v = (record as unknown as Record<string, unknown>)[field];
+  const v =
+    field === "today"
+      ? todayBrasiliaIso()
+      : (record as unknown as Record<string, unknown>)[field];
   if (FK_FIELDS.has(field)) return v ? (fkLabels[String(v)] ?? "—") : "—";
   if (MONEY_FIELDS.has(field)) return money(v, record.currency);
   if (field === "closed") return v ? "Sim" : "Não";
@@ -118,6 +125,7 @@ function parseMatchField(field: string): { src: string; ref: string } | null {
 }
 
 function rawValue(field: string, record: RecordRow): unknown {
+  if (field === "today") return todayBrasiliaIso();
   const mm = parseMatchField(field);
   if (mm) {
     const mrec = record.__match?.[mm.src as keyof NonNullable<RecordRow["__match"]>];

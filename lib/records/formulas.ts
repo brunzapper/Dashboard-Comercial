@@ -13,6 +13,7 @@ import {
   yearQuarterOf,
   type CurrencyRates,
 } from "@/lib/widgets/currency";
+import { todayBrasiliaMs } from "@/lib/date/today";
 
 export type FormulaOp = "+" | "-" | "*" | "/";
 
@@ -70,6 +71,10 @@ export function buildDateContext(
     closed_at: toMs(rec.closed_at),
     opened_at: toMs(rec.opened_at),
     source_created_at: toMs(rec.source_created_at),
+    // Operando sintético "Data atual" (hoje em Brasília). Como calc-fields são
+    // materializados, o valor congela no momento do cálculo — o recalc diário
+    // (app/api/sync/recalc-daily) reatualiza os campos que usam `today`.
+    today: todayBrasiliaMs(),
   };
   for (const key of customDateKeys) ctx[`custom:${key}`] = toMs(customFields[key]);
   return ctx;

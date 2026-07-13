@@ -237,7 +237,12 @@ export function RecordEditSheet({
                   name="responsible_id"
                   options={[
                     { value: "", label: "— nenhum —" },
-                    ...responsibles.map((r) => ({ value: r.id, label: r.label })),
+                    // Este dropdown grava sempre no Bitrix (force_sync_write_back):
+                    // só responsáveis com usuário Bitrix. Os criados só no sistema
+                    // (sem bitrix_user_id) não têm p/ onde gravar a atribuição.
+                    ...responsibles
+                      .filter((r) => r.bitrixLinked)
+                      .map((r) => ({ value: r.id, label: r.label })),
                   ]}
                   value={responsibleId}
                   onValueChange={setResponsibleId}

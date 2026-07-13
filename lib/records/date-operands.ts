@@ -21,9 +21,20 @@ export interface CustomDateField {
 // Colunas de data do núcleo (closed_at, opened_at, source_created_at).
 const CORE_DATE_FIELDS = CORE_FIELDS.filter((f) => f.isDate);
 
-/** Datas do próprio registro + campos personalizados `data`. */
+// Operando sintético "Data atual" (hoje em Brasília). É resolvido no
+// contexto de datas (lib/records/formulas.ts) — não é uma coluna do banco, por
+// isso fica só nos operandos PRÓPRIOS (nunca em match:<fonte>:today).
+export const TODAY_REF = "today";
+const TODAY_OPERAND: OperandRef = {
+  ref: TODAY_REF,
+  label: "Data atual",
+  group: "Datas",
+};
+
+/** Datas do próprio registro + campos personalizados `data` + hoje (Brasília). */
 export function ownDateOperands(customDateFields: CustomDateField[]): OperandRef[] {
   return [
+    TODAY_OPERAND,
     ...CORE_DATE_FIELDS.map((f) => ({ ref: f.field, label: f.label, group: "Datas" })),
     ...customDateFields.map((f) => ({
       ref: `custom:${f.field_key}`,

@@ -94,4 +94,8 @@ export const RECORD_TYPE_LABELS: Record<RecordRow["record_type"], string> = {
 export interface OptionItem {
   id: string;
   label: string;
+  // Responsável vinculado a um usuário do Bitrix (bitrix_user_id não nulo).
+  // Só estes podem entrar em dropdowns com write-back: responsáveis criados só
+  // no sistema não têm usuário Bitrix p/ onde gravar a atribuição.
+  bitrixLinked?: boolean;
 }

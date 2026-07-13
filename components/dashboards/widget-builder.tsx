@@ -352,6 +352,15 @@ export function WidgetBuilder({
     widget?.settings?.formula ?? { tokens: [] }
   );
 
+  // KPI "Data atual": card que mostra o dia de hoje (Brasília). Não usa
+  // métrica/RPC — o valor é resolvido no engine (runKpi) via settings.mode.
+  const [kpiToday, setKpiToday] = useState<boolean>(
+    widget?.settings?.mode === "data_atual"
+  );
+  const [kpiTodayLabel, setKpiTodayLabel] = useState<string>(
+    widget?.settings?.label ?? "Data atual"
+  );
+
   // Aba (id) a que o widget pertence. Novo widget nasce na aba ativa; ao editar,
   // mantém a sua. Só relevante quando o dashboard tem abas configuradas.
   const [tabId, setTabId] = useState<string>(
@@ -364,8 +373,10 @@ export function WidgetBuilder({
     );
   }
 
-  // Config do widget de filtro de período (visual_type 'filtro').
-  const dateFields = available.filter((f) => f.isDate);
+  // Config do widget de filtro de período (visual_type 'filtro'). Exclui campos
+  // sintéticos (displayOnly, ex.: "Data atual"): não existem no banco, então não
+  // podem ser campo de filtro de período (que vai para o RPC).
+  const dateFields = available.filter((f) => f.isDate && !f.displayOnly);
   const [filterField, setFilterField] = useState(
     widget?.settings?.field ?? DEFAULT_PERIOD_FIELD
   );
@@ -439,6 +450,13 @@ export function WidgetBuilder({
   ];
 
   const availableOptions = toFieldOptions(available);
+  // Campos válidos para o RPC (dimensão agregada, filtro, busca): exclui os
+  // sintéticos (displayOnly, ex.: "Data atual") que não existem como coluna no
+  // banco. No modo lista as dimensões SÃO colunas do cliente, então lá o campo
+  // sintético é permitido (usa availableOptions).
+  const rpcFieldOptions = toFieldOptions(
+    available.filter((f) => !f.displayOnly)
+  );
   const metricOptions: ComboboxOption[] = [
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields),
@@ -685,6 +703,18 @@ export function WidgetBuilder({
       };
     }
 
+    // KPI "Data atual": grava o modo sintético (resolvido no engine sem RPC) ou
+    // limpa quando desmarcado. Não interfere nos KPIs meta/razão (vindos de preset).
+    if (visualType === "kpi") {
+      if (kpiToday) {
+        settings.mode = "data_atual";
+        settings.label = kpiTodayLabel.trim() || "Data atual";
+      } else if (settings.mode === "data_atual") {
+        delete settings.mode;
+        delete settings.label;
+      }
+    }
+
     const input = {
       title: title.trim() || null,
       visual_type: visualType,
@@ -856,7 +886,7 @@ export function WidgetBuilder({
                   <div key={i} className="flex items-center gap-2">
                     <Combobox
                       className="flex-1"
-                      options={availableOptions}
+                      options={rpcFieldOptions}
                       value={sf}
                       placeholder="— campo —"
                       onValueChange={(field) => {
@@ -904,7 +934,7 @@ export function WidgetBuilder({
                   <div key={i} className="flex items-center gap-2">
                     <Combobox
                       className="flex-1"
-                      options={availableOptions}
+                      options={rpcFieldOptions}
                       value={f.field}
                       placeholder="— campo —"
                       onValueChange={(field) => {
@@ -982,6 +1012,35 @@ export function WidgetBuilder({
               <p className="text-muted-foreground text-xs">
                 Combine agregações dos registros (+ − × ÷ e constantes).
               </p>
+            </div>
+          ) : null}
+
+          {/* KPI "Data atual": mostra o dia de hoje (Brasília), sem métrica. */}
+          {visualType === "kpi" ? (
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={kpiToday}
+                  onCheckedChange={(v) => setKpiToday(v === true)}
+                />
+                Card de Data atual (mostra o dia de hoje, horário de Brasília)
+              </label>
+              {kpiToday ? (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="kpi-today-label">Rótulo</Label>
+                    <Input
+                      id="kpi-today-label"
+                      value={kpiTodayLabel}
+                      onChange={(e) => setKpiTodayLabel(e.target.value)}
+                      placeholder="Data atual"
+                    />
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Métricas e filtros são ignorados neste modo.
+                  </p>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -1126,7 +1185,10 @@ export function WidgetBuilder({
               <div className="flex items-center gap-2">
                 <Combobox
                   className="flex-1"
-                  options={availableOptions}
+                  // No modo lista as dimensões são colunas do cliente → permite
+                  // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
+                  // agregado a dimensão vai ao RPC → só campos reais.
+                  options={isRecordList ? availableOptions : rpcFieldOptions}
                   value={d.field}
                   placeholder="— campo —"
                   onValueChange={(field) => {
@@ -1498,7 +1560,7 @@ export function WidgetBuilder({
               <div key={i} className="flex items-center gap-2">
                 <Combobox
                   className="flex-1"
-                  options={availableOptions}
+                  options={rpcFieldOptions}
                   value={f.field}
                   placeholder="— campo —"
                   onValueChange={(field) => {

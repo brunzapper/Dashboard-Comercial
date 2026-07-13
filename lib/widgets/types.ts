@@ -143,7 +143,8 @@ export interface WidgetFilter {
 
 // Extras de KPI (Fase 6B): comparação com meta e razões (TM, valor/conta).
 export interface KpiSettings {
-  mode?: "meta" | "ratio";
+  // 'data_atual' = card sintético que mostra o dia de hoje (Brasília), sem RPC.
+  mode?: "meta" | "ratio" | "data_atual";
   metric?: string; // modo meta: 'mrr' | 'clientes'
   scope?: "global" | "operation" | "responsible";
   operationId?: string | null;
@@ -398,7 +399,7 @@ export interface WidgetConfig {
 }
 
 export interface KpiResult {
-  mode: "meta" | "ratio";
+  mode: "meta" | "ratio" | "data_atual";
   label: string;
   realizado?: number;
   meta?: number | null;
