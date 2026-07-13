@@ -44,6 +44,8 @@ import {
 } from "./currency";
 import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import { DEFAULT_DATE_FORMAT, formatDateValue } from "./format";
+import { todayBrasiliaIso } from "@/lib/date/today";
 import { resolveGoal } from "@/lib/metas/resolve";
 import {
   RECORD_TYPE_SOURCE,
@@ -365,6 +367,19 @@ async function runKpi(
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
   const empty = { rows: [], dimensions: [], metrics: [] };
+
+  // KPI "Data atual": mostra o dia de hoje em Brasília. Sintético — não consulta
+  // o banco; o valor é sempre live (resolvido a cada render no servidor).
+  if (s.mode === "data_atual") {
+    return {
+      ...empty,
+      kpi: {
+        mode: "data_atual",
+        label: s.label ?? "Data atual",
+        valueText: formatDateValue(todayBrasiliaIso(), DEFAULT_DATE_FORMAT),
+      },
+    };
+  }
   // Config de moeda do KPI (mesma semântica dos campos de Metric).
   const kpiCfg = (agg: string) => ({
     agg,

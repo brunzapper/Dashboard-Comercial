@@ -1,6 +1,9 @@
-// Versão: 1.0 | Data: 05/07/2026
-// Server Actions da tela de Responsáveis (admin): ativar/desativar e mapear
-// operações com prioridade (responsible_operations). RLS exige admin.
+// Versão: 1.1 | Data: 13/07/2026
+// Server Actions da tela de Responsáveis (admin): criar, ativar/desativar e
+// mapear operações com prioridade (responsible_operations). RLS exige admin.
+// v1.1 (13/07/2026): createResponsible — responsáveis criados só no sistema
+//   (sem bitrix_user_id). Não aparecem em dropdowns write-back (não há usuário
+//   Bitrix p/ onde gravar); o guard em lib/records/actions.ts também os pula.
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -8,9 +11,34 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 
+export interface ResponsibleState {
+  ok?: boolean;
+  message?: string;
+}
+
 async function ensureAdmin(): Promise<boolean> {
   const s = await getSessionInfo();
   return !!s && s.roles.includes("admin");
+}
+
+export async function createResponsible(
+  _prev: ResponsibleState,
+  formData: FormData
+): Promise<ResponsibleState> {
+  if (!(await ensureAdmin())) {
+    return { ok: false, message: "Apenas administradores." };
+  }
+  const name = String(formData.get("display_name") ?? "").trim();
+  if (!name) return { ok: false, message: "Informe o nome." };
+
+  const supabase = await createClient();
+  // bitrix_user_id fica null: responsável só do sistema.
+  const { error } = await supabase
+    .from("responsibles")
+    .insert({ display_name: name });
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/configuracoes/responsaveis");
+  return { ok: true, message: `Responsável "${name}" criado.` };
 }
 
 export async function setResponsibleActive(

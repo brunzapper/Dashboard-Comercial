@@ -1,9 +1,10 @@
-// Versão: 1.0 | Data: 05/07/2026
-// Gerência de Responsáveis (admin): ativar/desativar e mapear operações com
-// prioridade. Responsáveis são criados pelo sync; aqui o admin cura a lista.
+// Versão: 1.1 | Data: 13/07/2026
+// Gerência de Responsáveis (admin): criar, ativar/desativar e mapear operações
+// com prioridade. Responsáveis vêm do sync OU são criados aqui (só no sistema,
+// sem Bitrix). O admin cura a lista.
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,10 @@ import {
 import type { OptionItem } from "@/lib/records/types";
 import {
   addResponsibleOperation,
+  createResponsible,
   removeResponsibleOperation,
   setResponsibleActive,
+  type ResponsibleState,
 } from "@/app/(app)/configuracoes/responsaveis/actions";
 
 export interface ResponsibleOp {
@@ -56,9 +59,44 @@ export function ResponsiblesManager({
   const [editing, setEditing] = useState<ResponsibleRow | null>(null);
   const [opId, setOpId] = useState("");
   const [priority, setPriority] = useState(1);
+  const [createState, createAction, creating] = useActionState<
+    ResponsibleState,
+    FormData
+  >(createResponsible, {});
 
   return (
-    <div className="rounded-lg border">
+    <div className="flex flex-col gap-4">
+      <form
+        action={createAction}
+        className="flex flex-wrap items-end gap-3 rounded-lg border p-4"
+      >
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="display_name">Novo responsável (só no sistema)</Label>
+          <Input
+            id="display_name"
+            name="display_name"
+            placeholder="Ex.: Maria Silva"
+            className="min-w-56"
+            required
+          />
+        </div>
+        <Button type="submit" disabled={creating}>
+          <Plus className="size-4" /> Criar
+        </Button>
+        {createState.message ? (
+          <span
+            className={
+              createState.ok
+                ? "text-muted-foreground text-sm"
+                : "text-destructive text-sm"
+            }
+          >
+            {createState.message}
+          </span>
+        ) : null}
+      </form>
+
+      <div className="rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow>
@@ -73,7 +111,7 @@ export function ResponsiblesManager({
           {responsibles.length === 0 ? (
             <TableRow>
               <TableCell colSpan={5} className="text-muted-foreground text-center">
-                Nenhum responsável ainda (são criados pelo sync do Bitrix/planilha).
+                Nenhum responsável ainda (são criados pelo sync do Bitrix/planilha ou aqui em cima).
               </TableCell>
             </TableRow>
           ) : (
@@ -198,6 +236,7 @@ export function ResponsiblesManager({
           </div>
         </SheetContent>
       </Sheet>
+      </div>
     </div>
   );
 }

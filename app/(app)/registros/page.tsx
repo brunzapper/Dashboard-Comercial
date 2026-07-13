@@ -96,7 +96,7 @@ export default async function RegistrosPage({
         .order("sort_order", { ascending: true }),
       supabase
         .from("responsibles")
-        .select("id, display_name")
+        .select("id, display_name, bitrix_user_id")
         .eq("active", true)
         .order("display_name"),
       supabase
@@ -113,6 +113,8 @@ export default async function RegistrosPage({
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,
+    // Só os com usuário Bitrix entram no dropdown write-back do formulário.
+    bitrixLinked: Boolean(r.bitrix_user_id),
   }));
   const operations: OptionItem[] = (opsData ?? []).map((o) => ({
     id: o.id as string,

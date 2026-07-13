@@ -214,6 +214,16 @@ export function WidgetChart({
   if (visualType === "kpi") {
     if (data.kpi) {
       const k = data.kpi;
+      if (k.mode === "data_atual") {
+        return (
+          <div className="flex h-full flex-col justify-center p-1">
+            <span className="text-3xl font-semibold tabular-nums">
+              {k.valueText ?? "—"}
+            </span>
+            <span className="text-muted-foreground text-xs">{k.label}</span>
+          </div>
+        );
+      }
       if (k.mode === "ratio") {
         return (
           <div className="flex h-full flex-col justify-center p-1">
