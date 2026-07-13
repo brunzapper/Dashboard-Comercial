@@ -1,6 +1,11 @@
-// Versão: 2.1 | Data: 12/07/2026
+// Versão: 2.2 | Data: 13/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.2 (13/07/2026): dimensões dinâmicas não sobrepõem mais os vizinhos. O layout
+//   enviado ao RGL passa por pushApart, que empurra os vizinhos no eixo do
+//   crescimento (largura → direita, altura → baixo). Como é função determinística
+//   da base, o colapso devolve todos à posição base. A persistência grava sempre a
+//   base (só o item manipulado muda), para o deslocamento automático não derivar.
 // v2.1 (12/07/2026): compactType={null} — sem compactação vertical, então os
 //   widgets ficam livres nos dois eixos (X e Y). Ao soltar sobre outro, empurra
 //   o vizinho (preventCollision no padrão false).
@@ -59,6 +64,89 @@ function posOf(w: Widget, i: number): GridPosition {
   const p = w.grid_position as GridPosition;
   if (p && typeof p.w === "number") return p;
   return { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 };
+}
+
+// Item do resolvedor de colisões: posição/tamanho corrente (x/y/w/h, com w/h já
+// inflados) mais a "pegada" base (bx/by/bw/bh, o tamanho mínimo persistido). A base
+// serve para decidir o eixo de empurrão a partir de como os dois estavam separados
+// ORIGINALMENTE (lado a lado → empurra na horizontal; empilhados → na vertical).
+type ResolveItem = {
+  i: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  bx: number;
+  by: number;
+  bw: number;
+  bh: number;
+};
+
+// Sobreposição de dois retângulos do grid (bordas estritas: encostar não colide).
+function collides(a: ResolveItem, b: ResolveItem): boolean {
+  return (
+    a.x < b.x + b.w &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.h &&
+    a.y + a.h > b.y
+  );
+}
+
+// Resolve as sobreposições criadas pela inflação (dimensões dinâmicas) empurrando
+// os vizinhos NO EIXO DO CRESCIMENTO: largura empurra à direita, altura para baixo.
+// É uma função pura de (pegadas base + tamanhos inflados) — determinística, então
+// ao colapsar (sem inflação → sem colisão) todos voltam exatamente à base.
+//
+// Cada empurrão só ocorre no eixo em que os dois estavam SEPARADOS na base, para que
+// crescer só a altura não empurre ninguém para o lado (e vice-versa). Como no layout
+// base nenhum par se sobrepõe, todo par colidente estava separado em ao menos um eixo.
+// Dois passos: horizontal (largura), depois vertical (altura), usando os x resolvidos.
+function pushApart(items: readonly ResolveItem[]): ResolveItem[] {
+  const byI = (a: ResolveItem, b: ResolveItem) =>
+    a.i < b.i ? -1 : a.i > b.i ? 1 : 0;
+  // p estava totalmente à esquerda / acima de c na base (pegada mínima).
+  const leftOf = (p: ResolveItem, c: ResolveItem) => p.bx + p.bw <= c.bx;
+  const above = (p: ResolveItem, c: ResolveItem) => p.by + p.bh <= c.by;
+
+  // Passo horizontal: ancora os mais à esquerda; empurra à direita só quem estava
+  // à direita na base (crescimento de largura).
+  const byX = [...items].sort((a, b) => a.bx - b.bx || a.by - b.by || byI(a, b));
+  const placedX: ResolveItem[] = [];
+  for (const it of byX) {
+    const cur = { ...it };
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const p of placedX) {
+        if (collides(cur, p) && leftOf(p, cur)) {
+          cur.x = p.x + p.w;
+          moved = true;
+        }
+      }
+    }
+    placedX.push(cur);
+  }
+
+  // Passo vertical: com os x resolvidos, ancora os mais acima; empurra para baixo só
+  // quem estava abaixo na base (crescimento de altura).
+  const byY = [...placedX].sort((a, b) => a.by - b.by || a.bx - b.bx || byI(a, b));
+  const placedY: ResolveItem[] = [];
+  for (const it of byY) {
+    const cur = { ...it };
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const p of placedY) {
+        if (collides(cur, p) && above(p, cur)) {
+          cur.y = p.y + p.h;
+          moved = true;
+        }
+      }
+    }
+    placedY.push(cur);
+  }
+
+  return placedY;
 }
 
 // Sobe do elemento até o ancestral que rola verticalmente (no app é o
@@ -200,19 +288,25 @@ export function DashboardGrid({
     );
   }, []);
 
-  // Tamanho base (mínimo) por widget — usado ao persistir, para nunca gravar o
-  // tamanho inflado pelo conteúdo.
-  const baseById = new Map(widgets.map((w, i) => [w.id, posOf(w, i)]));
-
-  // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado.
-  const layout: Layout = widgets.map((w, i) => {
+  // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado, e
+  // então um passo de resolução de colisões que empurra os vizinhos no eixo do
+  // crescimento (largura → direita, altura → baixo). Determinístico: ao colapsar,
+  // some a inflação, some a colisão e todos voltam à base.
+  const inflated: ResolveItem[] = widgets.map((w, i) => {
     const p = posOf(w, i);
     const a = w.settings?.autoSize;
     const m = measured[w.id];
     const ew = a?.width && m ? Math.max(p.w, m.w) : p.w;
     const eh = a?.height && m ? Math.max(p.h, m.h) : p.h;
-    return { i: w.id, x: p.x, y: p.y, w: ew, h: eh };
+    return { i: w.id, x: p.x, y: p.y, w: ew, h: eh, bx: p.x, by: p.y, bw: p.w, bh: p.h };
   });
+  const layout: Layout = pushApart(inflated).map(({ i, x, y, w, h }) => ({
+    i,
+    x,
+    y,
+    w,
+    h,
+  }));
 
   // Extensão do conteúdo — pisos para não cortar widgets ao encolher a área.
   const contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), MIN_COLS);
@@ -357,33 +451,43 @@ export function DashboardGrid({
   }
 
   // Persistência do layout: só em interações do usuário (arrastar/redimensionar),
-  // e sempre gravando o tamanho BASE (mínimo), nunca o inflado pelo conteúdo. Um
-  // arraste persiste posições; um redimensionamento redefine o mínimo do widget
-  // arrastado (é assim que se ajusta a base de um widget com tamanho dinâmico).
-  function persist(next: Layout, resizedItem?: LayoutItem | null) {
+  // e sempre gravando o tamanho/posição BASE, nunca o inflado/deslocado pelo passo
+  // de colisões. Como o layout enviado ao RGL é uma função determinística da base
+  // (inflação + pushApart), não podemos gravar o que o RGL devolve para os demais
+  // widgets — isso bakeria o deslocamento automático na base e derivaria a cada
+  // carregamento. Então gravamos a base de todos, exceto o item que o usuário mexeu:
+  //   • arraste       → nova x/y (do item), w/h da base;
+  //   • redimensiona   → novo w/h (do item), x/y da base (o handle é inferior/direito).
+  function persist(changed: LayoutItem | null, kind: "drag" | "resize") {
     if (!editMode) return;
     // saveLayout não revalida (edição fluida), então o snapshot vindo da page
     // não muda sozinho — registra a mudança no histórico após persistir.
     void saveLayout(
       dashboardId,
-      next.map((it) => {
-        const base = baseById.get(it.i);
-        const resized = resizedItem && it.i === resizedItem.i;
-        const w = resized ? resizedItem.w : base?.w ?? it.w;
-        const h = resized ? resizedItem.h : base?.h ?? it.h;
-        return { id: it.i, x: it.x, y: it.y, w, h };
+      widgets.map((w, i) => {
+        const base = posOf(w, i);
+        if (changed && changed.i === w.id) {
+          return kind === "resize"
+            ? { id: w.id, x: base.x, y: base.y, w: changed.w, h: changed.h }
+            : { id: w.id, x: changed.x, y: changed.y, w: base.w, h: base.h };
+        }
+        return { id: w.id, x: base.x, y: base.y, w: base.w, h: base.h };
       })
     ).then(() => history.captureNow());
   }
-  function onDragStop(next: Layout) {
-    persist(next);
-  }
-  function onResizeStop(
-    next: Layout,
+  function onDragStop(
+    _next: Layout,
     _old: LayoutItem | null,
     item: LayoutItem | null
   ) {
-    persist(next, item);
+    persist(item, "drag");
+  }
+  function onResizeStop(
+    _next: Layout,
+    _old: LayoutItem | null,
+    item: LayoutItem | null
+  ) {
+    persist(item, "resize");
   }
 
   // Alças de borda: a barra inferior arrasta a ALTURA (rows), a barra direita a
