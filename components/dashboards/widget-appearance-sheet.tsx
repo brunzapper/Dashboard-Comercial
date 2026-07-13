@@ -1,4 +1,8 @@
-// Versão: 2.0 | Data: 10/07/2026
+// Versão: 2.1 | Data: 13/07/2026
+// v2.1 (13/07/2026): UX — controles organizados em seções recolhíveis
+//   (Accordion, mesmo padrão do construtor). Seções raras abrem fechadas;
+//   as já configuradas (rótulos/legenda) abrem expandidas. Sem mudança de
+//   comportamento/salvamento.
 // Editor de APARÊNCIA de um widget (Sheet), aberto pelo menu "⋮" do card.
 // v2.0 (Fase 10.1): a reordenação, a ordenação e as cores por coluna/linha/
 // célula/categoria passaram a ser feitas IN-LOCO (direto na tabela/gráfico). Este
@@ -9,7 +13,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
+import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { BuilderSection } from "@/components/dashboards/widget-builder-rows";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
@@ -122,8 +128,23 @@ export function WidgetAppearanceSheet({
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4 pb-8">
+          {/* Seções recolhíveis: as de uso frequente abrem por padrão; "Título
+              e borda" e listas longas abrem fechadas. Rótulos/legenda abrem
+              expandidos quando já estão habilitados (nada configurado some). */}
+          <Accordion
+            type="multiple"
+            className="-mt-2"
+            defaultValue={[
+              ...(isChart ? ["grafico", "series"] : []),
+              ...(isChart && ap.dataLabels?.show ? ["rotulos"] : []),
+              ...(isChart && (ap.legend?.show ?? false) ? ["legenda"] : []),
+              ...(isPie ? ["pizza"] : []),
+              ...(isTable ? ["cores", "grade"] : []),
+              ...(isKpi ? ["kpi"] : []),
+            ]}
+          >
           {/* ---------- Título e borda (todos os tipos) ---------- */}
-          <Section title="Título e borda">
+          <BuilderSection value="titulo" title="Título e borda">
             <ColorField
               label="Cor do texto do título"
               value={ap.title?.color}
@@ -142,44 +163,46 @@ export function WidgetAppearanceSheet({
               onChange={(v) => patch({ title: { ...ap.title, border: v } })}
               onClear={() => patch({ title: { ...ap.title, border: undefined } })}
             />
-          </Section>
+          </BuilderSection>
 
           {/* ---------- Gráficos (barra/linha) ---------- */}
           {isChart ? (
             <>
-              <ColorField
-                label="Fundo do gráfico"
-                value={ap.chartBackground}
-                onChange={(v) => patch({ chartBackground: v })}
-                onClear={() => patch({ chartBackground: undefined })}
-              />
-              <SelectRow
-                label="Linhas de grade"
-                value={ap.gridLines ?? "default"}
-                onChange={(v) =>
-                  patch({ gridLines: v === "default" ? undefined : (v as GridLines) })
-                }
-                options={[
-                  { value: "default", label: "Padrão" },
-                  { value: "none", label: "Nenhuma" },
-                  { value: "horizontal", label: "Horizontais" },
-                  { value: "vertical", label: "Verticais" },
-                  { value: "both", label: "Ambas" },
-                ]}
-              />
-              {isBar ? (
+              <BuilderSection value="grafico" title="Gráfico">
+                <ColorField
+                  label="Fundo do gráfico"
+                  value={ap.chartBackground}
+                  onChange={(v) => patch({ chartBackground: v })}
+                  onClear={() => patch({ chartBackground: undefined })}
+                />
                 <SelectRow
-                  label="Preenchimento das barras"
-                  value={ap.fillMode ?? "solid"}
-                  onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
+                  label="Linhas de grade"
+                  value={ap.gridLines ?? "default"}
+                  onChange={(v) =>
+                    patch({ gridLines: v === "default" ? undefined : (v as GridLines) })
+                  }
                   options={[
-                    { value: "solid", label: "Sólido" },
-                    { value: "gradient", label: "Gradiente (sutil)" },
+                    { value: "default", label: "Padrão" },
+                    { value: "none", label: "Nenhuma" },
+                    { value: "horizontal", label: "Horizontais" },
+                    { value: "vertical", label: "Verticais" },
+                    { value: "both", label: "Ambas" },
                   ]}
                 />
-              ) : null}
+                {isBar ? (
+                  <SelectRow
+                    label="Preenchimento das barras"
+                    value={ap.fillMode ?? "solid"}
+                    onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
+                    options={[
+                      { value: "solid", label: "Sólido" },
+                      { value: "gradient", label: "Gradiente (sutil)" },
+                    ]}
+                  />
+                ) : null}
+              </BuilderSection>
 
-              <Section title="Cores das séries">
+              <BuilderSection value="series" title="Cores das séries">
                 {metrics.map((m) => (
                   <ColorField
                     key={m.key}
@@ -195,10 +218,10 @@ export function WidgetAppearanceSheet({
                     categoria (chips acima do gráfico).
                   </p>
                 ) : null}
-              </Section>
+              </BuilderSection>
 
               {metrics.length >= 2 ? (
-                <Section title="Eixo por série (combo)">
+                <BuilderSection value="eixos" title="Eixo por série (combo)">
                   {metrics.map((m) => (
                     <SelectRow
                       key={m.key}
@@ -211,11 +234,15 @@ export function WidgetAppearanceSheet({
                       ]}
                     />
                   ))}
-                </Section>
+                </BuilderSection>
               ) : null}
 
               {isBar ? (
-                <Section title="Legenda de dados (rótulos nas barras)">
+                <BuilderSection
+                  value="rotulos"
+                  title="Legenda de dados (rótulos nas barras)"
+                  badge={ap.dataLabels?.show ? "Ativos" : null}
+                >
                   <CheckRow
                     label="Exibir valores"
                     checked={ap.dataLabels?.show ?? false}
@@ -248,10 +275,14 @@ export function WidgetAppearanceSheet({
                       />
                     </>
                   ) : null}
-                </Section>
+                </BuilderSection>
               ) : null}
 
-              <Section title="Legenda do gráfico (séries)">
+              <BuilderSection
+                value="legenda"
+                title="Legenda do gráfico (séries)"
+                badge={(ap.legend?.show ?? metrics.length > 1) ? "Ativa" : null}
+              >
                 <CheckRow
                   label="Exibir legenda"
                   checked={ap.legend?.show ?? metrics.length > 1}
@@ -262,32 +293,34 @@ export function WidgetAppearanceSheet({
                   value={ap.legend?.color}
                   onChange={(v) => patch({ legend: { ...ap.legend, color: v } })}
                 />
-              </Section>
+              </BuilderSection>
             </>
           ) : null}
 
           {/* ---------- Pizza / Funil ---------- */}
           {isPie ? (
             <>
-              <SelectRow
-                label="Paleta"
-                value={ap.palette ?? "design"}
-                onChange={(v) => patch({ palette: v })}
-                options={Object.entries(PALETTES).map(([k, p]) => ({
-                  value: k,
-                  label: p.label,
-                }))}
-              />
-              <SelectRow
-                label="Preenchimento"
-                value={ap.fillMode ?? "solid"}
-                onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
-                options={[
-                  { value: "solid", label: "Sólido" },
-                  { value: "gradient", label: "Gradiente (sutil)" },
-                ]}
-              />
-              <Section title="Cor por fatia">
+              <BuilderSection value="pizza" title="Paleta e preenchimento">
+                <SelectRow
+                  label="Paleta"
+                  value={ap.palette ?? "design"}
+                  onChange={(v) => patch({ palette: v })}
+                  options={Object.entries(PALETTES).map(([k, p]) => ({
+                    value: k,
+                    label: p.label,
+                  }))}
+                />
+                <SelectRow
+                  label="Preenchimento"
+                  value={ap.fillMode ?? "solid"}
+                  onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
+                  options={[
+                    { value: "solid", label: "Sólido" },
+                    { value: "gradient", label: "Gradiente (sutil)" },
+                  ]}
+                />
+              </BuilderSection>
+              <BuilderSection value="fatias" title="Cor por fatia">
                 {slices.map((s, i) => (
                   <ColorField
                     key={i}
@@ -297,14 +330,14 @@ export function WidgetAppearanceSheet({
                     onClear={() => patchRecord("sliceColors", i, undefined)}
                   />
                 ))}
-              </Section>
+              </BuilderSection>
             </>
           ) : null}
 
           {/* ---------- Tabela (cores globais + grade) ---------- */}
           {isTable ? (
             <>
-              <Section title="Cores globais">
+              <BuilderSection value="cores" title="Cores globais">
                 <ColorField
                   label="Fundo do cabeçalho"
                   value={ap.table?.headerBg}
@@ -335,54 +368,56 @@ export function WidgetAppearanceSheet({
                   onChange={(v) => patchTable({ borderColor: v })}
                   onClear={() => patchTable({ borderColor: undefined })}
                 />
-              </Section>
-              <SelectRow
-                label="Linhas de grade"
-                value={ap.table?.gridLines ?? "both"}
-                onChange={(v) => patchTable({ gridLines: v as GridLines })}
-                options={[
-                  { value: "both", label: "Ambas" },
-                  { value: "horizontal", label: "Horizontais" },
-                  { value: "vertical", label: "Verticais" },
-                  { value: "none", label: "Nenhuma" },
-                ]}
-              />
-              <SelectRow
-                label="Texto que excede a célula"
-                value={ap.table?.cellText ?? "clip"}
-                onChange={(v) =>
-                  patchTable({ cellText: v as "clip" | "wrap" })
-                }
-                options={[
-                  { value: "clip", label: "Cortar (…)" },
-                  { value: "wrap", label: "Quebrar linha" },
-                ]}
-              />
-              <SelectRow
-                label="Alinhamento das colunas"
-                value={ap.table?.align ?? "default"}
-                onChange={(v) =>
-                  patchTable({
-                    align: v === "default" ? undefined : (v as TableAlign),
-                  })
-                }
-                options={[
-                  { value: "default", label: "Padrão" },
-                  { value: "left", label: "Esquerda" },
-                  { value: "center", label: "Centro" },
-                  { value: "right", label: "Direita" },
-                ]}
-              />
-              <p className="text-muted-foreground text-xs">
-                Reordenar colunas/linhas, ordenar e colorir coluna/linha/célula:
-                arraste a alça ou dê duplo-clique direto na tabela.
-              </p>
+              </BuilderSection>
+              <BuilderSection value="grade" title="Grade e texto">
+                <SelectRow
+                  label="Linhas de grade"
+                  value={ap.table?.gridLines ?? "both"}
+                  onChange={(v) => patchTable({ gridLines: v as GridLines })}
+                  options={[
+                    { value: "both", label: "Ambas" },
+                    { value: "horizontal", label: "Horizontais" },
+                    { value: "vertical", label: "Verticais" },
+                    { value: "none", label: "Nenhuma" },
+                  ]}
+                />
+                <SelectRow
+                  label="Texto que excede a célula"
+                  value={ap.table?.cellText ?? "clip"}
+                  onChange={(v) =>
+                    patchTable({ cellText: v as "clip" | "wrap" })
+                  }
+                  options={[
+                    { value: "clip", label: "Cortar (…)" },
+                    { value: "wrap", label: "Quebrar linha" },
+                  ]}
+                />
+                <SelectRow
+                  label="Alinhamento das colunas"
+                  value={ap.table?.align ?? "default"}
+                  onChange={(v) =>
+                    patchTable({
+                      align: v === "default" ? undefined : (v as TableAlign),
+                    })
+                  }
+                  options={[
+                    { value: "default", label: "Padrão" },
+                    { value: "left", label: "Esquerda" },
+                    { value: "center", label: "Centro" },
+                    { value: "right", label: "Direita" },
+                  ]}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Reordenar colunas/linhas, ordenar e colorir coluna/linha/célula:
+                  arraste a alça ou dê duplo-clique direto na tabela.
+                </p>
+              </BuilderSection>
             </>
           ) : null}
 
           {/* ---------- KPI ---------- */}
           {isKpi ? (
-            <Section title="Card KPI">
+            <BuilderSection value="kpi" title="Card KPI">
               <ColorField
                 label="Fundo"
                 value={ap.kpi?.bg}
@@ -401,8 +436,9 @@ export function WidgetAppearanceSheet({
                 onChange={(v) => patch({ kpi: { ...ap.kpi, accent: v } })}
                 onClear={() => patch({ kpi: { ...ap.kpi, accent: undefined } })}
               />
-            </Section>
+            </BuilderSection>
           ) : null}
+          </Accordion>
 
           <Button onClick={save} disabled={pending}>
             {pending ? "Salvando…" : "Aplicar"}
@@ -410,21 +446,6 @@ export function WidgetAppearanceSheet({
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-2 border-t pt-3">
-      <p className="text-sm font-medium">{title}</p>
-      {children}
-    </div>
   );
 }
 
