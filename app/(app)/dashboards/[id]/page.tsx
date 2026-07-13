@@ -8,6 +8,7 @@
 import { notFound } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
@@ -136,10 +137,20 @@ export default async function DashboardPage({
   const lastPeriodByTab = prefSettings.lastPeriodByTab ?? {};
 
   const widgets = (widgetsData ?? []) as Widget[];
-  const available = buildAvailableFields(
-    (fieldsData ?? []) as FieldDefinition[],
-    correspondences
-  );
+  const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
+  // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
+  // rótulos/tipos corretamente para qualquer papel.
+  const available = buildAvailableFields(allFields, correspondences);
+  // Construtor de widgets respeita o ACL por papel (visible_to_roles): quem edita
+  // só escolhe colunas visíveis ao seu papel (admin vê tudo). Assim a RLS
+  // afrouxada não deixa um dono não-admin montar widgets com colunas restritas.
+  const builderFields = isAdmin
+    ? allFields
+    : allFields.filter((f) => hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]));
+  const availableForBuilder = isAdmin
+    ? available
+    : buildAvailableFields(builderFields, correspondences);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
@@ -604,6 +615,7 @@ export default async function DashboardPage({
       userRoles={userRoles}
       canEditValues={canEditValues}
       available={available}
+      availableForBuilder={availableForBuilder}
       canEdit={canEdit}
       canManageFields={canManageFields}
       currencyOptions={currencyOptions}

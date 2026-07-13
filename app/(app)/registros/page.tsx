@@ -7,6 +7,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import {
@@ -108,8 +109,15 @@ export default async function RegistrosPage({
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   // Só as colunas que pertencem à fonte da aba (applies_to) — campos locais/app
-  // (applies_to vazio) aparecem em todas.
-  const fields = allFields.filter((f) => fieldAppliesToSource(f.applies_to, fonte));
+  // (applies_to vazio) aparecem em todas. Além disso, o ACL por papel
+  // (visible_to_roles) agora é aplicado aqui: os metadados de campo são legíveis
+  // por qualquer autenticado (RLS afrouxada), então filtramos as colunas
+  // restritas na camada de app para não vazar valores ao gestor. Admin vê tudo.
+  const fields = allFields.filter(
+    (f) =>
+      fieldAppliesToSource(f.applies_to, fonte) &&
+      (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
+  );
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,

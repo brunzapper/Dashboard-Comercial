@@ -64,6 +64,7 @@ export function WidgetCard({
   userRoles,
   canEditValues,
   available,
+  availableForBuilder,
   dashboardId,
   dateFormat,
   siblings,
@@ -96,6 +97,10 @@ export function WidgetCard({
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
+  // Lista COMPLETA para renderizar/filtrar (rótulos corretos p/ qualquer papel);
+  // `availableForBuilder` é filtrada pelo ACL por papel e alimenta só os seletores
+  // de edição (construtor do widget / aparência).
+  availableForBuilder: AvailableField[];
   dashboardId: string;
   dateFormat?: DateFormat;
   siblings: Widget[];
@@ -401,7 +406,7 @@ export function WidgetCard({
         <>
           <WidgetBuilder
             dashboardId={dashboardId}
-            available={available}
+            available={availableForBuilder}
             widget={widget}
             siblings={siblings}
             canManageFields={canManageFields}
@@ -416,7 +421,7 @@ export function WidgetCard({
               dashboardId={dashboardId}
               widget={widget}
               data={data}
-              available={available}
+              available={availableForBuilder}
               open={appearanceOpen}
               onOpenChange={setAppearanceOpen}
             />
