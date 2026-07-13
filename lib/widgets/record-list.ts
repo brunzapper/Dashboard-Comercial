@@ -231,6 +231,10 @@ async function attachMatches(
       const lead = partnerById.get(r.related_lead_id);
       if (lead) map.leads = lead;
     }
+    // Auto-fonte: `match:<própria fonte>` resolve para o PRÓPRIO registro (nunca
+    // há parceiro casado da mesma fonte). Espelha recalc.ts e o RPC (0044).
+    const ownSrc = RECORD_TYPE_SOURCE[r.record_type];
+    if (ownSrc && !map[ownSrc]) map[ownSrc] = r;
     if (Object.keys(map).length > 0) r.__match = map;
   }
 }

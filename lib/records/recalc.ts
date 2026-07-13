@@ -10,6 +10,7 @@
 //   registro casado) para fórmulas de aritmética de datas, e recalcula
 //   lead_time_days a partir do match resolvido (base consistente por fonte).
 import { createServiceClient } from "@/lib/supabase/service";
+import { RECORD_TYPE_SOURCE } from "@/lib/sources";
 import { leadTimeDays } from "@/lib/sync/shared";
 import {
   resolveMatchedRecords,
@@ -117,6 +118,13 @@ export async function recalcAllFormulaFields(): Promise<number> {
         ...((r.custom_fields as Record<string, unknown>) ?? {}),
       };
       const matched = matchedByRecord.get(r.id as string) ?? {};
+      // Auto-fonte: `match:<própria fonte>` resolve para o PRÓPRIO registro (um
+      // registro nunca casa com outro da mesma fonte). Assim `↪ <própria fonte>`
+      // num campo calculado vale o dado deste registro, e não um null perpétuo.
+      const ownSrc = RECORD_TYPE_SOURCE[r.record_type as string];
+      if (ownSrc && !matched[ownSrc]) {
+        matched[ownSrc] = r as unknown as MatchedBySource[string];
+      }
 
       const updates: Record<string, unknown> = {};
       let changed = false;
