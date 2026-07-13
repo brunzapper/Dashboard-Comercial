@@ -43,6 +43,8 @@ export interface FieldDefinition {
   source_field_id?: string | null;
   show_in_builder?: boolean;
   formula?: Formula | null;
+  // Campos calculados (13/07/2026): quando false, resultado negativo vira 0.
+  allow_negative?: boolean;
   // Moeda por campo (12/07/2026): 'moeda' guarda a moeda fixa em currency_code;
   // 'calculado' usa currency_mode ('inherit' = moeda do registro | 'fixed' =
   // currency_code) — ausente/null = número puro (não é moeda).

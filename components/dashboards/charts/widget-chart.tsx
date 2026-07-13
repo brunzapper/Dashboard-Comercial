@@ -39,6 +39,7 @@ import type {
   AppearanceSettings,
   ColorPair,
   Metric,
+  TableAlign,
   VisualType,
   WidgetData,
   WidgetRow,
@@ -51,11 +52,13 @@ import {
 } from "@/lib/widgets/currency";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
 import {
+  alignClass,
   applyManualOrder,
   distinctFills,
   gridFlags,
   groupByLevels,
   reorderKeys,
+  resolveAlign,
   rowKeyOf,
   sortRows,
   topWithOther,
@@ -635,6 +638,37 @@ function AppearanceTable({
     return {};
   }
 
+  // Alinhamento por escopo (linha/coluna/célula), espelhando setColor/colorValue.
+  // Linhas de grupo compartilham o colAlign das linhas de dados.
+  function setAlign(
+    m: { scope: ColorScope; column: string; rowKey?: string },
+    a: TableAlign | undefined
+  ) {
+    if (m.scope === "col") {
+      const map = { ...(t.colAlign ?? {}) };
+      if (!a) delete map[m.column];
+      else map[m.column] = a;
+      setTable({ colAlign: map });
+    } else if (m.scope === "row" && m.rowKey) {
+      const map = { ...(t.rowAlign ?? {}) };
+      if (!a) delete map[m.rowKey];
+      else map[m.rowKey] = a;
+      setTable({ rowAlign: map });
+    } else if (m.scope === "cell" && m.rowKey) {
+      const map = { ...(t.cellAlign ?? {}) };
+      const k = `${m.rowKey}:${m.column}`;
+      if (!a) delete map[k];
+      else map[k] = a;
+      setTable({ cellAlign: map });
+    }
+  }
+  function alignValue(m: { scope: ColorScope; column: string; rowKey?: string }): TableAlign | undefined {
+    if (m.scope === "col") return t.colAlign?.[m.column];
+    if (m.scope === "row" && m.rowKey) return t.rowAlign?.[m.rowKey];
+    if (m.scope === "cell" && m.rowKey) return t.cellAlign?.[`${m.rowKey}:${m.column}`];
+    return undefined;
+  }
+
   // Datas: uma coluna (dimensão) é "de data" se algum valor parece ISO. Formato
   // efetivo = override por coluna (t.dateFormats) ou padrão do dashboard.
   const dateCols = new Set<string>();
@@ -792,7 +826,10 @@ function AppearanceTable({
           return (
             <TableCell
               key={c.key}
-              className={isMetric ? "text-right tabular-nums" : undefined}
+              className={cn(
+                alignClass(resolveAlign(t, { column: c.key, rowKey: rk, numeric: isMetric })),
+                isMetric && "tabular-nums"
+              )}
               onDoubleClick={(e) => openCtx(e, c.key, ["row", "col", "cell"], rk)}
               style={{
                 background: cellCp?.fill ?? colCp?.fill,
@@ -862,7 +899,10 @@ function AppearanceTable({
         return (
           <TableCell
             key={c.key}
-            className={isMetric ? "text-right tabular-nums" : undefined}
+            className={cn(
+              alignClass(resolveAlign(t, { column: c.key, rowKey: grpKey, numeric: isMetric })),
+              isMetric && "tabular-nums"
+            )}
             onDoubleClick={extra.onDoubleClick}
             style={{ ...cellBorder(ci === cols.length - 1), ...extra.style }}
           >
@@ -937,7 +977,9 @@ function AppearanceTable({
                 {rows.map((r, ri) => (
                   <TableHead
                     key={rowKey(r)}
-                    className="text-right"
+                    className={alignClass(
+                      resolveAlign(t, { column: rowKey(r), numeric: true })
+                    )}
                     style={cellBorder(ri === rows.length - 1)}
                   >
                     {groupHeader(r)}
@@ -965,7 +1007,12 @@ function AppearanceTable({
                   {rows.map((r, ri) => (
                     <TableCell
                       key={rowKey(r)}
-                      className="text-right tabular-nums"
+                      className={cn(
+                        alignClass(
+                          resolveAlign(t, { column: rowKey(r), rowKey: c.key, numeric: true })
+                        ),
+                        "tabular-nums"
+                      )}
                       style={cellBorder(ri === rows.length - 1)}
                     >
                       {metricCellText(r, c.key)}
@@ -1083,7 +1130,9 @@ function AppearanceTable({
               {colVals.map((v, ci) => (
                 <TableHead
                   key={String(v ?? "")}
-                  className="text-right"
+                  className={alignClass(
+                    resolveAlign(t, { column: String(v ?? ""), numeric: true })
+                  )}
                   style={cellBorder(ci === colVals.length - 1)}
                 >
                   {dimDisplay(v, colDimKey)}
@@ -1140,7 +1189,16 @@ function AppearanceTable({
                   {colVals.map((v, ci) => (
                     <TableCell
                       key={String(v ?? "")}
-                      className="text-right tabular-nums"
+                      className={cn(
+                        alignClass(
+                          resolveAlign(t, {
+                            column: String(v ?? ""),
+                            rowKey: item.key,
+                            numeric: true,
+                          })
+                        ),
+                        "tabular-nums"
+                      )}
                       style={cellBorder(ci === colVals.length - 1)}
                     >
                       {metricAggCellText(
@@ -1177,7 +1235,9 @@ function AppearanceTable({
                 key={c.key}
                 className={cn(
                   "group relative",
-                  metricKeys.has(c.key) ? "text-right" : undefined,
+                  alignClass(
+                    resolveAlign(t, { column: c.key, numeric: metricKeys.has(c.key) })
+                  ),
                   editable && "cursor-move"
                 )}
                 draggable={editable}
@@ -1296,13 +1356,17 @@ function AppearanceTable({
           y={menu.y}
           title={
             menu.scope === "row"
-              ? "Cor da linha"
+              ? "Aparência da linha"
               : menu.scope === "col"
-                ? "Cor da coluna"
-                : "Cor da célula"
+                ? "Aparência da coluna"
+                : "Aparência da célula"
           }
           value={colorValue(menu)}
           onChange={(cp) => setColor(menu, cp)}
+          align={{
+            value: alignValue(menu),
+            onSelect: (a) => setAlign(menu, a),
+          }}
           onClose={() => setMenu(null)}
         />
       ) : null}

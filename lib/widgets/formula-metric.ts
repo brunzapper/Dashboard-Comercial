@@ -78,5 +78,7 @@ export async function runCalculatedWidget(
     );
   }
 
-  return evaluateFormula(formula, ctx);
+  // O KPI calculado é numérico: resultado de texto/booleano (ramo de SE) → null.
+  const v = evaluateFormula(formula, ctx);
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }

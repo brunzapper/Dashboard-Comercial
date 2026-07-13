@@ -140,7 +140,7 @@ export async function updateRecord(
   const { data: existingRow } = await supabase
     .from("records")
     .select(
-      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days, title, stage, currency, channel, sale_type, closed, opened_at, pipeline"
+      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days, title, stage, stage_semantic, currency, channel, sale_type, closed, opened_at, pipeline"
     )
     .eq("id", recordId)
     .maybeSingle();
@@ -267,11 +267,27 @@ export async function updateRecord(
       custom,
       await loadCustomDateKeys(supabase)
     );
+    // Valor efetivo de uma coluna do núcleo (edição desta chamada > registro).
+    const eff = (col: string): unknown =>
+      col in updates
+        ? updates[col]
+        : ((existing as unknown as Record<string, unknown>)[col] ?? null);
     const calc = computeFormulaFields(
       {
-        value: numOrNull(existing.value),
-        mrr: numOrNull(existing.mrr),
+        value: numOrNull(eff("value") ?? existing.value),
+        mrr: numOrNull(eff("mrr") ?? existing.mrr),
         lead_time_days: numOrNull(effLeadTime),
+        // Colunas textuais/booleanas do núcleo (condicionais SE/E/OU).
+        title: eff("title"),
+        record_type: existing.record_type,
+        source_system: existing.source_system,
+        pipeline: eff("pipeline"),
+        stage: eff("stage"),
+        stage_semantic: eff("stage_semantic"),
+        sale_type: eff("sale_type"),
+        channel: eff("channel"),
+        currency: eff("currency"),
+        closed: eff("closed"),
       },
       custom,
       formulaDefs,

@@ -18,12 +18,15 @@ import {
   type FieldDefinition,
 } from "@/lib/records/types";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
+import { formulaUsesFunctions } from "@/lib/records/formulas";
+import { cn } from "@/lib/utils";
 import {
   createField,
   updateField,
   type FieldActionState,
 } from "@/app/(app)/campos/actions";
 import { FormulaBuilder, type RefOption } from "./formula-builder";
+import { FormulaTextEditor } from "./formula-text-editor";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const DATA_TYPE_OPTIONS: ComboboxOption[] = (
@@ -63,11 +66,15 @@ function RoleChecks({
 export function FieldForm({
   field,
   numericRefs,
+  allRefs,
   currencyOptions,
   onDone,
 }: {
   field?: FieldDefinition;
   numericRefs: RefOption[];
+  // Catálogo completo p/ o editor de TEXTO (números + datas + texto/seleção/
+  // booleano p/ condicionais). Ausente → cai no numericRefs.
+  allRefs?: RefOption[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
   currencyOptions?: ComboboxOption[];
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
@@ -115,6 +122,16 @@ export function FieldForm({
   // Ao editar um campo calculado, ele não pode ser operando de si mesmo.
   const operandRefs = numericRefs.filter(
     (r) => r.ref !== `custom:${field?.field_key}`
+  );
+  const textRefs = (allRefs ?? numericRefs).filter(
+    (r) => r.ref !== `custom:${field?.field_key}`
+  );
+  // Editor da fórmula: construtor por botões (fórmulas simples) ou texto estilo
+  // Sheets (obrigatório p/ SE/E/OU — o construtor não representa funções).
+  const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
+    field?.formula && (field.formula.source || formulaUsesFunctions(field.formula))
+      ? "text"
+      : "builder"
   );
 
   useEffect(() => {
@@ -189,14 +206,45 @@ export function FieldForm({
       {dataType === "calculado" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
-          <FormulaBuilder refs={operandRefs} initial={field?.formula ?? null} />
-          <p className="text-muted-foreground text-xs">
-            Opere entre colunas numéricas e datas (+ − × ÷) e constantes.{" "}
-            <strong>data − data</strong> resulta em dias (ex.: lead time). Você
-            pode usar datas do registro casado (↪) via conexões entre fontes. O
-            resultado é calculado por registro a cada sincronização/edição (os
-            que usam ↪ são atualizados no auto-match/recálculo).
-          </p>
+          <input type="hidden" name="formula_mode" value={formulaMode} />
+          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
+            {(
+              [
+                ["builder", "Construtor"],
+                ["text", "Texto (funções)"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFormulaMode(k)}
+                className={cn(
+                  "rounded-sm px-2 py-1 text-xs",
+                  formulaMode === k
+                    ? "bg-background shadow-sm"
+                    : "text-muted-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {formulaMode === "builder" ? (
+            <>
+              <FormulaBuilder refs={operandRefs} initial={field?.formula ?? null} />
+              <p className="text-muted-foreground text-xs">
+                Opere entre colunas numéricas e datas (+ − × ÷) e constantes.{" "}
+                <strong>data − data</strong> resulta em dias (ex.: lead time).
+                Você pode usar datas do registro casado (↪) via conexões entre
+                fontes. Para condicionais (SE/E/OU), use a aba{" "}
+                <strong>Texto (funções)</strong>. O resultado é calculado por
+                registro a cada sincronização/edição (os que usam ↪ são
+                atualizados no auto-match/recálculo).
+              </p>
+            </>
+          ) : (
+            <FormulaTextEditor refs={textRefs} initial={field?.formula ?? null} />
+          )}
           <Label className="mt-1">Formato do resultado</Label>
           <Combobox
             options={calcResultOptions}
@@ -212,6 +260,15 @@ export function FieldForm({
             &quot;Herdar do registro&quot; usa a moeda de cada registro; ao
             envolver moedas diferentes, o cálculo converte para Real.
           </p>
+          <label className="mt-1 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="allow_negative"
+              defaultChecked={field?.allow_negative ?? true}
+              className="size-4 accent-primary"
+            />
+            Aceitar número negativo (desmarcado: resultado negativo vira 0)
+          </label>
         </div>
       ) : null}
 

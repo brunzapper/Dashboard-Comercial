@@ -40,6 +40,7 @@ import {
 } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { allDateOperands } from "@/lib/records/date-operands";
+import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
 import type { RefOption } from "./formula-builder";
@@ -205,6 +206,15 @@ export function FieldsManager({
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
     ...allDateOperands(customDateFields),
   ];
+  // Catálogo completo p/ o editor de TEXTO (SE/E/OU): números + datas + colunas
+  // de texto/seleção/booleano (próprias e do registro casado).
+  const customCondFields = fields
+    .filter((f) => COND_DATA_TYPES.includes(f.data_type))
+    .map((f) => ({ field_key: f.field_key, label: f.label }));
+  const allRefs: RefOption[] = [
+    ...numericRefs,
+    ...allCondOperands(customCondFields),
+  ];
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
@@ -299,6 +309,7 @@ export function FieldsManager({
               key={editing?.id ?? "new"}
               field={editing}
               numericRefs={numericRefs}
+              allRefs={allRefs}
               currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}
             />

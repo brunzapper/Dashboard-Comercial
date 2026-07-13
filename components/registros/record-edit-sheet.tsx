@@ -304,7 +304,13 @@ export function RecordEditSheet({
               {readOnlyFields.map((f) => (
                 <span key={f.id} className="contents">
                   <span>{f.label}</span>
-                  <span>{customValue(record, f.field_key) || "—"}</span>
+                  {/* Traço só para vazio/nulo — zero exibe "0". */}
+                  <span>
+                    {(() => {
+                      const v = customValue(record, f.field_key);
+                      return v == null || v === "" ? "—" : v;
+                    })()}
+                  </span>
                 </span>
               ))}
             </div>

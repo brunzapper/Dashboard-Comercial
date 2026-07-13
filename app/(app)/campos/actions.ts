@@ -14,7 +14,9 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
 import { validateFormula, type Formula } from "@/lib/records/formulas";
-import { allDateOperands } from "@/lib/records/date-operands";
+import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
+import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 
@@ -77,6 +79,58 @@ async function allowedFormulaDateRefs(
   return new Set(allDateOperands(customDateFields).map((o) => o.ref));
 }
 
+// Refs CONDICIONAIS permitidos numa fórmula (SE/E/OU e comparações): colunas
+// textuais/booleanas do núcleo + custom texto/seleção/booleano + as mesmas do
+// registro casado. Mesma origem do editor (lib/records/cond-operands).
+async function allowedFormulaCondRefs(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("field_key, label, data_type")
+    .in("data_type", COND_DATA_TYPES);
+  const customCondFields = (data ?? []).map((d) => ({
+    field_key: d.field_key as string,
+    label: (d.label as string) ?? (d.field_key as string),
+  }));
+  return new Set(allCondOperands(customCondFields).map((o) => o.ref));
+}
+
+// Catálogo completo de operandos (numéricos + datas + condicionais) com rótulos,
+// para resolver [Rótulo] no editor de texto — mesma montagem da UI
+// (components/campos/fields-manager.tsx), para editor e servidor concordarem.
+async function serverOperandCatalog(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  excludeFieldKey?: string
+): Promise<OperandRef[]> {
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("field_key, label, data_type");
+  const fields = (data ?? []).map((d) => ({
+    field_key: d.field_key as string,
+    label: ((d.label as string) ?? (d.field_key as string)),
+    data_type: d.data_type as DataType,
+  }));
+  const numeric: OperandRef[] = [
+    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
+      ref: f.field,
+      label: f.label,
+      group: "Números",
+    })),
+    ...fields
+      .filter(
+        (f) =>
+          NUMERIC_DATA_TYPES.includes(f.data_type) &&
+          f.data_type !== "calculado" &&
+          f.field_key !== excludeFieldKey
+      )
+      .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
+  ];
+  const dates = allDateOperands(fields.filter((f) => f.data_type === "data"));
+  const conds = allCondOperands(fields.filter((f) => COND_DATA_TYPES.includes(f.data_type)));
+  return [...numeric, ...dates, ...conds];
+}
+
 function parseFormula(raw: string): Formula | null {
   if (!raw.trim()) return null;
   try {
@@ -86,6 +140,33 @@ function parseFormula(raw: string): Formula | null {
   } catch {
     return null;
   }
+}
+
+// Resolve a fórmula de um campo calculado (texto → tokens quando o editor for o
+// de texto) e valida estrutura + refs (numéricos, datas e condicionais).
+async function resolveAndValidateFormula(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  f: ReturnType<typeof readForm>,
+  fieldKey?: string
+): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
+  let formula = f.formula;
+  if (f.formulaMode === "text") {
+    const catalog = await serverOperandCatalog(supabase, fieldKey);
+    const tok = tokenizeFormulaText(f.formulaText, catalog);
+    if (!tok.ok) return { ok: false, message: tok.error };
+    formula = tok.formula;
+  }
+  if (!formula) {
+    return { ok: false, message: "Defina a fórmula do campo calculado." };
+  }
+  const [allowed, allowedDates, allowedConds] = await Promise.all([
+    allowedFormulaRefs(supabase, fieldKey),
+    allowedFormulaDateRefs(supabase),
+    allowedFormulaCondRefs(supabase),
+  ]);
+  const v = validateFormula(formula, allowed, allowedDates, allowedConds);
+  if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+  return { ok: true, formula };
 }
 
 function slugify(label: string): string {
@@ -127,9 +208,14 @@ function readForm(formData: FormData) {
   const editable = parseRoles(formData, "editable_by_roles");
   const isLocal = formData.get("is_local") === "on";
   const showInBuilder = formData.get("show_in_builder") === "on";
+  const allowNegative = formData.get("allow_negative") === "on";
   const writeBack = formData.get("write_back") === "on";
   const sortOrder = Number(formData.get("sort_order") ?? 0) || 0;
   const formula = parseFormula(String(formData.get("formula") ?? ""));
+  // Editor de fórmula: "builder" (botões, hidden `formula`) ou "text" (estilo
+  // Sheets, hidden `formula_text` — tokenizado no servidor com o catálogo).
+  const formulaMode = String(formData.get("formula_mode") ?? "builder");
+  const formulaText = String(formData.get("formula_text") ?? "");
   const currencyCodeRaw = String(formData.get("currency_code") ?? "").trim().toUpperCase();
   const currencyModeRaw = String(formData.get("currency_mode") ?? "").trim();
   return {
@@ -140,9 +226,12 @@ function readForm(formData: FormData) {
     editable,
     isLocal,
     showInBuilder,
+    allowNegative,
     writeBack,
     sortOrder,
     formula,
+    formulaMode,
+    formulaText,
     currencyCodeRaw,
     currencyModeRaw,
   };
@@ -195,12 +284,11 @@ export async function createField(
 
   const supabase = await createClient();
 
+  let calcFormula: Formula | null = null;
   if (f.dataType === "calculado") {
-    if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
-    const allowed = await allowedFormulaRefs(supabase, fieldKey);
-    const allowedDates = await allowedFormulaDateRefs(supabase);
-    const v = validateFormula(f.formula, allowed, allowedDates);
-    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+    const r = await resolveAndValidateFormula(supabase, f, fieldKey);
+    if (!r.ok) return { ok: false, message: r.message };
+    calcFormula = r.formula;
   }
 
   const currency = resolveCurrencyColumns(f);
@@ -214,7 +302,10 @@ export async function createField(
     is_local: f.isLocal,
     show_in_builder: f.showInBuilder,
     write_back: f.writeBack,
-    formula: f.dataType === "calculado" ? f.formula : null,
+    formula: calcFormula,
+    // Só relevante em calculado; demais tipos gravam o default (true) para o
+    // checkbox ausente no form nunca virar false.
+    allow_negative: f.dataType === "calculado" ? f.allowNegative : true,
     currency_code: currency.currency_code,
     currency_mode: currency.currency_mode,
     sort_order: f.sortOrder,
@@ -258,12 +349,11 @@ export async function updateField(
     .maybeSingle();
   const fieldKey = (existing?.field_key as string | undefined) ?? undefined;
 
+  let calcFormula: Formula | null = null;
   if (f.dataType === "calculado") {
-    if (!f.formula) return { ok: false, message: "Defina a fórmula do campo calculado." };
-    const allowed = await allowedFormulaRefs(supabase, fieldKey);
-    const allowedDates = await allowedFormulaDateRefs(supabase);
-    const v = validateFormula(f.formula, allowed, allowedDates);
-    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+    const r = await resolveAndValidateFormula(supabase, f, fieldKey);
+    if (!r.ok) return { ok: false, message: r.message };
+    calcFormula = r.formula;
   }
 
   const currency = resolveCurrencyColumns(f);
@@ -278,7 +368,8 @@ export async function updateField(
       is_local: f.isLocal,
       show_in_builder: f.showInBuilder,
       write_back: f.writeBack,
-      formula: f.dataType === "calculado" ? f.formula : null,
+      formula: calcFormula,
+      allow_negative: f.dataType === "calculado" ? f.allowNegative : true,
       currency_code: currency.currency_code,
       currency_mode: currency.currency_mode,
       sort_order: f.sortOrder,
