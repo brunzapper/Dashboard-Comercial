@@ -18,6 +18,9 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowDownAZ,
   ArrowUpAZ,
   CalendarDays,
@@ -32,6 +35,7 @@ import { ColorField } from "./appearance-controls";
 import type {
   AppearanceSettings,
   ColorPair,
+  TableAlign,
   Widget,
 } from "@/lib/widgets/types";
 import {
@@ -186,7 +190,7 @@ export function ContextMenu({
       {coloring ? (
         <>
           {ordering ? <div className="bg-border my-1 h-px" /> : null}
-          <p className="text-muted-foreground px-2 pb-1 text-xs">Cor</p>
+          <p className="text-muted-foreground px-2 pb-1 text-xs">Aparência</p>
           {coloring.scopes.map((s) => (
             <MenuBtn key={s} onClick={() => coloring.onScope(s)}>
               <Palette /> {scopeLabel[s]}
@@ -213,7 +217,7 @@ export function ContextMenu({
   );
 }
 
-// -------- janela de cor com abas Texto/Preenchimento --------
+// -------- janela de aparência: cor (abas Texto/Preenchimento) + alinhamento --------
 export function ColorPopover({
   x,
   y,
@@ -222,6 +226,7 @@ export function ColorPopover({
   onChange,
   onClose,
   only,
+  align,
 }: {
   x: number;
   y: number;
@@ -230,9 +235,24 @@ export function ColorPopover({
   onChange: (v: ColorPair) => void;
   onClose: () => void;
   only?: "fill" | "text"; // esconde as abas e mostra só uma cor
+  // Alinhamento do escopo (linha/coluna/célula). onSelect(undefined) limpa o
+  // override (clicar de novo no alinhamento ativo).
+  align?: {
+    value?: TableAlign;
+    onSelect: (a: TableAlign | undefined) => void;
+  };
 }) {
   const [tab, setTab] = useState<"fill" | "text">(only ?? "fill");
   const active = only ?? tab;
+  const ALIGN_OPTIONS: {
+    key: TableAlign;
+    label: string;
+    Icon: typeof AlignLeft;
+  }[] = [
+    { key: "left", label: "Esquerda", Icon: AlignLeft },
+    { key: "center", label: "Centro", Icon: AlignCenter },
+    { key: "right", label: "Direita", Icon: AlignRight },
+  ];
   return (
     <FloatingPanel x={x} y={y} onClose={onClose} className="w-60">
       <div className="flex flex-col gap-2">
@@ -272,6 +292,33 @@ export function ColorPopover({
             onClear={() => onChange({ ...value, text: undefined })}
           />
         )}
+        {align ? (
+          <div className="flex flex-col gap-1 border-t pt-2">
+            <p className="text-muted-foreground text-xs">Alinhamento</p>
+            <div className="flex gap-1">
+              {ALIGN_OPTIONS.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={align.value === key}
+                  onClick={() =>
+                    align.onSelect(align.value === key ? undefined : key)
+                  }
+                  className={cn(
+                    "flex flex-1 items-center justify-center rounded-sm border px-2 py-1",
+                    align.value === key
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50"
+                  )}
+                >
+                  <Icon className="size-4" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </FloatingPanel>
   );

@@ -129,7 +129,7 @@ async function upsertSheetRow(
   const { data: existingRow } = await db
     .from("records")
     .select(
-      "id, custom_fields, field_modified_at, last_synced_at, responsible_id, operation_id, related_lead_id, lead_time_days, " +
+      "id, title, currency, closed, field_modified_at, last_synced_at, custom_fields, responsible_id, operation_id, related_lead_id, lead_time_days, " +
         CORE_SYNC_FIELDS.join(", ")
     )
     .eq("source_system", "sheet_site")
@@ -173,7 +173,18 @@ async function upsertSheetRow(
       Object.assign(
         custom_fields,
         computeFormulaFields(
-          { value: numOrNull(row.contract), mrr: numOrNull(row.mrr), lead_time_days: computedLeadTime },
+          {
+            value: numOrNull(row.contract),
+            mrr: numOrNull(row.mrr),
+            lead_time_days: computedLeadTime,
+            // Colunas textuais (condicionais SE/E/OU nas fórmulas).
+            title: row.name,
+            record_type: "venda_site",
+            source_system: "sheet_site",
+            stage: row.etapa_crm,
+            sale_type: row.plan,
+            channel: row.canal,
+          },
           custom_fields,
           formulaDefs,
           undefined,
@@ -267,6 +278,15 @@ async function upsertSheetRow(
           lead_time_days: numOrNull(
             "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days
           ),
+          // Valores efetivos das colunas textuais (condicionais SE/E/OU).
+          title: existing.title,
+          record_type: "venda_site",
+          source_system: "sheet_site",
+          stage: eff("stage"),
+          sale_type: eff("sale_type"),
+          channel: eff("channel"),
+          currency: existing.currency,
+          closed: existing.closed,
         },
         mergedCustom,
         formulaDefs,

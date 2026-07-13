@@ -34,6 +34,7 @@ import type {
   AppearanceSettings,
   AxisSide,
   GridLines,
+  TableAlign,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
@@ -355,6 +356,21 @@ export function WidgetAppearanceSheet({
                 options={[
                   { value: "clip", label: "Cortar (…)" },
                   { value: "wrap", label: "Quebrar linha" },
+                ]}
+              />
+              <SelectRow
+                label="Alinhamento das colunas"
+                value={ap.table?.align ?? "default"}
+                onChange={(v) =>
+                  patchTable({
+                    align: v === "default" ? undefined : (v as TableAlign),
+                  })
+                }
+                options={[
+                  { value: "default", label: "Padrão" },
+                  { value: "left", label: "Esquerda" },
+                  { value: "center", label: "Centro" },
+                  { value: "right", label: "Direita" },
                 ]}
               />
               <p className="text-muted-foreground text-xs">

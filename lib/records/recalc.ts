@@ -20,6 +20,7 @@ import {
   buildDateContext,
   buildRecordCurrencyContext,
   computeFormulaFields,
+  CORE_DATE_REFS,
   formulaRefs,
   loadCurrencyMaterials,
   loadCustomDateKeys,
@@ -41,12 +42,22 @@ function toMs(v: unknown): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-// Valores de data dos operandos match:<fonte>:<ref> a partir do registro casado.
-function matchDateEntries(
+// Valores dos operandos match:<fonte>:<ref> a partir do registro casado,
+// separados em DATAS (→ dateCtx, epoch ms) e demais valores brutos (→ contexto
+// de valores; texto/seleção/booleano/número para condicionais e aritmética).
+// `isDateRef` decide pela mesma regra do catálogo de operandos: colunas de data
+// do núcleo ou campo personalizado do tipo `data`.
+function matchEntries(
   neededRefs: string[],
-  matched: MatchedBySource
-): Record<string, number | null> {
-  const out: Record<string, number | null> = {};
+  matched: MatchedBySource,
+  customDateKeys: Set<string>
+): { dates: Record<string, number | null>; values: Record<string, unknown> } {
+  const dates: Record<string, number | null> = {};
+  const values: Record<string, unknown> = {};
+  const isDateRef = (inner: string): boolean =>
+    inner.startsWith("custom:")
+      ? customDateKeys.has(inner.slice(7))
+      : CORE_DATE_REFS.includes(inner as (typeof CORE_DATE_REFS)[number]);
   for (const ref of neededRefs) {
     const rest = ref.slice("match:".length);
     const i = rest.indexOf(":");
@@ -60,9 +71,10 @@ function matchDateEntries(
         ? rec.custom_fields?.[inner.slice(7)]
         : (rec as Record<string, unknown>)[inner];
     }
-    out[ref] = toMs(raw);
+    if (isDateRef(inner)) dates[ref] = toMs(raw);
+    else values[ref] = raw;
   }
-  return out;
+  return { dates, values };
 }
 
 /**
@@ -83,6 +95,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
     )
   );
   const customDateKeys = await loadCustomDateKeys(db);
+  const customDateKeySet = new Set(customDateKeys);
 
   // Só carrega o aparato de câmbio se algum calc-field for monetário.
   const needsCurrency = anyMoneyDef(defs);
@@ -96,7 +109,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
     const { data } = await db
       .from("records")
       .select(
-        "id, record_type, related_lead_id, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at"
+        "id, record_type, source_system, related_lead_id, title, pipeline, stage, stage_semantic, sale_type, channel, closed, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at"
       )
       .order("id", { ascending: true })
       .range(from, from + BATCH - 1);
@@ -155,6 +168,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
               materials
             )
           : undefined;
+        const matchVals = matchEntries(neededMatchRefs, matched, customDateKeySet);
         const dateCtx = {
           ...buildDateContext(
             {
@@ -165,13 +179,26 @@ export async function recalcAllFormulaFields(): Promise<number> {
             custom,
             customDateKeys
           ),
-          ...matchDateEntries(neededMatchRefs, matched),
+          ...matchVals.dates,
         };
         const calc = computeFormulaFields(
           {
             value: numOrNull(r.value),
             mrr: numOrNull(r.mrr),
             lead_time_days: effLeadTime,
+            // Colunas textuais/booleanas do núcleo (condicionais SE/E/OU) +
+            // valores brutos do registro casado (match:<fonte>:<ref> não-data).
+            title: r.title,
+            record_type: r.record_type,
+            source_system: r.source_system,
+            pipeline: r.pipeline,
+            stage: r.stage,
+            stage_semantic: r.stage_semantic,
+            sale_type: r.sale_type,
+            channel: r.channel,
+            currency: r.currency,
+            closed: r.closed,
+            ...matchVals.values,
           },
           custom,
           defs,

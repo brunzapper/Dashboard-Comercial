@@ -30,7 +30,7 @@ import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { ENTITY_TYPE_OF } from "@/lib/widgets/entity-list";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
-import { groupByLevels } from "@/lib/widgets/appearance";
+import { alignClass, groupByLevels, resolveAlign } from "@/lib/widgets/appearance";
 import {
   buildGroupItems,
   dedupeFields,
@@ -42,9 +42,14 @@ import {
   formatDateValue,
   type DateFormat,
 } from "@/lib/widgets/format";
-import type { AppearanceSettings, RecordListColumn } from "@/lib/widgets/types";
+import type {
+  AppearanceSettings,
+  ColorPair,
+  RecordListColumn,
+  TableAlign,
+} from "@/lib/widgets/types";
 import { updateEntityField } from "@/app/(app)/dashboards/actions";
-import { ContextMenu, ResizeHandle } from "../appearance-editing";
+import { ColorPopover, ContextMenu, ResizeHandle } from "../appearance-editing";
 
 // Célula editável de um valor ligado à entidade. Reusa o padrão da EditableCell
 // de Registros, mas grava via updateEntityField (entity_custom_values).
@@ -93,7 +98,12 @@ function EntityEditableCell({
       : field.data_type === "data"
         ? formatDateValue(serverValue, dateFormat)
         : serverValue;
-    return <span className="block truncate">{display || "—"}</span>;
+    // Traço só para vazio/nulo — zero (0 numérico ou "0") exibe normalmente.
+    return (
+      <span className="block truncate">
+        {display == null || display === "" ? "—" : display}
+      </span>
+    );
   }
 
   function commit(raw: string) {
@@ -248,7 +258,11 @@ export function EntityListTable({
   const dashFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
   const entityType = ENTITY_TYPE_OF[rowSource];
 
-  const [menu, setMenu] = useState<{ x: number; y: number; column: string } | null>(null);
+  const [menu, setMenu] = useState<
+    | { kind: "ctx"; x: number; y: number; column: string }
+    | { kind: "color"; x: number; y: number; column: string }
+    | null
+  >(null);
   // Grupos EXPANDIDOS no "Agrupar por" (efêmero) — abre sempre recolhido.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (key: string) =>
@@ -295,6 +309,19 @@ export function EntityListTable({
     setTable({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
   const setColDateFormat = (column: string, f: DateFormat) =>
     setTable({ dateFormats: { ...(t.dateFormats ?? {}), [column]: f } });
+  // Cor e alinhamento por coluna (único escopo deste widget: 1 linha = entidade).
+  const setColColor = (column: string, cp: ColorPair) => {
+    const map = { ...(t.colColors ?? {}) };
+    if (!cp.fill && !cp.text) delete map[column];
+    else map[column] = cp;
+    setTable({ colColors: map });
+  };
+  const setColAlign = (column: string, a: TableAlign | undefined) => {
+    const map = { ...(t.colAlign ?? {}) };
+    if (!a) delete map[column];
+    else map[column] = a;
+    setTable({ colAlign: map });
+  };
 
   // --- Agrupar por: agrupa as entidades por uma ou mais colunas em seções
   // recolhíveis. Colunas de data com "Agrupar período" entram como níveis mais
@@ -380,7 +407,13 @@ export function EntityListTable({
           ...(h ? { height: h } : {}),
         }}
       >
-        <TableCell className="relative align-top font-medium" style={cellBorder(0)}>
+        <TableCell
+          className={cn(
+            "relative align-top font-medium",
+            alignClass(resolveAlign(t, { column: "__name", rowKey: r.id }))
+          )}
+          style={cellBorder(0)}
+        >
           <span className={cellSpanClass}>{r.label}</span>
           {editable ? (
             <ResizeHandle axis="row" onResize={(hh) => setRowHeight(r.id, hh)} />
@@ -392,7 +425,13 @@ export function EntityListTable({
           return (
             <TableCell
               key={c.field}
-              className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
+              className={cn(
+                "align-top",
+                !t.colWidths?.[c.field] && "max-w-[200px]",
+                alignClass(
+                  resolveAlign(t, { column: c.field, rowKey: r.id, numeric: isNumericCol(c.field) })
+                )
+              )}
               style={{
                 background: t.colColors?.[c.field]?.fill,
                 color: t.colColors?.[c.field]?.text ?? t.bodyColor,
@@ -444,7 +483,10 @@ export function EntityListTable({
         ...(t.borderColor ? { borderColor: t.borderColor } : {}),
       }}
     >
-      <TableCell style={cellBorder(0)}>
+      <TableCell
+        className={alignClass(resolveAlign(t, { column: "__name" }))}
+        style={cellBorder(0)}
+      >
         <button
           type="button"
           className={cn(
@@ -469,7 +511,12 @@ export function EntityListTable({
       {cols.map((c, ci) => (
         <TableCell
           key={c.field}
-          className={cn(isNumericCol(c.field) && "text-right tabular-nums")}
+          className={cn(
+            alignClass(
+              resolveAlign(t, { column: c.field, numeric: isNumericCol(c.field) })
+            ),
+            isNumericCol(c.field) && "tabular-nums"
+          )}
           style={cellBorder(ci + 1)}
         >
           {isNumericCol(c.field) ? numFmt(c.field, sumCol(c.field, rs)) : null}
@@ -498,16 +545,28 @@ export function EntityListTable({
               ...(t.borderColor ? { borderColor: t.borderColor } : {}),
             }}
           >
-            <TableHead className="whitespace-nowrap" style={cellBorder(0)}>
+            <TableHead
+              className={cn(
+                "whitespace-nowrap",
+                alignClass(resolveAlign(t, { column: "__name" }))
+              )}
+              style={cellBorder(0)}
+            >
               Nome
             </TableHead>
             {cols.map((c, ci) => (
               <TableHead
                 key={c.field}
-                className="group relative whitespace-nowrap"
+                className={cn(
+                  "group relative whitespace-nowrap",
+                  alignClass(
+                    resolveAlign(t, { column: c.field, numeric: isNumericCol(c.field) })
+                  )
+                )}
                 onDoubleClick={
-                  editable && isDateCol(c.field)
-                    ? (e) => setMenu({ x: e.clientX, y: e.clientY, column: c.field })
+                  editable
+                    ? (e) =>
+                        setMenu({ kind: "ctx", x: e.clientX, y: e.clientY, column: c.field })
                     : undefined
                 }
                 style={{
@@ -543,18 +602,42 @@ export function EntityListTable({
         </TableBody>
       </Table>
 
-      {menu ? (
+      {menu?.kind === "ctx" ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
-          dateFormat={{
-            value: t.dateFormats?.[menu.column],
-            onSelect: (f) => {
-              setColDateFormat(menu.column, f);
-              setMenu(null);
-            },
+          coloring={{
+            scopes: ["col"],
+            onScope: () =>
+              setMenu({ kind: "color", x: menu.x, y: menu.y, column: menu.column }),
           }}
+          dateFormat={
+            isDateCol(menu.column)
+              ? {
+                  value: t.dateFormats?.[menu.column],
+                  onSelect: (f) => {
+                    setColDateFormat(menu.column, f);
+                    setMenu(null);
+                  },
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {menu?.kind === "color" ? (
+        <ColorPopover
+          x={menu.x}
+          y={menu.y}
+          title="Aparência da coluna"
+          value={t.colColors?.[menu.column] ?? {}}
+          onChange={(cp) => setColColor(menu.column, cp)}
+          align={{
+            value: t.colAlign?.[menu.column],
+            onSelect: (a) => setColAlign(menu.column, a),
+          }}
+          onClose={() => setMenu(null)}
         />
       ) : null}
     </div>

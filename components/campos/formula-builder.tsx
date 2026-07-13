@@ -32,8 +32,18 @@ function tokenLabel(t: FormulaToken, refs: RefOption[]): string {
       return refs.find((r) => r.ref === t.ref)?.label ?? t.ref;
     case "const":
       return String(t.value);
+    case "str":
+      return `"${t.value}"`;
+    case "bool":
+      return t.value ? "VERDADEIRO" : "FALSO";
     case "op":
       return t.op === "*" ? "×" : t.op === "/" ? "÷" : t.op;
+    case "cmp":
+      return t.op;
+    case "func":
+      return t.name;
+    case "argsep":
+      return ";";
     case "lparen":
       return "(";
     case "rparen":

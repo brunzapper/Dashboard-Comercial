@@ -1,10 +1,16 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 2.0 | Data: 09/07/2026
 // Campos calculados (Fase 7): modelo de fórmula estruturada + avaliador puro
-// (shunting-yard → RPN, SEM eval) usado para materializar o valor por registro.
-// Operandos são referências a colunas numéricas ('value','mrr','lead_time_days')
-// ou campos personalizados numéricos ('custom:<key>') e constantes. Operadores
-// + − × ÷ com precedência e parênteses. Null-safe: operando ausente/não-numérico
-// ou divisão por zero => resultado null (não engana com zero).
+// (parser recursivo tokens→AST, SEM eval) usado para materializar o valor por
+// registro. Operandos são referências a colunas ('value','mrr','stage',...),
+// campos personalizados ('custom:<key>') e constantes. Null-safe: operando
+// ausente/não-numérico em aritmética ou divisão por zero => null (não engana
+// com zero).
+// v2.0 (13/07/2026): condicionais estilo Google Sheets — funções SE/E/OU,
+//   comparações (= <> < > <= >=), literais de texto/booleano e separador de
+//   argumentos ';'. Valores tipados (número|texto|booleano|data|null); o
+//   resultado materializado pode ser texto. Fórmulas legadas (só + − × ÷)
+//   avaliam de forma idêntica. `Formula.source` guarda o texto digitado no
+//   editor estilo Sheets (round-trip; ver lib/records/formula-text.ts).
 
 import {
   convertCurrency,
@@ -16,19 +22,44 @@ import {
 import { todayBrasiliaMs } from "@/lib/date/today";
 
 export type FormulaOp = "+" | "-" | "*" | "/";
+export type FormulaCmpOp = "=" | "<>" | "<" | ">" | "<=" | ">=";
+export type FormulaFuncName = "SE" | "E" | "OU";
 
 export type FormulaToken =
   | { kind: "field"; ref: string }
   | { kind: "const"; value: number }
+  | { kind: "str"; value: string }
+  | { kind: "bool"; value: boolean }
   | { kind: "op"; op: FormulaOp }
+  | { kind: "cmp"; op: FormulaCmpOp }
+  | { kind: "func"; name: FormulaFuncName }
+  | { kind: "argsep" }
   | { kind: "lparen" }
   | { kind: "rparen" };
 
 export interface Formula {
   tokens: FormulaToken[];
+  // Texto original digitado no editor estilo Sheets (quando a fórmula foi criada
+  // por texto). Ausente em fórmulas montadas pelo construtor de botões.
+  source?: string;
 }
 
-const PRECEDENCE: Record<FormulaOp, number> = { "+": 1, "-": 1, "*": 2, "/": 2 };
+// Resultado de uma fórmula: número, texto (ramo de SE), booleano ou null.
+export type FormulaResult = number | string | boolean | null;
+
+/** True quando a fórmula usa recursos que o construtor de botões não representa
+ * (funções, comparações, textos, booleanos). */
+export function formulaUsesFunctions(formula: Formula | null | undefined): boolean {
+  if (!formula) return false;
+  return formula.tokens.some(
+    (t) =>
+      t.kind === "str" ||
+      t.kind === "bool" ||
+      t.kind === "cmp" ||
+      t.kind === "func" ||
+      t.kind === "argsep"
+  );
+}
 
 const DAY_MS = 86_400_000;
 
@@ -87,87 +118,321 @@ export function formulaRefs(formula: Formula): string[] {
     .map((t) => t.ref);
 }
 
-// Valor tipado na pilha do avaliador: número puro ou DATA (ms). O tipo permite
-// `data − data → dias` sem confundir com uma subtração numérica comum.
-type Val = { v: number | null; date: boolean };
+// --- Parser: tokens → AST (recursivo, com precedência) -----------------------
+// Gramática (menor → maior precedência):
+//   expression := additive ( CMP additive )?         (comparação não associativa)
+//   additive   := multiplicative ( (+|-) multiplicative )*
+//   multiplicative := unary ( (*|/) unary )*
+//   unary      := '-' unary | primary
+//   primary    := const | str | bool | field | FUNC '(' expr (';' expr)* ')' | '(' expr ')'
+
+type FormulaNode =
+  | { k: "lit"; v: number | string | boolean }
+  | { k: "ref"; ref: string }
+  | { k: "neg"; a: FormulaNode }
+  | { k: "bin"; op: FormulaOp; a: FormulaNode; b: FormulaNode }
+  | { k: "cmp"; op: FormulaCmpOp; a: FormulaNode; b: FormulaNode }
+  | { k: "call"; name: FormulaFuncName; args: FormulaNode[] };
+
+class FormulaParseError extends Error {}
+
+function parseTokens(tokens: FormulaToken[]): FormulaNode {
+  if (!tokens || tokens.length === 0) {
+    throw new FormulaParseError("A fórmula está vazia.");
+  }
+  let i = 0;
+  const peek = () => tokens[i];
+  const next = () => tokens[i++];
+
+  function expression(): FormulaNode {
+    const a = additive();
+    const t = peek();
+    if (t?.kind === "cmp") {
+      next();
+      const b = additive();
+      if (peek()?.kind === "cmp") {
+        throw new FormulaParseError(
+          "Comparações encadeadas não são permitidas (use E(a > b; b > c))."
+        );
+      }
+      return { k: "cmp", op: t.op, a, b };
+    }
+    return a;
+  }
+  function additive(): FormulaNode {
+    let a = multiplicative();
+    for (;;) {
+      const t = peek();
+      if (t?.kind === "op" && (t.op === "+" || t.op === "-")) {
+        next();
+        a = { k: "bin", op: t.op, a, b: multiplicative() };
+      } else return a;
+    }
+  }
+  function multiplicative(): FormulaNode {
+    let a = unary();
+    for (;;) {
+      const t = peek();
+      if (t?.kind === "op" && (t.op === "*" || t.op === "/")) {
+        next();
+        a = { k: "bin", op: t.op, a, b: unary() };
+      } else return a;
+    }
+  }
+  function unary(): FormulaNode {
+    const t = peek();
+    if (t?.kind === "op" && t.op === "-") {
+      next();
+      return { k: "neg", a: unary() };
+    }
+    return primary();
+  }
+  function primary(): FormulaNode {
+    const t = next();
+    if (!t) throw new FormulaParseError("A fórmula termina de forma incompleta.");
+    if (t.kind === "const") {
+      if (!Number.isFinite(t.value)) {
+        throw new FormulaParseError("Constante numérica inválida.");
+      }
+      return { k: "lit", v: t.value };
+    }
+    if (t.kind === "str") return { k: "lit", v: t.value };
+    if (t.kind === "bool") return { k: "lit", v: t.value };
+    if (t.kind === "field") return { k: "ref", ref: t.ref };
+    if (t.kind === "func") {
+      const name = t.name;
+      if (next()?.kind !== "lparen") {
+        throw new FormulaParseError(`Esperava '(' após ${name}.`);
+      }
+      const args: FormulaNode[] = [];
+      if (peek()?.kind === "rparen") {
+        next();
+      } else {
+        args.push(expression());
+        while (peek()?.kind === "argsep") {
+          next();
+          args.push(expression());
+        }
+        if (next()?.kind !== "rparen") {
+          throw new FormulaParseError(
+            `Esperava ')' ou ';' nos argumentos de ${name}.`
+          );
+        }
+      }
+      if (name === "SE" && (args.length < 2 || args.length > 3)) {
+        throw new FormulaParseError(
+          "SE espera 2 ou 3 argumentos: SE(condição; então; senão)."
+        );
+      }
+      if ((name === "E" || name === "OU") && args.length < 2) {
+        throw new FormulaParseError(`${name} espera pelo menos 2 argumentos.`);
+      }
+      return { k: "call", name, args };
+    }
+    if (t.kind === "lparen") {
+      const e = expression();
+      if (next()?.kind !== "rparen") {
+        throw new FormulaParseError("Parênteses desbalanceados.");
+      }
+      return e;
+    }
+    if (t.kind === "argsep") {
+      throw new FormulaParseError("';' só pode aparecer entre argumentos de uma função.");
+    }
+    throw new FormulaParseError("Esperava uma coluna, número, texto ou '('.");
+  }
+
+  const root = expression();
+  if (i < tokens.length) {
+    throw new FormulaParseError(
+      "Símbolo inesperado após o fim da fórmula (verifique operadores e parênteses)."
+    );
+  }
+  return root;
+}
+
+// --- Avaliador tipado ---------------------------------------------------------
+
+// Valor tipado do avaliador: número, texto, booleano ou null; `date` marca
+// datas (epoch ms) e permite `data − data → dias` e comparação cronológica.
+type Val = { v: number | string | boolean | null; date: boolean };
+
+const NULL_VAL: Val = { v: null, date: false };
+
+function toNumVal(v: Val): number | null {
+  if (v.date) return null; // data em aritmética comum → null
+  return toNum(v.v);
+}
+
+// Canonicaliza texto para comparação/booleano: minúsculas pt-BR, sem espaços nas
+// pontas; strings booleanas viram "true"/"false" (cobre custom booleano gravado
+// como "true"/"false" e literais VERDADEIRO/SIM/FALSO/NÃO digitados).
+function normStr(v: string): string {
+  const s = v.trim().toLocaleLowerCase("pt-BR");
+  if (s === "verdadeiro" || s === "sim" || s === "true") return "true";
+  if (s === "falso" || s === "não" || s === "nao" || s === "false") return "false";
+  return s;
+}
+
+function asComparableString(v: number | string | boolean): string {
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  return normStr(v);
+}
+
+// Verdade de um valor (condição do SE, argumentos de E/OU). null = FALSO
+// (comportamento do Sheets para célula vazia).
+function truthy(val: Val): boolean {
+  const v = val.v;
+  if (v == null) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return val.date ? true : v !== 0;
+  const s = normStr(v);
+  if (s === "true") return true;
+  if (s === "false" || s === "") return false;
+  const n = Number(s.replace(",", "."));
+  if (Number.isFinite(n)) return n !== 0;
+  return false;
+}
+
+// Igualdade tolerante a tipos: null ≡ "" ; números comparados numericamente
+// (aceita string numérica); texto case-insensitive (pt-BR); booleanos
+// canonicalizados ("true"/"false"). Datas comparam por ms.
+function valEquals(a: Val, b: Val): boolean {
+  const av = a.v === "" ? null : a.v;
+  const bv = b.v === "" ? null : b.v;
+  if (av == null || bv == null) return av == null && bv == null;
+  if (a.date && b.date) return av === bv;
+  const an = a.date ? null : toNum(av);
+  const bn = b.date ? null : toNum(bv);
+  if (an != null && bn != null && typeof av !== "boolean" && typeof bv !== "boolean") {
+    return an === bn;
+  }
+  return asComparableString(av) === asComparableString(bv);
+}
+
+// Ordenação: null → null (condição falsa); datas por ms; números numericamente;
+// texto por localeCompare pt-BR. Retorna negativo/zero/positivo ou null.
+function valCompare(a: Val, b: Val): number | null {
+  if (a.v == null || b.v == null) return null;
+  if (a.date && b.date) return Number(a.v) - Number(b.v);
+  const an = a.date ? null : toNum(a.v);
+  const bn = b.date ? null : toNum(b.v);
+  if (an != null && bn != null) return an - bn;
+  return asComparableString(a.v).localeCompare(asComparableString(b.v), "pt-BR");
+}
+
+function evalNode(
+  node: FormulaNode,
+  ctx: Record<string, unknown>,
+  dateCtx?: Record<string, number | null>
+): Val {
+  switch (node.k) {
+    case "lit":
+      return { v: node.v, date: false };
+    case "ref": {
+      if (dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, node.ref)) {
+        return { v: dateCtx[node.ref] ?? null, date: true };
+      }
+      const raw = ctx[node.ref];
+      if (raw == null || raw === "") return NULL_VAL;
+      if (
+        typeof raw === "number" ||
+        typeof raw === "string" ||
+        typeof raw === "boolean"
+      ) {
+        return { v: raw, date: false };
+      }
+      return NULL_VAL;
+    }
+    case "neg": {
+      const n = toNumVal(evalNode(node.a, ctx, dateCtx));
+      return { v: n == null ? null : -n, date: false };
+    }
+    case "bin": {
+      const a = evalNode(node.a, ctx, dateCtx);
+      const b = evalNode(node.b, ctx, dateCtx);
+      if (a.v == null || b.v == null) return NULL_VAL;
+      // data − data → dias
+      if (node.op === "-" && a.date && b.date) {
+        const r = Math.round((Number(a.v) - Number(b.v)) / DAY_MS);
+        return { v: Number.isFinite(r) ? r : null, date: false };
+      }
+      // Qualquer outra operação envolvendo data é inválida → null.
+      if (a.date || b.date) return NULL_VAL;
+      const an = toNum(a.v);
+      const bn = toNum(b.v);
+      if (an == null || bn == null) return NULL_VAL;
+      let r: number | null;
+      switch (node.op) {
+        case "+": r = an + bn; break;
+        case "-": r = an - bn; break;
+        case "*": r = an * bn; break;
+        case "/": r = bn === 0 ? null : an / bn; break;
+        default: r = null;
+      }
+      return { v: r != null && Number.isFinite(r) ? r : null, date: false };
+    }
+    case "cmp": {
+      const a = evalNode(node.a, ctx, dateCtx);
+      const b = evalNode(node.b, ctx, dateCtx);
+      if (node.op === "=") return { v: valEquals(a, b), date: false };
+      if (node.op === "<>") return { v: !valEquals(a, b), date: false };
+      const c = valCompare(a, b);
+      if (c == null) return NULL_VAL;
+      switch (node.op) {
+        case "<": return { v: c < 0, date: false };
+        case ">": return { v: c > 0, date: false };
+        case "<=": return { v: c <= 0, date: false };
+        case ">=": return { v: c >= 0, date: false };
+        default: return NULL_VAL;
+      }
+    }
+    case "call": {
+      if (node.name === "SE") {
+        const cond = evalNode(node.args[0], ctx, dateCtx);
+        if (truthy(cond)) return evalNode(node.args[1], ctx, dateCtx);
+        return node.args[2] ? evalNode(node.args[2], ctx, dateCtx) : NULL_VAL;
+      }
+      if (node.name === "E") {
+        for (const arg of node.args) {
+          if (!truthy(evalNode(arg, ctx, dateCtx))) return { v: false, date: false };
+        }
+        return { v: true, date: false };
+      }
+      // OU
+      for (const arg of node.args) {
+        if (truthy(evalNode(arg, ctx, dateCtx))) return { v: true, date: false };
+      }
+      return { v: false, date: false };
+    }
+  }
+}
 
 /**
- * Avalia a fórmula contra um contexto ref→valor. `dateCtx` (ref → epoch ms)
- * marca operandos de DATA: `data − data` resulta em DIAS; qualquer outra
- * combinação envolvendo data resulta em null; número op número inalterado. Um
- * resultado que sobra como data também vira null (o campo calculado é numérico).
- * Qualquer operando null/NaN ou divisão por zero propaga null. Retrocompatível:
- * sem `dateCtx`, comportamento idêntico ao anterior (tudo numérico).
+ * Avalia a fórmula contra um contexto ref→valor (número, texto, booleano ou
+ * null). `dateCtx` (ref → epoch ms) marca operandos de DATA: `data − data`
+ * resulta em DIAS; datas comparam cronologicamente; qualquer outra aritmética
+ * com data resulta em null. Operando null/NaN em aritmética ou divisão por zero
+ * propaga null. Fórmula estruturalmente inválida → null (a validação forte roda
+ * no salvamento via validateFormula). Retrocompatível: fórmulas legadas (só
+ * + − × ÷ com números) avaliam de forma idêntica à v1.
  */
 export function evaluateFormula(
   formula: Formula,
-  ctx: Record<string, number | null>,
+  ctx: Record<string, unknown>,
   dateCtx?: Record<string, number | null>
-): number | null {
-  const output: Val[] = [];
-  const ops: (FormulaOp | "(")[] = [];
-
-  const applyTop = () => {
-    const op = ops.pop();
-    if (op === "(" || op === undefined) return;
-    const b = output.pop();
-    const a = output.pop();
-    if (!a || !b || a.v == null || b.v == null) {
-      output.push({ v: null, date: false });
-      return;
-    }
-    // data − data → dias
-    if (op === "-" && a.date && b.date) {
-      const r = Math.round((a.v - b.v) / DAY_MS);
-      output.push({ v: Number.isFinite(r) ? r : null, date: false });
-      return;
-    }
-    // Qualquer outra operação envolvendo data é inválida → null.
-    if (a.date || b.date) {
-      output.push({ v: null, date: false });
-      return;
-    }
-    let r: number | null;
-    switch (op) {
-      case "+": r = a.v + b.v; break;
-      case "-": r = a.v - b.v; break;
-      case "*": r = a.v * b.v; break;
-      case "/": r = b.v === 0 ? null : a.v / b.v; break;
-      default: r = null;
-    }
-    output.push({ v: r != null && Number.isFinite(r) ? r : null, date: false });
-  };
-
-  for (const t of formula.tokens) {
-    if (t.kind === "field") {
-      if (dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, t.ref)) {
-        output.push({ v: dateCtx[t.ref] ?? null, date: true });
-      } else {
-        output.push({ v: ctx[t.ref] ?? null, date: false });
-      }
-    } else if (t.kind === "const") {
-      output.push({ v: Number.isFinite(t.value) ? t.value : null, date: false });
-    } else if (t.kind === "op") {
-      while (
-        ops.length > 0 &&
-        ops[ops.length - 1] !== "(" &&
-        PRECEDENCE[ops[ops.length - 1] as FormulaOp] >= PRECEDENCE[t.op]
-      ) {
-        applyTop();
-      }
-      ops.push(t.op);
-    } else if (t.kind === "lparen") {
-      ops.push("(");
-    } else if (t.kind === "rparen") {
-      while (ops.length > 0 && ops[ops.length - 1] !== "(") applyTop();
-      ops.pop(); // remove '('
-    }
+): FormulaResult {
+  let node: FormulaNode;
+  try {
+    node = parseTokens(formula.tokens);
+  } catch {
+    return null;
   }
-  while (ops.length > 0) applyTop();
-
-  if (output.length !== 1) return null;
-  const res = output[0];
-  return res.date ? null : res.v;
+  const res = evalNode(node, ctx, dateCtx);
+  if (res.date) return null; // resultado "cru" de data não é exibível
+  if (typeof res.v === "number" && !Number.isFinite(res.v)) return null;
+  return res.v;
 }
 
 export interface FormulaValidation {
@@ -176,51 +441,35 @@ export interface FormulaValidation {
 }
 
 /**
- * Valida a estrutura da fórmula: operandos/operadores alternados, parênteses
- * balanceados e refs conhecidas. `allowedRefs` deve conter APENAS colunas
- * numéricas que NÃO sejam campos calculados (evita dependência circular).
+ * Valida a fórmula: estrutura (mesmo parser da avaliação, com mensagens em PT)
+ * e refs conhecidas. `allowedRefs` deve conter APENAS colunas numéricas que NÃO
+ * sejam campos calculados (evita dependência circular); `allowedDateRefs` as
+ * datas; `allowedCondRefs` as colunas de texto/seleção/booleano permitidas em
+ * condicionais (SE/E/OU e comparações).
  */
 export function validateFormula(
   formula: Formula,
   allowedRefs: Set<string>,
-  allowedDateRefs?: Set<string>
+  allowedDateRefs?: Set<string>,
+  allowedCondRefs?: Set<string>
 ): FormulaValidation {
-  const tokens = formula.tokens;
-  if (!tokens || tokens.length === 0) {
-    return { ok: false, error: "A fórmula está vazia." };
+  try {
+    parseTokens(formula.tokens);
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof FormulaParseError ? e.message : "Fórmula inválida.",
+    };
   }
-  let expectOperand = true;
-  let depth = 0;
-  for (const t of tokens) {
-    if (expectOperand) {
-      if (t.kind === "field") {
-        if (!allowedRefs.has(t.ref) && !allowedDateRefs?.has(t.ref)) {
-          return { ok: false, error: `Coluna inválida na fórmula: ${t.ref}` };
-        }
-        expectOperand = false;
-      } else if (t.kind === "const") {
-        if (!Number.isFinite(t.value)) {
-          return { ok: false, error: "Constante numérica inválida." };
-        }
-        expectOperand = false;
-      } else if (t.kind === "lparen") {
-        depth += 1;
-      } else {
-        return { ok: false, error: "Esperava uma coluna/número ou '('." };
-      }
-    } else {
-      if (t.kind === "op") {
-        expectOperand = true;
-      } else if (t.kind === "rparen") {
-        depth -= 1;
-        if (depth < 0) return { ok: false, error: "Parênteses desbalanceados." };
-      } else {
-        return { ok: false, error: "Esperava um operador (+ − × ÷) ou ')'." };
-      }
+  for (const ref of formulaRefs(formula)) {
+    if (
+      !allowedRefs.has(ref) &&
+      !allowedDateRefs?.has(ref) &&
+      !allowedCondRefs?.has(ref)
+    ) {
+      return { ok: false, error: `Coluna inválida na fórmula: ${ref}` };
     }
   }
-  if (expectOperand) return { ok: false, error: "A fórmula termina de forma incompleta." };
-  if (depth !== 0) return { ok: false, error: "Parênteses desbalanceados." };
   return { ok: true };
 }
 
@@ -231,6 +480,8 @@ export interface FormulaFieldDef {
   // currency_code; ausente = número puro (sem conversão).
   currency_mode?: string | null;
   currency_code?: string | null;
+  // Quando false, resultado negativo é grampeado em 0 (13/07/2026).
+  allow_negative?: boolean | null;
 }
 
 /** Chaves dos campos personalizados do tipo `data` (para o contexto de datas). */
@@ -250,7 +501,7 @@ export async function loadFormulaDefs(
 ): Promise<FormulaFieldDef[]> {
   const { data } = await db
     .from("field_definitions")
-    .select("field_key, formula, currency_mode, currency_code")
+    .select("field_key, formula, currency_mode, currency_code, allow_negative")
     .eq("data_type", "calculado");
   return (data ?? [])
     .map((r) => ({
@@ -258,6 +509,7 @@ export async function loadFormulaDefs(
       formula: (r.formula as Formula | null) ?? null,
       currency_mode: (r.currency_mode as string | null) ?? null,
       currency_code: (r.currency_code as string | null) ?? null,
+      allow_negative: (r.allow_negative as boolean | null) ?? true,
     }))
     .filter((d) => d.formula != null);
 }
@@ -328,70 +580,83 @@ export function buildRecordCurrencyContext(
 
 /**
  * Materializa todos os campos calculados de um registro. Monta o contexto a
- * partir das colunas numéricas do núcleo + dos custom_fields já resolvidos e
- * avalia cada def. Retorna um mapa field_key → número|null para mesclar em
- * custom_fields. Campos calculados não entram no contexto como operandos.
+ * partir das colunas do núcleo (números e, para condicionais, textos/booleanos)
+ * + dos custom_fields já resolvidos (valores BRUTOS — a coerção é feita por
+ * operação no avaliador) e avalia cada def. Retorna um mapa field_key →
+ * número|texto|booleano|null para mesclar em custom_fields. Campos calculados
+ * não entram no contexto como operandos. Valores de `match:<fonte>:<ref>` não
+ * datados podem vir dentro de `coreValues` chaveados pelo ref completo (ver
+ * lib/records/recalc.ts).
  */
 export function computeFormulaFields(
-  coreValues: Record<string, number | null>,
+  coreValues: Record<string, unknown>,
   customFields: Record<string, unknown>,
   formulaDefs: FormulaFieldDef[],
   conv?: FormulaCurrencyContext,
   dateCtx?: Record<string, number | null>
-): Record<string, number | null> {
-  const baseCtx: Record<string, number | null> = {};
+): Record<string, FormulaResult> {
+  const baseCtx: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(coreValues)) baseCtx[k] = v;
-  for (const [k, v] of Object.entries(customFields)) baseCtx[`custom:${k}`] = toNum(v);
+  for (const [k, v] of Object.entries(customFields)) baseCtx[`custom:${k}`] = v;
 
-  const out: Record<string, number | null> = {};
+  const out: Record<string, FormulaResult> = {};
   for (const def of formulaDefs) {
     if (!def.formula) continue;
-    // Fórmula que usa um operando `match:` ainda não resolvido no dateCtx é
-    // PULADA (não entra em `out`) — deixa o valor anterior intacto. Assim o sync
-    // incremental não zera campos baseados em registro casado; eles são
-    // materializados no recalc em lote (lib/records/recalc.ts).
+    // Fórmula que usa um operando `match:` ainda não resolvido (nem no dateCtx
+    // nem no contexto de valores) é PULADA (não entra em `out`) — deixa o valor
+    // anterior intacto. Assim o sync incremental não zera campos baseados em
+    // registro casado; eles são materializados no recalc em lote
+    // (lib/records/recalc.ts).
     const hasUnresolvedMatch = formulaRefs(def.formula).some(
       (r) =>
         r.startsWith("match:") &&
-        !(dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, r))
+        !(dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, r)) &&
+        !Object.prototype.hasOwnProperty.call(baseCtx, r)
     );
     if (hasUnresolvedMatch) continue;
     // Campo calculado monetário: converte cada operando monetário para a moeda
     // de destino (herdada do registro ou fixa) antes de avaliar. Assim, ao
     // envolver moedas diferentes, o cálculo é feito já convertido.
     const isMoney = def.currency_mode === "inherit" || def.currency_mode === "fixed";
+    let raw: FormulaResult;
     if (conv && isMoney) {
       const target =
         def.currency_mode === "fixed"
           ? def.currency_code ?? "BRL"
           : conv.recordCurrency;
-      out[def.field_key] = evaluateFormula(
+      raw = evaluateFormula(
         def.formula,
         convertOperands(baseCtx, target, conv),
         dateCtx
       );
     } else {
-      out[def.field_key] = evaluateFormula(def.formula, baseCtx, dateCtx);
+      raw = evaluateFormula(def.formula, baseCtx, dateCtx);
     }
+    // "Aceitar número negativo" desmarcado: resultado negativo vira 0 (null
+    // permanece null — traço na exibição).
+    out[def.field_key] =
+      typeof raw === "number" && raw < 0 && def.allow_negative === false ? 0 : raw;
   }
   return out;
 }
 
 // Converte os operandos monetários do contexto para a moeda `target` (ponte via
-// Real). Operandos não-monetários (sem entrada em operandCurrency) passam iguais.
+// Real). Operandos não-monetários (sem entrada em operandCurrency) e valores
+// não numéricos passam iguais.
 function convertOperands(
-  baseCtx: Record<string, number | null>,
+  baseCtx: Record<string, unknown>,
   target: string,
   conv: FormulaCurrencyContext
-): Record<string, number | null> {
-  const ctx: Record<string, number | null> = {};
+): Record<string, unknown> {
+  const ctx: Record<string, unknown> = {};
   for (const [ref, v] of Object.entries(baseCtx)) {
     const cur = conv.operandCurrency[ref];
-    if (v == null || !cur) {
+    const n = toNum(v);
+    if (n == null || !cur) {
       ctx[ref] = v;
       continue;
     }
-    ctx[ref] = convertCurrency(v, cur, target, conv.rates, conv.year, conv.quarter);
+    ctx[ref] = convertCurrency(n, cur, target, conv.rates, conv.year, conv.quarter);
   }
   return ctx;
 }
@@ -407,10 +672,18 @@ export function formulaToText(
       switch (t.kind) {
         case "field": return labelForRef(t.ref);
         case "const": return String(t.value);
+        case "str": return `"${t.value}"`;
+        case "bool": return t.value ? "VERDADEIRO" : "FALSO";
         case "op": return t.op === "*" ? "×" : t.op === "/" ? "÷" : t.op;
+        case "cmp": return t.op;
+        case "func": return t.name;
+        case "argsep": return ";";
         case "lparen": return "(";
         case "rparen": return ")";
       }
     })
-    .join(" ");
+    .join(" ")
+    .replace(/\( /g, "(")
+    .replace(/ \)/g, ")")
+    .replace(/ ;/g, ";");
 }

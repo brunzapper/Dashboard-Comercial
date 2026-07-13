@@ -256,6 +256,9 @@ export interface ColorPair {
   fill?: string;
 }
 
+// Alinhamento horizontal do texto de células/cabeçalhos de tabela (13/07/2026).
+export type TableAlign = "left" | "center" | "right";
+
 export interface AppearanceSettings {
   // --- gráficos (barra / barra_horizontal / linha) ---
   chartBackground?: string; // fundo do gráfico
@@ -299,6 +302,13 @@ export interface AppearanceSettings {
     // altura por linha (px). Chaves = colKey / rowKey.
     colWidths?: Record<string, number>;
     rowHeights?: Record<string, number>;
+    // Alinhamento (13/07/2026): global (todas as colunas) + overrides por
+    // coluna/linha/célula. Precedência: célula > linha > coluna > global >
+    // default do tipo (numérico à direita, texto à esquerda). Ver resolveAlign.
+    align?: TableAlign;
+    colAlign?: Record<string, TableAlign>; // colKey -> alinhamento
+    rowAlign?: Record<string, TableAlign>; // rowKey -> alinhamento
+    cellAlign?: Record<string, TableAlign>; // "rowKey:colKey" -> alinhamento
     sort?: { column: string; dir: TableSortDir; colorOrder?: string[] };
     // Orientação da tabela agregada: "rows" (default) = dimensões/métricas como
     // colunas no topo, 1 linha por grupo; "columns" = transposta (rótulos descem

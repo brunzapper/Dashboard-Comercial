@@ -1,7 +1,12 @@
 // Versão: 1.0 | Data: 10/07/2026
 // Fase 10: helpers puros de render de aparência, compartilhados entre o fundo do
 // dashboard, os charts e as tabelas. Sem estado/UI — só transforma config em CSS.
-import type { AppearanceSettings, DashboardSettings, GridLines } from "@/lib/widgets/types";
+import type {
+  AppearanceSettings,
+  DashboardSettings,
+  GridLines,
+  TableAlign,
+} from "@/lib/widgets/types";
 
 export const MAX_CATEGORIES = 5;
 
@@ -151,6 +156,27 @@ export function reorderKeys(
   if (from < 0 || to < 0) return currentOrder;
   next.splice(to, 0, next.splice(from, 1)[0]);
   return next;
+}
+
+// Alinhamento efetivo de uma célula/cabeçalho de tabela. Precedência:
+// célula > linha > coluna > global > default do tipo (numérico à direita,
+// texto à esquerda). `t` pode ser undefined (widget sem aparência configurada).
+export function resolveAlign(
+  t: NonNullable<AppearanceSettings["table"]> | undefined,
+  o: { column: string; rowKey?: string; numeric?: boolean }
+): TableAlign {
+  return (
+    (o.rowKey ? t?.cellAlign?.[`${o.rowKey}:${o.column}`] : undefined) ??
+    (o.rowKey ? t?.rowAlign?.[o.rowKey] : undefined) ??
+    t?.colAlign?.[o.column] ??
+    t?.align ??
+    (o.numeric ? "right" : "left")
+  );
+}
+
+// Classe Tailwind correspondente ao alinhamento.
+export function alignClass(a: TableAlign): string {
+  return a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left";
 }
 
 // Cores de preenchimento distintas presentes (p/ montar a janela "Por cor").

@@ -50,10 +50,12 @@ import {
 import { AGG_LABELS } from "@/lib/widgets/types";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import {
+  alignClass,
   applyManualOrder,
   distinctFills,
   groupByLevels,
   reorderKeys,
+  resolveAlign,
 } from "@/lib/widgets/appearance";
 import {
   buildGroupItems,
@@ -75,6 +77,7 @@ import type {
   ColorPair,
   Metric,
   RecordListColumn,
+  TableAlign,
 } from "@/lib/widgets/types";
 import {
   ColorOrderDialog,
@@ -108,10 +111,13 @@ function coreDisplay(
     field === "today"
       ? todayBrasiliaIso()
       : (record as unknown as Record<string, unknown>)[field];
-  if (FK_FIELDS.has(field)) return v ? (fkLabels[String(v)] ?? "—") : "—";
+  // Traço só para vazio/nulo — nunca por truthiness (zero deve exibir "0").
+  if (FK_FIELDS.has(field))
+    return v == null || v === "" ? "—" : (fkLabels[String(v)] ?? "—");
   if (MONEY_FIELDS.has(field)) return money(v, record.currency);
   if (field === "closed") return v ? "Sim" : "Não";
-  if (DATE_FIELDS.has(field)) return v ? formatDateValue(v, dateFmt) : "—";
+  if (DATE_FIELDS.has(field))
+    return v == null || v === "" ? "—" : formatDateValue(v, dateFmt);
   return v == null || v === "" ? "—" : String(v);
 }
 
@@ -564,6 +570,36 @@ export function RecordListTable({
     if (m.scope === "cell" && m.rowKey) return t.cellColors?.[`${m.rowKey}:${m.column}`] ?? {};
     return {};
   }
+  // Alinhamento por escopo (linha/coluna/célula), espelhando setColor/colorValue.
+  // Colunas de linhas de grupo compartilham o colAlign das linhas de dados.
+  function setAlign(
+    m: { scope: ColorScope; column: string; rowKey?: string },
+    a: TableAlign | undefined
+  ) {
+    if (m.scope === "col") {
+      const map = { ...(t.colAlign ?? {}) };
+      if (!a) delete map[m.column];
+      else map[m.column] = a;
+      setTable({ colAlign: map });
+    } else if (m.scope === "row" && m.rowKey) {
+      const map = { ...(t.rowAlign ?? {}) };
+      if (!a) delete map[m.rowKey];
+      else map[m.rowKey] = a;
+      setTable({ rowAlign: map });
+    } else if (m.scope === "cell" && m.rowKey) {
+      const map = { ...(t.cellAlign ?? {}) };
+      const k = `${m.rowKey}:${m.column}`;
+      if (!a) delete map[k];
+      else map[k] = a;
+      setTable({ cellAlign: map });
+    }
+  }
+  function alignValue(m: { scope: ColorScope; column: string; rowKey?: string }): TableAlign | undefined {
+    if (m.scope === "col") return t.colAlign?.[m.column];
+    if (m.scope === "row" && m.rowKey) return t.rowAlign?.[m.rowKey];
+    if (m.scope === "cell" && m.rowKey) return t.cellAlign?.[`${m.rowKey}:${m.column}`];
+    return undefined;
+  }
   function setColDateFormat(column: string, f: DateFormat) {
     setTable({ dateFormats: { ...(t.dateFormats ?? {}), [column]: f } });
   }
@@ -643,6 +679,7 @@ export function RecordListTable({
           return (
             <TableCell
               key={x.key}
+              className={alignClass(resolveAlign(t, { column: colKey, rowKey: grpKey }))}
               style={{ ...border, ...extra.style }}
               onDoubleClick={extra.onDoubleClick}
             >
@@ -674,7 +711,10 @@ export function RecordListTable({
           return (
             <TableCell
               key={x.key}
-              className="text-right tabular-nums"
+              className={cn(
+                alignClass(resolveAlign(t, { column: x.key, rowKey: grpKey, numeric: true })),
+                "tabular-nums"
+              )}
               onDoubleClick={extra.onDoubleClick}
               style={{
                 ...border,
@@ -693,7 +733,10 @@ export function RecordListTable({
         return (
           <TableCell
             key={x.key}
-            className={numeric ? "text-right tabular-nums" : undefined}
+            className={cn(
+              alignClass(resolveAlign(t, { column: x.c.field, rowKey: grpKey, numeric })),
+              numeric && "tabular-nums"
+            )}
             onDoubleClick={extra.onDoubleClick}
             style={{ ...border, ...extra.style }}
           >
@@ -745,7 +788,10 @@ export function RecordListTable({
             return (
               <TableCell
                 key={x.key}
-                className="text-right tabular-nums"
+                className={cn(
+                  alignClass(resolveAlign(t, { column: x.key, rowKey: r.id, numeric: true })),
+                  "tabular-nums"
+                )}
                 style={{
                   color: rowCp?.text ?? t.bodyColor,
                   ...cellBorder(last),
@@ -799,7 +845,17 @@ export function RecordListTable({
           return (
             <TableCell
               key={x.key}
-              className={cn("align-top", !t.colWidths?.[c.field] && "max-w-[200px]")}
+              className={cn(
+                "align-top",
+                !t.colWidths?.[c.field] && "max-w-[200px]",
+                alignClass(
+                  resolveAlign(t, {
+                    column: c.field,
+                    rowKey: r.id,
+                    numeric: isNumericCol(c.field),
+                  })
+                )
+              )}
               onDoubleClick={
                 editable && !isEditableCell
                   ? (e) =>
@@ -956,7 +1012,15 @@ export function RecordListTable({
               {colVals.map((rep, ci) => (
                 <TableHead
                   key={groupOpts.keyOf(rep, colDimKey)}
-                  className="text-right whitespace-nowrap"
+                  className={cn(
+                    alignClass(
+                      resolveAlign(t, {
+                        column: groupOpts.keyOf(rep, colDimKey),
+                        numeric: true,
+                      })
+                    ),
+                    "whitespace-nowrap"
+                  )}
                   style={cellBorder(ci === colVals.length - 1)}
                 >
                   {colHeader(rep)}
@@ -1006,7 +1070,16 @@ export function RecordListTable({
                   {colVals.map((rep, ci) => (
                     <TableCell
                       key={groupOpts.keyOf(rep, colDimKey)}
-                      className="text-right tabular-nums"
+                      className={cn(
+                        alignClass(
+                          resolveAlign(t, {
+                            column: groupOpts.keyOf(rep, colDimKey),
+                            rowKey: item.key,
+                            numeric: true,
+                          })
+                        ),
+                        "tabular-nums"
+                      )}
                       style={cellBorder(ci === colVals.length - 1)}
                     >
                       {metricAggText(m, rowsForCol(item.rows, rep))}
@@ -1062,7 +1135,8 @@ export function RecordListTable({
                   <TableHead
                     key={x.key}
                     className={cn(
-                      "group relative text-right",
+                      "group relative",
+                      alignClass(resolveAlign(t, { column: x.key, numeric: true })),
                       editable && "cursor-move"
                     )}
                     {...dragProps}
@@ -1089,7 +1163,13 @@ export function RecordListTable({
               return (
                 <TableHead
                   key={x.key}
-                  className={cn("group relative whitespace-nowrap", editable && "cursor-move")}
+                  className={cn(
+                    "group relative whitespace-nowrap",
+                    alignClass(
+                      resolveAlign(t, { column: c.field, numeric: isNumericCol(c.field) })
+                    ),
+                    editable && "cursor-move"
+                  )}
                   {...dragProps}
                   onDoubleClick={
                     editable
@@ -1229,13 +1309,17 @@ export function RecordListTable({
           y={menu.y}
           title={
             menu.scope === "row"
-              ? "Cor da linha"
+              ? "Aparência da linha"
               : menu.scope === "col"
-                ? "Cor da coluna"
-                : "Cor da célula"
+                ? "Aparência da coluna"
+                : "Aparência da célula"
           }
           value={colorValue(menu)}
           onChange={(cp) => setColor(menu, cp)}
+          align={{
+            value: alignValue(menu),
+            onSelect: (a) => setAlign(menu, a),
+          }}
           onClose={() => setMenu(null)}
         />
       ) : null}

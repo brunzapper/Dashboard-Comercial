@@ -92,7 +92,12 @@ export function EditableCell({
       : field.data_type === "data"
         ? formatDateValue(serverValue, dateFormat)
         : serverValue;
-    return <span className="block truncate">{display || "—"}</span>;
+    // Traço só para vazio/nulo — zero (0 numérico ou "0") exibe normalmente.
+    return (
+      <span className="block truncate">
+        {display == null || display === "" ? "—" : display}
+      </span>
+    );
   }
 
   function commit(raw: string) {
