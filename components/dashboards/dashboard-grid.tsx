@@ -87,6 +87,7 @@ export function DashboardGrid({
   userRoles,
   canEditValues,
   available,
+  availableForBuilder,
   dashboardId,
   dateFormat,
   settings,
@@ -111,6 +112,9 @@ export function DashboardGrid({
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
+  // Lista COMPLETA (`available`) para renderização/filtros visíveis a todos; lista
+  // filtrada pelo ACL por papel (`availableForBuilder`) para os seletores de edição.
+  availableForBuilder: AvailableField[];
   dashboardId: string;
   dateFormat?: DateFormat;
   settings: DashboardSettings;
@@ -532,6 +536,7 @@ export function DashboardGrid({
                     userRoles={userRoles}
                     canEditValues={canEditValues}
                     available={available}
+                    availableForBuilder={availableForBuilder}
                     dashboardId={dashboardId}
                     dateFormat={dateFormat}
                     siblings={widgets}

@@ -84,6 +84,7 @@ export function DashboardClient({
   userRoles,
   canEditValues,
   available,
+  availableForBuilder,
   canEdit,
   canManageFields = false,
   currencyOptions,
@@ -112,6 +113,10 @@ export function DashboardClient({
   userRoles: string[];
   canEditValues: boolean;
   available: AvailableField[];
+  // Lista de campos para os SELETORES de edição (construtor de widgets, barra de
+  // período): já filtrada pelo ACL por papel (visible_to_roles) na page. Pode
+  // ser mais curta que `available`, que é a lista COMPLETA usada na renderização.
+  availableForBuilder: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
@@ -250,7 +255,7 @@ export function DashboardClient({
             </Button>
             <WidgetBuilder
               dashboardId={dashboardId}
-              available={available}
+              available={availableForBuilder}
               siblings={widgets}
               canManageFields={canManageFields}
               fields={fields}
@@ -285,7 +290,7 @@ export function DashboardClient({
       <DashboardPendingProvider>
         {barEnabled ? (
           <PeriodFilter
-            available={available}
+            available={availableForBuilder}
             canEdit={canEdit}
             dashboardId={dashboardId}
             settings={settings}
@@ -324,6 +329,7 @@ export function DashboardClient({
             userRoles={userRoles}
             canEditValues={canEditValues}
             available={available}
+            availableForBuilder={availableForBuilder}
             dashboardId={dashboardId}
             dateFormat={dateFormat}
             settings={settings}
