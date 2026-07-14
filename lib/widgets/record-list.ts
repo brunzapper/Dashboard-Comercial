@@ -9,7 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RecordRow } from "@/lib/records/types";
 import { RECORD_TYPE_SOURCE } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
-import { CORE_FIELDS } from "./fields";
+import { CORE_FIELDS, type AvailableField } from "./fields";
 import {
   applyPeriodToFilters,
   PERIOD_FIELD_SENTINEL,
@@ -31,10 +31,37 @@ const CORE_COLS = new Set<string>([
 
 // Traduz o `field` de um WidgetFilter para a coluna consultável no PostgREST.
 // custom:<k> vira o acesso JSON `custom_fields->>k`. Campos fora da whitelist
-// (ex.: unified:*) retornam null e o filtro é ignorado no modo lista.
+// retornam null e o filtro é ignorado no modo lista (unified:* é expandido por
+// fonte ANTES, no loop de filtros).
 function filterColumn(field: string): string | null {
   if (field.startsWith("custom:")) return `custom_fields->>${field.slice(7)}`;
   return CORE_COLS.has(field) ? field : null;
+}
+
+// Condição de UMA coluna na sintaxe de `.or()` do PostgREST para um operador do
+// widget; null = operador sem tradução (filtro ignorado). Valores são
+// higienizados p/ a sintaxe (sem vírgula/parênteses), como na busca textual.
+function postgrestCond(col: string, op: string, value: unknown): string | null {
+  const safe = (v: unknown) => String(v ?? "").replace(/[,()]/g, " ").trim();
+  switch (op) {
+    case "eq":
+    case "neq":
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte":
+      return `${col}.${op}.${safe(value)}`;
+    case "in": {
+      const list = (Array.isArray(value) ? value : [value]).map(safe).join(",");
+      return `${col}.in.(${list})`;
+    }
+    case "is_null":
+      return `${col}.is.null`;
+    case "not_null":
+      return `${col}.not.is.null`;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -44,11 +71,17 @@ function filterColumn(field: string): string | null {
 export async function runRecordList(
   supabase: SupabaseClient,
   config: WidgetConfig,
-  period?: DashboardPeriod | null
+  period?: DashboardPeriod | null,
+  // Catálogo de campos: usado só p/ resolver filtros unified:* (membros por
+  // record_type). Ausente = filtros unificados são ignorados (compat).
+  available: AvailableField[] = []
 ): Promise<RecordRow[]> {
   let filters = resolveFilters(config.filters ?? []);
   if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   filters = [...sourceFilters(config.sources), ...filters];
+
+  const unifiedMembersOf = (field: string) =>
+    available.find((a) => a.field === field)?.unifiedMembers;
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
@@ -82,10 +115,21 @@ export async function runRecordList(
     if (f.op === "ilike") {
       const term = String(f.value ?? "").trim();
       if (!term) continue;
-      const cols = f.field
-        .split(SEARCH_FIELD_SEP)
-        .map(filterColumn)
-        .filter((c): c is string => Boolean(c));
+      // unified:* expande nos membros (a busca vale em qualquer fonte; colunas
+      // de outra fonte simplesmente não casam).
+      const cols = [
+        ...new Set(
+          f.field
+            .split(SEARCH_FIELD_SEP)
+            .flatMap((sub) =>
+              sub.startsWith("unified:")
+                ? Object.values(unifiedMembersOf(sub) ?? {})
+                : [sub]
+            )
+            .map(filterColumn)
+            .filter((c): c is string => Boolean(c))
+        ),
+      ];
       if (cols.length === 0) continue;
       // Curingas/valor seguros para a sintaxe de .or() do PostgREST (sem vírgula/parênteses).
       const safe = term.replace(/[,()]/g, " ").trim();
@@ -94,6 +138,22 @@ export async function runRecordList(
       } else {
         q = q.or(cols.map((c) => `${c}.ilike.*${safe}*`).join(","));
       }
+      continue;
+    }
+    // Filtro sobre campo unificado: OR por fonte — cada record_type filtra pela
+    // coluna do SEU membro (espelha o coalesce do RPC). Fonte sem membro fica
+    // fora do OR (não casa o filtro); sem membros conhecidos, ignora (compat).
+    if (f.field.startsWith("unified:")) {
+      const members = unifiedMembersOf(f.field);
+      if (!members) continue;
+      const groups: string[] = [];
+      for (const [rt, ref] of Object.entries(members)) {
+        const memberCol = filterColumn(ref);
+        if (!memberCol) continue;
+        const cond = postgrestCond(memberCol, f.op, f.value);
+        if (cond) groups.push(`and(record_type.eq.${rt},${cond})`);
+      }
+      if (groups.length > 0) q = q.or(groups.join(","));
       continue;
     }
     const col = filterColumn(f.field);

@@ -86,6 +86,7 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import { unifiedMemberRef } from "@/lib/correspondences";
 import type {
   AppearanceSettings,
   ColorPair,
@@ -144,7 +145,10 @@ function parseMatchField(field: string): { src: string; ref: string } | null {
   return { src: rest.slice(0, i), ref: rest.slice(i + 1) };
 }
 
-function rawValue(field: string, record: RecordRow): unknown {
+// Valor cru de um ref CONCRETO (today/match:/custom:/núcleo). Campos unificados
+// são resolvidos antes, no `rawValue` do componente (precisa do catálogo
+// `available` p/ achar o membro da fonte do registro).
+function rawRefValue(field: string, record: RecordRow): unknown {
   if (field === "today") return todayBrasiliaIso();
   const mm = parseMatchField(field);
   if (mm) {
@@ -226,6 +230,21 @@ export function RecordListTable({
   const baseCols = columns.filter((c) => c.field);
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const cols = applyManualOrder(baseCols, t.columnOrder, (c) => c.field);
+
+  // Campo unificado: resolve o MEMBRO da fonte de cada registro (espelha o
+  // coalesce do RPC); fonte sem membro → undefined (célula "—"). Os demais
+  // campos delegam direto ao resolvedor de refs concretos.
+  const resolveUnifiedRef = (field: string, r: RecordRow): string | null =>
+    field.startsWith("unified:")
+      ? unifiedMemberRef(
+          available.find((a) => a.field === field)?.unifiedMembers,
+          r.record_type
+        )
+      : field;
+  const rawValue = (field: string, record: RecordRow): unknown => {
+    const ref = resolveUnifiedRef(field, record);
+    return ref ? rawRefValue(ref, record) : undefined;
+  };
 
   // Métricas do widget (mesmo comportamento do agregado): uma coluna por métrica,
   // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
@@ -348,8 +367,10 @@ export function RecordListTable({
   // Moeda de um valor de métrica num registro (calc-automático lê o carimbo por
   // valor "<key>__cur" com fallback p/ a moeda do registro).
   const metricCurrency = (field: string, r: RecordRow): string => {
-    if (field.startsWith("custom:")) {
-      const f = fieldByKey.get(field.slice(7));
+    // Unificado de moeda: a moeda segue o membro da fonte do registro.
+    const ref = resolveUnifiedRef(field, r) ?? field;
+    if (ref.startsWith("custom:")) {
+      const f = fieldByKey.get(ref.slice(7));
       return f
         ? resolveFieldMoneyFromRecord(f, r).code
         : resolveCurrencyCode(r.currency);
@@ -453,9 +474,12 @@ export function RecordListTable({
     (c) => c.transform && c.agg && c.agg !== "individual"
   );
 
-  // Descobre se a coluna é de data (núcleo ou custom) e o formato efetivo dela.
+  // Descobre se a coluna é de data (núcleo, custom ou unificada) e o formato
+  // efetivo dela.
   const isDateCol = (field: string): boolean => {
     if (DATE_FIELDS.has(field)) return true;
+    if (field.startsWith("unified:"))
+      return available.find((a) => a.field === field)?.isDate ?? false;
     if (field.startsWith("custom:"))
       return fieldByKey.get(field.slice(7))?.data_type === "data";
     const mm = parseMatchField(field);
@@ -569,6 +593,15 @@ export function RecordListTable({
   };
   // Rótulo de exibição de um valor (para o cabeçalho do grupo).
   const displayValue = (field: string, r: RecordRow): string => {
+    // Unificado: exibe como o MEMBRO da fonte do registro (data/moeda/texto),
+    // honrando a máscara de data configurada na própria coluna unificada.
+    if (field.startsWith("unified:")) {
+      const ref = resolveUnifiedRef(field, r);
+      if (!ref) return "—";
+      return ref.startsWith("custom:")
+        ? customText(fieldByKey.get(ref.slice(7)), r, field)
+        : coreDisplay(ref, r, fkLabels, fmtOf(field));
+    }
     if (field.startsWith("custom:")) {
       return customText(fieldByKey.get(field.slice(7)), r, field);
     }

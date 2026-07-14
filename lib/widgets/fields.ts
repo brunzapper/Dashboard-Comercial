@@ -34,6 +34,11 @@ export interface AvailableField {
   isMoney?: boolean;
   fk?: FkKind;
   unified?: boolean; // campo vindo de uma correspondência
+  // Só p/ unificados: membro por record_type (ex.: { negocio: 'closed_at',
+  // venda_site: 'custom:data' }). Permite resolver o valor POR REGISTRO nos
+  // caminhos client-side (modo registros, "Agrupar período"), espelhando o
+  // coalesce que o RPC monta.
+  unifiedMembers?: Record<string, string>;
   // Pode ser editável inline na tabela de registros (custom não calculado, ou
   // coluna do núcleo suportada). O toggle "Editável" do builder só aparece p/ estes.
   editableCapable?: boolean;
@@ -132,6 +137,11 @@ export function buildAvailableFields(
     isDate: c.data_type === "data",
     isMoney: c.data_type === "moeda",
     unified: true,
+    unifiedMembers: Object.fromEntries(
+      c.members
+        .filter((m) => m.field_ref)
+        .map((m) => [m.record_type, m.field_ref])
+    ),
   }));
   const match = buildMatchFields(customFields);
   return [...core, TODAY_FIELD, ...custom, ...unified, ...match];
