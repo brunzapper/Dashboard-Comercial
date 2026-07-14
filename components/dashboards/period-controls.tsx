@@ -60,7 +60,6 @@ export function PeriodControls({
   };
   const sel: PeriodSelection = hasSelection(urlSel) ? urlSel : (defaults ?? {});
 
-  const isAll = sel.preset === PERIOD_ALL;
   const isPreset = Boolean(sel.preset) && sel.preset !== PERIOD_ALL;
   const isCustom = !sel.preset && Boolean(sel.de || sel.ate);
 
