@@ -256,6 +256,10 @@ export function WidgetBuilder({
   const [tableGroupBy, setTableGroupBy] = useState<string[]>(
     groupByLevels(widget?.settings?.appearance?.table?.groupBy)
   );
+  // Transposta: dimensão que vira as colunas do topo ("" = automático, a 1ª).
+  const [tableColDim, setTableColDim] = useState<string>(
+    widget?.settings?.appearance?.table?.colDim ?? ""
+  );
 
   // Modo "registros individuais" (Fase 1): tabela lista 1 linha por entidade.
   // As colunas vêm das Dimensões (painel unificado); campos personalizados não
@@ -499,12 +503,18 @@ export function WidgetBuilder({
         label: available.find((a) => a.field === d.field)?.label ?? d.field,
       })),
   ];
-  // Na transposta a 1ª dimensão é o eixo de colunas (fica no topo), então ela não
-  // pode virar grupo do eixo esquerdo — some das opções de "Agrupar por".
-  const groupByOptions: ComboboxOption[] =
-    !isEntityList && tableOrientation === "columns"
-      ? allGroupByOptions.slice(1)
-      : allGroupByOptions;
+  // Na transposta UMA dimensão é o eixo de colunas (fica no topo) e não pode
+  // virar grupo do eixo esquerdo (grupo == coluna seria degenerado). Qual delas
+  // é configurável (`colDim`, "Colunas do topo"); ausente/órfã = a 1ª, o
+  // comportamento original.
+  const transposed = !isEntityList && tableOrientation === "columns";
+  const effColDim =
+    tableColDim && allGroupByOptions.some((o) => o.value === tableColDim)
+      ? tableColDim
+      : (allGroupByOptions[0]?.value ?? "");
+  const groupByOptions: ComboboxOption[] = transposed
+    ? allGroupByOptions.filter((o) => o.value !== effColDim)
+    : allGroupByOptions;
   // Opções disponíveis para um nível: exclui as keys já usadas nos OUTROS níveis
   // (evita agrupar duas vezes pela mesma dimensão), preservando a do próprio nível.
   const levelOptions = (idx: number): ComboboxOption[] => {
@@ -686,18 +696,28 @@ export function WidgetBuilder({
     // por coluna `c.field`). Nos outros tipos, limpa para não deixar lixo.
     if (visualType === "tabela") {
       const table = { ...(settings.appearance?.table ?? {}) };
-      // Níveis válidos (sem vazios), hierarquia de cima para baixo.
-      const groupLevels = tableGroupBy.filter(Boolean);
+      // Níveis válidos (sem vazios), hierarquia de cima para baixo. Na
+      // transposta, a dimensão das colunas não pode ser nível de grupo.
+      const groupLevels = tableGroupBy
+        .filter(Boolean)
+        .filter((k) => !transposed || k !== effColDim);
       if (isEntityList) {
         // Listas de entidades: sem orientação transposta.
         delete table.orientation;
+        delete table.colDim;
         if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       } else {
         // Agregada E lista de Registros: orientação + agrupamento nas duas
-        // orientações. Na transposta a 1ª dimensão vira as colunas e os níveis
-        // abaixo agrupam o eixo esquerdo (ver renderer).
+        // orientações. Na transposta a dimensão de `colDim` (default: a 1ª)
+        // vira as colunas e os níveis abaixo agrupam o eixo esquerdo.
         table.orientation = tableOrientation;
+        // colDim só faz sentido na transposta; "" = automático (1ª dimensão).
+        if (transposed && tableColDim && tableColDim === effColDim) {
+          table.colDim = tableColDim;
+        } else {
+          delete table.colDim;
+        }
         if (groupLevels.length > 0) table.groupBy = groupLevels;
         else delete table.groupBy;
       }
@@ -1367,9 +1387,29 @@ export function WidgetBuilder({
                     />
                   </div>
                 ) : null}
+                {transposed ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Colunas do topo</Label>
+                    <Combobox
+                      searchable={false}
+                      options={allGroupByOptions}
+                      value={effColDim}
+                      onValueChange={(v) => {
+                        setTableColDim(v);
+                        // A dimensão das colunas não pode seguir como nível de
+                        // grupo (grupo == coluna seria degenerado).
+                        setTableGroupBy((prev) => prev.filter((k) => k !== v));
+                      }}
+                      aria-label="Dimensão das colunas do topo"
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      Os valores desta dimensão viram as colunas do topo; as
+                      demais dimensões ficam disponíveis no &quot;Agrupar
+                      por&quot; para agrupar o eixo esquerdo.
+                    </p>
+                  </div>
+                ) : null}
                 {(() => {
-                  const transposed =
-                    !isEntityList && tableOrientation === "columns";
                   return (
                     <div className="flex flex-col gap-1.5">
                       <Label>Agrupar por</Label>
