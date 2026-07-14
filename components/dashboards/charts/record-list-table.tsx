@@ -35,8 +35,9 @@ import type { Formula } from "@/lib/records/formulas";
 import {
   basisKeysFor,
   basisMetric,
-  evalCalcFromBasis,
+  evalCalcMoney,
   isCalcMetric,
+  isMoneyOperandField,
   resolveCalcMetric,
   type BasisValues,
   type ResolvedCalcMetric,
@@ -44,11 +45,14 @@ import {
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
   buildRecordBreakdown,
+  calcCurrencyKey,
   formatMoney,
   formatMoneyAggregate,
   formatMoneyDisplay,
   resolveCurrencyCode,
   resolveFieldMoney,
+  resolveFieldMoneyFromRecord,
+  resolveRate,
   yearQuarterOf,
   type CurrencyRates,
 } from "@/lib/widgets/currency";
@@ -229,8 +233,9 @@ export function RecordListTable({
 
   // Métricas calculadas de agregados: fórmula reavaliada sobre os registros do
   // escopo (célula = 1 registro; subtotal/Total geral = registros do grupo) —
-  // nunca a soma da coluna. Moeda fixa da definição é só formatação (sem
-  // conversão entre moedas).
+  // nunca a soma da coluna. Moeda: automática preserva a moeda dos operandos
+  // (recorte de UMA moeda) e converte p/ Real ao misturar; fixa converte de
+  // verdade (resultado BRL→fixa pela taxa do período do dashboard).
   const calcCache = new Map<Metric, ResolvedCalcMetric | null>();
   const calcOf = (m: Metric): ResolvedCalcMetric | null => {
     if (!calcCache.has(m)) {
@@ -253,6 +258,22 @@ export function RecordListTable({
                 const v = rawValue(bm.field, r);
                 return v != null && v !== "";
               }).length;
+      } else if (isMoneyOperandField(bm.field, fieldByKey)) {
+        // Operando monetário: detalhamento por moeda (+ convertido pela taxa do
+        // período de cada registro) p/ preservar a moeda única do recorte ou
+        // operar em Real quando misturar.
+        out[key] = buildRecordBreakdown(
+          rs,
+          (r) => rawValue(bm.field, r),
+          (r) => metricCurrency(bm.field, r),
+          (r) => ({
+            year: yearQuarterOf(
+              r.closed_at ?? r.opened_at ?? r.source_created_at
+            ).year,
+            quarter: 0,
+          }),
+          currencyRates
+        );
       } else {
         const nums = rs
           .map((r) => Number(rawValue(bm.field, r)))
@@ -265,15 +286,24 @@ export function RecordListTable({
   const calcText = (m: Metric, rs: RecordRow[]): string => {
     const rc = calcOf(m);
     if (!rc || !rc.formula) return "—";
-    const v = evalCalcFromBasis(
+    const cp = conversionPeriod ?? yearQuarterOf(null);
+    const { value, currency } = evalCalcMoney(
       rc.formula,
       calcBasisFor(rc.formula, rs),
-      rc.allowNegative
+      {
+        mode: rc.mode,
+        code: rc.code,
+        fixedRate:
+          rc.mode === "fixed" && rc.code
+            ? resolveRate(currencyRates, rc.code, cp.year, cp.quarter)
+            : null,
+        allowNegative: rc.allowNegative,
+      }
     );
-    if (v == null) return "—";
-    return rc.currency
-      ? formatMoney(v, rc.currency)
-      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    if (value == null) return "—";
+    return currency
+      ? formatMoney(value, currency)
+      : value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
   };
 
   const metricLabel = (m: Metric) =>
@@ -315,11 +345,14 @@ export function RecordListTable({
   // Métrica monetária (value/mrr ou campo moeda/calc-moeda).
   const metricIsMoney = (field: string): boolean =>
     available.find((a) => a.field === field)?.isMoney ?? false;
-  // Moeda de um valor de métrica num registro.
+  // Moeda de um valor de métrica num registro (calc-automático lê o carimbo por
+  // valor "<key>__cur" com fallback p/ a moeda do registro).
   const metricCurrency = (field: string, r: RecordRow): string => {
     if (field.startsWith("custom:")) {
       const f = fieldByKey.get(field.slice(7));
-      return f ? resolveFieldMoney(f, r.currency).code : resolveCurrencyCode(r.currency);
+      return f
+        ? resolveFieldMoneyFromRecord(f, r).code
+        : resolveCurrencyCode(r.currency);
     }
     return resolveCurrencyCode(r.currency);
   };
@@ -446,7 +479,11 @@ export function RecordListTable({
       const f = fieldByKey.get(mm.ref.slice(7));
       if (f?.data_type === "data") return formatDateValue(raw, fmtOf(field));
       if (f) {
-        const cur = resolveFieldMoney(f, mrec?.currency ?? null);
+        const cur = resolveFieldMoney(
+          f,
+          mrec?.currency ?? null,
+          mrec?.custom_fields?.[calcCurrencyKey(f.field_key)]
+        );
         if (cur.isMoney) return formatMoney(raw, cur.code);
       }
       return String(raw);
@@ -459,7 +496,8 @@ export function RecordListTable({
     t.dateFormats?.[field] ?? dashFmt;
 
   // Texto de exibição de uma coluna personalizada (dimensão): moeda/calc-moeda na
-  // sua moeda (fixa ou herdada do registro), data formatada, demais como texto.
+  // sua moeda (fixa ou automática — carimbo por valor com fallback p/ a moeda do
+  // registro), data formatada, demais como texto.
   const customText = (
     f: FieldDefinition | undefined,
     r: RecordRow,
@@ -468,7 +506,7 @@ export function RecordListTable({
     if (!f) return "—";
     const v = r.custom_fields?.[f.field_key];
     if (v == null || v === "") return "—";
-    const m = resolveFieldMoney(f, r.currency);
+    const m = resolveFieldMoneyFromRecord(f, r);
     if (m.isMoney) return formatMoney(v, m.code);
     if (f.data_type === "data") return formatDateValue(v, fmtOf(colField));
     return String(v);

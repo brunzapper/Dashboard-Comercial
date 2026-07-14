@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 14/07/2026
+// Versão: 2.0 | Data: 14/07/2026
 // Métricas calculadas de AGREGADOS: fórmulas cujos operandos são agregações de
 // registros (refs agg:sum|avg|count:<campo>), usáveis como métrica normal de
 // widget — avaliadas por grupo (linha do RPC), subtotal e Total geral.
@@ -10,12 +10,21 @@
 //   agg:count:f → basis 'count:f'   (agg:count:* → 'count:*')
 //   agg:avg:f   → basis 'sum:f' E 'count:f' (avg = sum/count em qualquer nível)
 // Cada linha (grupo) carrega sua basis em WidgetRow.__calcOps; subtotais fundem
-// as basis por soma (foldBasis) e reavaliam (evalCalcFromBasis) — exato em todos
-// os níveis, inclusive Total geral.
+// as basis (foldBasis) e reavaliam (evalCalcMoney) — exato em todos os níveis,
+// inclusive Total geral.
 //
-// Moeda: a definição pode fixar uma moeda de EXIBIÇÃO (formatação apenas). Sem
-// conversão multi-moeda na v1 — os operandos somam os valores crus do banco,
-// misturando as moedas do recorte (mesmo comportamento do RPC sem __money).
+// Moeda (v2.0, 14/07/2026): operandos monetários carregam um MoneyBreakdown
+// (soma por moeda + convertido p/ Real pela taxa do período de cada registro)
+// no lugar do número cru. Regra: moedas diferentes nunca operam entre si —
+//  - modo automático ('inherit'): recorte com UMA moeda → avalia as somas cruas
+//    e o resultado preserva essa moeda; misturou → avalia sobre os valores
+//    convertidos (.brl) e o resultado é BRL.
+//  - modo fixo: tudo já na moeda fixa → cru; senão avalia em BRL e converte o
+//    RESULTADO para a moeda fixa pela taxa do período do dashboard (fixedRate,
+//    pré-computada no servidor — o client não tem as taxas).
+//  - sem moeda: soma crua (número puro, comportamento v1).
+// Basis numérica (payload antigo / degradação sem a consulta auxiliar) continua
+// funcionando: opera nos números crus como na v1.
 //
 // Módulo puro/client-safe: importado pelo engine (server), pela página do
 // dashboard (RSC) e pelos componentes de tabela (client).
@@ -26,7 +35,12 @@ import {
 } from "@/lib/records/formulas";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/components/campos/formula-builder";
-import { resolveCurrencyCode } from "./currency";
+import {
+  foldBreakdowns,
+  resolveCurrencyCode,
+  resolveFieldMoney,
+  type MoneyBreakdown,
+} from "./currency";
 import type { Aggregation, Metric } from "./types";
 
 // Sentinela de Metric.field para a métrica calculada ad-hoc (fórmula guardada na
@@ -43,9 +57,40 @@ export function parseAggRef(ref: string): { agg: Aggregation; field: string } {
   return { agg, field };
 }
 
-// Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'.
+// Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando
+// monetário carrega um MoneyBreakdown (soma por moeda + .brl convertido); os
+// demais (contagens, campos numéricos, payload antigo) são números.
 export type BasisKey = string;
-export type BasisValues = Record<BasisKey, number | null>;
+export type BasisValues = Record<BasisKey, number | null | MoneyBreakdown>;
+
+function isMoneyBreakdown(v: unknown): v is MoneyBreakdown {
+  return (
+    v != null &&
+    typeof v === "object" &&
+    "perCurrency" in (v as Record<string, unknown>)
+  );
+}
+
+// Soma crua (misturando moedas) de um detalhamento; null quando o recorte não
+// tem nenhum valor (coerente com o SUM SQL de zero linhas).
+function rawTotal(bd: MoneyBreakdown): number | null {
+  const codes = Object.keys(bd.perCurrency);
+  if (codes.length === 0) return null;
+  return codes.reduce((s, c) => s + bd.perCurrency[c], 0);
+}
+
+/** O campo de um operando de basis é monetário? (value/mrr ou custom moeda/calc-moeda.) */
+export function isMoneyOperandField(
+  field: string,
+  fieldByKey: Map<string, FieldDefinition>
+): boolean {
+  if (field === "value" || field === "mrr") return true;
+  if (field.startsWith("custom:")) {
+    const f = fieldByKey.get(field.slice(7));
+    return f ? resolveFieldMoney(f).isMoney : false;
+  }
+  return false;
+}
 
 /** Chaves de basis (somas/contagens canônicas) que a fórmula precisa. */
 export function basisKeysFor(formula: Formula): BasisKey[] {
@@ -71,8 +116,10 @@ export function basisMetric(key: BasisKey): Metric {
 }
 
 /**
- * Funde basis de várias linhas (subtotal/Total geral): soma por chave ignorando
- * null; chave sem nenhum valor numérico → null (operando ausente).
+ * Funde basis de várias linhas (subtotal/Total geral): detalhamentos monetários
+ * fundem por foldBreakdowns; números somam ignorando null; chave sem nenhum
+ * valor → null (operando ausente). Mistura número/detalhamento na mesma chave
+ * (payload antigo + novo): o detalhamento prevalece.
  */
 export function foldBasis(
   list: (BasisValues | undefined)[]
@@ -81,26 +128,73 @@ export function foldBasis(
   for (const basis of list) {
     if (!basis) continue;
     for (const [k, v] of Object.entries(basis)) {
+      if (isMoneyBreakdown(v)) {
+        const prev = out[k];
+        out[k] = foldBreakdowns([isMoneyBreakdown(prev) ? prev : undefined, v]);
+        continue;
+      }
       if (typeof v !== "number" || !Number.isFinite(v)) {
         if (!(k in out)) out[k] = null;
         continue;
       }
-      out[k] = (out[k] ?? 0) + v;
+      const prev = out[k];
+      if (isMoneyBreakdown(prev)) continue; // detalhamento prevalece
+      out[k] = (typeof prev === "number" ? prev : 0) + v;
     }
   }
   return out;
 }
 
+// Como formatar/converter o resultado de uma métrica calculada de agregados.
+export type CalcCurrencyMode = "none" | "auto" | "fixed";
+
+export interface CalcMoneyMeta {
+  mode: CalcCurrencyMode;
+  code?: string | null; // moeda fixa (mode 'fixed')
+  // R$ por 1 unidade de `code` (taxa do período do dashboard), pré-computada no
+  // servidor — converte o RESULTADO BRL→fixa quando os operandos misturaram
+  // moedas. null/ausente = sem taxa (o resultado misto permanece em BRL).
+  fixedRate?: number | null;
+  allowNegative?: boolean;
+}
+
 /**
- * Avalia a fórmula sobre uma basis: monta ctx ref→número (avg = sum/count;
- * count 0 ⇒ null, nunca divisão por zero) e delega ao avaliador compartilhado.
- * Resultado não numérico/não finito ⇒ null (exibido como "—").
+ * Avalia a fórmula sobre uma basis com moeda: monta ctx ref→número (avg =
+ * sum/count; count 0 ⇒ null, nunca divisão por zero) e delega ao avaliador
+ * compartilhado. Operando monetário (MoneyBreakdown):
+ *  - recorte com UMA moeda (ou já na moeda fixa) → soma crua; resultado nessa moeda;
+ *  - moedas misturadas → usa o convertido (.brl); resultado em BRL (modo fixo
+ *    converte o resultado BRL→fixa via meta.fixedRate).
+ * Retorna também a moeda do resultado (null = número puro).
  */
-export function evalCalcFromBasis(
+export function evalCalcMoney(
   formula: Formula,
   basis: BasisValues,
-  allowNegative: boolean = true
-): number | null {
+  meta: CalcMoneyMeta
+): { value: number | null; currency: string | null } {
+  // Moedas presentes nos operandos monetários do recorte.
+  const codes = new Set<string>();
+  for (const key of basisKeysFor(formula)) {
+    const v = basis[key];
+    if (isMoneyBreakdown(v)) {
+      for (const c of Object.keys(v.perCurrency)) codes.add(c);
+    }
+  }
+  const fixed = meta.mode === "fixed" ? resolveCurrencyCode(meta.code) : null;
+  // Representação dos operandos monetários: crua (uma moeda só — preservada) ou
+  // convertida p/ Real (misturou; moedas diferentes nunca operam entre si).
+  // Modo 'none' (número puro) mantém a soma crua da v1.
+  const useRaw =
+    meta.mode === "none" ||
+    codes.size === 0 ||
+    (codes.size === 1 && (!fixed || codes.has(fixed)));
+  const operand = (
+    v: number | null | MoneyBreakdown | undefined
+  ): number | null => {
+    if (v == null) return null;
+    if (isMoneyBreakdown(v)) return useRaw ? rawTotal(v) : v.brl;
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
   const ctx: Record<string, number | null> = {};
   for (const ref of formulaRefs(formula)) {
     if (!ref.startsWith("agg:")) {
@@ -108,20 +202,34 @@ export function evalCalcFromBasis(
       continue;
     }
     const { agg, field } = parseAggRef(ref);
-    if (agg === "sum") ctx[ref] = basis[`sum:${field}`] ?? null;
-    else if (agg === "count") ctx[ref] = basis[`count:${field}`] ?? null;
+    if (agg === "sum") ctx[ref] = operand(basis[`sum:${field}`]);
+    else if (agg === "count") ctx[ref] = operand(basis[`count:${field}`]);
     else {
-      const sum = basis[`sum:${field}`];
-      const count = basis[`count:${field}`];
-      ctx[ref] =
-        typeof sum === "number" && typeof count === "number" && count > 0
-          ? sum / count
-          : null;
+      const sum = operand(basis[`sum:${field}`]);
+      const count = operand(basis[`count:${field}`]);
+      ctx[ref] = sum != null && count != null && count > 0 ? sum / count : null;
     }
   }
-  const v = evaluateFormula(formula, ctx);
-  if (typeof v !== "number" || !Number.isFinite(v)) return null;
-  return !allowNegative && v < 0 ? 0 : v;
+  const raw = evaluateFormula(formula, ctx);
+  let value = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  let currency: string | null = null;
+  if (meta.mode === "fixed" && fixed) {
+    if (useRaw || value == null) {
+      currency = fixed;
+    } else {
+      const rate = fixed === "BRL" ? 1 : meta.fixedRate;
+      if (rate != null && Number.isFinite(rate) && rate > 0) {
+        value = value / rate;
+        currency = fixed;
+      } else {
+        currency = "BRL"; // sem taxa p/ a moeda fixa: mantém o Real
+      }
+    }
+  } else if (meta.mode === "auto") {
+    currency = codes.size === 1 ? [...codes][0] : codes.size > 1 ? "BRL" : null;
+  }
+  if (value != null && value < 0 && meta.allowNegative === false) value = 0;
+  return { value, currency };
 }
 
 /** A métrica é calculada de agregados? (ad-hoc ou campo 'calculado_agg'.) */
@@ -136,19 +244,25 @@ export function isCalcMetric(
 
 export interface ResolvedCalcMetric {
   formula: Formula | null; // null = campo deletado/sem fórmula → avalia p/ "—"
-  currency: string | null; // moeda FIXA de exibição; null = número puro
+  // 'auto' preserva a moeda dos operandos (misturou → BRL); 'fixed' converte
+  // para `code`; 'none' = número puro.
+  mode: CalcCurrencyMode;
+  code: string | null; // moeda fixa (mode 'fixed')
   allowNegative: boolean;
 }
 
-/** Resolve fórmula/formatação da métrica calculada (ad-hoc ou reutilizável). */
+/** Resolve fórmula/moeda da métrica calculada (ad-hoc ou reutilizável). */
 export function resolveCalcMetric(
   m: Metric,
   fieldByKey: Map<string, FieldDefinition>
 ): ResolvedCalcMetric {
   if (m.formula && m.formula.tokens.length > 0) {
+    // Ad-hoc: `resultCurrency` passa a ser conversão REAL para a moeda (antes
+    // era só rótulo de exibição) — consistente com o modo fixo dos campos.
     return {
       formula: m.formula,
-      currency: m.resultCurrency || null,
+      mode: m.resultCurrency ? "fixed" : "none",
+      code: m.resultCurrency ? resolveCurrencyCode(m.resultCurrency) : null,
       allowNegative: true,
     };
   }
@@ -161,11 +275,17 @@ export function resolveCalcMetric(
     !def.formula ||
     def.formula.tokens.length === 0
   ) {
-    return { formula: null, currency: null, allowNegative: true };
+    return { formula: null, mode: "none", code: null, allowNegative: true };
   }
   return {
     formula: def.formula,
-    currency:
+    mode:
+      def.currency_mode === "fixed"
+        ? "fixed"
+        : def.currency_mode === "inherit"
+          ? "auto"
+          : "none",
+    code:
       def.currency_mode === "fixed"
         ? resolveCurrencyCode(def.currency_code)
         : null,

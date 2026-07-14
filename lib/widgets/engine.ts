@@ -31,22 +31,27 @@ import { bucketRecordDate } from "./date-buckets";
 import {
   basisKeysFor,
   basisMetric,
-  evalCalcFromBasis,
+  evalCalcMoney,
   isCalcMetric,
+  isMoneyOperandField,
   resolveCalcMetric,
   type BasisValues,
+  type CalcMoneyMeta,
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { runRecordList } from "./record-list";
 import {
   buildRecordBreakdown,
+  calcCurrencyKey,
   convertToBRL,
   emptyBreakdown,
   formatMoney,
   formatMoneyAggregate,
   resolveCurrencyCode,
-  resolveFieldMoney,
+  resolveFieldMoneyFromRecord,
+  resolveRate,
   toReferenceUSD,
+  validCurrencyStamp,
   yearQuarterOf,
   type CurrencyRates,
   type MoneyBreakdown,
@@ -137,26 +142,75 @@ export async function aggregate(
 type ConversionYQ = { year: number; quarter: number };
 interface MoneyInfo {
   metric: Metric;
-  fixedCode: string | null; // moeda fixa do campo, ou null = moeda do registro
+  fixedCode: string | null; // moeda fixa do campo, ou null = moeda por registro
+  // Dimensão que dá a moeda de cada valor quando não há moeda fixa: 'currency'
+  // (moeda do registro) ou o carimbo por valor de um 'calculado'-automático
+  // ('custom:<key>__cur'), com coalesce p/ 'currency' quando vazio.
+  currencyField: string;
 }
 
 function isMoneyMetric(metric: Metric, available: AvailableField[]): boolean {
   return available.find((a) => a.field === metric.field)?.isMoney ?? false;
 }
 
-// Moeda FIXA de uma métrica monetária custom ('moeda' ou 'calculado'-fixo). null
-// = moeda derivada do registro (value/mrr, 'calculado'-herda, unificado).
-function moneyFixedCode(
+// Origem da moeda de uma métrica/operando monetário: moeda FIXA do campo
+// ('moeda' ou 'calculado'-fixo) ou a coluna/dimensão que carrega a moeda por
+// valor — 'currency' (registro) ou o carimbo 'custom:<key>__cur' do
+// 'calculado'-automático (a moeda do resultado pode diferir da do registro).
+function moneyCurrencyInfo(
   field: string,
   fieldByKey: Map<string, FieldDefinition>
-): string | null {
-  if (!field.startsWith("custom:")) return null;
-  const f = fieldByKey.get(field.slice(7));
-  if (!f) return null;
-  if (f.data_type === "moeda") return resolveCurrencyCode(f.currency_code);
-  if (f.data_type === "calculado" && f.currency_mode === "fixed")
-    return resolveCurrencyCode(f.currency_code);
-  return null; // 'calculado'-inherit → moeda do registro
+): { fixedCode: string | null; currencyField: string } {
+  if (field.startsWith("custom:")) {
+    const f = fieldByKey.get(field.slice(7));
+    if (f) {
+      if (f.data_type === "moeda") {
+        return {
+          fixedCode: resolveCurrencyCode(f.currency_code),
+          currencyField: "currency",
+        };
+      }
+      if (f.data_type === "calculado") {
+        if (f.currency_mode === "fixed") {
+          return {
+            fixedCode: resolveCurrencyCode(f.currency_code),
+            currencyField: "currency",
+          };
+        }
+        if (f.currency_mode === "inherit") {
+          return {
+            fixedCode: null,
+            currencyField: `custom:${calcCurrencyKey(f.field_key)}`,
+          };
+        }
+      }
+    }
+  }
+  return { fixedCode: null, currencyField: "currency" };
+}
+
+// Meta de moeda de uma métrica calculada de agregados (evalCalcMoney): modo
+// automático preserva a moeda dos operandos; fixo converte, com a taxa do
+// período do dashboard pré-resolvida — o client reavalia subtotais sem as taxas.
+function calcMoneyMeta(
+  rc: ResolvedCalcMetric,
+  rates: CurrencyRates,
+  conversionPeriod: ConversionYQ
+): CalcMoneyMeta {
+  return {
+    mode: rc.mode,
+    code: rc.code,
+    fixedRate:
+      rc.mode === "fixed" && rc.code
+        ? resolveRate(
+            rates,
+            rc.code,
+            conversionPeriod.year,
+            conversionPeriod.quarter
+          )
+        : null,
+    allowNegative: rc.allowNegative,
+  };
 }
 
 // Ano do bucket date_trunc('year', ...) (ISO "2026-..." → 2026).
@@ -195,13 +249,27 @@ async function buildMoneyBreakdowns(
     { field: info.metric.field, agg: "sum" },
     { field: info.metric.field, agg: "count" },
   ]);
+  // Dimensões extras de moeda por valor (carimbo 'custom:<key>__cur' dos campos
+  // 'calculado'-automáticos), além da coluna `currency` (sempre presente como
+  // fallback p/ carimbo vazio/registros pré-recálculo).
+  const stampFields = [
+    ...new Set(
+      infos
+        .map((info) => info.currencyField)
+        .filter((f) => f !== "currency")
+    ),
+  ];
 
   // Consulta auxiliar quebrada por moeda (e, quando `useRateDate`, também pela
   // data-da-taxa sintética `@rate_date`, que exige a migração 0039).
   const runAux = async (
     useRateDate: boolean
   ): Promise<Record<string, unknown>[]> => {
-    const auxDims: Dimension[] = [...dims, { field: "currency" }];
+    const auxDims: Dimension[] = [
+      ...dims,
+      { field: "currency" },
+      ...stampFields.map((f) => ({ field: f })),
+    ];
     if (useRateDate) {
       auxDims.push({ field: "@rate_date", transform: "year" });
       auxDims.push({ field: "@rate_date", transform: "quarter" });
@@ -233,8 +301,11 @@ async function buildMoneyBreakdowns(
   }
 
   const curKey = `dim_${nLead + 1}`;
-  const yearKey = `dim_${nLead + 2}`;
-  const quarterKey = `dim_${nLead + 3}`;
+  const stampKeyOf = new Map(
+    stampFields.map((f, i) => [f, `dim_${nLead + 2 + i}`])
+  );
+  const yearKey = `dim_${nLead + 2 + stampFields.length}`;
+  const quarterKey = `dim_${nLead + 3 + stampFields.length}`;
   const out: Record<string, MoneyBreakdown[]> = {};
 
   for (const row of auxRows) {
@@ -252,7 +323,13 @@ async function buildMoneyBreakdowns(
       const bd = arr[k];
       if (Number.isFinite(cnt)) bd.count += cnt;
       if (!Number.isFinite(raw)) return;
-      const code = info.fixedCode ?? resolveCurrencyCode(row[curKey] as string);
+      // Moeda do valor: fixa do campo > carimbo por valor (calculado-automático,
+      // com fallback p/ a moeda do registro) > moeda do registro.
+      const stampKey = stampKeyOf.get(info.currencyField);
+      const code =
+        info.fixedCode ??
+        (stampKey ? validCurrencyStamp(row[stampKey]) : null) ??
+        resolveCurrencyCode(row[curKey] as string);
       const isQuarter = info.metric.conversionBasis?.granularity === "quarter";
       let year: number;
       let quarter: number;
@@ -273,6 +350,42 @@ async function buildMoneyBreakdowns(
     });
   }
   return out;
+}
+
+/**
+ * Detalhamento monetário de métricas sobre TODO o recorte (sem dimensões) —
+ * wrapper exportado p/ o KPI "Métrica calculada" do dashboard resolver seus
+ * operandos monetários com moeda. Alinhado a `metrics`; null = aux indisponível
+ * (degrada p/ o número cru do aggregate).
+ */
+export async function aggregateMoneyBreakdowns(
+  supabase: SupabaseClient,
+  metrics: Metric[],
+  filters: WidgetFilter[],
+  correspondencesMap: Record<string, string[]>,
+  fieldByKey: Map<string, FieldDefinition>,
+  rates: CurrencyRates,
+  conversionPeriod: ConversionYQ
+): Promise<MoneyBreakdown[] | null> {
+  const infos: MoneyInfo[] = metrics.map((m) => ({
+    metric: m,
+    ...moneyCurrencyInfo(m.field, fieldByKey),
+  }));
+  try {
+    const map = await buildMoneyBreakdowns(
+      supabase,
+      [],
+      filters,
+      correspondencesMap,
+      infos,
+      rates,
+      conversionPeriod,
+      yearQuarterOf(null)
+    );
+    return map["[]"] ?? metrics.map(() => emptyBreakdown());
+  } catch {
+    return null;
+  }
 }
 
 // Valor numérico a plotar num gráfico para um detalhamento, conforme a decisão de
@@ -399,7 +512,7 @@ async function runKpi(
   // Detalhamento monetário de UMA métrica sobre todo o recorte (sem dimensões).
   const moneyBreakdown = async (m: Metric): Promise<MoneyBreakdown | null> => {
     const infos: MoneyInfo[] = [
-      { metric: m, fixedCode: moneyFixedCode(m.field, fieldByKey) },
+      { metric: m, ...moneyCurrencyInfo(m.field, fieldByKey) },
     ];
     // Degrada com elegância se a aux falhar (migração 0039 ausente): null =
     // cai no número cru do aggregate.
@@ -578,14 +691,15 @@ async function runWidgetByPeriod(
   const isMoney = (field: string) =>
     available.find((a) => a.field === field)?.isMoney ?? false;
 
-  // Moeda efetiva de um registro p/ uma métrica: campo 'moeda'/calc-fixo tem moeda
-  // própria; value/mrr e calc-herda usam a moeda do registro (mesma regra do
+  // Moeda efetiva de um registro p/ uma métrica: campo 'moeda'/calc-fixo tem
+  // moeda própria; calc-automático usa o carimbo por valor (fallback: moeda do
+  // registro); value/mrr usam a moeda do registro (mesma regra do
   // record-list-table).
   const metricCurrency = (field: string, r: RecordRow): string => {
     if (field.startsWith("custom:")) {
       const f = fieldByKey.get(field.slice(7));
       return f
-        ? resolveFieldMoney(f, r.currency).code
+        ? resolveFieldMoneyFromRecord(f, r).code
         : resolveCurrencyCode(r.currency);
     }
     return resolveCurrencyCode(r.currency);
@@ -700,6 +814,8 @@ async function runWidgetByPeriod(
       )
     ),
   ];
+  const calcMeta = (rc: ResolvedCalcMetric): CalcMoneyMeta =>
+    calcMoneyMeta(rc, rates, conversionPeriod);
   const basisFromRecords = (rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of calcBasisKeys) {
@@ -709,6 +825,22 @@ async function runWidgetByPeriod(
           bm.field === "*"
             ? rs.length
             : rs.filter((r) => rawValue(bm.field, r) != null).length;
+      } else if (isMoneyOperandField(bm.field, fieldByKey)) {
+        // Operando monetário: detalhamento por moeda (+ convertido pela taxa do
+        // período de cada registro, granularidade anual) p/ o evalCalcMoney
+        // preservar a moeda única ou operar em Real quando misturar.
+        out[key] = buildRecordBreakdown(
+          rs,
+          (r) => rawValue(bm.field, r),
+          (r) => metricCurrency(bm.field, r),
+          (r) => ({
+            year: yearQuarterOf(
+              r.closed_at ?? r.opened_at ?? r.source_created_at
+            ).year,
+            quarter: 0,
+          }),
+          rates
+        );
       } else {
         const nums = rs
           .map((r) => Number(rawValue(bm.field, r)))
@@ -732,7 +864,7 @@ async function runWidgetByPeriod(
       if (rc) {
         row[`metric_${mi + 1}`] =
           rc.formula && basis
-            ? evalCalcFromBasis(rc.formula, basis, rc.allowNegative)
+            ? evalCalcMoney(rc.formula, basis, calcMeta(rc)).value
             : null;
         return;
       }
@@ -775,6 +907,7 @@ async function runWidgetByPeriod(
   const metrics = config.metrics.map((m, i) => {
     const rc = calcResolved.get(i);
     if (rc) {
+      const meta = calcMeta(rc);
       return {
         key: `metric_${i + 1}`,
         label:
@@ -784,8 +917,10 @@ async function runWidgetByPeriod(
             : "Fórmula"),
         calc: {
           formula: rc.formula ?? { tokens: [] },
-          currency: rc.currency,
+          currency: rc.code,
           allowNegative: rc.allowNegative,
+          mode: meta.mode,
+          fixedRate: meta.fixedRate,
         },
       };
     }
@@ -908,25 +1043,90 @@ export async function runWidget(
 
   const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
 
+  // Consulta auxiliar por moeda + data-da-taxa (uma só): cobre as métricas
+  // monetárias normais (`__money`) E os operandos monetários das métricas
+  // calculadas (basis como MoneyBreakdown — preserva a moeda única do recorte
+  // ou opera nos valores convertidos p/ Real quando misturar).
+  const moneyEntries = config.metrics
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => isMoneyMetric(m, available));
+  const basisMoneyKeys = [
+    ...new Set(
+      [...calcResolved.values()].flatMap((rc) =>
+        rc.formula && rc.mode !== "none"
+          ? basisKeysFor(rc.formula).filter(
+              (key) =>
+                basisMetric(key).agg === "sum" &&
+                isMoneyOperandField(basisMetric(key).field, fieldByKey)
+            )
+          : []
+      )
+    ),
+  ];
+  const metricInfos: MoneyInfo[] = moneyEntries.map(({ m }) => ({
+    metric: m,
+    ...moneyCurrencyInfo(m.field, fieldByKey),
+  }));
+  const basisInfos: MoneyInfo[] = basisMoneyKeys.map((key) => {
+    const bm = basisMetric(key);
+    return { metric: bm, ...moneyCurrencyInfo(bm.field, fieldByKey) };
+  });
+  // Degrada com elegância se a consulta auxiliar falhar (ex.: migração 0039
+  // ainda não aplicada): sem `__money`, os charts caem no número puro; a basis
+  // calculada fica numérica (soma crua, comportamento v1).
+  let bdMap: Record<string, MoneyBreakdown[]> = {};
+  if (metricInfos.length + basisInfos.length > 0 && rows.length > 0) {
+    try {
+      bdMap = await buildMoneyBreakdowns(
+        supabase,
+        dims,
+        filters,
+        correspondencesMap,
+        [...metricInfos, ...basisInfos],
+        rates,
+        conversionPeriod,
+        today
+      );
+    } catch {
+      bdMap = {};
+    }
+  }
+  const hasBd = Object.keys(bdMap).length > 0;
+
   // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
-  // métricas calculadas — ANTES de attachMoney/rotulagem, que indexam pela config.
+  // métricas calculadas — ANTES de attachMoney/rotulagem, que mutam os dim_*
+  // usados como chave de grupo.
   if (calcResolved.size > 0) {
     for (const row of rows) {
       const src: Record<string, unknown> = {};
       rpcMetrics.forEach((_, ri) => {
         src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
       });
+      // Chave do grupo desta linha na consulta auxiliar (dims cruas do RPC).
+      const tuple: unknown[] = [];
+      for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
+      const bdArr = hasBd ? bdMap[JSON.stringify(tuple)] : undefined;
       const basis: BasisValues = {};
       for (const [key, ri] of rpcIdxOfBasis) {
         const n = Number(src[`metric_${ri + 1}`]);
         basis[key] =
           src[`metric_${ri + 1}`] == null || !Number.isFinite(n) ? null : n;
       }
+      // Sobrepõe os operandos monetários com o detalhamento por moeda do grupo
+      // (quando a aux respondeu); sem aux, ficam os números crus do RPC.
+      basisMoneyKeys.forEach((key, k) => {
+        const bd = bdArr?.[metricInfos.length + k];
+        if (bd) basis[key] = bd;
+      });
       config.metrics.forEach((_, i) => {
         const rc = calcResolved.get(i);
         if (rc) {
           row[`metric_${i + 1}`] = rc.formula
-            ? evalCalcFromBasis(rc.formula, basis, rc.allowNegative)
+            ? evalCalcMoney(
+                rc.formula,
+                basis,
+                calcMoneyMeta(rc, rates, conversionPeriod)
+              ).value
             : null;
         } else {
           row[`metric_${i + 1}`] = src[`metric_${rpcIdxOfConfig.get(i)! + 1}`];
@@ -939,39 +1139,12 @@ export async function runWidget(
     }
   }
 
-  // Métricas monetárias: consulta auxiliar por moeda + data-da-taxa e fold no
-  // cliente, anexando `__money` a cada linha (ANTES da rotulagem, que muta os
-  // dim_* usados como chave de grupo). Charts plotam `metric_<n>` numérico.
-  const moneyEntries = config.metrics
-    .map((m, i) => ({ m, i }))
-    .filter(({ m }) => isMoneyMetric(m, available));
-  if (moneyEntries.length > 0 && rows.length > 0) {
-    const infos: MoneyInfo[] = moneyEntries.map(({ m }) => ({
-      metric: m,
-      fixedCode: moneyFixedCode(m.field, fieldByKey),
-    }));
-    // Degrada com elegância se a consulta auxiliar falhar (ex.: migração
-    // 0039 ainda não aplicada): sem `__money`, os charts caem no número puro.
-    let bdMap: Record<string, MoneyBreakdown[]> = {};
-    try {
-      bdMap = await buildMoneyBreakdowns(
-        supabase,
-        dims,
-        filters,
-        correspondencesMap,
-        infos,
-        rates,
-        conversionPeriod,
-        today
-      );
-    } catch {
-      bdMap = {};
-    }
-    // bdMap vazio = degradação (aux falhou): não anexa __money nem sobrescreve os
-    // valores, deixando o número cru do RPC (fmt) — melhor que zerar tudo.
-    if (Object.keys(bdMap).length > 0) {
-      attachMoney(rows, dims, moneyEntries, bdMap);
-    }
+  // Métricas monetárias: anexa `__money` a cada linha (ANTES da rotulagem, que
+  // muta os dim_* usados como chave de grupo). Charts plotam `metric_<n>`
+  // numérico. bdMap vazio = degradação (aux falhou): não anexa __money nem
+  // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
+  if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
+    attachMoney(rows, dims, moneyEntries, bdMap);
   }
 
   // Transforms de data "por nome" (mês/semana): o RPC devolve um bucket ISO. Antes
@@ -1040,6 +1213,7 @@ export async function runWidget(
   const metrics = config.metrics.map((m, i) => {
     const rc = calcResolved.get(i);
     if (rc) {
+      const meta = calcMoneyMeta(rc, rates, conversionPeriod);
       return {
         key: `metric_${i + 1}`,
         label:
@@ -1049,8 +1223,10 @@ export async function runWidget(
             : "Fórmula"),
         calc: {
           formula: rc.formula ?? { tokens: [] },
-          currency: rc.currency,
+          currency: rc.code,
           allowNegative: rc.allowNegative,
+          mode: meta.mode,
+          fixedRate: meta.fixedRate,
         },
       };
     }

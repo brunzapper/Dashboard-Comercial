@@ -13,6 +13,8 @@
 //   editor estilo Sheets (round-trip; ver lib/records/formula-text.ts).
 
 import {
+  BASE_CURRENCY,
+  calcCurrencyKey,
   convertCurrency,
   loadCurrencyRates,
   resolveCurrencyCode,
@@ -614,28 +616,69 @@ export function computeFormulaFields(
         !Object.prototype.hasOwnProperty.call(baseCtx, r)
     );
     if (hasUnresolvedMatch) continue;
-    // Campo calculado monetário: converte cada operando monetário para a moeda
-    // de destino (herdada do registro ou fixa) antes de avaliar. Assim, ao
-    // envolver moedas diferentes, o cálculo é feito já convertido.
+    // Campo calculado monetário:
+    //  - 'fixed'   → converte cada operando monetário para a moeda fixa antes de
+    //                avaliar (conversão explícita; a moeda de exibição vem de
+    //                currency_code, sem carimbo).
+    //  - 'inherit' → moeda AUTOMÁTICA dos operandos: quando todos os operandos
+    //                monetários presentes têm a MESMA moeda, avalia os valores
+    //                crus e carimba essa moeda (custom_fields "<key>__cur");
+    //                quando misturam moedas, converte cada operando para Real
+    //                pela taxa do período do registro e carimba BRL.
     const isMoney = def.currency_mode === "inherit" || def.currency_mode === "fixed";
     let raw: FormulaResult;
+    let stamp: string | null = null;
     if (conv && isMoney) {
-      const target =
-        def.currency_mode === "fixed"
-          ? def.currency_code ?? "BRL"
-          : conv.recordCurrency;
-      raw = evaluateFormula(
-        def.formula,
-        convertOperands(baseCtx, target, conv),
-        dateCtx
-      );
+      if (def.currency_mode === "fixed") {
+        const target = def.currency_code ?? "BRL";
+        raw = evaluateFormula(
+          def.formula,
+          convertOperands(baseCtx, target, conv),
+          dateCtx
+        );
+      } else {
+        // Moedas dos operandos monetários COM valor numérico presente (operando
+        // null não "envolve" sua moeda no cálculo).
+        const codes = new Set<string>();
+        for (const ref of formulaRefs(def.formula)) {
+          const cur = conv.operandCurrency[ref];
+          if (!cur) continue;
+          if (toNum(baseCtx[ref]) == null) continue;
+          codes.add(cur);
+        }
+        if (codes.size <= 1) {
+          raw = evaluateFormula(def.formula, baseCtx, dateCtx);
+          stamp = codes.size === 1 ? [...codes][0] : null;
+        } else {
+          raw = evaluateFormula(
+            def.formula,
+            convertOperands(baseCtx, BASE_CURRENCY, conv),
+            dateCtx
+          );
+          stamp = BASE_CURRENCY;
+        }
+      }
     } else {
       raw = evaluateFormula(def.formula, baseCtx, dateCtx);
     }
     // "Aceitar número negativo" desmarcado: resultado negativo vira 0 (null
     // permanece null — traço na exibição).
-    out[def.field_key] =
+    const val =
       typeof raw === "number" && raw < 0 && def.allow_negative === false ? 0 : raw;
+    out[def.field_key] = val;
+    // Carimbo de moeda por valor: só p/ resultado numérico do modo automático.
+    // Se a chave já existe em custom_fields e não há carimbo novo (mudança de
+    // modo, resultado não numérico, fórmula sem operando monetário), emite null
+    // para limpar o carimbo obsoleto.
+    const curKey = calcCurrencyKey(def.field_key);
+    if (stamp != null && typeof val === "number") {
+      out[curKey] = stamp;
+    } else if (
+      customFields &&
+      Object.prototype.hasOwnProperty.call(customFields, curKey)
+    ) {
+      out[curKey] = null;
+    }
   }
   return out;
 }

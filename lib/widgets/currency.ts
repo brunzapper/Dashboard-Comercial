@@ -223,39 +223,79 @@ export function yearQuarterOf(dateIso?: string | null): {
 // Forma mínima de um FieldDefinition p/ resolver a moeda (evita ciclo de import).
 export interface FieldMoneyInput {
   data_type: string;
+  field_key?: string;
   currency_code?: string | null;
   currency_mode?: string | null;
 }
 
 export interface FieldMoney {
   isMoney: boolean;
-  // Código da moeda quando isMoney; para calc 'inherit' vem da moeda do registro.
+  // Código da moeda quando isMoney; para calc 'inherit' vem do carimbo por valor
+  // (custom_fields "<key>__cur") ou, na ausência dele, da moeda do registro.
   code: string;
+}
+
+// Carimbo de moeda por VALOR de um campo 'calculado'-automático: chave irmã em
+// custom_fields ("<field_key>__cur" → "USD"). O valor do campo continua número
+// puro; o carimbo diz em que moeda o resultado foi materializado (a moeda única
+// dos operandos, ou BRL quando a fórmula misturou moedas). `slugify` nunca gera
+// "__" em field_keys, então o sufixo não colide com campos reais.
+export const CALC_CURRENCY_SUFFIX = "__cur";
+export function calcCurrencyKey(fieldKey: string): string {
+  return `${fieldKey}${CALC_CURRENCY_SUFFIX}`;
+}
+
+// Código ISO válido vindo de um carimbo/valor desconhecido; senão null.
+export function validCurrencyStamp(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const c = v.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(c) ? c : null;
 }
 
 /**
  * Moeda efetiva de um campo para EXIBIÇÃO:
  * - 'moeda'      → currency_code (default BRL).
- * - 'calculado'  → currency_mode: 'inherit' usa a moeda do registro; 'fixed' usa
- *                  currency_code; ausente = não é moeda (número puro).
+ * - 'calculado'  → currency_mode: 'inherit' (automática) usa o carimbo por valor
+ *                  (`stampedCode`, gravado em custom_fields "<key>__cur") e cai
+ *                  na moeda do registro quando ausente (valores pré-recálculo);
+ *                  'fixed' usa currency_code; ausente = não é moeda (número puro).
  * - demais       → não é moeda.
  */
 export function resolveFieldMoney(
   field: FieldMoneyInput,
-  recordCurrency?: string | null
+  recordCurrency?: string | null,
+  stampedCode?: unknown
 ): FieldMoney {
   if (field.data_type === "moeda") {
     return { isMoney: true, code: resolveCurrencyCode(field.currency_code) };
   }
   if (field.data_type === "calculado") {
     if (field.currency_mode === "inherit") {
-      return { isMoney: true, code: resolveCurrencyCode(recordCurrency) };
+      const stamp = validCurrencyStamp(stampedCode);
+      return { isMoney: true, code: stamp ?? resolveCurrencyCode(recordCurrency) };
     }
     if (field.currency_mode === "fixed") {
       return { isMoney: true, code: resolveCurrencyCode(field.currency_code) };
     }
   }
   return { isMoney: false, code: BASE_CURRENCY };
+}
+
+/**
+ * `resolveFieldMoney` lendo o carimbo por valor direto do registro (conveniência
+ * p/ células/tabelas que têm o RecordRow em mãos).
+ */
+export function resolveFieldMoneyFromRecord(
+  field: FieldMoneyInput,
+  record: {
+    currency?: string | null;
+    custom_fields?: Record<string, unknown> | null;
+  }
+): FieldMoney {
+  const stamp = field.field_key
+    ? record.custom_fields?.[calcCurrencyKey(field.field_key)]
+    : undefined;
+  return resolveFieldMoney(field, record.currency, stamp);
 }
 
 // ===================== Modos de exibição de moeda =============================

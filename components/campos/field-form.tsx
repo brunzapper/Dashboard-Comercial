@@ -119,7 +119,7 @@ export function FieldForm({
     : "";
   const calcResultOptions: ComboboxOption[] = [
     { value: "number", label: "Número (sem moeda)" },
-    { value: "inherit", label: "Moeda — herdar do registro" },
+    { value: "inherit", label: "Moeda — automática (dos operandos)" },
     ...currencyChoices.map((o) => ({
       value: `fixed:${o.value}`,
       label: `Moeda — ${o.label}`,
@@ -137,9 +137,11 @@ export function FieldForm({
   const aggOperands = (aggRefs ?? []).filter(
     (r) => !r.ref.endsWith(`:custom:${field?.field_key}`)
   );
-  // Formato do resultado do calculado_agg: número ou moeda FIXA (sem "herdar").
+  // Formato do resultado do calculado_agg: número, moeda automática (preserva a
+  // dos operandos; misturou → Real) ou moeda fixa (converte).
   const aggResultOptions: ComboboxOption[] = [
     { value: "number", label: "Número (sem moeda)" },
+    { value: "inherit", label: "Moeda — automática (dos operandos)" },
     ...currencyChoices.map((o) => ({
       value: `fixed:${o.value}`,
       label: `Moeda — ${o.label}`,
@@ -264,21 +266,19 @@ export function FieldForm({
           <Label className="mt-1">Formato do resultado</Label>
           <Combobox
             options={aggResultOptions}
-            value={calcCurrency === "inherit" ? "number" : calcCurrency}
+            value={calcCurrency}
             onValueChange={setCalcCurrency}
             searchable={false}
             className="w-full"
             aria-label="Formato do resultado"
           />
-          <input
-            type="hidden"
-            name="currency_mode"
-            value={calcMode === "inherit" ? "" : calcMode}
-          />
+          <input type="hidden" name="currency_mode" value={calcMode} />
           <input type="hidden" name="currency_code" value={calcCode} />
           <p className="text-muted-foreground text-xs">
-            A moeda é só de exibição: os totais somam os valores como estão no
-            banco, sem conversão entre moedas.
+            Automática: os totais mantêm a moeda dos operandos quando é uma só;
+            ao misturar moedas, os operandos são somados convertidos para Real
+            (taxa do período). Moeda fixa converte o resultado para a moeda
+            escolhida.
           </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input
@@ -346,8 +346,10 @@ export function FieldForm({
           <input type="hidden" name="currency_mode" value={calcMode} />
           <input type="hidden" name="currency_code" value={calcCode} />
           <p className="text-muted-foreground text-xs">
-            &quot;Herdar do registro&quot; usa a moeda de cada registro; ao
-            envolver moedas diferentes, o cálculo converte para Real.
+            Automática: o resultado mantém a moeda dos operandos (ex.: campo em
+            US$ × 2 continua US$); ao misturar moedas diferentes, os valores são
+            convertidos para Real pela taxa do período do registro. Moeda fixa
+            converte tudo para a moeda escolhida.
           </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input

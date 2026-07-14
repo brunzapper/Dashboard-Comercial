@@ -1,25 +1,40 @@
-// Versão: 2.0 | Data: 11/07/2026
+// Versão: 3.0 | Data: 14/07/2026
 // Fase 3: métrica calculada no nível do DASHBOARD. O avaliador de fórmula
-// (evaluateFormula) é agnóstico de contexto — aqui montamos um `ctx` ref→número
-// resolvendo referências de agregação de registros:
+// (evaluateFormula) é agnóstico de contexto — aqui montamos a BASIS
+// (somas/contagens canônicas; ver lib/widgets/calc-metrics.ts) resolvendo
+// referências de agregação de registros:
 //   - agg:<sum|avg|count>:<field> → agregação dos registros via run_widget_query
 //     (field pode ser 'value'|'mrr'|'custom:<k>'|'*'; '*' com count = contagem).
-// Depois chamamos evaluateFormula(formula, ctx) sem tocar no avaliador.
+// Depois chamamos evalCalcMoney(formula, basis, meta) sem tocar no avaliador.
 // v2.0 (11/07/2026): removido o suporte a refs table:* (a "Tabela editável"/matriz
 //   foi descontinuada). Refs table:* remanescentes de fórmulas antigas resolvem
 //   para null (operando ausente → resultado null).
+// v3.0 (14/07/2026): moeda preservada — operandos monetários viram MoneyBreakdown
+//   (consulta auxiliar por moeda); o resultado sai com a moeda dos operandos
+//   (única → preservada; misturou → BRL) ou convertido p/ a moeda fixa. Retorna
+//   { value, currency }.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import {
-  evaluateFormula,
-  formulaRefs,
-  type Formula,
-} from "@/lib/records/formulas";
+import type { Formula } from "@/lib/records/formulas";
+import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
-import { parseAggRef } from "./calc-metrics";
-import { aggregate, resolveFilters, sourceFilters } from "./engine";
+import {
+  basisKeysFor,
+  basisMetric,
+  evalCalcMoney,
+  isMoneyOperandField,
+  type BasisValues,
+  type CalcMoneyMeta,
+} from "./calc-metrics";
+import {
+  aggregate,
+  aggregateMoneyBreakdowns,
+  resolveFilters,
+  sourceFilters,
+} from "./engine";
+import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
-import type { WidgetFilter } from "./types";
+import type { Metric, WidgetFilter } from "./types";
 
 export interface CalcInput {
   formula?: Formula | null;
@@ -27,49 +42,100 @@ export interface CalcInput {
   filters?: WidgetFilter[];
   period?: DashboardPeriod | null;
   correspondencesMap?: Record<string, string[]>;
+  // Moeda do resultado: 'auto' preserva a moeda dos operandos (misturou → BRL);
+  // 'fixed' converte p/ `code`; ausente/'none' = número puro (soma crua, v1).
+  currencyMode?: "none" | "auto" | "fixed";
+  currencyCode?: string | null;
+  allowNegative?: boolean;
+  // Insumos p/ resolver a moeda dos operandos (campos + taxas + período da taxa
+  // fixa). Sem eles, tudo degrada p/ números crus.
+  fields?: FieldDefinition[];
+  rates?: CurrencyRates;
+  conversionPeriod?: { year: number; quarter: number };
 }
 
 /**
  * Avalia a fórmula de uma métrica calculada com o contexto do dashboard.
- * Retorna número | null (null se algum operando faltar / divisão por zero).
+ * Retorna { value, currency }: value null se algum operando faltar / divisão
+ * por zero; currency null = número puro (sem moeda).
  */
 export async function runCalculatedWidget(
   supabase: SupabaseClient,
   input: CalcInput
-): Promise<number | null> {
+): Promise<{ value: number | null; currency: string | null }> {
   const { formula } = input;
-  if (!formula || formula.tokens.length === 0) return null;
+  if (!formula || formula.tokens.length === 0)
+    return { value: null, currency: null };
 
-  const refs = new Set(formulaRefs(formula));
-  const ctx: Record<string, number | null> = {};
+  const mode = input.currencyMode ?? "none";
+  const fieldByKey = new Map(
+    (input.fields ?? []).map((f) => [f.field_key, f])
+  );
+  const rates = input.rates ?? {};
+  const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
 
-  // Refs table:* são de tabelas editáveis descontinuadas → operando ausente.
-  for (const ref of refs) {
-    if (ref.startsWith("table:")) ctx[ref] = null;
-  }
+  let filters = resolveFilters(input.filters ?? []);
+  if (input.period)
+    filters = applyPeriodToFilters(filters, input.period, input.sources);
+  filters = [...sourceFilters(input.sources), ...filters];
 
-  // Refs de agregação de registros (via RPC).
-  const aggRefs = [...refs].filter((r) => r.startsWith("agg:"));
-  if (aggRefs.length > 0) {
-    let filters = resolveFilters(input.filters ?? []);
-    if (input.period)
-      filters = applyPeriodToFilters(filters, input.period, input.sources);
-    filters = [...sourceFilters(input.sources), ...filters];
-    await Promise.all(
-      aggRefs.map(async (ref) => {
-        const { agg, field } = parseAggRef(ref);
-        const [v] = await aggregate(
-          supabase,
-          [{ field, agg }],
-          filters,
-          input.correspondencesMap ?? {}
-        );
-        ctx[ref] = Number.isFinite(v) ? v : null;
-      })
+  // Basis numérica (todas as chaves) via RPC agregado — é o valor final das
+  // contagens/campos numéricos e o fallback cru dos monetários.
+  const basisKeys = basisKeysFor(formula);
+  const basis: BasisValues = {};
+  if (basisKeys.length > 0) {
+    const metrics: Metric[] = basisKeys.map(basisMetric);
+    const values = await aggregate(
+      supabase,
+      metrics,
+      filters,
+      input.correspondencesMap ?? {}
     );
+    basisKeys.forEach((key, i) => {
+      basis[key] = Number.isFinite(values[i]) ? values[i] : null;
+    });
+
+    // Operandos monetários: detalhamento por moeda (preserva a moeda única do
+    // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
+    // número cru (degradação = comportamento v1).
+    if (mode !== "none") {
+      const moneyKeys = basisKeys.filter(
+        (key) =>
+          basisMetric(key).agg === "sum" &&
+          isMoneyOperandField(basisMetric(key).field, fieldByKey)
+      );
+      if (moneyKeys.length > 0) {
+        const bds = await aggregateMoneyBreakdowns(
+          supabase,
+          moneyKeys.map(basisMetric),
+          filters,
+          input.correspondencesMap ?? {},
+          fieldByKey,
+          rates,
+          conversionPeriod
+        );
+        if (bds) moneyKeys.forEach((key, i) => {
+          basis[key] = bds[i];
+        });
+      }
+    }
   }
 
-  // O KPI calculado é numérico: resultado de texto/booleano (ramo de SE) → null.
-  const v = evaluateFormula(formula, ctx);
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
+  const meta: CalcMoneyMeta = {
+    mode,
+    code: input.currencyCode ?? null,
+    fixedRate:
+      mode === "fixed" && input.currencyCode
+        ? resolveRate(
+            rates,
+            input.currencyCode,
+            conversionPeriod.year,
+            conversionPeriod.quarter
+          )
+        : null,
+    allowNegative: input.allowNegative,
+  };
+  // Refs desconhecidas (table:* legadas) resolvem p/ null dentro do
+  // evalCalcMoney (operando ausente). Resultado texto/booleano → value null.
+  return evalCalcMoney(formula, basis, meta);
 }
