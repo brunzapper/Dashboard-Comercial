@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 13/07/2026
+// Versão: 1.3 | Data: 14/07/2026
+// v1.3 (14/07/2026): merge com a main — métricas calculadas de agregados
+//   (campos "Calculado (totais)" e sentinela 'calc:formula') portadas para o
+//   layout em seções (a UI da linha vive em widget-builder-rows.tsx/MetricRow).
 // v1.2 (13/07/2026): UX — bloco de dados reorganizado em seções recolhíveis
 //   (Accordion) com badge de resumo; linhas de dimensão/métrica/filtro viram
 //   cards (widget-builder-rows.tsx). Sem mudança de comportamento/salvamento.
@@ -74,6 +77,7 @@ import {
   FILTER_OPS,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { aggOperandRefs, CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
 import {
   BuilderSection,
   DimensionRow,
@@ -321,6 +325,11 @@ export function WidgetBuilder({
   const [formula, setFormula] = useState<Formula>(
     widget?.settings?.formula ?? { tokens: [] }
   );
+  // Widget 'calculado' apontando p/ um campo "Calculado (totais)" salvo em
+  // /campos ('custom:<key>'); vazio = fórmula própria (formula acima).
+  const [calcField, setCalcField] = useState<string>(
+    widget?.settings?.calcField ?? ""
+  );
 
   // KPI "Data atual": card que mostra o dia de hoje (Brasília). Não usa
   // métrica/RPC — o valor é resolvido no engine (runKpi) via settings.mode.
@@ -410,26 +419,29 @@ export function WidgetBuilder({
     setMetrics(next);
   };
 
-  // Refs disponíveis para a Métrica calculada: agregações de registros.
-  const calcRefs: RefOption[] = [
-    { ref: "agg:count:*", label: "Contagem de registros", group: "Registros" },
-    ...numericFields.flatMap((f) => [
-      { ref: `agg:sum:${f.field}`, label: `Σ ${f.label}`, group: "Registros" },
-      { ref: `agg:avg:${f.field}`, label: `Média ${f.label}`, group: "Registros" },
-    ]),
-  ];
+  // Refs disponíveis para as métricas/widget calculados: agregações de registros.
+  const calcRefs: RefOption[] = aggOperandRefs(numericFields);
+  // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
+  const aggCalcFields = available.filter((f) => f.aggCalc);
+  const isAggCalcField = (field: string): boolean =>
+    field === CALC_METRIC_FIELD ||
+    (available.find((a) => a.field === field)?.aggCalc ?? false);
 
-  const availableOptions = toFieldOptions(available);
+  // Os campos calculados de agregados nunca são dimensão/filtro/busca/coluna de
+  // registro (não têm valor por registro) — ficam fora dos dois catálogos.
+  const availableOptions = toFieldOptions(available.filter((f) => !f.aggCalc));
   // Campos válidos para o RPC (dimensão agregada, filtro, busca): exclui os
   // sintéticos (displayOnly, ex.: "Data atual") que não existem como coluna no
   // banco. No modo lista as dimensões SÃO colunas do cliente, então lá o campo
   // sintético é permitido (usa availableOptions).
   const rpcFieldOptions = toFieldOptions(
-    available.filter((f) => !f.displayOnly)
+    available.filter((f) => !f.displayOnly && !f.aggCalc)
   );
   const metricOptions: ComboboxOption[] = [
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields),
+    ...aggCalcFields.map((f) => ({ value: f.field, label: `ƒ ${f.label}` })),
+    { value: CALC_METRIC_FIELD, label: "ƒ Fórmula personalizada…" },
   ];
   const visualOptions: ComboboxOption[] = (
     Object.keys(VISUAL_TYPE_LABELS) as VisualType[]
@@ -567,9 +579,10 @@ export function WidgetBuilder({
     }
 
     // Métrica calculada: valida a fórmula (refs vêm do próprio seletor, mas
-    // conferimos estrutura/parênteses) e grava em settings.formula.
+    // conferimos estrutura/parênteses) e grava em settings.formula — ou aponta
+    // p/ um campo "Calculado (totais)" salvo (settings.calcField).
     if (visualType === "calculado") {
-      if (formula.tokens.length > 0) {
+      if (!calcField && formula.tokens.length > 0) {
         const allowed = new Set(calcRefs.map((r) => r.ref));
         const v = validateFormula(formula, allowed);
         if (!v.ok) {
@@ -577,6 +590,9 @@ export function WidgetBuilder({
           return;
         }
       }
+      const calcSettings = { ...(widget?.settings ?? {}), formula, ...tabPatch };
+      if (calcField) calcSettings.calcField = calcField;
+      else delete calcSettings.calcField;
       const input = {
         title: title.trim() || null,
         visual_type: visualType,
@@ -585,7 +601,7 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings: { ...(widget?.settings ?? {}), formula, ...tabPatch },
+        settings: calcSettings,
       };
       startTransition(async () => {
         const res = widget
@@ -595,6 +611,20 @@ export function WidgetBuilder({
         else setError(res.message ?? "Falha ao salvar.");
       });
       return;
+    }
+
+    // Métricas calculadas ad-hoc ('calc:formula'): fórmula obrigatória e válida.
+    for (const m of metrics) {
+      if (m.field !== CALC_METRIC_FIELD) continue;
+      if (!m.formula || m.formula.tokens.length === 0) {
+        setError("Defina a fórmula da métrica calculada.");
+        return;
+      }
+      const v = validateFormula(m.formula, new Set(calcRefs.map((r) => r.ref)));
+      if (!v.ok) {
+        setError(v.error ?? "Fórmula inválida na métrica calculada.");
+        return;
+      }
     }
 
     const cleanFilters = cleanFilterRows(filters);
@@ -973,15 +1003,42 @@ export function WidgetBuilder({
           {/* Métrica calculada: fórmula sobre agregações dos registros */}
           {visualType === "calculado" ? (
             <div className="flex flex-col gap-1.5">
-              <Label>Fórmula</Label>
-              <FormulaBuilder
-                refs={calcRefs}
-                initial={widget?.settings?.formula ?? null}
-                onChange={setFormula}
-              />
-              <p className="text-muted-foreground text-xs">
-                Combine agregações dos registros (+ − × ÷ e constantes).
-              </p>
+              {aggCalcFields.length > 0 ? (
+                <>
+                  <Label>Usar campo salvo</Label>
+                  <Combobox
+                    searchable={false}
+                    options={[
+                      { value: "", label: "— fórmula própria (abaixo) —" },
+                      ...aggCalcFields.map((f) => ({
+                        value: f.field,
+                        label: f.label,
+                      })),
+                    ]}
+                    value={calcField}
+                    onValueChange={setCalcField}
+                    className="w-full"
+                    aria-label="Usar campo salvo"
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Campos &quot;Calculado (totais)&quot; definidos em Campos.
+                    Selecionado, a fórmula/moeda vêm do campo.
+                  </p>
+                </>
+              ) : null}
+              {!calcField ? (
+                <>
+                  <Label>Fórmula</Label>
+                  <FormulaBuilder
+                    refs={calcRefs}
+                    initial={widget?.settings?.formula ?? null}
+                    onChange={setFormula}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Combine agregações dos registros (+ − × ÷ e constantes).
+                  </p>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -1152,8 +1209,52 @@ export function WidgetBuilder({
                 metricOptions={metricOptions}
                 aggOptions={aggOptions}
                 isMoney={isMoneyField(m.field)}
-                defaultLabel={`${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`}
+                isAggCalc={isAggCalcField(m.field)}
+                isCalcSentinel={m.field === CALC_METRIC_FIELD}
+                calcRefs={calcRefs}
+                resultFormatOptions={[
+                  { value: "", label: "Número (sem moeda)" },
+                  ...(currencyOptions ?? []).map((o) => ({
+                    value: o.value,
+                    label: `Moeda — ${o.label}`,
+                  })),
+                ]}
+                defaultLabel={
+                  isAggCalcField(m.field)
+                    ? m.field === CALC_METRIC_FIELD
+                      ? "Fórmula"
+                      : fieldLabel(m.field, available)
+                    : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
+                }
                 fieldMenu={renderFieldMenu(m.field)}
+                onFieldChange={(field) => {
+                  const next = [...metrics];
+                  if (isAggCalcField(field)) {
+                    // Métrica calculada de agregados: a fórmula manda (agg
+                    // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
+                    // sentinela 'calc:formula'.
+                    next[i] = {
+                      field,
+                      agg: "sum",
+                      calc: true,
+                      label: m.label,
+                      ...(field === CALC_METRIC_FIELD
+                        ? { formula: m.formula, resultCurrency: m.resultCurrency }
+                        : {}),
+                    };
+                  } else {
+                    const cleaned: Metric = {
+                      ...m,
+                      field,
+                      agg: field === "*" ? "count" : m.agg,
+                    };
+                    delete cleaned.calc;
+                    delete cleaned.formula;
+                    delete cleaned.resultCurrency;
+                    next[i] = cleaned;
+                  }
+                  setMetrics(next);
+                }}
                 onChange={(patch) => updateMetric(i, patch)}
                 onRemove={() => setMetrics(metrics.filter((_, j) => j !== i))}
               />
@@ -1402,19 +1503,29 @@ export function WidgetBuilder({
                 key={editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}
                 field={editingField ?? undefined}
                 numericRefs={fieldFormNumericRefs}
+                aggRefs={calcRefs}
                 currencyOptions={currencyOptions}
                 onDone={(created) => {
                   const wasEditing = Boolean(editingField);
                   setFieldSheetOpen(false);
                   setEditingField(null);
-                  // Só na CRIAÇÃO o campo recém-criado entra como dimensão.
+                  // Só na CRIAÇÃO o campo recém-criado entra na config: campo
+                  // comum vira dimensão; "Calculado (totais)" vira métrica.
                   if (!wasEditing && created?.field_key) {
                     const ref = `custom:${created.field_key}`;
-                    setDimensions((prev) =>
-                      prev.some((d) => d.field === ref)
-                        ? prev
-                        : [...prev, { field: ref, transform: "none" }]
-                    );
+                    if (created.data_type === "calculado_agg") {
+                      setMetrics((prev) =>
+                        prev.some((m) => m.field === ref)
+                          ? prev
+                          : [...prev, { field: ref, agg: "sum", calc: true }]
+                      );
+                    } else {
+                      setDimensions((prev) =>
+                        prev.some((d) => d.field === ref)
+                          ? prev
+                          : [...prev, { field: ref, transform: "none" }]
+                      );
+                    }
                   }
                   router.refresh();
                 }}

@@ -28,6 +28,15 @@ import {
   type FkKind,
 } from "./fields";
 import { bucketRecordDate } from "./date-buckets";
+import {
+  basisKeysFor,
+  basisMetric,
+  evalCalcFromBasis,
+  isCalcMetric,
+  resolveCalcMetric,
+  type BasisValues,
+  type ResolvedCalcMetric,
+} from "./calc-metrics";
 import { runRecordList } from "./record-list";
 import {
   buildRecordBreakdown,
@@ -676,13 +685,57 @@ async function runWidgetByPeriod(
     return 0;
   });
 
+  // Métricas calculadas de agregados: basis (somas/contagens) computada dos
+  // registros do grupo e fórmula avaliada por grupo. A função de agregação do
+  // "Agrupar período" (fn) NÃO se aplica a elas — a fórmula manda; com
+  // 'individual' o grupo é 1 registro (basis do próprio registro).
+  const calcResolved = new Map<number, ResolvedCalcMetric>();
+  config.metrics.forEach((m, mi) => {
+    if (isCalcMetric(m, fieldByKey)) calcResolved.set(mi, resolveCalcMetric(m, fieldByKey));
+  });
+  const calcBasisKeys = [
+    ...new Set(
+      [...calcResolved.values()].flatMap((rc) =>
+        rc.formula ? basisKeysFor(rc.formula) : []
+      )
+    ),
+  ];
+  const basisFromRecords = (rs: RecordRow[]): BasisValues => {
+    const out: BasisValues = {};
+    for (const key of calcBasisKeys) {
+      const bm = basisMetric(key);
+      if (bm.agg === "count") {
+        out[key] =
+          bm.field === "*"
+            ? rs.length
+            : rs.filter((r) => rawValue(bm.field, r) != null).length;
+      } else {
+        const nums = rs
+          .map((r) => Number(rawValue(bm.field, r)))
+          .filter((n) => Number.isFinite(n));
+        out[key] = nums.length ? nums.reduce((s, n) => s + n, 0) : null;
+      }
+    }
+    return out;
+  };
+
   const rows: WidgetRow[] = groupList.map((g) => {
     const row: WidgetRow = {};
     dims.forEach((d, di) => {
       row[`dim_${di + 1}`] = g.dv[di].label;
     });
+    const basis = calcResolved.size > 0 ? basisFromRecords(g.records) : null;
+    if (basis) row.__calcOps = basis;
     const money: Record<string, MoneyBreakdown> = {};
     config.metrics.forEach((m, mi) => {
+      const rc = calcResolved.get(mi);
+      if (rc) {
+        row[`metric_${mi + 1}`] =
+          rc.formula && basis
+            ? evalCalcFromBasis(rc.formula, basis, rc.allowNegative)
+            : null;
+        return;
+      }
       let val: number;
       if (fn === "individual") {
         if (m.field === "*") val = 1;
@@ -719,15 +772,33 @@ async function runWidgetByPeriod(
         : "";
     return { key: `dim_${i + 1}`, label: d.label?.trim() || `${base}${suffix}` };
   });
-  const metrics = config.metrics.map((m, i) => ({
-    key: `metric_${i + 1}`,
-    label:
-      m.label?.trim() ||
-      (fn === "individual"
-        ? fieldLabel(m.field, available)
-        : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`),
-    isMoney: isMoney(m.field),
-  }));
+  const metrics = config.metrics.map((m, i) => {
+    const rc = calcResolved.get(i);
+    if (rc) {
+      return {
+        key: `metric_${i + 1}`,
+        label:
+          m.label?.trim() ||
+          (m.field.startsWith("custom:")
+            ? fieldLabel(m.field, available)
+            : "Fórmula"),
+        calc: {
+          formula: rc.formula ?? { tokens: [] },
+          currency: rc.currency,
+          allowNegative: rc.allowNegative,
+        },
+      };
+    }
+    return {
+      key: `metric_${i + 1}`,
+      label:
+        m.label?.trim() ||
+        (fn === "individual"
+          ? fieldLabel(m.field, available)
+          : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`),
+      isMoney: isMoney(m.field),
+    };
+  });
 
   return { rows, dimensions, metrics };
 }
@@ -784,16 +855,89 @@ export async function runWidget(
     ? [{ field: "record_type" }, ...config.dimensions]
     : config.dimensions;
 
+  // Métricas calculadas de agregados (14/07/2026): NUNCA vão ao RPC — vão seus
+  // OPERANDOS (basis de somas/contagens; ver lib/widgets/calc-metrics.ts). O RPC
+  // recebe as métricas normais + as basis que ainda não estejam pedidas (dedup),
+  // e cada linha é remapeada de volta para a ordem de config.metrics, com a
+  // métrica calculada avaliada da basis do grupo (gravada em row.__calcOps para
+  // os subtotais/Total geral reavaliarem no cliente). Sem métrica calculada,
+  // rpcMetrics === config.metrics e nada muda.
+  const calcResolved = new Map<number, ResolvedCalcMetric>();
+  config.metrics.forEach((m, i) => {
+    if (isCalcMetric(m, fieldByKey)) calcResolved.set(i, resolveCalcMetric(m, fieldByKey));
+  });
+  const rpcMetrics: Metric[] = [];
+  const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
+  config.metrics.forEach((m, i) => {
+    if (calcResolved.has(i)) return;
+    rpcIdxOfConfig.set(i, rpcMetrics.length);
+    rpcMetrics.push(m);
+  });
+  const rpcIdxOfBasis = new Map<string, number>(); // basis key → idx rpc
+  for (const rc of calcResolved.values()) {
+    if (!rc.formula) continue;
+    for (const key of basisKeysFor(rc.formula)) {
+      if (rpcIdxOfBasis.has(key)) continue;
+      const bm = basisMetric(key);
+      // Reusa uma métrica normal idêntica (mesma coluna do RPC) quando houver.
+      const existing = rpcMetrics.findIndex(
+        (m) => m.field === bm.field && m.agg === bm.agg && !m.formula
+      );
+      if (existing >= 0) {
+        rpcIdxOfBasis.set(key, existing);
+      } else {
+        rpcIdxOfBasis.set(key, rpcMetrics.length);
+        rpcMetrics.push(bm);
+      }
+    }
+  }
+  // Toda métrica é calculada e sem operando (ex.: campo deletado): o RPC não
+  // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer.
+  if (calcResolved.size > 0 && rpcMetrics.length === 0 && dims.length === 0) {
+    rpcMetrics.push({ field: "*", agg: "count" });
+  }
+
   const { data, error } = await supabase.rpc("run_widget_query", {
     p_source: config.source,
     p_dimensions: dims,
-    p_metrics: config.metrics,
+    p_metrics: rpcMetrics,
     p_filters: filters,
     p_correspondences: correspondencesMap,
   });
   if (error) throw new Error(error.message);
 
   const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
+
+  // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
+  // métricas calculadas — ANTES de attachMoney/rotulagem, que indexam pela config.
+  if (calcResolved.size > 0) {
+    for (const row of rows) {
+      const src: Record<string, unknown> = {};
+      rpcMetrics.forEach((_, ri) => {
+        src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
+      });
+      const basis: BasisValues = {};
+      for (const [key, ri] of rpcIdxOfBasis) {
+        const n = Number(src[`metric_${ri + 1}`]);
+        basis[key] =
+          src[`metric_${ri + 1}`] == null || !Number.isFinite(n) ? null : n;
+      }
+      config.metrics.forEach((_, i) => {
+        const rc = calcResolved.get(i);
+        if (rc) {
+          row[`metric_${i + 1}`] = rc.formula
+            ? evalCalcFromBasis(rc.formula, basis, rc.allowNegative)
+            : null;
+        } else {
+          row[`metric_${i + 1}`] = src[`metric_${rpcIdxOfConfig.get(i)! + 1}`];
+        }
+      });
+      for (let k = config.metrics.length; k < rpcMetrics.length; k++) {
+        delete row[`metric_${k + 1}`];
+      }
+      row.__calcOps = basis;
+    }
+  }
 
   // Métricas monetárias: consulta auxiliar por moeda + data-da-taxa e fold no
   // cliente, anexando `__money` a cada linha (ANTES da rotulagem, que muta os
@@ -893,11 +1037,29 @@ export async function runWidget(
     return { key: `dim_${i + 1}`, label: d.label?.trim() || `${base}${suffix}` };
   });
 
-  const metrics = config.metrics.map((m, i) => ({
-    key: `metric_${i + 1}`,
-    label: m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
-    isMoney: isMoneyMetric(m, available),
-  }));
+  const metrics = config.metrics.map((m, i) => {
+    const rc = calcResolved.get(i);
+    if (rc) {
+      return {
+        key: `metric_${i + 1}`,
+        label:
+          m.label?.trim() ||
+          (m.field.startsWith("custom:")
+            ? fieldLabel(m.field, available)
+            : "Fórmula"),
+        calc: {
+          formula: rc.formula ?? { tokens: [] },
+          currency: rc.currency,
+          allowNegative: rc.allowNegative,
+        },
+      };
+    }
+    return {
+      key: `metric_${i + 1}`,
+      label: m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
+      isMoney: isMoneyMetric(m, available),
+    };
+  });
 
   return { rows, dimensions, metrics };
 }

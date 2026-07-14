@@ -31,6 +31,16 @@ import {
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
+import type { Formula } from "@/lib/records/formulas";
+import {
+  basisKeysFor,
+  basisMetric,
+  evalCalcFromBasis,
+  isCalcMetric,
+  resolveCalcMetric,
+  type BasisValues,
+  type ResolvedCalcMetric,
+} from "@/lib/widgets/calc-metrics";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
   buildRecordBreakdown,
@@ -216,8 +226,64 @@ export function RecordListTable({
   // Métricas do widget (mesmo comportamento do agregado): uma coluna por métrica,
   // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
   const metricList = metrics.filter((m) => m.field);
+
+  // Métricas calculadas de agregados: fórmula reavaliada sobre os registros do
+  // escopo (célula = 1 registro; subtotal/Total geral = registros do grupo) —
+  // nunca a soma da coluna. Moeda fixa da definição é só formatação (sem
+  // conversão entre moedas).
+  const calcCache = new Map<Metric, ResolvedCalcMetric | null>();
+  const calcOf = (m: Metric): ResolvedCalcMetric | null => {
+    if (!calcCache.has(m)) {
+      calcCache.set(
+        m,
+        isCalcMetric(m, fieldByKey) ? resolveCalcMetric(m, fieldByKey) : null
+      );
+    }
+    return calcCache.get(m)!;
+  };
+  const calcBasisFor = (formula: Formula, rs: RecordRow[]): BasisValues => {
+    const out: BasisValues = {};
+    for (const key of basisKeysFor(formula)) {
+      const bm = basisMetric(key);
+      if (bm.agg === "count") {
+        out[key] =
+          bm.field === "*"
+            ? rs.length
+            : rs.filter((r) => {
+                const v = rawValue(bm.field, r);
+                return v != null && v !== "";
+              }).length;
+      } else {
+        const nums = rs
+          .map((r) => Number(rawValue(bm.field, r)))
+          .filter((n) => Number.isFinite(n));
+        out[key] = nums.length ? nums.reduce((s, n) => s + n, 0) : null;
+      }
+    }
+    return out;
+  };
+  const calcText = (m: Metric, rs: RecordRow[]): string => {
+    const rc = calcOf(m);
+    if (!rc || !rc.formula) return "—";
+    const v = evalCalcFromBasis(
+      rc.formula,
+      calcBasisFor(rc.formula, rs),
+      rc.allowNegative
+    );
+    if (v == null) return "—";
+    return rc.currency
+      ? formatMoney(v, rc.currency)
+      : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  };
+
   const metricLabel = (m: Metric) =>
-    m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
+    calcOf(m)
+      ? m.label?.trim() ||
+        (m.field.startsWith("custom:")
+          ? fieldLabel(m.field, available)
+          : "Fórmula")
+      : m.label?.trim() ||
+        `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`;
 
   // Lista única de colunas (dimensões + métricas) reordenável em conjunto, igual
   // à tabela agregada: métricas podem ser arrastadas para qualquer posição,
@@ -275,6 +341,9 @@ export function RecordListTable({
   };
 
   const metricCellText = (m: Metric, r: RecordRow): string => {
+    // Calculada de agregados por registro: basis do próprio registro (ticket
+    // médio de 1 venda = mrr/1 — coerente com o "individual" do agregado).
+    if (calcOf(m)) return calcText(m, [r]);
     if (m.field === "*") return "";
     const n = Number(rawValue(m.field, r));
     if (!Number.isFinite(n)) return "—";
@@ -307,7 +376,9 @@ export function RecordListTable({
   };
   // Subtotal/total de uma métrica sobre `rs`, aplicando conversão/modos de moeda
   // quando a métrica é monetária. `isGrand` usa o modo do Total geral.
+  // Calculada de agregados: fórmula reavaliada sobre os registros do escopo.
   const metricAggText = (m: Metric, rs: RecordRow[], isGrand = false): string => {
+    if (calcOf(m)) return calcText(m, rs);
     if (m.agg === "count" || m.field === "*") {
       return metricAgg(m, rs).toLocaleString("pt-BR");
     }

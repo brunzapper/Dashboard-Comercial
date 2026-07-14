@@ -1,9 +1,14 @@
-// Versão: 1.2 | Data: 09/07/2026
+// Versão: 1.3 | Data: 14/07/2026
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
 // v1.1 (09/07/2026): Fase 7 — DataType ganha 'booleano' (campos Y/N do Bitrix)
 //   e 'calculado' (campo com fórmula); FieldDefinition ganha source_system,
 //   source_field_id, show_in_builder e formula.
 // v1.2 (09/07/2026): Fase 8 — FieldDefinition ganha applies_to (fonte/record_type).
+// v1.3 (14/07/2026): DataType ganha 'calculado_agg' — fórmula sobre AGREGAÇÕES
+//   (refs agg:sum|avg|count:<campo>), avaliada pelo engine de widgets sobre os
+//   totais do recorte. Nunca materializado por registro (fora de
+//   loadFormulaDefs/recalc) e fora de NUMERIC_DATA_TYPES (não é operando de
+//   fórmula por-registro nem métrica agregável diretamente pelo RPC).
 import type { Formula } from "./formulas";
 
 export type DataType =
@@ -13,7 +18,8 @@ export type DataType =
   | "selecao"
   | "moeda"
   | "booleano"
-  | "calculado";
+  | "calculado"
+  | "calculado_agg";
 
 export const DATA_TYPE_LABELS: Record<DataType, string> = {
   texto: "Texto",
@@ -23,6 +29,7 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
   moeda: "Moeda",
   booleano: "Booleano",
   calculado: "Calculado",
+  calculado_agg: "Calculado (totais)",
 };
 
 // Tipos numéricos: podem ser métrica (soma/média) e operando de fórmula.

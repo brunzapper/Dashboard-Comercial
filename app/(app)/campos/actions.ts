@@ -6,6 +6,10 @@
 // v1.1 (09/07/2026): Fase 7 — suporta tipos 'booleano'/'calculado', o toggle
 //   show_in_builder e a fórmula (validada) dos campos calculados; ao salvar um
 //   calculado, recalcula os registros existentes.
+// v1.2 (14/07/2026): tipo 'calculado_agg' — fórmula sobre AGREGAÇÕES (refs
+//   agg:sum|avg|count). Valida só refs agg:* (rejeita refs por-registro e
+//   vice-versa), moeda apenas número|fixa, e NÃO dispara recalc (nada é
+//   materializado por registro — o engine de widgets avalia em runtime).
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -18,6 +22,7 @@ import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
+import { aggOperandRefs } from "@/lib/widgets/calc-metrics";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 
 export interface FieldActionState {
@@ -36,7 +41,12 @@ const DATA_TYPES = [
   "moeda",
   "booleano",
   "calculado",
+  "calculado_agg",
 ] as const;
+
+// Os dois tipos com fórmula (por-registro e de agregados) compartilham o fluxo
+// de resolução/validação/persistência da fórmula.
+const FORMULA_DATA_TYPES = ["calculado", "calculado_agg"];
 
 // Referências numéricas que podem ser operandos de uma fórmula: colunas do
 // núcleo numéricas + campos personalizados numéricos que NÃO sejam calculados
@@ -60,6 +70,37 @@ async function allowedFormulaRefs(
     }
   }
   return refs;
+}
+
+// Operandos de AGREGAÇÃO (campos 'calculado_agg'): contagem de registros +
+// Σ/Média das colunas numéricas do núcleo e dos custom numéricos — incluindo o
+// 'calculado' por-registro (é materializado, o RPC agrega) e EXCLUINDO outros
+// 'calculado_agg' (sem aninhamento na v1). Mesma origem da UI
+// (lib/widgets/calc-metrics.aggOperandRefs) para editor e servidor concordarem.
+async function aggOperandCatalog(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  excludeFieldKey?: string
+): Promise<OperandRef[]> {
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("field_key, label, data_type");
+  const numeric = [
+    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
+      field: f.field,
+      label: f.label,
+    })),
+    ...(data ?? [])
+      .filter(
+        (d) =>
+          NUMERIC_DATA_TYPES.includes(d.data_type as DataType) &&
+          d.field_key !== excludeFieldKey
+      )
+      .map((d) => ({
+        field: `custom:${d.field_key}`,
+        label: ((d.label as string) ?? (d.field_key as string)),
+      })),
+  ];
+  return aggOperandRefs(numeric);
 }
 
 // Refs de DATA permitidos numa fórmula: datas do próprio registro + custom
@@ -143,21 +184,33 @@ function parseFormula(raw: string): Formula | null {
 }
 
 // Resolve a fórmula de um campo calculado (texto → tokens quando o editor for o
-// de texto) e valida estrutura + refs (numéricos, datas e condicionais).
+// de texto) e valida estrutura + refs. 'calculado' (por-registro) aceita
+// numéricos, datas e condicionais; 'calculado_agg' aceita SÓ refs de agregação
+// (agg:*) — refs por-registro são rejeitadas ali, e agg:* é rejeitado aqui
+// (nenhum dos catálogos do por-registro contém agg:*).
 async function resolveAndValidateFormula(
   supabase: Awaited<ReturnType<typeof createClient>>,
   f: ReturnType<typeof readForm>,
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
+  const isAgg = f.dataType === "calculado_agg";
   let formula = f.formula;
   if (f.formulaMode === "text") {
-    const catalog = await serverOperandCatalog(supabase, fieldKey);
+    const catalog = isAgg
+      ? await aggOperandCatalog(supabase, fieldKey)
+      : await serverOperandCatalog(supabase, fieldKey);
     const tok = tokenizeFormulaText(f.formulaText, catalog);
     if (!tok.ok) return { ok: false, message: tok.error };
     formula = tok.formula;
   }
   if (!formula) {
     return { ok: false, message: "Defina a fórmula do campo calculado." };
+  }
+  if (isAgg) {
+    const catalog = await aggOperandCatalog(supabase, fieldKey);
+    const v = validateFormula(formula, new Set(catalog.map((o) => o.ref)));
+    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+    return { ok: true, formula };
   }
   const [allowed, allowedDates, allowedConds] = await Promise.all([
     allowedFormulaRefs(supabase, fieldKey),
@@ -264,6 +317,17 @@ function resolveCurrencyColumns(f: {
     }
     return { currency_code: null, currency_mode: null };
   }
+  if (f.dataType === "calculado_agg") {
+    // Agregados: número puro ou moeda FIXA de exibição. 'inherit' não se aplica
+    // (não há registro para herdar a moeda) — cai em número.
+    if (f.currencyModeRaw === "fixed") {
+      return {
+        currency_code: /^[A-Z]{3}$/.test(f.currencyCodeRaw) ? f.currencyCodeRaw : "BRL",
+        currency_mode: "fixed",
+      };
+    }
+    return { currency_code: null, currency_mode: null };
+  }
   return { currency_code: null, currency_mode: null };
 }
 
@@ -285,7 +349,7 @@ export async function createField(
   const supabase = await createClient();
 
   let calcFormula: Formula | null = null;
-  if (f.dataType === "calculado") {
+  if (FORMULA_DATA_TYPES.includes(f.dataType)) {
     const r = await resolveAndValidateFormula(supabase, f, fieldKey);
     if (!r.ok) return { ok: false, message: r.message };
     calcFormula = r.formula;
@@ -303,9 +367,9 @@ export async function createField(
     show_in_builder: f.showInBuilder,
     write_back: f.writeBack,
     formula: calcFormula,
-    // Só relevante em calculado; demais tipos gravam o default (true) para o
+    // Só relevante nos calculados; demais tipos gravam o default (true) para o
     // checkbox ausente no form nunca virar false.
-    allow_negative: f.dataType === "calculado" ? f.allowNegative : true,
+    allow_negative: FORMULA_DATA_TYPES.includes(f.dataType) ? f.allowNegative : true,
     currency_code: currency.currency_code,
     currency_mode: currency.currency_mode,
     sort_order: f.sortOrder,
@@ -317,6 +381,8 @@ export async function createField(
         : error.message;
     return { ok: false, message: msg };
   }
+  // Só o calculado por-registro materializa valores; o de agregados é avaliado
+  // em runtime pelo engine de widgets — nada a recalcular.
   if (f.dataType === "calculado") await recalcAllFormulaFields();
   revalidatePath("/campos");
   revalidatePath("/registros");
@@ -350,7 +416,7 @@ export async function updateField(
   const fieldKey = (existing?.field_key as string | undefined) ?? undefined;
 
   let calcFormula: Formula | null = null;
-  if (f.dataType === "calculado") {
+  if (FORMULA_DATA_TYPES.includes(f.dataType)) {
     const r = await resolveAndValidateFormula(supabase, f, fieldKey);
     if (!r.ok) return { ok: false, message: r.message };
     calcFormula = r.formula;
@@ -369,7 +435,7 @@ export async function updateField(
       show_in_builder: f.showInBuilder,
       write_back: f.writeBack,
       formula: calcFormula,
-      allow_negative: f.dataType === "calculado" ? f.allowNegative : true,
+      allow_negative: FORMULA_DATA_TYPES.includes(f.dataType) ? f.allowNegative : true,
       currency_code: currency.currency_code,
       currency_mode: currency.currency_mode,
       sort_order: f.sortOrder,

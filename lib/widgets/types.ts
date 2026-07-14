@@ -123,6 +123,15 @@ export interface Dimension {
 export interface Metric {
   field: string;
   agg: Aggregation;
+  // Métrica calculada de AGREGADOS (14/07/2026): fórmula sobre agg:sum|avg|count
+  // avaliada por grupo/subtotal (ver lib/widgets/calc-metrics.ts). `calc` marca a
+  // métrica (robusto a campo deletado); `field` é 'custom:<key>' (campo
+  // 'calculado_agg' reutilizável) ou 'calc:formula' (ad-hoc, com `formula` e
+  // `resultCurrency` aqui). `agg` é ignorado nesse caso (persistido 'sum' por
+  // compat). A métrica NUNCA vai ao RPC — só seus operandos.
+  calc?: boolean;
+  formula?: Formula;
+  resultCurrency?: string | null; // ad-hoc: moeda fixa de exibição; null = número
   // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
   label?: string;
   // Moeda (12/07/2026): só relevante p/ métrica monetária (value/mrr/campo moeda).
@@ -238,6 +247,9 @@ export interface RecordListSettings {
 // tabelas editáveis (table:*) e para agregações de registros (agg:*).
 export interface CalcSettings {
   formula?: Formula;
+  // Campo 'calculado_agg' salvo em /campos ('custom:<key>') usado no lugar da
+  // fórmula local (14/07/2026). Presente → a fórmula/moeda vêm da definição.
+  calcField?: string;
 }
 
 // Aparência de um widget (Fase 10): camada opcional lida na renderização, com
@@ -408,6 +420,13 @@ export interface WidgetConfig {
   settings?: WidgetSettings;
 }
 
+// Resultado do widget "Métrica calculada" (RSC → client): valor + moeda FIXA de
+// exibição quando aponta p/ um campo 'calculado_agg' com moeda (null = número).
+export interface CalcWidgetResult {
+  value: number | null;
+  currency?: string | null;
+}
+
 export interface KpiResult {
   mode: "meta" | "ratio" | "data_atual";
   label: string;
@@ -462,13 +481,28 @@ export interface Dashboard {
 export interface WidgetRow {
   [key: string]: unknown;
   __money?: Record<string, MoneyBreakdown>;
+  // Basis das métricas calculadas de agregados desta linha (grupo): chave
+  // 'sum:<field>'|'count:<field>'|'count:*' → valor. Subtotais/Total geral
+  // fundem as basis das linhas e reavaliam a fórmula (lib/widgets/calc-metrics).
+  __calcOps?: Record<string, number | null>;
 }
 
 /** Resultado já pronto para os charts. */
 export interface WidgetData {
   rows: WidgetRow[]; // chaves dim_1.., metric_1..
   dimensions: { key: string; label: string }[];
-  // `isMoney` marca as métricas monetárias (têm `__money` nas linhas).
-  metrics: { key: string; label: string; isMoney?: boolean }[];
+  // `isMoney` marca as métricas monetárias (têm `__money` nas linhas). `calc`
+  // marca as métricas calculadas de agregados: a fórmula reavalia subtotais a
+  // partir de `__calcOps` e `currency` é a moeda FIXA de exibição (null=número).
+  metrics: {
+    key: string;
+    label: string;
+    isMoney?: boolean;
+    calc?: {
+      formula: Formula;
+      currency?: string | null;
+      allowNegative?: boolean;
+    };
+  }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
 }

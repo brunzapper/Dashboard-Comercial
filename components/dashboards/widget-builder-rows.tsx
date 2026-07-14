@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 13/07/2026
+// Versão: 1.1 | Data: 14/07/2026
+// v1.1 (14/07/2026): MetricRow suporta métricas calculadas de agregados
+//   (chip "Fórmula" no lugar da agregação, editor de fórmula + formato do
+//   resultado para o sentinela 'calc:formula') — lógica de troca de campo
+//   fica no pai via onFieldChange.
 // Peças APRESENTACIONAIS do construtor de widget (widget-builder.tsx):
 // - BuilderSection: seção recolhível (Accordion) com badge de resumo no título.
 // - DimensionRow / MetricRow / FilterRow: cards de linha, extraídos 1:1 do
@@ -20,6 +24,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  FormulaBuilder,
+  type RefOption,
+} from "@/components/campos/formula-builder";
 import type {
   Aggregation,
   DateAgg,
@@ -248,13 +256,20 @@ export function DimensionRow({
 
 // Card de uma métrica. Nas métricas monetárias, as 4 opções de moeda ficam num
 // bloco recolhível por linha (abre por padrão quando já há algo configurado).
+// Métrica calculada de agregados: chip "Fórmula" no lugar da agregação; o
+// sentinela 'calc:formula' ganha editor de fórmula + formato do resultado.
 export function MetricRow({
   metric,
   metricOptions,
   aggOptions,
   isMoney,
+  isAggCalc,
+  isCalcSentinel,
+  calcRefs,
+  resultFormatOptions,
   defaultLabel,
   fieldMenu,
+  onFieldChange,
   onChange,
   onRemove,
 }: {
@@ -262,8 +277,15 @@ export function MetricRow({
   metricOptions: ComboboxOption[];
   aggOptions: ComboboxOption[];
   isMoney: boolean;
+  isAggCalc: boolean;
+  isCalcSentinel: boolean;
+  calcRefs: RefOption[];
+  resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
+  // Troca de campo tem regras próprias (limpeza/marcação de `calc`), decididas
+  // pelo pai; os demais ajustes usam onChange(patch).
+  onFieldChange: (field: string) => void;
   onChange: (patch: Partial<Metric>) => void;
   onRemove: () => void;
 }) {
@@ -284,25 +306,57 @@ export function MetricRow({
           className="flex-1"
           options={metricOptions}
           value={metric.field}
-          onValueChange={(field) =>
-            onChange({ field, agg: field === "*" ? "count" : metric.agg })
-          }
+          onValueChange={onFieldChange}
           aria-label="Campo da métrica"
         />
-        <Combobox
-          className="w-28 shrink-0"
-          searchable={false}
-          options={aggOptions}
-          value={metric.agg}
-          disabled={metric.field === "*"}
-          onValueChange={(a) => onChange({ agg: a as Aggregation })}
-          aria-label="Agregação"
-        />
-        {metric.field && metric.field !== "*" ? fieldMenu : null}
+        {isAggCalc ? (
+          <span className="text-muted-foreground bg-muted w-28 shrink-0 rounded-md px-2 py-1.5 text-center text-xs">
+            Fórmula
+          </span>
+        ) : (
+          <Combobox
+            className="w-28 shrink-0"
+            searchable={false}
+            options={aggOptions}
+            value={metric.agg}
+            disabled={metric.field === "*"}
+            onValueChange={(a) => onChange({ agg: a as Aggregation })}
+            aria-label="Agregação"
+          />
+        )}
+        {metric.field && metric.field !== "*" && !isCalcSentinel
+          ? fieldMenu
+          : null}
         <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
           <Trash2 className="size-4" />
         </Button>
       </div>
+      {isCalcSentinel ? (
+        <div className="flex flex-col gap-1.5 rounded-md border p-2">
+          <FormulaBuilder
+            refs={calcRefs}
+            initial={metric.formula ?? null}
+            onChange={(f) => onChange({ formula: f })}
+          />
+          <div className="flex items-center gap-2">
+            <Label className="text-muted-foreground shrink-0 text-xs">
+              Formato do resultado
+            </Label>
+            <Combobox
+              className="h-8 flex-1 text-sm"
+              searchable={false}
+              options={resultFormatOptions}
+              value={metric.resultCurrency ?? ""}
+              onValueChange={(v) => onChange({ resultCurrency: v || null })}
+              aria-label="Formato do resultado"
+            />
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Fórmula sobre os totais do recorte, recalculada por grupo,
+            subtotal e Total geral. Moeda é só exibição (sem conversão).
+          </p>
+        </div>
+      ) : null}
       {metric.field && metric.field !== "*" ? (
         <Input
           className="h-8 text-sm"
