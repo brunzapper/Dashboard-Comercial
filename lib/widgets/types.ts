@@ -131,7 +131,7 @@ export interface Metric {
   // compat). A métrica NUNCA vai ao RPC — só seus operandos.
   calc?: boolean;
   formula?: Formula;
-  resultCurrency?: string | null; // ad-hoc: moeda fixa de exibição; null = número
+  resultCurrency?: string | null; // ad-hoc: moeda fixa (conversão real); null = número
   // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
   label?: string;
   // Moeda (12/07/2026): só relevante p/ métrica monetária (value/mrr/campo moeda).
@@ -420,8 +420,9 @@ export interface WidgetConfig {
   settings?: WidgetSettings;
 }
 
-// Resultado do widget "Métrica calculada" (RSC → client): valor + moeda FIXA de
-// exibição quando aponta p/ um campo 'calculado_agg' com moeda (null = número).
+// Resultado do widget "Métrica calculada" (RSC → client): valor + moeda do
+// resultado quando aponta p/ um campo 'calculado_agg' com moeda — automática
+// (preservada dos operandos; misturou → BRL) ou fixa (null = número puro).
 export interface CalcWidgetResult {
   value: number | null;
   currency?: string | null;
@@ -482,9 +483,10 @@ export interface WidgetRow {
   [key: string]: unknown;
   __money?: Record<string, MoneyBreakdown>;
   // Basis das métricas calculadas de agregados desta linha (grupo): chave
-  // 'sum:<field>'|'count:<field>'|'count:*' → valor. Subtotais/Total geral
-  // fundem as basis das linhas e reavaliam a fórmula (lib/widgets/calc-metrics).
-  __calcOps?: Record<string, number | null>;
+  // 'sum:<field>'|'count:<field>'|'count:*' → valor (número, ou MoneyBreakdown
+  // p/ operando monetário). Subtotais/Total geral fundem as basis das linhas e
+  // reavaliam a fórmula (lib/widgets/calc-metrics).
+  __calcOps?: Record<string, number | null | MoneyBreakdown>;
 }
 
 /** Resultado já pronto para os charts. */
@@ -492,8 +494,10 @@ export interface WidgetData {
   rows: WidgetRow[]; // chaves dim_1.., metric_1..
   dimensions: { key: string; label: string }[];
   // `isMoney` marca as métricas monetárias (têm `__money` nas linhas). `calc`
-  // marca as métricas calculadas de agregados: a fórmula reavalia subtotais a
-  // partir de `__calcOps` e `currency` é a moeda FIXA de exibição (null=número).
+  // marca as métricas calculadas de agregados: a fórmula reavalia célula/
+  // subtotal a partir de `__calcOps` (evalCalcMoney). `mode`/`fixedRate` regem a
+  // moeda ('auto' preserva a dos operandos; 'fixed' converte p/ `currency`);
+  // `currency` é a moeda fixa (null = automática/número).
   metrics: {
     key: string;
     label: string;
@@ -502,6 +506,8 @@ export interface WidgetData {
       formula: Formula;
       currency?: string | null;
       allowNegative?: boolean;
+      mode?: "none" | "auto" | "fixed";
+      fixedRate?: number | null;
     };
   }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)

@@ -563,7 +563,8 @@ export default async function DashboardPage({
   // Métricas calculadas: resolve a fórmula com o contexto do dashboard
   // (agregações de registros). `settings.calcField` aponta p/ um campo
   // "Calculado (totais)" salvo em /campos — a fórmula/moeda vêm da definição
-  // (campo deletado → fórmula null → valor null → "—").
+  // (campo deletado → fórmula null → valor null → "—"). Moeda: automática
+  // ('inherit') preserva a moeda dos operandos (misturou → BRL); fixa converte.
   const calcById: Record<string, CalcWidgetResult> = {};
   const calcWidgets = dataWidgets.filter(isCalcWidget);
   if (calcWidgets.length > 0) {
@@ -579,23 +580,27 @@ export default async function DashboardPage({
               )
             : undefined;
           const formula = calcKey ? (def?.formula ?? null) : w.settings?.formula;
-          const value = await runCalculatedWidget(supabase, {
+          calcById[w.id] = await runCalculatedWidget(supabase, {
             formula,
             sources: w.sources ?? [],
             filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
             correspondencesMap,
-          });
-          calcById[w.id] = {
-            value:
-              def?.allow_negative === false && value != null && value < 0
-                ? 0
-                : value,
-            currency:
+            currencyMode:
+              def?.currency_mode === "fixed"
+                ? "fixed"
+                : def?.currency_mode === "inherit"
+                  ? "auto"
+                  : "none",
+            currencyCode:
               def?.currency_mode === "fixed"
                 ? resolveCurrencyCode(def.currency_code)
                 : null,
-          };
+            allowNegative: def?.allow_negative !== false,
+            fields: allFields,
+            rates: currencyRates,
+            conversionPeriod: conversionPeriodById[w.id],
+          });
         } catch {
           calcById[w.id] = { value: null, currency: null };
         }
