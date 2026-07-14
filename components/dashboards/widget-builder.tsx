@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.3 | Data: 14/07/2026
+// v1.3 (14/07/2026): merge com a main — métricas calculadas de agregados
+//   (campos "Calculado (totais)" e sentinela 'calc:formula') portadas para o
+//   layout em seções (a UI da linha vive em widget-builder-rows.tsx/MetricRow).
+// v1.2 (13/07/2026): UX — bloco de dados reorganizado em seções recolhíveis
+//   (Accordion) com badge de resumo; linhas de dimensão/métrica/filtro viram
+//   cards (widget-builder-rows.tsx). Sem mudança de comportamento/salvamento.
 // v1.1 (09/07/2026): Fase 8 — bloco "Fontes" (multi-seleção) + toggle "Quebrar
 //   por fonte"; os campos unificados (correspondências) já vêm em `available`.
 // Construtor de widget (Sheet): fontes→dimensões→métricas→filtros→visual.
@@ -9,6 +15,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 
+import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -61,7 +68,6 @@ import {
   type Metric,
   type RecordListColumn,
   type RowSource,
-  type Transform,
   type VisualType,
   type Widget,
   type WidgetFilter,
@@ -72,12 +78,12 @@ import {
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
 import { aggOperandRefs, CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
-import type {
-  ConversionBasis,
-  CurrencyDisplay,
-  CurrencyMultiMode,
-  GrandTotalMode,
-} from "@/lib/widgets/currency";
+import {
+  BuilderSection,
+  DimensionRow,
+  FilterRow,
+  MetricRow,
+} from "@/components/dashboards/widget-builder-rows";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import {
   createWidget,
@@ -88,39 +94,6 @@ const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
   label: o.label,
 }));
-
-// --- Opções de moeda das métricas monetárias (Parte C) ---
-const CONVERSION_BASIS_OPTIONS: ComboboxOption[] = [
-  { value: "record_year", label: "Ano do registro" },
-  { value: "record_quarter", label: "Trimestre do registro" },
-  { value: "period_year", label: "Ano do período" },
-  { value: "period_quarter", label: "Trimestre do período" },
-];
-const CURRENCY_DISPLAY_OPTIONS: ComboboxOption[] = [
-  { value: "original", label: "Só a moeda original" },
-  { value: "converted", label: "Só convertido (R$)" },
-  { value: "reference", label: "US$ original → R$ convertido" },
-];
-const CURRENCY_MULTI_OPTIONS: ComboboxOption[] = [
-  { value: "convert", label: "Converter tudo (R$)" },
-  { value: "separate", label: "Totais por moeda (separados)" },
-  { value: "reference", label: "US$ total → R$ convertido" },
-];
-const GRAND_TOTAL_OPTIONS: ComboboxOption[] = [
-  { value: "converted", label: "Total convertido (R$)" },
-  { value: "dollar", label: "Total em US$" },
-];
-
-function basisValue(b?: ConversionBasis): string {
-  return b ? `${b.source}_${b.granularity}` : "record_year";
-}
-function parseBasis(v: string): ConversionBasis {
-  const [source, granularity] = v.split("_");
-  return {
-    source: source === "period" ? "period" : "record",
-    granularity: granularity === "quarter" ? "quarter" : "year",
-  };
-}
 
 export function WidgetBuilder({
   dashboardId,
@@ -894,7 +867,7 @@ export function WidgetBuilder({
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 border-t pt-4">
                 <div className="flex items-center justify-between">
                   <Label>Campos de busca (texto)</Label>
                   <Button
@@ -939,7 +912,7 @@ export function WidgetBuilder({
                 ))}
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 border-t pt-4">
                 <div className="flex items-center justify-between">
                   <Label>Campos filtráveis</Label>
                   <Button
@@ -997,7 +970,7 @@ export function WidgetBuilder({
                 ))}
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 border-t pt-4">
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
                   Por padrão atinge todos os widgets com fonte sobreposta.
@@ -1098,13 +1071,29 @@ export function WidgetBuilder({
             </div>
           ) : null}
 
-          {/* Fontes + modo de combinação */}
+          {/* Bloco de dados em seções recolhíveis. O badge resume o que está
+              configurado, visível mesmo com a seção fechada. Essenciais abrem
+              por padrão; ao editar, Fontes abre fechada (raramente muda). */}
           {visualType !== "filtro" &&
           visualType !== "filtro_campo" &&
           visualType !== "calculado" ? (
-          <>
-          <div className="flex flex-col gap-2">
-            <Label>Fontes</Label>
+          <Accordion
+            type="multiple"
+            defaultValue={
+              widget
+                ? ["dimensoes", "metricas"]
+                : ["fontes", "dimensoes", "metricas"]
+            }
+            className="-mt-2"
+          >
+          {/* Fontes + modo de combinação */}
+          <BuilderSection
+            value="fontes"
+            title="Fontes de dados"
+            badge={
+              sources.length === 0 ? "Todas" : `${sources.length} selecionada(s)`
+            }
+          >
             <p className="text-muted-foreground text-xs">
               Sem seleção = todas as fontes. Colunas correspondidas (↔) somam
               entre as fontes escolhidas.
@@ -1127,11 +1116,202 @@ export function WidgetBuilder({
               />
               Quebrar por fonte (uma série por fonte)
             </label>
-          </div>
+          </BuilderSection>
 
-          {/* Modo lista de registros (só para Tabela) */}
+          {/* Dimensões (no modo lista, definem também as colunas exibidas) */}
+          <BuilderSection
+            value="dimensoes"
+            title={isRecordList ? "Dimensões (colunas da tabela)" : "Dimensões"}
+            badge={
+              dimensions.filter((d) => d.field).length > 0
+                ? String(dimensions.filter((d) => d.field).length)
+                : null
+            }
+          >
+            {dimensions.map((d, i) => {
+              const af = available.find((a) => a.field === d.field);
+              return (
+                <DimensionRow
+                  key={i}
+                  dim={d}
+                  // No modo lista as dimensões são colunas do cliente → permite
+                  // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
+                  // agregado a dimensão vai ao RPC → só campos reais.
+                  fieldOptions={isRecordList ? availableOptions : rpcFieldOptions}
+                  transformOptions={transformOptions}
+                  dateAggOptions={dateAggOptions}
+                  isDateField={isDate(d.field)}
+                  defaultLabel={fieldLabel(d.field, available)}
+                  isRecordList={isRecordList}
+                  columnAggValue={columnAgg[d.field]}
+                  editable={effEditable(d.field)}
+                  writeBack={columnFlags[d.field]?.writeBack ?? false}
+                  editableCapable={af?.editableCapable ?? false}
+                  writable={af?.writable ?? false}
+                  fieldMenu={renderFieldMenu(d.field)}
+                  onChange={(patch) => {
+                    const next = [...dimensions];
+                    next[i] = { ...d, ...patch };
+                    setDimensions(next);
+                  }}
+                  onRemove={() =>
+                    setDimensions(dimensions.filter((_, j) => j !== i))
+                  }
+                  onColumnAggChange={(a) =>
+                    setColumnAgg((prev) => ({ ...prev, [d.field]: a }))
+                  }
+                  onFlagChange={(patch) => setColumnFlag(d.field, patch)}
+                />
+              );
+            })}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() =>
+                setDimensions([...dimensions, { field: "", transform: "none" }])
+              }
+            >
+              <Plus className="size-4" /> Adicionar dimensão
+            </Button>
+            {/* Criar coluna direto no editor (admins) */}
+            {canManageFields ? (
+              <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2">
+                <span className="text-muted-foreground text-xs">
+                  Falta uma coluna? Crie sem sair do editor.
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingField(null);
+                    setFieldSheetOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" /> Novo campo
+                </Button>
+              </div>
+            ) : null}
+          </BuilderSection>
+
+          {/* Métricas */}
+          <BuilderSection
+            value="metricas"
+            title="Métricas"
+            badge={metrics.length > 0 ? String(metrics.length) : null}
+          >
+            {metrics.map((m, i) => (
+              <MetricRow
+                key={i}
+                metric={m}
+                metricOptions={metricOptions}
+                aggOptions={aggOptions}
+                isMoney={isMoneyField(m.field)}
+                isAggCalc={isAggCalcField(m.field)}
+                isCalcSentinel={m.field === CALC_METRIC_FIELD}
+                calcRefs={calcRefs}
+                resultFormatOptions={[
+                  { value: "", label: "Número (sem moeda)" },
+                  ...(currencyOptions ?? []).map((o) => ({
+                    value: o.value,
+                    label: `Moeda — ${o.label}`,
+                  })),
+                ]}
+                defaultLabel={
+                  isAggCalcField(m.field)
+                    ? m.field === CALC_METRIC_FIELD
+                      ? "Fórmula"
+                      : fieldLabel(m.field, available)
+                    : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
+                }
+                fieldMenu={renderFieldMenu(m.field)}
+                onFieldChange={(field) => {
+                  const next = [...metrics];
+                  if (isAggCalcField(field)) {
+                    // Métrica calculada de agregados: a fórmula manda (agg
+                    // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
+                    // sentinela 'calc:formula'.
+                    next[i] = {
+                      field,
+                      agg: "sum",
+                      calc: true,
+                      label: m.label,
+                      ...(field === CALC_METRIC_FIELD
+                        ? { formula: m.formula, resultCurrency: m.resultCurrency }
+                        : {}),
+                    };
+                  } else {
+                    const cleaned: Metric = {
+                      ...m,
+                      field,
+                      agg: field === "*" ? "count" : m.agg,
+                    };
+                    delete cleaned.calc;
+                    delete cleaned.formula;
+                    delete cleaned.resultCurrency;
+                    next[i] = cleaned;
+                  }
+                  setMetrics(next);
+                }}
+                onChange={(patch) => updateMetric(i, patch)}
+                onRemove={() => setMetrics(metrics.filter((_, j) => j !== i))}
+              />
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() =>
+                setMetrics([...metrics, { field: "*", agg: "count" }])
+              }
+            >
+              <Plus className="size-4" /> Adicionar métrica
+            </Button>
+          </BuilderSection>
+
+          {/* Filtros */}
+          <BuilderSection
+            value="filtros"
+            title="Filtros"
+            badge={filters.length > 0 ? String(filters.length) : null}
+          >
+            {filters.map((f, i) => (
+              <FilterRow
+                key={i}
+                filter={f}
+                fieldOptions={rpcFieldOptions}
+                opOptions={FILTER_OP_OPTIONS}
+                onChange={(patch) => {
+                  const next = [...filters];
+                  next[i] = { ...f, ...patch };
+                  setFilters(next);
+                }}
+                onRemove={() => setFilters(filters.filter((_, j) => j !== i))}
+              />
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() =>
+                setFilters([...filters, { field: "", op: "eq", value: "" }])
+              }
+            >
+              <Plus className="size-4" /> Adicionar filtro
+            </Button>
+          </BuilderSection>
+
+          {/* Opções da tabela: modo lista, orientação e agrupamento */}
           {visualType === "tabela" ? (
-            <div className="flex flex-col gap-2">
+            <BuilderSection
+              value="tabela"
+              title="Opções da tabela"
+              badge={recordsMode ? "Registros individuais" : "Agregada"}
+            >
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={recordsMode}
@@ -1154,7 +1334,7 @@ export function WidgetBuilder({
                     aria-label="Fonte das linhas"
                   />
                   <p className="text-muted-foreground text-xs">
-                    As colunas são as Dimensões abaixo (na ordem). Campos
+                    As colunas são as Dimensões acima (na ordem). Campos
                     personalizados não calculados ficam editáveis (se o papel
                     permitir) e gravam na entidade listada.
                   </p>
@@ -1167,12 +1347,102 @@ export function WidgetBuilder({
                 />
                 Mostrar barra de busca/filtro na tabela
               </label>
-            </div>
+              {/* Orientação (agregada + lista de Registros) + Agrupar por (todos) */}
+              <div className="flex flex-col gap-3 border-t pt-3">
+                {!isEntityList ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Orientação</Label>
+                    <Combobox
+                      searchable={false}
+                      options={orientationOptions}
+                      value={tableOrientation}
+                      onValueChange={(v) =>
+                        setTableOrientation(v as "rows" | "columns")
+                      }
+                      aria-label="Orientação da tabela"
+                    />
+                  </div>
+                ) : null}
+                {(() => {
+                  const transposed =
+                    !isEntityList && tableOrientation === "columns";
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Agrupar por</Label>
+                      {tableGroupBy.map((level, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
+                            {idx + 1}.
+                          </span>
+                          <div className="flex-1">
+                            <Combobox
+                              searchable={false}
+                              options={levelOptions(idx)}
+                              value={level}
+                              placeholder="— selecione —"
+                              onValueChange={(v) => setGroupLevel(idx, v)}
+                              aria-label={`Agrupar por — nível ${idx + 1}`}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive size-8 shrink-0"
+                            onClick={() => removeGroupLevel(idx)}
+                            title="Remover nível"
+                            aria-label={`Remover nível ${idx + 1}`}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="self-start"
+                        disabled={!canAddGroupLevel}
+                        onClick={addGroupLevel}
+                      >
+                        <Plus className="size-4" />
+                        {tableGroupBy.length === 0
+                          ? "Agrupar por…"
+                          : "Adicionar nível"}
+                      </Button>
+                      <p className="text-muted-foreground text-xs">
+                        {transposed ? (
+                          <>
+                            Na orientação transposta, a 1ª dimensão fica nas colunas
+                            do topo e as dimensões escolhidas aqui viram grupos
+                            recolhíveis dentro de cada métrica. Recolhido mostra o
+                            total; expandido detalha cada grupo. Vários níveis criam
+                            uma hierarquia (o 1º aninha os demais dentro).
+                          </>
+                        ) : (
+                          <>
+                            Agrupa as linhas por uma ou mais{" "}
+                            {isRecordList ? "colunas" : "dimensões"} em seções
+                            recolhíveis com subtotais. Vários níveis criam uma
+                            hierarquia (o 1º é o grupo principal, os demais aninham
+                            dentro). Os grupos abrem recolhidos por padrão.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </BuilderSection>
           ) : null}
 
           {/* Dimensões dinâmicas: cresce p/ caber o conteúdo (por eixo) */}
           {supportsAutoSize ? (
-            <div className="flex flex-col gap-2 rounded-md border p-3">
+            <BuilderSection
+              value="avancado"
+              title="Opções avançadas"
+              badge={autoWidth || autoHeight ? "Tamanho dinâmico" : null}
+            >
               <Label>Tamanho dinâmico</Label>
               <p className="text-muted-foreground text-xs">
                 O widget cresce para caber o conteúdo e nunca encolhe abaixo do
@@ -1193,541 +1463,9 @@ export function WidgetBuilder({
                 />
                 Altura dinâmica (cresce com o conteúdo)
               </label>
-            </div>
+            </BuilderSection>
           ) : null}
-
-          {/* Criar coluna direto no editor (admins) */}
-          {canManageFields ? (
-            <div className="flex items-center justify-between rounded-md border border-dashed px-3 py-2">
-              <span className="text-muted-foreground text-xs">
-                Falta uma coluna? Crie sem sair do editor.
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditingField(null);
-                  setFieldSheetOpen(true);
-                }}
-              >
-                <Plus className="size-4" /> Novo campo
-              </Button>
-            </div>
-          ) : null}
-
-          {/* Dimensões (no modo lista, definem também as colunas exibidas) */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <Label>
-                {isRecordList ? "Dimensões (colunas da tabela)" : "Dimensões"}
-              </Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setDimensions([...dimensions, { field: "", transform: "none" }])}
-              >
-                <Plus className="size-4" /> Adicionar
-              </Button>
-            </div>
-            {dimensions.map((d, i) => {
-              const af = available.find((a) => a.field === d.field);
-              const editable = effEditable(d.field);
-              return (
-              <div key={i} className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <Combobox
-                  className="flex-1"
-                  // No modo lista as dimensões são colunas do cliente → permite
-                  // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
-                  // agregado a dimensão vai ao RPC → só campos reais.
-                  options={isRecordList ? availableOptions : rpcFieldOptions}
-                  value={d.field}
-                  placeholder="— campo —"
-                  onValueChange={(field) => {
-                    const next = [...dimensions];
-                    next[i] = { ...d, field };
-                    setDimensions(next);
-                  }}
-                  aria-label="Campo da dimensão"
-                />
-                {isDate(d.field) ? (
-                  <Combobox
-                    className="w-32 shrink-0"
-                    searchable={false}
-                    options={transformOptions}
-                    value={d.transform ?? "none"}
-                    onValueChange={(t) => {
-                      const next = [...dimensions];
-                      next[i] = { ...d, transform: t as Transform };
-                      setDimensions(next);
-                    }}
-                    aria-label="Transformação de data"
-                  />
-                ) : null}
-                {isDate(d.field) && d.transform === "week_month" ? (
-                  <Combobox
-                    className="w-28 shrink-0"
-                    searchable={false}
-                    options={[
-                      { value: "restricted", label: "Restrita" },
-                      { value: "full", label: "Cheia" },
-                    ]}
-                    value={d.weekMode ?? "restricted"}
-                    onValueChange={(wm) => {
-                      const next = [...dimensions];
-                      next[i] = { ...d, weekMode: wm as "full" | "restricted" };
-                      setDimensions(next);
-                    }}
-                    aria-label="Modo da semana do mês"
-                  />
-                ) : null}
-                {d.field ? renderFieldMenu(d.field) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setDimensions(dimensions.filter((_, j) => j !== i))}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-              {d.field ? (
-                <Input
-                  className="h-8 text-sm"
-                  placeholder={`Nome exibido (padrão: ${fieldLabel(d.field, available)})`}
-                  value={d.label ?? ""}
-                  onChange={(e) => {
-                    const next = [...dimensions];
-                    next[i] = { ...d, label: e.target.value };
-                    setDimensions(next);
-                  }}
-                  aria-label="Nome exibido da dimensão"
-                />
-              ) : null}
-              {isDate(d.field) && d.transform && d.transform !== "none" ? (
-                <div className="flex items-center gap-2 pl-1">
-                  <Label className="text-muted-foreground w-28 shrink-0 text-xs">
-                    Agrupar período
-                  </Label>
-                  <Combobox
-                    className="h-8 flex-1 text-sm"
-                    searchable={false}
-                    options={
-                      isRecordList
-                        ? dateAggOptions
-                        : [
-                            { value: "", label: "Padrão (agregado)" },
-                            ...dateAggOptions,
-                          ]
-                    }
-                    value={
-                      isRecordList
-                        ? columnAgg[d.field] ?? "individual"
-                        : d.dateAgg ?? ""
-                    }
-                    onValueChange={(a) => {
-                      if (isRecordList) {
-                        setColumnAgg((prev) => ({
-                          ...prev,
-                          [d.field]: a as DateAgg,
-                        }));
-                      } else {
-                        const next = [...dimensions];
-                        next[i] = {
-                          ...d,
-                          dateAgg: a ? (a as DateAgg) : undefined,
-                        };
-                        setDimensions(next);
-                      }
-                    }}
-                    aria-label="Agregação por período"
-                  />
-                </div>
-              ) : null}
-              {isRecordList && d.field && af?.editableCapable ? (
-                <div className="text-muted-foreground flex items-center gap-4 pl-1 text-xs">
-                  <label className="flex items-center gap-1.5">
-                    <Checkbox
-                      checked={editable}
-                      onCheckedChange={(c) =>
-                        setColumnFlag(d.field, { editable: c === true })
-                      }
-                    />
-                    Editável
-                  </label>
-                  {editable && af?.writable ? (
-                    <label className="flex items-center gap-1.5">
-                      <Checkbox
-                        checked={columnFlags[d.field]?.writeBack ?? false}
-                        onCheckedChange={(c) =>
-                          setColumnFlag(d.field, { writeBack: c === true })
-                        }
-                      />
-                      Gravar no Bitrix
-                    </label>
-                  ) : null}
-                </div>
-              ) : null}
-              </div>
-            );
-            })}
-          </div>
-
-          {/* Orientação (agregada + lista de Registros) + Agrupar por (todos) */}
-          {visualType === "tabela" ? (
-            <div className="flex flex-col gap-3 rounded-md border p-3">
-              {!isEntityList ? (
-                <div className="flex flex-col gap-1.5">
-                  <Label>Orientação</Label>
-                  <Combobox
-                    searchable={false}
-                    options={orientationOptions}
-                    value={tableOrientation}
-                    onValueChange={(v) =>
-                      setTableOrientation(v as "rows" | "columns")
-                    }
-                    aria-label="Orientação da tabela"
-                  />
-                </div>
-              ) : null}
-              {(() => {
-                const transposed =
-                  !isEntityList && tableOrientation === "columns";
-                return (
-                  <div className="flex flex-col gap-1.5">
-                    <Label>Agrupar por</Label>
-                    {tableGroupBy.map((level, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5">
-                        <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
-                          {idx + 1}.
-                        </span>
-                        <div className="flex-1">
-                          <Combobox
-                            searchable={false}
-                            options={levelOptions(idx)}
-                            value={level}
-                            placeholder="— selecione —"
-                            onValueChange={(v) => setGroupLevel(idx, v)}
-                            aria-label={`Agrupar por — nível ${idx + 1}`}
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-muted-foreground hover:text-destructive size-8 shrink-0"
-                          onClick={() => removeGroupLevel(idx)}
-                          title="Remover nível"
-                          aria-label={`Remover nível ${idx + 1}`}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="self-start"
-                      disabled={!canAddGroupLevel}
-                      onClick={addGroupLevel}
-                    >
-                      <Plus className="size-4" />
-                      {tableGroupBy.length === 0
-                        ? "Agrupar por…"
-                        : "Adicionar nível"}
-                    </Button>
-                    <p className="text-muted-foreground text-xs">
-                      {transposed ? (
-                        <>
-                          Na orientação transposta, a 1ª dimensão fica nas colunas
-                          do topo e as dimensões escolhidas aqui viram grupos
-                          recolhíveis dentro de cada métrica. Recolhido mostra o
-                          total; expandido detalha cada grupo. Vários níveis criam
-                          uma hierarquia (o 1º aninha os demais dentro).
-                        </>
-                      ) : (
-                        <>
-                          Agrupa as linhas por uma ou mais{" "}
-                          {isRecordList ? "colunas" : "dimensões"} em seções
-                          recolhíveis com subtotais. Vários níveis criam uma
-                          hierarquia (o 1º é o grupo principal, os demais aninham
-                          dentro). Os grupos abrem recolhidos por padrão.
-                        </>
-                      )}
-                    </p>
-                  </div>
-                );
-              })()}
-            </div>
-          ) : null}
-
-          {/* Métricas */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <Label>Métricas</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setMetrics([...metrics, { field: "*", agg: "count" }])}
-              >
-                <Plus className="size-4" /> Adicionar
-              </Button>
-            </div>
-            {metrics.map((m, i) => (
-              <div key={i} className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                <Combobox
-                  className="flex-1"
-                  options={metricOptions}
-                  value={m.field}
-                  onValueChange={(field) => {
-                    const next = [...metrics];
-                    if (isAggCalcField(field)) {
-                      // Métrica calculada de agregados: a fórmula manda (agg
-                      // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
-                      // sentinela 'calc:formula'.
-                      next[i] = {
-                        field,
-                        agg: "sum",
-                        calc: true,
-                        label: m.label,
-                        ...(field === CALC_METRIC_FIELD
-                          ? { formula: m.formula, resultCurrency: m.resultCurrency }
-                          : {}),
-                      };
-                    } else {
-                      const cleaned: Metric = {
-                        ...m,
-                        field,
-                        agg: field === "*" ? "count" : m.agg,
-                      };
-                      delete cleaned.calc;
-                      delete cleaned.formula;
-                      delete cleaned.resultCurrency;
-                      next[i] = cleaned;
-                    }
-                    setMetrics(next);
-                  }}
-                  aria-label="Campo da métrica"
-                />
-                {isAggCalcField(m.field) ? (
-                  <span className="text-muted-foreground bg-muted w-28 shrink-0 rounded-md px-2 py-1.5 text-center text-xs">
-                    Fórmula
-                  </span>
-                ) : (
-                <Combobox
-                  className="w-28 shrink-0"
-                  searchable={false}
-                  options={aggOptions}
-                  value={m.agg}
-                  disabled={m.field === "*"}
-                  onValueChange={(a) => {
-                    const next = [...metrics];
-                    next[i] = { ...m, agg: a as Aggregation };
-                    setMetrics(next);
-                  }}
-                  aria-label="Agregação"
-                />
-                )}
-                {m.field && m.field !== "*" && m.field !== CALC_METRIC_FIELD
-                  ? renderFieldMenu(m.field)
-                  : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setMetrics(metrics.filter((_, j) => j !== i))}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-                </div>
-                {m.field === CALC_METRIC_FIELD ? (
-                  <div className="flex flex-col gap-1.5 rounded-md border p-2">
-                    <FormulaBuilder
-                      refs={calcRefs}
-                      initial={m.formula ?? null}
-                      onChange={(f) => updateMetric(i, { formula: f })}
-                    />
-                    <div className="flex items-center gap-2">
-                      <Label className="text-muted-foreground shrink-0 text-xs">
-                        Formato do resultado
-                      </Label>
-                      <Combobox
-                        className="h-8 flex-1 text-sm"
-                        searchable={false}
-                        options={[
-                          { value: "", label: "Número (sem moeda)" },
-                          ...(currencyOptions ?? []).map((o) => ({
-                            value: o.value,
-                            label: `Moeda — ${o.label}`,
-                          })),
-                        ]}
-                        value={m.resultCurrency ?? ""}
-                        onValueChange={(v) =>
-                          updateMetric(i, { resultCurrency: v || null })
-                        }
-                        aria-label="Formato do resultado"
-                      />
-                    </div>
-                    <p className="text-muted-foreground text-xs">
-                      Fórmula sobre os totais do recorte, recalculada por grupo,
-                      subtotal e Total geral. Moeda é só exibição (sem conversão).
-                    </p>
-                  </div>
-                ) : null}
-                {m.field && m.field !== "*" ? (
-                  <Input
-                    className="h-8 text-sm"
-                    placeholder={
-                      isAggCalcField(m.field)
-                        ? `Nome exibido (padrão: ${m.field === CALC_METRIC_FIELD ? "Fórmula" : fieldLabel(m.field, available)})`
-                        : `Nome exibido (padrão: ${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)})`
-                    }
-                    value={m.label ?? ""}
-                    onChange={(e) => {
-                      const next = [...metrics];
-                      next[i] = { ...m, label: e.target.value };
-                      setMetrics(next);
-                    }}
-                    aria-label="Nome exibido da métrica"
-                  />
-                ) : null}
-                {isMoneyField(m.field) ? (
-                  <div className="grid grid-cols-2 gap-2 rounded-md border p-2">
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-muted-foreground text-xs">
-                        Base da taxa
-                      </Label>
-                      <Combobox
-                        className="h-8 text-sm"
-                        searchable={false}
-                        options={CONVERSION_BASIS_OPTIONS}
-                        value={basisValue(m.conversionBasis)}
-                        onValueChange={(v) =>
-                          updateMetric(i, { conversionBasis: parseBasis(v) })
-                        }
-                        aria-label="Base da taxa de conversão"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-muted-foreground text-xs">
-                        Exibição (1 moeda)
-                      </Label>
-                      <Combobox
-                        className="h-8 text-sm"
-                        searchable={false}
-                        options={CURRENCY_DISPLAY_OPTIONS}
-                        value={m.currencyDisplay ?? "original"}
-                        onValueChange={(v) =>
-                          updateMetric(i, { currencyDisplay: v as CurrencyDisplay })
-                        }
-                        aria-label="Exibição para moeda única"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-muted-foreground text-xs">
-                        Exibição (várias)
-                      </Label>
-                      <Combobox
-                        className="h-8 text-sm"
-                        searchable={false}
-                        options={CURRENCY_MULTI_OPTIONS}
-                        value={m.currencyMultiMode ?? "convert"}
-                        onValueChange={(v) =>
-                          updateMetric(i, {
-                            currencyMultiMode: v as CurrencyMultiMode,
-                          })
-                        }
-                        aria-label="Exibição para várias moedas"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-muted-foreground text-xs">
-                        Total geral
-                      </Label>
-                      <Combobox
-                        className="h-8 text-sm"
-                        searchable={false}
-                        options={GRAND_TOTAL_OPTIONS}
-                        value={m.grandTotalMode ?? "converted"}
-                        onValueChange={(v) =>
-                          updateMetric(i, { grandTotalMode: v as GrandTotalMode })
-                        }
-                        aria-label="Total geral"
-                      />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {/* Filtros */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <Label>Filtros</Label>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setFilters([...filters, { field: "", op: "eq", value: "" }])}
-              >
-                <Plus className="size-4" /> Adicionar
-              </Button>
-            </div>
-            {filters.map((f, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Combobox
-                  className="flex-1"
-                  options={rpcFieldOptions}
-                  value={f.field}
-                  placeholder="— campo —"
-                  onValueChange={(field) => {
-                    const next = [...filters];
-                    next[i] = { ...f, field };
-                    setFilters(next);
-                  }}
-                  aria-label="Campo do filtro"
-                />
-                <Combobox
-                  className="w-28 shrink-0"
-                  searchable={false}
-                  options={FILTER_OP_OPTIONS}
-                  value={f.op}
-                  onValueChange={(op) => {
-                    const next = [...filters];
-                    next[i] = { ...f, op: op as FilterOp };
-                    setFilters(next);
-                  }}
-                  aria-label="Operador do filtro"
-                />
-                {f.op !== "is_null" && f.op !== "not_null" ? (
-                  <Input
-                    value={String(f.value ?? "")}
-                    onChange={(e) => {
-                      const next = [...filters];
-                      next[i] = { ...f, value: e.target.value };
-                      setFilters(next);
-                    }}
-                    placeholder="valor"
-                  />
-                ) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setFilters(filters.filter((_, j) => j !== i))}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-          </>
+          </Accordion>
           ) : null}
 
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
