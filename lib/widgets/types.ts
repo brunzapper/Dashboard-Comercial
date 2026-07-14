@@ -327,11 +327,15 @@ export interface AppearanceSettings {
     // pela esquerda e cada grupo vira uma coluna).
     orientation?: "rows" | "columns";
     // Agrupamento estilo Excel: uma ou mais `keys` de dimensões/colunas pelas
-    // quais as linhas são agrupadas em seções recolhíveis com subtotais (só na
-    // orientação "rows"). Lista ordenada = hierarquia (1º = grupo principal,
-    // demais aninhados). String = config antiga de 1 nível (ainda válida; ver
-    // groupByLevels em lib/widgets/appearance.ts).
+    // quais as linhas são agrupadas em seções recolhíveis com subtotais (na
+    // transposta os níveis agrupam o eixo esquerdo). Lista ordenada = hierarquia
+    // (1º = grupo principal, demais aninhados). String = config antiga de 1
+    // nível (ainda válida; ver groupByLevels em lib/widgets/appearance.ts).
     groupBy?: string | string[];
+    // Transposta: qual dimensão vira as colunas do topo. Mesma convenção de
+    // chaves do groupBy (agregada `dim_<n>`; registros `<field>`). Ausente ou
+    // órfã (dimensões mudaram) = 1ª dimensão, comportamento original.
+    colDim?: string;
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior

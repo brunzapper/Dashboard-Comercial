@@ -1049,11 +1049,12 @@ function AppearanceTable({
   if (orientation === "columns") {
     const dimCols = cols.filter((c) => !metricKeys.has(c.key));
     const metricCols = cols.filter((c) => metricKeys.has(c.key));
-    // Com "Agrupar por" na transposta: a 1ª dimensão vira as colunas do topo e as
-    // demais dimensões escolhidas nos níveis viram grupos no eixo esquerdo,
-    // aninhados dentro de cada métrica. `tGroupLevels` exclui a dim de coluna e
-    // keys órfãs (que podem sobrar se as dimensões mudaram).
-    const colDimKey = dimKeys[0];
+    // Com "Agrupar por" na transposta: a dimensão de `colDim` (default: a 1ª)
+    // vira as colunas do topo e as demais dimensões escolhidas nos níveis viram
+    // grupos no eixo esquerdo, aninhados dentro de cada métrica. `tGroupLevels`
+    // exclui a dim de coluna e keys órfãs (se as dimensões mudaram).
+    const colDimKey =
+      t.colDim && dimKeys.includes(t.colDim) ? t.colDim : dimKeys[0];
     const tGroupLevels = groupByLevels(t.groupBy).filter(
       (k) => dimKeys.includes(k) && k !== colDimKey
     );

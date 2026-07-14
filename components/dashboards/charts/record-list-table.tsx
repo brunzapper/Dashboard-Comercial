@@ -1067,11 +1067,13 @@ export function RecordListTable({
   }
 
   // === Orientação transposta: visão AGREGADA (read-only). Colunas = valores
-  // distintos da 1ª coluna; eixo esquerdo = métricas com os grupos aninhados;
-  // células = subtotais (moeda ciente). Para EDITAR registros, use a comum. ===
+  // distintos da coluna de `colDim` (default: a 1ª); eixo esquerdo = métricas
+  // com os grupos aninhados; células = subtotais (moeda ciente). Para EDITAR
+  // registros, use a comum. ===
   const orientation = t.orientation === "columns" ? "columns" : "rows";
   if (orientation === "columns") {
-    const colDimCol = cols[0];
+    const colDimCol =
+      (t.colDim && cols.find((c) => c.field === t.colDim)) || cols[0];
     const colDimKey = colDimCol.field;
     const tMetrics: Metric[] =
       metricList.length > 0 ? metricList : [{ field: "*", agg: "count" }];
