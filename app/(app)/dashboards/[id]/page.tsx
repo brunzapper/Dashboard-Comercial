@@ -16,6 +16,7 @@ import {
   currencyOptionsFrom,
   loadCurrencyRates,
   loadEnabledCurrencies,
+  resolveCurrencyCode,
   yearQuarterOf,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
@@ -40,6 +41,7 @@ import {
   type SavedPeriod,
 } from "@/lib/widgets/period";
 import type {
+  CalcWidgetResult,
   DashboardSettings,
   FieldFilterOptions,
   Widget,
@@ -109,7 +111,7 @@ export default async function DashboardPage({
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, currency_code, currency_mode, sort_order, applies_to, source_system, source_field_id, write_back"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, sort_order, applies_to, source_system, source_field_id, write_back"
       )
       .eq("show_in_builder", true)
       .order("sort_order", { ascending: true }),
@@ -559,22 +561,43 @@ export default async function DashboardPage({
   }
 
   // Métricas calculadas: resolve a fórmula com o contexto do dashboard
-  // (agregações de registros).
-  const calcById: Record<string, number | null> = {};
+  // (agregações de registros). `settings.calcField` aponta p/ um campo
+  // "Calculado (totais)" salvo em /campos — a fórmula/moeda vêm da definição
+  // (campo deletado → fórmula null → valor null → "—").
+  const calcById: Record<string, CalcWidgetResult> = {};
   const calcWidgets = dataWidgets.filter(isCalcWidget);
   if (calcWidgets.length > 0) {
     await Promise.all(
       calcWidgets.map(async (w) => {
         try {
-          calcById[w.id] = await runCalculatedWidget(supabase, {
-            formula: w.settings?.formula,
+          const calcKey = w.settings?.calcField;
+          const def = calcKey?.startsWith("custom:")
+            ? allFields.find(
+                (f) =>
+                  f.field_key === calcKey.slice(7) &&
+                  f.data_type === "calculado_agg"
+              )
+            : undefined;
+          const formula = calcKey ? (def?.formula ?? null) : w.settings?.formula;
+          const value = await runCalculatedWidget(supabase, {
+            formula,
             sources: w.sources ?? [],
             filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
             correspondencesMap,
           });
+          calcById[w.id] = {
+            value:
+              def?.allow_negative === false && value != null && value < 0
+                ? 0
+                : value,
+            currency:
+              def?.currency_mode === "fixed"
+                ? resolveCurrencyCode(def.currency_code)
+                : null,
+          };
         } catch {
-          calcById[w.id] = null;
+          calcById[w.id] = { value: null, currency: null };
         }
       })
     );

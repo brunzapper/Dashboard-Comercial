@@ -50,6 +50,7 @@ import {
   formatMoneyAggregate,
   plotSingleCurrency,
 } from "@/lib/widgets/currency";
+import { evalCalcFromBasis, foldBasis } from "@/lib/widgets/calc-metrics";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
 import {
   alignClass,
@@ -85,6 +86,32 @@ function fmt(v: unknown): string {
   const n = Number(v);
   if (v == null || Number.isNaN(n)) return String(v ?? "—");
   return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+// Métrica calculada de agregados: null (divisão por zero / operando ausente) →
+// "—"; moeda FIXA da definição → formatMoney; senão número puro.
+type CalcMeta = NonNullable<WidgetData["metrics"][number]["calc"]>;
+function calcValueText(v: unknown, calc: CalcMeta): string {
+  const n = Number(v);
+  if (v == null || !Number.isFinite(n)) return "—";
+  return calc.currency ? formatMoney(n, calc.currency) : fmt(n);
+}
+
+// Subtotal/Total geral de uma métrica calculada: NUNCA soma a coluna — funde as
+// basis (__calcOps) das linhas do escopo e reavalia a fórmula. Linhas sem basis
+// (payload antigo) → "—".
+function calcAggValue(
+  rs: Record<string, unknown>[],
+  calc: CalcMeta
+): number | null {
+  if (calc.formula.tokens.length === 0) return null;
+  const list = rs.map((r) => (r as WidgetRow).__calcOps);
+  if (!list.some(Boolean)) return null;
+  return evalCalcFromBasis(
+    calc.formula,
+    foldBasis(list),
+    calc.allowNegative !== false
+  );
 }
 
 // Valor monetário compacto (sem centavos) p/ os eixos dos gráficos.
@@ -145,9 +172,12 @@ export function WidgetChart({
   });
   const isMoneyKey = (key: string) =>
     metrics.find((m) => m.key === key)?.isMoney ?? false;
+  const calcOf = (key: string) => metrics.find((m) => m.key === key)?.calc;
 
   // Texto de uma célula/valor de métrica honrando os modos de moeda (tabela/KPI).
   const moneyCellText = (row: WidgetRow, key: string): string => {
+    const calc = calcOf(key);
+    if (calc) return calcValueText(row[key], calc);
     const bd = row.__money?.[key];
     const cfg = metricByKey[key];
     if (isMoneyKey(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
@@ -173,8 +203,14 @@ export function WidgetChart({
   };
 
   // Texto de um valor plotado (tooltip/rótulo) na moeda da série; não-money = fmt.
-  const moneyChartText = (v: unknown, key: string): string =>
-    isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : fmt(v);
+  // Calculada de agregados: moeda fixa da definição (ou número) e null → "—".
+  // Obs.: a fatia "Outros" (pizza/funil, topWithOther) SOMA os valores plotados —
+  // para fórmulas-razão isso é uma aproximação, não a fórmula sobre o conjunto.
+  const moneyChartText = (v: unknown, key: string): string => {
+    const calc = calcOf(key);
+    if (calc) return calcValueText(v, calc);
+    return isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : fmt(v);
+  };
 
   // Código único do eixo quando todas as métricas monetárias compartilham a mesma
   // moeda de exibição; senão null (eixo numérico simples).
@@ -554,21 +590,33 @@ function AppearanceTable({
   );
   const dimKeys = data.dimensions.map((d) => d.key);
 
-  // Célula de métrica: monetária honra a config de moeda (via __money); demais
-  // caem no fmt numérico. Mesma formatação do modo registros.
+  const calcByKey: Record<string, CalcMeta> = {};
+  data.metrics.forEach((m) => {
+    if (m.calc) calcByKey[m.key] = m.calc;
+  });
+
+  // Célula de métrica: calculada de agregados formata pela definição (moeda fixa
+  // ou número; null → "—"); monetária honra a config de moeda (via __money);
+  // demais caem no fmt numérico. Mesma formatação do modo registros.
   const metricCellText = (r: Record<string, unknown>, key: string): string => {
+    const calc = calcByKey[key];
+    if (calc) return calcValueText(r[key], calc);
     const bd = (r as WidgetRow).__money?.[key];
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
     return fmt(r[key]);
   };
-  // Subtotal/Total geral de uma métrica sobre `rs`: monetária funde os __money e
-  // formata (isGrand usa o modo do Total geral); demais somam numérico.
+  // Subtotal/Total geral de uma métrica sobre `rs`: calculada de agregados
+  // REAVALIA a fórmula sobre as basis fundidas do escopo (nunca soma a coluna);
+  // monetária funde os __money e formata (isGrand usa o modo do Total geral);
+  // demais somam numérico.
   const metricAggCellText = (
     rs: Record<string, unknown>[],
     key: string,
     isGrand: boolean
   ): string => {
+    const calc = calcByKey[key];
+    if (calc) return calcValueText(calcAggValue(rs, calc), calc);
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && cfg) {
       const folded = foldBreakdowns(rs.map((r) => (r as WidgetRow).__money?.[key]));

@@ -357,7 +357,10 @@ export async function updateEntityField(
     .eq("field_key", fieldKey)
     .maybeSingle();
   if (!def) return { ok: false, message: "Campo não encontrado." };
-  if ((def.data_type as string) === "calculado") {
+  if (
+    (def.data_type as string) === "calculado" ||
+    (def.data_type as string) === "calculado_agg"
+  ) {
     return { ok: false, message: "Campo calculado não é editável." };
   }
   const editable = ((def.editable_by_roles as string[]) ?? []).some((r) =>

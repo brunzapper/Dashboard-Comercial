@@ -14,6 +14,7 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
 import type {
+  CalcWidgetResult,
   DashboardSettings,
   FieldFilterOptions,
   Widget,
@@ -106,7 +107,7 @@ export function DashboardClient({
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
   entityListById: Record<string, EntityListRow[]>;
-  calcById: Record<string, number | null>;
+  calcById: Record<string, CalcWidgetResult>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];

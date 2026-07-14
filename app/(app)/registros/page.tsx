@@ -115,6 +115,9 @@ export default async function RegistrosPage({
   // restritas na camada de app para não vazar valores ao gestor. Admin vê tudo.
   const fields = allFields.filter(
     (f) =>
+      // 'calculado_agg' não tem valor por registro (é métrica de dashboard) —
+      // nunca vira coluna de Registros.
+      f.data_type !== "calculado_agg" &&
       fieldAppliesToSource(f.applies_to, fonte) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
