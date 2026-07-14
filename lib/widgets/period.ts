@@ -9,6 +9,7 @@
 // default). Ao aplicar aos filtros de um widget, substitui os filtros de data
 // do próprio widget no mesmo campo.
 import type { WidgetFilter } from "./types";
+import type { Correspondence } from "@/lib/correspondences";
 import {
   SOURCE_KEYS,
   SOURCE_RECORD_TYPE,
@@ -178,6 +179,26 @@ export interface PeriodBetweenValue {
   from: string | null;
   to: string | null; // já com o limite superior inclusivo do dia (…T23:59:59)
   byType: Record<string, string>; // record_type → coluna de data
+}
+
+/**
+ * Resolve um campo de período para o ref CONCRETO de uma fonte:
+ * 'unified:<k>' → field_ref do membro cujo record_type é o da fonte (null se a
+ * correspondência não tem membro para ela); demais campos voltam como estão.
+ * O RPC/modo lista só entendem coluna do núcleo ou custom:<k> no `@period`,
+ * então o unificado precisa ser desdobrado por fonte ANTES de chegar lá.
+ */
+export function resolveUnifiedPeriodField(
+  field: string,
+  source: SourceKey,
+  correspondences: Correspondence[]
+): string | null {
+  if (!field.startsWith("unified:")) return field;
+  const key = field.slice("unified:".length);
+  const member = correspondences
+    .find((c) => c.key === key)
+    ?.members.find((m) => m.record_type === SOURCE_RECORD_TYPE[source]);
+  return member?.field_ref || null;
 }
 
 /** Coluna de data que uma fonte usa no período (override por fonte → primário). */

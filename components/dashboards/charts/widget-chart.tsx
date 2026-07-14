@@ -689,6 +689,10 @@ function AppearanceTable({
     ? sortRows(data.rows, t.sort, (r) => t.rowColors?.[rowKey(r)]?.fill)
     : applyManualOrder(data.rows, t.rowOrder, rowKey);
 
+  // Sem colunas (dados vazios/erro engolido) ou sem linhas: estado vazio, como
+  // nos gráficos (guard de `rows`) e no RecordListTable — nunca uma tabela nua.
+  if (allCols.length === 0 || rows.length === 0) return <EmptyState />;
+
   const distinctRowFills = distinctFills(
     rows.map((r) => t.rowColors?.[rowKey(r)]?.fill)
   );

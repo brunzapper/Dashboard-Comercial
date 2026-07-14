@@ -67,7 +67,13 @@ export function PeriodFilter({
   periodDefaultFieldByTab?: Record<string, string>;
 }) {
   const sp = useSearchParams();
-  const dateFields = available.filter((f) => f.isDate);
+  // Campos elegíveis como coluna de período: exclui sintéticos (displayOnly,
+  // ex.: "Data atual" — não existe no banco) e `match:` (subconsulta do registro
+  // casado — o RPC não a aceita como coluna do `@period`). `unified:` fica: o
+  // servidor o resolve no membro concreto de cada fonte.
+  const dateFields = available.filter(
+    (f) => f.isDate && !f.displayOnly && !f.field.startsWith("match:")
+  );
 
   // Escopo e "bucket" ativo: no modo por aba a barra opera sobre a aba ativa
   // (chaves de URL namespadas); no modo global, sobre o bucket único "".

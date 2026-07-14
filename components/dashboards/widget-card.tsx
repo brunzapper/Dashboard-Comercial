@@ -347,6 +347,20 @@ export function WidgetCard({
               available={available}
               options={filterOptions}
             />
+          ) : data.error ? (
+            // Erro ao computar o widget no servidor (WidgetData.error): mostra
+            // a mensagem em vez de uma tabela/gráfico silenciosamente em branco.
+            <div className="flex h-full flex-col items-center justify-center gap-1 p-2 text-center">
+              <span className="text-destructive text-sm font-medium">
+                Não foi possível carregar este widget.
+              </span>
+              <span
+                className="text-muted-foreground max-w-full truncate text-xs"
+                title={data.error}
+              >
+                {data.error}
+              </span>
+            </div>
           ) : isEntityList ? (
             <EntityListTable
               rows={entityList}

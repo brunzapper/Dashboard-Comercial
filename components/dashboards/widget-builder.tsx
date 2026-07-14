@@ -354,8 +354,12 @@ export function WidgetBuilder({
 
   // Config do widget de filtro de período (visual_type 'filtro'). Exclui campos
   // sintéticos (displayOnly, ex.: "Data atual"): não existem no banco, então não
-  // podem ser campo de filtro de período (que vai para o RPC).
-  const dateFields = available.filter((f) => f.isDate && !f.displayOnly);
+  // podem ser campo de filtro de período (que vai para o RPC). Exclui também
+  // `match:` (subconsulta do registro casado — o RPC não a aceita como coluna
+  // do `@period`); `unified:` fica, resolvido por fonte no servidor.
+  const dateFields = available.filter(
+    (f) => f.isDate && !f.displayOnly && !f.field.startsWith("match:")
+  );
   const [filterField, setFilterField] = useState(
     widget?.settings?.field ?? DEFAULT_PERIOD_FIELD
   );
