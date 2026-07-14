@@ -16,19 +16,10 @@ import {
   type Formula,
 } from "@/lib/records/formulas";
 import type { SourceKey } from "@/lib/sources";
+import { parseAggRef } from "./calc-metrics";
 import { aggregate, resolveFilters, sourceFilters } from "./engine";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
-import type { Aggregation, WidgetFilter } from "./types";
-
-// agg:<sum|avg|count>:<field>. field pode conter ':' (ex.: custom:forecast); por
-// isso o tipo de agregação vem PRIMEIRO e o field é o resto.
-function parseAggRef(ref: string): { agg: Aggregation; field: string } {
-  const rest = ref.slice("agg:".length);
-  const idx = rest.indexOf(":");
-  const agg = (idx === -1 ? rest : rest.slice(0, idx)) as Aggregation;
-  const field = idx === -1 ? "*" : rest.slice(idx + 1);
-  return { agg, field };
-}
+import type { WidgetFilter } from "./types";
 
 export interface CalcInput {
   formula?: Formula | null;

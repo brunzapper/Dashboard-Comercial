@@ -189,8 +189,10 @@ export async function updateRecord(
   // force_sync_write_back — "sempre editáveis nos Registros" para quem tem a permissão).
   let customChanged = false;
   for (const def of defs ?? []) {
-    // Calculados são derivados — nunca editados manualmente.
+    // Calculados são derivados — nunca editados manualmente. Os de agregados
+    // nem sequer têm valor por registro.
     if ((def.data_type as DataType) === "calculado") continue;
+    if ((def.data_type as DataType) === "calculado_agg") continue;
     const isBitrixSync =
       def.source_system === "bitrix" && Boolean(def.source_field_id);
     const roleAllows = ((def.editable_by_roles as string[]) ?? []).some((r) =>

@@ -44,6 +44,13 @@ export interface AvailableField {
   // banco, então NÃO pode virar dimensão/filtro do RPC. Serve como coluna do
   // modo lista e operando de fórmula. O builder filtra estes de dimensão/filtro.
   displayOnly?: boolean;
+  // Campo 'calculado_agg' (14/07/2026): métrica calculada de AGREGADOS. Só pode
+  // ser métrica (fórmula avaliada por grupo — ver lib/widgets/calc-metrics.ts);
+  // nunca dimensão/filtro/coluna de registro (não há valor por registro).
+  // isNumeric fica false de propósito: fora de operandos de outras fórmulas
+  // (sem aninhamento) e da lista genérica de métricas — o builder o adiciona
+  // explicitamente ao seletor de métricas.
+  aggCalc?: boolean;
 }
 
 // Campo sintético "Data atual" (hoje em Brasília). Resolvido no cliente
@@ -96,16 +103,28 @@ export function buildAvailableFields(
     editableCapable: isEditableCoreColumn(f.field) || isEditableRelation(f.field),
     writable: isEditableCoreColumn(f.field) || isWriteBackRelation(f.field),
   }));
-  const custom = customFields.map((f) => ({
-    field: `custom:${f.field_key}`,
-    label: f.label,
-    isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
-    isDate: f.data_type === "data",
-    isMoney: resolveFieldMoney(f).isMoney,
-    editableCapable: f.data_type !== "calculado",
-    // Campo de Sync do Bitrix (custom com source_field_id) → grava de volta.
-    writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
-  }));
+  const custom = customFields.map((f) =>
+    f.data_type === "calculado_agg"
+      ? {
+          field: `custom:${f.field_key}`,
+          label: f.label,
+          isNumeric: false,
+          isDate: false,
+          isMoney: false,
+          editableCapable: false,
+          aggCalc: true,
+        }
+      : {
+          field: `custom:${f.field_key}`,
+          label: f.label,
+          isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
+          isDate: f.data_type === "data",
+          isMoney: resolveFieldMoney(f).isMoney,
+          editableCapable: f.data_type !== "calculado",
+          // Campo de Sync do Bitrix (custom com source_field_id) → grava de volta.
+          writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
+        }
+  );
   const unified = correspondences.map((c) => ({
     field: `unified:${c.key}`,
     label: `↔ ${c.label}`,
@@ -152,6 +171,8 @@ function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
       });
     }
     for (const f of customFields) {
+      // 'calculado_agg' não tem valor por registro → nada a puxar do casado.
+      if (f.data_type === "calculado_agg") continue;
       if (!fieldAppliesToSource(f.applies_to, src)) continue;
       out.push({
         field: `match:${src}:custom:${f.field_key}`,

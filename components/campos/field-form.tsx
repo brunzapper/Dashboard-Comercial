@@ -1,7 +1,10 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 14/07/2026
 // Formulário de criação/edição de um campo personalizado (field_definition).
 // v1.1 (09/07/2026): Fase 7 — tipo "Calculado" abre o construtor de fórmula e o
 //   toggle "Exibir nos seletores" (show_in_builder).
+// v1.2 (14/07/2026): tipo "Calculado (totais)" (calculado_agg) — fórmula sobre
+//   AGREGAÇÕES (Σ/Média/Contagem, catálogo aggRefs) avaliada por grupo nos
+//   widgets; formato número | moeda FIXA (sem "herdar" — não há registro).
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
@@ -67,6 +70,7 @@ export function FieldForm({
   field,
   numericRefs,
   allRefs,
+  aggRefs,
   currencyOptions,
   onDone,
 }: {
@@ -75,6 +79,9 @@ export function FieldForm({
   // Catálogo completo p/ o editor de TEXTO (números + datas + texto/seleção/
   // booleano p/ condicionais). Ausente → cai no numericRefs.
   allRefs?: RefOption[];
+  // Operandos de AGREGAÇÃO (agg:*) p/ o tipo "Calculado (totais)". Ausente →
+  // o tipo ainda aparece, mas sem operandos (caller deve passar).
+  aggRefs?: RefOption[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
   currencyOptions?: ComboboxOption[];
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
@@ -126,6 +133,18 @@ export function FieldForm({
   const textRefs = (allRefs ?? numericRefs).filter(
     (r) => r.ref !== `custom:${field?.field_key}`
   );
+  // Operandos de agregação (calculado_agg): Σ/Média do próprio campo fora.
+  const aggOperands = (aggRefs ?? []).filter(
+    (r) => !r.ref.endsWith(`:custom:${field?.field_key}`)
+  );
+  // Formato do resultado do calculado_agg: número ou moeda FIXA (sem "herdar").
+  const aggResultOptions: ComboboxOption[] = [
+    { value: "number", label: "Número (sem moeda)" },
+    ...currencyChoices.map((o) => ({
+      value: `fixed:${o.value}`,
+      label: `Moeda — ${o.label}`,
+    })),
+  ];
   // Editor da fórmula: construtor por botões (fórmulas simples) ou texto estilo
   // Sheets (obrigatório p/ SE/E/OU — o construtor não representa funções).
   const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
@@ -200,6 +219,76 @@ export function FieldForm({
             Moeda em que os valores deste campo são exibidos. Habilite outras
             moedas em Configurações → Moedas.
           </p>
+        </div>
+      ) : null}
+
+      {dataType === "calculado_agg" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label>Fórmula (sobre os totais)</Label>
+          <input type="hidden" name="formula_mode" value={formulaMode} />
+          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
+            {(
+              [
+                ["builder", "Construtor"],
+                ["text", "Texto (funções)"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFormulaMode(k)}
+                className={cn(
+                  "rounded-sm px-2 py-1 text-xs",
+                  formulaMode === k
+                    ? "bg-background shadow-sm"
+                    : "text-muted-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {formulaMode === "builder" ? (
+            <FormulaBuilder refs={aggOperands} initial={field?.formula ?? null} />
+          ) : (
+            <FormulaTextEditor refs={aggOperands} initial={field?.formula ?? null} />
+          )}
+          <p className="text-muted-foreground text-xs">
+            Opere entre <strong>agregações</strong> (Σ soma, média e contagem
+            dos campos) e constantes — ex.: ticket médio ={" "}
+            <code>Σ MRR ÷ Contagem de registros</code>. O resultado é calculado
+            sobre os <strong>totais do recorte</strong> (filtros/período do
+            widget) e recalculado em cada grupo, subtotal e Total geral — não
+            por registro.
+          </p>
+          <Label className="mt-1">Formato do resultado</Label>
+          <Combobox
+            options={aggResultOptions}
+            value={calcCurrency === "inherit" ? "number" : calcCurrency}
+            onValueChange={setCalcCurrency}
+            searchable={false}
+            className="w-full"
+            aria-label="Formato do resultado"
+          />
+          <input
+            type="hidden"
+            name="currency_mode"
+            value={calcMode === "inherit" ? "" : calcMode}
+          />
+          <input type="hidden" name="currency_code" value={calcCode} />
+          <p className="text-muted-foreground text-xs">
+            A moeda é só de exibição: os totais somam os valores como estão no
+            banco, sem conversão entre moedas.
+          </p>
+          <label className="mt-1 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="allow_negative"
+              defaultChecked={field?.allow_negative ?? true}
+              className="size-4 accent-primary"
+            />
+            Aceitar número negativo (desmarcado: resultado negativo vira 0)
+          </label>
         </div>
       ) : null}
 

@@ -30,12 +30,13 @@ import {
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
+  CalcWidgetResult,
   FieldFilterOptions,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
-import type { CurrencyRates } from "@/lib/widgets/currency";
+import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
@@ -87,7 +88,7 @@ export function WidgetCard({
   data: WidgetData;
   recordList: RecordRow[];
   entityList: EntityListRow[];
-  calcValue: number | null;
+  calcValue: CalcWidgetResult | null;
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
@@ -381,11 +382,13 @@ export function WidgetCard({
           ) : isCalc ? (
             <div className="flex h-full flex-col justify-center p-1">
               <span className="text-3xl font-semibold tabular-nums">
-                {calcValue == null
+                {calcValue?.value == null
                   ? "—"
-                  : calcValue.toLocaleString("pt-BR", {
-                      maximumFractionDigits: 2,
-                    })}
+                  : calcValue.currency
+                    ? formatMoney(calcValue.value, calcValue.currency)
+                    : calcValue.value.toLocaleString("pt-BR", {
+                        maximumFractionDigits: 2,
+                      })}
               </span>
             </div>
           ) : (
