@@ -38,6 +38,7 @@ import type {
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
+import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   createWidget,
@@ -189,6 +190,7 @@ export function DashboardGrid({
   conversionPeriodById = {},
   editMode,
   filterOptionsById,
+  quickFiltersById,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -216,6 +218,7 @@ export function DashboardGrid({
   conversionPeriodById?: Record<string, { year: number; quarter: number }>;
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
+  quickFiltersById?: Record<string, WidgetQuickFilters>;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -650,6 +653,7 @@ export function DashboardGrid({
                     canManageFields={canManageFields}
                     editMode={editMode}
                     filterOptions={filterOptionsById?.[w.id]}
+                    quickFilters={quickFiltersById?.[w.id]}
                     autoSize={w.settings?.autoSize}
                     cellW={cellW}
                     rowH={ROW_H}

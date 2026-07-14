@@ -37,6 +37,7 @@ import {
 import type { DashboardSettings } from "@/lib/widgets/types";
 import {
   saveLastPeriod,
+  syncGlobalPeriodQuickFilters,
   updateDashboardSettings,
 } from "@/app/(app)/dashboards/actions";
 import { PeriodControls } from "./period-controls";
@@ -51,6 +52,7 @@ export function PeriodFilter({
   periodBar,
   periodScope,
   activeTabId,
+  firstTabId = "",
   hasTabs,
   periodDefaultsByTab,
   periodDefaultFieldByTab,
@@ -62,6 +64,9 @@ export function PeriodFilter({
   periodBar?: PeriodBar;
   periodScope?: PeriodScope;
   activeTabId: string;
+  // Id da 1ª aba (widgets sem etiqueta pertencem a ela) — usado pelo sync dos
+  // filtros rápidos no escopo por aba.
+  firstTabId?: string;
   hasTabs: boolean;
   periodDefaultsByTab?: Record<string, PeriodSelection>;
   periodDefaultFieldByTab?: Record<string, string>;
@@ -102,6 +107,17 @@ export function PeriodFilter({
           // Salva o último período consultado deste usuário/dashboard (por aba
           // no modo "tab"; global caso contrário).
           void saveLastPeriod(dashboardId, sel, scope === "tab" && bucket ? bucket : undefined);
+          // Sync UNIDIRECIONAL barra → filtros rápidos de período dos widgets
+          // com o MESMO campo (persistido p/ todos). O inverso não acontece:
+          // mudar o filtro do widget nunca altera a barra.
+          void syncGlobalPeriodQuickFilters(
+            dashboardId,
+            sel.campo || defaultField,
+            { preset: sel.periodo ?? "", de: sel.de ?? "", ate: sel.ate ?? "" },
+            scope === "tab" && bucket
+              ? { tabId: bucket, isFirst: bucket === firstTabId }
+              : undefined
+          );
         }}
         fieldControl={{
           paramKey: keys.campo,
