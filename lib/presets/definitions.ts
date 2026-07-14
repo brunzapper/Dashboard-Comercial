@@ -22,6 +22,8 @@ export interface PresetField {
   visible_to_roles: string[];
   editable_by_roles: string[];
   is_local: boolean;
+  // Campos 'moeda': 'inherit' = moeda do registro (padrão do sistema).
+  currency_mode?: string;
 }
 
 export interface PresetWidget {
@@ -51,6 +53,7 @@ export const PRESET_FIELDS: PresetField[] = [
     visible_to_roles: ["admin", "gestor", "vendedor"],
     editable_by_roles: ["admin", "gestor", "vendedor"],
     is_local: true,
+    currency_mode: "inherit",
   },
   {
     field_key: "implementacao",
@@ -60,6 +63,7 @@ export const PRESET_FIELDS: PresetField[] = [
     visible_to_roles: ["admin", "gestor", "vendedor"],
     editable_by_roles: ["admin", "gestor"],
     is_local: true,
+    currency_mode: "inherit",
   },
   {
     field_key: "potencial",

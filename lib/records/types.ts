@@ -52,9 +52,10 @@ export interface FieldDefinition {
   formula?: Formula | null;
   // Campos calculados (13/07/2026): quando false, resultado negativo vira 0.
   allow_negative?: boolean;
-  // Moeda por campo (12/07/2026): 'moeda' guarda a moeda fixa em currency_code;
-  // 'calculado' usa currency_mode ('inherit' = moeda do registro | 'fixed' =
-  // currency_code) — ausente/null = número puro (não é moeda).
+  // Moeda por campo (12/07/2026): 'moeda' e 'calculado' usam currency_mode
+  // ('inherit' = moeda do registro | 'fixed' = currency_code). Em 'moeda',
+  // 'inherit' é o padrão e mode null (legado) equivale a fixo em currency_code;
+  // em 'calculado', ausente/null = número puro (não é moeda).
   currency_code?: string | null;
   currency_mode?: "inherit" | "fixed" | null;
   // Fase 8: a quais record_type (fonte) a coluna pertence. Vazio/ausente = todas.

@@ -529,7 +529,8 @@ export interface FormulaCurrencyContext {
 // Insumos de câmbio compartilhados: taxas + moeda de cada campo 'moeda'.
 export interface CurrencyMaterials {
   rates: CurrencyRates;
-  moedaCurrency: Record<string, string>; // 'custom:<key>' → ISO
+  moedaCurrency: Record<string, string>; // fixos: 'custom:<key>' → ISO
+  inheritMoedaRefs: string[]; // 'custom:<key>' que herdam a moeda do registro
 }
 
 /** True quando algum calc-field é monetário (precisa de conversão). */
@@ -546,15 +547,19 @@ export async function loadCurrencyMaterials(
   const rates = await loadCurrencyRates(db);
   const { data } = await db
     .from("field_definitions")
-    .select("field_key, currency_code")
+    .select("field_key, currency_code, currency_mode")
     .eq("data_type", "moeda");
   const moedaCurrency: Record<string, string> = {};
+  const inheritMoedaRefs: string[] = [];
   for (const f of data ?? []) {
-    moedaCurrency[`custom:${f.field_key as string}`] = resolveCurrencyCode(
-      f.currency_code as string | null
-    );
+    const ref = `custom:${f.field_key as string}`;
+    if ((f.currency_mode as string | null) === "inherit") {
+      inheritMoedaRefs.push(ref);
+    } else {
+      moedaCurrency[ref] = resolveCurrencyCode(f.currency_code as string | null);
+    }
   }
-  return { rates, moedaCurrency };
+  return { rates, moedaCurrency, inheritMoedaRefs };
 }
 
 /** Monta o contexto de conversão de um registro a partir dos insumos. */
@@ -576,7 +581,12 @@ export function buildRecordCurrencyContext(
     year,
     quarter,
     rates: mats.rates,
-    operandCurrency: { value: recCur, mrr: recCur, ...mats.moedaCurrency },
+    operandCurrency: {
+      value: recCur,
+      mrr: recCur,
+      ...mats.moedaCurrency,
+      ...Object.fromEntries(mats.inheritMoedaRefs.map((r) => [r, recCur])),
+    },
   };
 }
 

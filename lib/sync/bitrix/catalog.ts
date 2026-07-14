@@ -179,9 +179,11 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
 
 /**
  * Cataloga (upsert) os campos de negócios e leads em field_definitions.
- * Insere ausentes com o show_in_builder correto; nos existentes atualiza APENAS
+ * Insere ausentes com o show_in_builder correto (campos money nascem com
+ * currency_mode='inherit' — moeda do registro); nos existentes atualiza APENAS
  * label/options/data_type/source_*, preservando os toggles do admin
- * (show_in_builder, visible_to_roles, editable_by_roles, formula, sort_order).
+ * (show_in_builder, visible_to_roles, editable_by_roles, formula, sort_order,
+ * currency_mode/currency_code).
  */
 export async function syncFieldCatalog(
   db: SupabaseClient,
@@ -207,7 +209,7 @@ export async function syncFieldCatalog(
   const { data: existing } = await db
     .from("field_definitions")
     .select(
-      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back"
+      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back, currency_mode, currency_code"
     )
     .in("field_key", keys);
   const existingByKey = new Map(
@@ -227,6 +229,8 @@ export async function syncFieldCatalog(
           formula?: unknown;
           sort_order?: number;
           write_back?: boolean;
+          currency_mode?: string | null;
+          currency_code?: string | null;
         }
       | undefined;
     return {
@@ -244,6 +248,14 @@ export async function syncFieldCatalog(
       formula: ex ? ex.formula ?? null : null,
       sort_order: ex ? ex.sort_order ?? 0 : 0,
       write_back: ex ? ex.write_back ?? false : false,
+      // Moeda: campo money novo nasce herdando a moeda do registro; nos
+      // existentes preserva a configuração do admin (inherit/fixed).
+      currency_mode: ex
+        ? ex.currency_mode ?? null
+        : r.data_type === "moeda"
+          ? "inherit"
+          : null,
+      currency_code: ex ? ex.currency_code ?? null : null,
     };
   });
 

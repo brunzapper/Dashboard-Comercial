@@ -456,6 +456,8 @@ export async function generatePresets(): Promise<ActionState> {
         editable_by_roles: f.editable_by_roles,
         is_local: f.is_local,
         sort_order: 100 + i,
+        currency_mode: f.currency_mode ?? null,
+        currency_code: null,
       }))
     );
   }

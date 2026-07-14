@@ -1,10 +1,12 @@
-// Versão: 1.2 | Data: 14/07/2026
+// Versão: 1.3 | Data: 14/07/2026
 // Formulário de criação/edição de um campo personalizado (field_definition).
 // v1.1 (09/07/2026): Fase 7 — tipo "Calculado" abre o construtor de fórmula e o
 //   toggle "Exibir nos seletores" (show_in_builder).
 // v1.2 (14/07/2026): tipo "Calculado (totais)" (calculado_agg) — fórmula sobre
 //   AGREGAÇÕES (Σ/Média/Contagem, catálogo aggRefs) avaliada por grupo nos
 //   widgets; formato número | moeda FIXA (sem "herdar" — não há registro).
+// v1.3 (14/07/2026): campo 'moeda' ganha seletor de modo — "Moeda do registro"
+//   (inherit, padrão) ou moeda fixa (fixed:<code>).
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
@@ -97,10 +99,24 @@ export function FieldForm({
     currencyOptions && currencyOptions.length > 0
       ? currencyOptions
       : DEFAULT_CURRENCY_OPTIONS;
-  // Moeda fixa de um campo 'moeda'.
-  const [currencyCode, setCurrencyCode] = useState(
-    field?.currency_code ?? "BRL"
+  // Moeda de um campo 'moeda': herdada do registro (padrão) ou fixed:<code>.
+  // Campo legado sem migração (mode null + code) continua exibindo o fixo.
+  const [moedaCurrency, setMoedaCurrency] = useState(
+    !field || field.currency_mode === "inherit"
+      ? "inherit"
+      : `fixed:${field.currency_code ?? "BRL"}`
   );
+  const moedaMode = moedaCurrency === "inherit" ? "inherit" : "fixed";
+  const moedaCode = moedaCurrency.startsWith("fixed:")
+    ? moedaCurrency.slice("fixed:".length)
+    : "";
+  const moedaOptions: ComboboxOption[] = [
+    { value: "inherit", label: "Moeda do registro (automática)" },
+    ...currencyChoices.map((o) => ({
+      value: `fixed:${o.value}`,
+      label: `Moeda fixa — ${o.label}`,
+    })),
+  ];
   // "Formato do resultado" de um campo 'calculado': número | herdar | fixed:<code>.
   const [calcCurrency, setCalcCurrency] = useState(
     field?.currency_mode === "inherit"
@@ -209,17 +225,20 @@ export function FieldForm({
         <div className="flex flex-col gap-1.5">
           <Label>Moeda</Label>
           <Combobox
-            name="currency_code"
-            options={currencyChoices}
-            value={currencyCode}
-            onValueChange={setCurrencyCode}
+            options={moedaOptions}
+            value={moedaCurrency}
+            onValueChange={setMoedaCurrency}
             searchable={false}
             className="w-full"
             aria-label="Moeda"
           />
+          <input type="hidden" name="currency_mode" value={moedaMode} />
+          <input type="hidden" name="currency_code" value={moedaCode} />
           <p className="text-muted-foreground text-xs">
-            Moeda em que os valores deste campo são exibidos. Habilite outras
-            moedas em Configurações → Moedas.
+            Moeda do registro: o valor segue a coluna Moeda de cada registro
+            (registros sem moeda contam como Real). Moeda fixa: todos os valores
+            deste campo são exibidos nessa moeda. Habilite outras moedas em
+            Configurações → Moedas.
           </p>
         </div>
       ) : null}
