@@ -246,13 +246,20 @@ export async function updateRecord(
   if (formulaDefs.length > 0) {
     const effLeadTime =
       "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days;
+    // Valor efetivo de uma coluna do núcleo (edição desta chamada > registro).
+    const eff = (col: string): unknown =>
+      col in updates
+        ? updates[col]
+        : ((existing as unknown as Record<string, unknown>)[col] ?? null);
     // Calc-fields monetários convertem os operandos p/ a moeda de destino.
+    // Usa a moeda/datas EFETIVAS: se esta edição troca a Moeda do registro, o
+    // carimbo (<key>__cur) já sai na moeda nova na mesma gravação.
     const conv = anyMoneyDef(formulaDefs)
       ? buildRecordCurrencyContext(
           {
-            currency: existing.currency,
+            currency: (eff("currency") as string | null) ?? null,
             closed_at: existing.closed_at,
-            opened_at: existing.opened_at,
+            opened_at: (eff("opened_at") as string | null) ?? null,
             source_created_at: existing.source_created_at,
           },
           await loadCurrencyMaterials(supabase)
@@ -263,17 +270,12 @@ export async function updateRecord(
     const dateCtx = buildDateContext(
       {
         closed_at: existing.closed_at,
-        opened_at: existing.opened_at,
+        opened_at: (eff("opened_at") as string | null) ?? null,
         source_created_at: existing.source_created_at,
       },
       custom,
       await loadCustomDateKeys(supabase)
     );
-    // Valor efetivo de uma coluna do núcleo (edição desta chamada > registro).
-    const eff = (col: string): unknown =>
-      col in updates
-        ? updates[col]
-        : ((existing as unknown as Record<string, unknown>)[col] ?? null);
     const calc = computeFormulaFields(
       {
         value: numOrNull(eff("value") ?? existing.value),
