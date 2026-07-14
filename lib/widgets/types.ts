@@ -511,4 +511,7 @@ export interface WidgetData {
     };
   }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
+  // Erro ao computar o widget (RPC/consulta): rows/dimensions/metrics vêm
+  // vazios e o card exibe o estado de erro em vez de ficar em branco.
+  error?: string;
 }

@@ -60,9 +60,18 @@ export async function runRecordList(
       if (!v?.byType) continue;
       const groups: string[] = [];
       for (const [rt, dateCol] of Object.entries(v.byType)) {
+        // Coluna de data da fonte: núcleo ou custom (acesso JSON). Os valores
+        // de data em custom_fields são ISO → a comparação textual do PostgREST
+        // ordena certo. Ref desconhecido → não filtra por data esta fonte
+        // (defensivo; o servidor já resolve unified:/match: antes de chegar aqui).
+        const col = dateCol.startsWith("custom:")
+          ? `custom_fields->>${dateCol.slice(7)}`
+          : CORE_COLS.has(dateCol)
+            ? dateCol
+            : null;
         const conds = [`record_type.eq.${rt}`];
-        if (v.from) conds.push(`${dateCol}.gte.${v.from}`);
-        if (v.to) conds.push(`${dateCol}.lte.${v.to}`);
+        if (col && v.from) conds.push(`${col}.gte.${v.from}`);
+        if (col && v.to) conds.push(`${col}.lte.${v.to}`);
         groups.push(`and(${conds.join(",")})`);
       }
       if (groups.length > 0) q = q.or(groups.join(","));
