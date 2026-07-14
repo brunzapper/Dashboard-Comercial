@@ -10,6 +10,10 @@ import { createClient } from "@/lib/supabase/server";
 import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
+import {
+  QF_ROW_KEY,
+  type QuickFilterValue,
+} from "@/lib/widgets/quick-filters";
 import type {
   DashboardSettings,
   Dimension,
@@ -314,6 +318,115 @@ export async function saveTableCell(
   return { ok: true };
 }
 
+// ---------------- Filtros rápidos (valores compartilhados) ----------------
+
+// Grava a SELEÇÃO de um filtro rápido de widget. Os valores vivem em
+// dashboard_table_cells (row_key '__qf__', col_key = id do entry) de propósito:
+// a RLS dessa tabela permite escrita por QUALQUER visualizador do dashboard
+// (0026), então a seleção persiste entre usuários e reloads — a regra pedida.
+// value null/vazio apaga a célula (volta ao "sem filtro").
+export async function saveQuickFilterValue(
+  dashboardId: string,
+  widgetId: string,
+  entryId: string,
+  value: QuickFilterValue | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+
+  const empty =
+    value == null ||
+    (value.kind === "options" && value.values.length === 0) ||
+    (value.kind === "period" && !value.preset && !value.de && !value.ate);
+  if (empty) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", QF_ROW_KEY)
+      .eq("col_key", entryId);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: QF_ROW_KEY,
+        col_key: entryId,
+        value,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// Sincronização UNIDIRECIONAL barra global → filtros rápidos de período: quando
+// a barra de período navega, os filtros rápidos de data no formato padrão cujo
+// campo é o MESMO da barra recebem a mesma seleção (persistida p/ todos). O
+// caminho inverso não existe — mudar o filtro do widget nunca toca a barra.
+// `tab` (escopo por aba): restringe aos widgets da aba ativa; widgets sem
+// etiqueta pertencem à primeira aba (isFirst).
+export async function syncGlobalPeriodQuickFilters(
+  dashboardId: string,
+  campo: string,
+  sel: { preset?: string; de?: string; ate?: string },
+  tab?: { tabId: string; isFirst: boolean }
+): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session || !campo) return;
+  const supabase = await createClient();
+
+  const { data: widgetsData } = await supabase
+    .from("widgets")
+    .select("id, settings")
+    .eq("dashboard_id", dashboardId);
+
+  const value: QuickFilterValue = {
+    kind: "period",
+    preset: sel.preset ?? "",
+    de: sel.de ?? "",
+    ate: sel.ate ?? "",
+  };
+  const rows: {
+    widget_id: string;
+    row_key: string;
+    col_key: string;
+    value: QuickFilterValue;
+    updated_by: string;
+  }[] = [];
+  for (const w of (widgetsData ?? []) as Pick<Widget, "id" | "settings">[]) {
+    if (tab) {
+      const wTab = w.settings?.tab;
+      const inTab = wTab ? wTab === tab.tabId : tab.isFirst;
+      if (!inTab) continue;
+    }
+    for (const entry of w.settings?.quickFilters ?? []) {
+      // Só datas no formato padrão (dropdown de período) do mesmo campo da
+      // barra. Formatos com transform não são espelho do período geral.
+      if (entry.transform && entry.transform !== "none") continue;
+      if (entry.field !== campo) continue;
+      rows.push({
+        widget_id: w.id,
+        row_key: QF_ROW_KEY,
+        col_key: entry.id,
+        value,
+        updated_by: session.user.id,
+      });
+    }
+  }
+  if (rows.length === 0) return;
+  await supabase
+    .from("dashboard_table_cells")
+    .upsert(rows, { onConflict: "widget_id,row_key,col_key" });
+  // Revalida ao FINAL: cobre a corrida com o router.replace da barra (que pode
+  // ter recomputado antes do upsert terminar).
+  revalidatePath(`/dashboards/${dashboardId}`);
+}
+
 // Coage o valor cru (string do input) para o tipo do campo antes de gravar em
 // entity_custom_values. Espelha a coerção de lib/records/actions.ts (numero/moeda,
 // booleano, e texto/data/seleção como string). '' → null (apaga a célula).
@@ -568,7 +681,9 @@ export async function captureDashboardSnapshot(
     dash.name as string,
     (dash.settings ?? {}) as DashboardSettings,
     widgets,
-    cellsData ?? []
+    // Valores de filtros rápidos ('__qf__') ficam FORA do histórico: mudar um
+    // dropdown não é edição de dashboard (e Desfazer não deve revertê-lo).
+    (cellsData ?? []).filter((c) => c.row_key !== QF_ROW_KEY)
   );
 }
 
@@ -621,11 +736,14 @@ export async function restoreDashboardSnapshot(
 
   // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
   // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
+  // Os valores de filtros rápidos ('__qf__') ficam de fora do snapshot E do
+  // delete — Desfazer/Refazer não deve apagar a seleção compartilhada.
   if (snapIds.length > 0) {
     const { error: delErr } = await supabase
       .from("dashboard_table_cells")
       .delete()
-      .in("widget_id", snapIds);
+      .in("widget_id", snapIds)
+      .neq("row_key", QF_ROW_KEY);
     if (delErr) return { ok: false, message: delErr.message };
   }
   if (snap.cells.length > 0) {

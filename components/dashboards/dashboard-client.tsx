@@ -22,6 +22,7 @@ import type {
 } from "@/lib/widgets/types";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
+import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
@@ -99,6 +100,7 @@ export function DashboardClient({
   periodDefaultsByTab,
   periodDefaultFieldByTab,
   filterOptionsById,
+  quickFiltersById,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -131,6 +133,7 @@ export function DashboardClient({
   periodDefaultsByTab?: Record<string, PeriodSelection>;
   periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
+  quickFiltersById?: Record<string, WidgetQuickFilters>;
 }) {
   const [editMode, setEditMode] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -298,6 +301,7 @@ export function DashboardClient({
             periodBar={periodBar}
             periodScope={periodScope}
             activeTabId={activeTabId}
+            firstTabId={firstTabId}
             hasTabs={tabs.length > 0}
             periodDefaultsByTab={periodDefaultsByTab}
             periodDefaultFieldByTab={periodDefaultFieldByTab}
@@ -343,6 +347,7 @@ export function DashboardClient({
             conversionPeriodById={conversionPeriodById}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
+            quickFiltersById={quickFiltersById}
           />
         </div>
       </DashboardPendingProvider>

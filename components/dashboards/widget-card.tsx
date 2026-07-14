@@ -35,6 +35,7 @@ import type {
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
+import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
@@ -48,6 +49,7 @@ import {
 import { EntityListTable } from "./charts/entity-list-table";
 import { PeriodControls } from "./period-controls";
 import { TableFilterBar } from "./table-filter-bar";
+import { QuickFiltersBar } from "./quick-filters-bar";
 import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
@@ -77,6 +79,7 @@ export function WidgetCard({
   conversionPeriod,
   editMode,
   filterOptions,
+  quickFilters,
   autoSize,
   cellW = 0,
   rowH = 0,
@@ -110,6 +113,9 @@ export function WidgetCard({
   canManageFields?: boolean;
   editMode: boolean;
   filterOptions?: FieldFilterOptions;
+  // Filtros rápidos do widget (config + valores efetivos + opções), montados no
+  // servidor (page.tsx). Presente só quando o widget configura quickFilters.
+  quickFilters?: WidgetQuickFilters;
   // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
   // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
   // métricas de célula do grid (p/ converter px → unidades).
@@ -324,6 +330,16 @@ export function WidgetCard({
         {showTableBar ? (
           <TableFilterBar
             paramKey={`tf_${widget.id}`}
+            available={available}
+          />
+        ) : null}
+        {/* Filtros rápidos: lado a lado, abaixo da barra de busca (tabelas) ou
+            no topo do card (gráficos/KPI/calculado). */}
+        {quickFilters && quickFilters.entries.length > 0 ? (
+          <QuickFiltersBar
+            dashboardId={dashboardId}
+            widgetId={widget.id}
+            qf={quickFilters}
             available={available}
           />
         ) : null}

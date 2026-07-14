@@ -16,6 +16,12 @@ import {
   type DashboardPeriod,
   type PeriodBetweenValue,
 } from "./period";
+import {
+  BUCKET_FIELD_SENTINEL,
+  bucketFilterValue,
+  matchesBucketFilter,
+  type BucketFilterValue,
+} from "./quick-filters";
 import { SEARCH_FIELD_SEP } from "./view-filters";
 import type { WidgetConfig, WidgetFilter } from "./types";
 
@@ -83,9 +89,20 @@ export async function runRecordList(
   const unifiedMembersOf = (field: string) =>
     available.find((a) => a.field === field)?.unifiedMembers;
 
+  // Filtro rápido por bucket de data (`@bucket`, quick-filters): o PostgREST
+  // não sabe bucketizar, então esses filtros saem da consulta e são aplicados
+  // DEPOIS do fetch (pós-filtro em JS com a mesma chave canônica do RPC) —
+  // inclusive sobre match:%, que só existe após attachMatches.
+  const bucketFilters: BucketFilterValue[] = [];
+
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
   for (const f of filters as WidgetFilter[]) {
+    if (f.field === BUCKET_FIELD_SENTINEL) {
+      const bf = bucketFilterValue(f);
+      if (bf && bf.keys.length > 0) bucketFilters.push(bf);
+      continue;
+    }
     // Período por fonte: filtro sintético `@period` — cada record_type filtra
     // pela sua própria coluna de data. Vira um OR de grupos AND no PostgREST.
     if (f.field === PERIOD_FIELD_SENTINEL) {
@@ -189,6 +206,15 @@ export async function runRecordList(
     }
   }
 
+  // Pós-filtro dos buckets (AND entre filtros): roda após attachMatches para
+  // os campos match:% terem o registro casado resolvido.
+  const applyBucketFilters = (rs: RecordRow[]): RecordRow[] =>
+    bucketFilters.length === 0
+      ? rs
+      : rs.filter((r) =>
+          bucketFilters.every((bf) => matchesBucketFilter(r, bf, available))
+        );
+
   // Sem limite por padrão (o usuário pediu p/ remover o teto); só aplica quando
   // o widget define settings.limit explicitamente.
   const tq = q.order("source_created_at", { ascending: false, nullsFirst: false });
@@ -198,7 +224,7 @@ export async function runRecordList(
     if (error) throw new Error(error.message);
     const records = (data ?? []) as unknown as RecordRow[];
     await attachMatches(supabase, records);
-    return records;
+    return applyBucketFilters(records);
   }
 
   // Busca paginada p/ driblar o teto server-side do PostgREST ("Max Rows"), que
@@ -216,7 +242,7 @@ export async function runRecordList(
     from += chunk.length;
   }
   await attachMatches(supabase, all);
-  return all;
+  return applyBucketFilters(all);
 }
 
 // Preenche `__match` de cada registro (Fase 2): registro casado por fonte, para

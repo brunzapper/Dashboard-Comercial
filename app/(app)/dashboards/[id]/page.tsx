@@ -33,6 +33,8 @@ import {
 } from "@/lib/correspondences";
 import {
   DEFAULT_PERIOD_FIELD,
+  applyPeriodToFilters,
+  hasSelection,
   periodKeys,
   resolvePeriodSelection,
   resolveUnifiedPeriodField,
@@ -41,10 +43,24 @@ import {
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
+import {
+  QF_ROW_KEY,
+  bucketKeyFromRpcValue,
+  hasQuickValue,
+  isBucketEntry,
+  isPeriodEntry,
+  parseQuickFilterValue,
+  quickOptionsFilter,
+  staticBucketOptions,
+  type QuickFilterValue,
+  type WidgetQuickFilters,
+} from "@/lib/widgets/quick-filters";
+import { formatBucketLabel } from "@/lib/widgets/date-buckets";
 import type {
   CalcWidgetResult,
   DashboardSettings,
   FieldFilterOptions,
+  Transform,
   Widget,
   WidgetData,
   WidgetFilter,
@@ -286,14 +302,21 @@ export default async function DashboardPage({
   // 2) Precedência: um widget de filtro sobrescreve o período dos seus alvos
   //    (ou de todos, se sem alvos) — aplicado logo abaixo.
   const periodByWidget: Record<string, DashboardPeriod | null> = {};
+  // Origem do período efetivo de cada widget: barra global ("bar") ou widget de
+  // filtro ("filter"). Usada pelos filtros rápidos de período (espelho da barra
+  // só faz sentido quando é a barra que rege o widget).
+  const periodSourceByWidget: Record<string, "bar" | "filter"> = {};
+  const widgetBucket = (w: Widget) => (scope === "tab" ? widgetTab(w) : "");
   if (periodBar?.enabled !== false) {
     const cache = new Map<string, DashboardPeriod | null>();
     const periodOf = (bucket: string) => {
       if (!cache.has(bucket)) cache.set(bucket, resolvePeriodForBucket(bucket));
       return cache.get(bucket) ?? null;
     };
-    for (const w of dataWidgets)
-      periodByWidget[w.id] = periodOf(scope === "tab" ? widgetTab(w) : "");
+    for (const w of dataWidgets) {
+      periodByWidget[w.id] = periodOf(widgetBucket(w));
+      periodSourceByWidget[w.id] = "bar";
+    }
   } else {
     for (const w of dataWidgets) periodByWidget[w.id] = null;
   }
@@ -321,7 +344,241 @@ export default async function DashboardPage({
         ? s.targets
         : dataWidgets.map((w) => w.id);
     for (const t of targets) {
-      if (t in periodByWidget) periodByWidget[t] = pWithMap;
+      if (t in periodByWidget) {
+        periodByWidget[t] = pWithMap;
+        periodSourceByWidget[t] = "filter";
+      }
+    }
+  }
+
+  // ===================== Filtros rápidos (dropdowns do card) =================
+  // Config em settings.quickFilters; valores persistidos em dashboard_table_cells
+  // (row_key '__qf__'), compartilhados entre usuários/reloads. Viram filtros de
+  // visualização (AND) e, no caso do período padrão, interagem com o período
+  // geral (espelho unidirecional). Ver lib/widgets/quick-filters.ts.
+  const qfWidgets = dataWidgets.filter(
+    (w) => (w.settings?.quickFilters ?? []).some((e) => e.field)
+  );
+  const quickFiltersById: Record<string, WidgetQuickFilters> = {};
+  const qfFiltersByWidget: Record<string, WidgetFilter[]> = {};
+
+  if (qfWidgets.length > 0) {
+    // 1) Valores persistidos (chave widget:entry).
+    const qfValues = new Map<string, QuickFilterValue>();
+    const { data: qfCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, col_key, value")
+      .in(
+        "widget_id",
+        qfWidgets.map((w) => w.id)
+      )
+      .eq("row_key", QF_ROW_KEY);
+    for (const c of qfCells ?? []) {
+      const v = parseQuickFilterValue(c.value);
+      if (v) qfValues.set(`${c.widget_id}:${c.col_key}`, v);
+    }
+
+    const allEntries = qfWidgets.flatMap((w) => w.settings?.quickFilters ?? []);
+
+    // 2) Exceção do vendedor: usuário sem view_all_records tem os próprios
+    //    responsáveis resolvidos (vínculo vivo responsibles.user_id).
+    const canViewAll =
+      session?.permissions.includes("view_all_records") ?? false;
+    let ownResponsibleIds: string[] = [];
+    if (
+      !canViewAll &&
+      session &&
+      allEntries.some((e) => e.field === "responsible_id")
+    ) {
+      const { data: ownResp } = await supabase
+        .from("responsibles")
+        .select("id")
+        .eq("user_id", session.user.id);
+      ownResponsibleIds = (ownResp ?? []).map((r) => r.id as string);
+    }
+
+    // 3) Opções dos dropdowns: responsáveis/operações ativos e, p/ datas com
+    //    formato, os buckets DISTINTOS existentes nos dados (via RPC, mesma
+    //    expressão das dimensões). month_name/weekday têm listas fixas.
+    const needsQfResp = allEntries.some((e) => e.field === "responsible_id");
+    const needsQfOps = allEntries.some((e) => e.field === "operation_id");
+    const bucketCombos = new Map<
+      string,
+      { field: string; transform: Transform; weekMode?: "full" | "restricted" }
+    >();
+    for (const e of allEntries) {
+      if (!isBucketEntry(e, available)) continue;
+      if (staticBucketOptions(e.transform!)) continue;
+      bucketCombos.set(`${e.field}|${e.transform}|${e.weekMode ?? "restricted"}`, {
+        field: e.field,
+        transform: e.transform!,
+        weekMode: e.weekMode,
+      });
+    }
+    const bucketOptionsByCombo: Record<string, { value: string; label: string }[]> =
+      {};
+    const bucketsPromise = Promise.all(
+      [...bucketCombos.entries()].map(async ([key, c]) => {
+        try {
+          const { data, error } = await supabase.rpc("run_widget_query", {
+            p_source: "records",
+            p_dimensions: [
+              { field: c.field, transform: c.transform, weekMode: c.weekMode },
+            ],
+            p_metrics: [],
+            p_filters: [],
+            p_correspondences: correspondencesMap,
+          });
+          if (error) throw new Error(error.message);
+          const rows = (Array.isArray(data) ? data : []) as Record<
+            string,
+            unknown
+          >[];
+          const seen = new Map<string, { raw: unknown; label: string }>();
+          for (const row of rows) {
+            const raw = row.dim_1;
+            const k = bucketKeyFromRpcValue(raw, c.transform);
+            if (!k || seen.has(k)) continue;
+            seen.set(k, {
+              raw,
+              label: formatBucketLabel(c.transform, raw, c.weekMode),
+            });
+          }
+          bucketOptionsByCombo[key] = [...seen.entries()]
+            .sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw)))
+            .map(([value, v]) => ({ value, label: v.label }));
+        } catch {
+          bucketOptionsByCombo[key] = []; // RPC sem 0048/transform inválido
+        }
+      })
+    );
+    const [qfRespRes, qfOpsRes] = await Promise.all([
+      needsQfResp
+        ? supabase
+            .from("responsibles")
+            .select("id, display_name")
+            .eq("active", true)
+            .order("display_name")
+        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+      needsQfOps
+        ? supabase
+            .from("operations")
+            .select("id, name")
+            .eq("active", true)
+            .order("name")
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    ]);
+    await bucketsPromise;
+    const qfRespOptions = (qfRespRes.data ?? []).map((r) => ({
+      value: r.id as string,
+      label: (r.display_name as string) ?? "—",
+    }));
+    const qfOpsOptions = (qfOpsRes.data ?? []).map((o) => ({
+      value: o.id as string,
+      label: (o.name as string) ?? "—",
+    }));
+
+    // Seleção CRUA efetiva da barra de período de um bucket (URL > default),
+    // p/ o filtro rápido de período sem valor espelhar o que a barra mostra.
+    const rawSelectionForBucket = (bucket: string): PeriodSelection => {
+      const { periodDefaults } = resolveDefaults(savedFor(bucket));
+      const keys = periodKeys(scope, bucket);
+      const urlSel: PeriodSelection = {
+        preset: str(sp[keys.preset]),
+        de: str(sp[keys.de]),
+        ate: str(sp[keys.ate]),
+      };
+      return hasSelection(urlSel) ? urlSel : periodDefaults;
+    };
+
+    // 4) Por widget: valores efetivos + filtros + interação com o período geral.
+    for (const w of qfWidgets) {
+      const entries = (w.settings?.quickFilters ?? []).filter((e) => e.field);
+      const values: Record<string, QuickFilterValue> = {};
+      const options: Record<string, { value: string; label: string }[]> = {};
+      let filters: WidgetFilter[] = [];
+
+      for (const entry of entries) {
+        const stored = qfValues.get(`${w.id}:${entry.id}`) ?? null;
+
+        // --- Data no formato padrão: dropdown de período -------------------
+        if (isPeriodEntry(entry, available)) {
+          let val: QuickFilterValue | null =
+            stored?.kind === "period" ? stored : null;
+          const wPeriod = periodByWidget[w.id];
+          if (val && hasQuickValue(val)) {
+            // Com valor persistido o filtro rápido ASSUME o campo: se é o
+            // mesmo campo do período efetivo do widget, o geral deixa de
+            // aplicar (senão o applyPeriodToFilters do engine sobrescreveria a
+            // divergência local). Campos diferentes convivem (cruzamento).
+            if (wPeriod && wPeriod.field === entry.field) {
+              periodByWidget[w.id] = null;
+            }
+            const p = resolvePeriodSelection(
+              { preset: val.preset ?? "", de: val.de ?? "", ate: val.ate ?? "" },
+              entry.field
+            );
+            if (p) {
+              const pMap = entry.field.startsWith("unified:")
+                ? { ...p, fieldBySource: resolveFieldBySource(entry.field) }
+                : p;
+              filters = applyPeriodToFilters(
+                filters,
+                pMap,
+                (w.sources ?? []) as SourceKey[]
+              );
+            }
+          } else if (
+            periodSourceByWidget[w.id] === "bar" &&
+            wPeriod?.field === entry.field
+          ) {
+            // Sem valor persistido e a barra rege o widget no MESMO campo:
+            // exibe a seleção da barra (o geral continua filtrando por si).
+            const sel = rawSelectionForBucket(widgetBucket(w));
+            val = {
+              kind: "period",
+              preset: sel.preset ?? "",
+              de: sel.de ?? "",
+              ate: sel.ate ?? "",
+            };
+          }
+          if (val) values[entry.id] = val;
+          continue;
+        }
+
+        // --- Multi-seleção: responsável / operação / bucket de data --------
+        let vals = stored?.kind === "options" ? stored.values : [];
+        // Exceção do vendedor: seleção que exclui os responsáveis dele →
+        // o valor EFETIVO (filtragem e exibição) vira os dele. O valor
+        // persistido não muda (admin/gestor seguem vendo a seleção deles).
+        if (
+          entry.field === "responsible_id" &&
+          vals.length > 0 &&
+          ownResponsibleIds.length > 0 &&
+          !vals.some((v) => ownResponsibleIds.includes(v))
+        ) {
+          vals = ownResponsibleIds;
+        }
+        if (vals.length > 0) {
+          values[entry.id] = { kind: "options", values: vals };
+          filters.push(...quickOptionsFilter(entry, vals, available));
+        }
+        if (entry.field === "responsible_id") {
+          options[entry.id] = qfRespOptions;
+        } else if (entry.field === "operation_id") {
+          options[entry.id] = qfOpsOptions;
+        } else if (isBucketEntry(entry, available)) {
+          options[entry.id] =
+            staticBucketOptions(entry.transform!) ??
+            bucketOptionsByCombo[
+              `${entry.field}|${entry.transform}|${entry.weekMode ?? "restricted"}`
+            ] ??
+            [];
+        }
+      }
+
+      quickFiltersById[w.id] = { entries, values, options };
+      if (filters.length > 0) qfFiltersByWidget[w.id] = filters;
     }
   }
 
@@ -344,6 +601,10 @@ export default async function DashboardPage({
     if (fs.length === 0) return;
     viewFiltersByWidget[id] = [...(viewFiltersByWidget[id] ?? []), ...fs];
   };
+
+  // Filtros rápidos do card: mesclados como filtros de visualização (AND) —
+  // valem para o engine/RPC, modo lista, KPI e métrica calculada.
+  for (const [id, fs] of Object.entries(qfFiltersByWidget)) addViewFilters(id, fs);
 
   // Barra embutida: só nos widgets de Tabela (agregada ou registros).
   for (const w of dataWidgets) {
@@ -663,7 +924,9 @@ export default async function DashboardPage({
     dash.name as string,
     dashSettings,
     widgets,
-    cellsData ?? []
+    // Valores de filtros rápidos ('__qf__') ficam fora do histórico de
+    // Desfazer/Refazer (não são edição de dashboard).
+    (cellsData ?? []).filter((c) => c.row_key !== QF_ROW_KEY)
   );
 
   return (
@@ -696,6 +959,7 @@ export default async function DashboardPage({
       periodDefaultsByTab={periodDefaultsByTab}
       periodDefaultFieldByTab={periodDefaultFieldByTab}
       filterOptionsById={filterOptionsById}
+      quickFiltersById={quickFiltersById}
     />
   );
 }

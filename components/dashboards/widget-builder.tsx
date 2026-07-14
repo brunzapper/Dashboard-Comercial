@@ -66,8 +66,10 @@ import {
   type FilterOp,
   type FilterSettings,
   type Metric,
+  type QuickFilterEntry,
   type RecordListColumn,
   type RowSource,
+  type Transform,
   type VisualType,
   type Widget,
   type WidgetFilter,
@@ -94,6 +96,12 @@ const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
   label: o.label,
 }));
+
+// Id estável de um filtro rápido (chave do valor persistido em
+// dashboard_table_cells). Fora do componente: só roda em handlers.
+function newQuickId(): string {
+  return `qf_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
 
 export function WidgetBuilder({
   dashboardId,
@@ -279,6 +287,37 @@ export function WidgetBuilder({
   const [showFilterBar, setShowFilterBar] = useState<boolean>(
     widget?.settings?.showFilterBar !== false
   );
+
+  // Filtros rápidos (dropdowns no card): Responsável, Operação e datas nos
+  // formatos das dimensões. Config aqui (settings.quickFilters); os VALORES
+  // selecionados persistem em dashboard_table_cells ('__qf__'), compartilhados
+  // entre usuários. Ids preservados na edição (chave do valor persistido).
+  const [quickFilters, setQuickFilters] = useState<QuickFilterEntry[]>(
+    widget?.settings?.quickFilters ?? []
+  );
+  const cleanQuickFilters = (): QuickFilterEntry[] =>
+    quickFilters
+      .filter((e) => e.field)
+      .map((e) => {
+        const af = available.find((a) => a.field === e.field);
+        const out: QuickFilterEntry = { id: e.id || newQuickId(), field: e.field };
+        if (af?.isDate && e.transform && e.transform !== "none") {
+          out.transform = e.transform;
+          if (e.transform === "week_month") out.weekMode = e.weekMode;
+        }
+        if (e.label?.trim()) out.label = e.label.trim();
+        return out;
+      });
+  // Tipos que exibem filtros rápidos: tabelas, gráficos, KPI e calculado.
+  const supportsQuickFilters =
+    visualType === "tabela" ||
+    visualType === "barra" ||
+    visualType === "barra_horizontal" ||
+    visualType === "linha" ||
+    visualType === "pizza" ||
+    visualType === "funil" ||
+    visualType === "kpi" ||
+    visualType === "calculado";
 
   // Dimensões dinâmicas (por eixo): o widget cresce p/ caber o conteúdo, sem
   // encolher abaixo do tamanho configurado. Só p/ tabela + gráficos.
@@ -481,6 +520,133 @@ export function WidgetBuilder({
     return available.find((a) => a.field === field)?.isDate ?? false;
   }
 
+  // Campos elegíveis p/ filtros rápidos (por enquanto): Responsável, Operação e
+  // datas — inclusive unificadas (↔) e do registro casado (↪ match:).
+  const quickFieldOptions: ComboboxOption[] = [
+    { value: "responsible_id", label: fieldLabel("responsible_id", available) },
+    { value: "operation_id", label: fieldLabel("operation_id", available) },
+    ...available
+      .filter((f) => f.isDate && !f.displayOnly)
+      .map((f) => ({ value: f.field, label: f.label })),
+  ];
+  // Formato do dropdown de data: padrão = período (presets/personalizado);
+  // demais = multi-seleção de buckets (os mesmos formatos das dimensões).
+  const quickFormatOptions: ComboboxOption[] = [
+    { value: "none", label: "Padrão (período)" },
+    ...DATE_TRANSFORMS.filter((t) => t !== "none").map((t) => ({
+      value: t,
+      label: TRANSFORM_LABELS[t],
+    })),
+  ];
+
+  const updateQuickFilter = (i: number, patch: Partial<QuickFilterEntry>) =>
+    setQuickFilters((prev) => {
+      const next = [...prev];
+      next[i] = { ...next[i], ...patch };
+      return next;
+    });
+
+  // Bloco de config dos filtros rápidos (reusado na seção "Filtros" e no
+  // widget calculado, que não usa o Accordion).
+  const quickFiltersBlock = (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <Label>Filtros rápidos</Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setQuickFilters((prev) => [...prev, { id: newQuickId(), field: "" }])
+          }
+        >
+          <Plus className="size-4" /> Adicionar
+        </Button>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        Dropdowns exibidos no próprio widget. A seleção é compartilhada entre
+        todos os usuários (persiste ao recarregar). Datas no formato padrão
+        abrem um dropdown de período; nos demais formatos, multi-seleção
+        (ex.: vários meses). O filtro de período com o MESMO campo do período
+        geral acompanha a barra (sem alterá-la de volta).
+      </p>
+      {quickFilters.map((e, i) => {
+        const eIsDate = isDate(e.field);
+        return (
+          <div key={e.id || i} className="flex flex-col gap-1.5 rounded-md border p-2">
+            <div className="flex items-center gap-1.5">
+              <Combobox
+                className="min-w-0 flex-1"
+                options={quickFieldOptions}
+                value={e.field}
+                placeholder="— campo —"
+                onValueChange={(field) =>
+                  updateQuickFilter(i, {
+                    field,
+                    // Campo não-data não tem formato; data nasce no padrão.
+                    transform: undefined,
+                    weekMode: undefined,
+                  })
+                }
+                aria-label="Campo do filtro rápido"
+              />
+              {eIsDate ? (
+                <Combobox
+                  className="w-44 shrink-0"
+                  searchable={false}
+                  options={quickFormatOptions}
+                  value={e.transform ?? "none"}
+                  onValueChange={(t) =>
+                    updateQuickFilter(i, {
+                      transform: t === "none" ? undefined : (t as Transform),
+                      weekMode: t === "week_month" ? (e.weekMode ?? "restricted") : undefined,
+                    })
+                  }
+                  aria-label="Formato do filtro rápido"
+                />
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() =>
+                  setQuickFilters((prev) => prev.filter((_, j) => j !== i))
+                }
+                aria-label="Remover filtro rápido"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+            {eIsDate && e.transform === "week_month" ? (
+              <Combobox
+                className="w-44"
+                searchable={false}
+                options={[
+                  { value: "restricted", label: "Semana restrita" },
+                  { value: "full", label: "Semana cheia" },
+                ]}
+                value={e.weekMode ?? "restricted"}
+                onValueChange={(wm) =>
+                  updateQuickFilter(i, { weekMode: wm as "full" | "restricted" })
+                }
+                aria-label="Modo da semana do mês"
+              />
+            ) : null}
+            <Input
+              className="h-8 text-sm"
+              value={e.label ?? ""}
+              onChange={(ev) => updateQuickFilter(i, { label: ev.target.value })}
+              placeholder={`Rótulo (opcional) — ${
+                e.field ? fieldLabel(e.field, available) : "campo"
+              }`}
+              aria-label="Rótulo do filtro rápido"
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // Opções de orientação e "Agrupar por" da tabela agregada (Parte 2/3). As keys
   // do groupBy espelham as que o engine gera em runtime (`dim_<n>`), respeitando
   // o deslocamento quando "Quebrar por fonte" injeta record_type como dim_1.
@@ -607,6 +773,10 @@ export function WidgetBuilder({
       const calcSettings = { ...(widget?.settings ?? {}), formula, ...tabPatch };
       if (calcField) calcSettings.calcField = calcField;
       else delete calcSettings.calcField;
+      // Filtros rápidos também valem no widget calculado (afetam a fórmula).
+      const calcQuick = cleanQuickFilters();
+      if (calcQuick.length > 0) calcSettings.quickFilters = calcQuick;
+      else delete calcSettings.quickFilters;
       const input = {
         title: title.trim() || null,
         visual_type: visualType,
@@ -682,6 +852,12 @@ export function WidgetBuilder({
       if (showFilterBar) delete settings.showFilterBar;
       else settings.showFilterBar = false;
     }
+
+    // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
+    // valores persistidos). Sem entries (ou tipo sem suporte) limpa a chave.
+    const quick = cleanQuickFilters();
+    if (supportsQuickFilters && quick.length > 0) settings.quickFilters = quick;
+    else delete settings.quickFilters;
 
     // Dimensões dinâmicas: grava só quando algum eixo está ligado (jsonb limpo).
     if (supportsAutoSize && (autoWidth || autoHeight)) {
@@ -1063,6 +1239,8 @@ export function WidgetBuilder({
                   </p>
                 </>
               ) : null}
+              {/* Filtros rápidos (o calculado não usa o Accordion de dados). */}
+              <div className="border-t pt-3">{quickFiltersBlock}</div>
             </div>
           ) : null}
 
@@ -1296,11 +1474,17 @@ export function WidgetBuilder({
             </Button>
           </BuilderSection>
 
-          {/* Filtros */}
+          {/* Filtros (fixos do widget + barra de busca + filtros rápidos) */}
           <BuilderSection
             value="filtros"
             title="Filtros"
-            badge={filters.length > 0 ? String(filters.length) : null}
+            badge={
+              filters.length + quickFilters.filter((e) => e.field).length > 0
+                ? String(
+                    filters.length + quickFilters.filter((e) => e.field).length
+                  )
+                : null
+            }
           >
             {filters.map((f, i) => (
               <FilterRow
@@ -1327,6 +1511,23 @@ export function WidgetBuilder({
             >
               <Plus className="size-4" /> Adicionar filtro
             </Button>
+
+            {/* Controles de filtro na VISUALIZAÇÃO, agrupados aqui: a barra de
+                busca embutida (tabelas) e os filtros rápidos (dropdowns). */}
+            {visualType === "tabela" ? (
+              <label className="flex items-center gap-2 border-t pt-3 text-sm">
+                <Checkbox
+                  checked={showFilterBar}
+                  onCheckedChange={(v) => setShowFilterBar(v === true)}
+                />
+                Mostrar barra de busca/filtro na tabela
+              </label>
+            ) : null}
+            {supportsQuickFilters ? (
+              <div className={visualType === "tabela" ? "" : "border-t pt-3"}>
+                {quickFiltersBlock}
+              </div>
+            ) : null}
           </BuilderSection>
 
           {/* Opções da tabela: modo lista, orientação e agrupamento */}
@@ -1364,13 +1565,8 @@ export function WidgetBuilder({
                   </p>
                 </div>
               ) : null}
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={showFilterBar}
-                  onCheckedChange={(v) => setShowFilterBar(v === true)}
-                />
-                Mostrar barra de busca/filtro na tabela
-              </label>
+              {/* A barra de busca/filtro é configurada na seção "Filtros"
+                  (agrupada com os filtros rápidos). */}
               {/* Orientação (agregada + lista de Registros) + Agrupar por (todos) */}
               <div className="flex flex-col gap-3 border-t pt-3">
                 {!isEntityList ? (

@@ -207,6 +207,22 @@ export type FieldFilterOptions = Record<
   { value: string; label: string }[]
 >;
 
+// Filtro rápido de um widget (14/07/2026): dropdown exibido no próprio card
+// (tabelas, gráficos, KPI e métrica calculada), configurado na seção "Filtros"
+// do construtor. Os VALORES selecionados não ficam aqui — persistem em
+// dashboard_table_cells (row_key '__qf__'), compartilhados entre usuários e
+// reloads (ver lib/widgets/quick-filters.ts).
+export interface QuickFilterEntry {
+  id: string; // estável (qf_<rand>); chave do valor persistido
+  field: string; // 'responsible_id' | 'operation_id' | campo de data
+  // Só p/ datas: formato do dropdown. Ausente/'none' = padrão → dropdown de
+  // período (presets/personalizado); demais = multi-seleção de buckets
+  // (Janeiro…, T1/26…), com as mesmas chaves dos transforms de dimensão.
+  transform?: Transform;
+  weekMode?: "full" | "restricted"; // só p/ transform 'week_month'
+  label?: string; // rótulo exibido no chip; ausente = rótulo do campo
+}
+
 // Config do widget de Tabela no modo "registros individuais" (Fase 1): a tabela
 // lista 1 linha por registro (sem agregação) e colunas marcadas como editáveis
 // gravam de volta no registro (via updateRecordField, respeitando permissões).
@@ -356,6 +372,9 @@ export type WidgetSettings = KpiSettings &
   RecordListSettings &
   CalcSettings & {
     appearance?: AppearanceSettings;
+    // Filtros rápidos expostos no card (dropdowns). Valores persistidos em
+    // dashboard_table_cells ('__qf__'), compartilhados entre usuários.
+    quickFilters?: QuickFilterEntry[];
     // Id da aba (DashboardSettings.tabs) a que este widget pertence. Ausente = aba
     // padrão (a primeira). Ver components/dashboards/dashboard-client.tsx.
     tab?: string;
