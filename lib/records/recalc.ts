@@ -101,7 +101,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
   const needsCurrency = anyMoneyDef(defs);
   const materials: CurrencyMaterials = needsCurrency
     ? await loadCurrencyMaterials(db)
-    : { rates: {}, moedaCurrency: {} };
+    : { rates: {}, moedaCurrency: {}, inheritMoedaRefs: [] };
 
   let from = 0;
   let updated = 0;

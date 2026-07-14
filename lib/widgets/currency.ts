@@ -1,4 +1,4 @@
-// Versão: 2.0 | Data: 12/07/2026
+// Versão: 2.1 | Data: 14/07/2026
 // Formatação e CONVERSÃO monetária. Cada registro tem uma coluna `currency`
 // (código ISO: "BRL", "USD", …) vinda do Bitrix; campos personalizados 'moeda'
 // e 'calculado'-moeda carregam sua própria moeda (currency_code/currency_mode).
@@ -7,6 +7,8 @@
 //   moeda estrangeira. Converter = valor × taxa. Também: resolveFieldMoney (a
 //   moeda efetiva de um campo) e formatMoneyDisplay (modos original/convertido/
 //   referência US$→R$).
+// v2.1 (14/07/2026): campos 'moeda' também suportam currency_mode='inherit'
+//   (moeda do registro) — agora o padrão; 'fixed'/null = moeda fixa (legado).
 
 // Opções do select de edição da coluna `currency` (registros individuais e a tela
 // de Registros). O `value` é o código ISO gravado (e enviado ao Bitrix no
@@ -254,7 +256,8 @@ export function validCurrencyStamp(v: unknown): string | null {
 
 /**
  * Moeda efetiva de um campo para EXIBIÇÃO:
- * - 'moeda'      → currency_code (default BRL).
+ * - 'moeda'      → currency_mode 'inherit' usa a moeda do registro (sem moeda =
+ *                  BRL); 'fixed'/null (legado) usa currency_code (default BRL).
  * - 'calculado'  → currency_mode: 'inherit' (automática) usa o carimbo por valor
  *                  (`stampedCode`, gravado em custom_fields "<key>__cur") e cai
  *                  na moeda do registro quando ausente (valores pré-recálculo);
@@ -267,6 +270,9 @@ export function resolveFieldMoney(
   stampedCode?: unknown
 ): FieldMoney {
   if (field.data_type === "moeda") {
+    if (field.currency_mode === "inherit") {
+      return { isMoney: true, code: resolveCurrencyCode(recordCurrency) };
+    }
     return { isMoney: true, code: resolveCurrencyCode(field.currency_code) };
   }
   if (field.data_type === "calculado") {

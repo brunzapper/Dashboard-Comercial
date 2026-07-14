@@ -291,7 +291,8 @@ function readForm(formData: FormData) {
 }
 
 // Resolve os campos de moeda a persistir conforme o tipo:
-//  - 'moeda'     → currency_code (fixo; default BRL), sem currency_mode.
+//  - 'moeda'     → currency_mode 'inherit' (padrão; moeda do registro) ou
+//    'fixed' + currency_code (default BRL).
 //  - 'calculado' e 'calculado_agg' → currency_mode ('inherit' = moeda automática
 //    dos operandos | 'fixed') + currency_code (só p/ fixed).
 //  - demais      → ambos null (não é moeda).
@@ -301,10 +302,13 @@ function resolveCurrencyColumns(f: {
   currencyModeRaw: string;
 }): { currency_code: string | null; currency_mode: string | null } {
   if (f.dataType === "moeda") {
-    return {
-      currency_code: /^[A-Z]{3}$/.test(f.currencyCodeRaw) ? f.currencyCodeRaw : "BRL",
-      currency_mode: null,
-    };
+    if (f.currencyModeRaw === "fixed") {
+      return {
+        currency_code: /^[A-Z]{3}$/.test(f.currencyCodeRaw) ? f.currencyCodeRaw : "BRL",
+        currency_mode: "fixed",
+      };
+    }
+    return { currency_code: null, currency_mode: "inherit" };
   }
   if (f.dataType === "calculado" || f.dataType === "calculado_agg") {
     if (f.currencyModeRaw === "inherit") {

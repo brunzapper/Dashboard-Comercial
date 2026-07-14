@@ -165,6 +165,10 @@ function moneyCurrencyInfo(
     const f = fieldByKey.get(field.slice(7));
     if (f) {
       if (f.data_type === "moeda") {
+        // 'inherit' (padrão) segue a moeda do registro, como value/mrr.
+        if (f.currency_mode === "inherit") {
+          return { fixedCode: null, currencyField: "currency" };
+        }
         return {
           fixedCode: resolveCurrencyCode(f.currency_code),
           currencyField: "currency",
