@@ -59,3 +59,18 @@ export function buildCorrespondenceMap(
   }
   return map;
 }
+
+/**
+ * Ref concreto (coluna do núcleo ou 'custom:<k>') do membro de um campo
+ * unificado para um record_type — null quando a correspondência não tem membro
+ * para essa fonte. Opera sobre o mapa `AvailableField.unifiedMembers` para os
+ * caminhos client-side (modo registros, "Agrupar período") resolverem o valor
+ * por registro, espelhando o coalesce do RPC.
+ */
+export function unifiedMemberRef(
+  members: Record<string, string> | undefined,
+  recordType: string | null | undefined
+): string | null {
+  if (!members || !recordType) return null;
+  return members[recordType] || null;
+}

@@ -60,6 +60,7 @@ import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import { unifiedMemberRef } from "@/lib/correspondences";
 import { resolveGoal } from "@/lib/metas/resolve";
 import {
   RECORD_TYPE_SOURCE,
@@ -686,12 +687,29 @@ async function runWidgetByPeriod(
   const isDateBucket = (d: Dimension) =>
     d.transform != null && d.transform !== "none";
 
-  const records = (await runRecordList(supabase, config, period)) as RecordRow[];
+  const records = (await runRecordList(
+    supabase,
+    config,
+    period,
+    available
+  )) as RecordRow[];
 
-  const rawValue = (field: string, r: RecordRow): unknown =>
-    field.startsWith("custom:")
-      ? r.custom_fields?.[field.slice(7)]
-      : (r as unknown as Record<string, unknown>)[field];
+  // Campo unificado: resolve o MEMBRO da fonte do registro (espelha o coalesce
+  // que o RPC monta); fonte sem membro → undefined (fica fora do bucket/soma).
+  const resolveRef = (field: string, r: RecordRow): string | null =>
+    field.startsWith("unified:")
+      ? unifiedMemberRef(
+          available.find((a) => a.field === field)?.unifiedMembers,
+          r.record_type
+        )
+      : field;
+  const rawValue = (field: string, r: RecordRow): unknown => {
+    const ref = resolveRef(field, r);
+    if (!ref) return undefined;
+    return ref.startsWith("custom:")
+      ? r.custom_fields?.[ref.slice(7)]
+      : (r as unknown as Record<string, unknown>)[ref];
+  };
   const isMoney = (field: string) =>
     available.find((a) => a.field === field)?.isMoney ?? false;
 
@@ -700,8 +718,10 @@ async function runWidgetByPeriod(
   // registro); value/mrr usam a moeda do registro (mesma regra do
   // record-list-table).
   const metricCurrency = (field: string, r: RecordRow): string => {
-    if (field.startsWith("custom:")) {
-      const f = fieldByKey.get(field.slice(7));
+    // Unificado de moeda: a moeda segue o membro da fonte do registro.
+    const ref = resolveRef(field, r) ?? field;
+    if (ref.startsWith("custom:")) {
+      const f = fieldByKey.get(ref.slice(7));
       return f
         ? resolveFieldMoneyFromRecord(f, r).code
         : resolveCurrencyCode(r.currency);

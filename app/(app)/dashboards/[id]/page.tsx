@@ -437,7 +437,8 @@ export default async function DashboardPage({
           recordListById[w.id] = await runRecordList(
             supabase,
             config,
-            periodByWidget[w.id]
+            periodByWidget[w.id],
+            available
           );
         } catch (e) {
           recordListById[w.id] = [];
