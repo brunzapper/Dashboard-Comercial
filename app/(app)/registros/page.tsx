@@ -72,6 +72,9 @@ export default async function RegistrosPage({
     .from("records")
     .select(RECORD_COLS, { count: "exact" })
     .eq("record_type", recordType)
+    // Fase 12: leads mock de "Data Reunião" (records.is_mock) ficam fora da
+    // listagem e da contagem — só existem para consultas por Data Reunião.
+    .eq("is_mock", false)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .range(from, to);
   if (etapa) query = query.ilike("stage", `%${etapa}%`);

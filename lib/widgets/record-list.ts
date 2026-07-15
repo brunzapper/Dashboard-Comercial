@@ -35,6 +35,13 @@ const CORE_COLS = new Set<string>([
   "record_type",
 ]);
 
+// Chaves jsonb de "Data Reunião" (Lead/Negócio) — gatilho da regra dos mocks
+// (Fase 12): widget que referencia uma delas passa a ver os leads mock.
+const MOCK_REUNIAO_KEYS = [
+  "bitrix_uf_crm_1743441331",
+  "bitrix_uf_crm_67eacefcccd98",
+];
+
 // Traduz o `field` de um WidgetFilter para a coluna consultável no PostgREST.
 // custom:<k> vira o acesso JSON `custom_fields->>k`. Campos fora da whitelist
 // retornam null e o filtro é ignorado no modo lista (unified:* é expandido por
@@ -86,6 +93,14 @@ export async function runRecordList(
   if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   filters = [...sourceFilters(config.sources), ...filters];
 
+  // Fase 12: leads MOCK de "Data Reunião" (records.is_mock) só são servidos
+  // quando o widget referencia o campo — nos filtros (inclui o byType do
+  // @period) ou nas colunas do modo lista. Espelha a regra do RPC
+  // run_widget_query (migração 0052). Fora disso, mocks nunca aparecem.
+  const mockRefs =
+    JSON.stringify(filters) + JSON.stringify(config.settings?.columns ?? []);
+  const includeMocks = MOCK_REUNIAO_KEYS.some((k) => mockRefs.includes(k));
+
   const unifiedMembersOf = (field: string) =>
     available.find((a) => a.field === field)?.unifiedMembers;
 
@@ -97,6 +112,7 @@ export async function runRecordList(
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
+  if (!includeMocks) q = q.eq("is_mock", false);
   for (const f of filters as WidgetFilter[]) {
     if (f.field === BUCKET_FIELD_SENTINEL) {
       const bf = bucketFilterValue(f);
