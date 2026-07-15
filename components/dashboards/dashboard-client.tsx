@@ -98,6 +98,7 @@ export function DashboardClient({
   calcVarsById = {},
   noteById = {},
   calcExprById = {},
+  tableCellsById = {},
   fields,
   fkLabels,
   responsibleOptions,
@@ -136,6 +137,11 @@ export function DashboardClient({
   noteById?: Record<string, CalcWidgetResult[]>;
   // Calculadora: expressão compartilhada corrente (row __calc__).
   calcExprById?: Record<string, string>;
+  // Tabela rápida: células digitadas por widget (rows não reservadas).
+  tableCellsById?: Record<
+    string,
+    { row_key: string; col_key: string; value: number | string | null }[]
+  >;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
@@ -496,6 +502,7 @@ export function DashboardClient({
             calcVarsById={calcVarsById}
             noteById={noteById}
             calcExprById={calcExprById}
+            tableCellsById={tableCellsById}
             fields={fields}
             fkLabels={fkLabels}
             responsibleOptions={responsibleOptions}

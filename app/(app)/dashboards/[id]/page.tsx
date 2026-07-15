@@ -1,6 +1,9 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 15/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.3 (15/07/2026): Tabela rápida (tabela_editavel) — widget fica FORA do
+//   loop de computação (dados BI deferidos via runQuickTable no cliente);
+//   células digitadas entregues em tableCellsById (carona no cellsData).
 // v2.2 (15/07/2026): widgets calculadora/nota/forma — computa as variáveis da
 //   calculadora (calcVarsById) e as expressões da nota (noteById) via
 //   runCalculatedWidget; carrega a expressão compartilhada (calcExprById,
@@ -678,6 +681,12 @@ export default async function DashboardPage({
   // Calculadora e Nota: fórmulas próprias (variáveis/expressões), fora do engine.
   const isCalculatorWidget = (w: Widget) => w.visual_type === "calculadora";
   const isNoteWidget = (w: Widget) => w.visual_type === "nota";
+  // Tabela rápida: NADA é computado aqui de propósito — o widget busca os dados
+  // BI e as expressões {=…} via runQuickTable (server action) DEPOIS do mount,
+  // para não pesar o carregamento inicial da página (carrega por último). As
+  // células digitadas pegam carona no cellsData do seed do histórico (abaixo).
+  const isQuickTableWidget = (w: Widget) =>
+    w.visual_type === "tabela_editavel";
 
   // 3) Computa cada widget de dados. Filtros, tabela editável e calculado não
   //    passam pelo engine de agregação padrão.
@@ -688,6 +697,7 @@ export default async function DashboardPage({
     dataWidgets.map(async (w) => {
       if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w))
         return; // computados abaixo
+      if (isQuickTableWidget(w)) return; // deferido (runQuickTable no cliente)
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],
@@ -1043,6 +1053,24 @@ export default async function DashboardPage({
     }
   }
 
+  // Células digitadas de cada Tabela rápida (payload inicial do widget; os
+  // dados BI chegam deferidos). Reusa o cellsData do seed — custo zero.
+  const quickTableIds = new Set(
+    widgets.filter(isQuickTableWidget).map((w) => w.id)
+  );
+  const tableCellsById: Record<
+    string,
+    { row_key: string; col_key: string; value: number | string | null }[]
+  > = {};
+  for (const c of cellsData ?? []) {
+    if (!quickTableIds.has(c.widget_id) || c.row_key.startsWith("__")) continue;
+    (tableCellsById[c.widget_id] ??= []).push({
+      row_key: c.row_key,
+      col_key: c.col_key,
+      value: c.value,
+    });
+  }
+
   // Atalho vindo de outro dashboard (?focus=<widgetId>): abre já na aba do
   // widget-alvo e o cliente centraliza/destaca ao montar.
   const focusId = str(sp.focus);
@@ -1063,6 +1091,7 @@ export default async function DashboardPage({
       calcVarsById={calcVarsById}
       noteById={noteById}
       calcExprById={calcExprById}
+      tableCellsById={tableCellsById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
       responsibleOptions={responsibleOptions}

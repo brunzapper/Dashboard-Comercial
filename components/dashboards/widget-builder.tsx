@@ -124,6 +124,7 @@ import {
   updateWidget,
 } from "@/app/(app)/dashboards/actions";
 import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
+import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 
 const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
@@ -991,6 +992,37 @@ export function WidgetBuilder({
       return;
     }
 
+    // Tabela rápida: a estrutura (colunas/linhas/bloqueios) é editada direto no
+    // card (painéis de coluna/linha e botões "+"); o builder só define
+    // título/aba. Na criação nasce uma grade padrão 3×3 (ou a desenhada — M2).
+    if (visualType === "tabela_editavel") {
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          quickTable: widget?.settings?.quickTable ?? defaultQuickTable(3, 3),
+          ...tabPatch,
+        },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
     // Forma (figura geométrica): tipo, texto e atalho em settings.shape.
     if (visualType === "forma") {
       const input = {
@@ -1634,6 +1666,19 @@ export function WidgetBuilder({
             </p>
           ) : null}
 
+          {/* Tabela rápida: estrutura editada direto no card. */}
+          {visualType === "tabela_editavel" ? (
+            <p className="text-muted-foreground rounded-md border p-3 text-sm">
+              A tabela é montada direto no card: com{" "}
+              <strong>Editar layout</strong> ativo, use os botões{" "}
+              <strong>+</strong> para adicionar linhas/colunas e o cabeçalho de
+              cada coluna para definir rótulo, tipo (livre, dimensão ou
+              métrica) e quem pode editar. Digite livremente nas células; use{" "}
+              <code>=</code> para fórmulas entre células e <code>{"{= … }"}</code>{" "}
+              para valores do sistema.
+            </p>
+          ) : null}
+
           {/* Config da Forma: tipo, texto interno e atalho para widget. */}
           {visualType === "forma" ? (
             <>
@@ -1714,7 +1759,8 @@ export function WidgetBuilder({
           visualType !== "calculado" &&
           visualType !== "calculadora" &&
           visualType !== "nota" &&
-          visualType !== "forma" ? (
+          visualType !== "forma" &&
+          visualType !== "tabela_editavel" ? (
           <Accordion
             type="multiple"
             defaultValue={

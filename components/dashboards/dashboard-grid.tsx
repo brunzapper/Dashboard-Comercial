@@ -208,6 +208,7 @@ export function DashboardGrid({
   calcVarsById = {},
   noteById = {},
   calcExprById = {},
+  tableCellsById = {},
   connectors = [],
   saveConnectors,
   connectMode = false,
@@ -247,6 +248,11 @@ export function DashboardGrid({
   calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
   noteById?: Record<string, CalcWidgetResult[]>;
   calcExprById?: Record<string, string>;
+  // Tabela rápida: células digitadas por widget (rows não reservadas).
+  tableCellsById?: Record<
+    string,
+    { row_key: string; col_key: string; value: number | string | null }[]
+  >;
   // Conectores (todas as abas; a camada filtra pela ativa) + persistência
   // otimista no shell. connectMode = criar conexões (submodo da edição).
   connectors?: Connector[];
@@ -788,6 +794,7 @@ export function DashboardGrid({
                     calcVars={calcVarsById[w.id]}
                     noteValues={noteById[w.id]}
                     calcExpr={calcExprById[w.id]}
+                    tableCells={tableCellsById[w.id]}
                     fields={fields}
                     currencyOptions={currencyOptions}
                     currencyRates={currencyRates}
