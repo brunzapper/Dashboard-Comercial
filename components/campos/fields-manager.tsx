@@ -220,15 +220,29 @@ export function FieldsManager({
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
   // é materializado; excluindo 'calculado_agg' — sem aninhamento). Mesmos
   // critérios do servidor (aggOperandCatalog em campos/actions.ts).
-  const aggRefs: RefOption[] = aggOperandRefs([
-    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-      field: f.field,
-      label: f.label,
-    })),
-    ...fields
-      .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
-  ]);
+  const aggRefs: RefOption[] = aggOperandRefs(
+    [
+      ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
+        field: f.field,
+        label: f.label,
+      })),
+      ...fields
+        .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
+        .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
+    ],
+    // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
+    // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
+    // + qualquer campo custom, exceto 'calculado_agg' (sem aninhar agregado).
+    [
+      ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
+        field: f.field,
+        label: f.label,
+      })),
+      ...fields
+        .filter((f) => f.data_type !== "calculado_agg")
+        .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
+    ]
+  );
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
