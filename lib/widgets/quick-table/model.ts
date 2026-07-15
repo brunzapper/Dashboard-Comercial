@@ -159,6 +159,10 @@ export interface QTCell {
   // Valor cru digitado (células livres) — é o que a edição mostra/regrava.
   raw: string | null;
   display: string; // texto exibido (fórmulas "=…" são sobrepostas no cliente)
+  // Valor "de máquina" p/ as fórmulas de célula (cell-formulas.ts): número da
+  // métrica, valor da dimensão, texto/número digitado ou o resultado de {=…}.
+  // Fórmulas "=…" ficam null aqui (o valor delas é computado no cliente).
+  value: number | string | boolean | null;
   content: QTCellContent | "data"; // "data" = valor vindo do BI (read-only)
   editable: boolean; // digitável por ESTE usuário (papel × editableRoles)
   numeric: boolean;
@@ -223,6 +227,12 @@ function dimDisplay(
   }
   if (isDateField) return formatDateValue(value, dateFmt);
   return String(value);
+}
+
+function toFiniteNumber(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 // Exibição do valor de uma métrica de uma linha do WidgetData (moeda via
@@ -369,14 +379,20 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     const raw = cellByKey.get(cellKey(rowKey, col.key)) ?? null;
     const content = raw == null ? "blank" : classifyCellRaw(raw);
     let display = raw ?? "";
+    let value: QTCell["value"] = raw;
     if (content === "expr") {
-      display = calcResultDisplay(exprValues[cellKey(rowKey, col.key)]);
+      const r = exprValues[cellKey(rowKey, col.key)];
+      display = calcResultDisplay(r);
+      value = r ? (r.value ?? r.text ?? null) : null;
+    } else if (content === "formula") {
+      value = null; // computado no cliente (cell-formulas.ts)
     }
     return {
       rowKey,
       colKey: col.key,
       raw,
       display,
+      value,
       content,
       editable: canTypeInColumn(col.column, userRoles),
       numeric: false,
@@ -411,11 +427,13 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
         const c = col.column;
         if (c.kind === "dimension" && c.field && dimKeyOf.has(c.id)) {
           const v = first[dimKeyOf.get(c.id)!];
+          const display = dimDisplay(c, v, isDateFieldOf(c), dateFmt);
           return {
             rowKey: rk,
             colKey: col.key,
             raw: null,
-            display: dimDisplay(c, v, isDateFieldOf(c), dateFmt),
+            display,
+            value: display === "—" ? null : display,
             content: "data",
             editable: false,
             numeric: false,
@@ -432,6 +450,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
               : rows.find(
                   (r) => String(r[pivotDimKey] ?? "") === col.key.slice(at + 1)
                 );
+          const num = srcRow == null ? null : toFiniteNumber(srcRow[mKey]);
           return {
             rowKey: rk,
             colKey: col.key,
@@ -439,6 +458,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
             display: srcRow
               ? metricDisplay(srcRow, mKey, info, c.metric!.agg)
               : "—",
+            value: num,
             content: "data",
             editable: false,
             numeric: true,

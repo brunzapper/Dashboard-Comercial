@@ -46,6 +46,12 @@ import {
   type QTCellValue,
   type QTMatrix,
 } from "@/lib/widgets/quick-table/model";
+import {
+  colLetter,
+  computeCellFormulas,
+  formatFormulaResult,
+  type CellFormulaOutput,
+} from "@/lib/widgets/quick-table/cell-formulas";
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
 import {
   runQuickTable,
@@ -217,6 +223,45 @@ export function QuickTableWidget({
       dateFormat,
     ]
   );
+
+  // ---- fórmulas de célula ("=…", avaliadas no cliente) ----
+  // Refs A1 posicionais sobre a grade renderizada; valores-base vêm de
+  // QTCell.value ({=…} entra pelo valor resolvido — a fórmula nunca lê o
+  // banco). Ciclos viram "#CICLO!"; erro de sintaxe vira mensagem na célula.
+  const formulaCalc: CellFormulaOutput = useMemo(() => {
+    const formulas = new Map<string, string>();
+    const grid: (string | null)[][] = [];
+    const cellMap = new Map<string, QTCell>();
+    matrix.rows.forEach((row, r) => {
+      grid[r] = [];
+      row.cells.forEach((cell, c) => {
+        const k = cellKey(row.key, cell.colKey);
+        grid[r][c] = k;
+        cellMap.set(k, cell);
+        if (cell.content === "formula" && cell.raw) formulas.set(k, cell.raw);
+      });
+    });
+    if (formulas.size === 0) {
+      return { values: new Map(), errors: new Map() };
+    }
+    return computeCellFormulas({
+      formulas,
+      keyAt: (c, r) => grid[r]?.[c] ?? null,
+      baseValue: (k) => {
+        const cell = cellMap.get(k);
+        if (!cell) return null;
+        const v = cell.value;
+        // Texto digitado com cara de número (aceita vírgula decimal) entra
+        // como número nas fórmulas.
+        if (typeof v === "string") {
+          const s = v.trim();
+          if (/^-?\d+(?:[.,]\d+)?$/.test(s)) return Number(s.replace(",", "."));
+        }
+        return v;
+      },
+      dims: { rows: matrix.rows.length, cols: matrix.cols.length },
+    });
+  }, [matrix]);
 
   // ---- persistência de células ----
   // refresh() debounced: reconcilia com o servidor (e alimenta o histórico de
@@ -596,6 +641,11 @@ export function QuickTableWidget({
                     }
                   >
                     <span className="flex items-center gap-1">
+                      {structureEdit ? (
+                        <span className="text-muted-foreground/70 text-[10px] font-normal">
+                          {colLetter(ci)}
+                        </span>
+                      ) : null}
                       <span className="block flex-1 truncate">
                         {col.label || " "}
                       </span>
@@ -678,10 +728,13 @@ export function QuickTableWidget({
                       className="group relative w-6 px-0.5"
                       style={cellBorder(false)}
                     >
+                      <span className="text-muted-foreground/70 block text-center text-[10px] group-hover:hidden">
+                        {ri + 1}
+                      </span>
                       {row.kind === "free" ? (
                         <button
                           type="button"
-                          className="text-muted-foreground hover:text-foreground flex w-full items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+                          className="text-muted-foreground hover:text-foreground hidden w-full items-center justify-center group-hover:flex"
                           title="Opções da linha"
                           aria-label="Opções da linha"
                           onClick={(e) =>
@@ -712,6 +765,19 @@ export function QuickTableWidget({
                     const locked =
                       matrix.cols[ci]?.column.kind === "free" &&
                       !cell.editable;
+                    // Fórmula "=…": exibe o resultado computado (ou o erro).
+                    const k = cellKey(row.key, cell.colKey);
+                    const formulaError =
+                      cell.content === "formula"
+                        ? formulaCalc.errors.get(k)
+                        : undefined;
+                    const display =
+                      cell.content === "formula"
+                        ? (formulaError ??
+                          formatFormulaResult(
+                            formulaCalc.values.get(k) ?? null
+                          ))
+                        : cell.display;
                     const pair = cellPair(row.key, cell.colKey);
                     const align = alignClass(
                       resolveAlign(t, {
@@ -728,7 +794,10 @@ export function QuickTableWidget({
                         title={
                           locked
                             ? "Coluna bloqueada para o seu papel"
-                            : undefined
+                            : (formulaError ??
+                              (cell.content === "formula"
+                                ? (cell.raw ?? undefined)
+                                : undefined))
                         }
                         className={cn(
                           "relative h-8 px-2 py-1 align-middle",
@@ -805,8 +874,13 @@ export function QuickTableWidget({
                             aria-label="Editar célula"
                           />
                         ) : (
-                          <span className={spanClass}>
-                            {cell.display || " "}
+                          <span
+                            className={cn(
+                              spanClass,
+                              formulaError && "text-destructive"
+                            )}
+                          >
+                            {display || " "}
                           </span>
                         )}
                       </td>

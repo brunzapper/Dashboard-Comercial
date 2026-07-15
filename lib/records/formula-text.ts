@@ -37,6 +37,29 @@ const FUNC_NAMES: Record<string, FormulaFuncName> = {
   contses: "CONT.SES",
   "médiase": "MÉDIASE",
   mediase: "MÉDIASE",
+  // Funções puras (v2.2 de formulas.ts) — estilo Google Sheets pt-BR, com
+  // aliases sem acento/em inglês comuns.
+  soma: "SOMA",
+  sum: "SOMA",
+  "média": "MÉDIA",
+  media: "MÉDIA",
+  average: "MÉDIA",
+  "mín": "MÍN",
+  min: "MÍN",
+  "máx": "MÁX",
+  max: "MÁX",
+  "cont.núm": "CONT.NÚM",
+  "cont.num": "CONT.NÚM",
+  contnum: "CONT.NÚM",
+  count: "CONT.NÚM",
+  "cont.valores": "CONT.VALORES",
+  contvalores: "CONT.VALORES",
+  counta: "CONT.VALORES",
+  arred: "ARRED",
+  round: "ARRED",
+  abs: "ABS",
+  concatenar: "CONCATENAR",
+  concat: "CONCATENAR",
 };
 
 const BOOL_NAMES: Record<string, boolean> = {
@@ -242,7 +265,7 @@ export function tokenizeFormulaText(
       }
       return {
         ok: false,
-        error: `"${word}" não é uma função conhecida (SE, E, OU, SOMASE, SOMASES, CONT.SE, CONT.SES, MÉDIASE). Para usar uma coluna, escreva entre colchetes: [${word}].`,
+        error: `"${word}" não é uma função conhecida (SE, E, OU, SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED, ABS, CONCATENAR, SOMASE, SOMASES, CONT.SE, CONT.SES, MÉDIASE). Para usar uma coluna, escreva entre colchetes: [${word}].`,
       };
     }
 
