@@ -1,6 +1,8 @@
-// Versão: 2.1 | Data: 15/07/2026
+// Versão: 2.2 | Data: 15/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.2 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch novo
+//   renderizando QuickTableWidget com as células iniciais (tableCells).
 // v2.1 (15/07/2026): widgets calculadora/nota/forma — branches novos no
 //   conteúdo, layout SEM CROMO (frameless: forma sempre; nota opcional) com
 //   grip de arraste flutuante (o .widget-drag é o único jeito de mover o item)
@@ -54,6 +56,8 @@ import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import { WidgetChart } from "./charts/widget-chart";
+import { QuickTableWidget } from "./quick-table/quick-table-widget";
+import type { QTCellValue } from "@/lib/widgets/quick-table/model";
 import { CalculatorWidget } from "./calculator-widget";
 import { NoteWidget } from "./note-widget";
 import { ShapeWidget } from "./shape-widget";
@@ -79,6 +83,7 @@ export function WidgetCard({
   calcVars,
   noteValues,
   calcExpr,
+  tableCells,
   fields,
   fkLabels,
   responsibleOptions,
@@ -115,6 +120,8 @@ export function WidgetCard({
   calcExpr?: string;
   // Nota: resultados das expressões {=…}, na ordem do texto.
   noteValues?: CalcWidgetResult[];
+  // Tabela Livre: células digitadas (dashboard_table_cells, rows não reservadas).
+  tableCells?: QTCellValue[];
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
@@ -170,6 +177,7 @@ export function WidgetCard({
   const isRecordList = isTable && widget.settings?.rowMode === "records";
   const rowSource = widget.settings?.rowSource ?? "records";
   const isEntityList = isRecordList && rowSource !== "records";
+  const isQuickTable = widget.visual_type === "tabela_editavel";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -518,6 +526,19 @@ export function WidgetCard({
               searchFields={widget.settings?.searchFields}
               available={available}
               options={filterOptions}
+            />
+          ) : isQuickTable ? (
+            <QuickTableWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              cells={tableCells ?? []}
+              userRoles={userRoles}
+              available={available}
+              dateFormat={dateFormat}
+              canEdit={canEdit}
+              editMode={editMode}
+              appearance={appearance}
+              onAppearanceChange={saveAppearance}
             />
           ) : data.error ? (
             // Erro ao computar o widget no servidor (WidgetData.error): mostra

@@ -1,6 +1,10 @@
-// Versão: 2.5 | Data: 15/07/2026
+// Versão: 2.6 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.6 (15/07/2026): modo "desenhar para criar" (Tabela Livre) — overlay de
+//   mira sobre o canvas (drawMode/onDrawDone/onDrawCancel), pan/menu/drag
+//   suspensos durante o desenho, canvas renderiza mesmo sem widgets; repasse
+//   de tableCellsById aos cards.
 // v2.5 (15/07/2026): clique nas linhas de conexão destravado — o container do
 //   RGL (div transparente sobre o canvas inteiro, acima do SVG dos conectores)
 //   engolia o clique nas linhas e armava o pan; agora é pointer-events-none e
@@ -71,6 +75,7 @@ import { posOf } from "@/lib/widgets/grid-placement";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel } from "./appearance-editing";
+import { DrawToCreateOverlay } from "./draw-to-create";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
@@ -212,9 +217,13 @@ export function DashboardGrid({
   calcVarsById = {},
   noteById = {},
   calcExprById = {},
+  tableCellsById = {},
   connectors = [],
   saveConnectors,
   connectMode = false,
+  drawMode = false,
+  onDrawDone,
+  onDrawCancel,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -251,11 +260,24 @@ export function DashboardGrid({
   calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
   noteById?: Record<string, CalcWidgetResult[]>;
   calcExprById?: Record<string, string>;
+  // Tabela Livre: células digitadas por widget (rows não reservadas).
+  tableCellsById?: Record<
+    string,
+    { row_key: string; col_key: string; value: number | string | null }[]
+  >;
   // Conectores (todas as abas; a camada filtra pela ativa) + persistência
   // otimista no shell. connectMode = criar conexões (submodo da edição).
   connectors?: Connector[];
   saveConnectors?: (next: Connector[]) => void;
   connectMode?: boolean;
+  // Modo "desenhar para criar" (Tabela Livre): overlay de mira sobre o canvas;
+  // o retângulo desenhado vira grid_position + linhas/colunas da tabela.
+  drawMode?: boolean;
+  onDrawDone?: (
+    rect: GridPosition,
+    table: { rows: number; cols: number }
+  ) => void;
+  onDrawCancel?: () => void;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -440,6 +462,7 @@ export function DashboardGrid({
   // um widget (`.react-grid-item`) não pega. Sem setPointerCapture — os listeners
   // no window garantem receber move/up mesmo se o ponteiro sair do canvas.
   function onCanvasPointerDown(e: React.PointerEvent) {
+    if (drawMode) return; // o overlay de desenho é dono do gesto
     if (e.pointerType === "touch" || e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     // UI dos conectores (âncoras/linhas/painel) não arma o pan.
@@ -488,7 +511,7 @@ export function DashboardGrid({
   // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
   // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
   function onCanvasContextMenu(e: React.MouseEvent) {
-    if (!canEdit) return;
+    if (!canEdit || drawMode) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -691,7 +714,8 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
-  if (widgets.length === 0) {
+  // Em drawMode o canvas renderiza mesmo vazio (é onde se desenha a tabela).
+  if (widgets.length === 0 && !drawMode) {
     return (
       <>
         <div
@@ -778,8 +802,8 @@ export function DashboardGrid({
               containerPadding={[MX, MY]}
               autoSize={false}
               style={{ height: gridH(rows) }}
-              isDraggable={editMode}
-              isResizable={editMode}
+              isDraggable={editMode && !drawMode}
+              isResizable={editMode && !drawMode}
               draggableHandle=".widget-drag"
               onDragStart={onDragStart}
               onResizeStart={onResizeStart}
@@ -803,6 +827,7 @@ export function DashboardGrid({
                     calcVars={calcVarsById[w.id]}
                     noteValues={noteById[w.id]}
                     calcExpr={calcExprById[w.id]}
+                    tableCells={tableCellsById[w.id]}
                     fields={fields}
                     currencyOptions={currencyOptions}
                     currencyRates={currencyRates}
@@ -832,7 +857,19 @@ export function DashboardGrid({
                 </div>
               ))}
             </RGL>
-            {editMode ? (
+            {drawMode && onDrawDone && onDrawCancel ? (
+              <DrawToCreateOverlay
+                cellW={cellW}
+                rowH={ROW_H}
+                mx={MX}
+                my={MY}
+                cols={cols}
+                rows={rows}
+                onDone={onDrawDone}
+                onCancel={onDrawCancel}
+              />
+            ) : null}
+            {editMode && !drawMode ? (
               <>
                 {/* Barra inferior: arrasta a ALTURA (adiciona linhas vazias). */}
                 <span

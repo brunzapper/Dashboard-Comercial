@@ -1,4 +1,11 @@
-// Versão: 2.0 | Data: 09/07/2026
+// Versão: 2.2 | Data: 15/07/2026
+// v2.2 (15/07/2026): funções PURAS estilo Google Sheets — SOMA, MÉDIA, MÍN,
+//   MÁX, CONT.NÚM, CONT.VALORES, ARRED, ABS, CONCATENAR. Variádicas sobre os
+//   argumentos (não tocam em basis/SQL — diferente de SOMASE etc.), null-safe:
+//   agregadoras numéricas ignoram não-números; ARRED/ABS propagam null;
+//   CONCATENAR trata null como "". Adição estritamente aditiva: nenhuma
+//   mudança de comportamento nos ramos existentes. Usadas primeiro pelas
+//   fórmulas de célula da Tabela Livre (refs cell:<c>:<r>).
 // Campos calculados (Fase 7): modelo de fórmula estruturada + avaliador puro
 // (parser recursivo tokens→AST, SEM eval) usado para materializar o valor por
 // registro. Operandos são referências a colunas ('value','mrr','stage',...),
@@ -38,7 +45,30 @@ export type FormulaFuncName =
   | "SOMASES"
   | "CONT.SE"
   | "CONT.SES"
-  | "MÉDIASE";
+  | "MÉDIASE"
+  // Funções puras variádicas (v2.2) — avaliadas direto sobre os argumentos.
+  | "SOMA"
+  | "MÉDIA"
+  | "MÍN"
+  | "MÁX"
+  | "CONT.NÚM"
+  | "CONT.VALORES"
+  | "ARRED"
+  | "ABS"
+  | "CONCATENAR";
+
+// Funções puras variádicas sobre os argumentos (nenhuma consulta/basis).
+const PURE_FUNCS = new Set<FormulaFuncName>([
+  "SOMA",
+  "MÉDIA",
+  "MÍN",
+  "MÁX",
+  "CONT.NÚM",
+  "CONT.VALORES",
+  "ARRED",
+  "ABS",
+  "CONCATENAR",
+]);
 
 export type FormulaToken =
   | { kind: "field"; ref: string }
@@ -262,6 +292,27 @@ function parseTokens(tokens: FormulaToken[]): FormulaNode {
           );
         }
         for (const arg of args) assertCondArg(name, arg);
+      }
+      // Funções puras (v2.2): só aridade — os argumentos são expressões livres.
+      if (
+        (name === "SOMA" ||
+          name === "MÉDIA" ||
+          name === "MÍN" ||
+          name === "MÁX" ||
+          name === "CONT.NÚM" ||
+          name === "CONT.VALORES" ||
+          name === "CONCATENAR") &&
+        args.length < 1
+      ) {
+        throw new FormulaParseError(`${name} espera pelo menos 1 argumento.`);
+      }
+      if (name === "ABS" && args.length !== 1) {
+        throw new FormulaParseError("ABS espera exatamente 1 argumento.");
+      }
+      if (name === "ARRED" && (args.length < 1 || args.length > 2)) {
+        throw new FormulaParseError(
+          "ARRED espera 1 ou 2 argumentos: ARRED(valor; casas)."
+        );
       }
       return { k: "call", name, args };
     }
@@ -674,6 +725,59 @@ function evalNode(
           return { v: sum / count, date: false };
         }
         return { v: toNum(ctx[condAggKey(specs[0])]), date: false };
+      }
+      if (PURE_FUNCS.has(node.name)) {
+        const vals = node.args.map((a) => evalNode(a, ctx, dateCtx));
+        // Números presentes entre os argumentos (datas/textos não numéricos e
+        // nulls são ignorados — semântica das agregadoras do Sheets).
+        const nums = vals
+          .map(toNumVal)
+          .filter((n): n is number => n != null);
+        switch (node.name) {
+          case "SOMA":
+            return { v: nums.reduce((s, n) => s + n, 0), date: false };
+          case "MÉDIA":
+            return {
+              v: nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : null,
+              date: false,
+            };
+          case "MÍN":
+            return { v: nums.length ? Math.min(...nums) : null, date: false };
+          case "MÁX":
+            return { v: nums.length ? Math.max(...nums) : null, date: false };
+          case "CONT.NÚM":
+            return { v: nums.length, date: false };
+          case "CONT.VALORES":
+            return {
+              v: vals.filter((x) => x.v != null && x.v !== "").length,
+              date: false,
+            };
+          case "ABS": {
+            const n = toNumVal(vals[0]);
+            return { v: n == null ? null : Math.abs(n), date: false };
+          }
+          case "ARRED": {
+            const n = toNumVal(vals[0]);
+            if (n == null) return NULL_VAL;
+            const places = vals[1] ? (toNumVal(vals[1]) ?? 0) : 0;
+            const f = Math.pow(10, Math.trunc(places));
+            const r = Math.round(n * f) / f;
+            return { v: Number.isFinite(r) ? r : null, date: false };
+          }
+          case "CONCATENAR": {
+            const out = vals
+              .map((x) => {
+                if (x.v == null || x.date) return "";
+                if (typeof x.v === "boolean")
+                  return x.v ? "VERDADEIRO" : "FALSO";
+                return String(x.v);
+              })
+              .join("");
+            return { v: out, date: false };
+          }
+          default:
+            return NULL_VAL;
+        }
       }
       // OU
       for (const arg of node.args) {

@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 15/07/2026
+// Versão: 1.8 | Data: 15/07/2026
+// v1.8 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch no
+//   save() (estrutura em settings.quickTable; grade padrão 3×3 na criação),
+//   hint no formulário e botão "Desenhar no painel" (onRequestDraw fecha o
+//   Sheet e arma o desenho no canvas com o título digitado).
 // v1.7 (15/07/2026): widgets calculadora/nota/forma — seção de variáveis da
 //   calculadora (nome + fórmula agregada), seção da forma (tipo/texto/atalho
 //   via WidgetLinkPicker), hint da nota (texto é editado direto no card) e
@@ -25,7 +29,13 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  MoreVertical,
+  Pencil,
+  Plus,
+  SquareDashedMousePointer,
+  Trash2,
+} from "lucide-react";
 
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
@@ -124,6 +134,7 @@ import {
   updateWidget,
 } from "@/app/(app)/dashboards/actions";
 import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
+import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 
 const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
@@ -149,6 +160,7 @@ export function WidgetBuilder({
   activeTabId,
   layoutById,
   canvasCols,
+  onRequestDraw,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -170,6 +182,10 @@ export function WidgetBuilder({
   // precisam passar.
   layoutById?: Record<string, GridPosition>;
   canvasCols?: number;
+  // Tabela Livre: em vez de salvar direto, fecha o painel e arma o modo
+  // "desenhar no canvas" (o retângulo dimensiona widget e linhas/colunas). O
+  // título digitado viaja no callback. Só oferecido na CRIAÇÃO.
+  onRequestDraw?: (title: string | null) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -991,6 +1007,37 @@ export function WidgetBuilder({
       return;
     }
 
+    // Tabela Livre: a estrutura (colunas/linhas/bloqueios) é editada direto no
+    // card (painéis de coluna/linha e botões "+"); o builder só define
+    // título/aba. Na criação nasce uma grade padrão 3×3 (ou a desenhada — M2).
+    if (visualType === "tabela_editavel") {
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          quickTable: widget?.settings?.quickTable ?? defaultQuickTable(3, 3),
+          ...tabPatch,
+        },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
     // Forma (figura geométrica): tipo, texto e atalho em settings.shape.
     if (visualType === "forma") {
       const input = {
@@ -1634,6 +1681,41 @@ export function WidgetBuilder({
             </p>
           ) : null}
 
+          {/* Tabela Livre: estrutura editada direto no card. */}
+          {visualType === "tabela_editavel" ? (
+            <>
+              <p className="text-muted-foreground rounded-md border p-3 text-sm">
+                A tabela é montada direto no card: com{" "}
+                <strong>Editar layout</strong> ativo, use os botões{" "}
+                <strong>+</strong> para adicionar linhas/colunas e o cabeçalho
+                de cada coluna para definir rótulo, tipo (livre, dimensão ou
+                métrica) e quem pode editar. Digite livremente nas células; use{" "}
+                <code>=</code> para fórmulas entre células e{" "}
+                <code>{"{= … }"}</code> para valores do sistema.
+              </p>
+              {!widget && onRequestDraw ? (
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onRequestDraw(title.trim() || null);
+                    }}
+                  >
+                    <SquareDashedMousePointer className="size-4" /> Desenhar no
+                    painel
+                  </Button>
+                  <p className="text-muted-foreground text-xs">
+                    Arraste um retângulo no dashboard: o tamanho desenhado
+                    define a posição do widget e a quantidade inicial de
+                    linhas e colunas. Ou salve abaixo para criar uma grade
+                    padrão 3×3.
+                  </p>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
           {/* Config da Forma: tipo, texto interno e atalho para widget. */}
           {visualType === "forma" ? (
             <>
@@ -1714,7 +1796,8 @@ export function WidgetBuilder({
           visualType !== "calculado" &&
           visualType !== "calculadora" &&
           visualType !== "nota" &&
-          visualType !== "forma" ? (
+          visualType !== "forma" &&
+          visualType !== "tabela_editavel" ? (
           <Accordion
             type="multiple"
             defaultValue={

@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 15/07/2026
+// v1.2 (15/07/2026): Tabela Livre — saveQuickTableCells (lote de células com
+//   validação de bloqueio por papel via settings.quickTable.editableRoles).
 // v1.1 (15/07/2026): widgets calculadora/nota/forma — saveCalcExpression
 //   (expressão compartilhada da calculadora, row __calc__), listWidgetLinkTargets
 //   (catálogo de destinos de atalho: dashboards→abas→widgets), deleteWidget
@@ -19,6 +21,7 @@ import {
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
+import { baseColId, canTypeInColumn } from "@/lib/widgets/quick-table/model";
 import type {
   DashboardSettings,
   Dimension,
@@ -337,6 +340,92 @@ export async function saveTableCell(
     if (error) return { ok: false, message: error.message };
   }
   revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// Grava um LOTE de células de um widget "Tabela Livre" (digitação, colar TSV,
+// limpar seleção). Além da RLS de dashboard_table_cells (qualquer visualizador
+// do dashboard), valida por coluna o bloqueio por papel (editableRoles em
+// settings.quickTable) — a RLS não distingue coluna, então o reforço fica aqui
+// (mesmo padrão do updateEntityField). Valor vazio (null/"") apaga a célula.
+export async function saveQuickTableCells(
+  dashboardId: string,
+  widgetId: string,
+  cells: { rowKey: string; colKey: string; value: number | string | null }[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (cells.length === 0) return { ok: true };
+  if (cells.length > 2000) {
+    return { ok: false, message: "Lote de células grande demais." };
+  }
+  // Rows reservadas (__qf__/__calc__) nunca passam por aqui.
+  if (cells.some((c) => c.rowKey.startsWith("__"))) {
+    return { ok: false, message: "Chave de linha inválida." };
+  }
+  const supabase = await createClient();
+
+  const { data: w } = await supabase
+    .from("widgets")
+    .select("settings")
+    .eq("id", widgetId)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  if (!w) return { ok: false, message: "Widget não encontrado." };
+  const qt = ((w.settings ?? {}) as WidgetSettings).quickTable;
+  if (!qt) return { ok: false, message: "Este widget não é uma Tabela Livre." };
+
+  // Toda célula digitável pertence a uma coluna LIVRE existente cuja
+  // allowlist de papéis (se houver) inclui o usuário. Rejeita o lote inteiro
+  // em qualquer violação (sem gravação parcial silenciosa).
+  const colById = new Map(qt.columns.map((c) => [c.id, c]));
+  for (const c of cells) {
+    const col = colById.get(baseColId(c.colKey));
+    if (!col) {
+      return { ok: false, message: "Coluna não encontrada (estrutura mudou)." };
+    }
+    if (!canTypeInColumn(col, session.roles)) {
+      return { ok: false, message: "Coluna bloqueada para o seu papel." };
+    }
+  }
+
+  const empty = cells.filter((c) => c.value == null || c.value === "");
+  const filled = cells.filter((c) => !(c.value == null || c.value === ""));
+
+  // Apaga células esvaziadas agrupando por linha (1 round-trip por linha).
+  const emptyByRow = new Map<string, string[]>();
+  for (const c of empty) {
+    (emptyByRow.get(c.rowKey) ?? emptyByRow.set(c.rowKey, []).get(c.rowKey)!)
+      .push(c.colKey);
+  }
+  for (const [rowKey, colKeys] of emptyByRow) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", rowKey)
+      .in("col_key", colKeys);
+    if (error) return { ok: false, message: error.message };
+  }
+
+  // Upsert das preenchidas em blocos.
+  for (let i = 0; i < filled.length; i += 500) {
+    const chunk = filled.slice(i, i + 500);
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      chunk.map((c) => ({
+        widget_id: widgetId,
+        row_key: c.rowKey,
+        col_key: c.colKey,
+        value: c.value,
+        updated_by: session.user.id,
+      })),
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+
+  // SEM revalidatePath de propósito (digitação fluida): o cliente reconcilia
+  // com router.refresh() debounced — que também alimenta o Desfazer/Refazer.
   return { ok: true };
 }
 

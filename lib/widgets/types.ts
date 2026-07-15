@@ -1,4 +1,9 @@
-// Versão: 1.4 | Data: 15/07/2026
+// Versão: 1.5 | Data: 15/07/2026
+// v1.5 (15/07/2026): widget "Tabela Livre" (visual_type 'tabela_editavel',
+//   reaproveitado da Fase 2) — QuickTableSettings: colunas tipadas (livre/
+//   dimensão/métrica), linhas livres e bloqueio de edição por papel. A
+//   estrutura vive em widgets.settings.quickTable; os VALORES das células em
+//   dashboard_table_cells (ver lib/widgets/quick-table/model.ts).
 // v1.4 (15/07/2026): novos widgets 'calculadora', 'nota' e 'forma' —
 //   CalculatorSettings/NoteSettings/ShapeSettings, WidgetLinkTarget (atalho
 //   para widget em qualquer aba/dashboard), Connector (linhas entre widgets,
@@ -14,6 +19,7 @@
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
 import type { SourceKey } from "@/lib/sources";
+import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
 import type { DateFormat } from "./format";
 import type {
@@ -26,6 +32,7 @@ import type {
 
 export type VisualType =
   | "tabela"
+  | "tabela_editavel"
   | "barra"
   | "barra_horizontal"
   | "linha"
@@ -46,6 +53,9 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   nota: "Nota (post-it)",
   forma: "Forma",
   tabela: "Tabela",
+  // O valor 'tabela_editavel' no banco é herdado da Fase 2 (o CHECK já o
+  // aceita); o produto atual chama o widget de "Tabela Livre".
+  tabela_editavel: "Tabela Livre",
   barra: "Barra",
   barra_horizontal: "Barra horizontal",
   linha: "Linha",
@@ -346,6 +356,45 @@ export interface NoteSettings {
   note?: { text?: string; exprs?: Formula[] };
 }
 
+// --- Tabela Livre (planilha editável, visual_type 'tabela_editavel') ---
+// A ESTRUTURA (colunas/linhas/bloqueios) vive em widgets.settings.quickTable
+// (editável por dono/admin, via RLS widgets_write); os VALORES das células
+// vivem em dashboard_table_cells (row_key/col_key = ids abaixo), graváveis por
+// qualquer visualizador do dashboard — exceto colunas restritas por papel,
+// validadas na server action (saveQuickTableCells).
+export type QuickTableColKind = "free" | "dimension" | "metric";
+export interface QuickTableColumn {
+  id: string; // estável ("qc_…") — é o col_key das células e da aparência
+  kind: QuickTableColKind;
+  // Texto do cabeçalho (coluna livre) ou override do rótulo (dimensão/métrica).
+  header?: string;
+  field?: string; // kind="dimension": ref de AvailableField ('stage', 'custom:…')
+  // Só p/ dimensão de DATA: formato/bucket (Nome do mês, Trimestre…), mesmo
+  // vocabulário das dimensões do builder.
+  transform?: Transform;
+  weekMode?: "full" | "restricted"; // só p/ transform 'week_month'
+  metric?: Metric; // kind="metric": mesmo shape das métricas do builder
+  // Só p/ dimensão: os valores distintos EXPANDEM COLUNAS (pivot clássico de
+  // BI) em vez de linhas. No máximo uma coluna pivot por tabela.
+  pivot?: boolean;
+  // Só p/ coluna livre: papéis que podem digitar nela. Ausente = todos os
+  // visualizadores; [] = ninguém (admin sempre pode). Validado na UI E na
+  // server action (a RLS da tabela de células não distingue coluna).
+  editableRoles?: RoleKey[];
+}
+// Linha LIVRE (estática) da tabela. No modo BI as linhas de DADOS são
+// derivadas dos valores da dimensão (row_key "d:…") e não ficam aqui.
+export interface QuickTableRow {
+  id: string; // estável ("qr_…") — é o row_key das células e da aparência
+}
+export interface QuickTableSettings {
+  quickTable?: {
+    columns: QuickTableColumn[];
+    rows: QuickTableRow[];
+    headerRow?: boolean; // exibe a linha de cabeçalho (default true)
+  };
+}
+
 // --- Forma (figura geométrica) ---
 export type ShapeKind =
   | "retangulo"
@@ -522,7 +571,8 @@ export type WidgetSettings = KpiSettings &
   CalcSettings &
   CalculatorSettings &
   NoteSettings &
-  ShapeSettings & {
+  ShapeSettings &
+  QuickTableSettings & {
     appearance?: AppearanceSettings;
     // Filtros rápidos expostos no card (dropdowns). Valores persistidos em
     // dashboard_table_cells ('__qf__'), compartilhados entre usuários.

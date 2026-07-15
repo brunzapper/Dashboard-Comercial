@@ -1,7 +1,10 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 15/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
+// v2.3 (15/07/2026): Tabela Livre — estado drawQuick (desenhar para criar,
+//   armado pelo builder via onRequestDraw; onDrawDone cria o widget com o
+//   retângulo desenhado) e fio de tableCellsById até o grid.
 // v2.2 (15/07/2026): widgets calculadora/nota/forma — focusWidget (atalhos:
 //   troca aba/dashboard e centraliza o alvo, WidgetFocusProvider), estado
 //   otimista de conectores (settings.connectors) + modo "Conectar", e repasse
@@ -40,7 +43,12 @@ import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
-import { renameDashboard, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  createWidget,
+  renameDashboard,
+  updateDashboardSettings,
+} from "@/app/(app)/dashboards/actions";
+import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
@@ -98,6 +106,7 @@ export function DashboardClient({
   calcVarsById = {},
   noteById = {},
   calcExprById = {},
+  tableCellsById = {},
   fields,
   fkLabels,
   responsibleOptions,
@@ -136,6 +145,11 @@ export function DashboardClient({
   noteById?: Record<string, CalcWidgetResult[]>;
   // Calculadora: expressão compartilhada corrente (row __calc__).
   calcExprById?: Record<string, string>;
+  // Tabela Livre: células digitadas por widget (rows não reservadas).
+  tableCellsById?: Record<
+    string,
+    { row_key: string; col_key: string; value: number | string | null }[]
+  >;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
@@ -170,6 +184,11 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+  // Modo "desenhar para criar" (Tabela Livre): armado pelo builder; o título
+  // digitado lá viaja junto. O retângulo desenhado dimensiona widget E tabela.
+  const [drawQuick, setDrawQuick] = useState<{ title: string | null } | null>(
+    null
+  );
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -350,6 +369,33 @@ export function DashboardClient({
     });
   }
 
+  // Fim do desenho da Tabela Livre: cria o widget com o retângulo como
+  // grid_position e linhas/colunas derivadas do tamanho desenhado.
+  const onDrawDone = useCallback(
+    (rect: GridPosition, table: { rows: number; cols: number }) => {
+      const cfg = drawQuick;
+      setDrawQuick(null);
+      startTransition(async () => {
+        await createWidget(dashboardId, {
+          title: cfg?.title ?? "Tabela Livre",
+          visual_type: "tabela_editavel",
+          sources: [],
+          splitBySource: false,
+          dimensions: [],
+          metrics: [],
+          filters: [],
+          settings: {
+            quickTable: defaultQuickTable(table.rows, table.cols),
+            ...(activeTabId ? { tab: activeTabId } : {}),
+          },
+          grid_position: rect,
+        });
+        router.refresh();
+      });
+    },
+    [drawQuick, dashboardId, activeTabId, router, startTransition]
+  );
+
   function saveTabs(next: DashboardSettings["tabs"]) {
     setTabs(next ?? []); // aplica na hora (cor/nome/adicionar/excluir)
     startTransition(async () => {
@@ -430,6 +476,7 @@ export function DashboardClient({
               activeTabId={activeTabId}
               layoutById={layoutById}
               canvasCols={settings.canvas?.cols ?? 12}
+              onRequestDraw={(title) => setDrawQuick({ title })}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
@@ -496,6 +543,7 @@ export function DashboardClient({
             calcVarsById={calcVarsById}
             noteById={noteById}
             calcExprById={calcExprById}
+            tableCellsById={tableCellsById}
             fields={fields}
             fkLabels={fkLabels}
             responsibleOptions={responsibleOptions}
@@ -521,6 +569,9 @@ export function DashboardClient({
             connectors={connectors}
             saveConnectors={saveConnectors}
             connectMode={editMode && connectMode}
+            drawMode={drawQuick != null}
+            onDrawDone={onDrawDone}
+            onDrawCancel={() => setDrawQuick(null)}
           />
           </WidgetFocusProvider>
         </div>
