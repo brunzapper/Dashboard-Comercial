@@ -139,6 +139,51 @@ A escrita das duas tabelas continua só via service role. Depois disso, gestor e
 vendedor passam a ver uma **Configurações simplificada** (Moedas em leitura, Log e
 troca da própria senha) — sem mudança de RLS nas moedas, cuja leitura já era pública.
 
+## Como aplicar a Fase 12 (Mock de "Data Reunião" jan–mai + congelamento)
+
+Cole o [`apply/fase-12.sql`](./apply/fase-12.sql) (migrações `0051`–`0052`) e execute.
+Idempotente. **Aplique o SQL ANTES de fazer o deploy do código desta fase** (o app
+passa a filtrar pela nova coluna `records.is_mock`). O que ela faz:
+
+- **Zera "Data Reunião"** (Lead `UF_CRM_1743441331` e Negócio `UF_CRM_67EACEFCCCD98`)
+  de todos os registros reais com data **anterior a 01/06/2026** (o período jan–mai e
+  tudo antes de 01/01). Os valores originais ficam guardados em
+  `reuniao_freeze_backup` (para o undo).
+- **Insere 270 leads mock** (CSV "Inbound Zapper") com Data Reunião entre 01/01/2026 e
+  31/05/2026 — os únicos com o campo preenchido no período. Eles têm todas as datas do
+  núcleo NULL e `is_mock = true`.
+- **Congela o campo** com um trigger no banco: nenhum sync do Bitrix, recálculo ou
+  edição no app consegue gravar Data Reunião anterior a 01/06/2026 nem alterar os
+  mocks. O sync continua rodando normalmente — as tentativas são descartadas em
+  silêncio (pode gerar algum ruído no audit_log; inofensivo). Datas a partir de
+  01/06/2026 seguem sincronizando normal.
+- **Regra de contagem**: os mocks **nunca somam** em nenhuma consulta (widgets,
+  contagens, listas, página Registros) — só aparecem quando a consulta referencia
+  Data Reunião (período, dimensão, métrica ou filtro, direto ou via campo unificado).
+  Consultas por data de criação/movimentação/fechamento os ignoram por construção.
+
+**Para desfazer** (única forma prevista): cole e execute
+[`apply/undo-mock-reuniao.sql`](./apply/undo-mock-reuniao.sql) — remove o trigger,
+restaura os valores originais do backup e apaga os mocks.
+
+Conferência pós-aplicação:
+
+```sql
+select count(*) from public.records where is_mock;                    -- esperado: 270
+select count(*) from public.records
+ where not is_mock
+   and left(custom_fields->>'bitrix_uf_crm_1743441331', 10) < '2026-06-01';  -- 0
+select count(*) from public.records
+ where not is_mock
+   and left(custom_fields->>'bitrix_uf_crm_67eacefcccd98', 10) < '2026-06-01'; -- 0
+-- teste do congelamento (deve continuar NULL depois do update):
+update public.records
+   set custom_fields = jsonb_set(custom_fields, '{bitrix_uf_crm_1743441331}', '"2026-03-10"')
+ where not is_mock and record_type = 'lead' and id = (
+   select id from public.records where not is_mock and record_type = 'lead' limit 1
+ );
+```
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
