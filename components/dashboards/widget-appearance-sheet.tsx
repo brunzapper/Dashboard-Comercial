@@ -74,7 +74,8 @@ export function WidgetAppearanceSheet({
   const isBar = vt === "barra" || vt === "barra_horizontal";
   const isChart = isBar || vt === "linha";
   const isPie = vt === "pizza" || vt === "funil";
-  const isTable = vt === "tabela";
+  // A Tabela rápida reusa a seção de tabela (cores globais/grade/alinhamento).
+  const isTable = vt === "tabela" || vt === "tabela_editavel";
   const isKpi = vt === "kpi";
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";

@@ -218,6 +218,9 @@ function dimDisplay(
   dateFmt: DateFormat
 ): string {
   if (value == null || value === "") return "—";
+  if (isDateField && c.transform && c.transform !== "none") {
+    return formatBucketLabel(c.transform, value, c.weekMode ?? "restricted");
+  }
   if (isDateField) return formatDateValue(value, dateFmt);
   return String(value);
 }

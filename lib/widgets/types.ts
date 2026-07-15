@@ -369,6 +369,10 @@ export interface QuickTableColumn {
   // Texto do cabeçalho (coluna livre) ou override do rótulo (dimensão/métrica).
   header?: string;
   field?: string; // kind="dimension": ref de AvailableField ('stage', 'custom:…')
+  // Só p/ dimensão de DATA: formato/bucket (Nome do mês, Trimestre…), mesmo
+  // vocabulário das dimensões do builder.
+  transform?: Transform;
+  weekMode?: "full" | "restricted"; // só p/ transform 'week_month'
   metric?: Metric; // kind="metric": mesmo shape das métricas do builder
   // Só p/ dimensão: os valores distintos EXPANDEM COLUNAS (pivot clássico de
   // BI) em vez de linhas. No máximo uma coluna pivot por tabela.
