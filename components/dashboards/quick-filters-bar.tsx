@@ -8,9 +8,13 @@
 // (dashboard_table_cells '__qf__', via saveQuickFilterValue) — compartilhada
 // entre usuários e sobrevive a reloads. Estado otimista + debounce; a action
 // revalida a página e o RSC recomputa o widget (overlay via useNavPending).
+// EXCEÇÃO — modo snapshot (viewer público /s/<token>): a seleção é POR
+// VISITANTE e vai para a URL (qf_<widget>_<entry>, mesma técnica da
+// TableFilterBar); nada é gravado no servidor.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +42,7 @@ import {
 } from "@/lib/widgets/quick-filters";
 import { TRANSFORM_LABELS, type QuickFilterEntry } from "@/lib/widgets/types";
 import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
+import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 
 const CUSTOM = "__custom__";
@@ -64,6 +69,10 @@ export function QuickFiltersBar({
   className?: string;
 }) {
   const { run } = useNavPending();
+  const { snapshot } = useSnapshotMode();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Estado otimista, ressincronizado quando o servidor manda valores novos
   // (outro usuário mudou / sync da barra global) — padrão seedKey do app.
@@ -89,6 +98,19 @@ export function QuickFiltersBar({
   const persist = (entryId: string, value: QuickFilterValue | null) => {
     clearTimeout(timersRef.current[entryId]);
     timersRef.current[entryId] = setTimeout(() => {
+      // Modo snapshot: seleção por visitante na URL; o RSC público a lê e
+      // recomputa sobre o dataset congelado. Nada persiste no servidor.
+      if (snapshot) {
+        const params = new URLSearchParams(searchParams.toString());
+        const key = `qf_${widgetId}_${entryId}`;
+        if (value) params.set(key, JSON.stringify(value));
+        else params.delete(key);
+        const qs = params.toString();
+        run(() =>
+          router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+        );
+        return;
+      }
       // Transition assíncrona: o overlay "Carregando…" cobre a gravação + a
       // revalidação da página disparada pela action.
       run(async () => {

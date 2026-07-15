@@ -9,7 +9,9 @@ import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/env";
 
 // Rotas públicas (sem exigir sessão). As rotas de API cuidam da própria
 // autenticação (tokens/segredos), então também não passam pelo redirect.
-const PUBLIC_PATHS = ["/login"];
+// "/s" é o viewer público de snapshots (/s/<token>): a página valida o token
+// (hash) sozinha, via service role — o anon key segue sem acesso a nada.
+const PUBLIC_PATHS = ["/login", "/s"];
 
 function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/")) return true;
@@ -63,6 +65,13 @@ export async function proxy(request: NextRequest) {
     homeUrl.pathname = "/";
     homeUrl.search = "";
     return NextResponse.redirect(homeUrl);
+  }
+
+  // Viewer público de snapshots: o token está na URL — nunca vazar por
+  // Referer nem entrar em índice de busca.
+  if (pathname.startsWith("/s/")) {
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   return response;
