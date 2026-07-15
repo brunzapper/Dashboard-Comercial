@@ -295,14 +295,24 @@ export function resolveCalcMetric(
 
 /**
  * Catálogo de operandos de agregação (FormulaBuilder/FormulaTextEditor):
- * contagem de registros + Σ/Média de cada campo numérico. Compartilhado entre o
+ * contagem de registros + Σ/Média de cada campo numérico + Contagem de cada
+ * campo "contável" (registros com o campo preenchido — inclui datas). A contagem
+ * por campo (`agg:count:<campo>`) vira `count(custom_fields ->> 'key')` no RPC,
+ * que só conta não-nulos — habilita razões como reunião→venda
+ * (Contagem(Data da assinatura) ÷ Contagem(Data Reunião)). Compartilhado entre o
  * construtor de widgets e a página /campos.
  */
 export function aggOperandRefs(
-  numericFields: { field: string; label: string }[]
+  numericFields: { field: string; label: string }[],
+  countableFields: { field: string; label: string }[] = []
 ): RefOption[] {
   return [
     { ref: "agg:count:*", label: "Contagem de registros", group: "Registros" },
+    ...countableFields.map((f) => ({
+      ref: `agg:count:${f.field}`,
+      label: `Contagem de ${f.label}`,
+      group: "Registros",
+    })),
     ...numericFields.flatMap((f) => [
       { ref: `agg:sum:${f.field}`, label: `Σ ${f.label}`, group: "Registros" },
       {

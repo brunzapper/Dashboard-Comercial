@@ -467,7 +467,12 @@ export function WidgetBuilder({
   };
 
   // Refs disponíveis para as métricas/widget calculados: agregações de registros.
-  const calcRefs: RefOption[] = aggOperandRefs(numericFields);
+  // Contáveis (agg:count:<campo>): datas/numéricos reais (não aggCalc/sintéticos)
+  // — permite razões como reunião→venda (Contagem de datas por tipo de registro).
+  const countableFields = available.filter(
+    (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+  );
+  const calcRefs: RefOption[] = aggOperandRefs(numericFields, countableFields);
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>

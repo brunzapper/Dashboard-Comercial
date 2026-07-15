@@ -100,7 +100,26 @@ async function aggOperandCatalog(
         label: ((d.label as string) ?? (d.field_key as string)),
       })),
   ];
-  return aggOperandRefs(numeric);
+  // Contáveis (agg:count:<campo>): datas/numéricos do núcleo + qualquer custom
+  // (exceto 'calculado_agg'). Mesmo critério do editor (fields-manager) para que
+  // o construtor e a validação concordem.
+  const countable = [
+    ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
+      field: f.field,
+      label: f.label,
+    })),
+    ...(data ?? [])
+      .filter(
+        (d) =>
+          (d.data_type as DataType) !== "calculado_agg" &&
+          d.field_key !== excludeFieldKey
+      )
+      .map((d) => ({
+        field: `custom:${d.field_key}`,
+        label: ((d.label as string) ?? (d.field_key as string)),
+      })),
+  ];
+  return aggOperandRefs(numeric, countable);
 }
 
 // Refs de DATA permitidos numa fórmula: datas do próprio registro + custom
