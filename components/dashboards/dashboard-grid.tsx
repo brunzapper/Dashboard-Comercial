@@ -1,10 +1,14 @@
-// Versão: 2.5 | Data: 15/07/2026
+// Versão: 2.6 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
-// v2.5 (15/07/2026): modo "desenhar para criar" (Tabela Livre) — overlay de
+// v2.6 (15/07/2026): modo "desenhar para criar" (Tabela Livre) — overlay de
 //   mira sobre o canvas (drawMode/onDrawDone/onDrawCancel), pan/menu/drag
 //   suspensos durante o desenho, canvas renderiza mesmo sem widgets; repasse
 //   de tableCellsById aos cards.
+// v2.5 (15/07/2026): clique nas linhas de conexão destravado — o container do
+//   RGL (div transparente sobre o canvas inteiro, acima do SVG dos conectores)
+//   engolia o clique nas linhas e armava o pan; agora é pointer-events-none e
+//   cada item reabilita com pointer-events-auto.
 // v2.4 (15/07/2026): conectores (ConnectorLayer sob os cards; pontas seguem o
 //   gesto via onDrag/onResize → apiRef, sem tocar o estado do grid), id de DOM
 //   por item (widget-<id>, alvo do focus/atalhos), guarda [data-conn-ui] no
@@ -780,7 +784,14 @@ export function DashboardGrid({
               />
             ) : null}
             <RGL
-              className={cn("layout transition-opacity", pending && "opacity-60")}
+              className={cn(
+                // pointer-events-none: o container do RGL é um div transparente
+                // que cobre o canvas INTEIRO por cima da camada de conectores
+                // (vem depois no DOM) — sem isso ele engole o clique nas linhas
+                // (e o pan armava no lugar). Os itens reabilitam abaixo.
+                "layout transition-opacity pointer-events-none",
+                pending && "opacity-60"
+              )}
               layout={layout}
               cols={cols}
               width={gridW(cols)}
@@ -802,7 +813,11 @@ export function DashboardGrid({
               onResizeStop={onResizeStop}
             >
               {widgets.map((w) => (
-                <div key={w.id} id={widgetDomId(w.id)} className="cursor-auto">
+                <div
+                  key={w.id}
+                  id={widgetDomId(w.id)}
+                  className="pointer-events-auto cursor-auto"
+                >
                   <WidgetCard
                     widget={w}
                     data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
