@@ -19,12 +19,22 @@ import {
 } from "@/components/ui/sheet";
 import {
   RECORD_TYPE_LABELS,
+  isPercentField,
   type FieldDefinition,
   type OptionItem,
   type RecordRow,
 } from "@/lib/records/types";
 import { updateRecord, type EditActionState } from "@/lib/records/actions";
-import { CURRENCY_OPTIONS, formatMoney } from "@/lib/widgets/currency";
+import {
+  CURRENCY_OPTIONS,
+  formatMoney,
+  resolveFieldMoneyFromRecord,
+} from "@/lib/widgets/currency";
+import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  formatPercent,
+} from "@/lib/widgets/format";
 import { LeadCombobox } from "./lead-combobox";
 import { RecordMatchConnect } from "./record-match-connect";
 
@@ -304,11 +314,19 @@ export function RecordEditSheet({
               {readOnlyFields.map((f) => (
                 <span key={f.id} className="contents">
                   <span>{f.label}</span>
-                  {/* Traço só para vazio/nulo — zero exibe "0". */}
+                  {/* Traço só para vazio/nulo — zero exibe "0". Formata moeda,
+                      percentual (×100 + "%") e data como no restante do app. */}
                   <span>
                     {(() => {
                       const v = customValue(record, f.field_key);
-                      return v == null || v === "" ? "—" : v;
+                      if (v == null || v === "") return "—";
+                      const money = resolveFieldMoneyFromRecord(f, record);
+                      if (money.isMoney) return formatMoney(v, money.code);
+                      if (isPercentField(f)) return formatPercent(v, true);
+                      if (f.data_type === "data") {
+                        return formatDateValue(v, DEFAULT_DATE_FORMAT);
+                      }
+                      return v;
                     })()}
                   </span>
                 </span>

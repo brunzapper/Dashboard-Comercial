@@ -29,7 +29,7 @@ export default async function CamposPage() {
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, allow_negative, currency_code, currency_mode, sort_order, applies_to, write_back"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, write_back"
       )
       .order("sort_order", { ascending: true })
       .order("label", { ascending: true }),

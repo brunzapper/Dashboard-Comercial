@@ -346,14 +346,21 @@ export function MetricRow({
               className="h-8 flex-1 text-sm"
               searchable={false}
               options={resultFormatOptions}
-              value={metric.resultCurrency ?? ""}
-              onValueChange={(v) => onChange({ resultCurrency: v || null })}
+              value={
+                metric.resultPercent ? "percent" : (metric.resultCurrency ?? "")
+              }
+              onValueChange={(v) =>
+                v === "percent"
+                  ? onChange({ resultPercent: true, resultCurrency: null })
+                  : onChange({ resultPercent: false, resultCurrency: v || null })
+              }
               aria-label="Formato do resultado"
             />
           </div>
           <p className="text-muted-foreground text-xs">
             Fórmula sobre os totais do recorte, recalculada por grupo,
-            subtotal e Total geral. Moeda é só exibição (sem conversão).
+            subtotal e Total geral. Percentual exibe ×100 (0,35 → 35%); moeda
+            é só exibição (sem conversão).
           </p>
         </div>
       ) : null}
@@ -365,6 +372,23 @@ export function MetricRow({
           onChange={(e) => onChange({ label: e.target.value })}
           aria-label="Nome exibido da métrica"
         />
+      ) : null}
+      {/* Toggle "%": só anexa o símbolo ao número exibido (sem ×100) — p/ números
+          que já vêm em magnitude percentual. Sem sentido em métrica monetária ou
+          fórmula com formato moeda (aí o combobox de formato manda). Contagem de
+          registros ("*") é caso de uso legítimo. */}
+      {metric.field &&
+      !isMoney &&
+      !(isCalcSentinel && (metric.resultCurrency || metric.resultPercent)) ? (
+        <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={metric.percent ?? false}
+            onChange={(e) => onChange({ percent: e.target.checked })}
+          />
+          Exibir com &quot;%&quot; (só o símbolo — não multiplica por 100)
+        </label>
       ) : null}
       {isMoney ? (
         <div className="flex flex-col gap-2 rounded-md border p-2">

@@ -209,7 +209,7 @@ export async function syncFieldCatalog(
   const { data: existing } = await db
     .from("field_definitions")
     .select(
-      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back, currency_mode, currency_code"
+      "field_key, show_in_builder, visible_to_roles, editable_by_roles, is_local, formula, sort_order, write_back, currency_mode, currency_code, show_as_percent"
     )
     .in("field_key", keys);
   const existingByKey = new Map(
@@ -231,6 +231,7 @@ export async function syncFieldCatalog(
           write_back?: boolean;
           currency_mode?: string | null;
           currency_code?: string | null;
+          show_as_percent?: boolean;
         }
       | undefined;
     return {
@@ -256,6 +257,9 @@ export async function syncFieldCatalog(
           ? "inherit"
           : null,
       currency_code: ex ? ex.currency_code ?? null : null,
+      // Exibição percentual: toggle do admin — preservado no upsert (novo nasce
+      // desligado). Sem isto, todo sync resetaria o flag para false.
+      show_as_percent: ex ? ex.show_as_percent ?? false : false,
     };
   });
 

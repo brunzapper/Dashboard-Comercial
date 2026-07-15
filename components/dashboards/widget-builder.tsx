@@ -1421,6 +1421,7 @@ export function WidgetBuilder({
                 calcRefs={calcRefs}
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
+                  { value: "percent", label: "Percentual (%) — exibe ×100" },
                   ...(currencyOptions ?? []).map((o) => ({
                     value: o.value,
                     label: `Moeda — ${o.label}`,
@@ -1446,7 +1447,11 @@ export function WidgetBuilder({
                       calc: true,
                       label: m.label,
                       ...(field === CALC_METRIC_FIELD
-                        ? { formula: m.formula, resultCurrency: m.resultCurrency }
+                        ? {
+                            formula: m.formula,
+                            resultCurrency: m.resultCurrency,
+                            resultPercent: m.resultPercent,
+                          }
                         : {}),
                     };
                   } else {
@@ -1458,6 +1463,7 @@ export function WidgetBuilder({
                     delete cleaned.calc;
                     delete cleaned.formula;
                     delete cleaned.resultCurrency;
+                    delete cleaned.resultPercent;
                     next[i] = cleaned;
                   }
                   setMetrics(next);

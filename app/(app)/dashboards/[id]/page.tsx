@@ -129,7 +129,7 @@ export default async function DashboardPage({
     supabase
       .from("field_definitions")
       .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, sort_order, applies_to, source_system, source_field_id, write_back"
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
       )
       .eq("show_in_builder", true)
       .order("sort_order", { ascending: true }),

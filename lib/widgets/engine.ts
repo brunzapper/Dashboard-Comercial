@@ -8,7 +8,11 @@
 // Fase 6B (widget KPI estendido).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  isPercentField,
+  type FieldDefinition,
+  type RecordRow,
+} from "@/lib/records/types";
 import {
   AGG_LABELS,
   DATE_AGG_LABELS,
@@ -58,7 +62,7 @@ import {
 } from "./currency";
 import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
-import { DEFAULT_DATE_FORMAT, formatDateValue } from "./format";
+import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { unifiedMemberRef } from "@/lib/correspondences";
 import { resolveGoal } from "@/lib/metas/resolve";
@@ -152,6 +156,22 @@ interface MoneyInfo {
 
 function isMoneyMetric(metric: Metric, available: AvailableField[]): boolean {
   return available.find((a) => a.field === metric.field)?.isMoney ?? false;
+}
+
+// Exibição percentual (15/07/2026): a métrica agrega um campo percentual?
+// Resolve 'custom:<key>' e 'match:<fonte>:custom:<key>'. Campos 'unified:'
+// ficam fora do v1 (resolver o membro exigiria as correspondences aqui).
+function isPercentMetricField(
+  field: string,
+  fieldByKey: Map<string, FieldDefinition>
+): boolean {
+  const key = field.startsWith("custom:")
+    ? field.slice("custom:".length)
+    : /^match:[^:]+:custom:/.test(field)
+      ? field.slice(field.indexOf(":custom:") + ":custom:".length)
+      : null;
+  const f = key ? fieldByKey.get(key) : undefined;
+  return f ? isPercentField(f) : false;
 }
 
 // Origem da moeda de uma métrica/operando monetário: moeda FIXA do campo
@@ -567,9 +587,12 @@ async function runKpi(
         label: s.label ?? "Razão",
         value,
         // A razão de um numerador monetário é uma cifra em R$ (ex.: ticket médio).
+        // `percent` (não-monetário): razão exibida ×100 + "%" (0.35 → "35%").
         ...(numConverted && value != null
           ? { valueText: formatMoney(value, "BRL") }
-          : {}),
+          : s.percent && value != null
+            ? { valueText: formatPercent(value, true) }
+            : {}),
       },
     };
   }
@@ -939,6 +962,7 @@ async function runWidgetByPeriod(
           (m.field.startsWith("custom:")
             ? fieldLabel(m.field, available)
             : "Fórmula"),
+        percent: rc.percent,
         calc: {
           formula: rc.formula ?? { tokens: [] },
           currency: rc.code,
@@ -956,6 +980,12 @@ async function runWidgetByPeriod(
           ? fieldLabel(m.field, available)
           : `${DATE_AGG_LABELS[fn]} · ${fieldLabel(m.field, available)}`),
       isMoney: isMoney(m.field),
+      // Percentual: sum/avg/median/mode/individual de campo percentual exibem
+      // ×100 + "%"; contagem nunca (contagem é contagem).
+      percent:
+        fn !== "count" &&
+        m.field !== "*" &&
+        isPercentMetricField(m.field, fieldByKey),
     };
   });
 
@@ -1245,6 +1275,7 @@ export async function runWidget(
           (m.field.startsWith("custom:")
             ? fieldLabel(m.field, available)
             : "Fórmula"),
+        percent: rc.percent,
         calc: {
           formula: rc.formula ?? { tokens: [] },
           currency: rc.code,
@@ -1258,6 +1289,12 @@ export async function runWidget(
       key: `metric_${i + 1}`,
       label: m.label?.trim() || `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
       isMoney: isMoneyMetric(m, available),
+      // Percentual: soma/média de campo percentual exibem ×100 + "%"; contagem
+      // nunca (contagem é contagem).
+      percent:
+        m.agg !== "count" &&
+        m.field !== "*" &&
+        isPercentMetricField(m.field, fieldByKey),
     };
   });
 

@@ -59,3 +59,18 @@ export function formatDateValue(value: unknown, fmt: DateFormat): string {
 export function looksLikeDate(value: unknown): boolean {
   return parseYmd(value) != null;
 }
+
+/**
+ * Percentual (15/07/2026) — único lugar com a matemática ×100.
+ * scale=true: formato de CAMPO percentual (0.35 → "35%").
+ * scale=false: toggle "%" por métrica — só sufixa o número (35 → "35%").
+ * O guard de string vazia é obrigatório: Number("") === 0.
+ */
+export function formatPercent(v: unknown, scale: boolean): string {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${(scale ? n * 100 : n).toLocaleString("pt-BR", {
+    maximumFractionDigits: 2,
+  })}%`;
+}

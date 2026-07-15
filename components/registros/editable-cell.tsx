@@ -11,10 +11,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  isPercentField,
+  type FieldDefinition,
+  type RecordRow,
+} from "@/lib/records/types";
 import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
+  formatPercent,
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
@@ -90,9 +95,14 @@ export function EditableCell({
     const money = resolveFieldMoneyFromRecord(field, record);
     const display = money.isMoney
       ? formatMoney(serverValue, money.code)
-      : field.data_type === "data"
-        ? formatDateValue(serverValue, dateFormat)
-        : serverValue;
+      : isPercentField(field)
+        ? // Percentual: exibe cru ×100 + "%" (0.35 → "35%"); vazio vira "—" abaixo.
+          serverValue === ""
+          ? ""
+          : formatPercent(serverValue, true)
+        : field.data_type === "data"
+          ? formatDateValue(serverValue, dateFormat)
+          : serverValue;
     // Traço só para vazio/nulo — zero (0 numérico ou "0") exibe normalmente.
     return (
       <span className="block truncate">

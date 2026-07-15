@@ -16,7 +16,11 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
+import {
+  NUMERIC_DATA_TYPES,
+  PERCENT_DATA_TYPES,
+  type DataType,
+} from "@/lib/records/types";
 import { validateFormula, type Formula } from "@/lib/records/formulas";
 import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
@@ -290,6 +294,9 @@ function readForm(formData: FormData) {
   const formulaText = String(formData.get("formula_text") ?? "");
   const currencyCodeRaw = String(formData.get("currency_code") ?? "").trim().toUpperCase();
   const currencyModeRaw = String(formData.get("currency_mode") ?? "").trim();
+  // Exibição percentual: checkbox (tipo numero) ou hidden derivado do combobox
+  // "Formato do resultado" (calculado/calculado_agg) — ambos enviam "on".
+  const showAsPercent = formData.get("show_as_percent") === "on";
   return {
     label,
     dataType,
@@ -306,6 +313,7 @@ function readForm(formData: FormData) {
     formulaText,
     currencyCodeRaw,
     currencyModeRaw,
+    showAsPercent,
   };
 }
 
@@ -342,6 +350,17 @@ function resolveCurrencyColumns(f: {
     return { currency_code: null, currency_mode: null };
   }
   return { currency_code: null, currency_mode: null };
+}
+
+// Exibição percentual: só tipos elegíveis e nunca junto com moeda (percent ×
+// moeda são mutuamente exclusivos — o form já garante, isto é a trava do server).
+function resolveShowAsPercent(
+  f: { dataType: string; showAsPercent: boolean },
+  currency: { currency_mode: string | null }
+): boolean {
+  if (!PERCENT_DATA_TYPES.includes(f.dataType as DataType)) return false;
+  if (currency.currency_mode) return false;
+  return f.showAsPercent;
 }
 
 export async function createField(
@@ -385,6 +404,7 @@ export async function createField(
     allow_negative: FORMULA_DATA_TYPES.includes(f.dataType) ? f.allowNegative : true,
     currency_code: currency.currency_code,
     currency_mode: currency.currency_mode,
+    show_as_percent: resolveShowAsPercent(f, currency),
     sort_order: f.sortOrder,
   });
   if (error) {
@@ -451,6 +471,7 @@ export async function updateField(
       allow_negative: FORMULA_DATA_TYPES.includes(f.dataType) ? f.allowNegative : true,
       currency_code: currency.currency_code,
       currency_mode: currency.currency_mode,
+      show_as_percent: resolveShowAsPercent(f, currency),
       sort_order: f.sortOrder,
     })
     .eq("id", id);

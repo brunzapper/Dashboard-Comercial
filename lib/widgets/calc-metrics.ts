@@ -33,7 +33,7 @@ import {
   formulaRefs,
   type Formula,
 } from "@/lib/records/formulas";
-import type { FieldDefinition } from "@/lib/records/types";
+import { isPercentField, type FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/components/campos/formula-builder";
 import {
   foldBreakdowns,
@@ -249,6 +249,10 @@ export interface ResolvedCalcMetric {
   mode: CalcCurrencyMode;
   code: string | null; // moeda fixa (mode 'fixed')
   allowNegative: boolean;
+  // Exibição percentual (15/07/2026): resultado exibe ×100 + "%" (só quando o
+  // resultado é número puro — nunca junto de moeda). Aplicado na formatação,
+  // depois da avaliação; evalCalcMoney não muda.
+  percent: boolean;
 }
 
 /** Resolve fórmula/moeda da métrica calculada (ad-hoc ou reutilizável). */
@@ -264,6 +268,7 @@ export function resolveCalcMetric(
       mode: m.resultCurrency ? "fixed" : "none",
       code: m.resultCurrency ? resolveCurrencyCode(m.resultCurrency) : null,
       allowNegative: true,
+      percent: Boolean(m.resultPercent) && !m.resultCurrency,
     };
   }
   const def = m.field.startsWith("custom:")
@@ -275,7 +280,13 @@ export function resolveCalcMetric(
     !def.formula ||
     def.formula.tokens.length === 0
   ) {
-    return { formula: null, mode: "none", code: null, allowNegative: true };
+    return {
+      formula: null,
+      mode: "none",
+      code: null,
+      allowNegative: true,
+      percent: false,
+    };
   }
   return {
     formula: def.formula,
@@ -290,6 +301,7 @@ export function resolveCalcMetric(
         ? resolveCurrencyCode(def.currency_code)
         : null,
     allowNegative: def.allow_negative !== false,
+    percent: isPercentField(def),
   };
 }
 

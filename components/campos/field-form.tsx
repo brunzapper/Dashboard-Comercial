@@ -117,13 +117,17 @@ export function FieldForm({
       label: `Moeda fixa — ${o.label}`,
     })),
   ];
-  // "Formato do resultado" de um campo 'calculado': número | herdar | fixed:<code>.
+  // "Formato do resultado" de um campo 'calculado': número | percentual |
+  // herdar | fixed:<code>. Percentual (15/07/2026) exibe o valor ×100 + "%" e é
+  // mutuamente exclusivo com moeda (mesmo combobox garante isso).
   const [calcCurrency, setCalcCurrency] = useState(
     field?.currency_mode === "inherit"
       ? "inherit"
       : field?.currency_mode === "fixed"
         ? `fixed:${field?.currency_code ?? "BRL"}`
-        : "number"
+        : field?.show_as_percent
+          ? "percent"
+          : "number"
   );
   const calcMode = calcCurrency.startsWith("fixed:")
     ? "fixed"
@@ -135,6 +139,7 @@ export function FieldForm({
     : "";
   const calcResultOptions: ComboboxOption[] = [
     { value: "number", label: "Número (sem moeda)" },
+    { value: "percent", label: "Percentual (%) — exibe o valor ×100" },
     { value: "inherit", label: "Moeda — automática (dos operandos)" },
     ...currencyChoices.map((o) => ({
       value: `fixed:${o.value}`,
@@ -157,6 +162,7 @@ export function FieldForm({
   // dos operandos; misturou → Real) ou moeda fixa (converte).
   const aggResultOptions: ComboboxOption[] = [
     { value: "number", label: "Número (sem moeda)" },
+    { value: "percent", label: "Percentual (%) — exibe o valor ×100" },
     { value: "inherit", label: "Moeda — automática (dos operandos)" },
     ...currencyChoices.map((o) => ({
       value: `fixed:${o.value}`,
@@ -218,6 +224,24 @@ export function FieldForm({
             placeholder={"Quente\nMorno\nFrio"}
             rows={4}
           />
+        </div>
+      ) : null}
+
+      {dataType === "numero" ? (
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="show_as_percent"
+              defaultChecked={field?.show_as_percent ?? false}
+              className="size-4 accent-primary"
+            />
+            Exibir como percentual (0,35 → 35%)
+          </label>
+          <p className="text-muted-foreground text-xs">
+            Só a exibição muda: o valor armazenado continua cru e a edição usa o
+            valor cru. Agregações (soma/média) em widgets também exibem em %.
+          </p>
         </div>
       ) : null}
 
@@ -293,11 +317,17 @@ export function FieldForm({
           />
           <input type="hidden" name="currency_mode" value={calcMode} />
           <input type="hidden" name="currency_code" value={calcCode} />
+          <input
+            type="hidden"
+            name="show_as_percent"
+            value={calcCurrency === "percent" ? "on" : ""}
+          />
           <p className="text-muted-foreground text-xs">
-            Automática: os totais mantêm a moeda dos operandos quando é uma só;
-            ao misturar moedas, os operandos são somados convertidos para Real
-            (taxa do período). Moeda fixa converte o resultado para a moeda
-            escolhida.
+            Percentual: o resultado exibe multiplicado por 100 (0,35 → 35%) em
+            widgets e registros. Automática: os totais mantêm a moeda dos
+            operandos quando é uma só; ao misturar moedas, os operandos são
+            somados convertidos para Real (taxa do período). Moeda fixa converte
+            o resultado para a moeda escolhida.
           </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input
@@ -364,11 +394,18 @@ export function FieldForm({
           />
           <input type="hidden" name="currency_mode" value={calcMode} />
           <input type="hidden" name="currency_code" value={calcCode} />
+          <input
+            type="hidden"
+            name="show_as_percent"
+            value={calcCurrency === "percent" ? "on" : ""}
+          />
           <p className="text-muted-foreground text-xs">
-            Automática: o resultado mantém a moeda dos operandos (ex.: campo em
-            US$ × 2 continua US$); ao misturar moedas diferentes, os valores são
-            convertidos para Real pela taxa do período do registro. Moeda fixa
-            converte tudo para a moeda escolhida.
+            Percentual: o valor calculado exibe multiplicado por 100 (0,35 →
+            35%) — o valor armazenado continua cru. Automática: o resultado
+            mantém a moeda dos operandos (ex.: campo em US$ × 2 continua US$);
+            ao misturar moedas diferentes, os valores são convertidos para Real
+            pela taxa do período do registro. Moeda fixa converte tudo para a
+            moeda escolhida.
           </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input
