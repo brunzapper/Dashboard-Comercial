@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 15/07/2026
+// Versão: 1.7 | Data: 15/07/2026
+// v1.7 (15/07/2026): widgets calculadora/nota/forma — seção de variáveis da
+//   calculadora (nome + fórmula agregada), seção da forma (tipo/texto/atalho
+//   via WidgetLinkPicker), hint da nota (texto é editado direto no card) e
+//   branches próprios no save() (config em settings; sem dimensões/métricas).
 // v1.6 (15/07/2026): correção da digitação no "Nome exibido" das métricas —
 //   calcRefs memoizado (identidade estável p/ os editores de fórmula) e
 //   updates de métrica/dimensão/filtro em forma funcional (sem snapshot
@@ -70,9 +74,11 @@ import {
 import {
   AGG_LABELS,
   DATE_AGG_LABELS,
+  SHAPE_KIND_LABELS,
   TRANSFORM_LABELS,
   VISUAL_TYPE_LABELS,
   type Aggregation,
+  type CalculatorVariable,
   type DateAgg,
   type Dimension,
   type FieldFilterEntry,
@@ -84,11 +90,15 @@ import {
   type QuickFilterEntry,
   type RecordListColumn,
   type RowSource,
+  type ShapeKind,
   type Transform,
   type VisualType,
   type Widget,
   type WidgetFilter,
+  type WidgetLinkTarget,
 } from "@/lib/widgets/types";
+import { newVarId } from "@/lib/widgets/calculator";
+import { WidgetLinkPicker } from "@/components/dashboards/widget-link-picker";
 import {
   cleanFilters as cleanFilterRows,
   FILTER_OPS,
@@ -411,6 +421,29 @@ export function WidgetBuilder({
     widget?.settings?.calcField ?? ""
   );
 
+  // Calculadora: variáveis nomeadas (fórmulas agregadas computadas no servidor
+  // com filtros+período do widget; inseridas na expressão do card como [Nome]).
+  const [calcVariables, setCalcVariables] = useState<CalculatorVariable[]>(
+    widget?.settings?.calculator?.variables ?? []
+  );
+  const updateVariable = (i: number, patch: Partial<CalculatorVariable>) =>
+    setCalcVariables((prev) => {
+      const next = [...prev];
+      next[i] = { ...prev[i], ...patch };
+      return next;
+    });
+
+  // Forma (figura geométrica): tipo, texto interno e atalho para widget.
+  const [shapeKind, setShapeKind] = useState<ShapeKind>(
+    widget?.settings?.shape?.kind ?? "retangulo_arredondado"
+  );
+  const [shapeText, setShapeText] = useState<string>(
+    widget?.settings?.shape?.text ?? ""
+  );
+  const [shapeLink, setShapeLink] = useState<WidgetLinkTarget | undefined>(
+    widget?.settings?.shape?.link
+  );
+
   // KPI "Data atual": card que mostra o dia de hoje (Brasília). Não usa
   // métrica/RPC — o valor é resolvido no engine (runKpi) via settings.mode.
   const [kpiToday, setKpiToday] = useState<boolean>(
@@ -449,12 +482,14 @@ export function WidgetBuilder({
   const [filterPreset, setFilterPreset] = useState(
     widget?.settings?.defaultPreset ?? ""
   );
-  // Widgets que este filtro pode controlar (exclui a si mesmo e os controles).
+  // Widgets que este filtro pode controlar (exclui a si mesmo, os controles e
+  // a forma, que não tem dados/período).
   const targetable = siblings.filter(
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
-      s.visual_type !== "filtro_campo"
+      s.visual_type !== "filtro_campo" &&
+      s.visual_type !== "forma"
   );
 
   function toggleTarget(id: string) {
@@ -478,7 +513,8 @@ export function WidgetBuilder({
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
-      s.visual_type !== "filtro_campo"
+      s.visual_type !== "filtro_campo" &&
+      s.visual_type !== "forma"
   );
   const affectedSiblings = dataSiblings.filter((s) => {
     const b = s.sources ?? [];
@@ -846,6 +882,134 @@ export function WidgetBuilder({
         metrics: [],
         filters: [],
         settings: { ...settings, ...tabPatch },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Calculadora: variáveis nomeadas (fórmulas agregadas) em
+    // settings.calculator. Nome obrigatório e único (case-insensitive) — a
+    // expressão do card resolve [Nome] pelo rótulo; duplicado fica ambíguo.
+    if (visualType === "calculadora") {
+      const clean = calcVariables.filter(
+        (v) => v.name.trim() || (v.formula?.tokens.length ?? 0) > 0
+      );
+      const seen = new Set<string>();
+      for (const v of clean) {
+        const name = v.name.trim();
+        if (!name) {
+          setError("Toda variável da calculadora precisa de um nome.");
+          return;
+        }
+        const key = name.toLocaleLowerCase("pt-BR");
+        if (seen.has(key)) {
+          setError(`Variável duplicada: "${name}". Use nomes únicos.`);
+          return;
+        }
+        seen.add(key);
+        if (v.formula && v.formula.tokens.length > 0) {
+          const val = validateFormula(
+            v.formula,
+            new Set(calcRefs.map((r) => r.ref))
+          );
+          if (!val.ok) {
+            setError(`Variável "${name}": ${val.error ?? "fórmula inválida."}`);
+            return;
+          }
+          const p = validateCondAggRefs(v.formula, calcRefs);
+          if (!p.ok) {
+            setError(`Variável "${name}": ${p.error ?? "fórmula inválida."}`);
+            return;
+          }
+        }
+      }
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          calculator: {
+            variables: clean.map((v) => ({
+              id: v.id || newVarId(),
+              name: v.name.trim(),
+              formula: v.formula,
+            })),
+          },
+          ...tabPatch,
+        },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Nota (post-it): o texto é editado direto no card (settings.note fica
+    // intocado aqui — preservado pelo spread); o builder só define título/aba.
+    if (visualType === "nota") {
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: { ...(widget?.settings ?? {}), ...tabPatch },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Forma (figura geométrica): tipo, texto e atalho em settings.shape.
+    if (visualType === "forma") {
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          shape: {
+            kind: shapeKind,
+            text: shapeText.trim() || undefined,
+            link: shapeLink,
+          },
+          ...tabPatch,
+        },
       };
       startTransition(async () => {
         const res = widget
@@ -1398,6 +1562,121 @@ export function WidgetBuilder({
             </div>
           ) : null}
 
+          {/* Config da Calculadora: variáveis de campos (nome + fórmula). */}
+          {visualType === "calculadora" ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <Label>Variáveis de campos</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setCalcVariables((prev) => [
+                      ...prev,
+                      { id: newVarId(), name: "" },
+                    ])
+                  }
+                >
+                  <Plus className="size-4" /> Adicionar variável
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Cada variável é um total dos dados (respeita filtros e período)
+                e entra na expressão da calculadora como <code>[Nome]</code> —
+                digite <code>[</code> no card para buscar.
+              </p>
+              {calcVariables.map((v, i) => (
+                <div key={v.id} className="flex flex-col gap-2 rounded-md border p-3">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={v.name}
+                      placeholder="Nome da variável (ex.: Vendas)"
+                      onChange={(e) => updateVariable(i, { name: e.target.value })}
+                      aria-label="Nome da variável"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Remover variável"
+                      onClick={() =>
+                        setCalcVariables((prev) => prev.filter((_, j) => j !== i))
+                      }
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                  <FormulaTextEditor
+                    refs={calcRefs}
+                    initial={v.formula ?? null}
+                    onChange={(f) => updateVariable(i, { formula: f })}
+                  />
+                </div>
+              ))}
+              {calcVariables.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  Sem variáveis a calculadora ainda funciona para contas
+                  básicas (+ − × ÷ e parênteses).
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Config da Nota: o texto é editado direto no card. */}
+          {visualType === "nota" ? (
+            <p className="text-muted-foreground rounded-md border p-3 text-sm">
+              O texto da nota é editado direto no card (modo{" "}
+              <strong>Editar layout</strong> → clique no post-it). Use{" "}
+              <code>{"{= … }"}</code> para cálculos com campos e condicionais, e
+              o botão <strong>Link…</strong> para transformar palavras em
+              atalhos para outros widgets. Cores em <strong>Aparência</strong>.
+            </p>
+          ) : null}
+
+          {/* Config da Forma: tipo, texto interno e atalho para widget. */}
+          {visualType === "forma" ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Forma</Label>
+                <Combobox
+                  searchable={false}
+                  options={(
+                    Object.keys(SHAPE_KIND_LABELS) as ShapeKind[]
+                  ).map((k) => ({ value: k, label: SHAPE_KIND_LABELS[k] }))}
+                  value={shapeKind}
+                  onValueChange={(v) => setShapeKind(v as ShapeKind)}
+                  aria-label="Tipo de forma"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Texto na forma</Label>
+                <Input
+                  value={shapeText}
+                  onChange={(e) => setShapeText(e.target.value)}
+                  placeholder="Opcional"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Atalho para widget</Label>
+                <p className="text-muted-foreground text-xs">
+                  Clicar na forma (fora do modo edição) vai até o widget-alvo —
+                  em qualquer aba deste dashboard ou de outro — centralizando-o
+                  na tela.
+                </p>
+                <WidgetLinkPicker
+                  currentDashboardId={dashboardId}
+                  value={shapeLink}
+                  onChange={setShapeLink}
+                />
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Cores (preenchimento/contorno/texto) em{" "}
+                <strong>Aparência</strong>.
+              </p>
+            </>
+          ) : null}
+
           {/* KPI "Data atual": mostra o dia de hoje (Brasília), sem métrica. */}
           {visualType === "kpi" ? (
             <div className="flex flex-col gap-2 rounded-md border p-3">
@@ -1432,7 +1711,10 @@ export function WidgetBuilder({
               por padrão; ao editar, Fontes abre fechada (raramente muda). */}
           {visualType !== "filtro" &&
           visualType !== "filtro_campo" &&
-          visualType !== "calculado" ? (
+          visualType !== "calculado" &&
+          visualType !== "calculadora" &&
+          visualType !== "nota" &&
+          visualType !== "forma" ? (
           <Accordion
             type="multiple"
             defaultValue={

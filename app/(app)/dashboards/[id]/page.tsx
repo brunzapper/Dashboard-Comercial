@@ -1,6 +1,11 @@
-// Versão: 2.1 | Data: 15/07/2026
+// Versão: 2.2 | Data: 15/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.2 (15/07/2026): widgets calculadora/nota/forma — computa as variáveis da
+//   calculadora (calcVarsById) e as expressões da nota (noteById) via
+//   runCalculatedWidget; carrega a expressão compartilhada (calcExprById,
+//   row __calc__); consome ?focus=<widgetId> (atalho vindo de outro dashboard).
+//   'forma' fica fora de dataWidgets (não tem dados nem período).
 // v2.1 (15/07/2026): filtros do "Filtro por campo" carregam as fontes do
 //   widget-filtro como alvo (pass-through) — exceto filtros unificados.
 // v2.0 (09/07/2026): período resolvido POR widget. Uma barra global
@@ -58,6 +63,8 @@ import {
   type WidgetQuickFilters,
 } from "@/lib/widgets/quick-filters";
 import { formatBucketLabel } from "@/lib/widgets/date-buckets";
+import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
+import { NOTE_MAX_EXPRS } from "@/lib/widgets/note-template";
 import type {
   CalcWidgetResult,
   DashboardSettings,
@@ -213,9 +220,15 @@ export default async function DashboardPage({
     return out;
   };
 
-  // Widgets de dados (excluem os controles: filtro de período e filtro por campo).
+  // Widgets de dados (excluem os controles — filtro de período e filtro por
+  // campo — e a forma, que não tem dados nem período). Calculadora e nota
+  // FICAM aqui: precisam de período/filtros por widget (variáveis/expressões),
+  // mas são pulados no engine e computados em blocos próprios (como calculado).
   const dataWidgets = widgets.filter(
-    (w) => w.visual_type !== "filtro" && w.visual_type !== "filtro_campo"
+    (w) =>
+      w.visual_type !== "filtro" &&
+      w.visual_type !== "filtro_campo" &&
+      w.visual_type !== "forma"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
   const fieldFilterWidgets = widgets.filter(
@@ -662,6 +675,9 @@ export default async function DashboardPage({
     w.visual_type === "tabela" && w.settings?.rowMode === "records";
   // Widget "Métrica calculada" (Fase 3): valor vem da fórmula (contexto do dash).
   const isCalcWidget = (w: Widget) => w.visual_type === "calculado";
+  // Calculadora e Nota: fórmulas próprias (variáveis/expressões), fora do engine.
+  const isCalculatorWidget = (w: Widget) => w.visual_type === "calculadora";
+  const isNoteWidget = (w: Widget) => w.visual_type === "nota";
 
   // 3) Computa cada widget de dados. Filtros, tabela editável e calculado não
   //    passam pelo engine de agregação padrão.
@@ -670,7 +686,8 @@ export default async function DashboardPage({
   const entityListById: Record<string, EntityListRow[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
-      if (isCalcWidget(w)) return; // computado abaixo
+      if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w))
+        return; // computados abaixo
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],
@@ -922,6 +939,78 @@ export default async function DashboardPage({
     );
   }
 
+  // Calculadora: valor de cada variável nomeada ({ widgetId: { varId: result }}).
+  // Mesmo contexto do calculado (filtros do widget + filtros de visão + período);
+  // a expressão digitada é avaliada no CLIENTE contra esses valores.
+  const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
+  const calculatorWidgets = dataWidgets.filter(isCalculatorWidget);
+  if (calculatorWidgets.length > 0) {
+    await Promise.all(
+      calculatorWidgets.map(async (w) => {
+        const vars = w.settings?.calculator?.variables ?? [];
+        const out: Record<string, CalcWidgetResult> = {};
+        await Promise.all(
+          vars.map(async (v) => {
+            try {
+              out[v.id] = await runCalculatedWidget(supabase, {
+                formula: v.formula ?? null,
+                sources: w.sources ?? [],
+                filters: [
+                  ...(w.filters ?? []),
+                  ...(viewFiltersByWidget[w.id] ?? []),
+                ],
+                period: periodByWidget[w.id],
+                correspondencesMap,
+                currencyMode: "auto",
+                fields: allFields,
+                rates: currencyRates,
+                conversionPeriod: conversionPeriodById[w.id],
+              });
+            } catch {
+              out[v.id] = { value: null, currency: null };
+            }
+          })
+        );
+        calcVarsById[w.id] = out;
+      })
+    );
+  }
+
+  // Nota (post-it): avalia as expressões {=…} salvas (settings.note.exprs, na
+  // ordem do texto; teto NOTE_MAX_EXPRS — cada SOMASE pode gerar query extra).
+  // Resultado alinhado por índice com as {=…} do texto (parseNoteTemplate).
+  const noteById: Record<string, CalcWidgetResult[]> = {};
+  const noteWidgets = dataWidgets.filter(isNoteWidget);
+  if (noteWidgets.length > 0) {
+    await Promise.all(
+      noteWidgets.map(async (w) => {
+        const exprs = (w.settings?.note?.exprs ?? []).slice(0, NOTE_MAX_EXPRS);
+        noteById[w.id] = await Promise.all(
+          exprs.map(async (formula) => {
+            try {
+              return await runCalculatedWidget(supabase, {
+                formula,
+                sources: w.sources ?? [],
+                filters: [
+                  ...(w.filters ?? []),
+                  ...(viewFiltersByWidget[w.id] ?? []),
+                ],
+                period: periodByWidget[w.id],
+                correspondencesMap,
+                currencyMode: "auto",
+                fields: allFields,
+                rates: currencyRates,
+                conversionPeriod: conversionPeriodById[w.id],
+              });
+            } catch {
+              return { value: null, currency: null };
+            }
+          })
+        );
+      })
+    );
+  }
+
   // Seed do histórico de Desfazer/Refazer: snapshot determinístico do estado
   // atual (nome + settings + widgets + células das tabelas editáveis). Recomputado
   // a cada render do RSC, é o que o provider observa para registrar mudanças.
@@ -938,10 +1027,28 @@ export default async function DashboardPage({
     dash.name as string,
     dashSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') ficam fora do histórico de
-    // Desfazer/Refazer (não são edição de dashboard).
-    (cellsData ?? []).filter((c) => c.row_key !== QF_ROW_KEY)
+    // Valores de filtros rápidos ('__qf__') e a expressão da calculadora
+    // ('__calc__') ficam fora do histórico de Desfazer/Refazer (não são
+    // edição de dashboard).
+    (cellsData ?? []).filter(
+      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+    )
   );
+
+  // Expressão compartilhada corrente de cada calculadora (row __calc__).
+  const calcExprById: Record<string, string> = {};
+  for (const c of cellsData ?? []) {
+    if (c.row_key === CALC_ROW_KEY && c.col_key === CALC_COL_KEY) {
+      calcExprById[c.widget_id] = String(c.value ?? "");
+    }
+  }
+
+  // Atalho vindo de outro dashboard (?focus=<widgetId>): abre já na aba do
+  // widget-alvo e o cliente centraliza/destaca ao montar.
+  const focusId = str(sp.focus);
+  const focusWidget = focusId
+    ? widgets.find((w) => w.id === focusId)
+    : undefined;
 
   return (
     <DashboardClient
@@ -953,6 +1060,9 @@ export default async function DashboardPage({
       recordListById={recordListById}
       entityListById={entityListById}
       calcById={calcById}
+      calcVarsById={calcVarsById}
+      noteById={noteById}
+      calcExprById={calcExprById}
       fields={(fieldsData ?? []) as FieldDefinition[]}
       fkLabels={fkLabels}
       responsibleOptions={responsibleOptions}
@@ -974,7 +1084,8 @@ export default async function DashboardPage({
       periodDefaultFieldByTab={periodDefaultFieldByTab}
       filterOptionsById={filterOptionsById}
       quickFiltersById={quickFiltersById}
-      initialTabId={str(sp.tab)}
+      initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
+      focusWidgetId={focusWidget ? focusId : undefined}
     />
   );
 }

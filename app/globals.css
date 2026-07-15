@@ -1,4 +1,5 @@
-/* Versão: 1.0 | Data: 04/07/2026 */
+/* Versão: 1.1 | Data: 15/07/2026 */
+/* v1.1 (15/07/2026): pulso .widget-focus (atalhos/links para widgets). */
 /* Estilos globais + design tokens shadcn/ui (Tailwind v4). */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -118,5 +119,22 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Pulso de destaque de um widget focado por atalho/link (lib/widgets/focus.ts):
+   anel na cor primária que some ao final. Aplicado no wrapper do item do grid. */
+.widget-focus {
+  animation: widget-focus-pulse 2.2s ease-out;
+}
+@keyframes widget-focus-pulse {
+  0%,
+  55% {
+    box-shadow:
+      0 0 0 3px var(--color-primary),
+      0 0 0 10px color-mix(in oklch, var(--color-primary) 30%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
   }
 }

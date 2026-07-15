@@ -1,4 +1,8 @@
-// Versão: 3.1 | Data: 15/07/2026
+// Versão: 3.2 | Data: 15/07/2026
+// v3.2 (15/07/2026): resultado TEXTUAL opcional — quando a fórmula usa funções
+//   (SE etc.) e o valor numérico sai null, reavalia sobre a basis numérica
+//   crua (rawBasis, sem MoneyBreakdown) e devolve string em `text` (booleano →
+//   "Verdadeiro"/"Falso"). Usado pelo widget Nota p/ condicionais textuais.
 // v3.1 (15/07/2026): filtros segmentados por fonte (applyFilterSourceTargets,
 //   mesma normalização do engine) antes do @period/sourceFilters.
 // Fase 3: métrica calculada no nível do DASHBOARD. O avaliador de fórmula
@@ -17,7 +21,12 @@
 //   { value, currency }.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { AggCondition, Formula } from "@/lib/records/formulas";
+import {
+  evaluateFormula,
+  formulaUsesFunctions,
+  type AggCondition,
+  type Formula,
+} from "@/lib/records/formulas";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
 import {
@@ -63,13 +72,14 @@ export interface CalcInput {
 
 /**
  * Avalia a fórmula de uma métrica calculada com o contexto do dashboard.
- * Retorna { value, currency }: value null se algum operando faltar / divisão
- * por zero; currency null = número puro (sem moeda).
+ * Retorna { value, currency, text? }: value null se algum operando faltar /
+ * divisão por zero; currency null = número puro (sem moeda); text presente
+ * quando a fórmula produz string/booleano (ex.: SE(...) textual da Nota).
  */
 export async function runCalculatedWidget(
   supabase: SupabaseClient,
   input: CalcInput
-): Promise<{ value: number | null; currency: string | null }> {
+): Promise<{ value: number | null; currency: string | null; text?: string }> {
   const { formula } = input;
   if (!formula || formula.tokens.length === 0)
     return { value: null, currency: null };
@@ -99,6 +109,9 @@ export async function runCalculatedWidget(
   const plainKeys = allKeys.filter((k) => !isCondBasisKey(k));
   const condKeys = allKeys.filter(isCondBasisKey);
   const basis: BasisValues = {};
+  // Basis numérica CRUA (antes da substituição por MoneyBreakdown): contexto
+  // da reavaliação textual (evaluateFormula não entende MoneyBreakdown).
+  const rawBasis: Record<string, number | null> = {};
 
   const resolveKeys = async (keys: BasisKey[], keyFilters: WidgetFilter[]) => {
     const metrics: Metric[] = keys.map(basisMetric);
@@ -110,6 +123,7 @@ export async function runCalculatedWidget(
     );
     keys.forEach((key, i) => {
       basis[key] = Number.isFinite(values[i]) ? values[i] : null;
+      rawBasis[key] = Number.isFinite(values[i]) ? values[i] : null;
     });
 
     // Operandos monetários: detalhamento por moeda (preserva a moeda única do
@@ -183,5 +197,18 @@ export async function runCalculatedWidget(
   };
   // Refs desconhecidas (table:* legadas) resolvem p/ null dentro do
   // evalCalcMoney (operando ausente). Resultado texto/booleano → value null.
-  return evalCalcMoney(formula, basis, meta);
+  const result = evalCalcMoney(formula, basis, meta);
+  if (result.value == null && formulaUsesFunctions(formula)) {
+    // Fórmula com funções (SE/E/OU…) pode legitimamente produzir texto ou
+    // booleano — reavalia sobre a basis crua e expõe como `text`.
+    try {
+      const raw = evaluateFormula(formula, rawBasis);
+      if (typeof raw === "string") return { ...result, text: raw };
+      if (typeof raw === "boolean")
+        return { ...result, text: raw ? "Verdadeiro" : "Falso" };
+    } catch {
+      // Avaliação textual é melhor-esforço: mantém o resultado numérico null.
+    }
+  }
+  return result;
 }

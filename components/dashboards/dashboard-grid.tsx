@@ -1,6 +1,10 @@
-// Versão: 2.3 | Data: 15/07/2026
+// Versão: 2.4 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.4 (15/07/2026): conectores (ConnectorLayer sob os cards; pontas seguem o
+//   gesto via onDrag/onResize → apiRef, sem tocar o estado do grid), id de DOM
+//   por item (widget-<id>, alvo do focus/atalhos), guarda [data-conn-ui] no
+//   pan/menu de colar, e repasse de calcVarsById/noteById/calcExprById.
 // v2.3 (15/07/2026): as posições base vêm do estado otimista do shell
 //   (layoutById em dashboard-client) em vez da prop do servidor — como
 //   saveLayout não revalida, a prop ficava obsoleta e qualquer re-render
@@ -40,12 +44,14 @@ import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
   CalcWidgetResult,
+  Connector,
   DashboardSettings,
   FieldFilterOptions,
   GridPosition,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
+import { widgetDomId } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
@@ -61,6 +67,7 @@ import { posOf } from "@/lib/widgets/grid-placement";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel } from "./appearance-editing";
+import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -198,6 +205,12 @@ export function DashboardGrid({
   quickFiltersById,
   layoutById,
   applyLayoutPatch,
+  calcVarsById = {},
+  noteById = {},
+  calcExprById = {},
+  connectors = [],
+  saveConnectors,
+  connectMode = false,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -231,6 +244,14 @@ export function DashboardGrid({
   // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
   layoutById: Record<string, GridPosition>;
   applyLayoutPatch: (patch: Record<string, GridPosition>) => void;
+  calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
+  noteById?: Record<string, CalcWidgetResult[]>;
+  calcExprById?: Record<string, string>;
+  // Conectores (todas as abas; a camada filtra pela ativa) + persistência
+  // otimista no shell. connectMode = criar conexões (submodo da edição).
+  connectors?: Connector[];
+  saveConnectors?: (next: Connector[]) => void;
+  connectMode?: boolean;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -417,6 +438,8 @@ export function DashboardGrid({
   function onCanvasPointerDown(e: React.PointerEvent) {
     if (e.pointerType === "touch" || e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    // UI dos conectores (âncoras/linhas/painel) não arma o pan.
+    if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
     const sc = scrollRef.current;
     if (!sc) return;
     const v = verticalScroller(sc);
@@ -463,6 +486,7 @@ export function DashboardGrid({
   function onCanvasContextMenu(e: React.MouseEvent) {
     if (!canEdit) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
+    if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || cellW <= 0) return;
     e.preventDefault();
@@ -565,11 +589,19 @@ export function DashboardGrid({
       }))
     ).then(() => history.captureNow());
   }
+  // Pontas dos conectores acompanham o gesto AO VIVO: onDrag/onResize entregam
+  // o layout transitório só à camada de conectores (via apiRef) — nunca ao
+  // estado do grid (trocar a prop `layout` do RGL no meio do gesto faz os
+  // widgets saltarem; ver v2.3).
+  const connApiRef = useRef<ConnectorLayerApi | null>(null);
   function onDragStart() {
     interactingRef.current = true;
   }
   function onResizeStart() {
     interactingRef.current = true;
+  }
+  function onLiveLayout(next: Layout) {
+    connApiRef.current?.setLive(next);
   }
   function onDragStop(
     next: Layout,
@@ -577,6 +609,7 @@ export function DashboardGrid({
     item: LayoutItem | null
   ) {
     interactingRef.current = false;
+    connApiRef.current?.setLive(null);
     persist(next, item, "drag");
     flushPendingMeasures();
   }
@@ -586,6 +619,7 @@ export function DashboardGrid({
     item: LayoutItem | null
   ) {
     interactingRef.current = false;
+    connApiRef.current?.setLive(null);
     persist(next, item, "resize");
     flushPendingMeasures();
   }
@@ -705,6 +739,22 @@ export function DashboardGrid({
             )}
             style={{ width: gridW(cols), height: gridH(rows) }}
           >
+            {/* Linhas entre widgets: antes do RGL no DOM = pintam SOB os cards
+                (as âncoras de criação têm z próprio, acima). */}
+            {saveConnectors ? (
+              <ConnectorLayer
+                connectors={connectors}
+                layout={layout}
+                widgets={widgets}
+                metrics={{ cellW, rowH: ROW_H, mx: MX, my: MY }}
+                tabs={tabs}
+                activeTabId={activeTabId ?? ""}
+                editMode={editMode}
+                connectMode={connectMode}
+                onChange={saveConnectors}
+                apiRef={connApiRef}
+              />
+            ) : null}
             <RGL
               className={cn("layout transition-opacity", pending && "opacity-60")}
               layout={layout}
@@ -722,17 +772,22 @@ export function DashboardGrid({
               draggableHandle=".widget-drag"
               onDragStart={onDragStart}
               onResizeStart={onResizeStart}
+              onDrag={onLiveLayout}
+              onResize={onLiveLayout}
               onDragStop={onDragStop}
               onResizeStop={onResizeStop}
             >
               {widgets.map((w) => (
-                <div key={w.id} className="cursor-auto">
+                <div key={w.id} id={widgetDomId(w.id)} className="cursor-auto">
                   <WidgetCard
                     widget={w}
                     data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
                     recordList={recordListById[w.id] ?? []}
                     entityList={entityListById[w.id] ?? []}
                     calcValue={calcById[w.id] ?? null}
+                    calcVars={calcVarsById[w.id]}
+                    noteValues={noteById[w.id]}
+                    calcExpr={calcExprById[w.id]}
                     fields={fields}
                     currencyOptions={currencyOptions}
                     currencyRates={currencyRates}
