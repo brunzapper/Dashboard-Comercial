@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 15/07/2026
+// Versão: 1.3 | Data: 15/07/2026
+// v1.3 (15/07/2026): filtros segmentados por fonte — applyFilterSourceTargets
+//   converte WidgetFilter.sources em record_types (wrapper pass-through no RPC,
+//   migração 0054) antes do @period/sourceFilters.
 // v1.2 (15/07/2026): exibição percentual — carimba percent em data.metrics
 //   (isPercentFieldRef; contagem nunca) e KPI razão com KpiSettings.percent.
 // v1.1 (09/07/2026): Fase 8 — filtra por fontes (record_type in ...), quebra por
@@ -50,6 +53,7 @@ import {
   type CalcMoneyMeta,
   type ResolvedCalcMetric,
 } from "./calc-metrics";
+import { applyFilterSourceTargets } from "./filter-sources";
 import { runRecordList } from "./record-list";
 import {
   buildRecordBreakdown,
@@ -999,7 +1003,12 @@ export async function runWidget(
   rates: CurrencyRates = {},
   conversionPeriod: ConversionYQ = yearQuarterOf(null)
 ): Promise<WidgetData> {
-  let filters = resolveFilters(config.filters ?? []);
+  // Segmentação por fonte ANTES do @period/sourceFilters: os filtros
+  // sintéticos e o record_type in (...) implícito nunca ganham alvo.
+  let filters = applyFilterSourceTargets(
+    resolveFilters(config.filters ?? []),
+    config.sources
+  );
   if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   // Fonte(s) selecionada(s) viram um filtro record_type in (...).
   filters = [...sourceFilters(config.sources), ...filters];

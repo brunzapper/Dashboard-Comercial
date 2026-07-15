@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 15/07/2026
+// Versão: 1.3 | Data: 15/07/2026
+// v1.3 (15/07/2026): FilterRow ganha seletor de fontes-alvo (pass-through):
+//   nenhum marcado = todas as fontes; o filtro só restringe as fontes marcadas
+//   e as demais fontes do widget passam sem restrição.
 // v1.2 (15/07/2026): toggle "%" por métrica (sufixo, oculto p/ monetárias) e
 //   opção Percentual no Formato do resultado do calc ad-hoc (resultPercent).
 // v1.1 (14/07/2026): MetricRow suporta métricas calculadas de agregados
@@ -32,6 +35,7 @@ import {
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
 import { formulaUsesFunctions } from "@/lib/records/formulas";
+import type { SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type {
   Aggregation,
@@ -520,21 +524,39 @@ export function MetricRow({
   );
 }
 
+// Opção do seletor de fontes-alvo de um filtro. `stale` = fonte que saiu das
+// fontes do widget depois de virar alvo (exibida com aviso, nunca escondida).
+export interface FilterSourceOption {
+  key: SourceKey;
+  label: string;
+  stale?: boolean;
+}
+
 // Card de um filtro: campo em cima, operador + valor embaixo (o valor não
-// colapsa mais quando o painel está na largura mínima).
+// colapsa mais quando o painel está na largura mínima). Com sourceOptions
+// (2+ fontes no widget), uma terceira linha escolhe as fontes-alvo do filtro:
+// nenhuma marcada = todas; marcadas = o filtro só restringe essas fontes e as
+// demais passam sem restrição (pass-through).
 export function FilterRow({
   filter,
   fieldOptions,
   opOptions,
+  sourceOptions,
   onChange,
   onRemove,
 }: {
   filter: WidgetFilter;
   fieldOptions: ComboboxOption[];
   opOptions: ComboboxOption[];
+  sourceOptions?: FilterSourceOption[];
   onChange: (patch: Partial<WidgetFilter>) => void;
   onRemove: () => void;
 }) {
+  const targets = filter.sources ?? [];
+  const toggleSource = (key: SourceKey, checked: boolean) => {
+    const next = checked ? [...new Set([...targets, key])] : targets.filter((s) => s !== key);
+    onChange({ sources: next.length > 0 ? next : undefined });
+  };
   return (
     <div className="flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
@@ -567,6 +589,35 @@ export function FilterRow({
           />
         ) : null}
       </div>
+      {sourceOptions && sourceOptions.length > 1 ? (
+        <div className="flex flex-col gap-1">
+          <Label className="text-muted-foreground text-xs">Fontes</Label>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {sourceOptions.map((opt) => (
+              <label
+                key={opt.key}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs",
+                  opt.stale && "text-destructive"
+                )}
+              >
+                <Checkbox
+                  checked={targets.includes(opt.key)}
+                  onCheckedChange={(c) => toggleSource(opt.key, c === true)}
+                  aria-label={`Aplicar filtro à fonte ${opt.label}`}
+                />
+                {opt.label}
+                {opt.stale ? " (fora das fontes do widget)" : null}
+              </label>
+            ))}
+          </div>
+          <span className="text-muted-foreground text-xs">
+            {targets.length === 0
+              ? "Nenhuma marcada = todas as fontes."
+              : "Só as fontes marcadas são restringidas; as demais entregam seus dados normalmente."}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): filtros segmentados por fonte — espelha o wrapper
+//   pass-through do RPC (0054) com `.or(record_type.not.in...)` do PostgREST.
 // Fase 1 (tabela editável de registros): executa um widget de Tabela em modo
 // "registros individuais". Ao contrário de runWidget (que agrega via o RPC e
 // perde o id), aqui consultamos `records` DIRETO — 1 linha por registro, com id
@@ -9,6 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { RecordRow } from "@/lib/records/types";
 import { RECORD_TYPE_SOURCE } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
+import { applyFilterSourceTargets } from "./filter-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
 import {
   applyPeriodToFilters,
@@ -89,7 +92,11 @@ export async function runRecordList(
   // record_type). Ausente = filtros unificados são ignorados (compat).
   available: AvailableField[] = []
 ): Promise<RecordRow[]> {
-  let filters = resolveFilters(config.filters ?? []);
+  // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
+  let filters = applyFilterSourceTargets(
+    resolveFilters(config.filters ?? []),
+    config.sources
+  );
   if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   filters = [...sourceFilters(config.sources), ...filters];
 
@@ -109,6 +116,14 @@ export async function runRecordList(
   // DEPOIS do fetch (pós-filtro em JS com a mesma chave canônica do RPC) —
   // inclusive sobre match:%, que só existe após attachMatches.
   const bucketFilters: BucketFilterValue[] = [];
+
+  // Segmentação por fonte (pass-through), espelho do wrapper do RPC (0054):
+  // `(record_type not in (alvos)) OR (<condição>)` — linhas de fontes fora do
+  // alvo passam sem restrição. Chamadas `.or()` separadas são ANDadas entre si
+  // pelo PostgREST (mesmo padrão dos ramos @period/unified: abaixo).
+  const rtsOf = (f: WidgetFilter) =>
+    f.record_types && f.record_types.length > 0 ? f.record_types : null;
+  const passThrough = (rts: string[]) => `record_type.not.in.(${rts.join(",")})`;
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
   let q = supabase.from("records").select(RECORD_COLS);
@@ -166,7 +181,13 @@ export async function runRecordList(
       if (cols.length === 0) continue;
       // Curingas/valor seguros para a sintaxe de .or() do PostgREST (sem vírgula/parênteses).
       const safe = term.replace(/[,()]/g, " ").trim();
-      if (cols.length === 1) {
+      const rts = rtsOf(f);
+      if (rts) {
+        // OR associativo: (rt∉alvos) or col1 or col2 ≡ (rt∉alvos or (col1 or col2)).
+        q = q.or(
+          [passThrough(rts), ...cols.map((c) => `${c}.ilike.*${safe}*`)].join(",")
+        );
+      } else if (cols.length === 1) {
         q = q.ilike(cols[0], `%${safe}%`);
       } else {
         q = q.or(cols.map((c) => `${c}.ilike.*${safe}*`).join(","));
@@ -179,18 +200,35 @@ export async function runRecordList(
     if (f.field.startsWith("unified:")) {
       const members = unifiedMembersOf(f.field);
       if (!members) continue;
+      const rts = rtsOf(f);
       const groups: string[] = [];
       for (const [rt, ref] of Object.entries(members)) {
+        // Com alvo, só as fontes-alvo entram no OR; as demais caem no
+        // pass-through. Fonte-alvo SEM membro fica sem grupo e sem pass-through
+        // → excluída (espelha o coalesce(...)≈NULL do RPC).
+        if (rts && !rts.includes(rt)) continue;
         const memberCol = filterColumn(ref);
         if (!memberCol) continue;
         const cond = postgrestCond(memberCol, f.op, f.value);
         if (cond) groups.push(`and(record_type.eq.${rt},${cond})`);
       }
+      if (rts) groups.unshift(passThrough(rts));
       if (groups.length > 0) q = q.or(groups.join(","));
       continue;
     }
     const col = filterColumn(f.field);
     if (!col) continue;
+    {
+      // Filtro simples com alvo: vira `.or(pass-through, condição)`. Limitação
+      // herdada da sintaxe de .or(): o valor é higienizado (vírgula/parênteses
+      // viram espaço), como no ramo unificado acima.
+      const rts = rtsOf(f);
+      if (rts) {
+        const cond = postgrestCond(col, f.op, f.value);
+        if (cond) q = q.or(`${passThrough(rts)},${cond}`);
+        continue;
+      }
+    }
     switch (f.op) {
       case "eq":
         q = q.eq(col, f.value as never);
