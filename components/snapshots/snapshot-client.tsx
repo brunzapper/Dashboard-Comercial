@@ -48,6 +48,7 @@ export function SnapshotClient({
   snapshotName,
   dashboardName,
   tabName,
+  periodLabel,
   lastRefreshedAt,
   dashboardId,
   widgets,
@@ -74,6 +75,9 @@ export function SnapshotClient({
   snapshotName: string;
   dashboardName: string;
   tabName: string;
+  // Rótulo do período congelado (0059), ex.: "Este ano · Data Reunião".
+  // Ausente = snapshot sem filtro de período (todo o período).
+  periodLabel?: string;
   lastRefreshedAt: string | null;
   dashboardId: string;
   widgets: Widget[];
@@ -152,11 +156,18 @@ export function SnapshotClient({
                 {tabName ? ` — ${tabName}` : ""}
               </p>
             </div>
-            {refreshedLabel ? (
-              <span className="text-muted-foreground shrink-0 rounded-full border px-3 py-1 text-xs">
-                Atualizado em {refreshedLabel}
-              </span>
-            ) : null}
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {periodLabel ? (
+                <span className="text-muted-foreground rounded-full border px-3 py-1 text-xs">
+                  Período: {periodLabel}
+                </span>
+              ) : null}
+              {refreshedLabel ? (
+                <span className="text-muted-foreground rounded-full border px-3 py-1 text-xs">
+                  Atualizado em {refreshedLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           <DashboardPendingProvider>

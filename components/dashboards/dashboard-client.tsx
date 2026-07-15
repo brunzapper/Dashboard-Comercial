@@ -16,7 +16,7 @@
 // (siblings ao builder).
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Clock, Pencil, Plus, Redo2, Spline, Undo2 } from "lucide-react";
 
@@ -52,6 +52,7 @@ import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
+import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import {
   DashboardHistoryProvider,
@@ -194,6 +195,27 @@ export function DashboardClient({
 
   const barEnabled = periodBar?.enabled !== false;
   const backgroundCss = dashboardBackgroundCss(settings.background);
+
+  // Contexto do período p/ o painel de Snapshots capturar a seleção efetiva no
+  // momento da criação (0059) — mesmos insumos entregues à barra de período.
+  const snapshotPeriod = useMemo<SnapshotPeriodCapture>(
+    () => ({
+      periodBar,
+      scope: periodScope ?? "global",
+      defaultsByTab: periodDefaultsByTab ?? {},
+      defaultFieldByTab: periodDefaultFieldByTab ?? {},
+      fieldLabels: Object.fromEntries(
+        availableForBuilder.map((a) => [a.field, a.label])
+      ),
+    }),
+    [
+      periodBar,
+      periodScope,
+      periodDefaultsByTab,
+      periodDefaultFieldByTab,
+      availableForBuilder,
+    ]
+  );
 
   // Abas: id efetivo de um widget = settings.tab ?? primeira aba. Sem abas
   // configuradas, o dashboard é uma tela única (todos os widgets visíveis).
@@ -487,6 +509,7 @@ export function DashboardClient({
               dashboardId={dashboardId}
               settings={settings}
               visibleToRoles={visibleToRoles}
+              snapshotPeriod={snapshotPeriod}
             />
           </div>
         ) : null}

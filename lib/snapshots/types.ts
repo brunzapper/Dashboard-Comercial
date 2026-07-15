@@ -5,6 +5,7 @@
 import type { FieldDefinition } from "@/lib/records/types";
 import type { Correspondence } from "@/lib/correspondences";
 import type { SystemCurrency, CurrencyRates } from "@/lib/widgets/currency";
+import type { SavedPeriod } from "@/lib/widgets/period";
 import type {
   DashboardSettings,
   FieldFilterOptions,
@@ -37,6 +38,9 @@ export interface SnapshotRow {
   refresh_time: string | null; // "HH:MM" (Brasília)
   refresh_weekday: number | null; // 1..7 ISO (segunda = 1)
   next_refresh_at: string | null;
+  // Filtro de período do dashboard no momento da criação (0059), aplicado como
+  // período de todos os widgets no viewer. null = todo o período.
+  default_period: SavedPeriod | null;
   status: SnapshotStatus;
   config: SnapshotConfig;
   last_refreshed_at: string | null;
@@ -50,7 +54,7 @@ export interface SnapshotRow {
 
 // Colunas seguras p/ listagens de gestão (sem config, que pode ser grande).
 export const SNAPSHOT_LIST_COLS =
-  "id, dashboard_id, tab_id, name, allowed_responsible_ids, allowed_operation_ids, allowed_sources, allow_quick_filters, allow_widget_filters, refresh_mode, refresh_time, refresh_weekday, next_refresh_at, status, last_refreshed_at, last_refresh_error, last_accessed_at, access_count, created_by, created_at, updated_at";
+  "id, dashboard_id, tab_id, name, allowed_responsible_ids, allowed_operation_ids, allowed_sources, allow_quick_filters, allow_widget_filters, refresh_mode, refresh_time, refresh_weekday, next_refresh_at, default_period, status, last_refreshed_at, last_refresh_error, last_accessed_at, access_count, created_by, created_at, updated_at";
 
 /** Item de listagem (gestão): SnapshotRow sem o config. */
 export type SnapshotListItem = Omit<SnapshotRow, "config">;

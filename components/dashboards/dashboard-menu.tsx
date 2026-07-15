@@ -53,7 +53,7 @@ import {
   updateDashboardSettings,
   updateDashboardVisibility,
 } from "@/app/(app)/dashboards/actions";
-import { SnapshotsPanel } from "./snapshots-panel";
+import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
 
 type BgMode = "none" | "solid" | "gradient";
 
@@ -63,10 +63,14 @@ export function DashboardMenu({
   dashboardId,
   settings,
   visibleToRoles,
+  snapshotPeriod,
 }: {
   dashboardId: string;
   settings: DashboardSettings;
   visibleToRoles: string[];
+  // Contexto do período do dashboard (0059): captura do período congelado na
+  // criação de snapshots.
+  snapshotPeriod?: SnapshotPeriodCapture;
 }) {
   const { toggleFullscreen } = useAppChrome();
   const [bgOpen, setBgOpen] = useState(false);
@@ -312,7 +316,9 @@ export function DashboardMenu({
               congelados e restrições de visibilidade.
             </SheetDescription>
           </SheetHeader>
-          {snapshotsOpen ? <SnapshotsPanel dashboardId={dashboardId} /> : null}
+          {snapshotsOpen ? (
+            <SnapshotsPanel dashboardId={dashboardId} period={snapshotPeriod} />
+          ) : null}
         </SheetContent>
       </Sheet>
 

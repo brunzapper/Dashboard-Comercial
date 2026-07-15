@@ -18,6 +18,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   regra 0052 (mock só conta em consulta que referencia Data Reunião) segue
   valendo. Não reintroduza filtros de restrição injetados pelo viewer — eles
   derrubariam os mocks (AND puro).
+- **Período congelado do snapshot (0059):** `snapshots.default_period` guarda
+  o filtro de período do dashboard capturado na criação (SnapshotsPanel →
+  `capturePeriod`) e o viewer o aplica via resolver padrão (periodBar sintético
+  + `prefSettings.lastPeriod`). É filtro de CONSULTA (mesma semântica da barra
+  do dashboard) — não é restrição; não o confunda com os filtros de restrição
+  proibidos acima. Sem ele, consultas em "todo período" deixam de referenciar
+  Data Reunião e a regra 0052 derruba os mocks.
 - **Snapshots são acesso público:** nunca crie política RLS `to anon` nem
   conceda EXECUTE a `anon`/`authenticated` nas funções de snapshot; o caminho
   público é exclusivamente `app/s/[token]` + service role após validar o token.
