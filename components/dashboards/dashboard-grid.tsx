@@ -1,11 +1,21 @@
-// Versão: 2.2 | Data: 13/07/2026
+// Versão: 2.3 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.3 (15/07/2026): as posições base vêm do estado otimista do shell
+//   (layoutById em dashboard-client) em vez da prop do servidor — como
+//   saveLayout não revalida, a prop ficava obsoleta e qualquer re-render
+//   (ex.: medição tardia do autoSize) devolvia o widget arrastado à posição
+//   antiga. Os vizinhos empurrados pelo RGL durante o gesto agora também
+//   persistem (delta aplicado à base de cada um); antes só o item manipulado
+//   era salvo e os demais "pulavam" de volta. Medições que chegam DURANTE um
+//   gesto ficam em buffer e só aplicam no fim (a prop layout não muda no meio
+//   do arraste). Alternativa avaliada: preventCollision={true} eliminaria o
+//   empurrão, mas o desejado é que os vizinhos se reposicionem — e fiquem lá.
 // v2.2 (13/07/2026): dimensões dinâmicas não sobrepõem mais os vizinhos. O layout
 //   enviado ao RGL passa por pushApart, que empurra os vizinhos no eixo do
 //   crescimento (largura → direita, altura → baixo). Como é função determinística
 //   da base, o colapso devolve todos à posição base. A persistência grava sempre a
-//   base (só o item manipulado muda), para o deslocamento automático não derivar.
+//   base, para o deslocamento automático não derivar.
 // v2.1 (12/07/2026): compactType={null} — sem compactação vertical, então os
 //   widgets ficam livres nos dois eixos (X e Y). Ao soltar sobre outro, empurra
 //   o vizinho (preventCollision no padrão false).
@@ -47,6 +57,7 @@ import {
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
+import { posOf } from "@/lib/widgets/grid-placement";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel } from "./appearance-editing";
@@ -61,12 +72,6 @@ const MIN_COLS = 12;
 const MAX_COLS = 48;
 const MIN_ROWS = 8;
 const MAX_ROWS = 200;
-
-function posOf(w: Widget, i: number): GridPosition {
-  const p = w.grid_position as GridPosition;
-  if (p && typeof p.w === "number") return p;
-  return { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 };
-}
 
 // Item do resolvedor de colisões: posição/tamanho corrente (x/y/w/h, com w/h já
 // inflados) mais a "pegada" base (bx/by/bw/bh, o tamanho mínimo persistido). A base
@@ -191,6 +196,8 @@ export function DashboardGrid({
   editMode,
   filterOptionsById,
   quickFiltersById,
+  layoutById,
+  applyLayoutPatch,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -219,6 +226,11 @@ export function DashboardGrid({
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
   quickFiltersById?: Record<string, WidgetQuickFilters>;
+  // Estado otimista de layout (vive no shell — dashboard-client): posições BASE
+  // por widget, fonte de verdade entre um saveLayout (que não revalida) e o
+  // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
+  layoutById: Record<string, GridPosition>;
+  applyLayoutPatch: (patch: Record<string, GridPosition>) => void;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -286,18 +298,53 @@ export function DashboardGrid({
   const [measured, setMeasured] = useState<
     Record<string, { w: number; h: number }>
   >({});
-  const onMeasure = useCallback((id: string, w: number, h: number) => {
-    setMeasured((prev) =>
-      prev[id]?.w === w && prev[id]?.h === h ? prev : { ...prev, [id]: { w, h } }
-    );
+  // Histerese anti-oscilação: crescer aplica na hora; encolher só quando a
+  // diferença é ≥ 2 unidades. Evita o ping-pong de ±1 unidade quando o chrome
+  // do card (título quebrando linha etc.) muda ao inflar/desinflar.
+  const applyMeasure = useCallback((id: string, w: number, h: number) => {
+    setMeasured((prev) => {
+      const cur = prev[id];
+      if (!cur) return { ...prev, [id]: { w, h } };
+      const nw = w >= cur.w || cur.w - w >= 2 ? w : cur.w;
+      const nh = h >= cur.h || cur.h - h >= 2 ? h : cur.h;
+      if (nw === cur.w && nh === cur.h) return prev;
+      return { ...prev, [id]: { w: nw, h: nh } };
+    });
   }, []);
+  // Medições que chegam DURANTE um arraste/redimensionamento ficam em buffer e
+  // só aplicam quando o gesto termina — trocar a prop `layout` do RGL no meio
+  // do gesto faz os widgets saltarem.
+  const interactingRef = useRef(false);
+  const pendingMeasureRef = useRef<Record<string, { w: number; h: number }>>({});
+  const onMeasure = useCallback(
+    (id: string, w: number, h: number) => {
+      if (interactingRef.current) {
+        pendingMeasureRef.current[id] = { w, h };
+        return;
+      }
+      applyMeasure(id, w, h);
+    },
+    [applyMeasure]
+  );
+  const flushPendingMeasures = useCallback(() => {
+    const pend = pendingMeasureRef.current;
+    pendingMeasureRef.current = {};
+    for (const [id, m] of Object.entries(pend)) applyMeasure(id, m.w, m.h);
+  }, [applyMeasure]);
+
+  // Posição base efetiva: o estado otimista do shell quando existe (sempre, fora
+  // de corridas de montagem); fallback na prop do servidor.
+  const basePos = useCallback(
+    (w: Widget, i: number): GridPosition => layoutById[w.id] ?? posOf(w, i),
+    [layoutById]
+  );
 
   // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado, e
   // então um passo de resolução de colisões que empurra os vizinhos no eixo do
   // crescimento (largura → direita, altura → baixo). Determinístico: ao colapsar,
   // some a inflação, some a colisão e todos voltam à base.
   const inflated: ResolveItem[] = widgets.map((w, i) => {
-    const p = posOf(w, i);
+    const p = basePos(w, i);
     const a = w.settings?.autoSize;
     const m = measured[w.id];
     const ew = a?.width && m ? Math.max(p.w, m.w) : p.w;
@@ -455,43 +502,92 @@ export function DashboardGrid({
   }
 
   // Persistência do layout: só em interações do usuário (arrastar/redimensionar),
-  // e sempre gravando o tamanho/posição BASE, nunca o inflado/deslocado pelo passo
-  // de colisões. Como o layout enviado ao RGL é uma função determinística da base
-  // (inflação + pushApart), não podemos gravar o que o RGL devolve para os demais
-  // widgets — isso bakeria o deslocamento automático na base e derivaria a cada
-  // carregamento. Então gravamos a base de todos, exceto o item que o usuário mexeu:
-  //   • arraste       → nova x/y (do item), w/h da base;
-  //   • redimensiona   → novo w/h (do item), x/y da base (o handle é inferior/direito).
-  function persist(changed: LayoutItem | null, kind: "drag" | "resize") {
+  // e sempre gravando o tamanho/posição BASE, nunca o offset de inflação/pushApart
+  // (que é derivado a cada render e sumiria/derivaria se fosse "assado" na base).
+  //   • item manipulado: arraste → nova x/y + w/h da base; redimensiona → novo
+  //     w/h + x/y da base (o handle é inferior/direito);
+  //   • vizinhos empurrados pelo RGL durante o gesto: delta entre o layout final
+  //     (next) e o que entregamos ao RGL (layout do render) aplicado à base de
+  //     cada um — o empurrão do usuário persiste, o automático não.
+  // O patch aplica no estado otimista do shell (applyLayoutPatch) na hora — como
+  // saveLayout não revalida (edição fluida), a prop do servidor fica obsoleta e
+  // era ela que fazia os widgets "voltarem" no próximo re-render. Após persistir,
+  // registra no histórico. Obs.: widgets com autoSize podem "assentar" um render
+  // depois do drop (a base nova repassa por inflação+pushApart) — determinístico.
+  function persist(
+    next: Layout,
+    changed: LayoutItem | null,
+    kind: "drag" | "resize"
+  ) {
     if (!editMode) return;
-    // saveLayout não revalida (edição fluida), então o snapshot vindo da page
-    // não muda sozinho — registra a mudança no histórico após persistir.
+    const patch: Record<string, GridPosition> = {};
+    widgets.forEach((w, i) => {
+      const base = basePos(w, i);
+      let nb: GridPosition | null = null;
+      if (changed && changed.i === w.id) {
+        nb =
+          kind === "resize"
+            ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
+            : { x: changed.x, y: changed.y, w: base.w, h: base.h };
+      } else {
+        const given = layout.find((l) => l.i === w.id);
+        const nl = next.find((l) => l.i === w.id);
+        if (given && nl) {
+          const dx = nl.x - given.x;
+          const dy = nl.y - given.y;
+          if (dx !== 0 || dy !== 0) {
+            nb = {
+              x: Math.max(0, base.x + dx),
+              y: Math.max(0, base.y + dy),
+              w: base.w,
+              h: base.h,
+            };
+          }
+        }
+      }
+      if (
+        nb &&
+        (nb.x !== base.x || nb.y !== base.y || nb.w !== base.w || nb.h !== base.h)
+      ) {
+        patch[w.id] = nb;
+      }
+    });
+    if (Object.keys(patch).length === 0) return;
+    applyLayoutPatch(patch);
     void saveLayout(
       dashboardId,
-      widgets.map((w, i) => {
-        const base = posOf(w, i);
-        if (changed && changed.i === w.id) {
-          return kind === "resize"
-            ? { id: w.id, x: base.x, y: base.y, w: changed.w, h: changed.h }
-            : { id: w.id, x: changed.x, y: changed.y, w: base.w, h: base.h };
-        }
-        return { id: w.id, x: base.x, y: base.y, w: base.w, h: base.h };
-      })
+      Object.entries(patch).map(([id, p]) => ({
+        id,
+        x: p.x,
+        y: p.y,
+        w: p.w,
+        h: p.h,
+      }))
     ).then(() => history.captureNow());
   }
+  function onDragStart() {
+    interactingRef.current = true;
+  }
+  function onResizeStart() {
+    interactingRef.current = true;
+  }
   function onDragStop(
-    _next: Layout,
+    next: Layout,
     _old: LayoutItem | null,
     item: LayoutItem | null
   ) {
-    persist(item, "drag");
+    interactingRef.current = false;
+    persist(next, item, "drag");
+    flushPendingMeasures();
   }
   function onResizeStop(
-    _next: Layout,
+    next: Layout,
     _old: LayoutItem | null,
     item: LayoutItem | null
   ) {
-    persist(item, "resize");
+    interactingRef.current = false;
+    persist(next, item, "resize");
+    flushPendingMeasures();
   }
 
   // Alças de borda: a barra inferior arrasta a ALTURA (rows), a barra direita a
@@ -624,6 +720,8 @@ export function DashboardGrid({
               isDraggable={editMode}
               isResizable={editMode}
               draggableHandle=".widget-drag"
+              onDragStart={onDragStart}
+              onResizeStart={onResizeStart}
               onDragStop={onDragStop}
               onResizeStop={onResizeStop}
             >

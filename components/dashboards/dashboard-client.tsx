@@ -1,11 +1,14 @@
-// Versão: 2.0 | Data: 09/07/2026
+// Versão: 2.1 | Data: 15/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
-// dados pré-computados). v2.0 (09/07/2026): barra de período editável/removível
-// e filtro como widget (siblings ao builder).
+// dados pré-computados). v2.1 (15/07/2026): estado otimista de layout
+// (layoutById) — fonte de verdade das posições entre um saveLayout (que não
+// revalida) e o próximo refresh real; aba ativa persistida na URL (?tab=).
+// v2.0 (09/07/2026): barra de período editável/removível e filtro como widget
+// (siblings ao builder).
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { Check, Clock, Pencil, Plus, Redo2, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,9 +20,11 @@ import type {
   CalcWidgetResult,
   DashboardSettings,
   FieldFilterOptions,
+  GridPosition,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
+import { posOf } from "@/lib/widgets/grid-placement";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
@@ -101,6 +106,7 @@ export function DashboardClient({
   periodDefaultFieldByTab,
   filterOptionsById,
   quickFiltersById,
+  initialTabId,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -134,6 +140,9 @@ export function DashboardClient({
   periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
   quickFiltersById?: Record<string, WidgetQuickFilters>;
+  // Aba vinda da URL (?tab=), para restaurar a aba ativa ao recarregar. Chega
+  // crua da page (sem validação) — validada aqui contra as abas efetivas.
+  initialTabId?: string;
 }) {
   const [editMode, setEditMode] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -159,8 +168,55 @@ export function DashboardClient({
     setSeedKey(serverKey);
     setTabs(serverTabs);
   }
-  const [activeTabId, setActiveTabId] = useState<string>(tabs[0]?.id ?? "");
+  // Aba inicial: a da URL (?tab=) quando ainda existe; senão a primeira. Assim
+  // recarregar a página mantém o usuário na aba em que estava.
+  const [activeTabId, setActiveTabId] = useState<string>(
+    initialTabId && tabs.some((t) => t.id === initialTabId)
+      ? initialTabId
+      : (tabs[0]?.id ?? "")
+  );
   const firstTabId = tabs[0]?.id ?? "";
+  // Troca de aba: além do estado, espelha na URL via history.replaceState (sem
+  // navegação RSC — a page é pesada; o Next sincroniza useSearchParams). A
+  // primeira aba fica sem ?tab para manter URLs limpas.
+  const selectTab = useCallback(
+    (id: string) => {
+      setActiveTabId(id);
+      const sp = new URLSearchParams(window.location.search);
+      if (id && id !== (tabs[0]?.id ?? "")) sp.set("tab", id);
+      else sp.delete("tab");
+      const qs = sp.toString();
+      window.history.replaceState(
+        null,
+        "",
+        qs ? `?${qs}` : window.location.pathname
+      );
+    },
+    [tabs]
+  );
+
+  // Layout otimista: posições BASE de TODOS os widgets (não só os da aba
+  // visível), seedadas do servidor com o mesmo padrão seedKey-resync das abas
+  // acima. saveLayout não revalida (edição fluida), então após arrastar ou
+  // redimensionar a prop `widgets` fica obsoleta — este mapa é a fonte de
+  // verdade do grid até um refresh real chegar (colar, período, undo/redo),
+  // quando o grid_position refetchado já é o salvo e o reseed é um no-op (ou
+  // aplica a restauração, no undo/redo). Vive aqui no shell para sobreviver à
+  // troca de abas e ao early-return de aba vazia do grid.
+  const serverLayout: Record<string, GridPosition> = {};
+  widgets.forEach((w, i) => {
+    serverLayout[w.id] = posOf(w, i);
+  });
+  const serverLayoutKey = JSON.stringify(serverLayout);
+  const [layoutSeedKey, setLayoutSeedKey] = useState(serverLayoutKey);
+  const [layoutById, setLayoutById] = useState(serverLayout);
+  if (layoutSeedKey !== serverLayoutKey) {
+    setLayoutSeedKey(serverLayoutKey);
+    setLayoutById(serverLayout);
+  }
+  const applyLayoutPatch = useCallback((patch: Record<string, GridPosition>) => {
+    setLayoutById((prev) => ({ ...prev, ...patch }));
+  }, []);
   const tabIds = new Set(tabs.map((t) => t.id));
   // Aba efetiva: a do widget quando ainda existe; senão (sem aba ou aba excluída)
   // cai na primeira aba, para nenhum widget "sumir".
@@ -266,6 +322,8 @@ export function DashboardClient({
               currencyOptions={currencyOptions}
               tabs={tabs}
               activeTabId={activeTabId}
+              layoutById={layoutById}
+              canvasCols={settings.canvas?.cols ?? 12}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
@@ -285,7 +343,7 @@ export function DashboardClient({
         <DashboardTabs
           tabs={tabs}
           activeId={activeTabId}
-          onSelect={setActiveTabId}
+          onSelect={selectTab}
           editMode={canEdit && editMode}
           onChange={saveTabs}
         />
@@ -348,6 +406,8 @@ export function DashboardClient({
             editMode={editMode}
             filterOptionsById={filterOptionsById}
             quickFiltersById={quickFiltersById}
+            layoutById={layoutById}
+            applyLayoutPatch={applyLayoutPatch}
           />
         </div>
       </DashboardPendingProvider>
