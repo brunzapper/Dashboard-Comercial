@@ -166,6 +166,31 @@ passa a filtrar pela nova coluna `records.is_mock`). O que ela faz:
 [`apply/undo-mock-reuniao.sql`](./apply/undo-mock-reuniao.sql) — remove o trigger,
 restaura os valores originais do backup e apaga os mocks.
 
+## Como aplicar a Fase 13 (Operação nos mocks: Inbound + Outbound)
+
+Cole o [`apply/fase-13.sql`](./apply/fase-13.sql) (migração `0053`) e execute, depois
+da Fase 12. Idempotente. O que ela faz:
+
+- Resolve as operações **Inbound** e **Outbound** (match pelo nome, case-insensitive
+  e depois "contém"; cria a operação se não existir nenhuma parecida).
+- Atribui **Inbound** aos 270 leads mock da Fase 12 — eles passam a responder aos
+  filtros de operação com esse nome.
+- Insere **32 leads mock Outbound** (CSV "Outbound Zapper", 06/01–29/05/2026) com a
+  mesma lógica da Fase 12 (só a Data Reunião preenchida, congelados, fora de qualquer
+  contagem que não referencie Data Reunião) e **Operação = Outbound**.
+
+O undo é o mesmo da Fase 12 (`apply/undo-mock-reuniao.sql`) — o delete por `is_mock`
+cobre também os mocks Outbound; as operações criadas pela 0053 permanecem.
+
+Conferência pós-aplicação:
+
+```sql
+select o.name, count(*)
+  from public.records r join public.operations o on o.id = r.operation_id
+ where r.is_mock group by o.name;   -- esperado: Inbound 270, Outbound 32
+select count(*) from public.records where is_mock and operation_id is null;  -- 0
+```
+
 Conferência pós-aplicação:
 
 ```sql
