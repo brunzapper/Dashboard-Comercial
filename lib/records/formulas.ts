@@ -532,6 +532,57 @@ function valCompare(a: Val, b: Val): number | null {
   return asComparableString(a.v).localeCompare(asComparableString(b.v), "pt-BR");
 }
 
+/**
+ * Compara um valor BRUTO de registro com o literal de uma condição de
+ * SOMASE/CONT.SE/MÉDIASE usando o MESMO maquinário do SE (valEquals/
+ * valCompare): trim + minúsculas pt-BR, booleanos canonizados
+ * (VERDADEIRO/SIM ≡ true), null ≡ '' e números comparados numericamente.
+ * Fonte única da semântica das condições nos caminhos client-side
+ * (lib/widgets/calc-metrics.recordMatchesConds); o SQL espelha via os
+ * operadores normalizados da migração 0050 (eq_ci/neq_ci e *_num).
+ */
+export function evalCondition(
+  raw: unknown,
+  op: FormulaCmpOp,
+  value: number | string | boolean
+): boolean {
+  // Mesmo tratamento do `case "ref"` do avaliador: ausente/vazio/não primitivo
+  // vira null tipado.
+  const a: Val =
+    raw == null ||
+    raw === "" ||
+    (typeof raw !== "number" && typeof raw !== "string" && typeof raw !== "boolean")
+      ? NULL_VAL
+      : { v: raw, date: false };
+  const b: Val = { v: value, date: false };
+  if (op === "=") return valEquals(a, b);
+  if (op === "<>") return !valEquals(a, b);
+  // Ordenação com literal NUMÉRICO: sem o fallback textual do valCompare
+  // ("abc" > 10 seria true por localeCompare) — espelha os ops *_num do SQL
+  // (valor que não parseia → não casa), para o modo registros e a consulta
+  // agregada SEMPRE concordarem. Única divergência (documentada) do SE.
+  let c: number | null;
+  if (typeof value === "number") {
+    const n = toNum(a.v);
+    c = n == null ? null : n - value;
+  } else {
+    c = valCompare(a, b);
+  }
+  if (c == null) return false;
+  switch (op) {
+    case "<":
+      return c < 0;
+    case ">":
+      return c > 0;
+    case "<=":
+      return c <= 0;
+    case ">=":
+      return c >= 0;
+    default:
+      return false;
+  }
+}
+
 function evalNode(
   node: FormulaNode,
   ctx: Record<string, unknown>,

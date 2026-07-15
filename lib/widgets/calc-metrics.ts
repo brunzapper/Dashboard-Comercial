@@ -32,6 +32,7 @@
 // dashboard (RSC) e pelos componentes de tabela (client).
 import {
   condAggKey,
+  evalCondition,
   evaluateFormula,
   formulaCondAggInfo,
   formulaRefs,
@@ -166,71 +167,58 @@ export function parseCondBasisKey(
   }
 }
 
-const COND_FILTER_OPS: Record<FormulaCmpOp, FilterOp> = {
-  "=": "eq",
-  "<>": "neq",
+// Ordenação com literal de TEXTO (uso real: datas ISO — lexicográfico =
+// cronológico): comparação de texto plain do RPC.
+const TEXT_ORDER_OPS: Record<FormulaCmpOp, FilterOp> = {
+  "=": "eq_ci",
+  "<>": "neq_ci",
   "<": "lt",
   ">": "gt",
   "<=": "lte",
   ">=": "gte",
 };
 
-/** Condições → filtros do RPC (anexados aos filtros do widget). Booleano vira
- * "true"/"false" (cobre a coluna `closed` e custom booleano gravado como texto). */
+// Literal NUMÉRICO: comparação numérica com cast seguro no RPC (0050).
+const NUM_OPS: Record<FormulaCmpOp, FilterOp> = {
+  "=": "eq_num",
+  "<>": "neq_num",
+  "<": "lt_num",
+  ">": "gt_num",
+  "<=": "lte_num",
+  ">=": "gte_num",
+};
+
+/** Condições → filtros do RPC (anexados aos filtros do widget), com a MESMA
+ * semântica do SE() via operadores normalizados da migração 0050: literal
+ * numérico → *_num (comparação numérica, cast seguro); texto/booleano em
+ * `=`/`<>` → eq_ci/neq_ci (trim + minúsculas + booleanos canonizados + null ≡
+ * ''; booleano serializado "true"/"false"). Ordenação com literal de texto
+ * (datas ISO) segue a comparação de texto plain. */
 export function condFilters(conds: AggCondition[]): WidgetFilter[] {
-  return conds.map((c) => ({
-    field: c.ref,
-    op: COND_FILTER_OPS[c.op],
-    value: typeof c.value === "boolean" ? String(c.value) : c.value,
-  }));
+  return conds.map((c) => {
+    if (typeof c.value === "number") {
+      return { field: c.ref, op: NUM_OPS[c.op], value: c.value };
+    }
+    return {
+      field: c.ref,
+      op: TEXT_ORDER_OPS[c.op],
+      value: typeof c.value === "boolean" ? String(c.value) : c.value,
+    };
+  });
 }
 
 /**
- * Predicado client-side equivalente aos filtros SQL de condFilters — usado nos
- * caminhos que agregam registros em JS (Agrupar período, tabela de registros).
- * Espelha a semântica do RPC, não a do SE(): texto compara case-sensitive;
- * valor null NUNCA satisfaz uma condição (como NULL no WHERE); literal numérico
- * compara numericamente quando o valor bruto parseia.
+ * Predicado client-side das condições — usado nos caminhos que agregam
+ * registros em JS (Agrupar período, tabela de registros). Delegado ao
+ * evalCondition do avaliador: semântica IDÊNTICA ao SE() por construção
+ * (normalização de texto, booleanos, null ≡ '', números como número). O RPC
+ * espelha via os operadores normalizados (0050).
  */
 export function recordMatchesConds(
   raw: (ref: string) => unknown,
   conds: AggCondition[]
 ): boolean {
-  for (const c of conds) {
-    const v = raw(c.ref);
-    if (v == null) return false;
-    const want = typeof c.value === "boolean" ? String(c.value) : c.value;
-    let cmp: number;
-    if (typeof want === "number") {
-      const n = typeof v === "number" ? v : Number(v);
-      if (!Number.isFinite(n)) return false;
-      cmp = n - want;
-    } else {
-      const s = typeof v === "boolean" ? String(v) : String(v);
-      cmp = s < want ? -1 : s > want ? 1 : 0;
-    }
-    switch (c.op) {
-      case "=":
-        if (cmp !== 0) return false;
-        break;
-      case "<>":
-        if (cmp === 0) return false;
-        break;
-      case "<":
-        if (cmp >= 0) return false;
-        break;
-      case ">":
-        if (cmp <= 0) return false;
-        break;
-      case "<=":
-        if (cmp > 0) return false;
-        break;
-      case ">=":
-        if (cmp < 0) return false;
-        break;
-    }
-  }
-  return true;
+  return conds.every((c) => evalCondition(raw(c.ref), c.op, c.value));
 }
 
 /**
@@ -469,8 +457,9 @@ export const COND_AGG_COND_GROUP = "Condições (SOMASE/CONT.SE)";
 /**
  * Operandos extras que fórmulas AGREGADAS ganham com SOMASE/CONT.SE/MÉDIASE:
  * campos numéricos CRUS (alvo do 1º argumento — diferente dos agg:*, que já
- * chegam agregados) e colunas de condição (texto/seleção/booleano + datas do
- * próprio registro; a condição sempre compara com um literal, ex.:
+ * chegam agregados; também valem como coluna de condição, ex.:
+ * CONT.SE([Valor] > 1000)) e colunas de condição (texto/seleção/booleano +
+ * datas do próprio registro; a condição sempre compara com um literal, ex.:
  * [Etapa] = "Ganho"). Fora do catálogo na v1: refs match:/unified: e "Data
  * atual" (today não é coluna no banco — o filtro SQL não o conhece).
  * Compartilhado entre os editores e a validação do servidor.
@@ -515,8 +504,13 @@ export function validateCondAggRefs(
   const targets = new Set<string>();
   const conds = new Set<string>();
   for (const o of catalog) {
-    if (o.group === COND_AGG_TARGET_GROUP) targets.add(o.ref);
-    else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
+    // Campos numéricos (grupo alvo) também valem como coluna de CONDIÇÃO
+    // (ex.: CONT.SE([Valor] > 1000)) — o SE() permite comparação numérica e a
+    // 0050 dá os operadores *_num no RPC.
+    if (o.group === COND_AGG_TARGET_GROUP) {
+      targets.add(o.ref);
+      conds.add(o.ref);
+    } else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
   }
   const labelOf = (ref: string) =>
     catalog.find((o) => o.ref === ref)?.label ?? ref;
@@ -541,7 +535,7 @@ export function validateCondAggRefs(
     if (!conds.has(ref)) {
       return {
         ok: false,
-        error: `[${labelOf(ref)}] não pode ser usado em condição de SOMASE/CONT.SE (use colunas de texto/seleção/booleano ou datas).`,
+        error: `[${labelOf(ref)}] não pode ser usado em condição de SOMASE/CONT.SE (use colunas de texto/seleção/booleano, datas ou números).`,
       };
     }
   }

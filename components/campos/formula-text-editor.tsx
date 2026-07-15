@@ -193,8 +193,9 @@ export function FormulaTextEditor({
           <code>MÉDIASE([Valor]; condição)</code>; várias condições (E):{" "}
           <code>SOMASES</code>/<code>CONT.SES</code> com condições separadas por{" "}
           <code>;</code>. Cada condição compara uma coluna com um valor fixo.
-          Texto compara exato (maiúsculas/minúsculas contam, como nos filtros);
-          datas no formato <code>&quot;2026-01-31&quot;</code>.
+          Texto compara como no <code>SE</code> (ignora maiúsculas/minúsculas e
+          espaços nas pontas); números sem aspas comparam como número; datas no
+          formato <code>&quot;2026-01-31&quot;</code>.
         </p>
       ) : null}
     </div>

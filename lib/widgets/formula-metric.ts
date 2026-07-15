@@ -148,7 +148,14 @@ export async function runCalculatedWidget(
       groups.set(gk, g);
     }
     for (const g of groups.values()) {
-      jobs.push(resolveKeys(g.keys, [...filters, ...condFilters(g.conds)]));
+      // Falha da consulta condicional (ex.: migração 0050 dos operadores
+      // normalizados ainda não aplicada) degrada a chave para null (operando
+      // ausente → "—") em vez de derrubar a página do dashboard.
+      jobs.push(
+        resolveKeys(g.keys, [...filters, ...condFilters(g.conds)]).catch(() => {
+          for (const key of g.keys) basis[key] = null;
+        })
+      );
     }
   }
   await Promise.all(jobs);
