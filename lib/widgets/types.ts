@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 15/07/2026
+// Versão: 1.3 | Data: 15/07/2026
+// v1.3 (15/07/2026): WidgetFilter ganha `sources` (fontes-alvo do filtro,
+//   pass-through — persistido) e `record_types` (formato de fio; ver
+//   lib/widgets/filter-sources.ts).
 // v1.2 (15/07/2026): exibição percentual — Metric.percent (sufixo "%") e
 //   Metric.resultPercent (calc ad-hoc ×100), KpiSettings.percent (razão) e o
 //   carimbo percent em WidgetData.metrics (engine).
@@ -170,6 +173,13 @@ export interface WidgetFilter {
   field: string;
   op: FilterOp;
   value?: unknown;
+  // Fontes-alvo do filtro (PERSISTIDO em widgets.filters): o filtro só restringe
+  // as linhas dessas fontes; as demais fontes do widget passam sem restrição
+  // (pass-through). Ausente/vazio = todas as fontes (comportamento clássico).
+  sources?: SourceKey[];
+  // Formato de FIO (record_type[]) p/ o RPC e o modo lista: produzido por
+  // applyFilterSourceTargets na hora da consulta; nunca persistido/editado.
+  record_types?: string[];
 }
 
 // Extras de KPI (Fase 6B): comparação com meta e razões (TM, valor/conta).

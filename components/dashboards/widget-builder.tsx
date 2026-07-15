@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 15/07/2026
+// Versão: 1.5 | Data: 15/07/2026
+// v1.5 (15/07/2026): filtros segmentados por fonte — cada linha de filtro ganha
+//   o seletor "Fontes" (pass-through: só as fontes marcadas são restringidas).
 // v1.4 (15/07/2026): formato "Percentual (%)" nas métricas calculadas ad-hoc
 //   (resultPercent propagado/limpo na troca de campo).
 // v1.3 (14/07/2026): merge com a main — métricas calculadas de agregados
@@ -87,6 +89,7 @@ import {
   FILTER_OPS,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { filterTargetSources } from "@/lib/widgets/filter-sources";
 import {
   aggOperandRefs,
   CALC_METRIC_FIELD,
@@ -521,6 +524,19 @@ export function WidgetBuilder({
   const rpcFieldOptions = toFieldOptions(
     available.filter((f) => !f.displayOnly && !f.aggCalc)
   );
+  // Opções de fontes-alvo por linha de filtro: fontes cobertas pelo widget ∪
+  // alvos já gravados no filtro. Alvo "órfão" (fonte que saiu do widget) vem
+  // marcado como stale — visível e removível, nunca escondido em silêncio; em
+  // runtime ele é neutralizado pela interseção (applyFilterSourceTargets).
+  const coveredSources = sources.length > 0 ? sources : SOURCE_KEYS;
+  const filterSourceOptions = (f: WidgetFilter) => {
+    const keys = new Set<SourceKey>([...coveredSources, ...filterTargetSources(f)]);
+    return [...keys].map((k) => ({
+      key: k,
+      label: SOURCE_LABELS[k],
+      stale: !coveredSources.includes(k),
+    }));
+  };
   const metricOptions: ComboboxOption[] = [
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields),
@@ -1099,7 +1115,9 @@ export function WidgetBuilder({
                 <Label>Fontes</Label>
                 <p className="text-muted-foreground text-xs">
                   Sem seleção = todas as fontes. Este filtro atinge os widgets
-                  cujas fontes se sobrepõem às escolhidas aqui.
+                  cujas fontes se sobrepõem às escolhidas aqui — e neles só
+                  restringe os registros das fontes escolhidas; registros de
+                  outras fontes dos widgets-alvo não são afetados.
                 </p>
                 <div className="flex flex-col gap-2 rounded-md border p-3">
                   {SOURCE_KEYS.map((key) => (
@@ -1579,6 +1597,7 @@ export function WidgetBuilder({
                 filter={f}
                 fieldOptions={rpcFieldOptions}
                 opOptions={FILTER_OP_OPTIONS}
+                sourceOptions={filterSourceOptions(f)}
                 onChange={(patch) => {
                   const next = [...filters];
                   next[i] = { ...f, ...patch };

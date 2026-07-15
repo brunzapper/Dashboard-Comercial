@@ -1,4 +1,6 @@
-// Versão: 3.0 | Data: 14/07/2026
+// Versão: 3.1 | Data: 15/07/2026
+// v3.1 (15/07/2026): filtros segmentados por fonte (applyFilterSourceTargets,
+//   mesma normalização do engine) antes do @period/sourceFilters.
 // Fase 3: métrica calculada no nível do DASHBOARD. O avaliador de fórmula
 // (evaluateFormula) é agnóstico de contexto — aqui montamos a BASIS
 // (somas/contagens canônicas; ver lib/widgets/calc-metrics.ts) resolvendo
@@ -36,6 +38,7 @@ import {
   resolveFilters,
   sourceFilters,
 } from "./engine";
+import { applyFilterSourceTargets } from "./filter-sources";
 import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import type { Metric, WidgetFilter } from "./types";
@@ -78,7 +81,11 @@ export async function runCalculatedWidget(
   const rates = input.rates ?? {};
   const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
 
-  let filters = resolveFilters(input.filters ?? []);
+  // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
+  let filters = applyFilterSourceTargets(
+    resolveFilters(input.filters ?? []),
+    input.sources
+  );
   if (input.period)
     filters = applyPeriodToFilters(filters, input.period, input.sources);
   filters = [...sourceFilters(input.sources), ...filters];

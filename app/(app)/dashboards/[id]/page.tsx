@@ -1,6 +1,8 @@
-// Versão: 2.0 | Data: 09/07/2026
+// Versão: 2.1 | Data: 15/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.1 (15/07/2026): filtros do "Filtro por campo" carregam as fontes do
+//   widget-filtro como alvo (pass-through) — exceto filtros unificados.
 // v2.0 (09/07/2026): período resolvido POR widget. Uma barra global
 // (?periodo/de/ate/campo + dashboards.settings.periodBar) atinge os widgets não
 // cobertos; cada widget de filtro (visual_type 'filtro') controla seus alvos
@@ -634,11 +636,23 @@ export default async function DashboardPage({
     const unified = fs.some((f) =>
       f.field.split("|").some((p) => p.startsWith("unified:"))
     );
+    // Segmentação por fonte (pass-through): os filtros emitidos carregam as
+    // fontes do filtro_campo como alvo — num widget-alvo com outras fontes,
+    // só as linhas das fontes-alvo são restringidas; as demais passam. Filtro
+    // unificado fica SEM alvo (o coalesce já resolve por fonte; segmentá-lo
+    // mudaria comportamento correto existente).
+    const fwSourceKeys = fwSources.filter(isSourceKey);
+    const isUnifiedFilter = (f: WidgetFilter) =>
+      f.field.split("|").some((p) => p.startsWith("unified:"));
+    const targeted =
+      fwSourceKeys.length > 0
+        ? fs.map((f) => (isUnifiedFilter(f) ? f : { ...f, sources: fwSourceKeys }))
+        : fs;
     for (const w of dataWidgets) {
       if (excluded.has(w.id)) continue;
       if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
         continue;
-      addViewFilters(w.id, fs);
+      addViewFilters(w.id, targeted);
     }
   }
 
