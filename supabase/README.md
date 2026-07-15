@@ -310,6 +310,36 @@ Mock cujo nome não casa com nenhum responsável — ou casa só com linhas sem
 `user_id` — continua visível apenas para admin/gestor até o vínculo existir
 (tela de Usuários / `responsibles.user_id`).
 
+### 0059 — período congelado do snapshot
+
+Depois da 0058, cole e execute
+[`migrations/0059_snapshot_default_period.sql`](./migrations/0059_snapshot_default_period.sql)
+(idempotente). **Aplique ANTES de (ou junto com) o deploy do app desta
+versão**: o código passa a selecionar `snapshots.default_period` em toda
+listagem/edição/refresh de snapshots — sem a coluna, essas telas quebram. O
+que muda:
+
+- `snapshots.default_period` guarda o filtro de período do dashboard no
+  momento da criação do snapshot, e o viewer público o aplica a **todos** os
+  widgets de dados. Antes o viewer rodava sempre em "todo o período": os
+  números divergiam do dashboard e os mocks de Data Reunião caíam fora (a
+  regra 0052/0057 só os inclui quando a consulta referencia o campo de Data
+  Reunião — sem o filtro de período sobre esse campo, a referência some).
+- **Snapshots existentes** ficam com `default_period` null (todo o período —
+  igual a hoje). Para corrigir sem recriar: deixe o dashboard no período
+  desejado, edite o snapshot no painel e marque "Substituir pelo período atual
+  do dashboard" — ou por SQL:
+
+```sql
+update public.snapshots
+   set default_period =
+       '{"periodo":"este_ano","campo":"unified:CHAVE-DO-CAMPO"}'::jsonb
+ where id = 'ID-DO-SNAPSHOT';
+```
+
+Não precisa de refresh: o período é aplicado em tempo de consulta sobre o
+dataset já congelado.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

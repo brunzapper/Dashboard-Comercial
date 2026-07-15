@@ -22,6 +22,11 @@ import {
   type SnapshotListItem,
 } from "@/lib/snapshots/types";
 import { SOURCE_KEYS, SOURCE_LABELS, SOURCE_RECORD_TYPE } from "@/lib/sources";
+import {
+  PERIOD_ALL,
+  PERIOD_PRESETS,
+  type SavedPeriod,
+} from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
 
 export interface SnapshotActionState {
@@ -42,6 +47,9 @@ export interface SnapshotInput {
   refreshMode: RefreshMode;
   refreshTime?: string | null;
   refreshWeekday?: number | null;
+  // Filtro de período do dashboard congelado no snapshot (0059).
+  // undefined = não tocar (edição mantém o gravado); null = todo o período.
+  defaultPeriod?: SavedPeriod | null;
 }
 
 const UUID_RE =
@@ -72,6 +80,40 @@ function cleanSources(
     return { ok: false, message: "Restrição de fontes inválida." };
   }
   return { ok: true, value: [...new Set(vals)] };
+}
+
+// Normaliza/valida o período congelado: undefined → não tocar; null/sem
+// conteúdo (ou "todo o período" explícito) → null; senão só as chaves
+// conhecidas, validadas — o valor alimenta o viewer PÚBLICO, nunca gravar
+// shape arbitrário.
+const PERIOD_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function cleanPeriod(
+  raw: SavedPeriod | null | undefined
+):
+  | { ok: true; value: SavedPeriod | null | undefined }
+  | { ok: false; message: string } {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === null) return { ok: true, value: null };
+  const periodo = String(raw.periodo ?? "").trim();
+  const de = String(raw.de ?? "").trim();
+  const ate = String(raw.ate ?? "").trim();
+  const campo = String(raw.campo ?? "").trim();
+  if (
+    (periodo && periodo !== PERIOD_ALL && !(periodo in PERIOD_PRESETS)) ||
+    (de && !PERIOD_DATE_RE.test(de)) ||
+    (ate && !PERIOD_DATE_RE.test(ate)) ||
+    campo.length > 200
+  ) {
+    return { ok: false, message: "Período congelado inválido." };
+  }
+  const hasContent = Boolean((periodo && periodo !== PERIOD_ALL) || de || ate);
+  if (!hasContent) return { ok: true, value: null };
+  const value: SavedPeriod = {};
+  if (periodo) value.periodo = periodo;
+  if (de) value.de = de;
+  if (ate) value.ate = ate;
+  if (campo) value.campo = campo;
+  return { ok: true, value };
 }
 
 function cleanSchedule(input: {
@@ -195,6 +237,8 @@ export async function createSnapshot(
   if (!sources.ok) return { ok: false, message: sources.message };
   const schedule = cleanSchedule(input);
   if (!schedule.ok) return { ok: false, message: schedule.message };
+  const period = cleanPeriod(input.defaultPeriod);
+  if (!period.ok) return { ok: false, message: period.message };
 
   const token = generateToken();
   const session = await getSessionInfo();
@@ -215,6 +259,7 @@ export async function createSnapshot(
       refresh_time: schedule.time,
       refresh_weekday: schedule.weekday,
       next_refresh_at: schedule.nextAt,
+      default_period: period.value ?? null,
       created_by: session?.user.id ?? null,
     })
     .select("id")
@@ -256,6 +301,8 @@ export async function updateSnapshot(
   if (!sources.ok) return { ok: false, message: sources.message };
   const schedule = cleanSchedule(input);
   if (!schedule.ok) return { ok: false, message: schedule.message };
+  const period = cleanPeriod(input.defaultPeriod);
+  if (!period.ok) return { ok: false, message: period.message };
 
   const supabase = await createClient();
   const { error } = await supabase
@@ -271,6 +318,9 @@ export async function updateSnapshot(
       refresh_time: schedule.time,
       refresh_weekday: schedule.weekday,
       next_refresh_at: schedule.nextAt,
+      // Período congelado: só muda quando o form pede a substituição (o
+      // filtro é aplicado em tempo de consulta — não exige recongelar).
+      ...(period.value !== undefined ? { default_period: period.value } : {}),
     })
     .eq("id", snapshotId);
   if (error) return { ok: false, message: error.message };

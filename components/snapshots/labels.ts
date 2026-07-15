@@ -1,7 +1,12 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 15/07/2026
 // Rótulos compartilhados da UI de snapshots (painel do dashboard e a aba de
 // Configurações). Client-safe: nada de node:crypto/service role aqui.
 import type { RefreshMode, SnapshotListItem } from "@/lib/snapshots/types";
+import {
+  PERIOD_PRESETS,
+  type PeriodPresetKey,
+  type SavedPeriod,
+} from "@/lib/widgets/period";
 
 // 1..7 (ISO, segunda = 1) — mesmo contrato de snapshots.refresh_weekday.
 export const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
@@ -49,4 +54,16 @@ const DATE_TIME_FMT = new Intl.DateTimeFormat("pt-BR", {
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   return DATE_TIME_FMT.format(new Date(iso));
+}
+
+// Rótulo do período congelado de um snapshot (snapshots.default_period, 0059).
+// null/sem conteúdo = sem filtro de período ("Todo o período").
+export function frozenPeriodLabel(p: SavedPeriod | null | undefined): string {
+  if (!p) return "Todo o período";
+  if (p.periodo && p.periodo in PERIOD_PRESETS) {
+    return PERIOD_PRESETS[p.periodo as PeriodPresetKey];
+  }
+  const fmt = (d?: string) => (d ? d.split("-").reverse().join("/") : "…");
+  if (p.de || p.ate) return `${fmt(p.de)} – ${fmt(p.ate)}`;
+  return "Todo o período";
 }

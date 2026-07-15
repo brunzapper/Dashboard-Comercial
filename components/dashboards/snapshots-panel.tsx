@@ -1,12 +1,16 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 15/07/2026
 // Painel "Snapshots" do menu ⋮ do dashboard: lista os snapshots deste
 // dashboard e cria novos. O link público (/s/<token>) aparece UMA única vez,
 // logo após a criação — o token não é recuperável depois (o banco guarda só o
 // hash). Ações por snapshot: atualizar agora, pausar/retomar, editar
 // (restrições/interatividade/agenda) e revogar (excluir; confirmação).
+// Período congelado (0059): a criação captura o filtro de período ATIVO do
+// dashboard (URL > defaults resolvidos no servidor — mesmo espelho da barra) e
+// o grava em snapshots.default_period, aplicado a todos os widgets no viewer.
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Check,
   Copy,
@@ -49,8 +53,68 @@ import {
   scheduleLabel,
 } from "@/components/snapshots/labels";
 import { SnapshotForm } from "@/components/snapshots/snapshot-form";
+import {
+  DEFAULT_PERIOD_FIELD,
+  hasSelection,
+  PERIOD_ALL,
+  periodKeys,
+  type PeriodScope,
+  type PeriodSelection,
+  type SavedPeriod,
+} from "@/lib/widgets/period";
+import type { DashboardSettings } from "@/lib/widgets/types";
 
-export function SnapshotsPanel({ dashboardId }: { dashboardId: string }) {
+// Contexto do filtro de período do dashboard, para capturar a seleção efetiva
+// no momento da criação do snapshot (espelha a resolução da barra: URL >
+// defaults por bucket resolvidos no servidor > config da barra).
+export interface SnapshotPeriodCapture {
+  periodBar?: DashboardSettings["periodBar"];
+  scope: PeriodScope;
+  defaultsByTab: Record<string, PeriodSelection>;
+  defaultFieldByTab: Record<string, string>;
+  // Rótulos por chave de campo (exibição do campo de data do período).
+  fieldLabels: Record<string, string>;
+}
+
+export function SnapshotsPanel({
+  dashboardId,
+  period,
+}: {
+  dashboardId: string;
+  period?: SnapshotPeriodCapture;
+}) {
+  const sp = useSearchParams();
+  // Seleção efetiva da aba: barra desabilitada → sem período; URL da barra >
+  // defaults do bucket ("" no escopo global; id da aba no escopo por aba).
+  const capturePeriod = period
+    ? (tabId: string): SavedPeriod | null => {
+        if (period.periodBar?.enabled === false) return null;
+        const keys = periodKeys(period.scope, tabId);
+        const bucket = period.scope === "tab" ? tabId : "";
+        const urlSel: PeriodSelection = {
+          preset: sp.get(keys.preset) ?? "",
+          de: sp.get(keys.de) ?? "",
+          ate: sp.get(keys.ate) ?? "",
+        };
+        const defaults = period.defaultsByTab[bucket] ?? {
+          preset: period.periodBar?.defaultPreset ?? "",
+        };
+        const sel = hasSelection(urlSel) ? urlSel : defaults;
+        const campo =
+          sp.get(keys.campo) ||
+          period.defaultFieldByTab[bucket] ||
+          period.periodBar?.field ||
+          DEFAULT_PERIOD_FIELD;
+        const preset =
+          sel.preset && sel.preset !== PERIOD_ALL ? sel.preset : "";
+        if (!preset && !sel.de && !sel.ate) return null;
+        const out: SavedPeriod = { campo };
+        if (preset) out.periodo = preset;
+        if (sel.de) out.de = sel.de;
+        if (sel.ate) out.ate = sel.ate;
+        return out;
+      }
+    : undefined;
   const [items, setItems] = useState<SnapshotListItem[] | null>(null);
   const [options, setOptions] = useState<SnapshotFormOptions | null>(null);
   const [view, setView] = useState<
@@ -184,6 +248,8 @@ export function SnapshotsPanel({ dashboardId }: { dashboardId: string }) {
           pending={pending}
           onSubmit={onCreate}
           onCancel={() => setView({ kind: "list" })}
+          capturePeriod={capturePeriod}
+          fieldLabels={period?.fieldLabels}
         />
       ) : view.kind === "edit" ? (
         <SnapshotForm
@@ -193,6 +259,8 @@ export function SnapshotsPanel({ dashboardId }: { dashboardId: string }) {
           pending={pending}
           onSubmit={(input) => onUpdate(view.item, input)}
           onCancel={() => setView({ kind: "list" })}
+          capturePeriod={capturePeriod}
+          fieldLabels={period?.fieldLabels}
         />
       ) : (
         <>

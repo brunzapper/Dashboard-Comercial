@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1: período congelado (0059) — snapshots.default_period (capturado do
+//   dashboard na criação) vira o período de TODOS os widgets de dados, via o
+//   resolver padrão (periodBar sintético + prefSettings.lastPeriod). As chaves
+//   da barra global na URL são SEMPRE descartadas (não há UI para elas aqui).
 // VIEWER PÚBLICO de um snapshot (/s/<token>) — a única rota sem autenticação
 // além do login. Segurança:
 //  * token de 256 bits na URL; o banco guarda só o sha256 (lookup por hash);
@@ -82,6 +86,7 @@ import {
 } from "@/lib/widgets/quick-table/model";
 import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-actions";
 import { SnapshotClient } from "@/components/snapshots/snapshot-client";
+import { frozenPeriodLabel } from "@/components/snapshots/labels";
 
 // Sempre computa por request (os filtros do visitante vivem na URL) e nunca
 // entra em índice de busca.
@@ -167,23 +172,53 @@ export default async function SnapshotPage({
     .eq("partner_only", true);
   const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
-  // Sem barra de período geral (o settings congelado já vem com periodBar
-  // desabilitado); widgets `filtro` seguem funcionando via URL quando os
+  // Período congelado na criação (0059): default_period vira o período de
+  // todos os widgets de dados via o resolver padrão — periodBar sintético
+  // habilitado (o settings congelado vem com ele desabilitado) e a seleção
+  // entregue como prefSettings.lastPeriod (tier-1 dos defaults; cobre preset,
+  // faixa de/até e campo, inclusive unificado). null = todo o período
+  // (snapshots antigos). O dataset congelado não muda: o filtro é em tempo de
+  // consulta — e, referenciando Data Reunião, mantém a regra dos mocks viva.
+  const frozenPeriod =
+    snap.default_period &&
+    (snap.default_period.periodo ||
+      snap.default_period.de ||
+      snap.default_period.ate)
+      ? snap.default_period
+      : null;
+
+  // Chaves da barra global fora SEMPRE (o período congelado é fixo; não há UI
+  // para ele no viewer); widgets `filtro` seguem funcionando via URL quando os
   // filtros de widget estão habilitados — senão vale só o defaultPreset.
-  const spForPeriods = allowWidgetFilters
-    ? sp
-    : Object.fromEntries(
-        Object.entries(sp).filter(
-          ([k]) =>
-            !k.startsWith("pf_") && !k.startsWith("pfd_") && !k.startsWith("pfa_")
-        )
-      );
+  const isBarKey = (k: string) =>
+    ["periodo", "de", "ate", "campo"].some(
+      (base) => k === base || k.startsWith(`${base}__`)
+    );
+  const spForPeriods = Object.fromEntries(
+    Object.entries(sp).filter(
+      ([k]) =>
+        !isBarKey(k) &&
+        (allowWidgetFilters ||
+          (!k.startsWith("pf_") &&
+            !k.startsWith("pfd_") &&
+            !k.startsWith("pfa_")))
+    )
+  );
   const resolver = createPeriodResolver({
     sp: spForPeriods,
     available,
     correspondences,
-    dashSettings,
-    prefSettings: {},
+    dashSettings: frozenPeriod
+      ? {
+          ...dashSettings,
+          periodBar: {
+            enabled: true,
+            scope: "global",
+            field: frozenPeriod.campo,
+          },
+        }
+      : dashSettings,
+    prefSettings: frozenPeriod ? { lastPeriod: frozenPeriod } : {},
   });
 
   const dataWidgets = widgets.filter(
@@ -197,10 +232,8 @@ export default async function SnapshotPage({
     (w) => w.visual_type === "filtro_campo"
   );
 
-  const { periodByWidget } = resolver.computeWidgetPeriods(
-    dataWidgets,
-    filterWidgets
-  );
+  const { periodByWidget, periodSourceByWidget } =
+    resolver.computeWidgetPeriods(dataWidgets, filterWidgets);
 
   // ============ Filtros rápidos (se habilitados) ============
   // Valores SÓ da URL (qf_<widget>_<entry>) — por visitante, nunca
@@ -223,11 +256,12 @@ export default async function SnapshotPage({
         const stored = raw ? parseQuickFilterValue(raw) : null;
 
         if (isPeriodEntry(entry, available)) {
-          const val = stored?.kind === "period" ? stored : null;
+          let val = stored?.kind === "period" ? stored : null;
+          const wPeriod = periodByWidget[w.id];
           if (val && hasQuickValue(val)) {
-            // Mesma interação da page: o filtro rápido assume o campo — se um
-            // widget `filtro` rege este widget no MESMO campo, o dele sai.
-            const wPeriod = periodByWidget[w.id];
+            // Mesma interação da page: o filtro rápido assume o campo — se o
+            // período congelado ou um widget `filtro` rege este widget no
+            // MESMO campo, o dele sai.
             if (wPeriod && wPeriod.field === entry.field) {
               periodByWidget[w.id] = null;
             }
@@ -248,8 +282,22 @@ export default async function SnapshotPage({
                 (w.sources ?? []) as SourceKey[]
               );
             }
-            values[entry.id] = val;
+          } else if (
+            frozenPeriod &&
+            periodSourceByWidget[w.id] === "bar" &&
+            wPeriod?.field === entry.field
+          ) {
+            // Sem valor do visitante e o período CONGELADO rege o widget no
+            // MESMO campo: exibe a seleção congelada no dropdown (espelho da
+            // page viva; o período geral continua filtrando por si).
+            val = {
+              kind: "period",
+              preset: frozenPeriod.periodo ?? "",
+              de: frozenPeriod.de ?? "",
+              ate: frozenPeriod.ate ?? "",
+            };
           }
+          if (val) values[entry.id] = val;
           continue;
         }
 
@@ -693,11 +741,22 @@ export default async function SnapshotPage({
 
   const activeTabId = dashSettings.tabs?.[0]?.id ?? "";
 
+  // Selo do período congelado no cabeçalho (ex.: "Este ano · Data Reunião").
+  const frozenCampoLabel = frozenPeriod?.campo
+    ? (available.find((a) => a.field === frozenPeriod.campo)?.label ??
+      frozenPeriod.campo)
+    : "";
+  const periodLabel = frozenPeriod
+    ? frozenPeriodLabel(frozenPeriod) +
+      (frozenCampoLabel ? ` · ${frozenCampoLabel}` : "")
+    : undefined;
+
   return (
     <SnapshotClient
       snapshotName={snap.name}
       dashboardName={cfg.dashboard.name}
       tabName={cfg.tabName}
+      periodLabel={periodLabel}
       lastRefreshedAt={snap.last_refreshed_at}
       dashboardId={snap.dashboard_id}
       widgets={renderWidgets}

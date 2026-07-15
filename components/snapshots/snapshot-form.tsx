@@ -1,11 +1,15 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 15/07/2026
 // Formulário de criação/edição de um snapshot (compartilhado entre o painel do
 // dashboard e a aba admin de Configurações). Colhe nome, aba (só na criação),
 // restrições (fontes/responsáveis/operações — vazio = todos), interatividade
 // (filtros rápidos/de widget) e agenda (presets). O submit fica com o chamador.
+// Período congelado (0059): na criação, captura o filtro de período ATUAL do
+// dashboard via `capturePeriod` (quando o chamador o fornece — só o painel do
+// dashboard tem esse contexto); na edição, mantém o gravado, com opção de
+// substituir pelo atual.
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,11 +23,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { RefreshMode, SnapshotListItem } from "@/lib/snapshots/types";
+import type { SavedPeriod } from "@/lib/widgets/period";
 import type {
   SnapshotFormOptions,
   SnapshotInput,
 } from "@/app/(app)/dashboards/snapshot-actions";
-import { REFRESH_MODE_LABELS, WEEKDAY_OPTIONS } from "./labels";
+import {
+  frozenPeriodLabel,
+  REFRESH_MODE_LABELS,
+  WEEKDAY_OPTIONS,
+} from "./labels";
 
 // Lista de checkboxes com rolagem (restrições). Vazio = todos (sem restrição).
 function CheckList({
@@ -72,6 +81,8 @@ export function SnapshotForm({
   pending,
   onSubmit,
   onCancel,
+  capturePeriod,
+  fieldLabels,
 }: {
   options: SnapshotFormOptions;
   // Presente = edição (aba fixa); ausente = criação.
@@ -80,6 +91,12 @@ export function SnapshotForm({
   pending: boolean;
   onSubmit: (input: SnapshotInput) => void;
   onCancel?: () => void;
+  // Filtro de período ATUAL do dashboard para a aba dada (null = todo o
+  // período). Ausente fora do contexto do dashboard (aba admin): o período
+  // congelado não é alterado.
+  capturePeriod?: (tabId: string) => SavedPeriod | null;
+  // Rótulos por chave de campo (p/ exibir o campo de data do período).
+  fieldLabels?: Record<string, string>;
 }) {
   const editing = Boolean(initial);
   const [name, setName] = useState(initial?.name ?? "");
@@ -104,6 +121,20 @@ export function SnapshotForm({
   const [mode, setMode] = useState<RefreshMode>(initial?.refresh_mode ?? "manual");
   const [time, setTime] = useState(initial?.refresh_time ?? "06:00");
   const [weekday, setWeekday] = useState<number>(initial?.refresh_weekday ?? 1);
+  // Edição: substituir o período congelado pelo atual do dashboard?
+  const [replacePeriod, setReplacePeriod] = useState(false);
+
+  // Período atual do dashboard para a aba escolhida (criação exibe/grava).
+  const captured = useMemo(
+    () => (capturePeriod ? capturePeriod(tabId) : undefined),
+    [capturePeriod, tabId]
+  );
+
+  const periodText = (p: SavedPeriod | null | undefined) => {
+    const label = frozenPeriodLabel(p);
+    const campo = p?.campo ? (fieldLabels?.[p.campo] ?? p.campo) : "";
+    return campo && label !== "Todo o período" ? `${label} · ${campo}` : label;
+  };
 
   const toggle =
     (set: Set<string>, setter: (s: Set<string>) => void) => (v: string) => {
@@ -114,6 +145,15 @@ export function SnapshotForm({
     };
 
   function submit() {
+    // Criação: grava o período atual (null = todo o período). Edição: só
+    // quando o usuário pediu a substituição; undefined = manter o gravado.
+    const defaultPeriod = !capturePeriod
+      ? undefined
+      : editing
+        ? replacePeriod
+          ? (captured ?? null)
+          : undefined
+        : (captured ?? null);
     onSubmit({
       name,
       tabId,
@@ -125,6 +165,7 @@ export function SnapshotForm({
       refreshMode: mode,
       refreshTime: mode === "daily" || mode === "weekly" ? time : null,
       refreshWeekday: mode === "weekly" ? weekday : null,
+      defaultPeriod,
     });
   }
 
@@ -158,6 +199,33 @@ export function SnapshotForm({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      ) : null}
+
+      {!editing && capturePeriod ? (
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Período congelado</Label>
+          <p className="text-sm">{periodText(captured)}</p>
+          <p className="text-muted-foreground text-xs">
+            O visitante vê os dados com o filtro de período ativo no dashboard
+            agora (mude o período do dashboard antes de criar, se necessário).
+          </p>
+        </div>
+      ) : null}
+      {editing ? (
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Período congelado</Label>
+          <p className="text-sm">{periodText(initial?.default_period)}</p>
+          {capturePeriod ? (
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox
+                checked={replacePeriod}
+                onCheckedChange={(v) => setReplacePeriod(v === true)}
+              />
+              Substituir pelo período atual do dashboard (
+              {periodText(captured)})
+            </label>
+          ) : null}
         </div>
       ) : null}
 
