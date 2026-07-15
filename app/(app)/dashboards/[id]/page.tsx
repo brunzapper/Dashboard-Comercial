@@ -42,17 +42,14 @@ import {
   loadCorrespondences,
 } from "@/lib/correspondences";
 import {
-  DEFAULT_PERIOD_FIELD,
   applyPeriodToFilters,
   hasSelection,
   periodKeys,
   resolvePeriodSelection,
-  resolveUnifiedPeriodField,
-  type DashboardPeriod,
-  type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
+import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
   QF_ROW_KEY,
   bucketKeyFromRpcValue,
@@ -78,9 +75,7 @@ import type {
   WidgetFilter,
 } from "@/lib/widgets/types";
 import {
-  DEFAULT_PERIOD_FIELD_BY_SOURCE,
   isSourceKey,
-  SOURCE_KEYS,
   SOURCE_RECORD_TYPE,
   type SourceKey,
 } from "@/lib/sources";
@@ -165,8 +160,6 @@ export default async function DashboardPage({
     lastPeriod?: SavedPeriod;
     lastPeriodByTab?: Record<string, SavedPeriod>;
   };
-  const savedPeriod = prefSettings.lastPeriod ?? {};
-  const lastPeriodByTab = prefSettings.lastPeriodByTab ?? {};
 
   const widgets = (widgetsData ?? []) as Widget[];
   const allFields = (fieldsData ?? []) as FieldDefinition[];
@@ -187,41 +180,17 @@ export default async function DashboardPage({
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
 
-  // Campo aceitável como coluna de período: data real, não sintético ("today"
-  // não existe no banco) e não `match:` (subconsulta escalar — o RPC e o modo
-  // lista não a aceitam como coluna do `@period`). `unified:` É aceito porque
-  // resolveFieldBySource o desdobra no membro concreto de cada fonte.
-  const isPeriodDateField = (f: string) =>
-    available.some((a) => a.field === f && a.isDate && !a.displayOnly) &&
-    !f.startsWith("match:");
-
-  // Mapa "campo de data por fonte" resolvido: defaults por fonte
-  // (DEFAULT_PERIOD_FIELD_BY_SOURCE) sobrescritos pelo campo primário (quando
-  // unificado) e pela config (só campos de data válidos). É o que faz uma
-  // seleção de calendário filtrar cada fonte pela sua coluna — ex.: negócios
-  // por assinatura e Estudo por Created At. Campos `unified:` são resolvidos no
-  // membro da fonte (coluna do núcleo ou custom:<k>) — o RPC/modo lista só
-  // entendem refs concretos no `@period`; fonte sem membro na correspondência
-  // mantém o default dela.
-  const resolveFieldBySource = (
-    primary?: string,
-    cfg?: Partial<Record<SourceKey, string>>
-  ): Partial<Record<SourceKey, string>> => {
-    const out: Partial<Record<SourceKey, string>> = {
-      ...DEFAULT_PERIOD_FIELD_BY_SOURCE,
-    };
-    const put = (k: SourceKey, raw: string) => {
-      const resolved = resolveUnifiedPeriodField(raw, k, correspondences);
-      if (resolved && isPeriodDateField(resolved)) out[k] = resolved;
-    };
-    if (primary?.startsWith("unified:")) {
-      for (const s of SOURCE_KEYS) put(s, primary);
-    }
-    for (const [k, v] of Object.entries(cfg ?? {})) {
-      if (isSourceKey(k) && typeof v === "string") put(k, v);
-    }
-    return out;
-  };
+  // Resolução de período por widget: lógica compartilhada com o runQuickTable
+  // da Tabela rápida (lib/widgets/period-resolve.ts) — uma única implementação
+  // p/ página e action deferida não divergirem.
+  const resolver = createPeriodResolver({
+    sp,
+    available,
+    correspondences,
+    dashSettings,
+    prefSettings,
+  });
+  const { resolveFieldBySource, resolveDefaults, savedFor } = resolver;
 
   // Widgets de dados (excluem os controles — filtro de período e filtro por
   // campo — e a forma, que não tem dados nem período). Calculadora e nota
@@ -238,69 +207,14 @@ export default async function DashboardPage({
     (w) => w.visual_type === "filtro_campo"
   );
 
-  // Escopo do filtro de período: "global" (um período p/ todo o dashboard) ou
-  // "tab" (cada aba com sua seleção). As abas e a "aba efetiva" de um widget
-  // espelham components/dashboards/dashboard-client.tsx.
-  const scope: PeriodScope = periodBar?.scope === "tab" ? "tab" : "global";
-  const tabs = dashSettings.tabs ?? [];
+  // Escopo do filtro de período e abas: resolvidos no resolver (espelham
+  // components/dashboards/dashboard-client.tsx).
+  const scope = resolver.scope;
+  const tabs = resolver.tabs;
   const tabIds = new Set(tabs.map((t) => t.id));
-  const firstTabId = tabs[0]?.id ?? "";
-  const widgetTab = (w: Widget) => {
-    const t = w.settings?.tab;
-    return t && tabIds.has(t) ? t : firstTabId;
-  };
-
-  // Defaults (campo + período) de um "bucket" quando a URL está vazia:
-  // preferência do usuário (último consultado no bucket) > config do dashboard >
-  // default. Bucket = "" no modo global; id da aba no modo por aba.
-  function resolveDefaults(saved: SavedPeriod): {
-    defaultField: string;
-    periodDefaults: PeriodSelection;
-  } {
-    const defaultField =
-      saved.campo && isPeriodDateField(saved.campo)
-        ? saved.campo
-        : periodBar?.field && isPeriodDateField(periodBar.field)
-          ? periodBar.field
-          : DEFAULT_PERIOD_FIELD;
-    const hasContent = Boolean(saved.periodo || saved.de || saved.ate);
-    const periodDefaults: PeriodSelection = hasContent
-      ? { preset: saved.periodo ?? "", de: saved.de ?? "", ate: saved.ate ?? "" }
-      : { preset: periodBar?.defaultPreset ?? "" };
-    return { defaultField, periodDefaults };
-  }
-
-  const savedFor = (bucket: string): SavedPeriod =>
-    scope === "tab" ? (lastPeriodByTab[bucket] ?? {}) : savedPeriod;
-
-  // Resolve o período de um bucket lendo suas próprias chaves de URL (namespadas
-  // por aba no modo "tab"; chaves fixas no modo global).
-  function resolvePeriodForBucket(bucket: string): DashboardPeriod | null {
-    const { defaultField, periodDefaults } = resolveDefaults(savedFor(bucket));
-    const keys = periodKeys(scope, bucket);
-    const campoRaw = str(sp[keys.campo]);
-    const userPickedField = isPeriodDateField(campoRaw);
-    const field = userPickedField ? campoRaw : defaultField;
-    const p = resolvePeriodSelection(
-      { preset: str(sp[keys.preset]), de: str(sp[keys.de]), ate: str(sp[keys.ate]) },
-      field,
-      periodDefaults
-    );
-    if (!p) return null;
-    // Sem escolha explícita de campo na barra, cada fonte filtra pela sua coluna
-    // de data (mapa por fonte). Quando o usuário troca o campo direto na barra,
-    // esse campo único vale p/ todas as fontes (retrocompatível) — exceto
-    // `unified:`, que sempre precisa do mapa p/ virar o membro de cada fonte.
-    if (userPickedField) {
-      return campoRaw.startsWith("unified:")
-        ? { ...p, fieldBySource: resolveFieldBySource(campoRaw) }
-        : p;
-    }
-    return {
-      ...p,
-      fieldBySource: resolveFieldBySource(field, periodBar?.fieldBySource),
-    };
-  }
+  const firstTabId = resolver.firstTabId;
+  const widgetTab = resolver.widgetTab;
+  const widgetBucket = resolver.widgetBucket;
 
   // Defaults por bucket, entregues ao cliente para exibir a seleção efetiva de
   // cada aba (deve bater com o que o servidor resolveu). Bucket "" cobre o modo
@@ -314,60 +228,11 @@ export default async function DashboardPage({
     periodDefaultFieldByTab[b] = d.defaultField;
   }
 
-  // 1) Período de cada widget (só se a barra estiver visível). No modo global,
-  //    todos compartilham o bucket ""; no modo por aba, cada widget usa o
-  //    período da sua aba efetiva (resolvido e cacheado por bucket).
-  // 2) Precedência: um widget de filtro sobrescreve o período dos seus alvos
-  //    (ou de todos, se sem alvos) — aplicado logo abaixo.
-  const periodByWidget: Record<string, DashboardPeriod | null> = {};
-  // Origem do período efetivo de cada widget: barra global ("bar") ou widget de
-  // filtro ("filter"). Usada pelos filtros rápidos de período (espelho da barra
-  // só faz sentido quando é a barra que rege o widget).
-  const periodSourceByWidget: Record<string, "bar" | "filter"> = {};
-  const widgetBucket = (w: Widget) => (scope === "tab" ? widgetTab(w) : "");
-  if (periodBar?.enabled !== false) {
-    const cache = new Map<string, DashboardPeriod | null>();
-    const periodOf = (bucket: string) => {
-      if (!cache.has(bucket)) cache.set(bucket, resolvePeriodForBucket(bucket));
-      return cache.get(bucket) ?? null;
-    };
-    for (const w of dataWidgets) {
-      periodByWidget[w.id] = periodOf(widgetBucket(w));
-      periodSourceByWidget[w.id] = "bar";
-    }
-  } else {
-    for (const w of dataWidgets) periodByWidget[w.id] = null;
-  }
-
-  for (const fw of filterWidgets) {
-    const s = fw.settings ?? {};
-    const field =
-      s.field && isPeriodDateField(s.field) ? s.field : DEFAULT_PERIOD_FIELD;
-    const p = resolvePeriodSelection(
-      {
-        preset: str(sp[`pf_${fw.id}`]),
-        de: str(sp[`pfd_${fw.id}`]),
-        ate: str(sp[`pfa_${fw.id}`]),
-      },
-      field,
-      { preset: s.defaultPreset ?? "" }
-    );
-    // O widget de filtro tem campo fixo; mesmo assim aplica o mapa por fonte
-    // (defaults + config), p/ cada fonte filtrar pela sua coluna de data.
-    const pWithMap: DashboardPeriod | null = p
-      ? { ...p, fieldBySource: resolveFieldBySource(field, s.fieldBySource) }
-      : p;
-    const targets =
-      s.targets && s.targets.length > 0
-        ? s.targets
-        : dataWidgets.map((w) => w.id);
-    for (const t of targets) {
-      if (t in periodByWidget) {
-        periodByWidget[t] = pWithMap;
-        periodSourceByWidget[t] = "filter";
-      }
-    }
-  }
+  // Período efetivo por widget: barra global (por bucket) + overrides dos
+  // widgets de filtro (precedência). Os filtros rápidos de período abaixo
+  // podem ainda anular o geral (quando assumem o mesmo campo).
+  const { periodByWidget, periodSourceByWidget } =
+    resolver.computeWidgetPeriods(dataWidgets, filterWidgets);
 
   // ===================== Filtros rápidos (dropdowns do card) =================
   // Config em settings.quickFilters; valores persistidos em dashboard_table_cells

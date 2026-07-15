@@ -21,8 +21,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
-import { Plus, Settings2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Loader2, Plus, Settings2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -38,13 +38,19 @@ import { alignClass, resolveAlign } from "@/lib/widgets/appearance";
 import {
   buildQuickTableMatrix,
   cellKey,
+  classifyCellRaw,
   newColId,
   newRowId,
+  quickTableBI,
   type QTCell,
   type QTCellValue,
   type QTMatrix,
 } from "@/lib/widgets/quick-table/model";
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
+import {
+  runQuickTable,
+  type QuickTableResult,
+} from "@/app/(app)/dashboards/quick-table-actions";
 import {
   ColorPopover,
   ContextMenu,
@@ -134,19 +140,82 @@ export function QuickTableWidget({
     return [...out.values()];
   }, [cells, overrides]);
 
+  // ---- computação deferida (dados BI + expressões {=…}) ----
+  // A page NÃO computa nada desta tabela: o widget busca via runQuickTable
+  // depois do mount ("carrega por último"). Refaz quando a config BI, as
+  // expressões digitadas ou os parâmetros de URL (período/filtros) mudam;
+  // enquanto refaz, mantém os dados anteriores (stale-while-refetch).
+  const bi = useMemo(() => quickTableBI(qt), [qt]);
+  const biKey = useMemo(
+    () =>
+      JSON.stringify(
+        qt.columns.map((c) => [
+          c.kind,
+          c.field,
+          c.transform,
+          c.weekMode,
+          c.metric?.field,
+          c.metric?.agg,
+          c.pivot === true,
+        ])
+      ),
+    [qt.columns]
+  );
+  const exprKey = useMemo(
+    () =>
+      JSON.stringify(
+        effectiveCells
+          .filter(
+            (c) => classifyCellRaw(String(c.value ?? "")) === "expr"
+          )
+          .map((c) => [c.row_key, c.col_key, c.value])
+          .sort()
+      ),
+    [effectiveCells]
+  );
+  const search = useSearchParams().toString();
+  const needsServer = bi.hasBI || exprKey !== "[]";
+  const [deferred, setDeferred] = useState<QuickTableResult | null>(null);
+  useEffect(() => {
+    if (!needsServer) return;
+    let cancelled = false;
+    // Pequeno atraso coalesce mudanças rápidas (digitação de {=…}, painel).
+    const timer = setTimeout(() => {
+      void runQuickTable(dashboardId, widget.id, search).then((res) => {
+        if (!cancelled) setDeferred(res);
+      });
+    }, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // biKey/exprKey resumem a config/expressões — são as deps reais.
+  }, [needsServer, biKey, exprKey, search, dashboardId, widget.id]);
+
   // ---- matriz renderizada ----
   const matrix: QTMatrix = useMemo(
     () =>
       buildQuickTableMatrix({
         qt,
         cells: effectiveCells,
-        data: null, // modo BI chega no carregamento deferido (runQuickTable)
+        // undefined = BI carregando (skeleton); null = sem colunas BI.
+        data: bi.hasBI ? (deferred ? deferred.data : undefined) : null,
+        exprValues: deferred?.exprValues,
         userRoles,
         available,
         tableAp: appearance?.table,
         dateFormat,
       }),
-    [qt, effectiveCells, userRoles, available, appearance?.table, dateFormat]
+    [
+      qt,
+      effectiveCells,
+      bi.hasBI,
+      deferred,
+      userRoles,
+      available,
+      appearance?.table,
+      dateFormat,
+    ]
   );
 
   // ---- persistência de células ----
@@ -575,6 +644,25 @@ export function QuickTableWidget({
             </thead>
           ) : null}
           <tbody>
+            {matrix.loading
+              ? // Skeleton das linhas de DADOS enquanto o runQuickTable roda
+                // (as células livres abaixo já renderizam de imediato).
+                [0, 1, 2].map((i) => (
+                  <tr key={`skel-${i}`} aria-hidden>
+                    {structureEdit ? <td className="w-6 px-0.5" /> : null}
+                    {matrix.cols.map((col, ci) => (
+                      <td
+                        key={col.key}
+                        className="h-8 px-2 py-1"
+                        style={cellBorder(ci === matrix.cols.length - 1)}
+                      >
+                        <span className="bg-muted block h-3.5 w-3/4 animate-pulse rounded" />
+                      </td>
+                    ))}
+                    {structureEdit ? <td className="w-8 px-0.5" /> : null}
+                  </tr>
+                ))
+              : null}
             {matrix.rows.map((row, ri) => {
               const h = t.rowHeights?.[row.key];
               return (
@@ -745,6 +833,19 @@ export function QuickTableWidget({
             ) : null}
           </tbody>
         </table>
+        {matrix.loading ? (
+          <div className="text-muted-foreground flex items-center gap-1.5 px-2 py-1 text-xs">
+            <Loader2 className="size-3 animate-spin" /> Carregando dados…
+          </div>
+        ) : null}
+        {matrix.error ? (
+          <div
+            className="text-destructive truncate px-2 py-1 text-xs"
+            title={matrix.error}
+          >
+            Não foi possível carregar os dados: {matrix.error}
+          </div>
+        ) : null}
       </div>
 
       {/* ---- menus/painéis flutuantes ---- */}
