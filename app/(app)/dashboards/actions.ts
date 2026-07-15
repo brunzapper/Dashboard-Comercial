@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): widgets calculadora/nota/forma — saveCalcExpression
+//   (expressão compartilhada da calculadora, row __calc__), listWidgetLinkTargets
+//   (catálogo de destinos de atalho: dashboards→abas→widgets), deleteWidget
+//   limpa conectores órfãos, e __calc__ fica fora do histórico (como __qf__).
 // Server Actions de dashboards e widgets (client do usuário → RLS:
 // dashboards/widgets exigem create_dashboards p/ criar; owner/admin p/ editar).
 "use server";
@@ -14,6 +18,7 @@ import {
   QF_ROW_KEY,
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
+import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
 import type {
   DashboardSettings,
   Dimension,
@@ -381,6 +386,104 @@ export async function saveQuickFilterValue(
   return { ok: true };
 }
 
+// ---------------- Calculadora (expressão compartilhada) ----------------
+
+// Grava a expressão corrente do widget Calculadora. Vive em
+// dashboard_table_cells (row_key '__calc__') pelo mesmo motivo dos filtros
+// rápidos: a RLS permite escrita por QUALQUER visualizador (0026), então o
+// último cálculo persiste entre usuários e reloads. Sem revalidatePath: o
+// estado do cliente manda (avaliação é local); o valor só semeia o próximo
+// carregamento da página. Expressão vazia apaga a célula.
+export async function saveCalcExpression(
+  dashboardId: string,
+  widgetId: string,
+  expr: string
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+
+  if (!expr.trim()) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", CALC_ROW_KEY)
+      .eq("col_key", CALC_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: CALC_ROW_KEY,
+        col_key: CALC_COL_KEY,
+        value: expr,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  return { ok: true };
+}
+
+// ---------------- Atalhos para widgets (links) ----------------
+
+// Catálogo de destinos de atalho (formas e links de nota): dashboards visíveis
+// ao usuário (RLS filtra) com suas abas e widgets ("Título (Tipo)"). Chamado
+// sob demanda pelo picker (components/dashboards/widget-link-picker.tsx).
+export interface LinkTargetsCatalog {
+  dashboards: {
+    id: string;
+    name: string;
+    tabs: { id: string; name: string }[];
+    widgets: {
+      id: string;
+      title: string | null;
+      visual_type: VisualType;
+      tab?: string;
+    }[];
+  }[];
+}
+
+export async function listWidgetLinkTargets(): Promise<LinkTargetsCatalog> {
+  const session = await getSessionInfo();
+  if (!session) return { dashboards: [] };
+  const supabase = await createClient();
+
+  const [{ data: dashData }, { data: widgetData }] = await Promise.all([
+    supabase.from("dashboards").select("id, name, settings"),
+    supabase.from("widgets").select("id, dashboard_id, title, visual_type, settings"),
+  ]);
+
+  const byDash = new Map<string, LinkTargetsCatalog["dashboards"][number]>();
+  for (const d of dashData ?? []) {
+    const settings = (d.settings ?? {}) as DashboardSettings;
+    byDash.set(d.id as string, {
+      id: d.id as string,
+      name: d.name as string,
+      tabs: (settings.tabs ?? []).map((t) => ({ id: t.id, name: t.name })),
+      widgets: [],
+    });
+  }
+  for (const w of widgetData ?? []) {
+    const dash = byDash.get(w.dashboard_id as string);
+    if (!dash) continue;
+    const settings = (w.settings ?? {}) as WidgetSettings;
+    dash.widgets.push({
+      id: w.id as string,
+      title: (w.title as string | null) ?? null,
+      visual_type: w.visual_type as VisualType,
+      tab: settings.tab,
+    });
+  }
+  return {
+    dashboards: [...byDash.values()].sort((a, b) =>
+      a.name.localeCompare(b.name, "pt-BR")
+    ),
+  };
+}
+
 // Sincronização UNIDIRECIONAL barra global → filtros rápidos de período: quando
 // a barra de período navega, os filtros rápidos de data no formato padrão cujo
 // campo é o MESMO da barra recebem a mesma seleção (persistida p/ todos). O
@@ -556,6 +659,32 @@ export async function deleteWidget(
   if (!session) return;
   const supabase = await createClient();
   await supabase.from("widgets").delete().eq("id", widgetId);
+
+  // Conectores órfãos (ponta no widget excluído) saem do settings do dashboard.
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("settings")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  const settings = (dash?.settings ?? {}) as DashboardSettings;
+  const connectors = settings.connectors ?? [];
+  if (
+    connectors.some(
+      (c) => c.from.widgetId === widgetId || c.to.widgetId === widgetId
+    )
+  ) {
+    await supabase
+      .from("dashboards")
+      .update({
+        settings: {
+          ...settings,
+          connectors: connectors.filter(
+            (c) => c.from.widgetId !== widgetId && c.to.widgetId !== widgetId
+          ),
+        },
+      })
+      .eq("id", dashboardId);
+  }
   revalidatePath(`/dashboards/${dashboardId}`);
 }
 
@@ -698,9 +827,12 @@ export async function captureDashboardSnapshot(
     dash.name as string,
     (dash.settings ?? {}) as DashboardSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') ficam FORA do histórico: mudar um
-    // dropdown não é edição de dashboard (e Desfazer não deve revertê-lo).
-    (cellsData ?? []).filter((c) => c.row_key !== QF_ROW_KEY)
+    // Valores de filtros rápidos ('__qf__') e a expressão compartilhada da
+    // calculadora ('__calc__') ficam FORA do histórico: mudar um dropdown ou
+    // digitar um cálculo não é edição de dashboard (Desfazer não os reverte).
+    (cellsData ?? []).filter(
+      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+    )
   );
 }
 
@@ -753,14 +885,16 @@ export async function restoreDashboardSnapshot(
 
   // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
   // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
-  // Os valores de filtros rápidos ('__qf__') ficam de fora do snapshot E do
-  // delete — Desfazer/Refazer não deve apagar a seleção compartilhada.
+  // Os valores de filtros rápidos ('__qf__') e a expressão da calculadora
+  // ('__calc__') ficam de fora do snapshot E do delete — Desfazer/Refazer não
+  // deve apagar estado compartilhado que não é edição de dashboard.
   if (snapIds.length > 0) {
     const { error: delErr } = await supabase
       .from("dashboard_table_cells")
       .delete()
       .in("widget_id", snapIds)
-      .neq("row_key", QF_ROW_KEY);
+      .neq("row_key", QF_ROW_KEY)
+      .neq("row_key", CALC_ROW_KEY);
     if (delErr) return { ok: false, message: delErr.message };
   }
   if (snap.cells.length > 0) {

@@ -1,12 +1,18 @@
-// Versão: 2.0 | Data: 10/07/2026
+// Versão: 2.1 | Data: 15/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
-// modo edição) e o chart. v2.0 (Fase 10): botões lápis/lixeira viram um menu
+// modo edição) e o chart.
+// v2.1 (15/07/2026): widgets calculadora/nota/forma — branches novos no
+//   conteúdo, layout SEM CROMO (frameless: forma sempre; nota opcional) com
+//   grip de arraste flutuante (o .widget-drag é o único jeito de mover o item)
+//   e menu "⋮" em hover, fundo do card da nota/calculadora, e catálogo de
+//   operandos p/ o editor in-place da nota (mesma montagem do builder).
+// v2.0 (Fase 10): botões lápis/lixeira viram um menu
 // "⋮" (Editar dados / Aparência / Excluir com confirmação); a aparência do
 // widget (cores, grade, legenda, etc.) é aplicada aos charts/tabelas e ao card
 // KPI (fundo/borda/abinha de destaque).
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -39,9 +45,18 @@ import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
+import {
+  aggOperandRefs,
+  condAggOperandRefs,
+} from "@/lib/widgets/calc-metrics";
+import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import { WidgetChart } from "./charts/widget-chart";
+import { CalculatorWidget } from "./calculator-widget";
+import { NoteWidget } from "./note-widget";
+import { ShapeWidget } from "./shape-widget";
 import {
   RecordListTable,
   type ResponsibleOption,
@@ -61,6 +76,9 @@ export function WidgetCard({
   recordList,
   entityList,
   calcValue,
+  calcVars,
+  noteValues,
+  calcExpr,
   fields,
   fkLabels,
   responsibleOptions,
@@ -92,6 +110,11 @@ export function WidgetCard({
   recordList: RecordRow[];
   entityList: EntityListRow[];
   calcValue: CalcWidgetResult | null;
+  // Calculadora: valores das variáveis (por id) e expressão compartilhada.
+  calcVars?: Record<string, CalcWidgetResult>;
+  calcExpr?: string;
+  // Nota: resultados das expressões {=…}, na ordem do texto.
+  noteValues?: CalcWidgetResult[];
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
@@ -149,12 +172,38 @@ export function WidgetCard({
   const isEntityList = isRecordList && rowSource !== "records";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
+  const isCalculator = widget.visual_type === "calculadora";
+  const isNote = widget.visual_type === "nota";
+  const isShape = widget.visual_type === "forma";
   const kpi = isKpi ? appearance?.kpi : undefined;
+  const noteAp = isNote ? appearance?.note : undefined;
+  // Sem cromo de card: forma sempre; nota quando "Sem moldura" (Aparência).
+  const frameless = isShape || (isNote && noteAp?.frameless === true);
   const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
   // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/calc).
   const canStyle = !isFilter && !isFieldFilter && !isCalc;
+
+  // Catálogo de operandos do editor in-place da nota (mesma montagem do
+  // calcRefs do builder — aggOperandRefs + condAggOperandRefs).
+  const noteEditorRefs: OperandRef[] = useMemo(() => {
+    if (!isNote) return [];
+    const numeric = availableForBuilder.filter((f) => f.isNumeric);
+    const countable = availableForBuilder.filter(
+      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+    );
+    const customCond = fields
+      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
+      .map((f) => ({ field_key: f.field_key, label: f.label }));
+    const customDate = fields
+      .filter((f) => f.data_type === "data")
+      .map((f) => ({ field_key: f.field_key, label: f.label }));
+    return [
+      ...aggOperandRefs(numeric, countable),
+      ...condAggOperandRefs(numeric, customCond, customDate),
+    ];
+  }, [isNote, availableForBuilder, fields]);
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
   // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do
@@ -249,12 +298,167 @@ export function WidgetCard({
     entityList,
   ]);
 
+  // Menu "⋮" e overlays (builder/aparência/excluir) compartilhados entre o
+  // layout padrão (com cabeçalho) e o frameless (forma/nota sem moldura).
+  const menu = canEdit ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Opções do widget">
+          <MoreVertical className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            setBuilderOpen(true);
+          }}
+        >
+          <Pencil className="size-4" /> Editar dados
+        </DropdownMenuItem>
+        {canStyle ? (
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setAppearanceOpen(true);
+            }}
+          >
+            <Palette className="size-4" /> Aparência
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            copyWidget(widget);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          onSelect={(e) => {
+            e.preventDefault();
+            setDeleteOpen(true);
+          }}
+        >
+          <Trash2 className="size-4" /> Excluir
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
+
+  const overlays = canEdit ? (
+    <>
+      <WidgetBuilder
+        dashboardId={dashboardId}
+        available={availableForBuilder}
+        widget={widget}
+        siblings={siblings}
+        canManageFields={canManageFields}
+        fields={fields}
+        currencyOptions={currencyOptions}
+        tabs={tabs}
+        open={builderOpen}
+        onOpenChange={setBuilderOpen}
+      />
+      {canStyle ? (
+        <WidgetAppearanceSheet
+          dashboardId={dashboardId}
+          widget={widget}
+          data={data}
+          available={availableForBuilder}
+          open={appearanceOpen}
+          onOpenChange={setAppearanceOpen}
+        />
+      ) : null}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir widget?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir
+              {widget.title ? ` "${widget.title}"` : " este widget"}? Esta
+              ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending}
+              onClick={(e) => {
+                e.preventDefault();
+                startTransition(async () => {
+                  await deleteWidget(widget.id, dashboardId);
+                  setDeleteOpen(false);
+                });
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  ) : null;
+
+  // Layout SEM CROMO (forma; nota "sem moldura"): o conteúdo ocupa o item
+  // inteiro; o grip .widget-drag flutuante é OBRIGATÓRIO no modo edição (o
+  // draggableHandle do grid é o único jeito de mover o item) e o menu "⋮"
+  // aparece em hover.
+  if (frameless) {
+    return (
+      <div ref={cardRef} className="group relative h-full">
+        {editMode ? (
+          <span className="widget-drag bg-background/80 text-muted-foreground absolute top-1 left-1 z-10 cursor-move rounded border p-0.5">
+            <GripVertical className="size-4" />
+          </span>
+        ) : null}
+        {canEdit ? (
+          <div className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            {menu}
+          </div>
+        ) : null}
+        {isShape ? (
+          <ShapeWidget
+            shape={widget.settings?.shape}
+            appearance={appearance?.shape}
+            editMode={editMode}
+          />
+        ) : (
+          <div className="h-full overflow-hidden rounded-lg">
+            <NoteWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              values={noteValues}
+              appearance={noteAp}
+              canEdit={canEdit}
+              editMode={editMode}
+              editorRefs={noteEditorRefs}
+            />
+          </div>
+        )}
+        {overlays}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={cardRef}
       className="bg-card flex h-full flex-col overflow-hidden rounded-lg border"
       style={{
-        background: kpi?.bg,
+        background:
+          kpi?.bg ??
+          (isNote
+            ? (noteAp?.bg ?? "#fef9c3")
+            : isCalculator
+              ? appearance?.calculator?.bg
+              : undefined),
         borderColor: title?.border ?? kpi?.border,
       }}
     >
@@ -276,55 +480,7 @@ export function WidgetCard({
         >
           {widget.title ?? "Sem título"}
         </span>
-        {canEdit ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Opções do widget">
-                <MoreVertical className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setBuilderOpen(true);
-                }}
-              >
-                <Pencil className="size-4" /> Editar dados
-              </DropdownMenuItem>
-              {canStyle ? (
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    setAppearanceOpen(true);
-                  }}
-                >
-                  <Palette className="size-4" /> Aparência
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  copyWidget(widget);
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1500);
-                }}
-              >
-                <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setDeleteOpen(true);
-                }}
-              >
-                <Trash2 className="size-4" /> Excluir
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+        {menu}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
         {showTableBar ? (
@@ -409,6 +565,24 @@ export function WidgetCard({
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />
+          ) : isCalculator ? (
+            <CalculatorWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              vars={calcVars}
+              initialExpr={calcExpr}
+              appearance={appearance?.calculator}
+            />
+          ) : isNote ? (
+            <NoteWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              values={noteValues}
+              appearance={noteAp}
+              canEdit={canEdit}
+              editMode={editMode}
+              editorRefs={noteEditorRefs}
+            />
           ) : isCalc ? (
             <div className="flex h-full flex-col justify-center p-1">
               <span className="text-3xl font-semibold tabular-nums">
@@ -435,61 +609,7 @@ export function WidgetCard({
         </div>
       </div>
 
-      {canEdit ? (
-        <>
-          <WidgetBuilder
-            dashboardId={dashboardId}
-            available={availableForBuilder}
-            widget={widget}
-            siblings={siblings}
-            canManageFields={canManageFields}
-            fields={fields}
-            currencyOptions={currencyOptions}
-            tabs={tabs}
-            open={builderOpen}
-            onOpenChange={setBuilderOpen}
-          />
-          {canStyle ? (
-            <WidgetAppearanceSheet
-              dashboardId={dashboardId}
-              widget={widget}
-              data={data}
-              available={availableForBuilder}
-              open={appearanceOpen}
-              onOpenChange={setAppearanceOpen}
-            />
-          ) : null}
-          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Excluir widget?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Tem certeza que deseja excluir
-                  {widget.title ? ` "${widget.title}"` : " este widget"}? Esta
-                  ação não pode ser desfeita.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={pending}>
-                  Cancelar
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  disabled={pending}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    startTransition(async () => {
-                      await deleteWidget(widget.id, dashboardId);
-                      setDeleteOpen(false);
-                    });
-                  }}
-                >
-                  Excluir
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </>
-      ) : null}
+      {overlays}
     </div>
   );
 }

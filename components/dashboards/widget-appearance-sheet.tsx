@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 13/07/2026
+// Versão: 2.2 | Data: 15/07/2026
+// v2.2 (15/07/2026): seções de cores dos widgets calculadora (card/visor/
+//   teclas), nota (papel/texto/links/fonte/sem moldura) e forma (preenchimento/
+//   contorno/texto). "Título e borda" fica oculto na forma (sem cromo).
 // v2.1 (13/07/2026): UX — controles organizados em seções recolhíveis
 //   (Accordion, mesmo padrão do construtor). Seções raras abrem fechadas;
 //   as já configuradas (rótulos/legenda) abrem expandidas. Sem mudança de
@@ -73,6 +76,9 @@ export function WidgetAppearanceSheet({
   const isPie = vt === "pizza" || vt === "funil";
   const isTable = vt === "tabela";
   const isKpi = vt === "kpi";
+  const isCalculator = vt === "calculadora";
+  const isNote = vt === "nota";
+  const isShape = vt === "forma";
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
@@ -141,9 +147,13 @@ export function WidgetAppearanceSheet({
               ...(isPie ? ["pizza"] : []),
               ...(isTable ? ["cores", "grade"] : []),
               ...(isKpi ? ["kpi"] : []),
+              ...(isCalculator ? ["calculadora"] : []),
+              ...(isNote ? ["nota"] : []),
+              ...(isShape ? ["forma"] : []),
             ]}
           >
-          {/* ---------- Título e borda (todos os tipos) ---------- */}
+          {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}
+          {!isShape ? (
           <BuilderSection value="titulo" title="Título e borda">
             <ColorField
               label="Cor do texto do título"
@@ -164,6 +174,203 @@ export function WidgetAppearanceSheet({
               onClear={() => patch({ title: { ...ap.title, border: undefined } })}
             />
           </BuilderSection>
+          ) : null}
+
+          {/* ---------- Calculadora ---------- */}
+          {isCalculator ? (
+            <BuilderSection value="calculadora" title="Calculadora">
+              <ColorField
+                label="Fundo do card"
+                value={ap.calculator?.bg}
+                onChange={(v) => patch({ calculator: { ...ap.calculator, bg: v } })}
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, bg: undefined } })
+                }
+              />
+              <ColorField
+                label="Fundo do visor"
+                value={ap.calculator?.displayBg}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, displayBg: v } })
+                }
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, displayBg: undefined } })
+                }
+              />
+              <ColorField
+                label="Texto do visor"
+                value={ap.calculator?.displayText}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, displayText: v } })
+                }
+                onClear={() =>
+                  patch({
+                    calculator: { ...ap.calculator, displayText: undefined },
+                  })
+                }
+              />
+              <ColorField
+                label="Fundo das teclas"
+                value={ap.calculator?.keyBg}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, keyBg: v } })
+                }
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, keyBg: undefined } })
+                }
+              />
+              <ColorField
+                label="Texto das teclas"
+                value={ap.calculator?.keyText}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, keyText: v } })
+                }
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, keyText: undefined } })
+                }
+              />
+              <ColorField
+                label="Fundo das teclas de operação"
+                value={ap.calculator?.opKeyBg}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, opKeyBg: v } })
+                }
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, opKeyBg: undefined } })
+                }
+              />
+              <ColorField
+                label="Texto das teclas de operação"
+                value={ap.calculator?.opKeyText}
+                onChange={(v) =>
+                  patch({ calculator: { ...ap.calculator, opKeyText: v } })
+                }
+                onClear={() =>
+                  patch({ calculator: { ...ap.calculator, opKeyText: undefined } })
+                }
+              />
+            </BuilderSection>
+          ) : null}
+
+          {/* ---------- Nota (post-it) ---------- */}
+          {isNote ? (
+            <BuilderSection value="nota" title="Nota (post-it)">
+              <ColorField
+                label="Fundo do papel"
+                value={ap.note?.bg}
+                onChange={(v) => patch({ note: { ...ap.note, bg: v } })}
+                onClear={() => patch({ note: { ...ap.note, bg: undefined } })}
+              />
+              <ColorField
+                label="Cor do texto"
+                value={ap.note?.color}
+                onChange={(v) => patch({ note: { ...ap.note, color: v } })}
+                onClear={() => patch({ note: { ...ap.note, color: undefined } })}
+              />
+              <ColorField
+                label="Cor dos links"
+                value={ap.note?.linkColor}
+                onChange={(v) => patch({ note: { ...ap.note, linkColor: v } })}
+                onClear={() =>
+                  patch({ note: { ...ap.note, linkColor: undefined } })
+                }
+              />
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Tamanho da fonte (px)</Label>
+                <input
+                  type="number"
+                  min={10}
+                  max={48}
+                  value={ap.note?.fontSize ?? 14}
+                  onChange={(e) =>
+                    patch({
+                      note: {
+                        ...ap.note,
+                        fontSize: Number(e.target.value) || undefined,
+                      },
+                    })
+                  }
+                  className="border-input h-8 w-24 rounded-md border bg-transparent px-2 text-xs tabular-nums outline-none"
+                  aria-label="Tamanho da fonte"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={ap.note?.frameless ?? false}
+                  onCheckedChange={(v) =>
+                    patch({ note: { ...ap.note, frameless: v === true } })
+                  }
+                />
+                Sem moldura (só o papel)
+              </label>
+            </BuilderSection>
+          ) : null}
+
+          {/* ---------- Forma ---------- */}
+          {isShape ? (
+            <BuilderSection value="forma" title="Forma">
+              <ColorField
+                label="Preenchimento"
+                value={ap.shape?.fill}
+                onChange={(v) => patch({ shape: { ...ap.shape, fill: v } })}
+                onClear={() => patch({ shape: { ...ap.shape, fill: undefined } })}
+              />
+              <ColorField
+                label="Contorno"
+                value={ap.shape?.stroke}
+                onChange={(v) => patch({ shape: { ...ap.shape, stroke: v } })}
+                onClear={() =>
+                  patch({ shape: { ...ap.shape, stroke: undefined } })
+                }
+              />
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Espessura do contorno (px)</Label>
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  value={ap.shape?.strokeWidth ?? 2}
+                  onChange={(e) =>
+                    patch({
+                      shape: {
+                        ...ap.shape,
+                        strokeWidth: Math.max(0, Number(e.target.value) || 0),
+                      },
+                    })
+                  }
+                  className="border-input h-8 w-24 rounded-md border bg-transparent px-2 text-xs tabular-nums outline-none"
+                  aria-label="Espessura do contorno"
+                />
+              </div>
+              <ColorField
+                label="Cor do texto"
+                value={ap.shape?.textColor}
+                onChange={(v) => patch({ shape: { ...ap.shape, textColor: v } })}
+                onClear={() =>
+                  patch({ shape: { ...ap.shape, textColor: undefined } })
+                }
+              />
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs">Tamanho da fonte (px)</Label>
+                <input
+                  type="number"
+                  min={10}
+                  max={64}
+                  value={ap.shape?.fontSize ?? 14}
+                  onChange={(e) =>
+                    patch({
+                      shape: {
+                        ...ap.shape,
+                        fontSize: Number(e.target.value) || undefined,
+                      },
+                    })
+                  }
+                  className="border-input h-8 w-24 rounded-md border bg-transparent px-2 text-xs tabular-nums outline-none"
+                  aria-label="Tamanho da fonte da forma"
+                />
+              </div>
+            </BuilderSection>
+          ) : null}
 
           {/* ---------- Gráficos (barra/linha) ---------- */}
           {isChart ? (

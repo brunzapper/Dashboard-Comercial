@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): novos widgets 'calculadora', 'nota' e 'forma' —
+//   CalculatorSettings/NoteSettings/ShapeSettings, WidgetLinkTarget (atalho
+//   para widget em qualquer aba/dashboard), Connector (linhas entre widgets,
+//   em DashboardSettings.connectors) e grupos calculator/note/shape em
+//   AppearanceSettings.
 // v1.3 (15/07/2026): WidgetFilter ganha `sources` (fontes-alvo do filtro,
 //   pass-through — persistido) e `record_types` (formato de fio; ver
 //   lib/widgets/filter-sources.ts).
@@ -29,11 +34,17 @@ export type VisualType =
   | "funil"
   | "filtro"
   | "filtro_campo"
-  | "calculado";
+  | "calculado"
+  | "calculadora"
+  | "nota"
+  | "forma";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
   calculado: "Métrica calculada",
+  calculadora: "Calculadora",
+  nota: "Nota (post-it)",
+  forma: "Forma",
   tabela: "Tabela",
   barra: "Barra",
   barra_horizontal: "Barra horizontal",
@@ -304,6 +315,82 @@ export interface CalcSettings {
   calcField?: string;
 }
 
+// Endereço de um widget-alvo de atalho (formas e links de nota). dashboardId
+// ausente = mesmo dashboard; tab é informativa (a navegação resolve a aba
+// efetiva pelo settings.tab ATUAL do alvo — sobrevive a mover o widget de aba).
+export interface WidgetLinkTarget {
+  widgetId: string;
+  tab?: string;
+  dashboardId?: string;
+}
+
+// --- Calculadora ---
+// Variável nomeada exposta na calculadora: fórmula sobre o catálogo agregado
+// (agg:*, SOMASE, …), computada no servidor com filtros+período do widget. O
+// id é estável (cv_…) — a expressão digitada referencia `var:<id>`, então
+// renomear a variável não quebra expressões salvas.
+export interface CalculatorVariable {
+  id: string;
+  name: string; // rótulo exibido/inserido como [Nome]
+  formula?: Formula;
+}
+export interface CalculatorSettings {
+  calculator?: { variables?: CalculatorVariable[] };
+}
+
+// --- Nota (post-it) ---
+// text = fonte editável ({=expressão} e [rótulo](@destino)); exprs = tokens de
+// cada {=…} NA ORDEM em que aparecem, gravados no salvamento pelo editor da
+// nota (refs estáveis sobrevivem a renomear campos, como no widget calculado).
+export interface NoteSettings {
+  note?: { text?: string; exprs?: Formula[] };
+}
+
+// --- Forma (figura geométrica) ---
+export type ShapeKind =
+  | "retangulo"
+  | "retangulo_arredondado"
+  | "elipse"
+  | "losango"
+  | "triangulo"
+  | "seta"
+  | "hexagono";
+export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
+  retangulo: "Retângulo",
+  retangulo_arredondado: "Retângulo arredondado",
+  elipse: "Elipse",
+  losango: "Losango",
+  triangulo: "Triângulo",
+  seta: "Seta",
+  hexagono: "Hexágono",
+};
+export interface ShapeSettings {
+  shape?: { kind?: ShapeKind; text?: string; link?: WidgetLinkTarget };
+}
+
+// --- Conectores (linhas entre widgets, estilo n8n/Make) ---
+// Persistidos em DashboardSettings.connectors (ganham undo/redo pelos
+// snapshots). Desenhados por uma camada SVG sobre o grid; as pontas seguem o
+// grid_position ao vivo durante drag/resize. side "auto" = escolhido pela
+// posição relativa dos widgets.
+export type ConnectorSide = "auto" | "top" | "right" | "bottom" | "left";
+export interface ConnectorEndpoint {
+  widgetId: string;
+  side?: ConnectorSide;
+}
+export interface Connector {
+  id: string; // cn_…
+  tab?: string; // aba dona (ausente = primeira aba / tela única)
+  from: ConnectorEndpoint;
+  to: ConnectorEndpoint;
+  shape?: "reta" | "curva"; // default "curva"
+  color?: string;
+  width?: number; // px (default 2)
+  dash?: boolean;
+  arrowEnd?: boolean; // default true
+  label?: string;
+}
+
 // Aparência de um widget (Fase 10): camada opcional lida na renderização, com
 // fallback total para o comportamento atual (paleta do design system) quando
 // ausente. Aninhada em WidgetSettings.appearance p/ não colidir com as demais
@@ -391,6 +478,32 @@ export interface AppearanceSettings {
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior
+  // --- calculadora ---
+  calculator?: {
+    bg?: string; // fundo do card
+    displayBg?: string; // fundo do visor
+    displayText?: string; // texto do visor
+    keyBg?: string; // fundo das teclas numéricas
+    keyText?: string;
+    opKeyBg?: string; // fundo das teclas de operação
+    opKeyText?: string;
+  };
+  // --- nota (post-it) ---
+  note?: {
+    bg?: string; // fundo do papel (default amarelo post-it #fef9c3)
+    color?: string; // cor do texto
+    linkColor?: string; // cor dos hyperlinks
+    fontSize?: number; // px (default 14)
+    frameless?: boolean; // sem cromo do card (só o papel)
+  };
+  // --- forma ---
+  shape?: {
+    fill?: string; // preenchimento
+    stroke?: string; // contorno
+    strokeWidth?: number; // px (default 2)
+    textColor?: string;
+    fontSize?: number; // px
+  };
   // --- título / borda do card (todos os tipos estilizáveis) ---
   title?: {
     color?: string; // cor do texto do título
@@ -406,7 +519,10 @@ export type WidgetSettings = KpiSettings &
   FilterSettings &
   FieldFilterSettings &
   RecordListSettings &
-  CalcSettings & {
+  CalcSettings &
+  CalculatorSettings &
+  NoteSettings &
+  ShapeSettings & {
     appearance?: AppearanceSettings;
     // Filtros rápidos expostos no card (dropdowns). Valores persistidos em
     // dashboard_table_cells ('__qf__'), compartilhados entre usuários.
@@ -465,6 +581,8 @@ export interface DashboardSettings {
   // widgets são associados por `WidgetSettings.tab` (id). Ausente/vazio = uma tela
   // única (todos os widgets numa aba padrão implícita).
   tabs?: { id: string; name: string; color?: string }[];
+  // Conectores entre widgets (linhas retas/curvas estilo n8n). Ver Connector.
+  connectors?: Connector[];
 }
 
 export interface WidgetConfig {
@@ -485,6 +603,9 @@ export interface WidgetConfig {
 export interface CalcWidgetResult {
   value: number | null;
   currency?: string | null;
+  // Resultado textual (SE(...) que devolve string/booleano) — usado pela Nota
+  // (v1.4). Presente só quando value é null e a fórmula produziu texto.
+  text?: string;
 }
 
 export interface KpiResult {

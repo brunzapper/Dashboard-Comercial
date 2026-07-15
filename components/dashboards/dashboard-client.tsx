@@ -1,15 +1,21 @@
-// Versão: 2.1 | Data: 15/07/2026
+// Versão: 2.2 | Data: 15/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
-// dados pré-computados). v2.1 (15/07/2026): estado otimista de layout
+// dados pré-computados).
+// v2.2 (15/07/2026): widgets calculadora/nota/forma — focusWidget (atalhos:
+//   troca aba/dashboard e centraliza o alvo, WidgetFocusProvider), estado
+//   otimista de conectores (settings.connectors) + modo "Conectar", e repasse
+//   de calcVarsById/noteById/calcExprById ao grid.
+// v2.1 (15/07/2026): estado otimista de layout
 // (layoutById) — fonte de verdade das posições entre um saveLayout (que não
 // revalida) e o próximo refresh real; aba ativa persistida na URL (?tab=).
 // v2.0 (09/07/2026): barra de período editável/removível e filtro como widget
 // (siblings ao builder).
 "use client";
 
-import { useCallback, useState, useTransition } from "react";
-import { Check, Clock, Pencil, Plus, Redo2, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Check, Clock, Pencil, Plus, Redo2, Spline, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,13 +24,16 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
 import type {
   CalcWidgetResult,
+  Connector,
   DashboardSettings,
   FieldFilterOptions,
   GridPosition,
   Widget,
   WidgetData,
+  WidgetLinkTarget,
 } from "@/lib/widgets/types";
 import { posOf } from "@/lib/widgets/grid-placement";
+import { focusWidgetWithRetry } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
@@ -41,6 +50,7 @@ import {
   useDashboardHistory,
 } from "./history-context";
 import { DashboardPendingProvider } from "./pending-context";
+import { WidgetFocusProvider } from "./focus-context";
 import { PeriodFilter } from "./period-filter";
 import { WidgetBuilder } from "./widget-builder";
 
@@ -85,6 +95,9 @@ export function DashboardClient({
   recordListById,
   entityListById,
   calcById,
+  calcVarsById = {},
+  noteById = {},
+  calcExprById = {},
   fields,
   fkLabels,
   responsibleOptions,
@@ -107,6 +120,7 @@ export function DashboardClient({
   filterOptionsById,
   quickFiltersById,
   initialTabId,
+  focusWidgetId,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -116,6 +130,12 @@ export function DashboardClient({
   recordListById: Record<string, RecordRow[]>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
+  // Calculadora: valores das variáveis por widget ({ widgetId: { varId: r } }).
+  calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
+  // Nota: resultados das expressões {=…} por widget, na ordem do texto.
+  noteById?: Record<string, CalcWidgetResult[]>;
+  // Calculadora: expressão compartilhada corrente (row __calc__).
+  calcExprById?: Record<string, string>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
@@ -143,9 +163,15 @@ export function DashboardClient({
   // Aba vinda da URL (?tab=), para restaurar a aba ativa ao recarregar. Chega
   // crua da page (sem validação) — validada aqui contra as abas efetivas.
   initialTabId?: string;
+  // Widget a focar ao montar (?focus= — atalho vindo de outro dashboard). A
+  // page já entrega initialTabId apontando para a aba do alvo.
+  focusWidgetId?: string;
 }) {
   const [editMode, setEditMode] = useState(false);
+  // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
+  const [connectMode, setConnectMode] = useState(false);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const barEnabled = periodBar?.enabled !== false;
   const backgroundCss = dashboardBackgroundCss(settings.background);
@@ -220,12 +246,79 @@ export function DashboardClient({
   const tabIds = new Set(tabs.map((t) => t.id));
   // Aba efetiva: a do widget quando ainda existe; senão (sem aba ou aba excluída)
   // cai na primeira aba, para nenhum widget "sumir".
-  const widgetTab = (w: Widget) => {
-    const t = w.settings?.tab;
-    return t && tabIds.has(t) ? t : firstTabId;
-  };
+  const widgetTab = useCallback(
+    (w: Widget) => {
+      const t = w.settings?.tab;
+      return t && tabIds.has(t) ? t : firstTabId;
+    },
+    // tabIds deriva de tabs; a dependência real é tabs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tabs, firstTabId]
+  );
   const visibleWidgets =
     tabs.length === 0 ? widgets : widgets.filter((w) => widgetTab(w) === activeTabId);
+
+  // Conectores: estado otimista com o mesmo padrão seedKey das abas. Toda
+  // gravação passa por saveConnectors (spread do settings — a action
+  // sobrescreve o jsonb inteiro).
+  const serverConnectors = settings.connectors ?? [];
+  const serverConnKey = JSON.stringify(serverConnectors);
+  const [connSeedKey, setConnSeedKey] = useState(serverConnKey);
+  const [connectors, setConnectors] = useState<Connector[]>(serverConnectors);
+  if (connSeedKey !== serverConnKey) {
+    setConnSeedKey(serverConnKey);
+    setConnectors(serverConnectors);
+  }
+  const saveConnectors = useCallback(
+    (next: Connector[]) => {
+      setConnectors(next);
+      startTransition(async () => {
+        await updateDashboardSettings(dashboardId, {
+          ...settings,
+          connectors: next,
+        });
+      });
+    },
+    [dashboardId, settings, startTransition]
+  );
+
+  // Focar um widget (atalhos de forma/nota): outro dashboard → navega com
+  // ?focus= (a page abre na aba do alvo e o effect abaixo centraliza); mesmo
+  // dashboard → troca de aba se preciso e rola até centralizar com destaque.
+  const focusWidget = useCallback(
+    (t: WidgetLinkTarget) => {
+      if (t.dashboardId && t.dashboardId !== dashboardId) {
+        router.push(`/dashboards/${t.dashboardId}?focus=${t.widgetId}`);
+        return;
+      }
+      const w = widgets.find((x) => x.id === t.widgetId);
+      if (!w) return;
+      if (tabs.length > 0) {
+        const target = widgetTab(w);
+        if (target !== activeTabId) selectTab(target);
+      }
+      focusWidgetWithRetry(t.widgetId);
+    },
+    [dashboardId, widgets, tabs.length, widgetTab, activeTabId, selectTab, router]
+  );
+
+  // Consome o ?focus= da URL uma única vez ao montar (atalho vindo de outro
+  // dashboard): centraliza o alvo e limpa o parâmetro (mesma técnica do
+  // selectTab, sem navegação RSC).
+  useEffect(() => {
+    if (!focusWidgetId) return;
+    focusWidgetWithRetry(focusWidgetId);
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete("focus");
+    const qs = sp.toString();
+    window.history.replaceState(
+      null,
+      "",
+      qs ? `?${qs}` : window.location.pathname
+    );
+    // Só no mount — o parâmetro já foi consumido.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Renomear o dashboard (inline no título). Estado otimista: aplica o nome na
   // hora e persiste no servidor. Nome vazio mantém o atual.
@@ -308,11 +401,24 @@ export function DashboardClient({
             <Button
               variant={editMode ? "default" : "outline"}
               size="sm"
-              onClick={() => setEditMode((v) => !v)}
+              onClick={() => {
+                setEditMode((v) => !v);
+                setConnectMode(false); // conectar é um submodo da edição
+              }}
             >
               {editMode ? <Check className="size-4" /> : <Pencil className="size-4" />}
               {editMode ? "Concluir" : "Editar layout"}
             </Button>
+            {editMode ? (
+              <Button
+                variant={connectMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setConnectMode((v) => !v)}
+                title="Conectar widgets com linhas (clique na origem e no destino)"
+              >
+                <Spline className="size-4" /> Conectar
+              </Button>
+            ) : null}
             <WidgetBuilder
               dashboardId={dashboardId}
               available={availableForBuilder}
@@ -380,12 +486,16 @@ export function DashboardClient({
           className={backgroundCss ? "rounded-lg p-3" : undefined}
           style={backgroundCss ? { background: backgroundCss } : undefined}
         >
+          <WidgetFocusProvider focus={focusWidget}>
           <DashboardGrid
             widgets={visibleWidgets}
             dataById={dataById}
             recordListById={recordListById}
             entityListById={entityListById}
             calcById={calcById}
+            calcVarsById={calcVarsById}
+            noteById={noteById}
+            calcExprById={calcExprById}
             fields={fields}
             fkLabels={fkLabels}
             responsibleOptions={responsibleOptions}
@@ -408,7 +518,11 @@ export function DashboardClient({
             quickFiltersById={quickFiltersById}
             layoutById={layoutById}
             applyLayoutPatch={applyLayoutPatch}
+            connectors={connectors}
+            saveConnectors={saveConnectors}
+            connectMode={editMode && connectMode}
           />
+          </WidgetFocusProvider>
         </div>
       </DashboardPendingProvider>
     </div>
