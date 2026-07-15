@@ -250,6 +250,31 @@ select p.proname, r.rolname
    and r.rolname in ('anon', 'authenticated', 'service_role');
 ```
 
+### 0057 — mocks de Data Reunião nos snapshots
+
+Depois da 0056, cole e execute
+[`migrations/0057_snapshots_mock_rule.sql`](./migrations/0057_snapshots_mock_rule.sql)
+(idempotente). O que muda:
+
+- Os mocks de Data Reunião (`records.is_mock`, Fases 12/13) entram **sempre**
+  no dataset congelado, ignorando as restrições do snapshot — antes, um
+  snapshot restrito por responsáveis os deixava de fora e os widgets de Data
+  Reunião divergiam do dashboard. A regra da 0052 segue valendo (mock só
+  conta em consulta que referencia Data Reunião).
+- As restrições do snapshot passam a ser aplicadas **dentro** de
+  `run_widget_query_snapshot` (predicado `(is_mock or restrições)` lido da
+  linha do snapshot); o viewer não injeta mais filtros de restrição.
+- **Snapshots já criados precisam de um refresh** ("Atualizar agora" no menu ⋮
+  ou aguardar a agenda) para incorporar os mocks.
+
+Conferência pós-refresh de um snapshot:
+
+```sql
+-- Mocks presentes na cópia (esperado: 302 = 270 Inbound + 32 Outbound):
+select count(*) from public.snapshot_records
+ where snapshot_id = 'ID-DO-SNAPSHOT' and is_mock;
+```
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
