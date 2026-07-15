@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 15/07/2026
+// Versão: 1.8 | Data: 15/07/2026
+// v1.8 (15/07/2026): widget "Tabela rápida" (tabela_editavel) — branch no
+//   save() (estrutura em settings.quickTable; grade padrão 3×3 na criação),
+//   hint no formulário e botão "Desenhar no painel" (onRequestDraw fecha o
+//   Sheet e arma o desenho no canvas com o título digitado).
 // v1.7 (15/07/2026): widgets calculadora/nota/forma — seção de variáveis da
 //   calculadora (nome + fórmula agregada), seção da forma (tipo/texto/atalho
 //   via WidgetLinkPicker), hint da nota (texto é editado direto no card) e

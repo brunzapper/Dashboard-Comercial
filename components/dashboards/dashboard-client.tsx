@@ -1,7 +1,10 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 15/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
+// v2.3 (15/07/2026): Tabela rápida — estado drawQuick (desenhar para criar,
+//   armado pelo builder via onRequestDraw; onDrawDone cria o widget com o
+//   retângulo desenhado) e fio de tableCellsById até o grid.
 // v2.2 (15/07/2026): widgets calculadora/nota/forma — focusWidget (atalhos:
 //   troca aba/dashboard e centraliza o alvo, WidgetFocusProvider), estado
 //   otimista de conectores (settings.connectors) + modo "Conectar", e repasse

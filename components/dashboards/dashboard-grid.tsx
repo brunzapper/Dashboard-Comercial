@@ -1,6 +1,10 @@
-// Versão: 2.4 | Data: 15/07/2026
+// Versão: 2.5 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.5 (15/07/2026): modo "desenhar para criar" (Tabela rápida) — overlay de
+//   mira sobre o canvas (drawMode/onDrawDone/onDrawCancel), pan/menu/drag
+//   suspensos durante o desenho, canvas renderiza mesmo sem widgets; repasse
+//   de tableCellsById aos cards.
 // v2.4 (15/07/2026): conectores (ConnectorLayer sob os cards; pontas seguem o
 //   gesto via onDrag/onResize → apiRef, sem tocar o estado do grid), id de DOM
 //   por item (widget-<id>, alvo do focus/atalhos), guarda [data-conn-ui] no
