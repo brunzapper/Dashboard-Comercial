@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 14/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): exibição percentual — FieldDefinition.show_as_percent,
+//   PERCENT_DATA_TYPES, isPercentField e isPercentFieldRef (refs custom:/match:).
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
 // v1.1 (09/07/2026): Fase 7 — DataType ganha 'booleano' (campos Y/N do Bitrix)
 //   e 'calculado' (campo com fórmula); FieldDefinition ganha source_system,
@@ -54,6 +56,24 @@ export function isPercentField(
     PERCENT_DATA_TYPES.includes(f.data_type) &&
     !f.currency_mode
   );
+}
+
+// Idem para uma REF de campo de widget: 'custom:<key>' ou
+// 'match:<fonte>:custom:<key>'. Refs 'unified:' ficam fora do v1 (resolver o
+// membro exigiria as correspondences aqui). Compartilhado entre o engine
+// (carimbo em data.metrics) e as tabelas de registros — um único parser evita
+// que as duas superfícies divirjam.
+export function isPercentFieldRef(
+  field: string,
+  fieldByKey: Map<string, FieldDefinition>
+): boolean {
+  const key = field.startsWith("custom:")
+    ? field.slice("custom:".length)
+    : /^match:[^:]+:custom:/.test(field)
+      ? field.slice(field.indexOf(":custom:") + ":custom:".length)
+      : null;
+  const f = key ? fieldByKey.get(key) : undefined;
+  return f ? isPercentField(f) : false;
 }
 
 export interface FieldDefinition {

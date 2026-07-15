@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): formatPercent — única casa da matemática ×100 do formato
+//   percentual (scale=true) e do sufixo "%" por métrica (scale=false).
 // Formatação de datas nas tabelas dos dashboards. As datas chegam do Bitrix em
 // ISO (ex.: "2026-03-19T16:34:48+00:00" ou já truncadas em "2026-03-01"). Aqui
 // convertemos para os formatos exibíveis escolhidos pelo usuário — padrão global

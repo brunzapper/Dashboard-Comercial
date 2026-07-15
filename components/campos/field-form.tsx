@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 14/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): exibição percentual — checkbox no tipo 'numero' e opção
+//   "Percentual (%)" no Formato do resultado dos calculados.
 // Formulário de criação/edição de um campo personalizado (field_definition).
 // v1.1 (09/07/2026): Fase 7 — tipo "Calculado" abre o construtor de fórmula e o
 //   toggle "Exibir nos seletores" (show_in_builder).

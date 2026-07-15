@@ -1,4 +1,6 @@
-// Versão: 3.0 | Data: 11/07/2026
+// Versão: 3.1 | Data: 15/07/2026
+// v3.1 (15/07/2026): exibição percentual — campo percentual (×100) em colunas/
+//   grupos/subtotais e toggle "%" (sufixo) nas métricas; contagem nunca converte.
 // Widget de Tabela em modo "registros individuais" (Fonte das linhas = Registros).
 // Uma linha por registro; colunas do núcleo read-only, colunas personalizadas
 // NÃO calculadas editáveis por padrão (respeitando editable_by_roles do campo).
@@ -29,6 +31,7 @@ import { LeadEditableCell } from "@/components/registros/lead-editable-cell";
 import {
   NUMERIC_DATA_TYPES,
   isPercentField,
+  isPercentFieldRef,
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
@@ -508,19 +511,10 @@ export function RecordListTable({
     return false;
   };
 
-  // Campo percentual (núcleo nunca é; espelha isDateCol p/ custom/match/unified).
-  const percentOf = (field: string): boolean => {
-    if (field.startsWith("custom:")) {
-      const f = fieldByKey.get(field.slice(7));
-      return f ? isPercentField(f) : false;
-    }
-    const mm = parseMatchField(field);
-    if (mm?.ref.startsWith("custom:")) {
-      const f = fieldByKey.get(mm.ref.slice(7));
-      return f ? isPercentField(f) : false;
-    }
-    return false;
-  };
+  // Campo percentual de uma ref custom:/match: (núcleo nunca é; 'unified:' fora
+  // do v1 — ver isPercentFieldRef). Mesmo parser do carimbo do engine.
+  const percentOf = (field: string): boolean =>
+    isPercentFieldRef(field, fieldByKey);
 
   // Texto de exibição de um campo do registro casado (match:<fonte>:<ref>):
   // formata data/moeda/texto conforme o tipo do ref subjacente.

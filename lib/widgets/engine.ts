@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 15/07/2026
+// v1.2 (15/07/2026): exibição percentual — carimba percent em data.metrics
+//   (isPercentFieldRef; contagem nunca) e KPI razão com KpiSettings.percent.
 // v1.1 (09/07/2026): Fase 8 — filtra por fontes (record_type in ...), quebra por
 //   fonte (dimensão record_type rotulada) e passa p_correspondences ao RPC para
 //   os campos unificados (unified:<key>).
@@ -9,7 +11,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  isPercentField,
+  isPercentFieldRef,
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
@@ -156,22 +158,6 @@ interface MoneyInfo {
 
 function isMoneyMetric(metric: Metric, available: AvailableField[]): boolean {
   return available.find((a) => a.field === metric.field)?.isMoney ?? false;
-}
-
-// Exibição percentual (15/07/2026): a métrica agrega um campo percentual?
-// Resolve 'custom:<key>' e 'match:<fonte>:custom:<key>'. Campos 'unified:'
-// ficam fora do v1 (resolver o membro exigiria as correspondences aqui).
-function isPercentMetricField(
-  field: string,
-  fieldByKey: Map<string, FieldDefinition>
-): boolean {
-  const key = field.startsWith("custom:")
-    ? field.slice("custom:".length)
-    : /^match:[^:]+:custom:/.test(field)
-      ? field.slice(field.indexOf(":custom:") + ":custom:".length)
-      : null;
-  const f = key ? fieldByKey.get(key) : undefined;
-  return f ? isPercentField(f) : false;
 }
 
 // Origem da moeda de uma métrica/operando monetário: moeda FIXA do campo
@@ -985,7 +971,7 @@ async function runWidgetByPeriod(
       percent:
         fn !== "count" &&
         m.field !== "*" &&
-        isPercentMetricField(m.field, fieldByKey),
+        isPercentFieldRef(m.field, fieldByKey),
     };
   });
 
@@ -1294,7 +1280,7 @@ export async function runWidget(
       percent:
         m.agg !== "count" &&
         m.field !== "*" &&
-        isPercentMetricField(m.field, fieldByKey),
+        isPercentFieldRef(m.field, fieldByKey),
     };
   });
 

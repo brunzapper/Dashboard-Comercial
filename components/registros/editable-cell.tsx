@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): leitura de campo percentual exibe ×100 + "%" (edição
+//   continua com o valor cru).
 // Célula editável inline na tabela de Registros: renderiza o controle certo por
 // data_type (dropdown de seleção, checkbox booleano, texto/número/data editáveis) e
 // grava um único campo personalizado na hora, reusando a Server Action
@@ -96,10 +98,8 @@ export function EditableCell({
     const display = money.isMoney
       ? formatMoney(serverValue, money.code)
       : isPercentField(field)
-        ? // Percentual: exibe cru ×100 + "%" (0.35 → "35%"); vazio vira "—" abaixo.
-          serverValue === ""
-          ? ""
-          : formatPercent(serverValue, true)
+        ? // Percentual: exibe cru ×100 + "%" (0.35 → "35%"; vazio → "—").
+          formatPercent(serverValue, true)
         : field.data_type === "data"
           ? formatDateValue(serverValue, dateFormat)
           : serverValue;

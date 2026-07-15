@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.3 | Data: 15/07/2026
+// v1.3 (15/07/2026): show_as_percent — lê o checkbox/hidden do form e persiste
+//   via resolveShowAsPercent (só tipos elegíveis; nunca junto com moeda).
 // Server Actions da tela de Campos (field_definitions). Gravação com o client
 // do usuário — a RLS exige `manage_field_definitions` (admin). É a infra de
 // "criar campos personalizados": tipo, opções de dropdown, visibilidade e

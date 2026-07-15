@@ -1,4 +1,7 @@
-// Versão: 3.0 | Data: 10/07/2026
+// Versão: 3.1 | Data: 15/07/2026
+// v3.1 (15/07/2026): exibição percentual — buildPercentModes (x100 do carimbo do
+//   engine vence o sufixo "%" da métrica) aplicado a células, tooltips, rótulos,
+//   eixos, subtotais e Total geral.
 // Renderiza um WidgetData conforme o visual_type (Recharts v3). v3.0 (Fase 10.1):
 // além da aparência (cores, grade, eixos, legenda, gradiente), suporta edição
 // IN-LOCO em tabelas e gráficos (reordenar por arraste, ordenar e colorir via
@@ -97,6 +100,25 @@ function fmt(v: unknown): string {
 // fato, 0.35 → "35%"); "suffix" = toggle "%" da métrica (só anexa o símbolo);
 // null = número normal. "x100" vence o toggle (nunca duplica o símbolo).
 type PercentMode = "x100" | "suffix" | null;
+
+// Modo percentual por chave de métrica, pré-computado uma vez por render (padrão
+// metricByKey/calcCodeByKey — nada de .find() por célula/tooltip). Única fonte da
+// precedência: carimbo do engine ("x100") > toggle da métrica ("suffix", nunca em
+// monetária) > null. Compartilhado entre o WidgetChart e a AppearanceTable.
+function buildPercentModes(
+  dataMetrics: WidgetData["metrics"],
+  metricByKey: Record<string, Metric>
+): Record<string, PercentMode> {
+  const out: Record<string, PercentMode> = {};
+  for (const m of dataMetrics) {
+    out[m.key] = m.percent
+      ? "x100"
+      : metricByKey[m.key]?.percent && !m.isMoney
+        ? "suffix"
+        : null;
+  }
+  return out;
+}
 
 // Métrica calculada de agregados: null (divisão por zero / operando ausente) →
 // "—"; com moeda → formatMoney; senão número puro. `calcValueText` é o fallback
@@ -223,13 +245,10 @@ export function WidgetChart({
     metrics.find((m) => m.key === key)?.isMoney ?? false;
   const calcOf = (key: string) => metrics.find((m) => m.key === key)?.calc;
 
-  // Percentual por métrica: "x100" (campo/calc percentual — carimbo do engine em
-  // data.metrics) vence o toggle "suffix" (Metric.percent). Moeda nunca sufixa.
-  const percentModeOf = (key: string): PercentMode => {
-    if (metrics.find((m) => m.key === key)?.percent) return "x100";
-    if (metricByKey[key]?.percent && !isMoneyKey(key)) return "suffix";
-    return null;
-  };
+  // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
+  const percentModeByKey = buildPercentModes(metrics, metricByKey);
+  const percentModeOf = (key: string): PercentMode =>
+    percentModeByKey[key] ?? null;
   const pfmt = (v: unknown, key: string): string => {
     const mode = percentModeOf(key);
     return mode ? formatPercent(v, mode === "x100") : fmt(v);
@@ -691,13 +710,10 @@ function AppearanceTable({
     if (m.calc) calcByKey[m.key] = m.calc;
   });
 
-  // Percentual por métrica (espelha o WidgetChart): "x100" (carimbo do engine
-  // em data.metrics) vence o toggle "suffix" (Metric.percent); moeda nunca.
-  const percentModeOf = (key: string): PercentMode => {
-    if (data.metrics.find((m) => m.key === key)?.percent) return "x100";
-    if (metricByKey[key]?.percent && !moneyKeys.has(key)) return "suffix";
-    return null;
-  };
+  // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
+  const percentModeByKey = buildPercentModes(data.metrics, metricByKey);
+  const percentModeOf = (key: string): PercentMode =>
+    percentModeByKey[key] ?? null;
   const pfmt = (v: unknown, key: string): string => {
     const mode = percentModeOf(key);
     return mode ? formatPercent(v, mode === "x100") : fmt(v);

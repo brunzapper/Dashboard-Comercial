@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 14/07/2026
+// Versão: 2.1 | Data: 15/07/2026
+// v2.1 (15/07/2026): ResolvedCalcMetric.percent — resultado percentual (campo
+//   calculado_agg com show_as_percent ou Metric.resultPercent do ad-hoc).
 // Métricas calculadas de AGREGADOS: fórmulas cujos operandos são agregações de
 // registros (refs agg:sum|avg|count:<campo>), usáveis como métrica normal de
 // widget — avaliadas por grupo (linha do RPC), subtotal e Total geral.

@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 15/07/2026
+// v1.2 (15/07/2026): exibição percentual — Metric.percent (sufixo "%") e
+//   Metric.resultPercent (calc ad-hoc ×100), KpiSettings.percent (razão) e o
+//   carimbo percent em WidgetData.metrics (engine).
 // v1.1 (09/07/2026): Fase 8 — WidgetConfig/Widget ganham `sources` (fontes
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).

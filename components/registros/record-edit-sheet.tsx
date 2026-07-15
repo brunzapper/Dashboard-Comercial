@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): campos read-only formatados (moeda/percentual/data) em vez
+//   do valor cru.
 // Painel lateral de edição de um registro: núcleo (read-only) + relações
 // (responsável/operação/lead) + campos personalizados editáveis pelo papel.
 "use client";

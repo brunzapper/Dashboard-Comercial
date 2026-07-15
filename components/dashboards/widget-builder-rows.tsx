@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 14/07/2026
+// Versão: 1.2 | Data: 15/07/2026
+// v1.2 (15/07/2026): toggle "%" por métrica (sufixo, oculto p/ monetárias) e
+//   opção Percentual no Formato do resultado do calc ad-hoc (resultPercent).
 // v1.1 (14/07/2026): MetricRow suporta métricas calculadas de agregados
 //   (chip "Fórmula" no lugar da agregação, editor de fórmula + formato do
 //   resultado para o sentinela 'calc:formula') — lógica de troca de campo

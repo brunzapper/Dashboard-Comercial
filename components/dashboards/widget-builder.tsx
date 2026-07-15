@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 14/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): formato "Percentual (%)" nas métricas calculadas ad-hoc
+//   (resultPercent propagado/limpo na troca de campo).
 // v1.3 (14/07/2026): merge com a main — métricas calculadas de agregados
 //   (campos "Calculado (totais)" e sentinela 'calc:formula') portadas para o
 //   layout em seções (a UI da linha vive em widget-builder-rows.tsx/MetricRow).

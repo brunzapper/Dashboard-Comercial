@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 09/07/2026
+// Versão: 1.3 | Data: 15/07/2026
+// v1.3 (15/07/2026): preserva show_as_percent (toggle do admin) no upsert do
+//   catálogo — sem isso todo sync resetaria o flag para false.
 // v1.1 (09/07/2026): Fase 8 — grava applies_to (record_type de origem) e usa o
 //   label curado (bitrix-field-map) como fallback do título do schema.
 // v1.2 (09/07/2026): Fase 8b — FIELD_LABELS é AUTORITATIVO (vence o título do
