@@ -275,6 +275,41 @@ select count(*) from public.snapshot_records
  where snapshot_id = 'ID-DO-SNAPSHOT' and is_mock;
 ```
 
+### 0058 — vínculo dos mocks com o responsável do usuário
+
+Depois da 0057, cole e execute
+[`migrations/0058_mock_responsible_user_link.sql`](./migrations/0058_mock_responsible_user_link.sql)
+(idempotente). O que muda:
+
+- Re-aponta o `responsible_id` dos 302 mocks de Data Reunião para a linha de
+  `responsibles` **vinculada a usuário** (`user_id`) com o mesmo nome. As
+  Fases 12/13 casavam por nome pegando a linha mais antiga — podia ser uma
+  duplicata sem vínculo (ou `NULL` quando o nome não casava), e o RLS de
+  `records` (0037) libera pelo vínculo vivo `responsibles.user_id`: o
+  **vendedor não via os próprios mocks** (e o campo calculado que conta Data
+  Reunião zerava para ele); só admin/gestor viam, via `view_all_records`.
+- **Snapshots precisam de um refresh depois** ("Atualizar agora" no menu ⋮ ou
+  `select public.snapshot_refresh_copy(id) from public.snapshots;`), pois
+  `snapshot_records` congela o `responsible_id`.
+
+Conferências:
+
+```sql
+-- A 0057 já está no banco? (esperado: true)
+select pg_get_functiondef('public.snapshot_refresh_copy'::regproc)
+       like '%r.is_mock%';
+-- Mocks vinculados a responsável com usuário (vendedor passa a vê-los):
+select p.display_name, p.user_id is not null as vinculado, count(*)
+  from public.records r
+  join public.responsibles p on p.id = r.responsible_id
+ where r.is_mock
+ group by 1, 2 order by 1;
+```
+
+Mock cujo nome não casa com nenhum responsável — ou casa só com linhas sem
+`user_id` — continua visível apenas para admin/gestor até o vínculo existir
+(tela de Usuários / `responsibles.user_id`).
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro
