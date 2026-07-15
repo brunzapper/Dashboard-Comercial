@@ -1,7 +1,7 @@
 // Versão: 2.3 | Data: 15/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
-// v2.3 (15/07/2026): Tabela rápida (tabela_editavel) — widget fica FORA do
+// v2.3 (15/07/2026): Tabela Livre (tabela_editavel) — widget fica FORA do
 //   loop de computação (dados BI deferidos via runQuickTable no cliente);
 //   células digitadas entregues em tableCellsById (carona no cellsData).
 // v2.2 (15/07/2026): widgets calculadora/nota/forma — computa as variáveis da
@@ -181,7 +181,7 @@ export default async function DashboardPage({
   const periodBar = dashSettings.periodBar;
 
   // Resolução de período por widget: lógica compartilhada com o runQuickTable
-  // da Tabela rápida (lib/widgets/period-resolve.ts) — uma única implementação
+  // da Tabela Livre (lib/widgets/period-resolve.ts) — uma única implementação
   // p/ página e action deferida não divergirem.
   const resolver = createPeriodResolver({
     sp,
@@ -546,7 +546,7 @@ export default async function DashboardPage({
   // Calculadora e Nota: fórmulas próprias (variáveis/expressões), fora do engine.
   const isCalculatorWidget = (w: Widget) => w.visual_type === "calculadora";
   const isNoteWidget = (w: Widget) => w.visual_type === "nota";
-  // Tabela rápida: NADA é computado aqui de propósito — o widget busca os dados
+  // Tabela Livre: NADA é computado aqui de propósito — o widget busca os dados
   // BI e as expressões {=…} via runQuickTable (server action) DEPOIS do mount,
   // para não pesar o carregamento inicial da página (carrega por último). As
   // células digitadas pegam carona no cellsData do seed do histórico (abaixo).
@@ -918,7 +918,7 @@ export default async function DashboardPage({
     }
   }
 
-  // Células digitadas de cada Tabela rápida (payload inicial do widget; os
+  // Células digitadas de cada Tabela Livre (payload inicial do widget; os
   // dados BI chegam deferidos). Reusa o cellsData do seed — custo zero.
   const quickTableIds = new Set(
     widgets.filter(isQuickTableWidget).map((w) => w.id)

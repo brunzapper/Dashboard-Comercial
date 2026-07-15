@@ -74,7 +74,7 @@ export function WidgetAppearanceSheet({
   const isBar = vt === "barra" || vt === "barra_horizontal";
   const isChart = isBar || vt === "linha";
   const isPie = vt === "pizza" || vt === "funil";
-  // A Tabela rápida reusa a seção de tabela (cores globais/grade/alinhamento).
+  // A Tabela Livre reusa a seção de tabela (cores globais/grade/alinhamento).
   const isTable = vt === "tabela" || vt === "tabela_editavel";
   const isKpi = vt === "kpi";
   const isCalculator = vt === "calculadora";

@@ -5,7 +5,7 @@
 //   agregadoras numéricas ignoram não-números; ARRED/ABS propagam null;
 //   CONCATENAR trata null como "". Adição estritamente aditiva: nenhuma
 //   mudança de comportamento nos ramos existentes. Usadas primeiro pelas
-//   fórmulas de célula da Tabela rápida (refs cell:<c>:<r>).
+//   fórmulas de célula da Tabela Livre (refs cell:<c>:<r>).
 // Campos calculados (Fase 7): modelo de fórmula estruturada + avaliador puro
 // (parser recursivo tokens→AST, SEM eval) usado para materializar o valor por
 // registro. Operandos são referências a colunas ('value','mrr','stage',...),

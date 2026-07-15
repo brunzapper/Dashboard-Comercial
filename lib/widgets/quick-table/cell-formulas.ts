@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 15/07/2026
-// Tabela rápida — fórmulas DE CÉLULA estilo Google Sheets ("=SOMA(A1:B3)+C2"),
+// Tabela Livre — fórmulas DE CÉLULA estilo Google Sheets ("=SOMA(A1:B3)+C2"),
 // avaliadas 100% no cliente sobre os VALORES exibidos na grade (nunca o banco;
 // uma célula com {=…} entra pelo seu valor já resolvido). Reusa o parser/
 // avaliador central (lib/records/formulas.ts + formula-text.ts): um

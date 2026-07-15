@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 15/07/2026
-// Widget "Tabela rápida" (visual_type 'tabela_editavel'): modelo PURO da grade
+// Widget "Tabela Livre" (visual_type 'tabela_editavel'): modelo PURO da grade
 // renderizada. A ESTRUTURA (colunas livre/dimensão/métrica + linhas livres)
 // vive em widgets.settings.quickTable; os VALORES digitados vivem em
 // dashboard_table_cells (row_key/col_key estáveis, nunca índices). O modo BI

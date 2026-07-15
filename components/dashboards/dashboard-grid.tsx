@@ -1,7 +1,7 @@
 // Versão: 2.5 | Data: 15/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
-// v2.5 (15/07/2026): modo "desenhar para criar" (Tabela rápida) — overlay de
+// v2.5 (15/07/2026): modo "desenhar para criar" (Tabela Livre) — overlay de
 //   mira sobre o canvas (drawMode/onDrawDone/onDrawCancel), pan/menu/drag
 //   suspensos durante o desenho, canvas renderiza mesmo sem widgets; repasse
 //   de tableCellsById aos cards.
@@ -256,7 +256,7 @@ export function DashboardGrid({
   calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
   noteById?: Record<string, CalcWidgetResult[]>;
   calcExprById?: Record<string, string>;
-  // Tabela rápida: células digitadas por widget (rows não reservadas).
+  // Tabela Livre: células digitadas por widget (rows não reservadas).
   tableCellsById?: Record<
     string,
     { row_key: string; col_key: string; value: number | string | null }[]
@@ -266,7 +266,7 @@ export function DashboardGrid({
   connectors?: Connector[];
   saveConnectors?: (next: Connector[]) => void;
   connectMode?: boolean;
-  // Modo "desenhar para criar" (Tabela rápida): overlay de mira sobre o canvas;
+  // Modo "desenhar para criar" (Tabela Livre): overlay de mira sobre o canvas;
   // o retângulo desenhado vira grid_position + linhas/colunas da tabela.
   drawMode?: boolean;
   onDrawDone?: (

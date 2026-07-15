@@ -1,7 +1,7 @@
 // Versão: 2.2 | Data: 15/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
-// v2.2 (15/07/2026): widget "Tabela rápida" (tabela_editavel) — branch novo
+// v2.2 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch novo
 //   renderizando QuickTableWidget com as células iniciais (tableCells).
 // v2.1 (15/07/2026): widgets calculadora/nota/forma — branches novos no
 //   conteúdo, layout SEM CROMO (frameless: forma sempre; nota opcional) com
@@ -120,7 +120,7 @@ export function WidgetCard({
   calcExpr?: string;
   // Nota: resultados das expressões {=…}, na ordem do texto.
   noteValues?: CalcWidgetResult[];
-  // Tabela rápida: células digitadas (dashboard_table_cells, rows não reservadas).
+  // Tabela Livre: células digitadas (dashboard_table_cells, rows não reservadas).
   tableCells?: QTCellValue[];
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];

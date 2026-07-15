@@ -2,7 +2,7 @@
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
-// v2.3 (15/07/2026): Tabela rápida — estado drawQuick (desenhar para criar,
+// v2.3 (15/07/2026): Tabela Livre — estado drawQuick (desenhar para criar,
 //   armado pelo builder via onRequestDraw; onDrawDone cria o widget com o
 //   retângulo desenhado) e fio de tableCellsById até o grid.
 // v2.2 (15/07/2026): widgets calculadora/nota/forma — focusWidget (atalhos:
@@ -145,7 +145,7 @@ export function DashboardClient({
   noteById?: Record<string, CalcWidgetResult[]>;
   // Calculadora: expressão compartilhada corrente (row __calc__).
   calcExprById?: Record<string, string>;
-  // Tabela rápida: células digitadas por widget (rows não reservadas).
+  // Tabela Livre: células digitadas por widget (rows não reservadas).
   tableCellsById?: Record<
     string,
     { row_key: string; col_key: string; value: number | string | null }[]
@@ -184,7 +184,7 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
-  // Modo "desenhar para criar" (Tabela rápida): armado pelo builder; o título
+  // Modo "desenhar para criar" (Tabela Livre): armado pelo builder; o título
   // digitado lá viaja junto. O retângulo desenhado dimensiona widget E tabela.
   const [drawQuick, setDrawQuick] = useState<{ title: string | null } | null>(
     null
@@ -369,7 +369,7 @@ export function DashboardClient({
     });
   }
 
-  // Fim do desenho da Tabela rápida: cria o widget com o retângulo como
+  // Fim do desenho da Tabela Livre: cria o widget com o retângulo como
   // grid_position e linhas/colunas derivadas do tamanho desenhado.
   const onDrawDone = useCallback(
     (rect: GridPosition, table: { rows: number; cols: number }) => {
@@ -377,7 +377,7 @@ export function DashboardClient({
       setDrawQuick(null);
       startTransition(async () => {
         await createWidget(dashboardId, {
-          title: cfg?.title ?? "Tabela rápida",
+          title: cfg?.title ?? "Tabela Livre",
           visual_type: "tabela_editavel",
           sources: [],
           splitBySource: false,

@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 15/07/2026
-// Tabela rápida — painéis flutuantes de estrutura (modo Editar layout):
+// Tabela Livre — painéis flutuantes de estrutura (modo Editar layout):
 //  - useQuickTableConfig: estado otimista de settings.quickTable + gravação
 //    debounced via saveWidgetSettings (espelho do useWidgetAppearance).
 //  - ColumnPanel: rótulo, tipo (livre/dimensão/métrica), campo/agregação,

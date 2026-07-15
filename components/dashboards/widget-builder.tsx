@@ -1,5 +1,5 @@
 // Versão: 1.8 | Data: 15/07/2026
-// v1.8 (15/07/2026): widget "Tabela rápida" (tabela_editavel) — branch no
+// v1.8 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch no
 //   save() (estrutura em settings.quickTable; grade padrão 3×3 na criação),
 //   hint no formulário e botão "Desenhar no painel" (onRequestDraw fecha o
 //   Sheet e arma o desenho no canvas com o título digitado).
@@ -182,7 +182,7 @@ export function WidgetBuilder({
   // precisam passar.
   layoutById?: Record<string, GridPosition>;
   canvasCols?: number;
-  // Tabela rápida: em vez de salvar direto, fecha o painel e arma o modo
+  // Tabela Livre: em vez de salvar direto, fecha o painel e arma o modo
   // "desenhar no canvas" (o retângulo dimensiona widget e linhas/colunas). O
   // título digitado viaja no callback. Só oferecido na CRIAÇÃO.
   onRequestDraw?: (title: string | null) => void;
@@ -1007,7 +1007,7 @@ export function WidgetBuilder({
       return;
     }
 
-    // Tabela rápida: a estrutura (colunas/linhas/bloqueios) é editada direto no
+    // Tabela Livre: a estrutura (colunas/linhas/bloqueios) é editada direto no
     // card (painéis de coluna/linha e botões "+"); o builder só define
     // título/aba. Na criação nasce uma grade padrão 3×3 (ou a desenhada — M2).
     if (visualType === "tabela_editavel") {
@@ -1681,7 +1681,7 @@ export function WidgetBuilder({
             </p>
           ) : null}
 
-          {/* Tabela rápida: estrutura editada direto no card. */}
+          {/* Tabela Livre: estrutura editada direto no card. */}
           {visualType === "tabela_editavel" ? (
             <>
               <p className="text-muted-foreground rounded-md border p-3 text-sm">

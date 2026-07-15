@@ -1,5 +1,5 @@
 // Versão: 1.2 | Data: 15/07/2026
-// v1.2 (15/07/2026): Tabela rápida — saveQuickTableCells (lote de células com
+// v1.2 (15/07/2026): Tabela Livre — saveQuickTableCells (lote de células com
 //   validação de bloqueio por papel via settings.quickTable.editableRoles).
 // v1.1 (15/07/2026): widgets calculadora/nota/forma — saveCalcExpression
 //   (expressão compartilhada da calculadora, row __calc__), listWidgetLinkTargets
@@ -343,7 +343,7 @@ export async function saveTableCell(
   return { ok: true };
 }
 
-// Grava um LOTE de células de um widget "Tabela rápida" (digitação, colar TSV,
+// Grava um LOTE de células de um widget "Tabela Livre" (digitação, colar TSV,
 // limpar seleção). Além da RLS de dashboard_table_cells (qualquer visualizador
 // do dashboard), valida por coluna o bloqueio por papel (editableRoles em
 // settings.quickTable) — a RLS não distingue coluna, então o reforço fica aqui
@@ -373,7 +373,7 @@ export async function saveQuickTableCells(
     .maybeSingle();
   if (!w) return { ok: false, message: "Widget não encontrado." };
   const qt = ((w.settings ?? {}) as WidgetSettings).quickTable;
-  if (!qt) return { ok: false, message: "Este widget não é uma Tabela rápida." };
+  if (!qt) return { ok: false, message: "Este widget não é uma Tabela Livre." };
 
   // Toda célula digitável pertence a uma coluna LIVRE existente cuja
   // allowlist de papéis (se houver) inclui o usuário. Rejeita o lote inteiro

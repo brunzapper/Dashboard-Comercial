@@ -1,5 +1,5 @@
 // Versão: 1.1 | Data: 15/07/2026
-// Widget "Tabela rápida" (visual_type 'tabela_editavel'): planilha editável no
+// Widget "Tabela Livre" (visual_type 'tabela_editavel'): planilha editável no
 // dashboard. Renderiza a matriz de lib/widgets/quick-table/model.ts; células
 // livres são digitáveis por qualquer visualizador (bloqueio por papel via
 // editableRoles, validado também na server action saveQuickTableCells). UX de
@@ -769,7 +769,7 @@ export function QuickTableWidget({
         }}
         className="outline-none"
         role="grid"
-        aria-label={widget.title ?? "Tabela rápida"}
+        aria-label={widget.title ?? "Tabela Livre"}
       >
         <table
           className="w-full border-collapse text-sm"

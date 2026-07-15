@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 15/07/2026
-// Tabela rápida — computação DEFERIDA (server action chamada pelo widget após
+// Tabela Livre — computação DEFERIDA (server action chamada pelo widget após
 // o mount, para a página abrir sem esse custo): dados BI (dimensões/métricas
 // via runWidget) + expressões {=…} das células (runCalculatedWidget), com o
 // MESMO período efetivo que a page resolveria (lib/widgets/period-resolve.ts,

@@ -1,5 +1,5 @@
 // Versão: 1.5 | Data: 15/07/2026
-// v1.5 (15/07/2026): widget "Tabela rápida" (visual_type 'tabela_editavel',
+// v1.5 (15/07/2026): widget "Tabela Livre" (visual_type 'tabela_editavel',
 //   reaproveitado da Fase 2) — QuickTableSettings: colunas tipadas (livre/
 //   dimensão/métrica), linhas livres e bloqueio de edição por papel. A
 //   estrutura vive em widgets.settings.quickTable; os VALORES das células em
@@ -54,8 +54,8 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   forma: "Forma",
   tabela: "Tabela",
   // O valor 'tabela_editavel' no banco é herdado da Fase 2 (o CHECK já o
-  // aceita); o produto atual chama o widget de "Tabela rápida".
-  tabela_editavel: "Tabela rápida",
+  // aceita); o produto atual chama o widget de "Tabela Livre".
+  tabela_editavel: "Tabela Livre",
   barra: "Barra",
   barra_horizontal: "Barra horizontal",
   linha: "Linha",
@@ -356,7 +356,7 @@ export interface NoteSettings {
   note?: { text?: string; exprs?: Formula[] };
 }
 
-// --- Tabela rápida (planilha editável, visual_type 'tabela_editavel') ---
+// --- Tabela Livre (planilha editável, visual_type 'tabela_editavel') ---
 // A ESTRUTURA (colunas/linhas/bloqueios) vive em widgets.settings.quickTable
 // (editável por dono/admin, via RLS widgets_write); os VALORES das células
 // vivem em dashboard_table_cells (row_key/col_key = ids abaixo), graváveis por

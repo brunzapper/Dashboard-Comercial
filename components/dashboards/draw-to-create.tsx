@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 15/07/2026
-// Overlay de "desenhar para criar" (Tabela rápida): cobre o canvas do grid com
+// Overlay de "desenhar para criar" (Tabela Livre): cobre o canvas do grid com
 // cursor de mira; arrastar desenha um retângulo tracejado com um badge ao vivo
 // "N linhas × M colunas" (derivadas do tamanho em px) e, ao soltar, entrega a
 // posição em unidades do GRID (mesma matemática do onCanvasContextMenu do
@@ -150,7 +150,7 @@ export function DrawToCreateOverlay({
       {!drag ? (
         <div className="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2">
           <span className="bg-background text-muted-foreground rounded-full border px-3 py-1.5 text-xs shadow-sm">
-            Arraste para desenhar a Tabela rápida — Esc cancela
+            Arraste para desenhar a Tabela Livre — Esc cancela
           </span>
         </div>
       ) : null}
