@@ -64,6 +64,7 @@ import {
   type ColorScope,
 } from "../appearance-editing";
 import { ColumnPanel, RowPanel, useQuickTableConfig } from "./column-panel";
+import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 
 // Posição de uma célula na GRADE RENDERIZADA (índices de exibição; as chaves
 // estáveis ficam nas próprias células da matriz).
@@ -106,6 +107,12 @@ export function QuickTableWidget({
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
   const router = useRouter();
+  // Modo snapshot (viewer público): dados BI chegam precomputados do servidor
+  // da página (runQuickTable exige sessão) e TODAS as células ficam
+  // somente-leitura (na app autenticada, células livres são digitáveis por
+  // qualquer visualizador — isso não vale num link público).
+  const snapshotMode = useSnapshotMode();
+  const readOnly = snapshotMode.snapshot;
   // Estrutura otimista (colunas/linhas) — gravação debounced em settings.
   const { qt, save: saveConfig } = useQuickTableConfig(widget, dashboardId);
   // Edição de estrutura/aparência: dono/admin com "Editar layout" ativo.
@@ -186,14 +193,16 @@ export function QuickTableWidget({
   );
   const search = useSearchParams().toString();
   const needsServer = bi.hasBI || exprKey !== "[]";
-  const [deferred, setDeferred] = useState<QuickTableResult | null>(null);
+  const [fetched, setFetched] = useState<QuickTableResult | null>(null);
   useEffect(() => {
-    if (!needsServer) return;
+    // Modo snapshot: sem sessão a action falharia; o resultado vem
+    // precomputado pela page pública (snapshotMode.quickTableResults).
+    if (!needsServer || readOnly) return;
     let cancelled = false;
     // Pequeno atraso coalesce mudanças rápidas (digitação de {=…}, painel).
     const timer = setTimeout(() => {
       void runQuickTable(dashboardId, widget.id, search).then((res) => {
-        if (!cancelled) setDeferred(res);
+        if (!cancelled) setFetched(res);
       });
     }, 60);
     return () => {
@@ -201,33 +210,45 @@ export function QuickTableWidget({
       clearTimeout(timer);
     };
     // biKey/exprKey resumem a config/expressões — são as deps reais.
-  }, [needsServer, biKey, exprKey, search, dashboardId, widget.id]);
+  }, [needsServer, readOnly, biKey, exprKey, search, dashboardId, widget.id]);
+  const deferred = readOnly
+    ? (snapshotMode.quickTableResults?.[widget.id] ?? null)
+    : fetched;
 
   // ---- matriz renderizada ----
-  const matrix: QTMatrix = useMemo(
-    () =>
-      buildQuickTableMatrix({
-        qt,
-        cells: effectiveCells,
-        // undefined = BI carregando (skeleton); null = sem colunas BI.
-        data: bi.hasBI ? (deferred ? deferred.data : undefined) : null,
-        exprValues: deferred?.exprValues,
-        userRoles,
-        available,
-        tableAp: appearance?.table,
-        dateFormat,
-      }),
-    [
+  const matrix: QTMatrix = useMemo(() => {
+    const m = buildQuickTableMatrix({
       qt,
-      effectiveCells,
-      bi.hasBI,
-      deferred,
+      cells: effectiveCells,
+      // undefined = BI carregando (skeleton); null = sem colunas BI.
+      data: bi.hasBI ? (deferred ? deferred.data : undefined) : null,
+      exprValues: deferred?.exprValues,
       userRoles,
       available,
-      appearance?.table,
+      tableAp: appearance?.table,
       dateFormat,
-    ]
-  );
+    });
+    // Snapshot: nenhuma célula é digitável, independentemente de editableRoles
+    // (ausente = "todos os visualizadores" — não vale para um link público).
+    if (!readOnly) return m;
+    return {
+      ...m,
+      rows: m.rows.map((r) => ({
+        ...r,
+        cells: r.cells.map((c) => (c.editable ? { ...c, editable: false } : c)),
+      })),
+    };
+  }, [
+    qt,
+    effectiveCells,
+    bi.hasBI,
+    deferred,
+    userRoles,
+    available,
+    appearance?.table,
+    dateFormat,
+    readOnly,
+  ]);
 
   // ---- fórmulas de célula ("=…", avaliadas no cliente) ----
   // Refs A1 posicionais sobre a grade renderizada; valores-base vêm de
@@ -285,7 +306,9 @@ export function QuickTableWidget({
 
   const saveCells = useCallback(
     (batch: { rowKey: string; colKey: string; value: string | null }[]) => {
-      if (batch.length === 0) return;
+      // readOnly (snapshot): nenhuma célula é editável, mas a guarda dupla
+      // garante que nada tenta gravar mesmo se um caminho novo surgir.
+      if (batch.length === 0 || readOnly) return;
       setOverrides((prev) => {
         const next = new Map(prev);
         for (const b of batch) next.set(cellKey(b.rowKey, b.colKey), b.value);
@@ -303,7 +326,7 @@ export function QuickTableWidget({
         scheduleRefresh();
       });
     },
-    [dashboardId, widget.id, scheduleRefresh]
+    [dashboardId, widget.id, scheduleRefresh, readOnly]
   );
 
   // ---- estrutura (colunas/linhas) ----

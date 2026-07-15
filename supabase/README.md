@@ -209,6 +209,47 @@ update public.records
  );
 ```
 
+## Como aplicar os Snapshots (link público congelado de uma aba)
+
+Cole a migração [`migrations/0056_snapshots.sql`](./migrations/0056_snapshots.sql)
+no SQL editor e execute. Idempotente. O que ela cria:
+
+- Tabelas `snapshots` (metadados + config congelado; o token vive só como
+  sha256 em `token_hash`), `snapshot_records` (cópia congelada dos registros
+  permitidos) e `snapshot_record_matches`.
+- RLS **somente `authenticated`** para gestão (dono do dashboard ou admin) —
+  **nenhuma política `anon`**: o viewer público (`/s/<token>`) valida o token
+  no servidor e lê via service role.
+- Funções `snapshot_refresh_copy` (cópia atômica), `_widget_match_expr_snap` e
+  `run_widget_query_snapshot` (cópia do RPC 0054 apontada para a cópia
+  congelada) — executáveis **só pela service role**.
+
+Para o refresh AGENDADO funcionar, agende o tick dos snapshots (depois do
+`pg-cron-tick.sql` do sync, que já cria os segredos no Vault): cole e execute
+[`apply/pg-cron-snapshots.sql`](./apply/pg-cron-snapshots.sql) (a cada 5min →
+`POST /api/snapshots/tick`, protegido pelo mesmo `SYNC_SECRET`). Snapshots com
+atualização "Manual" não dependem do cron.
+
+Conferência pós-aplicação (segurança):
+
+```sql
+-- Nenhuma política anon nas tabelas novas (esperado: 0 linhas):
+select polname, polroles::regrole[] from pg_policy
+ where polrelid in ('public.snapshots'::regclass,
+                    'public.snapshot_records'::regclass,
+                    'public.snapshot_record_matches'::regclass)
+   and polroles::regrole[]::text[] @> '{anon}';
+-- Funções executáveis só pela service role (esperado: apenas service_role):
+select p.proname, r.rolname
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+  join pg_roles r on r.oid = a.grantee
+ where n.nspname = 'public'
+   and p.proname in ('run_widget_query_snapshot', 'snapshot_refresh_copy')
+   and r.rolname in ('anon', 'authenticated', 'service_role');
+```
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

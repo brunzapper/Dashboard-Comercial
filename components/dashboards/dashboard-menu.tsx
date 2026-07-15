@@ -5,7 +5,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { LayoutGrid, Maximize, MoreVertical, Palette, Users } from "lucide-react";
+import {
+  Camera,
+  LayoutGrid,
+  Maximize,
+  MoreVertical,
+  Palette,
+  Users,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +53,7 @@ import {
   updateDashboardSettings,
   updateDashboardVisibility,
 } from "@/app/(app)/dashboards/actions";
+import { SnapshotsPanel } from "./snapshots-panel";
 
 type BgMode = "none" | "solid" | "gradient";
 
@@ -64,6 +72,7 @@ export function DashboardMenu({
   const [bgOpen, setBgOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   // Compartilhamento (visibilidade por papel).
@@ -169,6 +178,14 @@ export function DashboardMenu({
             }}
           >
             <Users className="size-4" /> Compartilhamento
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setSnapshotsOpen(true);
+            }}
+          >
+            <Camera className="size-4" /> Snapshots
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -281,6 +298,21 @@ export function DashboardMenu({
               Aplicar
             </Button>
           </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Snapshots: links públicos congelados de uma aba (sem login). O painel
+          carrega a lista/opções ao abrir; o link aparece só na criação. */}
+      <Sheet open={snapshotsOpen} onOpenChange={setSnapshotsOpen}>
+        <SheetContent className="overflow-y-auto sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Snapshots</SheetTitle>
+            <SheetDescription>
+              Acesso público (sem login) aos resultados de uma aba, com dados
+              congelados e restrições de visibilidade.
+            </SheetDescription>
+          </SheetHeader>
+          {snapshotsOpen ? <SnapshotsPanel dashboardId={dashboardId} /> : null}
         </SheetContent>
       </Sheet>
 

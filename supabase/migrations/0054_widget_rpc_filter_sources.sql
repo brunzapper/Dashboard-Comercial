@@ -9,6 +9,8 @@
 -- carregam alvo — fica pronto p/ quick/view filters adotarem depois).
 -- Recria run_widget_query a partir de 0052_widget_rpc_mock_rule.sql.
 -- Idempotente (create or replace).
+-- ATENÇÃO: run_widget_query_snapshot (0056_snapshots.sql) é uma cópia deste
+-- corpo apontada para snapshot_records — toda mudança aqui deve ser espelhada lá.
 
 -- Envolve um predicado no pass-through por fonte. p_record_types deve ser um
 -- array jsonb de record_types (lead|negocio|venda_site); null/vazio = sem

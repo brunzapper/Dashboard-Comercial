@@ -41,6 +41,7 @@ import type {
   Widget,
 } from "@/lib/widgets/types";
 import { saveCalcExpression } from "@/app/(app)/dashboards/actions";
+import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 
 // Texto da expressão por widget, vivo enquanto a página está aberta: sobrevive
 // à remontagem do card (troca de aba) mesmo antes de um refresh trazer o valor
@@ -111,6 +112,9 @@ export function CalculatorWidget({
 
   // Persistência compartilhada com debounce (fire-and-forget) + flush no
   // desmonte. O cache em memória cobre a remontagem por troca de aba.
+  // Modo snapshot (viewer público): a avaliação continua local, mas a
+  // expressão NUNCA é persistida (sem sessão; estado por visitante).
+  const { snapshot } = useSnapshotMode();
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef(initialExpr ?? "");
   // Espelho do texto p/ o flush no desmonte (sincronizado no setter — todo
@@ -121,6 +125,7 @@ export function CalculatorWidget({
     exprRef.current = next;
     exprCache.set(widget.id, next);
     if (nextCursor != null) setCursor(nextCursor);
+    if (snapshot) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       if (next === lastSaved.current) return;
@@ -131,7 +136,7 @@ export function CalculatorWidget({
   useEffect(
     () => () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      if (exprRef.current !== lastSaved.current) {
+      if (!snapshot && exprRef.current !== lastSaved.current) {
         lastSaved.current = exprRef.current;
         void saveCalcExpression(dashboardId, widget.id, exprRef.current);
       }
