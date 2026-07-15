@@ -1,232 +1,30 @@
 -- Versão: 1.0 | Data: 15/07/2026
--- Snapshots: acesso PÚBLICO (sem autenticação) e somente-leitura aos resultados
--- de UMA aba de um dashboard, sobre um DATASET CONGELADO — a cada refresh
--- (manual ou agendado) as linhas de `records` permitidas pelas restrições do
--- snapshot (responsáveis/operações/fontes) são copiadas para snapshot_records;
--- o viewer re-agrega SEMPRE sobre a cópia, nunca sobre dados vivos.
+-- Snapshots × mocks de "Data Reunião" (0051/0053): os mocks passam a entrar
+-- SEMPRE no dataset congelado, ignorando as restrições do snapshot
+-- (responsáveis/operações/fontes) — antes, um snapshot restrito por
+-- responsáveis deixava os mocks de fora (responsável casado por nome, às
+-- vezes NULL) e os widgets de Data Reunião divergiam do dashboard.
+-- A regra da 0052 segue intacta: mock só conta em consulta que referencia as
+-- chaves de Data Reunião (`not is_mock` nas demais).
 --
--- Modelo de segurança (não relaxar):
---  * token de 256 bits mostrado UMA vez; aqui só vive o sha256 (token_hash);
---  * NENHUMA política RLS `to anon` — o caminho público é exclusivamente a
---    rota server-side com service role, DEPOIS de validar o token;
---  * funções novas executáveis SÓ pela service role (revoke de public/anon/
---    authenticated);
---  * restrições aplicadas em dupla camada: linhas fora da restrição nem
---    existem na cópia E os filtros são re-injetados na consulta do viewer.
+-- Junto com isso, as RESTRIÇÕES do snapshot passam a ser aplicadas DENTRO de
+-- run_widget_query_snapshot (predicado `(is_mock or restrições)` lido da
+-- própria linha do snapshot) em vez de filtros injetados pelo viewer — que,
+-- por serem AND puros, derrubavam os mocks. Defesa em profundidade continua
+-- em dupla camada, agora inteiramente no banco: cópia restrita (linhas reais
+-- fora da restrição nem existem) + predicado interno do RPC.
 --
--- ATENÇÃO (manutenção): run_widget_query_snapshot abaixo é uma CÓPIA do corpo
--- de run_widget_query (0054_widget_rpc_filter_sources.sql) com 3 mudanças
--- (FROM snapshot_records, WHERE por snapshot_id/partner_only e o helper de
--- match). Toda mudança futura em run_widget_query DEVE ser espelhada aqui.
--- Idempotente (create or replace / drop if exists).
--- >>> SUPERSEDIDA EM PARTE PELA 0057: snapshot_refresh_copy e
--- run_widget_query_snapshot foram RECRIADAS em 0057_snapshots_mock_rule.sql
--- (mocks de Data Reunião entram sempre; restrições aplicadas dentro do RPC).
--- Espelhe mudanças futuras do run_widget_query na 0057, não aqui. <<<
-
--- ============ Tabela: snapshots (metadados + config congelado) ============
-create table if not exists public.snapshots (
-  id uuid primary key default gen_random_uuid(),
-  dashboard_id uuid not null references public.dashboards (id) on delete cascade,
-  -- '' = dashboard sem abas (tela única) ou primeira aba.
-  tab_id text not null default '',
-  name text not null,
-  -- sha256 hex do token (o token em claro NUNCA é armazenado).
-  token_hash text not null unique,
-  -- Restrições de visibilidade: null = todos. allowed_sources guarda
-  -- record_type ('lead' | 'negocio' | 'venda_site') — ver lib/sources.ts.
-  allowed_responsible_ids uuid[],
-  allowed_operation_ids uuid[],
-  allowed_sources text[],
-  -- Interatividade do visitante (filtros rápidos / filtros de widget).
-  allow_quick_filters boolean not null default true,
-  allow_widget_filters boolean not null default true,
-  -- Agendamento por presets. refresh_time = "HH:MM" (horário de Brasília);
-  -- refresh_weekday = 1..7 (ISO, segunda=1) para o modo semanal.
-  refresh_mode text not null default 'manual'
-    check (refresh_mode in ('manual', 'hourly', 'daily', 'weekly')),
-  refresh_time text,
-  refresh_weekday int check (refresh_weekday between 1 and 7),
-  next_refresh_at timestamptz,
-  -- Pausa desliga o link imediatamente (o loader público exige 'active').
-  status text not null default 'active' check (status in ('active', 'paused')),
-  -- Bundle congelado no refresh: dashboard {name, settings}, widgets da aba,
-  -- field_definitions, correspondences, moedas/câmbio, opções de filtros
-  -- (restritas!), calcExprById e tableCellsById. Shape: lib/snapshots/types.ts.
-  config jsonb not null default '{}'::jsonb,
-  last_refreshed_at timestamptz,
-  last_refresh_error text,
-  last_accessed_at timestamptz,
-  access_count bigint not null default 0,
-  created_by uuid references auth.users (id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists idx_snapshots_dashboard on public.snapshots (dashboard_id);
--- Busca do tick: snapshots agendados vencidos.
-create index if not exists idx_snapshots_due
-  on public.snapshots (next_refresh_at)
-  where status = 'active' and refresh_mode <> 'manual';
-
-drop trigger if exists trg_snapshots_updated_at on public.snapshots;
-create trigger trg_snapshots_updated_at
-  before update on public.snapshots
-  for each row execute function public.set_updated_at();
-
--- ============ Tabela: snapshot_records (cópia congelada de records) ============
--- Espelho das colunas que o RPC (v_allowed_cols) e o modo lista (RECORD_COLS de
--- lib/widgets/record-list.ts) consomem, + custom_fields e is_mock. SEM FKs para
--- tabelas vivas (é uma cópia; ids ficam como uuid puro). partner_only=true =
--- registro casado (match/related_lead) FORA das restrições, presente apenas
--- para resolver colunas `match:<fonte>:<ref>`; nunca conta como linha de dados
--- (o RPC força `not partner_only`; no modo lista os filtros de restrição
--- re-injetados o excluem por construção).
-create table if not exists public.snapshot_records (
-  snapshot_id uuid not null references public.snapshots (id) on delete cascade,
-  id uuid not null,
-  record_type text not null,
-  source_system text not null,
-  owner_user_id uuid,
-  title text,
-  pipeline text,
-  stage text,
-  stage_semantic text,
-  temperature text,
-  value numeric,
-  mrr numeric,
-  currency text,
-  sale_type text,
-  channel text,
-  closed boolean not null default false,
-  closed_at timestamptz,
-  opened_at timestamptz,
-  source_created_at timestamptz,
-  source_modified_at timestamptz,
-  custom_fields jsonb not null default '{}'::jsonb,
-  created_at timestamptz,
-  updated_at timestamptz,
-  last_synced_at timestamptz,
-  locally_modified_at timestamptz,
-  responsible_id uuid,
-  operation_id uuid,
-  related_lead_id uuid,
-  lead_time_days numeric,
-  is_mock boolean not null default false,
-  partner_only boolean not null default false,
-  primary key (snapshot_id, id)
-);
-
--- ============ Tabela: snapshot_record_matches (cópia dos matches) ============
-create table if not exists public.snapshot_record_matches (
-  snapshot_id uuid not null references public.snapshots (id) on delete cascade,
-  record_a_id uuid not null,
-  record_b_id uuid not null,
-  mode text not null default 'auto',
-  created_at timestamptz not null default now(),
-  primary key (snapshot_id, record_a_id, record_b_id)
-);
-
-create index if not exists idx_snapshot_matches_a
-  on public.snapshot_record_matches (snapshot_id, record_a_id);
-create index if not exists idx_snapshot_matches_b
-  on public.snapshot_record_matches (snapshot_id, record_b_id);
-
--- ============ RLS ============
--- Gestão (UI autenticada): dono do dashboard pai ou admin — espelho de
--- dashboards_update (0009). Cópias congeladas: SELECT para gestores (preview/
--- diagnóstico); escrita SÓ via service role (bypassa RLS — sem policy de
--- escrita). NENHUMA política `to anon`: usuário anônimo não lê NADA aqui;
--- o viewer público passa pela rota com service role após validar o token.
-alter table public.snapshots enable row level security;
-alter table public.snapshot_records enable row level security;
-alter table public.snapshot_record_matches enable row level security;
-
-drop policy if exists snapshots_select on public.snapshots;
-create policy snapshots_select on public.snapshots for select to authenticated
-  using (
-    exists (
-      select 1 from public.dashboards d
-      where d.id = snapshots.dashboard_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
-drop policy if exists snapshots_insert on public.snapshots;
-create policy snapshots_insert on public.snapshots for insert to authenticated
-  with check (
-    exists (
-      select 1 from public.dashboards d
-      where d.id = snapshots.dashboard_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
-drop policy if exists snapshots_update on public.snapshots;
-create policy snapshots_update on public.snapshots for update to authenticated
-  using (
-    exists (
-      select 1 from public.dashboards d
-      where d.id = snapshots.dashboard_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.dashboards d
-      where d.id = snapshots.dashboard_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
-drop policy if exists snapshots_delete on public.snapshots;
-create policy snapshots_delete on public.snapshots for delete to authenticated
-  using (
-    exists (
-      select 1 from public.dashboards d
-      where d.id = snapshots.dashboard_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
-drop policy if exists snapshot_records_select on public.snapshot_records;
-create policy snapshot_records_select on public.snapshot_records for select to authenticated
-  using (
-    exists (
-      select 1
-      from public.snapshots s
-      join public.dashboards d on d.id = s.dashboard_id
-      where s.id = snapshot_records.snapshot_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
-drop policy if exists snapshot_record_matches_select on public.snapshot_record_matches;
-create policy snapshot_record_matches_select on public.snapshot_record_matches for select to authenticated
-  using (
-    exists (
-      select 1
-      from public.snapshots s
-      join public.dashboards d on d.id = s.dashboard_id
-      where s.id = snapshot_record_matches.snapshot_id
-        and (d.owner_user_id = (select auth.uid()) or public.auth_has_role('admin'))
-    )
-  );
-
--- Belt-and-braces: anon não tem nem GRANT de tabela; escrita nas cópias fica
--- exclusiva da service role mesmo no nível de GRANT.
-revoke all on public.snapshots from anon;
-revoke all on public.snapshot_records from anon;
-revoke all on public.snapshot_record_matches from anon;
-revoke insert, update, delete on public.snapshot_records from authenticated;
-revoke insert, update, delete on public.snapshot_record_matches from authenticated;
+-- Recria (create or replace) as duas funções da 0056_snapshots.sql — o resto
+-- da 0056 (tabelas, RLS, _widget_match_expr_snap) permanece como está.
+--
+-- ATENÇÃO (manutenção): este arquivo passa a ser a CÓPIA VIGENTE de
+-- run_widget_query_snapshot. Toda mudança futura em run_widget_query
+-- (0054_widget_rpc_filter_sources.sql) deve ser espelhada AQUI (não mais na
+-- 0056). Idempotente.
 
 -- ============ Função: snapshot_refresh_copy ============
--- Cópia set-based e ATÔMICA (uma transação): sem janela de dados vazios para o
--- viewer e sem trafegar linhas pelo Node (teto de 60s da Vercel). Aplica as
--- restrições do snapshot; depois copia os matches com ao menos um lado dentro
--- e insere os parceiros ausentes (lado de fora do match + related_lead_id)
--- com partner_only = true. Retorna o nº de linhas de DADOS copiadas.
+-- Igual à 0056, com UMA mudança: mocks são copiados incondicionalmente como
+-- linhas de DADOS (`r.is_mock or (restrições)`).
 create or replace function public.snapshot_refresh_copy(p_snapshot_id uuid)
 returns integer
 language plpgsql
@@ -245,8 +43,9 @@ begin
   delete from public.snapshot_record_matches where snapshot_id = p_snapshot_id;
   delete from public.snapshot_records where snapshot_id = p_snapshot_id;
 
-  -- Linhas de dados: records dentro das restrições (null = sem restrição).
-  -- is_mock é copiado como está — a regra dos mocks (0052) decide na consulta.
+  -- Linhas de dados: records dentro das restrições (null = sem restrição) OU
+  -- mocks de Data Reunião (sempre — a regra 0052 decide na consulta quando
+  -- eles contam; is_mock é copiado como está).
   insert into public.snapshot_records (
     snapshot_id, id, record_type, source_system, owner_user_id, title, pipeline,
     stage, stage_semantic, temperature, value, mrr, currency, sale_type, channel,
@@ -264,12 +63,13 @@ begin
     r.responsible_id, r.operation_id, r.related_lead_id, r.lead_time_days,
     r.is_mock, false
   from public.records r
-  where (v_snap.allowed_sources is null
-         or r.record_type = any (v_snap.allowed_sources))
-    and (v_snap.allowed_responsible_ids is null
-         or r.responsible_id = any (v_snap.allowed_responsible_ids))
-    and (v_snap.allowed_operation_ids is null
-         or r.operation_id = any (v_snap.allowed_operation_ids));
+  where r.is_mock
+     or ((v_snap.allowed_sources is null
+          or r.record_type = any (v_snap.allowed_sources))
+     and (v_snap.allowed_responsible_ids is null
+          or r.responsible_id = any (v_snap.allowed_responsible_ids))
+     and (v_snap.allowed_operation_ids is null
+          or r.operation_id = any (v_snap.allowed_operation_ids)));
 
   get diagnostics v_rows = row_count;
 
@@ -325,84 +125,15 @@ $$;
 revoke execute on function public.snapshot_refresh_copy(uuid) from public, anon, authenticated;
 grant execute on function public.snapshot_refresh_copy(uuid) to service_role;
 
--- ============ Função: _widget_match_expr_snap ============
--- Cópia de _widget_match_expr (0042) apontada para as tabelas congeladas,
--- correlacionada por records.snapshot_id (o FROM do RPC abaixo usa o alias
--- `records`, então a correlação continua válida). Parceiros (partner_only)
--- são alcançáveis SÓ por aqui — é a razão de existirem na cópia.
-create or replace function public._widget_match_expr_snap(p_spec text, p_numeric boolean)
-returns text
-language plpgsql
-immutable
-set search_path = ''
-as $$
-declare
-  v_pos int := position(':' in p_spec);
-  v_src text;
-  v_ref text;
-  v_rt text;
-  v_inner text;
-  v_match_sub text;
-  v_lead_sub text;
-begin
-  if v_pos = 0 then
-    raise exception 'match: sem "<fonte>:<campo>" — %', p_spec;
-  end if;
-  v_src := substring(p_spec from 1 for v_pos - 1);
-  v_ref := substring(p_spec from v_pos + 1);
-  v_rt := case v_src
-    when 'leads' then 'lead'
-    when 'deals' then 'negocio'
-    when 'estudo' then 'venda_site'
-    else null
-  end;
-  if v_rt is null then
-    raise exception 'Fonte de match inválida: %', v_src;
-  end if;
-
-  v_inner := public._widget_col_expr(v_ref, p_numeric);
-
-  -- Igual ao original, com snapshot_records/snapshot_record_matches e a
-  -- correlação extra por snapshot_id em cada nível.
-  v_match_sub :=
-    '(select ' || v_inner || ' from public.snapshot_records mm' ||
-    ' where mm.snapshot_id = records.snapshot_id and mm.id = (' ||
-    'select case when rm.record_a_id = records.id then rm.record_b_id' ||
-    '   else rm.record_a_id end' ||
-    ' from public.snapshot_record_matches rm' ||
-    ' join public.snapshot_records p on p.snapshot_id = records.snapshot_id' ||
-    '   and p.id = (case when rm.record_a_id = records.id' ||
-    '   then rm.record_b_id else rm.record_a_id end)' ||
-    ' where rm.snapshot_id = records.snapshot_id' ||
-    '   and (rm.record_a_id = records.id or rm.record_b_id = records.id)' ||
-    '   and p.record_type = ' || quote_literal(v_rt) ||
-    ' order by (rm.mode = ''manual'') desc, rm.created_at desc limit 1))';
-
-  if v_rt = 'lead' then
-    v_lead_sub :=
-      '(select ' || v_inner || ' from public.snapshot_records mm' ||
-      ' where mm.snapshot_id = records.snapshot_id' ||
-      '   and mm.id = records.related_lead_id)';
-    return 'coalesce(' || v_match_sub || ', ' || v_lead_sub || ')';
-  end if;
-
-  return v_match_sub;
-end;
-$$;
-
-revoke execute on function public._widget_match_expr_snap(text, boolean) from public, anon, authenticated;
-grant execute on function public._widget_match_expr_snap(text, boolean) to service_role;
-
 -- ============ Função: run_widget_query_snapshot ============
--- CÓPIA LITERAL do corpo de run_widget_query (0054) com exatamente 3 mudanças:
---  1. FROM: `public.snapshot_records records` (o alias mantém válidas todas as
---     expressões geradas, inclusive as correlações do match);
---  2. WHERE sempre inicia com `records.snapshot_id = <id>` e
---     `not records.partner_only` (garantia no banco, independente do JS);
---  3. `_widget_match_expr` -> `_widget_match_expr_snap`.
--- Reusa como estão os helpers imutáveis já instalados (_widget_col_expr,
--- _widget_unified_expr, _widget_unified_date_expr, _widget_wrap_record_types,
--- _widget_norm_text, _widget_safe_numeric, _widget_col_date_expr).
+-- Cópia da 0056 com UM bloco novo: as restrições do snapshot são aplicadas
+-- AQUI, mock-aware — `(records.is_mock or (restrições))`. Para consultas sem
+-- Data Reunião, o `not is_mock` (regra 0052, mais abaixo) reduz o predicado
+-- às restrições puras sobre linhas reais. O viewer NÃO injeta mais filtros de
+-- restrição (eram AND puros e derrubavam os mocks).
+-- Continua sendo uma cópia do corpo de run_widget_query (0054) com as 3
+-- mudanças originais (FROM snapshot_records, escopo por snapshot_id/
+-- partner_only e _widget_match_expr_snap) + este bloco.
 create or replace function public.run_widget_query_snapshot(
   p_snapshot_id uuid,
   p_source text,
@@ -444,6 +175,9 @@ declare
   -- referenciam uma das duas chaves do campo (lead/negócio).
   v_mock_params text;
   v_include_mocks boolean := false;
+  -- Restrições do snapshot (aplicadas aqui, mock-aware — 0057).
+  v_snap public.snapshots%rowtype;
+  v_restr text[] := array[]::text[];
 begin
   if p_source is distinct from 'records' then
     raise exception 'Fonte não suportada: %', p_source;
@@ -456,6 +190,32 @@ begin
   v_where_parts := v_where_parts
     || format('records.snapshot_id = %L', p_snapshot_id)
     || 'not records.partner_only'::text;
+
+  -- ===== Restrições do snapshot, mock-aware (0057) =====
+  -- Mocks de Data Reunião ignoram as restrições (entram sempre na cópia);
+  -- linhas reais fora da restrição nem existem na cópia — este predicado é a
+  -- segunda camada, no próprio banco. Restrição vazia ({}) fica fail-closed
+  -- para linhas reais.
+  select * into v_snap from public.snapshots where id = p_snapshot_id;
+  if not found then
+    raise exception 'Snapshot inexistente: %', p_snapshot_id;
+  end if;
+  if v_snap.allowed_sources is not null then
+    v_restr := v_restr
+      || format('records.record_type = any (%L::text[])', v_snap.allowed_sources);
+  end if;
+  if v_snap.allowed_responsible_ids is not null then
+    v_restr := v_restr
+      || format('records.responsible_id = any (%L::uuid[])', v_snap.allowed_responsible_ids);
+  end if;
+  if v_snap.allowed_operation_ids is not null then
+    v_restr := v_restr
+      || format('records.operation_id = any (%L::uuid[])', v_snap.allowed_operation_ids);
+  end if;
+  if array_length(v_restr, 1) is not null then
+    v_where_parts := v_where_parts
+      || ('(records.is_mock or (' || array_to_string(v_restr, ' and ') || '))');
+  end if;
 
   -- ===== Regra dos mocks (Fase 12) =====
   v_mock_params := coalesce(p_dimensions::text, '')

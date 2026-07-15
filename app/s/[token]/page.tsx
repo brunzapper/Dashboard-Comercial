@@ -6,8 +6,12 @@
 //  * toda leitura passa pelo snapshotClient (dataset congelado do snapshot;
 //    fail closed para qualquer outra tabela/RPC) via service role — o anon
 //    key não enxerga NADA (nenhuma política RLS anon existe);
-//  * as restrições do snapshot são re-injetadas como filtros em TODO widget
-//    (defesa em profundidade: as linhas fora já nem existem na cópia);
+//  * as restrições do snapshot são aplicadas em dupla camada NO BANCO (0057):
+//    linhas reais fora da restrição nem existem na cópia E o RPC do snapshot
+//    re-aplica o predicado internamente, mock-aware — os mocks de Data
+//    Reunião entram sempre (regra 0052 intacta). O viewer NÃO injeta filtros
+//    de restrição (AND puro derrubaria os mocks); no modo lista, os partner
+//    rows (só p/ colunas match:) são excluídos por pós-filtro de ids;
 //  * inputs do visitante (qf_/tf_/ff_/pf_ na URL) são parseados com os
 //    parsers seguros do app e validados contra as opções CONGELADAS.
 // A computação espelha app/(app)/dashboards/[id]/page.tsx, trocando o client
@@ -150,31 +154,18 @@ export default async function SnapshotPage({
 
   const db = snapshotClient(service, snap.id);
 
-  // Restrições re-injetadas em TODO widget (as linhas fora já nem existem na
-  // cópia; este é o segundo cadeado — e o que exclui os partner rows no modo
-  // lista). Sem chave `sources`, o pass-through não os altera.
-  const restrictionFilters: WidgetFilter[] = [];
-  if (snap.allowed_sources) {
-    restrictionFilters.push({
-      field: "record_type",
-      op: "in",
-      value: snap.allowed_sources,
-    });
-  }
-  if (snap.allowed_responsible_ids) {
-    restrictionFilters.push({
-      field: "responsible_id",
-      op: "in",
-      value: snap.allowed_responsible_ids,
-    });
-  }
-  if (snap.allowed_operation_ids) {
-    restrictionFilters.push({
-      field: "operation_id",
-      op: "in",
-      value: snap.allowed_operation_ids,
-    });
-  }
+  // Partner rows (registros casados fora das restrições, presentes SÓ para
+  // resolver colunas match:): o RPC os exclui no SQL (`not partner_only`);
+  // no modo lista (PostgREST direto) eles são excluídos por pós-filtro com
+  // este conjunto de ids. Restrições de linhas reais NÃO são injetadas aqui:
+  // a cópia é a garantia física e o RPC re-aplica o predicado internamente,
+  // mock-aware (0057) — filtros AND injetados derrubariam os mocks.
+  const { data: partnerRows } = await service
+    .from("snapshot_records")
+    .select("id")
+    .eq("snapshot_id", snap.id)
+    .eq("partner_only", true);
+  const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
   // Sem barra de período geral (o settings congelado já vem com periodBar
   // desabilitado); widgets `filtro` seguem funcionando via URL quando os
@@ -339,11 +330,12 @@ export default async function SnapshotPage({
     }
   }
 
-  // Filtros efetivos de um widget: os do próprio widget + visão + RESTRIÇÕES.
+  // Filtros efetivos de um widget: os do próprio widget + filtros de visão.
+  // As restrições do snapshot NÃO entram aqui — são aplicadas no banco
+  // (cópia + RPC interno, mock-aware; ver cabeçalho).
   const effectiveFilters = (w: Widget): WidgetFilter[] => [
     ...(w.filters ?? []),
     ...(viewFiltersByWidget[w.id] ?? []),
-    ...restrictionFilters,
   ];
 
   // ============ Computação dos widgets (espelho da page, com o adapter) ======
@@ -408,12 +400,18 @@ export default async function SnapshotPage({
           return;
         }
         try {
-          recordListById[w.id] = await runRecordList(
+          const rows = await runRecordList(
             db,
             config,
             periodByWidget[w.id],
             available
           );
+          // Partner rows nunca são linhas de dados (existem só p/ resolver
+          // colunas match: — e por construção violam ≥1 restrição).
+          recordListById[w.id] =
+            partnerIds.size > 0
+              ? rows.filter((r) => !partnerIds.has(r.id))
+              : rows;
         } catch (e) {
           recordListById[w.id] = [];
           fail(e);
