@@ -960,6 +960,7 @@ export default async function DashboardPage({
       periodDefaultFieldByTab={periodDefaultFieldByTab}
       filterOptionsById={filterOptionsById}
       quickFiltersById={quickFiltersById}
+      initialTabId={str(sp.tab)}
     />
   );
 }

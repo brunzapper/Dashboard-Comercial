@@ -229,6 +229,23 @@ export async function createWidget(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // Fallback de posição (o builder normalmente já envia grid_position): logo
+  // abaixo do widget mais fundo do dashboard, em vez de um y fixo lá no fim da
+  // página. Sem noção de abas aqui — o cliente cobre o caso comum.
+  let position = input.grid_position;
+  if (!position) {
+    const { data: existing } = await supabase
+      .from("widgets")
+      .select("grid_position")
+      .eq("dashboard_id", dashboardId);
+    const maxBottom = (existing ?? []).reduce((m, r) => {
+      const p = r.grid_position as { y?: number; h?: number } | null;
+      return typeof p?.y === "number" && typeof p?.h === "number"
+        ? Math.max(m, p.y + p.h)
+        : m;
+    }, 0);
+    position = { x: 0, y: maxBottom, w: 6, h: 8 };
+  }
   const { data, error } = await supabase
     .from("widgets")
     .insert({
@@ -242,7 +259,7 @@ export async function createWidget(
       metrics: input.metrics,
       filters: input.filters,
       settings: input.settings ?? {},
-      grid_position: input.grid_position ?? { x: 0, y: 100, w: 6, h: 8 },
+      grid_position: position,
     })
     .select("id")
     .maybeSingle();

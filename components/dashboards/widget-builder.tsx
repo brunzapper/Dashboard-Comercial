@@ -73,6 +73,7 @@ import {
   type FieldFilterSettings,
   type FilterOp,
   type FilterSettings,
+  type GridPosition,
   type Metric,
   type QuickFilterEntry,
   type RecordListColumn,
@@ -105,6 +106,7 @@ import {
   createWidget,
   updateWidget,
 } from "@/app/(app)/dashboards/actions";
+import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
 
 const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
   value: o.op,
@@ -128,6 +130,8 @@ export function WidgetBuilder({
   currencyOptions,
   tabs = [],
   activeTabId,
+  layoutById,
+  canvasCols,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -143,6 +147,12 @@ export function WidgetBuilder({
   currencyOptions?: ComboboxOption[];
   tabs?: { id: string; name: string; color?: string }[];
   activeTabId?: string;
+  // Layout otimista do shell (posições correntes) e largura do canvas — usados
+  // só na CRIAÇÃO, para posicionar o widget novo no primeiro espaço livre da
+  // aba destino. Opcionais: os pontos que montam o builder para edição não
+  // precisam passar.
+  layoutById?: Record<string, GridPosition>;
+  canvasCols?: number;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -735,6 +745,27 @@ export function WidgetBuilder({
   const removeGroupLevel = (idx: number) =>
     setTableGroupBy((prev) => prev.filter((_, i) => i !== idx));
 
+  // Posição inicial de um widget NOVO: primeiro espaço livre 6×8 na aba destino
+  // (cada aba é uma tela — só os widgets da mesma aba ocupam espaço). Aba
+  // destino = seletor do builder (tabId) ou a primeira. Posições correntes vêm
+  // do layout otimista do shell (fallback: grid_position persistido). Sem isso,
+  // createWidget usava um y fixo lá no fundo da página.
+  function newWidgetPosition(): GridPosition {
+    const firstTab = tabs[0]?.id ?? "";
+    const targetTab = tabId || firstTab;
+    const knownTabs = new Set(tabs.map((t) => t.id));
+    const occupied: GridPosition[] = [];
+    siblings.forEach((s, i) => {
+      if (tabs.length > 0) {
+        const t = s.settings?.tab;
+        const eff = t && knownTabs.has(t) ? t : firstTab;
+        if (eff !== targetTab) return;
+      }
+      occupied.push(layoutById?.[s.id] ?? posOf(s, i));
+    });
+    return findFreePosition(occupied, canvasCols ?? 12, 6, 8);
+  }
+
   function save() {
     setError(null);
 
@@ -760,7 +791,10 @@ export function WidgetBuilder({
       startTransition(async () => {
         const res = widget
           ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, input);
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
         if (res.ok) setOpen(false);
         else setError(res.message ?? "Falha ao salvar.");
       });
@@ -788,7 +822,10 @@ export function WidgetBuilder({
       startTransition(async () => {
         const res = widget
           ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, input);
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
         if (res.ok) setOpen(false);
         else setError(res.message ?? "Falha ao salvar.");
       });
@@ -832,7 +869,10 @@ export function WidgetBuilder({
       startTransition(async () => {
         const res = widget
           ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, input);
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
         if (res.ok) setOpen(false);
         else setError(res.message ?? "Falha ao salvar.");
       });
@@ -975,7 +1015,10 @@ export function WidgetBuilder({
     startTransition(async () => {
       const res = widget
         ? await updateWidget(widget.id, dashboardId, input)
-        : await createWidget(dashboardId, input);
+        : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
       if (res.ok) {
         setOpen(false);
       } else {
