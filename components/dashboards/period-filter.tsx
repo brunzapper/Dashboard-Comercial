@@ -35,6 +35,8 @@ import {
   type SavedPeriod,
 } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
+import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
+import { useSourceLabels } from "@/components/source-labels-context";
 import {
   saveLastPeriod,
   syncGlobalPeriodQuickFilters,
@@ -174,10 +176,12 @@ function PeriodBarConfig({
       label: PERIOD_PRESETS[k],
     })),
   ];
-  const fieldOptions: ComboboxOption[] = dateFields.map((f) => ({
-    value: f.field,
-    label: f.label,
-  }));
+  const sourceLabels = useSourceLabels();
+  const fieldSourceChips = sourceChips(sourceLabels);
+  const fieldOptions: ComboboxOption[] = toFieldOptions(
+    dateFields,
+    sourceLabels
+  );
   const scopeOptions: ComboboxOption[] = [
     { value: "global", label: "Global (todas as abas)" },
     { value: "tab", label: "Por aba" },
@@ -231,6 +235,7 @@ function PeriodBarConfig({
           <Label>Campo de data primário (visível)</Label>
           <Combobox
             options={fieldOptions}
+            chips={fieldSourceChips}
             value={field}
             onValueChange={setField}
             aria-label="Campo de data primário"
@@ -249,6 +254,7 @@ function PeriodBarConfig({
               </span>
               <Combobox
                 options={fieldOptions}
+                chips={fieldSourceChips}
                 value={fieldBySource[src] ?? DEFAULT_PERIOD_FIELD_BY_SOURCE[src]}
                 onValueChange={(v) =>
                   setFieldBySource((prev) => ({ ...prev, [src]: v }))

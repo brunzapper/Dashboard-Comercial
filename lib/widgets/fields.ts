@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 09/07/2026
+// Versão: 1.3 | Data: 15/07/2026
 // Campos disponíveis no construtor de widgets: colunas do núcleo (com rótulos
 // PT) + campos personalizados (custom:<key>). Marca quais são numéricos
 // (métricas), quais são datas (aceitam transform) e quais são FK (resolver
@@ -7,12 +7,21 @@
 //   filtragem por show_in_builder é feita por quem carrega os field_definitions.
 // v1.2 (09/07/2026): Fase 8 — buildAvailableFields agrega os campos UNIFICADOS
 //   (unified:<key>) vindos das correspondências globais.
+// v1.3 (15/07/2026): metadados de exibição p/ os dropdowns de campo: `source`
+//   (fonte única efetiva — applies_to ou, em calculados, os operandos da
+//   fórmula), `calc` (indicador ƒ), `formulaText` (tooltip com a fórmula em
+//   rótulos client-side) e `baseLabel` (match: rótulo sem o prefixo de fonte).
+//   `label` segue LIMPO — prefixos só na camada de opções (filter-ops).
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
+import { formulaRefs, formulaToText } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
+  RECORD_TYPE_SOURCE,
   SOURCE_KEYS,
   SOURCE_LABELS,
   fieldAppliesToSource,
+  isSourceKey,
+  type SourceKey,
 } from "@/lib/sources";
 import {
   isEditableCoreColumn,
@@ -56,6 +65,20 @@ export interface AvailableField {
   // (sem aninhamento) e da lista genérica de métricas — o builder o adiciona
   // explicitamente ao seletor de métricas.
   aggCalc?: boolean;
+  // Fonte ÚNICA efetiva (prefixo/chips nos dropdowns de campo): custom com
+  // applies_to de exatamente 1 fonte, match:<fonte>:, ou calculado cujos
+  // operandos tocam só 1 fonte. Ausente = campo "geral" (todas/múltiplas).
+  // NAVEGAÇÃO apenas — não restringe a consulta (isso é widget.sources).
+  source?: SourceKey;
+  // Campo calculado ('calculado' por-registro ou 'calculado_agg') → indicador ƒ
+  // nos dropdowns.
+  calc?: boolean;
+  // Fórmula legível (rótulos client-side, nunca refs internos) p/ o tooltip das
+  // opções de dropdown. Só campos calculados com fórmula.
+  formulaText?: string;
+  // Só match:<fonte>:*: rótulo do campo interno (sem o prefixo '↪ <Fonte>: ' do
+  // `label`), p/ os dropdowns comporem o prefixo curto sem duplicar a fonte.
+  baseLabel?: string;
 }
 
 // Campo sintético "Data atual" (hoje em Brasília). Resolvido no cliente
@@ -91,6 +114,129 @@ export const CORE_FIELDS: AvailableField[] = [
   { field: "source_created_at", label: "Data de criação (origem)", isNumeric: false, isDate: true },
 ];
 
+// applies_to (record_types) → fontes correspondentes, deduplicadas.
+function appliesSources(appliesTo: string[] | null | undefined): SourceKey[] {
+  if (!appliesTo || appliesTo.length === 0) return [];
+  const out = new Set<SourceKey>();
+  for (const rt of appliesTo) {
+    const src = RECORD_TYPE_SOURCE[rt];
+    if (src) out.add(src);
+  }
+  return [...out];
+}
+
+function isCalcType(dataType: FieldDefinition["data_type"]): boolean {
+  return dataType === "calculado" || dataType === "calculado_agg";
+}
+
+// Campo interno de um ref 'agg:<sum|avg|count>:<campo>' ('*' = contagem de
+// registros). Parser local — NÃO importar calc-metrics aqui (ciclo de import:
+// calc-metrics → cond-operands → CORE_FIELDS deste módulo).
+function aggInnerField(ref: string): string {
+  const rest = ref.slice("agg:".length);
+  const i = rest.indexOf(":");
+  return i === -1 ? "*" : rest.slice(i + 1);
+}
+
+// Acumula em `out` as fontes que um ref de fórmula toca: match pina a própria
+// fonte; custom usa o applies_to do referenciado (vazio + calculado → recursão
+// na fórmula dele, com `visited` anti-ciclo); agg recursa no campo interno;
+// núcleo/'today'/'unified:' são neutros (não pinam fonte).
+function collectRefSources(
+  ref: string,
+  byKey: Map<string, FieldDefinition>,
+  visited: Set<string>,
+  out: Set<SourceKey>
+): void {
+  if (ref.startsWith("match:")) {
+    const src = ref.split(":")[1];
+    if (isSourceKey(src)) out.add(src);
+    return;
+  }
+  if (ref.startsWith("agg:")) {
+    const inner = aggInnerField(ref);
+    if (inner !== "*") collectRefSources(inner, byKey, visited, out);
+    return;
+  }
+  if (ref.startsWith("custom:")) {
+    const key = ref.slice("custom:".length);
+    if (visited.has(key)) return;
+    visited.add(key);
+    const def = byKey.get(key);
+    if (!def) return;
+    const srcs = appliesSources(def.applies_to);
+    if (srcs.length > 0) {
+      for (const s of srcs) out.add(s);
+      return;
+    }
+    if (isCalcType(def.data_type) && def.formula) {
+      for (const r of formulaRefs(def.formula))
+        collectRefSources(r, byKey, visited, out);
+    }
+  }
+}
+
+// Fonte única efetiva de uma FieldDefinition: applies_to com exatamente 1 fonte
+// → ela; múltiplas → geral. Sem applies_to, calculados herdam a fonte quando a
+// união das fontes dos operandos tem exatamente 1 elemento (campo calculado com
+// dados de uma fonte só é classificado nessa fonte).
+function singleFieldSource(
+  f: FieldDefinition,
+  byKey: Map<string, FieldDefinition>
+): SourceKey | undefined {
+  const direct = appliesSources(f.applies_to);
+  if (direct.length === 1) return direct[0];
+  if (direct.length > 1) return undefined;
+  if (isCalcType(f.data_type) && f.formula) {
+    const out = new Set<SourceKey>();
+    const visited = new Set([f.field_key]);
+    for (const r of formulaRefs(f.formula))
+      collectRefSources(r, byKey, visited, out);
+    if (out.size === 1) return [...out][0];
+  }
+  return undefined;
+}
+
+// Pré-computa a fórmula legível dos campos calculados (tooltip das opções de
+// dropdown), com rótulos de exibição. Refs 'agg:' espelham os rótulos de
+// aggOperandRefs (calc-metrics) sem importá-lo (ciclo — ver aggInnerField).
+// Ref fora do catálogo (ex.: builder não-admin sem o campo) cai no ref cru.
+function decorateFormulaTexts(
+  all: AvailableField[],
+  byKey: Map<string, FieldDefinition>
+): void {
+  const labelByRef = new Map(all.map((a) => [a.field, a.label] as const));
+  const labelForRef = (ref: string): string => {
+    if (ref.startsWith("agg:")) {
+      const rest = ref.slice("agg:".length);
+      const i = rest.indexOf(":");
+      const fn = i === -1 ? rest : rest.slice(0, i);
+      const inner = i === -1 ? "*" : rest.slice(i + 1);
+      if (fn === "count")
+        return inner === "*"
+          ? "Contagem de registros"
+          : `Contagem de ${labelForRef(inner)}`;
+      if (fn === "sum") return `Σ ${labelForRef(inner)}`;
+      if (fn === "avg") return `Média ${labelForRef(inner)}`;
+      return ref;
+    }
+    return labelByRef.get(ref) ?? ref;
+  };
+  for (const a of all) {
+    if (!a.calc) continue;
+    // custom:<key> ou match:<fonte>:custom:<key> (calculado do registro casado).
+    let key: string | null = null;
+    if (a.field.startsWith("custom:")) {
+      key = a.field.slice("custom:".length);
+    } else if (a.field.startsWith("match:")) {
+      const inner = a.field.split(":").slice(2).join(":");
+      if (inner.startsWith("custom:")) key = inner.slice("custom:".length);
+    }
+    const def = key ? byKey.get(key) : undefined;
+    if (def?.formula) a.formulaText = formulaToText(def.formula, labelForRef);
+  }
+}
+
 /**
  * Junta os campos do núcleo + personalizados (field_definitions) + unificados
  * (correspondências globais). Os unificados aparecem como `unified:<key>`.
@@ -108,6 +254,7 @@ export function buildAvailableFields(
     editableCapable: isEditableCoreColumn(f.field) || isEditableRelation(f.field),
     writable: isEditableCoreColumn(f.field) || isWriteBackRelation(f.field),
   }));
+  const byKey = new Map(customFields.map((f) => [f.field_key, f] as const));
   const custom = customFields.map((f) =>
     f.data_type === "calculado_agg"
       ? {
@@ -118,6 +265,8 @@ export function buildAvailableFields(
           isMoney: false,
           editableCapable: false,
           aggCalc: true,
+          calc: true,
+          source: singleFieldSource(f, byKey),
         }
       : {
           field: `custom:${f.field_key}`,
@@ -128,6 +277,8 @@ export function buildAvailableFields(
           editableCapable: f.data_type !== "calculado",
           // Campo de Sync do Bitrix (custom com source_field_id) → grava de volta.
           writable: f.source_system === "bitrix" && Boolean(f.source_field_id),
+          calc: f.data_type === "calculado" || undefined,
+          source: singleFieldSource(f, byKey),
         }
   );
   const unified = correspondences.map((c) => ({
@@ -144,7 +295,9 @@ export function buildAvailableFields(
     ),
   }));
   const match = buildMatchFields(customFields);
-  return [...core, TODAY_FIELD, ...custom, ...unified, ...match];
+  const all = [...core, TODAY_FIELD, ...custom, ...unified, ...match];
+  decorateFormulaTexts(all, byKey);
+  return all;
 }
 
 // Colunas do núcleo úteis de puxar do registro CASADO (match:<fonte>:<ref>).
@@ -178,6 +331,8 @@ function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
         isNumeric: f.isNumeric,
         isDate: f.isDate,
         isMoney: f.isMoney,
+        source: src,
+        baseLabel: f.label,
       });
     }
     for (const f of customFields) {
@@ -190,6 +345,9 @@ function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
         isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
         isDate: f.data_type === "data",
         isMoney: resolveFieldMoney(f).isMoney,
+        source: src,
+        baseLabel: f.label,
+        calc: f.data_type === "calculado" || undefined,
       });
     }
   }

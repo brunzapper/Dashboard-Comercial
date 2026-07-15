@@ -29,7 +29,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import {
+  Combobox,
+  type ComboboxChip,
+  type ComboboxOption,
+} from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -126,6 +130,7 @@ export function BuilderSection({
 export function DimensionRow({
   dim,
   fieldOptions,
+  fieldChips,
   transformOptions,
   dateAggOptions,
   isDateField,
@@ -144,6 +149,7 @@ export function DimensionRow({
 }: {
   dim: Dimension;
   fieldOptions: ComboboxOption[];
+  fieldChips?: ComboboxChip[];
   transformOptions: ComboboxOption[];
   dateAggOptions: ComboboxOption[];
   isDateField: boolean;
@@ -166,6 +172,7 @@ export function DimensionRow({
         <Combobox
           className="flex-1"
           options={fieldOptions}
+          chips={fieldChips}
           value={dim.field}
           placeholder="— campo —"
           onValueChange={(field) => onChange({ field })}
@@ -273,6 +280,7 @@ export function DimensionRow({
 export function MetricRow({
   metric,
   metricOptions,
+  fieldChips,
   aggOptions,
   isMoney,
   isAggCalc,
@@ -287,6 +295,7 @@ export function MetricRow({
 }: {
   metric: Metric;
   metricOptions: ComboboxOption[];
+  fieldChips?: ComboboxChip[];
   aggOptions: ComboboxOption[];
   isMoney: boolean;
   isAggCalc: boolean;
@@ -323,6 +332,7 @@ export function MetricRow({
         <Combobox
           className="flex-1"
           options={metricOptions}
+          chips={fieldChips}
           value={metric.field}
           onValueChange={onFieldChange}
           aria-label="Campo da métrica"
@@ -376,6 +386,7 @@ export function MetricRow({
           {formulaMode === "builder" ? (
             <FormulaBuilder
               refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+              chips={fieldChips}
               initial={metric.formula ?? null}
               onChange={(f) => onChange({ formula: f })}
             />
@@ -543,6 +554,7 @@ export interface FilterSourceOption {
 export function FilterRow({
   filter,
   fieldOptions,
+  fieldChips,
   opOptions,
   sourceOptions,
   onChange,
@@ -550,6 +562,7 @@ export function FilterRow({
 }: {
   filter: WidgetFilter;
   fieldOptions: ComboboxOption[];
+  fieldChips?: ComboboxChip[];
   opOptions: ComboboxOption[];
   sourceOptions?: FilterSourceOption[];
   onChange: (patch: Partial<WidgetFilter>) => void;
@@ -566,6 +579,7 @@ export function FilterRow({
         <Combobox
           className="flex-1"
           options={fieldOptions}
+          chips={fieldChips}
           value={filter.field}
           placeholder="— campo —"
           onValueChange={(field) => onChange({ field })}

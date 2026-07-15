@@ -1,15 +1,19 @@
-// Versão: 1.1 | Data: 05/07/2026
+// Versão: 1.2 | Data: 15/07/2026
 // Layout autenticado: shell com navegação lateral filtrada por papel/permissão.
 // v1.1 (05/07/2026): itens de admin da Fase 6B (Operações/Responsáveis/Metas)
 //   gated por papel; NavItem ganha `role`.
+// v1.2 (15/07/2026): SourceLabelsProvider — rótulos curtos das fontes
+//   (Configurações → Fontes) para os dropdowns de campo em todo o app.
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { loadSourceLabels } from "@/lib/config/source-labels";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
+import { SourceLabelsProvider } from "@/components/source-labels-context";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
 // sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
@@ -49,12 +53,16 @@ export default async function AppLayout({
     .join(", ");
 
   // Preferência global do usuário: barra lateral fixada (default = oculta).
+  // Rótulos curtos das fontes: carregados uma vez por request para o provider.
   const supabase = await createClient();
-  const { data: userSettings } = await supabase
-    .from("user_settings")
-    .select("settings")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [{ data: userSettings }, sourceLabels] = await Promise.all([
+    supabase
+      .from("user_settings")
+      .select("settings")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    loadSourceLabels(supabase),
+  ]);
   const initialPinned =
     (userSettings?.settings as { sidebarPinned?: boolean } | null)
       ?.sidebarPinned ?? false;
@@ -81,8 +89,10 @@ export default async function AppLayout({
   );
 
   return (
-    <AppShell initialPinned={initialPinned} sidebar={sidebarContent}>
-      {children}
-    </AppShell>
+    <SourceLabelsProvider labels={sourceLabels}>
+      <AppShell initialPinned={initialPinned} sidebar={sidebarContent}>
+        {children}
+      </AppShell>
+    </SourceLabelsProvider>
   );
 }

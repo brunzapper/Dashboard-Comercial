@@ -38,7 +38,9 @@ import {
   SOURCE_RECORD_TYPE,
   type SourceKey,
 } from "@/lib/sources";
-import { CORE_FIELDS } from "@/lib/widgets/fields";
+import { buildAvailableFields, CORE_FIELDS } from "@/lib/widgets/fields";
+import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
+import { useSourceLabels } from "@/components/source-labels-context";
 import { allDateOperands } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { aggOperandRefs, condAggOperandRefs } from "@/lib/widgets/calc-metrics";
@@ -188,13 +190,23 @@ export function FieldsManager({
   const [editing, setEditing] = useState<FieldDefinition | undefined>(undefined);
   const [query, setQuery] = useState("");
 
+  // Catálogo de campos + rótulos de fonte SÓ p/ decorar os operandos de fórmula
+  // (fonte curta/chips/tooltip nos seletores — decorateRefOptions não toca nos
+  // labels, que fazem o round-trip texto⇄tokens e a validação do servidor).
+  const sourceLabels = useSourceLabels();
+  const fieldSourceChips = sourceChips(sourceLabels);
+  // Memoizado: a digitação na busca re-renderiza o manager inteiro.
+  const availableForHints = useMemo(() => buildAvailableFields(fields), [fields]);
+  const decorate = (refs: RefOption[]): RefOption[] =>
+    decorateRefOptions(refs, availableForHints, sourceLabels);
+
   // Operandos do construtor de fórmula: colunas numéricas (núcleo + custom não
   // calculado) e operandos de DATA (datas do próprio registro, custom `data` e
   // datas do registro casado, match:<fonte>:<data>). Agrupados para o seletor.
   const customDateFields = fields
     .filter((f) => f.data_type === "data")
     .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const numericRefs: RefOption[] = [
+  const numericRefs: RefOption[] = decorate([
     ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
       ref: f.field,
       label: f.label,
@@ -206,7 +218,7 @@ export function FieldsManager({
       )
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
     ...allDateOperands(customDateFields),
-  ];
+  ]);
   // Catálogo completo p/ o editor de TEXTO (SE/E/OU): números + datas + colunas
   // de texto/seleção/booleano (próprias e do registro casado).
   const customCondFields = fields
@@ -214,7 +226,7 @@ export function FieldsManager({
     .map((f) => ({ field_key: f.field_key, label: f.label }));
   const allRefs: RefOption[] = [
     ...numericRefs,
-    ...allCondOperands(customCondFields),
+    ...decorate(allCondOperands(customCondFields)),
   ];
   // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
@@ -230,7 +242,7 @@ export function FieldsManager({
       .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
       .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
   ];
-  const aggRefs: RefOption[] = [
+  const aggRefs: RefOption[] = decorate([
     ...aggOperandRefs(
       aggNumericFields,
       // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
@@ -247,7 +259,7 @@ export function FieldsManager({
       ]
     ),
     ...condAggOperandRefs(aggNumericFields, customCondFields, customDateFields),
-  ];
+  ]);
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
@@ -344,6 +356,7 @@ export function FieldsManager({
               numericRefs={numericRefs}
               allRefs={allRefs}
               aggRefs={aggRefs}
+              fieldChips={fieldSourceChips}
               currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}
             />

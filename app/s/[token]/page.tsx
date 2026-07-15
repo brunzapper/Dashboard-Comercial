@@ -87,6 +87,8 @@ import {
 import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-actions";
 import { SnapshotClient } from "@/components/snapshots/snapshot-client";
 import { frozenPeriodLabel } from "@/components/snapshots/labels";
+import { SourceLabelsProvider } from "@/components/source-labels-context";
+import { loadSourceLabels } from "@/lib/config/source-labels";
 
 // Sempre computa por request (os filtros do visitante vivem na URL) e nunca
 // entra em índice de busca.
@@ -151,6 +153,9 @@ export default async function SnapshotPage({
   const fields = (cfg.fields ?? []) as FieldDefinition[];
   const correspondences = cfg.correspondences ?? [];
   const available = buildAvailableFields(fields, correspondences);
+  // Rótulos curtos das fontes (dropdowns de campo do viewer) — leitura VIVA de
+  // sync_config via service role (config de exibição, não dado congelado).
+  const sourceLabels = await loadSourceLabels(service);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
@@ -752,33 +757,37 @@ export default async function SnapshotPage({
     : undefined;
 
   return (
-    <SnapshotClient
-      snapshotName={snap.name}
-      dashboardName={cfg.dashboard.name}
-      tabName={cfg.tabName}
-      periodLabel={periodLabel}
-      lastRefreshedAt={snap.last_refreshed_at}
-      dashboardId={snap.dashboard_id}
-      widgets={renderWidgets}
-      dataById={dataById}
-      recordListById={recordListById}
-      entityListById={entityListById}
-      calcById={calcById}
-      calcVarsById={calcVarsById}
-      noteById={noteById}
-      calcExprById={cfg.calcExprById ?? {}}
-      tableCellsById={cfg.tableCellsById ?? {}}
-      quickTableResults={quickTableResults}
-      fields={fields}
-      fkLabels={fkLabels}
-      available={available}
-      settings={dashSettings}
-      activeTabId={activeTabId}
-      dateFormat={dashSettings.dateFormat}
-      currencyRates={currencyRates}
-      conversionPeriodById={conversionPeriodById}
-      filterOptionsById={allowWidgetFilters ? (cfg.fieldFilterOptions ?? {}) : undefined}
-      quickFiltersById={allowQuickFilters ? quickFiltersById : undefined}
-    />
+    <SourceLabelsProvider labels={sourceLabels}>
+      <SnapshotClient
+        snapshotName={snap.name}
+        dashboardName={cfg.dashboard.name}
+        tabName={cfg.tabName}
+        periodLabel={periodLabel}
+        lastRefreshedAt={snap.last_refreshed_at}
+        dashboardId={snap.dashboard_id}
+        widgets={renderWidgets}
+        dataById={dataById}
+        recordListById={recordListById}
+        entityListById={entityListById}
+        calcById={calcById}
+        calcVarsById={calcVarsById}
+        noteById={noteById}
+        calcExprById={cfg.calcExprById ?? {}}
+        tableCellsById={cfg.tableCellsById ?? {}}
+        quickTableResults={quickTableResults}
+        fields={fields}
+        fkLabels={fkLabels}
+        available={available}
+        settings={dashSettings}
+        activeTabId={activeTabId}
+        dateFormat={dashSettings.dateFormat}
+        currencyRates={currencyRates}
+        conversionPeriodById={conversionPeriodById}
+        filterOptionsById={
+          allowWidgetFilters ? (cfg.fieldFilterOptions ?? {}) : undefined
+        }
+        quickFiltersById={allowQuickFilters ? quickFiltersById : undefined}
+      />
+    </SourceLabelsProvider>
   );
 }
