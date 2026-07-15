@@ -22,7 +22,7 @@ import {
   useState,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Plus, Settings2 } from "lucide-react";
+import { Copy, Eraser, Loader2, Palette, Plus, Settings2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -68,13 +68,18 @@ import { ColumnPanel, RowPanel, useQuickTableConfig } from "./column-panel";
 // Posição de uma célula na GRADE RENDERIZADA (índices de exibição; as chaves
 // estáveis ficam nas próprias células da matriz).
 type Pos = { r: number; c: number };
+// Seleção retangular: âncora (onde o gesto começou) e cabeça (onde está). Uma
+// célula só = anchor === head.
+type Sel = { anchor: Pos; head: Pos };
 
 // Menus/painéis flutuantes abertos por gesto (um por vez).
 type Menu =
   | { kind: "ctx"; x: number; y: number; column: string; rowKey?: string; scopes: ColorScope[] }
   | { kind: "color"; x: number; y: number; scope: ColorScope; column: string; rowKey?: string }
   | { kind: "colPanel"; x: number; y: number; colId: string }
-  | { kind: "rowPanel"; x: number; y: number; rowId: string };
+  | { kind: "rowPanel"; x: number; y: number; rowId: string }
+  // Aparência em LOTE da seleção retangular (cor/alinhamento por célula).
+  | { kind: "batchColor"; x: number; y: number };
 
 export function QuickTableWidget({
   widget,
@@ -414,113 +419,285 @@ export function QuickTableWidget({
   const setRowHeight = (rowKey: string, h: number) =>
     changeAp({ rowHeights: { ...(t.rowHeights ?? {}), [rowKey]: h } });
 
+  // Aparência em LOTE: aplica cor/alinhamento a TODAS as células da seleção
+  // num único patch (um save, um refresh).
+  function setBatchColor(cp: ColorPair) {
+    const clear = !cp.fill && !cp.text;
+    const map = { ...(t.cellColors ?? {}) };
+    for (const cell of rectCells()) {
+      const k = `${cell.rowKey}:${cell.colKey}`;
+      if (clear) delete map[k];
+      else map[k] = cp;
+    }
+    changeAp({ cellColors: map });
+  }
+  function setBatchAlign(a: TableAlign | undefined) {
+    const map = { ...(t.cellAlign ?? {}) };
+    for (const cell of rectCells()) {
+      const k = `${cell.rowKey}:${cell.colKey}`;
+      if (!a) delete map[k];
+      else map[k] = a;
+    }
+    changeAp({ cellAlign: map });
+  }
+
   // ---- seleção e edição (UX de planilha) ----
-  const [sel, setSel] = useState<Pos | null>(null);
+  const [sel, setSel] = useState<Sel | null>(null);
   const [editing, setEditing] = useState<{ pos: Pos; draft: string } | null>(
     null
   );
+  // Mini-toolbar de aparência em lote: aparece ao SOLTAR um arrasto de seleção
+  // multi-célula (posição do ponteiro no fim do gesto).
+  const [selToolbar, setSelToolbar] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const dragSelAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => dragSelAbort.current?.abort(), []);
 
   const cellAt = (p: Pos): QTCell | undefined => matrix.rows[p.r]?.cells[p.c];
 
-  const startEdit = useCallback(
-    (p: Pos, initial?: string) => {
-      const cell = matrix.rows[p.r]?.cells[p.c];
-      if (!cell?.editable) return;
-      setSel(p);
-      setEditing({ pos: p, draft: initial ?? (cell.raw ?? "") });
-    },
-    [matrix]
-  );
+  // Retângulo normalizado da seleção (índices de exibição, inclusivos).
+  const rect = sel
+    ? {
+        r0: Math.min(sel.anchor.r, sel.head.r),
+        r1: Math.max(sel.anchor.r, sel.head.r),
+        c0: Math.min(sel.anchor.c, sel.head.c),
+        c1: Math.max(sel.anchor.c, sel.head.c),
+      }
+    : null;
+  const inRect = (r: number, c: number) =>
+    rect != null && r >= rect.r0 && r <= rect.r1 && c >= rect.c0 && c <= rect.c1;
+  const multiSel =
+    rect != null && (rect.r0 !== rect.r1 || rect.c0 !== rect.c1);
+  // Células do retângulo, na ordem de leitura (linhas de cima p/ baixo).
+  const rectCells = (): QTCell[] => {
+    if (!rect) return [];
+    const out: QTCell[] = [];
+    for (let r = rect.r0; r <= rect.r1; r += 1) {
+      for (let c = rect.c0; c <= rect.c1; c += 1) {
+        const cell = matrix.rows[r]?.cells[c];
+        if (cell) out.push(cell);
+      }
+    }
+    return out;
+  };
 
-  const commitEdit = useCallback(
-    (move?: "down" | "right") => {
-      setEditing((cur) => {
-        if (!cur) return null;
-        const cell = matrix.rows[cur.pos.r]?.cells[cur.pos.c];
-        if (cell && (cell.raw ?? "") !== cur.draft) {
-          saveCells([
-            {
-              rowKey: cell.rowKey,
-              colKey: cell.colKey,
-              value: cur.draft.trim() === "" ? null : cur.draft,
-            },
-          ]);
-        }
-        if (move) {
-          setSel((s) => {
-            if (!s) return s;
-            const r = move === "down" ? s.r + 1 : s.r;
-            const c = move === "right" ? s.c + 1 : s.c;
-            if (r < matrix.rows.length && c < matrix.cols.length) return { r, c };
-            return s;
-          });
-        }
-        return null;
+  // Texto exibido de uma célula (fórmulas usam o valor computado no cliente).
+  const displayOf = (cell: QTCell): string => {
+    if (cell.content !== "formula") return cell.display;
+    const k = cellKey(cell.rowKey, cell.colKey);
+    return (
+      formulaCalc.errors.get(k) ??
+      formatFormulaResult(formulaCalc.values.get(k) ?? null)
+    );
+  };
+
+  // Copiar a seleção como TSV (compatível com Excel/Google Sheets).
+  function copySelection() {
+    if (!rect) return;
+    const lines: string[] = [];
+    for (let r = rect.r0; r <= rect.r1; r += 1) {
+      const cols: string[] = [];
+      for (let c = rect.c0; c <= rect.c1; c += 1) {
+        const cell = matrix.rows[r]?.cells[c];
+        cols.push(cell ? displayOf(cell).replaceAll("\t", " ") : "");
+      }
+      lines.push(cols.join("\t"));
+    }
+    void navigator.clipboard?.writeText(lines.join("\n"));
+  }
+
+  // Colar TSV a partir da ÂNCORA: só em células editáveis pela role (as
+  // bloqueadas/derivadas são puladas em silêncio). "=…"/"{=…}" colados entram
+  // como fórmula/expressão.
+  function pasteText(text: string) {
+    if (!sel || !text) return;
+    const start = {
+      r: Math.min(sel.anchor.r, sel.head.r),
+      c: Math.min(sel.anchor.c, sel.head.c),
+    };
+    const rows = text.replace(/\r/g, "").split("\n");
+    while (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+    const batch: { rowKey: string; colKey: string; value: string | null }[] = [];
+    rows.forEach((line, dr) => {
+      line.split("\t").forEach((val, dc) => {
+        const cell = matrix.rows[start.r + dr]?.cells[start.c + dc];
+        if (!cell?.editable) return;
+        batch.push({
+          rowKey: cell.rowKey,
+          colKey: cell.colKey,
+          value: val.trim() === "" ? null : val,
+        });
       });
-      containerRef.current?.focus();
-    },
-    [matrix, saveCells]
-  );
+    });
+    saveCells(batch);
+  }
 
-  const cancelEdit = useCallback(() => {
+  // Limpar (Delete) todas as células editáveis da seleção.
+  function clearSelection() {
+    const batch = rectCells()
+      .filter((cell) => cell.editable && cell.raw != null)
+      .map((cell) => ({
+        rowKey: cell.rowKey,
+        colKey: cell.colKey,
+        value: null,
+      }));
+    saveCells(batch);
+  }
+
+  function startEdit(p: Pos, initial?: string) {
+    const cell = matrix.rows[p.r]?.cells[p.c];
+    if (!cell?.editable) return;
+    setSel({ anchor: p, head: p });
+    setSelToolbar(null);
+    setEditing({ pos: p, draft: initial ?? (cell.raw ?? "") });
+  }
+
+  function commitEdit(move?: "down" | "right") {
+    setEditing((cur) => {
+      if (!cur) return null;
+      const cell = matrix.rows[cur.pos.r]?.cells[cur.pos.c];
+      if (cell && (cell.raw ?? "") !== cur.draft) {
+        saveCells([
+          {
+            rowKey: cell.rowKey,
+            colKey: cell.colKey,
+            value: cur.draft.trim() === "" ? null : cur.draft,
+          },
+        ]);
+      }
+      if (move) {
+        setSel((s) => {
+          if (!s) return s;
+          const r = move === "down" ? s.anchor.r + 1 : s.anchor.r;
+          const c = move === "right" ? s.anchor.c + 1 : s.anchor.c;
+          if (r < matrix.rows.length && c < matrix.cols.length) {
+            return { anchor: { r, c }, head: { r, c } };
+          }
+          return s;
+        });
+      }
+      return null;
+    });
+    containerRef.current?.focus();
+  }
+
+  function cancelEdit() {
     setEditing(null);
     containerRef.current?.focus();
-  }, []);
+  }
 
   // Teclado no container (fora da edição): navegação/atalhos de planilha.
+  // Setas movem (Shift estende a seleção); Ctrl/Cmd+C copia TSV; colar chega
+  // pelo evento `paste` do container; Delete limpa a seleção em lote.
   function onKeyDown(e: React.KeyboardEvent) {
     if (editing) return; // o input cuida do próprio teclado
     if (!sel) return;
-    const move = (dr: number, dc: number) => {
+    const move = (dr: number, dc: number, extend: boolean) => {
       e.preventDefault();
+      setSelToolbar(null);
       setSel((s) => {
         if (!s) return s;
-        const r = Math.min(Math.max(0, s.r + dr), matrix.rows.length - 1);
-        const c = Math.min(Math.max(0, s.c + dc), matrix.cols.length - 1);
-        return { r, c };
+        const base = extend ? s.head : s.anchor;
+        const r = Math.min(Math.max(0, base.r + dr), matrix.rows.length - 1);
+        const c = Math.min(Math.max(0, base.c + dc), matrix.cols.length - 1);
+        return extend
+          ? { anchor: s.anchor, head: { r, c } }
+          : { anchor: { r, c }, head: { r, c } };
       });
     };
+    if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+      e.preventDefault();
+      copySelection();
+      return;
+    }
     switch (e.key) {
       case "ArrowUp":
-        return move(-1, 0);
+        return move(-1, 0, e.shiftKey);
       case "ArrowDown":
-        return move(1, 0);
+        return move(1, 0, e.shiftKey);
       case "ArrowLeft":
-        return move(0, -1);
+        return move(0, -1, e.shiftKey);
       case "ArrowRight":
-        return move(0, 1);
+        return move(0, 1, e.shiftKey);
       case "Tab":
-        return move(0, e.shiftKey ? -1 : 1);
+        return move(0, e.shiftKey ? -1 : 1, false);
       case "Enter":
       case "F2": {
         e.preventDefault();
-        startEdit(sel);
+        startEdit(sel.anchor);
         return;
       }
       case "Escape":
         setSel(null);
+        setSelToolbar(null);
         return;
       case "Delete":
       case "Backspace": {
-        const cell = cellAt(sel);
-        if (cell?.editable && cell.raw != null) {
-          e.preventDefault();
-          saveCells([{ rowKey: cell.rowKey, colKey: cell.colKey, value: null }]);
-        }
+        e.preventDefault();
+        clearSelection();
         return;
       }
       default: {
         // Digitar um caractere imprimível substitui o conteúdo (como planilha).
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          const cell = cellAt(sel);
+          const cell = cellAt(sel.anchor);
           if (cell?.editable) {
             e.preventDefault();
-            startEdit(sel, e.key);
+            startEdit(sel.anchor, e.key);
           }
         }
       }
     }
+  }
+
+  // Arrasto de seleção: âncora no pointerdown da célula; a cabeça segue o
+  // ponteiro (elementFromPoint → data-r/data-c). Ao soltar com mais de uma
+  // célula selecionada, abre a mini-toolbar de aparência (se pode estilizar).
+  function beginDragSelect(e: React.PointerEvent, p: Pos) {
+    if (e.shiftKey && sel) {
+      setSel({ anchor: sel.anchor, head: p });
+      return;
+    }
+    setSel({ anchor: p, head: p });
+    setSelToolbar(null);
+    dragSelAbort.current?.abort();
+    const ac = new AbortController();
+    dragSelAbort.current = ac;
+    const { signal } = ac;
+    let last: Pos = p;
+    window.addEventListener(
+      "pointermove",
+      (ev) => {
+        const el = document
+          .elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest("[data-r]") as HTMLElement | null;
+        if (!el) return;
+        const r = Number(el.dataset.r);
+        const c = Number(el.dataset.c);
+        if (!Number.isInteger(r) || !Number.isInteger(c)) return;
+        if (r === last.r && c === last.c) return;
+        last = { r, c };
+        setSel((s) => (s ? { anchor: s.anchor, head: { r, c } } : s));
+      },
+      { signal }
+    );
+    window.addEventListener(
+      "pointerup",
+      (ev) => {
+        ac.abort();
+        if (
+          (last.r !== p.r || last.c !== p.c) &&
+          canEdit &&
+          onAppearanceChange
+        ) {
+          setSelToolbar({ x: ev.clientX + 8, y: ev.clientY + 8 });
+        }
+      },
+      { signal }
+    );
+    window.addEventListener("pointercancel", () => ac.abort(), { signal });
   }
 
   // ---- estilos derivados da aparência ----
@@ -578,6 +755,18 @@ export function QuickTableWidget({
         ref={containerRef}
         tabIndex={0}
         onKeyDown={onKeyDown}
+        onCopy={(e) => {
+          if (editing || !sel) return;
+          e.preventDefault();
+          copySelection();
+        }}
+        onPaste={(e) => {
+          if (editing || !sel) return;
+          const text = e.clipboardData.getData("text/plain");
+          if (!text) return;
+          e.preventDefault();
+          pasteText(text);
+        }}
         className="outline-none"
         role="grid"
         aria-label={widget.title ?? "Tabela rápida"}
@@ -757,7 +946,9 @@ export function QuickTableWidget({
                     </td>
                   ) : null}
                   {row.cells.map((cell, ci) => {
-                    const isSel = sel?.r === ri && sel?.c === ci;
+                    const isSel =
+                      sel?.anchor.r === ri && sel?.anchor.c === ci;
+                    const selected = !isSel && inRect(ri, ci);
                     const isEditing =
                       editing?.pos.r === ri && editing?.pos.c === ci;
                     // Coluna livre em que ESTE usuário não pode digitar
@@ -823,8 +1014,17 @@ export function QuickTableWidget({
                           if (isEditing) return;
                           e.preventDefault();
                           if (editing) commitEdit();
-                          setSel({ r: ri, c: ci });
                           containerRef.current?.focus();
+                          if (e.button === 0) {
+                            beginDragSelect(e, { r: ri, c: ci });
+                          } else if (!inRect(ri, ci)) {
+                            // Clique-direito fora da seleção: seleciona a célula.
+                            setSel({
+                              anchor: { r: ri, c: ci },
+                              head: { r: ri, c: ci },
+                            });
+                            setSelToolbar(null);
+                          }
                         }}
                         onDoubleClick={() => {
                           if (cell.editable) startEdit({ r: ri, c: ci });
@@ -883,6 +1083,12 @@ export function QuickTableWidget({
                             {display || " "}
                           </span>
                         )}
+                        {selected ? (
+                          <span
+                            aria-hidden
+                            className="bg-primary/10 pointer-events-none absolute inset-0"
+                          />
+                        ) : null}
                       </td>
                     );
                   })}
@@ -986,6 +1192,66 @@ export function QuickTableWidget({
           onDelete={() => deleteRow(menu.rowId)}
           onClose={() => setMenu(null)}
         />
+      ) : null}
+      {menu?.kind === "batchColor" && sel ? (
+        <ColorPopover
+          x={menu.x}
+          y={menu.y}
+          title={`Aparência da seleção (${rectCells().length} células)`}
+          value={
+            t.cellColors?.[
+              `${cellAt(sel.anchor)?.rowKey}:${cellAt(sel.anchor)?.colKey}`
+            ] ?? {}
+          }
+          onChange={setBatchColor}
+          onClose={() => setMenu(null)}
+          align={{
+            value:
+              t.cellAlign?.[
+                `${cellAt(sel.anchor)?.rowKey}:${cellAt(sel.anchor)?.colKey}`
+              ],
+            onSelect: setBatchAlign,
+          }}
+        />
+      ) : null}
+      {/* Mini-toolbar da seleção multi-célula (aparece ao soltar o arrasto). */}
+      {selToolbar && multiSel && !menu ? (
+        <div
+          className="bg-popover text-popover-foreground fixed z-50 flex items-center gap-0.5 rounded-md border p-1 shadow-md"
+          style={{
+            left: Math.max(4, Math.min(selToolbar.x, window.innerWidth - 160)),
+            top: Math.max(4, Math.min(selToolbar.y, window.innerHeight - 48)),
+          }}
+        >
+          {canEdit && onAppearanceChange ? (
+            <button
+              type="button"
+              className="hover:bg-accent hover:text-accent-foreground flex items-center gap-1 rounded-sm px-2 py-1 text-xs"
+              onClick={() =>
+                setMenu({ kind: "batchColor", x: selToolbar.x, y: selToolbar.y })
+              }
+            >
+              <Palette className="size-3.5" /> Aparência
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="hover:bg-accent hover:text-accent-foreground flex items-center gap-1 rounded-sm px-2 py-1 text-xs"
+            onClick={copySelection}
+          >
+            <Copy className="size-3.5" /> Copiar
+          </button>
+          <button
+            type="button"
+            className="hover:bg-accent hover:text-accent-foreground flex items-center gap-1 rounded-sm px-2 py-1 text-xs"
+            onClick={() => {
+              clearSelection();
+              setSelToolbar(null);
+            }}
+          >
+            <Eraser className="size-3.5" /> Limpar
+          </button>
+        </div>
       ) : null}
     </div>
   );
