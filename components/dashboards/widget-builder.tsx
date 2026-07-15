@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 15/07/2026
+// Versão: 1.6 | Data: 15/07/2026
+// v1.6 (15/07/2026): correção da digitação no "Nome exibido" das métricas —
+//   calcRefs memoizado (identidade estável p/ os editores de fórmula) e
+//   updates de métrica/dimensão/filtro em forma funcional (sem snapshot
+//   obsoleto); "Contagem de registros" também ganha o campo "Nome exibido".
 // v1.5 (15/07/2026): filtros segmentados por fonte — cada linha de filtro ganha
 //   o seletor "Fontes" (pass-through: só as fontes marcadas são restringidas).
 // v1.4 (15/07/2026): formato "Percentual (%)" nas métricas calculadas ad-hoc
@@ -15,7 +19,7 @@
 // Monta um WidgetConfig e salva via create/updateWidget.
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -493,31 +497,39 @@ export function WidgetBuilder({
   // de moeda/conversão da métrica.
   const isMoneyField = (field: string): boolean =>
     available.find((a) => a.field === field)?.isMoney ?? false;
-  const updateMetric = (i: number, patch: Partial<Metric>) => {
-    const next = [...metrics];
-    next[i] = { ...metrics[i], ...patch };
-    setMetrics(next);
-  };
+  // Forma funcional: efeitos dos editores de fórmula também gravam métricas —
+  // um snapshot do closure aqui poderia sobrescrever teclas recém-digitadas.
+  const updateMetric = (i: number, patch: Partial<Metric>) =>
+    setMetrics((prev) => {
+      const next = [...prev];
+      next[i] = { ...prev[i], ...patch };
+      return next;
+    });
 
   // Refs disponíveis para as métricas/widget calculados: agregações de registros.
   // Contáveis (agg:count:<campo>): datas/numéricos reais (não aggCalc/sintéticos)
   // — permite razões como reunião→venda (Contagem de datas por tipo de registro).
-  const countableFields = available.filter(
-    (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
-  );
   // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
   // de condição (texto/seleção/booleano e datas dos campos personalizados).
   // Mesma montagem do servidor (aggOperandCatalog em campos/actions.ts).
-  const condAggCustomCond = fields
-    .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-    .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const condAggCustomDate = fields
-    .filter((f) => f.data_type === "data")
-    .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const calcRefs: RefOption[] = [
-    ...aggOperandRefs(numericFields, countableFields),
-    ...condAggOperandRefs(numericFields, condAggCustomCond, condAggCustomDate),
-  ];
+  // Memoizado: os editores de fórmula derivam a validação da identidade de
+  // `refs`; um array novo por render disparava reemissão de onChange em cadeia.
+  const calcRefs: RefOption[] = useMemo(() => {
+    const numeric = available.filter((f) => f.isNumeric);
+    const countable = available.filter(
+      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+    );
+    const customCond = fields
+      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
+      .map((f) => ({ field_key: f.field_key, label: f.label }));
+    const customDate = fields
+      .filter((f) => f.data_type === "data")
+      .map((f) => ({ field_key: f.field_key, label: f.label }));
+    return [
+      ...aggOperandRefs(numeric, countable),
+      ...condAggOperandRefs(numeric, customCond, customDate),
+    ];
+  }, [available, fields]);
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>
@@ -1493,13 +1505,15 @@ export function WidgetBuilder({
                   editableCapable={af?.editableCapable ?? false}
                   writable={af?.writable ?? false}
                   fieldMenu={renderFieldMenu(d.field)}
-                  onChange={(patch) => {
-                    const next = [...dimensions];
-                    next[i] = { ...d, ...patch };
-                    setDimensions(next);
-                  }}
+                  onChange={(patch) =>
+                    setDimensions((prev) => {
+                      const next = [...prev];
+                      next[i] = { ...prev[i], ...patch };
+                      return next;
+                    })
+                  }
                   onRemove={() =>
-                    setDimensions(dimensions.filter((_, j) => j !== i))
+                    setDimensions((prev) => prev.filter((_, j) => j !== i))
                   }
                   onColumnAggChange={(a) =>
                     setColumnAgg((prev) => ({ ...prev, [d.field]: a }))
@@ -1514,7 +1528,10 @@ export function WidgetBuilder({
               size="sm"
               className="self-start"
               onClick={() =>
-                setDimensions([...dimensions, { field: "", transform: "none" }])
+                setDimensions((prev) => [
+                  ...prev,
+                  { field: "", transform: "none" },
+                ])
               }
             >
               <Plus className="size-4" /> Adicionar dimensão
@@ -1569,44 +1586,51 @@ export function WidgetBuilder({
                     ? m.field === CALC_METRIC_FIELD
                       ? "Fórmula"
                       : fieldLabel(m.field, available)
-                    : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
+                    : m.field === "*"
+                      ? "Contagem de registros"
+                      : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
                 }
                 fieldMenu={renderFieldMenu(m.field)}
                 onFieldChange={(field) => {
-                  const next = [...metrics];
-                  if (isAggCalcField(field)) {
-                    // Métrica calculada de agregados: a fórmula manda (agg
-                    // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
-                    // sentinela 'calc:formula'.
-                    next[i] = {
-                      field,
-                      agg: "sum",
-                      calc: true,
-                      label: m.label,
-                      ...(field === CALC_METRIC_FIELD
-                        ? {
-                            formula: m.formula,
-                            resultCurrency: m.resultCurrency,
-                            resultPercent: m.resultPercent,
-                          }
-                        : {}),
-                    };
-                  } else {
-                    const cleaned: Metric = {
-                      ...m,
-                      field,
-                      agg: field === "*" ? "count" : m.agg,
-                    };
-                    delete cleaned.calc;
-                    delete cleaned.formula;
-                    delete cleaned.resultCurrency;
-                    delete cleaned.resultPercent;
-                    next[i] = cleaned;
-                  }
-                  setMetrics(next);
+                  setMetrics((prev) => {
+                    const next = [...prev];
+                    const cur = prev[i];
+                    if (isAggCalcField(field)) {
+                      // Métrica calculada de agregados: a fórmula manda (agg
+                      // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
+                      // sentinela 'calc:formula'.
+                      next[i] = {
+                        field,
+                        agg: "sum",
+                        calc: true,
+                        label: cur.label,
+                        ...(field === CALC_METRIC_FIELD
+                          ? {
+                              formula: cur.formula,
+                              resultCurrency: cur.resultCurrency,
+                              resultPercent: cur.resultPercent,
+                            }
+                          : {}),
+                      };
+                    } else {
+                      const cleaned: Metric = {
+                        ...cur,
+                        field,
+                        agg: field === "*" ? "count" : cur.agg,
+                      };
+                      delete cleaned.calc;
+                      delete cleaned.formula;
+                      delete cleaned.resultCurrency;
+                      delete cleaned.resultPercent;
+                      next[i] = cleaned;
+                    }
+                    return next;
+                  });
                 }}
                 onChange={(patch) => updateMetric(i, patch)}
-                onRemove={() => setMetrics(metrics.filter((_, j) => j !== i))}
+                onRemove={() =>
+                  setMetrics((prev) => prev.filter((_, j) => j !== i))
+                }
               />
             ))}
             <Button
@@ -1615,7 +1639,7 @@ export function WidgetBuilder({
               size="sm"
               className="self-start"
               onClick={() =>
-                setMetrics([...metrics, { field: "*", agg: "count" }])
+                setMetrics((prev) => [...prev, { field: "*", agg: "count" }])
               }
             >
               <Plus className="size-4" /> Adicionar métrica
@@ -1641,12 +1665,16 @@ export function WidgetBuilder({
                 fieldOptions={rpcFieldOptions}
                 opOptions={FILTER_OP_OPTIONS}
                 sourceOptions={filterSourceOptions(f)}
-                onChange={(patch) => {
-                  const next = [...filters];
-                  next[i] = { ...f, ...patch };
-                  setFilters(next);
-                }}
-                onRemove={() => setFilters(filters.filter((_, j) => j !== i))}
+                onChange={(patch) =>
+                  setFilters((prev) => {
+                    const next = [...prev];
+                    next[i] = { ...prev[i], ...patch };
+                    return next;
+                  })
+                }
+                onRemove={() =>
+                  setFilters((prev) => prev.filter((_, j) => j !== i))
+                }
               />
             ))}
             <Button
@@ -1655,7 +1683,10 @@ export function WidgetBuilder({
               size="sm"
               className="self-start"
               onClick={() =>
-                setFilters([...filters, { field: "", op: "eq", value: "" }])
+                setFilters((prev) => [
+                  ...prev,
+                  { field: "", op: "eq", value: "" },
+                ])
               }
             >
               <Plus className="size-4" /> Adicionar filtro

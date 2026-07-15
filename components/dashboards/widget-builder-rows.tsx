@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): "Nome exibido" também para a métrica "Contagem de
+//   registros" (field "*") — o pipeline (save/engine/chart) já honrava o
+//   apelido; só o input era ocultado.
 // v1.3 (15/07/2026): FilterRow ganha seletor de fontes-alvo (pass-through):
 //   nenhum marcado = todas as fontes; o filtro só restringe as fontes marcadas
 //   e as demais fontes do widget passam sem restrição.
@@ -413,7 +416,7 @@ export function MetricRow({
           </p>
         </div>
       ) : null}
-      {metric.field && metric.field !== "*" ? (
+      {metric.field ? (
         <Input
           className="h-8 text-sm"
           placeholder={`Nome exibido (padrão: ${defaultLabel})`}
