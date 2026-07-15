@@ -359,10 +359,12 @@ select
 from dados d
 -- distinct on: nomes duplicados em responsibles não podem multiplicar linhas
 -- (o ON CONFLICT não aceita a mesma linha duas vezes no mesmo INSERT).
+-- (user_id is null) prefere a linha vinculada a usuário: o RLS de records
+-- (0037) libera por responsibles.user_id, senão o vendedor não vê o mock.
 left join (
   select distinct on (display_name) id, display_name
   from public.responsibles
-  order by display_name, created_at
+  order by display_name, (user_id is null), created_at
 ) resp on resp.display_name = d.responsavel
 on conflict (source_system, source_id) do nothing;
 
