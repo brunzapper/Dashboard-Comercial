@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 13/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): modo controlado só emite onChange quando a fórmula
+//   emitida MUDA (assinatura em ref) — antes reemitia a cada render do pai
+//   (identidade nova de `refs`), realimentando o estado num loop que revertia
+//   teclas digitadas no "Nome exibido" das métricas.
 // Editor de fórmula por TEXTO estilo Google Sheets (pt-BR) para campos
 // calculados: SE(E([Valor] > 10; [Etapa] = "Ganho"); [Valor] * 2; 0).
 // Digite `[` para abrir o autocomplete de colunas (setas + Enter inserem).
@@ -68,9 +72,18 @@ export function FormulaTextEditor({
     [text, refs]
   );
 
+  // Última fórmula emitida (assinatura): `validation` ganha identidade nova a
+  // cada render do pai (a prop `refs` é recriada lá), e reemitir o mesmo
+  // conteúdo realimenta o setState do pai num loop de re-render que engole
+  // teclas digitadas em outros campos da mesma linha/estado.
+  const lastEmitted = useRef<string | null>(null);
   useEffect(() => {
     if (!onChange) return;
-    onChange(validation?.ok ? validation.formula : { tokens: [] });
+    const payload = validation?.ok ? validation.formula : { tokens: [] };
+    const sig = JSON.stringify(payload);
+    if (sig === lastEmitted.current) return;
+    lastEmitted.current = sig;
+    onChange(payload);
     // onChange é passado inline pelo pai; dependemos só da validação.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validation]);
