@@ -141,7 +141,9 @@ export function SnapshotClient({
   return (
     <SnapshotModeProvider value={{ snapshot: true, quickTableResults }}>
       <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 p-4 md:p-6">
+        {/* Largura total (sem max-width): o snapshot não tem sidebar e deve
+            ocupar a tela inteira, como o <main> do app autenticado (p-6). */}
+        <div className="flex w-full flex-col gap-4 p-4 md:p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div className="flex min-w-0 flex-col">
               <h1 className="truncate text-2xl font-semibold">{snapshotName}</h1>
