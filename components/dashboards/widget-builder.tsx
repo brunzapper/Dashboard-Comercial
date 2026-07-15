@@ -35,7 +35,13 @@ import {
   FormulaBuilder,
   type RefOption,
 } from "@/components/campos/formula-builder";
-import { validateFormula, type Formula } from "@/lib/records/formulas";
+import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import { cn } from "@/lib/utils";
+import {
+  formulaUsesFunctions,
+  validateFormula,
+  type Formula,
+} from "@/lib/records/formulas";
 import { SOURCE_KEYS, SOURCE_LABELS, type SourceKey } from "@/lib/sources";
 import {
   Sheet,
@@ -81,7 +87,13 @@ import {
   FILTER_OPS,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
-import { aggOperandRefs, CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
+import {
+  aggOperandRefs,
+  CALC_METRIC_FIELD,
+  condAggOperandRefs,
+  validateCondAggRefs,
+} from "@/lib/widgets/calc-metrics";
+import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import {
   BuilderSection,
   DimensionRow,
@@ -370,6 +382,12 @@ export function WidgetBuilder({
   const [formula, setFormula] = useState<Formula>(
     widget?.settings?.formula ?? { tokens: [] }
   );
+  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
+  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
+  // não a representa).
+  const [calcFormulaMode, setCalcFormulaMode] = useState<"builder" | "text">(
+    formulaUsesFunctions(widget?.settings?.formula) ? "text" : "builder"
+  );
   // Widget 'calculado' apontando p/ um campo "Calculado (totais)" salvo em
   // /campos ('custom:<key>'); vazio = fórmula própria (formula acima).
   const [calcField, setCalcField] = useState<string>(
@@ -474,7 +492,19 @@ export function WidgetBuilder({
   const countableFields = available.filter(
     (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
   );
-  const calcRefs: RefOption[] = aggOperandRefs(numericFields, countableFields);
+  // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
+  // de condição (texto/seleção/booleano e datas dos campos personalizados).
+  // Mesma montagem do servidor (aggOperandCatalog em campos/actions.ts).
+  const condAggCustomCond = fields
+    .filter((f) => COND_DATA_TYPES.includes(f.data_type))
+    .map((f) => ({ field_key: f.field_key, label: f.label }));
+  const condAggCustomDate = fields
+    .filter((f) => f.data_type === "data")
+    .map((f) => ({ field_key: f.field_key, label: f.label }));
+  const calcRefs: RefOption[] = [
+    ...aggOperandRefs(numericFields, countableFields),
+    ...condAggOperandRefs(numericFields, condAggCustomCond, condAggCustomDate),
+  ];
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>
@@ -776,6 +806,11 @@ export function WidgetBuilder({
           setError(v.error ?? "Fórmula inválida.");
           return;
         }
+        const p = validateCondAggRefs(formula, calcRefs);
+        if (!p.ok) {
+          setError(p.error ?? "Fórmula inválida.");
+          return;
+        }
       }
       const calcSettings = { ...(widget?.settings ?? {}), formula, ...tabPatch };
       if (calcField) calcSettings.calcField = calcField;
@@ -814,6 +849,11 @@ export function WidgetBuilder({
       const v = validateFormula(m.formula, new Set(calcRefs.map((r) => r.ref)));
       if (!v.ok) {
         setError(v.error ?? "Fórmula inválida na métrica calculada.");
+        return;
+      }
+      const p = validateCondAggRefs(m.formula, calcRefs);
+      if (!p.ok) {
+        setError(p.error ?? "Fórmula inválida na métrica calculada.");
         return;
       }
     }
@@ -1236,14 +1276,48 @@ export function WidgetBuilder({
               {!calcField ? (
                 <>
                   <Label>Fórmula</Label>
-                  <FormulaBuilder
-                    refs={calcRefs}
-                    initial={widget?.settings?.formula ?? null}
-                    onChange={setFormula}
-                  />
-                  <p className="text-muted-foreground text-xs">
-                    Combine agregações dos registros (+ − × ÷ e constantes).
-                  </p>
+                  <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
+                    {(
+                      [
+                        ["builder", "Construtor"],
+                        ["text", "Texto (funções)"],
+                      ] as const
+                    ).map(([k, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setCalcFormulaMode(k)}
+                        className={cn(
+                          "rounded-sm px-2 py-1 text-xs",
+                          calcFormulaMode === k
+                            ? "bg-background shadow-sm"
+                            : "text-muted-foreground"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {calcFormulaMode === "builder" ? (
+                    <>
+                      <FormulaBuilder
+                        refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+                        initial={widget?.settings?.formula ?? null}
+                        onChange={setFormula}
+                      />
+                      <p className="text-muted-foreground text-xs">
+                        Combine agregações dos registros (+ − × ÷ e constantes).
+                        Para condicionais (SOMASE/CONT.SE/MÉDIASE), use a aba{" "}
+                        <strong>Texto (funções)</strong>.
+                      </p>
+                    </>
+                  ) : (
+                    <FormulaTextEditor
+                      refs={calcRefs}
+                      initial={formula.tokens.length > 0 ? formula : null}
+                      onChange={setFormula}
+                    />
+                  )}
                 </>
               ) : null}
               {/* Filtros rápidos (o calculado não usa o Accordion de dados). */}

@@ -23,12 +23,20 @@ import {
   PERCENT_DATA_TYPES,
   type DataType,
 } from "@/lib/records/types";
-import { validateFormula, type Formula } from "@/lib/records/formulas";
+import {
+  formulaUsesCondAgg,
+  validateFormula,
+  type Formula,
+} from "@/lib/records/formulas";
 import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
-import { aggOperandRefs } from "@/lib/widgets/calc-metrics";
+import {
+  aggOperandRefs,
+  condAggOperandRefs,
+  validateCondAggRefs,
+} from "@/lib/widgets/calc-metrics";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 
 export interface FieldActionState {
@@ -125,7 +133,31 @@ async function aggOperandCatalog(
         label: ((d.label as string) ?? (d.field_key as string)),
       })),
   ];
-  return aggOperandRefs(numeric, countable);
+  // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
+  // de condição (texto/seleção/booleano e datas). Mesma montagem dos editores
+  // (fields-manager/widget-builder) para catálogo e validação concordarem.
+  const customCond = (data ?? [])
+    .filter(
+      (d) =>
+        COND_DATA_TYPES.includes(d.data_type as DataType) &&
+        d.field_key !== excludeFieldKey
+    )
+    .map((d) => ({
+      field_key: d.field_key as string,
+      label: ((d.label as string) ?? (d.field_key as string)),
+    }));
+  const customDate = (data ?? [])
+    .filter(
+      (d) => (d.data_type as DataType) === "data" && d.field_key !== excludeFieldKey
+    )
+    .map((d) => ({
+      field_key: d.field_key as string,
+      label: ((d.label as string) ?? (d.field_key as string)),
+    }));
+  return [
+    ...aggOperandRefs(numeric, countable),
+    ...condAggOperandRefs(numeric, customCond, customDate),
+  ];
 }
 
 // Refs de DATA permitidos numa fórmula: datas do próprio registro + custom
@@ -235,7 +267,20 @@ async function resolveAndValidateFormula(
     const catalog = await aggOperandCatalog(supabase, fieldKey);
     const v = validateFormula(formula, new Set(catalog.map((o) => o.ref)));
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+    // Colocação dos refs de SOMASE/CONT.SE/MÉDIASE: campo cru só dentro das
+    // funções condicionais; alvo numérico; condição sobre coluna de condição.
+    const p = validateCondAggRefs(formula, catalog);
+    if (!p.ok) return { ok: false, message: p.error ?? "Fórmula inválida." };
     return { ok: true, formula };
+  }
+  // SOMASE/CONT.SE/MÉDIASE agregam VÁRIOS registros — não existem no campo
+  // calculado por registro (que enxerga um registro só).
+  if (formulaUsesCondAgg(formula)) {
+    return {
+      ok: false,
+      message:
+        'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
+    };
   }
   const [allowed, allowedDates, allowedConds] = await Promise.all([
     allowedFormulaRefs(supabase, fieldKey),

@@ -11,6 +11,11 @@
 //   resultado materializado pode ser texto. Fórmulas legadas (só + − × ÷)
 //   avaliam de forma idêntica. `Formula.source` guarda o texto digitado no
 //   editor estilo Sheets (round-trip; ver lib/records/formula-text.ts).
+// v2.1 (15/07/2026): agregações condicionais SOMASE/SOMASES/CONT.SE/CONT.SES/
+//   MÉDIASE. Só valem no contexto AGREGADO (calculado_agg / métricas de
+//   widget): cada chamada compila para uma chave de basis condicional
+//   ("aggif:...") resolvida por consulta SQL extra com os filtros da condição
+//   (ver lib/widgets/calc-metrics.ts); o avaliador apenas lê ctx[chave].
 
 import {
   BASE_CURRENCY,
@@ -25,7 +30,15 @@ import { todayBrasiliaMs } from "@/lib/date/today";
 
 export type FormulaOp = "+" | "-" | "*" | "/";
 export type FormulaCmpOp = "=" | "<>" | "<" | ">" | "<=" | ">=";
-export type FormulaFuncName = "SE" | "E" | "OU";
+export type FormulaFuncName =
+  | "SE"
+  | "E"
+  | "OU"
+  | "SOMASE"
+  | "SOMASES"
+  | "CONT.SE"
+  | "CONT.SES"
+  | "MÉDIASE";
 
 export type FormulaToken =
   | { kind: "field"; ref: string }
@@ -229,6 +242,27 @@ function parseTokens(tokens: FormulaToken[]): FormulaNode {
       if ((name === "E" || name === "OU") && args.length < 2) {
         throw new FormulaParseError(`${name} espera pelo menos 2 argumentos.`);
       }
+      if (name === "SOMASE" || name === "SOMASES" || name === "MÉDIASE") {
+        if (args.length < 2) {
+          throw new FormulaParseError(
+            `${name} espera pelo menos 2 argumentos: ${name}([Campo]; [Coluna] = valor).`
+          );
+        }
+        if (args[0].k !== "ref") {
+          throw new FormulaParseError(
+            `O 1º argumento de ${name} deve ser uma coluna, ex.: ${name}([Valor]; [Etapa] = "Ganho").`
+          );
+        }
+        for (const arg of args.slice(1)) assertCondArg(name, arg);
+      }
+      if (name === "CONT.SE" || name === "CONT.SES") {
+        if (args.length < 1) {
+          throw new FormulaParseError(
+            `${name} espera pelo menos 1 condição: ${name}([Coluna] = valor).`
+          );
+        }
+        for (const arg of args) assertCondArg(name, arg);
+      }
       return { k: "call", name, args };
     }
     if (t.kind === "lparen") {
@@ -251,6 +285,180 @@ function parseTokens(tokens: FormulaToken[]): FormulaNode {
     );
   }
   return root;
+}
+
+// --- Agregações condicionais (SOMASE/CONT.SE/MÉDIASE) -------------------------
+// Cada condição deve ser exatamente `[Coluna] <op> literal`, porque compila
+// para UM WidgetFilter que o RPC de agregação já entende. Multi-critério =
+// argumentos extras (E implícito). O avaliador não agrega nada: lê do contexto
+// o valor pré-computado sob a chave canônica `condAggKey(spec)`.
+
+export interface AggCondition {
+  ref: string;
+  op: FormulaCmpOp;
+  value: number | string | boolean;
+}
+
+export interface CondAggSpec {
+  agg: "sum" | "count";
+  // Ref do campo alvo (soma/contagem por campo) ou "*" (contagem de registros).
+  field: string;
+  conds: AggCondition[];
+}
+
+const COND_AGG_FUNCS = new Set<FormulaFuncName>([
+  "SOMASE",
+  "SOMASES",
+  "CONT.SE",
+  "CONT.SES",
+  "MÉDIASE",
+]);
+
+export function isCondAggFunc(name: FormulaFuncName): boolean {
+  return COND_AGG_FUNCS.has(name);
+}
+
+/** True quando a fórmula chama SOMASE/CONT.SE/MÉDIASE (scan de tokens — vale
+ * mesmo para fórmula estruturalmente inválida). */
+export function formulaUsesCondAgg(formula: Formula | null | undefined): boolean {
+  if (!formula) return false;
+  return formula.tokens.some((t) => t.kind === "func" && isCondAggFunc(t.name));
+}
+
+/** Chave de basis canônica e determinística de uma agregação condicional. */
+export function condAggKey(spec: CondAggSpec): string {
+  return (
+    "aggif:" +
+    JSON.stringify([
+      spec.agg,
+      spec.field,
+      spec.conds.map((c) => [c.ref, c.op, c.value]),
+    ])
+  );
+}
+
+const FLIP_CMP: Record<FormulaCmpOp, FormulaCmpOp> = {
+  "=": "=",
+  "<>": "<>",
+  "<": ">",
+  ">": "<",
+  "<=": ">=",
+  ">=": "<=",
+};
+
+// Extrai `[Coluna] <op> literal` de um nó de comparação (literal à esquerda é
+// normalizado invertendo o operador). Null quando o nó não tem essa forma.
+function condOf(node: FormulaNode): AggCondition | null {
+  if (node.k !== "cmp") return null;
+  if (node.a.k === "ref" && node.b.k === "lit") {
+    return { ref: node.a.ref, op: node.op, value: node.b.v };
+  }
+  if (node.a.k === "lit" && node.b.k === "ref") {
+    return { ref: node.b.ref, op: FLIP_CMP[node.op], value: node.a.v };
+  }
+  return null;
+}
+
+function assertCondArg(name: FormulaFuncName, node: FormulaNode): void {
+  if (condOf(node)) return;
+  if (node.k === "call" && (node.name === "E" || node.name === "OU")) {
+    throw new FormulaParseError(
+      `Não use ${node.name}(...) dentro de ${name} — passe várias condições ` +
+        `separadas por ';', ex.: SOMASES([Valor]; cond1; cond2).`
+    );
+  }
+  if (node.k === "cmp" && node.a.k === "ref" && node.b.k === "ref") {
+    throw new FormulaParseError(
+      `Cada condição de ${name} compara uma coluna com um valor fixo, ` +
+        `ex.: [Etapa] = "Ganho".`
+    );
+  }
+  throw new FormulaParseError(
+    `Cada condição de ${name} deve ter a forma [Coluna] operador valor, ` +
+      `ex.: [Etapa] = "Ganho".`
+  );
+}
+
+// Specs de basis de uma chamada já validada pelo parser. MÉDIASE precisa de
+// soma E contagem do mesmo campo/condições (média = soma ÷ contagem).
+function condAggSpecsOf(node: Extract<FormulaNode, { k: "call" }>): CondAggSpec[] {
+  const isCount = node.name === "CONT.SE" || node.name === "CONT.SES";
+  const conds = node.args
+    .slice(isCount ? 0 : 1)
+    .map((a) => condOf(a))
+    .filter((c): c is AggCondition => c != null);
+  if (isCount) return [{ agg: "count", field: "*", conds }];
+  const target = node.args[0];
+  if (target?.k !== "ref") return [];
+  if (node.name === "MÉDIASE") {
+    return [
+      { agg: "sum", field: target.ref, conds },
+      { agg: "count", field: target.ref, conds },
+    ];
+  }
+  return [{ agg: "sum", field: target.ref, conds }];
+}
+
+export interface CondAggInfo {
+  specs: CondAggSpec[]; // agregações condicionais que o basis precisa computar
+  targetRefs: string[]; // 1º argumento (campo alvo) de SOMASE/SOMASES/MÉDIASE
+  condRefs: string[]; // colunas usadas nas condições
+  plainRefs: string[]; // refs FORA de chamadas condicionais (para validação)
+}
+
+/** Inventário das agregações condicionais de uma fórmula (walk do AST).
+ * Fórmula estruturalmente inválida → tudo vazio (a validação forte acusa). */
+export function formulaCondAggInfo(formula: Formula): CondAggInfo {
+  const info: CondAggInfo = { specs: [], targetRefs: [], condRefs: [], plainRefs: [] };
+  let root: FormulaNode;
+  try {
+    root = parseTokens(formula.tokens);
+  } catch {
+    return info;
+  }
+  const seen = new Set<string>();
+  const walk = (node: FormulaNode): void => {
+    switch (node.k) {
+      case "ref":
+        info.plainRefs.push(node.ref);
+        return;
+      case "neg":
+        walk(node.a);
+        return;
+      case "bin":
+      case "cmp":
+        walk(node.a);
+        walk(node.b);
+        return;
+      case "call": {
+        if (!isCondAggFunc(node.name)) {
+          for (const arg of node.args) walk(arg);
+          return;
+        }
+        // Refs internos (alvo + condições) não entram em plainRefs.
+        const isCount = node.name === "CONT.SE" || node.name === "CONT.SES";
+        if (!isCount && node.args[0]?.k === "ref") {
+          info.targetRefs.push(node.args[0].ref);
+        }
+        for (const arg of node.args.slice(isCount ? 0 : 1)) {
+          const c = condOf(arg);
+          if (c) info.condRefs.push(c.ref);
+        }
+        for (const spec of condAggSpecsOf(node)) {
+          const key = condAggKey(spec);
+          if (!seen.has(key)) {
+            seen.add(key);
+            info.specs.push(spec);
+          }
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  };
+  walk(root);
+  return info;
 }
 
 // --- Avaliador tipado ---------------------------------------------------------
@@ -401,6 +609,20 @@ function evalNode(
           if (!truthy(evalNode(arg, ctx, dateCtx))) return { v: false, date: false };
         }
         return { v: true, date: false };
+      }
+      if (isCondAggFunc(node.name)) {
+        // Agregações condicionais: o valor vem pré-computado no contexto sob a
+        // chave canônica (basis agregado). Fora do contexto agregado a chave
+        // não existe → null.
+        const specs = condAggSpecsOf(node);
+        if (specs.length === 0) return NULL_VAL;
+        if (node.name === "MÉDIASE") {
+          const sum = toNum(ctx[condAggKey(specs[0])]);
+          const count = toNum(ctx[condAggKey(specs[1])]);
+          if (sum == null || count == null || count === 0) return NULL_VAL;
+          return { v: sum / count, date: false };
+        }
+        return { v: toNum(ctx[condAggKey(specs[0])]), date: false };
       }
       // OU
       for (const arg of node.args) {

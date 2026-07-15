@@ -31,10 +31,23 @@
 // Módulo puro/client-safe: importado pelo engine (server), pela página do
 // dashboard (RSC) e pelos componentes de tabela (client).
 import {
+  condAggKey,
   evaluateFormula,
+  formulaCondAggInfo,
   formulaRefs,
+  type AggCondition,
   type Formula,
+  type FormulaCmpOp,
 } from "@/lib/records/formulas";
+import {
+  ownCondOperands,
+  type CustomCondField,
+} from "@/lib/records/cond-operands";
+import {
+  ownDateOperands,
+  TODAY_REF,
+  type CustomDateField,
+} from "@/lib/records/date-operands";
 import { isPercentField, type FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/components/campos/formula-builder";
 import {
@@ -43,7 +56,7 @@ import {
   resolveFieldMoney,
   type MoneyBreakdown,
 } from "./currency";
-import type { Aggregation, Metric } from "./types";
+import type { Aggregation, FilterOp, Metric, WidgetFilter } from "./types";
 
 // Sentinela de Metric.field para a métrica calculada ad-hoc (fórmula guardada na
 // própria métrica). Nunca é enviado ao RPC.
@@ -94,7 +107,8 @@ export function isMoneyOperandField(
   return false;
 }
 
-/** Chaves de basis (somas/contagens canônicas) que a fórmula precisa. */
+/** Chaves de basis (somas/contagens canônicas) que a fórmula precisa. Inclui
+ * as chaves CONDICIONAIS ("aggif:...") de SOMASE/CONT.SE/MÉDIASE. */
 export function basisKeysFor(formula: Formula): BasisKey[] {
   const keys = new Set<BasisKey>();
   for (const ref of formulaRefs(formula)) {
@@ -107,14 +121,116 @@ export function basisKeysFor(formula: Formula): BasisKey[] {
       keys.add(`count:${field}`);
     }
   }
+  for (const spec of formulaCondAggInfo(formula).specs) keys.add(condAggKey(spec));
   return [...keys];
 }
 
-/** Métrica (para o RPC) que computa uma chave de basis. */
+/** Métrica (para o RPC) que computa uma chave de basis. Chave condicional
+ * (aggif:) devolve a métrica alvo — mas o chamador PRECISA ramificar por
+ * isCondBasisKey e aplicar também os filtros (parseCondBasisKey().conds). */
 export function basisMetric(key: BasisKey): Metric {
+  const cond = parseCondBasisKey(key);
+  if (cond) return cond.metric;
   const idx = key.indexOf(":");
   const agg = key.slice(0, idx) as Aggregation;
   return { field: key.slice(idx + 1), agg };
+}
+
+// --- Chaves de basis condicionais (SOMASE/CONT.SE/MÉDIASE) --------------------
+// Uma chave "aggif:..." (ver condAggKey em lib/records/formulas.ts) representa
+// uma soma/contagem RESTRITA a registros que satisfazem condições fixas. Como a
+// condição é constante por chave, o fold aditivo de foldBasis continua exato em
+// subtotais/Total geral. A resolução acontece por consulta SQL extra (filtros
+// anexados) ou, nos caminhos client-side, filtrando os registros do grupo.
+
+export function isCondBasisKey(key: BasisKey): boolean {
+  return key.startsWith("aggif:");
+}
+
+export function parseCondBasisKey(
+  key: BasisKey
+): { metric: Metric; conds: AggCondition[] } | null {
+  if (!isCondBasisKey(key)) return null;
+  try {
+    const [agg, field, conds] = JSON.parse(key.slice("aggif:".length)) as [
+      "sum" | "count",
+      string,
+      [string, FormulaCmpOp, number | string | boolean][],
+    ];
+    return {
+      metric: { field, agg },
+      conds: conds.map(([ref, op, value]) => ({ ref, op, value })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const COND_FILTER_OPS: Record<FormulaCmpOp, FilterOp> = {
+  "=": "eq",
+  "<>": "neq",
+  "<": "lt",
+  ">": "gt",
+  "<=": "lte",
+  ">=": "gte",
+};
+
+/** Condições → filtros do RPC (anexados aos filtros do widget). Booleano vira
+ * "true"/"false" (cobre a coluna `closed` e custom booleano gravado como texto). */
+export function condFilters(conds: AggCondition[]): WidgetFilter[] {
+  return conds.map((c) => ({
+    field: c.ref,
+    op: COND_FILTER_OPS[c.op],
+    value: typeof c.value === "boolean" ? String(c.value) : c.value,
+  }));
+}
+
+/**
+ * Predicado client-side equivalente aos filtros SQL de condFilters — usado nos
+ * caminhos que agregam registros em JS (Agrupar período, tabela de registros).
+ * Espelha a semântica do RPC, não a do SE(): texto compara case-sensitive;
+ * valor null NUNCA satisfaz uma condição (como NULL no WHERE); literal numérico
+ * compara numericamente quando o valor bruto parseia.
+ */
+export function recordMatchesConds(
+  raw: (ref: string) => unknown,
+  conds: AggCondition[]
+): boolean {
+  for (const c of conds) {
+    const v = raw(c.ref);
+    if (v == null) return false;
+    const want = typeof c.value === "boolean" ? String(c.value) : c.value;
+    let cmp: number;
+    if (typeof want === "number") {
+      const n = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(n)) return false;
+      cmp = n - want;
+    } else {
+      const s = typeof v === "boolean" ? String(v) : String(v);
+      cmp = s < want ? -1 : s > want ? 1 : 0;
+    }
+    switch (c.op) {
+      case "=":
+        if (cmp !== 0) return false;
+        break;
+      case "<>":
+        if (cmp === 0) return false;
+        break;
+      case "<":
+        if (cmp >= 0) return false;
+        break;
+      case ">":
+        if (cmp <= 0) return false;
+        break;
+      case "<=":
+        if (cmp > 0) return false;
+        break;
+      case ">=":
+        if (cmp < 0) return false;
+        break;
+    }
+  }
+  return true;
 }
 
 /**
@@ -211,6 +327,12 @@ export function evalCalcMoney(
       const count = operand(basis[`count:${field}`]);
       ctx[ref] = sum != null && count != null && count > 0 ? sum / count : null;
     }
+  }
+  // Agregações condicionais: o avaliador lê ctx[chave] diretamente (a chave
+  // canônica é recomputada do AST em evalNode). Chave sem valor → null.
+  for (const spec of formulaCondAggInfo(formula).specs) {
+    const key = condAggKey(spec);
+    ctx[key] = operand(basis[key]);
   }
   const raw = evaluateFormula(formula, ctx);
   let value = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
@@ -336,4 +458,92 @@ export function aggOperandRefs(
       },
     ]),
   ];
+}
+
+// Grupos dos operandos extras de SOMASE/CONT.SE/MÉDIASE no catálogo agregado —
+// usados para derivar os conjuntos de validação (validateCondAggRefs) do mesmo
+// catálogo que o editor mostra, sem lista paralela.
+export const COND_AGG_TARGET_GROUP = "Campos (SOMASE/MÉDIASE)";
+export const COND_AGG_COND_GROUP = "Condições (SOMASE/CONT.SE)";
+
+/**
+ * Operandos extras que fórmulas AGREGADAS ganham com SOMASE/CONT.SE/MÉDIASE:
+ * campos numéricos CRUS (alvo do 1º argumento — diferente dos agg:*, que já
+ * chegam agregados) e colunas de condição (texto/seleção/booleano + datas do
+ * próprio registro; a condição sempre compara com um literal, ex.:
+ * [Etapa] = "Ganho"). Fora do catálogo na v1: refs match:/unified: e "Data
+ * atual" (today não é coluna no banco — o filtro SQL não o conhece).
+ * Compartilhado entre os editores e a validação do servidor.
+ */
+export function condAggOperandRefs(
+  rawNumericFields: { field: string; label: string }[],
+  customCondFields: CustomCondField[],
+  customDateFields: CustomDateField[]
+): RefOption[] {
+  return [
+    ...rawNumericFields.map((f) => ({
+      ref: f.field,
+      label: f.label,
+      group: COND_AGG_TARGET_GROUP,
+    })),
+    ...ownCondOperands(customCondFields).map((o) => ({
+      ref: o.ref,
+      label: o.label,
+      group: COND_AGG_COND_GROUP,
+    })),
+    ...ownDateOperands(customDateFields)
+      .filter((o) => o.ref !== TODAY_REF)
+      .map((o) => ({
+        ref: o.ref,
+        label: o.label,
+        group: COND_AGG_COND_GROUP,
+      })),
+  ];
+}
+
+/**
+ * Validação de COLOCAÇÃO dos refs numa fórmula agregada (roda após
+ * validateFormula, que já garantiu estrutura e refs conhecidas): campo cru só
+ * dentro de SOMASE/CONT.SE/MÉDIASE (fora deles o operando precisa ser
+ * agregado), alvo numérico e condição sobre coluna de condição. Recebe o mesmo
+ * catálogo dos editores; os conjuntos saem dos grupos de condAggOperandRefs.
+ */
+export function validateCondAggRefs(
+  formula: Formula,
+  catalog: RefOption[]
+): { ok: boolean; error?: string } {
+  const targets = new Set<string>();
+  const conds = new Set<string>();
+  for (const o of catalog) {
+    if (o.group === COND_AGG_TARGET_GROUP) targets.add(o.ref);
+    else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
+  }
+  const labelOf = (ref: string) =>
+    catalog.find((o) => o.ref === ref)?.label ?? ref;
+  const info = formulaCondAggInfo(formula);
+  for (const ref of info.plainRefs) {
+    if (!ref.startsWith("agg:")) {
+      return {
+        ok: false,
+        error: `[${labelOf(ref)}] só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE — fora deles, use os operandos agregados (Σ, Média, Contagem).`,
+      };
+    }
+  }
+  for (const ref of info.targetRefs) {
+    if (!targets.has(ref)) {
+      return {
+        ok: false,
+        error: `O 1º argumento de SOMASE/MÉDIASE deve ser um campo numérico: [${labelOf(ref)}].`,
+      };
+    }
+  }
+  for (const ref of info.condRefs) {
+    if (!conds.has(ref)) {
+      return {
+        ok: false,
+        error: `[${labelOf(ref)}] não pode ser usado em condição de SOMASE/CONT.SE (use colunas de texto/seleção/booleano ou datas).`,
+      };
+    }
+  }
+  return { ok: true };
 }

@@ -15,14 +15,18 @@
 //   { value, currency }.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Formula } from "@/lib/records/formulas";
+import type { AggCondition, Formula } from "@/lib/records/formulas";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
 import {
   basisKeysFor,
   basisMetric,
+  condFilters,
   evalCalcMoney,
+  isCondBasisKey,
   isMoneyOperandField,
+  parseCondBasisKey,
+  type BasisKey,
   type BasisValues,
   type CalcMoneyMeta,
 } from "./calc-metrics";
@@ -79,19 +83,25 @@ export async function runCalculatedWidget(
     filters = applyPeriodToFilters(filters, input.period, input.sources);
   filters = [...sourceFilters(input.sources), ...filters];
 
-  // Basis numérica (todas as chaves) via RPC agregado — é o valor final das
-  // contagens/campos numéricos e o fallback cru dos monetários.
-  const basisKeys = basisKeysFor(formula);
+  // Basis numérica via RPC agregado — é o valor final das contagens/campos
+  // numéricos e o fallback cru dos monetários. Chaves condicionais (aggif: de
+  // SOMASE/CONT.SE/MÉDIASE) NÃO entram na consulta principal: filtro é da
+  // consulta inteira, então cada conjunto de condições vira uma consulta extra
+  // com os filtros da condição anexados aos do dashboard.
+  const allKeys = basisKeysFor(formula);
+  const plainKeys = allKeys.filter((k) => !isCondBasisKey(k));
+  const condKeys = allKeys.filter(isCondBasisKey);
   const basis: BasisValues = {};
-  if (basisKeys.length > 0) {
-    const metrics: Metric[] = basisKeys.map(basisMetric);
+
+  const resolveKeys = async (keys: BasisKey[], keyFilters: WidgetFilter[]) => {
+    const metrics: Metric[] = keys.map(basisMetric);
     const values = await aggregate(
       supabase,
       metrics,
-      filters,
+      keyFilters,
       input.correspondencesMap ?? {}
     );
-    basisKeys.forEach((key, i) => {
+    keys.forEach((key, i) => {
       basis[key] = Number.isFinite(values[i]) ? values[i] : null;
     });
 
@@ -99,7 +109,7 @@ export async function runCalculatedWidget(
     // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
     // número cru (degradação = comportamento v1).
     if (mode !== "none") {
-      const moneyKeys = basisKeys.filter(
+      const moneyKeys = keys.filter(
         (key) =>
           basisMetric(key).agg === "sum" &&
           isMoneyOperandField(basisMetric(key).field, fieldByKey)
@@ -108,7 +118,7 @@ export async function runCalculatedWidget(
         const bds = await aggregateMoneyBreakdowns(
           supabase,
           moneyKeys.map(basisMetric),
-          filters,
+          keyFilters,
           input.correspondencesMap ?? {},
           fieldByKey,
           rates,
@@ -119,7 +129,29 @@ export async function runCalculatedWidget(
         });
       }
     }
+  };
+
+  const jobs: Promise<void>[] = [];
+  if (plainKeys.length > 0) jobs.push(resolveKeys(plainKeys, filters));
+  if (condKeys.length > 0) {
+    // Uma consulta por conjunto distinto de condições.
+    const groups = new Map<string, { conds: AggCondition[]; keys: BasisKey[] }>();
+    for (const key of condKeys) {
+      const parsed = parseCondBasisKey(key);
+      if (!parsed) {
+        basis[key] = null;
+        continue;
+      }
+      const gk = JSON.stringify(parsed.conds);
+      const g = groups.get(gk) ?? { conds: parsed.conds, keys: [] };
+      g.keys.push(key);
+      groups.set(gk, g);
+    }
+    for (const g of groups.values()) {
+      jobs.push(resolveKeys(g.keys, [...filters, ...condFilters(g.conds)]));
+    }
   }
+  await Promise.all(jobs);
 
   const meta: CalcMoneyMeta = {
     mode,

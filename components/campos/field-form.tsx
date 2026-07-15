@@ -160,6 +160,10 @@ export function FieldForm({
   const aggOperands = (aggRefs ?? []).filter(
     (r) => !r.ref.endsWith(`:custom:${field?.field_key}`)
   );
+  // O construtor de botões só expressa + − × ÷ — recebe apenas os operandos
+  // agregados (agg:*). Os operandos de SOMASE/CONT.SE/MÉDIASE (campos crus e
+  // colunas de condição) ficam só no editor de texto, que sabe usá-los.
+  const aggBuilderOperands = aggOperands.filter((r) => r.ref.startsWith("agg:"));
   // Formato do resultado do calculado_agg: número, moeda automática (preserva a
   // dos operandos; misturou → Real) ou moeda fixa (converte).
   const aggResultOptions: ComboboxOption[] = [
@@ -296,7 +300,7 @@ export function FieldForm({
             ))}
           </div>
           {formulaMode === "builder" ? (
-            <FormulaBuilder refs={aggOperands} initial={field?.formula ?? null} />
+            <FormulaBuilder refs={aggBuilderOperands} initial={field?.formula ?? null} />
           ) : (
             <FormulaTextEditor refs={aggOperands} initial={field?.formula ?? null} />
           )}

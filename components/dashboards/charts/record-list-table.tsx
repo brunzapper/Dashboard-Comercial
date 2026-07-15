@@ -42,6 +42,8 @@ import {
   evalCalcMoney,
   isCalcMetric,
   isMoneyOperandField,
+  parseCondBasisKey,
+  recordMatchesConds,
   resolveCalcMetric,
   type BasisValues,
   type ResolvedCalcMetric,
@@ -273,12 +275,18 @@ export function RecordListTable({
   const calcBasisFor = (formula: Formula, rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of basisKeysFor(formula)) {
-      const bm = basisMetric(key);
+      // Chave condicional (SOMASE/CONT.SE/MÉDIASE): restringe os registros do
+      // escopo às condições e reusa a mesma lógica de contagem/soma/moeda.
+      const cond = parseCondBasisKey(key);
+      const recs = cond
+        ? rs.filter((r) => recordMatchesConds((ref) => rawValue(ref, r), cond.conds))
+        : rs;
+      const bm = cond ? cond.metric : basisMetric(key);
       if (bm.agg === "count") {
         out[key] =
           bm.field === "*"
-            ? rs.length
-            : rs.filter((r) => {
+            ? recs.length
+            : recs.filter((r) => {
                 const v = rawValue(bm.field, r);
                 return v != null && v !== "";
               }).length;
@@ -287,7 +295,7 @@ export function RecordListTable({
         // período de cada registro) p/ preservar a moeda única do recorte ou
         // operar em Real quando misturar.
         out[key] = buildRecordBreakdown(
-          rs,
+          recs,
           (r) => rawValue(bm.field, r),
           (r) => metricCurrency(bm.field, r),
           (r) => ({
@@ -299,7 +307,7 @@ export function RecordListTable({
           currencyRates
         );
       } else {
-        const nums = rs
+        const nums = recs
           .map((r) => Number(rawValue(bm.field, r)))
           .filter((n) => Number.isFinite(n));
         out[key] = nums.length ? nums.reduce((s, n) => s + n, 0) : null;
