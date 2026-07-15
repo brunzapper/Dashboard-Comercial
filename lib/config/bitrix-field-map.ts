@@ -181,7 +181,9 @@ export const FIELD_LABELS: Record<string, string> = {
   UF_CRM_1731531005705: "Indústria (detalhes)",
   UF_CRM_1731952339: "Negociação/Cliente?",
   UF_CRM_1732191501: "Recebe E-mails Marketing?",
-  UF_CRM_1743441331: "Data Reunião",
+  // "(Lead)" para distinguir do campo homônimo de negócio (UF_CRM_67EACEFCCCD98)
+  // no construtor de fórmulas — os dois viravam "Contagem de Data Reunião".
+  UF_CRM_1743441331: "Data Reunião (Lead)",
   UF_CRM_LEAD_1746471547151: "O que você busca resolver com Zapper? - Facebook",
   UF_CRM_1749753840: "Quantidade de contas de WhatsApp a monitorar(FB)",
   UF_CRM_1753299252: "email.lead",
@@ -288,7 +290,8 @@ export const FIELD_LABELS: Record<string, string> = {
   UF_CRM_1741295646288: "Houve reversão?",
   UF_CRM_1741296180747: "Houve reversão?",
   UF_CRM_1742214066621: "Pasta do Cliente",
-  UF_CRM_67EACEFCCCD98: "Data Reunião",
+  // "(Negócio)" para distinguir do campo homônimo de lead (UF_CRM_1743441331).
+  UF_CRM_67EACEFCCCD98: "Data Reunião (Negócio)",
   UF_CRM_1744202582275: "E-mail para Liberação do Analytics",
   UF_CRM_1744203748950: "Regra de Cobrança",
   UF_CRM_1744203833098: "Modelo de Upsell",
