@@ -106,7 +106,19 @@ export type FilterOp =
   | "in"
   | "ilike"
   | "is_null"
-  | "not_null";
+  | "not_null"
+  // Operadores NORMALIZADOS (migração 0050) — internos das condições de
+  // SOMASE/CONT.SE/MÉDIASE (lib/widgets/calc-metrics.condFilters); fora da UI
+  // de filtros. eq_ci/neq_ci: texto com trim+minúsculas+booleanos canonizados
+  // e null ≡ ''. *_num: comparação numérica com cast seguro.
+  | "eq_ci"
+  | "neq_ci"
+  | "eq_num"
+  | "neq_num"
+  | "gt_num"
+  | "gte_num"
+  | "lt_num"
+  | "lte_num";
 
 export interface Dimension {
   field: string;

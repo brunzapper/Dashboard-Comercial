@@ -7,7 +7,8 @@
 //    o catálogo de operandos) ou [ref] bruta (ex.: [custom:forecast]).
 //  - formulaToSource: Formula → texto (prefere formula.source; senão serializa
 //    os tokens), para o round-trip do editor.
-// Funções aceitas (case-insensitive): SE, E, OU. Separador de argumentos ';'.
+// Funções aceitas (case-insensitive): SE, E, OU, SOMASE, SOMASES, CONT.SE,
+// CONT.SES, MÉDIASE. Separador de argumentos ';'.
 // Literais: números (1.5 ou 1,5), "texto" ou 'texto', VERDADEIRO/FALSO.
 // Operadores: + − × ÷ * / , comparações = <> != < > <= >=.
 // Puro (sem IO): usável no cliente (validação ao vivo) e no servidor (submit).
@@ -27,6 +28,15 @@ const FUNC_NAMES: Record<string, FormulaFuncName> = {
   se: "SE",
   e: "E",
   ou: "OU",
+  somase: "SOMASE",
+  somases: "SOMASES",
+  "cont.se": "CONT.SE",
+  "cont.ses": "CONT.SES",
+  // Aliases sem ponto/acento (facilita digitação).
+  contse: "CONT.SE",
+  contses: "CONT.SES",
+  "médiase": "MÉDIASE",
+  mediase: "MÉDIASE",
 };
 
 const BOOL_NAMES: Record<string, boolean> = {
@@ -211,6 +221,12 @@ export function tokenizeFormulaText(
     if (isIdentChar(ch)) {
       let j = i;
       while (j < src.length && isIdentChar(src[j])) j += 1;
+      // '.' no meio da palavra continua o identificador (CONT.SE, CONT.SES).
+      // Decimais não passam por aqui: dígito inicial cai no ramo de número.
+      while (src[j] === "." && j + 1 < src.length && isIdentChar(src[j + 1])) {
+        j += 1;
+        while (j < src.length && isIdentChar(src[j])) j += 1;
+      }
       const word = src.slice(i, j);
       const lower = word.toLocaleLowerCase("pt-BR");
       const func = FUNC_NAMES[lower];
@@ -226,7 +242,7 @@ export function tokenizeFormulaText(
       }
       return {
         ok: false,
-        error: `"${word}" não é uma função conhecida (SE, E, OU). Para usar uma coluna, escreva entre colchetes: [${word}].`,
+        error: `"${word}" não é uma função conhecida (SE, E, OU, SOMASE, SOMASES, CONT.SE, CONT.SES, MÉDIASE). Para usar uma coluna, escreva entre colchetes: [${word}].`,
       };
     }
 
@@ -263,7 +279,7 @@ export function formulaToSource(
   }
   return parts
     .join(" ")
-    .replace(/(SE|E|OU) \(/g, "$1(")
+    .replace(/(SE|E|OU|SOMASES?|CONT\.SES?|MÉDIASE) \(/g, "$1(")
     .replace(/\( /g, "(")
     .replace(/ \)/g, ")")
     .replace(/ ;/g, ";");

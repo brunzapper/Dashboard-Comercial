@@ -6,7 +6,7 @@
 // permitidos) roda no servidor no submit. Emite <input hidden name="formula_text">.
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CircleAlert } from "lucide-react";
 
 import { Textarea } from "@/components/ui/textarea";
@@ -18,9 +18,15 @@ import { formulaToSource, tokenizeFormulaText } from "@/lib/records/formula-text
 export function FormulaTextEditor({
   refs,
   initial,
+  onChange,
 }: {
   refs: OperandRef[];
   initial?: Formula | null;
+  // Modo controlado (editor de widget): emite os tokens a cada texto VÁLIDO;
+  // texto inválido/vazio emite tokens vazios (o submit acusa "defina a
+  // fórmula"; o erro fino aparece na validação ao vivo abaixo do campo). O
+  // <input hidden> continua para os forms nativos (campos calculados).
+  onChange?: (formula: Formula) => void;
 }) {
   const [text, setText] = useState(() =>
     formulaToSource(initial, (ref) => refs.find((r) => r.ref === ref)?.label ?? ref)
@@ -60,6 +66,20 @@ export function FormulaTextEditor({
   const validation = useMemo(
     () => (text.trim() ? tokenizeFormulaText(text, refs) : null),
     [text, refs]
+  );
+
+  useEffect(() => {
+    if (!onChange) return;
+    onChange(validation?.ok ? validation.formula : { tokens: [] });
+    // onChange é passado inline pelo pai; dependemos só da validação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validation]);
+
+  // Catálogo com operandos agregados (agg:*) = fórmula de totais → mostra a
+  // ajuda de SOMASE/CONT.SE/MÉDIASE (que só existem nesse contexto).
+  const isAggContext = useMemo(
+    () => refs.some((r) => r.ref.startsWith("agg:")),
+    [refs]
   );
 
   function syncCursor() {
@@ -165,6 +185,19 @@ export function FormulaTextEditor({
         <code>= &lt;&gt; &lt; &gt; &lt;= &gt;=</code>. Textos entre aspas:{" "}
         <code>&quot;Ganho&quot;</code>.
       </p>
+      {isAggContext ? (
+        <p className="text-muted-foreground text-xs">
+          Condicionais de agregação:{" "}
+          <code>SOMASE([Valor]; [Etapa] = &quot;Ganho&quot;)</code>,{" "}
+          <code>CONT.SE([Etapa] = &quot;Ganho&quot;)</code>,{" "}
+          <code>MÉDIASE([Valor]; condição)</code>; várias condições (E):{" "}
+          <code>SOMASES</code>/<code>CONT.SES</code> com condições separadas por{" "}
+          <code>;</code>. Cada condição compara uma coluna com um valor fixo.
+          Texto compara como no <code>SE</code> (ignora maiúsculas/minúsculas e
+          espaços nas pontas); números sem aspas comparam como número; datas no
+          formato <code>&quot;2026-01-31&quot;</code>.
+        </p>
+      ) : null}
     </div>
   );
 }

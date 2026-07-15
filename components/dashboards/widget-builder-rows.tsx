@@ -30,6 +30,9 @@ import {
   FormulaBuilder,
   type RefOption,
 } from "@/components/campos/formula-builder";
+import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import { formulaUsesFunctions } from "@/lib/records/formulas";
+import { cn } from "@/lib/utils";
 import type {
   Aggregation,
   DateAgg,
@@ -301,6 +304,12 @@ export function MetricRow({
         metric.grandTotalMode
     )
   );
+  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
+  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
+  // não a representa).
+  const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
+    formulaUsesFunctions(metric.formula) ? "text" : "builder"
+  );
   return (
     <div className="flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
@@ -335,11 +344,45 @@ export function MetricRow({
       </div>
       {isCalcSentinel ? (
         <div className="flex flex-col gap-1.5 rounded-md border p-2">
-          <FormulaBuilder
-            refs={calcRefs}
-            initial={metric.formula ?? null}
-            onChange={(f) => onChange({ formula: f })}
-          />
+          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
+            {(
+              [
+                ["builder", "Construtor"],
+                ["text", "Texto (funções)"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFormulaMode(k)}
+                className={cn(
+                  "rounded-sm px-2 py-1 text-xs",
+                  formulaMode === k
+                    ? "bg-background shadow-sm"
+                    : "text-muted-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {formulaMode === "builder" ? (
+            <FormulaBuilder
+              refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+              initial={metric.formula ?? null}
+              onChange={(f) => onChange({ formula: f })}
+            />
+          ) : (
+            <FormulaTextEditor
+              refs={calcRefs}
+              initial={
+                metric.formula && metric.formula.tokens.length > 0
+                  ? metric.formula
+                  : null
+              }
+              onChange={(f) => onChange({ formula: f })}
+            />
+          )}
           <div className="flex items-center gap-2">
             <Label className="text-muted-foreground shrink-0 text-xs">
               Formato do resultado

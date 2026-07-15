@@ -37,10 +37,15 @@ import { bucketRecordDate } from "./date-buckets";
 import {
   basisKeysFor,
   basisMetric,
+  condFilters,
   evalCalcMoney,
   isCalcMetric,
+  isCondBasisKey,
   isMoneyOperandField,
+  parseCondBasisKey,
+  recordMatchesConds,
   resolveCalcMetric,
+  type BasisKey,
   type BasisValues,
   type CalcMoneyMeta,
   type ResolvedCalcMetric,
@@ -852,18 +857,24 @@ async function runWidgetByPeriod(
   const basisFromRecords = (rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of calcBasisKeys) {
-      const bm = basisMetric(key);
+      // Chave condicional (SOMASE/CONT.SE/MÉDIASE): restringe os registros do
+      // grupo às condições e reusa a mesma lógica de contagem/soma/moeda.
+      const cond = parseCondBasisKey(key);
+      const recs = cond
+        ? rs.filter((r) => recordMatchesConds((ref) => rawValue(ref, r), cond.conds))
+        : rs;
+      const bm = cond ? cond.metric : basisMetric(key);
       if (bm.agg === "count") {
         out[key] =
           bm.field === "*"
-            ? rs.length
-            : rs.filter((r) => rawValue(bm.field, r) != null).length;
+            ? recs.length
+            : recs.filter((r) => rawValue(bm.field, r) != null).length;
       } else if (isMoneyOperandField(bm.field, fieldByKey)) {
         // Operando monetário: detalhamento por moeda (+ convertido pela taxa do
         // período de cada registro, granularidade anual) p/ o evalCalcMoney
         // preservar a moeda única ou operar em Real quando misturar.
         out[key] = buildRecordBreakdown(
-          rs,
+          recs,
           (r) => rawValue(bm.field, r),
           (r) => metricCurrency(bm.field, r),
           (r) => ({
@@ -875,7 +886,7 @@ async function runWidgetByPeriod(
           rates
         );
       } else {
-        const nums = rs
+        const nums = recs
           .map((r) => Number(rawValue(bm.field, r)))
           .filter((n) => Number.isFinite(n));
         out[key] = nums.length ? nums.reduce((s, n) => s + n, 0) : null;
@@ -1049,9 +1060,17 @@ export async function runWidget(
     rpcMetrics.push(m);
   });
   const rpcIdxOfBasis = new Map<string, number>(); // basis key → idx rpc
+  // Chaves condicionais (SOMASE/CONT.SE/MÉDIASE): NUNCA entram na consulta
+  // principal (o filtro da condição valeria para a consulta inteira) — cada
+  // conjunto de condições vira uma consulta auxiliar própria, adiante.
+  const condBasisKeys: BasisKey[] = [];
   for (const rc of calcResolved.values()) {
     if (!rc.formula) continue;
     for (const key of basisKeysFor(rc.formula)) {
+      if (isCondBasisKey(key)) {
+        if (!condBasisKeys.includes(key)) condBasisKeys.push(key);
+        continue;
+      }
       if (rpcIdxOfBasis.has(key)) continue;
       const bm = basisMetric(key);
       // Reusa uma métrica normal idêntica (mesma coluna do RPC) quando houver.
@@ -1083,6 +1102,60 @@ export async function runWidget(
 
   const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
 
+  // Chaves condicionais: uma consulta auxiliar por conjunto DISTINTO de
+  // condições (mesmas dims; filtros da condição anexados aos do widget),
+  // casada por tupla de dims como a consulta de moeda. Falha da auxiliar
+  // degrada a chave para null (operando ausente → "—"), nunca para o número
+  // sem condição (que seria um valor errado).
+  const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
+  if (condBasisKeys.length > 0) {
+    const condGroups = new Map<
+      string,
+      { filters: WidgetFilter[]; keys: BasisKey[] }
+    >();
+    for (const key of condBasisKeys) {
+      const parsed = parseCondBasisKey(key);
+      if (!parsed) continue;
+      const extra = condFilters(parsed.conds);
+      const gk = JSON.stringify(extra);
+      const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+      g.keys.push(key);
+      condGroups.set(gk, g);
+    }
+    await Promise.all(
+      [...condGroups.values()].map(async (g) => {
+        try {
+          const { data: condData, error: condError } = await supabase.rpc(
+            "run_widget_query",
+            {
+              p_source: config.source,
+              p_dimensions: dims,
+              p_metrics: g.keys.map(basisMetric),
+              p_filters: [...filters, ...g.filters],
+              p_correspondences: correspondencesMap,
+            }
+          );
+          if (condError) throw new Error(condError.message);
+          const condRows = (Array.isArray(condData) ? condData : []) as WidgetRow[];
+          for (const key of g.keys) condValueByKey.set(key, {});
+          for (const r of condRows) {
+            const tuple: unknown[] = [];
+            for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+            const tk = JSON.stringify(tuple);
+            g.keys.forEach((key, ki) => {
+              const v = r[`metric_${ki + 1}`];
+              const n = Number(v);
+              condValueByKey.get(key)![tk] =
+                v == null || !Number.isFinite(n) ? null : n;
+            });
+          }
+        } catch {
+          for (const key of g.keys) condValueByKey.delete(key);
+        }
+      })
+    );
+  }
+
   // Consulta auxiliar por moeda + data-da-taxa (uma só): cobre as métricas
   // monetárias normais (`__money`) E os operandos monetários das métricas
   // calculadas (basis como MoneyBreakdown — preserva a moeda única do recorte
@@ -1090,12 +1163,16 @@ export async function runWidget(
   const moneyEntries = config.metrics
     .map((m, i) => ({ m, i }))
     .filter(({ m }) => isMoneyMetric(m, available));
+  // Chaves condicionais ficam de fora: a consulta de moeda não aplica os
+  // filtros da condição (o detalhamento sairia sem condição — valor errado);
+  // o operando condicional segue numérico (soma crua, degradação v1).
   const basisMoneyKeys = [
     ...new Set(
       [...calcResolved.values()].flatMap((rc) =>
         rc.formula && rc.mode !== "none"
           ? basisKeysFor(rc.formula).filter(
               (key) =>
+                !isCondBasisKey(key) &&
                 basisMetric(key).agg === "sum" &&
                 isMoneyOperandField(basisMetric(key).field, fieldByKey)
             )
@@ -1158,6 +1235,23 @@ export async function runWidget(
         const bd = bdArr?.[metricInfos.length + k];
         if (bd) basis[key] = bd;
       });
+      // Valores condicionais do grupo (consulta auxiliar por condição). Grupo
+      // ausente na auxiliar = nenhum registro casou → contagem 0, soma null.
+      // Auxiliar indisponível → null (operando ausente).
+      for (const key of condBasisKeys) {
+        const byTuple = condValueByKey.get(key);
+        if (!byTuple) {
+          basis[key] = null;
+          continue;
+        }
+        const tk = JSON.stringify(tuple);
+        if (tk in byTuple) {
+          basis[key] = byTuple[tk];
+        } else {
+          basis[key] =
+            parseCondBasisKey(key)?.metric.agg === "count" ? 0 : null;
+        }
+      }
       config.metrics.forEach((_, i) => {
         const rc = calcResolved.get(i);
         if (rc) {

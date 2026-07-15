@@ -41,7 +41,7 @@ import {
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { allDateOperands } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
-import { aggOperandRefs } from "@/lib/widgets/calc-metrics";
+import { aggOperandRefs, condAggOperandRefs } from "@/lib/widgets/calc-metrics";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
 import type { RefOption } from "./formula-builder";
@@ -218,31 +218,36 @@ export function FieldsManager({
   ];
   // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
-  // é materializado; excluindo 'calculado_agg' — sem aninhamento). Mesmos
+  // é materializado; excluindo 'calculado_agg' — sem aninhamento) + operandos de
+  // SOMASE/CONT.SE/MÉDIASE (campos crus alvo + colunas de condição). Mesmos
   // critérios do servidor (aggOperandCatalog em campos/actions.ts).
-  const aggRefs: RefOption[] = aggOperandRefs(
-    [
-      ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-        field: f.field,
-        label: f.label,
-      })),
-      ...fields
-        .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
-        .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
-    ],
-    // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
-    // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
-    // + qualquer campo custom, exceto 'calculado_agg' (sem aninhar agregado).
-    [
-      ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
-        field: f.field,
-        label: f.label,
-      })),
-      ...fields
-        .filter((f) => f.data_type !== "calculado_agg")
-        .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
-    ]
-  );
+  const aggNumericFields = [
+    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
+      field: f.field,
+      label: f.label,
+    })),
+    ...fields
+      .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
+      .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
+  ];
+  const aggRefs: RefOption[] = [
+    ...aggOperandRefs(
+      aggNumericFields,
+      // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
+      // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
+      // + qualquer campo custom, exceto 'calculado_agg' (sem aninhar agregado).
+      [
+        ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
+          field: f.field,
+          label: f.label,
+        })),
+        ...fields
+          .filter((f) => f.data_type !== "calculado_agg")
+          .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
+      ]
+    ),
+    ...condAggOperandRefs(aggNumericFields, customCondFields, customDateFields),
+  ];
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
