@@ -14,7 +14,11 @@
 import { useActionState, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import {
+  Combobox,
+  type ComboboxChip,
+  type ComboboxOption,
+} from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -75,6 +79,7 @@ export function FieldForm({
   numericRefs,
   allRefs,
   aggRefs,
+  fieldChips,
   currencyOptions,
   onDone,
 }: {
@@ -86,6 +91,8 @@ export function FieldForm({
   // Operandos de AGREGAÇÃO (agg:*) p/ o tipo "Calculado (totais)". Ausente →
   // o tipo ainda aparece, mas sem operandos (caller deve passar).
   aggRefs?: RefOption[];
+  // Chips de fonte dos seletores de coluna das fórmulas (ver Combobox.chips).
+  fieldChips?: ComboboxChip[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
   currencyOptions?: ComboboxOption[];
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
@@ -300,7 +307,11 @@ export function FieldForm({
             ))}
           </div>
           {formulaMode === "builder" ? (
-            <FormulaBuilder refs={aggBuilderOperands} initial={field?.formula ?? null} />
+            <FormulaBuilder
+              refs={aggBuilderOperands}
+              chips={fieldChips}
+              initial={field?.formula ?? null}
+            />
           ) : (
             <FormulaTextEditor refs={aggOperands} initial={field?.formula ?? null} />
           )}
@@ -375,7 +386,11 @@ export function FieldForm({
           </div>
           {formulaMode === "builder" ? (
             <>
-              <FormulaBuilder refs={operandRefs} initial={field?.formula ?? null} />
+              <FormulaBuilder
+                refs={operandRefs}
+                chips={fieldChips}
+                initial={field?.formula ?? null}
+              />
               <p className="text-muted-foreground text-xs">
                 Opere entre colunas numéricas e datas (+ − × ÷) e constantes.{" "}
                 <strong>data − data</strong> resulta em dias (ex.: lead time).

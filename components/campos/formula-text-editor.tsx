@@ -51,8 +51,12 @@ export function FormulaTextEditor({
   const suggestions = useMemo(() => {
     if (!frag) return [];
     const q = frag.query.trim().toLocaleLowerCase("pt-BR");
+    // Busca também pela fonte (sourceHint): digitar "[deals" lista os campos
+    // dessa fonte. A inserção continua usando só o rótulo limpo.
     return refs
-      .filter((r) => r.label.toLocaleLowerCase("pt-BR").includes(q))
+      .filter((r) =>
+        `${r.sourceHint ?? ""} ${r.label}`.toLocaleLowerCase("pt-BR").includes(q)
+      )
       .slice(0, 8);
   }, [frag, refs]);
 
@@ -159,6 +163,7 @@ export function FormulaTextEditor({
             <button
               key={r.ref}
               type="button"
+              title={r.title}
               onMouseDown={(e) => {
                 e.preventDefault();
                 insert(r);
@@ -170,7 +175,12 @@ export function FormulaTextEditor({
                   : "hover:bg-accent/50"
               )}
             >
-              <span className="truncate">{r.label}</span>
+              <span className="truncate">
+                {r.sourceHint ? (
+                  <span className="text-muted-foreground">{r.sourceHint} · </span>
+                ) : null}
+                {r.label}
+              </span>
               {r.group ? (
                 <span className="text-muted-foreground shrink-0 text-xs">{r.group}</span>
               ) : null}

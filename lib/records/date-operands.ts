@@ -9,8 +9,15 @@ import { SOURCE_KEYS, SOURCE_LABELS } from "@/lib/sources";
 
 export interface OperandRef {
   ref: string;
+  // Rótulo LIMPO — load-bearing: o round-trip texto⇄tokens ([Rótulo] → ref) e a
+  // validação do servidor casam por ele. Nunca embuta fonte/indicadores aqui.
   label: string;
   group?: string;
+  // Metadados SÓ de exibição (decorateRefOptions em lib/widgets/filter-ops):
+  // fonte curta, chips de navegação e tooltip (fórmula de campo calculado).
+  sourceHint?: string;
+  chips?: string[];
+  title?: string;
 }
 
 export interface CustomDateField {

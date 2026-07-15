@@ -11,7 +11,9 @@ import { useState } from "react";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { useNavPending } from "./pending-context";
+import { useSourceLabels } from "@/components/source-labels-context";
 import type { AvailableField } from "@/lib/widgets/fields";
+import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
 import {
   PERIOD_ALL,
   PERIOD_PRESETS,
@@ -52,6 +54,7 @@ export function PeriodControls({
   const pathname = usePathname();
   const sp = useSearchParams();
   const { run } = useNavPending();
+  const sourceLabels = useSourceLabels();
 
   const urlSel: PeriodSelection = {
     preset: sp.get(keys.preset) ?? "",
@@ -161,10 +164,8 @@ export function PeriodControls({
 
       {fieldControl ? (
         <Combobox
-          options={fieldControl.options.map((f) => ({
-            value: f.field,
-            label: f.label,
-          }))}
+          options={toFieldOptions(fieldControl.options, sourceLabels)}
+          chips={sourceChips(sourceLabels)}
           value={fieldControl.value}
           onValueChange={(v) => navigate({ [fieldControl.paramKey]: v })}
           className="w-auto min-w-44"

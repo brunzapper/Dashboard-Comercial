@@ -27,6 +27,8 @@ import {
   type Widget,
 } from "@/lib/widgets/types";
 import type { QuickTable } from "@/lib/widgets/quick-table/model";
+import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
+import { useSourceLabels } from "@/components/source-labels-context";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { FloatingPanel } from "../appearance-editing";
 
@@ -100,15 +102,20 @@ export function ColumnPanel({
   onClose: () => void;
 }) {
   // Campos elegíveis: dimensão = qualquer coluna real do RPC; métrica =
-  // numéricos + contagem de registros (mesmos recortes do builder).
-  const dimOptions: ComboboxOption[] = available
-    .filter((f) => !f.displayOnly && !f.aggCalc)
-    .map((f) => ({ value: f.field, label: f.label }));
+  // numéricos + contagem de registros (mesmos recortes do builder), com o mesmo
+  // formato de opção dos dropdowns do builder (fonte, chips, ƒ, tooltip).
+  const sourceLabels = useSourceLabels();
+  const fieldSourceChips = sourceChips(sourceLabels);
+  const dimOptions: ComboboxOption[] = toFieldOptions(
+    available.filter((f) => !f.displayOnly && !f.aggCalc),
+    sourceLabels
+  );
   const metricFieldOptions: ComboboxOption[] = [
     { value: "*", label: "Contagem de registros" },
-    ...available
-      .filter((f) => f.isNumeric && !f.aggCalc)
-      .map((f) => ({ value: f.field, label: f.label })),
+    ...toFieldOptions(
+      available.filter((f) => f.isNumeric && !f.aggCalc),
+      sourceLabels
+    ),
   ];
   const aggOptions: ComboboxOption[] = (
     Object.keys(AGG_LABELS) as Aggregation[]
@@ -165,6 +172,7 @@ export function ColumnPanel({
               <Label className="text-xs">Campo (dimensão)</Label>
               <Combobox
                 options={dimOptions}
+                chips={fieldSourceChips}
                 value={column.field ?? ""}
                 placeholder="— campo —"
                 onValueChange={(field) =>
@@ -213,6 +221,7 @@ export function ColumnPanel({
               <Label className="text-xs">Métrica</Label>
               <Combobox
                 options={metricFieldOptions}
+                chips={fieldSourceChips}
                 value={column.metric?.field ?? ""}
                 placeholder="— campo —"
                 onValueChange={(field) =>

@@ -20,8 +20,10 @@ import {
   cleanFilters,
   FILTER_OPS,
   opHasNoValue,
+  sourceChips,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { useSourceLabels } from "@/components/source-labels-context";
 import {
   encodeViewFilter,
   parseViewFilter,
@@ -49,7 +51,9 @@ export function TableFilterBar({
   const [filters, setFilters] = useState<WidgetFilter[]>(initial.filters);
   const [open, setOpen] = useState(initial.filters.length > 0);
 
-  const fieldOptions = toFieldOptions(available);
+  const sourceLabels = useSourceLabels();
+  const fieldOptions = toFieldOptions(available, sourceLabels);
+  const fieldSourceChips = sourceChips(sourceLabels);
 
   // Estado efetivo (normalizado) → parâmetro de URL. Debounce p/ não navegar a
   // cada tecla. Só navega quando o valor muda de fato.
@@ -146,6 +150,7 @@ export function TableFilterBar({
               <Combobox
                 className="min-w-0 flex-1"
                 options={fieldOptions}
+                chips={fieldSourceChips}
                 value={f.field}
                 placeholder="— campo —"
                 onValueChange={(field) => updateFilter(i, { field })}

@@ -1,7 +1,10 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 1.1 | Data: 15/07/2026
 // Fase 8: definição das FONTES do produto. Cada fonte mapeia 1:1 num record_type
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
 // Registros (abas por fonte) e no construtor de widgets (seleção de fontes).
+// v1.1 (15/07/2026): rótulos CURTOS de exibição (prefixo/chips dos dropdowns de
+//   campo), personalizáveis em Configurações → Fontes (sync_config
+//   'source_labels' — ver lib/config/source-labels.ts).
 
 export type SourceKey = "leads" | "deals" | "estudo";
 
@@ -11,6 +14,22 @@ export const SOURCE_LABELS: Record<SourceKey, string> = {
   leads: "Leads do Bitrix",
   deals: "Deals do Bitrix",
   estudo: "Estudo de Fechamentos",
+};
+
+// Rótulos de exibição dos dropdowns de campo: nome curto de cada fonte + rótulo
+// dos campos "gerais" (presentes em todas as fontes / sem fonte única).
+export interface SourceDisplayLabels {
+  leads: string;
+  deals: string;
+  estudo: string;
+  geral: string;
+}
+
+export const DEFAULT_SOURCE_DISPLAY_LABELS: SourceDisplayLabels = {
+  leads: "Leads",
+  deals: "Deals",
+  estudo: "Estudo",
+  geral: "Geral",
 };
 
 // record_type correspondente a cada fonte.

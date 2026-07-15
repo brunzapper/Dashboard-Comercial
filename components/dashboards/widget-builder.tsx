@@ -111,9 +111,14 @@ import { newVarId } from "@/lib/widgets/calculator";
 import { WidgetLinkPicker } from "@/components/dashboards/widget-link-picker";
 import {
   cleanFilters as cleanFilterRows,
+  decorateRefOptions,
   FILTER_OPS,
+  fieldOptionLabel,
+  fieldOptionTitle,
+  sourceChips,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { useSourceLabels } from "@/components/source-labels-context";
 import { filterTargetSources } from "@/lib/widgets/filter-sources";
 import {
   aggOperandRefs,
@@ -545,6 +550,11 @@ export function WidgetBuilder({
 
   const numericFields = available.filter((f) => f.isNumeric);
 
+  // Rótulos de exibição das fontes (Configurações → Fontes) + chips de
+  // navegação dos dropdowns de campo (Todas · fontes · Geral).
+  const sourceLabels = useSourceLabels();
+  const fieldSourceChips = sourceChips(sourceLabels);
+
   // Métrica monetária (value/mrr ou campo moeda/calc-moeda): habilita as opções
   // de moeda/conversão da métrica.
   const isMoneyField = (field: string): boolean =>
@@ -577,11 +587,16 @@ export function WidgetBuilder({
     const customDate = fields
       .filter((f) => f.data_type === "data")
       .map((f) => ({ field_key: f.field_key, label: f.label }));
-    return [
-      ...aggOperandRefs(numeric, countable),
-      ...condAggOperandRefs(numeric, customCond, customDate),
-    ];
-  }, [available, fields]);
+    // Decoração só de exibição (fonte/chips/tooltip) — labels seguem limpos.
+    return decorateRefOptions(
+      [
+        ...aggOperandRefs(numeric, countable),
+        ...condAggOperandRefs(numeric, customCond, customDate),
+      ],
+      available,
+      sourceLabels
+    );
+  }, [available, fields, sourceLabels]);
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>
@@ -590,13 +605,17 @@ export function WidgetBuilder({
 
   // Os campos calculados de agregados nunca são dimensão/filtro/busca/coluna de
   // registro (não têm valor por registro) — ficam fora dos dois catálogos.
-  const availableOptions = toFieldOptions(available.filter((f) => !f.aggCalc));
+  const availableOptions = toFieldOptions(
+    available.filter((f) => !f.aggCalc),
+    sourceLabels
+  );
   // Campos válidos para o RPC (dimensão agregada, filtro, busca): exclui os
   // sintéticos (displayOnly, ex.: "Data atual") que não existem como coluna no
   // banco. No modo lista as dimensões SÃO colunas do cliente, então lá o campo
   // sintético é permitido (usa availableOptions).
   const rpcFieldOptions = toFieldOptions(
-    available.filter((f) => !f.displayOnly && !f.aggCalc)
+    available.filter((f) => !f.displayOnly && !f.aggCalc),
+    sourceLabels
   );
   // Opções de fontes-alvo por linha de filtro: fontes cobertas pelo widget ∪
   // alvos já gravados no filtro. Alvo "órfão" (fonte que saiu do widget) vem
@@ -612,9 +631,12 @@ export function WidgetBuilder({
     }));
   };
   const metricOptions: ComboboxOption[] = [
+    // Sentinelas sem fonte (sempre visíveis em qualquer chip): contagem e
+    // fórmula ad-hoc. Os campos "Calculado (totais)" entram com prefixo de
+    // fonte + ƒ + tooltip da fórmula, como os demais.
     { value: "*", label: "Contagem de registros" },
-    ...toFieldOptions(numericFields),
-    ...aggCalcFields.map((f) => ({ value: f.field, label: `ƒ ${f.label}` })),
+    ...toFieldOptions(numericFields, sourceLabels),
+    ...toFieldOptions(aggCalcFields, sourceLabels),
     { value: CALC_METRIC_FIELD, label: "ƒ Fórmula personalizada…" },
   ];
   const visualOptions: ComboboxOption[] = (
@@ -638,10 +660,10 @@ export function WidgetBuilder({
       label: PERIOD_PRESETS[k],
     })),
   ];
-  const dateFieldOptions: ComboboxOption[] = dateFields.map((f) => ({
-    value: f.field,
-    label: f.label,
-  }));
+  const dateFieldOptions: ComboboxOption[] = toFieldOptions(
+    dateFields,
+    sourceLabels
+  );
 
   function isDate(field: string): boolean {
     return available.find((a) => a.field === field)?.isDate ?? false;
@@ -649,13 +671,15 @@ export function WidgetBuilder({
 
   // Campos elegíveis p/ filtros rápidos (por enquanto): Responsável, Operação e
   // datas — inclusive unificadas (↔) e do registro casado (↪ match:).
-  const quickFieldOptions: ComboboxOption[] = [
-    { value: "responsible_id", label: fieldLabel("responsible_id", available) },
-    { value: "operation_id", label: fieldLabel("operation_id", available) },
-    ...available
-      .filter((f) => f.isDate && !f.displayOnly)
-      .map((f) => ({ value: f.field, label: f.label })),
-  ];
+  const quickFieldOptions: ComboboxOption[] = toFieldOptions(
+    available.filter(
+      (f) =>
+        f.field === "responsible_id" ||
+        f.field === "operation_id" ||
+        (f.isDate && !f.displayOnly)
+    ),
+    sourceLabels
+  );
   // Formato do dropdown de data: padrão = período (presets/personalizado);
   // demais = multi-seleção de buckets (os mesmos formatos das dimensões).
   const quickFormatOptions: ComboboxOption[] = [
@@ -705,6 +729,7 @@ export function WidgetBuilder({
               <Combobox
                 className="min-w-0 flex-1"
                 options={quickFieldOptions}
+                chips={fieldSourceChips}
                 value={e.field}
                 placeholder="— campo —"
                 onValueChange={(field) =>
@@ -791,10 +816,14 @@ export function WidgetBuilder({
       : []),
     ...dimensions
       .filter((d) => d.field)
-      .map((d, i) => ({
-        value: isRecordList ? d.field : `dim_${groupByOffset + i + 1}`,
-        label: available.find((a) => a.field === d.field)?.label ?? d.field,
-      })),
+      .map((d, i) => {
+        const af = available.find((a) => a.field === d.field);
+        return {
+          value: isRecordList ? d.field : `dim_${groupByOffset + i + 1}`,
+          label: af ? fieldOptionLabel(af, sourceLabels) : d.field,
+          title: af ? fieldOptionTitle(af) : undefined,
+        };
+      }),
   ];
   // Na transposta UMA dimensão é o eixo de colunas (fica no topo) e não pode
   // virar grupo do eixo esquerdo (grupo == coluna seria degenerado). Qual delas
@@ -1328,6 +1357,7 @@ export function WidgetBuilder({
                 <Label>Campo de data</Label>
                 <Combobox
                   options={dateFieldOptions}
+                  chips={fieldSourceChips}
                   value={filterField}
                   onValueChange={setFilterField}
                   aria-label="Campo de data"
@@ -1418,6 +1448,7 @@ export function WidgetBuilder({
                     <Combobox
                       className="flex-1"
                       options={rpcFieldOptions}
+                      chips={fieldSourceChips}
                       value={sf}
                       placeholder="— campo —"
                       onValueChange={(field) => {
@@ -1466,6 +1497,7 @@ export function WidgetBuilder({
                     <Combobox
                       className="flex-1"
                       options={rpcFieldOptions}
+                      chips={fieldSourceChips}
                       value={f.field}
                       placeholder="— campo —"
                       onValueChange={(field) => {
@@ -1541,10 +1573,7 @@ export function WidgetBuilder({
                     searchable={false}
                     options={[
                       { value: "", label: "— fórmula própria (abaixo) —" },
-                      ...aggCalcFields.map((f) => ({
-                        value: f.field,
-                        label: f.label,
-                      })),
+                      ...toFieldOptions(aggCalcFields, sourceLabels),
                     ]}
                     value={calcField}
                     onValueChange={setCalcField}
@@ -1586,6 +1615,7 @@ export function WidgetBuilder({
                     <>
                       <FormulaBuilder
                         refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+                        chips={fieldSourceChips}
                         initial={widget?.settings?.formula ?? null}
                         onChange={setFormula}
                       />
@@ -1859,6 +1889,7 @@ export function WidgetBuilder({
                   // campos sintéticos (ex.: "Data atual"). Na tabela/gráfico
                   // agregado a dimensão vai ao RPC → só campos reais.
                   fieldOptions={isRecordList ? availableOptions : rpcFieldOptions}
+                  fieldChips={fieldSourceChips}
                   transformOptions={transformOptions}
                   dateAggOptions={dateAggOptions}
                   isDateField={isDate(d.field)}
@@ -1933,6 +1964,7 @@ export function WidgetBuilder({
                 key={i}
                 metric={m}
                 metricOptions={metricOptions}
+                fieldChips={fieldSourceChips}
                 aggOptions={aggOptions}
                 isMoney={isMoneyField(m.field)}
                 isAggCalc={isAggCalcField(m.field)}
@@ -2028,6 +2060,7 @@ export function WidgetBuilder({
                 key={i}
                 filter={f}
                 fieldOptions={rpcFieldOptions}
+                fieldChips={fieldSourceChips}
                 opOptions={FILTER_OP_OPTIONS}
                 sourceOptions={filterSourceOptions(f)}
                 onChange={(patch) =>

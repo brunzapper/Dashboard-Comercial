@@ -9,14 +9,21 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
+import { Combobox, type ComboboxChip } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
 
 export interface RefOption {
   ref: string;
+  // Rótulo LIMPO — load-bearing: o round-trip texto⇄tokens ([Rótulo] → ref) e a
+  // validação do servidor casam por ele. Nunca embuta fonte/indicadores aqui.
   label: string;
   group?: string; // agrupa as opções no seletor (ex.: por tabela / "Registros")
+  // Metadados SÓ de exibição (decorateRefOptions): fonte curta prefixada no
+  // seletor, chips de navegação e tooltip (fórmula de campo calculado).
+  sourceHint?: string;
+  chips?: string[];
+  title?: string;
 }
 
 const OPS: { op: "+" | "-" | "*" | "/"; glyph: string }[] = [
@@ -53,10 +60,13 @@ function tokenLabel(t: FormulaToken, refs: RefOption[]): string {
 
 export function FormulaBuilder({
   refs,
+  chips,
   initial,
   onChange,
 }: {
   refs: RefOption[];
+  // Chips de fonte do seletor de coluna (navegação — ver Combobox.chips).
+  chips?: ComboboxChip[];
   initial?: Formula | null;
   // Modo controlado (dashboards): emite a fórmula a cada mudança de tokens. O
   // <input hidden> continua para os forms nativos (campos calculados).
@@ -143,9 +153,15 @@ export function FormulaBuilder({
         <Combobox
           options={refs.map((r) => ({
             value: r.ref,
-            label: r.label,
+            // Fonte curta só na EXIBIÇÃO — os tokens/chips da fórmula seguem
+            // usando r.label limpo (tokenLabel).
+            label: r.sourceHint ? `${r.sourceHint} · ${r.label}` : r.label,
+            cleanLabel: r.label,
             group: r.group,
+            chips: r.chips,
+            title: r.title,
           }))}
+          chips={chips}
           value=""
           onValueChange={(ref) => push({ kind: "field", ref })}
           placeholder="Adicionar coluna…"
