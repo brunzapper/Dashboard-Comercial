@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 15/07/2026
+// v1.1 (15/07/2026): leitura de campo percentual exibe ×100 + "%" (edição
+//   continua com o valor cru).
 // Célula editável inline na tabela de Registros: renderiza o controle certo por
 // data_type (dropdown de seleção, checkbox booleano, texto/número/data editáveis) e
 // grava um único campo personalizado na hora, reusando a Server Action
@@ -11,10 +13,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  isPercentField,
+  type FieldDefinition,
+  type RecordRow,
+} from "@/lib/records/types";
 import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
+  formatPercent,
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
@@ -90,9 +97,12 @@ export function EditableCell({
     const money = resolveFieldMoneyFromRecord(field, record);
     const display = money.isMoney
       ? formatMoney(serverValue, money.code)
-      : field.data_type === "data"
-        ? formatDateValue(serverValue, dateFormat)
-        : serverValue;
+      : isPercentField(field)
+        ? // Percentual: exibe cru ×100 + "%" (0.35 → "35%"; vazio → "—").
+          formatPercent(serverValue, true)
+        : field.data_type === "data"
+          ? formatDateValue(serverValue, dateFormat)
+          : serverValue;
     // Traço só para vazio/nulo — zero (0 numérico ou "0") exibe normalmente.
     return (
       <span className="block truncate">

@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 14/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): formato "Percentual (%)" nas métricas calculadas ad-hoc
+//   (resultPercent propagado/limpo na troca de campo).
 // v1.3 (14/07/2026): merge com a main — métricas calculadas de agregados
 //   (campos "Calculado (totais)" e sentinela 'calc:formula') portadas para o
 //   layout em seções (a UI da linha vive em widget-builder-rows.tsx/MetricRow).
@@ -1421,6 +1423,7 @@ export function WidgetBuilder({
                 calcRefs={calcRefs}
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
+                  { value: "percent", label: "Percentual (%) — exibe ×100" },
                   ...(currencyOptions ?? []).map((o) => ({
                     value: o.value,
                     label: `Moeda — ${o.label}`,
@@ -1446,7 +1449,11 @@ export function WidgetBuilder({
                       calc: true,
                       label: m.label,
                       ...(field === CALC_METRIC_FIELD
-                        ? { formula: m.formula, resultCurrency: m.resultCurrency }
+                        ? {
+                            formula: m.formula,
+                            resultCurrency: m.resultCurrency,
+                            resultPercent: m.resultPercent,
+                          }
                         : {}),
                     };
                   } else {
@@ -1458,6 +1465,7 @@ export function WidgetBuilder({
                     delete cleaned.calc;
                     delete cleaned.formula;
                     delete cleaned.resultCurrency;
+                    delete cleaned.resultPercent;
                     next[i] = cleaned;
                   }
                   setMetrics(next);

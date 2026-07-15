@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 14/07/2026
+// Versão: 1.4 | Data: 15/07/2026
+// v1.4 (15/07/2026): exibição percentual — FieldDefinition.show_as_percent,
+//   PERCENT_DATA_TYPES, isPercentField e isPercentFieldRef (refs custom:/match:).
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
 // v1.1 (09/07/2026): Fase 7 — DataType ganha 'booleano' (campos Y/N do Bitrix)
 //   e 'calculado' (campo com fórmula); FieldDefinition ganha source_system,
@@ -35,6 +37,45 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
 // Tipos numéricos: podem ser métrica (soma/média) e operando de fórmula.
 export const NUMERIC_DATA_TYPES: DataType[] = ["numero", "moeda", "calculado"];
 
+// Exibição percentual (15/07/2026): tipos elegíveis a show_as_percent — o valor
+// cru (0.35) exibe como "35%". Moeda fica de fora (formato conflita).
+export const PERCENT_DATA_TYPES: DataType[] = [
+  "numero",
+  "calculado",
+  "calculado_agg",
+];
+
+// true quando o campo deve exibir como percentual (×100 + "%"). Exige tipo
+// elegível e ausência de currency_mode (moeda × percent são mutuamente
+// exclusivos; o server já zera o flag, isto é a segunda trava).
+export function isPercentField(
+  f: Pick<FieldDefinition, "data_type" | "show_as_percent" | "currency_mode">
+): boolean {
+  return (
+    f.show_as_percent === true &&
+    PERCENT_DATA_TYPES.includes(f.data_type) &&
+    !f.currency_mode
+  );
+}
+
+// Idem para uma REF de campo de widget: 'custom:<key>' ou
+// 'match:<fonte>:custom:<key>'. Refs 'unified:' ficam fora do v1 (resolver o
+// membro exigiria as correspondences aqui). Compartilhado entre o engine
+// (carimbo em data.metrics) e as tabelas de registros — um único parser evita
+// que as duas superfícies divirjam.
+export function isPercentFieldRef(
+  field: string,
+  fieldByKey: Map<string, FieldDefinition>
+): boolean {
+  const key = field.startsWith("custom:")
+    ? field.slice("custom:".length)
+    : /^match:[^:]+:custom:/.test(field)
+      ? field.slice(field.indexOf(":custom:") + ":custom:".length)
+      : null;
+  const f = key ? fieldByKey.get(key) : undefined;
+  return f ? isPercentField(f) : false;
+}
+
 export interface FieldDefinition {
   id: string;
   field_key: string;
@@ -63,6 +104,9 @@ export interface FieldDefinition {
   // Write-back: quando true, editar este campo enfileira a mudança de volta ao
   // Bitrix (só faz sentido em campos de origem Bitrix, com source_field_id).
   write_back?: boolean;
+  // Exibição percentual (15/07/2026): valor cru exibe ×100 + "%" (0.35 → "35%").
+  // Só exibição — edição e valores gravados permanecem crus. Ver isPercentField.
+  show_as_percent?: boolean;
 }
 
 export interface RecordRow {

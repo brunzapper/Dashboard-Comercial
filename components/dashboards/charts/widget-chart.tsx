@@ -1,4 +1,7 @@
-// Versão: 3.0 | Data: 10/07/2026
+// Versão: 3.1 | Data: 15/07/2026
+// v3.1 (15/07/2026): exibição percentual — buildPercentModes (x100 do carimbo do
+//   engine vence o sufixo "%" da métrica) aplicado a células, tooltips, rótulos,
+//   eixos, subtotais e Total geral.
 // Renderiza um WidgetData conforme o visual_type (Recharts v3). v3.0 (Fase 10.1):
 // além da aparência (cores, grade, eixos, legenda, gradiente), suporta edição
 // IN-LOCO em tabelas e gráficos (reordenar por arraste, ordenar e colorir via
@@ -71,6 +74,7 @@ import {
 import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
+  formatPercent,
   looksLikeDate,
   type DateFormat,
 } from "@/lib/widgets/format";
@@ -92,6 +96,30 @@ function fmt(v: unknown): string {
   return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 }
 
+// Exibição percentual (15/07/2026): "x100" = campo/calc percentual (converte de
+// fato, 0.35 → "35%"); "suffix" = toggle "%" da métrica (só anexa o símbolo);
+// null = número normal. "x100" vence o toggle (nunca duplica o símbolo).
+type PercentMode = "x100" | "suffix" | null;
+
+// Modo percentual por chave de métrica, pré-computado uma vez por render (padrão
+// metricByKey/calcCodeByKey — nada de .find() por célula/tooltip). Única fonte da
+// precedência: carimbo do engine ("x100") > toggle da métrica ("suffix", nunca em
+// monetária) > null. Compartilhado entre o WidgetChart e a AppearanceTable.
+function buildPercentModes(
+  dataMetrics: WidgetData["metrics"],
+  metricByKey: Record<string, Metric>
+): Record<string, PercentMode> {
+  const out: Record<string, PercentMode> = {};
+  for (const m of dataMetrics) {
+    out[m.key] = m.percent
+      ? "x100"
+      : metricByKey[m.key]?.percent && !m.isMoney
+        ? "suffix"
+        : null;
+  }
+  return out;
+}
+
 // Métrica calculada de agregados: null (divisão por zero / operando ausente) →
 // "—"; com moeda → formatMoney; senão número puro. `calcValueText` é o fallback
 // SEM basis (payload antigo / valor plotado): usa a moeda fixa da definição.
@@ -104,22 +132,34 @@ function calcMetaOf(calc: CalcMeta): CalcMoneyMeta {
     allowNegative: calc.allowNegative,
   };
 }
-function calcValueText(v: unknown, calc: CalcMeta): string {
+function calcValueText(
+  v: unknown,
+  calc: CalcMeta,
+  pct: PercentMode = null
+): string {
   const n = Number(v);
   if (v == null || !Number.isFinite(n)) return "—";
-  return calc.currency ? formatMoney(n, calc.currency) : fmt(n);
+  if (calc.currency) return formatMoney(n, calc.currency);
+  return pct ? formatPercent(n, pct === "x100") : fmt(n);
 }
 
 // Célula de métrica calculada: reavalia a fórmula da basis da linha (moeda
-// automática preservada / convertida); sem basis cai no valor plotado.
-function calcCellText(row: Record<string, unknown>, key: string, calc: CalcMeta): string {
+// automática preservada / convertida); sem basis cai no valor plotado. `pct`
+// só se aplica quando o resultado é número puro (sem moeda).
+function calcCellText(
+  row: Record<string, unknown>,
+  key: string,
+  calc: CalcMeta,
+  pct: PercentMode = null
+): string {
   const ops = (row as WidgetRow).__calcOps;
   if (ops) {
     const { value, currency } = evalCalcMoney(calc.formula, ops, calcMetaOf(calc));
     if (value == null) return "—";
-    return currency ? formatMoney(value, currency) : fmt(value);
+    if (currency) return formatMoney(value, currency);
+    return pct ? formatPercent(value, pct === "x100") : fmt(value);
   }
-  return calcValueText(row[key], calc);
+  return calcValueText(row[key], calc, pct);
 }
 
 // Subtotal/Total geral de uma métrica calculada: NUNCA soma a coluna — funde as
@@ -134,10 +174,15 @@ function calcAggResult(
   if (!list.some(Boolean)) return null;
   return evalCalcMoney(calc.formula, foldBasis(list), calcMetaOf(calc));
 }
-function calcAggText(rs: Record<string, unknown>[], calc: CalcMeta): string {
+function calcAggText(
+  rs: Record<string, unknown>[],
+  calc: CalcMeta,
+  pct: PercentMode = null
+): string {
   const res = calcAggResult(rs, calc);
   if (!res || res.value == null) return "—";
-  return res.currency ? formatMoney(res.value, res.currency) : fmt(res.value);
+  if (res.currency) return formatMoney(res.value, res.currency);
+  return pct ? formatPercent(res.value, pct === "x100") : fmt(res.value);
 }
 
 // Valor monetário compacto (sem centavos) p/ os eixos dos gráficos.
@@ -200,14 +245,23 @@ export function WidgetChart({
     metrics.find((m) => m.key === key)?.isMoney ?? false;
   const calcOf = (key: string) => metrics.find((m) => m.key === key)?.calc;
 
+  // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
+  const percentModeByKey = buildPercentModes(metrics, metricByKey);
+  const percentModeOf = (key: string): PercentMode =>
+    percentModeByKey[key] ?? null;
+  const pfmt = (v: unknown, key: string): string => {
+    const mode = percentModeOf(key);
+    return mode ? formatPercent(v, mode === "x100") : fmt(v);
+  };
+
   // Texto de uma célula/valor de métrica honrando os modos de moeda (tabela/KPI).
   const moneyCellText = (row: WidgetRow, key: string): string => {
     const calc = calcOf(key);
-    if (calc) return calcCellText(row, key, calc);
+    if (calc) return calcCellText(row, key, calc, percentModeOf(key));
     const bd = row.__money?.[key];
     const cfg = metricByKey[key];
     if (isMoneyKey(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
-    return fmt(row[key]);
+    return pfmt(row[key], key);
   };
 
   // Moeda de EXIBIÇÃO de uma série no gráfico: mantém a moeda estrangeira única
@@ -259,9 +313,9 @@ export function WidgetChart({
       const n = Number(v);
       if (v == null || !Number.isFinite(n)) return "—";
       const code = calcCodeByKey[key];
-      return code ? formatMoney(n, code) : fmt(n);
+      return code ? formatMoney(n, code) : pfmt(n, key);
     }
-    return isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : fmt(v);
+    return isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : pfmt(v, key);
   };
 
   // Código único do eixo quando todas as métricas monetárias compartilham a mesma
@@ -272,9 +326,18 @@ export function WidgetChart({
     const codes = new Set(moneyKeys.map(seriesMoneyCode));
     return codes.size === 1 ? [...codes][0]! : null;
   })();
+  // Eixo percentual: sem eixo monetário e TODAS as métricas plotadas com o MESMO
+  // modo percentual não-nulo → ticks em "%"; modos divergentes = eixo numérico.
+  const axisPercentMode = (() => {
+    if (axisMoneyCode || metrics.length === 0) return null;
+    const modes = new Set(metrics.map((m) => percentModeOf(m.key)));
+    return modes.size === 1 ? [...modes][0]! : null;
+  })();
   const yTickFormatter = axisMoneyCode
     ? (v: number) => moneyAxis(v, axisMoneyCode)
-    : undefined;
+    : axisPercentMode
+      ? (v: number) => formatPercent(v, axisPercentMode === "x100")
+      : undefined;
   const ap = appearance ?? {};
   const change = onAppearanceChange ?? NOOP;
   const editable = canEdit && Boolean(onAppearanceChange);
@@ -647,17 +710,26 @@ function AppearanceTable({
     if (m.calc) calcByKey[m.key] = m.calc;
   });
 
+  // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
+  const percentModeByKey = buildPercentModes(data.metrics, metricByKey);
+  const percentModeOf = (key: string): PercentMode =>
+    percentModeByKey[key] ?? null;
+  const pfmt = (v: unknown, key: string): string => {
+    const mode = percentModeOf(key);
+    return mode ? formatPercent(v, mode === "x100") : fmt(v);
+  };
+
   // Célula de métrica: calculada de agregados reavalia a fórmula da basis da
   // linha (moeda automática preservada / fixa convertida; null → "—"); monetária
   // honra a config de moeda (via __money); demais caem no fmt numérico. Mesma
   // formatação do modo registros.
   const metricCellText = (r: Record<string, unknown>, key: string): string => {
     const calc = calcByKey[key];
-    if (calc) return calcCellText(r, key, calc);
+    if (calc) return calcCellText(r, key, calc, percentModeOf(key));
     const bd = (r as WidgetRow).__money?.[key];
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
-    return fmt(r[key]);
+    return pfmt(r[key], key);
   };
   // Subtotal/Total geral de uma métrica sobre `rs`: calculada de agregados
   // REAVALIA a fórmula sobre as basis fundidas do escopo (nunca soma a coluna);
@@ -669,13 +741,13 @@ function AppearanceTable({
     isGrand: boolean
   ): string => {
     const calc = calcByKey[key];
-    if (calc) return calcAggText(rs, calc);
+    if (calc) return calcAggText(rs, calc, percentModeOf(key));
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && cfg) {
       const folded = foldBreakdowns(rs.map((r) => (r as WidgetRow).__money?.[key]));
       return formatMoneyAggregate(folded, cfg, isGrand);
     }
-    return fmt(sumMetric(rs, key));
+    return pfmt(sumMetric(rs, key), key);
   };
   const allCols = [
     ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),

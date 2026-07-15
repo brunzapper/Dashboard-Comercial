@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 15/07/2026
+// v1.2 (15/07/2026): exibição percentual — Metric.percent (sufixo "%") e
+//   Metric.resultPercent (calc ad-hoc ×100), KpiSettings.percent (razão) e o
+//   carimbo percent em WidgetData.metrics (engine).
 // v1.1 (09/07/2026): Fase 8 — WidgetConfig/Widget ganham `sources` (fontes
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
@@ -132,6 +135,13 @@ export interface Metric {
   calc?: boolean;
   formula?: Formula;
   resultCurrency?: string | null; // ad-hoc: moeda fixa (conversão real); null = número
+  // Ad-hoc calc (15/07/2026): "Formato do resultado" = Percentual — o resultado
+  // exibe ×100 + "%" (0.35 → "35%"). Mutuamente exclusivo com resultCurrency.
+  resultPercent?: boolean;
+  // Toggle "%" (15/07/2026): SÓ anexa "%" ao número exibido (35 → "35%"), sem
+  // multiplicar — p/ números que já vêm em magnitude percentual. Ignorado em
+  // métrica monetária e quando o campo já é percentual (×100 vence).
+  percent?: boolean;
   // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
   label?: string;
   // Moeda (12/07/2026): só relevante p/ métrica monetária (value/mrr/campo moeda).
@@ -162,6 +172,10 @@ export interface KpiSettings {
   numerator?: Metric; // modo razão
   denominator?: Metric;
   label?: string;
+  // Razão (15/07/2026): exibe o valor ×100 + "%" (razão de contagens ≈ 0.35 →
+  // "35%"). Ignorado quando o numerador é monetário. Sem UI própria — via
+  // settings JSON/preset.
+  percent?: boolean;
   // Moeda do KPI monetário (mesma semântica dos campos de Metric acima).
   conversionBasis?: ConversionBasis;
   currencyDisplay?: CurrencyDisplay;
@@ -525,6 +539,10 @@ export interface WidgetData {
     key: string;
     label: string;
     isMoney?: boolean;
+    // Exibição percentual (15/07/2026): carimbo do engine — a métrica exibe
+    // ×100 + "%" (campo percentual agregado por sum/avg, ou calc percentual).
+    // Contagens nunca recebem o carimbo. Poupa o chart de precisar de fieldDefs.
+    percent?: boolean;
     calc?: {
       formula: Formula;
       currency?: string | null;

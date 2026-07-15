@@ -1,4 +1,6 @@
-// Versão: 3.0 | Data: 11/07/2026
+// Versão: 3.1 | Data: 15/07/2026
+// v3.1 (15/07/2026): exibição percentual — campo percentual (×100) em colunas/
+//   grupos/subtotais e toggle "%" (sufixo) nas métricas; contagem nunca converte.
 // Widget de Tabela em modo "registros individuais" (Fonte das linhas = Registros).
 // Uma linha por registro; colunas do núcleo read-only, colunas personalizadas
 // NÃO calculadas editáveis por padrão (respeitando editable_by_roles do campo).
@@ -28,6 +30,8 @@ import { RelationEditableCell } from "@/components/registros/relation-editable-c
 import { LeadEditableCell } from "@/components/registros/lead-editable-cell";
 import {
   NUMERIC_DATA_TYPES,
+  isPercentField,
+  isPercentFieldRef,
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
@@ -83,6 +87,7 @@ import {
 import {
   DEFAULT_DATE_FORMAT,
   formatDateValue,
+  formatPercent,
   type DateFormat,
 } from "@/lib/widgets/format";
 import { todayBrasiliaIso } from "@/lib/date/today";
@@ -320,9 +325,11 @@ export function RecordListTable({
       }
     );
     if (value == null) return "—";
-    return currency
-      ? formatMoney(value, currency)
-      : value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    if (currency) return formatMoney(value, currency);
+    // Percentual: calc percentual converte ×100; toggle "%" da métrica só sufixa.
+    if (rc.percent) return formatPercent(value, true);
+    if (m.percent) return formatPercent(value, false);
+    return value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
   };
 
   const metricLabel = (m: Metric) =>
@@ -401,7 +408,12 @@ export function RecordListTable({
     if (m.field === "*") return "";
     const n = Number(rawValue(m.field, r));
     if (!Number.isFinite(n)) return "—";
-    if (!metricIsMoney(m.field)) return n.toLocaleString("pt-BR");
+    if (!metricIsMoney(m.field)) {
+      // Percentual: campo percentual converte ×100 (vence o toggle "%").
+      if (percentOf(m.field)) return formatPercent(n, true);
+      if (m.percent) return formatPercent(n, false);
+      return n.toLocaleString("pt-BR");
+    }
     const code = metricCurrency(m.field, r);
     const { year, quarter } = recYQ(r, m);
     return formatMoneyDisplay(
@@ -434,10 +446,18 @@ export function RecordListTable({
   const metricAggText = (m: Metric, rs: RecordRow[], isGrand = false): string => {
     if (calcOf(m)) return calcText(m, rs);
     if (m.agg === "count" || m.field === "*") {
-      return metricAgg(m, rs).toLocaleString("pt-BR");
+      // Contagem NUNCA converte ×100 (mesmo de campo percentual); o toggle "%"
+      // da métrica ainda pode sufixar (número já em magnitude percentual).
+      const n = metricAgg(m, rs);
+      return m.percent
+        ? formatPercent(n, false)
+        : n.toLocaleString("pt-BR");
     }
     if (!metricIsMoney(m.field)) {
-      return metricAgg(m, rs).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+      const n = metricAgg(m, rs);
+      if (percentOf(m.field)) return formatPercent(n, true);
+      if (m.percent) return formatPercent(n, false);
+      return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
     }
     // Agregação monetária: acumula por moeda + convertido (R$) + referência (US$),
     // convertendo cada registro pela taxa do seu próprio ano/trimestre. Helper
@@ -491,6 +511,11 @@ export function RecordListTable({
     return false;
   };
 
+  // Campo percentual de uma ref custom:/match: (núcleo nunca é; 'unified:' fora
+  // do v1 — ver isPercentFieldRef). Mesmo parser do carimbo do engine.
+  const percentOf = (field: string): boolean =>
+    isPercentFieldRef(field, fieldByKey);
+
   // Texto de exibição de um campo do registro casado (match:<fonte>:<ref>):
   // formata data/moeda/texto conforme o tipo do ref subjacente.
   const matchText = (field: string, r: RecordRow): string => {
@@ -509,6 +534,7 @@ export function RecordListTable({
           mrec?.custom_fields?.[calcCurrencyKey(f.field_key)]
         );
         if (cur.isMoney) return formatMoney(raw, cur.code);
+        if (isPercentField(f)) return formatPercent(raw, true);
       }
       return String(raw);
     }
@@ -533,6 +559,7 @@ export function RecordListTable({
     const m = resolveFieldMoneyFromRecord(f, r);
     if (m.isMoney) return formatMoney(v, m.code);
     if (f.data_type === "data") return formatDateValue(v, fmtOf(colField));
+    if (isPercentField(f)) return formatPercent(v, true);
     return String(v);
   };
 
@@ -582,7 +609,11 @@ export function RecordListTable({
     return false;
   };
   const numFmt = (field: string, n: number): string =>
-    MONEY_FIELDS.has(field) ? money(n) : n.toLocaleString("pt-BR");
+    MONEY_FIELDS.has(field)
+      ? money(n)
+      : percentOf(field)
+        ? formatPercent(n, true)
+        : n.toLocaleString("pt-BR");
   const sumCol = (field: string, rs: RecordRow[]): number => {
     let s = 0;
     for (const r of rs) {
