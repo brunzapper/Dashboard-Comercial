@@ -40,7 +40,12 @@ import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
-import { renameDashboard, updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import {
+  createWidget,
+  renameDashboard,
+  updateDashboardSettings,
+} from "@/app/(app)/dashboards/actions";
+import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
@@ -176,6 +181,11 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+  // Modo "desenhar para criar" (Tabela rápida): armado pelo builder; o título
+  // digitado lá viaja junto. O retângulo desenhado dimensiona widget E tabela.
+  const [drawQuick, setDrawQuick] = useState<{ title: string | null } | null>(
+    null
+  );
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -356,6 +366,33 @@ export function DashboardClient({
     });
   }
 
+  // Fim do desenho da Tabela rápida: cria o widget com o retângulo como
+  // grid_position e linhas/colunas derivadas do tamanho desenhado.
+  const onDrawDone = useCallback(
+    (rect: GridPosition, table: { rows: number; cols: number }) => {
+      const cfg = drawQuick;
+      setDrawQuick(null);
+      startTransition(async () => {
+        await createWidget(dashboardId, {
+          title: cfg?.title ?? "Tabela rápida",
+          visual_type: "tabela_editavel",
+          sources: [],
+          splitBySource: false,
+          dimensions: [],
+          metrics: [],
+          filters: [],
+          settings: {
+            quickTable: defaultQuickTable(table.rows, table.cols),
+            ...(activeTabId ? { tab: activeTabId } : {}),
+          },
+          grid_position: rect,
+        });
+        router.refresh();
+      });
+    },
+    [drawQuick, dashboardId, activeTabId, router, startTransition]
+  );
+
   function saveTabs(next: DashboardSettings["tabs"]) {
     setTabs(next ?? []); // aplica na hora (cor/nome/adicionar/excluir)
     startTransition(async () => {
@@ -436,6 +473,7 @@ export function DashboardClient({
               activeTabId={activeTabId}
               layoutById={layoutById}
               canvasCols={settings.canvas?.cols ?? 12}
+              onRequestDraw={(title) => setDrawQuick({ title })}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
@@ -528,6 +566,9 @@ export function DashboardClient({
             connectors={connectors}
             saveConnectors={saveConnectors}
             connectMode={editMode && connectMode}
+            drawMode={drawQuick != null}
+            onDrawDone={onDrawDone}
+            onDrawCancel={() => setDrawQuick(null)}
           />
           </WidgetFocusProvider>
         </div>

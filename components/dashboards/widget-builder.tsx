@@ -25,7 +25,13 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MoreVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  MoreVertical,
+  Pencil,
+  Plus,
+  SquareDashedMousePointer,
+  Trash2,
+} from "lucide-react";
 
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
@@ -150,6 +156,7 @@ export function WidgetBuilder({
   activeTabId,
   layoutById,
   canvasCols,
+  onRequestDraw,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -171,6 +178,10 @@ export function WidgetBuilder({
   // precisam passar.
   layoutById?: Record<string, GridPosition>;
   canvasCols?: number;
+  // Tabela rápida: em vez de salvar direto, fecha o painel e arma o modo
+  // "desenhar no canvas" (o retângulo dimensiona widget e linhas/colunas). O
+  // título digitado viaja no callback. Só oferecido na CRIAÇÃO.
+  onRequestDraw?: (title: string | null) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -1668,15 +1679,37 @@ export function WidgetBuilder({
 
           {/* Tabela rápida: estrutura editada direto no card. */}
           {visualType === "tabela_editavel" ? (
-            <p className="text-muted-foreground rounded-md border p-3 text-sm">
-              A tabela é montada direto no card: com{" "}
-              <strong>Editar layout</strong> ativo, use os botões{" "}
-              <strong>+</strong> para adicionar linhas/colunas e o cabeçalho de
-              cada coluna para definir rótulo, tipo (livre, dimensão ou
-              métrica) e quem pode editar. Digite livremente nas células; use{" "}
-              <code>=</code> para fórmulas entre células e <code>{"{= … }"}</code>{" "}
-              para valores do sistema.
-            </p>
+            <>
+              <p className="text-muted-foreground rounded-md border p-3 text-sm">
+                A tabela é montada direto no card: com{" "}
+                <strong>Editar layout</strong> ativo, use os botões{" "}
+                <strong>+</strong> para adicionar linhas/colunas e o cabeçalho
+                de cada coluna para definir rótulo, tipo (livre, dimensão ou
+                métrica) e quem pode editar. Digite livremente nas células; use{" "}
+                <code>=</code> para fórmulas entre células e{" "}
+                <code>{"{= … }"}</code> para valores do sistema.
+              </p>
+              {!widget && onRequestDraw ? (
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onRequestDraw(title.trim() || null);
+                    }}
+                  >
+                    <SquareDashedMousePointer className="size-4" /> Desenhar no
+                    painel
+                  </Button>
+                  <p className="text-muted-foreground text-xs">
+                    Arraste um retângulo no dashboard: o tamanho desenhado
+                    define a posição do widget e a quantidade inicial de
+                    linhas e colunas. Ou salve abaixo para criar uma grade
+                    padrão 3×3.
+                  </p>
+                </div>
+              ) : null}
+            </>
           ) : null}
 
           {/* Config da Forma: tipo, texto interno e atalho para widget. */}

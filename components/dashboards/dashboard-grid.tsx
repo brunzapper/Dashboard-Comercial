@@ -67,6 +67,7 @@ import { posOf } from "@/lib/widgets/grid-placement";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel } from "./appearance-editing";
+import { DrawToCreateOverlay } from "./draw-to-create";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
@@ -212,6 +213,9 @@ export function DashboardGrid({
   connectors = [],
   saveConnectors,
   connectMode = false,
+  drawMode = false,
+  onDrawDone,
+  onDrawCancel,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -258,6 +262,14 @@ export function DashboardGrid({
   connectors?: Connector[];
   saveConnectors?: (next: Connector[]) => void;
   connectMode?: boolean;
+  // Modo "desenhar para criar" (Tabela rápida): overlay de mira sobre o canvas;
+  // o retângulo desenhado vira grid_position + linhas/colunas da tabela.
+  drawMode?: boolean;
+  onDrawDone?: (
+    rect: GridPosition,
+    table: { rows: number; cols: number }
+  ) => void;
+  onDrawCancel?: () => void;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
@@ -442,6 +454,7 @@ export function DashboardGrid({
   // um widget (`.react-grid-item`) não pega. Sem setPointerCapture — os listeners
   // no window garantem receber move/up mesmo se o ponteiro sair do canvas.
   function onCanvasPointerDown(e: React.PointerEvent) {
+    if (drawMode) return; // o overlay de desenho é dono do gesto
     if (e.pointerType === "touch" || e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     // UI dos conectores (âncoras/linhas/painel) não arma o pan.
@@ -490,7 +503,7 @@ export function DashboardGrid({
   // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
   // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
   function onCanvasContextMenu(e: React.MouseEvent) {
-    if (!canEdit) return;
+    if (!canEdit || drawMode) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -693,7 +706,8 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
-  if (widgets.length === 0) {
+  // Em drawMode o canvas renderiza mesmo vazio (é onde se desenha a tabela).
+  if (widgets.length === 0 && !drawMode) {
     return (
       <>
         <div
@@ -773,8 +787,8 @@ export function DashboardGrid({
               containerPadding={[MX, MY]}
               autoSize={false}
               style={{ height: gridH(rows) }}
-              isDraggable={editMode}
-              isResizable={editMode}
+              isDraggable={editMode && !drawMode}
+              isResizable={editMode && !drawMode}
               draggableHandle=".widget-drag"
               onDragStart={onDragStart}
               onResizeStart={onResizeStart}
@@ -824,7 +838,19 @@ export function DashboardGrid({
                 </div>
               ))}
             </RGL>
-            {editMode ? (
+            {drawMode && onDrawDone && onDrawCancel ? (
+              <DrawToCreateOverlay
+                cellW={cellW}
+                rowH={ROW_H}
+                mx={MX}
+                my={MY}
+                cols={cols}
+                rows={rows}
+                onDone={onDrawDone}
+                onCancel={onDrawCancel}
+              />
+            ) : null}
+            {editMode && !drawMode ? (
               <>
                 {/* Barra inferior: arrasta a ALTURA (adiciona linhas vazias). */}
                 <span
