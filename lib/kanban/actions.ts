@@ -2,8 +2,10 @@
 // Server Actions do Kanban. Mover card de REGISTRO reaproveita updateRecordField
 // (permissão edit_record_values, coerção, field_modified_at, recomputo de
 // fórmulas, audit_log e revalidate vêm de graça — mover card É uma edição de
-// campo). Sem write-back: a edição fica local (fontes de Sync divergem do
-// Bitrix de propósito — ver plano/risco; fontes manuais não têm write-back).
+// campo). Write-back OPCIONAL por quadro (settings.kanban.writeBack): desligado
+// (default) a edição fica LOCAL (bom p/ fases em campo local que nunca vem da
+// Sync); ligado, mover ENFILEIRA a mudança de volta ao Bitrix (só surte efeito
+// em registros de Sync e campos mapeados/marcados; fontes manuais são no-op).
 // Mock (0051): congelado no produto — bloqueamos o move aqui com mensagem
 // amigável (o trigger do banco só reverteria silenciosamente alguns campos).
 "use server";
@@ -33,6 +35,10 @@ export interface MoveRecordCardInput {
   currentDateValue?: string | null;
   // Coluna destino (valor do campo, key do bucket ou KANBAN_NO_VALUE_KEY).
   targetKey: string;
+  // Quando true, a edição é ENFILEIRADA de volta ao Bitrix (write-back). Só surte
+  // efeito em registros de Sync e campos mapeados/marcados; caso contrário é
+  // no-op. Default (ausente/false) = edição local, não altera a origem.
+  writeBack?: boolean;
 }
 
 /** Move um card de registro: grava o novo valor do campo de agrupamento. */
@@ -75,10 +81,12 @@ export async function moveRecordCard(
         // O campo foi eleito pelo dono do board — mover libera a edição p/ quem
         // tem edit_record_values (mesma semântica do allowEdit dos dashboards).
         allowEdit: true,
+        writeBack: input.writeBack,
       });
     }
     return updateRecordField(input.recordId, input.dateField, value, {
       kind: "core",
+      writeBack: input.writeBack,
     });
   }
 
@@ -89,7 +97,11 @@ export async function moveRecordCard(
     return updateRecordField(input.recordId, field.slice("custom:".length), value, {
       kind: "custom",
       allowEdit: true,
+      writeBack: input.writeBack,
     });
   }
-  return updateRecordField(input.recordId, field, value, { kind: "core" });
+  return updateRecordField(input.recordId, field, value, {
+    kind: "core",
+    writeBack: input.writeBack,
+  });
 }

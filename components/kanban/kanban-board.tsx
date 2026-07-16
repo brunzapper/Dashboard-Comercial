@@ -340,6 +340,7 @@ export function KanbanBoard({
           dateBucket: settings.dateBucket,
           currentDateValue: payload.dateValue,
           targetKey: toKey,
+          writeBack: settings.writeBack,
         });
     if (!res.ok) {
       if (beforeMove.current) setColumns(beforeMove.current);

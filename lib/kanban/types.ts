@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
+// v1.1 (16/07/2026): KanbanSettings.writeBack — write-back opcional por quadro
+//   (mover card grava de volta no Bitrix; default off = edição local, base do
+//   fluxo "fases em campo local que nunca vem da Sync, sem tocar no original").
 // Tipos do Kanban — compartilhados entre a PÁGINA dedicada (dashboards.kind
 // 'kanban', config em dashboards.settings.kanban) e o WIDGET de dashboard
 // (widgets.settings.kanban). Sem imports de lib/widgets p/ evitar ciclos (o
@@ -49,6 +52,13 @@ export interface KanbanSettings {
   // Métrica somada no cabeçalho da coluna ('value' | 'mrr' | 'custom:<key>').
   metric?: string;
   card?: KanbanCardSettings;
+  // Write-back (modo registros, agrupamento por VALOR): quando true, mover um
+  // card ENFILEIRA a mudança de volta ao Bitrix (só surte efeito em registros de
+  // Sync — source_system 'bitrix' com source_id — e em campos mapeados/marcados
+  // com write_back; para os demais é no-op). Ausente/false = edição LOCAL apenas:
+  // mover NÃO altera o registro na origem. É o "criar fases sem afetar o original"
+  // — basta agrupar por um campo local (que nunca vem da Sync) e deixar isto off.
+  writeBack?: boolean;
   // ---- ambos os modos ----
   columns?: KanbanColumnOverride[];
   // ---- modo tarefas ----
