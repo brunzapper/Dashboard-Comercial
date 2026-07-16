@@ -12,6 +12,10 @@
 //   linha (excluir), redimensionar coluna/linha (appearance.colWidths/
 //   rowHeights) e aparência por clique-direito (cor/alinhamento por
 //   coluna/linha/célula, via ContextMenu/ColorPopover compartilhados).
+// v1.2 (16/07/2026): clique-direito em célula/seleção abre DIRETO o popover de
+//   aparência (fundo/texto/borda + alinhamento; atalhos p/ linha/coluna),
+//   mesmo fora do Editar layout; borda por célula (appearance.cellBorders);
+//   flutuantes via BodyPortal (fix: fixed dentro do transform do RGL).
 "use client";
 
 import {
@@ -58,8 +62,10 @@ import {
   type QuickTableResult,
 } from "@/app/(app)/dashboards/quick-table-actions";
 import {
+  BodyPortal,
   ColorPopover,
   ContextMenu,
+  MenuBtn,
   ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
@@ -117,6 +123,9 @@ export function QuickTableWidget({
   const { qt, save: saveConfig } = useQuickTableConfig(widget, dashboardId);
   // Edição de estrutura/aparência: dono/admin com "Editar layout" ativo.
   const structureEdit = canEdit && editMode && Boolean(onAppearanceChange);
+  // Aparência por clique-direito em célula/seleção: dono/admin mesmo FORA do
+  // "Editar layout" (mesmo gate da mini-toolbar da seleção); nunca no snapshot.
+  const appearanceEdit = canEdit && Boolean(onAppearanceChange) && !readOnly;
 
   // ---- valores otimistas ----
   // Overrides locais por chave de célula ("rowKey:colKey"); null = apagada.
@@ -462,6 +471,15 @@ export function QuickTableWidget({
       else map[k] = a;
     }
     changeAp({ cellAlign: map });
+  }
+  function setBatchBorder(color: string | undefined) {
+    const map = { ...(t.cellBorders ?? {}) };
+    for (const cell of rectCells()) {
+      const k = `${cell.rowKey}:${cell.colKey}`;
+      if (!color) delete map[k];
+      else map[k] = color;
+    }
+    changeAp({ cellBorders: map });
   }
 
   // ---- seleção e edição (UX de planilha) ----
@@ -1053,16 +1071,18 @@ export function QuickTableWidget({
                           if (cell.editable) startEdit({ r: ri, c: ci });
                         }}
                         onContextMenu={
-                          structureEdit
+                          appearanceEdit
                             ? (e) => {
+                                // Abre DIRETO a aparência da célula (ou da
+                                // seleção inteira, se o clique caiu dentro
+                                // dela — o pointerdown já colapsou a seleção
+                                // para a célula quando caiu fora).
                                 e.preventDefault();
+                                setSelToolbar(null);
                                 setMenu({
-                                  kind: "ctx",
+                                  kind: "batchColor",
                                   x: e.clientX,
                                   y: e.clientY,
-                                  column: cell.colKey,
-                                  rowKey: row.key,
-                                  scopes: ["row", "col", "cell"],
                                 });
                               }
                             : undefined
@@ -1110,6 +1130,17 @@ export function QuickTableWidget({
                           <span
                             aria-hidden
                             className="bg-primary/10 pointer-events-none absolute inset-0"
+                          />
+                        ) : null}
+                        {t.cellBorders?.[k] ? (
+                          // Contorno interno via overlay (boxShadow inline no
+                          // <td> suprimiria o anel Tailwind da célula âncora).
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute inset-0"
+                            style={{
+                              boxShadow: `inset 0 0 0 1px ${t.cellBorders[k]}`,
+                            }}
                           />
                         ) : null}
                       </td>
@@ -1216,29 +1247,76 @@ export function QuickTableWidget({
           onClose={() => setMenu(null)}
         />
       ) : null}
-      {menu?.kind === "batchColor" && sel ? (
-        <ColorPopover
-          x={menu.x}
-          y={menu.y}
-          title={`Aparência da seleção (${rectCells().length} células)`}
-          value={
-            t.cellColors?.[
-              `${cellAt(sel.anchor)?.rowKey}:${cellAt(sel.anchor)?.colKey}`
-            ] ?? {}
-          }
-          onChange={setBatchColor}
-          onClose={() => setMenu(null)}
-          align={{
-            value:
-              t.cellAlign?.[
-                `${cellAt(sel.anchor)?.rowKey}:${cellAt(sel.anchor)?.colKey}`
-              ],
-            onSelect: setBatchAlign,
-          }}
-        />
-      ) : null}
-      {/* Mini-toolbar da seleção multi-célula (aparece ao soltar o arrasto). */}
+      {menu?.kind === "batchColor" && sel
+        ? (() => {
+            const anchor = cellAt(sel.anchor);
+            if (!anchor) return null;
+            const ak = `${anchor.rowKey}:${anchor.colKey}`;
+            const { x, y } = menu;
+            return (
+              <ColorPopover
+                x={x}
+                y={y}
+                title={
+                  multiSel
+                    ? `Aparência da seleção (${rectCells().length} células)`
+                    : "Aparência da célula"
+                }
+                value={t.cellColors?.[ak] ?? {}}
+                onChange={setBatchColor}
+                onClose={() => setMenu(null)}
+                align={{
+                  value: t.cellAlign?.[ak],
+                  onSelect: setBatchAlign,
+                }}
+                border={{
+                  value: t.cellBorders?.[ak],
+                  onChange: setBatchBorder,
+                }}
+                footer={
+                  // Atalhos p/ aparência de linha/coluna (o menu de 2 passos
+                  // por escopo saiu do clique-direito da célula).
+                  !multiSel ? (
+                    <>
+                      <MenuBtn
+                        onClick={() =>
+                          setMenu({
+                            kind: "color",
+                            x,
+                            y,
+                            scope: "row",
+                            column: anchor.colKey,
+                            rowKey: anchor.rowKey,
+                          })
+                        }
+                      >
+                        <Palette /> Cor da linha…
+                      </MenuBtn>
+                      <MenuBtn
+                        onClick={() =>
+                          setMenu({
+                            kind: "color",
+                            x,
+                            y,
+                            scope: "col",
+                            column: anchor.colKey,
+                            rowKey: anchor.rowKey,
+                          })
+                        }
+                      >
+                        <Palette /> Cor da coluna…
+                      </MenuBtn>
+                    </>
+                  ) : undefined
+                }
+              />
+            );
+          })()
+        : null}
+      {/* Mini-toolbar da seleção multi-célula (aparece ao soltar o arrasto).
+          Via portal: `fixed` dentro do item do RGL (transform) abre deslocado. */}
       {selToolbar && multiSel && !menu ? (
+        <BodyPortal>
         <div
           className="bg-popover text-popover-foreground fixed z-50 flex items-center gap-0.5 rounded-md border p-1 shadow-md"
           style={{
@@ -1275,6 +1353,7 @@ export function QuickTableWidget({
             <Eraser className="size-3.5" /> Limpar
           </button>
         </div>
+        </BodyPortal>
       ) : null}
     </div>
   );

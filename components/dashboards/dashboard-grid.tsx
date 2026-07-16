@@ -1,6 +1,11 @@
-// Versão: 2.6 | Data: 15/07/2026
+// Versão: 2.7 | Data: 16/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.7 (16/07/2026): menu do clique-direito no vazio ganhou "Inserir ▸" (Nota
+//   post-it / Tabela livre) e "Calculadora" (4×9, mais quadrada), criados NA
+//   célula clicada via onQuickCreate (criação rápida/otimista no shell);
+//   pasteAt guarda a célula CRUA e cada ação clampa pela própria largura;
+//   repasse de onWidgetDeleted ao WidgetCard (X da calculadora).
 // v2.6 (15/07/2026): modo "desenhar para criar" (Tabela Livre) — overlay de
 //   mira sobre o canvas (drawMode/onDrawDone/onDrawCancel), pan/menu/drag
 //   suspensos durante o desenho, canvas renderiza mesmo sem widgets; repasse
@@ -40,7 +45,15 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardPaste, Loader2 } from "lucide-react";
+import {
+  Calculator,
+  ChevronRight,
+  ClipboardPaste,
+  Loader2,
+  Plus,
+  StickyNote,
+  Table2,
+} from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout, LayoutItem } from "react-grid-layout/legacy";
 
@@ -72,9 +85,10 @@ import {
 } from "@/app/(app)/dashboards/actions";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
 import { posOf } from "@/lib/widgets/grid-placement";
+import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
-import { FloatingPanel } from "./appearance-editing";
+import { FloatingPanel, MenuBtn } from "./appearance-editing";
 import { DrawToCreateOverlay } from "./draw-to-create";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { WidgetCard } from "./widget-card";
@@ -224,6 +238,8 @@ export function DashboardGrid({
   drawMode = false,
   onDrawDone,
   onDrawCancel,
+  onQuickCreate,
+  onWidgetDeleted,
 }: {
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
@@ -278,15 +294,22 @@ export function DashboardGrid({
     table: { rows: number; cols: number }
   ) => void;
   onDrawCancel?: () => void;
+  // Criação RÁPIDA pelo menu de contexto (Inserir/Calculadora): o shell insere
+  // sem revalidar e mostra o widget otimista na hora (ver dashboard-client).
+  onQuickCreate?: (input: WidgetInput) => void;
+  // Avisa o shell que um widget foi excluído (remove pendente otimista).
+  onWidgetDeleted?: (id: string) => void;
 }) {
   const { pending } = useNavPending();
   const history = useDashboardHistory();
   const router = useRouter();
   const [, startPaste] = useTransition();
 
-  // Menu de "Colar widget" no clique-direito do espaço vazio. Guarda a posição
-  // do menu (clientX/Y) e a célula-alvo do grid (gridX/Y). `hasCopy` é lido no
-  // momento da abertura para refletir o localStorage (funciona entre abas).
+  // Menu de contexto do clique-direito no espaço vazio (Inserir/Calculadora/
+  // Colar widget). Guarda a posição do menu (clientX/Y) e a célula-alvo CRUA do
+  // grid (gridX/Y, sem clamp — cada ação clampa pela largura do próprio
+  // widget). `hasCopy` é lido no momento da abertura para refletir o
+  // localStorage (funciona entre abas).
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [pasteAt, setPasteAt] = useState<{
     x: number;
@@ -295,6 +318,8 @@ export function DashboardGrid({
     gridY: number;
     hasCopy: boolean;
   } | null>(null);
+  // Flyout "Inserir ▸" aberto? Reseta a cada abertura do menu.
+  const [insertOpen, setInsertOpen] = useState(false);
 
   // Pan ("mãozinha"): arrastar o espaço vazio com o botão esquerdo rola o
   // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
@@ -519,14 +544,13 @@ export function DashboardGrid({
     e.preventDefault();
     const gx = Math.max(0, Math.floor((e.clientX - rect.left - MX) / (cellW + MX)));
     const gy = Math.max(0, Math.floor((e.clientY - rect.top - MY) / (ROW_H + MY)));
-    const copied = readCopiedWidget();
-    const w = copied?.w ?? 6;
+    setInsertOpen(false);
     setPasteAt({
       x: e.clientX,
       y: e.clientY,
-      gridX: Math.min(gx, Math.max(0, cols - w)),
+      gridX: gx,
       gridY: gy,
-      hasCopy: !!copied,
+      hasCopy: !!readCopiedWidget(),
     });
   }
 
@@ -544,11 +568,55 @@ export function DashboardGrid({
       metrics: copied.metrics,
       filters: copied.filters,
       settings: { ...(copied.settings ?? {}), tab: activeTabId || undefined },
-      grid_position: { x: at.gridX, y: at.gridY, w: copied.w, h: copied.h },
+      grid_position: {
+        x: Math.min(at.gridX, Math.max(0, cols - copied.w)),
+        y: at.gridY,
+        w: copied.w,
+        h: copied.h,
+      },
     };
     startPaste(async () => {
       await createWidget(dashboardId, input);
       router.refresh();
+    });
+  }
+
+  // "Inserir ▸ Nota/Tabela livre" e "Calculadora": cria NA célula clicada, com
+  // os mesmos defaults do builder. A calculadora nasce mais "quadrada" (4×9 ≈
+  // 416×366px com célula ~92px/linha 42px) que o padrão 6×8, e já com título.
+  function insertAt(kind: "nota" | "tabela_editavel" | "calculadora") {
+    const at = pasteAt;
+    setPasteAt(null);
+    if (!at || !onQuickCreate) return;
+    const w = kind === "calculadora" ? 4 : 6;
+    const h = kind === "calculadora" ? 9 : 8;
+    const title =
+      kind === "nota"
+        ? "Nota"
+        : kind === "tabela_editavel"
+          ? "Tabela Livre"
+          : "Calculadora";
+    onQuickCreate({
+      title,
+      visual_type: kind,
+      sources: [],
+      splitBySource: false,
+      dimensions: [],
+      metrics: [],
+      filters: [],
+      settings: {
+        ...(activeTabId ? { tab: activeTabId } : {}),
+        ...(kind === "tabela_editavel"
+          ? { quickTable: defaultQuickTable(3, 3) }
+          : {}),
+        ...(kind === "calculadora" ? { calculator: { variables: [] } } : {}),
+      },
+      grid_position: {
+        x: Math.min(at.gridX, Math.max(0, cols - w)),
+        y: at.gridY,
+        w,
+        h,
+      },
     });
   }
 
@@ -695,10 +763,52 @@ export function DashboardGrid({
     });
   }
 
-  // Menu flutuante de "Colar widget" (compartilhado entre o estado vazio e o
-  // grid). Reaproveita FloatingPanel (posiciona no clique, fecha ao clicar fora).
+  // Menu flutuante do clique-direito (compartilhado entre o estado vazio e o
+  // grid): Inserir ▸ (Nota/Tabela livre), Calculadora e Colar widget.
+  // Reaproveita FloatingPanel (posiciona no clique, fecha ao clicar fora).
   const pasteMenu = pasteAt ? (
     <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48">
+      {onQuickCreate ? (
+        <>
+          <div
+            className="relative"
+            onMouseEnter={() => setInsertOpen(true)}
+            onMouseLeave={() => setInsertOpen(false)}
+          >
+            <MenuBtn onClick={() => setInsertOpen((v) => !v)}>
+              <Plus />
+              <span className="flex-1">Inserir</span>
+              <ChevronRight />
+            </MenuBtn>
+            {insertOpen ? (
+              <div
+                className={cn(
+                  "bg-popover text-popover-foreground absolute top-0 z-50 w-44 rounded-md border p-2 shadow-md",
+                  // Flip para a esquerda quando o menu está colado na borda
+                  // direita da viewport (o flyout estouraria a tela).
+                  pasteAt.x > window.innerWidth - 400
+                    ? "right-full mr-1"
+                    : "left-full ml-1"
+                )}
+              >
+                <MenuBtn onClick={() => insertAt("nota")}>
+                  <StickyNote />
+                  <span className="flex-1">Nota (Post-it)</span>
+                </MenuBtn>
+                <MenuBtn onClick={() => insertAt("tabela_editavel")}>
+                  <Table2 />
+                  <span className="flex-1">Tabela livre</span>
+                </MenuBtn>
+              </div>
+            ) : null}
+          </div>
+          <MenuBtn onClick={() => insertAt("calculadora")}>
+            <Calculator />
+            <span className="flex-1">Calculadora</span>
+          </MenuBtn>
+          <div className="bg-border my-1 h-px" />
+        </>
+      ) : null}
       <button
         type="button"
         disabled={!pasteAt.hasCopy}
@@ -722,6 +832,7 @@ export function DashboardGrid({
           onContextMenu={(e) => {
             if (!canEdit) return;
             e.preventDefault();
+            setInsertOpen(false);
             setPasteAt({
               x: e.clientX,
               y: e.clientY,
@@ -853,6 +964,7 @@ export function DashboardGrid({
                     mx={MX}
                     my={MY}
                     onMeasure={onMeasure}
+                    onWidgetDeleted={onWidgetDeleted}
                   />
                 </div>
               ))}

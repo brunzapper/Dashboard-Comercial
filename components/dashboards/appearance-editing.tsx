@@ -16,6 +16,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   AlignCenter,
@@ -82,6 +83,15 @@ export function useWidgetAppearance(widget: Widget, dashboardId: string) {
   return { ap, save };
 }
 
+// -------- portal para o body --------
+// Elementos `position: fixed` renderizados dentro de um item do react-grid-layout
+// ficam presos ao item (o CSS transform do RGL vira o containing block do fixed)
+// e abrem deslocados/fora da tela. Todo flutuante de widget DEVE passar por aqui.
+export function BodyPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
+
 // -------- janela flutuante no ponto do clique --------
 export function FloatingPanel({
   x,
@@ -100,7 +110,7 @@ export function FloatingPanel({
   const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 240);
   const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 220);
   return (
-    <>
+    <BodyPortal>
       <div className="fixed inset-0 z-40" onMouseDown={onClose} />
       <div
         className={cn(
@@ -112,11 +122,11 @@ export function FloatingPanel({
       >
         {children}
       </div>
-    </>
+    </BodyPortal>
   );
 }
 
-function MenuBtn({
+export function MenuBtn({
   onClick,
   children,
 }: {
@@ -227,6 +237,8 @@ export function ColorPopover({
   onClose,
   only,
   align,
+  border,
+  footer,
 }: {
   x: number;
   y: number;
@@ -241,8 +253,14 @@ export function ColorPopover({
     value?: TableAlign;
     onSelect: (a: TableAlign | undefined) => void;
   };
+  // Borda do escopo (célula/seleção): terceira aba com cor; limpar remove.
+  border?: {
+    value?: string;
+    onChange: (v: string | undefined) => void;
+  };
+  footer?: ReactNode; // extras abaixo do alinhamento (ex.: atalhos linha/coluna)
 }) {
-  const [tab, setTab] = useState<"fill" | "text">(only ?? "fill");
+  const [tab, setTab] = useState<"fill" | "text" | "border">(only ?? "fill");
   const active = only ?? tab;
   const ALIGN_OPTIONS: {
     key: TableAlign;
@@ -263,6 +281,7 @@ export function ColorPopover({
               [
                 ["fill", "Preenchimento"],
                 ["text", "Texto"],
+                ...(border ? ([["border", "Borda"]] as const) : []),
               ] as const
             ).map(([k, label]) => (
               <button
@@ -284,6 +303,12 @@ export function ColorPopover({
             value={value.fill}
             onChange={(v) => onChange({ ...value, fill: v })}
             onClear={() => onChange({ ...value, fill: undefined })}
+          />
+        ) : active === "border" && border ? (
+          <ColorField
+            value={border.value}
+            onChange={(v) => border.onChange(v)}
+            onClear={() => border.onChange(undefined)}
           />
         ) : (
           <ColorField
@@ -318,6 +343,9 @@ export function ColorPopover({
               ))}
             </div>
           </div>
+        ) : null}
+        {footer ? (
+          <div className="flex flex-col border-t pt-1">{footer}</div>
         ) : null}
       </div>
     </FloatingPanel>
