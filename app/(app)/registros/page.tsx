@@ -189,12 +189,19 @@ export default async function RegistrosPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Registros</h1>
-        <p className="text-muted-foreground text-sm">
-          {total} registro(s). Edite responsável, operação, lead e campos
-          personalizados conforme suas permissões.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Registros</h1>
+          <p className="text-muted-foreground text-sm">
+            {total} registro(s). Edite responsável, operação, lead e campos
+            personalizados conforme suas permissões.
+          </p>
+        </div>
+        {isAdmin ? (
+          <Button asChild variant="outline">
+            <Link href="/registros/importar">Importar CSV</Link>
+          </Button>
+        ) : null}
       </div>
 
       {isAdmin ? <SyncPanel lastSyncedAt={lastSyncedAt} /> : null}

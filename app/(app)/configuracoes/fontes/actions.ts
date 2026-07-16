@@ -24,6 +24,8 @@ export interface SourceLabelsActionState {
 export interface SourceActionState {
   ok?: boolean;
   message?: string;
+  // Key da fonte criada (consumida pelo wizard de import ao criar inline).
+  key?: string;
 }
 
 // Campos de data aceitos pela barra de período (CHECK da 0060).
@@ -107,7 +109,7 @@ export async function createSource(
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: `Fonte "${label}" criada (chave: ${key}).` };
+  return { ok: true, message: `Fonte "${label}" criada (chave: ${key}).`, key };
 }
 
 export async function updateSource(

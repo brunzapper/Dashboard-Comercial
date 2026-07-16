@@ -115,3 +115,25 @@ end $$;
 alter table public.records
   add constraint records_source_system_check
   check (source_system ~ '^[a-z][a-z0-9_]{1,39}$');
+
+-- ============ audit_log.origin: aceita 'import_csv' ============
+-- O import de CSV audita atualizações (linhas re-importadas) via service role;
+-- a policy de INSERT p/ autenticados (0009) segue exigindo origin='app'.
+do $$
+declare
+  v_con text;
+begin
+  for v_con in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.audit_log'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%origin%'
+  loop
+    execute format('alter table public.audit_log drop constraint %I', v_con);
+  end loop;
+end $$;
+
+alter table public.audit_log
+  add constraint audit_log_origin_check
+  check (origin in ('app', 'sync_bitrix', 'sync_sheet', 'import_csv'));
