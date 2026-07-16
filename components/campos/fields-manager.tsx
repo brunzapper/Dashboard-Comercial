@@ -1,6 +1,10 @@
-// Versão: 2.0 | Data: 10/07/2026
-// Gerenciador de campos personalizados: busca + seções por fonte (Leads/Deals/
+// Versão: 2.1 | Data: 16/07/2026
+// Gerenciador de campos personalizados: busca + ABAS por fonte (Leads/Deals/
 // Estudo de Fechamentos/Gerais) + tabela com toggle do olho (show_in_builder).
+// v2.1 (16/07/2026): seções empilhadas viraram abas (mesma receita visual das
+//   abas de Registros, estado client — os dados já estão todos aqui). Cada aba
+//   mostra o contador da fonte, que reage à busca; aba vazia ganha mensagem
+//   (antes a seção vazia sumia).
 // v2.0 (10/07/2026): divisão por fonte (applies_to) e barra de pesquisa; o
 //   toggle de exibir/ocultar (ícone do olho) já era inline e foi preservado.
 "use client";
@@ -26,6 +30,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import {
   DATA_TYPE_LABELS,
@@ -129,41 +134,43 @@ function FieldRow({
 }
 
 function FieldsSection({
-  label,
   fields,
   onEdit,
+  emptyMessage,
 }: {
-  label: string;
   fields: FieldDefinition[];
   onEdit: (f: FieldDefinition) => void;
+  emptyMessage: string;
 }) {
-  if (fields.length === 0) return null;
+  // A aba identifica a fonte (rótulo + contador), então a seção é só a tabela;
+  // vazia, mostra mensagem (a aba selecionada não pode ficar em branco).
+  if (fields.length === 0) {
+    return (
+      <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
+        {emptyMessage}
+      </p>
+    );
+  }
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold">{label}</h3>
-        <Badge variant="secondary">{fields.length}</Badge>
-      </div>
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Rótulo</TableHead>
-              <TableHead>Chave</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Origem</TableHead>
-              <TableHead>Exibir</TableHead>
-              <TableHead>Visível</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {fields.map((f) => (
-              <FieldRow key={f.id} field={f} onEdit={onEdit} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+    <div className="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Rótulo</TableHead>
+            <TableHead>Chave</TableHead>
+            <TableHead>Tipo</TableHead>
+            <TableHead>Origem</TableHead>
+            <TableHead>Exibir</TableHead>
+            <TableHead>Visível</TableHead>
+            <TableHead className="text-right">Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {fields.map((f) => (
+            <FieldRow key={f.id} field={f} onEdit={onEdit} />
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -178,6 +185,9 @@ export function FieldsManager({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FieldDefinition | undefined>(undefined);
   const [query, setQuery] = useState("");
+  // Aba (fonte) ativa. A busca NÃO troca a aba: os contadores nas abas mostram
+  // onde estão os resultados e o usuário navega sem perder o contexto.
+  const [tab, setTab] = useState<string>("leads");
 
   // Catálogo de campos + rótulos de fonte SÓ p/ decorar os operandos de fórmula
   // (fonte curta/chips/tooltip nos seletores — decorateRefOptions não toca nos
@@ -288,6 +298,10 @@ export function FieldsManager({
     ...catalog.map((s) => ({ key: s.key, label: s.label })),
     { key: GERAIS_SECTION, label: GERAIS_LABEL },
   ];
+  // Aba efetiva: se a fonte da aba salva sumiu do catálogo, cai na primeira.
+  const activeTab = sectionOrder.some((s) => s.key === tab)
+    ? tab
+    : (sectionOrder[0]?.key ?? GERAIS_SECTION);
   const total = sectionOrder.reduce(
     (n, s) => n + (sections[s.key]?.length ?? 0),
     0
@@ -328,14 +342,42 @@ export function FieldsManager({
             : "Nenhum campo personalizado ainda. Crie o primeiro."}
         </p>
       ) : (
-        sectionOrder.map((s) => (
+        <>
+          {/* Abas por fonte (mesma receita visual das abas de Registros),
+              dirigidas pelo CATÁLOGO dinâmico (data_sources) + "Gerais". */}
+          <div className="flex flex-wrap gap-1 border-b">
+            {sectionOrder.map((s) => {
+              const active = s.key === activeTab;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setTab(s.key)}
+                  className={cn(
+                    "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                    active
+                      ? "border-primary text-foreground"
+                      : "text-muted-foreground border-transparent hover:text-foreground"
+                  )}
+                >
+                  {s.label}
+                  <Badge variant="secondary">
+                    {sections[s.key]?.length ?? 0}
+                  </Badge>
+                </button>
+              );
+            })}
+          </div>
           <FieldsSection
-            key={s.key}
-            label={s.label}
-            fields={sections[s.key] ?? []}
+            fields={sections[activeTab] ?? []}
             onEdit={openEdit}
+            emptyMessage={
+              query
+                ? "Nenhum campo corresponde à busca nesta fonte."
+                : "Nenhum campo nesta fonte."
+            }
           />
-        ))
+        </>
       )}
 
       <Sheet open={open} onOpenChange={setOpen}>
