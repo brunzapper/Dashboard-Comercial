@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 16/07/2026
+// Versão: 1.4 | Data: 16/07/2026
 // Layout autenticado: shell com navegação lateral filtrada por papel/permissão.
 // v1.1 (05/07/2026): itens de admin da Fase 6B (Operações/Responsáveis/Metas)
 //   gated por papel; NavItem ganha `role`.
@@ -6,6 +6,8 @@
 //   (Configurações → Fontes) para os dropdowns de campo em todo o app.
 // v1.3 (16/07/2026): SourcesProvider — catálogo de fontes dinâmicas
 //   (data_sources, 0060) para pickers/abas em todo o app.
+// v1.4 (16/07/2026): item "Tarefas" na navegação (todos os papéis — a RLS de
+//   tasks escopa o vendedor às próprias tarefas).
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -25,6 +27,7 @@ import { SourcesProvider } from "@/components/sources-context";
 // Registros só é visível a Gestores/Administradores.
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
   { href: "/", label: "Dashboards" },
+  { href: "/tarefas", label: "Tarefas" },
   { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
 ];

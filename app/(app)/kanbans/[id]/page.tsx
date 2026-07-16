@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
 // Página dedicada de um kanban (dashboards.kind 'kanban', 0062). O RSC computa
 // o quadro (lib/kanban/data.ts → runRecordList com RLS) e entrega ao client;
 // período simples via ?periodo/?de/?ate sobre o campo de data da fonte (ou do
 // bucket). RLS de dashboards decide a visibilidade (owner/papéis/admin).
+// v1.1 (16/07/2026): modo TAREFAS — tasks do board agrupadas por fase
+//   (lib/tasks/kanban.ts); RLS de tasks escopa o vendedor às próprias.
 import { notFound } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -15,6 +17,8 @@ import type { DashboardSettings } from "@/lib/widgets/types";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { runKanban } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
+import { taskBoardData } from "@/lib/tasks/kanban";
+import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import { KanbanPageClient } from "@/components/kanban/kanban-page-client";
 
 function str(v: string | string[] | undefined): string {
@@ -89,6 +93,10 @@ export default async function KanbanPage({
     label: o.name as string,
   }));
 
+  const responsibleLabels = Object.fromEntries(
+    responsibles.map((r) => [r.id, r.label])
+  );
+
   // Período: bucket de data filtra pelo próprio campo do bucket; senão, pelo
   // campo de período padrão da fonte. Default = todo o período.
   const periodField =
@@ -98,16 +106,33 @@ export default async function KanbanPage({
     periodField
   );
 
-  const data = await runKanban(supabase, kanban, period, fields, {
-    responsibles: Object.fromEntries(responsibles.map((r) => [r.id, r.label])),
-    operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
-  });
+  let data;
+  if (kanban.mode === "tarefas") {
+    const { data: tasksData } = await supabase
+      .from("tasks")
+      .select(TASK_COLS_WITH_RECORD)
+      .eq("board_id", id)
+      .order("position", { ascending: true })
+      .order("created_at", { ascending: false });
+    data = taskBoardData(
+      (tasksData ?? []) as unknown as TaskRow[],
+      kanban,
+      responsibleLabels
+    );
+  } else {
+    data = await runKanban(supabase, kanban, period, fields, {
+      responsibles: responsibleLabels,
+      operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
+    });
+  }
 
   const canConfig = isAdmin || board.owner_user_id === session.user.id;
   const quickCreateSource =
-    canEditValues && sourceDef?.manualEntry
+    kanban.mode === "registros" && canEditValues && sourceDef?.manualEntry
       ? { key: sourceDef.key, label: sourceDef.label }
       : null;
+  const viewAll = session.permissions.includes("view_all_records");
+  const isManager = isAdmin || userRoles.includes("gestor");
 
   return (
     <KanbanPageClient
@@ -125,6 +150,12 @@ export default async function KanbanPage({
         canEditValues,
         canManageFields,
       }}
+      taskCtx={{
+        responsibles,
+        canAssignOthers: viewAll,
+        canLock: isManager,
+      }}
+      responsibleLabels={responsibleLabels}
       canConfig={canConfig}
     />
   );

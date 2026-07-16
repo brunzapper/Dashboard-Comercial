@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import type { TaskRow } from "@/lib/tasks/types";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { runRecordList } from "@/lib/widgets/record-list";
@@ -50,10 +51,12 @@ export interface KanbanCard {
   fields: KanbanCardField[];
   metricValue: number | null;
   isMock: boolean;
-  // Tarefas abertas vinculadas (S3; 0 até lá).
+  // Tarefas ABERTAS vinculadas ao registro (badge do card).
   openTasks: number;
-  // Registro completo p/ o painel de edição e a visão lista.
-  record: RecordRow;
+  // Registro completo p/ o painel de edição e a visão lista (modo registros).
+  record?: RecordRow;
+  // Tarefa completa (modo tarefas — ver lib/tasks/kanban.ts).
+  task?: TaskRow & { responsible_label?: string | null };
 }
 
 export interface KanbanColumnCards extends KanbanColumn {
@@ -166,6 +169,29 @@ export async function runKanban(
 
   const records = await runRecordList(supabase, config, period ?? undefined);
 
+  // Tarefas ABERTAS por registro (badge do card). Falha silenciosa (ex.:
+  // migração 0063 ainda não aplicada) não derruba o quadro.
+  const taskCounts = new Map<string, number>();
+  try {
+    const ids = records.map((r) => r.id);
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      if (slice.length === 0) continue;
+      const { data } = await supabase
+        .from("tasks")
+        .select("record_id")
+        .is("completed_at", null)
+        .in("record_id", slice);
+      for (const t of data ?? []) {
+        const k = t.record_id as string;
+        taskCounts.set(k, (taskCounts.get(k) ?? 0) + 1);
+      }
+    }
+  } catch {
+    // sem contagem — o quadro segue sem badges
+  }
+
   const titleField = settings.card?.titleField || "title";
   const extraRefs = (settings.card?.extraFields ?? []).slice(0, 4);
   const metricRef = settings.metric || null;
@@ -195,7 +221,7 @@ export async function runKanban(
       })),
       metricValue: Number.isFinite(metricNum) ? metricNum : null,
       isMock: Boolean((r as unknown as { is_mock?: boolean }).is_mock),
-      openTasks: 0,
+      openTasks: taskCounts.get(r.id) ?? 0,
       record: r,
     };
   });

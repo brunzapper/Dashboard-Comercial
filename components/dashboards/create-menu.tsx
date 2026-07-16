@@ -62,6 +62,11 @@ const GROUP_KIND_OPTIONS: ComboboxOption[] = [
   { value: "date", label: "Períodos de um campo de data" },
 ];
 
+const MODE_OPTIONS: ComboboxOption[] = [
+  { value: "registros", label: "Registros de uma fonte" },
+  { value: "tarefas", label: "Tarefas (fases de execução)" },
+];
+
 function NewBoardForm({
   sources,
   fields,
@@ -71,6 +76,7 @@ function NewBoardForm({
 }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState(createBoard, initialBoard);
+  const [mode, setMode] = useState("registros");
   const [source, setSource] = useState(sources[0]?.key ?? "");
   const [groupKind, setGroupKind] = useState("field");
   const [groupField, setGroupField] = useState("stage");
@@ -109,7 +115,7 @@ function NewBoardForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
-      <input type="hidden" name="mode" value="registros" />
+      <input type="hidden" name="mode" value={mode} />
       <input type="hidden" name="source" value={source} />
       <input type="hidden" name="group_kind" value={groupKind} />
       <input type="hidden" name="group_field" value={groupField} />
@@ -144,33 +150,55 @@ function NewBoardForm({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label>Fonte dos registros</Label>
+        <Label>Tipo de quadro</Label>
         <Combobox
-          options={sources.map((s) => ({ value: s.key, label: s.label }))}
-          value={source}
-          onValueChange={setSource}
-          className="w-full"
-          aria-label="Fonte dos registros"
-        />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label>Colunas do quadro</Label>
-        <Combobox
-          options={GROUP_KIND_OPTIONS}
-          value={groupKind}
-          onValueChange={setGroupKind}
+          options={MODE_OPTIONS}
+          value={mode}
+          onValueChange={setMode}
           searchable={false}
           className="w-full"
-          aria-label="Tipo de agrupamento"
+          aria-label="Tipo de quadro"
         />
-        <p className="text-muted-foreground text-xs">
-          Mover um card entre colunas altera o valor (ou a data) do campo no
-          registro.
-        </p>
+        {mode === "tarefas" ? (
+          <p className="text-muted-foreground text-xs">
+            Quadro de tarefas com fases (A fazer / Em andamento / Concluída —
+            editáveis depois). Soltar na fase final conclui a tarefa.
+          </p>
+        ) : null}
       </div>
 
-      {groupKind === "date" ? (
+      {mode === "registros" ? (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <Label>Fonte dos registros</Label>
+            <Combobox
+              options={sources.map((s) => ({ value: s.key, label: s.label }))}
+              value={source}
+              onValueChange={setSource}
+              className="w-full"
+              aria-label="Fonte dos registros"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Colunas do quadro</Label>
+            <Combobox
+              options={GROUP_KIND_OPTIONS}
+              value={groupKind}
+              onValueChange={setGroupKind}
+              searchable={false}
+              className="w-full"
+              aria-label="Tipo de agrupamento"
+            />
+            <p className="text-muted-foreground text-xs">
+              Mover um card entre colunas altera o valor (ou a data) do campo no
+              registro.
+            </p>
+          </div>
+        </>
+      ) : null}
+
+      {mode === "registros" && groupKind === "date" ? (
         <>
           <div className="flex flex-col gap-1.5">
             <Label>Campo de data</Label>
@@ -194,7 +222,7 @@ function NewBoardForm({
             />
           </div>
         </>
-      ) : (
+      ) : mode === "registros" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Campo que define as colunas</Label>
           <Combobox
@@ -205,7 +233,7 @@ function NewBoardForm({
             aria-label="Campo que define as colunas"
           />
         </div>
-      )}
+      ) : null}
 
       {state.message && !state.ok ? (
         <p className="text-destructive text-sm" role="status">

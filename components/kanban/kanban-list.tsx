@@ -84,16 +84,18 @@ export function KanbanList({
                   </TableCell>
                 ) : null}
                 <TableCell>
-                  <RecordEditSheet
-                    record={card.record}
-                    fields={recordCtx.fields}
-                    responsibles={recordCtx.responsibles}
-                    operations={recordCtx.operations}
-                    relatedLeadLabel={null}
-                    userRoles={recordCtx.userRoles}
-                    canEditValues={recordCtx.canEditValues}
-                    canManageFields={recordCtx.canManageFields}
-                  />
+                  {card.record ? (
+                    <RecordEditSheet
+                      record={card.record}
+                      fields={recordCtx.fields}
+                      responsibles={recordCtx.responsibles}
+                      operations={recordCtx.operations}
+                      relatedLeadLabel={null}
+                      userRoles={recordCtx.userRoles}
+                      canEditValues={recordCtx.canEditValues}
+                      canManageFields={recordCtx.canManageFields}
+                    />
+                  ) : null}
                 </TableCell>
               </TableRow>
             ))
