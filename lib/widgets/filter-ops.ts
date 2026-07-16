@@ -12,8 +12,6 @@
 // só lugar, para os dois usarem exatamente a mesma semântica.
 import {
   DEFAULT_SOURCE_DISPLAY_LABELS,
-  SOURCE_KEYS,
-  isSourceKey,
   type SourceDisplayLabels,
 } from "@/lib/sources";
 import type { AvailableField } from "./fields";
@@ -49,13 +47,20 @@ export interface FieldOption {
   title?: string; // tooltip (fórmula legível dos calculados)
 }
 
+// Keys de fonte derivadas dos rótulos de exibição: mergeSourceLabels monta o
+// objeto na ordem do CATÁLOGO (builtins primeiro) + "geral" — é assim que as
+// fontes dinâmicas chegam a este módulo sem mudar a assinatura dos chamadores.
+function sourceKeysOf(labels: SourceDisplayLabels): string[] {
+  return Object.keys(labels).filter((k) => k !== "geral");
+}
+
 // Chips de fonte dos dropdowns de campo (prop `chips` do Combobox; o chip
 // "Todas" é implícito no componente). NAVEGAÇÃO apenas — não altera a consulta.
 export function sourceChips(
   labels: SourceDisplayLabels
 ): { key: string; label: string }[] {
   return [
-    ...SOURCE_KEYS.map((k) => ({ key: k, label: labels[k] })),
+    ...sourceKeysOf(labels).map((k) => ({ key: k, label: labels[k] })),
     { key: "geral", label: labels.geral },
   ];
 }
@@ -84,8 +89,11 @@ export function fieldOptionTitle(f: AvailableField): string | undefined {
 
 // Chips em que o campo aparece: a fonte única; campos gerais aparecem sob CADA
 // fonte E sob "Geral" (um campo geral também é utilizável em qualquer fonte).
-export function fieldOptionChips(f: AvailableField): string[] {
-  return f.source ? [f.source] : ["geral", ...SOURCE_KEYS];
+export function fieldOptionChips(
+  f: AvailableField,
+  labels: SourceDisplayLabels = DEFAULT_SOURCE_DISPLAY_LABELS
+): string[] {
+  return f.source ? [f.source] : ["geral", ...sourceKeysOf(labels)];
 }
 
 // Cabeçalho de grupo (exibido com chip de fonte ativo): fonte curta; campos do
@@ -99,11 +107,11 @@ export function fieldOptionGroup(
   return f.source ? labels[f.source] : labels.geral;
 }
 
-// Ordem dos grupos: fontes (ordem canônica) → registros casados → gerais.
-function fieldGroupRank(f: AvailableField): number {
-  if (!f.source) return 2 * SOURCE_KEYS.length;
-  const i = SOURCE_KEYS.indexOf(f.source);
-  return f.baseLabel != null ? SOURCE_KEYS.length + i : i;
+// Ordem dos grupos: fontes (ordem do catálogo) → registros casados → gerais.
+function fieldGroupRank(f: AvailableField, keys: string[]): number {
+  if (!f.source) return 2 * keys.length;
+  const i = keys.indexOf(f.source);
+  return f.baseLabel != null ? keys.length + i : i;
 }
 
 // Decora um catálogo de operandos de fórmula (RefOption/OperandRef) com os
@@ -135,7 +143,7 @@ export function decorateRefOptions<T extends { ref: string }>(
           : f.source
             ? labels[f.source]
             : labels.geral,
-      chips: fieldOptionChips(f),
+      chips: fieldOptionChips(f, labels),
       title: fieldOptionTitle(f),
     };
   });
@@ -147,14 +155,15 @@ export function toFieldOptions(
   fields: AvailableField[],
   labels: SourceDisplayLabels = DEFAULT_SOURCE_DISPLAY_LABELS
 ): FieldOption[] {
+  const keys = sourceKeysOf(labels);
   return [...fields]
-    .sort((a, b) => fieldGroupRank(a) - fieldGroupRank(b))
+    .sort((a, b) => fieldGroupRank(a, keys) - fieldGroupRank(b, keys))
     .map((f) => ({
       value: f.field,
       label: fieldOptionLabel(f, labels),
       cleanLabel: fieldOptionCleanLabel(f),
       group: fieldOptionGroup(f, labels),
-      chips: fieldOptionChips(f),
+      chips: fieldOptionChips(f, labels),
       title: fieldOptionTitle(f),
     }));
 }
@@ -167,7 +176,13 @@ export function cleanFilters(filters: WidgetFilter[]): WidgetFilter[] {
   return filters
     .filter((f) => f.field)
     .map((f) => {
-      const sources = [...new Set((f.sources ?? []).filter(isSourceKey))];
+      // Qualquer key não-vazia vale (fontes dinâmicas); a UI só oferece as do
+      // catálogo, e alvos órfãos são inofensivos (ver lib/widgets/filter-sources).
+      const sources = [
+        ...new Set(
+          (f.sources ?? []).filter((s) => typeof s === "string" && s !== "")
+        ),
+      ];
       const src = sources.length > 0 ? { sources } : {};
       if (f.op === "in") {
         return {

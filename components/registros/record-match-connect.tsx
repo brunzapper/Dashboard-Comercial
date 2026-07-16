@@ -11,12 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  RECORD_TYPE_SOURCE,
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  type SourceKey,
-} from "@/lib/sources";
+import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import {
   connectRecords,
   disconnectRecords,
@@ -32,8 +28,9 @@ export function RecordMatchConnect({
   recordId: string;
   recordType: "lead" | "negocio" | "venda_site";
 }) {
-  const ownSource = RECORD_TYPE_SOURCE[recordType];
-  const otherSources = SOURCE_KEYS.filter((s) => s !== ownSource);
+  const catalog = useSources();
+  const ownSource = toSourceKey(recordType);
+  const otherSources = catalog.map((s) => s.key).filter((s) => s !== ownSource);
 
   const [matches, setMatches] = useState<MatchListItem[]>([]);
   const [source, setSource] = useState<SourceKey>(otherSources[0]);
@@ -80,7 +77,7 @@ export function RecordMatchConnect({
             >
               <span className="truncate">
                 <span className="text-muted-foreground">
-                  {m.source ? SOURCE_LABELS[m.source as SourceKey] : "—"}
+                  {m.source ? sourceLabel(m.source) : "—"}
                   {m.mode === "auto" ? " (auto)" : ""}:{" "}
                 </span>
                 {m.title}
@@ -104,7 +101,7 @@ export function RecordMatchConnect({
 
       <div className="flex gap-2">
         <Combobox
-          options={otherSources.map((s) => ({ value: s, label: SOURCE_LABELS[s] }))}
+          options={otherSources.map((s) => ({ value: s, label: sourceLabel(s) }))}
           value={source}
           onValueChange={(v) => setSource(v as SourceKey)}
           searchable={false}

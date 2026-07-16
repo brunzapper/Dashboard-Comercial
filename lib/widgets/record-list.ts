@@ -9,7 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
-import { RECORD_TYPE_SOURCE } from "@/lib/sources";
+import { toSourceKey } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
@@ -372,7 +372,7 @@ async function attachMatches(
     for (const m of own) {
       const partner = partnerById.get(partnerOf(m, r.id));
       if (!partner) continue;
-      const src = RECORD_TYPE_SOURCE[partner.record_type];
+      const src = toSourceKey(partner.record_type);
       if (src && !map[src]) map[src] = partner; // melhor (manual/recente) vence
     }
     // Fallback do lead gêmeo (só quando não há match genérico p/ leads).

@@ -37,15 +37,11 @@ import {
   NUMERIC_DATA_TYPES,
   type FieldDefinition,
 } from "@/lib/records/types";
-import {
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  SOURCE_RECORD_TYPE,
-  type SourceKey,
-} from "@/lib/sources";
+import { toRecordType } from "@/lib/sources";
 import { buildAvailableFields, CORE_FIELDS } from "@/lib/widgets/fields";
 import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
+import { useSources } from "@/components/sources-context";
 import { allDateOperands } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { aggOperandRefs, condAggOperandRefs } from "@/lib/widgets/calc-metrics";
@@ -64,18 +60,11 @@ function SourceBadge({ field }: { field: FieldDefinition }) {
   return <Badge variant="secondary">App</Badge>;
 }
 
-// Seções na ordem exibida. "gerais" = campos sem applies_to (valem p/ todas as
-// fontes: locais/app); as demais mapeiam para um record_type via applies_to.
-type SectionKey = SourceKey | "gerais";
-
-const SECTION_LABELS: Record<SectionKey, string> = {
-  leads: SOURCE_LABELS.leads,
-  deals: SOURCE_LABELS.deals,
-  estudo: SOURCE_LABELS.estudo,
-  gerais: "Gerais (todas as fontes)",
-};
-
-const SECTION_ORDER: SectionKey[] = [...SOURCE_KEYS, "gerais"];
+// Seções na ordem exibida (catálogo dinâmico + "gerais" ao final). "gerais" =
+// campos sem applies_to (valem p/ todas as fontes: locais/app); as demais
+// mapeiam para um record_type via applies_to.
+const GERAIS_SECTION = "gerais";
+const GERAIS_LABEL = "Gerais (todas as fontes)";
 
 function FieldRow({
   field,
@@ -198,15 +187,19 @@ export function FieldsManager({
   const [query, setQuery] = useState("");
   // Aba (fonte) ativa. A busca NÃO troca a aba: os contadores nas abas mostram
   // onde estão os resultados e o usuário navega sem perder o contexto.
-  const [tab, setTab] = useState<SectionKey>("leads");
+  const [tab, setTab] = useState<string>("leads");
 
   // Catálogo de campos + rótulos de fonte SÓ p/ decorar os operandos de fórmula
   // (fonte curta/chips/tooltip nos seletores — decorateRefOptions não toca nos
   // labels, que fazem o round-trip texto⇄tokens e a validação do servidor).
   const sourceLabels = useSourceLabels();
   const fieldSourceChips = sourceChips(sourceLabels);
+  const catalog = useSources();
   // Memoizado: a digitação na busca re-renderiza o manager inteiro.
-  const availableForHints = useMemo(() => buildAvailableFields(fields), [fields]);
+  const availableForHints = useMemo(
+    () => buildAvailableFields(fields, [], catalog),
+    [fields, catalog]
+  );
   const decorate = (refs: RefOption[]): RefOption[] =>
     decorateRefOptions(refs, availableForHints, sourceLabels);
 
@@ -227,7 +220,7 @@ export function FieldsManager({
         (f) => NUMERIC_DATA_TYPES.includes(f.data_type) && f.data_type !== "calculado"
       )
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
-    ...allDateOperands(customDateFields),
+    ...allDateOperands(customDateFields, catalog),
   ]);
   // Catálogo completo p/ o editor de TEXTO (SE/E/OU): números + datas + colunas
   // de texto/seleção/booleano (próprias e do registro casado).
@@ -236,7 +229,7 @@ export function FieldsManager({
     .map((f) => ({ field_key: f.field_key, label: f.label }));
   const allRefs: RefOption[] = [
     ...numericRefs,
-    ...decorate(allCondOperands(customCondFields)),
+    ...decorate(allCondOperands(customCondFields, catalog)),
   ];
   // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
@@ -284,26 +277,35 @@ export function FieldsManager({
         )
       : fields;
 
-    const bySection: Record<SectionKey, FieldDefinition[]> = {
-      leads: [],
-      deals: [],
-      estudo: [],
-      gerais: [],
+    const bySection: Record<string, FieldDefinition[]> = {
+      [GERAIS_SECTION]: [],
     };
+    for (const s of catalog) bySection[s.key] = [];
     for (const f of filtered) {
       const appliesTo = f.applies_to ?? [];
       if (appliesTo.length === 0) {
-        bySection.gerais.push(f);
+        bySection[GERAIS_SECTION].push(f);
         continue;
       }
-      for (const key of SOURCE_KEYS) {
-        if (appliesTo.includes(SOURCE_RECORD_TYPE[key])) bySection[key].push(f);
+      for (const s of catalog) {
+        if (appliesTo.includes(toRecordType(s.key))) bySection[s.key].push(f);
       }
     }
     return bySection;
-  }, [fields, query]);
+  }, [fields, query, catalog]);
 
-  const total = SECTION_ORDER.reduce((n, key) => n + sections[key].length, 0);
+  const sectionOrder: { key: string; label: string }[] = [
+    ...catalog.map((s) => ({ key: s.key, label: s.label })),
+    { key: GERAIS_SECTION, label: GERAIS_LABEL },
+  ];
+  // Aba efetiva: se a fonte da aba salva sumiu do catálogo, cai na primeira.
+  const activeTab = sectionOrder.some((s) => s.key === tab)
+    ? tab
+    : (sectionOrder[0]?.key ?? GERAIS_SECTION);
+  const total = sectionOrder.reduce(
+    (n, s) => n + (sections[s.key]?.length ?? 0),
+    0
+  );
 
   function openCreate() {
     setEditing(undefined);
@@ -341,15 +343,16 @@ export function FieldsManager({
         </p>
       ) : (
         <>
-          {/* Abas por fonte (mesma receita visual das abas de Registros). */}
+          {/* Abas por fonte (mesma receita visual das abas de Registros),
+              dirigidas pelo CATÁLOGO dinâmico (data_sources) + "Gerais". */}
           <div className="flex flex-wrap gap-1 border-b">
-            {SECTION_ORDER.map((key) => {
-              const active = key === tab;
+            {sectionOrder.map((s) => {
+              const active = s.key === activeTab;
               return (
                 <button
-                  key={key}
+                  key={s.key}
                   type="button"
-                  onClick={() => setTab(key)}
+                  onClick={() => setTab(s.key)}
                   className={cn(
                     "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                     active
@@ -357,14 +360,16 @@ export function FieldsManager({
                       : "text-muted-foreground border-transparent hover:text-foreground"
                   )}
                 >
-                  {SECTION_LABELS[key]}
-                  <Badge variant="secondary">{sections[key].length}</Badge>
+                  {s.label}
+                  <Badge variant="secondary">
+                    {sections[s.key]?.length ?? 0}
+                  </Badge>
                 </button>
               );
             })}
           </div>
           <FieldsSection
-            fields={sections[tab]}
+            fields={sections[activeTab] ?? []}
             onEdit={openEdit}
             emptyMessage={
               query

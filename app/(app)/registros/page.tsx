@@ -11,13 +11,12 @@ import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import {
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  SOURCE_RECORD_TYPE,
   fieldAppliesToSource,
-  isSourceKey,
+  isKnownSource,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { FiltersBar } from "@/components/registros/filters-bar";
@@ -42,9 +41,6 @@ export default async function RegistrosPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const fonteRaw = str(sp.fonte);
-  const fonte: SourceKey = isSourceKey(fonteRaw) ? fonteRaw : "leads";
-  const recordType = SOURCE_RECORD_TYPE[fonte];
   const etapa = str(sp.etapa);
   const responsavel = str(sp.responsavel);
   const de = str(sp.de);
@@ -64,6 +60,14 @@ export default async function RegistrosPage({
   if (!canViewRegistros) redirect("/");
 
   const supabase = await createClient();
+
+  // Catálogo de fontes (abas): builtins + fontes criadas (data_sources).
+  const sources = await loadSources(supabase);
+  const fonteRaw = str(sp.fonte);
+  const fonte: SourceKey = isKnownSource(fonteRaw, sources)
+    ? fonteRaw
+    : (sources[0]?.key ?? "leads");
+  const recordType = toRecordType(fonte);
 
   // Filtros + paginação (RLS decide o que o usuário vê).
   const from = (page - 1) * PAGE_SIZE;
@@ -189,24 +193,31 @@ export default async function RegistrosPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Registros</h1>
-        <p className="text-muted-foreground text-sm">
-          {total} registro(s). Edite responsável, operação, lead e campos
-          personalizados conforme suas permissões.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Registros</h1>
+          <p className="text-muted-foreground text-sm">
+            {total} registro(s). Edite responsável, operação, lead e campos
+            personalizados conforme suas permissões.
+          </p>
+        </div>
+        {isAdmin ? (
+          <Button asChild variant="outline">
+            <Link href="/registros/importar">Importar CSV</Link>
+          </Button>
+        ) : null}
       </div>
 
       {isAdmin ? <SyncPanel lastSyncedAt={lastSyncedAt} /> : null}
 
-      {/* Abas por fonte */}
+      {/* Abas por fonte (catálogo dinâmico) */}
       <div className="flex flex-wrap gap-1 border-b">
-        {SOURCE_KEYS.map((key) => {
-          const active = key === fonte;
+        {sources.map((s) => {
+          const active = s.key === fonte;
           return (
             <Link
-              key={key}
-              href={tabHref(key)}
+              key={s.key}
+              href={tabHref(s.key)}
               className={cn(
                 "-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                 active
@@ -214,7 +225,7 @@ export default async function RegistrosPage({
                   : "text-muted-foreground border-transparent hover:text-foreground"
               )}
             >
-              {SOURCE_LABELS[key]}
+              {s.label}
             </Link>
           );
         })}

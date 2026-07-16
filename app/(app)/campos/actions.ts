@@ -18,6 +18,8 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { loadSources } from "@/lib/config/sources";
+import { slugify } from "@/lib/records/slug";
 import {
   NUMERIC_DATA_TYPES,
   PERCENT_DATA_TYPES,
@@ -174,7 +176,8 @@ async function allowedFormulaDateRefs(
     field_key: d.field_key as string,
     label: (d.label as string) ?? (d.field_key as string),
   }));
-  return new Set(allDateOperands(customDateFields).map((o) => o.ref));
+  const sources = await loadSources(supabase);
+  return new Set(allDateOperands(customDateFields, sources).map((o) => o.ref));
 }
 
 // Refs CONDICIONAIS permitidos numa fórmula (SE/E/OU e comparações): colunas
@@ -191,7 +194,8 @@ async function allowedFormulaCondRefs(
     field_key: d.field_key as string,
     label: (d.label as string) ?? (d.field_key as string),
   }));
-  return new Set(allCondOperands(customCondFields).map((o) => o.ref));
+  const sources = await loadSources(supabase);
+  return new Set(allCondOperands(customCondFields, sources).map((o) => o.ref));
 }
 
 // Catálogo completo de operandos (numéricos + datas + condicionais) com rótulos,
@@ -224,8 +228,15 @@ async function serverOperandCatalog(
       )
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
   ];
-  const dates = allDateOperands(fields.filter((f) => f.data_type === "data"));
-  const conds = allCondOperands(fields.filter((f) => COND_DATA_TYPES.includes(f.data_type)));
+  const sources = await loadSources(supabase);
+  const dates = allDateOperands(
+    fields.filter((f) => f.data_type === "data"),
+    sources
+  );
+  const conds = allCondOperands(
+    fields.filter((f) => COND_DATA_TYPES.includes(f.data_type)),
+    sources
+  );
   return [...numeric, ...dates, ...conds];
 }
 
@@ -290,17 +301,6 @@ async function resolveAndValidateFormula(
   const v = validateFormula(formula, allowed, allowedDates, allowedConds);
   if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   return { ok: true, formula };
-}
-
-function slugify(label: string): string {
-  return label
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 60);
 }
 
 function parseOptions(raw: string): string[] {

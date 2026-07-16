@@ -11,11 +11,8 @@ import type { FieldDefinition } from "@/lib/records/types";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { loadMatchRules } from "@/lib/matching";
 import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
-import {
-  SOURCE_KEYS,
-  fieldAppliesToSource,
-  type SourceKey,
-} from "@/lib/sources";
+import { fieldAppliesToSource, type SourceKey } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { CamposTabs } from "@/components/campos/campos-tabs";
 import { FieldsManager } from "@/components/campos/fields-manager";
@@ -29,6 +26,7 @@ export default async function CamposPage() {
   await requirePermission("manage_field_definitions");
 
   const supabase = await createClient();
+  const sources = await loadSources(supabase);
   const [{ data }, correspondences, matchRules, currencies] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -52,12 +50,12 @@ export default async function CamposPage() {
     label: f.label,
   }));
   const candidatesBySource = Object.fromEntries(
-    SOURCE_KEYS.map((key) => [
-      key,
+    sources.map((s) => [
+      s.key,
       [
         ...coreOptions,
         ...fields
-          .filter((f) => fieldAppliesToSource(f.applies_to, key))
+          .filter((f) => fieldAppliesToSource(f.applies_to, s.key))
           .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label })),
       ],
     ])

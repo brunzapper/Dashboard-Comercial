@@ -62,7 +62,8 @@ import {
   validateFormula,
   type Formula,
 } from "@/lib/records/formulas";
-import { SOURCE_KEYS, SOURCE_LABELS, type SourceKey } from "@/lib/sources";
+import { type SourceKey } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import {
   Sheet,
   SheetContent,
@@ -550,8 +551,11 @@ export function WidgetBuilder({
 
   const numericFields = available.filter((f) => f.isNumeric);
 
-  // Rótulos de exibição das fontes (Configurações → Fontes) + chips de
-  // navegação dos dropdowns de campo (Todas · fontes · Geral).
+  // Catálogo de fontes (data_sources) + rótulos de exibição (Configurações →
+  // Fontes) + chips de navegação dos dropdowns de campo (Todas · fontes · Geral).
+  const catalog = useSources();
+  const catalogLabel = (k: string) =>
+    catalog.find((s) => s.key === k)?.label ?? k;
   const sourceLabels = useSourceLabels();
   const fieldSourceChips = sourceChips(sourceLabels);
 
@@ -621,12 +625,13 @@ export function WidgetBuilder({
   // alvos já gravados no filtro. Alvo "órfão" (fonte que saiu do widget) vem
   // marcado como stale — visível e removível, nunca escondido em silêncio; em
   // runtime ele é neutralizado pela interseção (applyFilterSourceTargets).
-  const coveredSources = sources.length > 0 ? sources : SOURCE_KEYS;
+  const coveredSources =
+    sources.length > 0 ? sources : catalog.map((s) => s.key);
   const filterSourceOptions = (f: WidgetFilter) => {
     const keys = new Set<SourceKey>([...coveredSources, ...filterTargetSources(f)]);
     return [...keys].map((k) => ({
       key: k,
-      label: SOURCE_LABELS[k],
+      label: catalogLabel(k),
       stale: !coveredSources.includes(k),
     }));
   };
@@ -1416,13 +1421,13 @@ export function WidgetBuilder({
                   outras fontes dos widgets-alvo não são afetados.
                 </p>
                 <div className="flex flex-col gap-2 rounded-md border p-3">
-                  {SOURCE_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-sm">
+                  {catalog.map((s) => (
+                    <label key={s.key} className="flex items-center gap-2 text-sm">
                       <Checkbox
-                        checked={sources.includes(key)}
-                        onCheckedChange={() => toggleSource(key)}
+                        checked={sources.includes(s.key)}
+                        onCheckedChange={() => toggleSource(s.key)}
                       />
-                      {SOURCE_LABELS[key]}
+                      {s.label}
                     </label>
                   ))}
                 </div>
@@ -1850,13 +1855,13 @@ export function WidgetBuilder({
               entre as fontes escolhidas.
             </p>
             <div className="flex flex-col gap-2 rounded-md border p-3">
-              {SOURCE_KEYS.map((key) => (
-                <label key={key} className="flex items-center gap-2 text-sm">
+              {catalog.map((s) => (
+                <label key={s.key} className="flex items-center gap-2 text-sm">
                   <Checkbox
-                    checked={sources.includes(key)}
-                    onCheckedChange={() => toggleSource(key)}
+                    checked={sources.includes(s.key)}
+                    onCheckedChange={() => toggleSource(s.key)}
                   />
-                  {SOURCE_LABELS[key]}
+                  {s.label}
                 </label>
               ))}
             </div>

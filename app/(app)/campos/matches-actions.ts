@@ -9,11 +9,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import {
-  RECORD_TYPE_SOURCE,
-  SOURCE_RECORD_TYPE,
-  isSourceKey,
-} from "@/lib/sources";
+import { toRecordType, toSourceKey } from "@/lib/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 
@@ -31,10 +27,12 @@ async function ensureCanManage(): Promise<string | null> {
   return null;
 }
 
-// record_type a partir de uma SourceKey enviada pelo form.
+// record_type a partir de uma SourceKey enviada pelo form. Fontes dinâmicas:
+// key === record_type; a FK de match_rules -> data_sources (0060) é a
+// validação final contra o catálogo.
 function recordTypeFromForm(formData: FormData, key: string): string | null {
   const v = String(formData.get(key) ?? "").trim();
-  return isSourceKey(v) ? SOURCE_RECORD_TYPE[v] : null;
+  return v ? toRecordType(v) : null;
 }
 
 function readRule(formData: FormData): {
@@ -189,9 +187,10 @@ export async function searchRecordsForMatch(
   source: string,
   term: string
 ): Promise<{ id: string; title: string }[]> {
-  if (!isSourceKey(source)) return [];
+  if (!source.trim()) return [];
   const supabase = await createClient();
-  const rt = SOURCE_RECORD_TYPE[source];
+  // Fonte desconhecida resolve (identidade) p/ um record_type sem linhas — ok.
+  const rt = toRecordType(source);
   let q = supabase
     .from("records")
     .select("id, title")
@@ -247,7 +246,7 @@ export async function listRecordMatches(
       matchId: m.id as string,
       recordId: pid,
       title: info?.title ?? "—",
-      source: info ? RECORD_TYPE_SOURCE[info.rt] : "",
+      source: info ? toSourceKey(info.rt) : "",
       mode: m.mode as "auto" | "manual",
     };
   });

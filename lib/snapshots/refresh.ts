@@ -31,7 +31,8 @@ import type {
   Transform,
   Widget,
 } from "@/lib/widgets/types";
-import { SOURCE_RECORD_TYPE, type SourceKey } from "@/lib/sources";
+import { toRecordType, type SourceKey } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 
 import { snapshotClient } from "./db-adapter";
 import { computeNextRefreshAt } from "./schedule";
@@ -132,10 +133,11 @@ async function doRefresh(
     ]);
   if (!dashData) throw new Error("Dashboard do snapshot não existe mais.");
 
+  const sources = await loadSources(service);
   const widgets = (widgetsData ?? []) as Widget[];
   const fields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dashData.settings ?? {}) as DashboardSettings;
-  const available = buildAvailableFields(fields, correspondences);
+  const available = buildAvailableFields(fields, correspondences, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
 
   // 2) Aba efetiva e widgets da aba (mesma semântica de widgetTab da page).
@@ -308,7 +310,7 @@ async function doRefresh(
         const srcs = (fw.sources ?? []) as SourceKey[];
         const rts =
           srcs.length > 0
-            ? srcs.map((s) => SOURCE_RECORD_TYPE[s] as string)
+            ? srcs.map((s) => toRecordType(s))
             : Object.keys(stagesByRt);
         const set = new Set<string>();
         for (const rt of rts) for (const s of stagesByRt[rt] ?? []) set.add(s);

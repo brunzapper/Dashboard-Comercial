@@ -12,7 +12,7 @@ import type { WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   SOURCE_KEYS,
-  SOURCE_RECORD_TYPE,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 
@@ -197,7 +197,7 @@ export function resolveUnifiedPeriodField(
   const key = field.slice("unified:".length);
   const member = correspondences
     .find((c) => c.key === key)
-    ?.members.find((m) => m.record_type === SOURCE_RECORD_TYPE[source]);
+    ?.members.find((m) => m.record_type === toRecordType(source));
   return member?.field_ref || null;
 }
 
@@ -209,9 +209,16 @@ export function periodFieldForSource(
   return period.fieldBySource?.[source] ?? period.field;
 }
 
-// record_types cobertos por um widget: das fontes selecionadas (vazio = todas).
-function coveredSources(sources?: SourceKey[]): SourceKey[] {
-  return sources && sources.length > 0 ? sources : SOURCE_KEYS;
+// Fontes cobertas por um widget: as selecionadas; vazio = todas. "Todas" =
+// builtins ∪ chaves do mapa por fonte do período — o resolver
+// (period-resolve) monta fieldBySource a partir do CATÁLOGO, então as fontes
+// dinâmicas chegam aqui por ele, sem precisar passar o catálogo pelo engine.
+function coveredSources(
+  sources: SourceKey[] | undefined,
+  fieldBySource?: Partial<Record<SourceKey, string>>
+): SourceKey[] {
+  if (sources && sources.length > 0) return sources;
+  return [...new Set([...SOURCE_KEYS, ...Object.keys(fieldBySource ?? {})])];
 }
 
 /**
@@ -230,12 +237,12 @@ export function applyPeriodToFilters(
   const to = period.to ? `${period.to}T23:59:59` : null;
 
   // Mapa por fonte → campo de data das fontes cobertas por este widget.
-  const covered = coveredSources(sources);
+  const covered = coveredSources(sources, period.fieldBySource);
   const byType: Record<string, string> = {};
   const distinct = new Set<string>();
   for (const s of covered) {
     const col = periodFieldForSource(period, s);
-    byType[SOURCE_RECORD_TYPE[s]] = col;
+    byType[toRecordType(s)] = col;
     distinct.add(col);
   }
 

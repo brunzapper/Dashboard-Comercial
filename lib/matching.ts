@@ -6,9 +6,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { normalizeName } from "@/lib/sync/shared";
-import { RECORD_TYPE_SOURCE, type SourceKey } from "@/lib/sources";
+import { toSourceKey, type SourceKey } from "@/lib/sources";
 
-export type MatchRecordType = "lead" | "negocio" | "venda_site";
+// record_type de uma fonte qualquer (fontes dinâmicas: key === record_type).
+export type MatchRecordType = string;
 
 export interface MatchRule {
   id: string;
@@ -78,5 +79,5 @@ export function matchKey(value: unknown): string | null {
 
 /** SourceKey de um record_type (p/ montar refs match:<fonte>:…). */
 export function sourceKeyOf(rt: MatchRecordType): SourceKey {
-  return RECORD_TYPE_SOURCE[rt];
+  return toSourceKey(rt);
 }

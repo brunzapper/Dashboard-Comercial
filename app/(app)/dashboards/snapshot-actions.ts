@@ -21,7 +21,7 @@ import {
   type RefreshMode,
   type SnapshotListItem,
 } from "@/lib/snapshots/types";
-import { SOURCE_KEYS, SOURCE_LABELS, SOURCE_RECORD_TYPE } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import {
   PERIOD_ALL,
   PERIOD_PRESETS,
@@ -55,7 +55,6 @@ export interface SnapshotInput {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REFRESH_MODES: RefreshMode[] = ["manual", "hourly", "daily", "weekly"];
-const RECORD_TYPES = new Set<string>(Object.values(SOURCE_RECORD_TYPE));
 
 // Normaliza/valida uma lista de restrição: [] → null (= todos); item inválido
 // derruba a ação (nunca gravar restrição malformada num acesso público).
@@ -72,11 +71,13 @@ function cleanIdList(
 }
 
 function cleanSources(
-  raw: string[] | null | undefined
+  raw: string[] | null | undefined,
+  // record_types válidos, derivados do CATÁLOGO (data_sources) do chamador.
+  validRecordTypes: Set<string>
 ): { ok: true; value: string[] | null } | { ok: false; message: string } {
   if (!raw || raw.length === 0) return { ok: true, value: null };
   const vals = raw.map(String);
-  if (vals.some((v) => !RECORD_TYPES.has(v))) {
+  if (vals.some((v) => !validRecordTypes.has(v))) {
     return { ok: false, message: "Restrição de fontes inválida." };
   }
   return { ok: true, value: [...new Set(vals)] };
@@ -229,11 +230,16 @@ export async function createSnapshot(
     return { ok: false, message: "Escolha a aba do snapshot." };
   }
 
+  const supabase = await createClient();
+  const catalog = await loadSources(supabase);
   const resp = cleanIdList(input.allowedResponsibleIds, "responsáveis");
   if (!resp.ok) return { ok: false, message: resp.message };
   const ops = cleanIdList(input.allowedOperationIds, "operações");
   if (!ops.ok) return { ok: false, message: ops.message };
-  const sources = cleanSources(input.allowedSources);
+  const sources = cleanSources(
+    input.allowedSources,
+    new Set(catalog.map((s) => s.recordType))
+  );
   if (!sources.ok) return { ok: false, message: sources.message };
   const schedule = cleanSchedule(input);
   if (!schedule.ok) return { ok: false, message: schedule.message };
@@ -242,7 +248,6 @@ export async function createSnapshot(
 
   const token = generateToken();
   const session = await getSessionInfo();
-  const supabase = await createClient();
   const { data: created, error } = await supabase
     .from("snapshots")
     .insert({
@@ -293,18 +298,22 @@ export async function updateSnapshot(
 
   const name = String(input.name ?? "").trim();
   if (!name) return { ok: false, message: "Informe um nome para o snapshot." };
+  const supabase = await createClient();
+  const catalog = await loadSources(supabase);
   const resp = cleanIdList(input.allowedResponsibleIds, "responsáveis");
   if (!resp.ok) return { ok: false, message: resp.message };
   const ops = cleanIdList(input.allowedOperationIds, "operações");
   if (!ops.ok) return { ok: false, message: ops.message };
-  const sources = cleanSources(input.allowedSources);
+  const sources = cleanSources(
+    input.allowedSources,
+    new Set(catalog.map((s) => s.recordType))
+  );
   if (!sources.ok) return { ok: false, message: sources.message };
   const schedule = cleanSchedule(input);
   if (!schedule.ok) return { ok: false, message: schedule.message };
   const period = cleanPeriod(input.defaultPeriod);
   if (!period.ok) return { ok: false, message: period.message };
 
-  const supabase = await createClient();
   const { error } = await supabase
     .from("snapshots")
     .update({
@@ -469,7 +478,7 @@ export async function getSnapshotFormOptions(
     return { tabs: [], responsibles: [], operations: [], sources: [] };
   }
   const supabase = await createClient();
-  const [{ data: resp }, { data: ops }] = await Promise.all([
+  const [{ data: resp }, { data: ops }, catalog] = await Promise.all([
     supabase
       .from("responsibles")
       .select("id, display_name")
@@ -480,6 +489,7 @@ export async function getSnapshotFormOptions(
       .select("id, name")
       .eq("active", true)
       .order("name"),
+    loadSources(supabase),
   ]);
   return {
     tabs: (access.settings.tabs ?? []).map((t) => ({ id: t.id, name: t.name })),
@@ -492,9 +502,9 @@ export async function getSnapshotFormOptions(
       label: (o.name as string) ?? "—",
     })),
     // value = record_type (o que a restrição grava); label = nome da fonte.
-    sources: SOURCE_KEYS.map((k) => ({
-      value: SOURCE_RECORD_TYPE[k],
-      label: SOURCE_LABELS[k],
+    sources: catalog.map((s) => ({
+      value: s.recordType,
+      label: s.label,
     })),
   };
 }
