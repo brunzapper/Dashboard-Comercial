@@ -12,7 +12,7 @@ import type { WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   SOURCE_KEYS,
-  SOURCE_RECORD_TYPE,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 
@@ -197,7 +197,7 @@ export function resolveUnifiedPeriodField(
   const key = field.slice("unified:".length);
   const member = correspondences
     .find((c) => c.key === key)
-    ?.members.find((m) => m.record_type === SOURCE_RECORD_TYPE[source]);
+    ?.members.find((m) => m.record_type === toRecordType(source));
   return member?.field_ref || null;
 }
 
@@ -235,7 +235,7 @@ export function applyPeriodToFilters(
   const distinct = new Set<string>();
   for (const s of covered) {
     const col = periodFieldForSource(period, s);
-    byType[SOURCE_RECORD_TYPE[s]] = col;
+    byType[toRecordType(s)] = col;
     distinct.add(col);
   }
 

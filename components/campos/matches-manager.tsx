@@ -27,9 +27,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  RECORD_TYPE_SOURCE,
   SOURCE_KEYS,
   SOURCE_LABELS,
+  sourceLabel,
+  toSourceKey,
   type SourceKey,
 } from "@/lib/sources";
 import type { MatchRule } from "@/lib/matching";
@@ -75,10 +76,10 @@ function MatchRuleForm({
   const [state, formAction, pending] = useActionState(action, initial);
 
   const [sourceA, setSourceA] = useState<SourceKey>(
-    rule ? RECORD_TYPE_SOURCE[rule.source_a] : "leads"
+    rule ? toSourceKey(rule.source_a) : "leads"
   );
   const [sourceB, setSourceB] = useState<SourceKey>(
-    rule ? RECORD_TYPE_SOURCE[rule.source_b] : "estudo"
+    rule ? toSourceKey(rule.source_b) : "estudo"
   );
   const [fieldA1, setFieldA1] = useState(rule?.field_a_1 ?? "");
   const [fieldB1, setFieldB1] = useState(rule?.field_b_1 ?? "");
@@ -241,7 +242,7 @@ export function MatchesManager({
 
   const labelForRef = (rt: MatchRule["source_a"], ref: string | null): string => {
     if (!ref) return "—";
-    const src = RECORD_TYPE_SOURCE[rt];
+    const src = toSourceKey(rt);
     return candidatesBySource[src]?.find((c) => c.ref === ref)?.label ?? ref;
   };
 
@@ -299,8 +300,8 @@ export function MatchesManager({
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.label}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">
-                    {SOURCE_LABELS[RECORD_TYPE_SOURCE[r.source_a]]} ↔{" "}
-                    {SOURCE_LABELS[RECORD_TYPE_SOURCE[r.source_b]]}
+                    {sourceLabel(toSourceKey(r.source_a))} ↔{" "}
+                    {sourceLabel(toSourceKey(r.source_b))}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {labelForRef(r.source_a, r.field_a_1)} ↔{" "}

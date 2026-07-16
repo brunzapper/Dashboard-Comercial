@@ -78,9 +78,9 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { unifiedMemberRef } from "@/lib/correspondences";
 import { resolveGoal } from "@/lib/metas/resolve";
 import {
-  RECORD_TYPE_SOURCE,
   SOURCE_LABELS,
-  SOURCE_RECORD_TYPE,
+  toRecordType,
+  toSourceKey,
   type SourceKey,
 } from "@/lib/sources";
 
@@ -125,7 +125,7 @@ function metricForMeta(metric: string): Metric {
 // Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
 export function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
   if (!sources || sources.length === 0) return [];
-  const rts = sources.map((s) => SOURCE_RECORD_TYPE[s]);
+  const rts = sources.map((s) => toRecordType(s));
   return [{ field: "record_type", op: "in", value: rts }];
 }
 
@@ -810,8 +810,8 @@ async function runWidgetByPeriod(
     const d = dims[di];
     if (d.field === "record_type") {
       for (const g of groups.values()) {
-        const src = RECORD_TYPE_SOURCE[g.dv[di].key];
-        g.dv[di] = { ...g.dv[di], label: src ? SOURCE_LABELS[src] : g.dv[di].label };
+        const src = toSourceKey(g.dv[di].key);
+        g.dv[di] = { ...g.dv[di], label: SOURCE_LABELS[src] ?? g.dv[di].label };
       }
       continue;
     }
@@ -1324,8 +1324,8 @@ export async function runWidget(
       for (const r of rows) {
         const v = r[key];
         if (v != null) {
-          const src = RECORD_TYPE_SOURCE[String(v)];
-          r[key] = src ? SOURCE_LABELS[src] : String(v);
+          const src = toSourceKey(String(v));
+          r[key] = SOURCE_LABELS[src] ?? String(v);
         }
       }
       continue;

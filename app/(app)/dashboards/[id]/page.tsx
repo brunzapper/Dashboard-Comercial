@@ -76,7 +76,7 @@ import type {
 } from "@/lib/widgets/types";
 import {
   isSourceKey,
-  SOURCE_RECORD_TYPE,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
@@ -754,7 +754,7 @@ export default async function DashboardPage({
         const srcs = (fw.sources ?? []) as SourceKey[];
         const rts =
           srcs.length > 0
-            ? srcs.map((s) => SOURCE_RECORD_TYPE[s] as string)
+            ? srcs.map((s) => toRecordType(s))
             : Object.keys(stagesByRt);
         const set = new Set<string>();
         for (const rt of rts) for (const s of stagesByRt[rt] ?? []) set.add(s);

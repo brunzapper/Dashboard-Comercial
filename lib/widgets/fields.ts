@@ -16,11 +16,11 @@ import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { formulaRefs, formulaToText } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
-  RECORD_TYPE_SOURCE,
   SOURCE_KEYS,
   SOURCE_LABELS,
   fieldAppliesToSource,
   isSourceKey,
+  toSourceKey,
   type SourceKey,
 } from "@/lib/sources";
 import {
@@ -119,7 +119,7 @@ function appliesSources(appliesTo: string[] | null | undefined): SourceKey[] {
   if (!appliesTo || appliesTo.length === 0) return [];
   const out = new Set<SourceKey>();
   for (const rt of appliesTo) {
-    const src = RECORD_TYPE_SOURCE[rt];
+    const src = toSourceKey(rt);
     if (src) out.add(src);
   }
   return [...out];

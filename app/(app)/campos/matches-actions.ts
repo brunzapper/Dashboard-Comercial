@@ -9,11 +9,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import {
-  RECORD_TYPE_SOURCE,
-  SOURCE_RECORD_TYPE,
-  isSourceKey,
-} from "@/lib/sources";
+import { isSourceKey, toRecordType, toSourceKey } from "@/lib/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 
@@ -34,7 +30,7 @@ async function ensureCanManage(): Promise<string | null> {
 // record_type a partir de uma SourceKey enviada pelo form.
 function recordTypeFromForm(formData: FormData, key: string): string | null {
   const v = String(formData.get(key) ?? "").trim();
-  return isSourceKey(v) ? SOURCE_RECORD_TYPE[v] : null;
+  return isSourceKey(v) ? toRecordType(v) : null;
 }
 
 function readRule(formData: FormData): {
@@ -191,7 +187,7 @@ export async function searchRecordsForMatch(
 ): Promise<{ id: string; title: string }[]> {
   if (!isSourceKey(source)) return [];
   const supabase = await createClient();
-  const rt = SOURCE_RECORD_TYPE[source];
+  const rt = toRecordType(source);
   let q = supabase
     .from("records")
     .select("id, title")
@@ -247,7 +243,7 @@ export async function listRecordMatches(
       matchId: m.id as string,
       recordId: pid,
       title: info?.title ?? "—",
-      source: info ? RECORD_TYPE_SOURCE[info.rt] : "",
+      source: info ? toSourceKey(info.rt) : "",
       mode: m.mode as "auto" | "manual",
     };
   });

@@ -13,9 +13,9 @@ import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types
 import {
   SOURCE_KEYS,
   SOURCE_LABELS,
-  SOURCE_RECORD_TYPE,
   fieldAppliesToSource,
   isSourceKey,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 import { cn } from "@/lib/utils";
@@ -44,7 +44,7 @@ export default async function RegistrosPage({
   const sp = await searchParams;
   const fonteRaw = str(sp.fonte);
   const fonte: SourceKey = isSourceKey(fonteRaw) ? fonteRaw : "leads";
-  const recordType = SOURCE_RECORD_TYPE[fonte];
+  const recordType = toRecordType(fonte);
   const etapa = str(sp.etapa);
   const responsavel = str(sp.responsavel);
   const de = str(sp.de);

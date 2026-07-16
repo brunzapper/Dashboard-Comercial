@@ -7,7 +7,7 @@
 // (lib/sync/bitrix/sync.ts: loadRelatedLeadIndex/resolveRelatedLeadFromIndex).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { RECORD_TYPE_SOURCE } from "@/lib/sources";
+import { toSourceKey } from "@/lib/sources";
 import {
   loadMatchRules,
   matchKey,
@@ -211,7 +211,7 @@ export async function resolveMatchedRecords(
         m.record_a_id === r.id ? m.record_b_id : m.record_a_id
       );
       if (!partner) continue;
-      const src = RECORD_TYPE_SOURCE[partner.record_type];
+      const src = toSourceKey(partner.record_type);
       if (src && !map[src]) map[src] = partner;
     }
     if (!map.leads && r.related_lead_id) {

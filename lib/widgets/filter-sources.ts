@@ -8,8 +8,8 @@
 // mapeamento SourceKey→record_type acontece aqui, num único ponto.
 import {
   SOURCE_KEYS,
-  SOURCE_RECORD_TYPE,
   isSourceKey,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 import type { WidgetFilter } from "./types";
@@ -48,7 +48,7 @@ export function applyFilterSourceTargets(
       out.push(rest);
       continue;
     }
-    out.push({ ...rest, record_types: effective.map((s) => SOURCE_RECORD_TYPE[s]) });
+    out.push({ ...rest, record_types: effective.map((s) => toRecordType(s)) });
   }
   return out;
 }

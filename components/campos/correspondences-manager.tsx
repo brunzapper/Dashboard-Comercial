@@ -28,9 +28,10 @@ import {
 } from "@/components/ui/sheet";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
 import {
-  RECORD_TYPE_SOURCE,
   SOURCE_KEYS,
   SOURCE_LABELS,
+  sourceLabel,
+  toSourceKey,
   type SourceKey,
 } from "@/lib/sources";
 import type { Correspondence } from "@/lib/correspondences";
@@ -74,7 +75,7 @@ function CorrespondenceForm({
     estudo: "",
   };
   for (const m of correspondence?.members ?? []) {
-    const src = RECORD_TYPE_SOURCE[m.record_type];
+    const src = toSourceKey(m.record_type);
     if (src) defaultRef[src] = m.field_ref;
   }
   const [refs, setRefs] = useState<Record<SourceKey, string>>(defaultRef);
@@ -231,11 +232,11 @@ export function CorrespondencesManager({
                   <TableCell>{DATA_TYPE_LABELS[c.data_type]}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {c.members.map((m) => {
-                      const src = RECORD_TYPE_SOURCE[m.record_type];
+                      const src = toSourceKey(m.record_type);
                       return (
                         <div key={m.record_type}>
-                          {src ? SOURCE_LABELS[src] : m.record_type}:{" "}
-                          {src ? labelForRef(src, m.field_ref) : m.field_ref}
+                          {sourceLabel(src)}:{" "}
+                          {labelForRef(src, m.field_ref)}
                         </div>
                       );
                     })}

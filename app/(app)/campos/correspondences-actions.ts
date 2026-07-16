@@ -9,7 +9,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { SOURCE_KEYS, SOURCE_RECORD_TYPE } from "@/lib/sources";
+import { SOURCE_KEYS, toRecordType } from "@/lib/sources";
 
 export interface CorrespondenceActionState {
   ok?: boolean;
@@ -58,7 +58,10 @@ function readMembers(formData: FormData): {
   for (const key of SOURCE_KEYS) {
     const ref = String(formData.get(`member_${key}`) ?? "").trim();
     if (ref) {
-      members.push({ record_type: SOURCE_RECORD_TYPE[key], field_ref: ref });
+      members.push({
+        record_type: toRecordType(key) as "lead" | "negocio" | "venda_site",
+        field_ref: ref,
+      });
     }
   }
   return members;

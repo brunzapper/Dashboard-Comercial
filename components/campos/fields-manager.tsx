@@ -35,7 +35,7 @@ import {
 import {
   SOURCE_KEYS,
   SOURCE_LABELS,
-  SOURCE_RECORD_TYPE,
+  toRecordType,
   type SourceKey,
 } from "@/lib/sources";
 import { buildAvailableFields, CORE_FIELDS } from "@/lib/widgets/fields";
@@ -287,7 +287,7 @@ export function FieldsManager({
         continue;
       }
       for (const key of SOURCE_KEYS) {
-        if (appliesTo.includes(SOURCE_RECORD_TYPE[key])) bySection[key].push(f);
+        if (appliesTo.includes(toRecordType(key))) bySection[key].push(f);
       }
     }
     return bySection;
