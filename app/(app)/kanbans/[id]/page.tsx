@@ -75,6 +75,26 @@ export default async function KanbanPage({
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
 
+  // O campo que define as colunas (agrupamento por valor ou bucket de data) pode
+  // ter sido escolhido pelo dono do board mesmo que ele esteja fora do construtor
+  // (show_in_builder off) ou oculto ao papel — sem a definição, as OPÇÕES do
+  // selecao não virariam colunas. Garantimos que a definição do campo de
+  // agrupamento esteja presente para a derivação das colunas (columns.ts).
+  const groupRef = kanban.dateBucket ? kanban.dateField : kanban.groupField;
+  if (groupRef?.startsWith("custom:")) {
+    const groupKey = groupRef.slice("custom:".length);
+    if (!fields.some((f) => f.field_key === groupKey)) {
+      const { data: groupDefData } = await supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
+        )
+        .eq("field_key", groupKey)
+        .maybeSingle();
+      if (groupDefData) fields.push(groupDefData as FieldDefinition);
+    }
+  }
+
   const [{ data: respData }, { data: opsData }] = await Promise.all([
     supabase
       .from("responsibles")

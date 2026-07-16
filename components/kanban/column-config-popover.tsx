@@ -48,6 +48,12 @@ export function ColumnConfigPopover({
   const [lockByDefault, setLockByDefault] = useState(
     settings.kanban?.tasks?.lockByDefault ?? false
   );
+  // Write-back (modo registros): mover um card grava a mudança de volta ao
+  // Bitrix. Default desligado — mover altera só a cópia local (o original da
+  // Sync fica intacto). Só surte efeito em registros de Sync e campos mapeados.
+  const [writeBack, setWriteBack] = useState(
+    settings.kanban?.writeBack ?? false
+  );
 
   function init() {
     const overrides = settings.kanban?.columns ?? [];
@@ -116,7 +122,7 @@ export function ColumnConfigPopover({
                 lockByDefault,
               },
             }
-          : {}),
+          : { writeBack }),
       },
     });
     setSaving(false);
@@ -245,7 +251,26 @@ export function ColumnConfigPopover({
                 Novas tarefas nascem travadas (só admin/gestor excluem)
               </label>
             </div>
-          ) : null}
+          ) : (
+            <div className="flex flex-col gap-1 border-t pt-2">
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={writeBack}
+                  onChange={(e) => setWriteBack(e.target.checked)}
+                  className="mt-0.5 size-3.5 accent-primary"
+                />
+                <span>
+                  Gravar alterações de volta no Bitrix (write-back)
+                  <span className="text-muted-foreground block">
+                    Desligado, mover um card altera só a cópia local — o registro
+                    de origem na Sync fica intacto. Ligado, mover enfileira a
+                    mudança para o Bitrix (só campos de Sync mapeados).
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
           {message ? (
             <p className="text-destructive text-xs" role="status">
               {message}

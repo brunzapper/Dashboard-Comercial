@@ -143,6 +143,23 @@ export async function runKanbanWidget(
       (!kanban.source || fieldAppliesToSource(f.applies_to, kanban.source)) &&
       (isAdmin || hasAnyRole(session.roles, f.visible_to_roles as RoleKey[]))
   );
+
+  // Garante a definição do campo de agrupamento (mesmo fora do construtor/oculto
+  // ao papel) para que as OPÇÕES do selecao virem colunas — ver kanbans/[id].
+  const groupRef = kanban.dateBucket ? kanban.dateField : kanban.groupField;
+  if (groupRef?.startsWith("custom:")) {
+    const groupKey = groupRef.slice("custom:".length);
+    if (!fields.some((f) => f.field_key === groupKey)) {
+      const { data: groupDefData } = await supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
+        )
+        .eq("field_key", groupKey)
+        .maybeSingle();
+      if (groupDefData) fields.push(groupDefData as FieldDefinition);
+    }
+  }
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,

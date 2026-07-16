@@ -93,10 +93,13 @@ export default async function HomePage() {
   let fields: FieldDefinition[] = [];
   if (canCreate) {
     sources = await loadSources(supabase);
+    // Campos p/ o seletor de colunas do kanban: NÃO filtramos por show_in_builder
+    // (esse gate é dos construtores BI). Definir as colunas do quadro é escolha de
+    // exibição — inclusive campos LOCAIS criados só para servir de "fase" (nunca
+    // vêm da Sync). O filtro por tipo/fonte é feito no create-menu.
     const { data: fieldsData } = await supabase
       .from("field_definitions")
       .select("id, field_key, label, data_type, options, applies_to")
-      .eq("show_in_builder", true)
       .order("sort_order", { ascending: true });
     fields = (fieldsData ?? []) as FieldDefinition[];
   }
