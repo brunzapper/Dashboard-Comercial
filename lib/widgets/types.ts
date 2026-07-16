@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 15/07/2026
+// Versão: 1.6 | Data: 16/07/2026
+// v1.6 (16/07/2026): kanban — DashboardSettings.kanban (kanban dedicado, kind
+//   'kanban' na 0062) e WidgetSettings.kanban (widget kanban). Config em
+//   lib/kanban/types.ts (compartilhada página ↔ widget).
 // v1.5 (15/07/2026): widget "Tabela Livre" (visual_type 'tabela_editavel',
 //   reaproveitado da Fase 2) — QuickTableSettings: colunas tipadas (livre/
 //   dimensão/métrica), linhas livres e bloqueio de edição por papel. A
@@ -21,6 +24,7 @@
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
+import type { KanbanSettings } from "@/lib/kanban/types";
 import type { DateFormat } from "./format";
 import type {
   ConversionBasis,
@@ -576,6 +580,8 @@ export type WidgetSettings = KpiSettings &
   NoteSettings &
   ShapeSettings &
   QuickTableSettings & {
+    // Config do widget kanban (visual_type 'kanban', 0064).
+    kanban?: KanbanSettings;
     appearance?: AppearanceSettings;
     // Filtros rápidos expostos no card (dropdowns). Valores persistidos em
     // dashboard_table_cells ('__qf__'), compartilhados entre usuários.
@@ -590,8 +596,12 @@ export type WidgetSettings = KpiSettings &
     autoSize?: { width?: boolean; height?: boolean };
   };
 
-// Config por dashboard, guardada em dashboards.settings.
+// Config por dashboard, guardada em dashboards.settings. Kanbans dedicados
+// (dashboards.kind 'kanban', 0062) usam a MESMA coluna com a chave disjunta
+// `kanban` (lib/kanban/types.ts) — as demais chaves não se aplicam a eles.
 export interface DashboardSettings {
+  // Config do kanban dedicado (kind 'kanban'). Ausente em dashboards comuns.
+  kanban?: KanbanSettings;
   periodBar?: {
     enabled?: boolean; // default true (barra global visível)
     defaultPreset?: string; // preset inicial da barra global

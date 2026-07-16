@@ -99,6 +99,7 @@ export function RecordCreateSheet({
   onCreated,
   triggerLabel = "Novo registro",
   triggerVariant = "default",
+  iconTrigger = false,
 }: {
   // Fonte destino (key + label; o server revalida manual_entry).
   source: { key: string; label: string };
@@ -113,6 +114,8 @@ export function RecordCreateSheet({
   onCreated?: (id: string) => void;
   triggerLabel?: string;
   triggerVariant?: "default" | "outline" | "ghost";
+  // Gatilho compacto (só o ícone +) — usado nos cabeçalhos de coluna do kanban.
+  iconTrigger?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(createRecord, initial);
@@ -139,10 +142,22 @@ export function RecordCreateSheet({
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <Button variant={triggerVariant} onClick={() => setOpen(true)}>
-        <Plus className="size-4" />
-        {triggerLabel}
-      </Button>
+      {iconTrigger ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          aria-label={triggerLabel}
+          onClick={() => setOpen(true)}
+        >
+          <Plus className="size-4" />
+        </Button>
+      ) : (
+        <Button variant={triggerVariant} onClick={() => setOpen(true)}>
+          <Plus className="size-4" />
+          {triggerLabel}
+        </Button>
+      )}
       <SheetContent className="overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Novo registro</SheetTitle>

@@ -1,0 +1,246 @@
+// Versão: 1.0 | Data: 16/07/2026
+// Montagem dos dados de um kanban de REGISTROS: consulta via runRecordList
+// (RLS, período, fontes — mesma semântica dos widgets de registros), calcula a
+// chave de grupo por card (valor do campo ou bucket de data), deriva as
+// colunas (columns.ts) e agrega contagem + métrica opcional por coluna.
+// Compartilhado pela página dedicada (/kanbans/[id], computa no RSC) e pelo
+// widget kanban (fetch deferido via server action). O modo 'tarefas' tem
+// montagem própria (lib/tasks — S3).
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { bucketRecordDate } from "@/lib/widgets/date-buckets";
+import { CORE_FIELDS } from "@/lib/widgets/fields";
+import { runRecordList } from "@/lib/widgets/record-list";
+import type { DashboardPeriod } from "@/lib/widgets/period";
+import type { WidgetConfig } from "@/lib/widgets/types";
+import {
+  DEFAULT_DATE_FORMAT,
+  formatDateValue,
+  formatPercent,
+} from "@/lib/widgets/format";
+import {
+  formatMoney,
+  resolveFieldMoneyFromRecord,
+} from "@/lib/widgets/currency";
+import { isPercentField } from "@/lib/records/types";
+import { deriveColumns, resolveCardColumn } from "./columns";
+import {
+  KANBAN_NO_VALUE_KEY,
+  type KanbanColumn,
+  type KanbanMode,
+  type KanbanSettings,
+} from "./types";
+
+export interface KanbanCardField {
+  label: string;
+  value: string;
+}
+
+export interface KanbanCard {
+  id: string;
+  title: string;
+  columnKey: string;
+  // Chave de grupo crua (difere de columnKey só no estouro "Outros").
+  groupKey: string;
+  // Valor cru do campo de data (modo bucket) — insumo do computeDateOnMove.
+  dateValue: string | null;
+  // Valor cru do colorField (a UI mapeia valor → cor estável).
+  colorValue: string | null;
+  fields: KanbanCardField[];
+  metricValue: number | null;
+  isMock: boolean;
+  // Tarefas abertas vinculadas (S3; 0 até lá).
+  openTasks: number;
+  // Registro completo p/ o painel de edição e a visão lista.
+  record: RecordRow;
+}
+
+export interface KanbanColumnCards extends KanbanColumn {
+  cards: KanbanCard[];
+  count: number;
+  metricSum: number | null;
+}
+
+export interface KanbanBoardData {
+  mode: KanbanMode;
+  columns: KanbanColumnCards[];
+  metricLabel: string | null;
+  metricIsMoney: boolean;
+}
+
+const CORE_LABELS = new Map(CORE_FIELDS.map((f) => [f.field, f.label]));
+
+// Valor cru de um ref ('stage', 'value', 'custom:<key>') num registro.
+export function resolveRecordRef(record: RecordRow, ref: string): unknown {
+  if (ref.startsWith("custom:")) {
+    return record.custom_fields?.[ref.slice("custom:".length)] ?? null;
+  }
+  return (record as unknown as Record<string, unknown>)[ref] ?? null;
+}
+
+function fieldDefOf(
+  ref: string,
+  defs: FieldDefinition[]
+): FieldDefinition | null {
+  if (!ref.startsWith("custom:")) return null;
+  const key = ref.slice("custom:".length);
+  return defs.find((d) => d.field_key === key) ?? null;
+}
+
+function refLabel(ref: string, defs: FieldDefinition[]): string {
+  return fieldDefOf(ref, defs)?.label ?? CORE_LABELS.get(ref) ?? ref;
+}
+
+// Formata o valor de um ref p/ exibição no card (data/moeda/percentual/booleano).
+function formatRefValue(
+  record: RecordRow,
+  ref: string,
+  defs: FieldDefinition[],
+  labels: KanbanLabels
+): string {
+  const raw = resolveRecordRef(record, ref);
+  if (raw == null || raw === "") return "—";
+  if (ref === "responsible_id") {
+    return labels.responsibles?.[String(raw)] ?? "—";
+  }
+  if (ref === "operation_id") return labels.operations?.[String(raw)] ?? "—";
+  if (ref === "value" || ref === "mrr") {
+    return formatMoney(raw, record.currency);
+  }
+  const def = fieldDefOf(ref, defs);
+  if (def) {
+    const money = resolveFieldMoneyFromRecord(def, record);
+    if (money.isMoney) return formatMoney(raw, money.code);
+    if (isPercentField(def)) return formatPercent(raw, true);
+    if (def.data_type === "data") return formatDateValue(raw, DEFAULT_DATE_FORMAT);
+    if (def.data_type === "booleano") return raw === true || raw === "true" ? "Sim" : "Não";
+    return String(raw);
+  }
+  if (ref === "closed_at" || ref === "opened_at" || ref === "source_created_at") {
+    return formatDateValue(raw, DEFAULT_DATE_FORMAT);
+  }
+  if (ref === "closed") return raw === true || raw === "true" ? "Sim" : "Não";
+  return String(raw);
+}
+
+export interface KanbanLabels {
+  responsibles?: Record<string, string>;
+  operations?: Record<string, string>;
+}
+
+// Chave de grupo de um registro conforme a config (valor ou bucket de data).
+export function recordGroupKey(
+  record: RecordRow,
+  settings: KanbanSettings
+): string {
+  if (settings.dateBucket && settings.dateField) {
+    const raw = resolveRecordRef(record, settings.dateField);
+    const bucket = bucketRecordDate(raw, settings.dateBucket);
+    return bucket.key === "—" ? KANBAN_NO_VALUE_KEY : bucket.key;
+  }
+  const raw = resolveRecordRef(record, settings.groupField ?? "stage");
+  const s = raw == null ? "" : String(raw).trim();
+  return s === "" ? KANBAN_NO_VALUE_KEY : s;
+}
+
+/**
+ * Monta o quadro (modo registros): cards + colunas derivadas + agregados.
+ * `period` é o período já resolvido (barra da página/dashboard); `defs` são as
+ * field_definitions visíveis (options do selecao, rótulos, tipos).
+ */
+export async function runKanban(
+  supabase: SupabaseClient,
+  settings: KanbanSettings,
+  period: DashboardPeriod | null,
+  defs: FieldDefinition[],
+  labels: KanbanLabels = {}
+): Promise<KanbanBoardData> {
+  const config: WidgetConfig = {
+    sources: settings.source ? [settings.source] : [],
+    dimensions: [],
+    metrics: [],
+    filters: [],
+    settings: {},
+  } as unknown as WidgetConfig;
+
+  const records = await runRecordList(supabase, config, period ?? undefined);
+
+  const titleField = settings.card?.titleField || "title";
+  const extraRefs = (settings.card?.extraFields ?? []).slice(0, 4);
+  const metricRef = settings.metric || null;
+
+  const groupKeys: string[] = [];
+  const cards: Omit<KanbanCard, "columnKey">[] = records.map((r) => {
+    const groupKey = recordGroupKey(r, settings);
+    groupKeys.push(groupKey);
+    const metricRaw = metricRef ? resolveRecordRef(r, metricRef) : null;
+    const metricNum =
+      metricRaw == null || metricRaw === "" ? null : Number(metricRaw);
+    const titleRaw = resolveRecordRef(r, titleField);
+    return {
+      id: r.id,
+      title:
+        titleRaw == null || titleRaw === "" ? "(sem nome)" : String(titleRaw),
+      groupKey,
+      dateValue: settings.dateField
+        ? ((resolveRecordRef(r, settings.dateField) as string | null) ?? null)
+        : null,
+      colorValue: settings.card?.colorField
+        ? String(resolveRecordRef(r, settings.card.colorField) ?? "")
+        : null,
+      fields: extraRefs.map((ref) => ({
+        label: refLabel(ref, defs),
+        value: formatRefValue(r, ref, defs, labels),
+      })),
+      metricValue: Number.isFinite(metricNum) ? metricNum : null,
+      isMock: Boolean((r as unknown as { is_mock?: boolean }).is_mock),
+      openTasks: 0,
+      record: r,
+    };
+  });
+
+  const groupDef = settings.groupField
+    ? fieldDefOf(settings.groupField, defs)
+    : null;
+  const columns = deriveColumns(settings, groupKeys, groupDef);
+
+  const byColumn = new Map<string, KanbanCard[]>(
+    columns.map((c) => [c.key, []])
+  );
+  for (const card of cards) {
+    const columnKey = resolveCardColumn(card.groupKey, columns);
+    if (!columnKey) continue; // coluna oculta
+    byColumn.get(columnKey)?.push({ ...card, columnKey });
+  }
+
+  const columnCards: KanbanColumnCards[] = columns.map((c) => {
+    const list = byColumn.get(c.key) ?? [];
+    let metricSum: number | null = null;
+    if (metricRef) {
+      metricSum = 0;
+      for (const card of list) metricSum += card.metricValue ?? 0;
+    }
+    return { ...c, cards: list, count: list.length, metricSum };
+  });
+
+  const metricIsMoney =
+    metricRef === "value" ||
+    metricRef === "mrr" ||
+    (metricRef
+      ? Boolean(
+          fieldDefOf(metricRef, defs) &&
+            resolveFieldMoneyFromRecord(
+              fieldDefOf(metricRef, defs)!,
+              (records[0] as RecordRow | undefined) ?? ({} as RecordRow)
+            ).isMoney
+        )
+      : false);
+
+  return {
+    mode: settings.mode,
+    columns: columnCards,
+    metricLabel: metricRef ? refLabel(metricRef, defs) : null,
+    metricIsMoney,
+  };
+}

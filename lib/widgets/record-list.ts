@@ -1,6 +1,7 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 16/07/2026
 // v1.1 (15/07/2026): filtros segmentados por fonte — espelha o wrapper
 //   pass-through do RPC (0054) com `.or(record_type.not.in...)` do PostgREST.
+// v1.2 (16/07/2026): seleciona `is_mock` (o kanban bloqueia arrastar mocks).
 // Fase 1 (tabela editável de registros): executa um widget de Tabela em modo
 // "registros individuais". Ao contrário de runWidget (que agrega via o RPC e
 // perde o id), aqui consultamos `records` DIRETO — 1 linha por registro, com id
@@ -30,7 +31,7 @@ import type { WidgetConfig, WidgetFilter } from "./types";
 
 // Mesmas colunas carregadas na página de Registros — satisfaz RecordRow.
 const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at";
+  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
 const CORE_COLS = new Set<string>([

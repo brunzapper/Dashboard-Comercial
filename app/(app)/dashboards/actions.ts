@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 15/07/2026
+// Versão: 1.3 | Data: 16/07/2026
+// v1.3 (16/07/2026): kanbans dedicados (dashboards.kind 'kanban', 0062) —
+//   createBoard (seed de settings.kanban), updateBoardSettings (revalida
+//   /kanbans/[id]) e listWidgetLinkTargets filtra kind 'dashboard'.
 // v1.2 (15/07/2026): Tabela Livre — saveQuickTableCells (lote de células com
 //   validação de bloqueio por papel via settings.quickTable.editableRoles).
 // v1.1 (15/07/2026): widgets calculadora/nota/forma — saveCalcExpression
@@ -21,6 +24,10 @@ import {
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
+import {
+  DEFAULT_TASK_PHASES,
+  type KanbanSettings,
+} from "@/lib/kanban/types";
 import { baseColId, canTypeInColumn } from "@/lib/widgets/quick-table/model";
 import type {
   DashboardSettings,
@@ -79,6 +86,100 @@ export async function createDashboard(
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
   return { ok: true, message: `Dashboard "${name}" criado.` };
+}
+
+// ---------------- Kanbans dedicados (dashboards.kind 'kanban') ----------------
+
+export interface CreateBoardState {
+  ok?: boolean;
+  message?: string;
+  // id do kanban criado (o cliente navega p/ /kanbans/[id]).
+  id?: string;
+}
+
+// Cria um kanban dedicado: mesma tabela/permissão de dashboards (RLS exige
+// create_dashboards), kind 'kanban' e o seed de settings.kanban a partir do
+// formulário (modo, fonte, agrupamento por campo OU bucket de data).
+export async function createBoard(
+  _prev: CreateBoardState,
+  formData: FormData
+): Promise<CreateBoardState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return { ok: false, message: "Você não tem permissão para criar kanbans." };
+  }
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { ok: false, message: "Informe um nome." };
+  const visible = formData.getAll("visible_to_roles").map(String).filter(Boolean);
+
+  const mode = String(formData.get("mode") ?? "registros");
+  const kanban: KanbanSettings = { mode: mode === "tarefas" ? "tarefas" : "registros" };
+  if (kanban.mode === "tarefas") {
+    // Fases default editáveis depois (config de colunas do quadro).
+    kanban.columns = DEFAULT_TASK_PHASES;
+  } else {
+    const source = String(formData.get("source") ?? "").trim();
+    if (!source) return { ok: false, message: "Escolha a fonte dos registros." };
+    kanban.source = source;
+    const groupKind = String(formData.get("group_kind") ?? "field");
+    if (groupKind === "date") {
+      const bucketRaw = String(formData.get("date_bucket") ?? "weekday");
+      kanban.dateBucket =
+        bucketRaw === "month_name" || bucketRaw === "month_year"
+          ? bucketRaw
+          : "weekday";
+      const dateField = String(formData.get("date_field") ?? "").trim();
+      if (!dateField) {
+        return { ok: false, message: "Escolha o campo de data das colunas." };
+      }
+      kanban.dateField = dateField;
+    } else {
+      const groupField = String(formData.get("group_field") ?? "").trim();
+      if (!groupField) {
+        return { ok: false, message: "Escolha o campo que define as colunas." };
+      }
+      kanban.groupField = groupField;
+    }
+    kanban.card = { titleField: "title" };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("dashboards")
+    .insert({
+      name,
+      kind: "kanban",
+      owner_user_id: session.user.id,
+      visible_to_roles: visible,
+      is_shared: visible.length > 0,
+      settings: { kanban },
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  return { ok: true, message: `Kanban "${name}" criado.`, id: data.id as string };
+}
+
+// Settings de um kanban dedicado. Mesma semântica de updateDashboardSettings
+// (sobrescreve `settings` INTEIRO — enviar { ...settings, kanban: novo }), mas
+// revalida a rota do kanban. RLS restringe a owner/admin.
+export async function updateBoardSettings(
+  boardId: string,
+  settings: DashboardSettings
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ settings })
+    .eq("id", boardId)
+    .eq("kind", "kanban");
+  if (error) return { ok: false, message: error.message };
+  revalidatePath(`/kanbans/${boardId}`);
+  return { ok: true };
 }
 
 export async function deleteDashboard(formData: FormData): Promise<void> {
@@ -545,7 +646,8 @@ export async function listWidgetLinkTargets(): Promise<LinkTargetsCatalog> {
   const supabase = await createClient();
 
   const [{ data: dashData }, { data: widgetData }] = await Promise.all([
-    supabase.from("dashboards").select("id, name, settings"),
+    // Kanbans (kind 'kanban') não têm widgets/abas — fora do catálogo de atalhos.
+    supabase.from("dashboards").select("id, name, settings").eq("kind", "dashboard"),
     supabase.from("widgets").select("id, dashboard_id, title, visual_type, settings"),
   ]);
 

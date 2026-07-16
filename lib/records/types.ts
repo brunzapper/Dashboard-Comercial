@@ -134,6 +134,9 @@ export interface RecordRow {
   custom_fields: Record<string, unknown>;
   last_synced_at: string | null;
   locally_modified_at: string | null;
+  // Registro de demonstração (0051) — congelado; presente só em selects que o
+  // pedem (kanban bloqueia arrastar mocks).
+  is_mock?: boolean;
   // Registros casados por fonte (Fase 2), preenchido no modo lista para resolver
   // colunas `match:<fonte>:<campo>`. Chave = SourceKey ('leads'|'deals'|'estudo').
   __match?: Record<string, RecordRow | undefined>;
