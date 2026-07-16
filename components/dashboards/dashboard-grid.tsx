@@ -1,6 +1,9 @@
-// Versão: 2.7 | Data: 16/07/2026
+// Versão: 2.8 | Data: 16/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.8 (16/07/2026): pan extraído para o hook compartilhado lib/use-drag-pan
+//   (reusado na tabela de Registros); comportamento idêntico — guardas de
+//   drawMode/.react-grid-item/[data-conn-ui] preservadas.
 // v2.7 (16/07/2026): menu do clique-direito no vazio ganhou "Inserir ▸" (Nota
 //   post-it / Tabela livre) e "Calculadora" (4×9, mais quadrada), criados NA
 //   célula clicada via onQuickCreate (criação rápida/otimista no shell);
@@ -61,6 +64,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { cn } from "@/lib/utils";
+import { useDragPan } from "@/lib/use-drag-pan";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
@@ -186,20 +190,6 @@ function pushApart(items: readonly ResolveItem[]): ResolveItem[] {
   return placedY;
 }
 
-// Sobe do elemento até o ancestral que rola verticalmente (no app é o
-// <main className="flex-1 overflow-auto">). Fallback para o scroller do
-// documento caso, em algum layout, quem role seja a própria janela.
-function verticalScroller(from: HTMLElement): HTMLElement {
-  let el: HTMLElement | null = from;
-  while (el) {
-    const oy = getComputedStyle(el).overflowY;
-    if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight)
-      return el;
-    el = el.parentElement;
-  }
-  return (document.scrollingElement as HTMLElement) ?? document.documentElement;
-}
-
 export function DashboardGrid({
   widgets,
   dataById,
@@ -321,49 +311,6 @@ export function DashboardGrid({
   // Flyout "Inserir ▸" aberto? Reseta a cada abertura do menu.
   const [insertOpen, setInsertOpen] = useState(false);
 
-  // Pan ("mãozinha"): arrastar o espaço vazio com o botão esquerdo rola o
-  // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
-  // vertical no ancestral rolável (<main>). Refs para não re-renderizar a cada
-  // movimento; `panning` só troca o cursor/seleção.
-  //
-  // IMPORTANTE: NÃO usamos setPointerCapture. A captura no canvas roubava o
-  // ponteiro de eventos disparados por outros layers (ex.: ao abrir o Sheet de
-  // "Editar dados"/"Aparência" a partir do menu do widget, um pointerdown caía
-  // no canvas vazio, capturava o ponteiro e impedia o painel de montar). Em vez
-  // disso ouvimos pointermove/up no `window` e só engatamos o pan após um limiar
-  // de arraste (~4px), então um clique simples nunca inicia o pan.
-  const panRef = useRef<{
-    startX: number;
-    startY: number;
-    scrollLeft: number;
-    scrollTop: number;
-    v: HTMLElement;
-    engaged: boolean;
-  } | null>(null);
-  const [panning, setPanning] = useState(false);
-  // Um AbortController por gesto: os listeners de window são registrados com o
-  // `signal` e removidos de uma vez por `abort()` (no fim do gesto ou ao
-  // desmontar). Evita recriar/rastrear identidades de handler.
-  const panAbortRef = useRef<AbortController | null>(null);
-
-  // Segurança: encerra o gesto (remove os listeners) se desmontar no meio.
-  useEffect(() => () => panAbortRef.current?.abort(), []);
-
-  // Enquanto arrasta: cursor "fechado" e sem seleção de texto em toda a página.
-  // O cleanup restaura mesmo se o componente desmontar no meio do gesto.
-  useEffect(() => {
-    if (!panning) return;
-    const { body } = document;
-    const prevCursor = body.style.cursor;
-    const prevSelect = body.style.userSelect;
-    body.style.cursor = "grabbing";
-    body.style.userSelect = "none";
-    return () => {
-      body.style.cursor = prevCursor;
-      body.style.userSelect = prevSelect;
-    };
-  }, [panning]);
-
   // Dimensões dinâmicas: tamanho medido do conteúdo (unidades do grid), por
   // widget, reportado pelos cards. Só infla a renderização — o `grid_position`
   // gravado segue sendo o mínimo (ver onDragStop/onResizeStop).
@@ -476,60 +423,27 @@ export function DashboardGrid({
   }, []);
   useEffect(() => () => roRef.current?.disconnect(), []);
 
+  // Pan ("mãozinha"): arrastar o espaço vazio com o botão esquerdo rola o
+  // dashboard nos dois eixos — horizontal no container do grid (scrollRef) e
+  // vertical no ancestral rolável (<main>). Lógica compartilhada em
+  // lib/use-drag-pan (limiar de ~4px, listeners no window, sem
+  // setPointerCapture). Sobre um widget (`.react-grid-item`) ou na UI dos
+  // conectores (âncoras/linhas/painel, `[data-conn-ui]`) não pega.
+  const { panning, onPointerDown: panPointerDown } = useDragPan(scrollRef, {
+    ignore: (t) => !!t.closest(".react-grid-item, [data-conn-ui]"),
+  });
+
   // Célula constante: 12 colunas preenchem a largura visível (fórmula do RGL:
   // colWidth = (width - MX*(cols+1))/cols), então widgets não mudam de tamanho.
   const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
 
-  // Botão esquerdo no espaço vazio arma o pan (a rolagem só engata após o limiar
-  // em onWindowPanMove). Só mouse/caneta (o toque mantém a rolagem nativa); sobre
-  // um widget (`.react-grid-item`) não pega. Sem setPointerCapture — os listeners
-  // no window garantem receber move/up mesmo se o ponteiro sair do canvas.
+  // Botão esquerdo no espaço vazio arma o pan (useDragPan). Durante o desenho
+  // de criação o overlay é dono do gesto.
   function onCanvasPointerDown(e: React.PointerEvent) {
     if (drawMode) return; // o overlay de desenho é dono do gesto
-    if (e.pointerType === "touch" || e.button !== 0) return;
-    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
-    // UI dos conectores (âncoras/linhas/painel) não arma o pan.
-    if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
-    const sc = scrollRef.current;
-    if (!sc) return;
-    const v = verticalScroller(sc);
-    panRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      scrollLeft: sc.scrollLeft,
-      scrollTop: v.scrollTop,
-      v,
-      engaged: false,
-    };
-    const ac = new AbortController();
-    panAbortRef.current = ac;
-    const { signal } = ac;
-    const end = () => {
-      panRef.current = null;
-      setPanning(false);
-      ac.abort();
-    };
-    window.addEventListener(
-      "pointermove",
-      (ev) => {
-        const p = panRef.current;
-        if (!p) return;
-        const dx = ev.clientX - p.startX;
-        const dy = ev.clientY - p.startY;
-        if (!p.engaged) {
-          if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return; // ainda é um clique
-          p.engaged = true;
-          setPanning(true);
-        }
-        if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - dx;
-        p.v.scrollTop = p.scrollTop - dy;
-      },
-      { signal }
-    );
-    window.addEventListener("pointerup", end, { signal });
-    window.addEventListener("pointercancel", end, { signal });
+    panPointerDown(e);
   }
 
   // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
