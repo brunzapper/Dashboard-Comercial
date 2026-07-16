@@ -8,6 +8,10 @@
 //   manual_entry (0061): source_system='manual', source_id nulo, RLS força o
 //   vendedor ao próprio responsável; recomputo de calculados compartilhado com
 //   updateRecord (applyCalcFields); searchLeads generalizado em searchRecords.
+// v1.3 (16/07/2026): createRecord ganha "Criar também no Bitrix" (fontes
+//   lead/negocio): cria a entidade na origem (crm.*.add, lib/sync/bitrix/create)
+//   antes do insert e grava source_system='bitrix' + source_id p/ o sync adotar
+//   a linha sem duplicar (RLS 0065). Falha no Bitrix aborta a criação.
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -20,6 +24,10 @@ import {
   enqueueWriteBacks,
   type WriteBackChange,
 } from "@/lib/sync/bitrix/writeback";
+import {
+  createBitrixEntity,
+  type BitrixCreateCustom,
+} from "@/lib/sync/bitrix/create";
 import { leadTimeDays, primaryOperationId } from "@/lib/sync/shared";
 import {
   anyMoneyDef,
@@ -569,6 +577,17 @@ export async function createRecord(
     };
   }
 
+  // "Criar também no Bitrix": só faz sentido nas fontes espelhadas do Bitrix
+  // (lead → crm.lead, negocio → crm.deal). Fontes dinâmicas/venda_site nunca.
+  const bitrixEntity =
+    sourceDef.recordType === "negocio"
+      ? "deal"
+      : sourceDef.recordType === "lead"
+        ? "lead"
+        : null;
+  const createInBitrix =
+    bitrixEntity !== null && String(formData.get("create_in_bitrix") ?? "") === "1";
+
   const title = String(formData.get("core__title") ?? "").trim();
   if (!title) return { ok: false, message: "Informe o nome do registro." };
 
@@ -642,7 +661,12 @@ export async function createRecord(
   // Campos personalizados: só os da fonte (applies_to) editáveis pelo papel.
   const { data: defs } = await supabase
     .from("field_definitions")
-    .select("field_key, data_type, editable_by_roles, applies_to");
+    .select(
+      "field_key, label, data_type, editable_by_roles, applies_to, source_system, source_field_id"
+    );
+  // Campos de Sync (source_system='bitrix' + source_field_id) a enviar no
+  // crm.*.add quando "Criar também no Bitrix" está marcado.
+  const bitrixCustoms: BitrixCreateCustom[] = [];
   for (const def of defs ?? []) {
     const dt = def.data_type as DataType;
     if (dt === "calculado" || dt === "calculado_agg") continue;
@@ -657,9 +681,68 @@ export async function createRecord(
     if (!formData.has(key)) continue;
     const val = coerce(dt, formData.get(key));
     if (val == null) continue;
-    custom[def.field_key as string] = val;
-    fmod[def.field_key as string] = now;
-    audits.push({ field: def.field_key as string, new_value: val });
+    const fieldKey = def.field_key as string;
+    custom[fieldKey] = val;
+    fmod[fieldKey] = now;
+    audits.push({ field: fieldKey, new_value: val });
+    if (
+      createInBitrix &&
+      def.source_system === "bitrix" &&
+      def.source_field_id
+    ) {
+      bitrixCustoms.push({
+        sourceFieldId: def.source_field_id as string,
+        label: (def.label as string) ?? fieldKey,
+        value: val,
+      });
+    }
+  }
+
+  // Criação no Bitrix (síncrona) ANTES do insert: precisamos do ID para gravar
+  // source_id e deixar o próximo sync ADOTAR a linha (sem duplicar). Falha aqui
+  // ABORTA a criação — nada é salvo local (a entidade, se criada, é adotada pelo
+  // sync). Campo que não converte é pulado e salvo só localmente (skippedFields).
+  let skippedNote = "";
+  if (createInBitrix && bitrixEntity) {
+    let assignedBitrixUserId: string | null = null;
+    if (responsibleId) {
+      const { data: resp } = await supabase
+        .from("responsibles")
+        .select("bitrix_user_id")
+        .eq("id", responsibleId)
+        .maybeSingle();
+      assignedBitrixUserId = (resp?.bitrix_user_id as string | null) ?? null;
+    }
+    try {
+      const created = await createBitrixEntity({
+        entity: bitrixEntity,
+        core: {
+          title,
+          value: numOrNull(row.value),
+          mrr: numOrNull(row.mrr),
+          currency: (row.currency as string | null) ?? null,
+          channel: (row.channel as string | null) ?? null,
+          sale_type: (row.sale_type as string | null) ?? null,
+          closed_at: (row.closed_at as string | null) ?? null,
+          opened_at: (row.opened_at as string | null) ?? null,
+        },
+        customs: bitrixCustoms,
+        assignedBitrixUserId,
+      });
+      // Linha vinculada: o sync adota via (source_system,source_id). Os campos
+      // preenchidos ficam protegidos (field_modified_at + last_synced_at=null).
+      row.source_system = "bitrix";
+      row.source_id = created.sourceId;
+      row.last_synced_at = null;
+      if (created.skippedFields.length > 0) {
+        skippedNote = ` Campos não enviados ao Bitrix: ${created.skippedFields.join(", ")}.`;
+      }
+    } catch (e) {
+      return {
+        ok: false,
+        message: `Falha ao criar no Bitrix (nada foi salvo): ${(e as Error).message}`,
+      };
+    }
   }
 
   // Campos calculados já nascem materializados (mesma lógica de updateRecord).
@@ -671,7 +754,7 @@ export async function createRecord(
       lead_time_days: null,
       title,
       record_type: sourceDef.recordType,
-      source_system: "manual",
+      source_system: row.source_system as string,
       pipeline: row.pipeline ?? null,
       stage: row.stage ?? null,
       stage_semantic: null,
@@ -695,7 +778,10 @@ export async function createRecord(
     .select("id")
     .single();
   if (error) {
-    return { ok: false, message: `Falha ao criar: ${error.message}` };
+    return {
+      ok: false,
+      message: `Falha ao criar${row.source_id ? " (a entidade no Bitrix foi criada; rode o sync para importá-la)" : ""}: ${error.message}`,
+    };
   }
   const id = inserted.id as string;
 
@@ -713,7 +799,8 @@ export async function createRecord(
   }
 
   revalidatePath("/registros");
-  return { ok: true, message: "Registro criado.", id };
+  const bitrixNote = row.source_id ? ` (criado no Bitrix, ID ${row.source_id}).` : ".";
+  return { ok: true, message: `Registro criado${bitrixNote}${skippedNote}`, id };
 }
 
 export interface LeadOption {

@@ -1,16 +1,19 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
 // Painel lateral de CRIAÇÃO manual de registro (fontes com manual_entry, 0061).
 // Espelha record-edit-sheet: núcleo (nome obrigatório + colunas editáveis) +
 // responsável/operação + campos personalizados editáveis pelo papel. O server
 // (createRecord) revalida permissão, fonte e força o vendedor ao próprio
 // responsável. `defaultValues` pré-preenche campos (quick-create do kanban:
 // valor da coluna); `onCreated` avisa o chamador (client) com o id criado.
+// v1.1 (16/07/2026): fontes Bitrix (lead/negocio) ganham o checkbox "Criar
+//   também no Bitrix" (crm.lead.add/crm.deal.add via createRecord, 0065).
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,6 +94,7 @@ function NewCustomFieldInput({
 
 export function RecordCreateSheet({
   source,
+  recordType,
   fields,
   responsibles,
   operations,
@@ -103,6 +107,9 @@ export function RecordCreateSheet({
 }: {
   // Fonte destino (key + label; o server revalida manual_entry).
   source: { key: string; label: string };
+  // record_type da fonte: habilita "Criar também no Bitrix" nas fontes Bitrix
+  // (lead/negocio). Ausente/outras fontes = sem a opção.
+  recordType?: string;
   // Definições já filtradas pela fonte/visibilidade (o chamador — página ou
   // kanban — decide o recorte); aqui filtramos só as editáveis pelo papel.
   fields: FieldDefinition[];
@@ -123,6 +130,9 @@ export function RecordCreateSheet({
   const [responsibleId, setResponsibleId] = useState(dv("responsible_id"));
   const [operationId, setOperationId] = useState(dv("operation_id"));
   const [currencyCode, setCurrencyCode] = useState(dv("core__currency"));
+  const [createInBitrix, setCreateInBitrix] = useState(false);
+
+  const isBitrixEntity = recordType === "lead" || recordType === "negocio";
 
   useEffect(() => {
     // Fecha o painel quando a Server Action conclui com sucesso.
@@ -168,6 +178,13 @@ export function RecordCreateSheet({
 
         <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
           <input type="hidden" name="source" value={source.key} />
+          {isBitrixEntity ? (
+            <input
+              type="hidden"
+              name="create_in_bitrix"
+              value={createInBitrix ? "1" : "0"}
+            />
+          ) : null}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="create-title">Nome *</Label>
@@ -183,7 +200,12 @@ export function RecordCreateSheet({
           <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
             <div className="flex flex-col gap-1.5">
               <Label>Etapa</Label>
-              <Input name="core__stage" defaultValue={dv("core__stage")} />
+              <Input
+                name="core__stage"
+                defaultValue={dv("core__stage")}
+                disabled={createInBitrix}
+                placeholder={createInBitrix ? "definida pelo Bitrix" : ""}
+              />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Canal</Label>
@@ -286,6 +308,24 @@ export function RecordCreateSheet({
                 </div>
               ))}
             </div>
+          ) : null}
+
+          {isBitrixEntity ? (
+            <label className="flex items-start gap-2 border-t pt-4 text-sm">
+              <Checkbox
+                checked={createInBitrix}
+                onCheckedChange={(v) => setCreateInBitrix(v === true)}
+                className="mt-0.5"
+              />
+              <span>
+                Criar também no Bitrix
+                <span className="text-muted-foreground block text-xs">
+                  Gera o {recordType === "negocio" ? "negócio" : "lead"} no
+                  Bitrix e vincula este registro (a etapa inicial fica a cargo do
+                  Bitrix).
+                </span>
+              </span>
+            </label>
           ) : null}
 
           {state.message && !state.ok ? (
