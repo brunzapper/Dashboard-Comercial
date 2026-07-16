@@ -11,12 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  SOURCE_KEYS,
-  sourceLabel,
-  toSourceKey,
-  type SourceKey,
-} from "@/lib/sources";
+import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import {
   connectRecords,
   disconnectRecords,
@@ -32,8 +28,9 @@ export function RecordMatchConnect({
   recordId: string;
   recordType: "lead" | "negocio" | "venda_site";
 }) {
+  const catalog = useSources();
   const ownSource = toSourceKey(recordType);
-  const otherSources = SOURCE_KEYS.filter((s) => s !== ownSource);
+  const otherSources = catalog.map((s) => s.key).filter((s) => s !== ownSource);
 
   const [matches, setMatches] = useState<MatchListItem[]>([]);
   const [source, setSource] = useState<SourceKey>(otherSources[0]);

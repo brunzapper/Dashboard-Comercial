@@ -37,7 +37,8 @@ import {
   quickTableBI,
 } from "@/lib/widgets/quick-table/model";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
-import { isSourceKey } from "@/lib/sources";
+import { isKnownSource } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import type {
   CalcWidgetResult,
   DashboardSettings,
@@ -127,8 +128,9 @@ export async function runQuickTable(
   const qt = widget.settings?.quickTable;
   if (!qt) return empty;
 
+  const sources = await loadSources(supabase);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
-  const available = buildAvailableFields(allFields, correspondences);
+  const available = buildAvailableFields(allFields, correspondences, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
@@ -141,6 +143,7 @@ export async function runQuickTable(
     correspondences,
     dashSettings,
     prefSettings,
+    sources,
   });
   const dataWidgets = widgets.filter(
     (w) =>
@@ -181,7 +184,7 @@ export async function runQuickTable(
       !sourcesOverlap(fwSources, (widget.sources ?? []) as string[])
     )
       continue;
-    const fwSourceKeys = fwSources.filter(isSourceKey);
+    const fwSourceKeys = fwSources.filter((s) => isKnownSource(s, sources));
     viewFilters.push(
       ...(fwSourceKeys.length > 0
         ? fs.map((f) =>

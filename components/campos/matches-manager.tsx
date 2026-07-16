@@ -26,13 +26,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  sourceLabel,
-  toSourceKey,
-  type SourceKey,
-} from "@/lib/sources";
+import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import type { MatchRule } from "@/lib/matching";
 import type { RefOption } from "@/components/campos/correspondences-manager";
 import {
@@ -44,11 +39,6 @@ import {
 } from "@/app/(app)/campos/matches-actions";
 
 const initial: MatchActionState = {};
-
-const SOURCE_OPTIONS: ComboboxOption[] = SOURCE_KEYS.map((k) => ({
-  value: k,
-  label: SOURCE_LABELS[k],
-}));
 
 const ENABLED_OPTIONS: ComboboxOption[] = [
   { value: "on", label: "Ativa" },
@@ -75,6 +65,11 @@ function MatchRuleForm({
   const action = isEdit ? updateMatchRule : createMatchRule;
   const [state, formAction, pending] = useActionState(action, initial);
 
+  const catalog = useSources();
+  const sourceOptions: ComboboxOption[] = catalog.map((s) => ({
+    value: s.key,
+    label: s.label,
+  }));
   const [sourceA, setSourceA] = useState<SourceKey>(
     rule ? toSourceKey(rule.source_a) : "leads"
   );
@@ -120,7 +115,7 @@ function MatchRuleForm({
         <div className="flex flex-col gap-1.5">
           <Label>Fonte A</Label>
           <Combobox
-            options={SOURCE_OPTIONS}
+            options={sourceOptions}
             value={sourceA}
             onValueChange={(v) => setSourceA(v as SourceKey)}
             searchable={false}
@@ -130,7 +125,7 @@ function MatchRuleForm({
         <div className="flex flex-col gap-1.5">
           <Label>Fonte B</Label>
           <Combobox
-            options={SOURCE_OPTIONS}
+            options={sourceOptions}
             value={sourceB}
             onValueChange={(v) => setSourceB(v as SourceKey)}
             searchable={false}

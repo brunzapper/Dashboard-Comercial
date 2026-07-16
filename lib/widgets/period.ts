@@ -209,9 +209,16 @@ export function periodFieldForSource(
   return period.fieldBySource?.[source] ?? period.field;
 }
 
-// record_types cobertos por um widget: das fontes selecionadas (vazio = todas).
-function coveredSources(sources?: SourceKey[]): SourceKey[] {
-  return sources && sources.length > 0 ? sources : SOURCE_KEYS;
+// Fontes cobertas por um widget: as selecionadas; vazio = todas. "Todas" =
+// builtins ∪ chaves do mapa por fonte do período — o resolver
+// (period-resolve) monta fieldBySource a partir do CATÁLOGO, então as fontes
+// dinâmicas chegam aqui por ele, sem precisar passar o catálogo pelo engine.
+function coveredSources(
+  sources: SourceKey[] | undefined,
+  fieldBySource?: Partial<Record<SourceKey, string>>
+): SourceKey[] {
+  if (sources && sources.length > 0) return sources;
+  return [...new Set([...SOURCE_KEYS, ...Object.keys(fieldBySource ?? {})])];
 }
 
 /**
@@ -230,7 +237,7 @@ export function applyPeriodToFilters(
   const to = period.to ? `${period.to}T23:59:59` : null;
 
   // Mapa por fonte → campo de data das fontes cobertas por este widget.
-  const covered = coveredSources(sources);
+  const covered = coveredSources(sources, period.fieldBySource);
   const byType: Record<string, string> = {};
   const distinct = new Set<string>();
   for (const s of covered) {

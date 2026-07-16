@@ -19,12 +19,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { AvailableField } from "@/lib/widgets/fields";
-import {
-  DEFAULT_PERIOD_FIELD_BY_SOURCE,
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  type SourceKey,
-} from "@/lib/sources";
+import { defaultPeriodFieldBySource, type SourceKey } from "@/lib/sources";
 import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
@@ -37,6 +32,7 @@ import {
 import type { DashboardSettings } from "@/lib/widgets/types";
 import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
+import { useSources } from "@/components/sources-context";
 import {
   saveLastPeriod,
   syncGlobalPeriodQuickFilters,
@@ -165,9 +161,13 @@ function PeriodBarConfig({
   // Campo de data por fonte (secundária/terciária/…): a mesma seleção de
   // calendário filtra cada fonte pela sua coluna. Default por fonte quando não
   // configurado (ex.: Estudo → Data de criação).
+  const catalog = useSources();
   const [fieldBySource, setFieldBySource] = useState<
     Partial<Record<SourceKey, string>>
-  >(() => ({ ...DEFAULT_PERIOD_FIELD_BY_SOURCE, ...(periodBar?.fieldBySource ?? {}) }));
+  >(() => ({
+    ...defaultPeriodFieldBySource(catalog),
+    ...(periodBar?.fieldBySource ?? {}),
+  }));
 
   const presetOptions: ComboboxOption[] = [
     { value: "", label: "Todo o período" },
@@ -247,19 +247,19 @@ function PeriodBarConfig({
             A mesma seleção do calendário filtra cada fonte pela sua coluna de
             data (ex.: negócios por assinatura e Estudo por Created At).
           </p>
-          {SOURCE_KEYS.map((src) => (
-            <div key={src} className="flex items-center gap-2">
+          {catalog.map((s) => (
+            <div key={s.key} className="flex items-center gap-2">
               <span className="text-muted-foreground w-32 shrink-0 text-xs">
-                {SOURCE_LABELS[src]}
+                {s.label}
               </span>
               <Combobox
                 options={fieldOptions}
                 chips={fieldSourceChips}
-                value={fieldBySource[src] ?? DEFAULT_PERIOD_FIELD_BY_SOURCE[src]}
+                value={fieldBySource[s.key] ?? s.defaultPeriodField}
                 onValueChange={(v) =>
-                  setFieldBySource((prev) => ({ ...prev, [src]: v }))
+                  setFieldBySource((prev) => ({ ...prev, [s.key]: v }))
                 }
-                aria-label={`Campo de data — ${SOURCE_LABELS[src]}`}
+                aria-label={`Campo de data — ${s.label}`}
               />
             </div>
           ))}

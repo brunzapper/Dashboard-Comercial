@@ -8,7 +8,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DataType } from "@/lib/records/types";
 
 export interface CorrespondenceMember {
-  record_type: "lead" | "negocio" | "venda_site";
+  // record_type da fonte (fontes dinâmicas: key === record_type).
+  record_type: string;
   field_ref: string; // coluna do núcleo (ex.: 'mrr') ou 'custom:<key>'
 }
 

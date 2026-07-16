@@ -27,13 +27,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
-import {
-  SOURCE_KEYS,
-  SOURCE_LABELS,
-  sourceLabel,
-  toSourceKey,
-  type SourceKey,
-} from "@/lib/sources";
+import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   createCorrespondence,
@@ -65,18 +60,17 @@ function CorrespondenceForm({
   const isEdit = Boolean(correspondence);
   const action = isEdit ? updateCorrespondence : createCorrespondence;
   const [state, formAction, pending] = useActionState(action, initial);
+  const catalog = useSources();
   const [dataType, setDataType] = useState<DataType>(
     correspondence?.data_type ?? "numero"
   );
 
-  const defaultRef: Record<SourceKey, string> = {
-    leads: "",
-    deals: "",
-    estudo: "",
-  };
+  const defaultRef: Record<SourceKey, string> = Object.fromEntries(
+    catalog.map((s) => [s.key, ""])
+  );
   for (const m of correspondence?.members ?? []) {
     const src = toSourceKey(m.record_type);
-    if (src) defaultRef[src] = m.field_ref;
+    if (src in defaultRef) defaultRef[src] = m.field_ref;
   }
   const [refs, setRefs] = useState<Record<SourceKey, string>>(defaultRef);
 
@@ -125,22 +119,24 @@ function CorrespondenceForm({
           Escolha a coluna equivalente em cada fonte. Deixe em branco onde não se
           aplica (mínimo de duas fontes).
         </p>
-        {SOURCE_KEYS.map((key) => (
-          <div key={key} className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{SOURCE_LABELS[key]}</span>
+        {catalog.map((s) => (
+          <div key={s.key} className="flex flex-col gap-1">
+            <span className="text-sm font-medium">{s.label}</span>
             <Combobox
-              name={`member_${key}`}
+              name={`member_${s.key}`}
               options={[
                 { value: "", label: "— nenhuma —" },
-                ...candidatesBySource[key].map((c) => ({
+                ...(candidatesBySource[s.key] ?? []).map((c) => ({
                   value: c.ref,
                   label: c.label,
                 })),
               ]}
-              value={refs[key]}
-              onValueChange={(ref) => setRefs((prev) => ({ ...prev, [key]: ref }))}
+              value={refs[s.key] ?? ""}
+              onValueChange={(ref) =>
+                setRefs((prev) => ({ ...prev, [s.key]: ref }))
+              }
               placeholder="— nenhuma —"
-              aria-label={SOURCE_LABELS[key]}
+              aria-label={s.label}
             />
           </div>
         ))}

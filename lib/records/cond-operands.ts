@@ -7,7 +7,7 @@
 // do núcleo, campos personalizados texto/seleção/booleano e os mesmos campos do
 // registro CASADO (match:<fonte>:<ref>). Espelha lib/records/date-operands.ts.
 import { CORE_FIELDS } from "@/lib/widgets/fields";
-import { SOURCE_KEYS, SOURCE_LABELS } from "@/lib/sources";
+import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import type { OperandRef } from "./date-operands";
 import type { DataType } from "./types";
 
@@ -57,24 +57,28 @@ export function ownCondOperands(customCondFields: CustomCondField[]): OperandRef
   ];
 }
 
-/** Colunas condicionais do registro casado: match:<fonte>:<ref|custom:key>. */
+/** Colunas condicionais do registro casado: match:<fonte>:<ref|custom:key>.
+ *  `sources` = catálogo de fontes (data_sources); ausente = builtins. O rótulo
+ *  é load-bearing (round-trip texto⇄tokens): construtor e validação do
+ *  servidor DEVEM usar o mesmo catálogo. */
 export function matchCondOperands(
-  customCondFields: CustomCondField[]
+  customCondFields: CustomCondField[],
+  sources: SourceDef[] = BUILTIN_SOURCES
 ): OperandRef[] {
   const out: OperandRef[] = [];
-  for (const src of SOURCE_KEYS) {
+  for (const { key: src, label: srcLabel } of sources) {
     for (const f of CORE_COND_FIELDS) {
       if (!(MATCH_CORE_COND_REFS as readonly string[]).includes(f.field)) continue;
       out.push({
         ref: `match:${src}:${f.field}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         group: "Registro casado",
       });
     }
     for (const f of customCondFields) {
       out.push({
         ref: `match:${src}:custom:${f.field_key}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         group: "Registro casado",
       });
     }
@@ -83,6 +87,12 @@ export function matchCondOperands(
 }
 
 /** Todos os operandos condicionais (próprio registro + casado). */
-export function allCondOperands(customCondFields: CustomCondField[]): OperandRef[] {
-  return [...ownCondOperands(customCondFields), ...matchCondOperands(customCondFields)];
+export function allCondOperands(
+  customCondFields: CustomCondField[],
+  sources: SourceDef[] = BUILTIN_SOURCES
+): OperandRef[] {
+  return [
+    ...ownCondOperands(customCondFields),
+    ...matchCondOperands(customCondFields, sources),
+  ];
 }

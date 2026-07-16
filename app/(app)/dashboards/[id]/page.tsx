@@ -75,10 +75,11 @@ import type {
   WidgetFilter,
 } from "@/lib/widgets/types";
 import {
-  isSourceKey,
+  isKnownSource,
   toRecordType,
   type SourceKey,
 } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
@@ -125,6 +126,7 @@ export default async function DashboardPage({
     { data: prefData },
     enabledCurrencies,
     currencyRates,
+    sources,
   ] = await Promise.all([
     supabase
       .from("widgets")
@@ -151,6 +153,7 @@ export default async function DashboardPage({
       : Promise.resolve({ data: null }),
     loadEnabledCurrencies(supabase),
     loadCurrencyRates(supabase),
+    loadSources(supabase),
   ]);
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
@@ -166,7 +169,7 @@ export default async function DashboardPage({
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
-  const available = buildAvailableFields(allFields, correspondences);
+  const available = buildAvailableFields(allFields, correspondences, sources);
   // Construtor de widgets respeita o ACL por papel (visible_to_roles): quem edita
   // só escolhe colunas visíveis ao seu papel (admin vê tudo). Assim a RLS
   // afrouxada não deixa um dono não-admin montar widgets com colunas restritas.
@@ -175,7 +178,7 @@ export default async function DashboardPage({
     : allFields.filter((f) => hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]));
   const availableForBuilder = isAdmin
     ? available
-    : buildAvailableFields(builderFields, correspondences);
+    : buildAvailableFields(builderFields, correspondences, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
@@ -189,6 +192,7 @@ export default async function DashboardPage({
     correspondences,
     dashSettings,
     prefSettings,
+    sources,
   });
   const { resolveFieldBySource, resolveDefaults, savedFor } = resolver;
 
@@ -522,7 +526,7 @@ export default async function DashboardPage({
     // só as linhas das fontes-alvo são restringidas; as demais passam. Filtro
     // unificado fica SEM alvo (o coalesce já resolve por fonte; segmentá-lo
     // mudaria comportamento correto existente).
-    const fwSourceKeys = fwSources.filter(isSourceKey);
+    const fwSourceKeys = fwSources.filter((s) => isKnownSource(s, sources));
     const isUnifiedFilter = (f: WidgetFilter) =>
       f.field.split("|").some((p) => p.startsWith("unified:"));
     const targeted =

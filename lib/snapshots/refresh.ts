@@ -32,6 +32,7 @@ import type {
   Widget,
 } from "@/lib/widgets/types";
 import { toRecordType, type SourceKey } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 
 import { snapshotClient } from "./db-adapter";
 import { computeNextRefreshAt } from "./schedule";
@@ -132,10 +133,11 @@ async function doRefresh(
     ]);
   if (!dashData) throw new Error("Dashboard do snapshot não existe mais.");
 
+  const sources = await loadSources(service);
   const widgets = (widgetsData ?? []) as Widget[];
   const fields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dashData.settings ?? {}) as DashboardSettings;
-  const available = buildAvailableFields(fields, correspondences);
+  const available = buildAvailableFields(fields, correspondences, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
 
   // 2) Aba efetiva e widgets da aba (mesma semântica de widgetTab da page).

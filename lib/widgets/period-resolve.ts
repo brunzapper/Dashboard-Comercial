@@ -21,9 +21,10 @@ import {
   type SavedPeriod,
 } from "@/lib/widgets/period";
 import {
-  DEFAULT_PERIOD_FIELD_BY_SOURCE,
-  isSourceKey,
-  SOURCE_KEYS,
+  BUILTIN_SOURCES,
+  defaultPeriodFieldBySource,
+  isKnownSource,
+  type SourceDef,
   type SourceKey,
 } from "@/lib/sources";
 import type { DashboardSettings, Widget } from "@/lib/widgets/types";
@@ -50,8 +51,13 @@ export function createPeriodResolver(input: {
   correspondences: Correspondence[];
   dashSettings: DashboardSettings;
   prefSettings: PeriodPrefs;
+  // Catálogo de fontes (data_sources); ausente = builtins. É por aqui que as
+  // fontes dinâmicas entram no fieldBySource do período — o @period do RPC
+  // EXCLUI record_types fora do byType, então o mapa precisa cobrir todas.
+  sources?: SourceDef[];
 }) {
   const { sp, available, correspondences, dashSettings, prefSettings } = input;
+  const catalog = input.sources ?? BUILTIN_SOURCES;
   const periodBar = dashSettings.periodBar;
   const savedPeriod = prefSettings.lastPeriod ?? {};
   const lastPeriodByTab = prefSettings.lastPeriodByTab ?? {};
@@ -71,17 +77,17 @@ export function createPeriodResolver(input: {
     cfg?: Partial<Record<SourceKey, string>>
   ): Partial<Record<SourceKey, string>> => {
     const out: Partial<Record<SourceKey, string>> = {
-      ...DEFAULT_PERIOD_FIELD_BY_SOURCE,
+      ...defaultPeriodFieldBySource(catalog),
     };
     const put = (k: SourceKey, raw: string) => {
       const resolved = resolveUnifiedPeriodField(raw, k, correspondences);
       if (resolved && isPeriodDateField(resolved)) out[k] = resolved;
     };
     if (primary?.startsWith("unified:")) {
-      for (const s of SOURCE_KEYS) put(s, primary);
+      for (const s of catalog) put(s.key, primary);
     }
     for (const [k, v] of Object.entries(cfg ?? {})) {
-      if (isSourceKey(k) && typeof v === "string") put(k, v);
+      if (isKnownSource(k, catalog) && typeof v === "string") put(k, v);
     }
     return out;
   };

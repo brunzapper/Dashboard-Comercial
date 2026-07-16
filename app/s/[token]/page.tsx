@@ -69,7 +69,8 @@ import type {
   WidgetData,
   WidgetFilter,
 } from "@/lib/widgets/types";
-import { isSourceKey, type SourceKey } from "@/lib/sources";
+import { isKnownSource, type SourceKey } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
@@ -88,6 +89,7 @@ import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-action
 import { SnapshotClient } from "@/components/snapshots/snapshot-client";
 import { frozenPeriodLabel } from "@/components/snapshots/labels";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
+import { SourcesProvider } from "@/components/sources-context";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 
 // Sempre computa por request (os filtros do visitante vivem na URL) e nunca
@@ -152,10 +154,12 @@ export default async function SnapshotPage({
   const widgets = cfg.widgets;
   const fields = (cfg.fields ?? []) as FieldDefinition[];
   const correspondences = cfg.correspondences ?? [];
-  const available = buildAvailableFields(fields, correspondences);
-  // Rótulos curtos das fontes (dropdowns de campo do viewer) — leitura VIVA de
-  // sync_config via service role (config de exibição, não dado congelado).
-  const sourceLabels = await loadSourceLabels(service);
+  // Catálogo de fontes + rótulos curtos (dropdowns de campo do viewer) —
+  // leitura VIVA via service role (config de exibição, não dado congelado;
+  // NUNCA policy anon — regra do projeto).
+  const sources = await loadSources(service);
+  const available = buildAvailableFields(fields, correspondences, sources);
+  const sourceLabels = await loadSourceLabels(service, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
@@ -224,6 +228,7 @@ export default async function SnapshotPage({
         }
       : dashSettings,
     prefSettings: frozenPeriod ? { lastPeriod: frozenPeriod } : {},
+    sources,
   });
 
   const dataWidgets = widgets.filter(
@@ -369,7 +374,7 @@ export default async function SnapshotPage({
       const isUnifiedFilter = (f: WidgetFilter) =>
         f.field.split("|").some((p) => p.startsWith("unified:"));
       const unified = fs.some(isUnifiedFilter);
-      const fwSourceKeys = fwSources.filter(isSourceKey);
+      const fwSourceKeys = fwSources.filter((s) => isKnownSource(s, sources));
       const targeted =
         fwSourceKeys.length > 0
           ? fs.map((f) => (isUnifiedFilter(f) ? f : { ...f, sources: fwSourceKeys }))
@@ -757,37 +762,39 @@ export default async function SnapshotPage({
     : undefined;
 
   return (
-    <SourceLabelsProvider labels={sourceLabels}>
-      <SnapshotClient
-        snapshotName={snap.name}
-        dashboardName={cfg.dashboard.name}
-        tabName={cfg.tabName}
-        periodLabel={periodLabel}
-        lastRefreshedAt={snap.last_refreshed_at}
-        dashboardId={snap.dashboard_id}
-        widgets={renderWidgets}
-        dataById={dataById}
-        recordListById={recordListById}
-        entityListById={entityListById}
-        calcById={calcById}
-        calcVarsById={calcVarsById}
-        noteById={noteById}
-        calcExprById={cfg.calcExprById ?? {}}
-        tableCellsById={cfg.tableCellsById ?? {}}
-        quickTableResults={quickTableResults}
-        fields={fields}
-        fkLabels={fkLabels}
-        available={available}
-        settings={dashSettings}
-        activeTabId={activeTabId}
-        dateFormat={dashSettings.dateFormat}
-        currencyRates={currencyRates}
-        conversionPeriodById={conversionPeriodById}
-        filterOptionsById={
-          allowWidgetFilters ? (cfg.fieldFilterOptions ?? {}) : undefined
-        }
-        quickFiltersById={allowQuickFilters ? quickFiltersById : undefined}
-      />
-    </SourceLabelsProvider>
+    <SourcesProvider sources={sources}>
+      <SourceLabelsProvider labels={sourceLabels}>
+        <SnapshotClient
+          snapshotName={snap.name}
+          dashboardName={cfg.dashboard.name}
+          tabName={cfg.tabName}
+          periodLabel={periodLabel}
+          lastRefreshedAt={snap.last_refreshed_at}
+          dashboardId={snap.dashboard_id}
+          widgets={renderWidgets}
+          dataById={dataById}
+          recordListById={recordListById}
+          entityListById={entityListById}
+          calcById={calcById}
+          calcVarsById={calcVarsById}
+          noteById={noteById}
+          calcExprById={cfg.calcExprById ?? {}}
+          tableCellsById={cfg.tableCellsById ?? {}}
+          quickTableResults={quickTableResults}
+          fields={fields}
+          fkLabels={fkLabels}
+          available={available}
+          settings={dashSettings}
+          activeTabId={activeTabId}
+          dateFormat={dashSettings.dateFormat}
+          currencyRates={currencyRates}
+          conversionPeriodById={conversionPeriodById}
+          filterOptionsById={
+            allowWidgetFilters ? (cfg.fieldFilterOptions ?? {}) : undefined
+          }
+          quickFiltersById={allowQuickFilters ? quickFiltersById : undefined}
+        />
+      </SourceLabelsProvider>
+    </SourcesProvider>
   );
 }

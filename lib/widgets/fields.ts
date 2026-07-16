@@ -16,11 +16,10 @@ import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { formulaRefs, formulaToText } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
-  SOURCE_KEYS,
-  SOURCE_LABELS,
+  BUILTIN_SOURCES,
   fieldAppliesToSource,
-  isSourceKey,
   toSourceKey,
+  type SourceDef,
   type SourceKey,
 } from "@/lib/sources";
 import {
@@ -149,8 +148,10 @@ function collectRefSources(
   out: Set<SourceKey>
 ): void {
   if (ref.startsWith("match:")) {
+    // Qualquer key de fonte vale (fontes dinâmicas: key === record_type);
+    // refs órfãos (fonte excluída) só pinam uma fonte sem registros.
     const src = ref.split(":")[1];
-    if (isSourceKey(src)) out.add(src);
+    if (src) out.add(src);
     return;
   }
   if (ref.startsWith("agg:")) {
@@ -243,7 +244,10 @@ function decorateFormulaTexts(
  */
 export function buildAvailableFields(
   customFields: FieldDefinition[],
-  correspondences: Correspondence[] = []
+  correspondences: Correspondence[] = [],
+  // Catálogo de fontes (data_sources); ausente = builtins. Define quais fontes
+  // geram campos match:<fonte>:* e seus rótulos.
+  sources: SourceDef[] = BUILTIN_SOURCES
 ): AvailableField[] {
   const core = CORE_FIELDS.map((f) => ({
     ...f,
@@ -294,7 +298,7 @@ export function buildAvailableFields(
         .map((m) => [m.record_type, m.field_ref])
     ),
   }));
-  const match = buildMatchFields(customFields);
+  const match = buildMatchFields(customFields, sources);
   const all = [...core, TODAY_FIELD, ...custom, ...unified, ...match];
   decorateFormulaTexts(all, byKey);
   return all;
@@ -321,13 +325,16 @@ const MATCH_CORE_FIELDS = CORE_FIELDS.filter((f) =>
 // Campos do registro casado, por fonte: `match:<fonte>:<ref>`. Não são editáveis
 // (vêm do outro registro) nem de write-back. Ficam disponíveis em
 // dimensões/métricas/filtros e como colunas do modo lista.
-function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
+function buildMatchFields(
+  customFields: FieldDefinition[],
+  sources: SourceDef[] = BUILTIN_SOURCES
+): AvailableField[] {
   const out: AvailableField[] = [];
-  for (const src of SOURCE_KEYS) {
+  for (const { key: src, label: srcLabel } of sources) {
     for (const f of MATCH_CORE_FIELDS) {
       out.push({
         field: `match:${src}:${f.field}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         isNumeric: f.isNumeric,
         isDate: f.isDate,
         isMoney: f.isMoney,
@@ -341,7 +348,7 @@ function buildMatchFields(customFields: FieldDefinition[]): AvailableField[] {
       if (!fieldAppliesToSource(f.applies_to, src)) continue;
       out.push({
         field: `match:${src}:custom:${f.field_key}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         isNumeric: NUMERIC_DATA_TYPES.includes(f.data_type),
         isDate: f.data_type === "data",
         isMoney: resolveFieldMoney(f).isMoney,

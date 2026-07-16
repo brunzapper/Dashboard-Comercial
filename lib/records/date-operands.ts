@@ -5,7 +5,7 @@
 // (app/(app)/campos/actions.ts) concordarem. Cobre: datas do próprio registro,
 // campos personalizados `data`, e datas do registro CASADO (match:<fonte>:<ref>).
 import { CORE_FIELDS } from "@/lib/widgets/fields";
-import { SOURCE_KEYS, SOURCE_LABELS } from "@/lib/sources";
+import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 
 export interface OperandRef {
   ref: string;
@@ -51,23 +51,27 @@ export function ownDateOperands(customDateFields: CustomDateField[]): OperandRef
   ];
 }
 
-/** Datas do registro casado por fonte: match:<fonte>:<data|custom:data>. */
+/** Datas do registro casado por fonte: match:<fonte>:<data|custom:data>.
+ *  `sources` = catálogo de fontes (data_sources); ausente = builtins. O rótulo
+ *  é load-bearing (round-trip texto⇄tokens): construtor e validação do
+ *  servidor DEVEM usar o mesmo catálogo. */
 export function matchDateOperands(
-  customDateFields: CustomDateField[]
+  customDateFields: CustomDateField[],
+  sources: SourceDef[] = BUILTIN_SOURCES
 ): OperandRef[] {
   const out: OperandRef[] = [];
-  for (const src of SOURCE_KEYS) {
+  for (const { key: src, label: srcLabel } of sources) {
     for (const f of CORE_DATE_FIELDS) {
       out.push({
         ref: `match:${src}:${f.field}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         group: "Registro casado",
       });
     }
     for (const f of customDateFields) {
       out.push({
         ref: `match:${src}:custom:${f.field_key}`,
-        label: `↪ ${SOURCE_LABELS[src]}: ${f.label}`,
+        label: `↪ ${srcLabel}: ${f.label}`,
         group: "Registro casado",
       });
     }
@@ -76,6 +80,12 @@ export function matchDateOperands(
 }
 
 /** Todos os operandos de data (próprio registro + casado). */
-export function allDateOperands(customDateFields: CustomDateField[]): OperandRef[] {
-  return [...ownDateOperands(customDateFields), ...matchDateOperands(customDateFields)];
+export function allDateOperands(
+  customDateFields: CustomDateField[],
+  sources: SourceDef[] = BUILTIN_SOURCES
+): OperandRef[] {
+  return [
+    ...ownDateOperands(customDateFields),
+    ...matchDateOperands(customDateFields, sources),
+  ];
 }

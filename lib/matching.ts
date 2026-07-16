@@ -8,7 +8,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeName } from "@/lib/sync/shared";
 import { toSourceKey, type SourceKey } from "@/lib/sources";
 
-export type MatchRecordType = "lead" | "negocio" | "venda_site";
+// record_type de uma fonte qualquer (fontes dinâmicas: key === record_type).
+export type MatchRecordType = string;
 
 export interface MatchRule {
   id: string;

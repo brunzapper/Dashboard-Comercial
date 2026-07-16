@@ -116,6 +116,79 @@ alter table public.records
   add constraint records_source_system_check
   check (source_system ~ '^[a-z][a-z0-9_]{1,39}$');
 
+-- ============ Correspondências e regras de match: CHECK fixo -> FK ============
+-- field_correspondence_members.record_type (0019) e match_rules.source_a/b
+-- (0041) também travavam os 3 record_types históricos. Viram FK para o
+-- catálogo (on delete restrict: excluir fonte exige limpar correspondências/
+-- regras que a referenciam). O CHECK `source_a <> source_b` é preservado
+-- (o filtro `= ANY` não o alcança).
+do $$
+declare
+  v_con text;
+begin
+  for v_con in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.field_correspondence_members'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%record_type%'
+      and pg_get_constraintdef(oid) ilike '%= ANY%'
+  loop
+    execute format(
+      'alter table public.field_correspondence_members drop constraint %I',
+      v_con
+    );
+  end loop;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.field_correspondence_members'::regclass
+      and conname = 'field_correspondence_members_record_type_fkey'
+  ) then
+    alter table public.field_correspondence_members
+      add constraint field_correspondence_members_record_type_fkey
+      foreign key (record_type)
+      references public.data_sources (record_type)
+      on delete restrict;
+  end if;
+
+  for v_con in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.match_rules'::regclass
+      and contype = 'c'
+      and (pg_get_constraintdef(oid) ilike '%source_a%'
+           or pg_get_constraintdef(oid) ilike '%source_b%')
+      and pg_get_constraintdef(oid) ilike '%= ANY%'
+  loop
+    execute format('alter table public.match_rules drop constraint %I', v_con);
+  end loop;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.match_rules'::regclass
+      and conname = 'match_rules_source_a_fkey'
+  ) then
+    alter table public.match_rules
+      add constraint match_rules_source_a_fkey
+      foreign key (source_a)
+      references public.data_sources (record_type)
+      on delete restrict;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.match_rules'::regclass
+      and conname = 'match_rules_source_b_fkey'
+  ) then
+    alter table public.match_rules
+      add constraint match_rules_source_b_fkey
+      foreign key (source_b)
+      references public.data_sources (record_type)
+      on delete restrict;
+  end if;
+end $$;
+
 -- ============ audit_log.origin: aceita 'import_csv' ============
 -- O import de CSV audita atualizações (linhas re-importadas) via service role;
 -- a policy de INSERT p/ autenticados (0009) segue exigindo origin='app'.

@@ -9,7 +9,9 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { SOURCE_KEYS, toRecordType } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
+import { toRecordType, type SourceDef } from "@/lib/sources";
+import { slugify } from "@/lib/records/slug";
 
 export interface CorrespondenceActionState {
   ok?: boolean;
@@ -26,17 +28,6 @@ const DATA_TYPES = [
   "calculado",
 ] as const;
 
-function slugify(label: string): string {
-  return label
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 60);
-}
-
 async function ensureCanManage(): Promise<string | null> {
   const session = await getSessionInfo();
   if (!session) return "Sessão expirada.";
@@ -46,22 +37,16 @@ async function ensureCanManage(): Promise<string | null> {
   return null;
 }
 
-// Lê os membros do form: um field_ref por fonte (vazio = sem membro).
-function readMembers(formData: FormData): {
-  record_type: "lead" | "negocio" | "venda_site";
-  field_ref: string;
-}[] {
-  const members: {
-    record_type: "lead" | "negocio" | "venda_site";
-    field_ref: string;
-  }[] = [];
-  for (const key of SOURCE_KEYS) {
-    const ref = String(formData.get(`member_${key}`) ?? "").trim();
+// Lê os membros do form: um field_ref por fonte do CATÁLOGO (vazio = sem membro).
+function readMembers(
+  formData: FormData,
+  sources: SourceDef[]
+): { record_type: string; field_ref: string }[] {
+  const members: { record_type: string; field_ref: string }[] = [];
+  for (const s of sources) {
+    const ref = String(formData.get(`member_${s.key}`) ?? "").trim();
     if (ref) {
-      members.push({
-        record_type: toRecordType(key) as "lead" | "negocio" | "venda_site",
-        field_ref: ref,
-      });
+      members.push({ record_type: toRecordType(s.key), field_ref: ref });
     }
   }
   return members;
@@ -82,12 +67,12 @@ export async function createCorrespondence(
   }
   const key = slugify(label);
   if (!key) return { ok: false, message: "Rótulo inválido para gerar a chave." };
-  const members = readMembers(formData);
+  const supabase = await createClient();
+  const members = readMembers(formData, await loadSources(supabase));
   if (members.length < 2) {
     return { ok: false, message: "Ligue colunas de pelo menos duas fontes." };
   }
 
-  const supabase = await createClient();
   const { data: created, error } = await supabase
     .from("field_correspondences")
     .insert({ key, label, data_type: dataType })
@@ -122,12 +107,12 @@ export async function updateCorrespondence(
   const label = String(formData.get("label") ?? "").trim();
   const dataType = String(formData.get("data_type") ?? "texto");
   if (!label) return { ok: false, message: "Informe o rótulo." };
-  const members = readMembers(formData);
+  const supabase = await createClient();
+  const members = readMembers(formData, await loadSources(supabase));
   if (members.length < 2) {
     return { ok: false, message: "Ligue colunas de pelo menos duas fontes." };
   }
 
-  const supabase = await createClient();
   const { error } = await supabase
     .from("field_correspondences")
     .update({ label, data_type: dataType })
