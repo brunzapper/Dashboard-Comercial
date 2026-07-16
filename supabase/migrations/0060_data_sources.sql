@@ -39,6 +39,20 @@ values
   ('estudo', 'venda_site', 'Estudo de Fechamentos', 'Estudo', 'source_created_at', true)
 on conflict (key) do nothing;
 
+-- Migra rótulos curtos personalizados do legado (sync_config 'source_labels')
+-- para o catálogo — o catálogo passa a ser o canônico dos nomes curtos por
+-- fonte (sync_config segue guardando só o rótulo "geral"). Guarda: só copia
+-- enquanto o short_label ainda está no valor semeado (re-runs não sobrescrevem
+-- edições feitas depois na tela de Fontes).
+update public.data_sources ds
+set short_label = trim(sc.value ->> ds.key)
+from public.sync_config sc
+where sc.key = 'source_labels'
+  and ds.builtin
+  and ds.short_label in ('Leads', 'Deals', 'Estudo')
+  and coalesce(trim(sc.value ->> ds.key), '') <> ''
+  and length(trim(sc.value ->> ds.key)) <= 40;
+
 -- ============ RLS ============
 alter table public.data_sources enable row level security;
 

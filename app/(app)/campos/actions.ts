@@ -18,6 +18,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { slugify } from "@/lib/records/slug";
 import {
   NUMERIC_DATA_TYPES,
   PERCENT_DATA_TYPES,
@@ -290,17 +291,6 @@ async function resolveAndValidateFormula(
   const v = validateFormula(formula, allowed, allowedDates, allowedConds);
   if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   return { ok: true, formula };
-}
-
-function slugify(label: string): string {
-  return label
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 60);
 }
 
 function parseOptions(raw: string): string[] {
