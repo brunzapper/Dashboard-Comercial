@@ -1,4 +1,4 @@
-// Versão: 2.0 | Data: 16/07/2026
+// Versão: 2.1 | Data: 16/07/2026
 // Fase 8: definição das FONTES do produto. Cada fonte mapeia 1:1 num record_type
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
 // Registros (abas por fonte) e no construtor de widgets (seleção de fontes).
@@ -12,6 +12,9 @@
 //   qualquer fonte sem precisar do catálogo; apenas listas, rótulos, validação
 //   de pertencimento e campo de período dependem do catálogo (parâmetro
 //   `sources`, default BUILTIN_SOURCES).
+// v2.1 (16/07/2026): manualEntry — a fonte aceita criação MANUAL de registros
+//   no app (data_sources.manual_entry, migração 0061). Builtins (alimentados
+//   por Sync) nascem desligados.
 
 export type SourceKey = string;
 
@@ -23,6 +26,9 @@ export interface SourceDef {
   shortLabel: string; // chip/prefixo dos dropdowns de campo
   defaultPeriodField: string; // campo de data padrão da barra de período
   builtin: boolean;
+  // A fonte aceita registros criados manualmente no app (0061). Fontes de Sync
+  // (builtins) nascem desligadas; o admin pode religar em Configurações→Fontes.
+  manualEntry: boolean;
 }
 
 // Fallback/default: as 3 fontes históricas do produto.
@@ -34,6 +40,7 @@ export const BUILTIN_SOURCES: SourceDef[] = [
     shortLabel: "Leads",
     defaultPeriodField: "source_created_at",
     builtin: true,
+    manualEntry: false,
   },
   {
     key: "deals",
@@ -42,6 +49,7 @@ export const BUILTIN_SOURCES: SourceDef[] = [
     shortLabel: "Deals",
     defaultPeriodField: "closed_at",
     builtin: true,
+    manualEntry: false,
   },
   {
     key: "estudo",
@@ -50,6 +58,7 @@ export const BUILTIN_SOURCES: SourceDef[] = [
     shortLabel: "Estudo",
     defaultPeriodField: "source_created_at",
     builtin: true,
+    manualEntry: false,
   },
 ];
 

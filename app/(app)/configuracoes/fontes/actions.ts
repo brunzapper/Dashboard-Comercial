@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 16/07/2026
+// Versão: 2.1 | Data: 16/07/2026
+// v2.1 (16/07/2026): manual_entry (0061) — flag "Permite criação manual" por
+//   fonte (criar/editar).
 // Server Actions da tela Configurações → Fontes.
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo data_sources (0060):
 //   criar fonte (key slugificada do nome; record_type = key), editar
@@ -54,18 +56,32 @@ function readSourceForm(formData: FormData): {
   label: string;
   shortLabel: string;
   periodField: string;
+  manualEntry: boolean;
   error?: string;
 } {
   const label = cleanText(formData.get("label"), 60);
   const shortLabel = cleanText(formData.get("short_label"), 40);
   const periodField = cleanText(formData.get("default_period_field"), 40);
+  const manualEntry = String(formData.get("manual_entry") ?? "") === "1";
   if (label.length < 2) {
-    return { label, shortLabel, periodField, error: "Informe o nome da fonte." };
+    return {
+      label,
+      shortLabel,
+      periodField,
+      manualEntry,
+      error: "Informe o nome da fonte.",
+    };
   }
   if (!PERIOD_FIELDS.has(periodField)) {
-    return { label, shortLabel, periodField, error: "Campo de período inválido." };
+    return {
+      label,
+      shortLabel,
+      periodField,
+      manualEntry,
+      error: "Campo de período inválido.",
+    };
   }
-  return { label, shortLabel, periodField };
+  return { label, shortLabel, periodField, manualEntry };
 }
 
 export async function createSource(
@@ -73,7 +89,8 @@ export async function createSource(
   formData: FormData
 ): Promise<SourceActionState> {
   await requireRole("admin");
-  const { label, shortLabel, periodField, error } = readSourceForm(formData);
+  const { label, shortLabel, periodField, manualEntry, error } =
+    readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
   const key = slugify(label).slice(0, 40);
@@ -104,6 +121,7 @@ export async function createSource(
     short_label: shortLabel || label,
     default_period_field: periodField,
     builtin: false,
+    manual_entry: manualEntry,
   });
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
@@ -118,7 +136,8 @@ export async function updateSource(
 ): Promise<SourceActionState> {
   await requireRole("admin");
   const key = cleanText(formData.get("key"), 40);
-  const { label, shortLabel, periodField, error } = readSourceForm(formData);
+  const { label, shortLabel, periodField, manualEntry, error } =
+    readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
@@ -128,6 +147,7 @@ export async function updateSource(
       label,
       short_label: shortLabel || label,
       default_period_field: periodField,
+      manual_entry: manualEntry,
     })
     .eq("key", key);
   if (updateError) {

@@ -190,6 +190,7 @@ export function ImportWizard({
       shortLabel: newSourceLabel.trim(),
       defaultPeriodField: newSourcePeriod,
       builtin: false,
+      manualEntry: true,
     };
     setSources((prev) => [...prev, created]);
     setSourceKey(state.key);
