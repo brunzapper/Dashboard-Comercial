@@ -53,6 +53,10 @@ export interface KanbanSettings {
   columns?: KanbanColumnOverride[];
   // ---- modo tarefas ----
   tasks?: KanbanTasksSettings;
+  // Widget kanban de tarefas: aponta p/ um kanban dedicado (dashboards.kind
+  // 'kanban' modo tarefas) — mostra as tasks daquele board (fases dele).
+  // Ausente = "minhas tarefas" (todas as visíveis, fases default).
+  taskBoardId?: string;
 }
 
 // Chaves ESPECIAIS de coluna.

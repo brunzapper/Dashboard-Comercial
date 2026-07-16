@@ -74,9 +74,11 @@ function formatMetric(value: number | null, isMoney: boolean): string {
 function TaskCardBody({
   card,
   taskCtx,
+  readOnly,
 }: {
   card: KanbanCard;
   taskCtx: TaskFormContext;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const task = card.task!;
@@ -89,7 +91,9 @@ function TaskCardBody({
         <input
           type="checkbox"
           checked={done}
+          disabled={readOnly}
           onChange={async () => {
+            if (readOnly) return;
             const res = done
               ? await reopenTask(task.id)
               : await completeTask(task.id);
@@ -114,7 +118,7 @@ function TaskCardBody({
               aria-label="Exclusão travada (só admin/gestor)"
             />
           ) : null}
-          <TaskSheet task={task} ctx={taskCtx} editTrigger />
+          {!readOnly ? <TaskSheet task={task} ctx={taskCtx} editTrigger /> : null}
         </span>
       </div>
       <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-1.5 pl-7 text-xs">
@@ -152,6 +156,7 @@ function CardView({
   recordCtx,
   taskCtx,
   compact,
+  readOnly,
 }: {
   card: KanbanCard;
   draggable: boolean;
@@ -160,6 +165,7 @@ function CardView({
   recordCtx: KanbanRecordContext;
   taskCtx?: TaskFormContext;
   compact?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <div
@@ -182,7 +188,7 @@ function CardView({
         />
       ) : null}
       {card.task && taskCtx ? (
-        <TaskCardBody card={card} taskCtx={taskCtx} />
+        <TaskCardBody card={card} taskCtx={taskCtx} readOnly={readOnly} />
       ) : (
         <>
           <div className="flex items-start justify-between gap-1 pl-1.5">
@@ -194,7 +200,7 @@ function CardView({
                   aria-label="Registro de demonstração (congelado)"
                 />
               ) : null}
-              {card.record ? (
+              {card.record && !readOnly ? (
                 <RecordEditSheet
                   record={card.record}
                   fields={recordCtx.fields}
@@ -238,6 +244,7 @@ export function KanbanBoard({
   onMove,
   columnExtra,
   compact,
+  readOnly,
 }: {
   data: KanbanBoardData;
   settings: KanbanSettings;
@@ -256,6 +263,8 @@ export function KanbanBoard({
   columnExtra?: (col: KanbanColumnCards) => React.ReactNode;
   // Widget dentro do dashboard: cards sem campos extras e colunas mais justas.
   compact?: boolean;
+  // Snapshot público: sem drag, sem painéis de edição, sem concluir.
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [columns, setColumns] = useState<KanbanColumnCards[]>(data.columns);
@@ -272,7 +281,7 @@ export function KanbanBoard({
   }, [data]);
 
   const movable = (card: KanbanCard, col: KanbanColumnCards) =>
-    canMove && !card.isMock && col.key !== KANBAN_OVERFLOW_KEY;
+    !readOnly && canMove && !card.isMock && col.key !== KANBAN_OVERFLOW_KEY;
 
   function applyLocalMove(cardId: string, fromKey: string, toKey: string) {
     setColumns((cols) => {
@@ -421,6 +430,7 @@ export function KanbanBoard({
                     }}
                     recordCtx={recordCtx}
                     taskCtx={taskCtx}
+                    readOnly={readOnly}
                   />
                 ))}
                 {col.cards.length === 0 ? (

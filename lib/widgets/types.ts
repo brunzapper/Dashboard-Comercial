@@ -48,7 +48,8 @@ export type VisualType =
   | "calculado"
   | "calculadora"
   | "nota"
-  | "forma";
+  | "forma"
+  | "kanban";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
@@ -67,6 +68,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   funil: "Funil",
   filtro: "Filtro de período",
   filtro_campo: "Filtro por campo",
+  kanban: "Kanban",
 };
 
 export type Aggregation = "sum" | "count" | "avg";

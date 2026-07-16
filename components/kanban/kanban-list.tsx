@@ -20,9 +20,12 @@ import type { KanbanRecordContext } from "./kanban-board";
 export function KanbanList({
   data,
   recordCtx,
+  readOnly,
 }: {
   data: KanbanBoardData;
   recordCtx: KanbanRecordContext;
+  // Snapshot público: sem painel de edição.
+  readOnly?: boolean;
 }) {
   // Rótulos dos campos extras (iguais em todos os cards — config do board).
   const extraLabels = data.columns
@@ -84,7 +87,7 @@ export function KanbanList({
                   </TableCell>
                 ) : null}
                 <TableCell>
-                  {card.record ? (
+                  {card.record && !readOnly ? (
                     <RecordEditSheet
                       record={card.record}
                       fields={recordCtx.fields}
