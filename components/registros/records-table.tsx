@@ -1,10 +1,17 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 16/07/2026
+// v1.2 (16/07/2026): pan ("mãozinha") no container da tabela via useDragPan —
+//   segurar o botão esquerdo e arrastar rola horizontal (container) e vertical
+//   (<main>), sem precisar da scrollbar no fim da página. Gestos iniciados em
+//   controles interativos (inputs/botões/combobox das células) não armam o pan;
+//   cliques simples seguem funcionando pelo limiar de 4px do hook.
 // v1.1 (09/07/2026): Fase 8 — recebe a `source` (aba) e mostra só as colunas do
 //   núcleo adequadas: Pipeline só em Deals; MRR em Deals/Estudo (não em Leads).
 //   A coluna "Tipo" saiu (redundante dentro de uma aba de fonte).
 // Tabela de registros com colunas do núcleo + campos personalizados visíveis;
 // cada linha abre o painel de edição (RecordEditSheet).
 "use client";
+
+import { useRef } from "react";
 
 import {
   Table,
@@ -16,6 +23,8 @@ import {
 } from "@/components/ui/table";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
+import { cn } from "@/lib/utils";
+import { useDragPan } from "@/lib/use-drag-pan";
 import { formatMoney } from "@/lib/widgets/currency";
 import { EditableCell } from "./editable-cell";
 import { RecordEditSheet } from "./record-edit-sheet";
@@ -45,6 +54,14 @@ export function RecordsTable({
   const showPipeline = source === "deals";
   const showMrr = source === "deals" || source === "estudo";
 
+  // Pan: segurar e arrastar em qualquer área da tabela rola nos dois eixos.
+  // Controles interativos das linhas (EditableCell, botão Editar) ficam de fora
+  // para não roubar seleção de texto em inputs nem o gesto dos dropdowns.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const { panning, onPointerDown } = useDragPan(scrollRef, {
+    ignore: (t) => !!t.closest("button, a, input, select, textarea, [contenteditable]"),
+  });
+
   if (records.length === 0) {
     return (
       <div className="text-muted-foreground rounded-lg border p-8 text-center text-sm">
@@ -54,7 +71,14 @@ export function RecordsTable({
   }
 
   return (
-    <div className="rounded-lg border overflow-x-auto">
+    <div
+      ref={scrollRef}
+      onPointerDown={onPointerDown}
+      className={cn(
+        "rounded-lg border overflow-x-auto",
+        panning ? "cursor-grabbing" : "cursor-grab"
+      )}
+    >
       <Table>
         <TableHeader>
           <TableRow>
