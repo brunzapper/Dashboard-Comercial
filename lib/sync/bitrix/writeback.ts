@@ -65,13 +65,16 @@ interface QueueRow {
 }
 
 // Erro de conversão que NÃO se resolve com retentativa (ex.: campo somente-leitura
-// no Bitrix, ou rótulo de enum inexistente) — marca 'error' direto.
-class WriteBackFatal extends Error {}
+// no Bitrix, ou rótulo de enum inexistente) — marca 'error' direto. Exportado
+// para o fluxo de CRIAÇÃO (lib/sync/bitrix/create.ts) distinguir campos que devem
+// ser pulados do payload de crm.*.add.
+export class WriteBackFatal extends Error {}
 
 // Converte o valor armazenado no record DE VOLTA para o formato que o Bitrix
 // espera, usando o tipo do campo (crm.*.fields). O mapper resolve ids→rótulos na
-// leitura; aqui fazemos o caminho inverso.
-function toBitrixValue(meta: BitrixFieldMeta, value: unknown): unknown {
+// leitura; aqui fazemos o caminho inverso. Exportado para reuso na criação de
+// entidades (crm.*.add), que monta o mesmo payload de `fields`.
+export function toBitrixValue(meta: BitrixFieldMeta, value: unknown): unknown {
   if (meta.isReadOnly) {
     throw new WriteBackFatal(`Campo ${meta.fieldId} é somente-leitura no Bitrix.`);
   }

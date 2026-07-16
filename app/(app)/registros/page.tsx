@@ -209,6 +209,7 @@ export default async function RegistrosPage({
           {canEditValues && fonteDef?.manualEntry ? (
             <RecordCreateSheet
               source={{ key: fonte, label: fonteDef.label }}
+              recordType={fonteDef.recordType}
               fields={fields}
               responsibles={responsibles}
               operations={operations}
