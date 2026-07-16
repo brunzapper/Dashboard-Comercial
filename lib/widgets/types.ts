@@ -490,6 +490,9 @@ export interface AppearanceSettings {
     colColors?: Record<string, ColorPair>; // colKey -> {texto, preenchimento}
     rowColors?: Record<string, ColorPair>; // rowKey -> {texto, preenchimento}
     cellColors?: Record<string, ColorPair>; // "rowKey:colKey" -> {texto, preench.}
+    // Borda por célula (16/07/2026): "rowKey:colKey" -> cor. Desenhada como
+    // contorno interno (overlay), por cima das linhas de grade globais.
+    cellBorders?: Record<string, string>;
     // colKey -> {texto, preench.} aplicado SÓ às linhas de grupo (subtotais e
     // "Total geral") no "Agrupar por"; não afeta as linhas de dados.
     groupColColors?: Record<string, ColorPair>;

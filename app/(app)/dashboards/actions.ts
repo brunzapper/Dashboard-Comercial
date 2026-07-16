@@ -232,7 +232,11 @@ export async function updateUserSettings(
 
 export async function createWidget(
   dashboardId: string,
-  input: WidgetInput
+  input: WidgetInput,
+  // revalidate: false = criação "rápida" (menu de contexto): o await retorna
+  // logo após o INSERT, sem esperar o re-render RSC do dashboard inteiro; o
+  // cliente mostra o widget otimista e dispara router.refresh() por fora.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState & { id?: string }> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -272,7 +276,7 @@ export async function createWidget(
     .select("id")
     .maybeSingle();
   if (error) return { ok: false, message: error.message };
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true, id: (data?.id as string) ?? undefined };
 }
 

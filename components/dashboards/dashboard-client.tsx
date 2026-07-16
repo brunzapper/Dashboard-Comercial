@@ -47,6 +47,7 @@ import {
   createWidget,
   renameDashboard,
   updateDashboardSettings,
+  type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
@@ -296,8 +297,24 @@ export function DashboardClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabs, firstTabId]
   );
+  // Widgets da criação "rápida" (menu de contexto do grid): o INSERT retorna o
+  // id sem esperar a revalidação RSC e o widget entra aqui na hora; o
+  // router.refresh() corre em segundo plano. Sai quando o servidor passa a
+  // incluí-lo (reconciliação em render, mesmo padrão seedKey) ou quando é
+  // excluído antes do refresh chegar (onWidgetDeleted).
+  const [pendingWidgets, setPendingWidgets] = useState<Widget[]>([]);
+  const serverWidgetIds = new Set(widgets.map((w) => w.id));
+  const alivePending = pendingWidgets.filter((p) => !serverWidgetIds.has(p.id));
+  if (alivePending.length !== pendingWidgets.length) {
+    setPendingWidgets(alivePending);
+  }
+  const allWidgets = alivePending.length
+    ? [...widgets, ...alivePending]
+    : widgets;
   const visibleWidgets =
-    tabs.length === 0 ? widgets : widgets.filter((w) => widgetTab(w) === activeTabId);
+    tabs.length === 0
+      ? allWidgets
+      : allWidgets.filter((w) => widgetTab(w) === activeTabId);
 
   // Conectores: estado otimista com o mesmo padrão seedKey das abas. Toda
   // gravação passa por saveConnectors (spread do settings — a action
@@ -417,6 +434,43 @@ export function DashboardClient({
     },
     [drawQuick, dashboardId, activeTabId, router, startTransition]
   );
+
+  // Criação RÁPIDA pelo menu de contexto do grid (Inserir/Calculadora): INSERT
+  // sem revalidação (retorna após uma ida ao banco), widget otimista na hora e
+  // refresh completo em segundo plano. O append fica FORA da transition — o
+  // padrão do colar (tudo dentro) segura o commit até o refresh terminar.
+  const quickCreateWidget = useCallback(
+    async (input: WidgetInput) => {
+      const res = await createWidget(dashboardId, input, { revalidate: false });
+      if (!res.ok || !res.id) return;
+      const id = res.id;
+      setPendingWidgets((prev) => [
+        ...prev,
+        {
+          id,
+          dashboard_id: dashboardId,
+          title: input.title,
+          visual_type: input.visual_type,
+          source: "records",
+          sources: input.sources ?? [],
+          split_by_source: input.splitBySource ?? false,
+          dimensions: input.dimensions,
+          metrics: input.metrics,
+          filters: input.filters,
+          settings: input.settings ?? {},
+          grid_position: input.grid_position ?? {},
+          sort_order: 0,
+        },
+      ]);
+      startTransition(() => router.refresh());
+    },
+    [dashboardId, router, startTransition]
+  );
+  // Pendente excluído antes do refresh viraria fantasma (o id nunca chega do
+  // servidor para a reconciliação) — o WidgetCard avisa a exclusão por aqui.
+  const onWidgetDeleted = useCallback((id: string) => {
+    setPendingWidgets((prev) => prev.filter((w) => w.id !== id));
+  }, []);
 
   function saveTabs(next: DashboardSettings["tabs"]) {
     setTabs(next ?? []); // aplica na hora (cor/nome/adicionar/excluir)
@@ -595,6 +649,8 @@ export function DashboardClient({
             drawMode={drawQuick != null}
             onDrawDone={onDrawDone}
             onDrawCancel={() => setDrawQuick(null)}
+            onQuickCreate={quickCreateWidget}
+            onWidgetDeleted={onWidgetDeleted}
           />
           </WidgetFocusProvider>
         </div>

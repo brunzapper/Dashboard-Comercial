@@ -1,6 +1,9 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 16/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.3 (16/07/2026): calculadora ganha "X" no canto superior direito — fecha
+//   (exclui) sem confirmação, sumindo na hora (estado `closing`); exclusões
+//   avisam o shell via onWidgetDeleted (limpa o otimista da criação rápida).
 // v2.2 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch novo
 //   renderizando QuickTableWidget com as células iniciais (tableCells).
 // v2.1 (15/07/2026): widgets calculadora/nota/forma — branches novos no
@@ -15,7 +18,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2 } from "lucide-react";
+import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -109,6 +112,7 @@ export function WidgetCard({
   mx = 0,
   my = 0,
   onMeasure,
+  onWidgetDeleted,
 }: {
   widget: Widget;
   data: WidgetData;
@@ -155,12 +159,16 @@ export function WidgetCard({
   mx?: number;
   my?: number;
   onMeasure?: (id: string, wUnits: number, hUnits: number) => void;
+  // Avisa o shell da exclusão (limpa o widget otimista da criação rápida).
+  onWidgetDeleted?: (id: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // X da calculadora: some na hora (otimista); o refresh remove de vez.
+  const [closing, setClosing] = useState(false);
   const { ap: appearance, save: saveAppearance } = useWidgetAppearance(
     widget,
     dashboardId
@@ -308,6 +316,10 @@ export function WidgetCard({
 
   // Menu "⋮" e overlays (builder/aparência/excluir) compartilhados entre o
   // layout padrão (com cabeçalho) e o frameless (forma/nota sem moldura).
+  // Fechado pelo X (calculadora): desaparece imediatamente enquanto o
+  // deleteWidget/refresh corre por trás. Depois de TODOS os hooks acima.
+  if (closing) return null;
+
   const menu = canEdit ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -402,6 +414,7 @@ export function WidgetCard({
                 e.preventDefault();
                 startTransition(async () => {
                   await deleteWidget(widget.id, dashboardId);
+                  onWidgetDeleted?.(widget.id);
                   setDeleteOpen(false);
                 });
               }}
@@ -489,6 +502,26 @@ export function WidgetCard({
           {widget.title ?? "Sem título"}
         </span>
         {menu}
+        {isCalculator && canEdit ? (
+          // Fechar fácil (sem confirmação): a exclusão entra no histórico do
+          // dashboard, então Desfazer restaura a calculadora.
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-foreground size-6"
+            title="Fechar calculadora"
+            aria-label="Fechar calculadora"
+            onClick={() => {
+              setClosing(true);
+              startTransition(async () => {
+                await deleteWidget(widget.id, dashboardId);
+                onWidgetDeleted?.(widget.id);
+              });
+            }}
+          >
+            <X className="size-4" />
+          </Button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
         {showTableBar ? (
