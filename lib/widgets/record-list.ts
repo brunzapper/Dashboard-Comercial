@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 16/07/2026
+// v1.2 (16/07/2026): regra dos mocks alinhada ao RPC — passa a inspecionar
+//   dimensões/métricas (caminho "Agrupar período") e a expandir unified: via
+//   correspondências (helper compartilhado em ./mock-reuniao).
 // v1.1 (15/07/2026): filtros segmentados por fonte — espelha o wrapper
 //   pass-through do RPC (0054) com `.or(record_type.not.in...)` do PostgREST.
 // Fase 1 (tabela editável de registros): executa um widget de Tabela em modo
@@ -13,6 +16,7 @@ import { toSourceKey } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
+import { includesMockReuniaoRef } from "./mock-reuniao";
 import {
   applyPeriodToFilters,
   PERIOD_FIELD_SENTINEL,
@@ -37,13 +41,6 @@ const CORE_COLS = new Set<string>([
   ...CORE_FIELDS.map((f) => f.field),
   "record_type",
 ]);
-
-// Chaves jsonb de "Data Reunião" (Lead/Negócio) — gatilho da regra dos mocks
-// (Fase 12): widget que referencia uma delas passa a ver os leads mock.
-const MOCK_REUNIAO_KEYS = [
-  "bitrix_uf_crm_1743441331",
-  "bitrix_uf_crm_67eacefcccd98",
-];
 
 // Traduz o `field` de um WidgetFilter para a coluna consultável no PostgREST.
 // custom:<k> vira o acesso JSON `custom_fields->>k`. Campos fora da whitelist
@@ -101,12 +98,17 @@ export async function runRecordList(
   filters = [...sourceFilters(config.sources), ...filters];
 
   // Fase 12: leads MOCK de "Data Reunião" (records.is_mock) só são servidos
-  // quando o widget referencia o campo — nos filtros (inclui o byType do
-  // @period) ou nas colunas do modo lista. Espelha a regra do RPC
-  // run_widget_query (migração 0052). Fora disso, mocks nunca aparecem.
-  const mockRefs =
-    JSON.stringify(filters) + JSON.stringify(config.settings?.columns ?? []);
-  const includeMocks = MOCK_REUNIAO_KEYS.some((k) => mockRefs.includes(k));
+  // quando o widget referencia o campo (regra do RPC run_widget_query,
+  // 0052/0054/0057 — ver ./mock-reuniao). As partes inspecionadas espelham o
+  // que o RPC "veria" em cada caminho: no modo lista, filtros (inclui o byType
+  // do @period) + colunas; no caminho agregado "Agrupar período" (chamado por
+  // runWidgetByPeriod), filtros + dimensões + métricas — é aqui que "Data
+  // Reunião" como dimensão de data passa a ligar os mocks.
+  const refParts =
+    config.settings?.rowMode === "records"
+      ? [filters, config.settings?.columns ?? []]
+      : [filters, config.dimensions ?? [], config.metrics ?? []];
+  const includeMocks = includesMockReuniaoRef(refParts, available);
 
   const unifiedMembersOf = (field: string) =>
     available.find((a) => a.field === field)?.unifiedMembers;
