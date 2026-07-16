@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 16/07/2026
+// Versão: 1.4 | Data: 16/07/2026
 // Layout autenticado: shell com navegação lateral filtrada por papel/permissão.
 // v1.1 (05/07/2026): itens de admin da Fase 6B (Operações/Responsáveis/Metas)
 //   gated por papel; NavItem ganha `role`.
@@ -6,6 +6,9 @@
 //   (Configurações → Fontes) para os dropdowns de campo em todo o app.
 // v1.3 (16/07/2026): SourcesProvider — catálogo de fontes dinâmicas
 //   (data_sources, 0060) para pickers/abas em todo o app.
+// v1.4 (16/07/2026): item "Tarefas" na navegação (todos os papéis — a RLS de
+//   tasks escopa o vendedor às próprias tarefas) + sino de alertas de prazo
+//   (TaskBell; contagem inicial computada aqui no server).
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -16,6 +19,9 @@ import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
+import { TaskBell } from "@/components/layout/task-bell";
+import { addDaysIso, DEFAULT_DUE_SOON_DAYS } from "@/lib/tasks/alerts";
+import { todayBrasiliaIso } from "@/lib/date/today";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
 
@@ -25,6 +31,7 @@ import { SourcesProvider } from "@/components/sources-context";
 // Registros só é visível a Gestores/Administradores.
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
   { href: "/", label: "Dashboards" },
+  { href: "/tarefas", label: "Tarefas" },
   { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
 ];
@@ -73,6 +80,15 @@ export default async function AppLayout({
     (userSettings?.settings as { sidebarPinned?: boolean } | null)
       ?.sidebarPinned ?? false;
 
+  // Sino de alertas: contagem de tarefas ABERTAS vencidas/próximas do usuário
+  // (RLS escopa). Erro (ex.: migração 0063 pendente) cai em 0 sem quebrar.
+  const { count: dueCount } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .is("completed_at", null)
+    .not("due_date", "is", null)
+    .lte("due_date", addDaysIso(todayBrasiliaIso(), DEFAULT_DUE_SOON_DAYS));
+
   // Conteúdo da barra montado no server (itens já filtrados por papel);
   // o AppShell (client) controla ocultar/fixar/tela cheia.
   const sidebarContent = (
@@ -97,7 +113,11 @@ export default async function AppLayout({
   return (
     <SourcesProvider sources={sources}>
       <SourceLabelsProvider labels={sourceLabels}>
-        <AppShell initialPinned={initialPinned} sidebar={sidebarContent}>
+        <AppShell
+          initialPinned={initialPinned}
+          sidebar={sidebarContent}
+          topRight={<TaskBell initialCount={dueCount ?? 0} />}
+        >
           {children}
         </AppShell>
       </SourceLabelsProvider>

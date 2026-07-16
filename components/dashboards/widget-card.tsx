@@ -60,6 +60,8 @@ import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import { WidgetChart } from "./charts/widget-chart";
 import { QuickTableWidget } from "./quick-table/quick-table-widget";
+import { KanbanWidget } from "@/components/kanban/kanban-widget";
+import { AgendaWidget } from "@/components/agenda/agenda-widget";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
 import { CalculatorWidget } from "./calculator-widget";
 import { NoteWidget } from "./note-widget";
@@ -186,6 +188,8 @@ export function WidgetCard({
   const rowSource = widget.settings?.rowSource ?? "records";
   const isEntityList = isRecordList && rowSource !== "records";
   const isQuickTable = widget.visual_type === "tabela_editavel";
+  const isKanban = widget.visual_type === "kanban";
+  const isAgenda = widget.visual_type === "agenda";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -198,8 +202,10 @@ export function WidgetCard({
   const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
-  // Aparência só faz sentido em charts/tabela/pizza/kpi (não em filtro/calc).
-  const canStyle = !isFilter && !isFieldFilter && !isCalc;
+  // Aparência só faz sentido em charts/tabela/pizza/kpi (não em
+  // filtro/calc/kanban/agenda).
+  const canStyle =
+    !isFilter && !isFieldFilter && !isCalc && !isKanban && !isAgenda;
 
   // Catálogo de operandos do editor in-place da nota (mesma montagem do
   // calcRefs do builder — aggOperandRefs + condAggOperandRefs).
@@ -572,6 +578,22 @@ export function WidgetCard({
               editMode={editMode}
               appearance={appearance}
               onAppearanceChange={saveAppearance}
+            />
+          ) : isKanban ? (
+            <KanbanWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              userRoles={userRoles}
+              canEditValues={canEditValues}
+              canManageFields={canManageFields}
+            />
+          ) : isAgenda ? (
+            <AgendaWidget
+              widget={widget}
+              dashboardId={dashboardId}
+              userRoles={userRoles}
+              canEditValues={canEditValues}
+              canManageFields={canManageFields}
             />
           ) : data.error ? (
             // Erro ao computar o widget no servidor (WidgetData.error): mostra

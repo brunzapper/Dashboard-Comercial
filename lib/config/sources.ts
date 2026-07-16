@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
+// v1.1 (16/07/2026): manual_entry (0061) — a fonte aceita criação manual.
 // Loader do catálogo de fontes dinâmicas (tabela data_sources, migração 0060).
 // Mesma resiliência de lib/config/source-labels.ts: qualquer falha (tabela
 // ausente pré-migração, erro de rede) cai nos 3 builtins de lib/sources.ts.
@@ -15,7 +16,9 @@ export const loadSources = cache(async function loadSources(
   try {
     const { data, error } = await supabase
       .from("data_sources")
-      .select("key, record_type, label, short_label, default_period_field, builtin")
+      .select(
+        "key, record_type, label, short_label, default_period_field, builtin, manual_entry"
+      )
       .order("builtin", { ascending: false })
       .order("created_at", { ascending: true });
     if (error || !data || data.length === 0) return BUILTIN_SOURCES;
@@ -30,6 +33,7 @@ export const loadSources = cache(async function loadSources(
         defaultPeriodField:
           (r.default_period_field as string) || "source_created_at",
         builtin: Boolean(r.builtin),
+        manualEntry: Boolean(r.manual_entry),
       };
     });
   } catch {

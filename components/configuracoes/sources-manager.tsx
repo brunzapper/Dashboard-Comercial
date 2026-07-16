@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
 // Gestão do catálogo de fontes (data_sources, 0060): listar, criar, editar e
 // excluir fontes dinâmicas. Fontes novas mapeiam key === record_type; a chave
 // é gerada do nome (slugify) e imutável após a criação. Excluir exige fonte
 // sem registros (FK em records.record_type restringe).
+// v1.1 (16/07/2026): flag "Permite criação manual" (manual_entry, 0061) —
+//   habilita o botão "Novo registro" (Registros/kanbans) para a fonte.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -64,6 +66,8 @@ function SourceForm({
   const [periodField, setPeriodField] = useState(
     source?.defaultPeriodField ?? "source_created_at"
   );
+  // Fontes novas nascem aceitando criação manual; builtins (Sync) desligados.
+  const [manualEntry, setManualEntry] = useState(source?.manualEntry ?? true);
 
   useEffect(() => {
     if (state.ok && onDone) onDone();
@@ -119,6 +123,24 @@ function SourceForm({
         <p className="text-muted-foreground text-xs">
           Onde a barra de período do dashboard busca a data desta fonte quando
           não há override configurado.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="manual_entry"
+            value="1"
+            checked={manualEntry}
+            onChange={(e) => setManualEntry(e.target.checked)}
+            className="size-4 accent-primary"
+          />
+          Permite criação manual de registros
+        </label>
+        <p className="text-muted-foreground text-xs">
+          Habilita o botão &quot;Novo registro&quot; para esta fonte (Registros e
+          kanbans). Fontes alimentadas por Sync normalmente ficam desligadas.
         </p>
       </div>
 
@@ -201,6 +223,7 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
               <TableHead>Chave</TableHead>
               <TableHead>Nome curto</TableHead>
               <TableHead>Campo de período</TableHead>
+              <TableHead>Criação manual</TableHead>
               <TableHead>Origem</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -217,6 +240,9 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {periodFieldLabel(s.defaultPeriodField)}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs">
+                  {s.manualEntry ? "Sim" : "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {s.builtin ? "Interna" : "Personalizada"}

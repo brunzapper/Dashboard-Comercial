@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 16/07/2026
+// v1.2 (16/07/2026): seção "Tarefas" — tarefas vinculadas ao registro
+//   (listar/criar/concluir), carregadas sob demanda.
 // v1.1 (15/07/2026): campos read-only formatados (moeda/percentual/data) em vez
 //   do valor cru.
 // Painel lateral de edição de um registro: núcleo (read-only) + relações
@@ -39,6 +41,7 @@ import {
 } from "@/lib/widgets/format";
 import { LeadCombobox } from "./lead-combobox";
 import { RecordMatchConnect } from "./record-match-connect";
+import { RecordTasksSection } from "@/components/tarefas/record-tasks-section";
 
 const initial: EditActionState = {};
 
@@ -357,6 +360,17 @@ export function RecordEditSheet({
             </p>
           )}
         </form>
+
+        {/* Tarefas vinculadas — FORA do form (os botões internos da seção não
+            podem submeter a edição do registro). Carrega só com o painel aberto. */}
+        <div className="px-4 pb-6">
+          <RecordTasksSection
+            recordId={record.id}
+            recordTitle={record.title}
+            responsibles={responsibles}
+            userRoles={userRoles}
+          />
+        </div>
       </SheetContent>
     </Sheet>
   );

@@ -56,13 +56,16 @@ import {
   type RefOption,
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import type { KanbanSettings } from "@/lib/kanban/types";
+import type { AgendaSettings } from "@/lib/agenda/types";
+import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
 import { cn } from "@/lib/utils";
 import {
   formulaUsesFunctions,
   validateFormula,
   type Formula,
 } from "@/lib/records/formulas";
-import { type SourceKey } from "@/lib/sources";
+import { fieldAppliesToSource, type SourceKey } from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import {
   Sheet,
@@ -295,6 +298,34 @@ export function WidgetBuilder({
   const [visualType, setVisualType] = useState<VisualType>(
     widget?.visual_type ?? "barra"
   );
+
+  // Widget KANBAN: config própria (lib/kanban/types.ts) em settings.kanban.
+  const [kanbanCfg, setKanbanCfg] = useState<KanbanSettings>(
+    widget?.settings?.kanban ?? {
+      mode: "registros",
+      groupField: "stage",
+      card: { titleField: "title" },
+    }
+  );
+  const patchKanban = (p: Partial<KanbanSettings>) =>
+    setKanbanCfg((k) => ({ ...k, ...p }));
+
+  // Widget AGENDA: config própria (lib/agenda/types.ts) em settings.agenda.
+  const [agendaCfg, setAgendaCfg] = useState<AgendaSettings>(
+    widget?.settings?.agenda ?? { showTasks: true, defaultView: "month" }
+  );
+  const patchAgenda = (p: Partial<AgendaSettings>) =>
+    setAgendaCfg((a) => ({ ...a, ...p }));
+  // Kanbans dedicados de tarefas (destino do widget kanban modo tarefas) —
+  // carregados sob demanda ao entrar no tipo/modo.
+  const [taskBoards, setTaskBoards] = useState<
+    { id: string; name: string }[] | null
+  >(null);
+  useEffect(() => {
+    if (visualType !== "kanban" || kanbanCfg.mode !== "tarefas") return;
+    if (taskBoards !== null) return;
+    void listTaskBoards().then(setTaskBoards);
+  }, [visualType, kanbanCfg.mode, taskBoards]);
   // No modo lista, as colunas exibidas são as Dimensões. Para widgets de lista
   // já existentes (que guardavam settings.columns), semeia as Dimensões a partir
   // delas para não "perder" as colunas ao abrir o editor.
@@ -901,6 +932,101 @@ export function WidgetBuilder({
         metrics: [],
         filters: [],
         settings: { ...settings, ...tabPatch },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Kanban: config própria em settings.kanban (sem dimensões/métricas do
+    // engine). `sources` guarda a fonte p/ a resolução de período da page.
+    if (visualType === "kanban") {
+      const k = kanbanCfg;
+      if (k.mode === "registros") {
+        if (!k.source) {
+          setError("Escolha a fonte dos registros do kanban.");
+          return;
+        }
+        if (k.dateBucket ? !k.dateField : !k.groupField) {
+          setError("Escolha o campo que define as colunas do kanban.");
+          return;
+        }
+      }
+      const clean: KanbanSettings =
+        k.mode === "tarefas"
+          ? {
+              mode: "tarefas",
+              ...(k.taskBoardId ? { taskBoardId: k.taskBoardId } : {}),
+              ...(k.columns ? { columns: k.columns } : {}),
+              ...(k.tasks ? { tasks: k.tasks } : {}),
+            }
+          : {
+              mode: "registros",
+              source: k.source,
+              ...(k.dateBucket
+                ? { dateField: k.dateField, dateBucket: k.dateBucket }
+                : { groupField: k.groupField }),
+              ...(k.metric ? { metric: k.metric } : {}),
+              card: {
+                titleField: k.card?.titleField || "title",
+                ...(k.card?.extraFields && k.card.extraFields.filter(Boolean).length > 0
+                  ? { extraFields: k.card.extraFields.filter(Boolean).slice(0, 4) }
+                  : {}),
+                ...(k.card?.colorField ? { colorField: k.card.colorField } : {}),
+              },
+              ...(k.columns ? { columns: k.columns } : {}),
+            };
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: clean.source ? [clean.source as SourceKey] : [],
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: { kanban: clean, ...tabPatch },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Agenda: config própria em settings.agenda. Registros exigem fonte +
+    // campo de data; sem fonte, o calendário mostra só tarefas.
+    if (visualType === "agenda") {
+      const a = agendaCfg;
+      if (a.source && !a.dateField) {
+        setError("Escolha o campo de data que aloca o registro no dia.");
+        return;
+      }
+      const clean: AgendaSettings = {
+        ...(a.source ? { source: a.source, dateField: a.dateField } : {}),
+        showTasks: a.showTasks !== false,
+        defaultView: a.defaultView === "week" ? "week" : "month",
+      };
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: clean.source ? [clean.source as SourceKey] : [],
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: { agenda: clean, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -1751,6 +1877,350 @@ export function WidgetBuilder({
             </>
           ) : null}
 
+          {/* Config do KANBAN: modo, fonte, colunas (campo ou bucket de data),
+              métrica da coluna e conteúdo do card. Colunas (ordem/cor/WIP)
+              são configuradas no próprio card depois de criado. */}
+          {visualType === "kanban" ? (
+            (() => {
+              const k = kanbanCfg;
+              const src = k.source ?? "";
+              const customsOf = (pred: (f: FieldDefinition) => boolean) =>
+                fields
+                  .filter(
+                    (f) =>
+                      pred(f) &&
+                      (!src || fieldAppliesToSource(f.applies_to, src))
+                  )
+                  .map((f) => ({
+                    value: `custom:${f.field_key}`,
+                    label: f.label,
+                  }));
+              const groupOptions: ComboboxOption[] = [
+                { value: "stage", label: "Etapa" },
+                { value: "pipeline", label: "Pipeline" },
+                { value: "sale_type", label: "Tipo de venda" },
+                { value: "channel", label: "Canal" },
+                ...customsOf(
+                  (f) => f.data_type === "selecao" || f.data_type === "texto"
+                ),
+              ];
+              const dateOptions: ComboboxOption[] = [
+                { value: "closed_at", label: "Data de fechamento" },
+                { value: "opened_at", label: "Data de abertura" },
+                { value: "source_created_at", label: "Data de criação (origem)" },
+                ...customsOf((f) => f.data_type === "data"),
+              ];
+              const metricOptions: ComboboxOption[] = [
+                { value: "", label: "— nenhuma —" },
+                { value: "value", label: "Valor" },
+                { value: "mrr", label: "MRR" },
+                ...customsOf(
+                  (f) => f.data_type === "numero" || f.data_type === "moeda"
+                ),
+              ];
+              const cardFieldOptions: ComboboxOption[] = [
+                { value: "", label: "—" },
+                { value: "stage", label: "Etapa" },
+                { value: "value", label: "Valor" },
+                { value: "responsible_id", label: "Responsável" },
+                { value: "closed_at", label: "Data de fechamento" },
+                { value: "source_created_at", label: "Data de criação (origem)" },
+                ...customsOf(
+                  (f) =>
+                    f.data_type !== "calculado_agg" && f.data_type !== "calculado"
+                ),
+              ];
+              const extra = (i: number) => k.card?.extraFields?.[i] ?? "";
+              const setExtra = (i: number, v: string) => {
+                const arr = [...(k.card?.extraFields ?? [])];
+                arr[i] = v;
+                patchKanban({
+                  card: { ...k.card, extraFields: arr },
+                });
+              };
+              return (
+                <div className="flex flex-col gap-3 rounded-md border p-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Tipo de quadro</Label>
+                    <Combobox
+                      searchable={false}
+                      options={[
+                        { value: "registros", label: "Registros de uma fonte" },
+                        { value: "tarefas", label: "Tarefas (fases de execução)" },
+                      ]}
+                      value={k.mode}
+                      onValueChange={(v) =>
+                        patchKanban({
+                          mode: v === "tarefas" ? "tarefas" : "registros",
+                        })
+                      }
+                      className="w-full"
+                      aria-label="Tipo de quadro"
+                    />
+                  </div>
+
+                  {k.mode === "tarefas" ? (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Quadro de tarefas</Label>
+                      <Combobox
+                        options={[
+                          { value: "", label: "Minhas tarefas (todas visíveis)" },
+                          ...(taskBoards ?? []).map((b) => ({
+                            value: b.id,
+                            label: b.name,
+                          })),
+                        ]}
+                        value={k.taskBoardId ?? ""}
+                        onValueChange={(v) =>
+                          patchKanban({ taskBoardId: v || undefined })
+                        }
+                        className="w-full"
+                        aria-label="Quadro de tarefas"
+                      />
+                      <p className="text-muted-foreground text-xs">
+                        Aponte para um kanban de tarefas existente (fases dele)
+                        ou mostre todas as tarefas visíveis por fase padrão.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Fonte dos registros</Label>
+                        <Combobox
+                          options={catalog.map((s) => ({
+                            value: s.key,
+                            label: s.label,
+                          }))}
+                          value={src}
+                          onValueChange={(v) => patchKanban({ source: v })}
+                          className="w-full"
+                          aria-label="Fonte dos registros"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Colunas do quadro</Label>
+                        <Combobox
+                          searchable={false}
+                          options={[
+                            {
+                              value: "field",
+                              label: "Valores de um campo (ex.: etapa)",
+                            },
+                            {
+                              value: "date",
+                              label: "Períodos de um campo de data",
+                            },
+                          ]}
+                          value={k.dateBucket ? "date" : "field"}
+                          onValueChange={(v) =>
+                            v === "date"
+                              ? patchKanban({
+                                  dateBucket: k.dateBucket ?? "weekday",
+                                  dateField: k.dateField ?? "source_created_at",
+                                  groupField: undefined,
+                                })
+                              : patchKanban({
+                                  dateBucket: undefined,
+                                  dateField: undefined,
+                                  groupField: k.groupField ?? "stage",
+                                })
+                          }
+                          className="w-full"
+                          aria-label="Tipo de agrupamento"
+                        />
+                      </div>
+                      {k.dateBucket ? (
+                        <>
+                          <div className="flex flex-col gap-1.5">
+                            <Label>Campo de data</Label>
+                            <Combobox
+                              options={dateOptions}
+                              value={k.dateField ?? ""}
+                              onValueChange={(v) => patchKanban({ dateField: v })}
+                              className="w-full"
+                              aria-label="Campo de data"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <Label>Período de cada coluna</Label>
+                            <Combobox
+                              searchable={false}
+                              options={[
+                                { value: "weekday", label: "Dia da semana" },
+                                { value: "month_name", label: "Mês do ano" },
+                                { value: "month_year", label: "Mês/Ano" },
+                              ]}
+                              value={k.dateBucket}
+                              onValueChange={(v) =>
+                                patchKanban({
+                                  dateBucket:
+                                    v === "month_name" || v === "month_year"
+                                      ? v
+                                      : "weekday",
+                                })
+                              }
+                              className="w-full"
+                              aria-label="Período de cada coluna"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Campo que define as colunas</Label>
+                          <Combobox
+                            options={groupOptions}
+                            value={k.groupField ?? "stage"}
+                            onValueChange={(v) => patchKanban({ groupField: v })}
+                            className="w-full"
+                            aria-label="Campo que define as colunas"
+                          />
+                          <p className="text-muted-foreground text-xs">
+                            Mover um card entre colunas altera esse valor no
+                            registro.
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Métrica no cabeçalho (soma por coluna)</Label>
+                        <Combobox
+                          options={metricOptions}
+                          value={k.metric ?? ""}
+                          onValueChange={(v) =>
+                            patchKanban({ metric: v || undefined })
+                          }
+                          className="w-full"
+                          aria-label="Métrica no cabeçalho"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Campo extra 1 (card)</Label>
+                          <Combobox
+                            options={cardFieldOptions}
+                            value={extra(0)}
+                            onValueChange={(v) => setExtra(0, v)}
+                            className="w-full"
+                            aria-label="Campo extra 1"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Campo extra 2 (card)</Label>
+                          <Combobox
+                            options={cardFieldOptions}
+                            value={extra(1)}
+                            onValueChange={(v) => setExtra(1, v)}
+                            className="w-full"
+                            aria-label="Campo extra 2"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Cor do card por campo</Label>
+                        <Combobox
+                          options={cardFieldOptions}
+                          value={k.card?.colorField ?? ""}
+                          onValueChange={(v) =>
+                            patchKanban({
+                              card: { ...k.card, colorField: v || undefined },
+                            })
+                          }
+                          className="w-full"
+                          aria-label="Cor do card por campo"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()
+          ) : null}
+
+          {/* Config da AGENDA: fonte + campo de data (registros no dia) e
+              tarefas por vencimento. */}
+          {visualType === "agenda" ? (
+            (() => {
+              const a = agendaCfg;
+              const dateOptions: ComboboxOption[] = [
+                { value: "closed_at", label: "Data de fechamento" },
+                { value: "opened_at", label: "Data de abertura" },
+                { value: "source_created_at", label: "Data de criação (origem)" },
+                ...fields
+                  .filter(
+                    (f) =>
+                      f.data_type === "data" &&
+                      (!a.source || fieldAppliesToSource(f.applies_to, a.source))
+                  )
+                  .map((f) => ({
+                    value: `custom:${f.field_key}`,
+                    label: f.label,
+                  })),
+              ];
+              return (
+                <div className="flex flex-col gap-3 rounded-md border p-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Fonte dos registros</Label>
+                    <Combobox
+                      options={[
+                        { value: "", label: "— nenhuma (só tarefas) —" },
+                        ...catalog.map((s) => ({ value: s.key, label: s.label })),
+                      ]}
+                      value={a.source ?? ""}
+                      onValueChange={(v) =>
+                        patchAgenda({
+                          source: v || undefined,
+                          dateField: v
+                            ? (a.dateField ?? "source_created_at")
+                            : undefined,
+                        })
+                      }
+                      className="w-full"
+                      aria-label="Fonte dos registros"
+                    />
+                  </div>
+                  {a.source ? (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Campo de data (aloca o registro no dia)</Label>
+                      <Combobox
+                        options={dateOptions}
+                        value={a.dateField ?? ""}
+                        onValueChange={(v) => patchAgenda({ dateField: v })}
+                        className="w-full"
+                        aria-label="Campo de data"
+                      />
+                    </div>
+                  ) : null}
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={a.showTasks !== false}
+                      onCheckedChange={(v) =>
+                        patchAgenda({ showTasks: v === true })
+                      }
+                    />
+                    Mostrar tarefas (vencimento)
+                  </label>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Visão inicial</Label>
+                    <Combobox
+                      searchable={false}
+                      options={[
+                        { value: "month", label: "Mês" },
+                        { value: "week", label: "Semana" },
+                      ]}
+                      value={a.defaultView ?? "month"}
+                      onValueChange={(v) =>
+                        patchAgenda({
+                          defaultView: v === "week" ? "week" : "month",
+                        })
+                      }
+                      className="w-full"
+                      aria-label="Visão inicial"
+                    />
+                  </div>
+                </div>
+              );
+            })()
+          ) : null}
+
           {/* Config da Forma: tipo, texto interno e atalho para widget. */}
           {visualType === "forma" ? (
             <>
@@ -1832,7 +2302,9 @@ export function WidgetBuilder({
           visualType !== "calculadora" &&
           visualType !== "nota" &&
           visualType !== "forma" &&
-          visualType !== "tabela_editavel" ? (
+          visualType !== "tabela_editavel" &&
+          visualType !== "kanban" &&
+          visualType !== "agenda" ? (
           <Accordion
             type="multiple"
             defaultValue={

@@ -39,6 +39,8 @@ import {
   type CurrencyRates,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
+import { runKanban } from "@/lib/kanban/data";
+import type { KanbanWidgetResult } from "@/app/(app)/dashboards/kanban-actions";
 import { runRecordList } from "@/lib/widgets/record-list";
 import {
   runEntityList,
@@ -403,6 +405,13 @@ export default async function SnapshotPage({
   const isCalculatorWidget = (w: Widget) => w.visual_type === "calculadora";
   const isNoteWidget = (w: Widget) => w.visual_type === "nota";
   const isQuickTableWidget = (w: Widget) => w.visual_type === "tabela_editavel";
+  // Kanban: modo registros é precomputado abaixo (read-only sobre o dataset
+  // congelado); modo tarefas NUNCA entra no snapshot (dados privados por
+  // usuário numa página pública) — o widget mostra placeholder.
+  const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
+  // Agenda: nunca no snapshot (tarefas privadas + navegação exige sessão) —
+  // o widget mostra placeholder.
+  const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
 
   const allowedRespSet = snap.allowed_responsible_ids
     ? new Set(snap.allowed_responsible_ids)
@@ -418,6 +427,8 @@ export default async function SnapshotPage({
     dataWidgets.map(async (w) => {
       if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w)) return;
       if (isQuickTableWidget(w)) return; // precomputado abaixo
+      if (isKanbanWidget(w)) return; // precomputado abaixo (só modo registros)
+      if (isAgendaWidget(w)) return; // placeholder no viewer
       const config: WidgetConfig = {
         source: "records",
         sources: (w.sources ?? []) as SourceKey[],
@@ -733,6 +744,38 @@ export default async function SnapshotPage({
     );
   }
 
+  // ============ Kanban: quadro PRECOMPUTADO (read-only) ============
+  // Só o modo registros — roda sobre o dataset congelado via adapter (mesmo
+  // caminho do modo lista). Tarefas nunca entram no snapshot: o adapter falha
+  // fechado p/ a tabela `tasks` e o widget mostra placeholder.
+  const kanbanResults: Record<string, KanbanWidgetResult> = {};
+  await Promise.all(
+    dataWidgets.filter(isKanbanWidget).map(async (w) => {
+      const kanban = w.settings?.kanban;
+      if (!kanban || kanban.mode !== "registros") return;
+      try {
+        const data = await runKanban(
+          db,
+          kanban,
+          periodByWidget[w.id] ?? null,
+          fields,
+          { responsibles: fkLabels, operations: fkLabels }
+        );
+        kanbanResults[w.id] = {
+          data,
+          kanban,
+          fields: [],
+          responsibles: [],
+          operations: [],
+          quickCreateSource: null,
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[snapshot] kanban ${w.id} falhou:`, msg);
+      }
+    })
+  );
+
   // ============ Widgets a RENDERIZAR ============
   // Filtros de widget desabilitados: os cards de controle (filtro/filtro_campo)
   // saem da tela (o defaultPreset dos widgets `filtro` já foi aplicado acima) e
@@ -781,6 +824,7 @@ export default async function SnapshotPage({
           calcExprById={cfg.calcExprById ?? {}}
           tableCellsById={cfg.tableCellsById ?? {}}
           quickTableResults={quickTableResults}
+          kanbanResults={kanbanResults}
           fields={fields}
           fkLabels={fkLabels}
           available={available}

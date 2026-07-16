@@ -1,12 +1,17 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 16/07/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
 // v1.1 (09/07/2026): Fase 7 — recomputa os campos calculados do registro após a
 //   edição manual (dependem de value/mrr/lead_time_days e de custom numéricos).
+// v1.2 (16/07/2026): createRecord — criação MANUAL de registros em fontes com
+//   manual_entry (0061): source_system='manual', source_id nulo, RLS força o
+//   vendedor ao próprio responsável; recomputo de calculados compartilhado com
+//   updateRecord (applyCalcFields); searchLeads generalizado em searchRecords.
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -30,6 +35,8 @@ import {
   EDITABLE_CORE_COLUMNS,
   coreWriteBackFieldId,
 } from "@/lib/config/core-writeback";
+import { fieldAppliesToSource } from "@/lib/sources";
+import { loadSources } from "@/lib/config/sources";
 
 function numOrNull(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -96,6 +103,91 @@ function coerceCore(dataType: DataType, raw: FormDataEntryValue | null): unknown
   }
   if (dataType === "data") return s.slice(0, 10);
   return s;
+}
+
+// Valores EFETIVOS do núcleo p/ o recomputo de campos calculados (edição usa
+// "update > registro"; criação usa os valores do form). Compartilhado por
+// updateRecord e createRecord.
+interface CalcCoreValues {
+  value: unknown;
+  mrr: unknown;
+  lead_time_days: unknown;
+  title: unknown;
+  record_type: string;
+  source_system: string | null;
+  pipeline: unknown;
+  stage: unknown;
+  stage_semantic: unknown;
+  sale_type: unknown;
+  channel: unknown;
+  currency: unknown;
+  closed: unknown;
+  closed_at: string | null;
+  opened_at: string | null;
+  source_created_at: string | null;
+}
+
+// Recomputa os campos calculados sobre os valores efetivos e grava em `custom`
+// (in-place). Retorna true se algum valor mudou. Calc-fields monetários usam a
+// moeda/datas EFETIVAS (se a gravação troca a Moeda, o carimbo <key>__cur já
+// sai na moeda nova); operandos match:<fonte> ficam para o recalc (regra de
+// "pular" em computeFormulaFields).
+async function applyCalcFields(
+  supabase: SupabaseClient,
+  core: CalcCoreValues,
+  custom: Record<string, unknown>
+): Promise<boolean> {
+  const formulaDefs = await loadFormulaDefs(supabase);
+  if (formulaDefs.length === 0) return false;
+  const conv = anyMoneyDef(formulaDefs)
+    ? buildRecordCurrencyContext(
+        {
+          currency: (core.currency as string | null) ?? null,
+          closed_at: core.closed_at,
+          opened_at: core.opened_at,
+          source_created_at: core.source_created_at,
+        },
+        await loadCurrencyMaterials(supabase)
+      )
+    : undefined;
+  const dateCtx = buildDateContext(
+    {
+      closed_at: core.closed_at,
+      opened_at: core.opened_at,
+      source_created_at: core.source_created_at,
+    },
+    custom,
+    await loadCustomDateKeys(supabase)
+  );
+  const calc = computeFormulaFields(
+    {
+      value: numOrNull(core.value),
+      mrr: numOrNull(core.mrr),
+      lead_time_days: numOrNull(core.lead_time_days),
+      title: core.title,
+      record_type: core.record_type,
+      source_system: core.source_system,
+      pipeline: core.pipeline,
+      stage: core.stage,
+      stage_semantic: core.stage_semantic,
+      sale_type: core.sale_type,
+      channel: core.channel,
+      currency: core.currency,
+      closed: core.closed,
+    },
+    custom,
+    formulaDefs,
+    conv,
+    dateCtx
+  );
+  let changed = false;
+  for (const [k, v] of Object.entries(calc)) {
+    if (String(custom[k] ?? "") !== String(v ?? "")) {
+      custom[k] = v;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 // Igualdade "normalizada" p/ decidir se uma coluna do núcleo mudou (datas comparam
@@ -241,47 +333,22 @@ export async function updateRecord(
       : null;
   }
 
-  // Recomputa os campos calculados a partir dos valores efetivos do registro.
-  const formulaDefs = await loadFormulaDefs(supabase);
-  if (formulaDefs.length > 0) {
-    const effLeadTime =
-      "lead_time_days" in updates ? updates.lead_time_days : existing.lead_time_days;
-    // Valor efetivo de uma coluna do núcleo (edição desta chamada > registro).
+  // Recomputa os campos calculados a partir dos valores efetivos do registro
+  // (edição desta chamada > registro) — lógica compartilhada com createRecord.
+  {
     const eff = (col: string): unknown =>
       col in updates
         ? updates[col]
         : ((existing as unknown as Record<string, unknown>)[col] ?? null);
-    // Calc-fields monetários convertem os operandos p/ a moeda de destino.
-    // Usa a moeda/datas EFETIVAS: se esta edição troca a Moeda do registro, o
-    // carimbo (<key>__cur) já sai na moeda nova na mesma gravação.
-    const conv = anyMoneyDef(formulaDefs)
-      ? buildRecordCurrencyContext(
-          {
-            currency: (eff("currency") as string | null) ?? null,
-            closed_at: existing.closed_at,
-            opened_at: (eff("opened_at") as string | null) ?? null,
-            source_created_at: existing.source_created_at,
-          },
-          await loadCurrencyMaterials(supabase)
-        )
-      : undefined;
-    // Contexto de datas (próprias + custom) para aritmética de datas. Operandos
-    // match:<fonte> ficam para o recalc (regra de "pular" em computeFormulaFields).
-    const dateCtx = buildDateContext(
+    const calcChanged = await applyCalcFields(
+      supabase,
       {
-        closed_at: existing.closed_at,
-        opened_at: (eff("opened_at") as string | null) ?? null,
-        source_created_at: existing.source_created_at,
-      },
-      custom,
-      await loadCustomDateKeys(supabase)
-    );
-    const calc = computeFormulaFields(
-      {
-        value: numOrNull(eff("value") ?? existing.value),
-        mrr: numOrNull(eff("mrr") ?? existing.mrr),
-        lead_time_days: numOrNull(effLeadTime),
-        // Colunas textuais/booleanas do núcleo (condicionais SE/E/OU).
+        value: eff("value"),
+        mrr: eff("mrr"),
+        lead_time_days:
+          "lead_time_days" in updates
+            ? updates.lead_time_days
+            : existing.lead_time_days,
         title: eff("title"),
         record_type: existing.record_type,
         source_system: existing.source_system,
@@ -292,19 +359,12 @@ export async function updateRecord(
         channel: eff("channel"),
         currency: eff("currency"),
         closed: eff("closed"),
+        closed_at: existing.closed_at,
+        opened_at: (eff("opened_at") as string | null) ?? null,
+        source_created_at: existing.source_created_at,
       },
-      custom,
-      formulaDefs,
-      conv,
-      dateCtx
+      custom
     );
-    let calcChanged = false;
-    for (const [k, v] of Object.entries(calc)) {
-      if (String(custom[k] ?? "") !== String(v ?? "")) {
-        custom[k] = v;
-        calcChanged = true;
-      }
-    }
     if (calcChanged) updates.custom_fields = custom;
   }
 
@@ -466,13 +526,207 @@ export async function updateRecordField(
   return updateRecord({}, fd);
 }
 
+// ===================== Criação manual de registros =====================
+
+export interface CreateRecordState {
+  ok?: boolean;
+  message?: string;
+  // id do registro criado (consumido pelo quick-create do kanban).
+  id?: string;
+}
+
+/**
+ * Cria um registro MANUAL numa fonte com manual_entry (0061). Gravação com o
+ * client do usuário: a RLS records_insert exige edit_record_values,
+ * source_system='manual', source_id nulo, fonte com manual_entry e — sem
+ * view_all_records (vendedor) — responsável vinculado ao próprio usuário
+ * (forçado aqui também, p/ mensagem de erro amigável antes do banco).
+ * Campos aceitos no FormData: `source` (key da fonte), `core__<coluna>`
+ * (EDITABLE_CORE_COLUMNS; title obrigatório), `custom__<field_key>` (gating
+ * por editable_by_roles + applies_to), `responsible_id` e `operation_id`.
+ */
+export async function createRecord(
+  _prev: CreateRecordState,
+  formData: FormData
+): Promise<CreateRecordState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("edit_record_values")) {
+    return { ok: false, message: "Você não tem permissão para criar registros." };
+  }
+  const roles = session.roles;
+  const viewAll = session.permissions.includes("view_all_records");
+
+  const supabase = await createClient();
+  const sources = await loadSources(supabase);
+  const sourceKey = String(formData.get("source") ?? "");
+  const sourceDef = sources.find((s) => s.key === sourceKey);
+  if (!sourceDef) return { ok: false, message: "Fonte inválida." };
+  if (!sourceDef.manualEntry) {
+    return {
+      ok: false,
+      message: "Esta fonte não aceita criação manual de registros.",
+    };
+  }
+
+  const title = String(formData.get("core__title") ?? "").trim();
+  if (!title) return { ok: false, message: "Informe o nome do registro." };
+
+  // Responsável: sem view_all_records, o registro precisa nascer atribuído a um
+  // responsável vinculado ao próprio usuário (espelha a RLS; corrige silencioso
+  // quando o form manda outro valor).
+  let responsibleId = String(formData.get("responsible_id") ?? "") || null;
+  if (!viewAll) {
+    const { data: own } = await supabase
+      .from("responsibles")
+      .select("id")
+      .eq("user_id", session.user.id)
+      .eq("active", true);
+    const ownIds = (own ?? []).map((r) => r.id as string);
+    if (ownIds.length === 0) {
+      return {
+        ok: false,
+        message:
+          "Seu usuário não está vinculado a um responsável — peça a um administrador (Configurações → Responsáveis).",
+      };
+    }
+    responsibleId =
+      responsibleId && ownIds.includes(responsibleId)
+        ? responsibleId
+        : ownIds[0];
+  }
+
+  const now = new Date().toISOString();
+  const custom: Record<string, unknown> = {};
+  const fmod: Record<string, string> = {};
+  const audits: { field: string; new_value: unknown }[] = [];
+
+  const row: Record<string, unknown> = {
+    record_type: sourceDef.recordType,
+    source_system: "manual",
+    source_id: null,
+    is_mock: false,
+    owner_user_id: session.user.id,
+    responsible_id: responsibleId,
+    // Data de criação "na origem" = agora (é o default_period_field mais comum
+    // e o que a listagem de Registros ordena).
+    source_created_at: now,
+    locally_modified_at: now,
+  };
+  if (responsibleId) {
+    fmod.responsible_id = now;
+    audits.push({ field: "responsible_id", new_value: responsibleId });
+  }
+
+  // Colunas do núcleo (title obrigatório; demais opcionais).
+  for (const [col, dtype] of Object.entries(EDITABLE_CORE_COLUMNS)) {
+    const key = `core__${col}`;
+    if (!formData.has(key)) continue;
+    const val = coerceCore(dtype, formData.get(key));
+    if (val == null) continue;
+    row[col] = val;
+    fmod[col] = now;
+    audits.push({ field: col, new_value: val });
+  }
+
+  // Operação: explícita no form ou derivada do responsável (como updateRecord).
+  const operationRaw = String(formData.get("operation_id") ?? "");
+  if (operationRaw) {
+    row.operation_id = operationRaw;
+    fmod.operation_id = now;
+    audits.push({ field: "operation_id", new_value: operationRaw });
+  } else if (responsibleId) {
+    row.operation_id = await primaryOperationId(supabase, responsibleId);
+  }
+
+  // Campos personalizados: só os da fonte (applies_to) editáveis pelo papel.
+  const { data: defs } = await supabase
+    .from("field_definitions")
+    .select("field_key, data_type, editable_by_roles, applies_to");
+  for (const def of defs ?? []) {
+    const dt = def.data_type as DataType;
+    if (dt === "calculado" || dt === "calculado_agg") continue;
+    if (!fieldAppliesToSource(def.applies_to as string[] | null, sourceDef.key)) {
+      continue;
+    }
+    const roleAllows = ((def.editable_by_roles as string[]) ?? []).some((r) =>
+      roles.includes(r)
+    );
+    if (!roleAllows) continue;
+    const key = `custom__${def.field_key}`;
+    if (!formData.has(key)) continue;
+    const val = coerce(dt, formData.get(key));
+    if (val == null) continue;
+    custom[def.field_key as string] = val;
+    fmod[def.field_key as string] = now;
+    audits.push({ field: def.field_key as string, new_value: val });
+  }
+
+  // Campos calculados já nascem materializados (mesma lógica de updateRecord).
+  await applyCalcFields(
+    supabase,
+    {
+      value: row.value ?? null,
+      mrr: row.mrr ?? null,
+      lead_time_days: null,
+      title,
+      record_type: sourceDef.recordType,
+      source_system: "manual",
+      pipeline: row.pipeline ?? null,
+      stage: row.stage ?? null,
+      stage_semantic: null,
+      sale_type: row.sale_type ?? null,
+      channel: row.channel ?? null,
+      currency: row.currency ?? null,
+      closed: row.closed ?? null,
+      closed_at: (row.closed_at as string | null) ?? null,
+      opened_at: (row.opened_at as string | null) ?? null,
+      source_created_at: now,
+    },
+    custom
+  );
+
+  row.custom_fields = custom;
+  row.field_modified_at = fmod;
+
+  const { data: inserted, error } = await supabase
+    .from("records")
+    .insert(row)
+    .select("id")
+    .single();
+  if (error) {
+    return { ok: false, message: `Falha ao criar: ${error.message}` };
+  }
+  const id = inserted.id as string;
+
+  if (audits.length > 0) {
+    await supabase.from("audit_log").insert(
+      audits.map((a) => ({
+        record_id: id,
+        user_id: session.user.id,
+        field: a.field,
+        old_value: null,
+        new_value: a.new_value ?? null,
+        origin: "app" as const,
+      }))
+    );
+  }
+
+  revalidatePath("/registros");
+  return { ok: true, message: "Registro criado.", id };
+}
+
 export interface LeadOption {
   id: string;
   label: string;
 }
 
-/** Busca leads do sistema por nome (para o combobox de lead relacionado). */
-export async function searchLeads(query: string): Promise<LeadOption[]> {
+/** Busca registros de uma fonte por nome (comboboxes de vínculo). `recordType`
+ *  ausente busca em todas as fontes. RLS decide o que o usuário vê. */
+export async function searchRecords(
+  recordType: string | null,
+  query: string
+): Promise<LeadOption[]> {
   const session = await getSessionInfo();
   if (!session) return [];
   const q = query.trim();
@@ -480,13 +734,19 @@ export async function searchLeads(query: string): Promise<LeadOption[]> {
   let builder = supabase
     .from("records")
     .select("id, title, source_created_at")
-    .eq("record_type", "lead")
-    .order("source_created_at", { ascending: false })
+    .eq("is_mock", false)
+    .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(20);
+  if (recordType) builder = builder.eq("record_type", recordType);
   if (q) builder = builder.ilike("title", `%${q}%`);
   const { data } = await builder;
   return (data ?? []).map((r) => ({
     id: r.id as string,
     label: (r.title as string) ?? "(sem nome)",
   }));
+}
+
+/** Busca leads do sistema por nome (para o combobox de lead relacionado). */
+export async function searchLeads(query: string): Promise<LeadOption[]> {
+  return searchRecords("lead", query);
 }

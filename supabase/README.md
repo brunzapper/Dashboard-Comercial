@@ -340,6 +340,27 @@ update public.snapshots
 Não precisa de refresh: o período é aplicado em tempo de consulta sobre o
 dataset já congelado.
 
+## Como aplicar a Fase 14 (Criação manual + Kanban + Tarefas + Agenda)
+
+Cole o [`apply/fase-14.sql`](./apply/fase-14.sql) (migrações `0061`–`0064`, bloco
+único, idempotente) e execute. **Aplique ANTES do deploy do app desta versão** —
+o código seleciona as novas colunas/tabelas. O que muda:
+
+- **`0061`** — `data_sources.manual_entry` (a fonte aceita criação manual de
+  registros; builtins de Sync nascem desligados, religáveis em Configurações →
+  Fontes) e nova policy `records_insert`: além do admin, quem tem
+  `edit_record_values` cria registros **manuais** (`source_system='manual'`,
+  nunca mock) em fontes com `manual_entry`; vendedor (sem `view_all_records`)
+  só cria registros atribuídos a um responsável vinculado ao próprio usuário.
+- **`0062`** — `dashboards.kind` (`'dashboard' | 'kanban'`): kanbans dedicados
+  reusam a tabela/RLS/permissões de dashboards, mudando só a rota e o shape de
+  `settings`.
+- **`0063`** — tabela `tasks` (tarefas standalone, vinculadas a registro e/ou a
+  um kanban de tarefas), com RLS espelhando a visibilidade de registros
+  (vendedor só vê as próprias) e trava de exclusão `locked` (só admin/gestor
+  alteram — trigger `enforce_task_lock`).
+- **`0064`** — visual_type `'kanban'` e `'agenda'` no CHECK de `widgets`.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

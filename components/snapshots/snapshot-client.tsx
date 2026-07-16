@@ -27,6 +27,7 @@ import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-actions";
+import type { KanbanWidgetResult } from "@/app/(app)/dashboards/kanban-actions";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { focusWidgetWithRetry } from "@/lib/widgets/focus";
@@ -61,6 +62,7 @@ export function SnapshotClient({
   calcExprById,
   tableCellsById,
   quickTableResults,
+  kanbanResults,
   fields,
   fkLabels,
   available,
@@ -93,6 +95,8 @@ export function SnapshotClient({
     { row_key: string; col_key: string; value: number | string | null }[]
   >;
   quickTableResults: Record<string, QuickTableResult>;
+  // Quadros kanban precomputados (modo registros; read-only no snapshot).
+  kanbanResults?: Record<string, KanbanWidgetResult>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
   available: AvailableField[];
@@ -143,7 +147,9 @@ export function SnapshotClient({
     : null;
 
   return (
-    <SnapshotModeProvider value={{ snapshot: true, quickTableResults }}>
+    <SnapshotModeProvider
+      value={{ snapshot: true, quickTableResults, kanbanResults }}
+    >
       <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
         {/* Largura total (sem max-width): o snapshot não tem sidebar e deve
             ocupar a tela inteira, como o <main> do app autenticado (p-6). */}

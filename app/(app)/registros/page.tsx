@@ -1,8 +1,10 @@
-// Versão: 1.3 | Data: 09/07/2026
+// Versão: 1.4 | Data: 16/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
 // v1.2 (05/07/2026): Fase 4 — listagem/filtros/edição (antes só o SyncPanel).
 // v1.3 (09/07/2026): Fase 8 — abas por fonte (Leads/Deals/Estudo). Cada aba
 //   filtra por record_type e mostra só as colunas daquela fonte (applies_to).
+// v1.4 (16/07/2026): botão "Novo registro" quando a fonte da aba permite
+//   criação manual (manual_entry, 0061) e o usuário tem edit_record_values.
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -20,6 +22,7 @@ import { loadSources } from "@/lib/config/sources";
 import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { FiltersBar } from "@/components/registros/filters-bar";
+import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import { RecordsTable } from "@/components/registros/records-table";
 import { Button } from "@/components/ui/button";
 
@@ -68,6 +71,7 @@ export default async function RegistrosPage({
     ? fonteRaw
     : (sources[0]?.key ?? "leads");
   const recordType = toRecordType(fonte);
+  const fonteDef = sources.find((s) => s.key === fonte);
 
   // Filtros + paginação (RLS decide o que o usuário vê).
   const from = (page - 1) * PAGE_SIZE;
@@ -201,11 +205,22 @@ export default async function RegistrosPage({
             personalizados conforme suas permissões.
           </p>
         </div>
-        {isAdmin ? (
-          <Button asChild variant="outline">
-            <Link href="/registros/importar">Importar CSV</Link>
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {canEditValues && fonteDef?.manualEntry ? (
+            <RecordCreateSheet
+              source={{ key: fonte, label: fonteDef.label }}
+              fields={fields}
+              responsibles={responsibles}
+              operations={operations}
+              userRoles={userRoles}
+            />
+          ) : null}
+          {isAdmin ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/importar">Importar CSV</Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {isAdmin ? <SyncPanel lastSyncedAt={lastSyncedAt} /> : null}

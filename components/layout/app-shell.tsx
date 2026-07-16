@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 16/07/2026
 // Fase 10: shell do app (client). Envolve a barra lateral + conteúdo e controla:
 //  - barra OCULTA por padrão (revelada por hover numa faixa fina à esquerda),
 //    FIXÁVEL por um pin discreto no topo direito da barra (pref. por usuário,
@@ -6,6 +6,8 @@
 //  - "modo tela cheia" (AppChromeContext.toggleFullscreen): esconde o chrome E
 //    entra na Fullscreen API do navegador (Esc restaura).
 // O conteúdo da barra é montado no server (layout.tsx) e passado em `sidebar`.
+// v1.1 (16/07/2026): `topRight` — controle flutuante no topo-direito (sino de
+//   alertas de tarefas), oculto no modo tela cheia.
 "use client";
 
 import {
@@ -39,10 +41,13 @@ export function useAppChrome(): AppChrome {
 export function AppShell({
   initialPinned,
   sidebar,
+  topRight,
   children,
 }: {
   initialPinned: boolean;
   sidebar: ReactNode;
+  // Controle flutuante no topo-direito (ex.: sino de alertas).
+  topRight?: ReactNode;
   children: ReactNode;
 }) {
   const [pinned, setPinned] = useState(initialPinned);
@@ -120,6 +125,8 @@ export function AppShell({
             className="fixed inset-y-0 left-0 z-30 w-2"
           />
         ) : null}
+
+        {!chromeHidden ? topRight : null}
 
         <main
           className={cn(

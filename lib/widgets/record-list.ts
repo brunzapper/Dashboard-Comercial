@@ -1,4 +1,5 @@
-// Versão: 1.2 | Data: 16/07/2026
+// Versão: 1.3 | Data: 16/07/2026
+// v1.3 (16/07/2026): seleciona `is_mock` (o kanban bloqueia arrastar mocks).
 // v1.2 (16/07/2026): regra dos mocks alinhada ao RPC — passa a inspecionar
 //   dimensões/métricas (caminho "Agrupar período") e a expandir unified: via
 //   correspondências (helper compartilhado em ./mock-reuniao).
@@ -34,7 +35,7 @@ import type { WidgetConfig, WidgetFilter } from "./types";
 
 // Mesmas colunas carregadas na página de Registros — satisfaz RecordRow.
 const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at";
+  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
 const CORE_COLS = new Set<string>([
