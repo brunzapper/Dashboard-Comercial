@@ -1,9 +1,10 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
 // Configuração das colunas do kanban (owner/admin): ordem, rótulo, cor, WIP e
-// ocultar. Persiste em settings.kanban.columns via updateBoardSettings —
-// ATENÇÃO: a action sobrescreve `settings` INTEIRO, então enviamos
-// { ...settings, kanban: { ...kanban, columns } } (regra documentada em
-// app/(app)/dashboards/actions.ts).
+// ocultar; em boards de TAREFAS, também a antecedência do alerta de prazo
+// (dueSoonDays) e a trava de exclusão por padrão. Persiste em settings.kanban
+// via updateBoardSettings — ATENÇÃO: a action sobrescreve `settings` INTEIRO,
+// então enviamos { ...settings, kanban: { ...kanban, ... } } (regra documentada
+// em app/(app)/dashboards/actions.ts).
 "use client";
 
 import { useState } from "react";
@@ -40,6 +41,13 @@ export function ColumnConfigPopover({
   const [rows, setRows] = useState<Row[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const isTasks = settings.kanban?.mode === "tarefas";
+  const [dueSoonDays, setDueSoonDays] = useState<number | "">(
+    settings.kanban?.tasks?.dueSoonDays ?? ""
+  );
+  const [lockByDefault, setLockByDefault] = useState(
+    settings.kanban?.tasks?.lockByDefault ?? false
+  );
 
   function init() {
     const overrides = settings.kanban?.columns ?? [];
@@ -95,7 +103,21 @@ export function ColumnConfigPopover({
     });
     const res = await updateBoardSettings(boardId, {
       ...settings,
-      kanban: { mode: "registros", ...settings.kanban, columns },
+      kanban: {
+        mode: "registros",
+        ...settings.kanban,
+        columns,
+        ...(isTasks
+          ? {
+              tasks: {
+                ...settings.kanban?.tasks,
+                dueSoonDays:
+                  dueSoonDays === "" ? undefined : Number(dueSoonDays),
+                lockByDefault,
+              },
+            }
+          : {}),
+      },
     });
     setSaving(false);
     if (!res.ok) {
@@ -195,6 +217,35 @@ export function ColumnConfigPopover({
               </div>
             ))}
           </div>
+          {isTasks ? (
+            <div className="flex flex-col gap-2 border-t pt-2">
+              <label className="flex items-center justify-between gap-2 text-xs">
+                <span>Alerta &quot;vence em breve&quot; (dias)</span>
+                <Input
+                  type="number"
+                  min={0}
+                  value={dueSoonDays}
+                  onChange={(e) =>
+                    setDueSoonDays(
+                      e.target.value === "" ? "" : Number(e.target.value)
+                    )
+                  }
+                  placeholder="3"
+                  className="h-7 w-16 text-xs"
+                  aria-label="Dias de antecedência do alerta"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={lockByDefault}
+                  onChange={(e) => setLockByDefault(e.target.checked)}
+                  className="size-3.5 accent-primary"
+                />
+                Novas tarefas nascem travadas (só admin/gestor excluem)
+              </label>
+            </div>
+          ) : null}
           {message ? (
             <p className="text-destructive text-xs" role="status">
               {message}

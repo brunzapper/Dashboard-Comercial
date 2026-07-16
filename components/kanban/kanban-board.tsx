@@ -75,15 +75,18 @@ function TaskCardBody({
   card,
   taskCtx,
   readOnly,
+  dueSoonDays,
 }: {
   card: KanbanCard;
   taskCtx: TaskFormContext;
   readOnly?: boolean;
+  // Antecedência de "vence em breve" (config do board; default 3).
+  dueSoonDays?: number;
 }) {
   const router = useRouter();
   const task = card.task!;
   const done = Boolean(task.completed_at);
-  const status = classifyDue(task);
+  const status = classifyDue(task, dueSoonDays);
 
   return (
     <>
@@ -157,6 +160,7 @@ function CardView({
   taskCtx,
   compact,
   readOnly,
+  dueSoonDays,
 }: {
   card: KanbanCard;
   draggable: boolean;
@@ -166,6 +170,7 @@ function CardView({
   taskCtx?: TaskFormContext;
   compact?: boolean;
   readOnly?: boolean;
+  dueSoonDays?: number;
 }) {
   return (
     <div
@@ -188,7 +193,12 @@ function CardView({
         />
       ) : null}
       {card.task && taskCtx ? (
-        <TaskCardBody card={card} taskCtx={taskCtx} readOnly={readOnly} />
+        <TaskCardBody
+          card={card}
+          taskCtx={taskCtx}
+          readOnly={readOnly}
+          dueSoonDays={dueSoonDays}
+        />
       ) : (
         <>
           <div className="flex items-start justify-between gap-1 pl-1.5">
@@ -431,6 +441,7 @@ export function KanbanBoard({
                     recordCtx={recordCtx}
                     taskCtx={taskCtx}
                     readOnly={readOnly}
+                    dueSoonDays={settings.tasks?.dueSoonDays}
                   />
                 ))}
                 {col.cards.length === 0 ? (
