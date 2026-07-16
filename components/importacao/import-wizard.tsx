@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 16/07/2026
+// v1.1 (16/07/2026): fontes criadas inline nascem com manual_entry (0061).
 // Wizard de import de CSV (Registros → Importar CSV, admin):
 //   1 Upload (papaparse no browser — evita multipart/limite de body; os dados
 //     sobem em chunks JSON de ~300 linhas para Server Actions)
@@ -178,6 +179,9 @@ export function ImportWizard({
     fd.set("label", newSourceLabel);
     fd.set("short_label", "");
     fd.set("default_period_field", newSourcePeriod);
+    // Fontes novas nascem aceitando criação manual (0061) — mesmo default da
+    // tela de Fontes; o admin desliga lá se a fonte for só de import/API.
+    fd.set("manual_entry", "1");
     const state = await createSource({}, fd);
     if (!state.ok || !state.key) {
       setSourceMessage(state.message ?? "Falha ao criar a fonte.");
