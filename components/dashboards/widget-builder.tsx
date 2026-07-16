@@ -57,6 +57,7 @@ import {
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
 import type { KanbanSettings } from "@/lib/kanban/types";
+import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
 import { cn } from "@/lib/utils";
 import {
@@ -308,6 +309,13 @@ export function WidgetBuilder({
   );
   const patchKanban = (p: Partial<KanbanSettings>) =>
     setKanbanCfg((k) => ({ ...k, ...p }));
+
+  // Widget AGENDA: config própria (lib/agenda/types.ts) em settings.agenda.
+  const [agendaCfg, setAgendaCfg] = useState<AgendaSettings>(
+    widget?.settings?.agenda ?? { showTasks: true, defaultView: "month" }
+  );
+  const patchAgenda = (p: Partial<AgendaSettings>) =>
+    setAgendaCfg((a) => ({ ...a, ...p }));
   // Kanbans dedicados de tarefas (destino do widget kanban modo tarefas) —
   // carregados sob demanda ao entrar no tipo/modo.
   const [taskBoards, setTaskBoards] = useState<
@@ -984,6 +992,41 @@ export function WidgetBuilder({
         metrics: [],
         filters: [],
         settings: { kanban: clean, ...tabPatch },
+      };
+      startTransition(async () => {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(),
+          });
+        if (res.ok) setOpen(false);
+        else setError(res.message ?? "Falha ao salvar.");
+      });
+      return;
+    }
+
+    // Agenda: config própria em settings.agenda. Registros exigem fonte +
+    // campo de data; sem fonte, o calendário mostra só tarefas.
+    if (visualType === "agenda") {
+      const a = agendaCfg;
+      if (a.source && !a.dateField) {
+        setError("Escolha o campo de data que aloca o registro no dia.");
+        return;
+      }
+      const clean: AgendaSettings = {
+        ...(a.source ? { source: a.source, dateField: a.dateField } : {}),
+        showTasks: a.showTasks !== false,
+        defaultView: a.defaultView === "week" ? "week" : "month",
+      };
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: clean.source ? [clean.source as SourceKey] : [],
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: { agenda: clean, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -2092,6 +2135,92 @@ export function WidgetBuilder({
             })()
           ) : null}
 
+          {/* Config da AGENDA: fonte + campo de data (registros no dia) e
+              tarefas por vencimento. */}
+          {visualType === "agenda" ? (
+            (() => {
+              const a = agendaCfg;
+              const dateOptions: ComboboxOption[] = [
+                { value: "closed_at", label: "Data de fechamento" },
+                { value: "opened_at", label: "Data de abertura" },
+                { value: "source_created_at", label: "Data de criação (origem)" },
+                ...fields
+                  .filter(
+                    (f) =>
+                      f.data_type === "data" &&
+                      (!a.source || fieldAppliesToSource(f.applies_to, a.source))
+                  )
+                  .map((f) => ({
+                    value: `custom:${f.field_key}`,
+                    label: f.label,
+                  })),
+              ];
+              return (
+                <div className="flex flex-col gap-3 rounded-md border p-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Fonte dos registros</Label>
+                    <Combobox
+                      options={[
+                        { value: "", label: "— nenhuma (só tarefas) —" },
+                        ...catalog.map((s) => ({ value: s.key, label: s.label })),
+                      ]}
+                      value={a.source ?? ""}
+                      onValueChange={(v) =>
+                        patchAgenda({
+                          source: v || undefined,
+                          dateField: v
+                            ? (a.dateField ?? "source_created_at")
+                            : undefined,
+                        })
+                      }
+                      className="w-full"
+                      aria-label="Fonte dos registros"
+                    />
+                  </div>
+                  {a.source ? (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Campo de data (aloca o registro no dia)</Label>
+                      <Combobox
+                        options={dateOptions}
+                        value={a.dateField ?? ""}
+                        onValueChange={(v) => patchAgenda({ dateField: v })}
+                        className="w-full"
+                        aria-label="Campo de data"
+                      />
+                    </div>
+                  ) : null}
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={a.showTasks !== false}
+                      onCheckedChange={(v) =>
+                        patchAgenda({ showTasks: v === true })
+                      }
+                    />
+                    Mostrar tarefas (vencimento)
+                  </label>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Visão inicial</Label>
+                    <Combobox
+                      searchable={false}
+                      options={[
+                        { value: "month", label: "Mês" },
+                        { value: "week", label: "Semana" },
+                      ]}
+                      value={a.defaultView ?? "month"}
+                      onValueChange={(v) =>
+                        patchAgenda({
+                          defaultView: v === "week" ? "week" : "month",
+                        })
+                      }
+                      className="w-full"
+                      aria-label="Visão inicial"
+                    />
+                  </div>
+                </div>
+              );
+            })()
+          ) : null}
+
           {/* Config da Forma: tipo, texto interno e atalho para widget. */}
           {visualType === "forma" ? (
             <>
@@ -2174,7 +2303,8 @@ export function WidgetBuilder({
           visualType !== "nota" &&
           visualType !== "forma" &&
           visualType !== "tabela_editavel" &&
-          visualType !== "kanban" ? (
+          visualType !== "kanban" &&
+          visualType !== "agenda" ? (
           <Accordion
             type="multiple"
             defaultValue={

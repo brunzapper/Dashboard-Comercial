@@ -409,6 +409,9 @@ export default async function SnapshotPage({
   // congelado); modo tarefas NUNCA entra no snapshot (dados privados por
   // usuário numa página pública) — o widget mostra placeholder.
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
+  // Agenda: nunca no snapshot (tarefas privadas + navegação exige sessão) —
+  // o widget mostra placeholder.
+  const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
 
   const allowedRespSet = snap.allowed_responsible_ids
     ? new Set(snap.allowed_responsible_ids)
@@ -425,6 +428,7 @@ export default async function SnapshotPage({
       if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w)) return;
       if (isQuickTableWidget(w)) return; // precomputado abaixo
       if (isKanbanWidget(w)) return; // precomputado abaixo (só modo registros)
+      if (isAgendaWidget(w)) return; // placeholder no viewer
       const config: WidgetConfig = {
         source: "records",
         sources: (w.sources ?? []) as SourceKey[],

@@ -25,6 +25,7 @@ import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
 import type { KanbanSettings } from "@/lib/kanban/types";
+import type { AgendaSettings } from "@/lib/agenda/types";
 import type { DateFormat } from "./format";
 import type {
   ConversionBasis,
@@ -49,7 +50,8 @@ export type VisualType =
   | "calculadora"
   | "nota"
   | "forma"
-  | "kanban";
+  | "kanban"
+  | "agenda";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "KPI (número)",
@@ -69,6 +71,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   filtro: "Filtro de período",
   filtro_campo: "Filtro por campo",
   kanban: "Kanban",
+  agenda: "Agenda",
 };
 
 export type Aggregation = "sum" | "count" | "avg";
@@ -584,6 +587,8 @@ export type WidgetSettings = KpiSettings &
   QuickTableSettings & {
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
+    // Config do widget agenda (visual_type 'agenda', 0064).
+    agenda?: AgendaSettings;
     appearance?: AppearanceSettings;
     // Filtros rápidos expostos no card (dropdowns). Valores persistidos em
     // dashboard_table_cells ('__qf__'), compartilhados entre usuários.

@@ -556,8 +556,9 @@ export default async function DashboardPage({
   // células digitadas pegam carona no cellsData do seed do histórico (abaixo).
   const isQuickTableWidget = (w: Widget) =>
     w.visual_type === "tabela_editavel";
-  // Kanban: também DEFERIDO (runKanbanWidget no cliente, padrão Tabela Livre).
+  // Kanban e Agenda: também DEFERIDOS (fetch no cliente, padrão Tabela Livre).
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
+  const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
 
   // 3) Computa cada widget de dados. Filtros, tabela editável e calculado não
   //    passam pelo engine de agregação padrão.
@@ -570,6 +571,7 @@ export default async function DashboardPage({
         return; // computados abaixo
       if (isQuickTableWidget(w)) return; // deferido (runQuickTable no cliente)
       if (isKanbanWidget(w)) return; // deferido (runKanbanWidget no cliente)
+      if (isAgendaWidget(w)) return; // deferido (fetchAgendaWidget no cliente)
       const config = {
         source: "records" as const,
         sources: w.sources ?? [],

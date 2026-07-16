@@ -5,11 +5,13 @@
 // a URL (?periodo/?de/?ate) e o servidor recomputa.
 // v1.1 (16/07/2026): modo TAREFAS — quadro por fase (mover conclui na coluna
 //   `completesTask`), quick-create de tarefa por coluna e lista de tarefas.
+// v1.2 (16/07/2026): 3ª visão AGENDA — calendário do board (registros pelo
+//   campo de data do board + tarefas por vencimento; fetch deferido por range).
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { List, SquareKanban } from "lucide-react";
+import { CalendarDays, List, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -27,7 +29,13 @@ import {
 } from "@/lib/kanban/types";
 import { moveTaskPhase } from "@/lib/tasks/actions";
 import type { TaskRow } from "@/lib/tasks/types";
+import { fetchBoardAgenda, type AgendaResult } from "@/lib/agenda/actions";
+import { monthGrid, weekOf } from "@/lib/agenda/month-grid";
 import { cn } from "@/lib/utils";
+import {
+  AgendaView,
+  type AgendaViewMode,
+} from "@/components/agenda/agenda-view";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import { TaskList } from "@/components/tarefas/task-list";
 import {
@@ -47,7 +55,7 @@ const PERIOD_OPTIONS: ComboboxOption[] = [
   ...Object.entries(PERIOD_PRESETS).map(([value, label]) => ({ value, label })),
 ];
 
-type View = "kanban" | "lista";
+type View = "kanban" | "lista" | "agenda";
 
 export function KanbanPageClient({
   boardId,
@@ -77,6 +85,25 @@ export function KanbanPageClient({
   const searchParams = useSearchParams();
   const [view, setView] = useState<View>("kanban");
   const isTasks = kanban.mode === "tarefas";
+
+  // ---- Agenda (3ª visão): fetch deferido do range visível ----
+  const [agendaAnchor, setAgendaAnchor] = useState(todayBrasiliaIso());
+  const [agendaView, setAgendaView] = useState<AgendaViewMode>("month");
+  const [agendaResult, setAgendaResult] = useState<AgendaResult | null>(null);
+  const reloadAgenda = useCallback(() => {
+    const range =
+      agendaView === "week"
+        ? { from: weekOf(agendaAnchor)[0], to: weekOf(agendaAnchor)[6] }
+        : (() => {
+            const weeks = monthGrid(agendaAnchor);
+            return { from: weeks[0][0], to: weeks[weeks.length - 1][6] };
+          })();
+    void fetchBoardAgenda(boardId, range.from, range.to).then(setAgendaResult);
+  }, [boardId, agendaAnchor, agendaView]);
+  useEffect(() => {
+    if (view !== "agenda") return;
+    reloadAgenda();
+  }, [view, reloadAgenda]);
 
   const periodo = searchParams.get("periodo") ?? "";
   const de = searchParams.get("de") ?? "";
@@ -191,6 +218,16 @@ export function KanbanPageClient({
               <List className="size-4" />
               Lista
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn("h-7 gap-1 px-2", view === "agenda" && "bg-muted")}
+              onClick={() => setView("agenda")}
+              aria-pressed={view === "agenda"}
+            >
+              <CalendarDays className="size-4" />
+              Agenda
+            </Button>
           </div>
 
           {/* Período (modo registros; tarefas usam o vencimento nos destaques) */}
@@ -251,6 +288,23 @@ export function KanbanPageClient({
           taskCtx={isTasks ? taskCtx : undefined}
           onMove={isTasks ? onMoveTask : undefined}
           columnExtra={columnExtra}
+        />
+      ) : view === "agenda" ? (
+        <AgendaView
+          anchor={agendaAnchor}
+          view={agendaView}
+          data={agendaResult?.data ?? null}
+          recordCtx={recordCtx}
+          taskCtx={
+            taskCtx ?? {
+              responsibles: recordCtx.responsibles,
+              canAssignOthers: false,
+              canLock: false,
+            }
+          }
+          onNavigate={setAgendaAnchor}
+          onViewChange={setAgendaView}
+          onChanged={reloadAgenda}
         />
       ) : isTasks && taskCtx ? (
         <TaskList
