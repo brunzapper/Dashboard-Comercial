@@ -1,6 +1,9 @@
-// Versão: 2.4 | Data: 17/07/2026
+// Versão: 2.5 | Data: 17/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.5 (17/07/2026): autoOpenEditor — card recém-criado pelo "Inserir ▸" (tipo
+//   que exige configuração) monta com o editor de dados já aberto; consumo
+//   one-shot via onAutoEditConsumed.
 // v2.4 (17/07/2026): busca client-side na lista de registros — estado clientQ
 //   elevado entre TableFilterBar (onSearchChange) e RecordListTable (searchQ),
 //   ligado quando searchHandledOnClient(settings); semeado do tf_ da URL
@@ -159,6 +162,8 @@ export const WidgetCard = memo(function WidgetCard({
   my = 0,
   onMeasure,
   onWidgetDeleted,
+  autoOpenEditor = false,
+  onAutoEditConsumed,
 }: {
   widget: Widget;
   data: WidgetData;
@@ -213,9 +218,19 @@ export const WidgetCard = memo(function WidgetCard({
   onMeasure?: (id: string, wUnits: number, hUnits: number) => void;
   // Avisa o shell da exclusão (limpa o widget otimista da criação rápida).
   onWidgetDeleted?: (id: string) => void;
+  // Inserir ▸ tipo que exige configuração: o card recém-criado monta com o
+  // editor já aberto (one-shot — o consumo avisa o shell, para o editor não
+  // reabrir num remount).
+  autoOpenEditor?: boolean;
+  onAutoEditConsumed?: (id: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
-  const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(!!autoOpenEditor);
+  useEffect(() => {
+    if (autoOpenEditor) onAutoEditConsumed?.(widget.id);
+    // Só no mount — o prop já foi consumido no estado inicial de builderOpen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);

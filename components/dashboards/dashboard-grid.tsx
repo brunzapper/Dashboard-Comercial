@@ -1,6 +1,12 @@
-// Versão: 2.8 | Data: 16/07/2026
+// Versão: 2.9 | Data: 17/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.9 (17/07/2026): modo Posicionar (PlaceWidgetOverlay — ghost centrado no
+//   cursor; pan/menu/drag suspensos como no drawMode; canvas renderiza mesmo
+//   vazio) e "Inserir ▸" com TODOS os tipos + busca (InsertTypeMenu; insertAt
+//   generalizado com defaults de lib/widgets/widget-defaults e posição com o
+//   centro na célula clicada via centerAnchored; tipos que exigem config abrem
+//   o editor na sequência — autoEditWidgetId repassado ao WidgetCard).
 // v2.8 (16/07/2026): pan extraído para o hook compartilhado lib/use-drag-pan
 //   (reusado na tabela de Registros); comportamento idêntico — guardas de
 //   drawMode/.react-grid-item/[data-conn-ui] preservadas.
@@ -55,15 +61,7 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Calculator,
-  ChevronRight,
-  ClipboardPaste,
-  Loader2,
-  Plus,
-  StickyNote,
-  Table2,
-} from "lucide-react";
+import { ChevronRight, ClipboardPaste, Loader2, Plus } from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout, LayoutItem } from "react-grid-layout/legacy";
 
@@ -80,6 +78,7 @@ import type {
   DashboardSettings,
   FieldFilterOptions,
   GridPosition,
+  VisualType,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
@@ -95,12 +94,18 @@ import {
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
-import { posOf } from "@/lib/widgets/grid-placement";
-import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
+import { centerAnchored, posOf } from "@/lib/widgets/grid-placement";
+import {
+  DEFAULT_WIDGET_SIZE,
+  defaultWidgetSeed,
+  WIDGET_NEEDS_CONFIG,
+} from "@/lib/widgets/widget-defaults";
 import { useDashboardHistory } from "./history-context";
 import { useNavPending } from "./pending-context";
 import { FloatingPanel, MenuBtn } from "./appearance-editing";
 import { DrawToCreateOverlay } from "./draw-to-create";
+import { PlaceWidgetOverlay } from "./place-widget-overlay";
+import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
@@ -243,6 +248,11 @@ export function DashboardGrid({
   drawMode = false,
   onDrawDone,
   onDrawCancel,
+  placing = null,
+  onPlace,
+  onPlaceCancel,
+  autoEditWidgetId = null,
+  onAutoEditConsumed,
   onQuickCreate,
   onWidgetDeleted,
 }: {
@@ -305,9 +315,19 @@ export function DashboardGrid({
     table: { rows: number; cols: number }
   ) => void;
   onDrawCancel?: () => void;
-  // Criação RÁPIDA pelo menu de contexto (Inserir/Calculadora): o shell insere
-  // sem revalidar e mostra o widget otimista na hora (ver dashboard-client).
-  onQuickCreate?: (input: WidgetInput) => void;
+  // Modo Posicionar: overlay com ghost w×h seguindo o cursor; o clique entrega
+  // a posição (centro ancorado) ao shell; Esc cai no onPlaceCancel (fallback).
+  placing?: { w: number; h: number } | null;
+  onPlace?: (pos: GridPosition) => void;
+  onPlaceCancel?: () => void;
+  // Abertura automática do editor de um widget recém-criado pelo Inserir
+  // (tipos que exigem configuração). Consumo one-shot avisado ao shell.
+  autoEditWidgetId?: string | null;
+  onAutoEditConsumed?: (id: string) => void;
+  // Criação RÁPIDA pelo menu de contexto (Inserir ▸ tipo): o shell insere sem
+  // revalidar e mostra o widget otimista na hora (ver dashboard-client);
+  // autoEdit abre o editor do widget novo assim que ele monta.
+  onQuickCreate?: (input: WidgetInput, opts?: { autoEdit?: boolean }) => void;
   // Avisa o shell que um widget foi excluído (remove pendente otimista).
   onWidgetDeleted?: (id: string) => void;
 }) {
@@ -473,7 +493,7 @@ export function DashboardGrid({
   // Botão esquerdo no espaço vazio arma o pan (useDragPan). Durante o desenho
   // de criação o overlay é dono do gesto.
   function onCanvasPointerDown(e: React.PointerEvent) {
-    if (drawMode) return; // o overlay de desenho é dono do gesto
+    if (drawMode || placing) return; // o overlay ativo é dono do gesto
     panPointerDown(e);
   }
 
@@ -481,7 +501,7 @@ export function DashboardGrid({
   // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
   // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
   function onCanvasContextMenu(e: React.MouseEvent) {
-    if (!canEdit || drawMode) return;
+    if (!canEdit || drawMode || placing) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -526,43 +546,21 @@ export function DashboardGrid({
     });
   }
 
-  // "Inserir ▸ Nota/Tabela livre" e "Calculadora": cria NA célula clicada, com
-  // os mesmos defaults do builder. A calculadora nasce mais "quadrada" (4×9 ≈
-  // 416×366px com célula ~92px/linha 42px) que o padrão 6×8, e já com título.
-  function insertAt(kind: "nota" | "tabela_editavel" | "calculadora") {
+  // "Inserir ▸ <tipo>": cria NA célula clicada (centro do widget ancorado
+  // nela), com os defaults centralizados em lib/widgets/widget-defaults. Tipos
+  // que exigem configuração (WIDGET_NEEDS_CONFIG) abrem o editor na sequência.
+  function insertAt(kind: VisualType) {
     const at = pasteAt;
     setPasteAt(null);
     if (!at || !onQuickCreate) return;
-    const w = kind === "calculadora" ? 4 : 6;
-    const h = kind === "calculadora" ? 9 : 8;
-    const title =
-      kind === "nota"
-        ? "Nota"
-        : kind === "tabela_editavel"
-          ? "Tabela Livre"
-          : "Calculadora";
-    onQuickCreate({
-      title,
-      visual_type: kind,
-      sources: [],
-      splitBySource: false,
-      dimensions: [],
-      metrics: [],
-      filters: [],
-      settings: {
-        ...(activeTabId ? { tab: activeTabId } : {}),
-        ...(kind === "tabela_editavel"
-          ? { quickTable: defaultQuickTable(3, 3) }
-          : {}),
-        ...(kind === "calculadora" ? { calculator: { variables: [] } } : {}),
+    const { w, h } = DEFAULT_WIDGET_SIZE[kind];
+    onQuickCreate(
+      {
+        ...defaultWidgetSeed(kind, activeTabId || undefined),
+        grid_position: centerAnchored(at.gridX, at.gridY, w, h, cols),
       },
-      grid_position: {
-        x: Math.min(at.gridX, Math.max(0, cols - w)),
-        y: at.gridY,
-        w,
-        h,
-      },
-    });
+      { autoEdit: WIDGET_NEEDS_CONFIG[kind] }
+    );
   }
 
   // Persistência do layout: só em interações do usuário (arrastar/redimensionar),
@@ -709,48 +707,29 @@ export function DashboardGrid({
   }
 
   // Menu flutuante do clique-direito (compartilhado entre o estado vazio e o
-  // grid): Inserir ▸ (Nota/Tabela livre), Calculadora e Colar widget.
-  // Reaproveita FloatingPanel (posiciona no clique, fecha ao clicar fora).
+  // grid): Inserir ▸ (todos os tipos, com busca) e Colar widget. Reaproveita
+  // FloatingPanel (posiciona no clique, fecha ao clicar fora). O flyout NÃO
+  // fecha no mouse-leave — tem input de busca dentro; fecha com o menu ou Esc.
   const pasteMenu = pasteAt ? (
     <FloatingPanel x={pasteAt.x} y={pasteAt.y} onClose={() => setPasteAt(null)} className="w-48">
       {onQuickCreate ? (
         <>
-          <div
-            className="relative"
-            onMouseEnter={() => setInsertOpen(true)}
-            onMouseLeave={() => setInsertOpen(false)}
-          >
+          <div className="relative" onMouseEnter={() => setInsertOpen(true)}>
             <MenuBtn onClick={() => setInsertOpen((v) => !v)}>
               <Plus />
               <span className="flex-1">Inserir</span>
               <ChevronRight />
             </MenuBtn>
             {insertOpen ? (
-              <div
-                className={cn(
-                  "bg-popover text-popover-foreground absolute top-0 z-50 w-44 rounded-md border p-2 shadow-md",
-                  // Flip para a esquerda quando o menu está colado na borda
-                  // direita da viewport (o flyout estouraria a tela).
-                  pasteAt.x > window.innerWidth - 400
-                    ? "right-full mr-1"
-                    : "left-full ml-1"
-                )}
-              >
-                <MenuBtn onClick={() => insertAt("nota")}>
-                  <StickyNote />
-                  <span className="flex-1">Nota (Post-it)</span>
-                </MenuBtn>
-                <MenuBtn onClick={() => insertAt("tabela_editavel")}>
-                  <Table2 />
-                  <span className="flex-1">Tabela livre</span>
-                </MenuBtn>
-              </div>
+              <InsertTypeMenu
+                // Flip para a esquerda quando o menu está colado na borda
+                // direita da viewport (o flyout estouraria a tela).
+                alignLeft={pasteAt.x > window.innerWidth - 400}
+                onPick={insertAt}
+                onClose={() => setInsertOpen(false)}
+              />
             ) : null}
           </div>
-          <MenuBtn onClick={() => insertAt("calculadora")}>
-            <Calculator />
-            <span className="flex-1">Calculadora</span>
-          </MenuBtn>
           <div className="bg-border my-1 h-px" />
         </>
       ) : null}
@@ -769,8 +748,9 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
-  // Em drawMode o canvas renderiza mesmo vazio (é onde se desenha a tabela).
-  if (widgets.length === 0 && !drawMode) {
+  // Em drawMode/placing o canvas renderiza mesmo vazio (é onde se desenha a
+  // tabela / se clica para posicionar o widget novo).
+  if (widgets.length === 0 && !drawMode && !placing) {
     return (
       <>
         <div
@@ -858,8 +838,8 @@ export function DashboardGrid({
               containerPadding={[MX, MY]}
               autoSize={false}
               style={{ height: gridH(rows) }}
-              isDraggable={editMode && !drawMode}
-              isResizable={editMode && !drawMode}
+              isDraggable={editMode && !drawMode && !placing}
+              isResizable={editMode && !drawMode && !placing}
               draggableHandle=".widget-drag"
               onDragStart={onDragStart}
               onResizeStart={onResizeStart}
@@ -912,6 +892,8 @@ export function DashboardGrid({
                     my={MY}
                     onMeasure={onMeasure}
                     onWidgetDeleted={onWidgetDeleted}
+                    autoOpenEditor={w.id === autoEditWidgetId}
+                    onAutoEditConsumed={onAutoEditConsumed}
                   />
                 </div>
               ))}
@@ -926,6 +908,20 @@ export function DashboardGrid({
                 rows={rows}
                 onDone={onDrawDone}
                 onCancel={onDrawCancel}
+              />
+            ) : null}
+            {placing && onPlace && onPlaceCancel ? (
+              <PlaceWidgetOverlay
+                cellW={cellW}
+                rowH={ROW_H}
+                mx={MX}
+                my={MY}
+                cols={cols}
+                rows={rows}
+                w={placing.w}
+                h={placing.h}
+                onPlace={onPlace}
+                onCancel={onPlaceCancel}
               />
             ) : null}
             {editMode && !drawMode ? (
