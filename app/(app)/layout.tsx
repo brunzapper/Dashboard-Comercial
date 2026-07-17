@@ -34,7 +34,7 @@ import { RealtimeRefresher } from "@/components/realtime-refresher";
 // sub-abas de "Configurações" — o item pai é inserido abaixo conforme o acesso.
 // Registros só é visível a Gestores/Administradores.
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
-  { href: "/", label: "Dashboards" },
+  { href: "/", label: "Workspace" },
   { href: "/tarefas", label: "Tarefas" },
   { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
