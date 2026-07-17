@@ -27,6 +27,7 @@ import { TaskBell } from "@/components/layout/task-bell";
 import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
+import { RealtimeRefresher } from "@/components/realtime-refresher";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
 // sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
@@ -106,6 +107,9 @@ export default async function AppLayout({
   return (
     <SourcesProvider sources={sources}>
       <SourceLabelsProvider labels={sourceLabels}>
+        {/* Sinal realtime (records/tasks/comments) → event bus + refresh
+            coalescido; só no app autenticado (o viewer /s/ fica fora). */}
+        <RealtimeRefresher />
         <AppShell
           initialPinned={initialPinned}
           sidebar={sidebarContent}

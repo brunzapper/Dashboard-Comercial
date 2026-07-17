@@ -1,10 +1,12 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 17/07/2026
 // Event bus CLIENT-SIDE de mudanças de tarefas/comentários/registros: mutação
 // concluída em qualquer superfície → emitDataChanged → assinantes (widget
-// kanban, agenda, sino, listas) recarregam na hora, sem Supabase Realtime.
-// Alcance: mesma aba/sessão (decisão do plano); outros usuários veem no
-// próximo carregamento. Emita SEMPRE no client, após a Server Action resolver
-// ok — nunca de dentro da action (não há window no server).
+// kanban, agenda, sino, listas) recarregam na hora.
+// v1.1 (17/07/2026): o bus também é alimentado pelo Supabase Realtime
+// (components/realtime-refresher.tsx, coalescido) — mudanças de OUTROS
+// usuários/syncs chegam pelo mesmo caminho; o alcance deixou de ser só a
+// própria aba. Emita SEMPRE no client, após a Server Action resolver ok —
+// nunca de dentro da action (não há window no server).
 "use client";
 
 import { useEffect, useRef } from "react";
