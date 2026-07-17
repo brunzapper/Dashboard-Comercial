@@ -36,7 +36,15 @@ export function RealtimeRefresher() {
   const router = useRouter();
 
   useEffect(() => {
-    const supabase = createClient();
+    // Falha SUAVE: realtime é aprimoramento — se o client não puder ser criado
+    // (ex.: env pública ausente no build), o app segue funcionando sem ele.
+    let supabase: ReturnType<typeof createClient>;
+    try {
+      supabase = createClient();
+    } catch (e) {
+      console.warn("[realtime] desativado:", e instanceof Error ? e.message : e);
+      return;
+    }
     let channel: RealtimeChannel | null = null;
     let disposed = false;
     let retry = 0;

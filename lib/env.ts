@@ -1,9 +1,15 @@
-// Versão: 1.0 | Data: 04/07/2026
+// Versão: 1.1 | Data: 17/07/2026
 // Leitura e validação de variáveis de ambiente.
 // Não há .env.local neste projeto: os valores vivem nas Environment Variables
 // da Vercel e no painel do Supabase. Falhamos com mensagem clara quando uma
 // variável obrigatória está ausente em runtime, para facilitar o diagnóstico
 // nos previews da Vercel.
+// v1.1 (17/07/2026): as públicas (NEXT_PUBLIC_*) passam a ser lidas com acesso
+//   ESTÁTICO (process.env.NEXT_PUBLIC_...). O Next só embute variáveis no
+//   bundle do BROWSER quando a referência é literal — o lookup dinâmico
+//   `process.env[name]` do requireEnv nunca é embutido (docs: guia de
+//   environment-variables, "dynamic lookups will not be inlined"), então o
+//   primeiro consumidor client (realtime-refresher) quebrava o app inteiro.
 
 /**
  * Lê uma variável de ambiente obrigatória. Lança erro explícito se ausente.
@@ -24,10 +30,26 @@ export function optionalEnv(name: string): string | undefined {
   return value && value.trim() !== "" ? value : undefined;
 }
 
-// --- Supabase (públicas, seguras no browser) ---
-export const getSupabaseUrl = () => requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+/**
+ * Valida um valor JÁ lido. As públicas DEVEM chegar aqui via acesso estático
+ * (process.env.NEXT_PUBLIC_...) para o Next embutir o literal no bundle do
+ * browser em build time — nunca usar requireEnv (lookup dinâmico) para elas.
+ */
+function requireValue(name: string, value: string | undefined): string {
+  if (!value || value.trim() === "") {
+    throw new Error(`Variável de ambiente obrigatória ausente: ${name}`);
+  }
+  return value;
+}
+
+// --- Supabase (públicas, seguras no browser; acesso ESTÁTICO obrigatório) ---
+export const getSupabaseUrl = () =>
+  requireValue("NEXT_PUBLIC_SUPABASE_URL", process.env.NEXT_PUBLIC_SUPABASE_URL);
 export const getSupabaseAnonKey = () =>
-  requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  requireValue(
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
 
 // --- Supabase (privada, apenas servidor) ---
 export const getSupabaseServiceRoleKey = () =>
