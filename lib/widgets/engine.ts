@@ -22,6 +22,7 @@ import {
   AGG_LABELS,
   DATE_AGG_LABELS,
   TRANSFORM_LABELS,
+  type ComparisonSettings,
   type DateAgg,
   type Dimension,
   type Metric,
@@ -54,6 +55,15 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
+import {
+  alignComparisonRows,
+  collapseMedianRows,
+  comparisonLabel,
+  comparisonSpec,
+  isChronoDim,
+  uniquePeriodField,
+  type ComparisonSpec,
+} from "./comparison";
 import { runRecordList } from "./record-list";
 import {
   buildRecordBreakdown,
@@ -438,33 +448,47 @@ function attachMoney(
   }
   for (const { m, i } of moneyEntries) {
     const metricKey = `metric_${i + 1}`;
-    let single = true;
-    let code: string | null = null;
-    for (const row of rows) {
-      const codes = Object.keys(row.__money![metricKey].perCurrency);
-      if (codes.length === 0) continue;
-      if (codes.length > 1) {
-        single = false;
-        break;
-      }
-      if (code == null) code = codes[0];
-      else if (code !== codes[0]) {
-        single = false;
-        break;
-      }
-    }
-    const disp = m.currencyDisplay ?? "original";
-    const foreign =
-      single && code != null && code !== "BRL" && disp === "original"
-        ? code
-        : null;
+    const foreign = seriesForeignCode(rows, metricKey, m.currencyDisplay ?? "original");
     for (const row of rows) {
       row[metricKey] = plotAmount(row.__money![metricKey], m.agg, foreign);
     }
   }
 }
 
-async function fetchFkLabels(
+// Decisão de moeda de plotagem de uma SÉRIE (metricKey): mantém a moeda
+// estrangeira quando toda a série tem uma única moeda estrangeira e a exibição
+// é "original"; senão converte p/ R$. Compartilhada entre attachMoney e a
+// reescrita dos valores de comparação (os dois lados na MESMA escala).
+function seriesForeignCode(
+  rows: WidgetRow[],
+  metricKey: string,
+  disp: string
+): string | null {
+  let single = true;
+  let code: string | null = null;
+  for (const row of rows) {
+    const bd = row.__money?.[metricKey];
+    if (!bd) continue;
+    const codes = Object.keys(bd.perCurrency);
+    if (codes.length === 0) continue;
+    if (codes.length > 1) {
+      single = false;
+      break;
+    }
+    if (code == null) code = codes[0];
+    else if (code !== codes[0]) {
+      single = false;
+      break;
+    }
+  }
+  return single && code != null && code !== "BRL" && disp === "original"
+    ? code
+    : null;
+}
+
+// Exportado p/ o Card modo "record" (lib/widgets/card.ts) resolver o rótulo do
+// campo FK exibido com a mesma semântica das dimensões.
+export async function fetchFkLabels(
   supabase: SupabaseClient,
   fk: FkKind,
   ids: string[]
@@ -505,7 +529,14 @@ async function runKpi(
   rates: CurrencyRates,
   conversionPeriod: ConversionYQ,
   today: ConversionYQ,
-  period?: DashboardPeriod | null
+  period?: DashboardPeriod | null,
+  // Comparação com período anterior (só o modo razão usa; meta não compara —
+  // a meta já é a referência do card).
+  cmp?: {
+    spec: ComparisonSpec;
+    settings: ComparisonSettings;
+    filters: WidgetFilter[];
+  } | null
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
   const empty = { rows: [], dimensions: [], metrics: [] };
@@ -530,7 +561,11 @@ async function runKpi(
     grandTotalMode: s.grandTotalMode,
   });
   // Detalhamento monetário de UMA métrica sobre todo o recorte (sem dimensões).
-  const moneyBreakdown = async (m: Metric): Promise<MoneyBreakdown | null> => {
+  // `f` permite reusar com os filtros do período de comparação.
+  const moneyBreakdown = async (
+    m: Metric,
+    f: WidgetFilter[] = filters
+  ): Promise<MoneyBreakdown | null> => {
     const infos: MoneyInfo[] = [
       { metric: m, ...moneyCurrencyInfo(m.field, fieldByKey) },
     ];
@@ -540,7 +575,7 @@ async function runKpi(
       const map = await buildMoneyBreakdowns(
         supabase,
         [],
-        filters,
+        f,
         correspondencesMap,
         infos,
         rates,
@@ -575,12 +610,51 @@ async function runKpi(
       if (bd) d = den.agg === "avg" && bd.count > 0 ? bd.brl / bd.count : bd.brl;
     }
     const value = d ? n / d : null;
+    // Comparação: a MESMA razão sob os filtros do período de comparação. Razão
+    // é intensiva — nas bases de janela compara a razão da janela inteira (sem
+    // dividir por buckets; mediana degrada p/ o agregado da janela).
+    let cmpValue: number | null | undefined;
+    if (cmp) {
+      try {
+        const [cn0, cd0] = await aggregate(
+          supabase,
+          [num, den],
+          cmp.filters,
+          correspondencesMap
+        );
+        let cn = cn0;
+        let cd = cd0;
+        if (numMoney) {
+          const bd = await moneyBreakdown(num, cmp.filters);
+          if (bd) cn = num.agg === "avg" && bd.count > 0 ? bd.brl / bd.count : bd.brl;
+        }
+        if (denMoney) {
+          const bd = await moneyBreakdown(den, cmp.filters);
+          if (bd) cd = den.agg === "avg" && bd.count > 0 ? bd.brl / bd.count : bd.brl;
+        }
+        cmpValue = cd ? cn / cd : null;
+      } catch {
+        cmpValue = undefined; // degrada sem variação
+      }
+    }
     return {
       ...empty,
+      ...(cmp && cmpValue !== undefined
+        ? {
+            comparison: {
+              base: cmp.spec.base,
+              from: cmp.spec.from,
+              to: cmp.spec.to,
+              label: comparisonLabel(cmp.settings, cmp.spec),
+              settings: cmp.settings,
+            },
+          }
+        : {}),
       kpi: {
         mode: "ratio",
         label: s.label ?? "Razão",
         value,
+        ...(cmpValue !== undefined ? { cmpValue } : {}),
         // A razão de um numerador monetário é uma cifra em R$ (ex.: ticket médio).
         // `percent` (não-monetário): razão exibida ×100 + "%" (0.35 → "35%").
         ...(numConverted && value != null
@@ -1005,16 +1079,36 @@ export async function runWidget(
 ): Promise<WidgetData> {
   // Segmentação por fonte ANTES do @period/sourceFilters: os filtros
   // sintéticos e o record_type in (...) implícito nunca ganham alvo.
-  let filters = applyFilterSourceTargets(
+  const baseFilters = applyFilterSourceTargets(
     resolveFilters(config.filters ?? []),
     config.sources
   );
+  let filters = baseFilters;
   if (period) filters = applyPeriodToFilters(filters, period, config.sources);
   // Fonte(s) selecionada(s) viram um filtro record_type in (...).
   filters = [...sourceFilters(config.sources), ...filters];
 
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const today = yearQuarterOf(null);
+
+  // Comparação com período anterior (settings.comparison): resolve o range da
+  // segunda consulta (lib/widgets/comparison.ts). Ela filtra pelo MESMO campo
+  // de data do período atual (regra dos mocks 0052 preservada) e nasce dos
+  // filtros do próprio widget — nunca de filtros de restrição externos.
+  const cmpSettings = config.settings?.comparison;
+  const cmpSpec = comparisonSpec(period, cmpSettings);
+  const cmpFiltersFor = (spec: ComparisonSpec): WidgetFilter[] => {
+    const cmpPeriod: DashboardPeriod = {
+      field: period!.field,
+      from: spec.from,
+      to: spec.to,
+      fieldBySource: period?.fieldBySource,
+    };
+    return [
+      ...sourceFilters(config.sources),
+      ...applyPeriodToFilters(baseFilters, cmpPeriod, config.sources),
+    ];
+  };
 
   if (config.visual_type === "kpi" && config.settings?.mode) {
     return runKpi(
@@ -1027,7 +1121,14 @@ export async function runWidget(
       rates,
       conversionPeriod,
       today,
-      period
+      period,
+      cmpSpec && cmpSettings
+        ? {
+            spec: cmpSpec,
+            settings: cmpSettings,
+            filters: cmpFiltersFor(cmpSpec),
+          }
+        : null
     );
   }
 
@@ -1061,233 +1162,362 @@ export async function runWidget(
   config.metrics.forEach((m, i) => {
     if (isCalcMetric(m, fieldByKey)) calcResolved.set(i, resolveCalcMetric(m, fieldByKey));
   });
-  const rpcMetrics: Metric[] = [];
-  const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
-  config.metrics.forEach((m, i) => {
-    if (calcResolved.has(i)) return;
-    rpcIdxOfConfig.set(i, rpcMetrics.length);
-    rpcMetrics.push(m);
-  });
-  const rpcIdxOfBasis = new Map<string, number>(); // basis key → idx rpc
-  // Chaves condicionais (SOMASE/CONT.SE/MÉDIASE): NUNCA entram na consulta
-  // principal (o filtro da condição valeria para a consulta inteira) — cada
-  // conjunto de condições vira uma consulta auxiliar própria, adiante.
-  const condBasisKeys: BasisKey[] = [];
-  for (const rc of calcResolved.values()) {
-    if (!rc.formula) continue;
-    for (const key of basisKeysFor(rc.formula)) {
-      if (isCondBasisKey(key)) {
-        if (!condBasisKeys.includes(key)) condBasisKeys.push(key);
-        continue;
-      }
-      if (rpcIdxOfBasis.has(key)) continue;
-      const bm = basisMetric(key);
-      // Reusa uma métrica normal idêntica (mesma coluna do RPC) quando houver.
-      const existing = rpcMetrics.findIndex(
-        (m) => m.field === bm.field && m.agg === bm.agg && !m.formula
-      );
-      if (existing >= 0) {
-        rpcIdxOfBasis.set(key, existing);
-      } else {
-        rpcIdxOfBasis.set(key, rpcMetrics.length);
-        rpcMetrics.push(bm);
-      }
-    }
-  }
-  // Toda métrica é calculada e sem operando (ex.: campo deletado): o RPC não
-  // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer.
-  if (calcResolved.size > 0 && rpcMetrics.length === 0 && dims.length === 0) {
-    rpcMetrics.push({ field: "*", agg: "count" });
-  }
 
-  const { data, error } = await supabase.rpc("run_widget_query", {
-    p_source: config.source,
-    p_dimensions: dims,
-    p_metrics: rpcMetrics,
-    p_filters: filters,
-    p_correspondences: correspondencesMap,
-  });
-  if (error) throw new Error(error.message);
-
-  const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
-
-  // Chaves condicionais: uma consulta auxiliar por conjunto DISTINTO de
-  // condições (mesmas dims; filtros da condição anexados aos do widget),
-  // casada por tupla de dims como a consulta de moeda. Falha da auxiliar
-  // degrada a chave para null (operando ausente → "—"), nunca para o número
-  // sem condição (que seria um valor errado).
-  const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
-  if (condBasisKeys.length > 0) {
-    const condGroups = new Map<
-      string,
-      { filters: WidgetFilter[]; keys: BasisKey[] }
-    >();
-    for (const key of condBasisKeys) {
-      const parsed = parseCondBasisKey(key);
-      if (!parsed) continue;
-      const extra = condFilters(parsed.conds);
-      const gk = JSON.stringify(extra);
-      const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
-      g.keys.push(key);
-      condGroups.set(gk, g);
-    }
-    await Promise.all(
-      [...condGroups.values()].map(async (g) => {
-        try {
-          const { data: condData, error: condError } = await supabase.rpc(
-            "run_widget_query",
-            {
-              p_source: config.source,
-              p_dimensions: dims,
-              p_metrics: g.keys.map(basisMetric),
-              p_filters: [...filters, ...g.filters],
-              p_correspondences: correspondencesMap,
-            }
-          );
-          if (condError) throw new Error(condError.message);
-          const condRows = (Array.isArray(condData) ? condData : []) as WidgetRow[];
-          for (const key of g.keys) condValueByKey.set(key, {});
-          for (const r of condRows) {
-            const tuple: unknown[] = [];
-            for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
-            const tk = JSON.stringify(tuple);
-            g.keys.forEach((key, ki) => {
-              const v = r[`metric_${ki + 1}`];
-              const n = Number(v);
-              condValueByKey.get(key)![tk] =
-                v == null || !Number.isFinite(n) ? null : n;
-            });
-          }
-        } catch {
-          for (const key of g.keys) condValueByKey.delete(key);
-        }
-      })
-    );
-  }
-
-  // Consulta auxiliar por moeda + data-da-taxa (uma só): cobre as métricas
-  // monetárias normais (`__money`) E os operandos monetários das métricas
-  // calculadas (basis como MoneyBreakdown — preserva a moeda única do recorte
-  // ou opera nos valores convertidos p/ Real quando misturar).
-  const moneyEntries = config.metrics
-    .map((m, i) => ({ m, i }))
-    .filter(({ m }) => isMoneyMetric(m, available));
-  // Chaves condicionais ficam de fora: a consulta de moeda não aplica os
-  // filtros da condição (o detalhamento sairia sem condição — valor errado);
-  // o operando condicional segue numérico (soma crua, degradação v1).
-  const basisMoneyKeys = [
-    ...new Set(
-      [...calcResolved.values()].flatMap((rc) =>
-        rc.formula && rc.mode !== "none"
-          ? basisKeysFor(rc.formula).filter(
-              (key) =>
-                !isCondBasisKey(key) &&
-                basisMetric(key).agg === "sum" &&
-                isMoneyOperandField(basisMetric(key).field, fieldByKey)
-            )
-          : []
-      )
-    ),
-  ];
-  const metricInfos: MoneyInfo[] = moneyEntries.map(({ m }) => ({
-    metric: m,
-    ...moneyCurrencyInfo(m.field, fieldByKey),
-  }));
-  const basisInfos: MoneyInfo[] = basisMoneyKeys.map((key) => {
-    const bm = basisMetric(key);
-    return { metric: bm, ...moneyCurrencyInfo(bm.field, fieldByKey) };
-  });
-  // Degrada com elegância se a consulta auxiliar falhar (ex.: migração 0039
-  // ainda não aplicada): sem `__money`, os charts caem no número puro; a basis
-  // calculada fica numérica (soma crua, comportamento v1).
-  let bdMap: Record<string, MoneyBreakdown[]> = {};
-  if (metricInfos.length + basisInfos.length > 0 && rows.length > 0) {
-    try {
-      bdMap = await buildMoneyBreakdowns(
-        supabase,
-        dims,
-        filters,
-        correspondencesMap,
-        [...metricInfos, ...basisInfos],
-        rates,
-        conversionPeriod,
-        today
-      );
-    } catch {
-      bdMap = {};
-    }
-  }
-  const hasBd = Object.keys(bdMap).length > 0;
-
-  // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
-  // métricas calculadas — ANTES de attachMoney/rotulagem, que mutam os dim_*
-  // usados como chave de grupo.
-  if (calcResolved.size > 0) {
-    for (const row of rows) {
-      const src: Record<string, unknown> = {};
-      rpcMetrics.forEach((_, ri) => {
-        src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
-      });
-      // Chave do grupo desta linha na consulta auxiliar (dims cruas do RPC).
-      const tuple: unknown[] = [];
-      for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
-      const bdArr = hasBd ? bdMap[JSON.stringify(tuple)] : undefined;
-      const basis: BasisValues = {};
-      for (const [key, ri] of rpcIdxOfBasis) {
-        const n = Number(src[`metric_${ri + 1}`]);
-        basis[key] =
-          src[`metric_${ri + 1}`] == null || !Number.isFinite(n) ? null : n;
-      }
-      // Sobrepõe os operandos monetários com o detalhamento por moeda do grupo
-      // (quando a aux respondeu); sem aux, ficam os números crus do RPC.
-      basisMoneyKeys.forEach((key, k) => {
-        const bd = bdArr?.[metricInfos.length + k];
-        if (bd) basis[key] = bd;
-      });
-      // Valores condicionais do grupo (consulta auxiliar por condição). Grupo
-      // ausente na auxiliar = nenhum registro casou → contagem 0, soma null.
-      // Auxiliar indisponível → null (operando ausente).
-      for (const key of condBasisKeys) {
-        const byTuple = condValueByKey.get(key);
-        if (!byTuple) {
-          basis[key] = null;
+  // Uma rodada COMPLETA da consulta agregada (RPC principal + auxiliares de
+  // condição/moeda + remapeamento e avaliação das métricas calculadas) para um
+  // par dims/filtros. A mesma rodada serve o período atual e o de comparação —
+  // os parâmetros SOMBREIAM `dims`/`filters` de fora de propósito.
+  const computeRows = async (
+    dims: Dimension[],
+    filters: WidgetFilter[]
+  ): Promise<WidgetRow[]> => {
+    const rpcMetrics: Metric[] = [];
+    const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
+    config.metrics.forEach((m, i) => {
+      if (calcResolved.has(i)) return;
+      rpcIdxOfConfig.set(i, rpcMetrics.length);
+      rpcMetrics.push(m);
+    });
+    const rpcIdxOfBasis = new Map<string, number>(); // basis key → idx rpc
+    // Chaves condicionais (SOMASE/CONT.SE/MÉDIASE): NUNCA entram na consulta
+    // principal (o filtro da condição valeria para a consulta inteira) — cada
+    // conjunto de condições vira uma consulta auxiliar própria, adiante.
+    const condBasisKeys: BasisKey[] = [];
+    for (const rc of calcResolved.values()) {
+      if (!rc.formula) continue;
+      for (const key of basisKeysFor(rc.formula)) {
+        if (isCondBasisKey(key)) {
+          if (!condBasisKeys.includes(key)) condBasisKeys.push(key);
           continue;
         }
-        const tk = JSON.stringify(tuple);
-        if (tk in byTuple) {
-          basis[key] = byTuple[tk];
+        if (rpcIdxOfBasis.has(key)) continue;
+        const bm = basisMetric(key);
+        // Reusa uma métrica normal idêntica (mesma coluna do RPC) quando houver.
+        const existing = rpcMetrics.findIndex(
+          (m) => m.field === bm.field && m.agg === bm.agg && !m.formula
+        );
+        if (existing >= 0) {
+          rpcIdxOfBasis.set(key, existing);
         } else {
-          basis[key] =
-            parseCondBasisKey(key)?.metric.agg === "count" ? 0 : null;
+          rpcIdxOfBasis.set(key, rpcMetrics.length);
+          rpcMetrics.push(bm);
         }
       }
-      config.metrics.forEach((_, i) => {
-        const rc = calcResolved.get(i);
-        if (rc) {
-          row[`metric_${i + 1}`] = rc.formula
-            ? evalCalcMoney(
-                rc.formula,
-                basis,
-                calcMoneyMeta(rc, rates, conversionPeriod)
-              ).value
-            : null;
-        } else {
-          row[`metric_${i + 1}`] = src[`metric_${rpcIdxOfConfig.get(i)! + 1}`];
-        }
-      });
-      for (let k = config.metrics.length; k < rpcMetrics.length; k++) {
-        delete row[`metric_${k + 1}`];
-      }
-      row.__calcOps = basis;
     }
-  }
+    // Toda métrica é calculada e sem operando (ex.: campo deletado): o RPC não
+    // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer.
+    if (calcResolved.size > 0 && rpcMetrics.length === 0 && dims.length === 0) {
+      rpcMetrics.push({ field: "*", agg: "count" });
+    }
 
-  // Métricas monetárias: anexa `__money` a cada linha (ANTES da rotulagem, que
-  // muta os dim_* usados como chave de grupo). Charts plotam `metric_<n>`
-  // numérico. bdMap vazio = degradação (aux falhou): não anexa __money nem
-  // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
-  if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
-    attachMoney(rows, dims, moneyEntries, bdMap);
+    const { data, error } = await supabase.rpc("run_widget_query", {
+      p_source: config.source,
+      p_dimensions: dims,
+      p_metrics: rpcMetrics,
+      p_filters: filters,
+      p_correspondences: correspondencesMap,
+    });
+    if (error) throw new Error(error.message);
+
+    const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
+
+    // Chaves condicionais: uma consulta auxiliar por conjunto DISTINTO de
+    // condições (mesmas dims; filtros da condição anexados aos do widget),
+    // casada por tupla de dims como a consulta de moeda. Falha da auxiliar
+    // degrada a chave para null (operando ausente → "—"), nunca para o número
+    // sem condição (que seria um valor errado).
+    const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
+    if (condBasisKeys.length > 0) {
+      const condGroups = new Map<
+        string,
+        { filters: WidgetFilter[]; keys: BasisKey[] }
+      >();
+      for (const key of condBasisKeys) {
+        const parsed = parseCondBasisKey(key);
+        if (!parsed) continue;
+        const extra = condFilters(parsed.conds);
+        const gk = JSON.stringify(extra);
+        const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+        g.keys.push(key);
+        condGroups.set(gk, g);
+      }
+      await Promise.all(
+        [...condGroups.values()].map(async (g) => {
+          try {
+            const { data: condData, error: condError } = await supabase.rpc(
+              "run_widget_query",
+              {
+                p_source: config.source,
+                p_dimensions: dims,
+                p_metrics: g.keys.map(basisMetric),
+                p_filters: [...filters, ...g.filters],
+                p_correspondences: correspondencesMap,
+              }
+            );
+            if (condError) throw new Error(condError.message);
+            const condRows = (Array.isArray(condData) ? condData : []) as WidgetRow[];
+            for (const key of g.keys) condValueByKey.set(key, {});
+            for (const r of condRows) {
+              const tuple: unknown[] = [];
+              for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+              const tk = JSON.stringify(tuple);
+              g.keys.forEach((key, ki) => {
+                const v = r[`metric_${ki + 1}`];
+                const n = Number(v);
+                condValueByKey.get(key)![tk] =
+                  v == null || !Number.isFinite(n) ? null : n;
+              });
+            }
+          } catch {
+            for (const key of g.keys) condValueByKey.delete(key);
+          }
+        })
+      );
+    }
+
+    // Consulta auxiliar por moeda + data-da-taxa (uma só): cobre as métricas
+    // monetárias normais (`__money`) E os operandos monetários das métricas
+    // calculadas (basis como MoneyBreakdown — preserva a moeda única do recorte
+    // ou opera nos valores convertidos p/ Real quando misturar).
+    // min/max ficam fora: o breakdown por moeda assume agregação linear (somar
+    // parcelas por moeda) — min/max monetário exibe o agregado cru do RPC.
+    const moneyEntries = config.metrics
+      .map((m, i) => ({ m, i }))
+      .filter(
+        ({ m }) =>
+          isMoneyMetric(m, available) && m.agg !== "min" && m.agg !== "max"
+      );
+    // Chaves condicionais ficam de fora: a consulta de moeda não aplica os
+    // filtros da condição (o detalhamento sairia sem condição — valor errado);
+    // o operando condicional segue numérico (soma crua, degradação v1).
+    const basisMoneyKeys = [
+      ...new Set(
+        [...calcResolved.values()].flatMap((rc) =>
+          rc.formula && rc.mode !== "none"
+            ? basisKeysFor(rc.formula).filter(
+                (key) =>
+                  !isCondBasisKey(key) &&
+                  basisMetric(key).agg === "sum" &&
+                  isMoneyOperandField(basisMetric(key).field, fieldByKey)
+              )
+            : []
+        )
+      ),
+    ];
+    const metricInfos: MoneyInfo[] = moneyEntries.map(({ m }) => ({
+      metric: m,
+      ...moneyCurrencyInfo(m.field, fieldByKey),
+    }));
+    const basisInfos: MoneyInfo[] = basisMoneyKeys.map((key) => {
+      const bm = basisMetric(key);
+      return { metric: bm, ...moneyCurrencyInfo(bm.field, fieldByKey) };
+    });
+    // Degrada com elegância se a consulta auxiliar falhar (ex.: migração 0039
+    // ainda não aplicada): sem `__money`, os charts caem no número puro; a basis
+    // calculada fica numérica (soma crua, comportamento v1).
+    let bdMap: Record<string, MoneyBreakdown[]> = {};
+    if (metricInfos.length + basisInfos.length > 0 && rows.length > 0) {
+      try {
+        bdMap = await buildMoneyBreakdowns(
+          supabase,
+          dims,
+          filters,
+          correspondencesMap,
+          [...metricInfos, ...basisInfos],
+          rates,
+          conversionPeriod,
+          today
+        );
+      } catch {
+        bdMap = {};
+      }
+    }
+    const hasBd = Object.keys(bdMap).length > 0;
+
+    // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
+    // métricas calculadas — ANTES de attachMoney/rotulagem, que mutam os dim_*
+    // usados como chave de grupo.
+    if (calcResolved.size > 0) {
+      for (const row of rows) {
+        const src: Record<string, unknown> = {};
+        rpcMetrics.forEach((_, ri) => {
+          src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
+        });
+        // Chave do grupo desta linha na consulta auxiliar (dims cruas do RPC).
+        const tuple: unknown[] = [];
+        for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
+        const bdArr = hasBd ? bdMap[JSON.stringify(tuple)] : undefined;
+        const basis: BasisValues = {};
+        for (const [key, ri] of rpcIdxOfBasis) {
+          const n = Number(src[`metric_${ri + 1}`]);
+          basis[key] =
+            src[`metric_${ri + 1}`] == null || !Number.isFinite(n) ? null : n;
+        }
+        // Sobrepõe os operandos monetários com o detalhamento por moeda do grupo
+        // (quando a aux respondeu); sem aux, ficam os números crus do RPC.
+        basisMoneyKeys.forEach((key, k) => {
+          const bd = bdArr?.[metricInfos.length + k];
+          if (bd) basis[key] = bd;
+        });
+        // Valores condicionais do grupo (consulta auxiliar por condição). Grupo
+        // ausente na auxiliar = nenhum registro casou → contagem 0, soma null.
+        // Auxiliar indisponível → null (operando ausente).
+        for (const key of condBasisKeys) {
+          const byTuple = condValueByKey.get(key);
+          if (!byTuple) {
+            basis[key] = null;
+            continue;
+          }
+          const tk = JSON.stringify(tuple);
+          if (tk in byTuple) {
+            basis[key] = byTuple[tk];
+          } else {
+            basis[key] =
+              parseCondBasisKey(key)?.metric.agg === "count" ? 0 : null;
+          }
+        }
+        config.metrics.forEach((_, i) => {
+          const rc = calcResolved.get(i);
+          if (rc) {
+            row[`metric_${i + 1}`] = rc.formula
+              ? evalCalcMoney(
+                  rc.formula,
+                  basis,
+                  calcMoneyMeta(rc, rates, conversionPeriod)
+                ).value
+              : null;
+          } else {
+            row[`metric_${i + 1}`] = src[`metric_${rpcIdxOfConfig.get(i)! + 1}`];
+          }
+        });
+        for (let k = config.metrics.length; k < rpcMetrics.length; k++) {
+          delete row[`metric_${k + 1}`];
+        }
+        row.__calcOps = basis;
+      }
+    }
+
+    // Métricas monetárias: anexa `__money` a cada linha (ANTES da rotulagem, que
+    // muta os dim_* usados como chave de grupo). Charts plotam `metric_<n>`
+    // numérico. bdMap vazio = degradação (aux falhou): não anexa __money nem
+    // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
+    if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
+      attachMoney(rows, dims, moneyEntries, bdMap);
+    }
+    return rows;
+  };
+
+  // Rodada de comparação em paralelo com a principal. Qualquer falha aqui
+  // degrada silenciosamente: o widget segue sem variação.
+  const runComparison = async (): Promise<{
+    cmpRows: WidgetRow[];
+    sharedIdx: number[];
+    bucketed: boolean;
+    divide: boolean;
+  } | null> => {
+    if (!cmpSpec || !period) return null;
+    try {
+      const isWindow =
+        cmpSpec.base === "window_avg" || cmpSpec.base === "window_median";
+      // Janelas: dims cronológicas saem da consulta de comparação — cada
+      // bucket do período atual compara contra a média/mediana por bucket da
+      // janela inteira (por tupla das demais dims).
+      const sharedIdx = dims
+        .map((_, i) => i)
+        .filter((i) => !isWindow || !isChronoDim(dims[i]));
+      let cmpDims = sharedIdx.map((i) => dims[i]);
+      let bucketed = false;
+      let divide = cmpSpec.base === "window_avg";
+      if (cmpSpec.base === "window_median" && cmpSpec.bucket) {
+        // Mediana precisa de UMA coluna de data p/ bucketizar; fontes com
+        // campos divergentes degradam p/ média (total ÷ nº de buckets).
+        const bucketField = uniquePeriodField(period);
+        if (bucketField) {
+          cmpDims = [
+            ...cmpDims,
+            { field: bucketField, transform: cmpSpec.bucket },
+          ];
+          bucketed = true;
+        } else {
+          divide = true;
+        }
+      }
+      const cmpRows = await computeRows(cmpDims, cmpFiltersFor(cmpSpec));
+      return { cmpRows, sharedIdx, bucketed, divide };
+    } catch {
+      return null;
+    }
+  };
+
+  const [rows, cmpRun] = await Promise.all([
+    computeRows(dims, filters),
+    runComparison(),
+  ]);
+
+  let comparisonMeta: WidgetData["comparison"] | undefined;
+  if (cmpRun && cmpSpec && cmpSettings) {
+    let { cmpRows } = cmpRun;
+    // Moeda: reescreve o valor comparado com a MESMA decisão de moeda da série
+    // principal (R$ vs. moeda estrangeira única) — comparação na mesma escala.
+    // Sem __money (aux degradada), fica o número cru do RPC.
+    const cmpMoneyEntries = config.metrics
+      .map((m, i) => ({ m, i }))
+      .filter(
+        ({ m }) =>
+          isMoneyMetric(m, available) && m.agg !== "min" && m.agg !== "max"
+      );
+    for (const { m, i } of cmpMoneyEntries) {
+      const key = `metric_${i + 1}`;
+      const foreign = seriesForeignCode(
+        rows,
+        key,
+        m.currencyDisplay ?? "original"
+      );
+      for (const r of cmpRows) {
+        const bd = r.__money?.[key];
+        if (bd) r[key] = plotAmount(bd, m.agg, foreign);
+      }
+    }
+    // Extensivas (soma/contagem não-calculadas) dividem pela janela e zeram
+    // buckets vazios; intensivas (média/min/max/fórmula) comparam o agregado
+    // da janela em si (dividir uma razão por N seria matemática errada).
+    const isExtensive = config.metrics.map(
+      (m, i) => !calcResolved.has(i) && (m.agg === "sum" || m.agg === "count")
+    );
+    if (cmpRun.bucketed) {
+      cmpRows = collapseMedianRows(
+        cmpRows,
+        cmpRun.sharedIdx.length,
+        config.metrics.length,
+        cmpSpec.bucketCount ?? 1,
+        isExtensive
+      );
+    } else if (cmpRun.divide && cmpSpec.bucketCount) {
+      for (const r of cmpRows) {
+        config.metrics.forEach((_, i) => {
+          if (!isExtensive[i]) return;
+          const key = `metric_${i + 1}`;
+          const v = Number(r[key]);
+          if (r[key] != null && Number.isFinite(v)) {
+            r[key] = v / cmpSpec.bucketCount!;
+          }
+        });
+      }
+    }
+    alignComparisonRows(
+      rows,
+      cmpRows,
+      dims,
+      cmpRun.sharedIdx,
+      config.metrics.length
+    );
+    comparisonMeta = {
+      base: cmpSpec.base,
+      from: cmpSpec.from,
+      to: cmpSpec.to,
+      label: comparisonLabel(cmpSettings, cmpSpec),
+      settings: cmpSettings,
+    };
   }
 
   // Transforms de data "por nome" (mês/semana): o RPC devolve um bucket ISO. Antes
@@ -1387,5 +1617,10 @@ export async function runWidget(
     };
   });
 
-  return { rows, dimensions, metrics };
+  return {
+    rows,
+    dimensions,
+    metrics,
+    ...(comparisonMeta ? { comparison: comparisonMeta } : {}),
+  };
 }

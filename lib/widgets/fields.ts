@@ -375,7 +375,7 @@ export function fieldFk(
   return available.find((a) => a.field === field)?.fk;
 }
 
-export const AGGREGATIONS: Aggregation[] = ["sum", "count", "avg"];
+export const AGGREGATIONS: Aggregation[] = ["sum", "count", "avg", "min", "max"];
 // Lista exibida na UI (o RPC ainda aceita os legados day/week/month). Ordem:
 // dia da semana, semanas, mês por nome, mês/ano, trimestre, ano.
 export const DATE_TRANSFORMS: Transform[] = [

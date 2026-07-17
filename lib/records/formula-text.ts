@@ -60,6 +60,12 @@ const FUNC_NAMES: Record<string, FormulaFuncName> = {
   abs: "ABS",
   concatenar: "CONCATENAR",
   concat: "CONCATENAR",
+  // Comparação com período anterior (dashboard: nota/calculado/calculadora).
+  anterior: "ANTERIOR",
+  varpct: "VARPCT",
+  "var.pct": "VARPCT",
+  varabs: "VARABS",
+  "var.abs": "VARABS",
 };
 
 const BOOL_NAMES: Record<string, boolean> = {
@@ -265,7 +271,7 @@ export function tokenizeFormulaText(
       }
       return {
         ok: false,
-        error: `"${word}" não é uma função conhecida (SE, E, OU, SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED, ABS, CONCATENAR, SOMASE, SOMASES, CONT.SE, CONT.SES, MÉDIASE). Para usar uma coluna, escreva entre colchetes: [${word}].`,
+        error: `"${word}" não é uma função conhecida (SE, E, OU, SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED, ABS, CONCATENAR, SOMASE, SOMASES, CONT.SE, CONT.SES, MÉDIASE, ANTERIOR, VARPCT, VARABS). Para usar uma coluna, escreva entre colchetes: [${word}].`,
       };
     }
 

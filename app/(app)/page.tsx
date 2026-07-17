@@ -108,9 +108,10 @@ export default async function HomePage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboards</h1>
+          <h1 className="text-2xl font-semibold">Workspace</h1>
           <p className="text-muted-foreground text-sm">
-            Crie dashboards e kanbans a partir dos seus registros.
+            Seu workspace: crie dashboards e kanbans a partir dos seus
+            registros.
           </p>
         </div>
         {canCreate ? <CreateMenu sources={sources} fields={fields} /> : null}
@@ -118,7 +119,7 @@ export default async function HomePage() {
 
       {dashboards.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          Nenhum dashboard ainda.
+          Nenhum dashboard no workspace ainda.
           {canCreate ? " Use o botão Criar acima." : ""}
         </p>
       ) : (

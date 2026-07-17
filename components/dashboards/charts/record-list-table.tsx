@@ -98,6 +98,11 @@ import {
 } from "@/lib/widgets/format";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { unifiedMemberRef } from "@/lib/correspondences";
+import {
+  evalConditional,
+  hasConditional,
+  scaleDomains,
+} from "@/lib/widgets/conditional";
 import type {
   AppearanceSettings,
   ColorPair,
@@ -283,6 +288,30 @@ export const RecordListTable = memo(function RecordListTable({
     const ref = resolveUnifiedRef(field, record);
     return ref ? rawRefValue(ref, record) : undefined;
   };
+
+  // Formatação condicional (appearance.conditional): alvo = field da coluna;
+  // avaliada sobre o valor CRU do registro. Precedência: célula manual > regra
+  // > escala > linha/coluna manual (ver lib/widgets/conditional.ts).
+  const cond = ap.conditional;
+  const condActive = hasConditional(cond);
+  const condDomains = useMemo(
+    () =>
+      condActive
+        ? scaleDomains(
+            records as unknown as Record<string, unknown>[],
+            cond?.scales,
+            (row, target) => rawValue(target, row as unknown as RecordRow)
+          )
+        : {},
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [condActive, cond, records]
+  );
+  const condStyleOf = (field: string, record: RecordRow) =>
+    condActive
+      ? evalConditional(cond, field, rawValue(field, record), {
+          domain: condDomains[field],
+        })
+      : null;
 
   // Métricas do widget (mesmo comportamento do agregado): uma coluna por métrica,
   // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
@@ -1079,6 +1108,7 @@ export const RecordListTable = memo(function RecordListTable({
             customEditable || coreEditable || relationEditable || leadEditable;
           const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
           const colCp = t.colColors?.[c.field];
+          const cs = condStyleOf(c.field, r);
           return (
             <TableCell
               key={x.key}
@@ -1108,8 +1138,14 @@ export const RecordListTable = memo(function RecordListTable({
                   : undefined
               }
               style={{
-                background: cellCp?.fill ?? colCp?.fill,
-                color: cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
+                background: cellCp?.fill ?? cs?.fill ?? colCp?.fill,
+                color:
+                  cellCp?.text ??
+                  cs?.text ??
+                  rowCp?.text ??
+                  colCp?.text ??
+                  t.bodyColor,
+                ...(cs?.bold ? { fontWeight: 600 } : {}),
                 ...cellBorder(last),
                 ...widthStyle(c.field),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),

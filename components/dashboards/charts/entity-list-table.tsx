@@ -26,6 +26,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import {
+  evalConditional,
+  hasConditional,
+  scaleDomains,
+} from "@/lib/widgets/conditional";
 import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { ENTITY_TYPE_OF } from "@/lib/widgets/entity-list";
@@ -270,6 +275,23 @@ export function EntityListTable({
   const dashFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
   const entityType = ENTITY_TYPE_OF[rowSource];
 
+  // Formatação condicional (appearance.conditional): alvo = field da coluna
+  // (custom:<key>); valor cru vem de r.values. Regra > coluna manual.
+  const cond = ap.conditional;
+  const condActive = hasConditional(cond);
+  const condDomains = condActive
+    ? scaleDomains(
+        rows as unknown as Record<string, unknown>[],
+        cond?.scales,
+        (row, target) =>
+          (row as unknown as EntityListRow).values[target.slice(7)]
+      )
+    : {};
+  const condStyleOf = (field: string, raw: unknown) =>
+    condActive
+      ? evalConditional(cond, field, raw, { domain: condDomains[field] })
+      : null;
+
   const [menu, setMenu] = useState<
     | { kind: "ctx"; x: number; y: number; column: string }
     | { kind: "color"; x: number; y: number; column: string }
@@ -434,6 +456,7 @@ export function EntityListTable({
         {cols.map((c, ci) => {
           const field = fieldByKey.get(c.field.slice(7));
           const raw = r.values[c.field.slice(7)];
+          const cs = condStyleOf(c.field, raw);
           return (
             <TableCell
               key={c.field}
@@ -445,8 +468,9 @@ export function EntityListTable({
                 )
               )}
               style={{
-                background: t.colColors?.[c.field]?.fill,
-                color: t.colColors?.[c.field]?.text ?? t.bodyColor,
+                background: cs?.fill ?? t.colColors?.[c.field]?.fill,
+                color: cs?.text ?? t.colColors?.[c.field]?.text ?? t.bodyColor,
+                ...(cs?.bold ? { fontWeight: 600 } : {}),
                 ...cellBorder(ci + 1),
                 ...widthStyle(c.field),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),

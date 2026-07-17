@@ -23,8 +23,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   evaluateFormula,
+  formulaComparisonBases,
   formulaUsesFunctions,
   type AggCondition,
+  type ComparisonFuncBase,
   type Formula,
 } from "@/lib/records/formulas";
 import type { FieldDefinition } from "@/lib/records/types";
@@ -48,6 +50,7 @@ import {
   sourceFilters,
 } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
+import { comparisonSpec } from "./comparison";
 import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import type { Metric, WidgetFilter } from "./types";
@@ -92,13 +95,35 @@ export async function runCalculatedWidget(
   const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
 
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
-  let filters = applyFilterSourceTargets(
+  const baseFilters = applyFilterSourceTargets(
     resolveFilters(input.filters ?? []),
     input.sources
   );
-  if (input.period)
-    filters = applyPeriodToFilters(filters, input.period, input.sources);
-  filters = [...sourceFilters(input.sources), ...filters];
+  const withPeriod = (p: DashboardPeriod | null | undefined): WidgetFilter[] => {
+    let f = baseFilters;
+    if (p) f = applyPeriodToFilters(f, p, input.sources);
+    return [...sourceFilters(input.sources), ...f];
+  };
+  const filters = withPeriod(input.period);
+
+  // Funções ANTERIOR/VARPCT/VARABS: a MESMA basis é resolvida também sob os
+  // filtros do período de comparação (bases "anterior"/"ano"; janelas ficam de
+  // fora do v1 das fórmulas) e vira contexto alternativo do avaliador. Sem
+  // período ativo (todo o período) → base indisponível → null ("—").
+  const cmpFiltersByBase: Partial<Record<ComparisonFuncBase, WidgetFilter[]>> = {};
+  for (const b of formulaComparisonBases(formula)) {
+    const spec = comparisonSpec(input.period, {
+      enabled: true,
+      base: b === "ano" ? "previous_year" : "previous_period",
+    });
+    if (!spec || !input.period) continue;
+    cmpFiltersByBase[b] = withPeriod({
+      field: input.period.field,
+      from: spec.from,
+      to: spec.to,
+      fieldBySource: input.period.fieldBySource,
+    });
+  }
 
   // Basis numérica via RPC agregado — é o valor final das contagens/campos
   // numéricos e o fallback cru dos monetários. Chaves condicionais (aggif: de
@@ -112,72 +137,117 @@ export async function runCalculatedWidget(
   // Basis numérica CRUA (antes da substituição por MoneyBreakdown): contexto
   // da reavaliação textual (evaluateFormula não entende MoneyBreakdown).
   const rawBasis: Record<string, number | null> = {};
+  // Basis do período de comparação, por base (mesmas chaves da principal).
+  const cmpBasis: Partial<Record<ComparisonFuncBase, BasisValues>> = {};
+  const cmpRawBasis: Partial<
+    Record<ComparisonFuncBase, Record<string, number | null>>
+  > = {};
 
-  const resolveKeys = async (keys: BasisKey[], keyFilters: WidgetFilter[]) => {
-    const metrics: Metric[] = keys.map(basisMetric);
-    const values = await aggregate(
-      supabase,
-      metrics,
-      keyFilters,
-      input.correspondencesMap ?? {}
-    );
-    keys.forEach((key, i) => {
-      basis[key] = Number.isFinite(values[i]) ? values[i] : null;
-      rawBasis[key] = Number.isFinite(values[i]) ? values[i] : null;
-    });
-
-    // Operandos monetários: detalhamento por moeda (preserva a moeda única do
-    // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
-    // número cru (degradação = comportamento v1).
-    if (mode !== "none") {
-      const moneyKeys = keys.filter(
-        (key) =>
-          basisMetric(key).agg === "sum" &&
-          isMoneyOperandField(basisMetric(key).field, fieldByKey)
+  // Resolve `keys` sob `keyFilters` escrevendo nos alvos dados — a mesma rodada
+  // serve a basis principal e as de comparação.
+  const makeResolver =
+    (target: BasisValues, rawTarget: Record<string, number | null>) =>
+    async (keys: BasisKey[], keyFilters: WidgetFilter[]) => {
+      const metrics: Metric[] = keys.map(basisMetric);
+      const values = await aggregate(
+        supabase,
+        metrics,
+        keyFilters,
+        input.correspondencesMap ?? {}
       );
-      if (moneyKeys.length > 0) {
-        const bds = await aggregateMoneyBreakdowns(
-          supabase,
-          moneyKeys.map(basisMetric),
-          keyFilters,
-          input.correspondencesMap ?? {},
-          fieldByKey,
-          rates,
-          conversionPeriod
+      keys.forEach((key, i) => {
+        target[key] = Number.isFinite(values[i]) ? values[i] : null;
+        rawTarget[key] = Number.isFinite(values[i]) ? values[i] : null;
+      });
+
+      // Operandos monetários: detalhamento por moeda (preserva a moeda única do
+      // recorte / converte p/ Real quando misturar). Aux indisponível → mantém o
+      // número cru (degradação = comportamento v1).
+      if (mode !== "none") {
+        const moneyKeys = keys.filter(
+          (key) =>
+            basisMetric(key).agg === "sum" &&
+            isMoneyOperandField(basisMetric(key).field, fieldByKey)
         );
-        if (bds) moneyKeys.forEach((key, i) => {
-          basis[key] = bds[i];
-        });
+        if (moneyKeys.length > 0) {
+          const bds = await aggregateMoneyBreakdowns(
+            supabase,
+            moneyKeys.map(basisMetric),
+            keyFilters,
+            input.correspondencesMap ?? {},
+            fieldByKey,
+            rates,
+            conversionPeriod
+          );
+          if (bds) moneyKeys.forEach((key, i) => {
+            target[key] = bds[i];
+          });
+        }
+      }
+    };
+
+  // Enfileira as consultas (plain + condicionais) de UMA basis num conjunto de
+  // filtros; usada p/ a principal e p/ cada base de comparação presente.
+  const enqueueBasis = (
+    jobs: Promise<void>[],
+    target: BasisValues,
+    rawTarget: Record<string, number | null>,
+    baseFiltersFor: WidgetFilter[],
+    // Basis de comparação degrada TUDO para null em falha (widget segue sem
+    // variação); a principal preserva o comportamento original (plain propaga).
+    lenient: boolean
+  ) => {
+    const resolveKeys = makeResolver(target, rawTarget);
+    if (plainKeys.length > 0) {
+      const p = resolveKeys(plainKeys, baseFiltersFor);
+      jobs.push(
+        lenient
+          ? p.catch(() => {
+              for (const key of plainKeys) target[key] = null;
+            })
+          : p
+      );
+    }
+    if (condKeys.length > 0) {
+      // Uma consulta por conjunto distinto de condições.
+      const groups = new Map<string, { conds: AggCondition[]; keys: BasisKey[] }>();
+      for (const key of condKeys) {
+        const parsed = parseCondBasisKey(key);
+        if (!parsed) {
+          target[key] = null;
+          continue;
+        }
+        const gk = JSON.stringify(parsed.conds);
+        const g = groups.get(gk) ?? { conds: parsed.conds, keys: [] };
+        g.keys.push(key);
+        groups.set(gk, g);
+      }
+      for (const g of groups.values()) {
+        // Falha da consulta condicional (ex.: migração 0050 dos operadores
+        // normalizados ainda não aplicada) degrada a chave para null (operando
+        // ausente → "—") em vez de derrubar a página do dashboard.
+        jobs.push(
+          resolveKeys(g.keys, [...baseFiltersFor, ...condFilters(g.conds)]).catch(
+            () => {
+              for (const key of g.keys) target[key] = null;
+            }
+          )
+        );
       }
     }
   };
 
   const jobs: Promise<void>[] = [];
-  if (plainKeys.length > 0) jobs.push(resolveKeys(plainKeys, filters));
-  if (condKeys.length > 0) {
-    // Uma consulta por conjunto distinto de condições.
-    const groups = new Map<string, { conds: AggCondition[]; keys: BasisKey[] }>();
-    for (const key of condKeys) {
-      const parsed = parseCondBasisKey(key);
-      if (!parsed) {
-        basis[key] = null;
-        continue;
-      }
-      const gk = JSON.stringify(parsed.conds);
-      const g = groups.get(gk) ?? { conds: parsed.conds, keys: [] };
-      g.keys.push(key);
-      groups.set(gk, g);
-    }
-    for (const g of groups.values()) {
-      // Falha da consulta condicional (ex.: migração 0050 dos operadores
-      // normalizados ainda não aplicada) degrada a chave para null (operando
-      // ausente → "—") em vez de derrubar a página do dashboard.
-      jobs.push(
-        resolveKeys(g.keys, [...filters, ...condFilters(g.conds)]).catch(() => {
-          for (const key of g.keys) basis[key] = null;
-        })
-      );
-    }
+  enqueueBasis(jobs, basis, rawBasis, filters, false);
+  for (const [b, f] of Object.entries(cmpFiltersByBase) as [
+    ComparisonFuncBase,
+    WidgetFilter[],
+  ][]) {
+    const target: BasisValues = {};
+    const rawTarget: Record<string, number | null> = {};
+    cmpBasis[b] = target;
+    cmpRawBasis[b] = rawTarget;
+    enqueueBasis(jobs, target, rawTarget, f, true);
   }
   await Promise.all(jobs);
 
@@ -197,12 +267,23 @@ export async function runCalculatedWidget(
   };
   // Refs desconhecidas (table:* legadas) resolvem p/ null dentro do
   // evalCalcMoney (operando ausente). Resultado texto/booleano → value null.
-  const result = evalCalcMoney(formula, basis, meta);
+  const hasCmp = Boolean(cmpBasis.anterior || cmpBasis.ano);
+  const result = evalCalcMoney(
+    formula,
+    basis,
+    meta,
+    hasCmp ? cmpBasis : undefined
+  );
   if (result.value == null && formulaUsesFunctions(formula)) {
     // Fórmula com funções (SE/E/OU…) pode legitimamente produzir texto ou
     // booleano — reavalia sobre a basis crua e expõe como `text`.
     try {
-      const raw = evaluateFormula(formula, rawBasis);
+      const raw = evaluateFormula(
+        formula,
+        rawBasis,
+        undefined,
+        hasCmp ? cmpRawBasis : undefined
+      );
       if (typeof raw === "string") return { ...result, text: raw };
       if (typeof raw === "boolean")
         return { ...result, text: raw ? "Verdadeiro" : "Falso" };

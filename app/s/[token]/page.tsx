@@ -43,6 +43,7 @@ import {
   type CurrencyRates,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
+import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
 import { runKanban } from "@/lib/kanban/data";
 import type { KanbanWidgetResult } from "@/app/(app)/dashboards/kanban-actions";
 import { runRecordList } from "@/lib/widgets/record-list";
@@ -456,6 +457,27 @@ export default async function SnapshotPage({
         console.error(`[snapshot] widget ${w.id} falhou:`, msg);
         dataById[w.id] = { rows: [], dimensions: [], metrics: [], error: msg };
       };
+      // Card em modo novo (record/topn/list/formula): mesmo motor do dashboard
+      // (lib/widgets/card.ts) sobre o dataset congelado; partner rows excluídas
+      // do modo record como nas listas.
+      if (isCardModeWidget(w)) {
+        try {
+          dataById[w.id] = await runCardWidget(
+            db,
+            config,
+            periodByWidget[w.id],
+            available,
+            fields,
+            currencyRates,
+            conversionPeriodById[w.id],
+            correspondencesMap,
+            { excludeRecordIds: partnerIds }
+          );
+        } catch (e) {
+          fail(e);
+        }
+        return;
+      }
       if (isListWidget(w)) {
         const rowSource = w.settings?.rowSource ?? "records";
         if (rowSource === "responsibles" || rowSource === "operations") {

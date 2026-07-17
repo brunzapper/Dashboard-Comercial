@@ -109,6 +109,8 @@ import {
   type FilterSettings,
   type GridPosition,
   type Metric,
+  type CardConfig,
+  type ComparisonSettings,
   type QuickFilterEntry,
   type RecordListColumn,
   type RowSource,
@@ -145,6 +147,8 @@ import {
   FilterRow,
   MetricRow,
 } from "@/components/dashboards/widget-builder-rows";
+import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
+import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import {
   createWidget,
@@ -446,6 +450,23 @@ export function WidgetBuilder({
     visualType === "pizza" ||
     visualType === "funil";
 
+  // Comparação com período anterior (settings.comparison): só nos widgets
+  // AGREGADOS (tabela agregada, gráficos e Card) — o modo lista de registros
+  // não tem valor agregado p/ comparar.
+  const [comparison, setComparison] = useState<ComparisonSettings>(
+    widget?.settings?.comparison ?? {}
+  );
+  // (o Card de "Data atual" fica de fora — gate `!kpiToday` nos usos, pois o
+  // estado kpiToday é declarado mais abaixo.)
+  const supportsComparison =
+    (visualType === "tabela" && !isRecordList) ||
+    visualType === "barra" ||
+    visualType === "barra_horizontal" ||
+    visualType === "linha" ||
+    visualType === "pizza" ||
+    visualType === "funil" ||
+    visualType === "kpi";
+
   // Flags por coluna no modo lista: editável + gravar no Bitrix. Semeadas das
   // colunas existentes (RecordListColumn.editable/writeBack).
   const [columnFlags, setColumnFlags] = useState<
@@ -515,6 +536,11 @@ export function WidgetBuilder({
 
   // KPI "Data atual": card que mostra o dia de hoje (Brasília). Não usa
   // métrica/RPC — o valor é resolvido no engine (runKpi) via settings.mode.
+  // Modos novos do Card (settings.card): registro (argmax/argmin), ranking,
+  // lista e fórmula. `mode` ausente = número agregado (comportamento original).
+  const [cardCfg, setCardCfg] = useState<CardConfig>(
+    widget?.settings?.card ?? {}
+  );
   const [kpiToday, setKpiToday] = useState<boolean>(
     widget?.settings?.mode === "data_atual"
   );
@@ -690,6 +716,16 @@ export function WidgetBuilder({
     ...toFieldOptions(numericFields, sourceLabels),
     ...toFieldOptions(aggCalcFields, sourceLabels),
     { value: CALC_METRIC_FIELD, label: "ƒ Fórmula personalizada…" },
+  ];
+  // Modos do Card (settings.card): campos ranqueáveis (números e datas) e
+  // métricas simples do ranking (sem ƒ ad-hoc — fórmula tem modo próprio).
+  const cardRankOptions = toFieldOptions(
+    available.filter((f) => (f.isNumeric || f.isDate) && !f.aggCalc),
+    sourceLabels
+  );
+  const cardMetricOptions: ComboboxOption[] = [
+    { value: "*", label: "Contagem de registros" },
+    ...toFieldOptions(numericFields, sourceLabels),
   ];
   const visualOptions: ComboboxOption[] = (
     Object.keys(VISUAL_TYPE_LABELS) as VisualType[]
@@ -1370,6 +1406,58 @@ export function WidgetBuilder({
         delete settings.mode;
         delete settings.label;
       }
+    }
+
+    // Modos novos do Card (settings.card): valida o mínimo de cada modo e
+    // grava; modo "value" (ou Data atual) limpa a chave.
+    if (visualType === "kpi") {
+      const cm = cardCfg.mode ?? "value";
+      if (!kpiToday && cm !== "value") {
+        if (cm === "record" && !cardCfg.rankField && !cardCfg.showField) {
+          setError("Card (registro): escolha o campo de classificação.");
+          return;
+        }
+        if ((cm === "topn" || cm === "list") && !cardCfg.labelField) {
+          setError("Card (ranking/lista): escolha o campo do rótulo.");
+          return;
+        }
+        if (cm === "topn" && !cardCfg.metric?.field) {
+          setError("Card (ranking): escolha a métrica do ranking.");
+          return;
+        }
+        if (cm === "formula") {
+          if (!cardCfg.formula || cardCfg.formula.tokens.length === 0) {
+            setError("Card (fórmula): escreva a fórmula.");
+            return;
+          }
+          const v = validateFormula(
+            cardCfg.formula,
+            new Set(calcRefs.map((r) => r.ref))
+          );
+          if (!v.ok) {
+            setError(v.error ?? "Fórmula inválida no Card.");
+            return;
+          }
+          const p = validateCondAggRefs(cardCfg.formula, calcRefs);
+          if (!p.ok) {
+            setError(p.error ?? "Fórmula inválida no Card.");
+            return;
+          }
+        }
+        settings.card = cardCfg;
+      } else {
+        delete settings.card;
+      }
+    } else {
+      delete settings.card;
+    }
+
+    // Comparação com período anterior: grava só quando habilitada num tipo
+    // suportado (agregados); senão limpa (jsonb limpo).
+    if (supportsComparison && !(visualType === "kpi" && kpiToday) && comparison.enabled) {
+      settings.comparison = comparison;
+    } else {
+      delete settings.comparison;
     }
 
     const input = {
@@ -2282,6 +2370,19 @@ export function WidgetBuilder({
             </div>
           ) : null}
 
+          {/* Modos do Card: registro (maior/menor), ranking, lista e fórmula. */}
+          {visualType === "kpi" && !kpiToday ? (
+            <CardModeSection
+              value={cardCfg}
+              onChange={setCardCfg}
+              fieldOptions={availableOptions}
+              rankOptions={cardRankOptions}
+              metricFieldOptions={cardMetricOptions}
+              fieldChips={fieldSourceChips}
+              calcRefs={calcRefs}
+            />
+          ) : null}
+
           {/* Bloco de dados em seções recolhíveis. O badge resume o que está
               configurado, visível mesmo com a seção fechada. Essenciais abrem
               por padrão; ao editar, Fontes abre fechada (raramente muda). */}
@@ -2718,6 +2819,15 @@ export function WidgetBuilder({
                 })()}
               </div>
             </BuilderSection>
+          ) : null}
+
+          {/* Comparação com período anterior (variação) */}
+          {supportsComparison && !(visualType === "kpi" && kpiToday) ? (
+            <ComparisonSection
+              value={comparison}
+              onChange={setComparison}
+              visualType={visualType}
+            />
           ) : null}
 
           {/* Dimensões dinâmicas: cresce p/ caber o conteúdo (por eixo) */}

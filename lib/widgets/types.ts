@@ -54,7 +54,7 @@ export type VisualType =
   | "agenda";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
-  kpi: "KPI (número)",
+  kpi: "Card",
   calculado: "Métrica calculada",
   calculadora: "Calculadora",
   nota: "Nota (post-it)",
@@ -74,11 +74,13 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   agenda: "Agenda",
 };
 
-export type Aggregation = "sum" | "count" | "avg";
+export type Aggregation = "sum" | "count" | "avg" | "min" | "max";
 export const AGG_LABELS: Record<Aggregation, string> = {
   sum: "Soma",
   count: "Contagem",
   avg: "Média",
+  min: "Mínimo",
+  max: "Máximo",
 };
 
 export type Transform =
@@ -334,6 +336,84 @@ export interface CalcSettings {
   calcField?: string;
 }
 
+// --- Card (evolução do KPI, 17/07/2026) ---
+// O card numérico ("value", comportamento original) ganha modos novos, todos
+// resolvidos no servidor por lib/widgets/card.ts e exibidos pelo branch kpi do
+// WidgetChart. `settings.mode` (meta/razão/data_atual) tem precedência sobre
+// `card.mode` (presets antigos continuam intactos).
+export type CardMode = "value" | "record" | "topn" | "list" | "formula";
+export const CARD_MODE_LABELS: Record<CardMode, string> = {
+  value: "Número (agregação)",
+  record: "Valor de um registro (maior/menor)",
+  topn: "Ranking (Top N)",
+  list: "Lista de valores",
+  formula: "Fórmula",
+};
+export interface CardConfig {
+  mode?: CardMode; // ausente = "value"
+  // record: exibe `showField` do registro com maior/menor `rankField` (número
+  // ou data — cobre "cliente de maior valor" e "data mais recente").
+  showField?: string;
+  rankField?: string;
+  rankDir?: "max" | "min"; // default "max"
+  // topn/list: campo do rótulo (vira a dimensão da consulta agregada).
+  labelField?: string;
+  metric?: Metric; // topn: métrica do ranking
+  limit?: number; // topn default 5; list default 10
+  // formula: mesma engine do widget "calculado" (aceita SE/SOMASE/VARPCT…).
+  formula?: Formula;
+  // Extras de exibição (opcionais).
+  prefix?: string;
+  suffix?: string;
+  secondaryText?: string;
+}
+export interface CardSettings {
+  card?: CardConfig;
+}
+
+// --- Comparação com período anterior (17/07/2026) ---
+// Config de DADOS por widget (settings.comparison): o engine roda uma segunda
+// consulta com o range de comparação (lib/widgets/comparison.ts) e anexa o
+// valor comparado por métrica em WidgetRow.__cmp + o metadado em
+// WidgetData.comparison. Sem período ativo ("todo o período") não há base de
+// comparação e a variação fica indisponível.
+export type ComparisonBase =
+  | "previous_period" // período imediatamente anterior de mesma duração
+  | "previous_year" // mesmo período do ano anterior
+  | "window_avg" // média por bucket de uma janela anterior maior
+  | "window_median"; // mediana por bucket de uma janela anterior maior
+export type ComparisonWindow = "quarter" | "semester" | "ytd" | "last_12m";
+export const COMPARISON_BASE_LABELS: Record<ComparisonBase, string> = {
+  previous_period: "Período anterior",
+  previous_year: "Mesmo período do ano passado",
+  window_avg: "Média de uma janela anterior",
+  window_median: "Mediana de uma janela anterior",
+};
+export const COMPARISON_WINDOW_LABELS: Record<ComparisonWindow, string> = {
+  quarter: "Último trimestre",
+  semester: "Último semestre",
+  ytd: "Ano até agora",
+  last_12m: "Últimos 12 meses",
+};
+
+export interface ComparisonSettings {
+  enabled?: boolean;
+  base?: ComparisonBase; // default previous_period
+  window?: ComparisonWindow; // só nas bases window_* (default last_12m)
+  // Exibição (consumida pelos renderizadores; ver VariationBadge):
+  showBaseValue?: boolean; // exibe o valor do período de comparação junto
+  onlyVariation?: boolean; // Card: o número principal É a variação
+  format?: "pct" | "abs" | "both"; // default "pct"
+  style?: "color" | "arrow" | "both"; // default "both"
+  invertColors?: boolean; // queda = verde (métricas tipo churn)
+  tablePlacement?: "inline" | "column"; // tabela agregada; default "inline"
+  ghostSeries?: boolean; // gráficos: série do período de comparação
+  chartLabels?: boolean; // gráficos: rótulo de variação nos pontos/barras
+}
+export interface ComparisonWidgetSettings {
+  comparison?: ComparisonSettings;
+}
+
 // Endereço de um widget-alvo de atalho (formas e links de nota). dashboardId
 // ausente = mesmo dashboard; tab é informativa (a navegação resolve a aba
 // efetiva pelo settings.tab ATUAL do alvo — sobrevive a mover o widget de aba).
@@ -468,6 +548,66 @@ export interface ColorPair {
 // Alinhamento horizontal do texto de células/cabeçalhos de tabela (13/07/2026).
 export type TableAlign = "left" | "center" | "right";
 
+// --- Formatação condicional (17/07/2026) ---
+// Regras valor→estilo e escalas de cor contínuas (heatmap), avaliadas nos
+// renderizadores por lib/widgets/conditional.ts. Alvos (`target`):
+//  - tabela agregada: colKey (`metric_1`, `dim_1`, `metric_1__var`);
+//  - listas de registros/entidades: o field da coluna;
+//  - Card/calculado: a chave especial "value";
+//  - gráficos (barra série única / pizza): a chave da métrica plotada.
+// Precedência com as cores manuais: ver conditional.ts.
+export type CondOp =
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "eq"
+  | "neq"
+  | "between"
+  | "contains"
+  | "empty"
+  | "not_empty"
+  | "var_up" // variação vs. período de comparação positiva
+  | "var_down"; // variação negativa
+export const COND_OP_LABELS: Record<CondOp, string> = {
+  gt: "maior que",
+  gte: "maior ou igual a",
+  lt: "menor que",
+  lte: "menor ou igual a",
+  eq: "igual a",
+  neq: "diferente de",
+  between: "entre",
+  contains: "contém",
+  empty: "vazio",
+  not_empty: "não vazio",
+  var_up: "variação positiva",
+  var_down: "variação negativa",
+};
+export interface ConditionalRule {
+  id: string; // cr_<rand>, estável
+  target: string;
+  op: CondOp;
+  value?: number | string;
+  value2?: number | string; // "entre": limite superior
+  style: {
+    text?: string;
+    fill?: string;
+    bold?: boolean;
+    icon?: "up" | "down" | "dot" | "warn";
+  };
+}
+export interface ColorScale {
+  id: string; // cs_<rand>
+  target: string; // coluna numérica
+  min: string; // cor do menor valor
+  mid?: string; // cor do ponto médio (opcional, escala de 3 pontos)
+  max: string; // cor do maior valor
+}
+export interface ConditionalFormatting {
+  rules?: ConditionalRule[];
+  scales?: ColorScale[];
+}
+
 export interface AppearanceSettings {
   // --- gráficos (barra / barra_horizontal / linha) ---
   chartBackground?: string; // fundo do gráfico
@@ -571,6 +711,8 @@ export interface AppearanceSettings {
     bg?: string; // fundo da barra de título
     border?: string; // cor da borda/contorno externo do card
   };
+  // --- formatação condicional (tabelas, listas, Card, gráficos) ---
+  conditional?: ConditionalFormatting;
 }
 
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista
@@ -584,7 +726,9 @@ export type WidgetSettings = KpiSettings &
   CalculatorSettings &
   NoteSettings &
   ShapeSettings &
-  QuickTableSettings & {
+  QuickTableSettings &
+  CardSettings &
+  ComparisonWidgetSettings & {
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
@@ -692,6 +836,9 @@ export interface KpiResult {
   metaText?: string;
   faltaText?: string;
   valueText?: string;
+  // Valor do período de comparação (modo ratio; settings.comparison ativa).
+  // Meta não compara — a meta já é a referência do card.
+  cmpValue?: number | null;
 }
 
 export interface GridPosition {
@@ -732,6 +879,11 @@ export interface Dashboard {
 export interface WidgetRow {
   [key: string]: unknown;
   __money?: Record<string, MoneyBreakdown>;
+  // Valor do período de comparação por métrica (`metric_<n>` → número a
+  // comparar, na MESMA escala do valor plotado da métrica; monetárias usam a
+  // decisão de moeda da série principal). null = grupo sem valor comparável.
+  // Ausente = comparação desligada/indisponível. Ver lib/widgets/comparison.ts.
+  __cmp?: Record<string, number | null>;
   // Basis das métricas calculadas de agregados desta linha (grupo): chave
   // 'sum:<field>'|'count:<field>'|'count:*' → valor (número, ou MoneyBreakdown
   // p/ operando monetário). Subtotais/Total geral fundem as basis das linhas e
@@ -765,6 +917,21 @@ export interface WidgetData {
     };
   }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
+  // Modos novos do Card (lib/widgets/card.ts): "record"/"formula" trazem o
+  // texto pronto; "topn"/"list" usam as próprias rows (rótulo + métrica) já
+  // ordenadas/cortadas no servidor.
+  card?: { mode: CardMode; valueText?: string; subText?: string };
+  // Comparação com período anterior ATIVA neste resultado: range consultado +
+  // rótulo pronto ("vs. período anterior") + a config de exibição. Ausente =
+  // sem comparação (desligada, "todo o período" ou base indisponível) — os
+  // renderizadores ocultam a variação.
+  comparison?: {
+    base: ComparisonBase;
+    from: string;
+    to: string;
+    label: string;
+    settings: ComparisonSettings;
+  };
   // Erro ao computar o widget (RPC/consulta): rows/dimensions/metrics vêm
   // vazios e o card exibe o estado de erro em vez de ficar em branco.
   error?: string;

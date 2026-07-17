@@ -276,14 +276,24 @@ export interface CalcMoneyMeta {
 export function evalCalcMoney(
   formula: Formula,
   basis: BasisValues,
-  meta: CalcMoneyMeta
+  meta: CalcMoneyMeta,
+  // Basis do período de comparação (ANTERIOR/VARPCT/VARABS), por base. As
+  // chaves são as MESMAS da basis principal, resolvidas sob os filtros do
+  // período de comparação (ver lib/widgets/formula-metric.ts).
+  cmpBasis?: Partial<Record<"anterior" | "ano", BasisValues>>
 ): { value: number | null; currency: string | null } {
-  // Moedas presentes nos operandos monetários do recorte.
+  // Moedas presentes nos operandos monetários do recorte — INCLUINDO os do
+  // período de comparação (os dois lados precisam operar na mesma moeda).
   const codes = new Set<string>();
+  const allBasis = [basis, cmpBasis?.anterior, cmpBasis?.ano].filter(
+    (b): b is BasisValues => b != null
+  );
   for (const key of basisKeysFor(formula)) {
-    const v = basis[key];
-    if (isMoneyBreakdown(v)) {
-      for (const c of Object.keys(v.perCurrency)) codes.add(c);
+    for (const b of allBasis) {
+      const v = b[key];
+      if (isMoneyBreakdown(v)) {
+        for (const c of Object.keys(v.perCurrency)) codes.add(c);
+      }
     }
   }
   const fixed = meta.mode === "fixed" ? resolveCurrencyCode(meta.code) : null;
@@ -301,28 +311,39 @@ export function evalCalcMoney(
     if (isMoneyBreakdown(v)) return useRaw ? rawTotal(v) : v.brl;
     return typeof v === "number" && Number.isFinite(v) ? v : null;
   };
-  const ctx: Record<string, number | null> = {};
-  for (const ref of formulaRefs(formula)) {
-    if (!ref.startsWith("agg:")) {
-      ctx[ref] = null; // ref desconhecida (ex.: table:* legada) → operando ausente
-      continue;
+  const buildCtx = (b: BasisValues): Record<string, number | null> => {
+    const ctx: Record<string, number | null> = {};
+    for (const ref of formulaRefs(formula)) {
+      if (!ref.startsWith("agg:")) {
+        ctx[ref] = null; // ref desconhecida (ex.: table:* legada) → operando ausente
+        continue;
+      }
+      const { agg, field } = parseAggRef(ref);
+      if (agg === "sum") ctx[ref] = operand(b[`sum:${field}`]);
+      else if (agg === "count") ctx[ref] = operand(b[`count:${field}`]);
+      else {
+        const sum = operand(b[`sum:${field}`]);
+        const count = operand(b[`count:${field}`]);
+        ctx[ref] = sum != null && count != null && count > 0 ? sum / count : null;
+      }
     }
-    const { agg, field } = parseAggRef(ref);
-    if (agg === "sum") ctx[ref] = operand(basis[`sum:${field}`]);
-    else if (agg === "count") ctx[ref] = operand(basis[`count:${field}`]);
-    else {
-      const sum = operand(basis[`sum:${field}`]);
-      const count = operand(basis[`count:${field}`]);
-      ctx[ref] = sum != null && count != null && count > 0 ? sum / count : null;
+    // Agregações condicionais: o avaliador lê ctx[chave] diretamente (a chave
+    // canônica é recomputada do AST em evalNode). Chave sem valor → null.
+    for (const spec of formulaCondAggInfo(formula).specs) {
+      const key = condAggKey(spec);
+      ctx[key] = operand(b[key]);
     }
-  }
-  // Agregações condicionais: o avaliador lê ctx[chave] diretamente (a chave
-  // canônica é recomputada do AST em evalNode). Chave sem valor → null.
-  for (const spec of formulaCondAggInfo(formula).specs) {
-    const key = condAggKey(spec);
-    ctx[key] = operand(basis[key]);
-  }
-  const raw = evaluateFormula(formula, ctx);
+    return ctx;
+  };
+  const ctx = buildCtx(basis);
+  const cmpCtxs =
+    cmpBasis && (cmpBasis.anterior || cmpBasis.ano)
+      ? {
+          ...(cmpBasis.anterior ? { anterior: buildCtx(cmpBasis.anterior) } : {}),
+          ...(cmpBasis.ano ? { ano: buildCtx(cmpBasis.ano) } : {}),
+        }
+      : undefined;
+  const raw = evaluateFormula(formula, ctx, undefined, cmpCtxs);
   let value = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
   let currency: string | null = null;
   if (meta.mode === "fixed" && fixed) {

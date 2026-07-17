@@ -90,6 +90,7 @@ import { fetchWidgetRecordsPage } from "@/app/(app)/dashboards/record-list-actio
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
+import { evalConditional } from "@/lib/widgets/conditional";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   aggOperandRefs,
@@ -972,15 +973,33 @@ export const WidgetCard = memo(function WidgetCard({
             />
           ) : isCalc ? (
             <div className="flex h-full flex-col justify-center p-1">
-              <span className="text-3xl font-semibold tabular-nums">
-                {calcValue?.value == null
-                  ? "—"
-                  : calcValue.currency
-                    ? formatMoney(calcValue.value, calcValue.currency)
-                    : calcValue.value.toLocaleString("pt-BR", {
-                        maximumFractionDigits: 2,
-                      })}
-              </span>
+              {(() => {
+                // Formatação condicional do valor (alvo "value"; regra vence
+                // só quando casa — ver lib/widgets/conditional.ts).
+                const cs = evalConditional(
+                  appearance?.conditional,
+                  "value",
+                  calcValue?.value
+                );
+                return (
+                  <span
+                    className="text-3xl font-semibold tabular-nums"
+                    style={{
+                      color: cs?.text,
+                      background: cs?.fill,
+                      ...(cs?.bold ? { fontWeight: 700 } : {}),
+                    }}
+                  >
+                    {calcValue?.value == null
+                      ? "—"
+                      : calcValue.currency
+                        ? formatMoney(calcValue.value, calcValue.currency)
+                        : calcValue.value.toLocaleString("pt-BR", {
+                            maximumFractionDigits: 2,
+                          })}
+                  </span>
+                );
+              })()}
             </div>
           ) : (
             <WidgetChart
@@ -988,7 +1007,13 @@ export const WidgetCard = memo(function WidgetCard({
               data={data}
               appearance={appearance}
               dateFormat={dateFormat}
-              metricsConfig={widget.metrics ?? []}
+              // Card em modo ranking: a métrica efetiva é a do settings.card
+              // (as metrics do widget não participam da consulta derivada).
+              metricsConfig={
+                data.card?.mode === "topn" && widget.settings?.card?.metric
+                  ? [widget.settings.card.metric]
+                  : (widget.metrics ?? [])
+              }
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

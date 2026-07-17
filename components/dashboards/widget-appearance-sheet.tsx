@@ -37,7 +37,9 @@ import {
 } from "@/components/ui/sheet";
 import { ColorField } from "./appearance-controls";
 import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
-import { type AvailableField } from "@/lib/widgets/fields";
+import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import type { ComboboxOption } from "@/components/ui/combobox";
+import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
 import { topWithOther } from "@/lib/widgets/appearance";
 import type { KanbanAppearance } from "@/lib/kanban/types";
 import { PALETTES } from "@/lib/widgets/palettes";
@@ -56,6 +58,7 @@ export function WidgetAppearanceSheet({
   dashboardId,
   widget,
   data,
+  available,
   open,
   onOpenChange,
 }: {
@@ -95,6 +98,51 @@ export function WidgetAppearanceSheet({
     isPie && dimKey && metrics[0]
       ? topWithOther(data.rows, dimKey, metrics[0].key)
       : [];
+
+  // Alvos da formatação condicional (ver lib/widgets/conditional.ts): tabela
+  // agregada/gráficos usam as chaves de data (dim_n/metric_n, + Δ quando a
+  // comparação está em coluna exclusiva); modo lista usa o field da coluna;
+  // Card/calculado usam a chave especial "value".
+  const isRecordListW = vt === "tabela" && widget.settings?.rowMode === "records";
+  const cmpColumns =
+    widget.settings?.comparison?.enabled &&
+    widget.settings.comparison.tablePlacement === "column";
+  const listColumns = widget.settings?.columns ?? [];
+  const condTargets: ComboboxOption[] =
+    vt === "calculado" || isKpi
+      ? [
+          { value: "value", label: "Valor do card" },
+          ...data.dimensions.map((d) => ({ value: d.key, label: d.label })),
+          ...data.metrics.map((m) => ({ value: m.key, label: m.label })),
+        ]
+      : isRecordListW
+        ? listColumns.map((c) => ({
+            value: c.field,
+            label: c.label?.trim() || fieldLabel(c.field, available),
+          }))
+        : vt === "tabela" || isChart || isPie
+          ? [
+              ...data.dimensions.map((d) => ({ value: d.key, label: d.label })),
+              ...data.metrics.flatMap((m) => [
+                { value: m.key, label: m.label },
+                ...(cmpColumns
+                  ? [{ value: `${m.key}__var`, label: `Δ ${m.label}` }]
+                  : []),
+              ]),
+            ]
+          : [];
+  const condNumericTargets: ComboboxOption[] = isRecordListW
+    ? listColumns
+        .filter(
+          (c) => available.find((a) => a.field === c.field)?.isNumeric
+        )
+        .map((c) => ({
+          value: c.field,
+          label: c.label?.trim() || fieldLabel(c.field, available),
+        }))
+    : condTargets.filter(
+        (t) => typeof t.value === "string" && t.value.startsWith("metric_")
+      );
 
   const patch = (p: Partial<AppearanceSettings>) =>
     setAp((prev) => ({ ...prev, ...p }));
@@ -174,6 +222,16 @@ export function WidgetAppearanceSheet({
             <BuilderSection value="kanban" title="Kanban">
               <KanbanAppearanceSection value={kap} onChange={setKap} />
             </BuilderSection>
+          ) : null}
+          {/* ---------- Formatação condicional (valor→estilo + heatmap) ---------- */}
+          {condTargets.length > 0 ? (
+            <ConditionalFormatSection
+              value={ap.conditional}
+              onChange={(v) => patch({ conditional: v })}
+              targets={condTargets}
+              numericTargets={condNumericTargets}
+              hasComparison={Boolean(widget.settings?.comparison?.enabled)}
+            />
           ) : null}
           {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}
           {!isShape ? (
@@ -647,7 +705,7 @@ export function WidgetAppearanceSheet({
 
           {/* ---------- KPI ---------- */}
           {isKpi ? (
-            <BuilderSection value="kpi" title="Card KPI">
+            <BuilderSection value="kpi" title="Card">
               <ColorField
                 label="Fundo"
                 value={ap.kpi?.bg}

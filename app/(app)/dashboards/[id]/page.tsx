@@ -34,6 +34,7 @@ import {
   yearQuarterOf,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
+import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
 import { runRecordList, runRecordListPage } from "@/lib/widgets/record-list";
 import { collectRecordFkLabels } from "@/lib/widgets/fk-labels";
 import {
@@ -801,6 +802,25 @@ export default async function DashboardPage({
         );
         dataById[w.id] = { rows: [], dimensions: [], metrics: [], error: msg };
       };
+      // Card em modo novo (record/topn/list/formula): motor próprio
+      // (lib/widgets/card.ts), compartilhado com o viewer de snapshot.
+      if (isCardModeWidget(w)) {
+        try {
+          dataById[w.id] = await runCardWidget(
+            rpcClient,
+            config,
+            periodByWidget[w.id],
+            available,
+            allFields,
+            currencyRates,
+            conversionPeriodById[w.id],
+            correspondencesMap
+          );
+        } catch (e) {
+          fail(e);
+        }
+        return;
+      }
       if (isListWidget(w)) {
         const rowSource = w.settings?.rowSource ?? "records";
         // Fonte das linhas: entidade (responsáveis/operações) x registros.

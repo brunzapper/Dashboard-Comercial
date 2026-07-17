@@ -55,7 +55,15 @@ export type FormulaFuncName =
   | "CONT.VALORES"
   | "ARRED"
   | "ABS"
-  | "CONCATENAR";
+  | "CONCATENAR"
+  // Comparação com período anterior (17/07/2026) — só fazem sentido no contexto
+  // AGREGADO do dashboard (nota/métrica calculada/calculadora): o runtime
+  // (formula-metric.ts) resolve a MESMA basis sob os filtros do período de
+  // comparação e a passa como contexto alternativo ao avaliador. Fora desse
+  // contexto (campo calculado por registro), avaliam para null.
+  | "ANTERIOR"
+  | "VARPCT"
+  | "VARABS";
 
 // Funções puras variádicas sobre os argumentos (nenhuma consulta/basis).
 const PURE_FUNCS = new Set<FormulaFuncName>([
@@ -91,6 +99,65 @@ export interface Formula {
 
 // Resultado de uma fórmula: número, texto (ramo de SE), booleano ou null.
 export type FormulaResult = number | string | boolean | null;
+
+// Funções de comparação com período anterior (ver FormulaFuncName acima).
+export const COMPARISON_FUNCS = new Set<FormulaFuncName>([
+  "ANTERIOR",
+  "VARPCT",
+  "VARABS",
+]);
+
+/** Bases de comparação usadas pelas funções ANTERIOR/VARPCT/VARABS. */
+export type ComparisonFuncBase = "anterior" | "ano";
+
+export function formulaUsesComparison(
+  formula: Formula | null | undefined
+): boolean {
+  if (!formula) return false;
+  return formula.tokens.some(
+    (t) => t.kind === "func" && COMPARISON_FUNCS.has(t.name)
+  );
+}
+
+/**
+ * Bases de comparação referenciadas pela fórmula (2º argumento literal de
+ * ANTERIOR/VARPCT/VARABS; ausente = "anterior"). Fórmula inválida → [].
+ */
+export function formulaComparisonBases(
+  formula: Formula | null | undefined
+): ComparisonFuncBase[] {
+  if (!formula || !formulaUsesComparison(formula)) return [];
+  let root: FormulaNode;
+  try {
+    root = parseTokens(formula.tokens);
+  } catch {
+    return [];
+  }
+  const bases = new Set<ComparisonFuncBase>();
+  const walk = (n: FormulaNode): void => {
+    switch (n.k) {
+      case "call":
+        if (COMPARISON_FUNCS.has(n.name)) {
+          const b = n.args[1];
+          bases.add(b && b.k === "lit" && b.v === "ano" ? "ano" : "anterior");
+        }
+        n.args.forEach(walk);
+        return;
+      case "bin":
+      case "cmp":
+        walk(n.a);
+        walk(n.b);
+        return;
+      case "neg":
+        walk(n.a);
+        return;
+      default:
+        return;
+    }
+  };
+  walk(root);
+  return [...bases];
+}
 
 /** True quando a fórmula usa recursos que o construtor de botões não representa
  * (funções, comparações, textos, booleanos). */
@@ -308,6 +375,19 @@ function parseTokens(tokens: FormulaToken[]): FormulaNode {
       }
       if (name === "ABS" && args.length !== 1) {
         throw new FormulaParseError("ABS espera exatamente 1 argumento.");
+      }
+      if (COMPARISON_FUNCS.has(name)) {
+        if (args.length < 1 || args.length > 2) {
+          throw new FormulaParseError(
+            `${name} espera 1 ou 2 argumentos: ${name}(expressão; "anterior" | "ano").`
+          );
+        }
+        const b = args[1];
+        if (b && !(b.k === "lit" && (b.v === "anterior" || b.v === "ano"))) {
+          throw new FormulaParseError(
+            `O 2º argumento de ${name} deve ser "anterior" ou "ano".`
+          );
+        }
       }
       if (name === "ARRED" && (args.length < 1 || args.length > 2)) {
         throw new FormulaParseError(
@@ -701,6 +781,28 @@ function evalNode(
       }
     }
     case "call": {
+      if (COMPARISON_FUNCS.has(node.name)) {
+        // Avalia a MESMA expressão contra o contexto do período de comparação
+        // (CMP_ENV, injetado por evaluateFormula). Sem contexto (fora do
+        // dashboard, sem período ativo ou base indisponível) → null.
+        const baseArg = node.args[1];
+        const baseName: ComparisonFuncBase =
+          baseArg && baseArg.k === "lit" && baseArg.v === "ano"
+            ? "ano"
+            : "anterior";
+        const cmpCtx = CMP_ENV?.[baseName];
+        if (!node.args[0] || !cmpCtx) return NULL_VAL;
+        const prev = evalNode(node.args[0], cmpCtx, dateCtx);
+        if (node.name === "ANTERIOR") return prev.date ? NULL_VAL : prev;
+        const cur = evalNode(node.args[0], ctx, dateCtx);
+        const curN = toNumVal(cur);
+        const prevN = toNumVal(prev);
+        if (curN == null || prevN == null) return NULL_VAL;
+        if (node.name === "VARABS") return { v: curN - prevN, date: false };
+        // VARPCT já sai ×100 ("cresceu {=VARPCT([MRR])}%" lê natural na nota).
+        if (prevN === 0) return NULL_VAL;
+        return { v: ((curN - prevN) / Math.abs(prevN)) * 100, date: false };
+      }
       if (node.name === "SE") {
         const cond = evalNode(node.args[0], ctx, dateCtx);
         if (truthy(cond)) return evalNode(node.args[1], ctx, dateCtx);
@@ -797,10 +899,19 @@ function evalNode(
  * no salvamento via validateFormula). Retrocompatível: fórmulas legadas (só
  * + − × ÷ com números) avaliam de forma idêntica à v1.
  */
+// Contextos do período de comparação (ANTERIOR/VARPCT/VARABS), por base. A
+// avaliação é 100% síncrona, então uma variável de módulo com try/finally é
+// segura e evita enfiar mais um parâmetro em toda a recursão de evalNode.
+export type ComparisonContexts = Partial<
+  Record<ComparisonFuncBase, Record<string, unknown>>
+>;
+let CMP_ENV: ComparisonContexts | undefined;
+
 export function evaluateFormula(
   formula: Formula,
   ctx: Record<string, unknown>,
-  dateCtx?: Record<string, number | null>
+  dateCtx?: Record<string, number | null>,
+  cmpCtxs?: ComparisonContexts
 ): FormulaResult {
   let node: FormulaNode;
   try {
@@ -808,10 +919,16 @@ export function evaluateFormula(
   } catch {
     return null;
   }
-  const res = evalNode(node, ctx, dateCtx);
-  if (res.date) return null; // resultado "cru" de data não é exibível
-  if (typeof res.v === "number" && !Number.isFinite(res.v)) return null;
-  return res.v;
+  const prevEnv = CMP_ENV;
+  CMP_ENV = cmpCtxs;
+  try {
+    const res = evalNode(node, ctx, dateCtx);
+    if (res.date) return null; // resultado "cru" de data não é exibível
+    if (typeof res.v === "number" && !Number.isFinite(res.v)) return null;
+    return res.v;
+  } finally {
+    CMP_ENV = prevEnv;
+  }
 }
 
 export interface FormulaValidation {
