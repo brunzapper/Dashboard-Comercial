@@ -73,7 +73,8 @@ export async function prepareImportFields(
   if (!source) return { ok: false, message: `Fonte "${sourceKey}" não encontrada.` };
   const rt = source.recordType;
 
-  const fieldKeys: Record<string, string> = {};
+  // 1) Resolve/valida as chaves (puro, sem I/O).
+  const keyed: { spec: (typeof specs)[number]; key: string }[] = [];
   for (const spec of specs) {
     let key = spec.fieldKey ?? "";
     if (spec.create) {
@@ -85,56 +86,83 @@ export async function prepareImportFields(
         return { ok: false, message: `Nome inválido para o campo de "${spec.csvColumn}".` };
       }
     }
-    if (!key) continue;
+    if (key) keyed.push({ spec, key });
+  }
+  const fieldKeys: Record<string, string> = {};
+  if (keyed.length === 0) return { ok: true, fieldKeys };
 
-    const { data: existing, error: selectError } = await supabase
+  // 2) UMA consulta para todas as chaves (antes: 1 SELECT por coluna, em série).
+  const allKeys = [...new Set(keyed.map((k) => k.key))];
+  const { data: existingRows, error: selectError } = await supabase
+    .from("field_definitions")
+    .select("field_key, applies_to")
+    .in("field_key", allKeys);
+  if (selectError) {
+    return { ok: false, message: `Falha ao consultar campos: ${selectError.message}` };
+  }
+  const existingByKey = new Map(
+    (existingRows ?? []).map((r) => [r.field_key as string, r])
+  );
+
+  // 3) Campos novos: UM insert em lote (dedupe — duas colunas podem gerar a
+  // mesma chave; a primeira vence, como no fluxo por coluna).
+  const inserts: Record<string, unknown>[] = [];
+  const inserting = new Set<string>();
+  for (const { spec, key } of keyed) {
+    if (existingByKey.has(key) || inserting.has(key)) continue;
+    if (!spec.create) {
+      return { ok: false, message: `Campo "${key}" não existe mais.` };
+    }
+    inserting.add(key);
+    inserts.push({
+      field_key: key,
+      label: spec.create.label.trim().slice(0, 60),
+      data_type: spec.create.dataType,
+      options: [],
+      visible_to_roles: ["admin", "gestor", "vendedor"],
+      editable_by_roles: ["admin"],
+      is_local: false,
+      sort_order: 0,
+      source_system: "csv",
+      // Prefixo da fonte: o índice único (source_system, source_field_id) é
+      // global — sem ele, o mesmo cabeçalho em fontes diferentes colidiria.
+      source_field_id: `${sourceKey}:${key}`,
+      show_in_builder: true,
+      applies_to: [rt],
+    });
+  }
+  if (inserts.length > 0) {
+    const { error: insertError } = await supabase
       .from("field_definitions")
-      .select("field_key, applies_to")
-      .eq("field_key", key)
-      .maybeSingle();
-    if (selectError) {
-      return { ok: false, message: `Falha ao consultar campos: ${selectError.message}` };
+      .insert(inserts);
+    if (insertError) {
+      return { ok: false, message: `Falha ao criar campos: ${insertError.message}` };
     }
-
-    if (!existing) {
-      if (!spec.create) {
-        return { ok: false, message: `Campo "${key}" não existe mais.` };
-      }
-      const { error: insertError } = await supabase.from("field_definitions").insert({
-        field_key: key,
-        label: spec.create.label.trim().slice(0, 60),
-        data_type: spec.create.dataType,
-        options: [],
-        visible_to_roles: ["admin", "gestor", "vendedor"],
-        editable_by_roles: ["admin"],
-        is_local: false,
-        sort_order: 0,
-        source_system: "csv",
-        // Prefixo da fonte: o índice único (source_system, source_field_id) é
-        // global — sem ele, o mesmo cabeçalho em fontes diferentes colidiria.
-        source_field_id: `${sourceKey}:${key}`,
-        show_in_builder: true,
-        applies_to: [rt],
-      });
-      if (insertError) {
-        return { ok: false, message: `Falha ao criar o campo "${key}": ${insertError.message}` };
-      }
-    } else {
-      // Campo existente: garante a fonte no applies_to (vazio = todas, deixa).
-      const appliesTo = (existing.applies_to as string[] | null) ?? [];
-      if (appliesTo.length > 0 && !appliesTo.includes(rt)) {
-        const { error: updateError } = await supabase
-          .from("field_definitions")
-          .update({ applies_to: [...appliesTo, rt] })
-          .eq("field_key", key);
-        if (updateError) {
-          return { ok: false, message: `Falha ao atualizar o campo "${key}": ${updateError.message}` };
-        }
-      }
-    }
-    fieldKeys[spec.csvColumn] = key;
   }
 
+  // 4) Campos existentes: garante a fonte no applies_to (vazio = todas, deixa)
+  // — só onde falta, em paralelo.
+  const updates = [...existingByKey.entries()]
+    .filter(([, existing]) => {
+      const appliesTo = (existing.applies_to as string[] | null) ?? [];
+      return appliesTo.length > 0 && !appliesTo.includes(rt);
+    })
+    .map(([key, existing]) => {
+      const appliesTo = (existing.applies_to as string[] | null) ?? [];
+      return supabase
+        .from("field_definitions")
+        .update({ applies_to: [...appliesTo, rt] })
+        .eq("field_key", key);
+    });
+  if (updates.length > 0) {
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      return { ok: false, message: `Falha ao atualizar campos: ${failed.error.message}` };
+    }
+  }
+
+  for (const { spec, key } of keyed) fieldKeys[spec.csvColumn] = key;
   return { ok: true, fieldKeys };
 }
 

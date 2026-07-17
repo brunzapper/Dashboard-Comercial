@@ -81,11 +81,13 @@ export function KanbanWidget({
   useEffect(() => {
     if (readOnly) return; // snapshot: precomputado pela page pública
     let cancelled = false;
+    // 250ms: coalesce rajadas de eventos do bus (uma mutação pode emitir vários
+    // e cada re-busca é uma server action inteira) sem atrasar perceptivelmente.
     const timer = setTimeout(() => {
       void runKanbanWidget(dashboardId, widget.id, search).then((res) => {
         if (!cancelled) setFetched(res);
       });
-    }, 60);
+    }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
