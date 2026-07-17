@@ -39,7 +39,8 @@ export default async function ImportarPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
+      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-start justify-between gap-4 pr-8">
         <div>
           <h1 className="text-2xl font-semibold">Importar CSV</h1>
           <p className="text-muted-foreground text-sm">

@@ -198,7 +198,8 @@ export default async function RegistrosPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
+      {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-start justify-between gap-4 pr-8">
         <div>
           <h1 className="text-2xl font-semibold">Registros</h1>
           <p className="text-muted-foreground text-sm">

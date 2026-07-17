@@ -721,7 +721,8 @@ export function DashboardClient({
   return (
     <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-center justify-between pr-8">
         {renaming ? (
           <Input
             autoFocus

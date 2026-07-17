@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 17/07/2026
+// v1.2 (17/07/2026): passo terminal "6. Concluído" — banner de sucesso
+//   destacado (emerald, contagens, avisos) com "Ver registros" e "Nova
+//   importação" (resetWizard + router.refresh re-busca fields do server).
+//   Falha de chunk segue na Revisão com retry; falha só do finalize cai no
+//   Concluído com aviso (linhas já importadas).
 // v1.1 (16/07/2026): fontes criadas inline nascem com manual_entry (0061).
 // Wizard de import de CSV (Registros → Importar CSV, admin):
 //   1 Upload (papaparse no browser — evita multipart/limite de body; os dados
@@ -16,8 +21,16 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Papa from "papaparse";
-import { ArrowLeft, ArrowRight, FileUp, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CircleCheck,
+  FileUp,
+  RotateCcw,
+  Upload,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -75,7 +88,7 @@ interface Report {
   finalized: boolean;
 }
 
-type Step = "upload" | "fonte" | "mapeamento" | "dedup" | "revisao";
+type Step = "upload" | "fonte" | "mapeamento" | "dedup" | "revisao" | "concluido";
 
 const STEP_LABELS: Record<Step, string> = {
   upload: "1. Arquivo",
@@ -83,6 +96,7 @@ const STEP_LABELS: Record<Step, string> = {
   mapeamento: "3. Mapeamento",
   dedup: "4. Match & dedup",
   revisao: "5. Revisão",
+  concluido: "6. Concluído",
 };
 
 const MODE_OPTIONS: ComboboxOption[] = [
@@ -109,6 +123,7 @@ export function ImportWizard({
   sources: SourceDef[];
   fields: ImportFieldOption[];
 }) {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -445,14 +460,52 @@ export function ImportWizard({
       // 4) Auto-match + recálculo, uma vez só.
       const fin = await finalizeCsvImport();
       setReport({ result: acc, finalized: fin.ok });
+      // Linhas já importadas mesmo se o finalize falhou → tela de conclusão
+      // (com aviso); falha de chunk fica na Revisão com "Importar novamente".
+      setStep("concluido");
     } finally {
       setBusy(false);
     }
   }
 
+  // Zera o wizard para uma nova importação. Mantém `sources` (fontes criadas
+  // inline existem no banco) e re-busca `fields` do server — campos criados
+  // neste import viram alvos de mapeamento no próximo.
+  function resetWizard() {
+    setStep("upload");
+    setFileName("");
+    setHeaders([]);
+    setRows([]);
+    setPlans([]);
+    setParseError("");
+    setSourceKey("");
+    setCreatingSource(false);
+    setNewSourceLabel("");
+    setNewSourcePeriod("source_created_at");
+    setSourceMessage("");
+    setDedupColumns([]);
+    setDedupMode("insert");
+    setMatchCsvColumn("");
+    setMatchTargetField("");
+    setMatchInsertNew(true);
+    setMatchUpdateExisting(true);
+    setMatchWriteBack(false);
+    setProgress({ done: 0, total: 0 });
+    setRunError("");
+    setReport(null);
+    router.refresh();
+  }
+
   // ============ Render ============
 
-  const stepOrder: Step[] = ["upload", "fonte", "mapeamento", "dedup", "revisao"];
+  const stepOrder: Step[] = [
+    "upload",
+    "fonte",
+    "mapeamento",
+    "dedup",
+    "revisao",
+    "concluido",
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -861,7 +914,7 @@ export function ImportWizard({
               Configurações → Fontes).
             </p>
           ) : null}
-          {busy || report || runError ? (
+          {busy || runError ? (
             <div className="flex flex-col gap-2">
               {progress.total > 0 ? (
                 <>
@@ -883,52 +936,6 @@ export function ImportWizard({
                   {runError}
                 </p>
               ) : null}
-              {report ? (
-                <div className="rounded-lg border p-4 text-sm" role="status">
-                  <p className="font-medium">Import concluído</p>
-                  <p className="text-muted-foreground mt-1">
-                    {report.result.inserted} inserido(s) ·{" "}
-                    {report.result.updated} atualizado(s) ·{" "}
-                    {report.result.skipped} ignorado(s) ·{" "}
-                    {report.result.errors} erro(s)
-                  </p>
-                  {report.result.noMatch ? (
-                    <p className="mt-1 font-medium text-amber-600">
-                      {report.result.noMatch} linha(s) sem match rejeitada(s)
-                      (“Incluir novos” desmarcado — nada foi inserido para
-                      elas).
-                    </p>
-                  ) : null}
-                  {report.result.alreadyExists ? (
-                    <p className="text-muted-foreground mt-1">
-                      {report.result.alreadyExists} linha(s) com match não
-                      alterada(s) (“Atualizar existentes” desmarcado).
-                    </p>
-                  ) : null}
-                  {report.result.ambiguous ? (
-                    <p className="text-destructive mt-1">
-                      {report.result.ambiguous} linha(s) com match ambíguo (o
-                      valor casa mais de um registro) — veja os erros abaixo.
-                    </p>
-                  ) : null}
-                  {report.result.errorSamples.length > 0 ? (
-                    <ul className="text-destructive mt-2 list-disc pl-5 text-xs">
-                      {report.result.errorSamples.map((e, i) => (
-                        <li key={i}>{e}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {!report.finalized ? (
-                    <p className="text-muted-foreground mt-2 text-xs">
-                      Auto-match/recálculo não rodaram — rode “auto-match” em
-                      Campos → Conexões se precisar.
-                    </p>
-                  ) : null}
-                  <Button asChild className="mt-3">
-                    <a href={`/registros?fonte=${source.key}`}>Ver registros</a>
-                  </Button>
-                </div>
-              ) : null}
             </div>
           ) : null}
           <div className="flex gap-2">
@@ -940,13 +947,90 @@ export function ImportWizard({
               <ArrowLeft className="size-4" />
               Voltar
             </Button>
-            <Button disabled={busy || Boolean(report)} onClick={runImport}>
+            <Button disabled={busy} onClick={runImport}>
               <Upload className="size-4" />
               {busy
                 ? "Importando…"
                 : runError
                   ? "Importar novamente"
                   : `Importar ${rows.length} linha(s)`}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ============ Passo 6: concluído ============ */}
+      {step === "concluido" && report ? (
+        <div
+          className="flex max-w-xl flex-col gap-4"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-500/10 p-6">
+            <div className="flex items-center gap-3">
+              <CircleCheck className="size-8 shrink-0 text-emerald-600" />
+              <div>
+                <p className="text-lg font-semibold">
+                  {report.result.errors > 0 || !report.finalized
+                    ? "Importação concluída com avisos"
+                    : "Importação concluída"}
+                </p>
+                <p className="text-muted-foreground text-sm">
+                  {fileName} → {source?.label ?? sourceKey}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm">
+              <span className="font-semibold">{report.result.inserted}</span>{" "}
+              inserido(s) ·{" "}
+              <span className="font-semibold">{report.result.updated}</span>{" "}
+              atualizado(s) ·{" "}
+              <span className="font-semibold">{report.result.skipped}</span>{" "}
+              ignorado(s) ·{" "}
+              <span className="font-semibold">{report.result.errors}</span>{" "}
+              erro(s)
+            </p>
+            {report.result.noMatch ? (
+              <p className="text-sm font-medium text-amber-600">
+                {report.result.noMatch} linha(s) sem match rejeitada(s)
+                (“Incluir novos” desmarcado — nada foi inserido para elas).
+              </p>
+            ) : null}
+            {report.result.alreadyExists ? (
+              <p className="text-muted-foreground text-sm">
+                {report.result.alreadyExists} linha(s) com match não
+                alterada(s) (“Atualizar existentes” desmarcado).
+              </p>
+            ) : null}
+            {report.result.ambiguous ? (
+              <p className="text-destructive text-sm">
+                {report.result.ambiguous} linha(s) com match ambíguo (o valor
+                casa mais de um registro) — veja os erros abaixo.
+              </p>
+            ) : null}
+            {report.result.errorSamples.length > 0 ? (
+              <ul className="text-destructive list-disc pl-5 text-xs">
+                {report.result.errorSamples.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            ) : null}
+            {!report.finalized ? (
+              <p className="text-xs text-amber-600">
+                Auto-match/recálculo não rodaram — rode “auto-match” em Campos
+                → Conexões se precisar.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex gap-2">
+            <Button asChild>
+              <a href={`/registros?fonte=${source?.key ?? ""}`}>
+                Ver registros
+              </a>
+            </Button>
+            <Button variant="outline" onClick={resetWizard}>
+              <RotateCcw className="size-4" />
+              Nova importação
             </Button>
           </div>
         </div>

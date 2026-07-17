@@ -140,7 +140,8 @@ export default async function HomePage() {
         target={restoreTarget}
         hadStored={storedView !== null}
       />
-      <div className="flex items-start justify-between gap-4">
+      {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-start justify-between gap-4 pr-8">
         <div>
           <h1 className="text-2xl font-semibold">Workspace</h1>
           <p className="text-muted-foreground text-sm">

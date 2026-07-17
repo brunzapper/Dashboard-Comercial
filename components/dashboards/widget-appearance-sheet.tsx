@@ -1,4 +1,6 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 17/07/2026
+// v2.3 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
+//   defaultValue no Accordion) — expandir sob demanda; badges seguem resumindo.
 // v2.2 (15/07/2026): seções de cores dos widgets calculadora (card/visor/
 //   teclas), nota (papel/texto/links/fonte/sem moldura) e forma (preenchimento/
 //   contorno/texto). "Título e borda" fica oculto na forma (sem cromo).
@@ -198,25 +200,9 @@ export function WidgetAppearanceSheet({
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4 pb-8">
-          {/* Seções recolhíveis: as de uso frequente abrem por padrão; "Título
-              e borda" e listas longas abrem fechadas. Rótulos/legenda abrem
-              expandidos quando já estão habilitados (nada configurado some). */}
-          <Accordion
-            type="multiple"
-            className="-mt-2"
-            defaultValue={[
-              ...(isChart ? ["grafico", "series"] : []),
-              ...(isChart && ap.dataLabels?.show ? ["rotulos"] : []),
-              ...(isChart && (ap.legend?.show ?? false) ? ["legenda"] : []),
-              ...(isPie ? ["pizza"] : []),
-              ...(isTable ? ["cores", "grade"] : []),
-              ...(isKpi ? ["kpi"] : []),
-              ...(isCalculator ? ["calculadora"] : []),
-              ...(isNote ? ["nota"] : []),
-              ...(isShape ? ["forma"] : []),
-              ...(isKanban ? ["kanban"] : []),
-            ]}
-          >
+          {/* Seções recolhíveis: todas abrem fechadas — o usuário expande sob
+              demanda; os badges resumem o que está configurado (nada some). */}
+          <Accordion type="multiple" className="-mt-2">
           {/* ---------- Kanban (quadro/colunas/cards/abas de visão) ---------- */}
           {isKanban ? (
             <BuilderSection value="kanban" title="Kanban">

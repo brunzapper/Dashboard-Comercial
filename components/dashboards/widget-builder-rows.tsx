@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 15/07/2026
+// Versão: 1.5 | Data: 17/07/2026
+// v1.5 (17/07/2026): título da BuilderSection vira faixa destacada (fundo
+//   preto/texto branco) para separar visualmente as seções do editor.
 // v1.4 (15/07/2026): "Nome exibido" também para a métrica "Contagem de
 //   registros" (field "*") — o pipeline (save/engine/chart) já honrava o
 //   apelido; só o input era ocultado.
@@ -107,10 +109,10 @@ export function BuilderSection({
   children: React.ReactNode;
 }) {
   return (
-    <AccordionItem value={value}>
-      <AccordionTrigger className="py-2.5 hover:no-underline">
+    <AccordionItem value={value} className="border-b-0">
+      <AccordionTrigger className="bg-foreground text-background hover:bg-foreground/90 my-1 rounded-md px-3 py-2.5 hover:no-underline [&>svg]:text-background/70">
         <span className="flex items-center gap-2">
-          <span className="text-sm font-medium hover:underline">{title}</span>
+          <span className="text-sm font-medium">{title}</span>
           {badge ? (
             <Badge variant="secondary" className="font-normal">
               {badge}
@@ -118,7 +120,7 @@ export function BuilderSection({
           ) : null}
         </span>
       </AccordionTrigger>
-      <AccordionContent className="flex flex-col gap-3">
+      <AccordionContent className="flex flex-col gap-3 pt-1">
         {children}
       </AccordionContent>
     </AccordionItem>
