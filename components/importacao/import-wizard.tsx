@@ -36,9 +36,11 @@ import { slugify } from "@/lib/records/slug";
 import { type SourceDef } from "@/lib/sources";
 import {
   CORE_IMPORT_TARGETS,
+  MATCH_CORE_TARGETS,
   inferDataType,
   suggestTarget,
   type ColumnMapping,
+  type MatchConfig,
 } from "@/lib/import/csv";
 import type { SyncResult } from "@/lib/sync/shared";
 import { createSource } from "@/app/(app)/configuracoes/fontes/actions";
@@ -79,9 +81,14 @@ const STEP_LABELS: Record<Step, string> = {
   upload: "1. Arquivo",
   fonte: "2. Fonte",
   mapeamento: "3. Mapeamento",
-  dedup: "4. Deduplicação",
+  dedup: "4. Match & dedup",
   revisao: "5. Revisão",
 };
+
+const MODE_OPTIONS: ComboboxOption[] = [
+  { value: "insert", label: "Somente incluir (chave de deduplicação)" },
+  { value: "match", label: "Incluir/atualizar existentes (match por coluna)" },
+];
 
 const NEW_FIELD_TYPES: ComboboxOption[] = [
   { value: "texto", label: "Texto" },
@@ -117,6 +124,15 @@ export function ImportWizard({
   const [sourceMessage, setSourceMessage] = useState("");
 
   const [dedupColumns, setDedupColumns] = useState<string[]>([]);
+
+  // Modo do passo 4: "insert" (fluxo original, hash de dedup) ou "match"
+  // (upsert em fonte existente por coluna — ver lib/import/csv.ts).
+  const [dedupMode, setDedupMode] = useState<"insert" | "match">("insert");
+  const [matchCsvColumn, setMatchCsvColumn] = useState("");
+  const [matchTargetField, setMatchTargetField] = useState("");
+  const [matchInsertNew, setMatchInsertNew] = useState(true);
+  const [matchUpdateExisting, setMatchUpdateExisting] = useState(true);
+  const [matchWriteBack, setMatchWriteBack] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -263,6 +279,68 @@ export function ImportWizard({
       (p) => p.target !== "new" || slugify(p.newLabel).length > 0
     );
 
+  // ============ Passo 4: match por coluna ============
+
+  // Fonte de Sync Bitrix (builtins Leads/Negócios): write-back disponível.
+  // Estudo (sheet_site) é push-only — toggle desabilitado com explicação.
+  const isBitrixSource = Boolean(
+    source?.builtin &&
+      (source.recordType === "lead" || source.recordType === "negocio")
+  );
+  const isSheetSource = source?.recordType === "venda_site";
+
+  const matchTargetOptions: ComboboxOption[] = [
+    {
+      value: "source_id",
+      label: isBitrixSource ? "ID na origem (Bitrix)" : "ID na origem (source_id)",
+      group: "Sistema",
+    },
+    ...MATCH_CORE_TARGETS.map((t) => ({
+      value: t.value,
+      label: t.label,
+      group: "Colunas do sistema",
+    })),
+    ...fields
+      .filter(
+        (f) =>
+          (f.appliesTo.length === 0 ||
+            f.appliesTo.includes(source?.recordType ?? "")) &&
+          (f.dataType === "texto" || f.dataType === "numero")
+      )
+      .map((f) => ({
+        value: `custom:${f.key}`,
+        label: f.label,
+        group: "Campos da fonte",
+      })),
+  ];
+
+  // Ao escolher a coluna do CSV, sugere o campo alvo a partir do mapeamento.
+  function pickMatchColumn(csvColumn: string) {
+    setMatchCsvColumn(csvColumn);
+    const plan = plans.find((p) => p.csvColumn === csvColumn);
+    if (!plan || matchTargetField) return;
+    if (matchTargetOptions.some((o) => o.value === plan.target)) {
+      setMatchTargetField(plan.target);
+    }
+  }
+
+  const matchStepValid =
+    dedupMode === "insert" ||
+    (matchCsvColumn !== "" &&
+      matchTargetField !== "" &&
+      (matchInsertNew || matchUpdateExisting));
+
+  const matchConfig: MatchConfig | null =
+    dedupMode === "match" && matchCsvColumn && matchTargetField
+      ? {
+          csvColumn: matchCsvColumn,
+          targetField: matchTargetField,
+          insertNew: matchInsertNew,
+          updateExisting: matchUpdateExisting,
+          writeBack: isBitrixSource && matchWriteBack,
+        }
+      : null;
+
   // ============ Passo 5: revisão + execução ============
 
   const periodField = source?.defaultPeriodField ?? "source_created_at";
@@ -316,6 +394,10 @@ export function ImportWizard({
       });
 
       // 3) Chunks sequenciais (idempotente — re-rodar cura falha no meio).
+      // Write-back com inclusão: cada linha nova cria a entidade no Bitrix de
+      // forma síncrona — chunk pequeno p/ caber no teto de ~60s por request.
+      const chunkSize =
+        matchConfig?.writeBack && matchConfig.insertNew ? 20 : CHUNK_SIZE;
       const total = rows.length;
       setProgress({ done: 0, total });
       const acc: SyncResult = {
@@ -326,12 +408,13 @@ export function ImportWizard({
         byEntity: {},
         errorSamples: [],
       };
-      for (let i = 0; i < total; i += CHUNK_SIZE) {
-        const chunk = rows.slice(i, i + CHUNK_SIZE);
+      for (let i = 0; i < total; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
         const res = await importCsvChunk({
           sourceKey: source.key,
           mapping,
-          dedupColumns,
+          dedupColumns: matchConfig ? [] : dedupColumns,
+          match: matchConfig ?? undefined,
           rows: chunk,
         });
         if (!res.ok || !res.result) {
@@ -344,10 +427,19 @@ export function ImportWizard({
         acc.updated += res.result.updated;
         acc.skipped += res.result.skipped;
         acc.errors += res.result.errors;
+        if (res.result.noMatch) {
+          acc.noMatch = (acc.noMatch ?? 0) + res.result.noMatch;
+        }
+        if (res.result.alreadyExists) {
+          acc.alreadyExists = (acc.alreadyExists ?? 0) + res.result.alreadyExists;
+        }
+        if (res.result.ambiguous) {
+          acc.ambiguous = (acc.ambiguous ?? 0) + res.result.ambiguous;
+        }
         for (const s of res.result.errorSamples) {
           if (acc.errorSamples.length < 10) acc.errorSamples.push(s);
         }
-        setProgress({ done: Math.min(i + CHUNK_SIZE, total), total });
+        setProgress({ done: Math.min(i + chunkSize, total), total });
       }
 
       // 4) Auto-match + recálculo, uma vez só.
@@ -566,43 +658,161 @@ export function ImportWizard({
 
       {step === "dedup" ? (
         <div className="flex max-w-xl flex-col gap-4">
-          <p className="text-muted-foreground text-sm">
-            Escolha a(s) coluna(s) que identificam cada linha (ex.: e-mail, ID
-            do negócio). Re-importar o arquivo atualiza as linhas com a mesma
-            chave em vez de duplicá-las — e edições feitas no app são
-            preservadas.
-          </p>
-          <div className="flex flex-col gap-2">
-            {mappedPlans.map((p) => (
-              <label key={p.csvColumn} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={dedupColumns.includes(p.csvColumn)}
-                  onCheckedChange={(checked) =>
-                    setDedupColumns((prev) =>
-                      checked === true
-                        ? [...prev, p.csvColumn]
-                        : prev.filter((c) => c !== p.csvColumn)
-                    )
-                  }
-                  aria-label={`Usar ${p.csvColumn} na chave`}
-                />
-                {p.csvColumn}
-              </label>
-            ))}
+          <div className="flex flex-col gap-1.5">
+            <Label>Como tratar registros existentes?</Label>
+            <Combobox
+              options={MODE_OPTIONS}
+              value={dedupMode}
+              onValueChange={(v) => setDedupMode(v as "insert" | "match")}
+              searchable={false}
+              aria-label="Modo de import"
+            />
           </div>
-          {dedupColumns.length === 0 ? (
-            <p className="text-muted-foreground text-xs">
-              Sem colunas marcadas, a chave é a linha inteira: re-importar o
-              mesmo arquivo não duplica, mas uma linha alterada na planilha
-              entra como registro novo.
-            </p>
-          ) : null}
+
+          {dedupMode === "insert" ? (
+            <>
+              <p className="text-muted-foreground text-sm">
+                Escolha a(s) coluna(s) que identificam cada linha (ex.: e-mail,
+                ID do negócio). Re-importar o arquivo atualiza as linhas com a
+                mesma chave em vez de duplicá-las — e edições feitas no app são
+                preservadas.
+              </p>
+              <div className="flex flex-col gap-2">
+                {mappedPlans.map((p) => (
+                  <label
+                    key={p.csvColumn}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={dedupColumns.includes(p.csvColumn)}
+                      onCheckedChange={(checked) =>
+                        setDedupColumns((prev) =>
+                          checked === true
+                            ? [...prev, p.csvColumn]
+                            : prev.filter((c) => c !== p.csvColumn)
+                        )
+                      }
+                      aria-label={`Usar ${p.csvColumn} na chave`}
+                    />
+                    {p.csvColumn}
+                  </label>
+                ))}
+              </div>
+              {dedupColumns.length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  Sem colunas marcadas, a chave é a linha inteira: re-importar
+                  o mesmo arquivo não duplica, mas uma linha alterada na
+                  planilha entra como registro novo.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground text-sm">
+                Cada linha do CSV procura um registro existente de{" "}
+                <span className="font-medium">{source?.label}</span> comparando
+                a coluna escolhida com o campo escolhido (igualdade exata, sem
+                espaços nas pontas). Edições feitas no app são preservadas.
+              </p>
+              <div className="flex flex-col gap-1.5">
+                <Label>Coluna do CSV com o valor de match</Label>
+                <Combobox
+                  options={headers.map((h) => ({ value: h, label: h }))}
+                  value={matchCsvColumn}
+                  onValueChange={pickMatchColumn}
+                  placeholder="Escolha a coluna"
+                  aria-label="Coluna do CSV do match"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Campo do registro para comparar</Label>
+                <Combobox
+                  options={matchTargetOptions}
+                  value={matchTargetField}
+                  onValueChange={setMatchTargetField}
+                  placeholder="Escolha o campo"
+                  aria-label="Campo do registro do match"
+                />
+              </div>
+              <div className="flex flex-col gap-2 rounded-lg border p-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={matchInsertNew}
+                    onCheckedChange={(c) => setMatchInsertNew(c === true)}
+                    aria-label="Incluir novos"
+                  />
+                  <span>
+                    <span className="font-medium">Incluir novos</span> — linha
+                    sem match vira um registro novo
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={matchUpdateExisting}
+                    onCheckedChange={(c) => setMatchUpdateExisting(c === true)}
+                    aria-label="Atualizar existentes"
+                  />
+                  <span>
+                    <span className="font-medium">Atualizar existentes</span> —
+                    linha com match atualiza o registro
+                  </span>
+                </label>
+                {!matchInsertNew && matchUpdateExisting ? (
+                  <p className="text-muted-foreground text-xs">
+                    Modo só-atualização: linhas sem match são rejeitadas e
+                    aparecem no relatório — nada é inserido por engano.
+                  </p>
+                ) : null}
+                {!matchInsertNew && !matchUpdateExisting ? (
+                  <p className="text-destructive text-xs" role="status">
+                    Marque ao menos uma das opções.
+                  </p>
+                ) : null}
+              </div>
+              {isBitrixSource ? (
+                <div className="flex flex-col gap-2 rounded-lg border p-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={matchWriteBack}
+                      onCheckedChange={(c) => setMatchWriteBack(c === true)}
+                      aria-label="Write-back para o Bitrix"
+                    />
+                    <span>
+                      <span className="font-medium">
+                        Gravar de volta no Bitrix (write-back)
+                      </span>
+                    </span>
+                  </label>
+                  <p className="text-muted-foreground text-xs">
+                    Atualizações entram na fila de write-back (campos com
+                    “Gravar no Bitrix” ligado em Campos + colunas do sistema
+                    mapeadas; acompanhe em Configurações → Log).{" "}
+                    {matchInsertNew
+                      ? "Inclusões CRIAM a entidade no Bitrix na hora — o import fica mais lento (lotes menores)."
+                      : ""}
+                  </p>
+                </div>
+              ) : isSheetSource ? (
+                <div className="rounded-lg border p-4">
+                  <label className="text-muted-foreground flex items-center gap-2 text-sm">
+                    <Checkbox checked={false} disabled aria-label="Write-back indisponível" />
+                    Gravar de volta na planilha (write-back)
+                  </label>
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    Indisponível: a integração do Estudo de Fechamentos é
+                    somente de entrada (a planilha empurra os dados para cá).
+                  </p>
+                </div>
+              ) : null}
+            </>
+          )}
+
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("mapeamento")}>
               <ArrowLeft className="size-4" />
               Voltar
             </Button>
-            <Button onClick={() => setStep("revisao")}>
+            <Button disabled={!matchStepValid} onClick={() => setStep("revisao")}>
               Continuar
               <ArrowRight className="size-4" />
             </Button>
@@ -620,9 +830,27 @@ export function ImportWizard({
             </p>
             <p className="text-muted-foreground mt-1">
               {mappedPlans.length} coluna(s) mapeada(s) ·{" "}
-              {plans.length - mappedPlans.length} ignorada(s) · chave:{" "}
-              {dedupColumns.length > 0 ? dedupColumns.join(" + ") : "linha inteira"}
+              {plans.length - mappedPlans.length} ignorada(s) ·{" "}
+              {matchConfig
+                ? `match: "${matchConfig.csvColumn}" ↔ ${
+                    matchTargetOptions.find(
+                      (o) => o.value === matchConfig.targetField
+                    )?.label ?? matchConfig.targetField
+                  }`
+                : `chave: ${dedupColumns.length > 0 ? dedupColumns.join(" + ") : "linha inteira"}`}
             </p>
+            {matchConfig ? (
+              <p className="text-muted-foreground mt-1">
+                {matchConfig.insertNew ? "☑" : "☐"} Incluir novos ·{" "}
+                {matchConfig.updateExisting ? "☑" : "☐"} Atualizar existentes
+                {isBitrixSource
+                  ? ` · ${matchConfig.writeBack ? "☑" : "☐"} Write-back Bitrix`
+                  : ""}
+                {!matchConfig.insertNew
+                  ? " — linhas sem match serão rejeitadas"
+                  : ""}
+              </p>
+            ) : null}
           </div>
           {!hasPeriodDate ? (
             <p className="text-sm text-amber-600" role="status">
@@ -664,6 +892,25 @@ export function ImportWizard({
                     {report.result.skipped} ignorado(s) ·{" "}
                     {report.result.errors} erro(s)
                   </p>
+                  {report.result.noMatch ? (
+                    <p className="mt-1 font-medium text-amber-600">
+                      {report.result.noMatch} linha(s) sem match rejeitada(s)
+                      (“Incluir novos” desmarcado — nada foi inserido para
+                      elas).
+                    </p>
+                  ) : null}
+                  {report.result.alreadyExists ? (
+                    <p className="text-muted-foreground mt-1">
+                      {report.result.alreadyExists} linha(s) com match não
+                      alterada(s) (“Atualizar existentes” desmarcado).
+                    </p>
+                  ) : null}
+                  {report.result.ambiguous ? (
+                    <p className="text-destructive mt-1">
+                      {report.result.ambiguous} linha(s) com match ambíguo (o
+                      valor casa mais de um registro) — veja os erros abaixo.
+                    </p>
+                  ) : null}
                   {report.result.errorSamples.length > 0 ? (
                     <ul className="text-destructive mt-2 list-disc pl-5 text-xs">
                       {report.result.errorSamples.map((e, i) => (

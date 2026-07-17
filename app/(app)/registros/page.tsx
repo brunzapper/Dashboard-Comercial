@@ -21,6 +21,7 @@ import {
 import { loadSources } from "@/lib/config/sources";
 import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
+import { ExportCsvButton } from "@/components/registros/export-csv-button";
 import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import { RecordsTable } from "@/components/registros/records-table";
@@ -216,6 +217,9 @@ export default async function RegistrosPage({
               userRoles={userRoles}
             />
           ) : null}
+          <ExportCsvButton
+            params={{ fonte, etapa, responsavel, de, ate, busca }}
+          />
           {isAdmin ? (
             <Button asChild variant="outline">
               <Link href="/registros/importar">Importar CSV</Link>

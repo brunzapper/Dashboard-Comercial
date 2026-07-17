@@ -25,6 +25,11 @@ export interface SyncResult {
   byEntity: Record<string, EntityCounts>;
   // Primeiras mensagens de erro (para diagnóstico no painel de Sync).
   errorSamples: string[];
+  // Contadores do import em modo "match por coluna" (lib/import/ingest.ts) —
+  // ausentes fora dele. Todos também contam em skipped/errors acima.
+  noMatch?: number; // sem match e "Incluir novos" desmarcado → rejeitada
+  alreadyExists?: number; // com match e "Atualizar existentes" desmarcado
+  ambiguous?: number; // valor casa 2+ registros → erro
 }
 
 const MAX_ERROR_SAMPLES = 10;

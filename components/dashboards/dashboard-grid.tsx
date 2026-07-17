@@ -209,6 +209,7 @@ export function DashboardGrid({
   tabs,
   activeTabId,
   canEdit,
+  canExport = false,
   canManageFields = false,
   currencyOptions,
   currencyRates = {},
@@ -251,6 +252,9 @@ export function DashboardGrid({
   tabs?: { id: string; name: string; color?: string }[];
   activeTabId?: string;
   canEdit: boolean;
+  // Exibe "Exportar CSV" no menu ⋮ dos widgets. Fica DESLIGADO por padrão para
+  // nunca vazar no viewer público de snapshots (snapshot-client não o passa).
+  canExport?: boolean;
   canManageFields?: boolean;
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
@@ -868,6 +872,7 @@ export function DashboardGrid({
                     siblings={widgets}
                     tabs={tabs}
                     canEdit={canEdit}
+                    canExport={canExport}
                     canManageFields={canManageFields}
                     editMode={editMode}
                     filterOptions={filterOptionsById?.[w.id]}

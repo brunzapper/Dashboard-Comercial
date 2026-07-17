@@ -23,7 +23,16 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
-import { Copy, GripVertical, MoreVertical, Palette, Pencil, Trash2, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  GripVertical,
+  MoreVertical,
+  Palette,
+  Pencil,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -48,14 +57,23 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type {
   CalcWidgetResult,
   FieldFilterOptions,
+  RecordListColumn,
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
+import { widgetDataToCsv } from "@/lib/export/widget-data";
+import {
+  recordColumnValue,
+  recordRefLabel,
+} from "@/lib/export/record-cells";
+import { exportWidgetRecordsCsv } from "@/app/(app)/dashboards/export-actions";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import {
   parseViewFilter,
   searchHandledOnClient,
 } from "@/lib/widgets/view-filters";
+import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
@@ -110,6 +128,7 @@ export function WidgetCard({
   siblings,
   tabs,
   canEdit,
+  canExport = false,
   canManageFields = false,
   currencyOptions,
   currencyRates = {},
@@ -155,6 +174,9 @@ export function WidgetCard({
   siblings: Widget[];
   tabs?: { id: string; name: string; color?: string }[];
   canEdit: boolean;
+  // Itens "Exportar CSV" do menu ⋮. Desligado por padrão — o viewer público de
+  // snapshots nunca o liga.
+  canExport?: boolean;
   canManageFields?: boolean;
   editMode: boolean;
   filterOptions?: FieldFilterOptions;
@@ -178,6 +200,8 @@ export function WidgetCard({
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   // X da calculadora: some na hora (otimista); o refresh remove de vez.
   const [closing, setClosing] = useState(false);
   const { ap: appearance, save: saveAppearance } = useWidgetAppearance(
@@ -347,55 +371,210 @@ export function WidgetCard({
   // deleteWidget/refresh corre por trás. Depois de TODOS os hooks acima.
   if (closing) return null;
 
-  const menu = canEdit ? (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Opções do widget">
-          <MoreVertical className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault();
-            setBuilderOpen(true);
-          }}
-        >
-          <Pencil className="size-4" /> Editar dados
-        </DropdownMenuItem>
-        {canStyle ? (
-          <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault();
-              setAppearanceOpen(true);
-            }}
-          >
-            <Palette className="size-4" /> Aparência
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem
-          onSelect={(e) => {
-            e.preventDefault();
-            copyWidget(widget);
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-          }}
-        >
-          <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          variant="destructive"
-          onSelect={(e) => {
-            e.preventDefault();
-            setDeleteOpen(true);
-          }}
-        >
-          <Trash2 className="size-4" /> Excluir
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  ) : null;
+  // Exportação CSV (menu ⋮): "Exportar CSV" baixa o que o card exibe (dados já
+  // recebidos por props — sem nova consulta); "Exportar registros (CSV)" busca
+  // no servidor os registros por trás do recorte (runRecordList, RLS).
+  const isAggregatedData =
+    !isFilter &&
+    !isFieldFilter &&
+    !isQuickTable &&
+    !isKanban &&
+    !isAgenda &&
+    !isCalc &&
+    !isCalculator &&
+    !isNote &&
+    !isShape &&
+    !isRecordList;
+  const canExportDisplayed =
+    canExport && ((isAggregatedData && !data.error) || isRecordList);
+  const canExportRecords =
+    canExport && (isAggregatedData || (isRecordList && !isEntityList));
+
+  const exportFileName = (suffix?: string) =>
+    csvFilename(
+      `${widget.title ?? widget.visual_type}${suffix ? `-${suffix}` : ""}`
+    );
+  const exportLabels = {
+    responsibles: fkLabels,
+    operations: fkLabels,
+    leads: fkLabels,
+  };
+  const exportColHeader = (c: RecordListColumn): string =>
+    c.label ??
+    available.find((a) => a.field === c.field)?.label ??
+    recordRefLabel(c.field, fields);
+
+  const exportDisplayedCsv = () => {
+    const cols = (widget.settings?.columns ?? []) as RecordListColumn[];
+    if (isEntityList) {
+      const headers = ["Nome", ...cols.map(exportColHeader)];
+      const rows = entityList.map((row) => {
+        // Linha de entidade vira um "registro" só de custom_fields para reusar
+        // o formatador compartilhado (moeda/data/percentual por definição).
+        const fake = {
+          custom_fields: row.values,
+          currency: null,
+        } as unknown as RecordRow;
+        return [
+          row.label,
+          ...cols.map((c) =>
+            recordColumnValue(fake, c.field, fields, exportLabels, available, {
+              csv: true,
+            })
+          ),
+        ];
+      });
+      downloadCsv(exportFileName(), buildCsv(headers, rows));
+      return;
+    }
+    if (isRecordList) {
+      // Busca client-side ativa: exporta só o que a tabela exibe (mesmo
+      // matcher em memória de record-search.ts).
+      const matcher = clientSearch
+        ? recordSearchMatcher(clientQ, widget.settings?.searchFields, available)
+        : null;
+      const visibleRecords = matcher ? recordList.filter(matcher) : recordList;
+      const metricCols = (widget.metrics ?? []).filter((m) => m.field);
+      const headers = [
+        ...cols.map(exportColHeader),
+        ...metricCols.map(
+          (m) =>
+            m.label ??
+            available.find((a) => a.field === m.field)?.label ??
+            m.field
+        ),
+      ];
+      const rows = visibleRecords.map((r) => [
+        ...cols.map((c) =>
+          recordColumnValue(r, c.field, fields, exportLabels, available, {
+            csv: true,
+          })
+        ),
+        ...metricCols.map((m) =>
+          recordColumnValue(r, m.field, fields, exportLabels, available, {
+            csv: true,
+          })
+        ),
+      ]);
+      downloadCsv(exportFileName(), buildCsv(headers, rows));
+      return;
+    }
+    const { headers, rows } = widgetDataToCsv(data, widget.metrics ?? []);
+    downloadCsv(exportFileName(), buildCsv(headers, rows));
+  };
+
+  const exportRecordsCsv = () => {
+    setExportError(null);
+    setExporting(true);
+    void (async () => {
+      try {
+        const res = await exportWidgetRecordsCsv(
+          dashboardId,
+          widget.id,
+          window.location.search
+        );
+        if (!res.ok) {
+          setExportError(res.message);
+          return;
+        }
+        downloadCsv(
+          exportFileName("registros"),
+          buildCsv(res.headers, res.rows)
+        );
+      } catch {
+        setExportError("Falha ao exportar. Tente novamente.");
+      } finally {
+        setExporting(false);
+      }
+    })();
+  };
+
+  const showExportItems = canExportDisplayed || canExportRecords;
+  const menu =
+    canEdit || showExportItems ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Opções do widget">
+            <MoreVertical className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {canEdit ? (
+            <>
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setBuilderOpen(true);
+                }}
+              >
+                <Pencil className="size-4" /> Editar dados
+              </DropdownMenuItem>
+              {canStyle ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setAppearanceOpen(true);
+                  }}
+                >
+                  <Palette className="size-4" /> Aparência
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  copyWidget(widget);
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+          {showExportItems ? (
+            <>
+              {canEdit ? <DropdownMenuSeparator /> : null}
+              {canExportDisplayed ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    exportDisplayedCsv();
+                  }}
+                >
+                  <Download className="size-4" /> Exportar CSV
+                </DropdownMenuItem>
+              ) : null}
+              {canExportRecords ? (
+                <DropdownMenuItem
+                  disabled={exporting}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    exportRecordsCsv();
+                  }}
+                >
+                  <Download className="size-4" />{" "}
+                  {exporting ? "Exportando…" : "Exportar registros (CSV)"}
+                </DropdownMenuItem>
+              ) : null}
+            </>
+          ) : null}
+          {canEdit ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="size-4" /> Excluir
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : null;
 
   const overlays = canEdit ? (
     <>
@@ -466,7 +645,7 @@ export function WidgetCard({
             <GripVertical className="size-4" />
           </span>
         ) : null}
-        {canEdit ? (
+        {menu ? (
           <div className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             {menu}
           </div>
@@ -550,6 +729,11 @@ export function WidgetCard({
           </Button>
         ) : null}
       </div>
+      {exportError ? (
+        <p className="text-destructive border-b px-3 py-1 text-xs">
+          {exportError}
+        </p>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
         {showTableBar ? (
           <TableFilterBar

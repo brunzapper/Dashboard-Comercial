@@ -49,6 +49,42 @@ export function coreTargetKind(col: string): "texto" | "numero" | "data" {
   );
 }
 
+// ============ Match por coluna (upsert em fonte existente) ============
+// Modo "match" do passo 4 do wizard: em vez do hash de dedup no namespace
+// 'csv', cada linha procura um registro EXISTENTE da fonte (qualquer
+// source_system) pelo valor de uma coluna. Igualdade exata após trim.
+export interface MatchConfig {
+  // Coluna do CSV que carrega o valor de match.
+  csvColumn: string;
+  // Campo do registro a comparar: "source_id" | "core:<col>" | "custom:<key>".
+  targetField: string;
+  // ☑ "Incluir novos": linha SEM match vira INSERT. Desmarcado = linha sem
+  // match é REJEITADA (proteção contra inserção acidental por falha de match).
+  insertNew: boolean;
+  // ☑ "Atualizar existentes": linha COM match atualiza o registro (conflito
+  // por campo). Desmarcado = registro existente não é tocado.
+  updateExisting: boolean;
+  // Fontes de Sync Bitrix: updates enfileiram write-back e inclusões criam a
+  // entidade no CRM. Sempre false para as demais fontes.
+  writeBack: boolean;
+}
+
+// Alvos de match aceitos no núcleo core (texto — datas/números do núcleo ficam
+// de fora: formato ambíguo entre CSV e banco).
+export const MATCH_CORE_TARGETS = CORE_IMPORT_TARGETS.filter(
+  (t) => t.kind === "texto"
+);
+
+/** Valida a forma do targetField (a action ainda valida contra o catálogo). */
+export function isValidMatchTarget(target: string): boolean {
+  return (
+    target === "source_id" ||
+    (target.startsWith("core:") &&
+      MATCH_CORE_TARGETS.some((t) => t.value === target)) ||
+    (target.startsWith("custom:") && target.length > "custom:".length)
+  );
+}
+
 // Sugestões de alvo por cabeçalho normalizado (slug) — só palpites; o usuário
 // confirma no passo de mapeamento.
 const HEADER_SUGGESTIONS: Record<string, string> = {
