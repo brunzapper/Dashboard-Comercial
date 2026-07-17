@@ -42,6 +42,10 @@ export interface DashboardPeriod {
   field: string; // campo PRIMÁRIO (visível/selecionável): 'closed_at' | 'opened_at' | …
   from: string | null;
   to: string | null;
+  // Preset de origem (quando a seleção veio de um preset): permite deslocar o
+  // período SEMANTICAMENTE na comparação (este_mes → mês anterior cheio, e não
+  // "mesma duração em dias"). Ausente = intervalo personalizado.
+  preset?: PeriodPresetKey;
   // Campo de data por fonte (já resolvido, com defaults). Quando presente, o
   // período filtra CADA fonte pela sua coluna de data — ex.: negócios por
   // `closed_at` e Estudo por `source_created_at` na mesma seleção. Ausente =
@@ -156,7 +160,7 @@ export function resolvePeriodSelection(
   if (preset === PERIOD_ALL) return null;
   if (preset in PERIOD_PRESETS) {
     const { from, to } = presetRange(preset as PeriodPresetKey);
-    return { field, from, to };
+    return { field, from, to, preset: preset as PeriodPresetKey };
   }
   const de = eff.de && DATE_RE.test(eff.de) ? eff.de : null;
   const ate = eff.ate && DATE_RE.test(eff.ate) ? eff.ate : null;

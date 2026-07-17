@@ -336,6 +336,49 @@ export interface CalcSettings {
   calcField?: string;
 }
 
+// --- Comparação com período anterior (17/07/2026) ---
+// Config de DADOS por widget (settings.comparison): o engine roda uma segunda
+// consulta com o range de comparação (lib/widgets/comparison.ts) e anexa o
+// valor comparado por métrica em WidgetRow.__cmp + o metadado em
+// WidgetData.comparison. Sem período ativo ("todo o período") não há base de
+// comparação e a variação fica indisponível.
+export type ComparisonBase =
+  | "previous_period" // período imediatamente anterior de mesma duração
+  | "previous_year" // mesmo período do ano anterior
+  | "window_avg" // média por bucket de uma janela anterior maior
+  | "window_median"; // mediana por bucket de uma janela anterior maior
+export type ComparisonWindow = "quarter" | "semester" | "ytd" | "last_12m";
+export const COMPARISON_BASE_LABELS: Record<ComparisonBase, string> = {
+  previous_period: "Período anterior",
+  previous_year: "Mesmo período do ano passado",
+  window_avg: "Média de uma janela anterior",
+  window_median: "Mediana de uma janela anterior",
+};
+export const COMPARISON_WINDOW_LABELS: Record<ComparisonWindow, string> = {
+  quarter: "Último trimestre",
+  semester: "Último semestre",
+  ytd: "Ano até agora",
+  last_12m: "Últimos 12 meses",
+};
+
+export interface ComparisonSettings {
+  enabled?: boolean;
+  base?: ComparisonBase; // default previous_period
+  window?: ComparisonWindow; // só nas bases window_* (default last_12m)
+  // Exibição (consumida pelos renderizadores; ver VariationBadge):
+  showBaseValue?: boolean; // exibe o valor do período de comparação junto
+  onlyVariation?: boolean; // Card: o número principal É a variação
+  format?: "pct" | "abs" | "both"; // default "pct"
+  style?: "color" | "arrow" | "both"; // default "both"
+  invertColors?: boolean; // queda = verde (métricas tipo churn)
+  tablePlacement?: "inline" | "column"; // tabela agregada; default "inline"
+  ghostSeries?: boolean; // gráficos: série do período de comparação
+  chartLabels?: boolean; // gráficos: rótulo de variação nos pontos/barras
+}
+export interface ComparisonWidgetSettings {
+  comparison?: ComparisonSettings;
+}
+
 // Endereço de um widget-alvo de atalho (formas e links de nota). dashboardId
 // ausente = mesmo dashboard; tab é informativa (a navegação resolve a aba
 // efetiva pelo settings.tab ATUAL do alvo — sobrevive a mover o widget de aba).
@@ -586,7 +629,8 @@ export type WidgetSettings = KpiSettings &
   CalculatorSettings &
   NoteSettings &
   ShapeSettings &
-  QuickTableSettings & {
+  QuickTableSettings &
+  ComparisonWidgetSettings & {
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
@@ -694,6 +738,9 @@ export interface KpiResult {
   metaText?: string;
   faltaText?: string;
   valueText?: string;
+  // Valor do período de comparação (modo ratio; settings.comparison ativa).
+  // Meta não compara — a meta já é a referência do card.
+  cmpValue?: number | null;
 }
 
 export interface GridPosition {
@@ -734,6 +781,11 @@ export interface Dashboard {
 export interface WidgetRow {
   [key: string]: unknown;
   __money?: Record<string, MoneyBreakdown>;
+  // Valor do período de comparação por métrica (`metric_<n>` → número a
+  // comparar, na MESMA escala do valor plotado da métrica; monetárias usam a
+  // decisão de moeda da série principal). null = grupo sem valor comparável.
+  // Ausente = comparação desligada/indisponível. Ver lib/widgets/comparison.ts.
+  __cmp?: Record<string, number | null>;
   // Basis das métricas calculadas de agregados desta linha (grupo): chave
   // 'sum:<field>'|'count:<field>'|'count:*' → valor (número, ou MoneyBreakdown
   // p/ operando monetário). Subtotais/Total geral fundem as basis das linhas e
@@ -767,6 +819,17 @@ export interface WidgetData {
     };
   }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
+  // Comparação com período anterior ATIVA neste resultado: range consultado +
+  // rótulo pronto ("vs. período anterior") + a config de exibição. Ausente =
+  // sem comparação (desligada, "todo o período" ou base indisponível) — os
+  // renderizadores ocultam a variação.
+  comparison?: {
+    base: ComparisonBase;
+    from: string;
+    to: string;
+    label: string;
+    settings: ComparisonSettings;
+  };
   // Erro ao computar o widget (RPC/consulta): rows/dimensions/metrics vêm
   // vazios e o card exibe o estado de erro em vez de ficar em branco.
   error?: string;
