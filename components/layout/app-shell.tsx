@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 17/07/2026
 // Fase 10: shell do app (client). Envolve a barra lateral + conteúdo e controla:
 //  - barra OCULTA por padrão (revelada por hover numa faixa fina à esquerda),
 //    FIXÁVEL por um pin discreto no topo direito da barra (pref. por usuário,
@@ -6,6 +6,9 @@
 //  - "modo tela cheia" (AppChromeContext.toggleFullscreen): esconde o chrome E
 //    entra na Fullscreen API do navegador (Esc restaura).
 // O conteúdo da barra é montado no server (layout.tsx) e passado em `sidebar`.
+// v1.2 (17/07/2026): marca a flag de sessão do app (lib/app-session) ao montar
+//   — insumo do RestoreLastView (Home) p/ restaurar a última view só na
+//   REABERTURA do app.
 // v1.1 (16/07/2026): `topRight` — controle flutuante no topo-direito (sino de
 //   alertas de tarefas), oculto no modo tela cheia.
 "use client";
@@ -23,6 +26,7 @@ import {
 import { Pin, PinOff } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { markAppSessionActive } from "@/lib/app-session";
 import { updateUserSettings } from "@/app/(app)/dashboards/actions";
 
 interface AppChrome {
@@ -55,6 +59,14 @@ export function AppShell({
   const [hovering, setHovering] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [, startTransition] = useTransition();
+
+  // Marca "app aberto nesta sessão do navegador" em QUALQUER página (inclui
+  // entrada direta por bookmark num board): visita posterior à Home não deve
+  // redirecionar. Filhos rodam efeitos antes (React), então na entrada pela
+  // própria Home o RestoreLastView ainda lê a flag ausente e restaura.
+  useEffect(() => {
+    markAppSessionActive();
+  }, []);
 
   const togglePin = useCallback(() => {
     setPinned((prev) => {

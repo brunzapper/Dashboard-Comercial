@@ -316,6 +316,10 @@ export interface UserAppSettings {
   // Marca d'água da seção "Novas" do sino de tarefas (ISO): tarefas
   // criadas/reatribuídas depois disso contam como novas.
   tasksSeenAt?: string;
+  // Última rota de board visitada (/dashboards/<id> ou /kanbans/<id>, com
+  // ?tab= se houver), para restaurar ao reabrir o app (RestoreLastView na
+  // Home); null = limpou (fechou na Home). Período fica de fora (lastPeriod).
+  lastView?: string | null;
 }
 
 export async function updateUserSettings(
