@@ -1,11 +1,14 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 17/07/2026
 // Visão LISTA do kanban: os mesmos cards do quadro numa tabela (coluna do
 // quadro, título, campos extras do card, métrica e edição). Compartilhada
 // entre a página dedicada e o widget.
+// v1.1 (17/07/2026): subconjunto da aparência do kanban (cabeçalho e linhas —
+//   settings.kanban.appearance).
 "use client";
 
 import { formatMoney } from "@/lib/widgets/currency";
 import type { KanbanBoardData } from "@/lib/kanban/data";
+import type { KanbanAppearance } from "@/lib/kanban/types";
 import {
   Table,
   TableBody,
@@ -21,11 +24,15 @@ export function KanbanList({
   data,
   recordCtx,
   readOnly,
+  appearance,
 }: {
   data: KanbanBoardData;
   recordCtx: KanbanRecordContext;
   // Snapshot público: sem painel de edição.
   readOnly?: boolean;
+  // Subconjunto aplicado: cabeçalho (column.headerBg/headerColor) e linhas
+  // (card.bg/text).
+  appearance?: KanbanAppearance;
 }) {
   // Rótulos dos campos extras (iguais em todos os cards — config do board).
   const extraLabels = data.columns
@@ -41,7 +48,12 @@ export function KanbanList({
     <div className="rounded-lg border">
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow
+            style={{
+              background: appearance?.column?.headerBg,
+              color: appearance?.column?.headerColor,
+            }}
+          >
             <TableHead>Coluna</TableHead>
             <TableHead>Nome</TableHead>
             {extraLabels.map((l) => (
@@ -65,7 +77,13 @@ export function KanbanList({
             </TableRow>
           ) : (
             rows.map(({ col, card }) => (
-              <TableRow key={card.id}>
+              <TableRow
+                key={card.id}
+                style={{
+                  background: appearance?.card?.bg,
+                  color: appearance?.card?.text,
+                }}
+              >
                 <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
                   {col.label}
                 </TableCell>

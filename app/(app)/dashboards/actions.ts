@@ -25,6 +25,7 @@ import {
 } from "@/lib/widgets/quick-filters";
 import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
 import {
+  DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
   type KanbanSettings,
 } from "@/lib/kanban/types";
@@ -123,7 +124,12 @@ export async function createBoard(
     if (!source) return { ok: false, message: "Escolha a fonte dos registros." };
     kanban.source = source;
     const groupKind = String(formData.get("group_kind") ?? "field");
-    if (groupKind === "date") {
+    if (groupKind === "custom") {
+      // "Personalizar": colunas livres do usuário; posição do card é dado da
+      // visão (kanban_placements) — mover não altera o registro.
+      kanban.columnSource = "custom";
+      kanban.columns = DEFAULT_CUSTOM_COLUMNS;
+    } else if (groupKind === "date") {
       const bucketRaw = String(formData.get("date_bucket") ?? "weekday");
       kanban.dateBucket =
         bucketRaw === "month_name" || bucketRaw === "month_year"
@@ -301,11 +307,14 @@ export async function saveLastPeriod(
   );
 }
 
-// Preferências GLOBAIS do usuário (user_settings), não por dashboard. Hoje só a
-// barra lateral fixada. Read-modify-write para preservar chaves futuras. RLS
-// garante que cada usuário só toca a própria linha. Fire-and-forget no cliente.
+// Preferências GLOBAIS do usuário (user_settings), não por dashboard.
+// Read-modify-write para preservar chaves futuras. RLS garante que cada
+// usuário só toca a própria linha. Fire-and-forget no cliente.
 export interface UserAppSettings {
   sidebarPinned?: boolean;
+  // Marca d'água da seção "Novas" do sino de tarefas (ISO): tarefas
+  // criadas/reatribuídas depois disso contam como novas.
+  tasksSeenAt?: string;
 }
 
 export async function updateUserSettings(

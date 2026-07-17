@@ -56,7 +56,10 @@ import {
   type RefOption,
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
-import type { KanbanSettings } from "@/lib/kanban/types";
+import {
+  DEFAULT_CUSTOM_COLUMNS,
+  type KanbanSettings,
+} from "@/lib/kanban/types";
 import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
 import { cn } from "@/lib/utils";
@@ -950,12 +953,14 @@ export function WidgetBuilder({
     // engine). `sources` guarda a fonte p/ a resolução de período da page.
     if (visualType === "kanban") {
       const k = kanbanCfg;
+      const isCustomCols = k.mode === "registros" && k.columnSource === "custom";
       if (k.mode === "registros") {
         if (!k.source) {
           setError("Escolha a fonte dos registros do kanban.");
           return;
         }
-        if (k.dateBucket ? !k.dateField : !k.groupField) {
+        // "Personalizar": as colunas são do usuário — não exigem campo.
+        if (!isCustomCols && (k.dateBucket ? !k.dateField : !k.groupField)) {
           setError("Escolha o campo que define as colunas do kanban.");
           return;
         }
@@ -967,13 +972,21 @@ export function WidgetBuilder({
               ...(k.taskBoardId ? { taskBoardId: k.taskBoardId } : {}),
               ...(k.columns ? { columns: k.columns } : {}),
               ...(k.tasks ? { tasks: k.tasks } : {}),
+              ...(k.appearance ? { appearance: k.appearance } : {}),
             }
           : {
               mode: "registros",
               source: k.source,
-              ...(k.dateBucket
-                ? { dateField: k.dateField, dateBucket: k.dateBucket }
-                : { groupField: k.groupField }),
+              ...(isCustomCols
+                ? {
+                    columnSource: "custom" as const,
+                    columns: k.columns?.length
+                      ? k.columns
+                      : DEFAULT_CUSTOM_COLUMNS,
+                  }
+                : k.dateBucket
+                  ? { dateField: k.dateField, dateBucket: k.dateBucket }
+                  : { groupField: k.groupField }),
               ...(k.metric ? { metric: k.metric } : {}),
               card: {
                 titleField: k.card?.titleField || "title",
@@ -982,7 +995,8 @@ export function WidgetBuilder({
                   : {}),
                 ...(k.card?.colorField ? { colorField: k.card.colorField } : {}),
               },
-              ...(k.columns ? { columns: k.columns } : {}),
+              ...(!isCustomCols && k.columns ? { columns: k.columns } : {}),
+              ...(k.appearance ? { appearance: k.appearance } : {}),
             };
       const input = {
         title: title.trim() || null,
@@ -991,7 +1005,8 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings: { kanban: clean, ...tabPatch },
+        // Preserva chaves fora do escopo do builder (ex.: appearance do card).
+        settings: { ...widget?.settings, kanban: clean, ...tabPatch },
       };
       startTransition(async () => {
         const res = widget
@@ -2010,26 +2025,56 @@ export function WidgetBuilder({
                               value: "date",
                               label: "Períodos de um campo de data",
                             },
+                            {
+                              value: "custom",
+                              label: "Personalizar (colunas livres)",
+                            },
                           ]}
-                          value={k.dateBucket ? "date" : "field"}
+                          value={
+                            k.columnSource === "custom"
+                              ? "custom"
+                              : k.dateBucket
+                                ? "date"
+                                : "field"
+                          }
                           onValueChange={(v) =>
-                            v === "date"
+                            v === "custom"
                               ? patchKanban({
-                                  dateBucket: k.dateBucket ?? "weekday",
-                                  dateField: k.dateField ?? "source_created_at",
-                                  groupField: undefined,
-                                })
-                              : patchKanban({
+                                  columnSource: "custom",
                                   dateBucket: undefined,
                                   dateField: undefined,
-                                  groupField: k.groupField ?? "stage",
+                                  groupField: undefined,
+                                  columns: k.columns?.length
+                                    ? k.columns
+                                    : DEFAULT_CUSTOM_COLUMNS,
                                 })
+                              : v === "date"
+                                ? patchKanban({
+                                    columnSource: undefined,
+                                    dateBucket: k.dateBucket ?? "weekday",
+                                    dateField: k.dateField ?? "source_created_at",
+                                    groupField: undefined,
+                                  })
+                                : patchKanban({
+                                    columnSource: undefined,
+                                    dateBucket: undefined,
+                                    dateField: undefined,
+                                    groupField: k.groupField ?? "stage",
+                                  })
                           }
                           className="w-full"
                           aria-label="Tipo de agrupamento"
                         />
                       </div>
-                      {k.dateBucket ? (
+                      {k.columnSource === "custom" ? (
+                        <p className="text-muted-foreground text-xs">
+                          As colunas são suas: adicione/renomeie pela engrenagem
+                          do quadro ou pelo “+” ao lado das colunas. Mover um
+                          card NÃO altera o registro — a posição vale só para
+                          este quadro. Novos registros entram na primeira
+                          coluna.
+                        </p>
+                      ) : k.dateBucket ? (
                         <>
                           <div className="flex flex-col gap-1.5">
                             <Label>Campo de data</Label>

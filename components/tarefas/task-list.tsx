@@ -6,7 +6,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { Globe, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   deleteTask,
   reopenTask,
 } from "@/lib/tasks/actions";
+import { emitDataChanged } from "@/lib/tasks/events";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import { TaskSheet, type TaskFormContext } from "./task-sheet";
@@ -57,12 +58,24 @@ export function TaskListItem({
   const [error, setError] = useState<string | null>(null);
   const done = Boolean(task.completed_at);
 
+  function emit() {
+    emitDataChanged({
+      kind: "task",
+      taskId: task.id,
+      recordId: task.record_id,
+      boardId: task.board_id,
+    });
+  }
+
   function toggle() {
     setError(null);
     startTransition(async () => {
       const res = done ? await reopenTask(task.id) : await completeTask(task.id);
       if (!res.ok) setError(res.message ?? "Falha ao atualizar.");
-      else router.refresh();
+      else {
+        emit();
+        router.refresh();
+      }
     });
   }
 
@@ -71,7 +84,10 @@ export function TaskListItem({
     startTransition(async () => {
       const res = await deleteTask(task.id);
       if (!res.ok) setError(res.message ?? "Falha ao excluir.");
-      else router.refresh();
+      else {
+        emit();
+        router.refresh();
+      }
     });
   }
 
@@ -88,12 +104,18 @@ export function TaskListItem({
         />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-sm",
+            "flex min-w-0 flex-1 items-center gap-1 truncate text-sm",
             done && "text-muted-foreground line-through"
           )}
           title={task.description ?? undefined}
         >
-          {task.title}
+          {task.is_global ? (
+            <Globe
+              className="text-primary size-3 shrink-0"
+              aria-label="Tarefa global (notifica todos)"
+            />
+          ) : null}
+          <span className="truncate">{task.title}</span>
         </span>
         <DueBadge task={task} />
         {responsibleLabel ? (

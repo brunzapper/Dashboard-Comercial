@@ -21,6 +21,8 @@ export default async function TarefasPage() {
     supabase
       .from("tasks")
       .select(TASK_COLS_WITH_RECORD)
+      // Subtarefas vivem no feed da tarefa pai, não na lista/quadro.
+      .is("parent_task_id", null)
       .order("completed_at", { ascending: true, nullsFirst: true })
       .order("due_date", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false })

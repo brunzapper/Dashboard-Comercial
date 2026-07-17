@@ -36,8 +36,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ColorField } from "./appearance-controls";
+import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
 import { type AvailableField } from "@/lib/widgets/fields";
 import { topWithOther } from "@/lib/widgets/appearance";
+import type { KanbanAppearance } from "@/lib/kanban/types";
 import { PALETTES } from "@/lib/widgets/palettes";
 import type {
   AppearanceSettings,
@@ -69,6 +71,11 @@ export function WidgetAppearanceSheet({
   const [ap, setAp] = useState<AppearanceSettings>(
     widget.settings?.appearance ?? {}
   );
+  // Aparência do kanban vive DENTRO de settings.kanban (compartilhada com a
+  // página dedicada) — estado separado, merge no save.
+  const [kap, setKap] = useState<KanbanAppearance>(
+    widget.settings?.kanban?.appearance ?? {}
+  );
 
   const vt = widget.visual_type;
   const isBar = vt === "barra" || vt === "barra_horizontal";
@@ -80,6 +87,7 @@ export function WidgetAppearanceSheet({
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";
   const isShape = vt === "forma";
+  const isKanban = vt === "kanban";
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
@@ -113,7 +121,14 @@ export function WidgetAppearanceSheet({
       dimensions: widget.dimensions,
       metrics: widget.metrics,
       filters: widget.filters,
-      settings: { ...widget.settings, appearance: ap },
+      settings: {
+        ...widget.settings,
+        appearance: ap,
+        // Kanban: aparência dentro de settings.kanban (config preservada).
+        ...(isKanban && widget.settings?.kanban
+          ? { kanban: { ...widget.settings.kanban, appearance: kap } }
+          : {}),
+      },
     };
     startTransition(async () => {
       await updateWidget(widget.id, dashboardId, input);
@@ -151,8 +166,15 @@ export function WidgetAppearanceSheet({
               ...(isCalculator ? ["calculadora"] : []),
               ...(isNote ? ["nota"] : []),
               ...(isShape ? ["forma"] : []),
+              ...(isKanban ? ["kanban"] : []),
             ]}
           >
+          {/* ---------- Kanban (quadro/colunas/cards/abas de visão) ---------- */}
+          {isKanban ? (
+            <BuilderSection value="kanban" title="Kanban">
+              <KanbanAppearanceSection value={kap} onChange={setKap} />
+            </BuilderSection>
+          ) : null}
           {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}
           {!isShape ? (
           <BuilderSection value="titulo" title="Título e borda">

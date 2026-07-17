@@ -202,10 +202,9 @@ export function WidgetCard({
   const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
-  // Aparência só faz sentido em charts/tabela/pizza/kpi (não em
-  // filtro/calc/kanban/agenda).
-  const canStyle =
-    !isFilter && !isFieldFilter && !isCalc && !isKanban && !isAgenda;
+  // Aparência: charts/tabela/pizza/kpi e KANBAN (quadro/colunas/cards/abas —
+  // settings.kanban.appearance); segue fora em filtro/calc/agenda.
+  const canStyle = !isFilter && !isFieldFilter && !isCalc && !isAgenda;
 
   // Catálogo de operandos do editor in-place da nota (mesma montagem do
   // calcRefs do builder — aggOperandRefs + condAggOperandRefs).
@@ -586,6 +585,7 @@ export function WidgetCard({
               userRoles={userRoles}
               canEditValues={canEditValues}
               canManageFields={canManageFields}
+              canConfig={canEdit}
             />
           ) : isAgenda ? (
             <AgendaWidget

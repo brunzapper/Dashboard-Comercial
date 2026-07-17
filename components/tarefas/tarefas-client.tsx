@@ -5,6 +5,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { List, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import type { TaskRow } from "@/lib/tasks/types";
 import { classifyDue } from "@/lib/tasks/alerts";
 import { taskBoardData } from "@/lib/tasks/kanban";
 import { moveTaskPhase } from "@/lib/tasks/actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import {
   DEFAULT_TASK_PHASES,
   type KanbanSettings,
@@ -47,9 +49,16 @@ export function TarefasClient({
   canFilterResponsible: boolean;
   taskCtx: TaskFormContext;
 }) {
+  const router = useRouter();
   const [view, setView] = useState<View>("lista");
   const [status, setStatus] = useState("abertas");
   const [responsavel, setResponsavel] = useState("");
+
+  // Event bus: mutação vinda do sino/widgets enquanto esta página está aberta
+  // → re-renderiza o RSC (as próprias mutações da página já revalidam /tarefas).
+  useDataChanged((d) => {
+    if (d.kind !== "record") router.refresh();
+  });
 
   const responsibleLabels = useMemo(
     () => Object.fromEntries(responsibles.map((r) => [r.id, r.label])),

@@ -1,15 +1,19 @@
-// Versão: 1.1 | Data: 16/07/2026
-// Configuração das colunas do kanban (owner/admin): ordem, rótulo, cor, WIP e
-// ocultar; em boards de TAREFAS, também a antecedência do alerta de prazo
-// (dueSoonDays) e a trava de exclusão por padrão. Persiste em settings.kanban
-// via updateBoardSettings — ATENÇÃO: a action sobrescreve `settings` INTEIRO,
-// então enviamos { ...settings, kanban: { ...kanban, ... } } (regra documentada
-// em app/(app)/dashboards/actions.ts).
+// Versão: 2.0 | Data: 17/07/2026
+// Configuração das colunas do kanban: ordem, rótulo, cor, WIP; em quadros de
+// TAREFAS, também a antecedência do alerta de prazo (dueSoonDays) e a trava de
+// exclusão por padrão; em quadros de REGISTROS por campo, o write-back e o
+// checkbox "Ocultar" (seletor de fases visíveis — vetado em fases de período
+// e desnecessário nas "Personalizar", onde o conjunto é do usuário).
+// v2.0 (17/07/2026): generalizado p/ o WIDGET kanban — quem persiste é o
+//   chamador via `onSave(nextKanban)` (página dedicada → updateBoardSettings
+//   com spread completo do settings; widget → saveWidgetSettings idem); modos
+//   tarefas/Personalizar ganham adicionar/remover coluna (teto
+//   KANBAN_MAX_COLUMNS; remoção joga os cards na 1ª coluna).
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Settings2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Settings2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,45 +22,53 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { updateBoardSettings } from "@/app/(app)/dashboards/actions";
-import type { DashboardSettings } from "@/lib/widgets/types";
 import type { KanbanBoardData } from "@/lib/kanban/data";
-import type { KanbanColumnOverride } from "@/lib/kanban/types";
+import {
+  KANBAN_MAX_COLUMNS,
+  type KanbanColumnOverride,
+  type KanbanSettings,
+} from "@/lib/kanban/types";
 
 interface Row extends KanbanColumnOverride {
   currentLabel: string;
 }
 
 export function ColumnConfigPopover({
-  boardId,
-  settings,
+  kanban,
   data,
+  onSave,
 }: {
-  boardId: string;
-  settings: DashboardSettings;
+  kanban: KanbanSettings;
   data: KanbanBoardData;
+  // Persiste settings.kanban inteiro (o chamador faz o spread do resto).
+  onSave: (next: KanbanSettings) => Promise<{ ok?: boolean; message?: string }>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const isTasks = settings.kanban?.mode === "tarefas";
+  const isTasks = kanban.mode === "tarefas";
+  const isCustom = kanban.mode === "registros" && kanban.columnSource === "custom";
+  // Conjunto de colunas é DO USUÁRIO (tarefas/Personalizar): adiciona/remove.
+  const canEditSet = isTasks || isCustom;
+  // Seletor de fases visíveis: só fases derivadas de CAMPO (não de período).
+  const canHide = kanban.mode === "registros" && !kanban.dateBucket && !isCustom;
   const [dueSoonDays, setDueSoonDays] = useState<number | "">(
-    settings.kanban?.tasks?.dueSoonDays ?? ""
+    kanban.tasks?.dueSoonDays ?? ""
   );
   const [lockByDefault, setLockByDefault] = useState(
-    settings.kanban?.tasks?.lockByDefault ?? false
+    kanban.tasks?.lockByDefault ?? false
   );
-  // Write-back (modo registros): mover um card grava a mudança de volta ao
-  // Bitrix. Default desligado — mover altera só a cópia local (o original da
-  // Sync fica intacto). Só surte efeito em registros de Sync e campos mapeados.
-  const [writeBack, setWriteBack] = useState(
-    settings.kanban?.writeBack ?? false
-  );
+  // Write-back (modo registros por campo): mover um card grava a mudança de
+  // volta ao Bitrix. Default desligado — mover altera só a cópia local (o
+  // original da Sync fica intacto). Só surte efeito em registros de Sync e
+  // campos mapeados. Nas colunas "Personalizar" não se aplica (mover não toca
+  // no registro).
+  const [writeBack, setWriteBack] = useState(kanban.writeBack ?? false);
 
   function init() {
-    const overrides = settings.kanban?.columns ?? [];
+    const overrides = kanban.columns ?? [];
     const byKey = new Map(overrides.map((o) => [o.key, o] as const));
     // Colunas visíveis (ordem atual do quadro) + ocultas (só nos overrides).
     const seen = new Set<string>();
@@ -95,6 +107,24 @@ export function ColumnConfigPopover({
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
   }
 
+  function addRow() {
+    setRows((rs) => {
+      if (rs.length >= KANBAN_MAX_COLUMNS) return rs;
+      return [
+        ...rs,
+        {
+          key: `c_${Date.now().toString(36)}`,
+          label: "",
+          currentLabel: "Nova coluna",
+        },
+      ];
+    });
+  }
+
+  function removeRow(i: number) {
+    setRows((rs) => rs.filter((_, idx) => idx !== i));
+  }
+
   async function save() {
     setSaving(true);
     setMessage(null);
@@ -107,23 +137,20 @@ export function ColumnConfigPopover({
       if (r.completesTask) out.completesTask = true;
       return out;
     });
-    const res = await updateBoardSettings(boardId, {
-      ...settings,
-      kanban: {
-        mode: "registros",
-        ...settings.kanban,
-        columns,
-        ...(isTasks
-          ? {
-              tasks: {
-                ...settings.kanban?.tasks,
-                dueSoonDays:
-                  dueSoonDays === "" ? undefined : Number(dueSoonDays),
-                lockByDefault,
-              },
-            }
+    const res = await onSave({
+      ...kanban,
+      columns,
+      ...(isTasks
+        ? {
+            tasks: {
+              ...kanban.tasks,
+              dueSoonDays: dueSoonDays === "" ? undefined : Number(dueSoonDays),
+              lockByDefault,
+            },
+          }
+        : isCustom
+          ? {}
           : { writeBack }),
-      },
     });
     setSaving(false);
     if (!res.ok) {
@@ -152,8 +179,11 @@ export function ColumnConfigPopover({
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium">Colunas do quadro</p>
           <p className="text-muted-foreground text-xs">
-            Ordem, rótulo, cor, limite (WIP) e ocultar. Rótulo vazio usa o valor
-            do campo.
+            {canEditSet
+              ? "Ordem, rótulo, cor, limite (WIP), adicionar e remover colunas."
+              : canHide
+                ? "Ordem, rótulo, cor, limite (WIP) e quais fases aparecem no quadro. Rótulo vazio usa o valor do campo."
+                : "Ordem, rótulo, cor e limite (WIP). Rótulo vazio usa o nome do período."}
           </p>
           <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
             {rows.map((r, i) => (
@@ -209,20 +239,48 @@ export function ColumnConfigPopover({
                       className="h-7 w-16 text-xs"
                       aria-label={`Limite WIP da coluna ${r.currentLabel}`}
                     />
-                    <label className="text-muted-foreground flex items-center gap-1 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(r.hidden)}
-                        onChange={(e) => patch(i, { hidden: e.target.checked })}
-                        className="size-3.5 accent-primary"
-                      />
-                      Ocultar
-                    </label>
+                    {canHide ? (
+                      <label className="text-muted-foreground flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(r.hidden)}
+                          onChange={(e) => patch(i, { hidden: e.target.checked })}
+                          className="size-3.5 accent-primary"
+                        />
+                        Ocultar
+                      </label>
+                    ) : null}
+                    {canEditSet ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="ml-auto size-5"
+                        onClick={() => removeRow(i)}
+                        aria-label={`Remover coluna ${r.currentLabel}`}
+                        title="Remover coluna (os cards dela caem na primeira)"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </div>
             ))}
           </div>
+          {canEditSet ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={addRow}
+              disabled={rows.length >= KANBAN_MAX_COLUMNS}
+              className="gap-1"
+            >
+              <Plus className="size-3.5" />
+              {rows.length >= KANBAN_MAX_COLUMNS
+                ? `Limite de ${KANBAN_MAX_COLUMNS} colunas`
+                : "Adicionar coluna"}
+            </Button>
+          ) : null}
           {isTasks ? (
             <div className="flex flex-col gap-2 border-t pt-2">
               <label className="flex items-center justify-between gap-2 text-xs">
@@ -251,7 +309,7 @@ export function ColumnConfigPopover({
                 Novas tarefas nascem travadas (só admin/gestor excluem)
               </label>
             </div>
-          ) : (
+          ) : isCustom ? null : (
             <div className="flex flex-col gap-1 border-t pt-2">
               <label className="flex items-start gap-2 text-xs">
                 <input

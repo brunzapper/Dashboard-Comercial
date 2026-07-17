@@ -11,6 +11,7 @@
 import type { FieldDefinition } from "@/lib/records/types";
 import { MONTH_NAMES_PT, WEEKDAY_NAMES_PT } from "@/lib/widgets/date-buckets";
 import {
+  DEFAULT_CUSTOM_COLUMNS,
   DEFAULT_TASK_PHASES,
   KANBAN_MAX_COLUMNS,
   KANBAN_NO_VALUE_KEY,
@@ -82,6 +83,23 @@ export function deriveColumns(
     return base;
   }
 
+  // "Personalizar" (registros): como nas tarefas, settings.columns É a
+  // definição das colunas (sem "Sem valor" — card sem posição cai na 1ª).
+  if (settings.columnSource === "custom") {
+    const phases =
+      settings.columns && settings.columns.length > 0
+        ? settings.columns
+        : DEFAULT_CUSTOM_COLUMNS;
+    return phases
+      .filter((p) => !p.hidden)
+      .map((p) => ({
+        key: p.key,
+        label: p.label?.trim() || p.key,
+        color: p.color,
+        wipLimit: p.wipLimit,
+      }));
+  }
+
   const counts = new Map<string, number>();
   for (const k of groupKeys) counts.set(k, (counts.get(k) ?? 0) + 1);
   const hasNoValue = counts.has(KANBAN_NO_VALUE_KEY);
@@ -137,6 +155,57 @@ export function deriveColumns(
   }
 
   return applyOverrides(base, settings.columns);
+}
+
+// Conjunto de overrides vigente (com os seeds default dos modos livres) —
+// base p/ reordenar/adicionar sem perder rótulos/cores.
+function currentOverrides(settings: KanbanSettings): KanbanColumnOverride[] {
+  if (settings.columns && settings.columns.length > 0) return settings.columns;
+  if (settings.mode === "tarefas") return DEFAULT_TASK_PHASES;
+  if (settings.columnSource === "custom") return DEFAULT_CUSTOM_COLUMNS;
+  return [];
+}
+
+/**
+ * Reconstrói settings.columns na ordem visível `orderedKeys` (drag de
+ * cabeçalhos): overrides existentes preservados, chaves novas viram override
+ * mínimo (ordem), ocultas permanecem ao fim. `applyOverrides` já torna a
+ * ordem do array autoritativa para TODAS as fontes de coluna.
+ */
+export function reorderColumnOverrides(
+  settings: KanbanSettings,
+  orderedKeys: string[]
+): KanbanColumnOverride[] {
+  const current = currentOverrides(settings);
+  const byKey = new Map(current.map((o) => [o.key, o] as const));
+  const next: KanbanColumnOverride[] = orderedKeys.map(
+    (k) => byKey.get(k) ?? { key: k }
+  );
+  for (const o of current) {
+    if (o.hidden && !next.some((n) => n.key === o.key)) next.push(o);
+  }
+  return next;
+}
+
+/**
+ * Acrescenta uma coluna nova (modos tarefas/Personalizar — o "+" ao lado das
+ * colunas). Retorna null no teto de KANBAN_MAX_COLUMNS.
+ */
+export function addColumnOverride(
+  settings: KanbanSettings,
+  label: string
+): KanbanColumnOverride[] | null {
+  const current = currentOverrides(settings);
+  if (current.filter((c) => !c.hidden).length >= KANBAN_MAX_COLUMNS) {
+    return null;
+  }
+  return [
+    ...current,
+    {
+      key: `c_${Date.now().toString(36)}`,
+      label: label.trim() || "Nova coluna",
+    },
+  ];
 }
 
 /** Chaves visíveis → cards de valores estourados caem em "Outros". */
