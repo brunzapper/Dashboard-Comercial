@@ -1,7 +1,13 @@
-// Versão: 2.3 | Data: 15/07/2026
+// Versão: 2.4 | Data: 17/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
+// v2.4 (17/07/2026): modo Posicionar — beginPlacement pré-cria o widget
+//   ({revalidate:false} + refresh em segundo plano) enquanto o usuário mira; o
+//   clique no canvas define a posição (patch sticky + saveLayout); Esc/troca
+//   de aba caem no fallback. stickyLayout protege a posição escolhida do
+//   reseed de um refresh em voo. Inserir ▸ tipo com autoEdit (abre o editor do
+//   widget novo); appendPending extraído do quickCreateWidget.
 // v2.3 (15/07/2026): Tabela Livre — estado drawQuick (desenhar para criar,
 //   armado pelo builder via onRequestDraw; onDrawDone cria o widget com o
 //   retângulo desenhado) e fio de tableCellsById até o grid.
@@ -16,7 +22,14 @@
 // (siblings ao builder).
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Check, Clock, Pencil, Plus, Redo2, Spline, Undo2 } from "lucide-react";
 
@@ -46,6 +59,7 @@ import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
   createWidget,
   renameDashboard,
+  saveLayout,
   updateDashboardSettings,
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
@@ -266,6 +280,15 @@ export function DashboardClient({
     [tabs]
   );
 
+  // Widgets da criação "rápida" (menu de contexto / modo Posicionar): o INSERT
+  // retorna o id sem esperar a revalidação RSC e o widget entra aqui na hora; o
+  // router.refresh() corre em segundo plano. Sai quando o servidor passa a
+  // incluí-lo (reconciliação em render, mesmo padrão seedKey) ou quando é
+  // excluído antes do refresh chegar (onWidgetDeleted). Declarado antes do
+  // layout otimista: a poda do sticky abaixo precisa saber quem ainda existe.
+  const [pendingWidgets, setPendingWidgets] = useState<Widget[]>([]);
+  const serverWidgetIds = new Set(widgets.map((w) => w.id));
+
   // Layout otimista: posições BASE de TODOS os widgets (não só os da aba
   // visível), seedadas do servidor com o mesmo padrão seedKey-resync das abas
   // acima. saveLayout não revalida (edição fluida), então após arrastar ou
@@ -274,20 +297,62 @@ export function DashboardClient({
   // quando o grid_position refetchado já é o salvo e o reseed é um no-op (ou
   // aplica a restauração, no undo/redo). Vive aqui no shell para sobreviver à
   // troca de abas e ao early-return de aba vazia do grid.
+  //
+  // stickyLayout: overrides que SOBREVIVEM ao reseed. Um refresh disparado
+  // antes do clique do modo Posicionar aterrissa DEPOIS dele trazendo a posição
+  // fallback — sem o sticky, o reseed devolveria o widget recém-posicionado
+  // para lá. A poda solta o override quando o servidor já reflete a posição ou
+  // quando o widget sumiu (exclusão/undo); um patch comum (arrasto manual)
+  // também solta. Não generalizar para todo arrasto: um sticky permanente
+  // impediria o undo/redo de restaurar posições antigas.
   const serverLayout: Record<string, GridPosition> = {};
   widgets.forEach((w, i) => {
     serverLayout[w.id] = posOf(w, i);
   });
   const serverLayoutKey = JSON.stringify(serverLayout);
+  const [stickyLayout, setStickyLayout] = useState<
+    Record<string, GridPosition>
+  >({});
   const [layoutSeedKey, setLayoutSeedKey] = useState(serverLayoutKey);
   const [layoutById, setLayoutById] = useState(serverLayout);
   if (layoutSeedKey !== serverLayoutKey) {
     setLayoutSeedKey(serverLayoutKey);
-    setLayoutById(serverLayout);
+    const alive: Record<string, GridPosition> = {};
+    for (const [id, p] of Object.entries(stickyLayout)) {
+      const known =
+        serverWidgetIds.has(id) || pendingWidgets.some((w) => w.id === id);
+      if (!known) continue;
+      const s = serverLayout[id];
+      if (s && s.x === p.x && s.y === p.y && s.w === p.w && s.h === p.h) {
+        continue; // servidor alcançou → solta o override
+      }
+      alive[id] = p;
+    }
+    if (Object.keys(alive).length !== Object.keys(stickyLayout).length) {
+      setStickyLayout(alive);
+    }
+    setLayoutById({ ...serverLayout, ...alive });
   }
-  const applyLayoutPatch = useCallback((patch: Record<string, GridPosition>) => {
-    setLayoutById((prev) => ({ ...prev, ...patch }));
-  }, []);
+  const applyLayoutPatch = useCallback(
+    (patch: Record<string, GridPosition>, opts?: { sticky?: boolean }) => {
+      setLayoutById((prev) => ({ ...prev, ...patch }));
+      setStickyLayout((prev) => {
+        if (opts?.sticky) return { ...prev, ...patch };
+        // Patch comum (arrasto/redimensionamento) solta o override dos ids
+        // afetados — a partir dali o fluxo normal reassume.
+        let changed = false;
+        const next = { ...prev };
+        for (const id of Object.keys(patch)) {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    },
+    []
+  );
   const tabIds = new Set(tabs.map((t) => t.id));
   // Aba efetiva: a do widget quando ainda existe; senão (sem aba ou aba excluída)
   // cai na primeira aba, para nenhum widget "sumir".
@@ -300,13 +365,6 @@ export function DashboardClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tabs, firstTabId]
   );
-  // Widgets da criação "rápida" (menu de contexto do grid): o INSERT retorna o
-  // id sem esperar a revalidação RSC e o widget entra aqui na hora; o
-  // router.refresh() corre em segundo plano. Sai quando o servidor passa a
-  // incluí-lo (reconciliação em render, mesmo padrão seedKey) ou quando é
-  // excluído antes do refresh chegar (onWidgetDeleted).
-  const [pendingWidgets, setPendingWidgets] = useState<Widget[]>([]);
-  const serverWidgetIds = new Set(widgets.map((w) => w.id));
   const alivePending = pendingWidgets.filter((p) => !serverWidgetIds.has(p.id));
   if (alivePending.length !== pendingWidgets.length) {
     setPendingWidgets(alivePending);
@@ -314,10 +372,17 @@ export function DashboardClient({
   const allWidgets = alivePending.length
     ? [...widgets, ...alivePending]
     : widgets;
-  const visibleWidgets =
+  // Widget oculto: o do modo Posicionar enquanto o usuário mira — cobre tanto a
+  // cópia pendente quanto a do servidor (mesmo id), se o refresh da
+  // pré-criação aterrissar no meio da mira.
+  const [hiddenWidgetId, setHiddenWidgetId] = useState<string | null>(null);
+  const tabWidgets =
     tabs.length === 0
       ? allWidgets
       : allWidgets.filter((w) => widgetTab(w) === activeTabId);
+  const visibleWidgets = hiddenWidgetId
+    ? tabWidgets.filter((w) => w.id !== hiddenWidgetId)
+    : tabWidgets;
 
   // Conectores: estado otimista com o mesmo padrão seedKey das abas. Toda
   // gravação passa por saveConnectors (spread do settings — a action
@@ -438,15 +503,12 @@ export function DashboardClient({
     [drawQuick, dashboardId, activeTabId, router, startTransition]
   );
 
-  // Criação RÁPIDA pelo menu de contexto do grid (Inserir/Calculadora): INSERT
-  // sem revalidação (retorna após uma ida ao banco), widget otimista na hora e
-  // refresh completo em segundo plano. O append fica FORA da transition — o
-  // padrão do colar (tudo dentro) segura o commit até o refresh terminar.
-  const quickCreateWidget = useCallback(
-    async (input: WidgetInput) => {
-      const res = await createWidget(dashboardId, input, { revalidate: false });
-      if (!res.ok || !res.id) return;
-      const id = res.id;
+  // Widget otimista: entra em pendingWidgets na hora (renderiza com dados
+  // vazios até o refresh reconciliar). Compartilhado entre a criação rápida do
+  // menu de contexto e o modo Posicionar. Fica FORA de transition — o padrão do
+  // colar (tudo dentro) segura o commit até o refresh terminar.
+  const appendPending = useCallback(
+    (id: string, input: WidgetInput) => {
       setPendingWidgets((prev) => [
         ...prev,
         {
@@ -465,9 +527,183 @@ export function DashboardClient({
           sort_order: 0,
         },
       ]);
+    },
+    [dashboardId]
+  );
+
+  // Abertura automática do editor de um widget recém-criado pelo Inserir
+  // (tipos que exigem configuração). Consumido one-shot pelo WidgetCard.
+  const [autoEditId, setAutoEditId] = useState<string | null>(null);
+  const clearAutoEdit = useCallback((id: string) => {
+    setAutoEditId((v) => (v === id ? null : v));
+  }, []);
+
+  // Criação RÁPIDA pelo menu de contexto do grid (Inserir ▸ tipo): INSERT sem
+  // revalidação (retorna após uma ida ao banco), widget otimista na hora e
+  // refresh completo em segundo plano. `autoEdit` abre o editor do widget novo.
+  const quickCreateWidget = useCallback(
+    async (input: WidgetInput, opts?: { autoEdit?: boolean }) => {
+      const res = await createWidget(dashboardId, input, { revalidate: false });
+      if (!res.ok || !res.id) return;
+      appendPending(res.id, input);
+      if (opts?.autoEdit) setAutoEditId(res.id);
       startTransition(() => router.refresh());
     },
-    [dashboardId, router, startTransition]
+    [dashboardId, appendPending, router, startTransition]
+  );
+
+  // ---------------- Modo Posicionar (criação pelo builder) ----------------
+  // O botão "Posicionar" do builder entrega o input pronto (posição fallback =
+  // primeiro espaço livre da aba destino). Daqui em diante:
+  //   1. o INSERT parte IMEDIATAMENTE ({revalidate:false}) e o router.refresh()
+  //      em seguida — os dados computam ENQUANTO o usuário mira (pré-aceleração);
+  //   2. o canvas mostra o ghost (PlaceWidgetOverlay) e o widget fica OCULTO;
+  //   3. o clique define a posição (centro na célula clicada): patch otimista
+  //      sticky + saveLayout; Esc/troca de aba posicionam no fallback — o
+  //      widget nunca se perde.
+  // O job vive num ref (o INSERT resolve fora do render); `placing` é só o que
+  // a UI precisa (tamanho do ghost).
+  type PlacementJob = {
+    input: WidgetInput;
+    fallback: GridPosition;
+    id: string | null; // null = INSERT ainda em voo
+    clickedAt: GridPosition | null; // clique antes do INSERT voltar
+    done: boolean;
+  };
+  const placingJobRef = useRef<PlacementJob | null>(null);
+  const [placing, setPlacing] = useState<{ w: number; h: number } | null>(null);
+  const [placeError, setPlaceError] = useState<string | null>(null);
+
+  // Posição final de um widget posicionado: patch sticky (sobrevive ao reseed
+  // do refresh da pré-criação) + saveLayout quando saiu do fallback, com
+  // refresh na sequência (captura o histórico e solta o sticky).
+  const finalizePlaced = useCallback(
+    (
+      id: string,
+      pos: GridPosition,
+      fallback: GridPosition,
+      opts?: { refreshAlways?: boolean }
+    ) => {
+      applyLayoutPatch({ [id]: pos }, { sticky: true });
+      const moved =
+        pos.x !== fallback.x ||
+        pos.y !== fallback.y ||
+        pos.w !== fallback.w ||
+        pos.h !== fallback.h;
+      if (moved) {
+        void saveLayout(dashboardId, [{ id, ...pos }]).then(() => {
+          startTransition(() => router.refresh());
+        });
+      } else if (opts?.refreshAlways) {
+        startTransition(() => router.refresh());
+      }
+    },
+    [dashboardId, applyLayoutPatch, router, startTransition]
+  );
+
+  // Resolve o placement ativo no fallback (Esc, troca de aba, novo Posicionar).
+  const resolveAutoPlacement = useCallback(() => {
+    const job = placingJobRef.current;
+    placingJobRef.current = null;
+    setPlacing(null);
+    setHiddenWidgetId(null);
+    if (!job || job.done) return;
+    if (job.id === null) {
+      job.clickedAt = job.fallback; // o then() do INSERT finaliza lá
+    } else {
+      job.done = true; // já está no fallback (patch da pré-criação) — só desocultar
+    }
+  }, []);
+
+  const beginPlacement = useCallback(
+    (input: WidgetInput) => {
+      resolveAutoPlacement(); // placement anterior ainda ativo → fallback
+      const fallback = input.grid_position;
+      if (!fallback) return; // o builder sempre envia; guarda de tipo
+      const targetTab = input.settings?.tab ?? firstTabId;
+      if (tabs.length > 0 && targetTab !== activeTabId) selectTab(targetTab);
+      const job: PlacementJob = {
+        input,
+        fallback,
+        id: null,
+        clickedAt: null,
+        done: false,
+      };
+      placingJobRef.current = job;
+      setPlacing({ w: fallback.w, h: fallback.h });
+      setPlaceError(null);
+      void createWidget(dashboardId, input, { revalidate: false }).then(
+        (res) => {
+          if (!res.ok || !res.id) {
+            job.done = true;
+            if (placingJobRef.current === job) {
+              placingJobRef.current = null;
+              setPlacing(null);
+            }
+            setPlaceError(res.message ?? "Falha ao criar o widget.");
+            return;
+          }
+          const id = res.id;
+          job.id = id;
+          appendPending(id, input);
+          if (job.clickedAt) {
+            // Clicou (ou resolveu no fallback) enquanto o INSERT corria: já
+            // nasce na posição final, visível.
+            job.done = true;
+            finalizePlaced(id, job.clickedAt, job.fallback, {
+              refreshAlways: true,
+            });
+          } else {
+            // Ainda mirando: entra OCULTO no fallback e o refresh começa a
+            // computar os dados; o clique desoculta na posição final.
+            applyLayoutPatch({ [id]: job.fallback });
+            if (placingJobRef.current === job) setHiddenWidgetId(id);
+            startTransition(() => router.refresh());
+          }
+        }
+      );
+    },
+    [
+      dashboardId,
+      tabs.length,
+      activeTabId,
+      firstTabId,
+      selectTab,
+      resolveAutoPlacement,
+      appendPending,
+      applyLayoutPatch,
+      finalizePlaced,
+      router,
+      startTransition,
+    ]
+  );
+
+  // Clique de posicionamento (overlay): pos já vem com o centro ancorado.
+  const onPlaceAt = useCallback(
+    (pos: GridPosition) => {
+      const job = placingJobRef.current;
+      placingJobRef.current = null;
+      setPlacing(null);
+      setHiddenWidgetId(null);
+      if (!job || job.done) return;
+      if (job.id === null) {
+        job.clickedAt = pos; // INSERT em voo — o then() finaliza aqui
+        return;
+      }
+      job.done = true;
+      finalizePlaced(job.id, pos, job.fallback);
+    },
+    [finalizePlaced]
+  );
+
+  // Troca de aba segura: um placement ativo resolve no fallback antes (o ghost
+  // não atravessa abas — a posição pertence à aba destino do builder).
+  const selectTabSafe = useCallback(
+    (id: string) => {
+      resolveAutoPlacement();
+      selectTab(id);
+    },
+    [resolveAutoPlacement, selectTab]
   );
   // Pendente excluído antes do refresh viraria fantasma (o id nunca chega do
   // servidor para a reconciliação) — o WidgetCard avisa a exclusão por aqui.
@@ -556,6 +792,7 @@ export function DashboardClient({
               layoutById={layoutById}
               canvasCols={settings.canvas?.cols ?? 12}
               onRequestDraw={(title) => setDrawQuick({ title })}
+              onRequestPlacement={beginPlacement}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Adicionar widget
@@ -576,7 +813,7 @@ export function DashboardClient({
         <DashboardTabs
           tabs={tabs}
           activeId={activeTabId}
-          onSelect={selectTab}
+          onSelect={selectTabSafe}
           editMode={canEdit && editMode}
           onChange={saveTabs}
         />
@@ -607,6 +844,19 @@ export function DashboardClient({
           >
             <Clock className="size-4" /> Mostrar barra de período
           </Button>
+        ) : null}
+
+        {placeError ? (
+          <div className="border-destructive/50 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+            <span>{placeError}</span>
+            <button
+              type="button"
+              className="shrink-0 underline"
+              onClick={() => setPlaceError(null)}
+            >
+              Fechar
+            </button>
+          </div>
         ) : null}
 
         <div
@@ -654,6 +904,11 @@ export function DashboardClient({
             drawMode={drawQuick != null}
             onDrawDone={onDrawDone}
             onDrawCancel={() => setDrawQuick(null)}
+            placing={placing}
+            onPlace={onPlaceAt}
+            onPlaceCancel={resolveAutoPlacement}
+            autoEditWidgetId={autoEditId}
+            onAutoEditConsumed={clearAutoEdit}
             onQuickCreate={quickCreateWidget}
             onWidgetDeleted={onWidgetDeleted}
           />

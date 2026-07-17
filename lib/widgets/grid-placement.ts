@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 17/07/2026
+// v1.1 (17/07/2026): centerAnchored — posição com o CENTRO do widget na célula
+//   clicada (modo Posicionar e Inserir do menu de contexto).
 // Posicionamento no grid: helpers compartilhados entre o grid (dashboard-grid),
 // o shell (dashboard-client, estado otimista de layout) e o construtor de
 // widgets (posição inicial de um widget novo).
@@ -38,4 +40,21 @@ export function findFreePosition(
     }
   }
   return { x: 0, y: maxBottom, w: width, h };
+}
+
+// Posição com o CENTRO do widget ancorado na célula (gx, gy) clicada. X é
+// clampado ao canvas; Y só ao topo (o canvas cresce para baixo pelo conteúdo).
+export function centerAnchored(
+  gx: number,
+  gy: number,
+  w: number,
+  h: number,
+  cols: number
+): GridPosition {
+  return {
+    x: Math.min(Math.max(0, gx - Math.floor(w / 2)), Math.max(0, cols - w)),
+    y: Math.max(0, gy - Math.floor(h / 2)),
+    w,
+    h,
+  };
 }

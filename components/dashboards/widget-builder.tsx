@@ -1,4 +1,9 @@
-// Versão: 1.8 | Data: 15/07/2026
+// Versão: 1.9 | Data: 17/07/2026
+// v1.9 (17/07/2026): modo Posicionar — na criação, o botão vira "Posicionar" e
+//   entrega o input ao shell via onRequestPlacement (pré-criação em segundo
+//   plano + clique no canvas define a posição). Rabos idênticos dos branches
+//   do save() extraídos em commit(); newWidgetPosition parametrizado (w, h por
+//   tipo, via DEFAULT_WIDGET_SIZE).
 // v1.8 (15/07/2026): widget "Tabela Livre" (tabela_editavel) — branch no
 //   save() (estrutura em settings.quickTable; grade padrão 3×3 na criação),
 //   hint no formulário e botão "Desenhar no painel" (onRequestDraw fecha o
@@ -144,8 +149,10 @@ import { groupByLevels } from "@/lib/widgets/appearance";
 import {
   createWidget,
   updateWidget,
+  type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
+import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
 import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 
 const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
@@ -173,6 +180,7 @@ export function WidgetBuilder({
   layoutById,
   canvasCols,
   onRequestDraw,
+  onRequestPlacement,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -198,6 +206,11 @@ export function WidgetBuilder({
   // "desenhar no canvas" (o retângulo dimensiona widget e linhas/colunas). O
   // título digitado viaja no callback. Só oferecido na CRIAÇÃO.
   onRequestDraw?: (title: string | null) => void;
+  // Modo Posicionar (só CRIAÇÃO): em vez de salvar direto, fecha o painel e
+  // entrega o input pronto (com posição fallback) ao shell, que pré-cria o
+  // widget em segundo plano e arma o clique de posicionamento no canvas. O
+  // botão "Salvar widget" vira "Posicionar" quando este callback existe.
+  onRequestPlacement?: (input: WidgetInput) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -893,12 +906,12 @@ export function WidgetBuilder({
   const removeGroupLevel = (idx: number) =>
     setTableGroupBy((prev) => prev.filter((_, i) => i !== idx));
 
-  // Posição inicial de um widget NOVO: primeiro espaço livre 6×8 na aba destino
+  // Posição inicial de um widget NOVO: primeiro espaço livre w×h na aba destino
   // (cada aba é uma tela — só os widgets da mesma aba ocupam espaço). Aba
   // destino = seletor do builder (tabId) ou a primeira. Posições correntes vêm
   // do layout otimista do shell (fallback: grid_position persistido). Sem isso,
   // createWidget usava um y fixo lá no fundo da página.
-  function newWidgetPosition(): GridPosition {
+  function newWidgetPosition(w = 6, h = 8): GridPosition {
     const firstTab = tabs[0]?.id ?? "";
     const targetTab = tabId || firstTab;
     const knownTabs = new Set(tabs.map((t) => t.id));
@@ -911,7 +924,31 @@ export function WidgetBuilder({
       }
       occupied.push(layoutById?.[s.id] ?? posOf(s, i));
     });
-    return findFreePosition(occupied, canvasCols ?? 12, 6, 8);
+    return findFreePosition(occupied, canvasCols ?? 12, w, h);
+  }
+
+  // Desfecho comum de todos os branches do save(). Na CRIAÇÃO com o modo
+  // Posicionar disponível: fecha o painel e entrega o input (com a posição
+  // fallback já calculada) ao shell — que pré-cria o widget em segundo plano e
+  // deixa o usuário clicar no canvas para posicioná-lo. Edição (ou instância
+  // sem onRequestPlacement) segue salvando direto.
+  function commit(input: Omit<WidgetInput, "grid_position">) {
+    const { w, h } = DEFAULT_WIDGET_SIZE[visualType];
+    if (!widget && onRequestPlacement) {
+      setOpen(false);
+      onRequestPlacement({ ...input, grid_position: newWidgetPosition(w, h) });
+      return;
+    }
+    startTransition(async () => {
+      const res = widget
+        ? await updateWidget(widget.id, dashboardId, input)
+        : await createWidget(dashboardId, {
+            ...input,
+            grid_position: newWidgetPosition(w, h),
+          });
+      if (res.ok) setOpen(false);
+      else setError(res.message ?? "Falha ao salvar.");
+    });
   }
 
   function save() {
@@ -936,16 +973,7 @@ export function WidgetBuilder({
         filters: [],
         settings: { ...settings, ...tabPatch },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1008,16 +1036,7 @@ export function WidgetBuilder({
         // Preserva chaves fora do escopo do builder (ex.: appearance do card).
         settings: { ...widget?.settings, kanban: clean, ...tabPatch },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1043,16 +1062,7 @@ export function WidgetBuilder({
         filters: [],
         settings: { agenda: clean, ...tabPatch },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1074,16 +1084,7 @@ export function WidgetBuilder({
         filters: [],
         settings: { ...settings, ...tabPatch },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1143,16 +1144,7 @@ export function WidgetBuilder({
           ...tabPatch,
         },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1169,16 +1161,7 @@ export function WidgetBuilder({
         filters: [],
         settings: { ...(widget?.settings ?? {}), ...tabPatch },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1200,16 +1183,7 @@ export function WidgetBuilder({
           ...tabPatch,
         },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1233,16 +1207,7 @@ export function WidgetBuilder({
           ...tabPatch,
         },
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1280,16 +1245,7 @@ export function WidgetBuilder({
         filters: [],
         settings: calcSettings,
       };
-      startTransition(async () => {
-        const res = widget
-          ? await updateWidget(widget.id, dashboardId, input)
-          : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-        if (res.ok) setOpen(false);
-        else setError(res.message ?? "Falha ao salvar.");
-      });
+      commit(input);
       return;
     }
 
@@ -1426,19 +1382,7 @@ export function WidgetBuilder({
       filters: cleanFilters,
       settings: { ...settings, ...tabPatch },
     };
-    startTransition(async () => {
-      const res = widget
-        ? await updateWidget(widget.id, dashboardId, input)
-        : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(),
-          });
-      if (res.ok) {
-        setOpen(false);
-      } else {
-        setError(res.message ?? "Falha ao salvar.");
-      }
-    });
+    commit(input);
   }
 
   return (
@@ -2811,7 +2755,11 @@ export function WidgetBuilder({
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
 
           <Button onClick={save} disabled={pending}>
-            {pending ? "Salvando..." : "Salvar widget"}
+            {pending
+              ? "Salvando..."
+              : !widget && onRequestPlacement
+                ? "Posicionar"
+                : "Salvar widget"}
           </Button>
         </div>
       </SheetContent>
