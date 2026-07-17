@@ -90,6 +90,7 @@ import {
   viewStateToFilters,
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
+import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 
@@ -106,14 +107,21 @@ export default async function DashboardPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const session = await getSessionInfo();
   const supabase = await createClient();
+  // Client com dedup de run_widget_query por render: widgets/notas/calculadoras
+  // com o mesmo escopo compartilham a mesma chamada (ver lib/widgets/rpc-memo).
+  const rpcClient = withRpcMemo(supabase);
 
-  const { data: dash } = await supabase
-    .from("dashboards")
-    .select("id, name, owner_user_id, visible_to_roles, settings")
-    .eq("id", id)
-    .maybeSingle();
+  // Sessão (getUser é ida de rede) e dashboard em paralelo — a RLS do select de
+  // dashboards não depende do objeto session daqui.
+  const [session, { data: dash }] = await Promise.all([
+    getSessionInfo(),
+    supabase
+      .from("dashboards")
+      .select("id, name, owner_user_id, visible_to_roles, settings")
+      .eq("id", id)
+      .maybeSingle(),
+  ]);
   if (!dash) notFound();
 
   const isOwner = dash.owner_user_id === session?.user.id;
@@ -258,43 +266,20 @@ export default async function DashboardPage({
   const qfFiltersByWidget: Record<string, WidgetFilter[]> = {};
 
   if (qfWidgets.length > 0) {
-    // 1) Valores persistidos (chave widget:entry).
-    const qfValues = new Map<string, QuickFilterValue>();
-    const { data: qfCells } = await supabase
-      .from("dashboard_table_cells")
-      .select("widget_id, col_key, value")
-      .in(
-        "widget_id",
-        qfWidgets.map((w) => w.id)
-      )
-      .eq("row_key", QF_ROW_KEY);
-    for (const c of qfCells ?? []) {
-      const v = parseQuickFilterValue(c.value);
-      if (v) qfValues.set(`${c.widget_id}:${c.col_key}`, v);
-    }
-
     const allEntries = qfWidgets.flatMap((w) => w.settings?.quickFilters ?? []);
 
-    // 2) Exceção do vendedor: usuário sem view_all_records tem os próprios
-    //    responsáveis resolvidos (vínculo vivo responsibles.user_id).
+    // Exceção do vendedor: usuário sem view_all_records tem os próprios
+    // responsáveis resolvidos (vínculo vivo responsibles.user_id).
     const canViewAll =
       session?.permissions.includes("view_all_records") ?? false;
-    let ownResponsibleIds: string[] = [];
-    if (
+    const needsOwnResp =
       !canViewAll &&
-      session &&
-      allEntries.some((e) => e.field === "responsible_id")
-    ) {
-      const { data: ownResp } = await supabase
-        .from("responsibles")
-        .select("id")
-        .eq("user_id", session.user.id);
-      ownResponsibleIds = (ownResp ?? []).map((r) => r.id as string);
-    }
+      !!session &&
+      allEntries.some((e) => e.field === "responsible_id");
 
-    // 3) Opções dos dropdowns: responsáveis/operações ativos e, p/ datas com
-    //    formato, os buckets DISTINTOS existentes nos dados (via RPC, mesma
-    //    expressão das dimensões). month_name/weekday têm listas fixas.
+    // Opções dos dropdowns: responsáveis/operações ativos e, p/ datas com
+    // formato, os buckets DISTINTOS existentes nos dados (via RPC, mesma
+    // expressão das dimensões). month_name/weekday têm listas fixas.
     const needsQfResp = allEntries.some((e) => e.field === "responsible_id");
     const needsQfOps = allEntries.some((e) => e.field === "operation_id");
     const bucketCombos = new Map<
@@ -312,58 +297,82 @@ export default async function DashboardPage({
     }
     const bucketOptionsByCombo: Record<string, { value: string; label: string }[]> =
       {};
-    const bucketsPromise = Promise.all(
-      [...bucketCombos.entries()].map(async ([key, c]) => {
-        try {
-          const { data, error } = await supabase.rpc("run_widget_query", {
-            p_source: "records",
-            p_dimensions: [
-              { field: c.field, transform: c.transform, weekMode: c.weekMode },
-            ],
-            p_metrics: [],
-            p_filters: [],
-            p_correspondences: correspondencesMap,
-          });
-          if (error) throw new Error(error.message);
-          const rows = (Array.isArray(data) ? data : []) as Record<
-            string,
-            unknown
-          >[];
-          const seen = new Map<string, { raw: unknown; label: string }>();
-          for (const row of rows) {
-            const raw = row.dim_1;
-            const k = bucketKeyFromRpcValue(raw, c.transform);
-            if (!k || seen.has(k)) continue;
-            seen.set(k, {
-              raw,
-              label: formatBucketLabel(c.transform, raw, c.weekMode),
-            });
-          }
-          bucketOptionsByCombo[key] = [...seen.entries()]
-            .sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw)))
-            .map(([value, v]) => ({ value, label: v.label }));
-        } catch {
-          bucketOptionsByCombo[key] = []; // RPC sem 0048/transform inválido
-        }
-      })
+    // Valores persistidos + exceção do vendedor + opções (entidades e buckets):
+    // tudo em UM Promise.all — antes eram 4 ondas seriais de round trips.
+    const [{ data: qfCells }, ownRespRes, qfRespRes, qfOpsRes] =
+      await Promise.all([
+        supabase
+          .from("dashboard_table_cells")
+          .select("widget_id, col_key, value")
+          .in(
+            "widget_id",
+            qfWidgets.map((w) => w.id)
+          )
+          .eq("row_key", QF_ROW_KEY),
+        needsOwnResp && session
+          ? supabase
+              .from("responsibles")
+              .select("id")
+              .eq("user_id", session.user.id)
+          : Promise.resolve({ data: [] as { id: string }[] }),
+        needsQfResp
+          ? supabase
+              .from("responsibles")
+              .select("id, display_name")
+              .eq("active", true)
+              .order("display_name")
+          : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+        needsQfOps
+          ? supabase
+              .from("operations")
+              .select("id, name")
+              .eq("active", true)
+              .order("name")
+          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+        Promise.all(
+          [...bucketCombos.entries()].map(async ([key, c]) => {
+            try {
+              const { data, error } = await rpcClient.rpc("run_widget_query", {
+                p_source: "records",
+                p_dimensions: [
+                  { field: c.field, transform: c.transform, weekMode: c.weekMode },
+                ],
+                p_metrics: [],
+                p_filters: [],
+                p_correspondences: correspondencesMap,
+              });
+              if (error) throw new Error(error.message);
+              const rows = (Array.isArray(data) ? data : []) as Record<
+                string,
+                unknown
+              >[];
+              const seen = new Map<string, { raw: unknown; label: string }>();
+              for (const row of rows) {
+                const raw = row.dim_1;
+                const k = bucketKeyFromRpcValue(raw, c.transform);
+                if (!k || seen.has(k)) continue;
+                seen.set(k, {
+                  raw,
+                  label: formatBucketLabel(c.transform, raw, c.weekMode),
+                });
+              }
+              bucketOptionsByCombo[key] = [...seen.entries()]
+                .sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw)))
+                .map(([value, v]) => ({ value, label: v.label }));
+            } catch {
+              bucketOptionsByCombo[key] = []; // RPC sem 0048/transform inválido
+            }
+          })
+        ),
+      ]);
+    const qfValues = new Map<string, QuickFilterValue>();
+    for (const c of qfCells ?? []) {
+      const v = parseQuickFilterValue(c.value);
+      if (v) qfValues.set(`${c.widget_id}:${c.col_key}`, v);
+    }
+    const ownResponsibleIds = (ownRespRes.data ?? []).map(
+      (r) => r.id as string
     );
-    const [qfRespRes, qfOpsRes] = await Promise.all([
-      needsQfResp
-        ? supabase
-            .from("responsibles")
-            .select("id, display_name")
-            .eq("active", true)
-            .order("display_name")
-        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
-      needsQfOps
-        ? supabase
-            .from("operations")
-            .select("id, name")
-            .eq("active", true)
-            .order("name")
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    ]);
-    await bucketsPromise;
     const qfRespOptions = (qfRespRes.data ?? []).map((r) => ({
       value: r.id as string,
       label: (r.display_name as string) ?? "—",
@@ -573,15 +582,195 @@ export default async function DashboardPage({
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
   const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
 
-  // 3) Computa cada widget de dados. Filtros, tabela editável e calculado não
-  //    passam pelo engine de agregação padrão.
+  // Buscas que NÃO dependem do resultado dos widgets: disparadas AGORA para
+  // correrem em paralelo com a computação (antes eram ondas seriais depois
+  // dela). Cada uma é aguardada no ponto onde o resultado é consumido.
+  // 1) Células (seed do histórico + Tabela Livre + expressão da calculadora).
+  const cellsDataPromise = widgets.length
+    ? supabase
+        .from("dashboard_table_cells")
+        .select("widget_id, row_key, col_key, value")
+        .in(
+          "widget_id",
+          widgets.map((w) => w.id)
+        )
+    : Promise.resolve({
+        data: [] as {
+          widget_id: string;
+          row_key: string;
+          col_key: string;
+          value: number | string | null;
+        }[],
+      });
+  // 2) Opções do SELECT de responsável editável nas tabelas de registros:
+  // só carrega se algum widget-lista expõe responsible_id como editável.
+  const needsResponsibleSelect = dataWidgets.some(
+    (w) =>
+      isListWidget(w) &&
+      (w.settings?.rowSource ?? "records") === "records" &&
+      (w.settings?.columns ?? []).some(
+        (c) => c.field === "responsible_id" && c.editable
+      )
+  );
+  const responsibleOptionsPromise = needsResponsibleSelect
+    ? supabase
+        .from("responsibles")
+        .select("id, display_name, bitrix_user_id")
+        .eq("active", true)
+        .order("display_name")
+    : Promise.resolve({
+        data: [] as {
+          id: string;
+          display_name: string;
+          bitrix_user_id: number | null;
+        }[],
+      });
+  // 3) Opções dos controles "Filtro por campo" (responsáveis/operações/etapas).
+  const exposedFilterFields = new Set<string>();
+  for (const fw of fieldFilterWidgets)
+    for (const f of fw.settings?.fields ?? []) exposedFilterFields.add(f.field);
+  const filterOptionsFetchPromise =
+    fieldFilterWidgets.length > 0
+      ? Promise.all([
+          exposedFilterFields.has("responsible_id")
+            ? supabase
+                .from("responsibles")
+                .select("id, display_name")
+                .eq("active", true)
+                .order("display_name")
+            : Promise.resolve({
+                data: [] as { id: string; display_name: string }[],
+              }),
+          exposedFilterFields.has("operation_id")
+            ? supabase
+                .from("operations")
+                .select("id, name")
+                .eq("active", true)
+                .order("name")
+            : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+          exposedFilterFields.has("stage")
+            ? rpcClient.rpc("run_widget_query", {
+                p_source: "records",
+                p_dimensions: [{ field: "record_type" }, { field: "stage" }],
+                p_metrics: [],
+                p_filters: [],
+                p_correspondences: {},
+              })
+            : Promise.resolve({ data: [] }),
+        ])
+      : null;
+
+  // 3) Computa cada widget de dados. Filtros, tabela editável e os deferidos
+  //    não passam pelo engine; calculado/calculadora/nota são computados AQUI
+  //    dentro do mesmo Promise.all (antes eram 3 ondas seriais próprias).
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
   const entityListById: Record<string, EntityListRow[]> = {};
+  const calcById: Record<string, CalcWidgetResult> = {};
+  const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
+  const noteById: Record<string, CalcWidgetResult[]> = {};
   await Promise.all(
     dataWidgets.map(async (w) => {
-      if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w))
-        return; // computados abaixo
+      // Métricas calculadas: resolve a fórmula com o contexto do dashboard.
+      // `settings.calcField` aponta p/ um campo "Calculado (totais)" salvo em
+      // /campos (campo deletado → fórmula null → valor null → "—"). Moeda:
+      // automática ('inherit') preserva a moeda dos operandos; fixa converte.
+      if (isCalcWidget(w)) {
+        try {
+          const calcKey = w.settings?.calcField;
+          const def = calcKey?.startsWith("custom:")
+            ? allFields.find(
+                (f) =>
+                  f.field_key === calcKey.slice(7) &&
+                  f.data_type === "calculado_agg"
+              )
+            : undefined;
+          const formula = calcKey ? (def?.formula ?? null) : w.settings?.formula;
+          calcById[w.id] = await runCalculatedWidget(rpcClient, {
+            formula,
+            sources: w.sources ?? [],
+            filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
+            period: periodByWidget[w.id],
+            correspondencesMap,
+            currencyMode:
+              def?.currency_mode === "fixed"
+                ? "fixed"
+                : def?.currency_mode === "inherit"
+                  ? "auto"
+                  : "none",
+            currencyCode:
+              def?.currency_mode === "fixed"
+                ? resolveCurrencyCode(def.currency_code)
+                : null,
+            allowNegative: def?.allow_negative !== false,
+            fields: allFields,
+            rates: currencyRates,
+            conversionPeriod: conversionPeriodById[w.id],
+          });
+        } catch {
+          calcById[w.id] = { value: null, currency: null };
+        }
+        return;
+      }
+      // Calculadora: valor de cada variável nomeada; a expressão digitada é
+      // avaliada no CLIENTE contra esses valores.
+      if (isCalculatorWidget(w)) {
+        const vars = w.settings?.calculator?.variables ?? [];
+        const out: Record<string, CalcWidgetResult> = {};
+        await Promise.all(
+          vars.map(async (v) => {
+            try {
+              out[v.id] = await runCalculatedWidget(rpcClient, {
+                formula: v.formula ?? null,
+                sources: w.sources ?? [],
+                filters: [
+                  ...(w.filters ?? []),
+                  ...(viewFiltersByWidget[w.id] ?? []),
+                ],
+                period: periodByWidget[w.id],
+                correspondencesMap,
+                currencyMode: "auto",
+                fields: allFields,
+                rates: currencyRates,
+                conversionPeriod: conversionPeriodById[w.id],
+              });
+            } catch {
+              out[v.id] = { value: null, currency: null };
+            }
+          })
+        );
+        calcVarsById[w.id] = out;
+        return;
+      }
+      // Nota (post-it): avalia as expressões {=…} salvas (settings.note.exprs,
+      // na ordem do texto; teto NOTE_MAX_EXPRS). Resultado alinhado por índice
+      // com as {=…} do texto (parseNoteTemplate).
+      if (isNoteWidget(w)) {
+        const exprs = (w.settings?.note?.exprs ?? []).slice(0, NOTE_MAX_EXPRS);
+        noteById[w.id] = await Promise.all(
+          exprs.map(async (formula) => {
+            try {
+              return await runCalculatedWidget(rpcClient, {
+                formula,
+                sources: w.sources ?? [],
+                filters: [
+                  ...(w.filters ?? []),
+                  ...(viewFiltersByWidget[w.id] ?? []),
+                ],
+                period: periodByWidget[w.id],
+                correspondencesMap,
+                currencyMode: "auto",
+                fields: allFields,
+                rates: currencyRates,
+                conversionPeriod: conversionPeriodById[w.id],
+              });
+            } catch {
+              return { value: null, currency: null };
+            }
+          })
+        );
+        return;
+      }
       if (isQuickTableWidget(w)) return; // deferido (runQuickTable no cliente)
       if (isKanbanWidget(w)) return; // deferido (runKanbanWidget no cliente)
       if (isAgendaWidget(w)) return; // deferido (fetchAgendaWidget no cliente)
@@ -637,7 +826,7 @@ export default async function DashboardPage({
       }
       try {
         dataById[w.id] = await runWidget(
-          supabase,
+          rpcClient,
           config,
           available,
           periodByWidget[w.id],
@@ -683,69 +872,23 @@ export default async function DashboardPage({
       fkLabels[l.id as string] = (l.title as string) ?? "—";
   }
 
-  // Opções do SELECT de responsável editável nas tabelas de registros individuais:
-  // só carrega se algum widget-lista expõe a coluna responsible_id como editável.
-  let responsibleOptions: ResponsibleOption[] = [];
-  const needsResponsibleSelect = dataWidgets.some(
-    (w) =>
-      isListWidget(w) &&
-      (w.settings?.rowSource ?? "records") === "records" &&
-      (w.settings?.columns ?? []).some(
-        (c) => c.field === "responsible_id" && c.editable
-      )
-  );
-  if (needsResponsibleSelect) {
-    const { data: respRows } = await supabase
-      .from("responsibles")
-      .select("id, display_name, bitrix_user_id")
-      .eq("active", true)
-      .order("display_name");
-    responsibleOptions = (respRows ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-      // Marca os responsáveis com vínculo no Bitrix: são os únicos oferecidos
-      // quando a coluna grava de volta (ASSIGNED_BY_ID).
-      bitrixLinked: Boolean(r.bitrix_user_id),
-    }));
-  }
+  // Opções do SELECT de responsável editável (promise disparada antes da
+  // computação dos widgets). Marca os responsáveis com vínculo no Bitrix: são
+  // os únicos oferecidos quando a coluna grava de volta (ASSIGNED_BY_ID).
+  const { data: respRows } = await responsibleOptionsPromise;
+  const responsibleOptions: ResponsibleOption[] = (respRows ?? []).map((r) => ({
+    value: r.id as string,
+    label: (r.display_name as string) ?? "—",
+    bitrixLinked: Boolean(r.bitrix_user_id),
+  }));
 
   // Opções de dropdown dos controles "Filtro por campo": responsáveis/operações
   // ativos (value = id, corrige o filtro que não casava com texto livre) e as
   // etapas distintas da(s) fonte(s) de cada widget (value = texto da etapa).
   const filterOptionsById: Record<string, FieldFilterOptions> = {};
-  if (fieldFilterWidgets.length > 0) {
-    const exposed = new Set<string>();
-    for (const fw of fieldFilterWidgets)
-      for (const f of fw.settings?.fields ?? []) exposed.add(f.field);
-    const needResp = exposed.has("responsible_id");
-    const needOps = exposed.has("operation_id");
-    const needStage = exposed.has("stage");
-
-    const [respRes, opsRes, stageRes] = await Promise.all([
-      needResp
-        ? supabase
-            .from("responsibles")
-            .select("id, display_name")
-            .eq("active", true)
-            .order("display_name")
-        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
-      needOps
-        ? supabase
-            .from("operations")
-            .select("id, name")
-            .eq("active", true)
-            .order("name")
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      needStage
-        ? supabase.rpc("run_widget_query", {
-            p_source: "records",
-            p_dimensions: [{ field: "record_type" }, { field: "stage" }],
-            p_metrics: [],
-            p_filters: [],
-            p_correspondences: {},
-          })
-        : Promise.resolve({ data: [] }),
-    ]);
+  if (filterOptionsFetchPromise) {
+    // Promise disparada antes da computação dos widgets — aqui só consome.
+    const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
 
     const responsibleOptions = (respRes.data ?? []).map((r) => ({
       value: r.id as string,
@@ -788,138 +931,11 @@ export default async function DashboardPage({
     }
   }
 
-  // Métricas calculadas: resolve a fórmula com o contexto do dashboard
-  // (agregações de registros). `settings.calcField` aponta p/ um campo
-  // "Calculado (totais)" salvo em /campos — a fórmula/moeda vêm da definição
-  // (campo deletado → fórmula null → valor null → "—"). Moeda: automática
-  // ('inherit') preserva a moeda dos operandos (misturou → BRL); fixa converte.
-  const calcById: Record<string, CalcWidgetResult> = {};
-  const calcWidgets = dataWidgets.filter(isCalcWidget);
-  if (calcWidgets.length > 0) {
-    await Promise.all(
-      calcWidgets.map(async (w) => {
-        try {
-          const calcKey = w.settings?.calcField;
-          const def = calcKey?.startsWith("custom:")
-            ? allFields.find(
-                (f) =>
-                  f.field_key === calcKey.slice(7) &&
-                  f.data_type === "calculado_agg"
-              )
-            : undefined;
-          const formula = calcKey ? (def?.formula ?? null) : w.settings?.formula;
-          calcById[w.id] = await runCalculatedWidget(supabase, {
-            formula,
-            sources: w.sources ?? [],
-            filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
-            period: periodByWidget[w.id],
-            correspondencesMap,
-            currencyMode:
-              def?.currency_mode === "fixed"
-                ? "fixed"
-                : def?.currency_mode === "inherit"
-                  ? "auto"
-                  : "none",
-            currencyCode:
-              def?.currency_mode === "fixed"
-                ? resolveCurrencyCode(def.currency_code)
-                : null,
-            allowNegative: def?.allow_negative !== false,
-            fields: allFields,
-            rates: currencyRates,
-            conversionPeriod: conversionPeriodById[w.id],
-          });
-        } catch {
-          calcById[w.id] = { value: null, currency: null };
-        }
-      })
-    );
-  }
-
-  // Calculadora: valor de cada variável nomeada ({ widgetId: { varId: result }}).
-  // Mesmo contexto do calculado (filtros do widget + filtros de visão + período);
-  // a expressão digitada é avaliada no CLIENTE contra esses valores.
-  const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
-  const calculatorWidgets = dataWidgets.filter(isCalculatorWidget);
-  if (calculatorWidgets.length > 0) {
-    await Promise.all(
-      calculatorWidgets.map(async (w) => {
-        const vars = w.settings?.calculator?.variables ?? [];
-        const out: Record<string, CalcWidgetResult> = {};
-        await Promise.all(
-          vars.map(async (v) => {
-            try {
-              out[v.id] = await runCalculatedWidget(supabase, {
-                formula: v.formula ?? null,
-                sources: w.sources ?? [],
-                filters: [
-                  ...(w.filters ?? []),
-                  ...(viewFiltersByWidget[w.id] ?? []),
-                ],
-                period: periodByWidget[w.id],
-                correspondencesMap,
-                currencyMode: "auto",
-                fields: allFields,
-                rates: currencyRates,
-                conversionPeriod: conversionPeriodById[w.id],
-              });
-            } catch {
-              out[v.id] = { value: null, currency: null };
-            }
-          })
-        );
-        calcVarsById[w.id] = out;
-      })
-    );
-  }
-
-  // Nota (post-it): avalia as expressões {=…} salvas (settings.note.exprs, na
-  // ordem do texto; teto NOTE_MAX_EXPRS — cada SOMASE pode gerar query extra).
-  // Resultado alinhado por índice com as {=…} do texto (parseNoteTemplate).
-  const noteById: Record<string, CalcWidgetResult[]> = {};
-  const noteWidgets = dataWidgets.filter(isNoteWidget);
-  if (noteWidgets.length > 0) {
-    await Promise.all(
-      noteWidgets.map(async (w) => {
-        const exprs = (w.settings?.note?.exprs ?? []).slice(0, NOTE_MAX_EXPRS);
-        noteById[w.id] = await Promise.all(
-          exprs.map(async (formula) => {
-            try {
-              return await runCalculatedWidget(supabase, {
-                formula,
-                sources: w.sources ?? [],
-                filters: [
-                  ...(w.filters ?? []),
-                  ...(viewFiltersByWidget[w.id] ?? []),
-                ],
-                period: periodByWidget[w.id],
-                correspondencesMap,
-                currencyMode: "auto",
-                fields: allFields,
-                rates: currencyRates,
-                conversionPeriod: conversionPeriodById[w.id],
-              });
-            } catch {
-              return { value: null, currency: null };
-            }
-          })
-        );
-      })
-    );
-  }
-
   // Seed do histórico de Desfazer/Refazer: snapshot determinístico do estado
   // atual (nome + settings + widgets + células das tabelas editáveis). Recomputado
   // a cada render do RSC, é o que o provider observa para registrar mudanças.
-  const { data: cellsData } = widgets.length
-    ? await supabase
-        .from("dashboard_table_cells")
-        .select("widget_id, row_key, col_key, value")
-        .in(
-          "widget_id",
-          widgets.map((w) => w.id)
-        )
-    : { data: [] as { widget_id: string; row_key: string; col_key: string; value: number | string | null }[] };
+  // (Fetch disparado antes da computação dos widgets — aqui só consome.)
+  const { data: cellsData } = await cellsDataPromise;
   const historySeed = buildDashboardSnapshot(
     dash.name as string,
     dashSettings,
