@@ -6,6 +6,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Regras do projeto
 
+> Documentação para humanos: [`docs/arquitetura.md`](./docs/arquitetura.md)
+> (fluxos + todas as invariantes, incl. as abaixo),
+> [`docs/banco-de-dados.md`](./docs/banco-de-dados.md) (schema consolidado) e
+> [`docs/manual-de-manutencao.md`](./docs/manual-de-manutencao.md) (runbook).
+> Ao alterar schema ou invariantes, atualize esses docs na mesma entrega.
+
 - **RPC de widgets duplicado (Snapshots):** `run_widget_query_snapshot`
   (versão vigente na 0072; introduzido na 0056) é uma cópia de
   `run_widget_query` (vigente na 0072; base 0054) apontada para
