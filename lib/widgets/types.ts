@@ -336,6 +336,41 @@ export interface CalcSettings {
   calcField?: string;
 }
 
+// --- Card (evolução do KPI, 17/07/2026) ---
+// O card numérico ("value", comportamento original) ganha modos novos, todos
+// resolvidos no servidor por lib/widgets/card.ts e exibidos pelo branch kpi do
+// WidgetChart. `settings.mode` (meta/razão/data_atual) tem precedência sobre
+// `card.mode` (presets antigos continuam intactos).
+export type CardMode = "value" | "record" | "topn" | "list" | "formula";
+export const CARD_MODE_LABELS: Record<CardMode, string> = {
+  value: "Número (agregação)",
+  record: "Valor de um registro (maior/menor)",
+  topn: "Ranking (Top N)",
+  list: "Lista de valores",
+  formula: "Fórmula",
+};
+export interface CardConfig {
+  mode?: CardMode; // ausente = "value"
+  // record: exibe `showField` do registro com maior/menor `rankField` (número
+  // ou data — cobre "cliente de maior valor" e "data mais recente").
+  showField?: string;
+  rankField?: string;
+  rankDir?: "max" | "min"; // default "max"
+  // topn/list: campo do rótulo (vira a dimensão da consulta agregada).
+  labelField?: string;
+  metric?: Metric; // topn: métrica do ranking
+  limit?: number; // topn default 5; list default 10
+  // formula: mesma engine do widget "calculado" (aceita SE/SOMASE/VARPCT…).
+  formula?: Formula;
+  // Extras de exibição (opcionais).
+  prefix?: string;
+  suffix?: string;
+  secondaryText?: string;
+}
+export interface CardSettings {
+  card?: CardConfig;
+}
+
 // --- Comparação com período anterior (17/07/2026) ---
 // Config de DADOS por widget (settings.comparison): o engine roda uma segunda
 // consulta com o range de comparação (lib/widgets/comparison.ts) e anexa o
@@ -630,6 +665,7 @@ export type WidgetSettings = KpiSettings &
   NoteSettings &
   ShapeSettings &
   QuickTableSettings &
+  CardSettings &
   ComparisonWidgetSettings & {
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
@@ -819,6 +855,10 @@ export interface WidgetData {
     };
   }[];
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
+  // Modos novos do Card (lib/widgets/card.ts): "record"/"formula" trazem o
+  // texto pronto; "topn"/"list" usam as próprias rows (rótulo + métrica) já
+  // ordenadas/cortadas no servidor.
+  card?: { mode: CardMode; valueText?: string; subText?: string };
   // Comparação com período anterior ATIVA neste resultado: range consultado +
   // rótulo pronto ("vs. período anterior") + a config de exibição. Ausente =
   // sem comparação (desligada, "todo o período" ou base indisponível) — os

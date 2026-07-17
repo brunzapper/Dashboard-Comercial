@@ -451,6 +451,61 @@ export const WidgetChart = memo(function WidgetChart({
   }
 
   if (visualType === "kpi") {
+    // Modos novos do Card (lib/widgets/card.ts): ranking/lista usam as rows já
+    // ordenadas/cortadas no servidor; record/formula trazem o texto pronto.
+    if (data.card) {
+      const c = data.card;
+      if (c.mode === "topn" || c.mode === "list") {
+        if (rows.length === 0) return <EmptyState />;
+        const dKey = dimensions[0]?.key ?? "dim_1";
+        const mKey = metrics[0]?.key;
+        return (
+          <div className="flex h-full flex-col justify-center gap-1 overflow-auto p-1">
+            {rows.map((r, i) => (
+              <div key={i} className="flex items-baseline gap-2 text-sm">
+                <span className="text-muted-foreground w-4 shrink-0 text-right text-xs tabular-nums">
+                  {i + 1}.
+                </span>
+                <span className="min-w-0 flex-1 truncate">
+                  {String(r[dKey] ?? "—")}
+                </span>
+                {c.mode === "topn" && mKey ? (
+                  <span className="shrink-0 font-medium tabular-nums">
+                    {moneyCellText(r as WidgetRow, mKey)}
+                  </span>
+                ) : null}
+                {c.mode === "topn" && mKey && cmp ? (
+                  <VariationBadge
+                    cur={numOrNull(r[mKey])}
+                    prev={(r as WidgetRow).__cmp?.[mKey] ?? null}
+                    settings={cmp.settings}
+                    fmtAbs={(n) => moneyChartText(n, mKey)}
+                    className="shrink-0 text-xs"
+                    hideWhenUnavailable
+                  />
+                ) : null}
+              </div>
+            ))}
+            {c.subText ? (
+              <span className="text-muted-foreground text-xs">{c.subText}</span>
+            ) : null}
+            {cmp ? (
+              <span className="text-muted-foreground/70 text-[10px]">
+                {cmp.label}
+              </span>
+            ) : null}
+          </div>
+        );
+      }
+      return (
+        <div className="flex h-full flex-col justify-center gap-1 p-1">
+          <span className="text-3xl font-semibold">{c.valueText ?? "—"}</span>
+          {c.subText ? (
+            <span className="text-muted-foreground text-xs">{c.subText}</span>
+          ) : null}
+        </div>
+      );
+    }
     if (data.kpi) {
       const k = data.kpi;
       if (k.mode === "data_atual") {

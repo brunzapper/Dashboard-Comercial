@@ -988,7 +988,13 @@ export const WidgetCard = memo(function WidgetCard({
               data={data}
               appearance={appearance}
               dateFormat={dateFormat}
-              metricsConfig={widget.metrics ?? []}
+              // Card em modo ranking: a métrica efetiva é a do settings.card
+              // (as metrics do widget não participam da consulta derivada).
+              metricsConfig={
+                data.card?.mode === "topn" && widget.settings?.card?.metric
+                  ? [widget.settings.card.metric]
+                  : (widget.metrics ?? [])
+              }
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

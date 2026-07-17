@@ -486,7 +486,9 @@ function seriesForeignCode(
     : null;
 }
 
-async function fetchFkLabels(
+// Exportado p/ o Card modo "record" (lib/widgets/card.ts) resolver o rótulo do
+// campo FK exibido com a mesma semântica das dimensões.
+export async function fetchFkLabels(
   supabase: SupabaseClient,
   fk: FkKind,
   ids: string[]
