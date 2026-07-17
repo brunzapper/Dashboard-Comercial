@@ -8,6 +8,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Check,
@@ -173,7 +174,15 @@ export function WebhookEndpointsManager({
           <p className="text-muted-foreground text-sm">
             URLs https notificadas quando dados mudam. Cada envio leva a
             assinatura HMAC no header{" "}
-            <code className="text-xs">x-webhook-signature</code>.
+            <code className="text-xs">x-webhook-signature</code> — como
+            verificar está na{" "}
+            <Link
+              href="/configuracoes/integracoes/docs"
+              className="underline underline-offset-2"
+            >
+              Documentação da API
+            </Link>
+            .
           </p>
         </div>
         <Button size="sm" onClick={openCreate}>

@@ -6,9 +6,13 @@
 //     registros/tarefas/comentários mudam.
 // Leituras aqui usam o client do usuário — a RLS (0074) libera select só p/
 // admin; segredos nunca aparecem (o banco guarda hash/ciphertext).
+import Link from "next/link";
+import { BookOpen } from "lucide-react";
+
 import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { Button } from "@/components/ui/button";
 import { ApiKeysManager, type ApiKeyListItem } from "@/components/admin/api-keys-manager";
 import {
   WebhookEndpointsManager,
@@ -60,14 +64,20 @@ export default async function IntegracoesPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Integrações</h1>
-        <p className="text-muted-foreground text-sm">
-          Conecte sistemas externos via webhooks: chaves de API para RECEBER
-          dados (push para /api/ingest) e endpoints para ENVIAR notificações
-          assinadas quando registros, tarefas ou comentários mudam. Detalhes e
-          exemplos em docs/webhooks.md.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Integrações</h1>
+          <p className="text-muted-foreground text-sm">
+            Conecte sistemas externos via webhooks: chaves de API para RECEBER
+            dados (push para /api/ingest) e endpoints para ENVIAR notificações
+            assinadas quando registros, tarefas ou comentários mudam.
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/configuracoes/integracoes/docs">
+            <BookOpen className="mr-1 size-4" /> Documentação da API
+          </Link>
+        </Button>
       </div>
       <ApiKeysManager keys={keys} sources={sources.map((s) => ({ key: s.key, label: s.label }))} />
       <WebhookEndpointsManager endpoints={endpoints} />
