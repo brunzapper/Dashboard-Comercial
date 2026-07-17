@@ -251,6 +251,11 @@ export async function finalizeCsvImport(): Promise<{ ok: boolean; message?: stri
   } catch {
     /* ignora: auto-match/recalc podem ser rodados depois em Campos. */
   }
-  revalidatePath("/", "layout");
+  // Dados de REGISTROS não afetam os providers do layout raiz (fontes/rótulos):
+  // revalida só as superfícies que exibem registros, em vez de "/" + layout
+  // (que derrubava o app inteiro do cache a cada import).
+  revalidatePath("/registros");
+  revalidatePath("/dashboards/[id]", "page");
+  revalidatePath("/kanbans/[id]", "page");
   return { ok: true };
 }

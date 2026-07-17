@@ -778,7 +778,11 @@ export async function updateEntityField(
   entityType: "responsible" | "operation",
   entityId: string,
   fieldKey: string,
-  rawValue: string
+  rawValue: string,
+  // Dashboard de origem: revalida SÓ ele (outros dashboards que exibem o mesmo
+  // valor global atualizam na próxima navegação — páginas dinâmicas). Ausente
+  // (compat) = revalida todos, como antes.
+  dashboardId?: string
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -829,7 +833,8 @@ export async function updateEntityField(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath("/dashboards/[id]", "page");
+  if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
+  else revalidatePath("/dashboards/[id]", "page");
   return { ok: true };
 }
 

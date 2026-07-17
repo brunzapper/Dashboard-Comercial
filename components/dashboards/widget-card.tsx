@@ -912,6 +912,7 @@ export const WidgetCard = memo(function WidgetCard({
               canEditValues={canEditValues}
               appearance={appearance}
               dateFormat={dateFormat}
+              dashboardId={dashboardId}
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
             />

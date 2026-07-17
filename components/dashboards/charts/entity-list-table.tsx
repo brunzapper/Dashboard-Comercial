@@ -61,6 +61,7 @@ function EntityEditableCell({
   canEditValues,
   dateFormat,
   value: serverValue,
+  dashboardId,
   onSaved,
 }: {
   entityType: "responsible" | "operation";
@@ -70,6 +71,8 @@ function EntityEditableCell({
   canEditValues: boolean;
   dateFormat: DateFormat;
   value: string;
+  // Dashboard de origem — a action revalida SÓ ele (ver updateEntityField).
+  dashboardId?: string;
   onSaved?: () => void;
 }) {
   const [value, setValue] = useState(serverValue);
@@ -111,7 +114,13 @@ function EntityEditableCell({
     setValue(raw);
     setError(false);
     startTransition(async () => {
-      const res = await updateEntityField(entityType, entityId, field.field_key, raw);
+      const res = await updateEntityField(
+        entityType,
+        entityId,
+        field.field_key,
+        raw,
+        dashboardId
+      );
       if (res.ok) {
         savedRef.current = raw;
         onSaved?.();
@@ -235,6 +244,7 @@ export function EntityListTable({
   canEditValues,
   appearance,
   dateFormat,
+  dashboardId,
   canEdit = false,
   onAppearanceChange,
 }: {
@@ -247,6 +257,8 @@ export function EntityListTable({
   canEditValues: boolean;
   appearance?: AppearanceSettings;
   dateFormat?: DateFormat;
+  // Dashboard de origem — repassado à action p/ revalidação cirúrgica.
+  dashboardId?: string;
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
@@ -449,6 +461,7 @@ export function EntityListTable({
                   canEditValues={canEditValues}
                   dateFormat={fmtOf(c.field)}
                   value={raw == null ? "" : String(raw)}
+                  dashboardId={dashboardId}
                   onSaved={() => router.refresh()}
                 />
               ) : (
