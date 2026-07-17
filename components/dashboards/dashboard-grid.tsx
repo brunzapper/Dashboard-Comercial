@@ -1,6 +1,10 @@
-// Versão: 2.9 | Data: 17/07/2026
+// Versão: 2.10 | Data: 17/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.10 (17/07/2026): arraste das alças da área de trabalho fluido — guard de
+//   igualdade no onHandleMove (re-render só ao cruzar limite de célula, antes
+//   era a cada pointermove), transition de width/height durante o arraste,
+//   chip "cols × linhas" ao vivo na alça ativa e clique parado não persiste.
 // v2.9 (17/07/2026): modo Posicionar (PlaceWidgetOverlay — ghost centrado no
 //   cursor; pan/menu/drag suspensos como no drawMode; canvas renderiza mesmo
 //   vazio) e "Inserir ▸" com TODOS os tipos + busca (InsertTypeMenu; insertAt
@@ -669,10 +673,14 @@ export function DashboardGrid({
     { x: number; y: number; cols: number; rows: number; axis: "row" | "col" } | null
   >(null);
   const lastRef = useRef<{ cols: number; rows: number } | null>(null);
+  // Eixo em arraste: liga o chip "cols × linhas" e a transition de tamanho.
+  const [dragAxis, setDragAxis] = useState<"row" | "col" | null>(null);
   function onHandleDown(e: React.PointerEvent, axis: "row" | "col") {
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = { x: e.clientX, y: e.clientY, cols, rows, axis };
+    lastRef.current = { cols, rows };
+    setDragAxis(axis);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onHandleMove(e: React.PointerEvent) {
@@ -686,20 +694,27 @@ export function DashboardGrid({
       d.axis === "row"
         ? Math.min(MAX_ROWS, Math.max(contentBottom, d.rows + Math.round((e.clientY - d.y) / (ROW_H + MY))))
         : d.rows;
+    // Só re-renderiza ao cruzar um limite de célula — sem isso, cada pointermove
+    // reflowia o grid inteiro e o arraste ficava travado.
+    const prev = lastRef.current;
+    if (prev && prev.cols === nextCols && prev.rows === nextRows) return;
     const next = { cols: nextCols, rows: nextRows };
     lastRef.current = next;
     setDrag(next);
   }
   function onHandleUp(e: React.PointerEvent) {
-    if (!dragRef.current) return;
+    const d = dragRef.current;
+    if (!d) return;
     dragRef.current = null;
+    setDragAxis(null);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       // capture pode já ter sido liberada
     }
     const last = lastRef.current;
-    if (!last) return;
+    // Clique sem mudança de tamanho não persiste nada.
+    if (!last || (last.cols === d.cols && last.rows === d.rows)) return;
     void updateDashboardSettings(dashboardId, {
       ...settings,
       canvas: { ...settings.canvas, cols: last.cols, rows: last.rows },
@@ -799,7 +814,10 @@ export function DashboardGrid({
               "relative",
               panning ? "cursor-grabbing" : "cursor-grab",
               editMode &&
-                "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]"
+                "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]",
+              // Só durante o arraste da alça: a borda desliza entre os degraus
+              // de célula (fora dele, resize de janela/menu fica instantâneo).
+              dragAxis && "transition-[width,height] duration-150 ease-out"
             )}
             style={{ width: gridW(cols), height: gridH(rows) }}
           >
@@ -826,7 +844,8 @@ export function DashboardGrid({
                 // (vem depois no DOM) — sem isso ele engole o clique nas linhas
                 // (e o pan armava no lugar). Os itens reabilitam abaixo.
                 "layout transition-opacity pointer-events-none",
-                pending && "opacity-60"
+                pending && "opacity-60",
+                dragAxis && "transition-[width,height,opacity] duration-150 ease-out"
               )}
               layout={layout}
               cols={cols}
@@ -958,6 +977,21 @@ export function DashboardGrid({
                     "before:h-8 before:w-0.5 before:rounded-full before:bg-primary/60 before:content-['']"
                   )}
                 />
+                {/* Chip com o tamanho ao vivo, junto da alça em arraste. */}
+                {dragAxis ? (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute z-30 rounded-md bg-primary px-2 py-0.5",
+                      "text-xs font-medium text-primary-foreground tabular-nums shadow-sm",
+                      dragAxis === "row"
+                        ? "bottom-4 left-1/2 -translate-x-1/2"
+                        : "top-1/2 right-4 -translate-y-1/2"
+                    )}
+                  >
+                    {cols} × {rows}
+                  </span>
+                ) : null}
               </>
             ) : null}
           </div>

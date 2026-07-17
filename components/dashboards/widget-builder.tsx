@@ -1,4 +1,6 @@
-// Versão: 1.9 | Data: 17/07/2026
+// Versão: 1.10 | Data: 17/07/2026
+// v1.10 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
+//   defaultValue no Accordion) — expandir sob demanda; badges seguem resumindo.
 // v1.9 (17/07/2026): modo Posicionar — na criação, o botão vira "Posicionar" e
 //   entrega o input ao shell via onRequestPlacement (pré-criação em segundo
 //   plano + clique no canvas define a posição). Rabos idênticos dos branches
@@ -2526,8 +2528,8 @@ export function WidgetBuilder({
           ) : null}
 
           {/* Bloco de dados em seções recolhíveis. O badge resume o que está
-              configurado, visível mesmo com a seção fechada. Essenciais abrem
-              por padrão; ao editar, Fontes abre fechada (raramente muda). */}
+              configurado, visível mesmo com a seção fechada. Todas abrem
+              recolhidas; o usuário expande sob demanda. */}
           {visualType !== "filtro" &&
           visualType !== "filtro_campo" &&
           visualType !== "calculado" &&
@@ -2538,15 +2540,7 @@ export function WidgetBuilder({
           visualType !== "tabela_editavel" &&
           visualType !== "kanban" &&
           visualType !== "agenda" ? (
-          <Accordion
-            type="multiple"
-            defaultValue={
-              widget
-                ? ["dimensoes", "metricas"]
-                : ["fontes", "dimensoes", "metricas"]
-            }
-            className="-mt-2"
-          >
+          <Accordion type="multiple" className="-mt-2">
           {/* Fontes + modo de combinação */}
           <BuilderSection
             value="fontes"
