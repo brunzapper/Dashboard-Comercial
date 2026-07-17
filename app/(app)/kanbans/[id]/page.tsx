@@ -1,8 +1,10 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 17/07/2026
 // Página dedicada de um kanban (dashboards.kind 'kanban', 0062). O RSC computa
 // o quadro (lib/kanban/data.ts → runRecordList com RLS) e entrega ao client;
 // período simples via ?periodo/?de/?ate sobre o campo de data da fonte (ou do
 // bucket). RLS de dashboards decide a visibilidade (owner/papéis/admin).
+// v1.2 (17/07/2026): <TrackLastView /> — grava a rota em user_settings.lastView
+//   p/ a Home restaurar ao reabrir o app.
 // v1.1 (16/07/2026): modo TAREFAS — tasks do board agrupadas por fase
 //   (lib/tasks/kanban.ts); RLS de tasks escopa o vendedor às próprias.
 import { notFound } from "next/navigation";
@@ -20,6 +22,7 @@ import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import { KanbanPageClient } from "@/components/kanban/kanban-page-client";
+import { TrackLastView } from "@/components/layout/track-last-view";
 
 function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
@@ -165,28 +168,32 @@ export default async function KanbanPage({
   const isManager = isAdmin || userRoles.includes("gestor");
 
   return (
-    <KanbanPageClient
-      boardId={board.id as string}
-      boardName={board.name as string}
-      settings={settings}
-      kanban={kanban}
-      data={data}
-      quickCreateSource={quickCreateSource}
-      recordCtx={{
-        fields,
-        responsibles,
-        operations,
-        userRoles,
-        canEditValues,
-        canManageFields,
-      }}
-      taskCtx={{
-        responsibles,
-        canAssignOthers: viewAll,
-        canLock: isManager,
-      }}
-      responsibleLabels={responsibleLabels}
-      canConfig={canConfig}
-    />
+    <>
+      {/* Grava a view p/ restauração ao reabrir o app. */}
+      <TrackLastView />
+      <KanbanPageClient
+        boardId={board.id as string}
+        boardName={board.name as string}
+        settings={settings}
+        kanban={kanban}
+        data={data}
+        quickCreateSource={quickCreateSource}
+        recordCtx={{
+          fields,
+          responsibles,
+          operations,
+          userRoles,
+          canEditValues,
+          canManageFields,
+        }}
+        taskCtx={{
+          responsibles,
+          canAssignOthers: viewAll,
+          canLock: isManager,
+        }}
+        responsibleLabels={responsibleLabels}
+        canConfig={canConfig}
+      />
+    </>
   );
 }

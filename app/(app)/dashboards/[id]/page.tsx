@@ -1,6 +1,8 @@
-// Versão: 2.4 | Data: 17/07/2026
+// Versão: 2.5 | Data: 17/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.5 (17/07/2026): <TrackLastView /> — grava a rota (com ?tab=) em
+//   user_settings.lastView p/ a Home restaurar ao reabrir o app.
 // v2.4 (17/07/2026): busca client-side — o q do tf_ é PULADO nos widgets em
 //   que searchHandledOnClient(settings) (lista de registros sem limit, barra
 //   visível): o cliente recebe o dataset completo e filtra em memória
@@ -96,6 +98,7 @@ import {
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
+import { TrackLastView } from "@/components/layout/track-last-view";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 
 function str(v: string | string[] | undefined): string {
@@ -1000,43 +1003,47 @@ export default async function DashboardPage({
     : undefined;
 
   return (
-    <DashboardClient
-      dashboardId={dash.id as string}
-      dashboardName={dash.name as string}
-      historySeed={historySeed}
-      widgets={widgets}
-      dataById={dataById}
-      recordListById={recordListById}
-      recordListTotalById={recordListTotalById}
-      entityListById={entityListById}
-      calcById={calcById}
-      calcVarsById={calcVarsById}
-      noteById={noteById}
-      calcExprById={calcExprById}
-      tableCellsById={tableCellsById}
-      fields={(fieldsData ?? []) as FieldDefinition[]}
-      fkLabels={fkLabels}
-      responsibleOptions={responsibleOptions}
-      userRoles={userRoles}
-      canEditValues={canEditValues}
-      available={available}
-      availableForBuilder={availableForBuilder}
-      canEdit={canEdit}
-      canManageFields={canManageFields}
-      currencyOptions={currencyOptions}
-      currencyRates={currencyRates}
-      conversionPeriodById={conversionPeriodById}
-      settings={dashSettings}
-      visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
-      dateFormat={dashSettings.dateFormat}
-      periodBar={periodBar}
-      periodScope={scope}
-      periodDefaultsByTab={periodDefaultsByTab}
-      periodDefaultFieldByTab={periodDefaultFieldByTab}
-      filterOptionsById={filterOptionsById}
-      quickFiltersById={quickFiltersById}
-      initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
-      focusWidgetId={focusWidget ? focusId : undefined}
-    />
+    <>
+      {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
+      <TrackLastView />
+      <DashboardClient
+        dashboardId={dash.id as string}
+        dashboardName={dash.name as string}
+        historySeed={historySeed}
+        widgets={widgets}
+        dataById={dataById}
+        recordListById={recordListById}
+        recordListTotalById={recordListTotalById}
+        entityListById={entityListById}
+        calcById={calcById}
+        calcVarsById={calcVarsById}
+        noteById={noteById}
+        calcExprById={calcExprById}
+        tableCellsById={tableCellsById}
+        fields={(fieldsData ?? []) as FieldDefinition[]}
+        fkLabels={fkLabels}
+        responsibleOptions={responsibleOptions}
+        userRoles={userRoles}
+        canEditValues={canEditValues}
+        available={available}
+        availableForBuilder={availableForBuilder}
+        canEdit={canEdit}
+        canManageFields={canManageFields}
+        currencyOptions={currencyOptions}
+        currencyRates={currencyRates}
+        conversionPeriodById={conversionPeriodById}
+        settings={dashSettings}
+        visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
+        dateFormat={dashSettings.dateFormat}
+        periodBar={periodBar}
+        periodScope={scope}
+        periodDefaultsByTab={periodDefaultsByTab}
+        periodDefaultFieldByTab={periodDefaultFieldByTab}
+        filterOptionsById={filterOptionsById}
+        quickFiltersById={quickFiltersById}
+        initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
+        focusWidgetId={focusWidget ? focusId : undefined}
+      />
+    </>
   );
 }
