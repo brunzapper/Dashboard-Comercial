@@ -56,7 +56,7 @@ import type {
   Widget,
   WidgetData,
 } from "@/lib/widgets/types";
-import { buildCsv, csvFilename, csvNumber, downloadCsv } from "@/lib/export/csv";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { widgetDataToCsv } from "@/lib/export/widget-data";
 import {
   recordColumnValue,

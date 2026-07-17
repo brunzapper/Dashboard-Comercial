@@ -17,7 +17,12 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
 import { ingestRows } from "@/lib/import/ingest";
-import { CORE_IMPORT_COLUMNS, type ColumnMapping } from "@/lib/import/csv";
+import {
+  CORE_IMPORT_COLUMNS,
+  isValidMatchTarget,
+  type ColumnMapping,
+  type MatchConfig,
+} from "@/lib/import/csv";
 import type { SyncResult } from "@/lib/sync/shared";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
@@ -139,6 +144,8 @@ export interface ImportChunkPayload {
   sourceKey: string;
   mapping: ColumnMapping[];
   dedupColumns: string[];
+  // Modo "match por coluna" (upsert em fonte existente) — ver lib/import/csv.ts.
+  match?: MatchConfig;
   rows: Record<string, unknown>[];
 }
 
@@ -154,7 +161,7 @@ export async function importCsvChunk(
   const auth = await ensureAdmin();
   if (!auth.ok) return { ok: false, message: auth.message };
 
-  const { sourceKey, mapping, dedupColumns, rows } = payload;
+  const { sourceKey, mapping, dedupColumns, match, rows } = payload;
   if (!Array.isArray(rows) || rows.length === 0) {
     return { ok: false, message: "Chunk vazio." };
   }
@@ -177,6 +184,44 @@ export async function importCsvChunk(
   const source = sources.find((s) => s.key === sourceKey);
   if (!source) return { ok: false, message: `Fonte "${sourceKey}" não encontrada.` };
 
+  // Modo match: valida o alvo, os checkboxes e o write-back no servidor (a UI
+  // também valida, mas o payload vem do client).
+  if (match) {
+    if (!match.insertNew && !match.updateExisting) {
+      return {
+        ok: false,
+        message:
+          'Marque ao menos um entre "Incluir novos" e "Atualizar existentes".',
+      };
+    }
+    if (!isValidMatchTarget(match.targetField)) {
+      return { ok: false, message: `Campo de match inválido: ${match.targetField}` };
+    }
+    if (match.targetField.startsWith("custom:")) {
+      const key = match.targetField.slice("custom:".length);
+      const { data: def } = await db
+        .from("field_definitions")
+        .select("field_key")
+        .eq("field_key", key)
+        .maybeSingle();
+      if (!def) {
+        return { ok: false, message: `Campo de match "${key}" não existe.` };
+      }
+    }
+    if (
+      match.writeBack &&
+      !(source.builtin && (source.recordType === "lead" || source.recordType === "negocio"))
+    ) {
+      return {
+        ok: false,
+        message:
+          source.recordType === "venda_site"
+            ? "Write-back indisponível: a integração da planilha é somente de entrada."
+            : "Write-back só está disponível para as fontes sincronizadas do Bitrix (Leads e Negócios).",
+      };
+    }
+  }
+
   const result = await ingestRows(
     db,
     {
@@ -184,6 +229,7 @@ export async function importCsvChunk(
       recordType: source.recordType,
       mapping,
       dedupColumns,
+      match,
       userId: auth.userId,
     },
     rows
