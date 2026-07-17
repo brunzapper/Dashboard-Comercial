@@ -7,8 +7,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # Regras do projeto
 
 - **RPC de widgets duplicado (Snapshots):** `run_widget_query_snapshot`
-  (versão vigente na 0057; introduzido na 0056) é uma cópia de
-  `run_widget_query` (0054) apontada para `snapshot_records`, acrescida das
+  (versão vigente na 0072; introduzido na 0056) é uma cópia de
+  `run_widget_query` (vigente na 0072; base 0054) apontada para
+  `snapshot_records`, acrescida das
   restrições do snapshot aplicadas internamente (mock-aware). Toda mudança em
   `run_widget_query` (nova migração que o recrie) DEVE ser espelhada em
   `run_widget_query_snapshot` na mesma migração — inclusive o helper

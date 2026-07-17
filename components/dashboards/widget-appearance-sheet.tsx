@@ -647,7 +647,7 @@ export function WidgetAppearanceSheet({
 
           {/* ---------- KPI ---------- */}
           {isKpi ? (
-            <BuilderSection value="kpi" title="Card KPI">
+            <BuilderSection value="kpi" title="Card">
               <ColorField
                 label="Fundo"
                 value={ap.kpi?.bg}

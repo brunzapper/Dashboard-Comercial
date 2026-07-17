@@ -1169,9 +1169,14 @@ export async function runWidget(
   // monetárias normais (`__money`) E os operandos monetários das métricas
   // calculadas (basis como MoneyBreakdown — preserva a moeda única do recorte
   // ou opera nos valores convertidos p/ Real quando misturar).
+  // min/max ficam fora: o breakdown por moeda assume agregação linear (somar
+  // parcelas por moeda) — min/max monetário exibe o agregado cru do RPC.
   const moneyEntries = config.metrics
     .map((m, i) => ({ m, i }))
-    .filter(({ m }) => isMoneyMetric(m, available));
+    .filter(
+      ({ m }) =>
+        isMoneyMetric(m, available) && m.agg !== "min" && m.agg !== "max"
+    );
   // Chaves condicionais ficam de fora: a consulta de moeda não aplica os
   // filtros da condição (o detalhamento sairia sem condição — valor errado);
   // o operando condicional segue numérico (soma crua, degradação v1).

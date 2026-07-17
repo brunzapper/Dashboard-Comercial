@@ -54,7 +54,7 @@ export type VisualType =
   | "agenda";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
-  kpi: "KPI (número)",
+  kpi: "Card",
   calculado: "Métrica calculada",
   calculadora: "Calculadora",
   nota: "Nota (post-it)",
@@ -74,11 +74,13 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   agenda: "Agenda",
 };
 
-export type Aggregation = "sum" | "count" | "avg";
+export type Aggregation = "sum" | "count" | "avg" | "min" | "max";
 export const AGG_LABELS: Record<Aggregation, string> = {
   sum: "Soma",
   count: "Contagem",
   avg: "Média",
+  min: "Mínimo",
+  max: "Máximo",
 };
 
 export type Transform =
