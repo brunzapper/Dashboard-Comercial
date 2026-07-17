@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { loadUserSettings } from "@/lib/config/user-settings";
 import { addDaysIso, DEFAULT_DUE_SOON_DAYS } from "./alerts";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "./types";
@@ -381,17 +382,11 @@ export async function listRecordTasks(recordId: string): Promise<TaskRow[]> {
 }
 
 // Marca d'água da seção "Novas": tasksSeenAt de user_settings; sem registro,
-// janela de 7 dias (não inundar o sino de quem nunca abriu).
-async function tasksSeenSince(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string
-): Promise<string> {
-  const { data } = await supabase
-    .from("user_settings")
-    .select("settings")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const seen = (data?.settings as { tasksSeenAt?: string } | null)?.tasksSeenAt;
+// janela de 7 dias (não inundar o sino de quem nunca abriu). Usa o loader
+// cache()d — o layout lê a mesma linha (sidebarPinned) na mesma request.
+async function tasksSeenSince(userId: string): Promise<string> {
+  const settings = await loadUserSettings(userId);
+  const seen = (settings as { tasksSeenAt?: string }).tasksSeenAt;
   if (seen) return seen;
   return new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
 }
@@ -414,10 +409,12 @@ export async function listTaskAlerts(
   const session = await getSessionInfo();
   if (!session) return { due: [], fresh: [] };
   const supabase = await createClient();
-  const respIds = await ownResponsibleIds(supabase, session.user.id);
+  const [respIds, since] = await Promise.all([
+    ownResponsibleIds(supabase, session.user.id),
+    tasksSeenSince(session.user.id),
+  ]);
   const notify = notifyMeFilter(session.user.id, respIds);
   const limitIso = addDaysIso(todayBrasiliaIso(), Math.max(0, dueSoonDays));
-  const since = await tasksSeenSince(supabase, session.user.id);
 
   const [{ data: due }, { data: fresh }] = await Promise.all([
     supabase

@@ -1,7 +1,12 @@
-// Versão: 1.1 | Data: 04/07/2026
+// Versão: 1.2 | Data: 17/07/2026
 // Helpers de sessão no servidor: usuário autenticado + seus papéis/permissões.
 // v1.1 (04/07/2026): adicionados requireSession/requirePermission (guards de
 //   páginas server-side, complementando o proxy).
+// v1.2 (17/07/2026): getUser/getSessionInfo em React cache() — auth.getUser()
+//   é chamada de REDE ao servidor de auth; layout + página + sino chamavam
+//   getSessionInfo 3-4× por navegação, cada uma revalidando o mesmo token.
+//   Com cache(), 1 validação (+ 1 consulta de papéis) por render/request.
+import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 
@@ -14,19 +19,19 @@ export interface SessionInfo {
 }
 
 /** Retorna o usuário autenticado ou null (não lança). */
-export async function getUser(): Promise<User | null> {
+export const getUser = cache(async function getUser(): Promise<User | null> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user ?? null;
-}
+});
 
 /**
  * Retorna usuário + papéis + permissões efetivas, ou null se não autenticado.
  * Papéis vêm de user_roles; permissões são derivadas de role_permissions.
  */
-export async function getSessionInfo(): Promise<SessionInfo | null> {
+export const getSessionInfo = cache(async function getSessionInfo(): Promise<SessionInfo | null> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -52,7 +57,7 @@ export async function getSessionInfo(): Promise<SessionInfo | null> {
   }
 
   return { user, roles, permissions };
-}
+});
 
 /** Exige sessão; redireciona para /login se ausente. */
 export async function requireSession(): Promise<SessionInfo> {
