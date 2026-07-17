@@ -48,15 +48,25 @@ export function mergeSourceLabels(
   return out;
 }
 
-/** Lê os rótulos de exibição das fontes; qualquer falha cai nos defaults. */
-export async function loadSourceLabels(
-  supabase: SupabaseClient,
-  sources: SourceDef[] = BUILTIN_SOURCES
-): Promise<SourceDisplayLabels> {
+/**
+ * Só o fetch do sync_config (não depende do catálogo de fontes) — permite
+ * buscar em paralelo com loadSources e mesclar depois via mergeSourceLabels.
+ */
+export async function loadSourceLabelsValue(
+  supabase: SupabaseClient
+): Promise<unknown> {
   const { data } = await supabase
     .from("sync_config")
     .select("value")
     .eq("key", SOURCE_LABELS_CONFIG_KEY)
     .maybeSingle();
-  return mergeSourceLabels(data?.value, sources);
+  return data?.value;
+}
+
+/** Lê os rótulos de exibição das fontes; qualquer falha cai nos defaults. */
+export async function loadSourceLabels(
+  supabase: SupabaseClient,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): Promise<SourceDisplayLabels> {
+  return mergeSourceLabels(await loadSourceLabelsValue(supabase), sources);
 }

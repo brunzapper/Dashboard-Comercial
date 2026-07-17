@@ -105,6 +105,14 @@ export async function recalcAllFormulaFields(): Promise<number> {
 
   let from = 0;
   let updated = 0;
+  // Updates do lote acumulados e aplicados num único UPDATE set-based via
+  // recalc_apply_updates (0070) — antes era 1 round trip por linha alterada.
+  type BatchUpdate = {
+    id: string;
+    custom_fields: Record<string, unknown> | null;
+    set_lead_time: boolean;
+    lead_time_days: number | null;
+  };
   for (;;) {
     const { data } = await db
       .from("records")
@@ -125,6 +133,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
       }))
     );
 
+    const batchUpdates: BatchUpdate[] = [];
     for (const r of rows) {
       const custom: Record<string, unknown> = {
         ...((r.custom_fields as Record<string, unknown>) ?? {}),
@@ -215,9 +224,28 @@ export async function recalcAllFormulaFields(): Promise<number> {
       }
 
       if (changed) {
-        await db.from("records").update(updates).eq("id", r.id as string);
-        updated += 1;
+        batchUpdates.push({
+          id: r.id as string,
+          custom_fields:
+            "custom_fields" in updates
+              ? (updates.custom_fields as Record<string, unknown>)
+              : null,
+          set_lead_time: "lead_time_days" in updates,
+          lead_time_days:
+            "lead_time_days" in updates
+              ? (updates.lead_time_days as number | null)
+              : null,
+        });
       }
+    }
+
+    if (batchUpdates.length > 0) {
+      const { data: count, error } = await db.rpc("recalc_apply_updates", {
+        p_updates: batchUpdates,
+      });
+      // Como no per-row anterior, erro não aborta o recalc (lotes seguintes
+      // ainda rodam); só não conta como atualizado.
+      if (!error) updated += (count as number | null) ?? batchUpdates.length;
     }
 
     if (rows.length < BATCH) break;

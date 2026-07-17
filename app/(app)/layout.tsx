@@ -14,7 +14,11 @@ import { redirect } from "next/navigation";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
-import { loadSourceLabels } from "@/lib/config/source-labels";
+import {
+  loadSourceLabelsValue,
+  mergeSourceLabels,
+} from "@/lib/config/source-labels";
+import { loadUserSettings } from "@/lib/config/user-settings";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
@@ -23,6 +27,7 @@ import { TaskBell } from "@/components/layout/task-bell";
 import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
+import { RealtimeRefresher } from "@/components/realtime-refresher";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
 // sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
@@ -62,27 +67,21 @@ export default async function AppLayout({
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
     .join(", ");
 
-  // Preferência global do usuário: barra lateral fixada (default = oculta).
-  // Catálogo de fontes + rótulos curtos: carregados uma vez por request para
-  // os providers (rótulos derivam do catálogo — nomes curtos por fonte).
+  // Preferência global do usuário (loader cache()d — o sino relê a mesma linha
+  // na mesma request sem nova consulta), catálogo de fontes + valor bruto dos
+  // rótulos e a contagem do sino: tudo em UM Promise.all — antes eram 4 ondas
+  // seriais. O merge dos rótulos depende de `sources`, mas o FETCH não.
+  // Sino: erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
   const supabase = await createClient();
-  const [{ data: userSettings }, sources] = await Promise.all([
-    supabase
-      .from("user_settings")
-      .select("settings")
-      .eq("user_id", user.id)
-      .maybeSingle(),
+  const [settings, sources, labelsValue, dueCount] = await Promise.all([
+    loadUserSettings(user.id),
     loadSources(supabase),
+    loadSourceLabelsValue(supabase),
+    countTaskAlerts().catch(() => 0),
   ]);
-  const sourceLabels = await loadSourceLabels(supabase, sources);
+  const sourceLabels = mergeSourceLabels(labelsValue, sources);
   const initialPinned =
-    (userSettings?.settings as { sidebarPinned?: boolean } | null)
-      ?.sidebarPinned ?? false;
-
-  // Sino de alertas: novas + com prazo, com a regra de notificação (global /
-  // criador / responsável) — mesma conta do badge no client (countTaskAlerts).
-  // Erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
-  const dueCount = await countTaskAlerts().catch(() => 0);
+    (settings as { sidebarPinned?: boolean }).sidebarPinned ?? false;
 
   // Conteúdo da barra montado no server (itens já filtrados por papel);
   // o AppShell (client) controla ocultar/fixar/tela cheia.
@@ -108,6 +107,9 @@ export default async function AppLayout({
   return (
     <SourcesProvider sources={sources}>
       <SourceLabelsProvider labels={sourceLabels}>
+        {/* Sinal realtime (records/tasks/comments) → event bus + refresh
+            coalescido; só no app autenticado (o viewer /s/ fica fora). */}
+        <RealtimeRefresher />
         <AppShell
           initialPinned={initialPinned}
           sidebar={sidebarContent}

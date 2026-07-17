@@ -8,7 +8,7 @@
 // duplo-clique) quando canEdit. Sem `appearance` = comportamento original.
 "use client";
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import {
   Bar,
@@ -215,7 +215,9 @@ function EmptyState() {
   );
 }
 
-export function WidgetChart({
+// React.memo: sob o WidgetCard memoizado, o chart (recharts) só re-renderiza
+// quando dados/aparência mudam — não a cada medição/drag/hover do grid.
+export const WidgetChart = memo(function WidgetChart({
   visualType,
   data,
   appearance,
@@ -237,16 +239,22 @@ export function WidgetChart({
   const dimKey = dimensions[0]?.key;
 
   // --- Moeda: config por métrica + helpers de formatação (paridade c/ registros) ---
-  const metricByKey: Record<string, Metric> = {};
-  metrics.forEach((m, i) => {
-    if (metricsConfig[i]) metricByKey[m.key] = metricsConfig[i];
-  });
+  const metricByKey: Record<string, Metric> = useMemo(() => {
+    const out: Record<string, Metric> = {};
+    metrics.forEach((m, i) => {
+      if (metricsConfig[i]) out[m.key] = metricsConfig[i];
+    });
+    return out;
+  }, [metrics, metricsConfig]);
   const isMoneyKey = (key: string) =>
     metrics.find((m) => m.key === key)?.isMoney ?? false;
   const calcOf = (key: string) => metrics.find((m) => m.key === key)?.calc;
 
   // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
-  const percentModeByKey = buildPercentModes(metrics, metricByKey);
+  const percentModeByKey = useMemo(
+    () => buildPercentModes(metrics, metricByKey),
+    [metrics, metricByKey]
+  );
   const percentModeOf = (key: string): PercentMode =>
     percentModeByKey[key] ?? null;
   const pfmt = (v: unknown, key: string): string => {
@@ -266,42 +274,60 @@ export function WidgetChart({
 
   // Moeda de EXIBIÇÃO de uma série no gráfico: mantém a moeda estrangeira única
   // (exibição "original"); senão R$ (convertido) — coerente com o número plotado
-  // pelo engine.
-  const seriesMoneyCode = (key: string): string => {
-    if ((metricByKey[key]?.currencyDisplay ?? "original") !== "original")
-      return "BRL";
-    let code: string | null = null;
-    for (const r of rows as WidgetRow[]) {
-      const bd = r.__money?.[key];
-      if (!bd) continue;
-      const c = plotSingleCurrency(bd);
-      if (c == null) return "BRL";
-      if (code == null) code = c;
-      else if (code !== c) return "BRL";
+  // pelo engine. Mapa pré-computado por métrica monetária: o scan percorre
+  // TODAS as linhas e era refeito por datapoint (tooltip/rótulo/eixo).
+  const seriesMoneyCodeByKey = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const m of metrics) {
+      if (!m.isMoney) continue;
+      const key = m.key;
+      let res = "BRL";
+      if ((metricByKey[key]?.currencyDisplay ?? "original") === "original") {
+        let code: string | null = null;
+        let mixed = false;
+        for (const r of rows as WidgetRow[]) {
+          const bd = r.__money?.[key];
+          if (!bd) continue;
+          const c = plotSingleCurrency(bd);
+          if (c == null || (code != null && code !== c)) {
+            mixed = true;
+            break;
+          }
+          code = c;
+        }
+        if (!mixed && code && code !== "BRL") res = code;
+      }
+      out[key] = res;
     }
-    return code && code !== "BRL" ? code : "BRL";
-  };
+    return out;
+  }, [rows, metrics, metricByKey]);
+  const seriesMoneyCode = (key: string): string =>
+    seriesMoneyCodeByKey[key] ?? "BRL";
 
   // Moeda uniforme da série de uma métrica calculada: todas as linhas avaliadas
   // na MESMA moeda → usa-a nos rótulos; mista ou sem moeda → null (número puro,
-  // já que os valores plotados estariam em moedas diferentes).
-  const calcSeriesCode = (calc: CalcMeta): string | null => {
-    let code: string | null = null;
-    let any = false;
-    for (const r of rows as WidgetRow[]) {
-      if (!r.__calcOps) continue;
-      const { currency } = evalCalcMoney(calc.formula, r.__calcOps, calcMetaOf(calc));
-      any = true;
-      if (currency == null) return null;
-      if (code == null) code = currency;
-      else if (code !== currency) return null;
-    }
-    return any ? code : (calc.currency ?? null);
-  };
-  const calcCodeByKey: Record<string, string | null> = {};
-  metrics.forEach((m) => {
-    if (m.calc) calcCodeByKey[m.key] = calcSeriesCode(m.calc);
-  });
+  // já que os valores plotados estariam em moedas diferentes). useMemo: avalia
+  // a fórmula linha a linha por métrica calculada — só quando rows/metrics mudam.
+  const calcCodeByKey: Record<string, string | null> = useMemo(() => {
+    const calcSeriesCode = (calc: CalcMeta): string | null => {
+      let code: string | null = null;
+      let any = false;
+      for (const r of rows as WidgetRow[]) {
+        if (!r.__calcOps) continue;
+        const { currency } = evalCalcMoney(calc.formula, r.__calcOps, calcMetaOf(calc));
+        any = true;
+        if (currency == null) return null;
+        if (code == null) code = currency;
+        else if (code !== currency) return null;
+      }
+      return any ? code : (calc.currency ?? null);
+    };
+    const out: Record<string, string | null> = {};
+    metrics.forEach((m) => {
+      if (m.calc) out[m.key] = calcSeriesCode(m.calc);
+    });
+    return out;
+  }, [rows, metrics]);
 
   // Texto de um valor plotado (tooltip/rótulo) na moeda da série; não-money = fmt.
   // Calculada de agregados: moeda uniforme da série (ou número) e null → "—".
@@ -661,7 +687,7 @@ export function WidgetChart({
       })}
     </BarChart>
   );
-}
+});
 
 // ---------------- Tabela agregada com aparência + edição in-loco ----------------
 type TableMenu =

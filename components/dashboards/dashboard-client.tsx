@@ -103,6 +103,7 @@ export function DashboardClient({
   widgets,
   dataById,
   recordListById,
+  recordListTotalById,
   entityListById,
   calcById,
   calcVarsById = {},
@@ -139,6 +140,8 @@ export function DashboardClient({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  // Total dos widgets-lista paginados no servidor (chave ausente = full fetch).
+  recordListTotalById: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   // Calculadora: valores das variáveis por widget ({ widgetId: { varId: r } }).
@@ -615,6 +618,7 @@ export function DashboardClient({
             widgets={visibleWidgets}
             dataById={dataById}
             recordListById={recordListById}
+            recordListTotalById={recordListTotalById}
             entityListById={entityListById}
             calcById={calcById}
             calcVarsById={calcVarsById}

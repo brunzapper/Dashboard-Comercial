@@ -556,5 +556,10 @@ export async function deleteField(formData: FormData): Promise<void> {
   if (!id) return;
   const supabase = await createClient();
   await supabase.from("field_definitions").delete().eq("id", id);
+  // Mesmo escopo do create/update: a coluna some da tabela de Registros e dos
+  // widgets — sem revalidar, essas telas mostravam o campo excluído até a
+  // próxima navegação (dado stale é pior que lento).
   revalidatePath("/campos");
+  revalidatePath("/registros");
+  revalidatePath("/dashboards/[id]", "page");
 }

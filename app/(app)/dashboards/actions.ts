@@ -506,20 +506,26 @@ export async function saveQuickTableCells(
   const empty = cells.filter((c) => c.value == null || c.value === "");
   const filled = cells.filter((c) => !(c.value == null || c.value === ""));
 
-  // Apaga células esvaziadas agrupando por linha (1 round-trip por linha).
+  // Apaga células esvaziadas agrupando por linha (1 delete por linha, todos em
+  // PARALELO — antes eram aguardados em série).
   const emptyByRow = new Map<string, string[]>();
   for (const c of empty) {
     (emptyByRow.get(c.rowKey) ?? emptyByRow.set(c.rowKey, []).get(c.rowKey)!)
       .push(c.colKey);
   }
-  for (const [rowKey, colKeys] of emptyByRow) {
-    const { error } = await supabase
-      .from("dashboard_table_cells")
-      .delete()
-      .eq("widget_id", widgetId)
-      .eq("row_key", rowKey)
-      .in("col_key", colKeys);
-    if (error) return { ok: false, message: error.message };
+  if (emptyByRow.size > 0) {
+    const results = await Promise.all(
+      [...emptyByRow.entries()].map(([rowKey, colKeys]) =>
+        supabase
+          .from("dashboard_table_cells")
+          .delete()
+          .eq("widget_id", widgetId)
+          .eq("row_key", rowKey)
+          .in("col_key", colKeys)
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) return { ok: false, message: failed.error.message };
   }
 
   // Upsert das preenchidas em blocos.
@@ -778,7 +784,11 @@ export async function updateEntityField(
   entityType: "responsible" | "operation",
   entityId: string,
   fieldKey: string,
-  rawValue: string
+  rawValue: string,
+  // Dashboard de origem: revalida SÓ ele (outros dashboards que exibem o mesmo
+  // valor global atualizam na próxima navegação — páginas dinâmicas). Ausente
+  // (compat) = revalida todos, como antes.
+  dashboardId?: string
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -829,7 +839,8 @@ export async function updateEntityField(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath("/dashboards/[id]", "page");
+  if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
+  else revalidatePath("/dashboards/[id]", "page");
   return { ok: true };
 }
 

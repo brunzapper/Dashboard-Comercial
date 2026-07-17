@@ -1,7 +1,11 @@
-// Versão: 1.0 | Data: 04/07/2026
+// Versão: 1.1 | Data: 17/07/2026
 // Proxy (Next.js 16 — antigo "middleware"). Atualiza a sessão do Supabase a
 // cada request e redireciona usuários não autenticados para /login.
 // Runtime: nodejs (padrão do proxy no Next 16).
+// v1.1 (17/07/2026): /api/* e /s/* saem ANTES do getUser() — essas rotas cuidam
+//   da própria autenticação (segredos/token de snapshot) e getUser() é uma ida
+//   de REDE ao servidor de auth por request. /login segue validando (o
+//   redirect de usuário já logado depende do user).
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
@@ -21,6 +25,22 @@ function isPublic(pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Rotas de API: autenticação própria (tokens/segredos) — sem sessão a validar.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.next({ request });
+  }
+
+  // Viewer público de snapshots: valida o token sozinho (service role). O token
+  // está na URL — nunca vazar por Referer nem entrar em índice de busca.
+  if (pathname === "/s" || pathname.startsWith("/s/")) {
+    const publicResponse = NextResponse.next({ request });
+    publicResponse.headers.set("Referrer-Policy", "no-referrer");
+    publicResponse.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return publicResponse;
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -50,8 +70,6 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-
   if (!user && !isPublic(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
@@ -65,13 +83,6 @@ export async function proxy(request: NextRequest) {
     homeUrl.pathname = "/";
     homeUrl.search = "";
     return NextResponse.redirect(homeUrl);
-  }
-
-  // Viewer público de snapshots: o token está na URL — nunca vazar por
-  // Referer nem entrar em índice de busca.
-  if (pathname.startsWith("/s/")) {
-    response.headers.set("Referrer-Policy", "no-referrer");
-    response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   return response;

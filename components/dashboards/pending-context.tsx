@@ -6,7 +6,7 @@
 // quem exibe o overlay (DashboardGrid), para mostrar "Carregando…" enquanto isso.
 "use client";
 
-import { createContext, useContext, useTransition } from "react";
+import { createContext, useContext, useMemo, useTransition } from "react";
 
 interface NavPending {
   pending: boolean;
@@ -21,10 +21,14 @@ export function DashboardPendingProvider({
   children: React.ReactNode;
 }) {
   const [pending, startTransition] = useTransition();
+  // Referência estável do value: objeto novo por render re-renderizava todos
+  // os consumidores (grid inteiro) a cada render do provider.
+  const value = useMemo<NavPending>(
+    () => ({ pending, run: (fn) => startTransition(fn) }),
+    [pending]
+  );
   return (
-    <PendingContext.Provider
-      value={{ pending, run: (fn) => startTransition(fn) }}
-    >
+    <PendingContext.Provider value={value}>
       {children}
     </PendingContext.Provider>
   );

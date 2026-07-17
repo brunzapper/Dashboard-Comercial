@@ -13,7 +13,7 @@
 //   coluna e altura de linha redimensionáveis na edição de layout.
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
@@ -187,8 +187,11 @@ export type ResponsibleOption = {
   bitrixLinked?: boolean;
 };
 
-export function RecordListTable({
+// React.memo: sob o WidgetCard memoizado, a tabela só re-renderiza quando os
+// registros/aparência/props realmente mudam — não a cada churn do grid.
+export const RecordListTable = memo(function RecordListTable({
   records,
+  serverPage,
   searchQ,
   searchFields,
   columns,
@@ -207,6 +210,17 @@ export function RecordListTable({
   onAppearanceChange,
 }: {
   records: RecordRow[];
+  // Paginação SERVER-SIDE (widgets elegíveis — serverPaginatedList): `records`
+  // é só a página corrente, já filtrada/ordenada pelo servidor; o pager usa
+  // `total` e delega a troca de página ao WidgetCard (onPageChange). Ausente =
+  // full fetch com sort/paginação client-side (comportamento original).
+  serverPage?: {
+    page: number;
+    total: number;
+    pageSize: number;
+    loading?: boolean;
+    onPageChange: (page: number) => void;
+  };
   // Busca textual client-side (WidgetCard, quando searchHandledOnClient):
   // termo digitado na TableFilterBar + campos de busca do widget. Ausentes =
   // sem filtro local (a busca, se houver, veio aplicada do servidor).
@@ -600,31 +614,41 @@ export function RecordListTable({
   );
 
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
-  let rows = filtered;
-  if (t.sort?.column) {
-    const { column, dir, colorOrder } = t.sort;
-    rows = [...filtered].sort((a, b) => {
-      if (dir === "color") {
-        const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
-        const ra = rank.get(t.rowColors?.[a.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
-        const rb = rank.get(t.rowColors?.[b.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
-        return ra - rb;
-      }
-      const av = rawValue(column, a);
-      const bv = rawValue(column, b);
-      const an = Number(av);
-      const bn = Number(bv);
-      const bothNum = av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn);
-      const cmp = bothNum
-        ? an - bn
-        : String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
-      return dir === "desc" ? -cmp : cmp;
-    });
-  } else {
-    rows = applyManualOrder(filtered, t.rowOrder, (r) => r.id);
-  }
+  // useMemo: o sort percorre o conjunto INTEIRO e rodava a cada re-render
+  // (expandir grupo, trocar página, digitar) — só recomputa quando os dados/
+  // config de ordenação mudam. rawValue lê via cols/fkLabels (nas deps).
+  const rows = useMemo(() => {
+    // Página server-side: linhas já chegam filtradas/ordenadas do servidor —
+    // re-ordenar aqui só a página seria errado (a ordem vale sobre o conjunto).
+    if (serverPage) return filtered;
+    if (t.sort?.column) {
+      const { column, dir, colorOrder } = t.sort;
+      return [...filtered].sort((a, b) => {
+        if (dir === "color") {
+          const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
+          const ra = rank.get(t.rowColors?.[a.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
+          const rb = rank.get(t.rowColors?.[b.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
+          return ra - rb;
+        }
+        const av = rawValue(column, a);
+        const bv = rawValue(column, b);
+        const an = Number(av);
+        const bn = Number(bv);
+        const bothNum = av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn);
+        const cmp = bothNum
+          ? an - bn
+          : String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
+        return dir === "desc" ? -cmp : cmp;
+      });
+    }
+    return applyManualOrder(filtered, t.rowOrder, (r) => r.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, serverPage != null, t.sort, t.rowOrder, t.rowColors, cols, fkLabels]);
 
-  const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
+  const distinctRowFills = useMemo(
+    () => distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill)),
+    [rows, t.rowColors]
+  );
 
   // --- Agrupar por (modo registros): agrupa as linhas por uma ou mais colunas em
   // seções recolhíveis com subtotais das colunas numéricas. Multinível = hierarquia
@@ -714,16 +738,20 @@ export function RecordListTable({
     displayItems = rows.map((r) => ({ kind: "data", row: r }));
   }
 
-  // Paginação no cliente: sem teto de registros, apenas 100 itens por página. A
-  // fatia é feita DEPOIS de sort/ordem manual/agrupamento, então a página reflete
-  // o conjunto inteiro.
+  // Paginação: no modo server-side, `records` já É a página corrente (o pager
+  // usa o total do servidor e delega a troca ao WidgetCard). No modo cliente:
+  // sem teto de registros, 100 itens por página, com a fatia DEPOIS de
+  // sort/ordem manual/agrupamento — a página reflete o conjunto inteiro.
   const PAGE_SIZE = 100;
-  const totalPages = Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
-  const current = Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
-  const pageItems = displayItems.slice(
-    (current - 1) * PAGE_SIZE,
-    current * PAGE_SIZE
-  );
+  const totalPages = serverPage
+    ? Math.max(1, Math.ceil(serverPage.total / serverPage.pageSize))
+    : Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
+  const current = serverPage
+    ? Math.min(serverPage.page, totalPages)
+    : Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
+  const pageItems = serverPage
+    ? displayItems
+    : displayItems.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
   // Classe do conteúdo interno da célula: cortar (…) ou quebrar linha.
   const cellText = t.cellText ?? "clip";
@@ -1442,21 +1470,30 @@ export function RecordListTable({
         <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
           <span className="text-muted-foreground">
             Página {current} de {totalPages}
+            {serverPage?.loading ? " — carregando…" : ""}
           </span>
           <div className="flex gap-1">
             <Button
               variant="outline"
               size="sm"
-              disabled={current <= 1}
-              onClick={() => setPage(current - 1)}
+              disabled={current <= 1 || serverPage?.loading}
+              onClick={() =>
+                serverPage
+                  ? serverPage.onPageChange(current - 1)
+                  : setPage(current - 1)
+              }
             >
               Anterior
             </Button>
             <Button
               variant="outline"
               size="sm"
-              disabled={current >= totalPages}
-              onClick={() => setPage(current + 1)}
+              disabled={current >= totalPages || serverPage?.loading}
+              onClick={() =>
+                serverPage
+                  ? serverPage.onPageChange(current + 1)
+                  : setPage(current + 1)
+              }
             >
               Próxima
             </Button>
@@ -1553,4 +1590,4 @@ export function RecordListTable({
       ) : null}
     </div>
   );
-}
+});

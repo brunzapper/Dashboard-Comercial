@@ -14,6 +14,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -137,10 +138,16 @@ export function DashboardHistoryProvider({
     void applyRestore(target);
   }
 
+  // Referência estável do value (o provider envolve o DashboardClient inteiro:
+  // objeto novo por render re-renderizava grid + botões a cada render daqui).
+  // As funções só fecham sobre refs (estáveis), setters e o estado das deps.
+  const value = useMemo<HistoryApi>(
+    () => ({ undo, redo, canUndo, canRedo, isRestoring, captureNow }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canUndo, canRedo, isRestoring, dashboardId]
+  );
   return (
-    <HistoryContext.Provider
-      value={{ undo, redo, canUndo, canRedo, isRestoring, captureNow }}
-    >
+    <HistoryContext.Provider value={value}>
       {children}
     </HistoryContext.Provider>
   );
