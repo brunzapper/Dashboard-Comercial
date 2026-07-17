@@ -109,6 +109,7 @@ import {
   type FilterSettings,
   type GridPosition,
   type Metric,
+  type ComparisonSettings,
   type QuickFilterEntry,
   type RecordListColumn,
   type RowSource,
@@ -145,6 +146,7 @@ import {
   FilterRow,
   MetricRow,
 } from "@/components/dashboards/widget-builder-rows";
+import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import {
   createWidget,
@@ -445,6 +447,23 @@ export function WidgetBuilder({
     visualType === "linha" ||
     visualType === "pizza" ||
     visualType === "funil";
+
+  // Comparação com período anterior (settings.comparison): só nos widgets
+  // AGREGADOS (tabela agregada, gráficos e Card) — o modo lista de registros
+  // não tem valor agregado p/ comparar.
+  const [comparison, setComparison] = useState<ComparisonSettings>(
+    widget?.settings?.comparison ?? {}
+  );
+  // (o Card de "Data atual" fica de fora — gate `!kpiToday` nos usos, pois o
+  // estado kpiToday é declarado mais abaixo.)
+  const supportsComparison =
+    (visualType === "tabela" && !isRecordList) ||
+    visualType === "barra" ||
+    visualType === "barra_horizontal" ||
+    visualType === "linha" ||
+    visualType === "pizza" ||
+    visualType === "funil" ||
+    visualType === "kpi";
 
   // Flags por coluna no modo lista: editável + gravar no Bitrix. Semeadas das
   // colunas existentes (RecordListColumn.editable/writeBack).
@@ -1370,6 +1389,14 @@ export function WidgetBuilder({
         delete settings.mode;
         delete settings.label;
       }
+    }
+
+    // Comparação com período anterior: grava só quando habilitada num tipo
+    // suportado (agregados); senão limpa (jsonb limpo).
+    if (supportsComparison && !(visualType === "kpi" && kpiToday) && comparison.enabled) {
+      settings.comparison = comparison;
+    } else {
+      delete settings.comparison;
     }
 
     const input = {
@@ -2718,6 +2745,15 @@ export function WidgetBuilder({
                 })()}
               </div>
             </BuilderSection>
+          ) : null}
+
+          {/* Comparação com período anterior (variação) */}
+          {supportsComparison && !(visualType === "kpi" && kpiToday) ? (
+            <ComparisonSection
+              value={comparison}
+              onChange={setComparison}
+              visualType={visualType}
+            />
           ) : null}
 
           {/* Dimensões dinâmicas: cresce p/ caber o conteúdo (por eixo) */}

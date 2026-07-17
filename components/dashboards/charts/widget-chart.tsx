@@ -86,6 +86,12 @@ import {
   ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
+import {
+  computeVariation,
+  formatVariation,
+  variationTone,
+} from "@/lib/widgets/variation";
+import { VariationBadge } from "./variation-badge";
 
 // noop p/ quando não há edição (canEdit=false).
 const NOOP = () => {};
@@ -94,6 +100,26 @@ function fmt(v: unknown): string {
   const n = Number(v);
   if (v == null || Number.isNaN(n)) return String(v ?? "—");
   return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Glyph textual da variação (tooltips — sem cor/ícone SVG).
+function variationGlyph(dir: "up" | "down" | "flat"): string {
+  return dir === "up" ? "▲" : dir === "down" ? "▼" : "•";
+}
+
+// Cor (CSS var) do tom da variação p/ SVG/labels dos gráficos.
+function variationFill(tone: "good" | "bad" | "flat"): string {
+  return tone === "good"
+    ? "var(--chart-2)"
+    : tone === "bad"
+      ? "var(--destructive)"
+      : "var(--muted-foreground)";
 }
 
 // Exibição percentual (15/07/2026): "x100" = campo/calc percentual (converte de
@@ -344,6 +370,39 @@ export const WidgetChart = memo(function WidgetChart({
     return isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : pfmt(v, key);
   };
 
+  // --- Comparação com período anterior (WidgetData.comparison) ---
+  const cmp = data.comparison;
+  // Série fantasma nos gráficos: config explícita; default acompanha "exibir
+  // valor do período de comparação".
+  const ghost = Boolean(
+    cmp && (cmp.settings.ghostSeries ?? cmp.settings.showBaseValue)
+  );
+  // Linhas de plotagem com o valor comparado achatado (`<metric>__cmp`) — o
+  // Recharts precisa de dataKey plano p/ a série fantasma.
+  const plotRows = useMemo(() => {
+    if (!cmp) return rows;
+    return (rows as WidgetRow[]).map((r) => {
+      const flat: Record<string, unknown> = {};
+      for (const m of metrics) flat[`${m.key}__cmp`] = r.__cmp?.[m.key] ?? null;
+      return { ...r, ...flat };
+    });
+  }, [rows, metrics, cmp]);
+  // Texto de tooltip com a variação anexada ("R$ 12 mil · ▲ 8% vs. período
+  // anterior"). Séries fantasma (dataKey __cmp) formatam na escala da métrica.
+  const chartTooltipText = (v: unknown, dk: string, payload: unknown): string => {
+    const isCmpKey = dk.endsWith("__cmp");
+    const baseKey = isCmpKey ? dk.slice(0, -5) : dk;
+    const text = moneyChartText(v, baseKey);
+    if (!cmp || isCmpKey) return text;
+    const prev = (payload as WidgetRow | undefined)?.__cmp?.[baseKey];
+    const vr = computeVariation(numOrNull(v), prev == null ? null : Number(prev));
+    if (!vr) return text;
+    return `${text} · ${variationGlyph(vr.dir)} ${formatVariation(
+      vr,
+      cmp.settings.format ?? "pct"
+    )} ${cmp.label}`;
+  };
+
   // Código único do eixo quando todas as métricas monetárias compartilham a mesma
   // moeda de exibição; senão null (eixo numérico simples).
   const moneyKeys = metrics.filter((m) => m.isMoney).map((m) => m.key);
@@ -405,12 +464,39 @@ export const WidgetChart = memo(function WidgetChart({
         );
       }
       if (k.mode === "ratio") {
+        const only = Boolean(cmp?.settings.onlyVariation);
         return (
           <div className="flex h-full flex-col justify-center p-1">
-            <span className="text-3xl font-semibold tabular-nums">
-              {k.valueText ?? (k.value == null ? "—" : fmt(k.value))}
-            </span>
+            {cmp && only ? (
+              <VariationBadge
+                cur={k.value}
+                prev={k.cmpValue}
+                settings={cmp.settings}
+                className="text-3xl font-semibold"
+              />
+            ) : (
+              <span className="text-3xl font-semibold tabular-nums">
+                {k.valueText ?? (k.value == null ? "—" : fmt(k.value))}
+              </span>
+            )}
             <span className="text-muted-foreground text-xs">{k.label}</span>
+            {cmp ? (
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                {!only ? (
+                  <VariationBadge
+                    cur={k.value}
+                    prev={k.cmpValue}
+                    settings={cmp.settings}
+                  />
+                ) : null}
+                {cmp.settings.showBaseValue && k.cmpValue != null ? (
+                  <span className="text-muted-foreground">
+                    vs. {fmt(k.cmpValue)}
+                  </span>
+                ) : null}
+                <span className="text-muted-foreground/70">{cmp.label}</span>
+              </span>
+            ) : null}
           </div>
         );
       }
@@ -438,17 +524,51 @@ export const WidgetChart = memo(function WidgetChart({
       );
     }
 
-    const row = rows[0] ?? {};
+    const row = (rows[0] ?? {}) as WidgetRow;
+    const only = Boolean(cmp?.settings.onlyVariation);
     return (
       <div className="flex h-full flex-wrap items-center gap-x-8 gap-y-3 p-1">
-        {metrics.map((m) => (
-          <div key={m.key} className="flex flex-col">
-            <span className="text-2xl font-semibold tabular-nums">
-              {moneyCellText(row, m.key)}
-            </span>
-            <span className="text-muted-foreground text-xs">{m.label}</span>
-          </div>
-        ))}
+        {metrics.map((m) => {
+          const cur = numOrNull(row[m.key]);
+          const prev = row.__cmp?.[m.key] ?? null;
+          const fmtAbs = (n: number) => moneyChartText(n, m.key);
+          return (
+            <div key={m.key} className="flex flex-col">
+              {cmp && only ? (
+                <VariationBadge
+                  cur={cur}
+                  prev={prev}
+                  settings={cmp.settings}
+                  fmtAbs={fmtAbs}
+                  className="text-2xl font-semibold"
+                />
+              ) : (
+                <span className="text-2xl font-semibold tabular-nums">
+                  {moneyCellText(row, m.key)}
+                </span>
+              )}
+              <span className="text-muted-foreground text-xs">{m.label}</span>
+              {cmp ? (
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                  {!only ? (
+                    <VariationBadge
+                      cur={cur}
+                      prev={prev}
+                      settings={cmp.settings}
+                      fmtAbs={fmtAbs}
+                    />
+                  ) : null}
+                  {cmp.settings.showBaseValue && prev != null ? (
+                    <span className="text-muted-foreground">
+                      vs. {fmtAbs(prev)}
+                    </span>
+                  ) : null}
+                  <span className="text-muted-foreground/70">{cmp.label}</span>
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -476,11 +596,50 @@ export const WidgetChart = memo(function WidgetChart({
       ap.sliceColors?.[i] ?? paletteColor(ap.palette, i);
     const sliceOpacity = (i: number) =>
       ap.fillMode === "gradient" ? gradientOpacity(i, pieData.length) : 1;
+    // Comparação no tooltip: topWithOther colapsa p/ {name,value}, então o
+    // valor comparado é reagregado por nome ("Outros" = soma do resto). Sem
+    // série fantasma em pizza/funil.
+    const cmpByName = (() => {
+      if (!cmp) return null;
+      const inTop = new Set(pieData.map((p) => p.name));
+      const map = new Map<string, { sum: number; any: boolean }>();
+      const add = (name: string, v: number | null | undefined) => {
+        const e = map.get(name) ?? { sum: 0, any: false };
+        if (v != null && Number.isFinite(v)) {
+          e.sum += v;
+          e.any = true;
+        }
+        map.set(name, e);
+      };
+      for (const r of rows as WidgetRow[]) {
+        const name = String(r[dimKey] ?? "—");
+        add(inTop.has(name) ? name : "Outros", r.__cmp?.[metricKey]);
+      }
+      return map;
+    })();
+    const pieTooltip = (v: unknown, payload: unknown): string => {
+      const text = moneyChartText(v, metricKey);
+      if (!cmp || !cmpByName) return text;
+      const name = String(
+        (payload as { name?: unknown } | undefined)?.name ?? "—"
+      );
+      const e = cmpByName.get(name);
+      const vr = computeVariation(numOrNull(v), e?.any ? e.sum : null);
+      if (!vr) return text;
+      return `${text} · ${variationGlyph(vr.dir)} ${formatVariation(
+        vr,
+        cmp.settings.format ?? "pct"
+      )} ${cmp.label}`;
+    };
 
     if (visualType === "funil") {
       return withBg(
         <FunnelChart>
-          <Tooltip formatter={(v) => moneyChartText(v, metricKey)} />
+          <Tooltip
+            formatter={(v, _n, item) =>
+              pieTooltip(v, (item as { payload?: unknown })?.payload)
+            }
+          />
           <Funnel dataKey="value" data={pieData} isAnimationActive={false}>
             <LabelList
               position="right"
@@ -499,7 +658,11 @@ export const WidgetChart = memo(function WidgetChart({
 
     return withBg(
       <PieChart>
-        <Tooltip formatter={(v) => moneyChartText(v, metricKey)} />
+        <Tooltip
+          formatter={(v, _n, item) =>
+            pieTooltip(v, (item as { payload?: unknown })?.payload)
+          }
+        />
         <Legend wrapperStyle={legendStyle} />
         <Pie
           data={pieData}
@@ -522,7 +685,7 @@ export const WidgetChart = memo(function WidgetChart({
   const catName = (r: Record<string, unknown>) => String(r[dimKey] ?? "—");
   const chartRows = ap.categorySort
     ? sortRows(
-        rows,
+        plotRows,
         {
           column: dimKey,
           dir: ap.categorySort.dir,
@@ -531,9 +694,49 @@ export const WidgetChart = memo(function WidgetChart({
         (r) => ap.categoryColors?.[catName(r)]?.fill
       )
     : ap.categoryOrder
-      ? applyManualOrder(rows, ap.categoryOrder, catName)
-      : rows;
+      ? applyManualOrder(plotRows, ap.categoryOrder, catName)
+      : plotRows;
   const catNames = chartRows.map(catName);
+
+  // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
+  // como <text> SVG posicionado pelo LabelList (content custom) e colorido pelo
+  // tom da variação. Com dataLabels ligado, desloca p/ dentro p/ não sobrepor.
+  const renderVarLabel = (props: unknown, key: string): React.ReactElement => {
+    if (!cmp) return <g />;
+    const { x, y, width, height, index } = props as {
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      index?: number;
+    };
+    if (index == null || !chartRows[index]) return <g />;
+    const r = chartRows[index] as WidgetRow;
+    const vr = computeVariation(
+      numOrNull(r[key]),
+      r.__cmp?.[key] == null ? null : Number(r.__cmp[key])
+    );
+    if (!vr) return <g />;
+    const fill = variationFill(variationTone(vr, cmp.settings.invertColors));
+    const text = `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`;
+    const hasDataLabels = Boolean(ap.dataLabels?.show);
+    if (visualType === "barra_horizontal") {
+      const tx = (x ?? 0) + (width ?? 0) + (hasDataLabels ? 44 : 4);
+      const ty = (y ?? 0) + (height ?? 0) / 2 + 3;
+      return (
+        <text x={tx} y={ty} fontSize={10} fill={fill}>
+          {text}
+        </text>
+      );
+    }
+    const tx = (x ?? 0) + (width ?? 0) / 2;
+    const ty = (y ?? 0) - (hasDataLabels ? 16 : 4);
+    return (
+      <text x={tx} y={ty} textAnchor="middle" fontSize={10} fill={fill}>
+        {text}
+      </text>
+    );
+  };
 
   function wrapCat(chartEl: React.ReactNode) {
     if (!editable) return withBg(chartEl);
@@ -571,10 +774,31 @@ export const WidgetChart = memo(function WidgetChart({
         ) : null}
         <Tooltip
           formatter={(v, _n, item) =>
-            moneyChartText(v, String((item as { dataKey?: unknown })?.dataKey ?? ""))
+            chartTooltipText(
+              v,
+              String((item as { dataKey?: unknown })?.dataKey ?? ""),
+              (item as { payload?: unknown })?.payload
+            )
           }
         />
         {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
+        {ghost
+          ? metrics.map((m, i) => (
+              <Line
+                key={`${m.key}__cmp`}
+                yAxisId={axisOf(m.key)}
+                type="monotone"
+                dataKey={`${m.key}__cmp`}
+                name={`${m.label} (comparação)`}
+                stroke={resolveSeriesColor(ap, m.key, i)}
+                strokeWidth={2}
+                strokeDasharray="4 4"
+                strokeOpacity={0.55}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))
+          : null}
         {metrics.map((m, i) => (
           <Line
             key={m.key}
@@ -635,11 +859,29 @@ export const WidgetChart = memo(function WidgetChart({
       )}
       <Tooltip
         formatter={(v, _n, item) =>
-          moneyChartText(v, String((item as { dataKey?: unknown })?.dataKey ?? ""))
+          chartTooltipText(
+            v,
+            String((item as { dataKey?: unknown })?.dataKey ?? ""),
+            (item as { payload?: unknown })?.payload
+          )
         }
         cursor={{ fill: "var(--muted)" }}
       />
       {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
+      {ghost
+        ? metrics.map((m, i) => (
+            <Bar
+              key={`${m.key}__cmp`}
+              {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
+              dataKey={`${m.key}__cmp`}
+              name={`${m.label} (comparação)`}
+              fill={resolveSeriesColor(ap, m.key, i)}
+              fillOpacity={0.35}
+              radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+              isAnimationActive={false}
+            />
+          ))
+        : null}
       {metrics.map((m, i) => {
         const base = resolveSeriesColor(ap, m.key, i);
         const perColumn =
@@ -680,6 +922,12 @@ export const WidgetChart = memo(function WidgetChart({
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
                 fontSize={11}
                 formatter={(v: unknown) => moneyChartText(v, m.key)}
+              />
+            ) : null}
+            {cmp?.settings.chartLabels ? (
+              <LabelList
+                dataKey={m.key}
+                content={(p) => renderVarLabel(p, m.key)}
               />
             ) : null}
           </Bar>
@@ -745,6 +993,60 @@ function AppearanceTable({
     return mode ? formatPercent(v, mode === "x100") : fmt(v);
   };
 
+  // --- Comparação com período anterior (WidgetData.comparison) ---
+  // "inline": badge dentro da célula da métrica; "column": colunas virtuais
+  // `<metric>__var` (e `<metric>__cmp` com "exibir valor") após cada métrica —
+  // colKeys novos participam de largura/cor/ordem como qualquer coluna.
+  const cmp = data.comparison;
+  // Modo transposto fica sem variação no v1 (as colunas viram eixo).
+  const transposed = t.orientation === "columns";
+  const cmpInline =
+    cmp && !transposed && (cmp.settings.tablePlacement ?? "inline") === "inline";
+  const cmpColumns =
+    cmp && !transposed && cmp.settings.tablePlacement === "column";
+  const varBaseOf = (key: string): string | null =>
+    key.endsWith("__var") ? key.slice(0, -5) : null;
+  const cmpBaseOf = (key: string): string | null =>
+    key.endsWith("__cmp") ? key.slice(0, -5) : null;
+  // Moeda de exibição da série (mesma decisão do valor plotado pelo engine):
+  // formata o valor comparado/variação absoluta na escala da métrica.
+  const seriesCodeOf = (key: string): string => {
+    if ((metricByKey[key]?.currencyDisplay ?? "original") !== "original")
+      return "BRL";
+    let code: string | null = null;
+    for (const r of data.rows as WidgetRow[]) {
+      const bd = r.__money?.[key];
+      if (!bd) continue;
+      const c = plotSingleCurrency(bd);
+      if (c == null || (code != null && c !== code)) return "BRL";
+      code = c;
+    }
+    return code ?? "BRL";
+  };
+  const absFmtOf = (key: string) => (n: number) =>
+    moneyKeys.has(key) ? formatMoney(n, seriesCodeOf(key)) : pfmt(n, key);
+  const cmpValOf = (r: Record<string, unknown>, key: string): number | null => {
+    const v = (r as WidgetRow).__cmp?.[key];
+    return v == null ? null : Number(v);
+  };
+  // Soma dos valores comparados de um escopo (subtotais); null quando nenhuma
+  // linha tem valor comparável.
+  const sumCmp = (
+    rs: Record<string, unknown>[],
+    key: string
+  ): number | null => {
+    let any = false;
+    let sum = 0;
+    for (const r of rs) {
+      const v = cmpValOf(r, key);
+      if (v != null) {
+        any = true;
+        sum += v;
+      }
+    }
+    return any ? sum : null;
+  };
+
   // Célula de métrica: calculada de agregados reavalia a fórmula da basis da
   // linha (moeda automática preservada / fixa convertida; null → "—"); monetária
   // honra a config de moeda (via __money); demais caem no fmt numérico. Mesma
@@ -777,7 +1079,15 @@ function AppearanceTable({
   };
   const allCols = [
     ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
-    ...data.metrics.map((m) => ({ key: m.key, label: m.label })),
+    ...data.metrics.flatMap((m) => {
+      const entry = [{ key: m.key, label: m.label }];
+      if (cmpColumns) {
+        if (cmp!.settings.showBaseValue)
+          entry.push({ key: `${m.key}__cmp`, label: `${m.label} (comparação)` });
+        entry.push({ key: `${m.key}__var`, label: `Δ ${m.label}` });
+      }
+      return entry;
+    }),
   ];
   const cols = applyManualOrder(allCols, t.columnOrder, (c) => c.key);
   const rowKey = (r: Record<string, unknown>) => rowKeyOf(r, dimKeys);
@@ -1024,14 +1334,17 @@ function AppearanceTable({
         ) : null}
         {cols.map((c, ci) => {
           const isMetric = metricKeys.has(c.key);
+          const varBase = varBaseOf(c.key);
+          const cmpBase = cmpBaseOf(c.key);
+          const isNumeric = isMetric || varBase != null || cmpBase != null;
           const cellCp = t.cellColors?.[`${rk}:${c.key}`];
           const colCp = t.colColors?.[c.key];
           return (
             <TableCell
               key={c.key}
               className={cn(
-                alignClass(resolveAlign(t, { column: c.key, rowKey: rk, numeric: isMetric })),
-                isMetric && "tabular-nums"
+                alignClass(resolveAlign(t, { column: c.key, rowKey: rk, numeric: isNumeric })),
+                isNumeric && "tabular-nums"
               )}
               onDoubleClick={(e) => openCtx(e, c.key, ["row", "col", "cell"], rk)}
               style={{
@@ -1043,9 +1356,46 @@ function AppearanceTable({
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
               }}
             >
-              <span className={cellSpanClass}>
-                {isMetric ? metricCellText(r, c.key) : dimDisplay(r[c.key], c.key)}
-              </span>
+              {varBase && cmp ? (
+                <VariationBadge
+                  cur={numOrNull(r[varBase])}
+                  prev={cmpValOf(r, varBase)}
+                  settings={cmp.settings}
+                  fmtAbs={absFmtOf(varBase)}
+                  className="text-xs"
+                />
+              ) : cmpBase ? (
+                <span className={cellSpanClass}>
+                  {cmpValOf(r, cmpBase) == null
+                    ? "—"
+                    : absFmtOf(cmpBase)(cmpValOf(r, cmpBase)!)}
+                </span>
+              ) : (
+                <>
+                  <span className={cellSpanClass}>
+                    {isMetric
+                      ? metricCellText(r, c.key)
+                      : dimDisplay(r[c.key], c.key)}
+                  </span>
+                  {isMetric && cmpInline ? (
+                    <span className="flex flex-wrap items-center gap-x-1 text-[10px] leading-tight">
+                      <VariationBadge
+                        cur={numOrNull(r[c.key])}
+                        prev={cmpValOf(r, c.key)}
+                        settings={cmp!.settings}
+                        fmtAbs={absFmtOf(c.key)}
+                        hideWhenUnavailable
+                      />
+                      {cmp!.settings.showBaseValue &&
+                      cmpValOf(r, c.key) != null ? (
+                        <span className="text-muted-foreground">
+                          vs. {absFmtOf(c.key)(cmpValOf(r, c.key)!)}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </>
+              )}
             </TableCell>
           );
         })}
@@ -1097,14 +1447,32 @@ function AppearanceTable({
       {editable ? <TableCell className="w-6 px-1" /> : null}
       {cols.map((c, ci) => {
         const isMetric = metricKeys.has(c.key);
+        const varBase = varBaseOf(c.key);
+        const cmpBase = cmpBaseOf(c.key);
         const isFirst = ci === 0;
         const extra = cellExtra(c.key);
+        // Subtotal da variação: variação dos SOMATÓRIOS cur/prev do escopo.
+        // Métrica calculada fica "—" (fundir basis de comparação é extensão
+        // futura); soma dos __cmp cobre soma/contagem (aprox. p/ avg/min/max,
+        // como o próprio sumMetric).
+        const subtotalVar = () => {
+          if (!cmp || !varBase || calcByKey[varBase]) return <>—</>;
+          return (
+            <VariationBadge
+              cur={sumMetric(rs, varBase)}
+              prev={sumCmp(rs, varBase)}
+              settings={cmp.settings}
+              fmtAbs={absFmtOf(varBase)}
+              className="text-xs"
+            />
+          );
+        };
         return (
           <TableCell
             key={c.key}
             className={cn(
-              alignClass(resolveAlign(t, { column: c.key, rowKey: grpKey, numeric: isMetric })),
-              isMetric && "tabular-nums"
+              alignClass(resolveAlign(t, { column: c.key, rowKey: grpKey, numeric: isMetric || varBase != null || cmpBase != null })),
+              (isMetric || varBase != null || cmpBase != null) && "tabular-nums"
             )}
             onDoubleClick={extra.onDoubleClick}
             style={{ ...cellBorder(ci === cols.length - 1), ...extra.style }}
@@ -1131,8 +1499,29 @@ function AppearanceTable({
                 ) : null}
                 {label}
               </button>
+            ) : varBase ? (
+              subtotalVar()
+            ) : cmpBase ? (
+              sumCmp(rs, cmpBase) == null || calcByKey[cmpBase] ? (
+                "—"
+              ) : (
+                absFmtOf(cmpBase)(sumCmp(rs, cmpBase)!)
+              )
             ) : isMetric ? (
-              metricAggCellText(rs, c.key, opts?.isGrand ?? false)
+              <>
+                {metricAggCellText(rs, c.key, opts?.isGrand ?? false)}
+                {cmpInline && !calcByKey[c.key] ? (
+                  <span className="ml-1 text-[10px]">
+                    <VariationBadge
+                      cur={sumMetric(rs, c.key)}
+                      prev={sumCmp(rs, c.key)}
+                      settings={cmp!.settings}
+                      fmtAbs={absFmtOf(c.key)}
+                      hideWhenUnavailable
+                    />
+                  </span>
+                ) : null}
+              </>
             ) : null}
           </TableCell>
         );
