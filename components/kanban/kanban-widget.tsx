@@ -9,10 +9,12 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { List, SquareKanban } from "lucide-react";
+import { Download, List, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
+import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import type { Widget } from "@/lib/widgets/types";
 import type { KanbanColumnCards } from "@/lib/kanban/data";
 import { moveTaskPhase } from "@/lib/tasks/actions";
@@ -227,6 +229,28 @@ export function KanbanWidget({
     );
   }
 
+  // Export CSV do quadro (cards achatados por coluna) — dados já computados.
+  const exportCsv = () => {
+    if (!result.data) return;
+    const labels = {
+      responsibles: Object.fromEntries(
+        result.responsibles.map((r) => [r.id, r.label])
+      ),
+      operations: Object.fromEntries(
+        result.operations.map((o) => [o.id, o.label])
+      ),
+    };
+    const { headers, rows } = kanbanBoardToCsv(
+      result.data,
+      result.fields,
+      labels
+    );
+    downloadCsv(
+      csvFilename(widget.title ?? "kanban"),
+      buildCsv(headers, rows)
+    );
+  };
+
   // Aparência do seletor de visão (as "abas" do kanban).
   const sw = kanban.appearance?.switcher;
   const swStyle = (active: boolean): React.CSSProperties => ({
@@ -237,6 +261,18 @@ export function KanbanWidget({
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-1">
       <div className="flex items-center justify-end gap-1.5">
+        {!readOnly ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground h-6 gap-1 px-1.5 text-xs"
+            onClick={exportCsv}
+            title="Exportar CSV"
+          >
+            <Download className="size-3.5" />
+            CSV
+          </Button>
+        ) : null}
         {canManageColumns ? (
           <ColumnConfigPopover
             kanban={kanban}

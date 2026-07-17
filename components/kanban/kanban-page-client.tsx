@@ -11,9 +11,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, List, SquareKanban } from "lucide-react";
+import { CalendarDays, Download, List, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
+import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { PERIOD_PRESETS } from "@/lib/widgets/period";
@@ -293,6 +295,32 @@ export function KanbanPageClient({
               />
             </>
           ) : null}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1"
+            title="Exportar CSV"
+            onClick={() => {
+              const labels = {
+                responsibles: Object.fromEntries(
+                  recordCtx.responsibles.map((r) => [r.id, r.label])
+                ),
+                operations: Object.fromEntries(
+                  recordCtx.operations.map((o) => [o.id, o.label])
+                ),
+              };
+              const { headers, rows } = kanbanBoardToCsv(
+                data,
+                recordCtx.fields,
+                labels
+              );
+              downloadCsv(csvFilename(boardName), buildCsv(headers, rows));
+            }}
+          >
+            <Download className="size-4" />
+            Exportar CSV
+          </Button>
 
           {canConfig ? (
             <>

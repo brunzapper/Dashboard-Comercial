@@ -11,20 +11,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { TaskRow } from "@/lib/tasks/types";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
-import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { runRecordList } from "@/lib/widgets/record-list";
 import type { DashboardPeriod } from "@/lib/widgets/period";
 import type { WidgetConfig } from "@/lib/widgets/types";
+import { resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
 import {
-  DEFAULT_DATE_FORMAT,
-  formatDateValue,
-  formatPercent,
-} from "@/lib/widgets/format";
-import {
-  formatMoney,
-  resolveFieldMoneyFromRecord,
-} from "@/lib/widgets/currency";
-import { isPercentField } from "@/lib/records/types";
+  recordCellValue,
+  recordFieldDef,
+  recordRefLabel,
+  resolveRecordRef,
+  type RecordLabels,
+} from "@/lib/export/record-cells";
 import { deriveColumns, resolveCardColumn } from "./columns";
 import {
   KANBAN_NO_VALUE_KEY,
@@ -72,65 +69,11 @@ export interface KanbanBoardData {
   metricIsMoney: boolean;
 }
 
-const CORE_LABELS = new Map(CORE_FIELDS.map((f) => [f.field, f.label]));
-
-// Valor cru de um ref ('stage', 'value', 'custom:<key>') num registro.
-export function resolveRecordRef(record: RecordRow, ref: string): unknown {
-  if (ref.startsWith("custom:")) {
-    return record.custom_fields?.[ref.slice("custom:".length)] ?? null;
-  }
-  return (record as unknown as Record<string, unknown>)[ref] ?? null;
-}
-
-function fieldDefOf(
-  ref: string,
-  defs: FieldDefinition[]
-): FieldDefinition | null {
-  if (!ref.startsWith("custom:")) return null;
-  const key = ref.slice("custom:".length);
-  return defs.find((d) => d.field_key === key) ?? null;
-}
-
-function refLabel(ref: string, defs: FieldDefinition[]): string {
-  return fieldDefOf(ref, defs)?.label ?? CORE_LABELS.get(ref) ?? ref;
-}
-
-// Formata o valor de um ref p/ exibição no card (data/moeda/percentual/booleano).
-function formatRefValue(
-  record: RecordRow,
-  ref: string,
-  defs: FieldDefinition[],
-  labels: KanbanLabels
-): string {
-  const raw = resolveRecordRef(record, ref);
-  if (raw == null || raw === "") return "—";
-  if (ref === "responsible_id") {
-    return labels.responsibles?.[String(raw)] ?? "—";
-  }
-  if (ref === "operation_id") return labels.operations?.[String(raw)] ?? "—";
-  if (ref === "value" || ref === "mrr") {
-    return formatMoney(raw, record.currency);
-  }
-  const def = fieldDefOf(ref, defs);
-  if (def) {
-    const money = resolveFieldMoneyFromRecord(def, record);
-    if (money.isMoney) return formatMoney(raw, money.code);
-    if (isPercentField(def)) return formatPercent(raw, true);
-    if (def.data_type === "data") return formatDateValue(raw, DEFAULT_DATE_FORMAT);
-    if (def.data_type === "booleano") return raw === true || raw === "true" ? "Sim" : "Não";
-    return String(raw);
-  }
-  if (ref === "closed_at" || ref === "opened_at" || ref === "source_created_at") {
-    return formatDateValue(raw, DEFAULT_DATE_FORMAT);
-  }
-  if (ref === "closed") return raw === true || raw === "true" ? "Sim" : "Não";
-  return String(raw);
-}
-
-export interface KanbanLabels {
-  responsibles?: Record<string, string>;
-  operations?: Record<string, string>;
-}
+// Extraídos para lib/export/record-cells.ts (compartilhados com os exports
+// CSV); re-exportados aqui porque a agenda e os hosts de kanban importam deste
+// módulo.
+export { resolveRecordRef };
+export type KanbanLabels = RecordLabels;
 
 // Chave de grupo de um registro conforme a config (valor ou bucket de data).
 export function recordGroupKey(
@@ -254,8 +197,8 @@ export async function runKanban(
         ? String(resolveRecordRef(r, settings.card.colorField) ?? "")
         : null,
       fields: extraRefs.map((ref) => ({
-        label: refLabel(ref, defs),
-        value: formatRefValue(r, ref, defs, labels),
+        label: recordRefLabel(ref, defs),
+        value: recordCellValue(r, ref, defs, labels),
       })),
       metricValue: Number.isFinite(metricNum) ? metricNum : null,
       isMock: Boolean((r as unknown as { is_mock?: boolean }).is_mock),
@@ -265,7 +208,7 @@ export async function runKanban(
   });
 
   const groupDef = settings.groupField
-    ? fieldDefOf(settings.groupField, defs)
+    ? recordFieldDef(settings.groupField, defs)
     : null;
   const columns = deriveColumns(settings, groupKeys, groupDef);
 
@@ -309,9 +252,9 @@ export async function runKanban(
     metricRef === "mrr" ||
     (metricRef
       ? Boolean(
-          fieldDefOf(metricRef, defs) &&
+          recordFieldDef(metricRef, defs) &&
             resolveFieldMoneyFromRecord(
-              fieldDefOf(metricRef, defs)!,
+              recordFieldDef(metricRef, defs)!,
               (records[0] as RecordRow | undefined) ?? ({} as RecordRow)
             ).isMoney
         )
@@ -320,7 +263,7 @@ export async function runKanban(
   return {
     mode: settings.mode,
     columns: columnCards,
-    metricLabel: metricRef ? refLabel(metricRef, defs) : null,
+    metricLabel: metricRef ? recordRefLabel(metricRef, defs) : null,
     metricIsMoney,
   };
 }

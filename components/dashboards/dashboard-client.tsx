@@ -634,6 +634,7 @@ export function DashboardClient({
             tabs={tabs}
             activeTabId={activeTabId}
             canEdit={canEdit}
+            canExport
             canManageFields={canManageFields}
             currencyOptions={currencyOptions}
             currencyRates={currencyRates}
