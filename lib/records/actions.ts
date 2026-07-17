@@ -20,6 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import {
   enqueueWriteBacks,
   type WriteBackChange,
@@ -485,6 +486,19 @@ export async function updateRecord(
     }
   }
 
+  // Webhook de saída (0074): emitWebhookEvent nunca lança — falha na emissão
+  // jamais derruba a edição já persistida.
+  if (audits.length > 0) {
+    await emitWebhookEvent("record.updated", {
+      recordId,
+      changes: audits.map((a) => ({
+        field: a.field,
+        old_value: a.old_value ?? null,
+        new_value: a.new_value ?? null,
+      })),
+    });
+  }
+
   revalidatePath("/registros");
   return { ok: true, message: "Registro atualizado." };
 }
@@ -797,6 +811,8 @@ export async function createRecord(
       }))
     );
   }
+
+  await emitWebhookEvent("record.created", { recordId: id, source: sourceKey });
 
   revalidatePath("/registros");
   const bitrixNote = row.source_id ? ` (criado no Bitrix, ID ${row.source_id}).` : ".";

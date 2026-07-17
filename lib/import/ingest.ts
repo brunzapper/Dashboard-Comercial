@@ -69,6 +69,9 @@ export interface IngestOptions {
   match?: MatchConfig;
   // Autor do import (auditoria das atualizações).
   userId: string | null;
+  // Origem na auditoria: 'import_csv' (wizard, padrão) ou 'api' (ingestão
+  // via /api/ingest/<fonte> — ver 0074). Mesmo motor, fronts diferentes.
+  auditOrigin?: "import_csv" | "api";
 }
 
 interface BuiltRow {
@@ -720,7 +723,7 @@ export async function ingestRows(
       audits.map((a) => ({
         ...a,
         user_id: opts.userId,
-        origin: "import_csv" as const,
+        origin: opts.auditOrigin ?? "import_csv",
       }))
     );
   }
