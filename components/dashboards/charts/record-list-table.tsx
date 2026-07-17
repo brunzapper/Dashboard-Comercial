@@ -1,4 +1,7 @@
-// Versão: 3.1 | Data: 15/07/2026
+// Versão: 3.2 | Data: 17/07/2026
+// v3.2 (17/07/2026): busca textual client-side — props searchQ/searchFields;
+//   filtra em memória (recordSearchMatcher) ANTES de sort/grupo/paginação,
+//   com reset p/ página 1 ao mudar o termo. Ausentes = comportamento antigo.
 // v3.1 (15/07/2026): exibição percentual — campo percentual (×100) em colunas/
 //   grupos/subtotais e toggle "%" (sufixo) nas métricas; contagem nunca converte.
 // Widget de Tabela em modo "registros individuais" (Fonte das linhas = Registros).
@@ -10,7 +13,7 @@
 //   coluna e altura de linha redimensionáveis na edição de layout.
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
@@ -49,6 +52,7 @@ import {
   type ResolvedCalcMetric,
 } from "@/lib/widgets/calc-metrics";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import {
   buildRecordBreakdown,
   calcCurrencyKey,
@@ -185,6 +189,8 @@ export type ResponsibleOption = {
 
 export function RecordListTable({
   records,
+  searchQ,
+  searchFields,
   columns,
   metrics = [],
   fields,
@@ -201,6 +207,11 @@ export function RecordListTable({
   onAppearanceChange,
 }: {
   records: RecordRow[];
+  // Busca textual client-side (WidgetCard, quando searchHandledOnClient):
+  // termo digitado na TableFilterBar + campos de busca do widget. Ausentes =
+  // sem filtro local (a busca, se houver, veio aplicada do servidor).
+  searchQ?: string;
+  searchFields?: string[];
   columns: RecordListColumn[];
   metrics?: Metric[];
   fields: FieldDefinition[];
@@ -230,6 +241,12 @@ export function RecordListTable({
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [page, setPage] = useState(1);
+  // Termo de busca mudou → volta pra página 1 (ajuste de estado em render).
+  const [prevSearchQ, setPrevSearchQ] = useState(searchQ);
+  if (prevSearchQ !== searchQ) {
+    setPrevSearchQ(searchQ);
+    setPage(1);
+  }
   // Grupos EXPANDIDOS no "Agrupar por" (efêmero). Vazio = tudo colapsado, então a
   // visualização padrão de uma tabela agrupada abre sempre recolhida.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -571,11 +588,22 @@ export function RecordListTable({
     return String(v);
   };
 
+  // Busca textual client-side: filtra ANTES de sort/grupo/paginação — grupos,
+  // subtotais, total geral e contagens passam a refletir só o que casa.
+  const searchMatcher = useMemo(
+    () => recordSearchMatcher(searchQ ?? "", searchFields, available),
+    [searchQ, searchFields, available]
+  );
+  const filtered = useMemo(
+    () => (searchMatcher ? records.filter(searchMatcher) : records),
+    [records, searchMatcher]
+  );
+
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
-  let rows = records;
+  let rows = filtered;
   if (t.sort?.column) {
     const { column, dir, colorOrder } = t.sort;
-    rows = [...records].sort((a, b) => {
+    rows = [...filtered].sort((a, b) => {
       if (dir === "color") {
         const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
         const ra = rank.get(t.rowColors?.[a.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
@@ -593,7 +621,7 @@ export function RecordListTable({
       return dir === "desc" ? -cmp : cmp;
     });
   } else {
-    rows = applyManualOrder(records, t.rowOrder, (r) => r.id);
+    rows = applyManualOrder(filtered, t.rowOrder, (r) => r.id);
   }
 
   const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
@@ -1130,7 +1158,7 @@ export function RecordListTable({
       </div>
     );
   }
-  if (records.length === 0) {
+  if (filtered.length === 0) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-2 text-center text-sm">
         Nenhum registro para os filtros atuais.

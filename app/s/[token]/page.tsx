@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 17/07/2026
+// v1.2 (17/07/2026): busca client-side — com allowWidgetFilters, o q do tf_ é
+//   pulado nos widgets em que searchHandledOnClient(settings) (lista de
+//   registros sem limit): o viewer filtra em memória, como no dashboard. Com
+//   allowWidgetFilters off nada muda (tf_ nem é lido; barra forçada a oculta).
 // v1.1: período congelado (0059) — snapshots.default_period (capturado do
 //   dashboard na criação) vira o período de TODOS os widgets de dados, via o
 //   resolver padrão (periodBar sintético + prefSettings.lastPeriod). As chaves
@@ -73,7 +77,11 @@ import type {
 } from "@/lib/widgets/types";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
-import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
+import {
+  parseViewFilter,
+  searchHandledOnClient,
+  viewStateToFilters,
+} from "@/lib/widgets/view-filters";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
@@ -355,7 +363,11 @@ export default async function SnapshotPage({
       if (!raw) continue;
       addViewFilters(
         w.id,
-        viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields)
+        // Lista de registros sem limit: o q roda no CLIENTE (mesmo critério do
+        // dashboard — ver searchHandledOnClient); estruturados seguem aqui.
+        viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields, {
+          skipSearch: searchHandledOnClient(w.settings),
+        })
       );
     }
 

@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 17/07/2026
+// v1.1 (17/07/2026): busca client-side na lista de registros — opção
+//   `skipSearch` em viewStateToFilters + helper `searchHandledOnClient`
+//   (critério único de "quem aplica o q": servidor ou cliente).
 // Filtros de VISUALIZAÇÃO: filtros/busca que o usuário aplica no dashboard já
 // renderizado (barra embutida da tabela + widget "Filtro por campo"), em vez de
 // só na edição do widget. São transportados pela URL como um JSON compacto e
@@ -95,12 +98,49 @@ export function searchToFilters(
 /**
  * Resolve o estado de visualização (termo + filtros) para uma lista de
  * WidgetFilter pronta para mesclar em config.filters (semântica AND).
+ * `skipSearch` omite o termo (`q`) — usado quando a busca textual do widget é
+ * aplicada no CLIENTE (ver searchHandledOnClient); os filtros estruturados
+ * continuam valendo no servidor.
  */
 export function viewStateToFilters(
   state: ViewFilterState,
-  searchFields: string[] | undefined
+  searchFields: string[] | undefined,
+  opts?: { skipSearch?: boolean }
 ): WidgetFilter[] {
-  return [...searchToFilters(state.q, searchFields), ...(state.filters ?? [])];
+  return [
+    ...(opts?.skipSearch ? [] : searchToFilters(state.q, searchFields)),
+    ...(state.filters ?? []),
+  ];
+}
+
+/**
+ * A busca textual (q do tf_) deste widget é resolvida no CLIENTE? Vale para a
+ * tabela em modo "registros individuais" (rowSource records), SEM limit e com a
+ * barra visível — nesse caso runRecordList entrega o dataset completo e a
+ * RecordListTable filtra localmente (busca instantânea, sem round-trip RSC).
+ * Servidor (page.tsx/snapshot) e cliente (WidgetCard) DEVEM usar este mesmo
+ * critério: se o servidor pulasse o q sem o cliente filtrar (ou vice-versa), a
+ * busca aplicaria em dobro ou nunca. Com a barra oculta (showFilterBar false,
+ * inclui snapshot com allowWidgetFilters off) ninguém digita q — um q forjado
+ * na URL segue tratado no servidor, como sempre.
+ */
+export function searchHandledOnClient(
+  settings:
+    | {
+        rowMode?: string;
+        rowSource?: string;
+        limit?: number;
+        showFilterBar?: boolean;
+      }
+    | null
+    | undefined
+): boolean {
+  return (
+    settings?.rowMode === "records" &&
+    (settings.rowSource ?? "records") === "records" &&
+    !(typeof settings.limit === "number" && settings.limit > 0) &&
+    settings.showFilterBar !== false
+  );
 }
 
 /** Anexa os filtros de visualização aos do widget (AND). */

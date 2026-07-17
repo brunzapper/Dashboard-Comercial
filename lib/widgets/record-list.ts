@@ -38,6 +38,8 @@ const RECORD_COLS =
   "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
+// ESPELHO: mudanças aqui, em filterColumn ou no ramo ilike abaixo devem ser
+// espelhadas em ./record-search.ts (busca textual client-side do modo lista).
 const CORE_COLS = new Set<string>([
   ...CORE_FIELDS.map((f) => f.field),
   "record_type",
