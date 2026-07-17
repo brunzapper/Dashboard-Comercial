@@ -51,6 +51,7 @@ export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
     forma: { w: 4, h: 6 },
     kanban: { w: 6, h: 8 },
     agenda: { w: 6, h: 8 },
+    imagem: { w: 4, h: 6 },
   };
 
 // Tipos que exigem configuração para mostrar algo útil: a criação rápida abre
@@ -73,6 +74,8 @@ export const WIDGET_NEEDS_CONFIG: Record<VisualType, boolean> = {
   forma: false,
   kanban: true,
   agenda: true,
+  // Sem URL não há nada a mostrar: abre o editor direto na criação.
+  imagem: true,
 };
 
 // Tipos consultados pelo engine (run_widget_query): precisam de ≥1 métrica —
@@ -117,6 +120,8 @@ function seedSettings(type: VisualType): WidgetSettings {
       return { kanban: { mode: "tarefas" } };
     case "agenda":
       return { agenda: { showTasks: true, defaultView: "month" } };
+    case "imagem":
+      return { image: {} };
     default:
       return {};
   }

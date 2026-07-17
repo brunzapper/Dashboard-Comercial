@@ -44,6 +44,7 @@ import {
   buildDashboardSnapshot,
   type DashboardSnapshot,
 } from "@/lib/widgets/history";
+import { sanitizeImageSettings } from "@/lib/widgets/image-url";
 
 export interface ActionState {
   ok?: boolean;
@@ -380,7 +381,9 @@ export async function createWidget(
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
-      settings: input.settings ?? {},
+      // Widget Imagem: URLs não-https nunca são persistidas (o settings
+      // congelado chega ao viewer público de snapshots).
+      settings: sanitizeImageSettings(input.settings),
       grid_position: position,
     })
     .select("id")
@@ -408,7 +411,7 @@ export async function updateWidget(
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
-      settings: input.settings ?? {},
+      settings: sanitizeImageSettings(input.settings),
     })
     .eq("id", widgetId);
   if (error) return { ok: false, message: error.message };
@@ -859,7 +862,7 @@ export async function saveWidgetSettings(
   const supabase = await createClient();
   const { error } = await supabase
     .from("widgets")
-    .update({ settings })
+    .update({ settings: sanitizeImageSettings(settings) })
     .eq("id", widgetId)
     .eq("dashboard_id", dashboardId);
   if (error) return { ok: false, message: error.message };

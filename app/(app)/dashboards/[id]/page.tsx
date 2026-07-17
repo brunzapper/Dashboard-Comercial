@@ -224,7 +224,8 @@ export default async function DashboardPage({
     (w) =>
       w.visual_type !== "filtro" &&
       w.visual_type !== "filtro_campo" &&
-      w.visual_type !== "forma"
+      w.visual_type !== "forma" &&
+      w.visual_type !== "imagem"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
   const fieldFilterWidgets = widgets.filter(

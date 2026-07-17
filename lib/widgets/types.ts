@@ -51,7 +51,8 @@ export type VisualType =
   | "nota"
   | "forma"
   | "kanban"
-  | "agenda";
+  | "agenda"
+  | "imagem";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "Card",
@@ -59,6 +60,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   calculadora: "Calculadora",
   nota: "Nota (post-it)",
   forma: "Forma",
+  imagem: "Imagem",
   tabela: "Tabela",
   // O valor 'tabela_editavel' no banco é herdado da Fase 2 (o CHECK já o
   // aceita); o produto atual chama o widget de "Tabela Livre".
@@ -506,6 +508,36 @@ export interface ShapeSettings {
   shape?: { kind?: ShapeKind; text?: string; link?: WidgetLinkTarget };
 }
 
+// --- Imagem (visual_type 'imagem', 0073) ---
+// URL externa renderizada num <img> frameless (fundo transparente — PNG com
+// alpha aparece sem card por trás). Somente https é aceito; a validação vale
+// na escrita (actions → sanitizeImageSettings) E na renderização
+// (image-widget → sanitizeHttpsUrl), pois o settings congelado viaja ao
+// viewer público de snapshots.
+export type ImageFit = "contain" | "cover" | "fill" | "scale-down";
+export const IMAGE_FIT_LABELS: Record<ImageFit, string> = {
+  contain: "Conter (imagem inteira)",
+  cover: "Cobrir (preenche, corta sobras)",
+  fill: "Esticar (deforma p/ caber)",
+  "scale-down": "Tamanho original (reduz se faltar espaço)",
+};
+// Clique fora do modo edição: nada, ampliar em lightbox, ou abrir um link
+// personalizado (nunca a URL da própria imagem) em nova aba.
+export type ImageClickAction = "none" | "lightbox" | "link";
+export const IMAGE_CLICK_LABELS: Record<ImageClickAction, string> = {
+  none: "Não faz nada",
+  lightbox: "Amplia (lightbox)",
+  link: "Abre um link (nova aba)",
+};
+export interface ImageSettings {
+  image?: {
+    url?: string;
+    fit?: ImageFit;
+    alt?: string; // texto alternativo (acessibilidade)
+    click?: { action?: ImageClickAction; href?: string };
+  };
+}
+
 // --- Conectores (linhas entre widgets, estilo n8n/Make) ---
 // Persistidos em DashboardSettings.connectors (ganham undo/redo pelos
 // snapshots). Desenhados por uma camada SVG sobre o grid; as pontas seguem o
@@ -726,6 +758,7 @@ export type WidgetSettings = KpiSettings &
   CalculatorSettings &
   NoteSettings &
   ShapeSettings &
+  ImageSettings &
   QuickTableSettings &
   CardSettings &
   ComparisonWidgetSettings & {
