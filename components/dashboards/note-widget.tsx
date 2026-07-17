@@ -375,6 +375,12 @@ export function NoteWidget({
             Salvar
           </Button>
         </div>
+        <p className="text-muted-foreground text-[10px] leading-snug">
+          Variação vs. período anterior: {"{=VARPCT([MRR])}"} (%, já ×100),
+          {" {=VARABS(...)}"} (absoluta) e {"{=ANTERIOR(...)}"} (valor do
+          período anterior). 2º argumento opcional: &quot;anterior&quot; ou
+          &quot;ano&quot; (mesmo período do ano passado).
+        </p>
       </div>
     );
   }
