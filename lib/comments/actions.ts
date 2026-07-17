@@ -9,6 +9,7 @@
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import {
   COMMENT_COLS,
@@ -51,6 +52,11 @@ export async function createComment(
     .select("id")
     .single();
   if (error) return { ok: false, message: `Falha ao comentar: ${error.message}` };
+  await emitWebhookEvent("comment.created", {
+    commentId: data.id as string,
+    recordId: "recordId" in target ? target.recordId : null,
+    taskId: "taskId" in target ? target.taskId : null,
+  });
   return { ok: true, id: data.id as string };
 }
 
@@ -73,6 +79,7 @@ export async function updateComment(
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para editar este comentário." };
   }
+  await emitWebhookEvent("comment.updated", { commentId: id });
   return { ok: true };
 }
 
@@ -89,6 +96,7 @@ export async function deleteComment(id: string): Promise<CommentActionState> {
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para excluir este comentário." };
   }
+  await emitWebhookEvent("comment.deleted", { commentId: id });
   return { ok: true };
 }
 

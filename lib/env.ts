@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 17/07/2026
 // Leitura e validação de variáveis de ambiente.
 // Não há .env.local neste projeto: os valores vivem nas Environment Variables
 // da Vercel e no painel do Supabase. Falhamos com mensagem clara quando uma
@@ -10,6 +10,9 @@
 //   `process.env[name]` do requireEnv nunca é embutido (docs: guia de
 //   environment-variables, "dynamic lookups will not be inlined"), então o
 //   primeiro consumidor client (realtime-refresher) quebrava o app inteiro.
+// v1.2 (17/07/2026): KEY_ENCRYPTION_KEY — chave-mestra AES-256-GCM para
+//   segredos reversíveis (assinatura de webhooks de saída; futuros conectores
+//   de pull). Ver docs/estudo-ingestao-api.md §3 e lib/crypto/secretbox.ts.
 
 /**
  * Lê uma variável de ambiente obrigatória. Lança erro explícito se ausente.
@@ -60,3 +63,6 @@ export const getBitrixWebhookUrl = () => requireEnv("BITRIX_WEBHOOK_URL");
 export const getBitrixOutboundToken = () =>
   requireEnv("BITRIX_OUTBOUND_TOKEN");
 export const getSyncSecret = () => requireEnv("SYNC_SECRET");
+
+// --- Webhooks / Integrações (privada, apenas servidor) ---
+export const getKeyEncryptionKey = () => requireEnv("KEY_ENCRYPTION_KEY");
