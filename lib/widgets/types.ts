@@ -548,6 +548,66 @@ export interface ColorPair {
 // Alinhamento horizontal do texto de células/cabeçalhos de tabela (13/07/2026).
 export type TableAlign = "left" | "center" | "right";
 
+// --- Formatação condicional (17/07/2026) ---
+// Regras valor→estilo e escalas de cor contínuas (heatmap), avaliadas nos
+// renderizadores por lib/widgets/conditional.ts. Alvos (`target`):
+//  - tabela agregada: colKey (`metric_1`, `dim_1`, `metric_1__var`);
+//  - listas de registros/entidades: o field da coluna;
+//  - Card/calculado: a chave especial "value";
+//  - gráficos (barra série única / pizza): a chave da métrica plotada.
+// Precedência com as cores manuais: ver conditional.ts.
+export type CondOp =
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "eq"
+  | "neq"
+  | "between"
+  | "contains"
+  | "empty"
+  | "not_empty"
+  | "var_up" // variação vs. período de comparação positiva
+  | "var_down"; // variação negativa
+export const COND_OP_LABELS: Record<CondOp, string> = {
+  gt: "maior que",
+  gte: "maior ou igual a",
+  lt: "menor que",
+  lte: "menor ou igual a",
+  eq: "igual a",
+  neq: "diferente de",
+  between: "entre",
+  contains: "contém",
+  empty: "vazio",
+  not_empty: "não vazio",
+  var_up: "variação positiva",
+  var_down: "variação negativa",
+};
+export interface ConditionalRule {
+  id: string; // cr_<rand>, estável
+  target: string;
+  op: CondOp;
+  value?: number | string;
+  value2?: number | string; // "entre": limite superior
+  style: {
+    text?: string;
+    fill?: string;
+    bold?: boolean;
+    icon?: "up" | "down" | "dot" | "warn";
+  };
+}
+export interface ColorScale {
+  id: string; // cs_<rand>
+  target: string; // coluna numérica
+  min: string; // cor do menor valor
+  mid?: string; // cor do ponto médio (opcional, escala de 3 pontos)
+  max: string; // cor do maior valor
+}
+export interface ConditionalFormatting {
+  rules?: ConditionalRule[];
+  scales?: ColorScale[];
+}
+
 export interface AppearanceSettings {
   // --- gráficos (barra / barra_horizontal / linha) ---
   chartBackground?: string; // fundo do gráfico
@@ -651,6 +711,8 @@ export interface AppearanceSettings {
     bg?: string; // fundo da barra de título
     border?: string; // cor da borda/contorno externo do card
   };
+  // --- formatação condicional (tabelas, listas, Card, gráficos) ---
+  conditional?: ConditionalFormatting;
 }
 
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista

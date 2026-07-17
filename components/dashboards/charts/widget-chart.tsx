@@ -91,7 +91,29 @@ import {
   formatVariation,
   variationTone,
 } from "@/lib/widgets/variation";
+import {
+  evalConditional,
+  hasConditional,
+  scaleDomains,
+  type ResolvedCondStyle,
+} from "@/lib/widgets/conditional";
 import { VariationBadge } from "./variation-badge";
+
+// Glyphs dos ícones de regra condicional (células/valores).
+const COND_ICONS: Record<string, string> = {
+  up: "▲",
+  down: "▼",
+  dot: "●",
+  warn: "⚠",
+};
+function CondIcon({ style }: { style: ResolvedCondStyle | null }) {
+  if (!style?.icon) return null;
+  return (
+    <span aria-hidden className="mr-0.5">
+      {COND_ICONS[style.icon] ?? ""}
+    </span>
+  );
+}
 
 // noop p/ quando não há edição (canEdit=false).
 const NOOP = () => {};
@@ -426,6 +448,12 @@ export const WidgetChart = memo(function WidgetChart({
   const ap = appearance ?? {};
   const change = onAppearanceChange ?? NOOP;
   const editable = canEdit && Boolean(onAppearanceChange);
+  // Formatação condicional no nível do chart/Card (a tabela agregada avalia a
+  // própria cópia dentro da AppearanceTable). Alvo "value" = número do Card.
+  const chartCond = ap.conditional;
+  const chartCondActive = hasConditional(chartCond);
+  const cardCondStyle = (value: unknown): ResolvedCondStyle | null =>
+    chartCondActive ? evalConditional(chartCond, "value", value) : null;
   const showLegend = ap.legend?.show ?? metrics.length > 1;
   const legendStyle = {
     fontSize: 11,
@@ -497,9 +525,20 @@ export const WidgetChart = memo(function WidgetChart({
           </div>
         );
       }
+      const cs = cardCondStyle(c.valueText);
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
-          <span className="text-3xl font-semibold">{c.valueText ?? "—"}</span>
+          <span
+            className="text-3xl font-semibold"
+            style={{
+              color: cs?.text,
+              background: cs?.fill,
+              ...(cs?.bold ? { fontWeight: 700 } : {}),
+            }}
+          >
+            <CondIcon style={cs} />
+            {c.valueText ?? "—"}
+          </span>
           {c.subText ? (
             <span className="text-muted-foreground text-xs">{c.subText}</span>
           ) : null}
@@ -587,6 +626,14 @@ export const WidgetChart = memo(function WidgetChart({
           const cur = numOrNull(row[m.key]);
           const prev = row.__cmp?.[m.key] ?? null;
           const fmtAbs = (n: number) => moneyChartText(n, m.key);
+          const cs =
+            cardCondStyle(cur) ??
+            (chartCondActive
+              ? evalConditional(chartCond, m.key, cur, {
+                  variation:
+                    cmp != null ? computeVariation(cur, prev) : null,
+                })
+              : null);
           return (
             <div key={m.key} className="flex flex-col">
               {cmp && only ? (
@@ -598,7 +645,15 @@ export const WidgetChart = memo(function WidgetChart({
                   className="text-2xl font-semibold"
                 />
               ) : (
-                <span className="text-2xl font-semibold tabular-nums">
+                <span
+                  className="text-2xl font-semibold tabular-nums"
+                  style={{
+                    color: cs?.text,
+                    background: cs?.fill,
+                    ...(cs?.bold ? { fontWeight: 700 } : {}),
+                  }}
+                >
+                  <CondIcon style={cs} />
                   {moneyCellText(row, m.key)}
                 </span>
               )}
@@ -647,8 +702,21 @@ export const WidgetChart = memo(function WidgetChart({
     const metricKey = metrics[0]?.key;
     if (!metricKey) return <EmptyState />;
     const pieData = topWithOther(rows, dimKey, metricKey);
+    // Fatia: cor manual > regra/escala condicional (sobre o valor plotado) >
+    // paleta.
+    const pieDomains = chartCondActive
+      ? scaleDomains(pieData, chartCond?.scales, (r, target) =>
+          target === metricKey ? r.value : undefined
+        )
+      : {};
     const sliceFill = (i: number) =>
-      ap.sliceColors?.[i] ?? paletteColor(ap.palette, i);
+      ap.sliceColors?.[i] ??
+      (chartCondActive
+        ? evalConditional(chartCond, metricKey, pieData[i]?.value, {
+            domain: pieDomains[metricKey],
+          })?.fill
+        : undefined) ??
+      paletteColor(ap.palette, i);
     const sliceOpacity = (i: number) =>
       ap.fillMode === "gradient" ? gradientOpacity(i, pieData.length) : 1;
     // Comparação no tooltip: topWithOther colapsa p/ {name,value}, então o
@@ -875,6 +943,27 @@ export const WidgetChart = memo(function WidgetChart({
   const horizontal = visualType === "barra_horizontal";
   const singleSeries = metrics.length === 1;
   const hasCatColors = Object.keys(ap.categoryColors ?? {}).length > 0;
+  // Formatação condicional nas barras (série única): regra/escala sobre o
+  // valor plotado colore a barra; cor manual de categoria vence a regra.
+  const barDomains = chartCondActive
+    ? scaleDomains(chartRows, chartCond?.scales)
+    : {};
+  const barCondFill = (
+    r: Record<string, unknown>,
+    key: string
+  ): string | undefined => {
+    if (!chartCondActive) return undefined;
+    const rw = r as WidgetRow;
+    return evalConditional(chartCond, key, r[key], {
+      variation: cmp
+        ? computeVariation(
+            numOrNull(r[key]),
+            rw.__cmp?.[key] == null ? null : Number(rw.__cmp[key])
+          )
+        : null,
+      domain: barDomains[key],
+    })?.fill;
+  };
 
   return wrapCat(
     <BarChart
@@ -940,7 +1029,8 @@ export const WidgetChart = memo(function WidgetChart({
       {metrics.map((m, i) => {
         const base = resolveSeriesColor(ap, m.key, i);
         const perColumn =
-          singleSeries && (ap.fillMode === "gradient" || hasCatColors);
+          singleSeries &&
+          (ap.fillMode === "gradient" || hasCatColors || chartCondActive);
         return (
           <Bar
             key={m.key}
@@ -955,7 +1045,11 @@ export const WidgetChart = memo(function WidgetChart({
               ? chartRows.map((r, idx) => (
                   <Cell
                     key={idx}
-                    fill={ap.categoryColors?.[catName(r)]?.fill ?? base}
+                    fill={
+                      ap.categoryColors?.[catName(r)]?.fill ??
+                      barCondFill(r, m.key) ??
+                      base
+                    }
                     fillOpacity={
                       ap.fillMode === "gradient"
                         ? gradientOpacity(idx, chartRows.length)
@@ -1100,6 +1194,43 @@ function AppearanceTable({
       }
     }
     return any ? sum : null;
+  };
+
+  // --- Formatação condicional (appearance.conditional) ---
+  const cond = appearance.conditional;
+  const condActive = hasConditional(cond);
+  // Valor avaliável de um alvo numa linha (colunas virtuais de variação usam a
+  // variação absoluta; __cmp usa o valor comparado).
+  const condValueOf = (r: Record<string, unknown>, target: string): unknown => {
+    const vb = varBaseOf(target);
+    if (vb) {
+      const cur = numOrNull(r[vb]);
+      const prev = cmpValOf(r, vb);
+      return cur != null && prev != null ? cur - prev : null;
+    }
+    const cb = cmpBaseOf(target);
+    if (cb) return cmpValOf(r, cb);
+    return r[target];
+  };
+  const condDomains = condActive
+    ? scaleDomains(data.rows, cond?.scales, condValueOf)
+    : {};
+  const condStyleOf = (
+    r: Record<string, unknown>,
+    colKey: string,
+    isMetric: boolean
+  ): ResolvedCondStyle | null => {
+    if (!condActive) return null;
+    // var_up/var_down avaliam a variação da métrica-base do alvo.
+    const vBase = varBaseOf(colKey) ?? (isMetric ? colKey : null);
+    const variation =
+      cmp && vBase
+        ? computeVariation(numOrNull(r[vBase]), cmpValOf(r, vBase))
+        : null;
+    return evalConditional(cond, colKey, condValueOf(r, colKey), {
+      variation,
+      domain: condDomains[colKey],
+    });
   };
 
   // Célula de métrica: calculada de agregados reavalia a fórmula da basis da
@@ -1394,6 +1525,9 @@ function AppearanceTable({
           const isNumeric = isMetric || varBase != null || cmpBase != null;
           const cellCp = t.cellColors?.[`${rk}:${c.key}`];
           const colCp = t.colColors?.[c.key];
+          // Precedência: célula manual > regra condicional > escala >
+          // linha/coluna manual > global (ver lib/widgets/conditional.ts).
+          const cs = condStyleOf(r, c.key, isMetric);
           return (
             <TableCell
               key={c.key}
@@ -1403,9 +1537,14 @@ function AppearanceTable({
               )}
               onDoubleClick={(e) => openCtx(e, c.key, ["row", "col", "cell"], rk)}
               style={{
-                background: cellCp?.fill ?? colCp?.fill,
+                background: cellCp?.fill ?? cs?.fill ?? colCp?.fill,
                 color:
-                  cellCp?.text ?? rowCp?.text ?? colCp?.text ?? t.bodyColor,
+                  cellCp?.text ??
+                  cs?.text ??
+                  rowCp?.text ??
+                  colCp?.text ??
+                  t.bodyColor,
+                ...(cs?.bold ? { fontWeight: 600 } : {}),
                 ...cellBorder(ci === cols.length - 1),
                 ...widthStyle(c.key),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
@@ -1428,6 +1567,7 @@ function AppearanceTable({
               ) : (
                 <>
                   <span className={cellSpanClass}>
+                    <CondIcon style={cs} />
                     {isMetric
                       ? metricCellText(r, c.key)
                       : dimDisplay(r[c.key], c.key)}
