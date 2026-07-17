@@ -96,6 +96,8 @@ import {
 import {
   AGG_LABELS,
   DATE_AGG_LABELS,
+  IMAGE_CLICK_LABELS,
+  IMAGE_FIT_LABELS,
   SHAPE_KIND_LABELS,
   TRANSFORM_LABELS,
   VISUAL_TYPE_LABELS,
@@ -108,6 +110,8 @@ import {
   type FilterOp,
   type FilterSettings,
   type GridPosition,
+  type ImageClickAction,
+  type ImageFit,
   type Metric,
   type CardConfig,
   type ComparisonSettings,
@@ -121,6 +125,7 @@ import {
   type WidgetFilter,
   type WidgetLinkTarget,
 } from "@/lib/widgets/types";
+import { sanitizeHttpsUrl } from "@/lib/widgets/image-url";
 import { newVarId } from "@/lib/widgets/calculator";
 import { WidgetLinkPicker } from "@/components/dashboards/widget-link-picker";
 import {
@@ -534,6 +539,24 @@ export function WidgetBuilder({
     widget?.settings?.shape?.link
   );
 
+  // Imagem: URL https, ajuste (object-fit), alt e ação de clique (nada/
+  // lightbox/link personalizado — nunca a URL da própria imagem).
+  const [imageUrl, setImageUrl] = useState<string>(
+    widget?.settings?.image?.url ?? ""
+  );
+  const [imageFit, setImageFit] = useState<ImageFit>(
+    widget?.settings?.image?.fit ?? "contain"
+  );
+  const [imageAlt, setImageAlt] = useState<string>(
+    widget?.settings?.image?.alt ?? ""
+  );
+  const [imageClick, setImageClick] = useState<ImageClickAction>(
+    widget?.settings?.image?.click?.action ?? "none"
+  );
+  const [imageHref, setImageHref] = useState<string>(
+    widget?.settings?.image?.click?.href ?? ""
+  );
+
   // KPI "Data atual": card que mostra o dia de hoje (Brasília). Não usa
   // métrica/RPC — o valor é resolvido no engine (runKpi) via settings.mode.
   // Modos novos do Card (settings.card): registro (argmax/argmin), ranking,
@@ -578,13 +601,14 @@ export function WidgetBuilder({
     widget?.settings?.defaultPreset ?? ""
   );
   // Widgets que este filtro pode controlar (exclui a si mesmo, os controles e
-  // a forma, que não tem dados/período).
+  // forma/imagem, que não têm dados/período).
   const targetable = siblings.filter(
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
       s.visual_type !== "filtro_campo" &&
-      s.visual_type !== "forma"
+      s.visual_type !== "forma" &&
+      s.visual_type !== "imagem"
   );
 
   function toggleTarget(id: string) {
@@ -609,7 +633,8 @@ export function WidgetBuilder({
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
       s.visual_type !== "filtro_campo" &&
-      s.visual_type !== "forma"
+      s.visual_type !== "forma" &&
+      s.visual_type !== "imagem"
   );
   const affectedSiblings = dataSiblings.filter((s) => {
     const b = s.sources ?? [];
@@ -1239,6 +1264,48 @@ export function WidgetBuilder({
             kind: shapeKind,
             text: shapeText.trim() || undefined,
             link: shapeLink,
+          },
+          ...tabPatch,
+        },
+      };
+      commit(input);
+      return;
+    }
+
+    // Imagem: valida as URLs aqui (feedback imediato) — as actions re-saneiam
+    // na escrita e o image-widget re-valida no render (viewer público).
+    if (visualType === "imagem") {
+      const url = sanitizeHttpsUrl(imageUrl);
+      if (imageUrl.trim() && !url) {
+        setError("URL da imagem inválida — use um link https:// direto.");
+        return;
+      }
+      const href = sanitizeHttpsUrl(imageHref);
+      if (imageClick === "link" && !href) {
+        setError("Link do clique inválido — use um endereço https://.");
+        return;
+      }
+      const input = {
+        title: title.trim() || null,
+        visual_type: visualType,
+        sources: [],
+        splitBySource: false,
+        dimensions: [],
+        metrics: [],
+        filters: [],
+        settings: {
+          ...(widget?.settings ?? {}),
+          image: {
+            url: url ?? undefined,
+            fit: imageFit,
+            alt: imageAlt.trim() || undefined,
+            click:
+              imageClick === "none"
+                ? undefined
+                : {
+                    action: imageClick,
+                    href: imageClick === "link" ? (href ?? undefined) : undefined,
+                  },
           },
           ...tabPatch,
         },
@@ -2341,6 +2408,81 @@ export function WidgetBuilder({
             </>
           ) : null}
 
+          {/* Config da Imagem: URL https, ajuste, alt e ação de clique. */}
+          {visualType === "imagem" ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="image-url">URL da imagem</Label>
+                <Input
+                  id="image-url"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://exemplo.com/logo.png"
+                  inputMode="url"
+                  spellCheck={false}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Link https:// direto para a imagem (png, jpg, webp, gif,
+                  svg…). PNG com fundo transparente aparece sem card por trás.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Ajuste no card</Label>
+                <Combobox
+                  searchable={false}
+                  options={(
+                    Object.keys(IMAGE_FIT_LABELS) as ImageFit[]
+                  ).map((k) => ({ value: k, label: IMAGE_FIT_LABELS[k] }))}
+                  value={imageFit}
+                  onValueChange={(v) => setImageFit(v as ImageFit)}
+                  aria-label="Ajuste da imagem no card"
+                />
+                <p className="text-muted-foreground text-xs">
+                  O tamanho do card é livre — redimensione pelas bordas no modo
+                  edição.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Ao clicar (fora do modo edição)</Label>
+                <Combobox
+                  searchable={false}
+                  options={(
+                    Object.keys(IMAGE_CLICK_LABELS) as ImageClickAction[]
+                  ).map((k) => ({ value: k, label: IMAGE_CLICK_LABELS[k] }))}
+                  value={imageClick}
+                  onValueChange={(v) => setImageClick(v as ImageClickAction)}
+                  aria-label="Ação ao clicar na imagem"
+                />
+              </div>
+              {imageClick === "link" ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="image-href">Link do clique</Label>
+                  <Input
+                    id="image-href"
+                    value={imageHref}
+                    onChange={(e) => setImageHref(e.target.value)}
+                    placeholder="https://exemplo.com/pagina"
+                    inputMode="url"
+                    spellCheck={false}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Abre em nova aba. Endereço próprio (https://) — não é a URL
+                    da imagem.
+                  </p>
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="image-alt">Texto alternativo</Label>
+                <Input
+                  id="image-alt"
+                  value={imageAlt}
+                  onChange={(e) => setImageAlt(e.target.value)}
+                  placeholder="Opcional — descrição p/ leitores de tela"
+                />
+              </div>
+            </>
+          ) : null}
+
           {/* KPI "Data atual": mostra o dia de hoje (Brasília), sem métrica. */}
           {visualType === "kpi" ? (
             <div className="flex flex-col gap-2 rounded-md border p-3">
@@ -2392,6 +2534,7 @@ export function WidgetBuilder({
           visualType !== "calculadora" &&
           visualType !== "nota" &&
           visualType !== "forma" &&
+          visualType !== "imagem" &&
           visualType !== "tabela_editavel" &&
           visualType !== "kanban" &&
           visualType !== "agenda" ? (

@@ -168,7 +168,8 @@ async function doRefresh(
     (w) =>
       w.visual_type !== "filtro" &&
       w.visual_type !== "filtro_campo" &&
-      w.visual_type !== "forma"
+      w.visual_type !== "forma" &&
+      w.visual_type !== "imagem"
   );
   const fieldFilterWidgets = tabWidgets.filter(
     (w) => w.visual_type === "filtro_campo"

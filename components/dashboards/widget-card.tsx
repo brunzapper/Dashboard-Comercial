@@ -106,6 +106,7 @@ import { KanbanWidget } from "@/components/kanban/kanban-widget";
 import { AgendaWidget } from "@/components/agenda/agenda-widget";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
 import { CalculatorWidget } from "./calculator-widget";
+import { ImageWidget } from "./image-widget";
 import { NoteWidget } from "./note-widget";
 import { ShapeWidget } from "./shape-widget";
 import {
@@ -263,10 +264,12 @@ export const WidgetCard = memo(function WidgetCard({
   const isCalculator = widget.visual_type === "calculadora";
   const isNote = widget.visual_type === "nota";
   const isShape = widget.visual_type === "forma";
+  const isImage = widget.visual_type === "imagem";
   const kpi = isKpi ? appearance?.kpi : undefined;
   const noteAp = isNote ? appearance?.note : undefined;
-  // Sem cromo de card: forma sempre; nota quando "Sem moldura" (Aparência).
-  const frameless = isShape || (isNote && noteAp?.frameless === true);
+  // Sem cromo de card: forma e imagem sempre (fundo transparente — PNG com
+  // alpha aparece limpo); nota quando "Sem moldura" (Aparência).
+  const frameless = isShape || isImage || (isNote && noteAp?.frameless === true);
   const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
@@ -347,8 +350,9 @@ export const WidgetCard = memo(function WidgetCard({
     };
   }, [serverPaged, srvPage, srvLoading, recordListTotal, handleServerPage]);
   // Aparência: charts/tabela/pizza/kpi e KANBAN (quadro/colunas/cards/abas —
-  // settings.kanban.appearance); segue fora em filtro/calc/agenda.
-  const canStyle = !isFilter && !isFieldFilter && !isCalc && !isAgenda;
+  // settings.kanban.appearance); segue fora em filtro/calc/agenda/imagem.
+  const canStyle =
+    !isFilter && !isFieldFilter && !isCalc && !isAgenda && !isImage;
 
   // Catálogo de operandos do editor in-place da nota (mesma montagem do
   // calcRefs do builder — aggOperandRefs + condAggOperandRefs).
@@ -756,6 +760,14 @@ export const WidgetCard = memo(function WidgetCard({
             shape={widget.settings?.shape}
             appearance={appearance?.shape}
             editMode={editMode}
+          />
+        ) : isImage ? (
+          <ImageWidget
+            image={widget.settings?.image}
+            title={widget.title}
+            editMode={editMode}
+            canEdit={canEdit}
+            onConfigure={() => setBuilderOpen(true)}
           />
         ) : (
           <div className="h-full overflow-hidden rounded-lg">
