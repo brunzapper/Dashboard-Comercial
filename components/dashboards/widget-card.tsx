@@ -1,6 +1,10 @@
-// Versão: 2.3 | Data: 16/07/2026
+// Versão: 2.4 | Data: 17/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.4 (17/07/2026): busca client-side na lista de registros — estado clientQ
+//   elevado entre TableFilterBar (onSearchChange) e RecordListTable (searchQ),
+//   ligado quando searchHandledOnClient(settings); semeado do tf_ da URL
+//   (deep-link chega filtrado, já que o servidor pula o q nesses widgets).
 // v2.3 (16/07/2026): calculadora ganha "X" no canto superior direito — fecha
 //   (exclui) sem confirmação, sumindo na hora (estado `closing`); exclusões
 //   avisam o shell via onWidgetDeleted (limpa o otimista da criação rápida).
@@ -18,6 +22,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Copy,
   Download,
@@ -64,6 +69,11 @@ import {
 } from "@/lib/export/record-cells";
 import { exportWidgetRecordsCsv } from "@/app/(app)/dashboards/export-actions";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
+import {
+  parseViewFilter,
+  searchHandledOnClient,
+} from "@/lib/widgets/view-filters";
+import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
@@ -225,6 +235,19 @@ export function WidgetCard({
   const title = appearance?.title;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
+  // Busca textual client-side (lista de registros sem limit, barra visível):
+  // a barra alimenta clientQ e a RecordListTable filtra em memória — o servidor
+  // pula o q do tf_ nesses widgets (page.tsx usa o MESMO critério; ver
+  // searchHandledOnClient). Semeia do tf_ da URL p/ deep-link chegar filtrado.
+  const sp = useSearchParams();
+  const clientSearch =
+    isRecordList &&
+    !isEntityList &&
+    showTableBar &&
+    searchHandledOnClient(widget.settings);
+  const [clientQ, setClientQ] = useState(() =>
+    clientSearch ? (parseViewFilter(sp.get(`tf_${widget.id}`)).q ?? "") : ""
+  );
   // Aparência: charts/tabela/pizza/kpi e KANBAN (quadro/colunas/cards/abas —
   // settings.kanban.appearance); segue fora em filtro/calc/agenda.
   const canStyle = !isFilter && !isFieldFilter && !isCalc && !isAgenda;
@@ -405,6 +428,12 @@ export function WidgetCard({
       return;
     }
     if (isRecordList) {
+      // Busca client-side ativa: exporta só o que a tabela exibe (mesmo
+      // matcher em memória de record-search.ts).
+      const matcher = clientSearch
+        ? recordSearchMatcher(clientQ, widget.settings?.searchFields, available)
+        : null;
+      const visibleRecords = matcher ? recordList.filter(matcher) : recordList;
       const metricCols = (widget.metrics ?? []).filter((m) => m.field);
       const headers = [
         ...cols.map(exportColHeader),
@@ -415,7 +444,7 @@ export function WidgetCard({
             m.field
         ),
       ];
-      const rows = recordList.map((r) => [
+      const rows = visibleRecords.map((r) => [
         ...cols.map((c) =>
           recordColumnValue(r, c.field, fields, exportLabels, available, {
             csv: true,
@@ -710,6 +739,7 @@ export function WidgetCard({
           <TableFilterBar
             paramKey={`tf_${widget.id}`}
             available={available}
+            onSearchChange={clientSearch ? setClientQ : undefined}
           />
         ) : null}
         {/* Filtros rápidos: lado a lado, abaixo da barra de busca (tabelas) ou
@@ -803,6 +833,8 @@ export function WidgetCard({
           ) : isRecordList ? (
             <RecordListTable
               records={recordList}
+              searchQ={clientSearch ? clientQ : undefined}
+              searchFields={widget.settings?.searchFields}
               columns={widget.settings?.columns ?? []}
               metrics={widget.metrics ?? []}
               fields={fields}

@@ -1,6 +1,10 @@
-// Versão: 2.3 | Data: 15/07/2026
+// Versão: 2.4 | Data: 17/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.4 (17/07/2026): busca client-side — o q do tf_ é PULADO nos widgets em
+//   que searchHandledOnClient(settings) (lista de registros sem limit, barra
+//   visível): o cliente recebe o dataset completo e filtra em memória
+//   (WidgetCard/RecordListTable). Filtros estruturados do tf_ seguem aqui.
 // v2.3 (15/07/2026): Tabela Livre (tabela_editavel) — widget fica FORA do
 //   loop de computação (dados BI deferidos via runQuickTable no cliente);
 //   células digitadas entregues em tableCellsById (carona no cellsData).
@@ -80,7 +84,11 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
-import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
+import {
+  parseViewFilter,
+  searchHandledOnClient,
+  viewStateToFilters,
+} from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
@@ -493,14 +501,19 @@ export default async function DashboardPage({
   // valem para o engine/RPC, modo lista, KPI e métrica calculada.
   for (const [id, fs] of Object.entries(qfFiltersByWidget)) addViewFilters(id, fs);
 
-  // Barra embutida: só nos widgets de Tabela (agregada ou registros).
+  // Barra embutida: só nos widgets de Tabela (agregada ou registros). Na lista
+  // de registros sem limit (searchHandledOnClient) o q é pulado — a busca
+  // textual roda no CLIENTE sobre o dataset completo; sem isso o servidor
+  // pré-filtraria e apagar letras nunca ampliaria os resultados.
   for (const w of dataWidgets) {
     if (w.visual_type !== "tabela") continue;
     const raw = str(sp[`tf_${w.id}`]);
     if (!raw) continue;
     addViewFilters(
       w.id,
-      viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields)
+      viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields, {
+        skipSearch: searchHandledOnClient(w.settings),
+      })
     );
   }
 

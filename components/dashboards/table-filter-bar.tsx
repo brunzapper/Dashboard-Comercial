@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 17/07/2026
+// v1.1 (17/07/2026): busca client-side — nova prop `onSearchChange`; quando
+//   presente, digitar filtra no cliente na hora e o `q` vai pra URL com
+//   history.replaceState raso (shareável, SEM navegação RSC). Filtros
+//   estruturados seguem navegando via router.replace como antes.
 // Barra de busca/filtro embutida nas tabelas (registros e agregada), usável na
 // VISUALIZAÇÃO do dashboard. Grava o estado ({q, filters}) na URL sob `paramKey`
 // (tf_<widgetId>) com debounce; o servidor (page.tsx) lê o parâmetro e mescla os
@@ -7,7 +11,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -36,10 +40,15 @@ export function TableFilterBar({
   paramKey,
   available,
   className,
+  onSearchChange,
 }: {
   paramKey: string;
   available: AvailableField[];
   className?: string;
+  // Busca client-side (searchHandledOnClient): presença liga o modo — cada
+  // tecla filtra na hora via callback e o `q` sincroniza com a URL de forma
+  // RASA (history.replaceState), sem navegação RSC. Ausente = tudo no servidor.
+  onSearchChange?: (q: string) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -56,19 +65,32 @@ export function TableFilterBar({
   const fieldSourceChips = sourceChips(sourceLabels);
 
   // Estado efetivo (normalizado) → parâmetro de URL. Debounce p/ não navegar a
-  // cada tecla. Só navega quando o valor muda de fato.
+  // cada tecla. Só escreve quando o valor muda de fato. Com onSearchChange
+  // (busca client-side), mudanças SÓ de `q` sincronizam a URL com
+  // history.replaceState raso (integrado ao router do Next, sem RSC); mudanças
+  // nos filtros estruturados seguem via router.replace (o `encoded` carrega o
+  // `q` atual junto — nada se perde). A URL é lida de window.location dentro do
+  // timer: vale para os dois caminhos de escrita.
+  const clientSearch = Boolean(onSearchChange);
   const encoded = encodeViewFilter({ q, filters: cleanFilters(filters) });
+  const filtersKey = JSON.stringify(cleanFilters(filters));
+  const lastNavFiltersKey = useRef(filtersKey); // filtros da última navegação RSC
   useEffect(() => {
-    const currentVal = sp.get(paramKey) ?? "";
+    const currentVal =
+      new URLSearchParams(window.location.search).get(paramKey) ?? "";
     if (encoded === currentVal) return;
     const timer = setTimeout(() => {
-      const params = new URLSearchParams(sp.toString());
+      const params = new URLSearchParams(window.location.search);
       if (encoded) params.set(paramKey, encoded);
       else params.delete(paramKey);
       const qs = params.toString();
-      run(() =>
-        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-      );
+      const url = qs ? `${pathname}?${qs}` : pathname;
+      if (clientSearch && filtersKey === lastNavFiltersKey.current) {
+        window.history.replaceState(null, "", url);
+      } else {
+        lastNavFiltersKey.current = filtersKey;
+        run(() => router.replace(url, { scroll: false }));
+      }
     }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -94,6 +116,7 @@ export function TableFilterBar({
     setQ("");
     setFilters([]);
     setOpen(false);
+    onSearchChange?.("");
   }
 
   const hasState = Boolean(q) || filters.length > 0;
@@ -105,7 +128,12 @@ export function TableFilterBar({
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
           <Input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              // Sem debounce: a filtragem client-side é instantânea; o debounce
+              // acima vale só para a escrita na URL.
+              onSearchChange?.(e.target.value);
+            }}
             placeholder="Buscar…"
             aria-label="Buscar na tabela"
             className="h-8 pl-7 text-sm"
