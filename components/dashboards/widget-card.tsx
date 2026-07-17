@@ -21,7 +21,7 @@
 // KPI (fundo/borda/abinha de destaque).
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
@@ -106,7 +106,11 @@ import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
 import { useWidgetAppearance } from "./appearance-editing";
 
-export function WidgetCard({
+// React.memo: o grid re-renderiza em toda medição/drag/hover — sem memo, TODOS
+// os cards (e seus charts/tabelas) re-renderizavam juntos. As props vêm com
+// referência estável do grid/página (fallbacks módulo-level, callbacks em
+// useCallback), então o shallow-compare segura os cards não afetados.
+export const WidgetCard = memo(function WidgetCard({
   widget,
   data,
   recordList,
@@ -897,4 +901,4 @@ export function WidgetCard({
       {overlays}
     </div>
   );
-}
+});

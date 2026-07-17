@@ -13,7 +13,7 @@
 //   coluna e altura de linha redimensionáveis na edição de layout.
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
@@ -187,7 +187,9 @@ export type ResponsibleOption = {
   bitrixLinked?: boolean;
 };
 
-export function RecordListTable({
+// React.memo: sob o WidgetCard memoizado, a tabela só re-renderiza quando os
+// registros/aparência/props realmente mudam — não a cada churn do grid.
+export const RecordListTable = memo(function RecordListTable({
   records,
   searchQ,
   searchFields,
@@ -600,31 +602,38 @@ export function RecordListTable({
   );
 
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
-  let rows = filtered;
-  if (t.sort?.column) {
-    const { column, dir, colorOrder } = t.sort;
-    rows = [...filtered].sort((a, b) => {
-      if (dir === "color") {
-        const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
-        const ra = rank.get(t.rowColors?.[a.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
-        const rb = rank.get(t.rowColors?.[b.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
-        return ra - rb;
-      }
-      const av = rawValue(column, a);
-      const bv = rawValue(column, b);
-      const an = Number(av);
-      const bn = Number(bv);
-      const bothNum = av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn);
-      const cmp = bothNum
-        ? an - bn
-        : String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
-      return dir === "desc" ? -cmp : cmp;
-    });
-  } else {
-    rows = applyManualOrder(filtered, t.rowOrder, (r) => r.id);
-  }
+  // useMemo: o sort percorre o conjunto INTEIRO e rodava a cada re-render
+  // (expandir grupo, trocar página, digitar) — só recomputa quando os dados/
+  // config de ordenação mudam. rawValue lê via cols/fkLabels (nas deps).
+  const rows = useMemo(() => {
+    if (t.sort?.column) {
+      const { column, dir, colorOrder } = t.sort;
+      return [...filtered].sort((a, b) => {
+        if (dir === "color") {
+          const rank = new Map((colorOrder ?? []).map((c, i) => [c, i]));
+          const ra = rank.get(t.rowColors?.[a.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
+          const rb = rank.get(t.rowColors?.[b.id]?.fill ?? "") ?? Number.MAX_SAFE_INTEGER;
+          return ra - rb;
+        }
+        const av = rawValue(column, a);
+        const bv = rawValue(column, b);
+        const an = Number(av);
+        const bn = Number(bv);
+        const bothNum = av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn);
+        const cmp = bothNum
+          ? an - bn
+          : String(av ?? "").localeCompare(String(bv ?? ""), "pt-BR");
+        return dir === "desc" ? -cmp : cmp;
+      });
+    }
+    return applyManualOrder(filtered, t.rowOrder, (r) => r.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, t.sort, t.rowOrder, t.rowColors, cols, fkLabels]);
 
-  const distinctRowFills = distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill));
+  const distinctRowFills = useMemo(
+    () => distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill)),
+    [rows, t.rowColors]
+  );
 
   // --- Agrupar por (modo registros): agrupa as linhas por uma ou mais colunas em
   // seções recolhíveis com subtotais das colunas numéricas. Multinível = hierarquia
@@ -1553,4 +1562,4 @@ export function RecordListTable({
       ) : null}
     </div>
   );
-}
+});

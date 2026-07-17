@@ -46,7 +46,14 @@
 //   settings.canvas ({ cols, rows, rowHeight }).
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Calculator,
@@ -103,6 +110,12 @@ const MX = 12;
 const MY = 12;
 const DEFAULT_ROW_H = 30;
 const MIN_COLS = 12;
+
+// Fallbacks ESTÁVEIS para os cards sem dados: um literal novo por render
+// derrotaria o React.memo do WidgetCard (props sempre "diferentes").
+const EMPTY_WIDGET_DATA: WidgetData = { rows: [], dimensions: [], metrics: [] };
+const EMPTY_RECORD_LIST: RecordRow[] = [];
+const EMPTY_ENTITY_LIST: EntityListRow[] = [];
 const MAX_COLS = 48;
 const MIN_ROWS = 8;
 const MAX_ROWS = 200;
@@ -366,21 +379,25 @@ export function DashboardGrid({
   // então um passo de resolução de colisões que empurra os vizinhos no eixo do
   // crescimento (largura → direita, altura → baixo). Determinístico: ao colapsar,
   // some a inflação, some a colisão e todos voltam à base.
-  const inflated: ResolveItem[] = widgets.map((w, i) => {
-    const p = basePos(w, i);
-    const a = w.settings?.autoSize;
-    const m = measured[w.id];
-    const ew = a?.width && m ? Math.max(p.w, m.w) : p.w;
-    const eh = a?.height && m ? Math.max(p.h, m.h) : p.h;
-    return { i: w.id, x: p.x, y: p.y, w: ew, h: eh, bx: p.x, by: p.y, bw: p.w, bh: p.h };
-  });
-  const layout: Layout = pushApart(inflated).map(({ i, x, y, w, h }) => ({
-    i,
-    x,
-    y,
-    w,
-    h,
-  }));
+  // useMemo: pushApart é O(n²) e rodava a CADA render do grid (medições,
+  // baseWidth, drag da alça) — só recomputa quando widgets/base/medidas mudam.
+  const layout: Layout = useMemo(() => {
+    const inflated: ResolveItem[] = widgets.map((w, i) => {
+      const p = basePos(w, i);
+      const a = w.settings?.autoSize;
+      const m = measured[w.id];
+      const ew = a?.width && m ? Math.max(p.w, m.w) : p.w;
+      const eh = a?.height && m ? Math.max(p.h, m.h) : p.h;
+      return { i: w.id, x: p.x, y: p.y, w: ew, h: eh, bx: p.x, by: p.y, bw: p.w, bh: p.h };
+    });
+    return pushApart(inflated).map(({ i, x, y, w, h }) => ({
+      i,
+      x,
+      y,
+      w,
+      h,
+    }));
+  }, [widgets, basePos, measured]);
 
   // Extensão do conteúdo — pisos para não cortar widgets ao encolher a área.
   const contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), MIN_COLS);
@@ -442,6 +459,12 @@ export function DashboardGrid({
   const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
+  // Métricas do ConnectorLayer com referência estável (objeto novo por render
+  // re-renderizava a camada de conectores a cada medição/hover).
+  const connMetrics = useMemo(
+    () => ({ cellW, rowH: ROW_H, mx: MX, my: MY }),
+    [cellW, ROW_H]
+  );
 
   // Botão esquerdo no espaço vazio arma o pan (useDragPan). Durante o desenho
   // de criação o overlay é dono do gesto.
@@ -803,7 +826,7 @@ export function DashboardGrid({
                 connectors={connectors}
                 layout={layout}
                 widgets={widgets}
-                metrics={{ cellW, rowH: ROW_H, mx: MX, my: MY }}
+                metrics={connMetrics}
                 tabs={tabs}
                 activeTabId={activeTabId ?? ""}
                 editMode={editMode}
@@ -849,9 +872,9 @@ export function DashboardGrid({
                 >
                   <WidgetCard
                     widget={w}
-                    data={dataById[w.id] ?? { rows: [], dimensions: [], metrics: [] }}
-                    recordList={recordListById[w.id] ?? []}
-                    entityList={entityListById[w.id] ?? []}
+                    data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
+                    recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
+                    entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
                     calcValue={calcById[w.id] ?? null}
                     calcVars={calcVarsById[w.id]}
                     noteValues={noteById[w.id]}

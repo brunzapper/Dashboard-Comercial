@@ -15,6 +15,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   useTransition,
   type ReactNode,
@@ -85,10 +86,16 @@ export function AppShell({
   // overlay = barra flutuante (não empurra o conteúdo) quando não fixada.
   const overlay = !pinned && !chromeHidden;
 
+  // Referência estável do value: o shell re-renderiza a cada hover da sidebar
+  // (setHovering) — objeto novo por render re-renderizava todos os
+  // consumidores de useAppChrome (páginas inteiras) a cada hover.
+  const chromeValue = useMemo<AppChrome>(
+    () => ({ chromeHidden, setChromeHidden, toggleFullscreen }),
+    [chromeHidden, toggleFullscreen]
+  );
+
   return (
-    <AppChromeContext.Provider
-      value={{ chromeHidden, setChromeHidden, toggleFullscreen }}
-    >
+    <AppChromeContext.Provider value={chromeValue}>
       <div className="flex min-h-screen">
         {!chromeHidden ? (
           <aside

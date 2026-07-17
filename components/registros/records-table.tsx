@@ -11,7 +11,7 @@
 // cada linha abre o painel de edição (RecordEditSheet).
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 
 import {
   Table,
@@ -50,7 +50,10 @@ export function RecordsTable({
   canEditValues: boolean;
   canManageFields: boolean;
 }) {
-  const responsibleMap = new Map(responsibles.map((r) => [r.id, r.label]));
+  const responsibleMap = useMemo(
+    () => new Map(responsibles.map((r) => [r.id, r.label])),
+    [responsibles]
+  );
   const showPipeline = source === "deals";
   const showMrr = source === "deals" || source === "estudo";
 
