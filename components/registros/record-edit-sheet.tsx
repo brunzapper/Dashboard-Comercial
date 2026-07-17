@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 16/07/2026
+// Versão: 1.3 | Data: 17/07/2026
+// v1.3 (17/07/2026): formulário extraído em RecordEditForm (exportado) — a aba
+//   "Dados" do CardDetailSheet (feed dos cards do kanban) embute o mesmo form;
+//   este Sheet segue funcionando igual para os call sites existentes. Sucesso
+//   emite emitDataChanged({kind:"record"}) p/ widgets recarregarem (W1).
 // v1.2 (16/07/2026): seção "Tarefas" — tarefas vinculadas ao registro
 //   (listar/criar/concluir), carregadas sob demanda.
 // v1.1 (15/07/2026): campos read-only formatados (moeda/percentual/data) em vez
@@ -29,6 +33,7 @@ import {
   type RecordRow,
 } from "@/lib/records/types";
 import { updateRecord, type EditActionState } from "@/lib/records/actions";
+import { emitDataChanged } from "@/lib/tasks/events";
 import {
   CURRENCY_OPTIONS,
   formatMoney,
@@ -114,16 +119,8 @@ function CustomFieldInput({
   return <Input name={name} defaultValue={value} />;
 }
 
-export function RecordEditSheet({
-  record,
-  fields,
-  responsibles,
-  operations,
-  relatedLeadLabel,
-  userRoles,
-  canEditValues,
-  canManageFields,
-}: {
+// Props compartilhadas do formulário/painel de edição de registro.
+export interface RecordEditFormProps {
   record: RecordRow;
   fields: FieldDefinition[];
   responsibles: OptionItem[];
@@ -132,17 +129,35 @@ export function RecordEditSheet({
   userRoles: string[];
   canEditValues: boolean;
   canManageFields: boolean;
-}) {
-  const [open, setOpen] = useState(false);
+}
+
+/**
+ * Formulário de edição do registro (sem Sheet) — embutível na aba "Dados" do
+ * CardDetailSheet ou em qualquer painel. `onSaved` avisa o chamador (fechar
+ * painel, recarregar); o evento global de dados é emitido aqui.
+ */
+export function RecordEditForm({
+  record,
+  fields,
+  responsibles,
+  operations,
+  relatedLeadLabel,
+  userRoles,
+  canEditValues,
+  canManageFields,
+  onSaved,
+}: RecordEditFormProps & { onSaved?: () => void }) {
   const [state, formAction, pending] = useActionState(updateRecord, initial);
   const [responsibleId, setResponsibleId] = useState(record.responsible_id ?? "");
   const [operationId, setOperationId] = useState(record.operation_id ?? "");
   const [currencyCode, setCurrencyCode] = useState(record.currency ?? "");
 
   useEffect(() => {
-    // Fecha o painel quando a Server Action conclui com sucesso.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (state.ok) setOpen(false);
+    if (state.ok) {
+      emitDataChanged({ kind: "record", recordId: record.id });
+      if (onSaved) onSaved();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.ok]);
 
   // Campos de Sync (vindos do Bitrix): nos Registros ficam SEMPRE editáveis para
@@ -159,24 +174,7 @@ export function RecordEditSheet({
   const readOnlyFields = fields.filter((f) => !editableFields.includes(f));
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Editar registro"
-        onClick={() => setOpen(true)}
-      >
-        <Pencil className="size-4" />
-      </Button>
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>{record.title ?? "(sem título)"}</SheetTitle>
-          <SheetDescription>
-            {RECORD_TYPE_LABELS[record.record_type]} · {record.source_system}
-          </SheetDescription>
-        </SheetHeader>
-
-        <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
+    <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
           <input type="hidden" name="record_id" value={record.id} />
           {/* Edições dos Registros gravam sempre no Bitrix (campos de Sync). */}
           <input type="hidden" name="force_sync_write_back" value="1" />
@@ -359,7 +357,34 @@ export function RecordEditSheet({
               Você não tem permissão para editar este registro.
             </p>
           )}
-        </form>
+    </form>
+  );
+}
+
+/** Painel lateral de edição (gatilho lápis) — wrapper do RecordEditForm. */
+export function RecordEditSheet(props: RecordEditFormProps) {
+  const { record, responsibles, userRoles } = props;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Editar registro"
+        onClick={() => setOpen(true)}
+      >
+        <Pencil className="size-4" />
+      </Button>
+      <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{record.title ?? "(sem título)"}</SheetTitle>
+          <SheetDescription>
+            {RECORD_TYPE_LABELS[record.record_type]} · {record.source_system}
+          </SheetDescription>
+        </SheetHeader>
+
+        <RecordEditForm {...props} onSaved={() => setOpen(false)} />
 
         {/* Tarefas vinculadas — FORA do form (os botões internos da seção não
             podem submeter a edição do registro). Carrega só com o painel aberto. */}

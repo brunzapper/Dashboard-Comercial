@@ -29,6 +29,29 @@ function cleanStr(v: FormDataEntryValue | null, max = 4000): string {
     .slice(0, max);
 }
 
+// Responsáveis vinculados ao usuário (ativos) — visibilidade e notificações.
+async function ownResponsibleIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("responsibles")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("active", true);
+  return (data ?? []).map((r) => r.id as string);
+}
+
+// Filtro "notifica-me" (sino): tarefa GLOBAL, criada por mim ou atribuída a um
+// responsável meu. Uma tarefa é UMA linha — criador=responsável não duplica.
+// Também vale p/ quem tem view_all_records: o sino mostra só o que notifica a
+// pessoa (a visibilidade ampla continua em /tarefas e nos quadros).
+function notifyMeFilter(userId: string, respIds: string[]): string {
+  const legs = ["is_global.eq.true", `created_by.eq.${userId}`];
+  if (respIds.length > 0) legs.push(`responsible_id.in.(${respIds.join(",")})`);
+  return legs.join(",");
+}
+
 // Coage o responsável de quem NÃO vê tudo (vendedor) a um responsável do
 // próprio usuário. Null é permitido (tarefa sem atribuição — visível ao criador).
 async function coerceResponsible(
@@ -38,12 +61,7 @@ async function coerceResponsible(
   responsibleId: string | null
 ): Promise<string | null> {
   if (viewAll || responsibleId == null) return responsibleId;
-  const { data: own } = await supabase
-    .from("responsibles")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("active", true);
-  const ownIds = (own ?? []).map((r) => r.id as string);
+  const ownIds = await ownResponsibleIds(supabase, userId);
   if (ownIds.includes(responsibleId)) return responsibleId;
   return ownIds[0] ?? null;
 }
@@ -113,6 +131,13 @@ export async function createTask(
   // `locked` na criação vale para qualquer papel (default do board / escolha):
   // o trigger só protege ALTERAÇÕES da flag.
   const locked = String(formData.get("locked") ?? "") === "1";
+  // Subtarefa: vive no feed da tarefa pai (não vira card de quadro).
+  const parentTaskId = cleanStr(formData.get("parent_task_id"), 40) || null;
+  // Global (notifica/aparece a todos): só admin/gestor — o trigger
+  // enforce_task_global reforça no banco.
+  const isManager =
+    session.roles.includes("admin") || session.roles.includes("gestor");
+  const isGlobal = isManager && String(formData.get("is_global") ?? "") === "1";
 
   const { data, error } = await supabase
     .from("tasks")
@@ -130,6 +155,8 @@ export async function createTask(
       // decrescente no tempo; ordenamos por position ASC).
       position: -Date.now(),
       locked,
+      parent_task_id: parentTaskId,
+      is_global: isGlobal,
     })
     .select("id")
     .single();
@@ -173,6 +200,21 @@ export async function updateTask(
   // Trava de exclusão: só admin/gestor mudam (o trigger reforça no banco).
   if (isManager && formData.has("locked")) {
     updates.locked = String(formData.get("locked")) === "1";
+  }
+  // Global: input hidden sempre presente quando o form permite (admin/gestor);
+  // o trigger enforce_task_global reforça no banco.
+  if (isManager && formData.has("is_global")) {
+    updates.is_global = String(formData.get("is_global")) === "1";
+  }
+  // Reatribuição de responsável carimba assigned_at — a tarefa reaparece na
+  // seção "Novas" do sino do novo responsável.
+  const { data: prev } = await supabase
+    .from("tasks")
+    .select("responsible_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (prev && (prev.responsible_id ?? null) !== (responsibleId ?? null)) {
+    updates.assigned_at = new Date().toISOString();
   }
 
   const { data, error } = await supabase
@@ -282,6 +324,47 @@ export async function deleteTask(id: string): Promise<TaskActionState> {
   return { ok: true };
 }
 
+/** Fixa/desafixa a tarefa no feed do card (RLS: envolvidos/gestão). */
+export async function setTaskPinned(
+  id: string,
+  pinned: boolean
+): Promise<TaskActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ pinned })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para fixar esta tarefa." };
+  }
+  return { ok: true };
+}
+
+/** Reordena a tarefa no FEED (feed_position; `position` é a do quadro). */
+export async function setTaskFeedPosition(
+  id: string,
+  position: number
+): Promise<TaskActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!Number.isFinite(position)) return { ok: false, message: "Posição inválida." };
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ feed_position: position })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para mover esta tarefa." };
+  }
+  return { ok: true };
+}
+
 /** Tarefas de um registro (seção do painel de edição). RLS escopa. */
 export async function listRecordTasks(recordId: string): Promise<TaskRow[]> {
   const session = await getSessionInfo();
@@ -297,9 +380,103 @@ export async function listRecordTasks(recordId: string): Promise<TaskRow[]> {
   return (data ?? []) as unknown as TaskRow[];
 }
 
+// Marca d'água da seção "Novas": tasksSeenAt de user_settings; sem registro,
+// janela de 7 dias (não inundar o sino de quem nunca abriu).
+async function tasksSeenSince(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+): Promise<string> {
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const seen = (data?.settings as { tasksSeenAt?: string } | null)?.tasksSeenAt;
+  if (seen) return seen;
+  return new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+}
+
+export interface TaskAlerts {
+  // Vencidas/próximas do prazo (janela dueSoonDays), abertas.
+  due: TaskRow[];
+  // Criadas/reatribuídas para mim desde a última visualização (sem as que já
+  // estão em `due` — badge = due + fresh sem duplicar).
+  fresh: TaskRow[];
+}
+
 /**
- * Tarefas ABERTAS com prazo vencido ou próximo (sino de alertas). RLS escopa
- * por usuário automaticamente. Janela = hoje + dueSoonDays (default 3).
+ * Alertas do sino: tarefas que NOTIFICAM o usuário (global / criador /
+ * responsável — notifyMeFilter), em duas seções. RLS ainda se aplica por baixo.
+ */
+export async function listTaskAlerts(
+  dueSoonDays: number = DEFAULT_DUE_SOON_DAYS
+): Promise<TaskAlerts> {
+  const session = await getSessionInfo();
+  if (!session) return { due: [], fresh: [] };
+  const supabase = await createClient();
+  const respIds = await ownResponsibleIds(supabase, session.user.id);
+  const notify = notifyMeFilter(session.user.id, respIds);
+  const limitIso = addDaysIso(todayBrasiliaIso(), Math.max(0, dueSoonDays));
+  const since = await tasksSeenSince(supabase, session.user.id);
+
+  const [{ data: due }, { data: fresh }] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select(TASK_COLS_WITH_RECORD)
+      .is("completed_at", null)
+      .not("due_date", "is", null)
+      .lte("due_date", limitIso)
+      .or(notify)
+      .order("due_date", { ascending: true })
+      .limit(50),
+    supabase
+      .from("tasks")
+      .select(TASK_COLS_WITH_RECORD)
+      .is("completed_at", null)
+      .is("parent_task_id", null)
+      .or(notify)
+      .or(`created_at.gt.${since},assigned_at.gt.${since}`)
+      .order("created_at", { ascending: false })
+      .limit(50),
+  ]);
+
+  const dueRows = (due ?? []) as unknown as TaskRow[];
+  const dueIds = new Set(dueRows.map((t) => t.id));
+  const freshRows = ((fresh ?? []) as unknown as TaskRow[]).filter(
+    (t) => !dueIds.has(t.id)
+  );
+  return { due: dueRows, fresh: freshRows };
+}
+
+/** Contagem p/ o badge do sino (novas + com prazo, sem duplicar). */
+export async function countTaskAlerts(): Promise<number> {
+  const { due, fresh } = await listTaskAlerts();
+  return due.length + fresh.length;
+}
+
+/** Carimba a marca d'água das "Novas" (abrir o sino marca como visto). */
+export async function markTasksSeen(): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const current = (data?.settings as Record<string, unknown> | null) ?? {};
+  await supabase.from("user_settings").upsert(
+    {
+      user_id: session.user.id,
+      settings: { ...current, tasksSeenAt: new Date().toISOString() },
+    },
+    { onConflict: "user_id" }
+  );
+}
+
+/**
+ * Tarefas ABERTAS com prazo vencido ou próximo (sino de alertas), filtradas
+ * pela regra de notificação (global / criador / responsável).
  */
 export async function listDueTasks(
   dueSoonDays: number = DEFAULT_DUE_SOON_DAYS
@@ -307,6 +484,7 @@ export async function listDueTasks(
   const session = await getSessionInfo();
   if (!session) return [];
   const supabase = await createClient();
+  const respIds = await ownResponsibleIds(supabase, session.user.id);
   const limitIso = addDaysIso(todayBrasiliaIso(), Math.max(0, dueSoonDays));
   const { data } = await supabase
     .from("tasks")
@@ -314,6 +492,7 @@ export async function listDueTasks(
     .is("completed_at", null)
     .not("due_date", "is", null)
     .lte("due_date", limitIso)
+    .or(notifyMeFilter(session.user.id, respIds))
     .order("due_date", { ascending: true })
     .limit(50);
   return (data ?? []) as unknown as TaskRow[];

@@ -17,17 +17,24 @@ import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { PERIOD_PRESETS } from "@/lib/widgets/period";
+import { updateBoardSettings } from "@/app/(app)/dashboards/actions";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import type { KanbanBoardData, KanbanColumnCards } from "@/lib/kanban/data";
 import { computeDateOnMove } from "@/lib/kanban/date-move";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
+  KANBAN_MAX_COLUMNS,
   KANBAN_NO_VALUE_KEY,
   KANBAN_OVERFLOW_KEY,
   type KanbanDateBucket,
   type KanbanSettings,
 } from "@/lib/kanban/types";
+import {
+  addColumnOverride,
+  reorderColumnOverrides,
+} from "@/lib/kanban/columns";
 import { moveTaskPhase } from "@/lib/tasks/actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import type { TaskRow } from "@/lib/tasks/types";
 import { fetchBoardAgenda, type AgendaResult } from "@/lib/agenda/actions";
 import { monthGrid, weekOf } from "@/lib/agenda/month-grid";
@@ -49,6 +56,7 @@ import {
 } from "./kanban-board";
 import { KanbanList } from "./kanban-list";
 import { ColumnConfigPopover } from "./column-config-popover";
+import { BoardAppearancePopover } from "./board-appearance-popover";
 
 const PERIOD_OPTIONS: ComboboxOption[] = [
   { value: "", label: "Todo o período" },
@@ -85,6 +93,22 @@ export function KanbanPageClient({
   const searchParams = useSearchParams();
   const [view, setView] = useState<View>("kanban");
   const isTasks = kanban.mode === "tarefas";
+  const isCustom = !isTasks && kanban.columnSource === "custom";
+
+  // Event bus: os dados do quadro vêm do RSC e revalidateTasks() não cobre
+  // /kanbans/[id] — tarefa mudada em outra superfície força o re-render aqui.
+  useDataChanged(() => router.refresh());
+
+  // Persistência das colunas (spread completo do settings — updateBoardSettings
+  // sobrescreve o jsonb inteiro).
+  const persistKanban = async (next: KanbanSettings) => {
+    const res = await updateBoardSettings(boardId, {
+      ...settings,
+      kanban: next,
+    });
+    if (res.ok) router.refresh();
+    return res;
+  };
 
   // ---- Agenda (3ª visão): fetch deferido do range visível ----
   const [agendaAnchor, setAgendaAnchor] = useState(todayBrasiliaIso());
@@ -125,6 +149,8 @@ export function KanbanPageClient({
   // campo, ou data concreta calculada do bucket.
   function quickCreateDefaults(colKey: string): Record<string, string> | null {
     if (colKey === KANBAN_OVERFLOW_KEY) return null;
+    // Personalizar: sem prefill — registro novo nasce na primeira coluna.
+    if (kanban.columnSource === "custom") return {};
     if (kanban.dateBucket && kanban.dateField) {
       if (colKey === KANBAN_NO_VALUE_KEY) return {};
       const iso = computeDateOnMove(
@@ -191,6 +217,13 @@ export function KanbanPageClient({
     ? data.columns.flatMap((c) => c.cards.map((card) => card.task!)).filter(Boolean)
     : [];
 
+  // Aparência do seletor de visão (as "abas" do kanban).
+  const sw = kanban.appearance?.switcher;
+  const swStyle = (active: boolean): React.CSSProperties => ({
+    background: active ? sw?.activeBg : sw?.inactiveBg,
+    color: active ? sw?.activeText : sw?.inactiveText,
+  });
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -202,6 +235,7 @@ export function KanbanPageClient({
               variant="ghost"
               size="sm"
               className={cn("h-7 gap-1 px-2", view === "kanban" && "bg-muted")}
+              style={swStyle(view === "kanban")}
               onClick={() => setView("kanban")}
               aria-pressed={view === "kanban"}
             >
@@ -212,6 +246,7 @@ export function KanbanPageClient({
               variant="ghost"
               size="sm"
               className={cn("h-7 gap-1 px-2", view === "lista" && "bg-muted")}
+              style={swStyle(view === "lista")}
               onClick={() => setView("lista")}
               aria-pressed={view === "lista"}
             >
@@ -222,6 +257,7 @@ export function KanbanPageClient({
               variant="ghost"
               size="sm"
               className={cn("h-7 gap-1 px-2", view === "agenda" && "bg-muted")}
+              style={swStyle(view === "agenda")}
               onClick={() => setView("agenda")}
               aria-pressed={view === "agenda"}
             >
@@ -259,7 +295,16 @@ export function KanbanPageClient({
           ) : null}
 
           {canConfig ? (
-            <ColumnConfigPopover boardId={boardId} settings={settings} data={data} />
+            <>
+              <ColumnConfigPopover
+                kanban={kanban}
+                data={data}
+                onSave={(next) =>
+                  updateBoardSettings(boardId, { ...settings, kanban: next })
+                }
+              />
+              <BoardAppearancePopover boardId={boardId} settings={settings} />
+            </>
           ) : null}
 
           {isTasks && taskCtx ? (
@@ -283,11 +328,36 @@ export function KanbanPageClient({
         <KanbanBoard
           data={data}
           settings={kanban}
-          canMove={isTasks || recordCtx.canEditValues}
+          canMove={isTasks || isCustom || recordCtx.canEditValues}
           recordCtx={recordCtx}
           taskCtx={isTasks ? taskCtx : undefined}
           onMove={isTasks ? onMoveTask : undefined}
           columnExtra={columnExtra}
+          owner={{ kind: "board", id: boardId }}
+          canReorderColumns={canConfig}
+          onReorderColumns={
+            canConfig
+              ? (keys) =>
+                  persistKanban({
+                    ...kanban,
+                    columns: reorderColumnOverrides(kanban, keys),
+                  })
+              : undefined
+          }
+          onAddColumn={
+            canConfig && (isTasks || isCustom)
+              ? (label) => {
+                  const cols = addColumnOverride(kanban, label);
+                  if (!cols) {
+                    return Promise.resolve({
+                      ok: false,
+                      message: `Limite de ${KANBAN_MAX_COLUMNS} colunas.`,
+                    });
+                  }
+                  return persistKanban({ ...kanban, columns: cols });
+                }
+              : undefined
+          }
         />
       ) : view === "agenda" ? (
         <AgendaView
@@ -314,7 +384,11 @@ export function KanbanPageClient({
           emptyMessage="Nenhuma tarefa neste quadro."
         />
       ) : (
-        <KanbanList data={data} recordCtx={recordCtx} />
+        <KanbanList
+          data={data}
+          recordCtx={recordCtx}
+          appearance={kanban.appearance}
+        />
       )}
     </div>
   );

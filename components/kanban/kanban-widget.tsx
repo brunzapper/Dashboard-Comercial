@@ -16,16 +16,23 @@ import { cn } from "@/lib/utils";
 import type { Widget } from "@/lib/widgets/types";
 import type { KanbanColumnCards } from "@/lib/kanban/data";
 import { moveTaskPhase } from "@/lib/tasks/actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import {
   runKanbanWidget,
   type KanbanWidgetResult,
 } from "@/app/(app)/dashboards/kanban-actions";
+import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
+import {
+  addColumnOverride,
+  reorderColumnOverrides,
+} from "@/lib/kanban/columns";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import {
   KanbanBoard,
   type KanbanDragPayload,
 } from "./kanban-board";
 import { KanbanList } from "./kanban-list";
+import { ColumnConfigPopover } from "./column-config-popover";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import {
   TaskSheet,
@@ -34,9 +41,11 @@ import {
 import { computeDateOnMove } from "@/lib/kanban/date-move";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
+  KANBAN_MAX_COLUMNS,
   KANBAN_NO_VALUE_KEY,
   KANBAN_OVERFLOW_KEY,
   type KanbanDateBucket,
+  type KanbanSettings,
 } from "@/lib/kanban/types";
 
 export function KanbanWidget({
@@ -45,18 +54,26 @@ export function KanbanWidget({
   userRoles,
   canEditValues,
   canManageFields,
+  canConfig,
 }: {
   widget: Widget;
   dashboardId: string;
   userRoles: string[];
   canEditValues: boolean;
   canManageFields: boolean;
+  // Pode configurar colunas do quadro (dono do dashboard/admin — canEdit).
+  canConfig?: boolean;
 }) {
   const snapshotMode = useSnapshotMode();
   const readOnly = snapshotMode.snapshot;
   const search = useSearchParams().toString();
   const [fetched, setFetched] = useState<KanbanWidgetResult | null>(null);
   const [view, setView] = useState<"kanban" | "lista">("kanban");
+
+  // Event bus: tarefa/registro/comentário mudou em qualquer superfície →
+  // re-busca o quadro (o debounce abaixo coalesce rajadas de eventos).
+  const [tick, setTick] = useState(0);
+  useDataChanged(() => setTick((t) => t + 1));
 
   const cfgKey = JSON.stringify(widget.settings?.kanban ?? {});
   useEffect(() => {
@@ -71,7 +88,7 @@ export function KanbanWidget({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [readOnly, dashboardId, widget.id, search, cfgKey]);
+  }, [readOnly, dashboardId, widget.id, search, cfgKey, tick]);
 
   // Snapshot: resultado precomputado (só modo registros; tarefas ficam fora).
   const result: KanbanWidgetResult | null = readOnly
@@ -109,6 +126,20 @@ export function KanbanWidget({
 
   const kanban = result.kanban;
   const isTasks = kanban.mode === "tarefas";
+  const isCustom = !isTasks && kanban.columnSource === "custom";
+  // Gestão de colunas no widget: quando as colunas pertencem ao PRÓPRIO widget
+  // (widget de tarefas apontando p/ board dedicado usa as fases DO board — lá
+  // é que se editam).
+  const ownsColumns = !(isTasks && kanban.taskBoardId);
+  const canManageColumns = Boolean(canConfig) && !readOnly && ownsColumns;
+  const persistKanban = async (next: KanbanSettings) => {
+    const res = await saveWidgetSettings(widget.id, dashboardId, {
+      ...widget.settings,
+      kanban: next,
+    });
+    if (res.ok) setTick((t) => t + 1);
+    return res;
+  };
   const recordCtx = {
     fields: result.fields,
     responsibles: result.responsibles,
@@ -126,6 +157,8 @@ export function KanbanWidget({
 
   function quickCreateDefaults(colKey: string): Record<string, string> | null {
     if (colKey === KANBAN_OVERFLOW_KEY) return null;
+    // Personalizar: sem prefill — registro novo nasce na primeira coluna.
+    if (kanban.columnSource === "custom") return {};
     if (kanban.dateBucket && kanban.dateField) {
       if (colKey === KANBAN_NO_VALUE_KEY) return {};
       const iso = computeDateOnMove(
@@ -194,14 +227,29 @@ export function KanbanWidget({
     );
   }
 
+  // Aparência do seletor de visão (as "abas" do kanban).
+  const sw = kanban.appearance?.switcher;
+  const swStyle = (active: boolean): React.CSSProperties => ({
+    background: active ? sw?.activeBg : sw?.inactiveBg,
+    color: active ? sw?.activeText : sw?.inactiveText,
+  });
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-1">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1.5">
+        {canManageColumns ? (
+          <ColumnConfigPopover
+            kanban={kanban}
+            data={result.data}
+            onSave={persistKanban}
+          />
+        ) : null}
         <div className="flex rounded-md border p-0.5">
           <Button
             variant="ghost"
             size="sm"
             className={cn("h-6 gap-1 px-1.5 text-xs", view === "kanban" && "bg-muted")}
+            style={swStyle(view === "kanban")}
             onClick={() => setView("kanban")}
             aria-pressed={view === "kanban"}
           >
@@ -212,6 +260,7 @@ export function KanbanWidget({
             variant="ghost"
             size="sm"
             className={cn("h-6 gap-1 px-1.5 text-xs", view === "lista" && "bg-muted")}
+            style={swStyle(view === "lista")}
             onClick={() => setView("lista")}
             aria-pressed={view === "lista"}
           >
@@ -224,16 +273,46 @@ export function KanbanWidget({
         <KanbanBoard
           data={result.data}
           settings={kanban}
-          canMove={!readOnly && (isTasks || canEditValues)}
+          canMove={!readOnly && (isTasks || isCustom || canEditValues)}
           recordCtx={recordCtx}
           taskCtx={isTasks ? taskCtx : undefined}
           onMove={isTasks ? onMoveTask : undefined}
           columnExtra={columnExtra}
           readOnly={readOnly}
           compact
+          owner={{ kind: "widget", id: widget.id }}
+          canReorderColumns={canManageColumns}
+          onReorderColumns={
+            canManageColumns
+              ? (keys) =>
+                  persistKanban({
+                    ...kanban,
+                    columns: reorderColumnOverrides(kanban, keys),
+                  })
+              : undefined
+          }
+          onAddColumn={
+            canManageColumns && (isTasks || isCustom)
+              ? (label) => {
+                  const cols = addColumnOverride(kanban, label);
+                  if (!cols) {
+                    return Promise.resolve({
+                      ok: false,
+                      message: `Limite de ${KANBAN_MAX_COLUMNS} colunas.`,
+                    });
+                  }
+                  return persistKanban({ ...kanban, columns: cols });
+                }
+              : undefined
+          }
         />
       ) : (
-        <KanbanList data={result.data} recordCtx={recordCtx} readOnly={readOnly} />
+        <KanbanList
+          data={result.data}
+          recordCtx={recordCtx}
+          readOnly={readOnly}
+          appearance={kanban.appearance}
+        />
       )}
     </div>
   );

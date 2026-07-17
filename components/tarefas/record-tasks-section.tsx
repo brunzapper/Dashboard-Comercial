@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 
 import type { OptionItem } from "@/lib/records/types";
 import { listRecordTasks } from "@/lib/tasks/actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import type { TaskRow } from "@/lib/tasks/types";
 import { TaskList } from "./task-list";
 import { TaskSheet, type TaskFormContext } from "./task-sheet";
@@ -41,6 +42,12 @@ export function RecordTasksSection({
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // Event bus: tarefa deste registro mudou em outra superfície (sino, feed,
+  // kanban) → recarrega a seção. Sem recordId no evento = origem desconhecida.
+  useDataChanged((d) => {
+    if (d.kind === "task" && (!d.recordId || d.recordId === recordId)) reload();
+  });
 
   return (
     <div className="flex flex-col gap-2 border-t pt-4">

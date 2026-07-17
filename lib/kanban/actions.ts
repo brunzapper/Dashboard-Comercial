@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 17/07/2026
 // Server Actions do Kanban. Mover card de REGISTRO reaproveita updateRecordField
 // (permissão edit_record_values, coerção, field_modified_at, recomputo de
 // fórmulas, audit_log e revalidate vêm de graça — mover card É uma edição de
@@ -8,6 +8,10 @@
 // em registros de Sync e campos mapeados/marcados; fontes manuais são no-op).
 // Mock (0051): congelado no produto — bloqueamos o move aqui com mensagem
 // amigável (o trigger do banco só reverteria silenciosamente alguns campos).
+// v1.1 (17/07/2026): colunas "Personalizar" (input.custom) — o move grava um
+//   POSICIONAMENTO da visão (kanban_placements, 0067; RLS = visualizador do
+//   dashboard) e NÃO toca no registro; a guarda de mock permanece (UX
+//   consistente entre modos).
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -39,6 +43,9 @@ export interface MoveRecordCardInput {
   // efeito em registros de Sync e campos mapeados/marcados; caso contrário é
   // no-op. Default (ausente/false) = edição local, não altera a origem.
   writeBack?: boolean;
+  // Colunas "Personalizar": posiciona o card na VISÃO (kanban_placements) em
+  // vez de editar o registro. ownerKind/ownerId = widget kanban ou board.
+  custom?: { ownerKind: "widget" | "board"; ownerId: string };
 }
 
 /** Move um card de registro: grava o novo valor do campo de agrupamento. */
@@ -64,6 +71,32 @@ export async function moveRecordCard(
       ok: false,
       message: "Registros de demonstração são congelados e não podem ser movidos.",
     };
+  }
+
+  // Colunas "Personalizar": upsert do posicionamento da visão (não toca no
+  // registro; a RLS de kanban_placements decide — visualizador do dashboard).
+  if (input.custom) {
+    const ownerCol =
+      input.custom.ownerKind === "widget" ? "widget_id" : "board_id";
+    const { data, error } = await supabase
+      .from("kanban_placements")
+      .upsert(
+        {
+          [ownerCol]: input.custom.ownerId,
+          record_id: input.recordId,
+          column_key: input.targetKey,
+          // Fracionária: movido vai ao topo da coluna destino.
+          position: -Date.now(),
+          updated_by: session.user.id,
+        },
+        { onConflict: `${ownerCol},record_id` }
+      )
+      .select("id");
+    if (error) return { ok: false, message: error.message };
+    if (!data || data.length === 0) {
+      return { ok: false, message: "Sem permissão para mover neste quadro." };
+    }
+    return { ok: true };
   }
 
   // Bucket de data: calcula a data concreta do destino e grava no campo.

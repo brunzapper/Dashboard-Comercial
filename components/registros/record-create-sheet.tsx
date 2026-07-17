@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/sheet";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { createRecord, type CreateRecordState } from "@/lib/records/actions";
+import { emitDataChanged } from "@/lib/tasks/events";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
 
 const initial: CreateRecordState = {};
@@ -138,7 +139,10 @@ export function RecordCreateSheet({
     // Fecha o painel quando a Server Action conclui com sucesso.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (state.ok) setOpen(false);
-    if (state.ok && state.id && onCreated) onCreated(state.id);
+    if (state.ok) {
+      emitDataChanged({ kind: "record", recordId: state.id ?? null });
+      if (state.id && onCreated) onCreated(state.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.ok, state.id]);
 

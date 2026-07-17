@@ -20,8 +20,7 @@ import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
 import { TaskBell } from "@/components/layout/task-bell";
-import { addDaysIso, DEFAULT_DUE_SOON_DAYS } from "@/lib/tasks/alerts";
-import { todayBrasiliaIso } from "@/lib/date/today";
+import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
 
@@ -80,14 +79,10 @@ export default async function AppLayout({
     (userSettings?.settings as { sidebarPinned?: boolean } | null)
       ?.sidebarPinned ?? false;
 
-  // Sino de alertas: contagem de tarefas ABERTAS vencidas/próximas do usuário
-  // (RLS escopa). Erro (ex.: migração 0063 pendente) cai em 0 sem quebrar.
-  const { count: dueCount } = await supabase
-    .from("tasks")
-    .select("id", { count: "exact", head: true })
-    .is("completed_at", null)
-    .not("due_date", "is", null)
-    .lte("due_date", addDaysIso(todayBrasiliaIso(), DEFAULT_DUE_SOON_DAYS));
+  // Sino de alertas: novas + com prazo, com a regra de notificação (global /
+  // criador / responsável) — mesma conta do badge no client (countTaskAlerts).
+  // Erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
+  const dueCount = await countTaskAlerts().catch(() => 0);
 
   // Conteúdo da barra montado no server (itens já filtrados por papel);
   // o AppShell (client) controla ocultar/fixar/tela cheia.

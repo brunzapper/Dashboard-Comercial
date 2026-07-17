@@ -179,6 +179,8 @@ export async function runKanbanWidget(
     let q = supabase
       .from("tasks")
       .select(TASK_COLS_WITH_RECORD)
+      // Subtarefas não viram card — aparecem no feed da tarefa pai.
+      .is("parent_task_id", null)
       .order("position", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(500);
@@ -235,10 +237,18 @@ export async function runKanbanWidget(
   const period = periodByWidget[widgetId] ?? null;
 
   try {
-    const data = await runKanban(supabase, kanban, period, fields, {
-      responsibles: responsibleLabels,
-      operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
-    });
+    const data = await runKanban(
+      supabase,
+      kanban,
+      period,
+      fields,
+      {
+        responsibles: responsibleLabels,
+        operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
+      },
+      // Colunas "Personalizar": posicionamentos escopados a ESTE widget.
+      { kind: "widget", id: widgetId }
+    );
     const sourceDef = sources.find((s) => s.key === kanban.source);
     const canEditValues = session.permissions.includes("edit_record_values");
     return {

@@ -14,6 +14,7 @@ import {
 } from "@/lib/agenda/actions";
 import { addDays, monthGrid, weekOf } from "@/lib/agenda/month-grid";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import { useDataChanged } from "@/lib/tasks/events";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import type { TaskFormContext } from "@/components/tarefas/task-sheet";
 import { AgendaView, type AgendaViewMode } from "./agenda-view";
@@ -57,6 +58,11 @@ export function AgendaWidget({
     if (snapshotMode.snapshot) return;
     reload();
   }, [snapshotMode.snapshot, reload]);
+
+  // Event bus: tarefa criada/alterada em qualquer superfície → recarrega.
+  useDataChanged(() => {
+    if (!snapshotMode.snapshot) reload();
+  });
 
   if (snapshotMode.snapshot) {
     return (

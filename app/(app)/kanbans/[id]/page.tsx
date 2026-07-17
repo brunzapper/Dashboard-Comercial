@@ -132,6 +132,8 @@ export default async function KanbanPage({
       .from("tasks")
       .select(TASK_COLS_WITH_RECORD)
       .eq("board_id", id)
+      // Subtarefas não viram card — aparecem no feed da tarefa pai.
+      .is("parent_task_id", null)
       .order("position", { ascending: true })
       .order("created_at", { ascending: false });
     data = taskBoardData(
@@ -140,10 +142,18 @@ export default async function KanbanPage({
       responsibleLabels
     );
   } else {
-    data = await runKanban(supabase, kanban, period, fields, {
-      responsibles: responsibleLabels,
-      operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
-    });
+    data = await runKanban(
+      supabase,
+      kanban,
+      period,
+      fields,
+      {
+        responsibles: responsibleLabels,
+        operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
+      },
+      // Colunas "Personalizar": posicionamentos escopados a ESTE board.
+      { kind: "board", id }
+    );
   }
 
   const canConfig = isAdmin || board.owner_user_id === session.user.id;

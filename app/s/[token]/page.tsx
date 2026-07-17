@@ -759,7 +759,10 @@ export default async function SnapshotPage({
           kanban,
           periodByWidget[w.id] ?? null,
           fields,
-          { responsibles: fkLabels, operations: fkLabels }
+          { responsibles: fkLabels, operations: fkLabels },
+          // Personalizar no snapshot: o adapter do dataset congelado não tem
+          // kanban_placements — o try/catch interno derruba tudo na 1ª coluna.
+          { kind: "widget", id: w.id }
         );
         kanbanResults[w.id] = {
           data,

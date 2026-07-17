@@ -60,6 +60,7 @@ const BUCKET_OPTIONS: ComboboxOption[] = [
 const GROUP_KIND_OPTIONS: ComboboxOption[] = [
   { value: "field", label: "Valores de um campo (ex.: etapa)" },
   { value: "date", label: "Períodos de um campo de data" },
+  { value: "custom", label: "Personalizar (colunas livres)" },
 ];
 
 const MODE_OPTIONS: ComboboxOption[] = [
@@ -191,8 +192,9 @@ function NewBoardForm({
               aria-label="Tipo de agrupamento"
             />
             <p className="text-muted-foreground text-xs">
-              Mover um card entre colunas altera o valor (ou a data) do campo no
-              registro.
+              {groupKind === "custom"
+                ? "Colunas livres: mover um card NÃO altera o registro — a posição vale só para este quadro."
+                : "Mover um card entre colunas altera o valor (ou a data) do campo no registro."}
             </p>
           </div>
         </>

@@ -147,17 +147,22 @@ export function recordGroupKey(
   return s === "" ? KANBAN_NO_VALUE_KEY : s;
 }
 
+/** Dono da visão (colunas "Personalizar"): widget kanban ou board dedicado. */
+export type KanbanOwner = { kind: "widget" | "board"; id: string };
+
 /**
  * Monta o quadro (modo registros): cards + colunas derivadas + agregados.
  * `period` é o período já resolvido (barra da página/dashboard); `defs` são as
- * field_definitions visíveis (options do selecao, rótulos, tipos).
+ * field_definitions visíveis (options do selecao, rótulos, tipos). `owner`
+ * escopa os posicionamentos das colunas "Personalizar" (kanban_placements).
  */
 export async function runKanban(
   supabase: SupabaseClient,
   settings: KanbanSettings,
   period: DashboardPeriod | null,
   defs: FieldDefinition[],
-  labels: KanbanLabels = {}
+  labels: KanbanLabels = {},
+  owner?: KanbanOwner
 ): Promise<KanbanBoardData> {
   const config: WidgetConfig = {
     sources: settings.source ? [settings.source] : [],
@@ -168,6 +173,36 @@ export async function runKanban(
   } as unknown as WidgetConfig;
 
   const records = await runRecordList(supabase, config, period ?? undefined);
+
+  // Colunas "Personalizar": posição do card é dado da visão
+  // (kanban_placements por widget/board). Falha silenciosa (migração 0067
+  // pendente, snapshot com dataset congelado) → todos na primeira coluna.
+  const isCustom = settings.columnSource === "custom";
+  const placements = new Map<string, { columnKey: string; position: number }>();
+  if (isCustom && owner) {
+    try {
+      const ownerCol = owner.kind === "widget" ? "widget_id" : "board_id";
+      const ids = records.map((r) => r.id);
+      const CHUNK = 200;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const slice = ids.slice(i, i + CHUNK);
+        if (slice.length === 0) continue;
+        const { data } = await supabase
+          .from("kanban_placements")
+          .select("record_id, column_key, position")
+          .eq(ownerCol, owner.id)
+          .in("record_id", slice);
+        for (const p of data ?? []) {
+          placements.set(p.record_id as string, {
+            columnKey: p.column_key as string,
+            position: Number(p.position) || 0,
+          });
+        }
+      }
+    } catch {
+      // sem posicionamentos — o quadro segue com tudo na primeira coluna
+    }
+  }
 
   // Tarefas ABERTAS por registro (badge do card). Falha silenciosa (ex.:
   // migração 0063 ainda não aplicada) não derruba o quadro.
@@ -198,7 +233,10 @@ export async function runKanban(
 
   const groupKeys: string[] = [];
   const cards: Omit<KanbanCard, "columnKey">[] = records.map((r) => {
-    const groupKey = recordGroupKey(r, settings);
+    // Personalizar: a "chave de grupo" é a coluna posicionada ("" = 1ª coluna).
+    const groupKey = isCustom
+      ? (placements.get(r.id)?.columnKey ?? "")
+      : recordGroupKey(r, settings);
     groupKeys.push(groupKey);
     const metricRaw = metricRef ? resolveRecordRef(r, metricRef) : null;
     const metricNum =
@@ -235,9 +273,25 @@ export async function runKanban(
     columns.map((c) => [c.key, []])
   );
   for (const card of cards) {
-    const columnKey = resolveCardColumn(card.groupKey, columns);
+    // Personalizar: coluna desconhecida/removida ou sem posição → 1ª coluna.
+    const columnKey = isCustom
+      ? byColumn.has(card.groupKey)
+        ? card.groupKey
+        : (columns[0]?.key ?? null)
+      : resolveCardColumn(card.groupKey, columns);
     if (!columnKey) continue; // coluna oculta
     byColumn.get(columnKey)?.push({ ...card, columnKey });
+  }
+  // Personalizar: ordena por posição fracionária (movidos recentes no topo;
+  // sem posição = 0 → abaixo dos movidos).
+  if (isCustom) {
+    for (const list of byColumn.values()) {
+      list.sort(
+        (a, b) =>
+          (placements.get(a.id)?.position ?? 0) -
+          (placements.get(b.id)?.position ?? 0)
+      );
+    }
   }
 
   const columnCards: KanbanColumnCards[] = columns.map((c) => {
