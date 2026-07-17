@@ -21,7 +21,15 @@
 // KPI (fundo/borda/abinha de destaque).
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Copy,
@@ -70,9 +78,12 @@ import {
 import { exportWidgetRecordsCsv } from "@/app/(app)/dashboards/export-actions";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
 import {
+  RECORD_LIST_PAGE_SIZE,
   parseViewFilter,
   searchHandledOnClient,
+  serverPaginatedList,
 } from "@/lib/widgets/view-filters";
+import { fetchWidgetRecordsPage } from "@/app/(app)/dashboards/record-list-actions";
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
@@ -114,6 +125,7 @@ export const WidgetCard = memo(function WidgetCard({
   widget,
   data,
   recordList,
+  recordListTotal,
   entityList,
   calcValue,
   calcVars,
@@ -151,6 +163,9 @@ export const WidgetCard = memo(function WidgetCard({
   widget: Widget;
   data: WidgetData;
   recordList: RecordRow[];
+  // Total de registros quando a lista é PAGINADA no servidor (recordList é só
+  // a página 1). Ausente = full fetch (paginação client-side, como antes).
+  recordListTotal?: number;
   entityList: EntityListRow[];
   calcValue: CalcWidgetResult | null;
   // Calculadora: valores das variáveis (por id) e expressão compartilhada.
@@ -252,6 +267,69 @@ export const WidgetCard = memo(function WidgetCard({
   const [clientQ, setClientQ] = useState(() =>
     clientSearch ? (parseViewFilter(sp.get(`tf_${widget.id}`)).q ?? "") : ""
   );
+
+  // Paginação server-side (serverPaginatedList): recordList é só a página 1;
+  // trocar de página busca as linhas via action (fetchWidgetRecordsPage), com
+  // o escopo reconstruído da URL. Quando as props do RSC mudam (refresh após
+  // edição/busca/navegação), volta à página 1 — as props JÁ são a página 1 do
+  // recorte novo (ajuste de estado em render, padrão do repo).
+  const serverPaged =
+    isRecordList &&
+    !isEntityList &&
+    typeof recordListTotal === "number" &&
+    serverPaginatedList(widget.settings);
+  const [srvPage, setSrvPage] = useState<{
+    page: number;
+    rows: RecordRow[];
+    fkLabels: Record<string, string>;
+  } | null>(null);
+  const [srvLoading, setSrvLoading] = useState(false);
+  const handleServerPage = useCallback(
+    (page: number) => {
+      if (page <= 1) {
+        setSrvPage(null); // página 1 = props do RSC (sempre atuais)
+        return;
+      }
+      setSrvLoading(true);
+      void fetchWidgetRecordsPage(
+        dashboardId,
+        widget.id,
+        window.location.search,
+        page - 1
+      )
+        .then((res) => {
+          if (!res.ok) return;
+          // Recorte encolheu (página pedida ficou vazia): volta à página 1.
+          if (res.rows.length === 0) setSrvPage(null);
+          else setSrvPage({ page, rows: res.rows, fkLabels: res.fkLabels });
+        })
+        .finally(() => setSrvLoading(false));
+    },
+    [dashboardId, widget.id]
+  );
+  // Props do RSC mudaram (refresh após edição/busca/período): re-busca a MESMA
+  // página no recorte novo em vez de voltar à página 1. Ref evita re-disparo
+  // quando só o srvPage muda; no mount é no-op (ref 0).
+  const srvPageNumRef = useRef(0);
+  srvPageNumRef.current = srvPage?.page ?? 0;
+  useEffect(() => {
+    if (srvPageNumRef.current > 1) handleServerPage(srvPageNumRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordList]);
+  const listFkLabels = useMemo(
+    () => (srvPage ? { ...fkLabels, ...srvPage.fkLabels } : fkLabels),
+    [fkLabels, srvPage]
+  );
+  const serverPageState = useMemo(() => {
+    if (!serverPaged) return undefined;
+    return {
+      page: srvPage?.page ?? 1,
+      total: recordListTotal,
+      pageSize: RECORD_LIST_PAGE_SIZE,
+      loading: srvLoading,
+      onPageChange: handleServerPage,
+    };
+  }, [serverPaged, srvPage, srvLoading, recordListTotal, handleServerPage]);
   // Aparência: charts/tabela/pizza/kpi e KANBAN (quadro/colunas/cards/abas —
   // settings.kanban.appearance); segue fora em filtro/calc/agenda.
   const canStyle = !isFilter && !isFieldFilter && !isCalc && !isAgenda;
@@ -433,11 +511,14 @@ export const WidgetCard = memo(function WidgetCard({
     }
     if (isRecordList) {
       // Busca client-side ativa: exporta só o que a tabela exibe (mesmo
-      // matcher em memória de record-search.ts).
+      // matcher em memória de record-search.ts). Widget paginado no servidor:
+      // exporta a PÁGINA visível (o conjunto completo sai pelo "Exportar
+      // registros (CSV)", que refaz a consulta no servidor).
+      const baseRecords = srvPage?.rows ?? recordList;
       const matcher = clientSearch
         ? recordSearchMatcher(clientQ, widget.settings?.searchFields, available)
         : null;
-      const visibleRecords = matcher ? recordList.filter(matcher) : recordList;
+      const visibleRecords = matcher ? baseRecords.filter(matcher) : baseRecords;
       const metricCols = (widget.metrics ?? []).filter((m) => m.field);
       const headers = [
         ...cols.map(exportColHeader),
@@ -836,7 +917,8 @@ export const WidgetCard = memo(function WidgetCard({
             />
           ) : isRecordList ? (
             <RecordListTable
-              records={recordList}
+              records={srvPage?.rows ?? recordList}
+              serverPage={serverPageState}
               searchQ={clientSearch ? clientQ : undefined}
               searchFields={widget.settings?.searchFields}
               columns={widget.settings?.columns ?? []}
@@ -845,7 +927,7 @@ export const WidgetCard = memo(function WidgetCard({
               available={available}
               userRoles={userRoles}
               canEditValues={canEditValues}
-              fkLabels={fkLabels}
+              fkLabels={listFkLabels}
               responsibleOptions={responsibleOptions}
               appearance={appearance}
               dateFormat={dateFormat}

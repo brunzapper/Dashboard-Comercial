@@ -191,6 +191,7 @@ export type ResponsibleOption = {
 // registros/aparência/props realmente mudam — não a cada churn do grid.
 export const RecordListTable = memo(function RecordListTable({
   records,
+  serverPage,
   searchQ,
   searchFields,
   columns,
@@ -209,6 +210,17 @@ export const RecordListTable = memo(function RecordListTable({
   onAppearanceChange,
 }: {
   records: RecordRow[];
+  // Paginação SERVER-SIDE (widgets elegíveis — serverPaginatedList): `records`
+  // é só a página corrente, já filtrada/ordenada pelo servidor; o pager usa
+  // `total` e delega a troca de página ao WidgetCard (onPageChange). Ausente =
+  // full fetch com sort/paginação client-side (comportamento original).
+  serverPage?: {
+    page: number;
+    total: number;
+    pageSize: number;
+    loading?: boolean;
+    onPageChange: (page: number) => void;
+  };
   // Busca textual client-side (WidgetCard, quando searchHandledOnClient):
   // termo digitado na TableFilterBar + campos de busca do widget. Ausentes =
   // sem filtro local (a busca, se houver, veio aplicada do servidor).
@@ -606,6 +618,9 @@ export const RecordListTable = memo(function RecordListTable({
   // (expandir grupo, trocar página, digitar) — só recomputa quando os dados/
   // config de ordenação mudam. rawValue lê via cols/fkLabels (nas deps).
   const rows = useMemo(() => {
+    // Página server-side: linhas já chegam filtradas/ordenadas do servidor —
+    // re-ordenar aqui só a página seria errado (a ordem vale sobre o conjunto).
+    if (serverPage) return filtered;
     if (t.sort?.column) {
       const { column, dir, colorOrder } = t.sort;
       return [...filtered].sort((a, b) => {
@@ -628,7 +643,7 @@ export const RecordListTable = memo(function RecordListTable({
     }
     return applyManualOrder(filtered, t.rowOrder, (r) => r.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, t.sort, t.rowOrder, t.rowColors, cols, fkLabels]);
+  }, [filtered, serverPage != null, t.sort, t.rowOrder, t.rowColors, cols, fkLabels]);
 
   const distinctRowFills = useMemo(
     () => distinctFills(rows.map((r) => t.rowColors?.[r.id]?.fill)),
@@ -723,16 +738,20 @@ export const RecordListTable = memo(function RecordListTable({
     displayItems = rows.map((r) => ({ kind: "data", row: r }));
   }
 
-  // Paginação no cliente: sem teto de registros, apenas 100 itens por página. A
-  // fatia é feita DEPOIS de sort/ordem manual/agrupamento, então a página reflete
-  // o conjunto inteiro.
+  // Paginação: no modo server-side, `records` já É a página corrente (o pager
+  // usa o total do servidor e delega a troca ao WidgetCard). No modo cliente:
+  // sem teto de registros, 100 itens por página, com a fatia DEPOIS de
+  // sort/ordem manual/agrupamento — a página reflete o conjunto inteiro.
   const PAGE_SIZE = 100;
-  const totalPages = Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
-  const current = Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
-  const pageItems = displayItems.slice(
-    (current - 1) * PAGE_SIZE,
-    current * PAGE_SIZE
-  );
+  const totalPages = serverPage
+    ? Math.max(1, Math.ceil(serverPage.total / serverPage.pageSize))
+    : Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
+  const current = serverPage
+    ? Math.min(serverPage.page, totalPages)
+    : Math.min(page, totalPages); // clamp p/ mudanças de filtro/dados
+  const pageItems = serverPage
+    ? displayItems
+    : displayItems.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
   // Classe do conteúdo interno da célula: cortar (…) ou quebrar linha.
   const cellText = t.cellText ?? "clip";
@@ -1451,21 +1470,30 @@ export const RecordListTable = memo(function RecordListTable({
         <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
           <span className="text-muted-foreground">
             Página {current} de {totalPages}
+            {serverPage?.loading ? " — carregando…" : ""}
           </span>
           <div className="flex gap-1">
             <Button
               variant="outline"
               size="sm"
-              disabled={current <= 1}
-              onClick={() => setPage(current - 1)}
+              disabled={current <= 1 || serverPage?.loading}
+              onClick={() =>
+                serverPage
+                  ? serverPage.onPageChange(current - 1)
+                  : setPage(current - 1)
+              }
             >
               Anterior
             </Button>
             <Button
               variant="outline"
               size="sm"
-              disabled={current >= totalPages}
-              onClick={() => setPage(current + 1)}
+              disabled={current >= totalPages || serverPage?.loading}
+              onClick={() =>
+                serverPage
+                  ? serverPage.onPageChange(current + 1)
+                  : setPage(current + 1)
+              }
             >
               Próxima
             </Button>

@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 16/07/2026
+// Versão: 1.4 | Data: 17/07/2026
+// v1.4 (17/07/2026): paginação server-side — construtor de consulta extraído
+//   (buildRecordListQuery) e novo runRecordListPage: widgets elegíveis
+//   (ver serverPaginatedList em ./view-filters) buscam SÓ a página visível
+//   com count exato, em vez do conjunto completo. Filtros @bucket (pós-fetch)
+//   caem no full fetch e paginam após o pós-filtro (total correto).
 // v1.3 (16/07/2026): seleciona `is_mock` (o kanban bloqueia arrastar mocks).
 // v1.2 (16/07/2026): regra dos mocks alinhada ao RPC — passa a inspecionar
 //   dimensões/métricas (caminho "Agrupar período") e a expandir unified: via
@@ -81,17 +86,19 @@ function postgrestCond(col: string, op: string, value: unknown): string | null {
 }
 
 /**
- * Lista os registros de um widget de Tabela em modo "registros individuais",
- * aplicando fontes/período/filtros do widget (mesma semântica de runWidget).
+ * Constrói a consulta de registros de um widget em modo lista (fontes/período/
+ * filtros — mesma semântica de runWidget) SEM executá-la. Compartilhado por
+ * runRecordList (conjunto completo) e runRecordListPage (página + count).
  */
-export async function runRecordList(
+function buildRecordListQuery(
   supabase: SupabaseClient,
   config: WidgetConfig,
-  period?: DashboardPeriod | null,
+  period: DashboardPeriod | null | undefined,
   // Catálogo de campos: usado só p/ resolver filtros unified:* (membros por
   // record_type). Ausente = filtros unificados são ignorados (compat).
-  available: AvailableField[] = []
-): Promise<RecordRow[]> {
+  available: AvailableField[],
+  opts?: { count?: boolean }
+) {
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   let filters = applyFilterSourceTargets(
     resolveFilters(config.filters ?? []),
@@ -131,7 +138,9 @@ export async function runRecordList(
   const passThrough = (rts: string[]) => `record_type.not.in.(${rts.join(",")})`;
 
   // Filtros primeiro (FilterBuilder), depois order/limit (TransformBuilder).
-  let q = supabase.from("records").select(RECORD_COLS);
+  let q = supabase
+    .from("records")
+    .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
   if (!includeMocks) q = q.eq("is_mock", false);
   for (const f of filters as WidgetFilter[]) {
     if (f.field === BUCKET_FIELD_SENTINEL) {
@@ -274,6 +283,46 @@ export async function runRecordList(
           bucketFilters.every((bf) => matchesBucketFilter(r, bf, available))
         );
 
+  return { q, hasBucketFilters: bucketFilters.length > 0, applyBucketFilters };
+}
+
+// Busca paginada p/ driblar o teto server-side do PostgREST ("Max Rows"), que
+// trunca respostas sem .range() (ex.: 100 ou 1000 linhas). Avança pelo total
+// REALMENTE lido (não por um passo fixo) e para só quando o lote vem vazio —
+// assim funciona seja o cap 100, 1000 ou qualquer outro, mesmo < BATCH.
+async function fetchAll(
+  tq: ReturnType<typeof buildRecordListQuery>["q"]
+): Promise<RecordRow[]> {
+  const BATCH = 1000;
+  const all: RecordRow[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await tq.range(from, from + BATCH - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as unknown as RecordRow[];
+    if (chunk.length === 0) break;
+    all.push(...chunk);
+    from += chunk.length;
+  }
+  return all;
+}
+
+/**
+ * Lista os registros de um widget de Tabela em modo "registros individuais",
+ * aplicando fontes/período/filtros do widget (mesma semântica de runWidget).
+ */
+export async function runRecordList(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  period?: DashboardPeriod | null,
+  available: AvailableField[] = []
+): Promise<RecordRow[]> {
+  const { q, applyBucketFilters } = buildRecordListQuery(
+    supabase,
+    config,
+    period,
+    available
+  );
+
   // Sem limite por padrão (o usuário pediu p/ remover o teto); só aplica quando
   // o widget define settings.limit explicitamente.
   const tq = q.order("source_created_at", { ascending: false, nullsFirst: false });
@@ -286,22 +335,66 @@ export async function runRecordList(
     return applyBucketFilters(records);
   }
 
-  // Busca paginada p/ driblar o teto server-side do PostgREST ("Max Rows"), que
-  // trunca respostas sem .range() (ex.: 100 ou 1000 linhas). Avança pelo total
-  // REALMENTE lido (não por um passo fixo) e para só quando o lote vem vazio —
-  // assim funciona seja o cap 100, 1000 ou qualquer outro, mesmo < BATCH.
-  const BATCH = 1000;
-  const all: RecordRow[] = [];
-  for (let from = 0; ; ) {
-    const { data, error } = await tq.range(from, from + BATCH - 1);
-    if (error) throw new Error(error.message);
-    const chunk = (data ?? []) as unknown as RecordRow[];
-    if (chunk.length === 0) break;
-    all.push(...chunk);
-    from += chunk.length;
-  }
+  const all = await fetchAll(tq);
   await attachMatches(supabase, all);
   return applyBucketFilters(all);
+}
+
+/**
+ * Versão PAGINADA de runRecordList (widgets elegíveis — serverPaginatedList):
+ * busca só a página pedida com count exato e ordenação no servidor (a
+ * ordenação vem de settings.appearance.table.sort quando traduzível; default =
+ * source_created_at desc, como sempre; `id` como desempate estável entre
+ * páginas). Filtros @bucket são pós-fetch: nesse caso cai no conjunto completo
+ * e pagina APÓS o pós-filtro (total correto, menos dados ao cliente).
+ */
+export async function runRecordListPage(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  period: DashboardPeriod | null | undefined,
+  available: AvailableField[],
+  opts: { pageIndex: number; pageSize: number }
+): Promise<{ rows: RecordRow[]; total: number }> {
+  const { q, hasBucketFilters, applyBucketFilters } = buildRecordListQuery(
+    supabase,
+    config,
+    period,
+    available,
+    { count: true }
+  );
+  const sort = config.settings?.appearance?.table?.sort;
+  const sortable =
+    sort?.column && (sort.dir === "asc" || sort.dir === "desc") ? sort : null;
+  // Espelha o sort do cliente: null/vazio primeiro no asc (String(v ?? "")).
+  const ordered = (
+    sortable
+      ? q.order(sortable.column, {
+          ascending: sortable.dir === "asc",
+          nullsFirst: sortable.dir === "asc",
+        })
+      : q.order("source_created_at", { ascending: false, nullsFirst: false })
+  ).order("id", { ascending: true });
+
+  const start = Math.max(0, opts.pageIndex) * opts.pageSize;
+
+  if (hasBucketFilters) {
+    const all = await fetchAll(ordered);
+    await attachMatches(supabase, all);
+    const filtered = applyBucketFilters(all);
+    return {
+      rows: filtered.slice(start, start + opts.pageSize),
+      total: filtered.length,
+    };
+  }
+
+  const { data, error, count } = await ordered.range(
+    start,
+    start + opts.pageSize - 1
+  );
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as unknown as RecordRow[];
+  await attachMatches(supabase, rows);
+  return { rows, total: count ?? rows.length };
 }
 
 // Preenche `__match` de cada registro (Fase 2): registro casado por fonte, para

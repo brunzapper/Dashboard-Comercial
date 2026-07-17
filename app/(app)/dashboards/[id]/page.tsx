@@ -34,7 +34,8 @@ import {
   yearQuarterOf,
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
-import { runRecordList } from "@/lib/widgets/record-list";
+import { runRecordList, runRecordListPage } from "@/lib/widgets/record-list";
+import { collectRecordFkLabels } from "@/lib/widgets/fk-labels";
 import {
   runEntityList,
   type EntityListRow,
@@ -85,8 +86,10 @@ import {
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import {
+  RECORD_LIST_PAGE_SIZE,
   parseViewFilter,
   searchHandledOnClient,
+  serverPaginatedList,
   viewStateToFilters,
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
@@ -665,6 +668,9 @@ export default async function DashboardPage({
   //    dentro do mesmo Promise.all (antes eram 3 ondas seriais próprias).
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
+  // Total de registros dos widgets-lista PAGINADOS no servidor (o cliente usa
+  // p/ montar o pager; ausente = widget de full fetch, paginação client-side).
+  const recordListTotalById: Record<string, number> = {};
   const entityListById: Record<string, EntityListRow[]> = {};
   const calcById: Record<string, CalcWidgetResult> = {};
   const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
@@ -812,12 +818,27 @@ export default async function DashboardPage({
           return;
         }
         try {
-          recordListById[w.id] = await runRecordList(
-            supabase,
-            config,
-            periodByWidget[w.id],
-            available
-          );
+          // Elegível: só a página 1 + count exato (serverPaginatedList — o
+          // WidgetCard busca as demais páginas via fetchWidgetRecordsPage).
+          // Inelegível (agrupado/ordem manual/sort exótico): full fetch atual.
+          if (serverPaginatedList(w.settings)) {
+            const { rows, total } = await runRecordListPage(
+              supabase,
+              config,
+              periodByWidget[w.id],
+              available,
+              { pageIndex: 0, pageSize: RECORD_LIST_PAGE_SIZE }
+            );
+            recordListById[w.id] = rows;
+            recordListTotalById[w.id] = total;
+          } else {
+            recordListById[w.id] = await runRecordList(
+              supabase,
+              config,
+              periodByWidget[w.id],
+              available
+            );
+          }
         } catch (e) {
           recordListById[w.id] = [];
           fail(e);
@@ -842,35 +863,11 @@ export default async function DashboardPage({
   );
 
   // Rótulos das colunas FK presentes nas tabelas de registros (id→nome).
-  const fkLabels: Record<string, string> = {};
-  const listRows = Object.values(recordListById).flat();
-  if (listRows.length > 0) {
-    const respIds = new Set<string>();
-    const opIds = new Set<string>();
-    const leadIds = new Set<string>();
-    for (const r of listRows) {
-      if (r.responsible_id) respIds.add(r.responsible_id);
-      if (r.operation_id) opIds.add(r.operation_id);
-      if (r.related_lead_id) leadIds.add(r.related_lead_id);
-    }
-    const [resp, ops, leads] = await Promise.all([
-      respIds.size
-        ? supabase.from("responsibles").select("id, display_name").in("id", [...respIds])
-        : Promise.resolve({ data: [] }),
-      opIds.size
-        ? supabase.from("operations").select("id, name").in("id", [...opIds])
-        : Promise.resolve({ data: [] }),
-      leadIds.size
-        ? supabase.from("records").select("id, title").in("id", [...leadIds])
-        : Promise.resolve({ data: [] }),
-    ]);
-    for (const r of resp.data ?? [])
-      fkLabels[r.id as string] = (r.display_name as string) ?? "—";
-    for (const o of ops.data ?? [])
-      fkLabels[o.id as string] = (o.name as string) ?? "—";
-    for (const l of leads.data ?? [])
-      fkLabels[l.id as string] = (l.title as string) ?? "—";
-  }
+  // Helper compartilhado com a action de paginação (lib/widgets/fk-labels.ts).
+  const fkLabels = await collectRecordFkLabels(
+    supabase,
+    Object.values(recordListById).flat()
+  );
 
   // Opções do SELECT de responsável editável (promise disparada antes da
   // computação dos widgets). Marca os responsáveis com vínculo no Bitrix: são
@@ -989,6 +986,7 @@ export default async function DashboardPage({
       widgets={widgets}
       dataById={dataById}
       recordListById={recordListById}
+      recordListTotalById={recordListTotalById}
       entityListById={entityListById}
       calcById={calcById}
       calcVarsById={calcVarsById}

@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 17/07/2026
+// v1.2 (17/07/2026): paginação server-side da lista de registros —
+//   `serverPaginatedList` (critério único de elegibilidade, compartilhado por
+//   page.tsx, widget-card e a action de página) + RECORD_LIST_PAGE_SIZE.
+//   Widgets elegíveis voltam a ter o q aplicado no SERVIDOR
+//   (searchHandledOnClient exclui os paginados).
 // v1.1 (17/07/2026): busca client-side na lista de registros — opção
 //   `skipSearch` em viewStateToFilters + helper `searchHandledOnClient`
 //   (critério único de "quem aplica o q": servidor ou cliente).
@@ -11,7 +16,8 @@
 // Busca textual: um único WidgetFilter com op 'ilike'. O `field` pode ser um
 // único campo ou vários unidos por '|' (OR entre colunas). O valor é o termo
 // cru — quem consulta (engine/record-list) envolve com '%...%'.
-import type { FilterOp, WidgetFilter } from "./types";
+import { CORE_FIELDS } from "./fields";
+import type { FilterOp, WidgetFilter, WidgetSettings } from "./types";
 
 const FILTER_OPS: ReadonlySet<FilterOp> = new Set<FilterOp>([
   "eq",
@@ -125,22 +131,66 @@ export function viewStateToFilters(
  * na URL segue tratado no servidor, como sempre.
  */
 export function searchHandledOnClient(
-  settings:
-    | {
-        rowMode?: string;
-        rowSource?: string;
-        limit?: number;
-        showFilterBar?: boolean;
-      }
-    | null
-    | undefined
+  settings: WidgetSettings | null | undefined
 ): boolean {
   return (
     settings?.rowMode === "records" &&
     (settings.rowSource ?? "records") === "records" &&
     !(typeof settings.limit === "number" && settings.limit > 0) &&
-    settings.showFilterBar !== false
+    settings.showFilterBar !== false &&
+    // Widget paginado no servidor: o q volta a ser aplicado no SERVIDOR (a
+    // navegação RSC da barra recomputa a página 1 já filtrada) — o cliente só
+    // recebe uma página, então filtrar localmente perderia resultados.
+    !serverPaginatedList(settings)
   );
+}
+
+// ===================== Paginação server-side do modo lista =====================
+
+/** Tamanho de página do modo lista (servidor e cliente usam o MESMO valor). */
+export const RECORD_LIST_PAGE_SIZE = 100;
+
+// Colunas do núcleo ordenáveis com segurança no servidor (colunas REAIS de
+// `records` — espelho da whitelist de filtros do modo lista, filterColumn em
+// ./record-list.ts). custom:/match:/unified: ficam de fora: custom ordenaria
+// numérico como texto (custom_fields->>k) e match/unified só existem pós-fetch.
+const SORTABLE_CORE_COLS = new Set<string>([
+  ...CORE_FIELDS.map((f) => f.field),
+  "record_type",
+]);
+
+/**
+ * O widget de lista de registros é PAGINADO NO SERVIDOR? Elegível quando toda
+ * a semântica atual pode ser reproduzida na consulta: sem agrupamento (grupos/
+ * subtotais/total geral enxergam o conjunto completo), sem "Agrupar período"
+ * (colunas com transform+agg viram níveis de grupo), sem ordem manual de
+ * linhas ativa e com a ordenação traduzível em ORDER BY (coluna do núcleo,
+ * asc/desc). Inelegível = mantém o full fetch atual (comportamento intacto).
+ * Servidor (page.tsx / action de página / export) e cliente (WidgetCard) DEVEM
+ * usar este mesmo critério — como o searchHandledOnClient acima.
+ */
+export function serverPaginatedList(
+  settings: WidgetSettings | null | undefined
+): boolean {
+  if (settings?.rowMode !== "records") return false;
+  if ((settings.rowSource ?? "records") !== "records") return false;
+  if (typeof settings.limit === "number" && settings.limit > 0) return false;
+  const t = settings.appearance?.table ?? {};
+  const groupLevels = (
+    t.groupBy == null ? [] : Array.isArray(t.groupBy) ? t.groupBy : [t.groupBy]
+  ).filter(Boolean);
+  if (groupLevels.length > 0) return false;
+  const cols = settings.columns ?? [];
+  if (cols.some((c) => c.transform && c.agg && c.agg !== "individual"))
+    return false;
+  const sort = t.sort;
+  if (sort?.column) {
+    if (sort.dir !== "asc" && sort.dir !== "desc") return false; // "color"
+    if (!SORTABLE_CORE_COLS.has(sort.column)) return false;
+  } else if ((t.rowOrder?.length ?? 0) > 0) {
+    return false; // ordem manual ativa (sem sort que a sobreponha)
+  }
+  return true;
 }
 
 /** Anexa os filtros de visualização aos do widget (AND). */

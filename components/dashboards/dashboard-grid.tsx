@@ -207,6 +207,7 @@ export function DashboardGrid({
   widgets,
   dataById,
   recordListById,
+  recordListTotalById,
   entityListById,
   calcById,
   fields,
@@ -248,6 +249,9 @@ export function DashboardGrid({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  // Total dos widgets-lista paginados no servidor (chave ausente = full fetch;
+  // opcional — o viewer de snapshots nunca pagina, dataset congelado).
+  recordListTotalById?: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   fields: FieldDefinition[];
@@ -874,6 +878,7 @@ export function DashboardGrid({
                     widget={w}
                     data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
                     recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
+                    recordListTotal={recordListTotalById?.[w.id]}
                     entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
                     calcValue={calcById[w.id] ?? null}
                     calcVars={calcVarsById[w.id]}
