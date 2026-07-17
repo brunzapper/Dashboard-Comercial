@@ -6,6 +6,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, Copy, Plus, Trash2 } from "lucide-react";
 
@@ -135,14 +136,17 @@ export function ApiKeysManager({
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             </Button>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="mt-2"
-            onClick={() => setCreated(null)}
-          >
-            Já copiei, fechar
-          </Button>
+          <div className="mt-2 flex items-center gap-3">
+            <Button size="sm" variant="ghost" onClick={() => setCreated(null)}>
+              Já copiei, fechar
+            </Button>
+            <Link
+              href="/configuracoes/integracoes/docs"
+              className="text-sm underline underline-offset-2"
+            >
+              Veja como usar esta chave →
+            </Link>
+          </div>
         </div>
       ) : null}
 
