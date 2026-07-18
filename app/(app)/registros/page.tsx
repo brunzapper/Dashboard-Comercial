@@ -1,5 +1,7 @@
-// Versão: 1.4 | Data: 16/07/2026
+// Versão: 1.5 | Data: 18/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v1.5 (18/07/2026): badge de write-backs pendentes (WritebackPendingBadge) —
+//   mostra "N aguardando envio ao Bitrix" com link p/ Configurações → Log.
 // v1.2 (05/07/2026): Fase 4 — listagem/filtros/edição (antes só o SyncPanel).
 // v1.3 (09/07/2026): Fase 8 — abas por fonte (Leads/Deals/Estudo). Cada aba
 //   filtra por record_type e mostra só as colunas daquela fonte (applies_to).
@@ -21,6 +23,7 @@ import {
 import { loadSources } from "@/lib/config/sources";
 import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
+import { WritebackPendingBadge } from "@/components/sync/writeback-pending-badge";
 import { ExportCsvButton } from "@/components/registros/export-csv-button";
 import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
@@ -230,6 +233,10 @@ export default async function RegistrosPage({
       </div>
 
       {isAdmin ? <SyncPanel lastSyncedAt={lastSyncedAt} /> : null}
+
+      {/* Fila de write-back: badge "N aguardando envio ao Bitrix" (some com 0).
+          Gestor/admin — mesmo público da página; a RLS da fila reforça. */}
+      <WritebackPendingBadge />
 
       {/* Abas por fonte (catálogo dinâmico) */}
       <div className="flex flex-wrap gap-1 border-b">

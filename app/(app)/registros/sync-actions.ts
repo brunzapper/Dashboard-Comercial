@@ -1,4 +1,4 @@
-// Versão: 2.0 | Data: 11/07/2026
+// Versão: 2.1 | Data: 18/07/2026
 // Server Actions do painel de sync (Bitrix), guardadas por admin. Desde a Fase de
 // sync automático, TODA a lógica de passos vive em lib/sync/bitrix/runner.ts —
 // aqui só validamos o admin e delegamos, usando o service role (createServiceClient),
@@ -7,9 +7,13 @@
 // v2.0: o navegador NÃO dirige mais o loop. O painel apenas ENFILEIRA o job
 // (startSyncJob) e observa o progresso (getActiveSyncJob); quem avança o job é o
 // tick agendado (/api/sync/tick), então navegar/fechar a aba não interrompe.
+// v2.1 (18/07/2026): getWritebackPendingCount — contagem de write-backs
+//   pendentes p/ o badge de /registros; client do USUÁRIO (a RLS 0038 já
+//   restringe a leitura da fila a quem tem view_all_records).
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   createJob,
@@ -68,4 +72,21 @@ export async function getSyncJobById(jobId: string): Promise<StepProgress | null
   if (err) return null;
   const db = createServiceClient();
   return getJob(db, jobId);
+}
+
+/**
+ * Quantos write-backs aguardam envio ao Bitrix (status='pending'). Consulta
+ * head/count barata com o client do usuário — a RLS (0038) já limita a leitura
+ * da fila a quem tem view_all_records (gestor/admin, o mesmo público de
+ * /registros). Sem a permissão, retorna 0 (o badge some).
+ */
+export async function getWritebackPendingCount(): Promise<number> {
+  const s = await getSessionInfo();
+  if (!s?.permissions.includes("view_all_records")) return 0;
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("bitrix_writeback_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  return count ?? 0;
 }
