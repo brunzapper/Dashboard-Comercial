@@ -25,10 +25,12 @@
 // A computação espelha app/(app)/dashboards/[id]/page.tsx, trocando o client
 // RLS pelo adapter do snapshot e as opções vivas pelas congeladas no config.
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
+import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { hashToken, isTokenShaped } from "@/lib/snapshots/token";
 import {
   SNAPSHOT_LIST_COLS,
@@ -101,7 +103,10 @@ import { SnapshotClient } from "@/components/snapshots/snapshot-client";
 import { frozenPeriodLabel } from "@/components/snapshots/labels";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
-import { loadSourceLabels } from "@/lib/config/source-labels";
+import {
+  loadSourceLabelsValue,
+  mergeSourceLabels,
+} from "@/lib/config/source-labels";
 
 // Sempre computa por request (os filtros do visitante vivem na URL) e nunca
 // entra em índice de busca.
@@ -142,13 +147,16 @@ export default async function SnapshotPage({
   const snap = snapData as unknown as SnapshotRow;
 
   // Auditoria de acesso (contagem aproximada; corrida entre requests é ok).
-  await service
-    .from("snapshots")
-    .update({
-      last_accessed_at: new Date().toISOString(),
-      access_count: (snap.access_count ?? 0) + 1,
-    })
-    .eq("id", snap.id);
+  // Roda DEPOIS da resposta (after) — o UPDATE não bloqueia a renderização.
+  after(async () => {
+    await service
+      .from("snapshots")
+      .update({
+        last_accessed_at: new Date().toISOString(),
+        access_count: (snap.access_count ?? 0) + 1,
+      })
+      .eq("id", snap.id);
+  });
 
   const cfg = (snap.config ?? {}) as SnapshotConfig;
   if (!cfg.dashboard || !Array.isArray(cfg.widgets)) {
@@ -167,29 +175,40 @@ export default async function SnapshotPage({
   const correspondences = cfg.correspondences ?? [];
   // Catálogo de fontes + rótulos curtos (dropdowns de campo do viewer) —
   // leitura VIVA via service role (config de exibição, não dado congelado;
-  // NUNCA policy anon — regra do projeto).
-  const sources = await loadSources(service);
+  // NUNCA policy anon — regra do projeto). Rótulos via loadSourceLabelsValue +
+  // mergeSourceLabels (mesmo split do layout autenticado) p/ buscar em
+  // paralelo com loadSources; partner rows entram na mesma leva (antes: três
+  // awaits seriais).
+  const [sources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
+    [
+      loadSources(service),
+      loadSourceLabelsValue(service),
+      // Partner rows (registros casados fora das restrições, presentes SÓ para
+      // resolver colunas match:): o RPC os exclui no SQL (`not partner_only`);
+      // no modo lista (PostgREST direto) eles são excluídos por pós-filtro com
+      // este conjunto de ids. Restrições de linhas reais NÃO são injetadas
+      // aqui: a cópia é a garantia física e o RPC re-aplica o predicado
+      // internamente, mock-aware (0057) — filtros AND injetados derrubariam os
+      // mocks.
+      service
+        .from("snapshot_records")
+        .select("id")
+        .eq("snapshot_id", snap.id)
+        .eq("partner_only", true),
+    ]
+  );
   const available = buildAvailableFields(fields, correspondences, sources);
-  const sourceLabels = await loadSourceLabels(service, sources);
+  const sourceLabels = mergeSourceLabels(sourceLabelsValue, sources);
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
   const allowQuickFilters = snap.allow_quick_filters;
   const allowWidgetFilters = snap.allow_widget_filters;
 
-  const db = snapshotClient(service, snap.id);
-
-  // Partner rows (registros casados fora das restrições, presentes SÓ para
-  // resolver colunas match:): o RPC os exclui no SQL (`not partner_only`);
-  // no modo lista (PostgREST direto) eles são excluídos por pós-filtro com
-  // este conjunto de ids. Restrições de linhas reais NÃO são injetadas aqui:
-  // a cópia é a garantia física e o RPC re-aplica o predicado internamente,
-  // mock-aware (0057) — filtros AND injetados derrubariam os mocks.
-  const { data: partnerRows } = await service
-    .from("snapshot_records")
-    .select("id")
-    .eq("snapshot_id", snap.id)
-    .eq("partner_only", true);
+  // Memoização por argumentos (a mesma do dashboard autenticado): widgets/
+  // notas/calculadoras duplicados geram RPCs idênticas — o memo intercepta
+  // `run_widget_query` ANTES de o adapter renomear p/ o RPC do snapshot.
+  const db = withRpcMemo(snapshotClient(service, snap.id));
   const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
   // Período congelado na criação (0059): default_period vira o período de
@@ -434,10 +453,14 @@ export default async function SnapshotPage({
     ? new Set(snap.allowed_operation_ids)
     : null;
 
+  // Todas as ondas de computação (widgets, rótulos FK, calc/calculadora/nota,
+  // tabela livre, kanban) são disparadas como promises e aguardadas numa
+  // BARREIRA ÚNICA adiante — antes eram ~6 await seriais. As únicas
+  // dependências reais são: rótulos FK ← widgets-lista; kanban ← rótulos FK.
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
   const entityListById: Record<string, EntityListRow[]> = {};
-  await Promise.all(
+  const widgetTasks =
     dataWidgets.map(async (w) => {
       if (isCalcWidget(w) || isCalculatorWidget(w) || isNoteWidget(w)) return;
       if (isQuickTableWidget(w)) return; // precomputado abaixo
@@ -536,14 +559,19 @@ export default async function SnapshotPage({
       } catch (e) {
         fail(e);
       }
-    })
-  );
+    });
 
   // Rótulos FK das tabelas de registros (ids congelados → nomes; leads saem da
-  // própria cópia via adapter).
+  // própria cópia via adapter). Só os widgets-lista alimentam recordListById:
+  // a busca dispara quando ELES terminam, em paralelo com o resto.
+  const listTasks = widgetTasks.filter((_, i) => {
+    const w = dataWidgets[i];
+    return isListWidget(w) && (w.settings?.rowSource ?? "records") === "records";
+  });
   const fkLabels: Record<string, string> = {};
-  const listRows = Object.values(recordListById).flat();
-  if (listRows.length > 0) {
+  const fkLabelsPromise = Promise.all(listTasks).then(async () => {
+    const listRows = Object.values(recordListById).flat();
+    if (listRows.length === 0) return;
     const respIds = new Set<string>();
     const opIds = new Set<string>();
     const leadIds = new Set<string>();
@@ -569,11 +597,11 @@ export default async function SnapshotPage({
       fkLabels[o.id as string] = (o.name as string) ?? "—";
     for (const l of leads.data ?? [])
       fkLabels[l.id as string] = (l.title as string) ?? "—";
-  }
+  });
 
   // ============ Métricas calculadas / calculadora / nota ============
   const calcById: Record<string, CalcWidgetResult> = {};
-  await Promise.all(
+  const calcPromise = Promise.all(
     dataWidgets.filter(isCalcWidget).map(async (w) => {
       try {
         const calcKey = w.settings?.calcField;
@@ -613,7 +641,7 @@ export default async function SnapshotPage({
   );
 
   const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
-  await Promise.all(
+  const calculatorPromise = Promise.all(
     dataWidgets.filter(isCalculatorWidget).map(async (w) => {
       const vars = w.settings?.calculator?.variables ?? [];
       const out: Record<string, CalcWidgetResult> = {};
@@ -641,7 +669,7 @@ export default async function SnapshotPage({
   );
 
   const noteById: Record<string, CalcWidgetResult[]> = {};
-  await Promise.all(
+  const notePromise = Promise.all(
     dataWidgets.filter(isNoteWidget).map(async (w) => {
       const exprs = (w.settings?.note?.exprs ?? []).slice(0, NOTE_MAX_EXPRS);
       noteById[w.id] = await Promise.all(
@@ -672,6 +700,7 @@ export default async function SnapshotPage({
   // SnapshotModeProvider (o widget pula o fetch em modo snapshot).
   const quickTableResults: Record<string, QuickTableResult> = {};
   const quickTableWidgets = dataWidgets.filter(isQuickTableWidget);
+  let quickTablePromise: Promise<unknown> = Promise.resolve();
   if (quickTableWidgets.length > 0) {
     // Catálogo de operandos das expressões {=…} — mesma montagem da action.
     const numeric = available.filter((f) => f.isNumeric);
@@ -689,7 +718,7 @@ export default async function SnapshotPage({
       ...condAggOperandRefs(numeric, customCond, customDate),
     ];
 
-    await Promise.all(
+    quickTablePromise = Promise.all(
       quickTableWidgets.map(async (w) => {
         const qt = w.settings?.quickTable;
         if (!qt) {
@@ -784,35 +813,52 @@ export default async function SnapshotPage({
   // caminho do modo lista). Tarefas nunca entram no snapshot: o adapter falha
   // fechado p/ a tabela `tasks` e o widget mostra placeholder.
   const kanbanResults: Record<string, KanbanWidgetResult> = {};
-  await Promise.all(
-    dataWidgets.filter(isKanbanWidget).map(async (w) => {
-      const kanban = w.settings?.kanban;
-      if (!kanban || kanban.mode !== "registros") return;
-      try {
-        const data = await runKanban(
-          db,
-          kanban,
-          periodByWidget[w.id] ?? null,
-          fields,
-          { responsibles: fkLabels, operations: fkLabels },
-          // Personalizar no snapshot: o adapter do dataset congelado não tem
-          // kanban_placements — o try/catch interno derruba tudo na 1ª coluna.
-          { kind: "widget", id: w.id }
-        );
-        kanbanResults[w.id] = {
-          data,
-          kanban,
-          fields: [],
-          responsibles: [],
-          operations: [],
-          quickCreateSource: null,
-        };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[snapshot] kanban ${w.id} falhou:`, msg);
-      }
-    })
+  // Kanban consome os rótulos FK — encadeia na promise deles (não em todos os
+  // widgets).
+  const kanbanPromise = fkLabelsPromise.then(() =>
+    Promise.all(
+      dataWidgets.filter(isKanbanWidget).map(async (w) => {
+        const kanban = w.settings?.kanban;
+        if (!kanban || kanban.mode !== "registros") return;
+        try {
+          const data = await runKanban(
+            db,
+            kanban,
+            periodByWidget[w.id] ?? null,
+            fields,
+            { responsibles: fkLabels, operations: fkLabels },
+            // Personalizar no snapshot: o adapter do dataset congelado não tem
+            // kanban_placements — o try/catch interno derruba tudo na 1ª
+            // coluna.
+            { kind: "widget", id: w.id }
+          );
+          kanbanResults[w.id] = {
+            data,
+            kanban,
+            fields: [],
+            responsibles: [],
+            operations: [],
+            quickCreateSource: null,
+          };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error(`[snapshot] kanban ${w.id} falhou:`, msg);
+        }
+      })
+    )
   );
+
+  // BARREIRA ÚNICA: tudo acima corre em paralelo (respeitadas as dependências
+  // widgets-lista → rótulos FK → kanban, encadeadas nas próprias promises).
+  await Promise.all([
+    ...widgetTasks,
+    fkLabelsPromise,
+    calcPromise,
+    calculatorPromise,
+    notePromise,
+    quickTablePromise,
+    kanbanPromise,
+  ]);
 
   // ============ Widgets a RENDERIZAR ============
   // Filtros de widget desabilitados: os cards de controle (filtro/filtro_campo)
