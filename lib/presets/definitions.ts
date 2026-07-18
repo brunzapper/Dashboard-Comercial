@@ -1,5 +1,7 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 18/07/2026
 // Definições declarativas dos dashboards preset (Fase 6B) + campos de apoio.
+// v1.1 (18/07/2026): remove `implementacao` dos campos locais de apoio — passou a
+//   ser campo sincronizado do Bitrix (UF_CRM_1778094396888; ver migração 0075).
 // Observação: o motor de widgets AGREGA (group by) — não lista registros linha a
 // linha. Por isso as "tabelas" dos presets são agregadas (por operação/vendedor),
 // aproximando o print ("mais ou menos"). Filtros usam tokens de período
@@ -52,16 +54,6 @@ export const PRESET_FIELDS: PresetField[] = [
     options: [],
     visible_to_roles: ["admin", "gestor", "vendedor"],
     editable_by_roles: ["admin", "gestor", "vendedor"],
-    is_local: true,
-    currency_mode: "inherit",
-  },
-  {
-    field_key: "implementacao",
-    label: "Implementação",
-    data_type: "moeda",
-    options: [],
-    visible_to_roles: ["admin", "gestor", "vendedor"],
-    editable_by_roles: ["admin", "gestor"],
     is_local: true,
     currency_mode: "inherit",
   },

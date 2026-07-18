@@ -66,7 +66,8 @@ No app (como admin):
   (com aninhamento), mapeie responsáveis→operações (prioridade 1 = padrão) e defina metas
   (global/operação/responsável — elas se comunicam por roll-up na leitura).
 - Na **home**, botão **"Gerar presets"** cria os 4 dashboards de exemplo (incluindo
-  "Performance comercial do mês") e os campos de apoio (forecast, implementação, etc.).
+  "Performance comercial do mês") e os campos de apoio (forecast, potencial, etc. —
+  "implementação" deixou de ser local: vem do Bitrix desde a migração 0075).
   É idempotente (pula o que já existe).
 
 ## Como aplicar a Fase 7 (Filtro de período interativo)

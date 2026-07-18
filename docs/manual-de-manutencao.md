@@ -134,6 +134,10 @@ npm run build      # o que a Vercel roda no deploy
 - [ ] Jobs continuam resumíveis (uma página por requisição; estado em `sync_jobs`).
 - [ ] Mapper/catalog: rótulos visuais vêm de `FIELD_LABELS`
   (`lib/sync/bitrix/catalog.ts`); após mudar catálogo, rode um Backfill.
+- [ ] Ao promover um campo descoberto (`bitrix_<id>`) a chave curada, reconcilie a
+  linha antiga de `field_definitions` numa migração ANTES do próximo catálogo — o
+  índice único `(source_system, source_field_id)` (0017) rejeita a chave nova
+  enquanto a descoberta existir (precedente: 0075, `fonte`/`implementacao`).
 - [ ] O sync **nunca** toca linhas mock (`source_system='manual'`,
   `source_id='mock_reuniao_*'`).
 
