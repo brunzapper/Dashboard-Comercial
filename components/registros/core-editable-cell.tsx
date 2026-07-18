@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 18/07/2026
+// v1.1 (18/07/2026): commit otimista extraído p/ useCellCommit; erro expõe a
+//   mensagem da action no title.
 // Célula editável inline para COLUNAS DO NÚCLEO de records (title, stage, value,
 // mrr, closed, closed_at, ...). Espelha a EditableCell (campos personalizados),
 // mas grava numa coluna própria via updateRecordField(kind:"core"). O tipo vem de
@@ -6,7 +8,7 @@
 // coluna é marcada como Editável (dono/admin do dashboard).
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
@@ -20,6 +22,7 @@ import {
 } from "@/lib/widgets/format";
 import { CURRENCY_OPTIONS, formatMoney } from "@/lib/widgets/currency";
 import { updateRecordField } from "@/lib/records/actions";
+import { useCellCommit } from "@/components/registros/use-cell-commit";
 
 export function CoreEditableCell({
   recordId,
@@ -40,36 +43,14 @@ export function CoreEditableCell({
   dateFormat?: DateFormat;
   onSaved?: () => void;
 }) {
-  const [value, setValue] = useState(serverValue);
-  const savedRef = useRef(serverValue);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState(false);
+  // Commit otimista + reconcile com o servidor: ver use-cell-commit.ts.
+  const { value, setValue, commit, revert, pending, error, errorMessage } =
+    useCellCommit(
+      serverValue,
+      (raw) => updateRecordField(recordId, field, raw, { kind: "core", writeBack }),
+      onSaved
+    );
   const [editingDate, setEditingDate] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue(serverValue);
-    savedRef.current = serverValue;
-  }, [serverValue]);
-
-  function commit(raw: string) {
-    if (raw === savedRef.current) return;
-    setValue(raw);
-    setError(false);
-    startTransition(async () => {
-      const res = await updateRecordField(recordId, field, raw, {
-        kind: "core",
-        writeBack,
-      });
-      if (res.ok) {
-        savedRef.current = raw;
-        onSaved?.();
-      } else {
-        setValue(savedRef.current);
-        setError(true);
-      }
-    });
-  }
 
   // Moeda (coluna `currency`): select de códigos ISO em vez de texto livre, para
   // corrigir a moeda do valor rapidamente. O write-back envia CURRENCY_ID ao Bitrix.
@@ -129,13 +110,14 @@ export function CoreEditableCell({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
-            setValue(savedRef.current);
+            revert();
             setEditingDate(false);
           }
         }}
         disabled={pending}
         aria-label={field}
         aria-invalid={error}
+        title={error ? errorMessage ?? undefined : undefined}
         className={cn(error && "border-destructive")}
       />
     );
@@ -155,7 +137,13 @@ export function CoreEditableCell({
         disabled={pending}
         aria-label={field}
         aria-invalid={error}
-        title={dataType === "moeda" ? formatMoney(value, currency) : undefined}
+        title={
+          error
+            ? errorMessage ?? undefined
+            : dataType === "moeda"
+              ? formatMoney(value, currency)
+              : undefined
+        }
         className={cn("text-right", error && "border-destructive")}
       />
     );
@@ -173,6 +161,7 @@ export function CoreEditableCell({
       disabled={pending}
       aria-label={field}
       aria-invalid={error}
+      title={error ? errorMessage ?? undefined : undefined}
       className={cn(error && "border-destructive")}
     />
   );

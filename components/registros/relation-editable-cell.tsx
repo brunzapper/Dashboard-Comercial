@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 18/07/2026
+// v1.1 (18/07/2026): commit otimista extraído p/ useCellCommit; erro expõe a
+//   mensagem da action no title.
 // Célula editável inline para COLUNAS DE RELAÇÃO de records (hoje: responsible_id)
 // nas tabelas de "registros individuais". Renderiza um SELECT das entidades
 // elegíveis (ex.: responsáveis ativos) em vez de texto livre, e grava a FK via
@@ -7,11 +9,10 @@
 // deal/lead (traduzido p/ bitrix_user_id no server action).
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-
 import { Combobox } from "@/components/ui/combobox";
 import { cn } from "@/lib/utils";
 import { updateRecordField } from "@/lib/records/actions";
+import { useCellCommit } from "@/components/registros/use-cell-commit";
 
 export function RelationEditableCell({
   recordId,
@@ -28,35 +29,13 @@ export function RelationEditableCell({
   writeBack?: boolean; // grava também no Bitrix (ASSIGNED_BY_ID)
   onSaved?: () => void;
 }) {
-  const [value, setValue] = useState(serverValue);
-  const savedRef = useRef(serverValue);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue(serverValue);
-    savedRef.current = serverValue;
-  }, [serverValue]);
-
-  function commit(raw: string) {
-    if (raw === savedRef.current) return;
-    setValue(raw);
-    setError(false);
-    startTransition(async () => {
-      const res = await updateRecordField(recordId, field, raw, {
-        kind: "relation",
-        writeBack,
-      });
-      if (res.ok) {
-        savedRef.current = raw;
-        onSaved?.();
-      } else {
-        setValue(savedRef.current);
-        setError(true);
-      }
-    });
-  }
+  // Commit otimista + reconcile com o servidor: ver use-cell-commit.ts.
+  const { value, commit, pending, error } = useCellCommit(
+    serverValue,
+    (raw) =>
+      updateRecordField(recordId, field, raw, { kind: "relation", writeBack }),
+    onSaved
+  );
 
   return (
     <Combobox
