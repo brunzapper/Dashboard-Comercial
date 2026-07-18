@@ -1,4 +1,8 @@
-// Versão: 1.13 | Data: 18/07/2026
+// Versão: 1.14 | Data: 18/07/2026
+// v1.14 (18/07/2026): "Formato do grupo" por nível do "Agrupar por" (listas de
+//   registros/entidades, colunas de data) — grava appearance.table.
+//   groupDateFormats; o grupo funde/rotula pelo formato escolhido sem alterar
+//   o formato da dimensão nas linhas expandidas.
 // v1.13 (18/07/2026): seletor "Fontes da métrica" (Metric.sources) por linha
 //   de métrica — opções do catálogo INTEIRO (ampliar é o ponto; diferente do
 //   seletor dos filtros, restrito às fontes do widget) e normalização no save
@@ -127,6 +131,7 @@ import {
   type CardConfig,
   type ComparisonSettings,
   type QuickFilterEntry,
+  type GroupDateFormat,
   type RecordListColumn,
   type RowSource,
   type ShapeKind,
@@ -170,6 +175,7 @@ import {
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { groupByLevels } from "@/lib/widgets/appearance";
+import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
 import {
   createWidget,
   updateWidget,
@@ -410,6 +416,11 @@ export function WidgetBuilder({
   const [tableColDim, setTableColDim] = useState<string>(
     widget?.settings?.appearance?.table?.colDim ?? ""
   );
+  // "Formato do grupo" por nível do "Agrupar por" (só modo lista, colunas de
+  // data). Ausência da chave = "Herdar da dimensão" (comportamento original).
+  const [tableGroupFormats, setTableGroupFormats] = useState<
+    Record<string, string>
+  >(widget?.settings?.appearance?.table?.groupDateFormats ?? {});
 
   // Modo "registros individuais" (Fase 1): tabela lista 1 linha por entidade.
   // As colunas vêm das Dimensões (painel unificado); campos personalizados não
@@ -999,10 +1010,37 @@ export function WidgetBuilder({
   const canAddGroupLevel =
     tableGroupBy.filter(Boolean).length < groupByOptions.length;
   const addGroupLevel = () => setTableGroupBy((prev) => [...prev, ""]);
-  const setGroupLevel = (idx: number, value: string) =>
+  // Trocar/remover um nível descarta o "Formato do grupo" do field antigo (o
+  // save também poda contra os níveis vigentes — limpeza dupla).
+  const dropGroupFormat = (field: string) =>
+    setTableGroupFormats((prev) => {
+      if (!field || !(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  const setGroupLevel = (idx: number, value: string) => {
+    const old = tableGroupBy[idx];
+    if (old && old !== value) dropGroupFormat(old);
     setTableGroupBy((prev) => prev.map((v, i) => (i === idx ? value : v)));
-  const removeGroupLevel = (idx: number) =>
+  };
+  const removeGroupLevel = (idx: number) => {
+    dropGroupFormat(tableGroupBy[idx] ?? "");
     setTableGroupBy((prev) => prev.filter((_, i) => i !== idx));
+  };
+  const setGroupFormat = (field: string, v: string) => {
+    if (v === "inherit") dropGroupFormat(field);
+    else setTableGroupFormats((prev) => ({ ...prev, [field]: v }));
+  };
+  // Opções do "Formato do grupo": herdar (padrão) + máscaras + transforms.
+  const groupFormatOptions: ComboboxOption[] = [
+    { value: "inherit", label: "Herdar da dimensão (padrão)" },
+    ...DATE_FORMATS.map((f) => ({ value: f, label: DATE_FORMAT_LABELS[f] })),
+    ...DATE_TRANSFORMS.filter((tr) => tr !== "none").map((tr) => ({
+      value: tr,
+      label: TRANSFORM_LABELS[tr],
+    })),
+  ];
 
   // Posição inicial de um widget NOVO: primeiro espaço livre w×h na aba destino
   // (cada aba é uma tela — só os widgets da mesma aba ocupam espaço). Aba
@@ -1488,6 +1526,20 @@ export function WidgetBuilder({
       const groupLevels = tableGroupBy
         .filter(Boolean)
         .filter((k) => !transposed || k !== effColDim);
+      // "Formato do grupo": só modo lista, só níveis vigentes que são colunas
+      // de data (poda automática de órfãos: nível removido/trocado, modo
+      // agregado, campo que deixou de ser data).
+      const groupFmts: Record<string, GroupDateFormat> = {};
+      if (isRecordList) {
+        for (const k of groupLevels) {
+          const v = tableGroupFormats[k];
+          if (v && v !== "inherit" && isDate(k))
+            groupFmts[k] = v as GroupDateFormat;
+        }
+      }
+      if (Object.keys(groupFmts).length > 0)
+        table.groupDateFormats = groupFmts;
+      else delete table.groupDateFormats;
       if (isEntityList) {
         // Listas de entidades: sem orientação transposta.
         delete table.orientation;
@@ -2944,31 +2996,52 @@ export function WidgetBuilder({
                     <div className="flex flex-col gap-1.5">
                       <Label>Agrupar por</Label>
                       {tableGroupBy.map((level, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5">
-                          <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
-                            {idx + 1}.
-                          </span>
-                          <div className="flex-1">
-                            <Combobox
-                              searchable={false}
-                              options={levelOptions(idx)}
-                              value={level}
-                              placeholder="— selecione —"
-                              onValueChange={(v) => setGroupLevel(idx, v)}
-                              aria-label={`Agrupar por — nível ${idx + 1}`}
-                            />
+                        <div key={idx} className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
+                              {idx + 1}.
+                            </span>
+                            <div className="flex-1">
+                              <Combobox
+                                searchable={false}
+                                options={levelOptions(idx)}
+                                value={level}
+                                placeholder="— selecione —"
+                                onValueChange={(v) => setGroupLevel(idx, v)}
+                                aria-label={`Agrupar por — nível ${idx + 1}`}
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:text-destructive size-8 shrink-0"
+                              onClick={() => removeGroupLevel(idx)}
+                              title="Remover nível"
+                              aria-label={`Remover nível ${idx + 1}`}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
                           </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-destructive size-8 shrink-0"
-                            onClick={() => removeGroupLevel(idx)}
-                            title="Remover nível"
-                            aria-label={`Remover nível ${idx + 1}`}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
+                          {/* Formato do GRUPO (só listas + coluna de data):
+                              funde/rotula o cabeçalho sem alterar o formato da
+                              dimensão nas linhas expandidas. */}
+                          {isRecordList && level && isDate(level) ? (
+                            <div className="flex items-center gap-1.5 pl-6 pr-9">
+                              <Label className="text-muted-foreground shrink-0 text-xs font-normal">
+                                Formato do grupo
+                              </Label>
+                              <div className="flex-1">
+                                <Combobox
+                                  searchable={false}
+                                  options={groupFormatOptions}
+                                  value={tableGroupFormats[level] ?? "inherit"}
+                                  onValueChange={(v) => setGroupFormat(level, v)}
+                                  aria-label={`Formato do grupo — nível ${idx + 1}`}
+                                />
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       ))}
                       <Button
@@ -3000,6 +3073,15 @@ export function WidgetBuilder({
                             recolhíveis com subtotais. Vários níveis criam uma
                             hierarquia (o 1º é o grupo principal, os demais aninham
                             dentro). Os grupos abrem recolhidos por padrão.
+                            {isRecordList ? (
+                              <>
+                                {" "}
+                                Em níveis de data, o &quot;Formato do grupo&quot;
+                                funde os registros por esse período no cabeçalho
+                                (ex.: Mês/ano) — as linhas expandidas mantêm o
+                                formato da dimensão.
+                              </>
+                            ) : null}
                           </>
                         )}
                       </p>
