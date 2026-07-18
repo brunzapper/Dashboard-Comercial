@@ -7,6 +7,8 @@
 // por dashboard (DashboardSettings.dateFormat) com override por coluna
 // (AppearanceSettings.table.dateFormats[colKey]).
 
+import { fracDigits } from "@/lib/widgets/appearance";
+
 export type DateFormat = "dd/mm/aaaa" | "dd/mm/aa" | "mm/aa";
 
 export const DEFAULT_DATE_FORMAT: DateFormat = "dd/mm/aaaa";
@@ -67,12 +69,16 @@ export function looksLikeDate(value: unknown): boolean {
  * scale=true: formato de CAMPO percentual (0.35 → "35%").
  * scale=false: toggle "%" por métrica — só sufixa o número (35 → "35%").
  * O guard de string vazia é obrigatório: Number("") === 0.
+ * `decimals` (18/07/2026): casas fixas configuradas na aparência; undefined =
+ * teto de 2 (comportamento original).
  */
-export function formatPercent(v: unknown, scale: boolean): string {
+export function formatPercent(
+  v: unknown,
+  scale: boolean,
+  decimals?: number
+): string {
   if (v == null || v === "") return "—";
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
-  return `${(scale ? n * 100 : n).toLocaleString("pt-BR", {
-    maximumFractionDigits: 2,
-  })}%`;
+  return `${(scale ? n * 100 : n).toLocaleString("pt-BR", fracDigits(decimals))}%`;
 }

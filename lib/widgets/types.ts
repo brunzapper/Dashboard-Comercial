@@ -633,6 +633,12 @@ export interface ConditionalRule {
   op: CondOp;
   value?: number | string;
   value2?: number | string; // "entre": limite superior
+  // Escopo do estilo nas TABELAS (18/07/2026). A regra é sempre avaliada sobre
+  // a coluna `target`, linha a linha; o escopo diz o que pintar quando casa:
+  // "cell" (default) = a própria célula; "row" = a linha inteira que casou;
+  // "col" = a coluna inteira, se ALGUMA linha casar. Card/gráficos ignoram
+  // (sempre célula/valor). Ícone só no escopo célula.
+  scope?: "cell" | "row" | "col";
   style: {
     text?: string;
     fill?: string;
@@ -705,6 +711,13 @@ export interface AppearanceSettings {
     colAlign?: Record<string, TableAlign>; // colKey -> alinhamento
     rowAlign?: Record<string, TableAlign>; // rowKey -> alinhamento
     cellAlign?: Record<string, TableAlign>; // "rowKey:colKey" -> alinhamento
+    // Casas decimais (18/07/2026): overrides por coluna/linha/célula sobre o
+    // `decimals` global do widget. Precedência: célula > linha > coluna >
+    // widget > default do ponto de render (ver resolveDecimals). Valor fixo
+    // (min=max): 2 casas exibe "1,50". Só afeta números/percentual/moeda.
+    colDecimals?: Record<string, number>; // colKey -> casas
+    rowDecimals?: Record<string, number>; // rowKey -> casas
+    cellDecimals?: Record<string, number>; // "rowKey:colKey" -> casas
     sort?: { column: string; dir: TableSortDir; colorOrder?: string[] };
     // Orientação da tabela agregada: "rows" (default) = dimensões/métricas como
     // colunas no topo, 1 linha por grupo; "columns" = transposta (rótulos descem
@@ -757,6 +770,11 @@ export interface AppearanceSettings {
   };
   // --- formatação condicional (tabelas, listas, Card, gráficos) ---
   conditional?: ConditionalFormatting;
+  // Casas decimais do widget inteiro (18/07/2026): 0–4; undefined = "Auto"
+  // (defaults atuais de cada ponto de render). Vale para tabelas, KPI/Card,
+  // rótulos de dados e tooltip de gráficos; eixos e visor da calculadora ficam
+  // fora. Overrides por coluna/linha/célula em table.colDecimals etc.
+  decimals?: number;
 }
 
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista

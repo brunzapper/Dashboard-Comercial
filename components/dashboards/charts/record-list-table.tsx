@@ -87,9 +87,12 @@ import {
   alignClass,
   applyManualOrder,
   distinctFills,
+  fracDigits,
   groupByLevels,
+  recordListMetricKey,
   reorderKeys,
   resolveAlign,
+  resolveDecimals,
 } from "@/lib/widgets/appearance";
 import {
   buildGroupItems,
@@ -110,6 +113,7 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { unifiedMemberRef } from "@/lib/correspondences";
 import {
   evalConditional,
+  evalScopedConditional,
   hasConditional,
   scaleDomains,
 } from "@/lib/widgets/conditional";
@@ -138,15 +142,16 @@ const DATE_FIELDS = new Set(["closed_at", "opened_at", "source_created_at", "tod
 // Valor monetário na moeda do registro (quando informada); sem moeda cai em BRL.
 // Usado tanto para células por registro (com r.currency) quanto para subtotais
 // agregados (sem moeda — podem misturar registros de moedas diferentes).
-function money(v: unknown, currency?: string | null): string {
-  return formatMoney(v, currency);
+function money(v: unknown, currency?: string | null, decimals?: number): string {
+  return formatMoney(v, currency, decimals);
 }
 
 function coreDisplay(
   field: string,
   record: RecordRow,
   fkLabels: Record<string, string>,
-  dateFmt: DateFormat
+  dateFmt: DateFormat,
+  decimals?: number
 ): string {
   const v =
     field === "today"
@@ -155,7 +160,7 @@ function coreDisplay(
   // Traço só para vazio/nulo — nunca por truthiness (zero deve exibir "0").
   if (FK_FIELDS.has(field))
     return v == null || v === "" ? "—" : (fkLabels[String(v)] ?? "—");
-  if (MONEY_FIELDS.has(field)) return money(v, record.currency);
+  if (MONEY_FIELDS.has(field)) return money(v, record.currency, decimals);
   if (field === "closed") return v ? "Sim" : "Não";
   if (DATE_FIELDS.has(field))
     return v == null || v === "" ? "—" : formatDateValue(v, dateFmt);
@@ -306,29 +311,9 @@ export const RecordListTable = memo(function RecordListTable({
     return ref ? rawRefValue(ref, record) : undefined;
   };
 
-  // Formatação condicional (appearance.conditional): alvo = field da coluna;
-  // avaliada sobre o valor CRU do registro. Precedência: célula manual > regra
-  // > escala > linha/coluna manual (ver lib/widgets/conditional.ts).
-  const cond = ap.conditional;
-  const condActive = hasConditional(cond);
-  const condDomains = useMemo(
-    () =>
-      condActive
-        ? scaleDomains(
-            records as unknown as Record<string, unknown>[],
-            cond?.scales,
-            (row, target) => rawValue(target, row as unknown as RecordRow)
-          )
-        : {},
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [condActive, cond, records]
-  );
-  const condStyleOf = (field: string, record: RecordRow) =>
-    condActive
-      ? evalConditional(cond, field, rawValue(field, record), {
-          domain: condDomains[field],
-        })
-      : null;
+  // Formatação condicional: definida mais abaixo (depois de `rows` e dos
+  // helpers de métrica — condValueOf resolve alvos __metric: e o pré-passe de
+  // escopo varre as linhas visíveis).
 
   // Métricas do widget (mesmo comportamento do agregado): uma coluna por métrica,
   // com o valor cru por registro e o agregado (sum/count/avg) nas linhas de total.
@@ -392,29 +377,34 @@ export const RecordListTable = memo(function RecordListTable({
     }
     return out;
   };
-  const calcText = (m: Metric, rs: RecordRow[]): string => {
+  // Resultado numérico da calculada sobre um escopo (valor + moeda), compartilhado
+  // entre o texto da célula/subtotal e o valor CRU da formatação condicional.
+  const calcResult = (
+    m: Metric,
+    rs: RecordRow[]
+  ): { value: number | null; currency: string | null } | null => {
     const rc = calcOf(m);
-    if (!rc || !rc.formula) return "—";
+    if (!rc || !rc.formula) return null;
     const cp = conversionPeriod ?? yearQuarterOf(null);
-    const { value, currency } = evalCalcMoney(
-      rc.formula,
-      calcBasisFor(rc.formula, rs),
-      {
-        mode: rc.mode,
-        code: rc.code,
-        fixedRate:
-          rc.mode === "fixed" && rc.code
-            ? resolveRate(currencyRates, rc.code, cp.year, cp.quarter)
-            : null,
-        allowNegative: rc.allowNegative,
-      }
-    );
-    if (value == null) return "—";
-    if (currency) return formatMoney(value, currency);
+    return evalCalcMoney(rc.formula, calcBasisFor(rc.formula, rs), {
+      mode: rc.mode,
+      code: rc.code,
+      fixedRate:
+        rc.mode === "fixed" && rc.code
+          ? resolveRate(currencyRates, rc.code, cp.year, cp.quarter)
+          : null,
+      allowNegative: rc.allowNegative,
+    });
+  };
+  const calcText = (m: Metric, rs: RecordRow[], decimals?: number): string => {
+    const rc = calcOf(m);
+    const res = calcResult(m, rs);
+    if (!rc || !res || res.value == null) return "—";
+    if (res.currency) return formatMoney(res.value, res.currency, decimals);
     // Percentual: calc percentual converte ×100; toggle "%" da métrica só sufixa.
-    if (rc.percent) return formatPercent(value, true);
-    if (m.percent) return formatPercent(value, false);
-    return value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    if (rc.percent) return formatPercent(res.value, true, decimals);
+    if (m.percent) return formatPercent(res.value, false, decimals);
+    return res.value.toLocaleString("pt-BR", fracDigits(decimals));
   };
 
   const metricLabel = (m: Metric) =>
@@ -433,7 +423,7 @@ export const RecordListTable = memo(function RecordListTable({
   // das dimensões; o índice desambigua métricas idênticas. Métricas ficam fora do
   // columnOrder salvo em configs antigos, então applyManualOrder as anexa após as
   // dimensões — preservando o layout atual sem migração.
-  const metricKey = (m: Metric, i: number) => `__metric:${m.field}:${m.agg}:${i}`;
+  const metricKey = recordListMetricKey; // compartilhada c/ o sheet de aparência
   type MergedCol =
     | { kind: "dim"; key: string; c: RecordListColumn }
     | { kind: "metric"; key: string; m: Metric; mi: number };
@@ -486,25 +476,29 @@ export const RecordListTable = memo(function RecordListTable({
     return { year, quarter: isQuarter ? quarter : 0 };
   };
 
-  const metricCellText = (m: Metric, r: RecordRow): string => {
-    // Métrica com fontes próprias: registro de fonte fora delas exibe "—" (o
-    // valor por registro não faz parte do universo da métrica).
-    {
-      const srcs = metricTargetSources(m);
-      if (srcs.length > 0 && !srcs.some((s) => toRecordType(s) === r.record_type))
-        return "—";
-    }
+  // Registro fora das fontes próprias da métrica (Metric.sources): o valor por
+  // registro não faz parte do universo dela — célula "—" e condicional null.
+  const outsideMetricSources = (m: Metric, r: RecordRow): boolean => {
+    const srcs = metricTargetSources(m);
+    return (
+      srcs.length > 0 && !srcs.some((s) => toRecordType(s) === r.record_type)
+    );
+  };
+  const metricCellText = (m: Metric, r: RecordRow, decimals?: number): string => {
+    if (outsideMetricSources(m, r)) return "—";
     // Calculada de agregados por registro: basis do próprio registro (ticket
     // médio de 1 venda = mrr/1 — coerente com o "individual" do agregado).
-    if (calcOf(m)) return calcText(m, [r]);
+    if (calcOf(m)) return calcText(m, [r], decimals);
     if (m.field === "*") return "";
     const n = Number(rawValue(m.field, r));
     if (!Number.isFinite(n)) return "—";
     if (!metricIsMoney(m.field)) {
       // Percentual: campo percentual converte ×100 (vence o toggle "%").
-      if (percentOf(m.field)) return formatPercent(n, true);
-      if (m.percent) return formatPercent(n, false);
-      return n.toLocaleString("pt-BR");
+      if (percentOf(m.field)) return formatPercent(n, true, decimals);
+      if (m.percent) return formatPercent(n, false, decimals);
+      return decimals != null
+        ? n.toLocaleString("pt-BR", fracDigits(decimals))
+        : n.toLocaleString("pt-BR");
     }
     const code = metricCurrency(m.field, r);
     const { year, quarter } = recYQ(r, m);
@@ -514,8 +508,19 @@ export const RecordListTable = memo(function RecordListTable({
       m.currencyDisplay ?? "original",
       currencyRates,
       year,
-      quarter
+      quarter,
+      decimals
     );
+  };
+  // Valor numérico CRU de uma métrica num registro — alvo da formatação
+  // condicional (regras/escala). null = "—" (fora das fontes próprias, não
+  // numérico, calculada sem resultado): nunca casa regra numérica.
+  const metricRawValue = (m: Metric, r: RecordRow): number | null => {
+    if (outsideMetricSources(m, r)) return null;
+    if (calcOf(m)) return calcResult(m, [r])?.value ?? null;
+    if (m.field === "*") return null;
+    const n = Number(rawValue(m.field, r));
+    return Number.isFinite(n) ? n : null;
   };
   const metricAgg = (m: Metric, rs: RecordRow[]): number => {
     if (m.agg === "count") {
@@ -535,21 +540,27 @@ export const RecordListTable = memo(function RecordListTable({
   // Subtotal/total de uma métrica sobre `rs`, aplicando conversão/modos de moeda
   // quando a métrica é monetária. `isGrand` usa o modo do Total geral.
   // Calculada de agregados: fórmula reavaliada sobre os registros do escopo.
-  const metricAggText = (m: Metric, rs: RecordRow[], isGrand = false): string => {
-    if (calcOf(m)) return calcText(m, rs);
+  const metricAggText = (
+    m: Metric,
+    rs: RecordRow[],
+    isGrand = false,
+    decimals?: number
+  ): string => {
+    if (calcOf(m)) return calcText(m, rs, decimals);
     if (m.agg === "count" || m.field === "*") {
       // Contagem NUNCA converte ×100 (mesmo de campo percentual); o toggle "%"
       // da métrica ainda pode sufixar (número já em magnitude percentual).
       const n = metricAgg(m, rs);
-      return m.percent
-        ? formatPercent(n, false)
+      if (m.percent) return formatPercent(n, false, decimals);
+      return decimals != null
+        ? n.toLocaleString("pt-BR", fracDigits(decimals))
         : n.toLocaleString("pt-BR");
     }
     if (!metricIsMoney(m.field)) {
       const n = metricAgg(m, rs);
-      if (percentOf(m.field)) return formatPercent(n, true);
-      if (m.percent) return formatPercent(n, false);
-      return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+      if (percentOf(m.field)) return formatPercent(n, true, decimals);
+      if (m.percent) return formatPercent(n, false, decimals);
+      return n.toLocaleString("pt-BR", fracDigits(decimals));
     }
     // Agregação monetária: acumula por moeda + convertido (R$) + referência (US$),
     // convertendo cada registro pela taxa do seu próprio ano/trimestre. Helper
@@ -561,7 +572,7 @@ export const RecordListTable = memo(function RecordListTable({
       (r) => recYQ(r, m),
       currencyRates
     );
-    return formatMoneyAggregate(bd, m, isGrand);
+    return formatMoneyAggregate(bd, m, isGrand, decimals);
   };
 
   // Valor de uma coluna do núcleo como string (para o editor inline do núcleo).
@@ -610,7 +621,7 @@ export const RecordListTable = memo(function RecordListTable({
 
   // Texto de exibição de um campo do registro casado (match:<fonte>:<ref>):
   // formata data/moeda/texto conforme o tipo do ref subjacente.
-  const matchText = (field: string, r: RecordRow): string => {
+  const matchText = (field: string, r: RecordRow, decimals?: number): string => {
     const mm = parseMatchField(field);
     if (!mm) return "—";
     const raw = rawValue(field, r);
@@ -625,13 +636,14 @@ export const RecordListTable = memo(function RecordListTable({
           mrec?.currency ?? null,
           mrec?.custom_fields?.[calcCurrencyKey(f.field_key)]
         );
-        if (cur.isMoney) return formatMoney(raw, cur.code);
-        if (isPercentField(f)) return formatPercent(raw, true);
+        if (cur.isMoney) return formatMoney(raw, cur.code, decimals);
+        if (isPercentField(f)) return formatPercent(raw, true, decimals);
       }
       return String(raw);
     }
     if (DATE_FIELDS.has(mm.ref)) return formatDateValue(raw, fmtOf(field));
-    if (MONEY_FIELDS.has(mm.ref)) return formatMoney(raw, mrec?.currency ?? null);
+    if (MONEY_FIELDS.has(mm.ref))
+      return formatMoney(raw, mrec?.currency ?? null, decimals);
     return String(raw);
   };
   const fmtOf = (field: string): DateFormat =>
@@ -643,15 +655,19 @@ export const RecordListTable = memo(function RecordListTable({
   const customText = (
     f: FieldDefinition | undefined,
     r: RecordRow,
-    colField: string
+    colField: string,
+    decimals?: number
   ): string => {
     if (!f) return "—";
     const v = r.custom_fields?.[f.field_key];
     if (v == null || v === "") return "—";
     const m = resolveFieldMoneyFromRecord(f, r);
-    if (m.isMoney) return formatMoney(v, m.code);
+    if (m.isMoney) return formatMoney(v, m.code, decimals);
     if (f.data_type === "data") return formatDateValue(v, fmtOf(colField));
-    if (isPercentField(f)) return formatPercent(v, true);
+    if (isPercentField(f)) return formatPercent(v, true, decimals);
+    // Numérico puro com casas configuradas: formata; senão texto cru (original).
+    if (decimals != null && Number.isFinite(Number(v)))
+      return Number(v).toLocaleString("pt-BR", fracDigits(decimals));
     return String(v);
   };
 
@@ -708,6 +724,54 @@ export const RecordListTable = memo(function RecordListTable({
     [rows, t.rowColors]
   );
 
+  // --- Formatação condicional (appearance.conditional) ---
+  // Alvo = field da coluna OU chave sintética de métrica (__metric:), avaliada
+  // sobre o valor CRU. Precedência: célula manual > regra de célula > escala >
+  // regra de linha > regra de coluna > linha/coluna manual (ver conditional.ts).
+  const cond = ap.conditional;
+  const condActive = hasConditional(cond);
+  const metricByColKey = useMemo(
+    () => new Map(metricList.map((m, mi) => [metricKey(m, mi), m])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [metricList]
+  );
+  const condValueOf = (target: string, r: RecordRow): unknown => {
+    const m = metricByColKey.get(target);
+    return m ? metricRawValue(m, r) : rawValue(target, r);
+  };
+  const condDomains = useMemo(
+    () =>
+      condActive
+        ? scaleDomains(
+            records as unknown as Record<string, unknown>[],
+            cond?.scales,
+            (row, target) => condValueOf(target, row as unknown as RecordRow)
+          )
+        : {},
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [condActive, cond, records]
+  );
+  const condStyleOf = (colKey: string, record: RecordRow) =>
+    condActive
+      ? evalConditional(cond, colKey, condValueOf(colKey, record), {
+          domain: condDomains[colKey],
+        })
+      : null;
+  // Regras com escopo linha/coluna: pré-passe sobre as linhas visíveis.
+  const scopedCond = useMemo(
+    () =>
+      condActive
+        ? evalScopedConditional(
+            cond,
+            rows as unknown as Record<string, unknown>[],
+            (r) => (r as unknown as RecordRow).id,
+            (r, target) => condValueOf(target, r as unknown as RecordRow)
+          )
+        : { row: {}, col: {} },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [condActive, cond, rows]
+  );
+
   // --- Agrupar por (modo registros): agrupa as linhas por uma ou mais colunas em
   // seções recolhíveis com subtotais das colunas numéricas. Multinível = hierarquia
   // (1º nível = grupo principal, demais aninhados). Chaveado pelo `c.field`.
@@ -726,12 +790,14 @@ export const RecordListTable = memo(function RecordListTable({
     }
     return false;
   };
-  const numFmt = (field: string, n: number): string =>
+  const numFmt = (field: string, n: number, decimals?: number): string =>
     MONEY_FIELDS.has(field)
-      ? money(n)
+      ? money(n, null, decimals)
       : percentOf(field)
-        ? formatPercent(n, true)
-        : n.toLocaleString("pt-BR");
+        ? formatPercent(n, true, decimals)
+        : decimals != null
+          ? n.toLocaleString("pt-BR", fracDigits(decimals))
+          : n.toLocaleString("pt-BR");
   const sumCol = (field: string, rs: RecordRow[]): number => {
     let s = 0;
     for (const r of rs) {
@@ -935,6 +1001,40 @@ export const RecordListTable = memo(function RecordListTable({
     if (m.scope === "cell" && m.rowKey) return t.cellAlign?.[`${m.rowKey}:${m.column}`];
     return undefined;
   }
+  // Casas decimais por escopo (linha/coluna/célula), espelhando setAlign.
+  function setDecimals(
+    m: { scope: ColorScope; column: string; rowKey?: string },
+    d: number | undefined
+  ) {
+    if (m.scope === "col") {
+      const map = { ...(t.colDecimals ?? {}) };
+      if (d == null) delete map[m.column];
+      else map[m.column] = d;
+      setTable({ colDecimals: map });
+    } else if (m.scope === "row" && m.rowKey) {
+      const map = { ...(t.rowDecimals ?? {}) };
+      if (d == null) delete map[m.rowKey];
+      else map[m.rowKey] = d;
+      setTable({ rowDecimals: map });
+    } else if (m.scope === "cell" && m.rowKey) {
+      const map = { ...(t.cellDecimals ?? {}) };
+      const k = `${m.rowKey}:${m.column}`;
+      if (d == null) delete map[k];
+      else map[k] = d;
+      setTable({ cellDecimals: map });
+    }
+  }
+  function decimalsValue(m: {
+    scope: ColorScope;
+    column: string;
+    rowKey?: string;
+  }): number | undefined {
+    if (m.scope === "col") return t.colDecimals?.[m.column];
+    if (m.scope === "row" && m.rowKey) return t.rowDecimals?.[m.rowKey];
+    if (m.scope === "cell" && m.rowKey)
+      return t.cellDecimals?.[`${m.rowKey}:${m.column}`];
+    return undefined;
+  }
   function setColDateFormat(column: string, f: DateFormat) {
     setTable({ dateFormats: { ...(t.dateFormats ?? {}), [column]: f } });
   }
@@ -1069,7 +1169,8 @@ export const RecordListTable = memo(function RecordListTable({
                 {metricAggText(
                   x.m,
                   scopeRecordsFor(x.m, rs, extrasFor(x.m)),
-                  opts?.isGrand
+                  opts?.isGrand,
+                  resolveDecimals(ap, { column: x.key, rowKey: grpKey })
                 )}
               </span>
             </TableCell>
@@ -1086,7 +1187,13 @@ export const RecordListTable = memo(function RecordListTable({
             onDoubleClick={extra.onDoubleClick}
             style={{ ...border, ...extra.style }}
           >
-            {numeric ? numFmt(x.c.field, sumCol(x.c.field, rs)) : null}
+            {numeric
+              ? numFmt(
+                  x.c.field,
+                  sumCol(x.c.field, rs),
+                  resolveDecimals(ap, { column: x.c.field, rowKey: grpKey })
+                )
+              : null}
           </TableCell>
         );
       })}
@@ -1130,7 +1237,14 @@ export const RecordListTable = memo(function RecordListTable({
         ) : null}
         {mergedCols.map((x, ci) => {
           const last = ci === mergedCols.length - 1;
+          const scRow = scopedCond.row[r.id];
           if (x.kind === "metric") {
+            // Paridade com o branch de campo: menu de aparência por duplo-clique
+            // e cadeia completa de cores (célula > condicional > coluna > linha).
+            const cellCp = t.cellColors?.[`${r.id}:${x.key}`];
+            const colCp = t.colColors?.[x.key];
+            const cs = condStyleOf(x.key, r);
+            const scCol = scopedCond.col[x.key];
             return (
               <TableCell
                 key={x.key}
@@ -1138,14 +1252,50 @@ export const RecordListTable = memo(function RecordListTable({
                   alignClass(resolveAlign(t, { column: x.key, rowKey: r.id, numeric: true })),
                   "tabular-nums"
                 )}
+                onDoubleClick={
+                  editable
+                    ? (e) =>
+                        setMenu({
+                          kind: "ctx",
+                          x: e.clientX,
+                          y: e.clientY,
+                          column: x.key,
+                          rowKey: r.id,
+                          scopes: ["row", "col", "cell"],
+                          isDate: false,
+                        })
+                    : undefined
+                }
                 style={{
-                  color: rowCp?.text ?? t.bodyColor,
+                  background:
+                    cellCp?.fill ??
+                    cs?.fill ??
+                    scRow?.fill ??
+                    scCol?.fill ??
+                    colCp?.fill,
+                  color:
+                    cellCp?.text ??
+                    cs?.text ??
+                    scRow?.text ??
+                    scCol?.text ??
+                    rowCp?.text ??
+                    colCp?.text ??
+                    t.bodyColor,
+                  ...(cs?.bold || scRow?.bold || scCol?.bold
+                    ? { fontWeight: 600 }
+                    : {}),
                   ...cellBorder(last),
                   ...widthStyle(x.key),
                   ...(cellText === "clip" ? { overflow: "hidden" } : {}),
                 }}
               >
-                <span className={cellSpanClass}>{metricCellText(x.m, r)}</span>
+                <span className={cellSpanClass}>
+                  {metricCellText(
+                    x.m,
+                    r,
+                    resolveDecimals(ap, { column: x.key, rowKey: r.id })
+                  )}
+                </span>
               </TableCell>
             );
           }
@@ -1189,6 +1339,8 @@ export const RecordListTable = memo(function RecordListTable({
           const cellCp = t.cellColors?.[`${r.id}:${c.field}`];
           const colCp = t.colColors?.[c.field];
           const cs = condStyleOf(c.field, r);
+          const scCol = scopedCond.col[c.field];
+          const dec = resolveDecimals(ap, { column: c.field, rowKey: r.id });
           return (
             <TableCell
               key={x.key}
@@ -1218,14 +1370,23 @@ export const RecordListTable = memo(function RecordListTable({
                   : undefined
               }
               style={{
-                background: cellCp?.fill ?? cs?.fill ?? colCp?.fill,
+                background:
+                  cellCp?.fill ??
+                  cs?.fill ??
+                  scRow?.fill ??
+                  scCol?.fill ??
+                  colCp?.fill,
                 color:
                   cellCp?.text ??
                   cs?.text ??
+                  scRow?.text ??
+                  scCol?.text ??
                   rowCp?.text ??
                   colCp?.text ??
                   t.bodyColor,
-                ...(cs?.bold ? { fontWeight: 600 } : {}),
+                ...(cs?.bold || scRow?.bold || scCol?.bold
+                  ? { fontWeight: 600 }
+                  : {}),
                 ...cellBorder(last),
                 ...widthStyle(c.field),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
@@ -1278,14 +1439,16 @@ export const RecordListTable = memo(function RecordListTable({
               ) : c.transform ? (
                 <span className={cellSpanClass}>{columnDateLabel(c, r)}</span>
               ) : isMatch ? (
-                <span className={cellSpanClass}>{matchText(c.field, r)}</span>
+                <span className={cellSpanClass}>
+                  {matchText(c.field, r, dec)}
+                </span>
               ) : isCustom ? (
                 <span className={cellSpanClass}>
-                  {customText(field, r, c.field)}
+                  {customText(field, r, c.field, dec)}
                 </span>
               ) : (
                 <span className={cellSpanClass}>
-                  {coreDisplay(c.field, r, fkLabels, fmtOf(c.field))}
+                  {coreDisplay(c.field, r, fkLabels, fmtOf(c.field), dec)}
                 </span>
               )}
             </TableCell>
@@ -1459,13 +1622,17 @@ export const RecordListTable = memo(function RecordListTable({
                       )}
                       style={cellBorder(ci === colVals.length - 1)}
                     >
+                      {/* Transposta: chaves de linha/coluna invertidas — só o
+                          decimal global do widget se aplica. */}
                       {metricAggText(
                         m,
                         scopeRecordsFor(
                           m,
                           rowsForCol(item.rows, rep),
                           tExtrasFor(item, m, rep)
-                        )
+                        ),
+                        false,
+                        ap.decimals
                       )}
                     </TableCell>
                   ))}
@@ -1524,8 +1691,22 @@ export const RecordListTable = memo(function RecordListTable({
                       editable && "cursor-move"
                     )}
                     {...dragProps}
+                    onDoubleClick={
+                      editable
+                        ? (e) =>
+                            setMenu({
+                              kind: "ctx",
+                              x: e.clientX,
+                              y: e.clientY,
+                              column: x.key,
+                              scopes: ["col"],
+                              isDate: false,
+                            })
+                        : undefined
+                    }
                     style={{
-                      color: t.headerColor,
+                      background: t.colColors?.[x.key]?.fill,
+                      color: t.colColors?.[x.key]?.text ?? t.headerColor,
                       ...cellBorder(last),
                       ...widthStyle(x.key),
                       ...(cellText === "clip" ? { overflow: "hidden" } : {}),
@@ -1713,6 +1894,19 @@ export const RecordListTable = memo(function RecordListTable({
             value: alignValue(menu),
             onSelect: (a) => setAlign(menu, a),
           }}
+          decimals={
+            // Só onde afeta algo numérico: métricas, colunas numéricas/percentuais
+            // ou o escopo linha (que atinge as células numéricas da linha).
+            menu.scope === "row" ||
+            menu.column.startsWith("__metric:") ||
+            isNumericCol(menu.column) ||
+            percentOf(menu.column)
+              ? {
+                  value: decimalsValue(menu),
+                  onSelect: (d) => setDecimals(menu, d),
+                }
+              : undefined
+          }
           onClose={() => setMenu(null)}
         />
       ) : null}

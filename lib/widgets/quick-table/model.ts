@@ -19,7 +19,7 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { formatMoney, formatMoneyAggregate } from "@/lib/widgets/currency";
-import { applyManualOrder } from "@/lib/widgets/appearance";
+import { applyManualOrder, fracDigits } from "@/lib/widgets/appearance";
 import { AGG_LABELS } from "@/lib/widgets/types";
 import type {
   AppearanceSettings,
@@ -105,15 +105,16 @@ export function exprSource(raw: string): string {
 
 /** Exibição de um resultado de expressão do servidor (mesma regra da Nota). */
 export function calcResultDisplay(
-  r: CalcWidgetResult | null | undefined
+  r: CalcWidgetResult | null | undefined,
+  decimals?: number
 ): string {
   if (!r) return "…"; // ainda carregando (deferred)
   if (r.value == null) {
     return r.text != null && r.text !== "" ? r.text : "—";
   }
   return r.currency
-    ? formatMoney(r.value, r.currency)
-    : r.value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    ? formatMoney(r.value, r.currency, decimals)
+    : r.value.toLocaleString("pt-BR", fracDigits(decimals));
 }
 
 // ===================== config BI derivada das colunas =====================
@@ -241,16 +242,17 @@ function metricDisplay(
   row: WidgetRow,
   key: string,
   info: WidgetData["metrics"][number] | undefined,
-  agg: string
+  agg: string,
+  decimals?: number
 ): string {
   const bd = row.__money?.[key];
-  if (info?.isMoney && bd) return formatMoneyAggregate(bd, { agg });
+  if (info?.isMoney && bd) return formatMoneyAggregate(bd, { agg }, false, decimals);
   const v = row[key];
   if (v == null || v === "") return "—";
-  if (info?.percent) return formatPercent(v, true);
+  if (info?.percent) return formatPercent(v, true, decimals);
   const n = Number(v);
   if (!Number.isFinite(n)) return String(v);
-  return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return n.toLocaleString("pt-BR", fracDigits(decimals));
 }
 
 export interface BuildMatrixInput {
@@ -266,6 +268,9 @@ export interface BuildMatrixInput {
   // Ordens manuais/aparência (columnOrder/rowOrder) — mesmas chaves das células.
   tableAp?: AppearanceSettings["table"];
   dateFormat?: DateFormat;
+  // Casas decimais do widget (AppearanceSettings.decimals) — números/moeda/
+  // percentual das células BI e resultados de expressão.
+  decimals?: number;
 }
 
 // Monta a grade renderizada: cabeçalhos (com expansão de pivot), linhas de
@@ -280,6 +285,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     available,
     tableAp,
     dateFormat,
+    decimals,
   } = input;
   const dateFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
   const bi = quickTableBI(qt);
@@ -382,7 +388,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
     let value: QTCell["value"] = raw;
     if (content === "expr") {
       const r = exprValues[cellKey(rowKey, col.key)];
-      display = calcResultDisplay(r);
+      display = calcResultDisplay(r, decimals);
       value = r ? (r.value ?? r.text ?? null) : null;
     } else if (content === "formula") {
       value = null; // computado no cliente (cell-formulas.ts)
@@ -456,7 +462,7 @@ export function buildQuickTableMatrix(input: BuildMatrixInput): QTMatrix {
             colKey: col.key,
             raw: null,
             display: srcRow
-              ? metricDisplay(srcRow, mKey, info, c.metric!.agg)
+              ? metricDisplay(srcRow, mKey, info, c.metric!.agg, decimals)
               : "—",
             value: num,
             content: "data",

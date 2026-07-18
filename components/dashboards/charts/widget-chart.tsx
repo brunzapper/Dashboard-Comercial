@@ -67,10 +67,12 @@ import {
   alignClass,
   applyManualOrder,
   distinctFills,
+  fracDigits,
   gridFlags,
   groupByLevels,
   reorderKeys,
   resolveAlign,
+  resolveDecimals,
   rowKeyOf,
   sortRows,
   topWithOther,
@@ -97,6 +99,7 @@ import {
 } from "@/lib/widgets/variation";
 import {
   evalConditional,
+  evalScopedConditional,
   hasConditional,
   scaleDomains,
   type ResolvedCondStyle,
@@ -122,10 +125,11 @@ function CondIcon({ style }: { style: ResolvedCondStyle | null }) {
 // noop p/ quando não há edição (canEdit=false).
 const NOOP = () => {};
 
-function fmt(v: unknown): string {
+// `decimals` (18/07/2026): casas fixas da aparência; undefined = teto de 2.
+function fmt(v: unknown, decimals?: number): string {
   const n = Number(v);
   if (v == null || Number.isNaN(n)) return String(v ?? "—");
-  return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return n.toLocaleString("pt-BR", fracDigits(decimals));
 }
 
 function numOrNull(v: unknown): number | null {
@@ -187,12 +191,13 @@ function calcMetaOf(calc: CalcMeta): CalcMoneyMeta {
 function calcValueText(
   v: unknown,
   calc: CalcMeta,
-  pct: PercentMode = null
+  pct: PercentMode = null,
+  decimals?: number
 ): string {
   const n = Number(v);
   if (v == null || !Number.isFinite(n)) return "—";
-  if (calc.currency) return formatMoney(n, calc.currency);
-  return pct ? formatPercent(n, pct === "x100") : fmt(n);
+  if (calc.currency) return formatMoney(n, calc.currency, decimals);
+  return pct ? formatPercent(n, pct === "x100", decimals) : fmt(n, decimals);
 }
 
 // Célula de métrica calculada: reavalia a fórmula da basis da linha (moeda
@@ -212,16 +217,17 @@ function calcCellText(
   row: Record<string, unknown>,
   key: string,
   calc: CalcMeta,
-  pct: PercentMode = null
+  pct: PercentMode = null,
+  decimals?: number
 ): string {
   const ops = calcOpsOf(row, key);
   if (ops) {
     const { value, currency } = evalCalcMoney(calc.formula, ops, calcMetaOf(calc));
     if (value == null) return "—";
-    if (currency) return formatMoney(value, currency);
-    return pct ? formatPercent(value, pct === "x100") : fmt(value);
+    if (currency) return formatMoney(value, currency, decimals);
+    return pct ? formatPercent(value, pct === "x100", decimals) : fmt(value, decimals);
   }
-  return calcValueText(row[key], calc, pct);
+  return calcValueText(row[key], calc, pct, decimals);
 }
 
 // Subtotal/Total geral de uma métrica calculada: NUNCA soma a coluna — funde as
@@ -241,12 +247,15 @@ function calcAggText(
   rs: Record<string, unknown>[],
   key: string,
   calc: CalcMeta,
-  pct: PercentMode = null
+  pct: PercentMode = null,
+  decimals?: number
 ): string {
   const res = calcAggResult(rs, key, calc);
   if (!res || res.value == null) return "—";
-  if (res.currency) return formatMoney(res.value, res.currency);
-  return pct ? formatPercent(res.value, pct === "x100") : fmt(res.value);
+  if (res.currency) return formatMoney(res.value, res.currency, decimals);
+  return pct
+    ? formatPercent(res.value, pct === "x100", decimals)
+    : fmt(res.value, decimals);
 }
 
 // Valor monetário compacto (sem centavos) p/ os eixos dos gráficos.
@@ -321,19 +330,27 @@ export const WidgetChart = memo(function WidgetChart({
   );
   const percentModeOf = (key: string): PercentMode =>
     percentModeByKey[key] ?? null;
-  const pfmt = (v: unknown, key: string): string => {
+  // Casas decimais do widget (gráficos/KPI usam só o global; a AppearanceTable
+  // resolve por célula via resolveDecimals).
+  const apDecimals = appearance?.decimals;
+  const pfmt = (v: unknown, key: string, decimals = apDecimals): string => {
     const mode = percentModeOf(key);
-    return mode ? formatPercent(v, mode === "x100") : fmt(v);
+    return mode ? formatPercent(v, mode === "x100", decimals) : fmt(v, decimals);
   };
 
   // Texto de uma célula/valor de métrica honrando os modos de moeda (tabela/KPI).
-  const moneyCellText = (row: WidgetRow, key: string): string => {
+  const moneyCellText = (
+    row: WidgetRow,
+    key: string,
+    decimals = apDecimals
+  ): string => {
     const calc = calcOf(key);
-    if (calc) return calcCellText(row, key, calc, percentModeOf(key));
+    if (calc) return calcCellText(row, key, calc, percentModeOf(key), decimals);
     const bd = row.__money?.[key];
     const cfg = metricByKey[key];
-    if (isMoneyKey(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
-    return pfmt(row[key], key);
+    if (isMoneyKey(key) && bd && cfg)
+      return formatMoneyAggregate(bd, cfg, false, decimals);
+    return pfmt(row[key], key, decimals);
   };
 
   // Moeda de EXIBIÇÃO de uma série no gráfico: mantém a moeda estrangeira única
@@ -404,9 +421,11 @@ export const WidgetChart = memo(function WidgetChart({
       const n = Number(v);
       if (v == null || !Number.isFinite(n)) return "—";
       const code = calcCodeByKey[key];
-      return code ? formatMoney(n, code) : pfmt(n, key);
+      return code ? formatMoney(n, code, apDecimals) : pfmt(n, key);
     }
-    return isMoneyKey(key) ? formatMoney(v, seriesMoneyCode(key)) : pfmt(v, key);
+    return isMoneyKey(key)
+      ? formatMoney(v, seriesMoneyCode(key), apDecimals)
+      : pfmt(v, key);
   };
 
   // --- Comparação com período anterior (WidgetData.comparison) ---
@@ -587,7 +606,7 @@ export const WidgetChart = memo(function WidgetChart({
               />
             ) : (
               <span className="text-3xl font-semibold tabular-nums">
-                {k.valueText ?? (k.value == null ? "—" : fmt(k.value))}
+                {k.valueText ?? (k.value == null ? "—" : fmt(k.value, apDecimals))}
               </span>
             )}
             <span className="text-muted-foreground text-xs">{k.label}</span>
@@ -602,7 +621,7 @@ export const WidgetChart = memo(function WidgetChart({
                 ) : null}
                 {cmp.settings.showBaseValue && k.cmpValue != null ? (
                   <span className="text-muted-foreground">
-                    vs. {fmt(k.cmpValue)}
+                    vs. {fmt(k.cmpValue, apDecimals)}
                   </span>
                 ) : null}
                 <span className="text-muted-foreground/70">{cmp.label}</span>
@@ -615,17 +634,17 @@ export const WidgetChart = memo(function WidgetChart({
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
           <span className="text-3xl font-semibold tabular-nums">
-            {k.realizadoText ?? fmt(k.realizado)}
+            {k.realizadoText ?? fmt(k.realizado, apDecimals)}
           </span>
           <span className="text-muted-foreground text-xs">{k.label}</span>
           {k.meta != null ? (
             <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 text-xs">
-              <span>Meta: {k.metaText ?? fmt(k.meta)}</span>
+              <span>Meta: {k.metaText ?? fmt(k.meta, apDecimals)}</span>
               {pct != null ? (
                 <span className={pct >= 100 ? "text-chart-2" : ""}>{pct}%</span>
               ) : null}
               {k.falta != null && k.falta > 0 ? (
-                <span>Falta: {k.faltaText ?? fmt(k.falta)}</span>
+                <span>Falta: {k.faltaText ?? fmt(k.falta, apDecimals)}</span>
               ) : null}
             </div>
           ) : (
@@ -1154,10 +1173,13 @@ function AppearanceTable({
   const percentModeByKey = buildPercentModes(data.metrics, metricByKey);
   const percentModeOf = (key: string): PercentMode =>
     percentModeByKey[key] ?? null;
-  const pfmt = (v: unknown, key: string): string => {
+  const pfmt = (v: unknown, key: string, decimals?: number): string => {
     const mode = percentModeOf(key);
-    return mode ? formatPercent(v, mode === "x100") : fmt(v);
+    return mode ? formatPercent(v, mode === "x100", decimals) : fmt(v, decimals);
   };
+  // Casas decimais efetivas de uma célula (célula > linha > coluna > widget).
+  const decOf = (column: string, rowKey?: string): number | undefined =>
+    resolveDecimals(appearance, { column, rowKey });
 
   // --- Comparação com período anterior (WidgetData.comparison) ---
   // "inline": badge dentro da célula da métrica; "column": colunas virtuais
@@ -1189,8 +1211,10 @@ function AppearanceTable({
     }
     return code ?? "BRL";
   };
-  const absFmtOf = (key: string) => (n: number) =>
-    moneyKeys.has(key) ? formatMoney(n, seriesCodeOf(key)) : pfmt(n, key);
+  const absFmtOf = (key: string, decimals?: number) => (n: number) =>
+    moneyKeys.has(key)
+      ? formatMoney(n, seriesCodeOf(key), decimals)
+      : pfmt(n, key, decimals);
   const cmpValOf = (r: Record<string, unknown>, key: string): number | null => {
     const v = (r as WidgetRow).__cmp?.[key];
     return v == null ? null : Number(v);
@@ -1232,20 +1256,20 @@ function AppearanceTable({
   const condDomains = condActive
     ? scaleDomains(data.rows, cond?.scales, condValueOf)
     : {};
+  // var_up/var_down avaliam a variação da métrica-base do alvo.
+  const variationOf = (r: Record<string, unknown>, target: string) => {
+    const vBase = varBaseOf(target) ?? (metricKeys.has(target) ? target : null);
+    return cmp && vBase
+      ? computeVariation(numOrNull(r[vBase]), cmpValOf(r, vBase))
+      : null;
+  };
   const condStyleOf = (
     r: Record<string, unknown>,
-    colKey: string,
-    isMetric: boolean
+    colKey: string
   ): ResolvedCondStyle | null => {
     if (!condActive) return null;
-    // var_up/var_down avaliam a variação da métrica-base do alvo.
-    const vBase = varBaseOf(colKey) ?? (isMetric ? colKey : null);
-    const variation =
-      cmp && vBase
-        ? computeVariation(numOrNull(r[vBase]), cmpValOf(r, vBase))
-        : null;
     return evalConditional(cond, colKey, condValueOf(r, colKey), {
-      variation,
+      variation: variationOf(r, colKey),
       domain: condDomains[colKey],
     });
   };
@@ -1254,13 +1278,18 @@ function AppearanceTable({
   // linha (moeda automática preservada / fixa convertida; null → "—"); monetária
   // honra a config de moeda (via __money); demais caem no fmt numérico. Mesma
   // formatação do modo registros.
-  const metricCellText = (r: Record<string, unknown>, key: string): string => {
+  const metricCellText = (
+    r: Record<string, unknown>,
+    key: string,
+    decimals?: number
+  ): string => {
     const calc = calcByKey[key];
-    if (calc) return calcCellText(r, key, calc, percentModeOf(key));
+    if (calc) return calcCellText(r, key, calc, percentModeOf(key), decimals);
     const bd = (r as WidgetRow).__money?.[key];
     const cfg = metricByKey[key];
-    if (moneyKeys.has(key) && bd && cfg) return formatMoneyAggregate(bd, cfg);
-    return pfmt(r[key], key);
+    if (moneyKeys.has(key) && bd && cfg)
+      return formatMoneyAggregate(bd, cfg, false, decimals);
+    return pfmt(r[key], key, decimals);
   };
   // Subtotal/Total geral de uma métrica sobre `rs`: calculada de agregados
   // REAVALIA a fórmula sobre as basis fundidas do escopo (nunca soma a coluna);
@@ -1269,16 +1298,17 @@ function AppearanceTable({
   const metricAggCellText = (
     rs: Record<string, unknown>[],
     key: string,
-    isGrand: boolean
+    isGrand: boolean,
+    decimals?: number
   ): string => {
     const calc = calcByKey[key];
-    if (calc) return calcAggText(rs, key, calc, percentModeOf(key));
+    if (calc) return calcAggText(rs, key, calc, percentModeOf(key), decimals);
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && cfg) {
       const folded = foldBreakdowns(rs.map((r) => (r as WidgetRow).__money?.[key]));
-      return formatMoneyAggregate(folded, cfg, isGrand);
+      return formatMoneyAggregate(folded, cfg, isGrand, decimals);
     }
-    return pfmt(sumMetric(rs, key), key);
+    return pfmt(sumMetric(rs, key), key, decimals);
   };
   const allCols = [
     ...data.dimensions.map((d) => ({ key: d.key, label: d.label })),
@@ -1307,6 +1337,13 @@ function AppearanceTable({
   const distinctRowFills = distinctFills(
     rows.map((r) => t.rowColors?.[rowKey(r)]?.fill)
   );
+
+  // Regras condicionais com escopo linha/coluna: pré-passe sobre as linhas
+  // visíveis (uma vez por render, como condDomains). Subtotais e transposta
+  // ficam fora (paridade com o condicional por célula atual).
+  const scopedCond = condActive
+    ? evalScopedConditional(cond, rows, rowKey, condValueOf, variationOf)
+    : { row: {}, col: {} };
 
   const gl = t.gridLines ?? "both";
   const vertical = gl === "vertical" || gl === "both";
@@ -1382,6 +1419,41 @@ function AppearanceTable({
     if (m.scope === "col") return t.colAlign?.[m.column];
     if (m.scope === "row" && m.rowKey) return t.rowAlign?.[m.rowKey];
     if (m.scope === "cell" && m.rowKey) return t.cellAlign?.[`${m.rowKey}:${m.column}`];
+    return undefined;
+  }
+
+  // Casas decimais por escopo (linha/coluna/célula), espelhando setAlign.
+  function setDecimals(
+    m: { scope: ColorScope; column: string; rowKey?: string },
+    d: number | undefined
+  ) {
+    if (m.scope === "col") {
+      const map = { ...(t.colDecimals ?? {}) };
+      if (d == null) delete map[m.column];
+      else map[m.column] = d;
+      setTable({ colDecimals: map });
+    } else if (m.scope === "row" && m.rowKey) {
+      const map = { ...(t.rowDecimals ?? {}) };
+      if (d == null) delete map[m.rowKey];
+      else map[m.rowKey] = d;
+      setTable({ rowDecimals: map });
+    } else if (m.scope === "cell" && m.rowKey) {
+      const map = { ...(t.cellDecimals ?? {}) };
+      const k = `${m.rowKey}:${m.column}`;
+      if (d == null) delete map[k];
+      else map[k] = d;
+      setTable({ cellDecimals: map });
+    }
+  }
+  function decimalsValue(m: {
+    scope: ColorScope;
+    column: string;
+    rowKey?: string;
+  }): number | undefined {
+    if (m.scope === "col") return t.colDecimals?.[m.column];
+    if (m.scope === "row" && m.rowKey) return t.rowDecimals?.[m.rowKey];
+    if (m.scope === "cell" && m.rowKey)
+      return t.cellDecimals?.[`${m.rowKey}:${m.column}`];
     return undefined;
   }
 
@@ -1542,9 +1614,13 @@ function AppearanceTable({
           const isNumeric = isMetric || varBase != null || cmpBase != null;
           const cellCp = t.cellColors?.[`${rk}:${c.key}`];
           const colCp = t.colColors?.[c.key];
-          // Precedência: célula manual > regra condicional > escala >
-          // linha/coluna manual > global (ver lib/widgets/conditional.ts).
-          const cs = condStyleOf(r, c.key, isMetric);
+          // Precedência: célula manual > regra de célula > escala > regra de
+          // linha > regra de coluna > linha/coluna manual > global (ver
+          // lib/widgets/conditional.ts).
+          const cs = condStyleOf(r, c.key);
+          const scRow = scopedCond.row[rk];
+          const scCol = scopedCond.col[c.key];
+          const dec = decOf(c.key, rk);
           return (
             <TableCell
               key={c.key}
@@ -1554,14 +1630,23 @@ function AppearanceTable({
               )}
               onDoubleClick={(e) => openCtx(e, c.key, ["row", "col", "cell"], rk)}
               style={{
-                background: cellCp?.fill ?? cs?.fill ?? colCp?.fill,
+                background:
+                  cellCp?.fill ??
+                  cs?.fill ??
+                  scRow?.fill ??
+                  scCol?.fill ??
+                  colCp?.fill,
                 color:
                   cellCp?.text ??
                   cs?.text ??
+                  scRow?.text ??
+                  scCol?.text ??
                   rowCp?.text ??
                   colCp?.text ??
                   t.bodyColor,
-                ...(cs?.bold ? { fontWeight: 600 } : {}),
+                ...(cs?.bold || scRow?.bold || scCol?.bold
+                  ? { fontWeight: 600 }
+                  : {}),
                 ...cellBorder(ci === cols.length - 1),
                 ...widthStyle(c.key),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
@@ -1572,21 +1657,21 @@ function AppearanceTable({
                   cur={numOrNull(r[varBase])}
                   prev={cmpValOf(r, varBase)}
                   settings={cmp.settings}
-                  fmtAbs={absFmtOf(varBase)}
+                  fmtAbs={absFmtOf(varBase, dec)}
                   className="text-xs"
                 />
               ) : cmpBase ? (
                 <span className={cellSpanClass}>
                   {cmpValOf(r, cmpBase) == null
                     ? "—"
-                    : absFmtOf(cmpBase)(cmpValOf(r, cmpBase)!)}
+                    : absFmtOf(cmpBase, dec)(cmpValOf(r, cmpBase)!)}
                 </span>
               ) : (
                 <>
                   <span className={cellSpanClass}>
                     <CondIcon style={cs} />
                     {isMetric
-                      ? metricCellText(r, c.key)
+                      ? metricCellText(r, c.key, dec)
                       : dimDisplay(r[c.key], c.key)}
                   </span>
                   {isMetric && cmpInline ? (
@@ -1595,13 +1680,13 @@ function AppearanceTable({
                         cur={numOrNull(r[c.key])}
                         prev={cmpValOf(r, c.key)}
                         settings={cmp!.settings}
-                        fmtAbs={absFmtOf(c.key)}
+                        fmtAbs={absFmtOf(c.key, dec)}
                         hideWhenUnavailable
                       />
                       {cmp!.settings.showBaseValue &&
                       cmpValOf(r, c.key) != null ? (
                         <span className="text-muted-foreground">
-                          vs. {absFmtOf(c.key)(cmpValOf(r, c.key)!)}
+                          vs. {absFmtOf(c.key, dec)(cmpValOf(r, c.key)!)}
                         </span>
                       ) : null}
                     </span>
@@ -1663,6 +1748,7 @@ function AppearanceTable({
         const cmpBase = cmpBaseOf(c.key);
         const isFirst = ci === 0;
         const extra = cellExtra(c.key);
+        const dec = decOf(c.key, grpKey);
         // Subtotal da variação: variação dos SOMATÓRIOS cur/prev do escopo.
         // Métrica calculada fica "—" (fundir basis de comparação é extensão
         // futura); soma dos __cmp cobre soma/contagem (aprox. p/ avg/min/max,
@@ -1674,7 +1760,7 @@ function AppearanceTable({
               cur={sumMetric(rs, varBase)}
               prev={sumCmp(rs, varBase)}
               settings={cmp.settings}
-              fmtAbs={absFmtOf(varBase)}
+              fmtAbs={absFmtOf(varBase, dec)}
               className="text-xs"
             />
           );
@@ -1717,18 +1803,18 @@ function AppearanceTable({
               sumCmp(rs, cmpBase) == null || calcByKey[cmpBase] ? (
                 "—"
               ) : (
-                absFmtOf(cmpBase)(sumCmp(rs, cmpBase)!)
+                absFmtOf(cmpBase, dec)(sumCmp(rs, cmpBase)!)
               )
             ) : isMetric ? (
               <>
-                {metricAggCellText(rs, c.key, opts?.isGrand ?? false)}
+                {metricAggCellText(rs, c.key, opts?.isGrand ?? false, dec)}
                 {cmpInline && !calcByKey[c.key] ? (
                   <span className="ml-1 text-[10px]">
                     <VariationBadge
                       cur={sumMetric(rs, c.key)}
                       prev={sumCmp(rs, c.key)}
                       settings={cmp!.settings}
-                      fmtAbs={absFmtOf(c.key)}
+                      fmtAbs={absFmtOf(c.key, dec)}
                       hideWhenUnavailable
                     />
                   </span>
@@ -1820,7 +1906,9 @@ function AppearanceTable({
                       )}
                       style={cellBorder(ri === rows.length - 1)}
                     >
-                      {metricCellText(r, c.key)}
+                      {/* Transposta: chaves de linha/coluna invertidas — só o
+                          decimal global do widget se aplica. */}
+                      {metricCellText(r, c.key, appearance.decimals)}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -2009,7 +2097,8 @@ function AppearanceTable({
                       {metricAggCellText(
                         rowsForCol(item.rows, v),
                         item.metricKey,
-                        false
+                        false,
+                        appearance.decimals
                       )}
                     </TableCell>
                   ))}
@@ -2172,6 +2261,19 @@ function AppearanceTable({
             value: alignValue(menu),
             onSelect: (a) => setAlign(menu, a),
           }}
+          decimals={
+            // Só onde afeta algo numérico: colunas de métrica/variação, ou o
+            // escopo linha (que atinge as células de métrica da linha).
+            menu.scope === "row" ||
+            metricKeys.has(menu.column) ||
+            varBaseOf(menu.column) != null ||
+            cmpBaseOf(menu.column) != null
+              ? {
+                  value: decimalsValue(menu),
+                  onSelect: (d) => setDecimals(menu, d),
+                }
+              : undefined
+          }
           onClose={() => setMenu(null)}
         />
       ) : null}

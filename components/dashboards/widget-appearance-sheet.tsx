@@ -44,7 +44,8 @@ import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-s
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
-import { topWithOther } from "@/lib/widgets/appearance";
+import { recordListMetricKey, topWithOther } from "@/lib/widgets/appearance";
+import { AGG_LABELS } from "@/lib/widgets/types";
 import type { KanbanAppearance } from "@/lib/kanban/types";
 import { PALETTES } from "@/lib/widgets/palettes";
 import type {
@@ -112,6 +113,20 @@ export function WidgetAppearanceSheet({
     widget.settings?.comparison?.enabled &&
     widget.settings.comparison.tablePlacement === "column";
   const listColumns = widget.settings?.columns ?? [];
+  // Métricas do modo registros como alvo (chave sintética compartilhada com o
+  // render — MESMO filtro/índice do metricList do RecordListTable). Lista de
+  // entidades (rowSource ≠ records) não renderiza métricas.
+  const listMetricTargets: ComboboxOption[] =
+    isRecordListW && (widget.settings?.rowSource ?? "records") === "records"
+      ? (widget.metrics ?? [])
+          .filter((m) => m.field)
+          .map((m, mi) => ({
+            value: recordListMetricKey(m, mi),
+            label:
+              m.label?.trim() ||
+              `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`,
+          }))
+      : [];
   const condTargets: ComboboxOption[] =
     vt === "calculado" || isKpi
       ? [
@@ -120,10 +135,13 @@ export function WidgetAppearanceSheet({
           ...data.metrics.map((m) => ({ value: m.key, label: m.label })),
         ]
       : isRecordListW
-        ? listColumns.map((c) => ({
-            value: c.field,
-            label: c.label?.trim() || fieldLabel(c.field, available),
-          }))
+        ? [
+            ...listColumns.map((c) => ({
+              value: c.field,
+              label: c.label?.trim() || fieldLabel(c.field, available),
+            })),
+            ...listMetricTargets,
+          ]
         : vt === "tabela" || isChart || isPie
           ? [
               ...data.dimensions.map((d) => ({ value: d.key, label: d.label })),
@@ -136,14 +154,17 @@ export function WidgetAppearanceSheet({
             ]
           : [];
   const condNumericTargets: ComboboxOption[] = isRecordListW
-    ? listColumns
-        .filter(
-          (c) => available.find((a) => a.field === c.field)?.isNumeric
-        )
-        .map((c) => ({
-          value: c.field,
-          label: c.label?.trim() || fieldLabel(c.field, available),
-        }))
+    ? [
+        ...listColumns
+          .filter(
+            (c) => available.find((a) => a.field === c.field)?.isNumeric
+          )
+          .map((c) => ({
+            value: c.field,
+            label: c.label?.trim() || fieldLabel(c.field, available),
+          })),
+        ...listMetricTargets,
+      ]
     : condTargets.filter(
         (t) => typeof t.value === "string" && t.value.startsWith("metric_")
       );
@@ -219,7 +240,37 @@ export function WidgetAppearanceSheet({
               targets={condTargets}
               numericTargets={condNumericTargets}
               hasComparison={Boolean(widget.settings?.comparison?.enabled)}
+              showScope={vt === "tabela"}
             />
+          ) : null}
+          {/* ---------- Números (casas decimais do widget inteiro) ---------- */}
+          {isTable || isChart || isPie || isKpi || vt === "calculado" ? (
+            <BuilderSection
+              value="numeros"
+              title="Números"
+              badge={ap.decimals != null ? String(ap.decimals) : null}
+            >
+              <p className="text-muted-foreground text-xs">
+                Casas decimais de todos os números do widget (tabelas, moeda,
+                percentual, rótulos). Nas tabelas dá para refinar por
+                coluna/linha/célula com duplo-clique na própria tabela.
+              </p>
+              <SelectRow
+                label="Casas decimais"
+                value={ap.decimals != null ? String(ap.decimals) : "auto"}
+                onChange={(v) =>
+                  patch({ decimals: v === "auto" ? undefined : Number(v) })
+                }
+                options={[
+                  { value: "auto", label: "Auto" },
+                  { value: "0", label: "0" },
+                  { value: "1", label: "1" },
+                  { value: "2", label: "2" },
+                  { value: "3", label: "3" },
+                  { value: "4", label: "4" },
+                ]}
+              />
+            </BuilderSection>
           ) : null}
           {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}
           {!isShape ? (
