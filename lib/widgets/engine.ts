@@ -1,4 +1,11 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 18/07/2026
+// v1.4 (18/07/2026): fontes por MÉTRICA (Metric.sources) — métricas com fontes
+//   próprias viram "pernas": chamadas RPC separadas com o pipeline de filtros
+//   (segmentação + @period + record_type in) reconstruído para AQUELAS fontes,
+//   mescladas às linhas da principal por tupla de dims. A basis das calculadas
+//   de perna vai em row.__calcOpsBy (por métrica), nunca em __calcOps. O RPC
+//   run_widget_query fica INTOCADO (fonte é só filtro record_type). Ver
+//   lib/widgets/metric-sources.ts.
 // v1.3 (15/07/2026): filtros segmentados por fonte — applyFilterSourceTargets
 //   converte WidgetFilter.sources em record_types (wrapper pass-through no RPC,
 //   migração 0054) antes do @period/sourceFilters.
@@ -55,6 +62,7 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
+import { partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
   collapseMedianRows,
@@ -444,7 +452,9 @@ function attachMoney(
     moneyEntries.forEach(({ i }, k) => {
       money[`metric_${i + 1}`] = arr?.[k] ?? emptyBreakdown();
     });
-    row.__money = money;
+    // Merge (não substituição): as pernas por fonte (Metric.sources) chamam
+    // attachMoney de novo com as métricas delas — chaves disjuntas por chamada.
+    row.__money = { ...row.__money, ...money };
   }
   for (const { m, i } of moneyEntries) {
     const metricKey = `metric_${i + 1}`;
@@ -779,12 +789,56 @@ async function runWidgetByPeriod(
   const isDateBucket = (d: Dimension) =>
     d.transform != null && d.transform !== "none";
 
-  const records = (await runRecordList(
-    supabase,
-    config,
-    period,
-    available
-  )) as RecordRow[];
+  // Fontes por métrica (18/07/2026): pernas (Metric.sources) compõem a basis
+  // com registros das fontes DELAS. O fetch de EXIBIÇÃO (linhas/grupos) segue
+  // as fontes do widget e, na regra dos mocks, inspeciona só as métricas da
+  // consulta principal (paridade com o caminho RPC); o fetch EXTRA cobre as
+  // fontes que faltam e inspeciona as métricas das pernas — mocks entram na
+  // basis sem virar linha. Fontes de perna já cobertas pelo widget reusam os
+  // registros de exibição (filtrados por record_type no escopo, adiante) —
+  // nesse recorte a regra dos mocks é a da consulta principal (limitação
+  // documentada; o fetch extra é que carrega os mocks da perna).
+  const { defaultIdx, legs } = partitionMetricLegs(
+    config.metrics,
+    config.sources
+  );
+  const legByIdx = new Map<number, { sources: SourceKey[]; idx: number[] }>();
+  for (const l of legs) for (const i of l.idx) legByIdx.set(i, l);
+  const extraSources =
+    config.sources && config.sources.length > 0
+      ? [...new Set(legs.flatMap((l) => l.sources))].filter(
+          (s) => !config.sources!.includes(s)
+        )
+      : [];
+  // Falha do fetch extra degrada as métricas de perna p/ null ("—") — nunca
+  // derruba o widget (mesma postura das pernas do caminho RPC).
+  let extraOk = true;
+  const [records, extraRecords] = await Promise.all([
+    runRecordList(
+      supabase,
+      legs.length > 0
+        ? { ...config, metrics: defaultIdx.map((i) => config.metrics[i]) }
+        : config,
+      period,
+      available
+    ) as Promise<RecordRow[]>,
+    extraSources.length > 0
+      ? (runRecordList(
+          supabase,
+          {
+            ...config,
+            sources: extraSources,
+            metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
+            settings: { ...config.settings, limit: undefined },
+          },
+          period,
+          available
+        ) as Promise<RecordRow[]>).catch(() => {
+          extraOk = false;
+          return [] as RecordRow[];
+        })
+      : Promise.resolve([] as RecordRow[]),
+  ]);
 
   // Campo unificado: resolve o MEMBRO da fonte do registro (espelha o coalesce
   // que o RPC monta); fonte sem membro → undefined (fica fora do bucket/soma).
@@ -866,16 +920,38 @@ async function runWidgetByPeriod(
   };
 
   // Agrupa: "individual" = 1 grupo por registro; senão pela tupla das dimensões.
-  const groups = new Map<string, { dv: DV[]; records: RecordRow[] }>();
+  // Chave de grupo: tupla das dimensões unida por U+0001 (separador que não
+  // colide com valores reais) — compartilhada com a atribuição dos extras.
+  const groupKeyOf = (dvs: DV[]): string =>
+    dvs.map((x) => x.key).join("");
+  const groups = new Map<
+    string,
+    { key: string; dv: DV[]; records: RecordRow[] }
+  >();
   for (const r of records) {
     const dvs = dims.map((d) => dimValue(d, r));
-    const gkey = fn === "individual" ? r.id : dvs.map((x) => x.key).join("");
+    const gkey = fn === "individual" ? r.id : groupKeyOf(dvs);
     let g = groups.get(gkey);
     if (!g) {
-      g = { dv: dvs, records: [] };
+      g = { key: gkey, dv: dvs, records: [] };
       groups.set(gkey, g);
     }
     g.records.push(r);
+  }
+
+  // Extras (fontes das pernas) atribuídos aos grupos pela MESMA chave de
+  // tupla; grupos que só existiriam nos extras NÃO viram linha (universo de
+  // linhas = fontes do widget). No modo "individual" não há como casar (grupo
+  // = 1 registro): o escopo da perna é o próprio registro, filtrado por fonte.
+  const extrasByGroup = new Map<string, RecordRow[]>();
+  if (fn !== "individual") {
+    for (const r of extraRecords) {
+      const gkey = groupKeyOf(dims.map((d) => dimValue(d, r)));
+      if (!groups.has(gkey)) continue;
+      const list = extrasByGroup.get(gkey) ?? [];
+      list.push(r);
+      extrasByGroup.set(gkey, list);
+    }
   }
 
   // Resolve rótulos das dimensões não-data (fonte e FK id→nome).
@@ -981,8 +1057,57 @@ async function runWidgetByPeriod(
     const basis = calcResolved.size > 0 ? basisFromRecords(g.records) : null;
     if (basis) row.__calcOps = basis;
     const money: Record<string, MoneyBreakdown> = {};
+    // Escopo de uma PERNA neste grupo: registros do grupo + extras do grupo,
+    // filtrados pelas fontes da métrica (no "individual", só o próprio
+    // registro — extras não casam com grupo de 1 registro).
+    const legScope = (leg: { sources: SourceKey[] }): RecordRow[] => {
+      const rts = new Set(leg.sources.map((s) => toRecordType(s)));
+      const extras =
+        fn === "individual" ? [] : (extrasByGroup.get(g.key) ?? []);
+      return [...g.records, ...extras].filter((r) => rts.has(r.record_type));
+    };
+    const calcOpsBy: NonNullable<WidgetRow["__calcOpsBy"]> = {};
     config.metrics.forEach((m, mi) => {
       const rc = calcResolved.get(mi);
+      const leg = legByIdx.get(mi);
+      if (leg) {
+        // Métrica de perna: escopo próprio; fetch extra indisponível → null.
+        const scope = extraOk ? legScope(leg) : null;
+        if (rc) {
+          const legBasis = scope ? basisFromRecords(scope) : {};
+          calcOpsBy[`metric_${mi + 1}`] = legBasis;
+          row[`metric_${mi + 1}`] =
+            rc.formula && scope
+              ? evalCalcMoney(rc.formula, legBasis, calcMeta(rc)).value
+              : null;
+          return;
+        }
+        if (!scope || (fn === "individual" && scope.length === 0)) {
+          row[`metric_${mi + 1}`] = null;
+          return;
+        }
+        let legVal: number;
+        if (fn === "individual") {
+          if (m.field === "*") legVal = scope.length;
+          else {
+            const n = Number(rawValue(m.field, scope[0]));
+            legVal = Number.isFinite(n) ? n : 0;
+          }
+        } else {
+          legVal = aggMetricNum(m, scope);
+        }
+        row[`metric_${mi + 1}`] = legVal;
+        if (m.field !== "*" && isMoney(m.field)) {
+          money[`metric_${mi + 1}`] = buildRecordBreakdown(
+            scope,
+            (r) => rawValue(m.field, r),
+            (r) => metricCurrency(m.field, r),
+            (r) => recYQ(r, m),
+            rates
+          );
+        }
+        return;
+      }
       if (rc) {
         row[`metric_${mi + 1}`] =
           rc.formula && basis
@@ -1015,6 +1140,7 @@ async function runWidgetByPeriod(
       }
     });
     if (Object.keys(money).length > 0) row.__money = money;
+    if (Object.keys(calcOpsBy).length > 0) row.__calcOpsBy = calcOpsBy;
     return row;
   });
 
@@ -1079,14 +1205,22 @@ export async function runWidget(
 ): Promise<WidgetData> {
   // Segmentação por fonte ANTES do @period/sourceFilters: os filtros
   // sintéticos e o record_type in (...) implícito nunca ganham alvo.
-  const baseFilters = applyFilterSourceTargets(
-    resolveFilters(config.filters ?? []),
-    config.sources
-  );
-  let filters = baseFilters;
-  if (period) filters = applyPeriodToFilters(filters, period, config.sources);
-  // Fonte(s) selecionada(s) viram um filtro record_type in (...).
-  filters = [...sourceFilters(config.sources), ...filters];
+  // O pipeline inteiro é reconstruível POR CONJUNTO DE FONTES (legFiltersFor):
+  // métricas com fontes próprias (Metric.sources) rodam em pernas separadas e
+  // precisam do @period byType das SUAS fontes — o RPC exclui record_types
+  // fora do mapa, então reaproveitar os filtros do widget derrubaria as
+  // fontes extras da métrica.
+  const resolved = resolveFilters(config.filters ?? []);
+  const legFiltersFor = (
+    p: DashboardPeriod | null | undefined,
+    srcs?: SourceKey[]
+  ): WidgetFilter[] => {
+    let f = applyFilterSourceTargets(resolved, srcs);
+    if (p) f = applyPeriodToFilters(f, p, srcs);
+    // Fonte(s) da perna viram um filtro record_type in (...).
+    return [...sourceFilters(srcs), ...f];
+  };
+  const filters = legFiltersFor(period, config.sources);
 
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const today = yearQuarterOf(null);
@@ -1097,18 +1231,21 @@ export async function runWidget(
   // filtros do próprio widget — nunca de filtros de restrição externos.
   const cmpSettings = config.settings?.comparison;
   const cmpSpec = comparisonSpec(period, cmpSettings);
-  const cmpFiltersFor = (spec: ComparisonSpec): WidgetFilter[] => {
-    const cmpPeriod: DashboardPeriod = {
-      field: period!.field,
-      from: spec.from,
-      to: spec.to,
-      fieldBySource: period?.fieldBySource,
-    };
-    return [
-      ...sourceFilters(config.sources),
-      ...applyPeriodToFilters(baseFilters, cmpPeriod, config.sources),
-    ];
-  };
+  // Parametrizado por fontes (mesmo pipeline da principal): a rodada de
+  // comparação também reconstrói os filtros por perna.
+  const cmpFiltersFor = (
+    spec: ComparisonSpec,
+    srcs?: SourceKey[]
+  ): WidgetFilter[] =>
+    legFiltersFor(
+      {
+        field: period!.field,
+        from: spec.from,
+        to: spec.to,
+        fieldBySource: period?.fieldBySource,
+      },
+      srcs
+    );
 
   if (config.visual_type === "kpi" && config.settings?.mode) {
     return runKpi(
@@ -1163,18 +1300,30 @@ export async function runWidget(
     if (isCalcMetric(m, fieldByKey)) calcResolved.set(i, resolveCalcMetric(m, fieldByKey));
   });
 
+  // Fontes por métrica (18/07/2026): particiona as métricas entre a consulta
+  // PRINCIPAL (fontes do widget — define o universo de LINHAS) e as pernas
+  // extras (uma por conjunto distinto de Metric.sources). Sem fontes próprias,
+  // legs = [] e tudo abaixo se comporta byte a byte como antes.
+  const { defaultIdx, legs } = partitionMetricLegs(
+    config.metrics,
+    config.sources
+  );
+  const defaultIdxSet = new Set(defaultIdx);
+
   // Uma rodada COMPLETA da consulta agregada (RPC principal + auxiliares de
-  // condição/moeda + remapeamento e avaliação das métricas calculadas) para um
-  // par dims/filtros. A mesma rodada serve o período atual e o de comparação —
-  // os parâmetros SOMBREIAM `dims`/`filters` de fora de propósito.
+  // condição/moeda + pernas por fonte + remapeamento e avaliação das métricas
+  // calculadas) para um par dims/pipeline-de-filtros. A mesma rodada serve o
+  // período atual e o de comparação — `dims` SOMBREIA o de fora de propósito;
+  // `filtersOf` reconstrói os filtros para as fontes de cada perna.
   const computeRows = async (
     dims: Dimension[],
-    filters: WidgetFilter[]
+    filtersOf: (srcs?: SourceKey[]) => WidgetFilter[]
   ): Promise<WidgetRow[]> => {
+    const filters = filtersOf(config.sources);
     const rpcMetrics: Metric[] = [];
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
-      if (calcResolved.has(i)) return;
+      if (!defaultIdxSet.has(i) || calcResolved.has(i)) return;
       rpcIdxOfConfig.set(i, rpcMetrics.length);
       rpcMetrics.push(m);
     });
@@ -1183,7 +1332,9 @@ export async function runWidget(
     // principal (o filtro da condição valeria para a consulta inteira) — cada
     // conjunto de condições vira uma consulta auxiliar própria, adiante.
     const condBasisKeys: BasisKey[] = [];
-    for (const rc of calcResolved.values()) {
+    for (const [ci, rc] of calcResolved) {
+      // Calculadas de perna resolvem a própria basis na perna (adiante).
+      if (!defaultIdxSet.has(ci)) continue;
       if (!rc.formula) continue;
       for (const key of basisKeysFor(rc.formula)) {
         if (isCondBasisKey(key)) {
@@ -1204,9 +1355,14 @@ export async function runWidget(
         }
       }
     }
-    // Toda métrica é calculada e sem operando (ex.: campo deletado): o RPC não
-    // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer.
-    if (calcResolved.size > 0 && rpcMetrics.length === 0 && dims.length === 0) {
+    // Toda métrica é calculada/de perna e sem operando na principal: o RPC não
+    // aceita SELECT vazio — pede uma contagem descartada só p/ a consulta valer
+    // (com pernas, a principal continua necessária: ela define as linhas).
+    if (
+      (calcResolved.size > 0 || legs.length > 0) &&
+      rpcMetrics.length === 0 &&
+      dims.length === 0
+    ) {
       rpcMetrics.push({ field: "*", agg: "count" });
     }
 
@@ -1284,26 +1440,32 @@ export async function runWidget(
     const moneyEntries = config.metrics
       .map((m, i) => ({ m, i }))
       .filter(
-        ({ m }) =>
-          isMoneyMetric(m, available) && m.agg !== "min" && m.agg !== "max"
+        ({ m, i }) =>
+          defaultIdxSet.has(i) &&
+          isMoneyMetric(m, available) &&
+          m.agg !== "min" &&
+          m.agg !== "max"
       );
     // Chaves condicionais ficam de fora: a consulta de moeda não aplica os
     // filtros da condição (o detalhamento sairia sem condição — valor errado);
     // o operando condicional segue numérico (soma crua, degradação v1).
-    const basisMoneyKeys = [
+    const moneyBasisKeysOf = (idxFilter: (i: number) => boolean): BasisKey[] => [
       ...new Set(
-        [...calcResolved.values()].flatMap((rc) =>
-          rc.formula && rc.mode !== "none"
-            ? basisKeysFor(rc.formula).filter(
-                (key) =>
-                  !isCondBasisKey(key) &&
-                  basisMetric(key).agg === "sum" &&
-                  isMoneyOperandField(basisMetric(key).field, fieldByKey)
-              )
-            : []
-        )
+        [...calcResolved]
+          .filter(([i]) => idxFilter(i))
+          .flatMap(([, rc]) =>
+            rc.formula && rc.mode !== "none"
+              ? basisKeysFor(rc.formula).filter(
+                  (key) =>
+                    !isCondBasisKey(key) &&
+                    basisMetric(key).agg === "sum" &&
+                    isMoneyOperandField(basisMetric(key).field, fieldByKey)
+                )
+              : []
+          )
       ),
     ];
+    const basisMoneyKeys = moneyBasisKeysOf((i) => defaultIdxSet.has(i));
     const metricInfos: MoneyInfo[] = moneyEntries.map(({ m }) => ({
       metric: m,
       ...moneyCurrencyInfo(m.field, fieldByKey),
@@ -1332,10 +1494,194 @@ export async function runWidget(
           ).catch(() => ({}))
         : Promise.resolve({});
 
-    const [{ data, error }, , bdAll] = await Promise.all([
+    // ---- Pernas por fonte (Metric.sources, 18/07/2026) ---------------------
+    // Cada conjunto distinto de fontes de métrica vira uma rodada própria
+    // (RPC principal + auxiliares de condição e moeda) com os filtros
+    // reconstruídos para AQUELAS fontes (filtersOf), casada às linhas da
+    // principal por tupla de dims. Grupo ausente na perna: contagem → 0,
+    // demais → null (precedente das auxiliares de condição). Falha da perna
+    // degrada as métricas dela para null — nunca derruba o widget.
+    interface LegRun {
+      idx: number[];
+      rpcIdxOfConfig: Map<number, number>; // idx config → idx rpc (normais)
+      rpcIdxOfBasis: Map<string, number>; // basis key → idx rpc
+      moneyEntries: { m: Metric; i: number }[];
+      basisMoneyKeys: BasisKey[];
+      rowByTuple: Map<string, Record<string, unknown>>;
+      condValueByKey: Map<BasisKey, Record<string, number | null>>;
+      bdMap: Record<string, MoneyBreakdown[]>;
+      ok: boolean;
+    }
+    const runLeg = async (leg: {
+      sources: SourceKey[];
+      idx: number[];
+    }): Promise<LegRun> => {
+      const legFilters = filtersOf(leg.sources);
+      const legMetrics: Metric[] = [];
+      const idxOfConfig = new Map<number, number>();
+      for (const i of leg.idx) {
+        if (calcResolved.has(i)) continue;
+        idxOfConfig.set(i, legMetrics.length);
+        legMetrics.push(config.metrics[i]);
+      }
+      const idxOfBasis = new Map<string, number>();
+      const condKeys: BasisKey[] = [];
+      for (const i of leg.idx) {
+        const rc = calcResolved.get(i);
+        if (!rc?.formula) continue;
+        for (const key of basisKeysFor(rc.formula)) {
+          if (isCondBasisKey(key)) {
+            if (!condKeys.includes(key)) condKeys.push(key);
+            continue;
+          }
+          if (idxOfBasis.has(key)) continue;
+          const bm = basisMetric(key);
+          const existing = legMetrics.findIndex(
+            (m) => m.field === bm.field && m.agg === bm.agg && !m.formula
+          );
+          if (existing >= 0) {
+            idxOfBasis.set(key, existing);
+          } else {
+            idxOfBasis.set(key, legMetrics.length);
+            legMetrics.push(bm);
+          }
+        }
+      }
+      const legMoneyEntries = leg.idx
+        .map((i) => ({ m: config.metrics[i], i }))
+        .filter(
+          ({ m, i }) =>
+            !calcResolved.has(i) &&
+            isMoneyMetric(m, available) &&
+            m.agg !== "min" &&
+            m.agg !== "max"
+        );
+      const out: LegRun = {
+        idx: leg.idx,
+        rpcIdxOfConfig: idxOfConfig,
+        rpcIdxOfBasis: idxOfBasis,
+        moneyEntries: legMoneyEntries,
+        basisMoneyKeys: moneyBasisKeysOf((i) => leg.idx.includes(i)),
+        rowByTuple: new Map(),
+        condValueByKey: new Map(),
+        bdMap: {},
+        ok: false,
+      };
+      // Perna sem nada a consultar (só calculadas sem fórmula/operando):
+      // valores saem null sem gastar RPC.
+      if (legMetrics.length === 0 && condKeys.length === 0) {
+        out.ok = true;
+        return out;
+      }
+      // O builder do supabase é thenable (não Promise) — sem anotação; o ramo
+      // vazio devolve o mesmo shape { data, error } p/ o destructuring.
+      const legMainP =
+        legMetrics.length > 0
+          ? supabase.rpc("run_widget_query", {
+              p_source: config.source,
+              p_dimensions: dims,
+              p_metrics: legMetrics,
+              p_filters: legFilters,
+              p_correspondences: correspondencesMap,
+            })
+          : Promise.resolve({ data: [] as unknown, error: null });
+      const condGroups = new Map<
+        string,
+        { filters: WidgetFilter[]; keys: BasisKey[] }
+      >();
+      for (const key of condKeys) {
+        const parsed = parseCondBasisKey(key);
+        if (!parsed) continue;
+        const extra = condFilters(parsed.conds);
+        const gk = JSON.stringify(extra);
+        const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+        g.keys.push(key);
+        condGroups.set(gk, g);
+      }
+      const legCondP = Promise.all(
+        [...condGroups.values()].map(async (g) => {
+          try {
+            const { data: condData, error: condError } = await supabase.rpc(
+              "run_widget_query",
+              {
+                p_source: config.source,
+                p_dimensions: dims,
+                p_metrics: g.keys.map(basisMetric),
+                p_filters: [...legFilters, ...g.filters],
+                p_correspondences: correspondencesMap,
+              }
+            );
+            if (condError) throw new Error(condError.message);
+            const condRows = (Array.isArray(condData)
+              ? condData
+              : []) as WidgetRow[];
+            for (const key of g.keys) out.condValueByKey.set(key, {});
+            for (const r of condRows) {
+              const tuple: unknown[] = [];
+              for (let i = 1; i <= dims.length; i++)
+                tuple.push(r[`dim_${i}`] ?? null);
+              const tk = JSON.stringify(tuple);
+              g.keys.forEach((key, ki) => {
+                const v = r[`metric_${ki + 1}`];
+                const n = Number(v);
+                out.condValueByKey.get(key)![tk] =
+                  v == null || !Number.isFinite(n) ? null : n;
+              });
+            }
+          } catch {
+            for (const key of g.keys) out.condValueByKey.delete(key);
+          }
+        })
+      );
+      const legMetricInfos: MoneyInfo[] = legMoneyEntries.map(({ m }) => ({
+        metric: m,
+        ...moneyCurrencyInfo(m.field, fieldByKey),
+      }));
+      const legBasisInfos: MoneyInfo[] = out.basisMoneyKeys.map((key) => {
+        const bm = basisMetric(key);
+        return { metric: bm, ...moneyCurrencyInfo(bm.field, fieldByKey) };
+      });
+      const legMoneyP: Promise<Record<string, MoneyBreakdown[]>> =
+        legMetricInfos.length + legBasisInfos.length > 0
+          ? buildMoneyBreakdowns(
+              supabase,
+              dims,
+              legFilters,
+              correspondencesMap,
+              [...legMetricInfos, ...legBasisInfos],
+              rates,
+              conversionPeriod,
+              today
+            ).catch(() => ({}))
+          : Promise.resolve({});
+      try {
+        const [{ data: legData, error: legError }, , legBd] = await Promise.all(
+          [legMainP, legCondP, legMoneyP]
+        );
+        if (legError) throw new Error(legError.message);
+        const legRows = (Array.isArray(legData)
+          ? legData
+          : []) as Record<string, unknown>[];
+        for (const r of legRows) {
+          const tuple: unknown[] = [];
+          for (let i = 1; i <= dims.length; i++)
+            tuple.push(r[`dim_${i}`] ?? null);
+          out.rowByTuple.set(JSON.stringify(tuple), r);
+        }
+        out.bdMap = legBd;
+        out.ok = true;
+      } catch {
+        // ok = false: métricas da perna degradam p/ null ("—").
+      }
+      return out;
+    };
+    const legsPromise = Promise.all(legs.map(runLeg));
+
+    const [{ data, error }, , bdAll, legRuns] = await Promise.all([
       mainPromise,
       condPromise,
       moneyPromise,
+      legsPromise,
     ]);
     if (error) throw new Error(error.message);
 
@@ -1345,17 +1691,63 @@ export async function runWidget(
 
     // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
     // métricas calculadas — ANTES de attachMoney/rotulagem, que mutam os dim_*
-    // usados como chave de grupo.
-    if (calcResolved.size > 0) {
+    // usados como chave de grupo. Com pernas, roda também sem calculadas (os
+    // índices do RPC principal deixam de coincidir com config.metrics).
+    if (calcResolved.size > 0 || legRuns.length > 0) {
+      const legByIdx = new Map<number, LegRun>();
+      for (const lr of legRuns) for (const i of lr.idx) legByIdx.set(i, lr);
+      // Basis de uma calculada de PERNA p/ um grupo (tk): valores do grupo na
+      // perna (ausente → contagem 0 / demais null), com os overrides de moeda
+      // e das chaves condicionais DA PERNA. Perna falha → basis vazia (avalia
+      // p/ null; subtotais idem — nunca cai na basis do universo do widget).
+      const legBasisFor = (lr: LegRun, i: number, tk: string): BasisValues => {
+        const rc = calcResolved.get(i)!;
+        const legBasis: BasisValues = {};
+        if (!lr.ok || !rc.formula) return legBasis;
+        const legRow = lr.rowByTuple.get(tk);
+        for (const key of basisKeysFor(rc.formula)) {
+          if (isCondBasisKey(key)) {
+            const byTuple = lr.condValueByKey.get(key);
+            if (!byTuple) {
+              legBasis[key] = null;
+              continue;
+            }
+            legBasis[key] =
+              tk in byTuple
+                ? byTuple[tk]
+                : parseCondBasisKey(key)?.metric.agg === "count"
+                  ? 0
+                  : null;
+            continue;
+          }
+          const ri = lr.rpcIdxOfBasis.get(key);
+          const v = ri != null ? legRow?.[`metric_${ri + 1}`] : undefined;
+          const n = Number(v);
+          legBasis[key] =
+            v == null || !Number.isFinite(n)
+              ? basisMetric(key).agg === "count"
+                ? 0
+                : null
+              : n;
+        }
+        const legBdArr = lr.bdMap[tk];
+        lr.basisMoneyKeys.forEach((key, k) => {
+          const bd = legBdArr?.[lr.moneyEntries.length + k];
+          if (bd) legBasis[key] = bd;
+        });
+        return legBasis;
+      };
       for (const row of rows) {
         const src: Record<string, unknown> = {};
         rpcMetrics.forEach((_, ri) => {
           src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
         });
-        // Chave do grupo desta linha na consulta auxiliar (dims cruas do RPC).
+        // Chave do grupo desta linha nas consultas auxiliares/pernas (dims
+        // cruas do RPC).
         const tuple: unknown[] = [];
         for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
-        const bdArr = hasBd ? bdMap[JSON.stringify(tuple)] : undefined;
+        const tk = JSON.stringify(tuple);
+        const bdArr = hasBd ? bdMap[tk] : undefined;
         const basis: BasisValues = {};
         for (const [key, ri] of rpcIdxOfBasis) {
           const n = Number(src[`metric_${ri + 1}`]);
@@ -1377,7 +1769,6 @@ export async function runWidget(
             basis[key] = null;
             continue;
           }
-          const tk = JSON.stringify(tuple);
           if (tk in byTuple) {
             basis[key] = byTuple[tk];
           } else {
@@ -1385,8 +1776,35 @@ export async function runWidget(
               parseCondBasisKey(key)?.metric.agg === "count" ? 0 : null;
           }
         }
-        config.metrics.forEach((_, i) => {
+        // Basis POR MÉTRICA das calculadas de perna (universo próprio) — os
+        // renderizadores leem __calcOpsBy[key] ?? __calcOps.
+        const calcOpsBy: NonNullable<WidgetRow["__calcOpsBy"]> = {};
+        config.metrics.forEach((m, i) => {
           const rc = calcResolved.get(i);
+          const lr = legByIdx.get(i);
+          if (lr) {
+            if (rc) {
+              const legBasis = legBasisFor(lr, i, tk);
+              calcOpsBy[`metric_${i + 1}`] = legBasis;
+              row[`metric_${i + 1}`] = rc.formula
+                ? evalCalcMoney(
+                    rc.formula,
+                    legBasis,
+                    calcMoneyMeta(rc, rates, conversionPeriod)
+                  ).value
+                : null;
+              return;
+            }
+            // Métrica normal de perna: valor do grupo na perna; grupo ausente
+            // → contagem 0, demais null; perna falha → null.
+            const ri = lr.rpcIdxOfConfig.get(i)!;
+            const v = lr.ok
+              ? lr.rowByTuple.get(tk)?.[`metric_${ri + 1}`]
+              : undefined;
+            row[`metric_${i + 1}`] =
+              v != null ? v : lr.ok && m.agg === "count" ? 0 : null;
+            return;
+          }
           if (rc) {
             row[`metric_${i + 1}`] = rc.formula
               ? evalCalcMoney(
@@ -1402,7 +1820,8 @@ export async function runWidget(
         for (let k = config.metrics.length; k < rpcMetrics.length; k++) {
           delete row[`metric_${k + 1}`];
         }
-        row.__calcOps = basis;
+        if (calcResolved.size > 0) row.__calcOps = basis;
+        if (Object.keys(calcOpsBy).length > 0) row.__calcOpsBy = calcOpsBy;
       }
     }
 
@@ -1412,6 +1831,13 @@ export async function runWidget(
     // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
     if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
       attachMoney(rows, dims, moneyEntries, bdMap);
+    }
+    // Métricas monetárias de PERNA: mesmo attach, com o detalhamento da perna
+    // (attachMoney faz merge em __money — chamadas múltiplas não se clobberam).
+    for (const lr of legRuns) {
+      if (!lr.ok || lr.moneyEntries.length === 0 || rows.length === 0) continue;
+      if (Object.keys(lr.bdMap).length === 0) continue;
+      attachMoney(rows, dims, lr.moneyEntries, lr.bdMap);
     }
     return rows;
   };
@@ -1451,7 +1877,9 @@ export async function runWidget(
           divide = true;
         }
       }
-      const cmpRows = await computeRows(cmpDims, cmpFiltersFor(cmpSpec));
+      const cmpRows = await computeRows(cmpDims, (srcs) =>
+        cmpFiltersFor(cmpSpec, srcs)
+      );
       return { cmpRows, sharedIdx, bucketed, divide };
     } catch {
       return null;
@@ -1459,7 +1887,7 @@ export async function runWidget(
   };
 
   const [rows, cmpRun] = await Promise.all([
-    computeRows(dims, filters),
+    computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
     runComparison(),
   ]);
 

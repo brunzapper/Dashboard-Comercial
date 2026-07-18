@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 16/07/2026
+// Versão: 1.7 | Data: 18/07/2026
+// v1.7 (18/07/2026): fontes por MÉTRICA — Metric.sources (universo de cálculo
+//   próprio da métrica; linhas/registros seguem widgets.sources) e
+//   WidgetRow.__calcOpsBy (basis por métrica calculada com fontes próprias).
+//   Ver lib/widgets/metric-sources.ts.
 // v1.6 (16/07/2026): kanban — DashboardSettings.kanban (kanban dedicado, kind
 //   'kanban' na 0062) e WidgetSettings.kanban (widget kanban). Config em
 //   lib/kanban/types.ts (compartilhada página ↔ widget).
@@ -193,6 +197,14 @@ export interface Metric {
   percent?: boolean;
   // Nome exibido (estético) desta métrica; ausente = "<Agg> · <campo>".
   label?: string;
+  // Fontes desta MÉTRICA (18/07/2026; PERSISTIDO em widgets.metrics): a métrica
+  // é calculada sobre essas fontes — pode ampliar OU restringir o universo em
+  // relação às fontes do widget (ex.: linhas só de Deals + conversão contando
+  // Leads e Deals). Ausente/vazio = fontes do widget (comportamento clássico).
+  // NUNCA vai ao RPC como chave: vira filtro `record_type in (...)` de uma
+  // chamada separada, mesclada por tupla de dims (lib/widgets/metric-sources.ts
+  // + engine.ts). O universo de LINHAS/registros segue widgets.sources.
+  sources?: SourceKey[];
   // Moeda (12/07/2026): só relevante p/ métrica monetária (value/mrr/campo moeda).
   // A taxa a usar (ano/trimestre do registro ou do período do dashboard):
   conversionBasis?: ConversionBasis;
@@ -922,6 +934,15 @@ export interface WidgetRow {
   // p/ operando monetário). Subtotais/Total geral fundem as basis das linhas e
   // reavaliam a fórmula (lib/widgets/calc-metrics).
   __calcOps?: Record<string, number | null | MoneyBreakdown>;
+  // Basis POR MÉTRICA (18/07/2026): métricas calculadas com fontes próprias
+  // (Metric.sources) gravam a basis aqui, chaveada por `metric_<n>` — o
+  // universo delas difere do da linha e a basis compartilhada (__calcOps)
+  // colidiria em operandos comuns (ex.: 'count:*'). Renderizadores leem
+  // `__calcOpsBy?.[key] ?? __calcOps` (fallback = comportamento clássico).
+  __calcOpsBy?: Record<
+    string,
+    Record<string, number | null | MoneyBreakdown>
+  >;
 }
 
 /** Resultado já pronto para os charts. */

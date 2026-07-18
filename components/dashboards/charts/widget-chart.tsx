@@ -1,4 +1,8 @@
-// Versão: 3.1 | Data: 15/07/2026
+// Versão: 3.2 | Data: 18/07/2026
+// v3.2 (18/07/2026): fontes por métrica — as leituras de basis das calculadas
+//   passam a preferir __calcOpsBy[key] (basis POR MÉTRICA, universo próprio de
+//   Metric.sources) com fallback ao __calcOps compartilhado (comportamento
+//   clássico). Ver lib/widgets/engine.ts v1.4.
 // v3.1 (15/07/2026): exibição percentual — buildPercentModes (x100 do carimbo do
 //   engine vence o sufixo "%" da métrica) aplicado a células, tooltips, rótulos,
 //   eixos, subtotais e Total geral.
@@ -194,13 +198,23 @@ function calcValueText(
 // Célula de métrica calculada: reavalia a fórmula da basis da linha (moeda
 // automática preservada / convertida); sem basis cai no valor plotado. `pct`
 // só se aplica quando o resultado é número puro (sem moeda).
+// Basis da métrica `key` numa linha: por métrica (__calcOpsBy, universo próprio
+// de Metric.sources) com fallback à compartilhada (__calcOps, clássico).
+function calcOpsOf(
+  row: Record<string, unknown>,
+  key: string
+): WidgetRow["__calcOps"] {
+  const r = row as WidgetRow;
+  return r.__calcOpsBy?.[key] ?? r.__calcOps;
+}
+
 function calcCellText(
   row: Record<string, unknown>,
   key: string,
   calc: CalcMeta,
   pct: PercentMode = null
 ): string {
-  const ops = (row as WidgetRow).__calcOps;
+  const ops = calcOpsOf(row, key);
   if (ops) {
     const { value, currency } = evalCalcMoney(calc.formula, ops, calcMetaOf(calc));
     if (value == null) return "—";
@@ -211,23 +225,25 @@ function calcCellText(
 }
 
 // Subtotal/Total geral de uma métrica calculada: NUNCA soma a coluna — funde as
-// basis (__calcOps) das linhas do escopo e reavalia a fórmula. Linhas sem basis
-// (payload antigo) → null ("—").
+// basis (__calcOpsBy[key] ?? __calcOps) das linhas do escopo e reavalia a
+// fórmula. Linhas sem basis (payload antigo) → null ("—").
 function calcAggResult(
   rs: Record<string, unknown>[],
+  key: string,
   calc: CalcMeta
 ): { value: number | null; currency: string | null } | null {
   if (calc.formula.tokens.length === 0) return null;
-  const list = rs.map((r) => (r as WidgetRow).__calcOps);
+  const list = rs.map((r) => calcOpsOf(r, key));
   if (!list.some(Boolean)) return null;
   return evalCalcMoney(calc.formula, foldBasis(list), calcMetaOf(calc));
 }
 function calcAggText(
   rs: Record<string, unknown>[],
+  key: string,
   calc: CalcMeta,
   pct: PercentMode = null
 ): string {
-  const res = calcAggResult(rs, calc);
+  const res = calcAggResult(rs, key, calc);
   if (!res || res.value == null) return "—";
   if (res.currency) return formatMoney(res.value, res.currency);
   return pct ? formatPercent(res.value, pct === "x100") : fmt(res.value);
@@ -357,12 +373,13 @@ export const WidgetChart = memo(function WidgetChart({
   // já que os valores plotados estariam em moedas diferentes). useMemo: avalia
   // a fórmula linha a linha por métrica calculada — só quando rows/metrics mudam.
   const calcCodeByKey: Record<string, string | null> = useMemo(() => {
-    const calcSeriesCode = (calc: CalcMeta): string | null => {
+    const calcSeriesCode = (key: string, calc: CalcMeta): string | null => {
       let code: string | null = null;
       let any = false;
       for (const r of rows as WidgetRow[]) {
-        if (!r.__calcOps) continue;
-        const { currency } = evalCalcMoney(calc.formula, r.__calcOps, calcMetaOf(calc));
+        const ops = calcOpsOf(r, key);
+        if (!ops) continue;
+        const { currency } = evalCalcMoney(calc.formula, ops, calcMetaOf(calc));
         any = true;
         if (currency == null) return null;
         if (code == null) code = currency;
@@ -372,7 +389,7 @@ export const WidgetChart = memo(function WidgetChart({
     };
     const out: Record<string, string | null> = {};
     metrics.forEach((m) => {
-      if (m.calc) out[m.key] = calcSeriesCode(m.calc);
+      if (m.calc) out[m.key] = calcSeriesCode(m.key, m.calc);
     });
     return out;
   }, [rows, metrics]);
@@ -1255,7 +1272,7 @@ function AppearanceTable({
     isGrand: boolean
   ): string => {
     const calc = calcByKey[key];
-    if (calc) return calcAggText(rs, calc, percentModeOf(key));
+    if (calc) return calcAggText(rs, key, calc, percentModeOf(key));
     const cfg = metricByKey[key];
     if (moneyKeys.has(key) && cfg) {
       const folded = foldBreakdowns(rs.map((r) => (r as WidgetRow).__money?.[key]));

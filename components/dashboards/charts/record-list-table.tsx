@@ -1,4 +1,9 @@
-// Versão: 3.3 | Data: 18/07/2026
+// Versão: 3.4 | Data: 18/07/2026
+// v3.4 (18/07/2026): fontes por métrica — prop extraRecords (registros das
+//   fontes de Metric.sources que o widget não exibe) entra SÓ na basis dos
+//   subtotais/Total geral (comum e transposta), casada ao grupo pela mesma
+//   construção de chave da árvore; célula por registro fora das fontes da
+//   métrica exibe "—". Linhas/contagens de grupo seguem intactas.
 // v3.3 (18/07/2026): refresh pós-edição de célula debounced e fora da transition
 //   (useDebouncedRefresh) — edição inline não recomputa mais o dashboard inteiro
 //   a cada célula nem trava o input até o re-render.
@@ -55,6 +60,8 @@ import {
   type ResolvedCalcMetric,
 } from "@/lib/widgets/calc-metrics";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
+import { metricTargetSources } from "@/lib/widgets/metric-sources";
+import { toRecordType } from "@/lib/sources";
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import {
   buildRecordBreakdown,
@@ -199,6 +206,7 @@ export type ResponsibleOption = {
 // registros/aparência/props realmente mudam — não a cada churn do grid.
 export const RecordListTable = memo(function RecordListTable({
   records,
+  extraRecords = [],
   serverPage,
   searchQ,
   searchFields,
@@ -218,6 +226,10 @@ export const RecordListTable = memo(function RecordListTable({
   onAppearanceChange,
 }: {
   records: RecordRow[];
+  // Registros EXTRAS das fontes das métricas com fontes próprias
+  // (Metric.sources) que o widget não exibe: entram SÓ na basis dos
+  // subtotais/Total geral (e nunca como linha). Ver runRecordListWithExtras.
+  extraRecords?: RecordRow[];
   // Paginação SERVER-SIDE (widgets elegíveis — serverPaginatedList): `records`
   // é só a página corrente, já filtrada/ordenada pelo servidor; o pager usa
   // `total` e delega a troca de página ao WidgetCard (onPageChange). Ausente =
@@ -475,6 +487,13 @@ export const RecordListTable = memo(function RecordListTable({
   };
 
   const metricCellText = (m: Metric, r: RecordRow): string => {
+    // Métrica com fontes próprias: registro de fonte fora delas exibe "—" (o
+    // valor por registro não faz parte do universo da métrica).
+    {
+      const srcs = metricTargetSources(m);
+      if (srcs.length > 0 && !srcs.some((s) => toRecordType(s) === r.record_type))
+        return "—";
+    }
     // Calculada de agregados por registro: basis do próprio registro (ticket
     // médio de 1 venda = mrr/1 — coerente com o "individual" do agregado).
     if (calcOf(m)) return calcText(m, [r]);
@@ -646,6 +665,11 @@ export const RecordListTable = memo(function RecordListTable({
     () => (searchMatcher ? records.filter(searchMatcher) : records),
     [records, searchMatcher]
   );
+  // Extras sob a MESMA busca textual: subtotais/Total refletem o que casa.
+  const filteredExtra = useMemo(
+    () => (searchMatcher ? extraRecords.filter(searchMatcher) : extraRecords),
+    [extraRecords, searchMatcher]
+  );
 
   // Ordenação: sort tem precedência sobre a ordem manual das linhas.
   // useMemo: o sort percorre o conjunto INTEIRO e rodava a cada re-render
@@ -763,6 +787,46 @@ export const RecordListTable = memo(function RecordListTable({
     sortKeyOf: (r, field) => dateSortKey(field, r),
     isExpanded: (k) => expanded.has(k),
   };
+
+  // --- Fontes por métrica (Metric.sources): escopo da basis dos subtotais ---
+  // record_types de uma métrica com fontes próprias (null = herda o widget).
+  const metricRts = (m: Metric): Set<string> | null => {
+    const srcs = metricTargetSources(m);
+    return srcs.length > 0 ? new Set(srcs.map((s) => toRecordType(s))) : null;
+  };
+  // Escopo de uma métrica sobre um recorte: sem fontes próprias → o recorte
+  // intacto (byte a byte igual a antes); com → recorte + extras do MESMO
+  // grupo, filtrados pelas fontes da métrica.
+  const scopeRecordsFor = (
+    m: Metric,
+    rs: RecordRow[],
+    extras: RecordRow[]
+  ): RecordRow[] => {
+    const rts = metricRts(m);
+    if (!rts) return rs;
+    return [...rs, ...extras].filter((r) => rts.has(r.record_type));
+  };
+  // Índice dos extras por caminho de grupo — MESMA construção de chave da
+  // árvore (prefixo + "›" + keyOf por nível; ver buildGroupItems), um mapa por
+  // nível. Nunca parseia a chave dos nós: reconstrói pelo mesmo algoritmo.
+  const extrasPathIndex = (levels: string[]): Map<string, RecordRow[]>[] => {
+    const maps: Map<string, RecordRow[]>[] = levels.map(() => new Map());
+    if (filteredExtra.length === 0) return maps;
+    for (const r of filteredExtra) {
+      let path = "";
+      levels.forEach((field, li) => {
+        path = `${path}›${groupOpts.keyOf(r, field)}`;
+        const list = maps[li].get(path) ?? [];
+        list.push(r);
+        maps[li].set(path, list);
+      });
+    }
+    return maps;
+  };
+  // Índice dos extras pelos níveis do "Agrupar por" comum (a transposta monta
+  // o próprio índice com os níveis dela).
+  const extrasGroupMaps = extrasPathIndex(groupLevels);
+
   type Item = GroupNode<RecordRow> | { kind: "grand" };
   let displayItems: Item[];
   if (groupLevels.length > 0) {
@@ -904,6 +968,13 @@ export const RecordListTable = memo(function RecordListTable({
     // Chave estável da linha de grupo (inclui o caminho hierárquico) — usada
     // como rowKey nos mapas de cor, isolada das linhas de dados pelo prefixo.
     const grpKey = `__grp:${keyId}`;
+    // Extras deste recorte p/ métricas com fontes próprias: Total geral = todos;
+    // grupo = os do mesmo caminho (keyId é a chave do nó da árvore).
+    const extrasFor = (m: Metric): RecordRow[] => {
+      if (!metricRts(m)) return [];
+      if (opts?.isGrand) return filteredExtra;
+      return extrasGroupMaps[opts?.level ?? 0]?.get(keyId) ?? [];
+    };
     const rowCp = t.rowColors?.[grpKey];
     // Cor + duplo-clique (abre o menu de aparência) por célula da linha de grupo.
     // `colKey` = chave da coluna mesclada (métrica sintética ou campo da coluna).
@@ -995,7 +1066,11 @@ export const RecordListTable = memo(function RecordListTable({
               }}
             >
               <span className={cellSpanClass}>
-                {metricAggText(x.m, rs, opts?.isGrand)}
+                {metricAggText(
+                  x.m,
+                  scopeRecordsFor(x.m, rs, extrasFor(x.m)),
+                  opts?.isGrand
+                )}
               </span>
             </TableCell>
           );
@@ -1252,9 +1327,31 @@ export const RecordListTable = memo(function RecordListTable({
       ...periodAggCols.map((c) => c.field),
       ...groupByLevels(t.groupBy),
     ]).filter((f) => f !== colDimKey && cols.some((c) => c.field === f));
-    const { colVals, rowsForCol } = columnAxis(rows, colDimKey, groupOpts.keyOf);
+    const { colVals, rowsForCol, colGroupKey } = columnAxis(
+      rows,
+      colDimKey,
+      groupOpts.keyOf
+    );
     const colHeader = (rep: RecordRow) =>
       groupOpts.labelOf ? groupOpts.labelOf(rep, colDimKey) : groupOpts.keyOf(rep, colDimKey);
+    // Extras por caminho de grupo da transposta (níveis próprios; o prefixo
+    // `__m:<i>` das chaves dos TItems é removido antes do lookup) + filtro
+    // pela coluna (mesma chave de coluna do rep).
+    const tExtrasMaps = extrasPathIndex(tGroupLevels);
+    const tExtrasFor = (
+      item: TItem<RecordRow>,
+      m: Metric,
+      rep: RecordRow
+    ): RecordRow[] => {
+      if (!metricRts(m)) return [];
+      const path = item.key.slice(item.metricKey.length);
+      const base =
+        path === ""
+          ? filteredExtra
+          : tExtrasMaps[item.level - 1]?.get(path) ?? [];
+      const rk = colGroupKey(rep);
+      return base.filter((r) => colGroupKey(r) === rk);
+    };
 
     const metricByKey = new Map(tMetrics.map((m, mi) => [`__m:${mi}`, m]));
     const tItems: TItem<RecordRow>[] = [];
@@ -1362,7 +1459,14 @@ export const RecordListTable = memo(function RecordListTable({
                       )}
                       style={cellBorder(ci === colVals.length - 1)}
                     >
-                      {metricAggText(m, rowsForCol(item.rows, rep))}
+                      {metricAggText(
+                        m,
+                        scopeRecordsFor(
+                          m,
+                          rowsForCol(item.rows, rep),
+                          tExtrasFor(item, m, rep)
+                        )
+                      )}
                     </TableCell>
                   ))}
                 </TableRow>

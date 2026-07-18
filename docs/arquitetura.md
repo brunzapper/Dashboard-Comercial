@@ -1,4 +1,7 @@
-<!-- Versão: 1.1 | Data: 18/07/2026 -->
+<!-- Versão: 1.2 | Data: 18/07/2026 -->
+<!-- v1.2 (18/07/2026): fontes por métrica (Metric.sources) — universo de
+     cálculo próprio por métrica via "pernas" no engine (§4.1); nova invariante
+     em §5 (nunca resolver fonte por métrica no RPC). -->
 <!-- v1.1 (18/07/2026): edição inline reconcilia no cliente (célula otimista +
      refresh debounced + realtime) em vez de revalidatePath por edição; badge
      de write-backs pendentes em /registros. -->
@@ -117,6 +120,25 @@ O subsistema mais crítico. A config do widget (JSONB: `p_source`, `p_dimensions
 O lado TypeScript é `lib/widgets/engine.ts` (chama o RPC, resolve rótulos de FK,
 pós-processa). A função foi **recriada 17 vezes** ao longo das migrações — a versão
 vigente é a da migração `0072_widget_rpc_min_max.sql`.
+
+**Fontes por métrica (`Metric.sources`, 18/07/2026):** o universo de LINHAS/
+dimensões/registros de um widget é sempre `widgets.sources`; cada métrica pode
+opcionalmente declarar as próprias fontes (`sources` no jsonb `widgets.metrics`)
+e passa a ser calculada sobre elas — super/subconjunto ou disjunto do widget
+(ex.: linhas só de Deals + conversão contando Leads E Deals). Implementação
+inteira no engine (`lib/widgets/metric-sources.ts`): a métrica vira uma "perna"
+— chamada RPC separada com o pipeline de filtros (segmentação por fonte,
+`@period` byType e `record_type in (...)`) reconstruído para as fontes DELA —
+mesclada às linhas da principal por tupla de dims. Grupos que só existem nas
+fontes extras não viram linha; grupo ausente na perna: contagem 0, demais "—".
+A basis das calculadas de perna vai em `WidgetRow.__calcOpsBy` (por métrica;
+os renderizadores leem `__calcOpsBy[key] ?? __calcOps`). No modo registros, o
+fetch extra (`runRecordListWithExtras`) traz os registros das fontes que
+faltam SÓ para a basis dos subtotais (nunca como linha; a regra dos mocks do
+fetch extra inspeciona as métricas das pernas). Restrições `allowed_sources`
+de snapshot podem excluir fontes de uma métrica — ela degrada para "—"
+(comportamento documentado, não é bug). KPI razão ignora
+`numerator/denominator.sources` no v1.
 
 ### 4.2 Filtros de período
 
@@ -279,6 +301,16 @@ principalmente — para mantenedores humanos.
    filtros rápidos.
 8. **Autorização pelo vínculo vivo.** Use `records.responsible_id →
    responsibles.user_id` para visibilidade; `owner_user_id` é legado (0037).
+9. **Fonte por métrica se resolve no ENGINE, nunca no RPC.** `Metric.sources`
+   vira filtro `record_type in (...)` de uma chamada RPC separada
+   (lib/widgets/metric-sources.ts + engine.ts); o par
+   `run_widget_query`/`run_widget_query_snapshot` não conhece o conceito. Não
+   introduza parâmetro de fonte-por-métrica no RPC — obrigaria nova migração
+   espelhada (invariante 1) sem necessidade. O universo de linhas é sempre
+   `widgets.sources`; o `@period` pré-sintetizado dos filtros rápidos deve
+   cobrir fontes do widget ∪ fontes das métricas (`widgetQuerySources` — 3
+   pontos: page, viewer de snapshot e widget-scope), senão as pernas perdem
+   registros em silêncio.
 
 ## 6. Convenções do projeto
 
