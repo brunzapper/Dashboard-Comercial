@@ -37,14 +37,23 @@ export function resolveCurrencyCode(code?: string | null): string {
 /**
  * Formata um valor monetário na moeda informada. `value` pode ser number,
  * string numérica ou null; retorna "—" quando não é um número finito.
+ * `decimals` (18/07/2026): casas fixas configuradas na aparência; undefined =
+ * default da moeda no Intl (2 na maioria).
  */
-export function formatMoney(value: unknown, currencyCode?: string | null): string {
+export function formatMoney(
+  value: unknown,
+  currencyCode?: string | null,
+  decimals?: number
+): string {
   if (value == null || value === "") return "—";
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString("pt-BR", {
     style: "currency",
     currency: resolveCurrencyCode(currencyCode),
+    ...(decimals != null
+      ? { minimumFractionDigits: decimals, maximumFractionDigits: decimals }
+      : {}),
   });
 }
 
@@ -344,19 +353,24 @@ export function formatMoneyDisplay(
   mode: CurrencyDisplay,
   rates: CurrencyRates,
   year: number,
-  quarter = 0
+  quarter = 0,
+  decimals?: number
 ): string {
   if (amount == null || !Number.isFinite(Number(amount))) return "—";
   const c = resolveCurrencyCode(code);
   // Real ou modo "original" → uma moeda só, sem conversão.
-  if (mode === "original" || c === BASE_CURRENCY) return formatMoney(amount, c);
+  if (mode === "original" || c === BASE_CURRENCY)
+    return formatMoney(amount, c, decimals);
   const brl = convertToBRL(amount, c, rates, year, quarter);
-  if (brl == null) return formatMoney(amount, c); // sem taxa: mostra o original
-  if (mode === "converted") return formatMoney(brl, BASE_CURRENCY);
+  if (brl == null) return formatMoney(amount, c, decimals); // sem taxa: mostra o original
+  if (mode === "converted") return formatMoney(brl, BASE_CURRENCY, decimals);
   // reference: US$ original → R$ convertido
   const usd = toReferenceUSD(amount, c, rates, year, quarter);
-  const left = usd == null ? formatMoney(amount, c) : formatMoney(usd, REFERENCE_CURRENCY);
-  return `${left} → ${formatMoney(brl, BASE_CURRENCY)}`;
+  const left =
+    usd == null
+      ? formatMoney(amount, c, decimals)
+      : formatMoney(usd, REFERENCE_CURRENCY, decimals);
+  return `${left} → ${formatMoney(brl, BASE_CURRENCY, decimals)}`;
 }
 
 // ===================== Agregação monetária (compartilhada) ====================
@@ -452,32 +466,35 @@ export function plotSingleCurrency(b: MoneyBreakdown): string | null {
 export function formatMoneyAggregate(
   b: MoneyBreakdown,
   cfg: MoneyAggConfig,
-  isGrand = false
+  isGrand = false,
+  decimals?: number
 ): string {
   const div = (v: number) => (cfg.agg === "avg" && b.count > 0 ? v / b.count : v);
   if (isGrand) {
     return cfg.grandTotalMode === "dollar"
-      ? formatMoney(div(b.usd), "USD")
-      : formatMoney(div(b.brl), "BRL");
+      ? formatMoney(div(b.usd), "USD", decimals)
+      : formatMoney(div(b.brl), "BRL", decimals);
   }
   const codes = Object.keys(b.perCurrency);
   if (codes.length <= 1) {
     const code = codes[0] ?? "BRL";
     const disp = cfg.currencyDisplay ?? "original";
     if (code === "BRL" || disp === "original") {
-      return formatMoney(div(b.perCurrency[code] ?? 0), code);
+      return formatMoney(div(b.perCurrency[code] ?? 0), code, decimals);
     }
-    if (disp === "converted") return formatMoney(div(b.brl), "BRL");
-    return `${formatMoney(div(b.usd), "USD")} → ${formatMoney(div(b.brl), "BRL")}`;
+    if (disp === "converted") return formatMoney(div(b.brl), "BRL", decimals);
+    return `${formatMoney(div(b.usd), "USD", decimals)} → ${formatMoney(div(b.brl), "BRL", decimals)}`;
   }
   // Várias moedas no grupo.
   switch (cfg.currencyMultiMode ?? "convert") {
     case "separate":
-      return codes.map((c) => formatMoney(div(b.perCurrency[c]), c)).join(" · ");
+      return codes
+        .map((c) => formatMoney(div(b.perCurrency[c]), c, decimals))
+        .join(" · ");
     case "reference":
-      return `${formatMoney(div(b.usd), "USD")} → ${formatMoney(div(b.brl), "BRL")}`;
+      return `${formatMoney(div(b.usd), "USD", decimals)} → ${formatMoney(div(b.brl), "BRL", decimals)}`;
     case "convert":
     default:
-      return formatMoney(div(b.brl), "BRL");
+      return formatMoney(div(b.brl), "BRL", decimals);
   }
 }

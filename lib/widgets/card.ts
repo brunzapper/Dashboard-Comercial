@@ -23,6 +23,7 @@ import { unifiedMemberRef } from "@/lib/correspondences";
 import { fetchFkLabels, runWidget } from "./engine";
 import { runCalculatedWidget } from "./formula-metric";
 import { runRecordList } from "./record-list";
+import { fracDigits } from "./appearance";
 import { formatMoney, yearQuarterOf, type CurrencyRates } from "./currency";
 import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { fieldFk, fieldLabel, type AvailableField } from "./fields";
@@ -48,8 +49,8 @@ export function isCardModeWidget(w: {
   );
 }
 
-const fmt = (n: number): string =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+const fmt = (n: number, decimals?: number): string =>
+  n.toLocaleString("pt-BR", fracDigits(decimals));
 
 function numOrNull(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -112,6 +113,8 @@ export async function runCardWidget(
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const wrap = (t: string) => `${card.prefix ?? ""}${t}${card.suffix ?? ""}`;
   const af = (f: string) => available.find((a) => a.field === f);
+  // Casas decimais do widget (aparência) — aplicadas aos textos do servidor.
+  const decimals = config.settings?.appearance?.decimals;
 
   // Exibição de um valor cru na escala do campo (moeda do registro, data,
   // percentual, FK via rótulo — resolvido pelo chamador).
@@ -127,11 +130,12 @@ export async function runCardWidget(
       const labels = await fetchFkLabels(supabase, fk, [String(v)]);
       return labels[String(v)] ?? String(v);
     }
-    if (meta?.isMoney) return formatMoney(v, record.currency);
+    if (meta?.isMoney) return formatMoney(v, record.currency, decimals);
     if (meta?.isDate) return formatDateValue(v, DEFAULT_DATE_FORMAT);
-    if (isPercentFieldRef(field, fieldByKey)) return formatPercent(v, true);
+    if (isPercentFieldRef(field, fieldByKey))
+      return formatPercent(v, true, decimals);
     const n = numOrNull(v);
-    return n != null ? fmt(n) : String(v);
+    return n != null ? fmt(n, decimals) : String(v);
   };
 
   if (mode === "record") {
@@ -247,8 +251,8 @@ export async function runCardWidget(
       (res.value == null
         ? "—"
         : res.currency
-          ? formatMoney(res.value, res.currency)
-          : fmt(res.value));
+          ? formatMoney(res.value, res.currency, decimals)
+          : fmt(res.value, decimals));
     return {
       ...empty,
       card: { mode, valueText: wrap(valueText), subText: card.secondaryText },

@@ -550,6 +550,8 @@ async function runKpi(
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
   const empty = { rows: [], dimensions: [], metrics: [] };
+  // Casas decimais do widget (aparência) — aplicadas aos textos do servidor.
+  const decimals = s.appearance?.decimals;
 
   // KPI "Data atual": mostra o dia de hoje em Brasília. Sintético — não consulta
   // o banco; o valor é sempre live (resolvido a cada render no servidor).
@@ -668,9 +670,9 @@ async function runKpi(
         // A razão de um numerador monetário é uma cifra em R$ (ex.: ticket médio).
         // `percent` (não-monetário): razão exibida ×100 + "%" (0.35 → "35%").
         ...(numConverted && value != null
-          ? { valueText: formatMoney(value, "BRL") }
+          ? { valueText: formatMoney(value, "BRL", decimals) }
           : s.percent && value != null
-            ? { valueText: formatPercent(value, true) }
+            ? { valueText: formatPercent(value, true, decimals) }
             : {}),
       },
     };
@@ -689,7 +691,12 @@ async function runKpi(
       metaMetric.agg === "avg" && metaBd.count > 0
         ? metaBd.brl / metaBd.count
         : metaBd.brl;
-    realizadoText = formatMoneyAggregate(metaBd, kpiCfg(metaMetric.agg));
+    realizadoText = formatMoneyAggregate(
+      metaBd,
+      kpiCfg(metaMetric.agg),
+      false,
+      decimals
+    );
   } else {
     [realizado] = await aggregate(supabase, [metaMetric], filters, correspondencesMap);
   }
@@ -730,9 +737,12 @@ async function runKpi(
       ...(metaMoney
         ? {
             realizadoText,
-            metaText: meta != null ? formatMoney(meta, "BRL") : undefined,
+            metaText:
+              meta != null ? formatMoney(meta, "BRL", decimals) : undefined,
             faltaText:
-              meta != null ? formatMoney(meta - realizado, "BRL") : undefined,
+              meta != null
+                ? formatMoney(meta - realizado, "BRL", decimals)
+                : undefined,
           }
         : {}),
     },

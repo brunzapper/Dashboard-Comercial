@@ -52,12 +52,20 @@ const ICON_OPTIONS: { value: string; label: string }[] = [
   { value: "warn", label: "⚠ alerta" },
 ];
 
+// Escopo do estilo (só tabelas): o que a regra pinta quando casa.
+const SCOPE_OPTIONS: { value: NonNullable<ConditionalRule["scope"]>; label: string }[] = [
+  { value: "cell", label: "Célula" },
+  { value: "row", label: "Linha inteira" },
+  { value: "col", label: "Coluna inteira" },
+];
+
 export function ConditionalFormatSection({
   value,
   onChange,
   targets,
   numericTargets,
   hasComparison,
+  showScope,
 }: {
   value: ConditionalFormatting | undefined;
   onChange: (v: ConditionalFormatting | undefined) => void;
@@ -67,6 +75,8 @@ export function ConditionalFormatSection({
   numericTargets: ComboboxOption[];
   /** Comparação habilitada no widget (mostra var_up/var_down). */
   hasComparison?: boolean;
+  /** Widgets tabulares: mostra o seletor "Aplicar em" (célula/linha/coluna). */
+  showScope?: boolean;
 }) {
   const rules = value?.rules ?? [];
   const scales = value?.scales ?? [];
@@ -181,6 +191,35 @@ export function ConditionalFormatSection({
               ) : null}
             </div>
           ) : null}
+          {showScope ? (
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground shrink-0 text-xs">
+                Aplicar em
+              </span>
+              <Select
+                value={r.scope ?? "cell"}
+                onValueChange={(v) =>
+                  patchRule(r.id, {
+                    scope:
+                      v === "cell"
+                        ? undefined
+                        : (v as ConditionalRule["scope"]),
+                  })
+                }
+              >
+                <SelectTrigger className="h-8 flex-1" aria-label="Aplicar em">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCOPE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2">
             <ColorField
               label="Texto"
@@ -211,31 +250,36 @@ export function ConditionalFormatSection({
               />
               Negrito
             </label>
-            <Select
-              value={r.style.icon ?? "none"}
-              onValueChange={(v) =>
-                patchRule(r.id, {
-                  style: {
-                    ...r.style,
-                    icon:
-                      v === "none"
-                        ? undefined
-                        : (v as ConditionalRule["style"]["icon"]),
-                  },
-                })
-              }
-            >
-              <SelectTrigger className="h-8 flex-1" aria-label="Ícone">
-                <SelectValue placeholder="Ícone" />
-              </SelectTrigger>
-              <SelectContent>
-                {ICON_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {(r.scope ?? "cell") === "cell" ? (
+              // Ícone só existe no escopo célula (linha/coluna o descartam).
+              <Select
+                value={r.style.icon ?? "none"}
+                onValueChange={(v) =>
+                  patchRule(r.id, {
+                    style: {
+                      ...r.style,
+                      icon:
+                        v === "none"
+                          ? undefined
+                          : (v as ConditionalRule["style"]["icon"]),
+                    },
+                  })
+                }
+              >
+                <SelectTrigger className="h-8 flex-1" aria-label="Ícone">
+                  <SelectValue placeholder="Ícone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ICON_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="flex-1" />
+            )}
             <Button
               type="button"
               variant="ghost"

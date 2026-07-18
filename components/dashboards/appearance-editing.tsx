@@ -238,6 +238,7 @@ export function ColorPopover({
   only,
   align,
   border,
+  decimals,
   footer,
 }: {
   x: number;
@@ -257,6 +258,12 @@ export function ColorPopover({
   border?: {
     value?: string;
     onChange: (v: string | undefined) => void;
+  };
+  // Casas decimais do escopo (18/07/2026): "Auto" = herda (limpa o override);
+  // clicar no valor ativo também limpa (mesmo padrão do alinhamento).
+  decimals?: {
+    value?: number;
+    onSelect: (d: number | undefined) => void;
   };
   footer?: ReactNode; // extras abaixo do alinhamento (ex.: atalhos linha/coluna)
 }) {
@@ -339,6 +346,33 @@ export function ColorPopover({
                   )}
                 >
                   <Icon className="size-4" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {decimals ? (
+          <div className="flex flex-col gap-1 border-t pt-2">
+            <p className="text-muted-foreground text-xs">Casas decimais</p>
+            <div className="flex gap-1">
+              {[undefined, 0, 1, 2, 3, 4].map((d) => (
+                <button
+                  key={d ?? "auto"}
+                  type="button"
+                  aria-pressed={decimals.value === d}
+                  onClick={() =>
+                    decimals.onSelect(
+                      d != null && decimals.value === d ? undefined : d
+                    )
+                  }
+                  className={cn(
+                    "flex flex-1 items-center justify-center rounded-sm border px-1 py-1 text-xs tabular-nums",
+                    decimals.value === d
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/50"
+                  )}
+                >
+                  {d ?? "Auto"}
                 </button>
               ))}
             </div>

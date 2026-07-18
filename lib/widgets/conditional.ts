@@ -5,12 +5,14 @@
 // pelos gráficos. Sem I/O e sem React.
 //
 // PRECEDÊNCIA com as cores manuais existentes (aplicada nos renderizadores):
-//   cellColors (célula explícita) > regra condicional > escala de cor >
+//   cellColors (célula explícita) > regra de célula > escala de cor >
+//   regra de LINHA (scope "row") > regra de COLUNA (scope "col") >
 //   rowColors/colColors > headerBg/bodyBg/global.
 // Racional: o clique manual numa célula é a intenção mais específica; a regra
-// é intenção de coluna (mais específica que a cor chapada de coluna/linha).
-// Nos gráficos, categoryColors/sliceColors manuais vencem a regra (mesmo
-// racional: explícito vence).
+// é intenção de coluna (mais específica que a cor chapada de coluna/linha);
+// entre regras, a mais específica vence (célula > linha > coluna). Ícone só
+// existe na regra de célula. Nos gráficos, categoryColors/sliceColors manuais
+// vencem a regra (mesmo racional: explícito vence).
 import type {
   ColorScale,
   ConditionalFormatting,
@@ -131,6 +133,8 @@ export function evalConditional(
   if (!cond) return null;
   for (const rule of cond.rules ?? []) {
     if (rule.target !== target) continue;
+    // Regras de linha/coluna saem do caminho por-célula (evalScopedConditional).
+    if ((rule.scope ?? "cell") !== "cell") continue;
     if (matches(rule, value, ctx?.variation)) {
       const { text, fill, bold, icon } = rule.style ?? {};
       if (text || fill || bold || icon) return { text, fill, bold, icon };
@@ -146,6 +150,49 @@ export function evalConditional(
     }
   }
   return null;
+}
+
+// Estilos de LINHA/COLUNA das regras com escopo (pré-passe sobre as linhas
+// visíveis, uma vez por render — não por célula). Semântica: a regra é avaliada
+// sobre a coluna `target` linha a linha; scope "row" pinta cada rowKey que
+// casou (primeira regra que casa vence, na ordem), scope "col" pinta o colKey
+// do target se ALGUMA linha casar. Escalas heatmap seguem célula-only. Ícone é
+// descartado (só faz sentido na célula que casou).
+export interface ScopedCondStyles {
+  row: Record<string, ResolvedCondStyle>; // rowKey -> estilo
+  col: Record<string, ResolvedCondStyle>; // colKey (target) -> estilo
+}
+
+export function evalScopedConditional(
+  cond: ConditionalFormatting | undefined,
+  rows: Record<string, unknown>[],
+  rowKeyOf: (r: Record<string, unknown>) => string,
+  valueOf?: (r: Record<string, unknown>, target: string) => unknown,
+  variationOf?: (r: Record<string, unknown>, target: string) => Variation | null
+): ScopedCondStyles {
+  const out: ScopedCondStyles = { row: {}, col: {} };
+  const scoped = (cond?.rules ?? []).filter(
+    (r) => (r.scope ?? "cell") !== "cell"
+  );
+  // Regras no loop EXTERNO: a primeira (na ordem) que casa vence por
+  // rowKey/colKey, igual ao caminho por-célula do evalConditional.
+  for (const rule of scoped) {
+    const { text, fill, bold } = rule.style ?? {};
+    if (!text && !fill && !bold) continue;
+    for (const r of rows) {
+      const rk = rowKeyOf(r);
+      if (rule.scope === "row" && out.row[rk]) continue;
+      if (rule.scope === "col" && out.col[rule.target]) continue;
+      const value = valueOf ? valueOf(r, rule.target) : r[rule.target];
+      if (!matches(rule, value, variationOf?.(r, rule.target))) continue;
+      if (rule.scope === "row") out.row[rk] = { text, fill, bold };
+      else {
+        out.col[rule.target] = { text, fill, bold };
+        break; // coluna já pintada — não precisa varrer o resto das linhas
+      }
+    }
+  }
+  return out;
 }
 
 /** A config tem algo a avaliar? (curto-circuito barato nos renderizadores) */

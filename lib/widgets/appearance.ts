@@ -179,6 +179,46 @@ export function alignClass(a: TableAlign): string {
   return a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left";
 }
 
+// Casas decimais efetivas de uma célula/coluna/widget. Precedência: célula >
+// linha > coluna > widget (AppearanceSettings.decimals). undefined = "Auto"
+// (o ponto de render mantém seu default atual).
+export function resolveDecimals(
+  ap: AppearanceSettings | undefined,
+  o?: { column?: string; rowKey?: string }
+): number | undefined {
+  const t = ap?.table;
+  return (
+    (o?.rowKey && o?.column
+      ? t?.cellDecimals?.[`${o.rowKey}:${o.column}`]
+      : undefined) ??
+    (o?.rowKey ? t?.rowDecimals?.[o.rowKey] : undefined) ??
+    (o?.column ? t?.colDecimals?.[o.column] : undefined) ??
+    ap?.decimals
+  );
+}
+
+// Options de fração p/ toLocaleString/Intl: decimais configurados são FIXOS
+// (min=max — 2 casas exibe "1,50"); sem config, só o teto default do chamador.
+export function fracDigits(
+  d: number | undefined,
+  defMax = 2
+): Intl.NumberFormatOptions {
+  return d == null
+    ? { maximumFractionDigits: defMax }
+    : { minimumFractionDigits: d, maximumFractionDigits: d };
+}
+
+// Chave estável de uma coluna de MÉTRICA no modo registros (prefixo __metric:
+// não colide com c.field). Compartilhada entre o render (record-list-table) e o
+// sheet de aparência (alvos da formatação condicional) — o índice `i` é sobre a
+// lista de métricas com field (metricList), desambiguando métricas idênticas.
+export function recordListMetricKey(
+  m: { field: string; agg: string },
+  i: number
+): string {
+  return `__metric:${m.field}:${m.agg}:${i}`;
+}
+
 // Cores de preenchimento distintas presentes (p/ montar a janela "Por cor").
 export function distinctFills(fills: (string | undefined)[]): string[] {
   const seen = new Set<string>();

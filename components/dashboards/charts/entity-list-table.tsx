@@ -33,6 +33,7 @@ import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
   evalConditional,
+  evalScopedConditional,
   hasConditional,
   scaleDomains,
 } from "@/lib/widgets/conditional";
@@ -44,7 +45,13 @@ import {
   bucketRecordDate,
   isGroupDateFormat,
 } from "@/lib/widgets/date-buckets";
-import { alignClass, groupByLevels, resolveAlign } from "@/lib/widgets/appearance";
+import {
+  alignClass,
+  fracDigits,
+  groupByLevels,
+  resolveAlign,
+  resolveDecimals,
+} from "@/lib/widgets/appearance";
 import {
   buildGroupItems,
   dedupeFields,
@@ -75,6 +82,7 @@ function EntityEditableCell({
   userRoles,
   canEditValues,
   dateFormat,
+  decimals,
   value: serverValue,
   dashboardId,
   onSaved,
@@ -85,6 +93,8 @@ function EntityEditableCell({
   userRoles: string[];
   canEditValues: boolean;
   dateFormat: DateFormat;
+  // Casas decimais configuradas na aparência (só afeta a exibição read-only).
+  decimals?: number;
   value: string;
   // Dashboard de origem — a action revalida SÓ ele (ver updateEntityField).
   dashboardId?: string;
@@ -112,10 +122,14 @@ function EntityEditableCell({
     // próprio campo (fixa p/ 'moeda'; fallback BRL quando 'calculado'-herdar).
     const fieldMoney = resolveFieldMoney(field, null);
     const display = fieldMoney.isMoney
-      ? formatMoney(serverValue, fieldMoney.code)
+      ? formatMoney(serverValue, fieldMoney.code, decimals)
       : field.data_type === "data"
         ? formatDateValue(serverValue, dateFormat)
-        : serverValue;
+        : decimals != null &&
+            serverValue !== "" &&
+            Number.isFinite(Number(serverValue))
+          ? Number(serverValue).toLocaleString("pt-BR", fracDigits(decimals))
+          : serverValue;
     // Traço só para vazio/nulo — zero (0 numérico ou "0") exibe normalmente.
     return (
       <span className="block truncate">
@@ -304,6 +318,16 @@ export function EntityListTable({
     condActive
       ? evalConditional(cond, field, raw, { domain: condDomains[field] })
       : null;
+  // Regras com escopo linha/coluna: pré-passe sobre as entidades visíveis.
+  const scopedCond = condActive
+    ? evalScopedConditional(
+        cond,
+        rows as unknown as Record<string, unknown>[],
+        (r) => (r as unknown as EntityListRow).id,
+        (row, target) =>
+          (row as unknown as EntityListRow).values[target.slice(7)]
+      )
+    : { row: {}, col: {} };
 
   const [menu, setMenu] = useState<
     | { kind: "ctx"; x: number; y: number; column: string }
@@ -368,6 +392,12 @@ export function EntityListTable({
     if (!a) delete map[column];
     else map[column] = a;
     setTable({ colAlign: map });
+  };
+  const setColDecimals = (column: string, d: number | undefined) => {
+    const map = { ...(t.colDecimals ?? {}) };
+    if (d == null) delete map[column];
+    else map[column] = d;
+    setTable({ colDecimals: map });
   };
 
   // --- Agrupar por: agrupa as entidades por uma ou mais colunas em seções
@@ -453,13 +483,15 @@ export function EntityListTable({
       ? [...buildGroupItems(rows, groupLevels, groupOpts), { kind: "grand" }]
       : rows.map((r) => ({ kind: "data", row: r }));
 
-  const numFmt = (field: string, n: number): string => {
+  const numFmt = (field: string, n: number, decimals?: number): string => {
     const f = fieldByKey.get(field.slice(7));
     if (f) {
       const m = resolveFieldMoney(f, null);
-      if (m.isMoney) return formatMoney(n, m.code);
+      if (m.isMoney) return formatMoney(n, m.code, decimals);
     }
-    return n.toLocaleString("pt-BR");
+    return decimals != null
+      ? n.toLocaleString("pt-BR", fracDigits(decimals))
+      : n.toLocaleString("pt-BR");
   };
 
   // Linha de dados = 1 entidade (com células editáveis).
@@ -492,6 +524,8 @@ export function EntityListTable({
           const field = fieldByKey.get(c.field.slice(7));
           const raw = r.values[c.field.slice(7)];
           const cs = condStyleOf(c.field, raw);
+          const scRow = scopedCond.row[r.id];
+          const scCol = scopedCond.col[c.field];
           return (
             <TableCell
               key={c.field}
@@ -503,9 +537,20 @@ export function EntityListTable({
                 )
               )}
               style={{
-                background: cs?.fill ?? t.colColors?.[c.field]?.fill,
-                color: cs?.text ?? t.colColors?.[c.field]?.text ?? t.bodyColor,
-                ...(cs?.bold ? { fontWeight: 600 } : {}),
+                background:
+                  cs?.fill ??
+                  scRow?.fill ??
+                  scCol?.fill ??
+                  t.colColors?.[c.field]?.fill,
+                color:
+                  cs?.text ??
+                  scRow?.text ??
+                  scCol?.text ??
+                  t.colColors?.[c.field]?.text ??
+                  t.bodyColor,
+                ...(cs?.bold || scRow?.bold || scCol?.bold
+                  ? { fontWeight: 600 }
+                  : {}),
                 ...cellBorder(ci + 1),
                 ...widthStyle(c.field),
                 ...(cellText === "clip" ? { overflow: "hidden" } : {}),
@@ -519,6 +564,7 @@ export function EntityListTable({
                   userRoles={userRoles}
                   canEditValues={canEditValues}
                   dateFormat={fmtOf(c.field)}
+                  decimals={resolveDecimals(ap, { column: c.field, rowKey: r.id })}
                   value={raw == null ? "" : String(raw)}
                   dashboardId={dashboardId}
                   onSaved={refresh}
@@ -591,7 +637,13 @@ export function EntityListTable({
           )}
           style={cellBorder(ci + 1)}
         >
-          {isNumericCol(c.field) ? numFmt(c.field, sumCol(c.field, rs)) : null}
+          {isNumericCol(c.field)
+            ? numFmt(
+                c.field,
+                sumCol(c.field, rs),
+                resolveDecimals(ap, { column: c.field })
+              )
+            : null}
         </TableCell>
       ))}
     </TableRow>
@@ -709,6 +761,14 @@ export function EntityListTable({
             value: t.colAlign?.[menu.column],
             onSelect: (a) => setColAlign(menu.column, a),
           }}
+          decimals={
+            isNumericCol(menu.column)
+              ? {
+                  value: t.colDecimals?.[menu.column],
+                  onSelect: (d) => setColDecimals(menu.column, d),
+                }
+              : undefined
+          }
           onClose={() => setMenu(null)}
         />
       ) : null}

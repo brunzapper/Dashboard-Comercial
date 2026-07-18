@@ -100,6 +100,7 @@ import { fetchWidgetRecordsPage } from "@/app/(app)/dashboards/record-list-actio
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
+import { fracDigits } from "@/lib/widgets/appearance";
 import { evalConditional } from "@/lib/widgets/conditional";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
@@ -1063,10 +1064,15 @@ export const WidgetCard = memo(function WidgetCard({
                     {calcValue?.value == null
                       ? "—"
                       : calcValue.currency
-                        ? formatMoney(calcValue.value, calcValue.currency)
-                        : calcValue.value.toLocaleString("pt-BR", {
-                            maximumFractionDigits: 2,
-                          })}
+                        ? formatMoney(
+                            calcValue.value,
+                            calcValue.currency,
+                            appearance?.decimals
+                          )
+                        : calcValue.value.toLocaleString(
+                            "pt-BR",
+                            fracDigits(appearance?.decimals)
+                          )}
                   </span>
                 );
               })()}

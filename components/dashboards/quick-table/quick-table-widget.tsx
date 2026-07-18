@@ -236,6 +236,7 @@ export function QuickTableWidget({
       available,
       tableAp: appearance?.table,
       dateFormat,
+      decimals: appearance?.decimals,
     });
     // Snapshot: nenhuma célula é digitável, independentemente de editableRoles
     // (ausente = "todos os visualizadores" — não vale para um link público).
@@ -255,6 +256,7 @@ export function QuickTableWidget({
     userRoles,
     available,
     appearance?.table,
+    appearance?.decimals,
     dateFormat,
     readOnly,
   ]);
