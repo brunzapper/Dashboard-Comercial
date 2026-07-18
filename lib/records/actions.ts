@@ -1,7 +1,11 @@
-// Versão: 1.2 | Data: 16/07/2026
+// Versão: 1.4 | Data: 18/07/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
+// v1.4 (18/07/2026): edição inline sem revalidatePath (no_revalidate=1 via
+//   updateRecordField) — a resposta da action volta sem re-render RSC da rota;
+//   reconcile no cliente (célula otimista + RealtimeRefresher + refresh
+//   debounced). Form lateral/createRecord seguem revalidando.
 // v1.1 (09/07/2026): Fase 7 — recomputa os campos calculados do registro após a
 //   edição manual (dependem de value/mrr/lead_time_days e de custom numéricos).
 // v1.2 (16/07/2026): createRecord — criação MANUAL de registros em fontes com
@@ -499,7 +503,15 @@ export async function updateRecord(
     });
   }
 
-  revalidatePath("/registros");
+  // Edição inline (updateRecordField) manda no_revalidate=1: a célula já é
+  // otimista e a página reconcilia no cliente (RealtimeRefresher + refresh
+  // debounced do chamador). Sem o revalidate, a resposta da action volta sem o
+  // re-render RSC da rota inteira — é isso que deixa a edição leve e libera a
+  // navegação (actions serializam por cliente). O form lateral (RecordEditSheet)
+  // e demais chamadores seguem revalidando (save one-shot que fecha o painel).
+  if (String(formData.get("no_revalidate") ?? "") !== "1") {
+    revalidatePath("/registros");
+  }
   return { ok: true, message: "Registro atualizado." };
 }
 
@@ -519,9 +531,10 @@ export interface UpdateFieldOptions {
 /**
  * Grava um único campo de um registro (edição inline na tabela). Reaproveita
  * `updateRecord` construindo um FormData com só aquele campo — toda a lógica de
- * permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log,
- * write-back e revalidatePath vem de graça. `kind` escolhe custom vs coluna do
- * núcleo; as flags de write-back viram os campos que `updateRecord` já entende.
+ * permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log e
+ * write-back vem de graça. `kind` escolhe custom vs coluna do núcleo; as flags
+ * de write-back viram os campos que `updateRecord` já entende. Diferença do
+ * form: manda no_revalidate=1 (a página reconcilia no cliente).
  */
 export async function updateRecordField(
   recordId: string,
@@ -545,6 +558,9 @@ export async function updateRecordField(
   if (opts.writeBack) fd.set(`write_back__${fieldKey}`, "1");
   if (opts.forceSyncWriteBack) fd.set("force_sync_write_back", "1");
   if (opts.allowEdit) fd.set("allow_edit", "1");
+  // Célula inline: sem revalidatePath — reconcile fica por conta do cliente
+  // (célula otimista + RealtimeRefresher + refresh debounced do chamador).
+  fd.set("no_revalidate", "1");
   return updateRecord({}, fd);
 }
 

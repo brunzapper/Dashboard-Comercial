@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 18/07/2026
+// v1.1 (18/07/2026): refresh pós-edição debounced e fora da transition da
+//   célula (useDebouncedRefresh) — sem re-render do dashboard por célula.
 // Widget de Tabela em modo lista cuja "Fonte das linhas" é uma ENTIDADE
 // (responsáveis/operações). Uma linha por entidade: a 1ª coluna é o nome
 // (read-only) e as demais são as colunas personalizadas escolhidas — as não
@@ -9,7 +11,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
@@ -24,6 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import {
@@ -267,7 +269,10 @@ export function EntityListTable({
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
-  const router = useRouter();
+  // Reconcile pós-edição debounced e fora da transition da célula (a action
+  // updateEntityField já revalida só o dashboard; aqui evitamos re-render por
+  // célula e o input travado até o recompute).
+  const refresh = useDebouncedRefresh();
   const ap = appearance ?? {};
   const t = ap.table ?? {};
   const editable = canEdit && Boolean(onAppearanceChange);
@@ -486,7 +491,7 @@ export function EntityListTable({
                   dateFormat={fmtOf(c.field)}
                   value={raw == null ? "" : String(raw)}
                   dashboardId={dashboardId}
-                  onSaved={() => router.refresh()}
+                  onSaved={refresh}
                 />
               ) : (
                 <span className={cellSpanClass}>—</span>

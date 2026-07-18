@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 16/07/2026
+// Versão: 1.3 | Data: 18/07/2026
+// v1.3 (18/07/2026): a edição inline deixou de revalidar no servidor
+//   (no_revalidate) — onSaved passa um refresh debounced (fallback de reconcile
+//   quando o realtime está indisponível; o RealtimeRefresher segue sendo o
+//   caminho principal).
 // v1.2 (16/07/2026): pan ("mãozinha") no container da tabela via useDragPan —
 //   segurar o botão esquerdo e arrastar rola horizontal (container) e vertical
 //   (<main>), sem precisar da scrollbar no fim da página. Gestos iniciados em
@@ -24,6 +28,7 @@ import {
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
+import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { useDragPan } from "@/lib/use-drag-pan";
 import { formatMoney } from "@/lib/widgets/currency";
 import { EditableCell } from "./editable-cell";
@@ -54,6 +59,11 @@ export function RecordsTable({
     () => new Map(responsibles.map((r) => [r.id, r.label])),
     [responsibles]
   );
+  // A edição inline não revalida mais no servidor (no_revalidate): a página
+  // reconcilia via RealtimeRefresher (~2s) e este refresh debounced é o
+  // fallback quando o realtime está indisponível. Delay maior que o do
+  // dashboard p/ coalescer com o refresh do realtime quando ambos disparam.
+  const refresh = useDebouncedRefresh(1500);
   const showPipeline = source === "deals";
   const showMrr = source === "deals" || source === "estudo";
 
@@ -130,6 +140,7 @@ export function RecordsTable({
                     userRoles={userRoles}
                     canEditValues={canEditValues}
                     forceSyncWriteBack
+                    onSaved={refresh}
                   />
                 </TableCell>
               ))}
