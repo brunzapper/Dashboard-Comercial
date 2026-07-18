@@ -1,6 +1,11 @@
-// Versão: 2.5 | Data: 17/07/2026
+// Versão: 2.6 | Data: 18/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.6 (18/07/2026): overlay de processamento no card — enquanto o save do
+//   builder (que agora fecha o painel na hora; pending espelhado via
+//   onPendingChange) ou a exclusão correm, o card exibe spinner + backdrop.
+//   "Editar dados" deixa de segurar o dropdown aberto (sem preventDefault):
+//   com o painel fechando no salvar, o menu ficaria pairando sobre o card.
 // v2.5 (17/07/2026): autoOpenEditor — card recém-criado pelo "Inserir ▸" (tipo
 //   que exige configuração) monta com o editor de dados já aberto; consumo
 //   one-shot via onAutoEditConsumed.
@@ -39,6 +44,7 @@ import {
   Copy,
   Download,
   GripVertical,
+  Loader2,
   MoreVertical,
   Palette,
   Pencil,
@@ -256,6 +262,9 @@ export const WidgetCard = memo(function WidgetCard({
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(!!autoOpenEditor);
+  // Save do builder em andamento (painel já fechado): exibe o overlay de
+  // processamento sobre o card até a revalidação entregar os dados novos.
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (autoOpenEditor) onAutoEditConsumed?.(widget.id);
     // Só no mount — o prop já foi consumido no estado inicial de builderOpen.
@@ -634,12 +643,10 @@ export const WidgetCard = memo(function WidgetCard({
         <DropdownMenuContent align="end">
           {canEdit ? (
             <>
-              <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setBuilderOpen(true);
-                }}
-              >
+              {/* Sem preventDefault: o Sheet vive fora do menu, e o menu
+                  precisa fechar — com o painel fechando já no salvar, um menu
+                  aberto ficaria pairando sobre o card durante o processamento. */}
+              <DropdownMenuItem onSelect={() => setBuilderOpen(true)}>
                 <Pencil className="size-4" /> Editar dados
               </DropdownMenuItem>
               {canStyle ? (
@@ -722,6 +729,7 @@ export const WidgetCard = memo(function WidgetCard({
         tabs={tabs}
         open={builderOpen}
         onOpenChange={setBuilderOpen}
+        onPendingChange={setSaving}
       />
       {canStyle ? (
         <WidgetAppearanceSheet
@@ -765,6 +773,19 @@ export const WidgetCard = memo(function WidgetCard({
       </AlertDialog>
     </>
   ) : null;
+
+  // Overlay de processamento: cobre o card enquanto o save do builder (painel
+  // já fechado) ou a exclusão correm — versão por card do overlay global do
+  // grid (dashboard-grid.tsx), pílula só com spinner (cards KPI são pequenos).
+  const processingOverlay =
+    saving || pending ? (
+      <div className="bg-background/50 absolute inset-0 z-20 flex items-center justify-center rounded-lg backdrop-blur-[1px]">
+        <div className="bg-background text-muted-foreground flex items-center rounded-full border p-1.5 shadow-sm">
+          <Loader2 className="size-4 animate-spin" />
+          <span className="sr-only">Atualizando...</span>
+        </div>
+      </div>
+    ) : null;
 
   // Layout SEM CROMO (forma; nota "sem moldura"): o conteúdo ocupa o item
   // inteiro; o grip .widget-drag flutuante é OBRIGATÓRIO no modo edição (o
@@ -810,6 +831,7 @@ export const WidgetCard = memo(function WidgetCard({
             />
           </div>
         )}
+        {processingOverlay}
         {overlays}
       </div>
     );
@@ -818,7 +840,7 @@ export const WidgetCard = memo(function WidgetCard({
   return (
     <div
       ref={cardRef}
-      className="bg-card flex h-full flex-col overflow-hidden rounded-lg border"
+      className="bg-card relative flex h-full flex-col overflow-hidden rounded-lg border"
       style={{
         background:
           kpi?.bg ??
@@ -1061,6 +1083,7 @@ export const WidgetCard = memo(function WidgetCard({
         </div>
       </div>
 
+      {processingOverlay}
       {overlays}
     </div>
   );
