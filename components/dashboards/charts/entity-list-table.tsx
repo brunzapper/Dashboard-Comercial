@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 18/07/2026
+// Versão: 1.2 | Data: 18/07/2026
+// v1.2 (18/07/2026): "Formato do grupo" (appearance.table.groupDateFormats) —
+//   nível de data do "Agrupar por" pode fundir/rotular por formato próprio
+//   (bucketGroupDate) sem alterar o formato da dimensão nas linhas expandidas.
 // v1.1 (18/07/2026): refresh pós-edição debounced e fora da transition da
 //   célula (useDebouncedRefresh) — sem re-render do dashboard por célula.
 // Widget de Tabela em modo lista cuja "Fonte das linhas" é uma ENTIDADE
@@ -37,7 +40,11 @@ import {
 import { formatMoney, resolveFieldMoney } from "@/lib/widgets/currency";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { ENTITY_TYPE_OF } from "@/lib/widgets/entity-list";
-import { bucketRecordDate } from "@/lib/widgets/date-buckets";
+import {
+  bucketGroupDate,
+  bucketRecordDate,
+  isGroupDateFormat,
+} from "@/lib/widgets/date-buckets";
 import {
   alignClass,
   fracDigits,
@@ -59,6 +66,7 @@ import {
 import type {
   AppearanceSettings,
   ColorPair,
+  GroupDateFormat,
   RecordListColumn,
   TableAlign,
 } from "@/lib/widgets/types";
@@ -440,11 +448,33 @@ export function EntityListTable({
     ...periodAggCols.map((c) => c.field),
     ...groupByLevels(t.groupBy),
   ]).filter((f) => cols.some((c) => c.field === f));
+  // "Formato do grupo" (appearance.table.groupDateFormats): override por nível
+  // do "Agrupar por" que seja coluna de data — funde/rotula/ordena o grupo por
+  // formato próprio, sem alterar as células expandidas (que seguem fmtOf/
+  // transform). Entradas órfãs ou de campo não-data ficam inertes.
+  const groupBySet = new Set(groupByLevels(t.groupBy));
+  const groupFmtOf = (field: string): GroupDateFormat | undefined => {
+    const v = t.groupDateFormats?.[field];
+    return v && groupBySet.has(field) && isDateCol(field) && isGroupDateFormat(v)
+      ? v
+      : undefined;
+  };
+  const groupBucketOf = (field: string, r: EntityListRow, gf: GroupDateFormat) =>
+    bucketGroupDate(rawOf(field, r), gf, cols.find((c) => c.field === field)?.weekMode);
   const groupOpts: GroupOpts<EntityListRow> = {
-    keyOf: (r, field) =>
-      isDateCol(field) ? colDisplay(field, r) : String(rawOf(field, r) ?? ""),
-    labelOf: (r, field) => colDisplay(field, r),
-    sortKeyOf: (r, field) => dateSortKey(field, r),
+    keyOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      if (gf) return groupBucketOf(field, r, gf).key;
+      return isDateCol(field) ? colDisplay(field, r) : String(rawOf(field, r) ?? "");
+    },
+    labelOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      return gf ? groupBucketOf(field, r, gf).label : colDisplay(field, r);
+    },
+    sortKeyOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      return gf ? groupBucketOf(field, r, gf).sort : dateSortKey(field, r);
+    },
     isExpanded: (k) => expanded.has(k),
   };
   type Item = GroupNode<EntityListRow> | { kind: "grand" };

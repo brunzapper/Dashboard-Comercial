@@ -1,4 +1,7 @@
-// Versão: 3.4 | Data: 18/07/2026
+// Versão: 3.5 | Data: 18/07/2026
+// v3.5 (18/07/2026): "Formato do grupo" (appearance.table.groupDateFormats) —
+//   nível de data do "Agrupar por" pode fundir/rotular por formato próprio
+//   (bucketGroupDate) sem alterar o formato da dimensão nas linhas expandidas.
 // v3.4 (18/07/2026): fontes por métrica — prop extraRecords (registros das
 //   fontes de Metric.sources que o widget não exibe) entra SÓ na basis dos
 //   subtotais/Total geral (comum e transposta), casada ao grupo pela mesma
@@ -82,7 +85,11 @@ import {
   isEditableRelation,
 } from "@/lib/config/core-writeback";
 import { AGG_LABELS } from "@/lib/widgets/types";
-import { bucketRecordDate } from "@/lib/widgets/date-buckets";
+import {
+  bucketGroupDate,
+  bucketRecordDate,
+  isGroupDateFormat,
+} from "@/lib/widgets/date-buckets";
 import {
   alignClass,
   applyManualOrder,
@@ -120,6 +127,7 @@ import {
 import type {
   AppearanceSettings,
   ColorPair,
+  GroupDateFormat,
   Metric,
   RecordListColumn,
   TableAlign,
@@ -842,15 +850,40 @@ export const RecordListTable = memo(function RecordListTable({
     const m = String(raw ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
     return m ? Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]) : 0;
   };
+  // "Formato do grupo" (appearance.table.groupDateFormats): override por nível
+  // do "Agrupar por" explícito que seja coluna de data — funde/rotula/ordena o
+  // grupo por formato próprio, sem alterar as células expandidas. periodAggCols
+  // e entradas órfãs (nível removido/campo trocado ou não-data) ficam inertes.
+  // Efeito colateral ao LIGAR um formato: a chave do nó muda (display → key do
+  // bucket) e cores/alturas persistidas de grupo (`__grp:<caminho>`) se
+  // desprendem — mesmo precedente de trocar o transform da dimensão.
+  const groupBySet = new Set(groupByLevels(t.groupBy));
+  const groupFmtOf = (field: string): GroupDateFormat | undefined => {
+    const v = t.groupDateFormats?.[field];
+    return v && groupBySet.has(field) && isDateCol(field) && isGroupDateFormat(v)
+      ? v
+      : undefined;
+  };
+  const groupBucketOf = (field: string, r: RecordRow, gf: GroupDateFormat) =>
+    bucketGroupDate(rawValue(field, r), gf, cols.find((c) => c.field === field)?.weekMode);
   // Acessores de agrupamento: data funde/rotula pelo valor FORMATADO (transform ou
   // máscara); demais colunas chaveiam por valor bruto (evita fundir valores
   // distintos que só coincidem no rótulo, ex.: FKs homônimas).
   const groupOpts: GroupOpts<RecordRow> = {
-    keyOf: (r, field) =>
-      isDateCol(field) ? groupCellDisplay(field, r) : String(rawValue(field, r) ?? ""),
-    labelOf: (r, field) =>
-      isDateCol(field) ? groupCellDisplay(field, r) : displayValue(field, r),
-    sortKeyOf: (r, field) => dateSortKey(field, r),
+    keyOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      if (gf) return groupBucketOf(field, r, gf).key;
+      return isDateCol(field) ? groupCellDisplay(field, r) : String(rawValue(field, r) ?? "");
+    },
+    labelOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      if (gf) return groupBucketOf(field, r, gf).label;
+      return isDateCol(field) ? groupCellDisplay(field, r) : displayValue(field, r);
+    },
+    sortKeyOf: (r, field) => {
+      const gf = groupFmtOf(field);
+      return gf ? groupBucketOf(field, r, gf).sort : dateSortKey(field, r);
+    },
     isExpanded: (k) => expanded.has(k),
   };
 

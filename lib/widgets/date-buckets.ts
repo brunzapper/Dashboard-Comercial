@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 11/07/2026
+// Versão: 2.1 | Data: 18/07/2026
+// v2.1 (18/07/2026): bucketGroupDate/isGroupDateFormat — bucketização do
+//   "Formato do grupo" (appearance.table.groupDateFormats): transform delega em
+//   bucketRecordDate; máscara funde por dia (dd/mm/*) ou mês (mm/aa).
 // Transforms de data "por nome" para dimensões de widgets. Duas funções:
 //  - formatBucketLabel: recebe o BUCKET já calculado pelo RPC (date_trunc/isodow)
 //    e devolve o rótulo PT-BR. Usado no engine dos widgets AGREGADOS.
@@ -15,7 +18,8 @@
 //    quinta-feira (convenção ISO), pegando dias do mês vizinho. Bucket = a segunda.
 //  - "restricted" (restrita): recortada na virada do mês (só dias do próprio mês).
 //    Bucket = greatest(início_da_semana, início_do_mês).
-import type { Transform } from "./types";
+import type { GroupDateFormat, Transform } from "./types";
+import { DATE_FORMATS, formatDateValue, type DateFormat } from "./format";
 
 export type WeekMode = "full" | "restricted";
 
@@ -223,4 +227,46 @@ export function bucketRecordDate(
     default:
       return { key: isoDate(Date.UTC(y, m - 1, d)), label: `${y}-${m}-${d}`, sort: Date.UTC(y, m - 1, d) };
   }
+}
+
+// --- Formato do GRUPO (appearance.table.groupDateFormats) ---
+
+/** Guard do valor persistido: transform "por nome" ou máscara de data. */
+export function isGroupDateFormat(v: unknown): v is GroupDateFormat {
+  return (
+    LABEL_TRANSFORMS.has(v as Transform) ||
+    (DATE_FORMATS as string[]).includes(v as string)
+  );
+}
+
+/**
+ * Bucketiza a data crua de um registro pelo "Formato do grupo" escolhido no
+ * "Agrupar por": a `key` FUNDE (transform → período; dd/mm/* → dia; mm/aa →
+ * mês), o `label` rotula o cabeçalho e o `sort` mantém a ordem cronológica —
+ * tudo sem tocar no formato da dimensão das linhas expandidas.
+ */
+export function bucketGroupDate(
+  rawIso: unknown,
+  gf: GroupDateFormat,
+  weekMode: WeekMode = "restricted"
+): RecordBucket {
+  if (LABEL_TRANSFORMS.has(gf as Transform))
+    return bucketRecordDate(rawIso, gf as Transform, weekMode);
+  const mask = gf as DateFormat; // não é transform → é máscara
+  const p = parseYmd(rawIso);
+  if (!p) return { key: "—", label: "—", sort: Number.POSITIVE_INFINITY };
+  const { y, m, d } = p;
+  if (mask === "mm/aa")
+    return {
+      key: `${y}-${m}`,
+      label: formatDateValue(rawIso, mask),
+      sort: y * 12 + m,
+    };
+  // dd/mm/aaaa | dd/mm/aa: funde por dia (mesma escala AAAAMMDD do dateSortKey
+  // das tabelas), rótulo pela máscara.
+  return {
+    key: isoDate(Date.UTC(y, m - 1, d)),
+    label: formatDateValue(rawIso, mask),
+    sort: y * 10000 + m * 100 + d,
+  };
 }

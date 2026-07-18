@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 18/07/2026
+// Versão: 1.8 | Data: 18/07/2026
+// v1.8 (18/07/2026): formato de data do GRUPO — GroupDateFormat e
+//   AppearanceSettings.table.groupDateFormats (por nível do "Agrupar por" nas
+//   listas de registros/entidades; funde e rotula o grupo sem alterar o
+//   formato da dimensão). Ver bucketGroupDate em lib/widgets/date-buckets.ts.
 // v1.7 (18/07/2026): fontes por MÉTRICA — Metric.sources (universo de cálculo
 //   próprio da métrica; linhas/registros seguem widgets.sources) e
 //   WidgetRow.__calcOpsBy (basis por métrica calculada com fontes próprias).
@@ -116,6 +120,14 @@ export const TRANSFORM_LABELS: Record<Transform, string> = {
   week: "Semana",
   month: "Mês",
 };
+
+// Formato de data do GRUPO (cabeçalho do "Agrupar por" nas listas): um transform
+// "por nome" (o subconjunto de Transform em LABEL_TRANSFORMS, date-buckets.ts)
+// ou uma máscara de data. Determina a FUSÃO e o rótulo do grupo, sem alterar o
+// formato da dimensão nas linhas expandidas.
+export type GroupDateFormat =
+  | Exclude<Transform, "none" | "day" | "week" | "month">
+  | DateFormat;
 
 // Agregação por período no widget de "registros individuais": como uma coluna de
 // data expõe as métricas do widget. "individual" mantém 1 linha por registro; as
@@ -729,6 +741,12 @@ export interface AppearanceSettings {
     // (1º = grupo principal, demais aninhados). String = config antiga de 1
     // nível (ainda válida; ver groupByLevels em lib/widgets/appearance.ts).
     groupBy?: string | string[];
+    // Formato de data do GRUPO por nível do "Agrupar por" (só listas de
+    // registros/entidades). Chave = field do nível; valor = transform (funde
+    // por período: Mês/ano, Trimestre…) ou máscara (dd/mm/* funde por dia;
+    // mm/aa por mês). Ausente = herda o formato da dimensão (comportamento
+    // original). Ignorado quando o field não está no groupBy ou não é de data.
+    groupDateFormats?: Record<string, GroupDateFormat>;
     // Transposta: qual dimensão vira as colunas do topo. Mesma convenção de
     // chaves do groupBy (agregada `dim_<n>`; registros `<field>`). Ausente ou
     // órfã (dimensões mudaram) = 1ª dimensão, comportamento original.
