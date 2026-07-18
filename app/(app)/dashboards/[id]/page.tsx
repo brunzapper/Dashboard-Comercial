@@ -57,6 +57,7 @@ import {
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
+import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
   QF_ROW_KEY,
@@ -436,10 +437,13 @@ export default async function DashboardPage({
               const pMap = entry.field.startsWith("unified:")
                 ? { ...p, fieldBySource: resolveFieldBySource(entry.field) }
                 : p;
+              // Cobertura = fontes do widget ∪ fontes das métricas: o @period
+              // byType EXCLUI record_types fora do mapa, e as pernas por
+              // métrica (Metric.sources) reusam este filtro pré-sintetizado.
               filters = applyPeriodToFilters(
                 filters,
                 pMap,
-                (w.sources ?? []) as SourceKey[]
+                widgetQuerySources((w.sources ?? []) as SourceKey[], w.metrics)
               );
             }
           } else if (

@@ -15,6 +15,7 @@ import { loadSources } from "@/lib/config/sources";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
+import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { loadCorrespondences } from "@/lib/correspondences";
 import {
   createPeriodResolver,
@@ -187,10 +188,15 @@ export async function loadWidgetScope(
             const pMap = entry.field.startsWith("unified:")
               ? { ...p, fieldBySource: resolver.resolveFieldBySource(entry.field) }
               : p;
+            // Cobertura = fontes do widget ∪ fontes das métricas (mesma regra
+            // da page): as pernas por métrica reusam este @period.
             const applied = applyPeriodToFilters(
               viewFilters.splice(0),
               pMap,
-              (widget.sources ?? []) as SourceKey[]
+              widgetQuerySources(
+                (widget.sources ?? []) as SourceKey[],
+                widget.metrics
+              )
             );
             viewFilters.push(...applied);
           }

@@ -60,6 +60,7 @@ import {
   applyPeriodToFilters,
   resolvePeriodSelection,
 } from "@/lib/widgets/period";
+import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
   hasQuickValue,
@@ -317,10 +318,12 @@ export default async function SnapshotPage({
                     fieldBySource: resolver.resolveFieldBySource(entry.field),
                   }
                 : p;
+              // Cobertura = fontes do widget ∪ fontes das métricas (espelho da
+              // page viva): as pernas por métrica reusam este @period.
               filters = applyPeriodToFilters(
                 filters,
                 pMap,
-                (w.sources ?? []) as SourceKey[]
+                widgetQuerySources((w.sources ?? []) as SourceKey[], w.metrics)
               );
             }
           } else if (
