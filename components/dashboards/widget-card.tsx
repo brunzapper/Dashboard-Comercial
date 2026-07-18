@@ -34,6 +34,7 @@ import {
   useTransition,
 } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   Copy,
   Download,
@@ -100,12 +101,7 @@ import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
-import { WidgetChart } from "./charts/widget-chart";
-import { QuickTableWidget } from "./quick-table/quick-table-widget";
-import { KanbanWidget } from "@/components/kanban/kanban-widget";
-import { AgendaWidget } from "@/components/agenda/agenda-widget";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
-import { CalculatorWidget } from "./calculator-widget";
 import { ImageWidget } from "./image-widget";
 import { NoteWidget } from "./note-widget";
 import { ShapeWidget } from "./shape-widget";
@@ -121,6 +117,38 @@ import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
 import { useWidgetAppearance } from "./appearance-editing";
+
+// Chunks deferidos (next/dynamic): o chart (recharts inteiro) e os widgets de
+// tipo pesado saem do JS inicial do dashboard e carregam sob demanda no
+// cliente. ssr: false — o conteúdo real deles só existe no browser (recharts
+// mede o contêiner; kanban/agenda/tabela-livre buscam dados pós-mount); o
+// fallback pulsante ocupa o espaço já reservado pelo card (sem layout shift).
+// Constantes de MÓDULO: identidade estável entre renders (não recriar dentro
+// do componente — remontaria o chunk a cada render).
+const chunkFallback = (
+  <div className="bg-muted h-full min-h-24 w-full animate-pulse rounded-md" />
+);
+const WidgetChart = dynamic(
+  () => import("./charts/widget-chart").then((m) => m.WidgetChart),
+  { ssr: false, loading: () => chunkFallback }
+);
+const QuickTableWidget = dynamic(
+  () =>
+    import("./quick-table/quick-table-widget").then((m) => m.QuickTableWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
+const KanbanWidget = dynamic(
+  () => import("@/components/kanban/kanban-widget").then((m) => m.KanbanWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
+const AgendaWidget = dynamic(
+  () => import("@/components/agenda/agenda-widget").then((m) => m.AgendaWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
+const CalculatorWidget = dynamic(
+  () => import("./calculator-widget").then((m) => m.CalculatorWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
 
 // React.memo: o grid re-renderiza em toda medição/drag/hover — sem memo, TODOS
 // os cards (e seus charts/tabelas) re-renderizavam juntos. As props vêm com
