@@ -35,3 +35,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **Snapshots são acesso público:** nunca crie política RLS `to anon` nem
   conceda EXECUTE a `anon`/`authenticated` nas funções de snapshot; o caminho
   público é exclusivamente `app/s/[token]` + service role após validar o token.
+- **Fonte por métrica se resolve no ENGINE, nunca no RPC:** `Metric.sources`
+  (fontes próprias de uma métrica; universo de linhas segue `widgets.sources`)
+  vira filtro `record_type in (...)` de uma chamada RPC separada, mesclada por
+  tupla de dims (`lib/widgets/metric-sources.ts` + `engine.ts`). NÃO introduza
+  parâmetro de fonte-por-métrica em `run_widget_query` — exigiria migração
+  espelhada (regra acima) sem necessidade. O `@period` pré-sintetizado dos
+  filtros rápidos deve cobrir fontes do widget ∪ fontes das métricas
+  (`widgetQuerySources` na page, no viewer de snapshot e no widget-scope) — sem
+  isso as pernas perdem registros em silêncio. Ver `docs/arquitetura.md` §4.1
+  e invariante 9.
