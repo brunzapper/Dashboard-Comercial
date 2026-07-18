@@ -1210,16 +1210,18 @@ export async function runWidget(
       rpcMetrics.push({ field: "*", agg: "count" });
     }
 
-    const { data, error } = await supabase.rpc("run_widget_query", {
+    // As três pernas da consulta (RPC principal + auxiliares de condição +
+    // auxiliar de moeda) dependem só de dims/filters/config — nunca do
+    // resultado umas das outras —, então disparam JUNTAS e um único
+    // Promise.all (adiante) as aguarda: o caminho crítico do widget vira
+    // max(principal, condição, moeda) em vez da soma das três.
+    const mainPromise = supabase.rpc("run_widget_query", {
       p_source: config.source,
       p_dimensions: dims,
       p_metrics: rpcMetrics,
       p_filters: filters,
       p_correspondences: correspondencesMap,
     });
-    if (error) throw new Error(error.message);
-
-    const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
 
     // Chaves condicionais: uma consulta auxiliar por conjunto DISTINTO de
     // condições (mesmas dims; filtros da condição anexados aos do widget),
@@ -1227,53 +1229,51 @@ export async function runWidget(
     // degrada a chave para null (operando ausente → "—"), nunca para o número
     // sem condição (que seria um valor errado).
     const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
-    if (condBasisKeys.length > 0) {
-      const condGroups = new Map<
-        string,
-        { filters: WidgetFilter[]; keys: BasisKey[] }
-      >();
-      for (const key of condBasisKeys) {
-        const parsed = parseCondBasisKey(key);
-        if (!parsed) continue;
-        const extra = condFilters(parsed.conds);
-        const gk = JSON.stringify(extra);
-        const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
-        g.keys.push(key);
-        condGroups.set(gk, g);
-      }
-      await Promise.all(
-        [...condGroups.values()].map(async (g) => {
-          try {
-            const { data: condData, error: condError } = await supabase.rpc(
-              "run_widget_query",
-              {
-                p_source: config.source,
-                p_dimensions: dims,
-                p_metrics: g.keys.map(basisMetric),
-                p_filters: [...filters, ...g.filters],
-                p_correspondences: correspondencesMap,
-              }
-            );
-            if (condError) throw new Error(condError.message);
-            const condRows = (Array.isArray(condData) ? condData : []) as WidgetRow[];
-            for (const key of g.keys) condValueByKey.set(key, {});
-            for (const r of condRows) {
-              const tuple: unknown[] = [];
-              for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
-              const tk = JSON.stringify(tuple);
-              g.keys.forEach((key, ki) => {
-                const v = r[`metric_${ki + 1}`];
-                const n = Number(v);
-                condValueByKey.get(key)![tk] =
-                  v == null || !Number.isFinite(n) ? null : n;
-              });
-            }
-          } catch {
-            for (const key of g.keys) condValueByKey.delete(key);
-          }
-        })
-      );
+    const condGroups = new Map<
+      string,
+      { filters: WidgetFilter[]; keys: BasisKey[] }
+    >();
+    for (const key of condBasisKeys) {
+      const parsed = parseCondBasisKey(key);
+      if (!parsed) continue;
+      const extra = condFilters(parsed.conds);
+      const gk = JSON.stringify(extra);
+      const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+      g.keys.push(key);
+      condGroups.set(gk, g);
     }
+    const condPromise = Promise.all(
+      [...condGroups.values()].map(async (g) => {
+        try {
+          const { data: condData, error: condError } = await supabase.rpc(
+            "run_widget_query",
+            {
+              p_source: config.source,
+              p_dimensions: dims,
+              p_metrics: g.keys.map(basisMetric),
+              p_filters: [...filters, ...g.filters],
+              p_correspondences: correspondencesMap,
+            }
+          );
+          if (condError) throw new Error(condError.message);
+          const condRows = (Array.isArray(condData) ? condData : []) as WidgetRow[];
+          for (const key of g.keys) condValueByKey.set(key, {});
+          for (const r of condRows) {
+            const tuple: unknown[] = [];
+            for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+            const tk = JSON.stringify(tuple);
+            g.keys.forEach((key, ki) => {
+              const v = r[`metric_${ki + 1}`];
+              const n = Number(v);
+              condValueByKey.get(key)![tk] =
+                v == null || !Number.isFinite(n) ? null : n;
+            });
+          }
+        } catch {
+          for (const key of g.keys) condValueByKey.delete(key);
+        }
+      })
+    );
 
     // Consulta auxiliar por moeda + data-da-taxa (uma só): cobre as métricas
     // monetárias normais (`__money`) E os operandos monetários das métricas
@@ -1314,24 +1314,33 @@ export async function runWidget(
     });
     // Degrada com elegância se a consulta auxiliar falhar (ex.: migração 0039
     // ainda não aplicada): sem `__money`, os charts caem no número puro; a basis
-    // calculada fica numérica (soma crua, comportamento v1).
-    let bdMap: Record<string, MoneyBreakdown[]> = {};
-    if (metricInfos.length + basisInfos.length > 0 && rows.length > 0) {
-      try {
-        bdMap = await buildMoneyBreakdowns(
-          supabase,
-          dims,
-          filters,
-          correspondencesMap,
-          [...metricInfos, ...basisInfos],
-          rates,
-          conversionPeriod,
-          today
-        );
-      } catch {
-        bdMap = {};
-      }
-    }
+    // calculada fica numérica (soma crua, comportamento v1). A aux dispara sem
+    // esperar a principal (ainda não dá pra saber se haverá linhas; widget
+    // monetário vazio gasta 1 RPC à toa — raro), mas o resultado só é USADO
+    // quando a principal traz linhas, como na versão serial.
+    const moneyPromise: Promise<Record<string, MoneyBreakdown[]>> =
+      metricInfos.length + basisInfos.length > 0
+        ? buildMoneyBreakdowns(
+            supabase,
+            dims,
+            filters,
+            correspondencesMap,
+            [...metricInfos, ...basisInfos],
+            rates,
+            conversionPeriod,
+            today
+          ).catch(() => ({}))
+        : Promise.resolve({});
+
+    const [{ data, error }, , bdAll] = await Promise.all([
+      mainPromise,
+      condPromise,
+      moneyPromise,
+    ]);
+    if (error) throw new Error(error.message);
+
+    const rows = (Array.isArray(data) ? data : []) as WidgetRow[];
+    const bdMap = rows.length > 0 ? bdAll : {};
     const hasBd = Object.keys(bdMap).length > 0;
 
     // Remapeia metric_<n> do RPC para a ordem de config.metrics e avalia as
@@ -1540,6 +1549,10 @@ export async function runWidget(
 
   // Resolve rótulos das dimensões: FK (id→nome), fonte (record_type→label) e os
   // transforms de data "por nome" (bucket ISO → Janeiro / 1ª semana de Janeiro).
+  // As dimensões FK acumulam suas buscas e um Promise.all as roda juntas
+  // (antes: um await por dimensão, em série); os demais casos são só CPU.
+  const fkDimLookups: { key: string; fetch: Promise<Record<string, string>> }[] =
+    [];
   for (let i = 0; i < dims.length; i++) {
     const dim = dims[i];
     const key = `dim_${i + 1}`;
@@ -1566,12 +1579,16 @@ export async function runWidget(
       new Set(rows.map((r) => r[key]).filter(Boolean) as string[])
     );
     if (ids.length === 0) continue;
-    const labels = await fetchFkLabels(supabase, fk, ids);
+    fkDimLookups.push({ key, fetch: fetchFkLabels(supabase, fk, ids) });
+  }
+  const fkLabelMaps = await Promise.all(fkDimLookups.map((l) => l.fetch));
+  fkDimLookups.forEach(({ key }, li) => {
+    const labels = fkLabelMaps[li];
     for (const r of rows) {
       const v = r[key];
       if (v != null) r[key] = labels[String(v)] ?? String(v);
     }
-  }
+  });
 
   const dimensions = dims.map((d, i) => {
     const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);

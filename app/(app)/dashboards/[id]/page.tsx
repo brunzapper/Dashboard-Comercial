@@ -272,6 +272,9 @@ export default async function DashboardPage({
   );
   const quickFiltersById: Record<string, WidgetQuickFilters> = {};
   const qfFiltersByWidget: Record<string, WidgetFilter[]> = {};
+  // Preenchimento adiado das OPÇÕES dos dropdowns (só exibição): definido no
+  // bloco abaixo e chamado depois da onda de widgets, fora do caminho crítico.
+  let fillQuickFilterOptions: (() => Promise<void>) | null = null;
 
   if (qfWidgets.length > 0) {
     const allEntries = qfWidgets.flatMap((w) => w.settings?.quickFilters ?? []);
@@ -305,74 +308,81 @@ export default async function DashboardPage({
     }
     const bucketOptionsByCombo: Record<string, { value: string; label: string }[]> =
       {};
-    // Valores persistidos + exceção do vendedor + opções (entidades e buckets):
-    // tudo em UM Promise.all — antes eram 4 ondas seriais de round trips.
-    const [{ data: qfCells }, ownRespRes, qfRespRes, qfOpsRes] =
-      await Promise.all([
-        supabase
-          .from("dashboard_table_cells")
-          .select("widget_id, col_key, value")
-          .in(
-            "widget_id",
-            qfWidgets.map((w) => w.id)
-          )
-          .eq("row_key", QF_ROW_KEY),
-        needsOwnResp && session
-          ? supabase
-              .from("responsibles")
-              .select("id")
-              .eq("user_id", session.user.id)
-          : Promise.resolve({ data: [] as { id: string }[] }),
-        needsQfResp
-          ? supabase
-              .from("responsibles")
-              .select("id, display_name")
-              .eq("active", true)
-              .order("display_name")
-          : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
-        needsQfOps
-          ? supabase
-              .from("operations")
-              .select("id, name")
-              .eq("active", true)
-              .order("name")
-          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-        Promise.all(
-          [...bucketCombos.entries()].map(async ([key, c]) => {
-            try {
-              const { data, error } = await rpcClient.rpc("run_widget_query", {
-                p_source: "records",
-                p_dimensions: [
-                  { field: c.field, transform: c.transform, weekMode: c.weekMode },
-                ],
-                p_metrics: [],
-                p_filters: [],
-                p_correspondences: correspondencesMap,
+    // Opções dos dropdowns (entidades e buckets) são SÓ exibição — não entram
+    // nos filtros da computação dos widgets. Disparam AGORA (o Promise.all
+    // subscreve os builders) e são aguardadas apenas depois da onda de widgets
+    // (fillQuickFilterOptions): os RPCs de bucket, varreduras agregadas, saem
+    // do caminho crítico. Nenhuma perna rejeita (buckets têm catch próprio e
+    // builders resolvem { data, error }), então a promise pode flutuar.
+    const qfOptionsPromise = Promise.all([
+      needsQfResp
+        ? supabase
+            .from("responsibles")
+            .select("id, display_name")
+            .eq("active", true)
+            .order("display_name")
+        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+      needsQfOps
+        ? supabase
+            .from("operations")
+            .select("id, name")
+            .eq("active", true)
+            .order("name")
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      Promise.all(
+        [...bucketCombos.entries()].map(async ([key, c]) => {
+          try {
+            const { data, error } = await rpcClient.rpc("run_widget_query", {
+              p_source: "records",
+              p_dimensions: [
+                { field: c.field, transform: c.transform, weekMode: c.weekMode },
+              ],
+              p_metrics: [],
+              p_filters: [],
+              p_correspondences: correspondencesMap,
+            });
+            if (error) throw new Error(error.message);
+            const rows = (Array.isArray(data) ? data : []) as Record<
+              string,
+              unknown
+            >[];
+            const seen = new Map<string, { raw: unknown; label: string }>();
+            for (const row of rows) {
+              const raw = row.dim_1;
+              const k = bucketKeyFromRpcValue(raw, c.transform);
+              if (!k || seen.has(k)) continue;
+              seen.set(k, {
+                raw,
+                label: formatBucketLabel(c.transform, raw, c.weekMode),
               });
-              if (error) throw new Error(error.message);
-              const rows = (Array.isArray(data) ? data : []) as Record<
-                string,
-                unknown
-              >[];
-              const seen = new Map<string, { raw: unknown; label: string }>();
-              for (const row of rows) {
-                const raw = row.dim_1;
-                const k = bucketKeyFromRpcValue(raw, c.transform);
-                if (!k || seen.has(k)) continue;
-                seen.set(k, {
-                  raw,
-                  label: formatBucketLabel(c.transform, raw, c.weekMode),
-                });
-              }
-              bucketOptionsByCombo[key] = [...seen.entries()]
-                .sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw)))
-                .map(([value, v]) => ({ value, label: v.label }));
-            } catch {
-              bucketOptionsByCombo[key] = []; // RPC sem 0048/transform inválido
             }
-          })
-        ),
-      ]);
+            bucketOptionsByCombo[key] = [...seen.entries()]
+              .sort((a, b) => String(a[1].raw).localeCompare(String(b[1].raw)))
+              .map(([value, v]) => ({ value, label: v.label }));
+          } catch {
+            bucketOptionsByCombo[key] = []; // RPC sem 0048/transform inválido
+          }
+        })
+      ),
+    ]);
+    // Valores persistidos + exceção do vendedor: estes SIM viram filtros da
+    // computação dos widgets e seguem aguardados antes dela.
+    const [{ data: qfCells }, ownRespRes] = await Promise.all([
+      supabase
+        .from("dashboard_table_cells")
+        .select("widget_id, col_key, value")
+        .in(
+          "widget_id",
+          qfWidgets.map((w) => w.id)
+        )
+        .eq("row_key", QF_ROW_KEY),
+      needsOwnResp && session
+        ? supabase
+            .from("responsibles")
+            .select("id")
+            .eq("user_id", session.user.id)
+        : Promise.resolve({ data: [] as { id: string }[] }),
+    ]);
     const qfValues = new Map<string, QuickFilterValue>();
     for (const c of qfCells ?? []) {
       const v = parseQuickFilterValue(c.value);
@@ -381,14 +391,6 @@ export default async function DashboardPage({
     const ownResponsibleIds = (ownRespRes.data ?? []).map(
       (r) => r.id as string
     );
-    const qfRespOptions = (qfRespRes.data ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-    }));
-    const qfOpsOptions = (qfOpsRes.data ?? []).map((o) => ({
-      value: o.id as string,
-      label: (o.name as string) ?? "—",
-    }));
 
     // Seleção CRUA efetiva da barra de período de um bucket (URL > default),
     // p/ o filtro rápido de período sem valor espelhar o que a barra mostra.
@@ -475,23 +477,44 @@ export default async function DashboardPage({
           values[entry.id] = { kind: "options", values: vals };
           filters.push(...quickOptionsFilter(entry, vals, available));
         }
-        if (entry.field === "responsible_id") {
-          options[entry.id] = qfRespOptions;
-        } else if (entry.field === "operation_id") {
-          options[entry.id] = qfOpsOptions;
-        } else if (isBucketEntry(entry, available)) {
-          options[entry.id] =
-            staticBucketOptions(entry.transform!) ??
-            bucketOptionsByCombo[
-              `${entry.field}|${entry.transform}|${entry.weekMode ?? "restricted"}`
-            ] ??
-            [];
-        }
       }
 
       quickFiltersById[w.id] = { entries, values, options };
       if (filters.length > 0) qfFiltersByWidget[w.id] = filters;
     }
+
+    // Preenche `options` (por referência, já dentro de quickFiltersById) quando
+    // a promise disparada acima resolver — chamado depois da onda de widgets,
+    // antes de entregar quickFiltersById ao cliente.
+    fillQuickFilterOptions = async () => {
+      const [qfRespRes, qfOpsRes] = await qfOptionsPromise;
+      const qfRespOptions = (qfRespRes.data ?? []).map((r) => ({
+        value: r.id as string,
+        label: (r.display_name as string) ?? "—",
+      }));
+      const qfOpsOptions = (qfOpsRes.data ?? []).map((o) => ({
+        value: o.id as string,
+        label: (o.name as string) ?? "—",
+      }));
+      for (const w of qfWidgets) {
+        const qf = quickFiltersById[w.id];
+        if (!qf) continue;
+        for (const entry of qf.entries) {
+          if (entry.field === "responsible_id") {
+            qf.options[entry.id] = qfRespOptions;
+          } else if (entry.field === "operation_id") {
+            qf.options[entry.id] = qfOpsOptions;
+          } else if (isBucketEntry(entry, available)) {
+            qf.options[entry.id] =
+              staticBucketOptions(entry.transform!) ??
+              bucketOptionsByCombo[
+                `${entry.field}|${entry.transform}|${entry.weekMode ?? "restricted"}`
+              ] ??
+              [];
+          }
+        }
+      }
+    };
   }
 
   // Ano/trimestre do período de cada widget (p/ métricas monetárias com base =
@@ -680,7 +703,7 @@ export default async function DashboardPage({
   const calcById: Record<string, CalcWidgetResult> = {};
   const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
   const noteById: Record<string, CalcWidgetResult[]> = {};
-  await Promise.all(
+  const widgetTasks =
     dataWidgets.map(async (w) => {
       // Métricas calculadas: resolve a fórmula com o contexto do dashboard.
       // `settings.calcField` aponta p/ um campo "Calculado (totais)" salvo em
@@ -883,15 +906,25 @@ export default async function DashboardPage({
       } catch (e) {
         fail(e);
       }
-    })
-  );
+    });
 
   // Rótulos das colunas FK presentes nas tabelas de registros (id→nome).
   // Helper compartilhado com a action de paginação (lib/widgets/fk-labels.ts).
-  const fkLabels = await collectRecordFkLabels(
-    supabase,
-    Object.values(recordListById).flat()
+  // Só os widgets-lista de registros alimentam recordListById, então a busca
+  // dos rótulos dispara assim que ELES terminam e corre em paralelo com os
+  // widgets restantes (antes: barreira serial depois de todos).
+  const listTasks = widgetTasks.filter((_, i) => {
+    const w = dataWidgets[i];
+    return isListWidget(w) && (w.settings?.rowSource ?? "records") === "records";
+  });
+  const fkLabelsPromise = Promise.all(listTasks).then(() =>
+    collectRecordFkLabels(supabase, Object.values(recordListById).flat())
   );
+  const [fkLabels] = await Promise.all([fkLabelsPromise, ...widgetTasks]);
+
+  // Opções de dropdown dos filtros rápidos (promise disparada antes da
+  // computação; ver fillQuickFilterOptions acima).
+  if (fillQuickFilterOptions) await fillQuickFilterOptions();
 
   // Opções do SELECT de responsável editável (promise disparada antes da
   // computação dos widgets). Marca os responsáveis com vínculo no Bitrix: são
