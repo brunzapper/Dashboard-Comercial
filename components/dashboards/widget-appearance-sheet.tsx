@@ -1,4 +1,6 @@
-// Versão: 2.3 | Data: 17/07/2026
+// Versão: 2.4 | Data: 17/07/2026
+// v2.4 (17/07/2026): painel (SheetContent) com bg-muted — cards internos
+//   (regras de formatação condicional etc.) se destacam em branco.
 // v2.3 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
 //   defaultValue no Accordion) — expandir sob demanda; badges seguem resumindo.
 // v2.2 (15/07/2026): seções de cores dos widgets calculadora (card/visor/
@@ -189,7 +191,7 @@ export function WidgetAppearanceSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-md">
+      <SheetContent className="bg-muted overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Aparência</SheetTitle>
           <SheetDescription>

@@ -1,5 +1,6 @@
 "use client";
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 17/07/2026
+// v1.1 (17/07/2026): caixa com bg-card (painel do editor ficou bg-muted).
 // Seção "Modo do Card" do builder (settings.card): além do número agregado
 // (comportamento original), o Card exibe o valor de um registro (maior/menor),
 // um ranking Top N, uma lista de valores ou uma fórmula (motor do widget
@@ -53,7 +54,7 @@ export function CardModeSection({
   const mode = value.mode ?? "value";
   const modes = Object.keys(CARD_MODE_LABELS) as CardMode[];
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-3">
+    <div className="bg-card flex flex-col gap-2 rounded-md border p-3">
       <div className="flex flex-col gap-1.5">
         <Label>Modo do Card</Label>
         <Select
