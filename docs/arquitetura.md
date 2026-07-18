@@ -176,7 +176,11 @@ exceção: sempre recomputados).
 - **Bitrix**: backfill/reconcile resumíveis por cursor (`sync_jobs`, uma página por
   requisição — cabe nos 60s da Vercel). O tick por minuto (`/api/sync/tick`, via
   pg_cron) drena a fila de write-back (`bitrix_writeback_queue`), avança o job ativo
-  e dispara um reconcile automático a cada ≥1h.
+  e dispara um reconcile automático a cada ≥1h. IDs viram nomes em
+  `lib/sync/bitrix/lookups.ts` (etapas, enums, usuários, empresas e — desde a 0075 —
+  origens: `SOURCE_ID` → campo `fonte`, resolvido via `crm.status.list`
+  `ENTITY_ID='SOURCE'`). "Implementação" (`implementacao`) é sincronizado de
+  `UF_CRM_1778094396888` desde a 0075 (antes era campo local dos presets).
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
   faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET`.
 - **API/webhooks de entrada**: `/api/ingest/<fonte>` com chaves de API

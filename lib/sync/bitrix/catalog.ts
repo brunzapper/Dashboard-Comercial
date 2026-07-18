@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 18/07/2026
+// v1.4 (18/07/2026): campos curados de tipo "source" (SOURCE_ID → `fonte`) viram
+//   data_type 'selecao' com as origens resolvidas como options (o schema diz
+//   crm_status, que cairia em texto sem options).
 // v1.3 (15/07/2026): preserva show_as_percent (toggle do admin) no upsert do
 //   catálogo — sem isso todo sync resetaria o flag para false.
 // v1.1 (09/07/2026): Fase 8 — grava applies_to (record_type de origem) e usa o
@@ -144,11 +147,16 @@ function catalogRowsFor(lookups: BitrixLookups, entity: Entity): CatalogRow[] {
   // sobre a exclusão do núcleo (ex.: Data da assinatura).
   for (const [fieldId, def] of Object.entries(curated)) {
     const meta = metaById.get(fieldId);
+    // Tipo curado "source" (SOURCE_ID): o schema devolve crm_status (sem items,
+    // cairia em texto) — vira seleção com as origens resolvidas como options.
+    const isSource = def.type === "source";
     rows.push({
       field_key: def.key,
       label: FIELD_LABELS[fieldId] ?? meta?.title ?? def.key,
-      data_type: meta ? toDataType(meta.type) : "texto",
-      options: meta?.items?.map((i) => i.VALUE) ?? [],
+      data_type: isSource ? "selecao" : meta ? toDataType(meta.type) : "texto",
+      options: isSource
+        ? lookups.sourceNames()
+        : (meta?.items?.map((i) => i.VALUE) ?? []),
       source_system: "bitrix",
       source_field_id: fieldId,
       show_in_builder: true,

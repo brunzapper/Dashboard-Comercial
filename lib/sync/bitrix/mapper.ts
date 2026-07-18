@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 09/07/2026
+// Versão: 1.3 | Data: 18/07/2026
+// v1.3 (18/07/2026): resolveCustom trata o tipo "source" (SOURCE_ID → nome da
+//   origem via BitrixLookups.sourceName).
 // Tradução de um DEAL/LEAD cru do Bitrix para o formato do núcleo `records`,
 // usando o field map (lib/config/bitrix-field-map) e os lookups. Campos
 // auxiliares com prefixo `_` não são colunas — servem ao orquestrador do sync
@@ -112,6 +114,8 @@ async function resolveCustom(
       return lookups.userName(val as string);
     case "company":
       return lookups.companyName(val as string);
+    case "source":
+      return lookups.sourceName(val as string);
     case "money":
       return parseMoney(val);
     case "double":

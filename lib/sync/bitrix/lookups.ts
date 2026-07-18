@@ -1,8 +1,10 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 18/07/2026
 // Resolução de IDs → nomes/labels do Bitrix, com cache. Stages/status,
 // categorias (pipelines) e labels de enumeration são carregados uma vez por
 // execução; nomes de usuários (user.get) usam cache persistente em
 // bitrix_lookup_cache (para atravessar invocações serverless).
+// v1.2 (18/07/2026): captura as origens (crm.status.list, ENTITY_ID='SOURCE') e
+//   expõe sourceName()/sourceNames() — resolução do SOURCE_ID → "Fonte".
 // v1.1 (09/07/2026): Fase 7 — guarda o metadata COMPLETO de crm.deal.fields /
 //   crm.lead.fields (título, tipo, items) e expõe dealFieldMetas()/leadFieldMetas()
 //   para a descoberta dinâmica de colunas (lib/sync/bitrix/catalog.ts).
@@ -51,6 +53,10 @@ export interface SerializedLookups {
   // etapa do lead). Ver preload()/statusName().
   leadStatuses: Record<string, string>;
   dealStages: Record<string, string>;
+  // Origens (SOURCE_ID → nome). Opcional: jobs serializados antes da v1.2 não
+  // têm o mapa — hydrate tolera e o campo `fonte` fica com o código cru até o
+  // próximo sync.
+  sources?: Record<string, string>;
   // Compat: formato antigo (mapa único) — usado só como fallback ao reidratar
   // jobs em andamento durante o deploy da correção.
   statuses?: Record<string, string>;
@@ -102,6 +108,7 @@ export class BitrixLookups {
   // evita a colisão de código (ex.: "NEW") entre status de lead e etapa de deal.
   private leadStatuses = new Map<string, string>();
   private dealStages = new Map<string, string>();
+  private sources = new Map<string, string>();
   private categories = new Map<string, string>();
   private dealEnums = new Map<string, Map<string, string>>();
   private leadEnums = new Map<string, Map<string, string>>();
@@ -120,12 +127,14 @@ export class BitrixLookups {
     if (this.loaded) return;
 
     // Particiona por ENTITY_ID: leads usam "STATUS"; etapas de deal usam
-    // "DEAL_STAGE" (pipeline padrão) ou "DEAL_STAGE_<categoryId>" (demais).
+    // "DEAL_STAGE" (pipeline padrão) ou "DEAL_STAGE_<categoryId>" (demais);
+    // "SOURCE" são as origens (labels do SOURCE_ID de leads e deals).
     const statuses = await this.client.listAll<StatusRow>("crm.status.list");
     for (const s of statuses) {
       const key = String(s.STATUS_ID);
       if (s.ENTITY_ID?.startsWith("DEAL_STAGE")) this.dealStages.set(key, s.NAME);
       else if (s.ENTITY_ID === "STATUS") this.leadStatuses.set(key, s.NAME);
+      else if (s.ENTITY_ID === "SOURCE") this.sources.set(key, s.NAME);
     }
 
     this.categories.set("0", "Vendas"); // default (pode não vir na lista)
@@ -158,6 +167,7 @@ export class BitrixLookups {
     return {
       leadStatuses: mapToObj(this.leadStatuses),
       dealStages: mapToObj(this.dealStages),
+      sources: mapToObj(this.sources),
       categories: mapToObj(this.categories),
       dealEnums: enumMapToObj(this.dealEnums),
       leadEnums: enumMapToObj(this.leadEnums),
@@ -186,6 +196,7 @@ export class BitrixLookups {
     l.dealStages = ctx.dealStages
       ? new Map(Object.entries(ctx.dealStages))
       : (legacy ?? new Map());
+    l.sources = new Map(Object.entries(ctx.sources ?? {}));
     l.categories = new Map(Object.entries(ctx.categories ?? {}));
     l.dealEnums = objToEnumMap(ctx.dealEnums ?? {});
     l.leadEnums = objToEnumMap(ctx.leadEnums ?? {});
@@ -225,6 +236,18 @@ export class BitrixLookups {
     const key = String(statusId);
     const map = entity === "deal" ? this.dealStages : this.leadStatuses;
     return map.get(key) ?? key;
+  }
+
+  // SOURCE_ID → nome da origem ("Fonte"). Fallback no código cru, como statusName.
+  sourceName(sourceId?: string | null): string | null {
+    if (sourceId == null || sourceId === "") return null;
+    const key = String(sourceId);
+    return this.sources.get(key) ?? key;
+  }
+
+  /** Nomes de todas as origens (options do catálogo do campo `fonte`). */
+  sourceNames(): string[] {
+    return Array.from(this.sources.values());
   }
 
   categoryName(categoryId?: string | null): string | null {

@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 09/07/2026
+// Versão: 1.3 | Data: 18/07/2026
+// v1.3 (18/07/2026): SOURCE_ID → "fonte" (novo tipo "source", resolvido via
+//   crm.status.list ENTITY_ID='SOURCE') e UF_CRM_1778094396888 → "implementacao"
+//   (campo de valor da implementação; substitui o antigo campo local homônimo —
+//   ver migração 0075).
 // v1.2 (09/07/2026): Fase 8b — FIELD_LABELS (fieldId → nome visual, do arquivo de
 //   integração) sobrepõe o título do schema do Bitrix (que às vezes volta vazio e
 //   cai para o próprio fieldId). Também define o conjunto de campos exibidos por
@@ -21,7 +25,8 @@ export type BitrixFieldType =
   | "boolean"
   | "enumeration"
   | "employee"
-  | "company"; // COMPANY_ID → nome da empresa (resolvido via crm.company.get)
+  | "company" // COMPANY_ID → nome da empresa (resolvido via crm.company.get)
+  | "source"; // SOURCE_ID → nome da origem (crm.status.list, ENTITY_ID='SOURCE')
 
 export interface CustomFieldMap {
   key: string; // chave dentro de records.custom_fields
@@ -56,6 +61,12 @@ export const DEAL_CUSTOM: Record<string, CustomFieldMap> = {
   // nome via crm.company.get (BitrixLookups.companyName). Mesma chave `empresa`
   // usada nos leads (COMPANY_TITLE) → coluna única entre as fontes.
   COMPANY_ID: { key: "empresa", type: "company" },
+  // Fonte (origem) do negócio: código resolvido p/ nome via lookup de origens.
+  // Mesma chave `fonte` usada nos leads → coluna única entre as fontes.
+  SOURCE_ID: { key: "fonte", type: "source" },
+  // Valor da implementação (taxa de setup). Substitui o antigo campo local
+  // homônimo dos presets — o sync passa a alimentá-lo (migração 0075).
+  UF_CRM_1778094396888: { key: "implementacao", type: "money" },
   // Data da assinatura: também é usada como referência do lead time
   // (DEAL_CORE.signatureDate). Exposta aqui como coluna própria disponível.
   UF_CRM_1729887608434: { key: "data_assinatura", type: "date" },
@@ -97,6 +108,8 @@ export const LEAD_CUSTOM: Record<string, CustomFieldMap> = {
   // Empresa do lead: COMPANY_TITLE já é o nome. Mesma chave `empresa` dos deals
   // (curada tem precedência sobre a exclusão de core-id no catálogo).
   COMPANY_TITLE: { key: "empresa", type: "string" },
+  // Fonte (origem) do lead — mesma chave `fonte` dos deals.
+  SOURCE_ID: { key: "fonte", type: "source" },
   UF_CRM_1713984862: { key: "sales_qualified_lead", type: "boolean" },
   UF_CRM_1728913702: { key: "lead_score", type: "enumeration" },
   UF_CRM_1728913647652: { key: "grupo_origem", type: "enumeration" },
@@ -134,6 +147,7 @@ export const FIELD_LABELS: Record<string, string> = {
   BIRTHDATE: "Data de nascimento",
   DATE_CREATE: "Criado",
   STATUS_DESCRIPTION: "Informações da etapa",
+  SOURCE_ID: "Fonte",
   SOURCE_DESCRIPTION: "Informações da fonte",
   DATE_MODIFY: "Última atualização em",
   COMPANY_TITLE: "Nome da Empresa",
@@ -312,6 +326,7 @@ export const FIELD_LABELS: Record<string, string> = {
   UF_CRM_68A4DE105C16A: "ID Lead MT",
   UF_CRM_1755888290: "Canal",
   UF_CRM_1757444918: "SDR Responsável",
+  UF_CRM_1778094396888: "Implementação",
   UF_CRM_69012FCE35D9D: "Work Email",
   REPEAT_SALE_SEGMENT_ID: "Script de vendas recorrentes",
 };
