@@ -1,6 +1,8 @@
-// Versão: 2.10 | Data: 17/07/2026
+// Versão: 2.11 | Data: 18/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.11 (18/07/2026): fontes por métrica — recordListExtraById repassado ao
+//   WidgetCard (extras p/ basis de subtotais; ver runRecordListWithExtras).
 // v2.10 (17/07/2026): arraste das alças da área de trabalho fluido — guard de
 //   igualdade no onHandleMove (re-render só ao cruzar limite de célula, antes
 //   era a cada pointermove), transition de width/height durante o arraste,
@@ -216,6 +218,7 @@ export function DashboardGrid({
   widgets,
   dataById,
   recordListById,
+  recordListExtraById,
   recordListTotalById,
   entityListById,
   calcById,
@@ -263,6 +266,9 @@ export function DashboardGrid({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
+  // alimentam SÓ a basis dos subtotais da tabela de registros (nunca linhas).
+  recordListExtraById?: Record<string, RecordRow[]>;
   // Total dos widgets-lista paginados no servidor (chave ausente = full fetch;
   // opcional — o viewer de snapshots nunca pagina, dataset congelado).
   recordListTotalById?: Record<string, number>;
@@ -877,6 +883,7 @@ export function DashboardGrid({
                     widget={w}
                     data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
                     recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
+                    recordListExtra={recordListExtraById?.[w.id]}
                     recordListTotal={recordListTotalById?.[w.id]}
                     entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
                     calcValue={calcById[w.id] ?? null}

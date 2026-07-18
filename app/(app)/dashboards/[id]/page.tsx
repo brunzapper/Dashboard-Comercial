@@ -1,6 +1,10 @@
-// Versão: 2.5 | Data: 17/07/2026
+// Versão: 2.6 | Data: 18/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.6 (18/07/2026): fontes por métrica (Metric.sources) — full fetch do modo
+//   lista via runRecordListWithExtras (recordListExtraById → basis dos
+//   subtotais no cliente, fora do export/FK) e cobertura do @period dos
+//   filtros rápidos ampliada p/ as fontes das métricas (widgetQuerySources).
 // v2.5 (17/07/2026): <TrackLastView /> — grava a rota (com ?tab=) em
 //   user_settings.lastView p/ a Home restaurar ao reabrir o app.
 // v2.4 (17/07/2026): busca client-side — o q do tf_ é PULADO nos widgets em
@@ -37,7 +41,10 @@ import {
 } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
-import { runRecordList, runRecordListPage } from "@/lib/widgets/record-list";
+import {
+  runRecordListPage,
+  runRecordListWithExtras,
+} from "@/lib/widgets/record-list";
 import { collectRecordFkLabels } from "@/lib/widgets/fk-labels";
 import {
   runEntityList,
@@ -700,6 +707,10 @@ export default async function DashboardPage({
   //    dentro do mesmo Promise.all (antes eram 3 ondas seriais próprias).
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
+  // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
+  // alimentam só a basis dos subtotais no cliente — fora do export e dos
+  // rótulos FK (nunca viram linha).
+  const recordListExtraById: Record<string, RecordRow[]> = {};
   // Total de registros dos widgets-lista PAGINADOS no servidor (o cliente usa
   // p/ montar o pager; ausente = widget de full fetch, paginação client-side).
   const recordListTotalById: Record<string, number> = {};
@@ -883,12 +894,14 @@ export default async function DashboardPage({
             recordListById[w.id] = rows;
             recordListTotalById[w.id] = total;
           } else {
-            recordListById[w.id] = await runRecordList(
+            const { records, extra } = await runRecordListWithExtras(
               supabase,
               config,
               periodByWidget[w.id],
               available
             );
+            recordListById[w.id] = records;
+            if (extra.length > 0) recordListExtraById[w.id] = extra;
           }
         } catch (e) {
           recordListById[w.id] = [];
@@ -1050,6 +1063,7 @@ export default async function DashboardPage({
         widgets={widgets}
         dataById={dataById}
         recordListById={recordListById}
+        recordListExtraById={recordListExtraById}
         recordListTotalById={recordListTotalById}
         entityListById={entityListById}
         calcById={calcById}

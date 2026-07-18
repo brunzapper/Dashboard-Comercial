@@ -1,4 +1,9 @@
-// Versão: 1.4 | Data: 17/07/2026
+// Versão: 1.5 | Data: 18/07/2026
+// v1.5 (18/07/2026): fontes por métrica — runRecordListWithExtras busca, além
+//   dos registros de EXIBIÇÃO (fontes do widget, intactos), os registros das
+//   fontes extras das pernas (Metric.sources) p/ a basis dos subtotais no
+//   cliente. O fetch extra NÃO tem rowMode/columns: a regra dos mocks passa a
+//   inspecionar as métricas das pernas (mocks entram na basis sem virar linha).
 // v1.4 (17/07/2026): paginação server-side — construtor de consulta extraído
 //   (buildRecordListQuery) e novo runRecordListPage: widgets elegíveis
 //   (ver serverPaginatedList em ./view-filters) buscam SÓ a página visível
@@ -21,6 +26,7 @@ import type { RecordRow } from "@/lib/records/types";
 import { toSourceKey } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
+import { partitionMetricLegs } from "./metric-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
 import { includesMockReuniaoRef } from "./mock-reuniao";
 import {
@@ -338,6 +344,56 @@ export async function runRecordList(
   const all = await fetchAll(tq);
   await attachMatches(supabase, all);
   return applyBucketFilters(all);
+}
+
+/**
+ * runRecordList + registros EXTRAS das fontes das pernas (Metric.sources):
+ * o conjunto de exibição fica INTACTO (fontes do widget, mesma regra dos
+ * mocks de sempre — filtros + colunas); `extra` traz os registros das fontes
+ * das métricas que o widget não cobre, para os subtotais/Total geral do
+ * cliente comporem a basis das métricas com fontes próprias. O fetch extra
+ * remove rowMode/columns/limit: sem rowMode, a regra dos mocks inspeciona
+ * filtros + dimensões + MÉTRICAS (as das pernas) — mocks de Data Reunião
+ * entram na basis sem nunca virar linha. Fontes de perna já cobertas pelo
+ * widget não são re-buscadas (o cliente filtra os registros de exibição por
+ * record_type ao compor o escopo).
+ */
+export async function runRecordListWithExtras(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  period?: DashboardPeriod | null,
+  available: AvailableField[] = []
+): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
+  const { legs } = partitionMetricLegs(config.metrics ?? [], config.sources);
+  const extraSources =
+    config.sources && config.sources.length > 0
+      ? [...new Set(legs.flatMap((l) => l.sources))].filter(
+          (s) => !config.sources!.includes(s)
+        )
+      : [];
+  const [records, extra] = await Promise.all([
+    runRecordList(supabase, config, period, available),
+    extraSources.length > 0
+      ? runRecordList(
+          supabase,
+          {
+            ...config,
+            sources: extraSources,
+            dimensions: [],
+            metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
+            settings: {
+              ...config.settings,
+              rowMode: undefined,
+              columns: undefined,
+              limit: undefined,
+            },
+          },
+          period,
+          available
+        )
+      : Promise.resolve([] as RecordRow[]),
+  ]);
+  return { records, extra };
 }
 
 /**

@@ -1,6 +1,9 @@
-// Versão: 2.5 | Data: 17/07/2026
+// Versão: 2.6 | Data: 18/07/2026
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
+// v2.6 (18/07/2026): fontes por métrica — prop recordListExtra repassada à
+//   RecordListTable (extraRecords: basis dos subtotais das métricas com
+//   Metric.sources).
 // v2.5 (17/07/2026): autoOpenEditor — card recém-criado pelo "Inserir ▸" (tipo
 //   que exige configuração) monta com o editor de dados já aberto; consumo
 //   one-shot via onAutoEditConsumed.
@@ -158,6 +161,7 @@ export const WidgetCard = memo(function WidgetCard({
   widget,
   data,
   recordList,
+  recordListExtra,
   recordListTotal,
   entityList,
   calcValue,
@@ -198,6 +202,9 @@ export const WidgetCard = memo(function WidgetCard({
   widget: Widget;
   data: WidgetData;
   recordList: RecordRow[];
+  // Registros das fontes de Metric.sources fora das do widget: só basis dos
+  // subtotais da RecordListTable (nunca linhas). Ver runRecordListWithExtras.
+  recordListExtra?: RecordRow[];
   // Total de registros quando a lista é PAGINADA no servidor (recordList é só
   // a página 1). Ausente = full fetch (paginação client-side, como antes).
   recordListTotal?: number;
@@ -975,6 +982,7 @@ export const WidgetCard = memo(function WidgetCard({
           ) : isRecordList ? (
             <RecordListTable
               records={srvPage?.rows ?? recordList}
+              extraRecords={recordListExtra}
               serverPage={serverPageState}
               searchQ={clientSearch ? clientQ : undefined}
               searchFields={widget.settings?.searchFields}

@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 18/07/2026
+// v1.1 (18/07/2026): fontes por métrica — @period dos filtros rápidos cobre
+//   também as fontes das métricas (widgetQuerySources), espelho da page.
 // Reconstrói, no servidor, o ESCOPO efetivo de um widget de dashboard a partir
 // do banco + URL (não confia em config vinda do client): widget/campos/fontes,
 // período efetivo (resolver único da page, lib/widgets/period-resolve.ts) e os

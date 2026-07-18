@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 18/07/2026
+// v1.1 (18/07/2026): fontes por métrica — recordListExtraById repassado ao
+//   grid (extras p/ basis de subtotais; ver runRecordListWithExtras).
 // Shell do VIEWER PÚBLICO de um snapshot (/s/<token>): título + selo de
 // atualização + o grid do dashboard em modo somente-leitura. Reusa o
 // DashboardGrid real (com os providers que ele exige — History/Pending —
@@ -55,6 +57,7 @@ export function SnapshotClient({
   widgets,
   dataById,
   recordListById,
+  recordListExtraById = {},
   entityListById,
   calcById,
   calcVarsById,
@@ -85,6 +88,9 @@ export function SnapshotClient({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
+  // só basis dos subtotais da tabela de registros (nunca linhas).
+  recordListExtraById?: Record<string, RecordRow[]>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   calcVarsById: Record<string, Record<string, CalcWidgetResult>>;
@@ -186,6 +192,7 @@ export function SnapshotClient({
                   widgets={widgets}
                   dataById={dataById}
                   recordListById={recordListById}
+                  recordListExtraById={recordListExtraById}
                   entityListById={entityListById}
                   calcById={calcById}
                   calcVarsById={calcVarsById}

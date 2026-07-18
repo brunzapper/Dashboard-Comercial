@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 18/07/2026
+// v1.3 (18/07/2026): fontes por métrica (Metric.sources) — modo lista via
+//   runRecordListWithExtras (extras saem do dataset congelado; allowed_sources
+//   pode zerá-los → métrica degrada p/ "—") e @period dos filtros rápidos
+//   cobrindo as fontes das métricas (widgetQuerySources), espelho da page.
 // v1.2 (17/07/2026): busca client-side — com allowWidgetFilters, o q do tf_ é
 //   pulado nos widgets em que searchHandledOnClient(settings) (lista de
 //   registros sem limit): o viewer filtra em memória, como no dashboard. Com
@@ -48,7 +52,7 @@ import { runWidget } from "@/lib/widgets/engine";
 import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
 import { runKanban } from "@/lib/kanban/data";
 import type { KanbanWidgetResult } from "@/app/(app)/dashboards/kanban-actions";
-import { runRecordList } from "@/lib/widgets/record-list";
+import { runRecordListWithExtras } from "@/lib/widgets/record-list";
 import {
   runEntityList,
   type EntityListRow,
@@ -462,6 +466,9 @@ export default async function SnapshotPage({
   // dependências reais são: rótulos FK ← widgets-lista; kanban ← rótulos FK.
   const dataById: Record<string, WidgetData> = {};
   const recordListById: Record<string, RecordRow[]> = {};
+  // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
+  // só basis dos subtotais no cliente; fora dos rótulos FK.
+  const recordListExtraById: Record<string, RecordRow[]> = {};
   const entityListById: Record<string, EntityListRow[]> = {};
   const widgetTasks =
     dataWidgets.map(async (w) => {
@@ -530,7 +537,7 @@ export default async function SnapshotPage({
           return;
         }
         try {
-          const rows = await runRecordList(
+          const { records: rows, extra } = await runRecordListWithExtras(
             db,
             config,
             periodByWidget[w.id],
@@ -542,6 +549,14 @@ export default async function SnapshotPage({
             partnerIds.size > 0
               ? rows.filter((r) => !partnerIds.has(r.id))
               : rows;
+          // Extras (Metric.sources): saem do dataset CONGELADO — allowed_sources
+          // do snapshot pode zerá-los (métrica degrada p/ "—"; documentado).
+          if (extra.length > 0) {
+            recordListExtraById[w.id] =
+              partnerIds.size > 0
+                ? extra.filter((r) => !partnerIds.has(r.id))
+                : extra;
+          }
         } catch (e) {
           recordListById[w.id] = [];
           fail(e);
@@ -904,6 +919,7 @@ export default async function SnapshotPage({
           widgets={renderWidgets}
           dataById={dataById}
           recordListById={recordListById}
+          recordListExtraById={recordListExtraById}
           entityListById={entityListById}
           calcById={calcById}
           calcVarsById={calcVarsById}

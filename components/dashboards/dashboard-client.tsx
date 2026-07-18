@@ -1,7 +1,9 @@
-// Versão: 2.4 | Data: 17/07/2026
+// Versão: 2.5 | Data: 18/07/2026
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
+// v2.5 (18/07/2026): fontes por métrica — recordListExtraById repassado ao
+//   grid (extras p/ basis de subtotais; ver runRecordListWithExtras).
 // v2.4 (17/07/2026): modo Posicionar — beginPlacement pré-cria o widget
 //   ({revalidate:false} + refresh em segundo plano) enquanto o usuário mira; o
 //   clique no canvas define a posição (patch sticky + saveLayout); Esc/troca
@@ -117,6 +119,7 @@ export function DashboardClient({
   widgets,
   dataById,
   recordListById,
+  recordListExtraById = {},
   recordListTotalById,
   entityListById,
   calcById,
@@ -154,6 +157,9 @@ export function DashboardClient({
   widgets: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
+  // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
+  // só basis dos subtotais da tabela de registros (nunca linhas).
+  recordListExtraById?: Record<string, RecordRow[]>;
   // Total dos widgets-lista paginados no servidor (chave ausente = full fetch).
   recordListTotalById: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
@@ -869,6 +875,7 @@ export function DashboardClient({
             widgets={visibleWidgets}
             dataById={dataById}
             recordListById={recordListById}
+            recordListExtraById={recordListExtraById}
             recordListTotalById={recordListTotalById}
             entityListById={entityListById}
             calcById={calcById}
