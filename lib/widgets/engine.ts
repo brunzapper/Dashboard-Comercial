@@ -789,12 +789,56 @@ async function runWidgetByPeriod(
   const isDateBucket = (d: Dimension) =>
     d.transform != null && d.transform !== "none";
 
-  const records = (await runRecordList(
-    supabase,
-    config,
-    period,
-    available
-  )) as RecordRow[];
+  // Fontes por métrica (18/07/2026): pernas (Metric.sources) compõem a basis
+  // com registros das fontes DELAS. O fetch de EXIBIÇÃO (linhas/grupos) segue
+  // as fontes do widget e, na regra dos mocks, inspeciona só as métricas da
+  // consulta principal (paridade com o caminho RPC); o fetch EXTRA cobre as
+  // fontes que faltam e inspeciona as métricas das pernas — mocks entram na
+  // basis sem virar linha. Fontes de perna já cobertas pelo widget reusam os
+  // registros de exibição (filtrados por record_type no escopo, adiante) —
+  // nesse recorte a regra dos mocks é a da consulta principal (limitação
+  // documentada; o fetch extra é que carrega os mocks da perna).
+  const { defaultIdx, legs } = partitionMetricLegs(
+    config.metrics,
+    config.sources
+  );
+  const legByIdx = new Map<number, { sources: SourceKey[]; idx: number[] }>();
+  for (const l of legs) for (const i of l.idx) legByIdx.set(i, l);
+  const extraSources =
+    config.sources && config.sources.length > 0
+      ? [...new Set(legs.flatMap((l) => l.sources))].filter(
+          (s) => !config.sources!.includes(s)
+        )
+      : [];
+  // Falha do fetch extra degrada as métricas de perna p/ null ("—") — nunca
+  // derruba o widget (mesma postura das pernas do caminho RPC).
+  let extraOk = true;
+  const [records, extraRecords] = await Promise.all([
+    runRecordList(
+      supabase,
+      legs.length > 0
+        ? { ...config, metrics: defaultIdx.map((i) => config.metrics[i]) }
+        : config,
+      period,
+      available
+    ) as Promise<RecordRow[]>,
+    extraSources.length > 0
+      ? (runRecordList(
+          supabase,
+          {
+            ...config,
+            sources: extraSources,
+            metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
+            settings: { ...config.settings, limit: undefined },
+          },
+          period,
+          available
+        ) as Promise<RecordRow[]>).catch(() => {
+          extraOk = false;
+          return [] as RecordRow[];
+        })
+      : Promise.resolve([] as RecordRow[]),
+  ]);
 
   // Campo unificado: resolve o MEMBRO da fonte do registro (espelha o coalesce
   // que o RPC monta); fonte sem membro → undefined (fica fora do bucket/soma).
@@ -876,16 +920,38 @@ async function runWidgetByPeriod(
   };
 
   // Agrupa: "individual" = 1 grupo por registro; senão pela tupla das dimensões.
-  const groups = new Map<string, { dv: DV[]; records: RecordRow[] }>();
+  // Chave de grupo: tupla das dimensões unida por U+0001 (separador que não
+  // colide com valores reais) — compartilhada com a atribuição dos extras.
+  const groupKeyOf = (dvs: DV[]): string =>
+    dvs.map((x) => x.key).join("");
+  const groups = new Map<
+    string,
+    { key: string; dv: DV[]; records: RecordRow[] }
+  >();
   for (const r of records) {
     const dvs = dims.map((d) => dimValue(d, r));
-    const gkey = fn === "individual" ? r.id : dvs.map((x) => x.key).join("");
+    const gkey = fn === "individual" ? r.id : groupKeyOf(dvs);
     let g = groups.get(gkey);
     if (!g) {
-      g = { dv: dvs, records: [] };
+      g = { key: gkey, dv: dvs, records: [] };
       groups.set(gkey, g);
     }
     g.records.push(r);
+  }
+
+  // Extras (fontes das pernas) atribuídos aos grupos pela MESMA chave de
+  // tupla; grupos que só existiriam nos extras NÃO viram linha (universo de
+  // linhas = fontes do widget). No modo "individual" não há como casar (grupo
+  // = 1 registro): o escopo da perna é o próprio registro, filtrado por fonte.
+  const extrasByGroup = new Map<string, RecordRow[]>();
+  if (fn !== "individual") {
+    for (const r of extraRecords) {
+      const gkey = groupKeyOf(dims.map((d) => dimValue(d, r)));
+      if (!groups.has(gkey)) continue;
+      const list = extrasByGroup.get(gkey) ?? [];
+      list.push(r);
+      extrasByGroup.set(gkey, list);
+    }
   }
 
   // Resolve rótulos das dimensões não-data (fonte e FK id→nome).
@@ -991,8 +1057,57 @@ async function runWidgetByPeriod(
     const basis = calcResolved.size > 0 ? basisFromRecords(g.records) : null;
     if (basis) row.__calcOps = basis;
     const money: Record<string, MoneyBreakdown> = {};
+    // Escopo de uma PERNA neste grupo: registros do grupo + extras do grupo,
+    // filtrados pelas fontes da métrica (no "individual", só o próprio
+    // registro — extras não casam com grupo de 1 registro).
+    const legScope = (leg: { sources: SourceKey[] }): RecordRow[] => {
+      const rts = new Set(leg.sources.map((s) => toRecordType(s)));
+      const extras =
+        fn === "individual" ? [] : (extrasByGroup.get(g.key) ?? []);
+      return [...g.records, ...extras].filter((r) => rts.has(r.record_type));
+    };
+    const calcOpsBy: NonNullable<WidgetRow["__calcOpsBy"]> = {};
     config.metrics.forEach((m, mi) => {
       const rc = calcResolved.get(mi);
+      const leg = legByIdx.get(mi);
+      if (leg) {
+        // Métrica de perna: escopo próprio; fetch extra indisponível → null.
+        const scope = extraOk ? legScope(leg) : null;
+        if (rc) {
+          const legBasis = scope ? basisFromRecords(scope) : {};
+          calcOpsBy[`metric_${mi + 1}`] = legBasis;
+          row[`metric_${mi + 1}`] =
+            rc.formula && scope
+              ? evalCalcMoney(rc.formula, legBasis, calcMeta(rc)).value
+              : null;
+          return;
+        }
+        if (!scope || (fn === "individual" && scope.length === 0)) {
+          row[`metric_${mi + 1}`] = null;
+          return;
+        }
+        let legVal: number;
+        if (fn === "individual") {
+          if (m.field === "*") legVal = scope.length;
+          else {
+            const n = Number(rawValue(m.field, scope[0]));
+            legVal = Number.isFinite(n) ? n : 0;
+          }
+        } else {
+          legVal = aggMetricNum(m, scope);
+        }
+        row[`metric_${mi + 1}`] = legVal;
+        if (m.field !== "*" && isMoney(m.field)) {
+          money[`metric_${mi + 1}`] = buildRecordBreakdown(
+            scope,
+            (r) => rawValue(m.field, r),
+            (r) => metricCurrency(m.field, r),
+            (r) => recYQ(r, m),
+            rates
+          );
+        }
+        return;
+      }
       if (rc) {
         row[`metric_${mi + 1}`] =
           rc.formula && basis
@@ -1025,6 +1140,7 @@ async function runWidgetByPeriod(
       }
     });
     if (Object.keys(money).length > 0) row.__money = money;
+    if (Object.keys(calcOpsBy).length > 0) row.__calcOpsBy = calcOpsBy;
     return row;
   });
 
