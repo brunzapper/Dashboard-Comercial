@@ -255,6 +255,12 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
+- **Formato do grupo nas listas** (18/07/2026):
+  `widgets.settings.appearance.table.groupDateFormats` (opcional, por field do
+  "Agrupar por") funde/rotula o grupo de uma coluna de data por formato próprio
+  (`bucketGroupDate`, `lib/widgets/date-buckets.ts`) sem alterar o formato da
+  dimensão nas linhas expandidas; client-side apenas (nada muda nos RPCs) e o
+  viewer de snapshot o honra por vir congelado no settings.
 - **Edição inline sem re-render global** (18/07/2026): a edição de célula
   (`updateRecordField`) NÃO chama `revalidatePath` — a célula é otimista
   (`components/registros/use-cell-commit.ts`) e a página reconcilia no cliente
