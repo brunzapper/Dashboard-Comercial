@@ -1,5 +1,6 @@
 "use client";
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 17/07/2026
+// v1.1 (17/07/2026): caixas de regra/escala com bg-card (painel bg-muted).
 // Seção "Formatação condicional" do sheet de Aparência
 // (appearance.conditional): regras valor→estilo e escalas de cor contínuas
 // (heatmap), avaliadas por lib/widgets/conditional.ts. Arquivo próprio para
@@ -127,7 +128,7 @@ export function ConditionalFormatSection({
         </Button>
       </div>
       {rules.map((r) => (
-        <div key={r.id} className="flex flex-col gap-2 rounded-md border p-2.5">
+        <div key={r.id} className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
           <div className="grid grid-cols-2 gap-2">
             <Select
               value={r.target}
@@ -276,7 +277,7 @@ export function ConditionalFormatSection({
         </Button>
       </div>
       {scales.map((s) => (
-        <div key={s.id} className="flex flex-col gap-2 rounded-md border p-2.5">
+        <div key={s.id} className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
           <div className="flex items-center gap-2">
             <Select
               value={s.target}

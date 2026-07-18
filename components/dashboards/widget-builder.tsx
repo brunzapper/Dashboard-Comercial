@@ -1,4 +1,6 @@
-// Versão: 1.10 | Data: 17/07/2026
+// Versão: 1.11 | Data: 17/07/2026
+// v1.11 (17/07/2026): painel (SheetContent) com bg-muted e linhas de filtro
+//   rápido com bg-card — cards brancos destacados sobre o fundo cinza.
 // v1.10 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
 //   defaultValue no Accordion) — expandir sob demanda; badges seguem resumindo.
 // v1.9 (17/07/2026): modo Posicionar — na criação, o botão vira "Posicionar" e
@@ -839,7 +841,7 @@ export function WidgetBuilder({
       {quickFilters.map((e, i) => {
         const eIsDate = isDate(e.field);
         return (
-          <div key={e.id || i} className="flex flex-col gap-1.5 rounded-md border p-2">
+          <div key={e.id || i} className="bg-card flex flex-col gap-1.5 rounded-md border p-2">
             <div className="flex items-center gap-1.5">
               <Combobox
                 className="min-w-0 flex-1"
@@ -1546,7 +1548,7 @@ export function WidgetBuilder({
     <Sheet open={open} onOpenChange={setOpen}>
       {trigger ? <SheetTrigger asChild>{trigger}</SheetTrigger> : null}
       <SheetContent
-        className="overflow-y-auto sm:max-w-none"
+        className="bg-muted overflow-y-auto sm:max-w-none"
         style={{ width: panelWidth, maxWidth: "95vw" }}
       >
         {/* Alça de redimensionamento (borda esquerda do painel). */}

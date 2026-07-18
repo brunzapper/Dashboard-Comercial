@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 17/07/2026
+// Versão: 1.6 | Data: 17/07/2026
+// v1.6 (17/07/2026): cards de dimensão/métrica/filtro com bg-card — o painel
+//   do editor ficou bg-muted e os cards se destacam em branco.
 // v1.5 (17/07/2026): título da BuilderSection vira faixa destacada (fundo
 //   preto/texto branco) para separar visualmente as seções do editor.
 // v1.4 (15/07/2026): "Nome exibido" também para a métrica "Contagem de
@@ -169,7 +171,7 @@ export function DimensionRow({
   onFlagChange: (patch: { editable?: boolean; writeBack?: boolean }) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-2.5">
+    <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
         <Combobox
           className="flex-1"
@@ -329,7 +331,7 @@ export function MetricRow({
     formulaUsesFunctions(metric.formula) ? "text" : "builder"
   );
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-2.5">
+    <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
         <Combobox
           className="flex-1"
@@ -576,7 +578,7 @@ export function FilterRow({
     onChange({ sources: next.length > 0 ? next : undefined });
   };
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-2.5">
+    <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
         <Combobox
           className="flex-1"
