@@ -1,8 +1,11 @@
-// Versão: 1.12 | Data: 18/07/2026
-// v1.12 (18/07/2026): seletor "Fontes da métrica" (Metric.sources) por linha
+// Versão: 1.13 | Data: 18/07/2026
+// v1.13 (18/07/2026): seletor "Fontes da métrica" (Metric.sources) por linha
 //   de métrica — opções do catálogo INTEIRO (ampliar é o ponto; diferente do
 //   seletor dos filtros, restrito às fontes do widget) e normalização no save
 //   (cleanMetricSources).
+// v1.12 (18/07/2026): na EDIÇÃO o painel fecha ao salvar e o processamento é
+//   sinalizado no card (prop onPendingChange espelha o pending do save; em
+//   erro o painel reabre com o formulário intacto).
 // v1.11 (17/07/2026): painel (SheetContent) com bg-muted e linhas de filtro
 //   rápido com bg-card — cards brancos destacados sobre o fundo cinza.
 // v1.10 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
@@ -204,6 +207,7 @@ export function WidgetBuilder({
   onRequestPlacement,
   open: controlledOpen,
   onOpenChange,
+  onPendingChange,
 }: {
   dashboardId: string;
   available: AvailableField[];
@@ -234,6 +238,9 @@ export function WidgetBuilder({
   onRequestPlacement?: (input: WidgetInput) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  // Espelha o pending do save para quem monta o builder (o WidgetCard usa para
+  // exibir o overlay de processamento no card enquanto o painel está fechado).
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const router = useRouter();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -244,6 +251,10 @@ export function WidgetBuilder({
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onPendingChange?.(pending);
+  }, [pending, onPendingChange]);
 
   // Definição personalizada por trás de um `custom:<key>` (p/ o ⋮).
   const fieldDefOf = (fieldStr: string): FieldDefinition | undefined =>
@@ -1026,15 +1037,29 @@ export function WidgetBuilder({
       onRequestPlacement({ ...input, grid_position: newWidgetPosition(w, h) });
       return;
     }
+    // EDIÇÃO: fecha o painel imediatamente — o card mostra o overlay de
+    // processamento (via onPendingChange) até a revalidação entregar os dados
+    // novos. Em erro, reabre com o formulário intacto (o estado do builder
+    // sobrevive ao fechamento: só o SheetContent desmonta).
+    if (widget) setOpen(false);
     startTransition(async () => {
-      const res = widget
-        ? await updateWidget(widget.id, dashboardId, input)
-        : await createWidget(dashboardId, {
-            ...input,
-            grid_position: newWidgetPosition(w, h),
-          });
-      if (res.ok) setOpen(false);
-      else setError(res.message ?? "Falha ao salvar.");
+      try {
+        const res = widget
+          ? await updateWidget(widget.id, dashboardId, input)
+          : await createWidget(dashboardId, {
+              ...input,
+              grid_position: newWidgetPosition(w, h),
+            });
+        if (res.ok) {
+          if (!widget) setOpen(false);
+        } else {
+          setError(res.message ?? "Falha ao salvar.");
+          if (widget) setOpen(true);
+        }
+      } catch {
+        setError("Falha ao salvar.");
+        if (widget) setOpen(true);
+      }
     });
   }
 
