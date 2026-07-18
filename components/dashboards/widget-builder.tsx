@@ -1,4 +1,8 @@
-// Versão: 1.11 | Data: 17/07/2026
+// Versão: 1.12 | Data: 18/07/2026
+// v1.12 (18/07/2026): seletor "Fontes da métrica" (Metric.sources) por linha
+//   de métrica — opções do catálogo INTEIRO (ampliar é o ponto; diferente do
+//   seletor dos filtros, restrito às fontes do widget) e normalização no save
+//   (cleanMetricSources).
 // v1.11 (17/07/2026): painel (SheetContent) com bg-muted e linhas de filtro
 //   rápido com bg-card — cards brancos destacados sobre o fundo cinza.
 // v1.10 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
@@ -143,6 +147,10 @@ import {
 } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { filterTargetSources } from "@/lib/widgets/filter-sources";
+import {
+  cleanMetricSources,
+  metricTargetSources,
+} from "@/lib/widgets/metric-sources";
 import {
   aggOperandRefs,
   CALC_METRIC_FIELD,
@@ -735,6 +743,20 @@ export function WidgetBuilder({
       key: k,
       label: catalogLabel(k),
       stale: !coveredSources.includes(k),
+    }));
+  };
+  // Opções de fontes POR MÉTRICA (Metric.sources): o catálogo INTEIRO ∪ alvos
+  // já gravados — diferente do filtro (restrito às cobertas), pois aqui a
+  // métrica pode AMPLIAR o universo (ex.: linhas só de Deals + conversão
+  // contando Leads e Deals). Stale = fonte excluída do catálogo (visível e
+  // removível; alvo órfão é inofensivo em runtime — nenhum record_type casa).
+  const metricSourceOptions = (m: Metric) => {
+    const catalogKeys = catalog.map((s) => s.key);
+    const keys = new Set<SourceKey>([...catalogKeys, ...metricTargetSources(m)]);
+    return [...keys].map((k) => ({
+      key: k,
+      label: catalogLabel(k),
+      stale: !catalogKeys.includes(k),
     }));
   };
   const metricOptions: ComboboxOption[] = [
@@ -1537,7 +1559,7 @@ export function WidgetBuilder({
       sources,
       splitBySource,
       dimensions: dimensions.filter((d) => d.field),
-      metrics: metrics.filter((m) => m.field),
+      metrics: metrics.filter((m) => m.field).map(cleanMetricSources),
       filters: cleanFilters,
       settings: { ...settings, ...tabPatch },
     };
@@ -2694,6 +2716,7 @@ export function WidgetBuilder({
                       : `${AGG_LABELS[m.agg]} · ${fieldLabel(m.field, available)}`
                 }
                 fieldMenu={renderFieldMenu(m.field)}
+                sourceOptions={metricSourceOptions(m)}
                 onFieldChange={(field) => {
                   setMetrics((prev) => {
                     const next = [...prev];
@@ -2701,12 +2724,14 @@ export function WidgetBuilder({
                     if (isAggCalcField(field)) {
                       // Métrica calculada de agregados: a fórmula manda (agg
                       // persiste 'sum' por compat); fórmula/moeda ad-hoc só no
-                      // sentinela 'calc:formula'.
+                      // sentinela 'calc:formula'. `sources` sobrevive à troca
+                      // de campo (como o label — é config da LINHA da métrica).
                       next[i] = {
                         field,
                         agg: "sum",
                         calc: true,
                         label: cur.label,
+                        sources: cur.sources,
                         ...(field === CALC_METRIC_FIELD
                           ? {
                               formula: cur.formula,

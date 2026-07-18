@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 17/07/2026
+// Versão: 1.7 | Data: 18/07/2026
+// v1.7 (18/07/2026): MetricRow ganha o bloco recolhível "Fontes da métrica"
+//   (Metric.sources): a métrica é calculada sobre as fontes marcadas — pode
+//   AMPLIAR ou restringir em relação às fontes do widget (as linhas/registros
+//   continuam seguindo widgets.sources). Nenhuma marcada = fontes do widget.
 // v1.6 (17/07/2026): cards de dimensão/métrica/filtro com bg-card — o painel
 //   do editor ficou bg-muted e os cards se destacam em branco.
 // v1.5 (17/07/2026): título da BuilderSection vira faixa destacada (fundo
@@ -293,6 +297,7 @@ export function MetricRow({
   resultFormatOptions,
   defaultLabel,
   fieldMenu,
+  sourceOptions,
   onFieldChange,
   onChange,
   onRemove,
@@ -308,6 +313,11 @@ export function MetricRow({
   resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
+  // Fontes da MÉTRICA (Metric.sources): catálogo inteiro — diferente do
+  // filtro, que só oferece as fontes do widget, aqui AMPLIAR é o ponto (ex.:
+  // linhas só de Deals + conversão contando Leads e Deals). Ausente/1 fonte no
+  // catálogo = bloco oculto.
+  sourceOptions?: FilterSourceOption[];
   // Troca de campo tem regras próprias (limpeza/marcação de `calc`), decididas
   // pelo pai; os demais ajustes usam onChange(patch).
   onFieldChange: (field: string) => void;
@@ -330,6 +340,16 @@ export function MetricRow({
   const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
     formulaUsesFunctions(metric.formula) ? "text" : "builder"
   );
+  // Fontes da métrica: aberto por padrão só quando já há fontes marcadas
+  // (config existente nunca fica escondida; métrica nova nasce limpa).
+  const srcTargets = metric.sources ?? [];
+  const [sourcesOpen, setSourcesOpen] = useState<boolean>(srcTargets.length > 0);
+  const toggleMetricSource = (key: SourceKey, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...srcTargets, key])]
+      : srcTargets.filter((s) => s !== key);
+    onChange({ sources: next.length > 0 ? next : undefined });
+  };
   return (
     <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
@@ -534,6 +554,54 @@ export function MetricRow({
                   aria-label="Total geral"
                 />
               </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {metric.field && sourceOptions && sourceOptions.length > 1 ? (
+        <div className="flex flex-col gap-2 rounded-md border p-2">
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs font-medium"
+            onClick={() => setSourcesOpen((o) => !o)}
+            aria-expanded={sourcesOpen}
+          >
+            {sourcesOpen ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+            Fontes da métrica
+            {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
+          </button>
+          {sourcesOpen ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {sourceOptions.map((opt) => (
+                  <label
+                    key={opt.key}
+                    className={cn(
+                      "flex items-center gap-1.5 text-xs",
+                      opt.stale && "text-destructive"
+                    )}
+                  >
+                    <Checkbox
+                      checked={srcTargets.includes(opt.key)}
+                      onCheckedChange={(c) =>
+                        toggleMetricSource(opt.key, c === true)
+                      }
+                      aria-label={`Calcular a métrica sobre a fonte ${opt.label}`}
+                    />
+                    {opt.label}
+                    {opt.stale ? " (fora do catálogo)" : null}
+                  </label>
+                ))}
+              </div>
+              <span className="text-muted-foreground text-xs">
+                {srcTargets.length === 0
+                  ? "Nenhuma marcada = as fontes do widget."
+                  : "A métrica é calculada sobre as fontes marcadas; as linhas e os registros do widget continuam seguindo as fontes do widget."}
+              </span>
             </div>
           ) : null}
         </div>
