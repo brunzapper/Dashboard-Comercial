@@ -1,7 +1,16 @@
-// Versão: 1.2 | Data: 16/07/2026
+// Versão: 1.5 | Data: 18/07/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
+// v1.5 (18/07/2026): menos roundtrips por edição — leituras iniciais em
+//   Promise.all; applyCalcFields deriva defs de fórmula/datas/moedas das
+//   field_definitions JÁ lidas (builders *FromRows; só taxas de câmbio seguem
+//   como consulta, condicional); audit + enqueue write-back + webhook em
+//   paralelo após o UPDATE. Semântica de fórmulas/auditoria/fila inalterada.
+// v1.4 (18/07/2026): edição inline sem revalidatePath (no_revalidate=1 via
+//   updateRecordField) — a resposta da action volta sem re-render RSC da rota;
+//   reconcile no cliente (célula otimista + RealtimeRefresher + refresh
+//   debounced). Form lateral/createRecord seguem revalidando.
 // v1.1 (09/07/2026): Fase 7 — recomputa os campos calculados do registro após a
 //   edição manual (dependem de value/mrr/lead_time_days e de custom numéricos).
 // v1.2 (16/07/2026): createRecord — criação MANUAL de registros em fontes com
@@ -35,10 +44,12 @@ import {
   buildDateContext,
   buildRecordCurrencyContext,
   computeFormulaFields,
-  loadCurrencyMaterials,
-  loadCustomDateKeys,
-  loadFormulaDefs,
+  currencyFieldMapsFromRows,
+  customDateKeysFromRows,
+  formulaDefsFromRows,
+  type CalcFieldRow,
 } from "@/lib/records/formulas";
+import { loadCurrencyRates } from "@/lib/widgets/currency";
 import type { DataType } from "@/lib/records/types";
 import {
   EDITABLE_CORE_COLUMNS,
@@ -140,13 +151,17 @@ interface CalcCoreValues {
 // (in-place). Retorna true se algum valor mudou. Calc-fields monetários usam a
 // moeda/datas EFETIVAS (se a gravação troca a Moeda, o carimbo <key>__cur já
 // sai na moeda nova); operandos match:<fonte> ficam para o recalc (regra de
-// "pular" em computeFormulaFields).
+// "pular" em computeFormulaFields). Os insumos (defs de fórmula, chaves de
+// data, moedas por campo) são derivados de `defRows` — as field_definitions que
+// o chamador JÁ leu — em memória; a única consulta daqui é a de taxas de câmbio
+// (condicional a haver calc-field monetário).
 async function applyCalcFields(
   supabase: SupabaseClient,
   core: CalcCoreValues,
-  custom: Record<string, unknown>
+  custom: Record<string, unknown>,
+  defRows: CalcFieldRow[]
 ): Promise<boolean> {
-  const formulaDefs = await loadFormulaDefs(supabase);
+  const formulaDefs = formulaDefsFromRows(defRows);
   if (formulaDefs.length === 0) return false;
   const conv = anyMoneyDef(formulaDefs)
     ? buildRecordCurrencyContext(
@@ -156,7 +171,10 @@ async function applyCalcFields(
           opened_at: core.opened_at,
           source_created_at: core.source_created_at,
         },
-        await loadCurrencyMaterials(supabase)
+        {
+          rates: await loadCurrencyRates(supabase),
+          ...currencyFieldMapsFromRows(defRows),
+        }
       )
     : undefined;
   const dateCtx = buildDateContext(
@@ -166,7 +184,7 @@ async function applyCalcFields(
       source_created_at: core.source_created_at,
     },
     custom,
-    await loadCustomDateKeys(supabase)
+    customDateKeysFromRows(defRows)
   );
   const calc = computeFormulaFields(
     {
@@ -238,21 +256,25 @@ export async function updateRecord(
 
   const supabase = await createClient();
 
-  const { data: existingRow } = await supabase
-    .from("records")
-    .select(
-      "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days, title, stage, stage_semantic, currency, channel, sale_type, closed, opened_at, pipeline"
-    )
-    .eq("id", recordId)
-    .maybeSingle();
+  // Leituras independentes em paralelo. O select de defs inclui as colunas de
+  // calc-fields (formula/currency_*/allow_negative) p/ o recomputo derivar os
+  // insumos em memória (applyCalcFields) sem consultas extras nesta tabela.
+  const [{ data: existingRow }, { data: defs }] = await Promise.all([
+    supabase
+      .from("records")
+      .select(
+        "id, record_type, source_system, source_id, custom_fields, field_modified_at, responsible_id, operation_id, related_lead_id, source_created_at, closed_at, value, mrr, lead_time_days, title, stage, stage_semantic, currency, channel, sale_type, closed, opened_at, pipeline"
+      )
+      .eq("id", recordId)
+      .maybeSingle(),
+    supabase
+      .from("field_definitions")
+      .select(
+        "field_key, label, data_type, editable_by_roles, source_system, source_field_id, write_back, formula, currency_mode, currency_code, allow_negative"
+      ),
+  ]);
   const existing = existingRow as ExistingForEdit | null;
   if (!existing) return { ok: false, message: "Registro não encontrado." };
-
-  const { data: defs } = await supabase
-    .from("field_definitions")
-    .select(
-      "field_key, label, data_type, editable_by_roles, source_system, source_field_id, write_back"
-    );
 
   const now = new Date().toISOString();
   const updates: Record<string, unknown> = {};
@@ -372,7 +394,8 @@ export async function updateRecord(
         opened_at: (eff("opened_at") as string | null) ?? null,
         source_created_at: existing.source_created_at,
       },
-      custom
+      custom,
+      (defs ?? []) as CalcFieldRow[]
     );
     if (calcChanged) updates.custom_fields = custom;
   }
@@ -390,16 +413,25 @@ export async function updateRecord(
     .eq("id", recordId);
   if (error) return { ok: false, message: error.message };
 
+  // Efeitos pós-UPDATE em paralelo (não dependem um do outro; nenhum leitor da
+  // fila lê audit_log): audit + enfileirar write-back + emitir webhook. Todos
+  // rodam APÓS a edição local persistida — falha aqui nunca desfaz o UPDATE.
+  const effects: Promise<unknown>[] = [];
+
   if (audits.length > 0) {
-    await supabase.from("audit_log").insert(
-      audits.map((a) => ({
-        record_id: recordId,
-        user_id: session.user.id,
-        field: a.field,
-        old_value: a.old_value ?? null,
-        new_value: a.new_value ?? null,
-        origin: "app" as const,
-      }))
+    effects.push(
+      Promise.resolve(
+        supabase.from("audit_log").insert(
+          audits.map((a) => ({
+            record_id: recordId,
+            user_id: session.user.id,
+            field: a.field,
+            old_value: a.old_value ?? null,
+            new_value: a.new_value ?? null,
+            origin: "app" as const,
+          }))
+        )
+      )
     );
   }
 
@@ -415,91 +447,109 @@ export async function updateRecord(
           ? "lead"
           : null;
     if (entity) {
-      const defByKey = new Map(
-        (defs ?? []).map((d) => [d.field_key as string, d])
-      );
-      const changes: WriteBackChange[] = [];
-      for (const a of audits) {
-        const d = defByKey.get(a.field);
-        if (d) {
-          // Campo personalizado de Sync: grava se marcado (write_back), forçado
-          // pelos Registros (forceSync) ou pela coluna do dashboard (override).
-          const isBitrix =
-            d.source_system === "bitrix" && Boolean(d.source_field_id);
-          if (!isBitrix) continue;
-          if (!(d.write_back || forceSync || wbOverride(a.field))) continue;
-          changes.push({
-            fieldKey: a.field,
-            sourceFieldId: d.source_field_id as string,
-            label: (d.label as string) ?? null,
-            newValue: a.new_value ?? null,
-          });
-          continue;
-        }
-        // Coluna do núcleo (ou relação responsável) mapeada p/ o Bitrix: grava
-        // quando forçado (Registros) ou marcado na coluna do dashboard.
-        const sfid = coreWriteBackFieldId(a.field, entity);
-        if (sfid && (forceSync || wbOverride(a.field))) {
-          // Responsável (ASSIGNED_BY_ID): o valor gravado no record é o uuid local
-          // de `responsibles`. O Bitrix espera o id do usuário, então traduzimos
-          // via responsibles.bitrix_user_id. Sem esse vínculo (ou sem responsável),
-          // pulamos — a edição fica local. Demais colunas gravam o valor cru.
-          if (a.field === "responsible_id") {
-            const respUuid = a.new_value == null ? null : String(a.new_value);
-            if (!respUuid) continue;
-            const { data: resp } = await supabase
-              .from("responsibles")
-              .select("bitrix_user_id")
-              .eq("id", respUuid)
-              .maybeSingle();
-            const bitrixUserId = (resp?.bitrix_user_id as string | null) ?? null;
-            if (!bitrixUserId) continue;
-            changes.push({
-              fieldKey: a.field,
-              sourceFieldId: sfid,
-              label: a.field,
-              newValue: bitrixUserId,
-            });
-            continue;
+      const sourceId = existing.source_id;
+      effects.push(
+        (async () => {
+          const defByKey = new Map(
+            (defs ?? []).map((d) => [d.field_key as string, d])
+          );
+          const changes: WriteBackChange[] = [];
+          for (const a of audits) {
+            const d = defByKey.get(a.field);
+            if (d) {
+              // Campo personalizado de Sync: grava se marcado (write_back), forçado
+              // pelos Registros (forceSync) ou pela coluna do dashboard (override).
+              const isBitrix =
+                d.source_system === "bitrix" && Boolean(d.source_field_id);
+              if (!isBitrix) continue;
+              if (!(d.write_back || forceSync || wbOverride(a.field))) continue;
+              changes.push({
+                fieldKey: a.field,
+                sourceFieldId: d.source_field_id as string,
+                label: (d.label as string) ?? null,
+                newValue: a.new_value ?? null,
+              });
+              continue;
+            }
+            // Coluna do núcleo (ou relação responsável) mapeada p/ o Bitrix: grava
+            // quando forçado (Registros) ou marcado na coluna do dashboard.
+            const sfid = coreWriteBackFieldId(a.field, entity);
+            if (sfid && (forceSync || wbOverride(a.field))) {
+              // Responsável (ASSIGNED_BY_ID): o valor gravado no record é o uuid local
+              // de `responsibles`. O Bitrix espera o id do usuário, então traduzimos
+              // via responsibles.bitrix_user_id. Sem esse vínculo (ou sem responsável),
+              // pulamos — a edição fica local. Demais colunas gravam o valor cru.
+              if (a.field === "responsible_id") {
+                const respUuid = a.new_value == null ? null : String(a.new_value);
+                if (!respUuid) continue;
+                const { data: resp } = await supabase
+                  .from("responsibles")
+                  .select("bitrix_user_id")
+                  .eq("id", respUuid)
+                  .maybeSingle();
+                const bitrixUserId =
+                  (resp?.bitrix_user_id as string | null) ?? null;
+                if (!bitrixUserId) continue;
+                changes.push({
+                  fieldKey: a.field,
+                  sourceFieldId: sfid,
+                  label: a.field,
+                  newValue: bitrixUserId,
+                });
+                continue;
+              }
+              changes.push({
+                fieldKey: a.field,
+                sourceFieldId: sfid,
+                label: a.field,
+                newValue: a.new_value ?? null,
+              });
+            }
           }
-          changes.push({
-            fieldKey: a.field,
-            sourceFieldId: sfid,
-            label: a.field,
-            newValue: a.new_value ?? null,
-          });
-        }
-      }
-      if (changes.length > 0) {
-        try {
-          await enqueueWriteBacks(createServiceClient(), {
-            recordId,
-            entity,
-            sourceId: existing.source_id,
-            createdBy: session.user.id,
-            changes,
-          });
-        } catch {
-          // best-effort: nunca falha a edição local por causa da fila.
-        }
-      }
+          if (changes.length > 0) {
+            try {
+              await enqueueWriteBacks(createServiceClient(), {
+                recordId,
+                entity,
+                sourceId,
+                createdBy: session.user.id,
+                changes,
+              });
+            } catch {
+              // best-effort: nunca falha a edição local por causa da fila.
+            }
+          }
+        })()
+      );
     }
   }
 
   // Webhook de saída (0074): emitWebhookEvent nunca lança — falha na emissão
   // jamais derruba a edição já persistida.
   if (audits.length > 0) {
-    await emitWebhookEvent("record.updated", {
-      recordId,
-      changes: audits.map((a) => ({
-        field: a.field,
-        old_value: a.old_value ?? null,
-        new_value: a.new_value ?? null,
-      })),
-    });
+    effects.push(
+      emitWebhookEvent("record.updated", {
+        recordId,
+        changes: audits.map((a) => ({
+          field: a.field,
+          old_value: a.old_value ?? null,
+          new_value: a.new_value ?? null,
+        })),
+      })
+    );
   }
 
-  revalidatePath("/registros");
+  await Promise.all(effects);
+
+  // Edição inline (updateRecordField) manda no_revalidate=1: a célula já é
+  // otimista e a página reconcilia no cliente (RealtimeRefresher + refresh
+  // debounced do chamador). Sem o revalidate, a resposta da action volta sem o
+  // re-render RSC da rota inteira — é isso que deixa a edição leve e libera a
+  // navegação (actions serializam por cliente). O form lateral (RecordEditSheet)
+  // e demais chamadores seguem revalidando (save one-shot que fecha o painel).
+  if (String(formData.get("no_revalidate") ?? "") !== "1") {
+    revalidatePath("/registros");
+  }
   return { ok: true, message: "Registro atualizado." };
 }
 
@@ -519,9 +569,10 @@ export interface UpdateFieldOptions {
 /**
  * Grava um único campo de um registro (edição inline na tabela). Reaproveita
  * `updateRecord` construindo um FormData com só aquele campo — toda a lógica de
- * permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log,
- * write-back e revalidatePath vem de graça. `kind` escolhe custom vs coluna do
- * núcleo; as flags de write-back viram os campos que `updateRecord` já entende.
+ * permissão, coerção, field_modified_at, recomputo de fórmulas, audit_log e
+ * write-back vem de graça. `kind` escolhe custom vs coluna do núcleo; as flags
+ * de write-back viram os campos que `updateRecord` já entende. Diferença do
+ * form: manda no_revalidate=1 (a página reconcilia no cliente).
  */
 export async function updateRecordField(
   recordId: string,
@@ -545,6 +596,9 @@ export async function updateRecordField(
   if (opts.writeBack) fd.set(`write_back__${fieldKey}`, "1");
   if (opts.forceSyncWriteBack) fd.set("force_sync_write_back", "1");
   if (opts.allowEdit) fd.set("allow_edit", "1");
+  // Célula inline: sem revalidatePath — reconcile fica por conta do cliente
+  // (célula otimista + RealtimeRefresher + refresh debounced do chamador).
+  fd.set("no_revalidate", "1");
   return updateRecord({}, fd);
 }
 
@@ -673,10 +727,12 @@ export async function createRecord(
   }
 
   // Campos personalizados: só os da fonte (applies_to) editáveis pelo papel.
+  // Inclui as colunas de calc-fields p/ o recomputo derivar os insumos em
+  // memória (applyCalcFields), como em updateRecord.
   const { data: defs } = await supabase
     .from("field_definitions")
     .select(
-      "field_key, label, data_type, editable_by_roles, applies_to, source_system, source_field_id"
+      "field_key, label, data_type, editable_by_roles, applies_to, source_system, source_field_id, formula, currency_mode, currency_code, allow_negative"
     );
   // Campos de Sync (source_system='bitrix' + source_field_id) a enviar no
   // crm.*.add quando "Criar também no Bitrix" está marcado.
@@ -780,7 +836,8 @@ export async function createRecord(
       opened_at: (row.opened_at as string | null) ?? null,
       source_created_at: now,
     },
-    custom
+    custom,
+    (defs ?? []) as CalcFieldRow[]
   );
 
   row.custom_fields = custom;

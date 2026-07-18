@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 18/07/2026
+// v1.2 (18/07/2026): commit otimista extraído p/ useCellCommit (compartilhado
+//   com Core/RelationEditableCell); erro expõe a mensagem da action no title.
 // v1.1 (15/07/2026): leitura de campo percentual exibe ×100 + "%" (edição
 //   continua com o valor cru).
 // Célula editável inline na tabela de Registros: renderiza o controle certo por
@@ -7,7 +9,7 @@
 // updateRecordField. Campos calculados e sem permissão caem no texto somente-leitura.
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState } from "react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
@@ -25,6 +27,7 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateRecordField } from "@/lib/records/actions";
+import { useCellCommit } from "@/components/registros/use-cell-commit";
 import { formatMoney, resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
 
 function customValue(record: RecordRow, key: string): string {
@@ -51,8 +54,9 @@ export function EditableCell({
   // Formato de exibição das datas (só afeta a leitura; a edição usa o calendário
   // nativo em ISO). Default = dd/mm/aaaa.
   dateFormat?: DateFormat;
-  // Chamado após uma gravação bem-sucedida. Em Registros a própria action
-  // revalida a página; no dashboard o pai usa isto para router.refresh().
+  // Chamado após uma gravação bem-sucedida. A action inline NÃO revalida no
+  // servidor (no_revalidate): o pai passa aqui o refresh debounced que
+  // reconcilia a página (Registros e dashboards), junto com o realtime.
   onSaved?: () => void;
   // Dashboard: esta coluna grava de volta no Bitrix ao editar.
   writeBack?: boolean;
@@ -63,21 +67,22 @@ export function EditableCell({
   forceEditable?: boolean;
 }) {
   const serverValue = customValue(record, field.field_key);
-  const [value, setValue] = useState(serverValue);
-  const savedRef = useRef(serverValue);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState(false);
+  // Commit otimista + reconcile com o servidor (refresh debounced/realtime):
+  // ver use-cell-commit.ts.
+  const { value, setValue, commit, revert, pending, error, errorMessage } =
+    useCellCommit(
+      serverValue,
+      (raw) =>
+        updateRecordField(record.id, field.field_key, raw, {
+          kind: "custom",
+          writeBack,
+          forceSyncWriteBack,
+          allowEdit: forceEditable,
+        }),
+      onSaved
+    );
   // Data: por padrão mostra o texto formatado; duplo-clique abre o calendário.
   const [editingDate, setEditingDate] = useState(false);
-
-  // Reconcilia com o servidor quando novos dados chegam (após revalidatePath):
-  // adota o valor do servidor sem sobrescrever uma edição ainda em andamento
-  // (nesse caso serverValue continua igual ao das props antigas).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue(serverValue);
-    savedRef.current = serverValue;
-  }, [serverValue]);
 
   // Campos de Sync (Bitrix): nos Registros (forceSyncWriteBack) ficam sempre
   // editáveis para quem tem permissão, independentemente de editable_by_roles.
@@ -109,27 +114,6 @@ export function EditableCell({
         {display == null || display === "" ? "—" : display}
       </span>
     );
-  }
-
-  function commit(raw: string) {
-    if (raw === savedRef.current) return;
-    setValue(raw);
-    setError(false);
-    startTransition(async () => {
-      const res = await updateRecordField(record.id, field.field_key, raw, {
-        kind: "custom",
-        writeBack,
-        forceSyncWriteBack,
-        allowEdit: forceEditable,
-      });
-      if (res.ok) {
-        savedRef.current = raw;
-        onSaved?.();
-      } else {
-        setValue(savedRef.current);
-        setError(true);
-      }
-    });
   }
 
   if (field.data_type === "selecao") {
@@ -192,13 +176,14 @@ export function EditableCell({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
-            setValue(savedRef.current);
+            revert();
             setEditingDate(false);
           }
         }}
         disabled={pending}
         aria-label={field.label}
         aria-invalid={error}
+        title={error ? errorMessage ?? undefined : undefined}
         className={cn(error && "border-destructive")}
       />
     );
@@ -218,6 +203,7 @@ export function EditableCell({
         disabled={pending}
         aria-label={field.label}
         aria-invalid={error}
+        title={error ? errorMessage ?? undefined : undefined}
         className={cn("text-right", error && "border-destructive")}
       />
     );
@@ -235,6 +221,7 @@ export function EditableCell({
       disabled={pending}
       aria-label={field.label}
       aria-invalid={error}
+      title={error ? errorMessage ?? undefined : undefined}
       className={cn(error && "border-destructive")}
     />
   );

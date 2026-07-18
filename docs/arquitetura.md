@@ -1,4 +1,8 @@
-<!-- Versão: 1.0 | Data: 17/07/2026 -->
+<!-- Versão: 1.1 | Data: 18/07/2026 -->
+<!-- v1.1 (18/07/2026): edição inline reconcilia no cliente (célula otimista +
+     refresh debounced + realtime) em vez de revalidatePath por edição; badge
+     de write-backs pendentes em /registros. -->
+
 
 # Arquitetura do sistema
 
@@ -186,7 +190,9 @@ exceção: sempre recomputados).
 - **API/webhooks de entrada**: `/api/ingest/<fonte>` com chaves de API
   (`api_keys`, hash sha256) — ver `docs/webhooks.md`.
 - **Write-back**: campos com `field_definitions.write_back = true` editados no app
-  entram na fila e são gravados de volta no Bitrix pelo tick.
+  entram na fila e são gravados de volta no Bitrix pelo tick. A edição nunca
+  espera o Bitrix; /registros mostra um badge "N aguardando envio"
+  (`components/sync/writeback-pending-badge.tsx`) com link para o Log.
 
 ### 4.6 Papéis, permissões e RLS
 
@@ -227,6 +233,15 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
+- **Edição inline sem re-render global** (18/07/2026): a edição de célula
+  (`updateRecordField`) NÃO chama `revalidatePath` — a célula é otimista
+  (`components/registros/use-cell-commit.ts`) e a página reconcilia no cliente
+  via realtime + `router.refresh()` debounced FORA da transition da célula
+  (`lib/use-debounced-refresh.ts`). Só o form lateral (`RecordEditSheet`) e
+  `createRecord` revalidam no servidor. Não reintroduza `revalidatePath` (nem
+  `router.refresh()` síncrono no `onSaved`) no caminho de célula: Server Actions
+  serializam por cliente e o re-render RSC da rota inteira a cada blur é o que
+  travava a navegação.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

@@ -1,4 +1,8 @@
-// Versão: 2.2 | Data: 15/07/2026
+// Versão: 2.3 | Data: 18/07/2026
+// v2.3 (18/07/2026): builders PUROS *FromRows (CalcFieldRow) — quem já leu
+//   field_definitions inteira deriva defs de fórmula/chaves de data/moedas em
+//   memória em vez de 3 consultas extras (updateRecord/createRecord). Os
+//   loaders load* mantêm assinatura e delegam o mapeamento aos builders.
 // v2.2 (15/07/2026): funções PURAS estilo Google Sheets — SOMA, MÉDIA, MÍN,
 //   MÁX, CONT.NÚM, CONT.VALORES, ARRED, ABS, CONCATENAR. Variádicas sobre os
 //   argumentos (não tocam em basis/SQL — diferente de SOMASE etc.), null-safe:
@@ -980,6 +984,39 @@ export interface FormulaFieldDef {
   allow_negative?: boolean | null;
 }
 
+// Linha de `field_definitions` com as colunas necessárias para derivar EM
+// MEMÓRIA os insumos de calc-fields (defs de fórmula, chaves de data, moedas
+// por campo). Quem já leu a tabela inteira (updateRecord/createRecord leem
+// todas as defs de qualquer forma) passa as linhas aos builders *FromRows
+// abaixo e evita 3 consultas extras na mesma tabela por edição.
+export interface CalcFieldRow {
+  field_key: string;
+  data_type: string;
+  formula?: unknown;
+  currency_mode?: string | null;
+  currency_code?: string | null;
+  allow_negative?: boolean | null;
+}
+
+/** Deriva as chaves dos campos `data` de linhas já carregadas. */
+export function customDateKeysFromRows(rows: CalcFieldRow[]): string[] {
+  return rows.filter((r) => r.data_type === "data").map((r) => r.field_key);
+}
+
+/** Deriva as defs de campos calculados de linhas já carregadas. */
+export function formulaDefsFromRows(rows: CalcFieldRow[]): FormulaFieldDef[] {
+  return rows
+    .filter((r) => r.data_type === "calculado")
+    .map((r) => ({
+      field_key: r.field_key,
+      formula: (r.formula as Formula | null) ?? null,
+      currency_mode: r.currency_mode ?? null,
+      currency_code: r.currency_code ?? null,
+      allow_negative: r.allow_negative ?? true,
+    }))
+    .filter((d) => d.formula != null);
+}
+
 /** Chaves dos campos personalizados do tipo `data` (para o contexto de datas). */
 export async function loadCustomDateKeys(
   db: import("@supabase/supabase-js").SupabaseClient
@@ -988,7 +1025,12 @@ export async function loadCustomDateKeys(
     .from("field_definitions")
     .select("field_key")
     .eq("data_type", "data");
-  return (data ?? []).map((r) => r.field_key as string);
+  return customDateKeysFromRows(
+    (data ?? []).map((r) => ({
+      field_key: r.field_key as string,
+      data_type: "data",
+    }))
+  );
 }
 
 /** Carrega as definições de campos calculados (data_type='calculado'). */
@@ -999,15 +1041,16 @@ export async function loadFormulaDefs(
     .from("field_definitions")
     .select("field_key, formula, currency_mode, currency_code, allow_negative")
     .eq("data_type", "calculado");
-  return (data ?? [])
-    .map((r) => ({
+  return formulaDefsFromRows(
+    (data ?? []).map((r) => ({
       field_key: r.field_key as string,
-      formula: (r.formula as Formula | null) ?? null,
+      data_type: "calculado",
+      formula: r.formula,
       currency_mode: (r.currency_mode as string | null) ?? null,
       currency_code: (r.currency_code as string | null) ?? null,
-      allow_negative: (r.allow_negative as boolean | null) ?? true,
+      allow_negative: (r.allow_negative as boolean | null) ?? null,
     }))
-    .filter((d) => d.formula != null);
+  );
 }
 
 // Contexto de conversão de moeda de um registro (para materializar calc-fields).
@@ -1020,11 +1063,31 @@ export interface FormulaCurrencyContext {
   operandCurrency: Record<string, string>;
 }
 
-// Insumos de câmbio compartilhados: taxas + moeda de cada campo 'moeda'.
-export interface CurrencyMaterials {
-  rates: CurrencyRates;
+// Moeda de cada campo personalizado 'moeda' (derivável de linhas já lidas).
+export interface CurrencyFieldMaps {
   moedaCurrency: Record<string, string>; // fixos: 'custom:<key>' → ISO
   inheritMoedaRefs: string[]; // 'custom:<key>' que herdam a moeda do registro
+}
+
+// Insumos de câmbio compartilhados: taxas + moeda de cada campo 'moeda'.
+export interface CurrencyMaterials extends CurrencyFieldMaps {
+  rates: CurrencyRates;
+}
+
+/** Deriva os mapas de moeda dos campos 'moeda' de linhas já carregadas. */
+export function currencyFieldMapsFromRows(rows: CalcFieldRow[]): CurrencyFieldMaps {
+  const moedaCurrency: Record<string, string> = {};
+  const inheritMoedaRefs: string[] = [];
+  for (const f of rows) {
+    if (f.data_type !== "moeda") continue;
+    const ref = `custom:${f.field_key}`;
+    if ((f.currency_mode ?? null) === "inherit") {
+      inheritMoedaRefs.push(ref);
+    } else {
+      moedaCurrency[ref] = resolveCurrencyCode(f.currency_code ?? null);
+    }
+  }
+  return { moedaCurrency, inheritMoedaRefs };
 }
 
 /** True quando algum calc-field é monetário (precisa de conversão). */
@@ -1043,17 +1106,17 @@ export async function loadCurrencyMaterials(
     .from("field_definitions")
     .select("field_key, currency_code, currency_mode")
     .eq("data_type", "moeda");
-  const moedaCurrency: Record<string, string> = {};
-  const inheritMoedaRefs: string[] = [];
-  for (const f of data ?? []) {
-    const ref = `custom:${f.field_key as string}`;
-    if ((f.currency_mode as string | null) === "inherit") {
-      inheritMoedaRefs.push(ref);
-    } else {
-      moedaCurrency[ref] = resolveCurrencyCode(f.currency_code as string | null);
-    }
-  }
-  return { rates, moedaCurrency, inheritMoedaRefs };
+  return {
+    rates,
+    ...currencyFieldMapsFromRows(
+      (data ?? []).map((r) => ({
+        field_key: r.field_key as string,
+        data_type: "moeda",
+        currency_mode: (r.currency_mode as string | null) ?? null,
+        currency_code: (r.currency_code as string | null) ?? null,
+      }))
+    ),
+  };
 }
 
 /** Monta o contexto de conversão de um registro a partir dos insumos. */

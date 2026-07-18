@@ -1,4 +1,7 @@
-// Versão: 3.2 | Data: 17/07/2026
+// Versão: 3.3 | Data: 18/07/2026
+// v3.3 (18/07/2026): refresh pós-edição de célula debounced e fora da transition
+//   (useDebouncedRefresh) — edição inline não recomputa mais o dashboard inteiro
+//   a cada célula nem trava o input até o re-render.
 // v3.2 (17/07/2026): busca textual client-side — props searchQ/searchFields;
 //   filtra em memória (recordSearchMatcher) ANTES de sort/grupo/paginação,
 //   com reset p/ página 1 ao mudar o termo. Ausentes = comportamento antigo.
@@ -14,7 +17,6 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
 import {
@@ -26,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { Button } from "@/components/ui/button";
 import { EditableCell } from "@/components/registros/editable-cell";
 import { CoreEditableCell } from "@/components/registros/core-editable-cell";
@@ -248,8 +251,10 @@ export const RecordListTable = memo(function RecordListTable({
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
-  const router = useRouter();
-  const refresh = () => router.refresh();
+  // Reconcile pós-edição de célula: debounced e fora da transition da célula —
+  // o input libera quando a action retorna e uma rajada de edições recomputa o
+  // dashboard uma vez só (a action inline não revalida mais no servidor).
+  const refresh = useDebouncedRefresh();
   const ap = appearance ?? {};
   const t = ap.table ?? {};
   const editable = canEdit && Boolean(onAppearanceChange);

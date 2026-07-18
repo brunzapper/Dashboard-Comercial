@@ -1,8 +1,10 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 18/07/2026
 // Server Actions do Kanban. Mover card de REGISTRO reaproveita updateRecordField
 // (permissão edit_record_values, coerção, field_modified_at, recomputo de
-// fórmulas, audit_log e revalidate vêm de graça — mover card É uma edição de
-// campo). Write-back OPCIONAL por quadro (settings.kanban.writeBack): desligado
+// fórmulas, audit_log e write-back vêm de graça — mover card É uma edição de
+// campo; a action não revalida mais no servidor e o kanban-board já reconcilia
+// com o router.refresh() próprio). Write-back OPCIONAL por quadro
+// (settings.kanban.writeBack): desligado
 // (default) a edição fica LOCAL (bom p/ fases em campo local que nunca vem da
 // Sync); ligado, mover ENFILEIRA a mudança de volta ao Bitrix (só surte efeito
 // em registros de Sync e campos mapeados/marcados; fontes manuais são no-op).
