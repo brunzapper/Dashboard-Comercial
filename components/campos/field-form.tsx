@@ -1,4 +1,9 @@
-// Versão: 1.4 | Data: 15/07/2026
+// Versão: 1.5 | Data: 19/07/2026
+// v1.5 (19/07/2026): aninhamento de campos calculados — excludeKeys (o campo
+//   em edição + dependentes transitivos, calculado pelo FieldsManager) filtra
+//   dos catálogos os operandos que criariam ciclo; o construtor de botões do
+//   "Calculado (totais)" aceita também o grupo de agregados aninhados
+//   (AGG_NESTED_GROUP, ref plano custom:<key>).
 // v1.4 (15/07/2026): exibição percentual — checkbox no tipo 'numero' e opção
 //   "Percentual (%)" no Formato do resultado dos calculados.
 // Formulário de criação/edição de um campo personalizado (field_definition).
@@ -29,7 +34,9 @@ import {
   type FieldDefinition,
 } from "@/lib/records/types";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
+import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
 import { formulaUsesFunctions } from "@/lib/records/formulas";
+import { refCustomKey } from "@/lib/records/formula-deps";
 import { cn } from "@/lib/utils";
 import {
   createField,
@@ -79,6 +86,7 @@ export function FieldForm({
   numericRefs,
   allRefs,
   aggRefs,
+  excludeKeys,
   fieldChips,
   currencyOptions,
   onDone,
@@ -91,6 +99,10 @@ export function FieldForm({
   // Operandos de AGREGAÇÃO (agg:*) p/ o tipo "Calculado (totais)". Ausente →
   // o tipo ainda aparece, mas sem operandos (caller deve passar).
   aggRefs?: RefOption[];
+  // Chaves PROIBIDAS como operando da fórmula: o campo em edição + seus
+  // dependentes transitivos (referenciá-los criaria ciclo — aninhamento,
+  // 19/07/2026). Ausente → só o próprio campo fica de fora.
+  excludeKeys?: Set<string>;
   // Chips de fonte dos seletores de coluna das fórmulas (ver Combobox.chips).
   fieldChips?: ComboboxChip[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
@@ -156,21 +168,26 @@ export function FieldForm({
     })),
   ];
 
-  // Ao editar um campo calculado, ele não pode ser operando de si mesmo.
-  const operandRefs = numericRefs.filter(
-    (r) => r.ref !== `custom:${field?.field_key}`
+  // Ao editar um campo calculado, nem ele nem quem depende dele (transitivos)
+  // podem ser operandos — criariam ciclo. Mesmo conjunto do servidor
+  // (forbiddenOperandKeys em campos/actions.ts).
+  const forbidden = excludeKeys ?? new Set(field ? [field.field_key] : []);
+  const allowedRef = (ref: string) => {
+    const key = refCustomKey(ref);
+    return key == null || !forbidden.has(key);
+  };
+  const operandRefs = numericRefs.filter((r) => allowedRef(r.ref));
+  const textRefs = (allRefs ?? numericRefs).filter((r) => allowedRef(r.ref));
+  // Operandos de agregação (calculado_agg): Σ/Média/Contagem e ref plano
+  // aninhado do próprio campo (e dependentes) fora.
+  const aggOperands = (aggRefs ?? []).filter((r) => allowedRef(r.ref));
+  // O construtor de botões só expressa + − × ÷ — recebe os operandos agregados
+  // (agg:*) e os 'calculado_agg' aninhados (ref plano — token de campo normal).
+  // Os operandos de SOMASE/CONT.SE/MÉDIASE (campos crus e colunas de condição)
+  // ficam só no editor de texto, que sabe usá-los.
+  const aggBuilderOperands = aggOperands.filter(
+    (r) => r.ref.startsWith("agg:") || r.group === AGG_NESTED_GROUP
   );
-  const textRefs = (allRefs ?? numericRefs).filter(
-    (r) => r.ref !== `custom:${field?.field_key}`
-  );
-  // Operandos de agregação (calculado_agg): Σ/Média do próprio campo fora.
-  const aggOperands = (aggRefs ?? []).filter(
-    (r) => !r.ref.endsWith(`:custom:${field?.field_key}`)
-  );
-  // O construtor de botões só expressa + − × ÷ — recebe apenas os operandos
-  // agregados (agg:*). Os operandos de SOMASE/CONT.SE/MÉDIASE (campos crus e
-  // colunas de condição) ficam só no editor de texto, que sabe usá-los.
-  const aggBuilderOperands = aggOperands.filter((r) => r.ref.startsWith("agg:"));
   // Formato do resultado do calculado_agg: número, moeda automática (preserva a
   // dos operandos; misturou → Real) ou moeda fixa (converte).
   const aggResultOptions: ComboboxOption[] = [

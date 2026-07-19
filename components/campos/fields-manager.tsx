@@ -1,6 +1,11 @@
-// Versão: 2.1 | Data: 16/07/2026
+// Versão: 2.2 | Data: 19/07/2026
 // Gerenciador de campos personalizados: busca + ABAS por fonte (Leads/Deals/
 // Estudo de Fechamentos/Gerais) + tabela com toggle do olho (show_in_builder).
+// v2.2 (19/07/2026): aninhamento de campos calculados — numericRefs inclui os
+//   'calculado' e aggRefs inclui os 'calculado_agg' (aggNestedOperandRefs);
+//   excludeKeys (o campo em edição + dependentes transitivos) sai daqui para o
+//   FieldForm filtrar os operandos que criariam ciclo. Excluir campo passa a
+//   exibir a mensagem da guarda de referência (useActionState).
 // v2.1 (16/07/2026): seções empilhadas viraram abas (mesma receita visual das
 //   abas de Registros, estado client — os dados já estão todos aqui). Cada aba
 //   mostra o contador da fonte, que reage à busca; aba vazia ganha mensagem
@@ -9,7 +14,7 @@
 //   toggle de exibir/ocultar (ícone do olho) já era inline e foi preservado.
 "use client";
 
-import { useMemo, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { Eye, EyeOff, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,7 +49,12 @@ import { useSourceLabels } from "@/components/source-labels-context";
 import { useSources } from "@/components/sources-context";
 import { allDateOperands } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
-import { aggOperandRefs, condAggOperandRefs } from "@/lib/widgets/calc-metrics";
+import { transitiveFormulaDependents } from "@/lib/records/formula-deps";
+import {
+  aggNestedOperandRefs,
+  aggOperandRefs,
+  condAggOperandRefs,
+} from "@/lib/widgets/calc-metrics";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
 import type { RefOption } from "./formula-builder";
@@ -73,6 +83,7 @@ function FieldRow({
   field: FieldDefinition;
   onEdit: (f: FieldDefinition) => void;
 }) {
+  const [delState, deleteAction] = useActionState(deleteField, {});
   const shown = field.show_in_builder ?? true;
   return (
     <TableRow>
@@ -116,7 +127,7 @@ function FieldRow({
           >
             <Pencil className="size-4" />
           </Button>
-          <form action={deleteField}>
+          <form action={deleteAction}>
             <input type="hidden" name="id" value={field.id} />
             <Button
               type="submit"
@@ -128,6 +139,13 @@ function FieldRow({
             </Button>
           </form>
         </div>
+        {/* Guarda de referência: campo usado em fórmula não pode ser excluído —
+            a mensagem do servidor aparece aqui, na própria linha. */}
+        {delState.message && !delState.ok && (
+          <p className="text-destructive mt-1 text-right text-xs">
+            {delState.message}
+          </p>
+        )}
       </TableCell>
     </TableRow>
   );
@@ -203,9 +221,11 @@ export function FieldsManager({
   const decorate = (refs: RefOption[]): RefOption[] =>
     decorateRefOptions(refs, availableForHints, sourceLabels);
 
-  // Operandos do construtor de fórmula: colunas numéricas (núcleo + custom não
-  // calculado) e operandos de DATA (datas do próprio registro, custom `data` e
-  // datas do registro casado, match:<fonte>:<data>). Agrupados para o seletor.
+  // Operandos do construtor de fórmula: colunas numéricas (núcleo + custom,
+  // inclusive 'calculado' — aninhamento, 19/07/2026; o FieldForm filtra o
+  // campo em edição + dependentes transitivos via excludeKeys) e operandos de
+  // DATA (datas do próprio registro, custom `data` e datas do registro casado,
+  // match:<fonte>:<data>). Agrupados para o seletor.
   const customDateFields = fields
     .filter((f) => f.data_type === "data")
     .map((f) => ({ field_key: f.field_key, label: f.label }));
@@ -216,9 +236,7 @@ export function FieldsManager({
       group: "Números",
     })),
     ...fields
-      .filter(
-        (f) => NUMERIC_DATA_TYPES.includes(f.data_type) && f.data_type !== "calculado"
-      )
+      .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
     ...allDateOperands(customDateFields, catalog),
   ]);
@@ -233,7 +251,8 @@ export function FieldsManager({
   ];
   // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
-  // é materializado; excluindo 'calculado_agg' — sem aninhamento) + operandos de
+  // é materializado) + outros 'calculado_agg' como ref plano (aninhamento,
+  // 19/07/2026 — expandido em runtime pelo engine) + operandos de
   // SOMASE/CONT.SE/MÉDIASE (campos crus alvo + colunas de condição). Mesmos
   // critérios do servidor (aggOperandCatalog em campos/actions.ts).
   const aggNumericFields = [
@@ -250,7 +269,8 @@ export function FieldsManager({
       aggNumericFields,
       // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
       // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
-      // + qualquer campo custom, exceto 'calculado_agg' (sem aninhar agregado).
+      // + qualquer campo custom, exceto 'calculado_agg' (contagem de agregado
+      // não existe — o aninhamento entra como ref plano abaixo).
       [
         ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
           field: f.field,
@@ -261,8 +281,21 @@ export function FieldsManager({
           .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
       ]
     ),
+    ...aggNestedOperandRefs(
+      fields
+        .filter((f) => f.data_type === "calculado_agg")
+        .map((f) => ({ field_key: f.field_key, label: f.label }))
+    ),
     ...condAggOperandRefs(aggNumericFields, customCondFields, customDateFields),
   ]);
+  // Operandos PROIBIDOS na fórmula do campo em edição: ele próprio + quem já
+  // depende dele (referenciar criaria ciclo — mesma regra do servidor).
+  const excludeKeys = useMemo(() => {
+    if (!editing) return new Set<string>();
+    const keys = transitiveFormulaDependents(editing.field_key, fields);
+    keys.add(editing.field_key);
+    return keys;
+  }, [editing, fields]);
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
@@ -396,6 +429,7 @@ export function FieldsManager({
               numericRefs={numericRefs}
               allRefs={allRefs}
               aggRefs={aggRefs}
+              excludeKeys={excludeKeys}
               fieldChips={fieldSourceChips}
               currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}

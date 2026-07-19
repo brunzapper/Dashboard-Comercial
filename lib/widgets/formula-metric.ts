@@ -1,4 +1,9 @@
-// Versão: 3.2 | Data: 15/07/2026
+// Versão: 3.3 | Data: 19/07/2026
+// v3.3 (19/07/2026): aninhamento de agregados — a fórmula de entrada é
+//   expandida (expandAggFormula: ref custom:<calculado_agg> → fórmula do campo
+//   entre parênteses) antes de qualquer resolução. Cobre widget calculado
+//   apontando p/ campo salvo, calculadora, nota, células da tabela rápida,
+//   cards e o viewer público de snapshot — todos passam por aqui.
 // v3.2 (15/07/2026): resultado TEXTUAL opcional — quando a fórmula usa funções
 //   (SE etc.) e o valor numérico sai null, reavalia sobre a basis numérica
 //   crua (rawBasis, sem MoneyBreakdown) e devolve string em `text` (booleano →
@@ -29,6 +34,7 @@ import {
   type ComparisonFuncBase,
   type Formula,
 } from "@/lib/records/formulas";
+import { expandAggFormula } from "@/lib/records/formula-deps";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
 import {
@@ -83,14 +89,18 @@ export async function runCalculatedWidget(
   supabase: SupabaseClient,
   input: CalcInput
 ): Promise<{ value: number | null; currency: string | null; text?: string }> {
-  const { formula } = input;
-  if (!formula || formula.tokens.length === 0)
+  if (!input.formula || input.formula.tokens.length === 0)
     return { value: null, currency: null };
 
   const mode = input.currencyMode ?? "none";
   const fieldByKey = new Map(
     (input.fields ?? []).map((f) => [f.field_key, f])
   );
+  // Aninhamento de agregados (19/07/2026): expande refs custom:<calculado_agg>
+  // para a fórmula do campo entre parênteses ANTES de resolver bases de
+  // comparação e basis — daqui para baixo tudo opera na fórmula expandida
+  // (fast path sem aninhamento devolve o mesmo objeto).
+  const formula = expandAggFormula(input.formula, (k) => fieldByKey.get(k));
   const rates = input.rates ?? {};
   const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
 
