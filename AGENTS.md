@@ -45,3 +45,25 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`widgetQuerySources` na page, no viewer de snapshot e no widget-scope) — sem
   isso as pernas perdem registros em silêncio. Ver `docs/arquitetura.md` §4.1
   e invariante 9.
+- **Sub-fontes (0077) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
+  (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
+  `filter` (WidgetFilter[]), com campo de data próprio. Compartilha o
+  `record_type` da pai — por isso NÃO é linha de `data_sources` (quebraria o
+  `record_type unique`/FK). `toRecordType`/`toSourceKey` por identidade NÃO
+  servem para subs; use os resolvers cientes do catálogo em `lib/sources.ts`
+  (`recordTypeOf`, `sourcePredicate`, `planSourceLegs`). Toda a resolução é no
+  engine (`lib/widgets/engine.ts` + `record-list.ts`): a consulta PRINCIPAL
+  resolve UMA fonte efetiva por `record_type` (subs absorvidas somem — a pai
+  cobre, SEM duplicar; sub avulsa recorta as linhas da pai), então
+  `@period.byType`, o `coalesce` dos unificados e o `record_type in (...)`
+  seguem chaveados por `record_type` — o par `run_widget_query`/`_snapshot`
+  fica INTOCADO (não recria; não aciona a invariante 1). O predicado da sub
+  entra scoped via `_widget_wrap_record_types` (o mesmo wrapper de 0054). O
+  membro de campo unificado passa a ser identificado pela SOURCE-KEY
+  (`field_correspondence_members.source_key`) — `correspondenceMapForSources`
+  monta um ref por perna (não misture o membro da pai e o da sub no mesmo
+  coalesce: uma linha com as duas colunas preenchidas pegaria a 1ª). Só quando
+  o toggle `settings.coexistSubSources` marca uma sub como "conviver" (ou há 2+
+  subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
+  caminho agregado); nesse caso o usuário garante que os conjuntos são
+  disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.

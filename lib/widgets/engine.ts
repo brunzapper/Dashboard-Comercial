@@ -106,6 +106,7 @@ import {
   recordTypeOf,
   rootSources,
   SOURCE_LABELS,
+  sourceLabel,
   sourcePredicate,
   toRecordType,
   toSourceKey,
@@ -1361,6 +1362,64 @@ export async function runWidget(
       rates,
       conversionPeriod
     );
+  }
+
+  // SUB-FONTES conviver (0077): pernas EXTRAS (sub convivendo com a pai, ou 2+
+  // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
+  // uma série própria (perna independente: filtro + data + membro próprios),
+  // com a fonte como dimensão LÍDER. Evita a ambiguidade de agregar linhas de
+  // datas/filtros diferentes no mesmo grupo (cada linha pertence a uma perna).
+  // KPI/card/"Agrupar período" já retornaram acima (ficam no absorver).
+  if (involvesSub && mainPlan.extraLegs.length > 0) {
+    const rowSourceKeys = [...mainPlan.mainSources, ...mainPlan.extraLegs];
+    const legData = await Promise.all(
+      rowSourceKeys.map((key) =>
+        runWidget(
+          supabase,
+          {
+            ...config,
+            sources: [key],
+            splitBySource: false,
+            settings: { ...config.settings, coexistSubSources: [] },
+          },
+          available,
+          period,
+          correspondencesMapIn,
+          fields,
+          rates,
+          conversionPeriod,
+          catalog,
+          correspondences
+        ).catch(
+          () => ({ rows: [], dimensions: [], metrics: [] }) as WidgetData
+        )
+      )
+    );
+    const nDims = config.dimensions.length;
+    const seriesRows: WidgetRow[] = [];
+    rowSourceKeys.forEach((key, li) => {
+      const label = sourceLabel(key, catalog);
+      for (const r of legData[li].rows) {
+        const nr: WidgetRow = { ...r };
+        // Desloca dim_n → dim_{n+1} (do maior p/ o menor) e injeta a Fonte.
+        for (let d = nDims; d >= 1; d--) nr[`dim_${d + 1}`] = r[`dim_${d}`];
+        nr.dim_1 = label;
+        seriesRows.push(nr);
+      }
+    });
+    const base = legData.find((d) => d.metrics.length > 0) ?? legData[0];
+    return {
+      rows: seriesRows,
+      dimensions: [
+        { key: "dim_1", label: "Fonte" },
+        ...(base?.dimensions ?? []).map((d, i) => ({
+          key: `dim_${i + 2}`,
+          label: d.label,
+        })),
+      ],
+      metrics: base?.metrics ?? [],
+      comparison: base?.comparison,
+    };
   }
 
   // "Quebrar por fonte": record_type entra como dimensão líder (série por fonte).

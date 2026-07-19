@@ -17,7 +17,9 @@ import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types
 import {
   fieldAppliesToSource,
   isKnownSource,
-  toRecordType,
+  isSubSource,
+  recordTypeOf,
+  sourcePredicate,
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
@@ -74,8 +76,13 @@ export default async function RegistrosPage({
   const fonte: SourceKey = isKnownSource(fonteRaw, sources)
     ? fonteRaw
     : (sources[0]?.key ?? "leads");
-  const recordType = toRecordType(fonte);
+  // SUB-FONTES (0077): sub → record_type da PAI (recordTypeOf); a aba mostra as
+  // linhas da pai recortadas pelo filtro da sub (aplicado abaixo).
+  const recordType = recordTypeOf(fonte, sources);
   const fonteDef = sources.find((s) => s.key === fonte);
+  const subFilter = isSubSource(fonte, sources)
+    ? sourcePredicate(fonte, sources)
+    : [];
 
   // Filtros + paginação (RLS decide o que o usuário vê).
   const from = (page - 1) * PAGE_SIZE;
@@ -94,6 +101,24 @@ export default async function RegistrosPage({
   if (de) query = query.gte("source_created_at", de);
   if (ate) query = query.lte("source_created_at", `${ate}T23:59:59`);
   if (busca) query = query.ilike("title", `%${busca}%`);
+  // Predicado da sub-fonte (todas as condições em E).
+  for (const f of subFilter) {
+    const col = f.field.startsWith("custom:")
+      ? `custom_fields->>${f.field.slice(7)}`
+      : f.field;
+    const v = f.value as string;
+    if (f.op === "eq") query = query.eq(col, v);
+    else if (f.op === "neq") query = query.neq(col, v);
+    else if (f.op === "gt") query = query.gt(col, v);
+    else if (f.op === "gte") query = query.gte(col, v);
+    else if (f.op === "lt") query = query.lt(col, v);
+    else if (f.op === "lte") query = query.lte(col, v);
+    else if (f.op === "ilike") query = query.ilike(col, `%${String(v ?? "")}%`);
+    else if (f.op === "in")
+      query = query.in(col, (Array.isArray(f.value) ? f.value : [f.value]) as string[]);
+    else if (f.op === "is_null") query = query.is(col, null);
+    else if (f.op === "not_null") query = query.not(col, "is", null);
+  }
 
   const { data: recordsData, count } = await query;
   const records = (recordsData ?? []) as unknown as RecordRow[];
@@ -133,7 +158,7 @@ export default async function RegistrosPage({
       // 'calculado_agg' não tem valor por registro (é métrica de dashboard) —
       // nunca vira coluna de Registros.
       f.data_type !== "calculado_agg" &&
-      fieldAppliesToSource(f.applies_to, fonte) &&
+      fieldAppliesToSource(f.applies_to, fonte, sources) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
