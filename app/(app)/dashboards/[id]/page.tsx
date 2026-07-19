@@ -891,7 +891,10 @@ export default async function DashboardPage({
             allFields,
             currencyRates,
             conversionPeriodById[w.id],
-            correspondencesMap
+            correspondencesMap,
+            {},
+            sources,
+            correspondences
           );
         } catch (e) {
           fail(e);
@@ -924,7 +927,8 @@ export default async function DashboardPage({
               config,
               periodByWidget[w.id],
               available,
-              { pageIndex: 0, pageSize: RECORD_LIST_PAGE_SIZE }
+              { pageIndex: 0, pageSize: RECORD_LIST_PAGE_SIZE },
+              sources
             );
             recordListById[w.id] = rows;
             recordListTotalById[w.id] = total;
@@ -933,7 +937,8 @@ export default async function DashboardPage({
               supabase,
               config,
               periodByWidget[w.id],
-              available
+              available,
+              sources
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;
@@ -953,7 +958,9 @@ export default async function DashboardPage({
           correspondencesMap,
           (fieldsData ?? []) as FieldDefinition[],
           currencyRates,
-          conversionPeriodById[w.id]
+          conversionPeriodById[w.id],
+          sources,
+          correspondences
         );
       } catch (e) {
         fail(e);

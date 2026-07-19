@@ -1,8 +1,12 @@
-<!-- Versão: 1.1 | Data: 19/07/2026 -->
+<!-- Versão: 1.2 | Data: 19/07/2026 -->
+<!-- v1.2 (19/07/2026): sub-fontes (0077) — tabela `sub_sources` (fonte derivada
+     de uma pai, filtrada) e `field_correspondence_members.source_key` (membro de
+     campo unificado passa a ser identificado pela source-key, não pelo
+     record_type). -->
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0076), para que um
+Referência do estado **atual** do banco (após a migração 0077), para que um
 mantenedor não precise ler as 77 migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -96,6 +100,16 @@ colunas de data do núcleo), `builtin`, `manual_entry` (0061 — aceita criaçã
 builtins nascem desligados). Seed dos 3 builtins: `leads/lead`, `deals/negocio`
 (período `closed_at`), `estudo/venda_site`.
 
+**`sub_sources`** (0077) — catálogo de **sub-fontes**: uma fonte derivada de uma
+pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
+`data_sources`), `parent_key` FK → `data_sources.key` (on delete cascade), `label`,
+`short_label`, `default_period_field` (CHECK entre as colunas de data do núcleo),
+`filter` jsonb (`WidgetFilter[]` — o recorte). A sub COMPARTILHA o `record_type` da
+pai (por isso mora em tabela separada, para não quebrar `data_sources.record_type
+unique`/FK de `records`). Resolvida no ENGINE (perna por source-key); NÃO toca nas
+RPCs de widget. O loader (`lib/config/sources.ts`) une `data_sources` + `sub_sources`
+num único `SourceDef[]`.
+
 **`field_definitions`** (0005) — metadados das colunas dinâmicas.
 `field_key` unique, `label`, `data_type` (`texto|numero|data|selecao|moeda` +
 `calculado`/`calculado_agg` via 0017/0045), `options`, `visible_to_roles`,
@@ -107,8 +121,12 @@ Leitura liberada a autenticados desde 0043 (só metadados de schema).
 
 **`field_correspondences`** + **`field_correspondence_members`** (0019) — campos
 unificados globais: uma correspondência (`key` unique, `label`, `data_type`) liga no
-máximo um `field_ref` por `record_type` (coluna do núcleo ou `custom:<key>`). O RPC
-consome como `unified:<key>` (coalesce).
+máximo um `field_ref` por **source-key** (coluna do núcleo ou `custom:<key>`). O RPC
+consome como `unified:<key>` (coalesce). `record_type` (FK → `data_sources`, 0060) +
+`source_key` (0077 — pai OU sub); unicidade em `(correspondence_id, source_key)`, o
+que permite N membros por `record_type` (um por source-key — ex.: `leads` e
+`leads_clientes_lite` mapeando datas diferentes). Membros antigos: `source_key`
+retro-preenchido com a fonte cujo `record_type` casa (a própria pai).
 
 **`entity_custom_values`** (0033) — valores de campos dinâmicos anexados a
 responsável/operação (não a um registro): `(entity_type, entity_id, field_key)` unique.
@@ -374,3 +392,4 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0074 | webhooks | api_keys, endpoints, outbox, log de entrada; `audit_log.origin='api'` |
 | 0075 | fonte_implementacao_bitrix | `fonte` (SOURCE_ID) curada + `implementacao` vira campo Bitrix (UF_CRM_1778094396888) |
 | 0076 | moved_time_visivel | Reconcilia `bitrix_moved_time` (MOVED_TIME) em field_definitions: chave canônica + visível (par do bitrix-field-map v1.4) |
+| 0077 | sub_sources | Sub-fontes (`sub_sources`: fonte derivada de uma pai, filtrada) + `field_correspondence_members.source_key` (membro por source-key). Não recria as RPCs de widget |

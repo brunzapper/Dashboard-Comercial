@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 16/07/2026
+// Versão: 2.2 | Data: 19/07/2026
+// v2.2 (19/07/2026): SUB-FONTES (0077) — CRUD de `sub_sources` (fonte derivada
+//   de uma pai, recortada por um filtro). createSubSource/updateSubSource/
+//   deleteSubSource; o predicado chega como JSON (WidgetFilter[]) e é saneado.
 // v2.1 (16/07/2026): manual_entry (0061) — flag "Permite criação manual" por
 //   fonte (criar/editar).
 // Server Actions da tela Configurações → Fontes.
@@ -17,6 +20,45 @@ import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/records/slug";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
+import type { WidgetFilter } from "@/lib/widgets/types";
+
+// Operadores aceitos no predicado de uma sub-fonte (subconjunto de FilterOp com
+// tradução no RPC e no modo lista).
+const SUB_FILTER_OPS = new Set([
+  "eq",
+  "neq",
+  "in",
+  "ilike",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "is_null",
+  "not_null",
+]);
+
+// Saneia o predicado (JSON do form) para WidgetFilter[]: mantém só condições com
+// field não-vazio e op reconhecido. Ops sem valor (is_null/not_null) não exigem
+// value. Nunca aceita `sources`/`record_types` (o scope é aplicado no engine).
+function parseSubFilter(raw: FormDataEntryValue | null): WidgetFilter[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw ?? "[]"));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: WidgetFilter[] = [];
+  for (const c of parsed) {
+    if (!c || typeof c !== "object") continue;
+    const field = String((c as { field?: unknown }).field ?? "").trim();
+    const op = String((c as { op?: unknown }).op ?? "").trim();
+    if (!field || !SUB_FILTER_OPS.has(op)) continue;
+    const value = (c as { value?: unknown }).value;
+    out.push({ field, op: op as WidgetFilter["op"], value });
+  }
+  return out;
+}
 
 export interface SourceLabelsActionState {
   ok?: boolean;
@@ -226,4 +268,130 @@ export async function saveSourceLabels(
   // Os rótulos entram via provider do layout raiz → revalida o app inteiro.
   revalidatePath("/", "layout");
   return { ok: true, message: "Rótulo salvo." };
+}
+
+// ============ SUB-FONTES (0077) ============
+
+function readSubSourceForm(formData: FormData): {
+  label: string;
+  shortLabel: string;
+  periodField: string;
+  parentKey: string;
+  filter: WidgetFilter[];
+  error?: string;
+} {
+  const label = cleanText(formData.get("label"), 60);
+  const shortLabel = cleanText(formData.get("short_label"), 40);
+  const periodField = cleanText(formData.get("default_period_field"), 40);
+  const parentKey = cleanText(formData.get("parent_key"), 40);
+  const filter = parseSubFilter(formData.get("filter"));
+  if (label.length < 2) {
+    return { label, shortLabel, periodField, parentKey, filter, error: "Informe o nome da sub-fonte." };
+  }
+  if (!parentKey) {
+    return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a fonte pai." };
+  }
+  if (!PERIOD_FIELDS.has(periodField)) {
+    return { label, shortLabel, periodField, parentKey, filter, error: "Campo de período inválido." };
+  }
+  if (filter.length === 0) {
+    return { label, shortLabel, periodField, parentKey, filter, error: "Defina ao menos uma condição de filtro." };
+  }
+  return { label, shortLabel, periodField, parentKey, filter };
+}
+
+export async function createSubSource(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireRole("admin");
+  const { label, shortLabel, periodField, parentKey, filter, error } =
+    readSubSourceForm(formData);
+  if (error) return { ok: false, message: error };
+
+  const key = slugify(label).slice(0, 40);
+  if (!KEY_RE.test(key) || RESERVED_KEYS.has(key)) {
+    return {
+      ok: false,
+      message:
+        "Nome inválido para gerar a chave: comece com uma letra e use ao menos 2 caracteres.",
+    };
+  }
+
+  const supabase = await createClient();
+  // A pai precisa existir como fonte RAIZ (data_sources).
+  const { data: parent } = await supabase
+    .from("data_sources")
+    .select("key")
+    .eq("key", parentKey)
+    .maybeSingle();
+  if (!parent) return { ok: false, message: "Fonte pai não encontrada." };
+
+  // Colisão de key com fonte raiz OU outra sub-fonte.
+  const [{ data: rootHit }, { data: subHit }] = await Promise.all([
+    supabase
+      .from("data_sources")
+      .select("key")
+      .or(`key.eq.${key},record_type.eq.${key}`)
+      .limit(1),
+    supabase.from("sub_sources").select("key").eq("key", key).limit(1),
+  ]);
+  if ((rootHit && rootHit.length > 0) || (subHit && subHit.length > 0)) {
+    return { ok: false, message: `Já existe uma fonte com a chave "${key}".` };
+  }
+
+  const { error: insertError } = await supabase.from("sub_sources").insert({
+    key,
+    parent_key: parentKey,
+    label,
+    short_label: shortLabel || label,
+    default_period_field: periodField,
+    filter,
+  });
+  if (insertError) {
+    return { ok: false, message: `Falha ao criar: ${insertError.message}` };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Sub-fonte "${label}" criada (chave: ${key}).`, key };
+}
+
+export async function updateSubSource(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireRole("admin");
+  const key = cleanText(formData.get("key"), 40);
+  const { label, shortLabel, periodField, filter, error } =
+    readSubSourceForm(formData);
+  if (error) return { ok: false, message: error };
+
+  const supabase = await createClient();
+  // parent_key é imutável na edição (troca de pai = record_type diferente).
+  const { error: updateError } = await supabase
+    .from("sub_sources")
+    .update({
+      label,
+      short_label: shortLabel || label,
+      default_period_field: periodField,
+      filter,
+    })
+    .eq("key", key);
+  if (updateError) {
+    return { ok: false, message: `Falha ao salvar: ${updateError.message}` };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Sub-fonte atualizada." };
+}
+
+export async function deleteSubSource(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireRole("admin");
+  const key = cleanText(formData.get("key"), 40);
+  const supabase = await createClient();
+  const { error } = await supabase.from("sub_sources").delete().eq("key", key);
+  if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Sub-fonte excluída." };
 }

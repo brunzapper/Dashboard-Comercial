@@ -832,6 +832,11 @@ export type WidgetSettings = KpiSettings &
     // Id da aba (DashboardSettings.tabs) a que este widget pertence. Ausente = aba
     // padrão (a primeira). Ver components/dashboards/dashboard-client.tsx.
     tab?: string;
+    // SUB-FONTES (0077): sub-fontes (keys) a tratar como perna INDEPENDENTE
+    // ("conviver") em vez de absorvidas pela pai. Ausente/vazio = absorver todas
+    // (padrão, sem duplicação). Ver planSourceLegs (lib/sources.ts) e
+    // lib/widgets/engine.ts. O usuário assume conjuntos disjuntos ao marcar.
+    coexistSubSources?: SourceKey[];
     // Dimensões dinâmicas: o widget cresce p/ caber o conteúdo, sem encolher
     // abaixo do tamanho configurado (mínimo). Independente por eixo. Ausente =
     // desligado. O tamanho inflado é só de renderização, nunca é persistido

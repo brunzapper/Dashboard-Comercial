@@ -93,12 +93,23 @@ import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
-import { unifiedMemberRef } from "@/lib/correspondences";
+import {
+  correspondenceMapForSources,
+  unifiedMemberRef,
+  type Correspondence,
+} from "@/lib/correspondences";
 import { resolveGoal } from "@/lib/metas/resolve";
 import {
+  BUILTIN_SOURCES,
+  isSubSource,
+  planSourceLegs,
+  recordTypeOf,
+  rootSources,
   SOURCE_LABELS,
+  sourcePredicate,
   toRecordType,
   toSourceKey,
+  type SourceDef,
   type SourceKey,
 } from "@/lib/sources";
 
@@ -141,10 +152,33 @@ function metricForMeta(metric: string): Metric {
 }
 
 // Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
-export function sourceFilters(sources?: SourceKey[]): WidgetFilter[] {
+// SUB-FONTES (0077): ciente do catálogo — subs resolvem para o record_type da
+// PAI (recordTypeOf) e injetam o PREDICADO da sub (sourcePredicate), scoped ao
+// record_type da pai via `record_types` (pass-through no RPC). Assim uma consulta
+// com a sub como fonte efetiva de um record_type restringe só as linhas dela.
+export function sourceFilters(
+  sources?: SourceKey[],
+  catalog: SourceDef[] = BUILTIN_SOURCES
+): WidgetFilter[] {
   if (!sources || sources.length === 0) return [];
-  const rts = sources.map((s) => toRecordType(s));
-  return [{ field: "record_type", op: "in", value: rts }];
+  const set = new Set(sources);
+  const rts = [...new Set(sources.map((s) => recordTypeOf(s, catalog)))];
+  const out: WidgetFilter[] = [{ field: "record_type", op: "in", value: rts }];
+  for (const s of sources) {
+    const def = catalog.find((c) => c.key === s);
+    if (!def?.parentKey) continue;
+    // ABSORVIDA: se a PAI também está na lista, ela cobre as linhas da sub — não
+    // aplica o predicado (senão restringiria as linhas da pai indevidamente).
+    if (set.has(def.parentKey)) continue;
+    const pred = sourcePredicate(s, catalog);
+    const rt = recordTypeOf(s, catalog);
+    for (const f of pred) {
+      // Descarta targeting antigo do predicado; scope pelo record_type da pai.
+      const { sources: _s, record_types: _rt, ...rest } = f;
+      out.push({ ...rest, record_types: [rt] });
+    }
+  }
+  return out;
 }
 
 export async function aggregate(
@@ -1208,11 +1242,47 @@ export async function runWidget(
   config: WidgetConfig,
   available: AvailableField[],
   period?: DashboardPeriod | null,
-  correspondencesMap: Record<string, string[]> = {},
+  correspondencesMapIn: Record<string, string[]> = {},
   fields: FieldDefinition[] = [],
   rates: CurrencyRates = {},
-  conversionPeriod: ConversionYQ = yearQuarterOf(null)
+  conversionPeriod: ConversionYQ = yearQuarterOf(null),
+  // SUB-FONTES (0077): catálogo + correspondências CRUAS para resolver a fonte
+  // efetiva por record_type (perna). Sem sub-fonte selecionada, o comportamento
+  // é byte a byte o de antes (usa `correspondencesMapIn` global).
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
+  const coexist = config.settings?.coexistSubSources;
+  // Só ativa o caminho de sub-fontes quando de fato há uma sub selecionada
+  // (nas fontes do widget ou nas fontes de uma métrica) — mantém widgets sem
+  // sub-fontes idênticos ao legado.
+  const involvesSub =
+    catalog.some((s) => s.parentKey) &&
+    ((config.sources ?? []).some((s) => isSubSource(s, catalog)) ||
+      (config.metrics ?? []).some((m) =>
+        (m.sources ?? []).some((s) => isSubSource(s, catalog))
+      ));
+  const mainPlan = planSourceLegs(config.sources, coexist, catalog);
+  // Fontes efetivas da consulta PRINCIPAL (uma por record_type; subs absorvidas
+  // somem, subs avulsas viram a fonte efetiva do seu record_type).
+  const effMainSources = involvesSub
+    ? mainPlan.allMain
+      ? []
+      : mainPlan.mainSources
+    : config.sources;
+  // Source-keys efetivas de uma perna (para montar o coalesce dos unificados).
+  const effKeysOf = (srcs?: SourceKey[]): SourceKey[] => {
+    const p = planSourceLegs(srcs, coexist, catalog);
+    return p.allMain ? rootSources(catalog).map((s) => s.key) : p.mainSources;
+  };
+  const corrMapForKeys = (keys: SourceKey[]): Record<string, string[]> =>
+    involvesSub
+      ? correspondenceMapForSources(correspondences, keys)
+      : correspondencesMapIn;
+  // Mapa de correspondências da consulta PRINCIPAL (um ref por record_type, da
+  // fonte efetiva) — sombreia o param p/ que todos os caminhos "default" o usem.
+  const correspondencesMap = corrMapForKeys(effKeysOf(config.sources));
+
   // Segmentação por fonte ANTES do @period/sourceFilters: os filtros
   // sintéticos e o record_type in (...) implícito nunca ganham alvo.
   // O pipeline inteiro é reconstruível POR CONJUNTO DE FONTES (legFiltersFor):
@@ -1225,12 +1295,12 @@ export async function runWidget(
     p: DashboardPeriod | null | undefined,
     srcs?: SourceKey[]
   ): WidgetFilter[] => {
-    let f = applyFilterSourceTargets(resolved, srcs);
-    if (p) f = applyPeriodToFilters(f, p, srcs);
-    // Fonte(s) da perna viram um filtro record_type in (...).
-    return [...sourceFilters(srcs), ...f];
+    let f = applyFilterSourceTargets(resolved, srcs, catalog);
+    if (p) f = applyPeriodToFilters(f, p, srcs, catalog);
+    // Fonte(s) da perna viram um filtro record_type in (...) + predicado da sub.
+    return [...sourceFilters(srcs, catalog), ...f];
   };
-  const filters = legFiltersFor(period, config.sources);
+  const filters = legFiltersFor(period, effMainSources);
 
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const today = yearQuarterOf(null);
@@ -1329,7 +1399,7 @@ export async function runWidget(
     dims: Dimension[],
     filtersOf: (srcs?: SourceKey[]) => WidgetFilter[]
   ): Promise<WidgetRow[]> => {
-    const filters = filtersOf(config.sources);
+    const filters = filtersOf(effMainSources);
     const rpcMetrics: Metric[] = [];
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
@@ -1527,6 +1597,9 @@ export async function runWidget(
       idx: number[];
     }): Promise<LegRun> => {
       const legFilters = filtersOf(leg.sources);
+      // Correspondências da perna: um ref por record_type das fontes DELA (subs
+      // resolvem o membro próprio). Sem sub, é o mapa global (corrMapForKeys).
+      const legCorr = corrMapForKeys(effKeysOf(leg.sources));
       const legMetrics: Metric[] = [];
       const idxOfConfig = new Map<number, number>();
       for (const i of leg.idx) {
@@ -1592,7 +1665,7 @@ export async function runWidget(
               p_dimensions: dims,
               p_metrics: legMetrics,
               p_filters: legFilters,
-              p_correspondences: correspondencesMap,
+              p_correspondences: legCorr,
             })
           : Promise.resolve({ data: [] as unknown, error: null });
       const condGroups = new Map<
@@ -1618,7 +1691,7 @@ export async function runWidget(
                 p_dimensions: dims,
                 p_metrics: g.keys.map(basisMetric),
                 p_filters: [...legFilters, ...g.filters],
-                p_correspondences: correspondencesMap,
+                p_correspondences: legCorr,
               }
             );
             if (condError) throw new Error(condError.message);
@@ -1657,7 +1730,7 @@ export async function runWidget(
               supabase,
               dims,
               legFilters,
-              correspondencesMap,
+              legCorr,
               [...legMetricInfos, ...legBasisInfos],
               rates,
               conversionPeriod,

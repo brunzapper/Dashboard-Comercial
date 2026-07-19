@@ -28,7 +28,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
-import { toSourceKey } from "@/lib/sources";
+import {
+  BUILTIN_SOURCES,
+  isSubSource,
+  planSourceLegs,
+  toSourceKey,
+  type SourceDef,
+} from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { partitionMetricLegs } from "./metric-sources";
@@ -108,15 +114,32 @@ function buildRecordListQuery(
   // Catálogo de campos: usado só p/ resolver filtros unified:* (membros por
   // record_type). Ausente = filtros unificados são ignorados (compat).
   available: AvailableField[],
-  opts?: { count?: boolean }
+  opts?: { count?: boolean },
+  // Catálogo de FONTES (0077): resolve a fonte efetiva por record_type (subs
+  // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
+  // (sem sub-fontes → comportamento legado idêntico).
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ) {
+  // SUB-FONTES: fontes efetivas da consulta (uma por record_type). Ativa só
+  // quando há sub selecionada — senão usa config.sources cru (legado).
+  const involvesSub =
+    catalog.some((s) => s.parentKey) &&
+    (config.sources ?? []).some((s) => isSubSource(s, catalog));
+  const plan = planSourceLegs(config.sources, config.settings?.coexistSubSources, catalog);
+  const effSources = involvesSub
+    ? plan.allMain
+      ? undefined
+      : plan.mainSources
+    : config.sources;
+
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   let filters = applyFilterSourceTargets(
     resolveFilters(config.filters ?? []),
-    config.sources
+    effSources,
+    catalog
   );
-  if (period) filters = applyPeriodToFilters(filters, period, config.sources);
-  filters = [...sourceFilters(config.sources), ...filters];
+  if (period) filters = applyPeriodToFilters(filters, period, effSources, catalog);
+  filters = [...sourceFilters(effSources, catalog), ...filters];
 
   // Fase 12: leads MOCK de "Data Reunião" (records.is_mock) só são servidos
   // quando o widget referencia o campo (regra do RPC run_widget_query,
@@ -325,13 +348,16 @@ export async function runRecordList(
   supabase: SupabaseClient,
   config: WidgetConfig,
   period?: DashboardPeriod | null,
-  available: AvailableField[] = []
+  available: AvailableField[] = [],
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): Promise<RecordRow[]> {
   const { q, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,
     period,
-    available
+    available,
+    undefined,
+    catalog
   );
 
   // Sem limite por padrão (o usuário pediu p/ remover o teto); só aplica quando
@@ -367,7 +393,8 @@ export async function runRecordListWithExtras(
   supabase: SupabaseClient,
   config: WidgetConfig,
   period?: DashboardPeriod | null,
-  available: AvailableField[] = []
+  available: AvailableField[] = [],
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
   const { legs } = partitionMetricLegs(config.metrics ?? [], config.sources);
   const extraSources =
@@ -377,7 +404,7 @@ export async function runRecordListWithExtras(
         )
       : [];
   const [records, extra] = await Promise.all([
-    runRecordList(supabase, config, period, available),
+    runRecordList(supabase, config, period, available, catalog),
     extraSources.length > 0
       ? runRecordList(
           supabase,
@@ -394,7 +421,8 @@ export async function runRecordListWithExtras(
             },
           },
           period,
-          available
+          available,
+          catalog
         )
       : Promise.resolve([] as RecordRow[]),
   ]);
@@ -414,14 +442,16 @@ export async function runRecordListPage(
   config: WidgetConfig,
   period: DashboardPeriod | null | undefined,
   available: AvailableField[],
-  opts: { pageIndex: number; pageSize: number }
+  opts: { pageIndex: number; pageSize: number },
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): Promise<{ rows: RecordRow[]; total: number }> {
   const { q, hasBucketFilters, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,
     period,
     available,
-    { count: true }
+    { count: true },
+    catalog
   );
   const sort = config.settings?.appearance?.table?.sort;
   const sortable =

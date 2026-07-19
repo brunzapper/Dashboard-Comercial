@@ -11,8 +11,10 @@
 import type { WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
+  BUILTIN_SOURCES,
+  recordTypeOf,
   SOURCE_KEYS,
-  toRecordType,
+  type SourceDef,
   type SourceKey,
 } from "@/lib/sources";
 
@@ -199,9 +201,12 @@ export function resolveUnifiedPeriodField(
 ): string | null {
   if (!field.startsWith("unified:")) return field;
   const key = field.slice("unified:".length);
+  // Casa pela SOURCE-KEY (0077): uma sub-fonte tem membro próprio, distinto do
+  // da pai, ainda que compartilhem o record_type (ex.: Leads→reunião,
+  // Leads/Clientes Lite→mudança de etapa).
   const member = correspondences
     .find((c) => c.key === key)
-    ?.members.find((m) => m.record_type === toRecordType(source));
+    ?.members.find((m) => m.source_key === source);
   return member?.field_ref || null;
 }
 
@@ -217,12 +222,23 @@ export function periodFieldForSource(
 // builtins ∪ chaves do mapa por fonte do período — o resolver
 // (period-resolve) monta fieldBySource a partir do CATÁLOGO, então as fontes
 // dinâmicas chegam aqui por ele, sem precisar passar o catálogo pelo engine.
+// SUB-FONTES (0077): em "todas as fontes" cobrimos só as RAIZ — subs
+// compartilham o record_type da pai, então incluí-las sobrescreveria o `byType`
+// da pai (mesma chave record_type). Subs só entram quando explicitamente
+// selecionadas (a lista `sources` já vem resolvida pelo engine nesse caso).
 function coveredSources(
   sources: SourceKey[] | undefined,
-  fieldBySource?: Partial<Record<SourceKey, string>>
+  fieldBySource: Partial<Record<SourceKey, string>> | undefined,
+  catalog: SourceDef[]
 ): SourceKey[] {
   if (sources && sources.length > 0) return sources;
-  return [...new Set([...SOURCE_KEYS, ...Object.keys(fieldBySource ?? {})])];
+  const isSub = (k: string) =>
+    Boolean(catalog.find((s) => s.key === k)?.parentKey);
+  const rootMapKeys = Object.keys(fieldBySource ?? {}).filter((k) => !isSub(k));
+  const catalogRoots = catalog.filter((s) => !s.parentKey).map((s) => s.key);
+  // SOURCE_KEYS (builtins) são sempre raiz; une com as raiz do catálogo e as
+  // chaves-raiz do mapa por fonte (fontes dinâmicas).
+  return [...new Set([...SOURCE_KEYS, ...catalogRoots, ...rootMapKeys])];
 }
 
 /**
@@ -236,17 +252,19 @@ function coveredSources(
 export function applyPeriodToFilters(
   filters: WidgetFilter[],
   period: DashboardPeriod,
-  sources?: SourceKey[]
+  sources?: SourceKey[],
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): WidgetFilter[] {
   const to = period.to ? `${period.to}T23:59:59` : null;
 
   // Mapa por fonte → campo de data das fontes cobertas por este widget.
-  const covered = coveredSources(sources, period.fieldBySource);
+  // record_type ciente do catálogo (sub-fonte → record_type da pai).
+  const covered = coveredSources(sources, period.fieldBySource, catalog);
   const byType: Record<string, string> = {};
   const distinct = new Set<string>();
   for (const s of covered) {
     const col = periodFieldForSource(period, s);
-    byType[toRecordType(s)] = col;
+    byType[recordTypeOf(s, catalog)] = col;
     distinct.add(col);
   }
 

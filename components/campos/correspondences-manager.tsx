@@ -27,7 +27,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
-import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import { sourceLabel, type SourceKey } from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import type { Correspondence } from "@/lib/correspondences";
 import {
@@ -69,7 +69,9 @@ function CorrespondenceForm({
     catalog.map((s) => [s.key, ""])
   );
   for (const m of correspondence?.members ?? []) {
-    const src = toSourceKey(m.record_type);
+    // Identidade do membro = source-key (0077); cai no record_type p/ membros
+    // antigos (fontes dinâmicas: key === record_type).
+    const src = m.source_key ?? m.record_type;
     if (src in defaultRef) defaultRef[src] = m.field_ref;
   }
   const [refs, setRefs] = useState<Record<SourceKey, string>>(defaultRef);
@@ -169,10 +171,12 @@ export function CorrespondencesManager({
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Correspondence | undefined>(undefined);
+  const catalog = useSources();
 
-  // ref -> rótulo, por fonte (para exibir os membros de forma legível).
+  // ref -> rótulo, por fonte (para exibir os membros de forma legível). Guarda
+  // contra source-key sem candidatos (ex.: sub-fonte recém-criada).
   const labelForRef = (source: SourceKey, ref: string): string =>
-    candidatesBySource[source].find((c) => c.ref === ref)?.label ?? ref;
+    candidatesBySource[source]?.find((c) => c.ref === ref)?.label ?? ref;
 
   function openCreate() {
     setEditing(undefined);
@@ -228,10 +232,10 @@ export function CorrespondencesManager({
                   <TableCell>{DATA_TYPE_LABELS[c.data_type]}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {c.members.map((m) => {
-                      const src = toSourceKey(m.record_type);
+                      const src = m.source_key ?? m.record_type;
                       return (
-                        <div key={m.record_type}>
-                          {sourceLabel(src)}:{" "}
+                        <div key={src}>
+                          {sourceLabel(src, catalog)}:{" "}
                           {labelForRef(src, m.field_ref)}
                         </div>
                       );
