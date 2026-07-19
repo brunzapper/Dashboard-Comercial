@@ -1,4 +1,11 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 19/07/2026
+// v1.4 (19/07/2026): aninhamento de campos calculados — os catálogos passam a
+//   incluir calculados (por-registro) e calculado_agg (ref plano custom:<key>)
+//   como operandos, excluindo o campo em edição + dependentes transitivos;
+//   ciclos são rejeitados no save (findFormulaCycle, caminho em rótulos);
+//   deleteField ganha guarda de referência (campo usado em fórmula não sai) e
+//   retorna FieldActionState. Defs carregadas UMA vez por validação
+//   (loadDefRows) — catálogos e grafo veem o mesmo snapshot.
 // v1.3 (15/07/2026): show_as_percent — lê o checkbox/hidden do form e persiste
 //   via resolveShowAsPercent (só tipos elegíveis; nunca junto com moeda).
 // Server Actions da tela de Campos (field_definitions). Gravação com o client
@@ -30,11 +37,17 @@ import {
   validateFormula,
   type Formula,
 } from "@/lib/records/formulas";
+import {
+  findFormulaCycle,
+  formulaReferencesField,
+  transitiveFormulaDependents,
+} from "@/lib/records/formula-deps";
 import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
 import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import {
+  aggNestedOperandRefs,
   aggOperandRefs,
   condAggOperandRefs,
   validateCondAggRefs,
@@ -64,25 +77,56 @@ const DATA_TYPES = [
 // de resolução/validação/persistência da fórmula.
 const FORMULA_DATA_TYPES = ["calculado", "calculado_agg"];
 
-// Referências numéricas que podem ser operandos de uma fórmula: colunas do
-// núcleo numéricas + campos personalizados numéricos que NÃO sejam calculados
-// (evita dependência circular).
-async function allowedFormulaRefs(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  excludeFieldKey?: string
-): Promise<Set<string>> {
+// Linha de field_definitions com o necessário para catálogos de operandos E
+// para o grafo de dependências entre calculados (formula-deps). Carregada UMA
+// vez por validação/exclusão, para ciclo e catálogos verem o mesmo snapshot.
+interface DefRow {
+  id: string;
+  field_key: string;
+  label: string;
+  data_type: DataType;
+  formula: Formula | null;
+}
+
+async function loadDefRows(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<DefRow[]> {
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("id, field_key, label, data_type, formula");
+  return (data ?? []).map((d) => ({
+    id: d.id as string,
+    field_key: d.field_key as string,
+    label: ((d.label as string) ?? (d.field_key as string)),
+    data_type: d.data_type as DataType,
+    formula: (d.formula as Formula | null) ?? null,
+  }));
+}
+
+// Conjunto PROIBIDO como operando do campo em edição: o próprio campo + seus
+// dependentes transitivos (referenciá-los criaria ciclo). Mesma regra da UI
+// (fields-manager), para editor e validação concordarem.
+function forbiddenOperandKeys(
+  rows: DefRow[],
+  fieldKey?: string
+): Set<string> {
+  if (!fieldKey) return new Set();
+  const forbidden = transitiveFormulaDependents(fieldKey, rows);
+  forbidden.add(fieldKey);
+  return forbidden;
+}
+
+// Referências numéricas que podem ser operandos de uma fórmula por registro:
+// colunas do núcleo numéricas + campos personalizados numéricos — inclusive
+// calculados (aninhamento, 19/07/2026), exceto os do conjunto proibido.
+function allowedFormulaRefs(rows: DefRow[], forbidden: Set<string>): Set<string> {
   const refs = new Set<string>(
     CORE_FIELDS.filter((f) => f.isNumeric).map((f) => f.field)
   );
-  const { data } = await supabase
-    .from("field_definitions")
-    .select("field_key, data_type");
-  for (const d of data ?? []) {
-    const key = d.field_key as string;
-    const dt = d.data_type as DataType;
-    if (key === excludeFieldKey) continue;
-    if (NUMERIC_DATA_TYPES.includes(dt) && dt !== "calculado") {
-      refs.add(`custom:${key}`);
+  for (const d of rows) {
+    if (forbidden.has(d.field_key)) continue;
+    if (NUMERIC_DATA_TYPES.includes(d.data_type)) {
+      refs.add(`custom:${d.field_key}`);
     }
   }
   return refs;
@@ -90,31 +134,25 @@ async function allowedFormulaRefs(
 
 // Operandos de AGREGAÇÃO (campos 'calculado_agg'): contagem de registros +
 // Σ/Média das colunas numéricas do núcleo e dos custom numéricos — incluindo o
-// 'calculado' por-registro (é materializado, o RPC agrega) e EXCLUINDO outros
-// 'calculado_agg' (sem aninhamento na v1). Mesma origem da UI
-// (lib/widgets/calc-metrics.aggOperandRefs) para editor e servidor concordarem.
-async function aggOperandCatalog(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  excludeFieldKey?: string
-): Promise<OperandRef[]> {
-  const { data } = await supabase
-    .from("field_definitions")
-    .select("field_key, label, data_type");
+// 'calculado' por-registro (é materializado, o RPC agrega) — + outros campos
+// 'calculado_agg' como ref plano custom:<key> (aninhamento, 19/07/2026;
+// expandido em runtime pelo engine), exceto os do conjunto proibido
+// (self + dependentes transitivos). Mesma origem da UI
+// (lib/widgets/calc-metrics.aggOperandRefs/aggNestedOperandRefs) para editor e
+// servidor concordarem.
+function aggOperandCatalog(
+  rows: DefRow[],
+  forbidden: Set<string>
+): OperandRef[] {
+  const allowed = rows.filter((d) => !forbidden.has(d.field_key));
   const numeric = [
     ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
       field: f.field,
       label: f.label,
     })),
-    ...(data ?? [])
-      .filter(
-        (d) =>
-          NUMERIC_DATA_TYPES.includes(d.data_type as DataType) &&
-          d.field_key !== excludeFieldKey
-      )
-      .map((d) => ({
-        field: `custom:${d.field_key}`,
-        label: ((d.label as string) ?? (d.field_key as string)),
-      })),
+    ...allowed
+      .filter((d) => NUMERIC_DATA_TYPES.includes(d.data_type))
+      .map((d) => ({ field: `custom:${d.field_key}`, label: d.label })),
   ];
   // Contáveis (agg:count:<campo>): datas/numéricos do núcleo + qualquer custom
   // (exceto 'calculado_agg'). Mesmo critério do editor (fields-manager) para que
@@ -124,120 +162,75 @@ async function aggOperandCatalog(
       field: f.field,
       label: f.label,
     })),
-    ...(data ?? [])
-      .filter(
-        (d) =>
-          (d.data_type as DataType) !== "calculado_agg" &&
-          d.field_key !== excludeFieldKey
-      )
-      .map((d) => ({
-        field: `custom:${d.field_key}`,
-        label: ((d.label as string) ?? (d.field_key as string)),
-      })),
+    ...allowed
+      .filter((d) => d.data_type !== "calculado_agg")
+      .map((d) => ({ field: `custom:${d.field_key}`, label: d.label })),
   ];
   // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
   // de condição (texto/seleção/booleano e datas). Mesma montagem dos editores
   // (fields-manager/widget-builder) para catálogo e validação concordarem.
-  const customCond = (data ?? [])
-    .filter(
-      (d) =>
-        COND_DATA_TYPES.includes(d.data_type as DataType) &&
-        d.field_key !== excludeFieldKey
-    )
-    .map((d) => ({
-      field_key: d.field_key as string,
-      label: ((d.label as string) ?? (d.field_key as string)),
-    }));
-  const customDate = (data ?? [])
-    .filter(
-      (d) => (d.data_type as DataType) === "data" && d.field_key !== excludeFieldKey
-    )
-    .map((d) => ({
-      field_key: d.field_key as string,
-      label: ((d.label as string) ?? (d.field_key as string)),
-    }));
+  const customCond = allowed
+    .filter((d) => COND_DATA_TYPES.includes(d.data_type))
+    .map((d) => ({ field_key: d.field_key, label: d.label }));
+  const customDate = allowed
+    .filter((d) => d.data_type === "data")
+    .map((d) => ({ field_key: d.field_key, label: d.label }));
+  const nestedAgg = allowed
+    .filter((d) => d.data_type === "calculado_agg")
+    .map((d) => ({ field_key: d.field_key, label: d.label }));
   return [
     ...aggOperandRefs(numeric, countable),
+    ...aggNestedOperandRefs(nestedAgg),
     ...condAggOperandRefs(numeric, customCond, customDate),
   ];
 }
 
-// Refs de DATA permitidos numa fórmula: datas do próprio registro + custom
-// `data` + datas do registro casado (match:<fonte>:<data>). Mesma origem do
-// construtor (lib/records/date-operands), para UI e validação concordarem.
-async function allowedFormulaDateRefs(
-  supabase: Awaited<ReturnType<typeof createClient>>
-): Promise<Set<string>> {
-  const { data } = await supabase
-    .from("field_definitions")
-    .select("field_key, label, data_type")
-    .eq("data_type", "data");
-  const customDateFields = (data ?? []).map((d) => ({
-    field_key: d.field_key as string,
-    label: (d.label as string) ?? (d.field_key as string),
-  }));
-  const sources = await loadSources(supabase);
-  return new Set(allDateOperands(customDateFields, sources).map((o) => o.ref));
+// Operandos de DATA e CONDICIONAIS permitidos numa fórmula por registro: datas
+// e colunas de texto/seleção/booleano próprias + as do registro casado
+// (match:<fonte>:<ref>). Mesma origem dos editores (lib/records/date-operands e
+// cond-operands), para UI e validação concordarem.
+type Sources = Awaited<ReturnType<typeof loadSources>>;
+
+function formulaDateOperands(rows: DefRow[], sources: Sources): OperandRef[] {
+  return allDateOperands(
+    rows.filter((d) => d.data_type === "data"),
+    sources
+  );
 }
 
-// Refs CONDICIONAIS permitidos numa fórmula (SE/E/OU e comparações): colunas
-// textuais/booleanas do núcleo + custom texto/seleção/booleano + as mesmas do
-// registro casado. Mesma origem do editor (lib/records/cond-operands).
-async function allowedFormulaCondRefs(
-  supabase: Awaited<ReturnType<typeof createClient>>
-): Promise<Set<string>> {
-  const { data } = await supabase
-    .from("field_definitions")
-    .select("field_key, label, data_type")
-    .in("data_type", COND_DATA_TYPES);
-  const customCondFields = (data ?? []).map((d) => ({
-    field_key: d.field_key as string,
-    label: (d.label as string) ?? (d.field_key as string),
-  }));
-  const sources = await loadSources(supabase);
-  return new Set(allCondOperands(customCondFields, sources).map((o) => o.ref));
+function formulaCondOperands(rows: DefRow[], sources: Sources): OperandRef[] {
+  return allCondOperands(
+    rows.filter((d) => COND_DATA_TYPES.includes(d.data_type)),
+    sources
+  );
 }
 
 // Catálogo completo de operandos (numéricos + datas + condicionais) com rótulos,
 // para resolver [Rótulo] no editor de texto — mesma montagem da UI
 // (components/campos/fields-manager.tsx), para editor e servidor concordarem.
-async function serverOperandCatalog(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  excludeFieldKey?: string
-): Promise<OperandRef[]> {
-  const { data } = await supabase
-    .from("field_definitions")
-    .select("field_key, label, data_type");
-  const fields = (data ?? []).map((d) => ({
-    field_key: d.field_key as string,
-    label: ((d.label as string) ?? (d.field_key as string)),
-    data_type: d.data_type as DataType,
-  }));
+function serverOperandCatalog(
+  rows: DefRow[],
+  forbidden: Set<string>,
+  sources: Sources
+): OperandRef[] {
   const numeric: OperandRef[] = [
     ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
       ref: f.field,
       label: f.label,
       group: "Números",
     })),
-    ...fields
+    ...rows
       .filter(
         (f) =>
-          NUMERIC_DATA_TYPES.includes(f.data_type) &&
-          f.data_type !== "calculado" &&
-          f.field_key !== excludeFieldKey
+          NUMERIC_DATA_TYPES.includes(f.data_type) && !forbidden.has(f.field_key)
       )
       .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
   ];
-  const sources = await loadSources(supabase);
-  const dates = allDateOperands(
-    fields.filter((f) => f.data_type === "data"),
-    sources
-  );
-  const conds = allCondOperands(
-    fields.filter((f) => COND_DATA_TYPES.includes(f.data_type)),
-    sources
-  );
-  return [...numeric, ...dates, ...conds];
+  return [
+    ...numeric,
+    ...formulaDateOperands(rows, sources),
+    ...formulaCondOperands(rows, sources),
+  ];
 }
 
 function parseFormula(raw: string): Formula | null {
@@ -253,20 +246,25 @@ function parseFormula(raw: string): Formula | null {
 
 // Resolve a fórmula de um campo calculado (texto → tokens quando o editor for o
 // de texto) e valida estrutura + refs. 'calculado' (por-registro) aceita
-// numéricos, datas e condicionais; 'calculado_agg' aceita SÓ refs de agregação
-// (agg:*) — refs por-registro são rejeitadas ali, e agg:* é rejeitado aqui
-// (nenhum dos catálogos do por-registro contém agg:*).
+// numéricos (inclusive outros calculados — aninhamento), datas e condicionais;
+// 'calculado_agg' aceita refs de agregação (agg:*) + outros 'calculado_agg'
+// (custom:<key> plano, expandido em runtime) — refs por-registro crus são
+// rejeitados ali, e agg:* é rejeitado aqui (nenhum dos catálogos do
+// por-registro contém agg:*). Ciclos de dependência entre calculados são
+// rejeitados aqui com o caminho completo (findFormulaCycle).
 async function resolveAndValidateFormula(
   supabase: Awaited<ReturnType<typeof createClient>>,
   f: ReturnType<typeof readForm>,
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
   const isAgg = f.dataType === "calculado_agg";
+  const rows = await loadDefRows(supabase);
+  const forbidden = forbiddenOperandKeys(rows, fieldKey);
+  const aggCatalog = isAgg ? aggOperandCatalog(rows, forbidden) : null;
   let formula = f.formula;
   if (f.formulaMode === "text") {
-    const catalog = isAgg
-      ? await aggOperandCatalog(supabase, fieldKey)
-      : await serverOperandCatalog(supabase, fieldKey);
+    const catalog =
+      aggCatalog ?? serverOperandCatalog(rows, forbidden, await loadSources(supabase));
     const tok = tokenizeFormulaText(f.formulaText, catalog);
     if (!tok.ok) return { ok: false, message: tok.error };
     formula = tok.formula;
@@ -274,13 +272,30 @@ async function resolveAndValidateFormula(
   if (!formula) {
     return { ok: false, message: "Defina a fórmula do campo calculado." };
   }
-  if (isAgg) {
-    const catalog = await aggOperandCatalog(supabase, fieldKey);
-    const v = validateFormula(formula, new Set(catalog.map((o) => o.ref)));
+  // Trava de ciclo do aninhamento (grafo unificado calculado + calculado_agg).
+  // O backstop é o conjunto proibido dos catálogos ("Coluna inválida…"), mas a
+  // detecção explícita dá a mensagem com o caminho.
+  const cycle = findFormulaCycle(fieldKey ?? "", formula, rows);
+  if (cycle) {
+    const labelOf = (k: string) =>
+      k === fieldKey
+        ? f.label || k
+        : (rows.find((r) => r.field_key === k)?.label ?? k);
+    return {
+      ok: false,
+      message:
+        `Dependência circular na fórmula: ${cycle
+          .map((k) => `"${labelOf(k)}"`)
+          .join(" → ")}. ` +
+        "Um campo calculado não pode depender, direta ou indiretamente, de si mesmo.",
+    };
+  }
+  if (isAgg && aggCatalog) {
+    const v = validateFormula(formula, new Set(aggCatalog.map((o) => o.ref)));
     if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
     // Colocação dos refs de SOMASE/CONT.SE/MÉDIASE: campo cru só dentro das
     // funções condicionais; alvo numérico; condição sobre coluna de condição.
-    const p = validateCondAggRefs(formula, catalog);
+    const p = validateCondAggRefs(formula, aggCatalog);
     if (!p.ok) return { ok: false, message: p.error ?? "Fórmula inválida." };
     return { ok: true, formula };
   }
@@ -293,12 +308,13 @@ async function resolveAndValidateFormula(
         'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
     };
   }
-  const [allowed, allowedDates, allowedConds] = await Promise.all([
-    allowedFormulaRefs(supabase, fieldKey),
-    allowedFormulaDateRefs(supabase),
-    allowedFormulaCondRefs(supabase),
-  ]);
-  const v = validateFormula(formula, allowed, allowedDates, allowedConds);
+  const sources = await loadSources(supabase);
+  const v = validateFormula(
+    formula,
+    allowedFormulaRefs(rows, forbidden),
+    new Set(formulaDateOperands(rows, sources).map((o) => o.ref)),
+    new Set(formulaCondOperands(rows, sources).map((o) => o.ref))
+  );
   if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   return { ok: true, formula };
 }
@@ -549,17 +565,44 @@ export async function toggleShowInBuilder(formData: FormData): Promise<void> {
   revalidatePath("/registros");
 }
 
-export async function deleteField(formData: FormData): Promise<void> {
+export async function deleteField(
+  _prev: FieldActionState,
+  formData: FormData
+): Promise<FieldActionState> {
   const err = await ensureCanManage();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const id = String(formData.get("id") ?? "");
-  if (!id) return;
+  if (!id) return { ok: false, message: "Campo não identificado." };
   const supabase = await createClient();
-  await supabase.from("field_definitions").delete().eq("id", id);
+  // Guarda de referência (19/07/2026): campo usado na fórmula de outro (como
+  // operando, agregação, alvo/condição de SOMASE ou via registro casado) não
+  // pode ser excluído — a ref órfã degradaria para null em silêncio e, num
+  // calculado materializado, congelaria o último valor dos dependentes (a
+  // exclusão não dispara recalc).
+  const rows = await loadDefRows(supabase);
+  const target = rows.find((r) => r.id === id);
+  const dependents = target
+    ? rows.filter(
+        (r) => r.id !== id && formulaReferencesField(r.formula, target.field_key)
+      )
+    : [];
+  if (target && dependents.length > 0) {
+    const extra =
+      dependents.length > 1 ? ` e mais ${dependents.length - 1} campo(s)` : "";
+    return {
+      ok: false,
+      message:
+        `Não é possível excluir "${target.label}": o campo é usado na fórmula ` +
+        `de "${dependents[0].label}"${extra}. Remova a referência antes de excluir.`,
+    };
+  }
+  const { error } = await supabase.from("field_definitions").delete().eq("id", id);
+  if (error) return { ok: false, message: error.message };
   // Mesmo escopo do create/update: a coluna some da tabela de Registros e dos
   // widgets — sem revalidar, essas telas mostravam o campo excluído até a
   // próxima navegação (dado stale é pior que lento).
   revalidatePath("/campos");
   revalidatePath("/registros");
   revalidatePath("/dashboards/[id]", "page");
+  return { ok: true, message: `Campo "${target?.label ?? ""}" excluído.` };
 }

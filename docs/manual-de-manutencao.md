@@ -126,6 +126,15 @@ npm run build      # o que a Vercel roda no deploy
 - [ ] Fórmulas com "Data atual" dependem do cron diário (`pg-cron-recalc.sql`).
 - [ ] Campos calculados são sempre recomputados pelo sync (não são protegidos por
   `field_modified_at`).
+- [ ] Aninhamento (19/07/2026): ciclos são bloqueados no salvamento
+  (`findFormulaCycle`, `lib/records/formula-deps.ts`) — **não** pré-ordene os
+  defs nos chamadores: a ordem topológica é interna a `computeFormulaFields`.
+- [ ] Excluir campo referenciado pela fórmula de outro é bloqueado
+  (`deleteField`); não remova a guarda — a ref órfã degradaria para null em
+  silêncio e congelaria o valor materializado dos dependentes.
+- [ ] Aninhamento de agregados expande tokens em runtime: novo consumidor de
+  fórmula de `calculado_agg` deve passar por `resolveCalcMetric` ou
+  `runCalculatedWidget` (nunca ler `def.formula` cru direto para avaliar).
 
 ### 4.6 Mexeu no sync do Bitrix
 

@@ -249,6 +249,27 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   materializados em `records.custom_fields`; recalc diário via
   `/api/sync/recalc-daily` (fórmulas com "Data atual"), em lote via
   `recalc_apply_updates` (0070).
+- **Aninhamento de campos calculados** (19/07/2026,
+  `lib/records/formula-deps.ts`): um calculado pode referenciar outro, nos dois
+  tipos. **Ciclos são rejeitados no salvamento** (`findFormulaCycle`, grafo
+  unificado calculado + calculado_agg; os catálogos excluem o campo em edição +
+  dependentes transitivos) e a **exclusão de campo referenciado por fórmula é
+  bloqueada** (`deleteField`). Por registro: `computeFormulaFields` ordena os
+  defs topologicamente e injeta cada resultado no contexto (com a moeda do
+  resultado em `operandCurrency` — herança/conversão em cadeia); ciclo residual
+  no banco materializa null. Agregados: o ref é o plano `custom:<key>` e o
+  engine **expande tokens em runtime** (`expandAggFormula`, aplicada em
+  `resolveCalcMetric` e `runCalculatedWidget` — cobre widgets, subtotais/Total,
+  snapshots, calculadora/nota/cards/tabela rápida) — nada muda nos RPCs
+  `run_widget_query*`. Semântica: referenciar = embutir a FÓRMULA do campo
+  entre parênteses; o formato do campo referenciado (moeda fixa,
+  `allow_negative`, percentual) NÃO se aplica dentro do campo externo — valem
+  os do campo externo. Refs aninhados dentro de SOMASE/CONT.SE/MÉDIASE
+  continuam proibidos (argumentos são estruturais). Catálogos ad-hoc de widgets
+  (calculadora, nota, células da tabela rápida, métrica ad-hoc) ainda não
+  oferecem o operando aninhado — a expansão nos choke points já os suportaria;
+  para habilitar, adicione `aggNestedOperandRefs` ao par catálogo client/server
+  correspondente.
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.

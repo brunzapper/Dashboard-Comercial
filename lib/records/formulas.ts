@@ -1,4 +1,10 @@
-// Versão: 2.3 | Data: 18/07/2026
+// Versão: 2.4 | Data: 19/07/2026
+// v2.4 (19/07/2026): aninhamento de campos calculados — computeFormulaFields
+//   avalia em ORDEM TOPOLÓGICA (lib/records/formula-deps.orderFormulaDefs) e
+//   injeta cada resultado no contexto como operando `custom:<key>` (com a
+//   moeda do resultado registrada em operandCurrency). Ciclos são rejeitados
+//   no salvamento (findFormulaCycle); ciclo residual no banco materializa
+//   null, nunca loop.
 // v2.3 (18/07/2026): builders PUROS *FromRows (CalcFieldRow) — quem já leu
 //   field_definitions inteira deriva defs de fórmula/chaves de data/moedas em
 //   memória em vez de 3 consultas extras (updateRecord/createRecord). Os
@@ -38,6 +44,13 @@ import {
   type CurrencyRates,
 } from "@/lib/widgets/currency";
 import { todayBrasiliaMs } from "@/lib/date/today";
+// Import circular seguro com formula-deps (que importa formulaRefs/
+// isCondAggFunc daqui): ambos só chamam funções um do outro em tempo de
+// avaliação de fórmula, nunca no top-level do módulo.
+import {
+  formulaDependencyKeys,
+  orderFormulaDefs,
+} from "@/lib/records/formula-deps";
 
 export type FormulaOp = "+" | "-" | "*" | "/";
 export type FormulaCmpOp = "=" | "<>" | "<" | ">" | "<=" | ">=";
@@ -942,10 +955,13 @@ export interface FormulaValidation {
 
 /**
  * Valida a fórmula: estrutura (mesmo parser da avaliação, com mensagens em PT)
- * e refs conhecidas. `allowedRefs` deve conter APENAS colunas numéricas que NÃO
- * sejam campos calculados (evita dependência circular); `allowedDateRefs` as
- * datas; `allowedCondRefs` as colunas de texto/seleção/booleano permitidas em
- * condicionais (SE/E/OU e comparações).
+ * e refs conhecidas. `allowedRefs` contém as colunas numéricas permitidas —
+ * inclusive campos calculados (aninhamento, 19/07/2026), EXCETO os que criariam
+ * dependência circular com o campo em edição (o chamador monta o conjunto; a
+ * trava de ciclo com mensagem própria é findFormulaCycle em
+ * lib/records/formula-deps.ts). `allowedDateRefs` as datas; `allowedCondRefs`
+ * as colunas de texto/seleção/booleano permitidas em condicionais (SE/E/OU e
+ * comparações).
  */
 export function validateFormula(
   formula: Formula,
@@ -1152,10 +1168,15 @@ export function buildRecordCurrencyContext(
  * partir das colunas do núcleo (números e, para condicionais, textos/booleanos)
  * + dos custom_fields já resolvidos (valores BRUTOS — a coerção é feita por
  * operação no avaliador) e avalia cada def. Retorna um mapa field_key →
- * número|texto|booleano|null para mesclar em custom_fields. Campos calculados
- * não entram no contexto como operandos. Valores de `match:<fonte>:<ref>` não
- * datados podem vir dentro de `coreValues` chaveados pelo ref completo (ver
- * lib/records/recalc.ts).
+ * número|texto|booleano|null para mesclar em custom_fields. Aninhamento
+ * (19/07/2026): os defs são avaliados em ordem topológica de dependência e
+ * cada resultado (pós-clamp) é injetado no contexto como operando
+ * `custom:<key>` — com a moeda do resultado registrada em operandCurrency —
+ * para que um calculado use outro. Não pré-ordene os defs no chamador: a
+ * ordem é interna. Membros de ciclo residual no banco (o salvamento rejeita
+ * ciclos via findFormulaCycle) materializam null, nunca loop. Valores de
+ * `match:<fonte>:<ref>` não datados podem vir dentro de `coreValues` chaveados
+ * pelo ref completo (ver lib/records/recalc.ts).
  */
 export function computeFormulaFields(
   coreValues: Record<string, unknown>,
@@ -1168,8 +1189,23 @@ export function computeFormulaFields(
   for (const [k, v] of Object.entries(coreValues)) baseCtx[k] = v;
   for (const [k, v] of Object.entries(customFields)) baseCtx[`custom:${k}`] = v;
 
+  const { ordered, cyclic } = orderFormulaDefs(formulaDefs);
+  // Ciclo residual materializa null — e é null que os dependentes fora do
+  // ciclo devem enxergar (não o valor materializado obsoleto do banco).
+  for (const key of cyclic) baseCtx[`custom:${key}`] = null;
+  // Cópia local mutável do mapa de moedas por operando: os calculados
+  // intermediários entram aqui à medida que são avaliados.
+  const effConv: FormulaCurrencyContext | undefined = conv
+    ? { ...conv, operandCurrency: { ...conv.operandCurrency } }
+    : undefined;
+  const defKeys = new Set(formulaDefs.map((d) => d.field_key));
+  // Defs pulados nesta passada (match não resolvido) — dependentes diretos ou
+  // indiretos também são pulados, para A e B permanecerem consistentes entre
+  // si até o recalc em lote.
+  const skipped = new Set<string>();
+
   const out: Record<string, FormulaResult> = {};
-  for (const def of formulaDefs) {
+  for (const def of ordered) {
     if (!def.formula) continue;
     // Fórmula que usa um operando `match:` ainda não resolvido (nem no dateCtx
     // nem no contexto de valores) é PULADA (não entra em `out`) — deixa o valor
@@ -1182,7 +1218,15 @@ export function computeFormulaFields(
         !(dateCtx && Object.prototype.hasOwnProperty.call(dateCtx, r)) &&
         !Object.prototype.hasOwnProperty.call(baseCtx, r)
     );
-    if (hasUnresolvedMatch) continue;
+    const dependsOnSkipped =
+      skipped.size > 0 &&
+      formulaDependencyKeys(def.formula, (k) => defKeys.has(k)).some((k) =>
+        skipped.has(k)
+      );
+    if (hasUnresolvedMatch || dependsOnSkipped) {
+      skipped.add(def.field_key);
+      continue;
+    }
     // Campo calculado monetário:
     //  - 'fixed'   → converte cada operando monetário para a moeda fixa antes de
     //                avaliar (conversão explícita; a moeda de exibição vem de
@@ -1195,12 +1239,12 @@ export function computeFormulaFields(
     const isMoney = def.currency_mode === "inherit" || def.currency_mode === "fixed";
     let raw: FormulaResult;
     let stamp: string | null = null;
-    if (conv && isMoney) {
+    if (effConv && isMoney) {
       if (def.currency_mode === "fixed") {
         const target = def.currency_code ?? "BRL";
         raw = evaluateFormula(
           def.formula,
-          convertOperands(baseCtx, target, conv),
+          convertOperands(baseCtx, target, effConv),
           dateCtx
         );
       } else {
@@ -1208,7 +1252,7 @@ export function computeFormulaFields(
         // null não "envolve" sua moeda no cálculo).
         const codes = new Set<string>();
         for (const ref of formulaRefs(def.formula)) {
-          const cur = conv.operandCurrency[ref];
+          const cur = effConv.operandCurrency[ref];
           if (!cur) continue;
           if (toNum(baseCtx[ref]) == null) continue;
           codes.add(cur);
@@ -1219,7 +1263,7 @@ export function computeFormulaFields(
         } else {
           raw = evaluateFormula(
             def.formula,
-            convertOperands(baseCtx, BASE_CURRENCY, conv),
+            convertOperands(baseCtx, BASE_CURRENCY, effConv),
             dateCtx
           );
           stamp = BASE_CURRENCY;
@@ -1244,6 +1288,30 @@ export function computeFormulaFields(
       customFields &&
       Object.prototype.hasOwnProperty.call(customFields, curKey)
     ) {
+      out[curKey] = null;
+    }
+    // Injeção do aninhamento: o resultado (pós-clamp) vira operando dos defs
+    // seguintes na ordem topológica, com a moeda do resultado (fixa ou o
+    // carimbo do modo automático; sem moeda = número puro) registrada para a
+    // herança/conversão em cadeia funcionar.
+    baseCtx[`custom:${def.field_key}`] = val;
+    if (effConv && isMoney) {
+      const opCur =
+        def.currency_mode === "fixed"
+          ? resolveCurrencyCode(def.currency_code ?? null)
+          : stamp;
+      if (opCur != null) {
+        effConv.operandCurrency[`custom:${def.field_key}`] = opCur;
+      }
+    }
+  }
+  // Ciclo residual no banco: materializa null (e limpa carimbo obsoleto) — o
+  // topo-sort os deixou fora de `ordered`, então nunca há loop.
+  for (const def of formulaDefs) {
+    if (!cyclic.has(def.field_key)) continue;
+    out[def.field_key] = null;
+    const curKey = calcCurrencyKey(def.field_key);
+    if (Object.prototype.hasOwnProperty.call(customFields, curKey)) {
       out[curKey] = null;
     }
   }

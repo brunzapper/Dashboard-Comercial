@@ -1,4 +1,11 @@
-// Versão: 2.1 | Data: 15/07/2026
+// Versão: 2.2 | Data: 19/07/2026
+// v2.2 (19/07/2026): aninhamento de agregados — um campo 'calculado_agg' pode
+//   referenciar outro por ref plano custom:<key> (grupo AGG_NESTED_GROUP /
+//   aggNestedOperandRefs). resolveCalcMetric EXPANDE a fórmula em runtime
+//   (expandAggFormula: o ref vira a fórmula aninhada entre parênteses), então
+//   basisKeysFor/evalCalcMoney/foldBasis seguem operando só sobre agg:*/aggif:
+//   — nada muda nos RPCs. validateCondAggRefs aceita o ref aninhado fora de
+//   SOMASE/CONT.SE/MÉDIASE (dentro continua proibido: args são estruturais).
 // v2.1 (15/07/2026): ResolvedCalcMetric.percent — resultado percentual (campo
 //   calculado_agg com show_as_percent ou Metric.resultPercent do ad-hoc).
 // Métricas calculadas de AGREGADOS: fórmulas cujos operandos são agregações de
@@ -40,6 +47,7 @@ import {
   type Formula,
   type FormulaCmpOp,
 } from "@/lib/records/formulas";
+import { expandAggFormula } from "@/lib/records/formula-deps";
 import {
   ownCondOperands,
   type CustomCondField,
@@ -388,16 +396,21 @@ export interface ResolvedCalcMetric {
   percent: boolean;
 }
 
-/** Resolve fórmula/moeda da métrica calculada (ad-hoc ou reutilizável). */
+/** Resolve fórmula/moeda da métrica calculada (ad-hoc ou reutilizável). A
+ * fórmula devolvida já vem com o aninhamento de agregados EXPANDIDO
+ * (expandAggFormula) — todos os consumidores (basisKeysFor, evalCalcMoney,
+ * fold de subtotais) enxergam só refs `agg:` e `aggif:`. */
 export function resolveCalcMetric(
   m: Metric,
   fieldByKey: Map<string, FieldDefinition>
 ): ResolvedCalcMetric {
+  const expand = (f: Formula): Formula =>
+    expandAggFormula(f, (k) => fieldByKey.get(k));
   if (m.formula && m.formula.tokens.length > 0) {
     // Ad-hoc: `resultCurrency` passa a ser conversão REAL para a moeda (antes
     // era só rótulo de exibição) — consistente com o modo fixo dos campos.
     return {
-      formula: m.formula,
+      formula: expand(m.formula),
       mode: m.resultCurrency ? "fixed" : "none",
       code: m.resultCurrency ? resolveCurrencyCode(m.resultCurrency) : null,
       allowNegative: true,
@@ -422,7 +435,7 @@ export function resolveCalcMetric(
     };
   }
   return {
-    formula: def.formula,
+    formula: expand(def.formula),
     mode:
       def.currency_mode === "fixed"
         ? "fixed"
@@ -475,6 +488,30 @@ export function aggOperandRefs(
 export const COND_AGG_TARGET_GROUP = "Campos (SOMASE/MÉDIASE)";
 export const COND_AGG_COND_GROUP = "Condições (SOMASE/CONT.SE)";
 
+// Grupo dos campos 'calculado_agg' referenciáveis por OUTRO 'calculado_agg'
+// (aninhamento de agregados, 19/07/2026). Mesmo papel dos grupos acima:
+// validateCondAggRefs deriva o conjunto de refs aninhados válidos do catálogo.
+export const AGG_NESTED_GROUP = "Calculados (totais)";
+
+/**
+ * Operandos de ANINHAMENTO de agregados: cada campo 'calculado_agg' vira um
+ * ref plano `custom:<key>` (um agregado não tem Σ/Média de si — o valor JÁ é
+ * o resultado da fórmula no recorte). Em runtime o engine expande o ref para a
+ * fórmula do campo entre parênteses (expandAggFormula via resolveCalcMetric /
+ * runCalculatedWidget) — nada é materializado. O chamador exclui o próprio
+ * campo em edição + dependentes transitivos (ciclo). Compartilhado entre a
+ * página /campos e a validação do servidor.
+ */
+export function aggNestedOperandRefs(
+  fields: { field_key: string; label: string }[]
+): RefOption[] {
+  return fields.map((f) => ({
+    ref: `custom:${f.field_key}`,
+    label: f.label,
+    group: AGG_NESTED_GROUP,
+  }));
+}
+
 /**
  * Operandos extras que fórmulas AGREGADAS ganham com SOMASE/CONT.SE/MÉDIASE:
  * campos numéricos CRUS (alvo do 1º argumento — diferente dos agg:*, que já
@@ -524,6 +561,7 @@ export function validateCondAggRefs(
 ): { ok: boolean; error?: string } {
   const targets = new Set<string>();
   const conds = new Set<string>();
+  const nested = new Set<string>();
   for (const o of catalog) {
     // Campos numéricos (grupo alvo) também valem como coluna de CONDIÇÃO
     // (ex.: CONT.SE([Valor] > 1000)) — o SE() permite comparação numérica e a
@@ -532,12 +570,15 @@ export function validateCondAggRefs(
       targets.add(o.ref);
       conds.add(o.ref);
     } else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
+    else if (o.group === AGG_NESTED_GROUP) nested.add(o.ref);
   }
   const labelOf = (ref: string) =>
     catalog.find((o) => o.ref === ref)?.label ?? ref;
   const info = formulaCondAggInfo(formula);
   for (const ref of info.plainRefs) {
-    if (!ref.startsWith("agg:")) {
+    // Ref plano de 'calculado_agg' aninhado é válido FORA das funções
+    // condicionais (expandido em runtime); os demais planos, não.
+    if (!ref.startsWith("agg:") && !nested.has(ref)) {
       return {
         ok: false,
         error: `[${labelOf(ref)}] só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE — fora deles, use os operandos agregados (Σ, Média, Contagem).`,
