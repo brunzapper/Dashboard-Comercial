@@ -1,4 +1,9 @@
-// Versão: 3.2 | Data: 18/07/2026
+// Versão: 3.3 | Data: 18/07/2026
+// v3.3 (18/07/2026): "Formato do grupo" na tabela agregada
+//   (appearance.table.groupDateFormats, keys dim_<n>) — nível de data do
+//   "Agrupar por" funde/rotula por formato próprio (bucketGroupDate) e ordena
+//   cronologicamente, sem alterar a máscara das células. Só dims cujo valor
+//   ainda é ISO cru (sem transform "por nome"; guard via dateCols).
 // v3.2 (18/07/2026): fontes por métrica — as leituras de basis das calculadas
 //   passam a preferir __calcOpsBy[key] (basis POR MÉTRICA, universo próprio de
 //   Metric.sources) com fallback ao __calcOps compartilhado (comportamento
@@ -45,12 +50,17 @@ import { cn } from "@/lib/utils";
 import type {
   AppearanceSettings,
   ColorPair,
+  GroupDateFormat,
   Metric,
   TableAlign,
   VisualType,
   WidgetData,
   WidgetRow,
 } from "@/lib/widgets/types";
+import {
+  bucketGroupDate,
+  isGroupDateFormat,
+} from "@/lib/widgets/date-buckets";
 import {
   foldBreakdowns,
   formatMoney,
@@ -1524,6 +1534,28 @@ function AppearanceTable({
     dateCols.has(key) && looksLikeDate(v)
       ? formatDateValue(v, fmtOf(key))
       : v == null || v === "" ? "—" : String(v);
+  // "Formato do grupo" (t.groupDateFormats): override por nível do "Agrupar
+  // por". Só vale quando a célula ainda carrega o ISO cru — dims com transform
+  // "por nome" viram rótulo no engine, ficam fora de dateCols e o setting
+  // órfão fica inerte.
+  const groupFmtOf = (key: string): GroupDateFormat | undefined => {
+    const v = t.groupDateFormats?.[key];
+    return v && dateCols.has(key) && isGroupDateFormat(v) ? v : undefined;
+  };
+  // Célula de grupo: chave de fusão + rótulo + sort cronológico (só override).
+  // Sem override, k === label — chaves de nós/cores existentes inalteradas.
+  const groupCellOf = (
+    v: unknown,
+    key: string
+  ): { k: string; label: string; sort?: number } => {
+    const gf = groupFmtOf(key);
+    if (gf) {
+      const b = bucketGroupDate(v, gf);
+      return { k: b.key, label: b.label, sort: b.sort };
+    }
+    const label = groupLabelOf(v, key);
+    return { k: label, label };
+  };
   // Subtotal de uma métrica sobre um conjunto de linhas (soma; exato p/ count/sum,
   // aproximado p/ avg/min/max — ver plano).
   const sumMetric = (rs: Record<string, unknown>[], key: string) =>
@@ -1546,25 +1578,33 @@ function AppearanceTable({
     if (levels.length === 0)
       return rs.map((r) => ({ kind: "data" as const, row: r }));
     const [key, ...rest] = levels;
-    const byLabel = new Map<string, Record<string, unknown>[]>();
+    const byKey = new Map<
+      string,
+      { label: string; sort: number; rows: Record<string, unknown>[] }
+    >();
     const order: string[] = [];
     for (const r of rs) {
-      const label = groupLabelOf(r[key], key);
-      let arr = byLabel.get(label);
-      if (!arr) {
-        arr = [];
-        byLabel.set(label, arr);
-        order.push(label);
+      const cell = groupCellOf(r[key], key);
+      let g = byKey.get(cell.k);
+      if (!g) {
+        g = { label: cell.label, sort: cell.sort ?? 0, rows: [] };
+        byKey.set(cell.k, g);
+        order.push(cell.k);
       }
-      arr.push(r);
+      g.rows.push(r);
     }
+    // Com "Formato do grupo", ordena cronologicamente pelo sort do bucket
+    // (vazios "—" com Infinity por último); sem, ordem de inserção (linhas
+    // pré-ordenadas a montante).
+    if (groupFmtOf(key))
+      order.sort((a, b) => byKey.get(a)!.sort - byKey.get(b)!.sort);
     const items: GroupItem[] = [];
-    for (const label of order) {
-      const groupRows = byLabel.get(label)!;
-      const k = `${prefix}›${label}`;
-      items.push({ kind: "group", level: depth, key: k, label, rows: groupRows });
+    for (const gk of order) {
+      const g = byKey.get(gk)!;
+      const k = `${prefix}›${gk}`;
+      items.push({ kind: "group", level: depth, key: k, label: g.label, rows: g.rows });
       if (expanded.has(k))
-        items.push(...buildGroupItems(groupRows, rest, depth + 1, k));
+        items.push(...buildGroupItems(g.rows, rest, depth + 1, k));
     }
     return items;
   };
@@ -1960,33 +2000,38 @@ function AppearanceTable({
     ): TItem[] => {
       if (levels.length === 0) return [];
       const [key, ...rest] = levels;
-      const byLabel = new Map<string, Record<string, unknown>[]>();
+      const byKey = new Map<
+        string,
+        { label: string; sort: number; rows: Record<string, unknown>[] }
+      >();
       const order: string[] = [];
       for (const r of rs) {
-        const label = groupLabelOf(r[key], key);
-        let arr = byLabel.get(label);
-        if (!arr) {
-          arr = [];
-          byLabel.set(label, arr);
-          order.push(label);
+        const cell = groupCellOf(r[key], key);
+        let g = byKey.get(cell.k);
+        if (!g) {
+          g = { label: cell.label, sort: cell.sort ?? 0, rows: [] };
+          byKey.set(cell.k, g);
+          order.push(cell.k);
         }
-        arr.push(r);
+        g.rows.push(r);
       }
+      if (groupFmtOf(key))
+        order.sort((a, b) => byKey.get(a)!.sort - byKey.get(b)!.sort);
       const items: TItem[] = [];
-      for (const label of order) {
-        const groupRows = byLabel.get(label)!;
-        const k = `${prefix}›${label}`;
+      for (const gk of order) {
+        const g = byKey.get(gk)!;
+        const k = `${prefix}›${gk}`;
         const isLeaf = rest.length === 0;
         items.push({
           metricKey,
           level: depth,
-          label,
+          label: g.label,
           key: k,
-          rows: groupRows,
+          rows: g.rows,
           collapsible: !isLeaf,
         });
         if (!isLeaf && expanded.has(k))
-          items.push(...buildTItems(groupRows, rest, depth + 1, k, metricKey));
+          items.push(...buildTItems(g.rows, rest, depth + 1, k, metricKey));
       }
       return items;
     };
