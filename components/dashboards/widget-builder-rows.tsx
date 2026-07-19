@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 18/07/2026
+// Versão: 1.8 | Data: 18/07/2026
+// v1.8 (18/07/2026): DimensionRow ganha a lista "Fonte do dado" (colunas
+//   unificadas no modo registros, 2+ fontes candidatas): hierarquia ordenada
+//   de fontes com fallback (RecordListColumn.unifiedSources).
 // v1.7 (18/07/2026): MetricRow ganha o bloco recolhível "Fontes da métrica"
 //   (Metric.sources): a métrica é calculada sobre as fontes marcadas — pode
 //   AMPLIAR ou restringir em relação às fontes do widget (as linhas/registros
@@ -27,7 +30,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 import {
   AccordionContent,
@@ -145,6 +148,9 @@ export function DimensionRow({
   defaultLabel,
   isRecordList,
   columnAggValue,
+  unifiedSourceOptions,
+  unifiedSourcesValue,
+  onUnifiedSourcesChange,
   editable,
   writeBack,
   editableCapable,
@@ -164,6 +170,12 @@ export function DimensionRow({
   defaultLabel: string;
   isRecordList: boolean;
   columnAggValue?: DateAgg;
+  // "Fonte do dado" da coluna unificada (modo registros): fontes candidatas
+  // (membro do campo ∩ fontes do widget; só renderiza com 2+) e a hierarquia
+  // escolhida, em ordem de prioridade com fallback.
+  unifiedSourceOptions?: ComboboxOption[];
+  unifiedSourcesValue?: string[];
+  onUnifiedSourcesChange?: (list: string[]) => void;
   editable: boolean;
   writeBack: boolean;
   editableCapable: boolean;
@@ -255,6 +267,78 @@ export function DimensionRow({
             }}
             aria-label="Agregação por período"
           />
+        </div>
+      ) : null}
+      {isRecordList &&
+      dim.field.startsWith("unified:") &&
+      unifiedSourceOptions &&
+      unifiedSourceOptions.length > 1 ? (
+        <div className="flex flex-col gap-1">
+          <Label className="text-muted-foreground text-xs">Fonte do dado</Label>
+          {(unifiedSourcesValue ?? []).map((src, idx) => {
+            const list = unifiedSourcesValue ?? [];
+            const used = new Set(list.filter((_, i) => i !== idx));
+            const opts = unifiedSourceOptions.filter(
+              (o) => o.value === src || !used.has(o.value)
+            );
+            return (
+              <div key={idx} className="flex items-center gap-1.5">
+                <span className="text-muted-foreground w-5 shrink-0 text-right text-xs tabular-nums">
+                  {idx + 1}.
+                </span>
+                <Combobox
+                  className="h-8 flex-1 text-sm"
+                  searchable={false}
+                  options={opts}
+                  value={src}
+                  onValueChange={(v) =>
+                    onUnifiedSourcesChange?.(
+                      list.map((s, i) => (i === idx ? v : s))
+                    )
+                  }
+                  aria-label={`Fonte do dado — prioridade ${idx + 1}`}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-destructive size-8 shrink-0"
+                  onClick={() =>
+                    onUnifiedSourcesChange?.(list.filter((_, i) => i !== idx))
+                  }
+                  title="Remover fonte"
+                  aria-label={`Remover fonte ${idx + 1}`}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            );
+          })}
+          {(() => {
+            const list = unifiedSourcesValue ?? [];
+            const used = new Set(list);
+            const free = unifiedSourceOptions.find((o) => !used.has(o.value));
+            return (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={!free}
+                onClick={() =>
+                  free && onUnifiedSourcesChange?.([...list, free.value])
+                }
+              >
+                <Plus className="size-4" />
+                {list.length === 0 ? "Escolher fonte…" : "Adicionar fallback"}
+              </Button>
+            );
+          })()}
+          <p className="text-muted-foreground text-xs">
+            {(unifiedSourcesValue ?? []).length === 0
+              ? "Padrão: cada registro mostra o dado da própria fonte."
+              : "Busca o dado na 1ª fonte (do próprio registro ou do registro casado dela); vazio cai para a próxima."}
+          </p>
         </div>
       ) : null}
       {isRecordList && dim.field && editableCapable ? (

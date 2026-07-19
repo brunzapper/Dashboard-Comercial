@@ -1,4 +1,8 @@
-// Versão: 1.14 | Data: 18/07/2026
+// Versão: 1.15 | Data: 18/07/2026
+// v1.15 (18/07/2026): "Formato do grupo" estendido à tabela AGREGADA (níveis
+//   dim_<n> de data sem transform "por nome" — groupFormatEligible) e lista
+//   "Fonte do dado" por dimensão unificada no modo registros (hierarquia de
+//   fontes com fallback → RecordListColumn.unifiedSources, poda no save).
 // v1.14 (18/07/2026): "Formato do grupo" por nível do "Agrupar por" (listas de
 //   registros/entidades, colunas de data) — grava appearance.table.
 //   groupDateFormats; o grupo funde/rotula pelo formato escolhido sem alterar
@@ -88,7 +92,7 @@ import {
   validateFormula,
   type Formula,
 } from "@/lib/records/formulas";
-import { fieldAppliesToSource, type SourceKey } from "@/lib/sources";
+import { fieldAppliesToSource, toSourceKey, type SourceKey } from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import {
   Sheet,
@@ -176,6 +180,7 @@ import { ComparisonSection } from "@/components/dashboards/widget-builder-compar
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
+import { isLabelTransform } from "@/lib/widgets/date-buckets";
 import {
   createWidget,
   updateWidget,
@@ -527,6 +532,16 @@ export function WidgetBuilder({
     for (const c of widget?.settings?.columns ?? []) if (c.agg) m[c.field] = c.agg;
     return m;
   });
+  // Hierarquia de fontes das colunas unificadas (só modo registros): ordem de
+  // prioridade com fallback (RecordListColumn.unifiedSources).
+  const [columnUnifiedSources, setColumnUnifiedSources] = useState<
+    Record<string, SourceKey[]>
+  >(() => {
+    const m: Record<string, SourceKey[]> = {};
+    for (const c of widget?.settings?.columns ?? [])
+      if (c.unifiedSources?.length) m[c.field] = c.unifiedSources;
+    return m;
+  });
   // Editabilidade "legada": widgets antigos deixavam custom não calculado editável.
   const legacyEditable = (field: string) =>
     field.startsWith("custom:") &&
@@ -759,6 +774,18 @@ export function WidgetBuilder({
   // runtime ele é neutralizado pela interseção (applyFilterSourceTargets).
   const coveredSources =
     sources.length > 0 ? sources : catalog.map((s) => s.key);
+  // Fontes candidatas da hierarquia de uma coluna unificada: fontes-membro do
+  // campo ∩ fontes cobertas pelo widget. O seletor "Fonte do dado" só aparece
+  // com 2+ candidatas — com uma só, fica implícito o membro da própria fonte.
+  const unifiedSourceOptionsFor = (field: string): ComboboxOption[] => {
+    const members = available.find((a) => a.field === field)?.unifiedMembers;
+    if (!members) return [];
+    const eff = new Set<string>(coveredSources);
+    return Object.keys(members)
+      .map((rt) => toSourceKey(rt))
+      .filter((s): s is SourceKey => !!s && eff.has(s))
+      .map((s) => ({ value: s, label: catalogLabel(s) }));
+  };
   const filterSourceOptions = (f: WidgetFilter) => {
     const keys = new Set<SourceKey>([...coveredSources, ...filterTargetSources(f)]);
     return [...keys].map((k) => ({
@@ -1041,6 +1068,24 @@ export function WidgetBuilder({
       label: TRANSFORM_LABELS[tr],
     })),
   ];
+  // Dimensão por trás de uma key dim_<n> do "Agrupar por" agregado (mesmo
+  // índice de allGroupByOptions: dimensões com field, deslocadas por
+  // groupByOffset; dim_1 = Fonte no split → undefined).
+  const dimOfGroupKey = (key: string): Dimension | undefined => {
+    const m = key.match(/^dim_(\d+)$/);
+    return m
+      ? dimensions.filter((d) => d.field)[Number(m[1]) - 1 - groupByOffset]
+      : undefined;
+  };
+  // Nível elegível ao "Formato do grupo": lista → coluna de data; agregada →
+  // dimensão de data SEM transform "por nome" (o engine substitui o valor da
+  // linha pelo rótulo e o ISO cru não sobrevive na WidgetRow p/ re-bucketizar).
+  const groupFormatEligible = (level: string): boolean => {
+    if (!level) return false;
+    if (isRecordList) return isDate(level);
+    const d = dimOfGroupKey(level);
+    return !!d && isDate(d.field) && !isLabelTransform(d.transform);
+  };
 
   // Posição inicial de um widget NOVO: primeiro espaço livre w×h na aba destino
   // (cada aba é uma tela — só os widgets da mesma aba ocupam espaço). Aba
@@ -1487,6 +1532,17 @@ export function WidgetBuilder({
               const agg = columnAgg[d.field] ?? "individual";
               if (agg !== "individual") col.agg = agg;
             }
+            // Hierarquia de fontes (só colunas unificadas): poda às fontes
+            // candidatas vigentes e deduplica; com ≤1 candidata a escolha é
+            // implícita (membro da própria fonte) e nada é gravado.
+            if (d.field.startsWith("unified:")) {
+              const cand = unifiedSourceOptionsFor(d.field).map((o) => o.value);
+              const list = (columnUnifiedSources[d.field] ?? []).filter(
+                (s, i, arr) => cand.includes(s) && arr.indexOf(s) === i
+              );
+              if (cand.length > 1 && list.length > 0)
+                col.unifiedSources = list;
+            }
             return col;
           }),
       };
@@ -1526,16 +1582,14 @@ export function WidgetBuilder({
       const groupLevels = tableGroupBy
         .filter(Boolean)
         .filter((k) => !transposed || k !== effColDim);
-      // "Formato do grupo": só modo lista, só níveis vigentes que são colunas
-      // de data (poda automática de órfãos: nível removido/trocado, modo
-      // agregado, campo que deixou de ser data).
+      // "Formato do grupo": só níveis vigentes elegíveis (poda automática de
+      // órfãos: nível removido/trocado, campo/dimensão que deixou de ser data
+      // ou dimensão agregada que ganhou transform "por nome").
       const groupFmts: Record<string, GroupDateFormat> = {};
-      if (isRecordList) {
-        for (const k of groupLevels) {
-          const v = tableGroupFormats[k];
-          if (v && v !== "inherit" && isDate(k))
-            groupFmts[k] = v as GroupDateFormat;
-        }
+      for (const k of groupLevels) {
+        const v = tableGroupFormats[k];
+        if (v && v !== "inherit" && groupFormatEligible(k))
+          groupFmts[k] = v as GroupDateFormat;
       }
       if (Object.keys(groupFmts).length > 0)
         table.groupDateFormats = groupFmts;
@@ -2701,6 +2755,20 @@ export function WidgetBuilder({
                   defaultLabel={fieldLabel(d.field, available)}
                   isRecordList={isRecordList}
                   columnAggValue={columnAgg[d.field]}
+                  unifiedSourceOptions={
+                    isRecordList && d.field.startsWith("unified:")
+                      ? unifiedSourceOptionsFor(d.field)
+                      : undefined
+                  }
+                  unifiedSourcesValue={columnUnifiedSources[d.field] ?? []}
+                  onUnifiedSourcesChange={(list) =>
+                    setColumnUnifiedSources((prev) => {
+                      const next = { ...prev };
+                      if (list.length > 0) next[d.field] = list as SourceKey[];
+                      else delete next[d.field];
+                      return next;
+                    })
+                  }
                   editable={effEditable(d.field)}
                   writeBack={columnFlags[d.field]?.writeBack ?? false}
                   editableCapable={af?.editableCapable ?? false}
@@ -3023,10 +3091,11 @@ export function WidgetBuilder({
                               <Trash2 className="size-4" />
                             </Button>
                           </div>
-                          {/* Formato do GRUPO (só listas + coluna de data):
-                              funde/rotula o cabeçalho sem alterar o formato da
-                              dimensão nas linhas expandidas. */}
-                          {isRecordList && level && isDate(level) ? (
+                          {/* Formato do GRUPO (níveis de data): funde/rotula o
+                              cabeçalho sem alterar o formato da dimensão nas
+                              linhas expandidas. Na agregada, só dims SEM
+                              transform "por nome" (ver groupFormatEligible). */}
+                          {groupFormatEligible(level) ? (
                             <div className="flex items-center gap-1.5 pl-6 pr-9">
                               <Label className="text-muted-foreground shrink-0 text-xs font-normal">
                                 Formato do grupo
@@ -3072,16 +3141,11 @@ export function WidgetBuilder({
                             {isRecordList ? "colunas" : "dimensões"} em seções
                             recolhíveis com subtotais. Vários níveis criam uma
                             hierarquia (o 1º é o grupo principal, os demais aninham
-                            dentro). Os grupos abrem recolhidos por padrão.
-                            {isRecordList ? (
-                              <>
-                                {" "}
-                                Em níveis de data, o &quot;Formato do grupo&quot;
-                                funde os registros por esse período no cabeçalho
-                                (ex.: Mês/ano) — as linhas expandidas mantêm o
-                                formato da dimensão.
-                              </>
-                            ) : null}
+                            dentro). Os grupos abrem recolhidos por padrão. Em
+                            níveis de data, o &quot;Formato do grupo&quot; funde
+                            as linhas por esse período no cabeçalho (ex.:
+                            Mês/ano) — as linhas expandidas mantêm o formato da
+                            dimensão.
                           </>
                         )}
                       </p>

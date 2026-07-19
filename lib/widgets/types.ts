@@ -1,4 +1,8 @@
-// Versão: 1.8 | Data: 18/07/2026
+// Versão: 1.9 | Data: 18/07/2026
+// v1.9 (18/07/2026): groupDateFormats estendido à tabela AGREGADA (keys
+//   dim_<n>; só dims de data sem transform "por nome") e
+//   RecordListColumn.unifiedSources — hierarquia de fontes com fallback das
+//   colunas unificadas no modo lista (valor próprio ou do registro casado).
 // v1.8 (18/07/2026): formato de data do GRUPO — GroupDateFormat e
 //   AppearanceSettings.table.groupDateFormats (por nível do "Agrupar por" nas
 //   listas de registros/entidades; funde e rotula o grupo sem alterar o
@@ -336,6 +340,11 @@ export interface RecordListColumn {
   // Só p/ colunas de data: agrega o widget por período (ver DateAgg). Default
   // 'individual' (1 linha por registro). As demais colapsam por período.
   agg?: DateAgg;
+  // Só p/ colunas 'unified:': hierarquia de fontes com fallback. Por registro,
+  // o valor vem da 1ª fonte da lista com dado não-vazio — o próprio registro
+  // quando ele é da fonte, senão o registro CASADO dela (__match). Ausente/
+  // vazio = membro da fonte de cada registro (comportamento original).
+  unifiedSources?: SourceKey[];
 }
 // Fonte das linhas do modo lista: registros (default), responsáveis ou operações.
 // Campos personalizados não calculados editáveis gravam de volta na entidade
@@ -741,11 +750,13 @@ export interface AppearanceSettings {
     // (1º = grupo principal, demais aninhados). String = config antiga de 1
     // nível (ainda válida; ver groupByLevels em lib/widgets/appearance.ts).
     groupBy?: string | string[];
-    // Formato de data do GRUPO por nível do "Agrupar por" (só listas de
-    // registros/entidades). Chave = field do nível; valor = transform (funde
+    // Formato de data do GRUPO por nível do "Agrupar por". Chave = field do
+    // nível (listas) ou dim_<n> (tabela agregada); valor = transform (funde
     // por período: Mês/ano, Trimestre…) ou máscara (dd/mm/* funde por dia;
     // mm/aa por mês). Ausente = herda o formato da dimensão (comportamento
-    // original). Ignorado quando o field não está no groupBy ou não é de data.
+    // original). Ignorado quando o nível não está no groupBy, não é de data
+    // ou (agregada) a dimensão tem transform "por nome" — o engine troca o
+    // ISO da linha pelo rótulo e não sobra data crua p/ re-bucketizar.
     groupDateFormats?: Record<string, GroupDateFormat>;
     // Transposta: qual dimensão vira as colunas do topo. Mesma convenção de
     // chaves do groupBy (agregada `dim_<n>`; registros `<field>`). Ausente ou

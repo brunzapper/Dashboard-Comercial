@@ -1,4 +1,9 @@
-// Versão: 3.5 | Data: 18/07/2026
+// Versão: 3.6 | Data: 18/07/2026
+// v3.6 (18/07/2026): colunas unificadas — célula de dados resolve o membro via
+//   displayValue (o fallback coreDisplay mostrava "—") e hierarquia de fontes
+//   com fallback (RecordListColumn.unifiedSources): por registro, 1ª fonte da
+//   lista com valor não-vazio (própria ou registro casado via ref match:);
+//   moeda/máscara seguem o membro resolvido (matchText/metricCurrency).
 // v3.5 (18/07/2026): "Formato do grupo" (appearance.table.groupDateFormats) —
 //   nível de data do "Agrupar por" pode fundir/rotular por formato próprio
 //   (bucketGroupDate) sem alterar o formato da dimensão nas linhas expandidas.
@@ -304,16 +309,34 @@ export const RecordListTable = memo(function RecordListTable({
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const cols = applyManualOrder(baseCols, t.columnOrder, (c) => c.field);
 
-  // Campo unificado: resolve o MEMBRO da fonte de cada registro (espelha o
-  // coalesce do RPC); fonte sem membro → undefined (célula "—"). Os demais
-  // campos delegam direto ao resolvedor de refs concretos.
-  const resolveUnifiedRef = (field: string, r: RecordRow): string | null =>
-    field.startsWith("unified:")
-      ? unifiedMemberRef(
-          available.find((a) => a.field === field)?.unifiedMembers,
-          r.record_type
-        )
-      : field;
+  // Campo unificado: por padrão resolve o MEMBRO da fonte de cada registro
+  // (espelha o coalesce do RPC); fonte sem membro → undefined (célula "—").
+  // Com hierarquia de fontes configurada (RecordListColumn.unifiedSources),
+  // resolve POR REGISTRO na 1ª fonte da lista com valor não-vazio: valor
+  // próprio quando o registro é da fonte, senão o registro casado dela
+  // (ref match:<fonte>:<membro> → __match). Sem valor em nenhuma → 1º ref
+  // válido (célula "—"). Os demais campos delegam ao resolvedor concreto.
+  // Obs.: o pós-filtro de quick-filters (quick-filters.ts) segue resolvendo
+  // pela fonte do registro — config independente da coluna.
+  const resolveUnifiedRef = (field: string, r: RecordRow): string | null => {
+    if (!field.startsWith("unified:")) return field;
+    const members = available.find((a) => a.field === field)?.unifiedMembers;
+    const order = cols.find((c) => c.field === field)?.unifiedSources;
+    if (order?.length) {
+      let first: string | null = null;
+      for (const src of order) {
+        const mref = unifiedMemberRef(members, toRecordType(src));
+        if (!mref) continue; // fonte sem membro (setting órfão)
+        const ref =
+          toRecordType(src) === r.record_type ? mref : `match:${src}:${mref}`;
+        first ??= ref;
+        const v = rawRefValue(ref, r);
+        if (v != null && v !== "") return ref;
+      }
+      if (first) return first; // hierarquia toda vazia p/ este registro
+    }
+    return unifiedMemberRef(members, r.record_type);
+  };
   const rawValue = (field: string, record: RecordRow): unknown => {
     const ref = resolveUnifiedRef(field, record);
     return ref ? rawRefValue(ref, record) : undefined;
@@ -457,8 +480,23 @@ export const RecordListTable = memo(function RecordListTable({
   // Moeda de um valor de métrica num registro (calc-automático lê o carimbo por
   // valor "<key>__cur" com fallback p/ a moeda do registro).
   const metricCurrency = (field: string, r: RecordRow): string => {
-    // Unificado de moeda: a moeda segue o membro da fonte do registro.
+    // Unificado de moeda: a moeda segue o membro resolvido — da fonte do
+    // registro ou, com hierarquia de fontes, do registro CASADO (ref match:).
     const ref = resolveUnifiedRef(field, r) ?? field;
+    const mm = parseMatchField(ref);
+    if (mm) {
+      const mrec = r.__match?.[mm.src as keyof NonNullable<RecordRow["__match"]>];
+      if (mm.ref.startsWith("custom:")) {
+        const f = fieldByKey.get(mm.ref.slice(7));
+        if (f)
+          return resolveFieldMoney(
+            f,
+            mrec?.currency ?? null,
+            mrec?.custom_fields?.[calcCurrencyKey(f.field_key)]
+          ).code;
+      }
+      return resolveCurrencyCode(mrec?.currency);
+    }
     if (ref.startsWith("custom:")) {
       const f = fieldByKey.get(ref.slice(7));
       return f
@@ -628,8 +666,16 @@ export const RecordListTable = memo(function RecordListTable({
     isPercentFieldRef(field, fieldByKey);
 
   // Texto de exibição de um campo do registro casado (match:<fonte>:<ref>):
-  // formata data/moeda/texto conforme o tipo do ref subjacente.
-  const matchText = (field: string, r: RecordRow, decimals?: number): string => {
+  // formata data/moeda/texto conforme o tipo do ref subjacente. `decimals` =
+  // casas decimais da coluna (aparência); `fmtField` = coluna dona da máscara
+  // de data (difere de `field` quando uma coluna unificada resolve num ref
+  // match: — a máscara segue keada pela coluna).
+  const matchText = (
+    field: string,
+    r: RecordRow,
+    decimals?: number,
+    fmtField = field
+  ): string => {
     const mm = parseMatchField(field);
     if (!mm) return "—";
     const raw = rawValue(field, r);
@@ -637,7 +683,7 @@ export const RecordListTable = memo(function RecordListTable({
     const mrec = r.__match?.[mm.src as keyof NonNullable<RecordRow["__match"]>];
     if (mm.ref.startsWith("custom:")) {
       const f = fieldByKey.get(mm.ref.slice(7));
-      if (f?.data_type === "data") return formatDateValue(raw, fmtOf(field));
+      if (f?.data_type === "data") return formatDateValue(raw, fmtOf(fmtField));
       if (f) {
         const cur = resolveFieldMoney(
           f,
@@ -649,7 +695,7 @@ export const RecordListTable = memo(function RecordListTable({
       }
       return String(raw);
     }
-    if (DATE_FIELDS.has(mm.ref)) return formatDateValue(raw, fmtOf(field));
+    if (DATE_FIELDS.has(mm.ref)) return formatDateValue(raw, fmtOf(fmtField));
     if (MONEY_FIELDS.has(mm.ref))
       return formatMoney(raw, mrec?.currency ?? null, decimals);
     return String(raw);
@@ -814,21 +860,25 @@ export const RecordListTable = memo(function RecordListTable({
     }
     return s;
   };
-  // Rótulo de exibição de um valor (para o cabeçalho do grupo).
-  const displayValue = (field: string, r: RecordRow): string => {
-    // Unificado: exibe como o MEMBRO da fonte do registro (data/moeda/texto),
-    // honrando a máscara de data configurada na própria coluna unificada.
+  // Rótulo de exibição de um valor (cabeçalho do grupo — sem decimals — e
+  // célula unificada, que encaminha as casas decimais da coluna).
+  const displayValue = (field: string, r: RecordRow, decimals?: number): string => {
+    // Unificado: exibe como o MEMBRO resolvido (data/moeda/texto), honrando a
+    // máscara de data configurada na própria coluna unificada. Com hierarquia
+    // de fontes o ref pode ser do registro casado (match:) → formata pelo
+    // parceiro (matchText), mantendo a máscara keada pela coluna.
     if (field.startsWith("unified:")) {
       const ref = resolveUnifiedRef(field, r);
       if (!ref) return "—";
+      if (ref.startsWith("match:")) return matchText(ref, r, decimals, field);
       return ref.startsWith("custom:")
-        ? customText(fieldByKey.get(ref.slice(7)), r, field)
-        : coreDisplay(ref, r, fkLabels, fmtOf(field));
+        ? customText(fieldByKey.get(ref.slice(7)), r, field, decimals)
+        : coreDisplay(ref, r, fkLabels, fmtOf(field), decimals);
     }
     if (field.startsWith("custom:")) {
-      return customText(fieldByKey.get(field.slice(7)), r, field);
+      return customText(fieldByKey.get(field.slice(7)), r, field, decimals);
     }
-    return coreDisplay(field, r, fkLabels, fmtOf(field));
+    return coreDisplay(field, r, fkLabels, fmtOf(field), decimals);
   };
 
   // Exibição de uma coluna de data para agrupamento — idêntica à célula: honra o
@@ -1478,6 +1528,12 @@ export const RecordListTable = memo(function RecordListTable({
               ) : isCustom ? (
                 <span className={cellSpanClass}>
                   {customText(field, r, c.field, dec)}
+                </span>
+              ) : c.field.startsWith("unified:") ? (
+                // Unificada: resolve o membro/fonte antes de formatar — o
+                // fallback coreDisplay leria record["unified:…"] (inexistente).
+                <span className={cellSpanClass}>
+                  {displayValue(c.field, r, dec)}
                 </span>
               ) : (
                 <span className={cellSpanClass}>

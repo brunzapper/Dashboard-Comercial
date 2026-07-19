@@ -255,12 +255,20 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
-- **Formato do grupo nas listas** (18/07/2026):
-  `widgets.settings.appearance.table.groupDateFormats` (opcional, por field do
-  "Agrupar por") funde/rotula o grupo de uma coluna de data por formato próprio
-  (`bucketGroupDate`, `lib/widgets/date-buckets.ts`) sem alterar o formato da
-  dimensão nas linhas expandidas; client-side apenas (nada muda nos RPCs) e o
-  viewer de snapshot o honra por vir congelado no settings.
+- **Formato do grupo nas tabelas** (18/07/2026):
+  `widgets.settings.appearance.table.groupDateFormats` (opcional; chave = field
+  do nível nas listas, `dim_<n>` na agregada) funde/rotula o grupo de um nível
+  de data do "Agrupar por" por formato próprio (`bucketGroupDate`,
+  `lib/widgets/date-buckets.ts`) sem alterar o formato da dimensão nas linhas.
+  Na agregada só vale para dimensões SEM transform "por nome" (o engine troca o
+  ISO da linha pelo rótulo). Client-side apenas (nada muda nos RPCs) e o viewer
+  de snapshot honra por vir congelado no settings.
+- **Fonte do dado das colunas unificadas** (18/07/2026):
+  `RecordListColumn.unifiedSources` (opcional, modo registros) define uma
+  hierarquia de fontes com fallback: por registro, o valor vem da 1ª fonte da
+  lista com dado não-vazio — o próprio registro ou o registro CASADO dela
+  (`__match`, sempre anexado por `attachMatches`; snapshots usam
+  `snapshot_record_matches`). Ausente = membro da fonte de cada registro.
 - **Edição inline sem re-render global** (18/07/2026): a edição de célula
   (`updateRecordField`) NÃO chama `revalidatePath` — a célula é otimista
   (`components/registros/use-cell-commit.ts`) e a página reconcilia no cliente
