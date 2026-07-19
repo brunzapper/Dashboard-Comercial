@@ -1,4 +1,11 @@
-// Versão: 2.2 | Data: 19/07/2026
+// Versão: 2.3 | Data: 19/07/2026
+// v2.3 (19/07/2026): operandos com ESCOPO DE FONTE — ref `agg:<agg>:<campo>@<fonte>`
+//   agrega SÓ as linhas daquela fonte. Em runtime o ref é ABAIXADO
+//   (lowerSourceScopedOperands, nos mesmos choke points do expandAggFormula)
+//   para a chave condicional `aggif:` já existente, com o predicado da fonte
+//   (record_type =, + filtro da sub quando expressável) — reaproveita TODO o
+//   caminho das agregações condicionais; nada muda nos RPCs (invariantes 1/9/10).
+//   Ref bare (sem @) segue significando "todo o universo em escopo" (compat).
 // v2.2 (19/07/2026): aninhamento de agregados — um campo 'calculado_agg' pode
 //   referenciar outro por ref plano custom:<key> (grupo AGG_NESTED_GROUP /
 //   aggNestedOperandRefs). resolveCalcMetric EXPANDE a fórmula em runtime
@@ -46,14 +53,24 @@ import {
   type AggCondition,
   type Formula,
   type FormulaCmpOp,
+  type FormulaToken,
 } from "@/lib/records/formulas";
+import {
+  BUILTIN_SOURCES,
+  fieldAppliesToSource,
+  recordTypeOf,
+  rootSources,
+  sourcePredicate,
+  type SourceDef,
+  type SourceKey,
+} from "@/lib/sources";
 import { expandAggFormula } from "@/lib/records/formula-deps";
 import {
-  ownCondOperands,
+  allCondOperands,
   type CustomCondField,
 } from "@/lib/records/cond-operands";
 import {
-  ownDateOperands,
+  allDateOperands,
   TODAY_REF,
   type CustomDateField,
 } from "@/lib/records/date-operands";
@@ -71,14 +88,114 @@ import type { Aggregation, FilterOp, Metric, WidgetFilter } from "./types";
 // própria métrica). Nunca é enviado ao RPC.
 export const CALC_METRIC_FIELD = "calc:formula";
 
-// agg:<sum|avg|count>:<field>. field pode conter ':' (ex.: custom:forecast); por
-// isso o tipo de agregação vem PRIMEIRO e o field é o resto.
-export function parseAggRef(ref: string): { agg: Aggregation; field: string } {
+// agg:<sum|avg|count>:<field>[@<fonte>]. field pode conter ':' (ex.:
+// custom:forecast); por isso o tipo de agregação vem PRIMEIRO e o field é o
+// resto. O sufixo opcional `@<fonte>` (v2.3) é o ESCOPO DE FONTE do operando —
+// split no ÚLTIMO '@' (keys de fonte/campo são slugs, '@' não ocorre nelas).
+// Ausente => operando sem escopo (todo o universo em escopo do widget/métrica).
+export function parseAggRef(ref: string): {
+  agg: Aggregation;
+  field: string;
+  source?: SourceKey;
+} {
   const rest = ref.slice("agg:".length);
   const idx = rest.indexOf(":");
   const agg = (idx === -1 ? rest : rest.slice(0, idx)) as Aggregation;
-  const field = idx === -1 ? "*" : rest.slice(idx + 1);
-  return { agg, field };
+  let field = idx === -1 ? "*" : rest.slice(idx + 1);
+  const at = field.lastIndexOf("@");
+  if (at === -1) return { agg, field };
+  const source = field.slice(at + 1);
+  field = field.slice(0, at);
+  return source ? { agg, field, source } : { agg, field };
+}
+
+// --- Abaixamento dos operandos com escopo de fonte (v2.3) ---------------------
+// Um ref `agg:<agg>:<campo>@<fonte>` vira, em runtime, a chave condicional
+// `aggif:` cujo predicado é o da FONTE: `record_type = <rt>` (raiz) mais o
+// filtro da sub-fonte quando expressável como `[Coluna] op literal`. Assim o
+// operando cai no MESMO caminho das agregações condicionais (consulta extra com
+// filtros anexados; fold aditivo exato em subtotais) — os RPCs ficam intocados.
+
+// Operadores de WidgetFilter expressáveis como condição `[Coluna] op literal`.
+const SCOPE_FILTER_OPS: Partial<Record<FilterOp, FormulaCmpOp>> = {
+  eq: "=",
+  neq: "<>",
+  gt: ">",
+  gte: ">=",
+  lt: "<",
+  lte: "<=",
+};
+
+/**
+ * Predicado de escopo de uma fonte como AggCondition[] — ou null quando o
+ * filtro da sub-fonte usa operador não expressável (in/is_null/ilike…): melhor
+ * operando ausente ("—") do que recorte silenciosamente mais largo que a sub.
+ */
+export function sourceScopeConds(
+  key: SourceKey,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): AggCondition[] | null {
+  const conds: AggCondition[] = [
+    { ref: "record_type", op: "=", value: recordTypeOf(key, sources) },
+  ];
+  for (const f of sourcePredicate(key, sources)) {
+    const op = SCOPE_FILTER_OPS[f.op];
+    const v = f.value;
+    if (
+      !op ||
+      (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean")
+    ) {
+      return null;
+    }
+    conds.push({ ref: f.field, op, value: v });
+  }
+  return conds;
+}
+
+/**
+ * Abaixa os operandos com escopo de fonte da fórmula (refs `agg:…@<fonte>`)
+ * para chaves condicionais `aggif:` (tokens de campo com a chave como ref;
+ * `avg` vira `( sum / count )` — reusa a guarda de divisão por zero do
+ * avaliador). Fórmula sem escopo retorna o MESMO objeto (fast path). Rodar nos
+ * choke points, logo após expandAggFormula (resolveCalcMetric /
+ * runCalculatedWidget); como no expand, `source` (texto) é descartado —
+ * transiente de runtime, o round-trip do editor usa a fórmula persistida.
+ */
+export function lowerSourceScopedOperands(
+  formula: Formula,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): Formula {
+  const scoped = (t: FormulaToken): boolean =>
+    t.kind === "field" &&
+    t.ref.startsWith("agg:") &&
+    parseAggRef(t.ref).source != null;
+  if (!formula.tokens.some(scoped)) return formula;
+  const tokens: FormulaToken[] = [];
+  for (const t of formula.tokens) {
+    if (!scoped(t) || t.kind !== "field") {
+      tokens.push(t);
+      continue;
+    }
+    const { agg, field, source } = parseAggRef(t.ref);
+    const conds = source ? sourceScopeConds(source, sources) : null;
+    // Sem predicado expressável, ou agregação fora de sum/count/avg (min/max não
+    // têm forma condicional): mantém o ref com escopo — basisKeysFor/buildCtx o
+    // resolvem para null (operando ausente), nunca para a basis SEM escopo.
+    if (!conds || (agg !== "sum" && agg !== "count" && agg !== "avg")) {
+      tokens.push(t);
+      continue;
+    }
+    if (agg === "avg") {
+      tokens.push({ kind: "lparen" });
+      tokens.push({ kind: "field", ref: condAggKey({ agg: "sum", field, conds }) });
+      tokens.push({ kind: "op", op: "/" });
+      tokens.push({ kind: "field", ref: condAggKey({ agg: "count", field, conds }) });
+      tokens.push({ kind: "rparen" });
+    } else {
+      tokens.push({ kind: "field", ref: condAggKey({ agg, field, conds }) });
+    }
+  }
+  return { tokens };
 }
 
 // Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando
@@ -117,12 +234,21 @@ export function isMoneyOperandField(
 }
 
 /** Chaves de basis (somas/contagens canônicas) que a fórmula precisa. Inclui
- * as chaves CONDICIONAIS ("aggif:...") de SOMASE/CONT.SE/MÉDIASE. */
+ * as chaves CONDICIONAIS ("aggif:...") de SOMASE/CONT.SE/MÉDIASE — e, desde a
+ * v2.3, chaves `aggif:` que aparecem como REF de token (operandos com escopo de
+ * fonte já abaixados por lowerSourceScopedOperands). */
 export function basisKeysFor(formula: Formula): BasisKey[] {
   const keys = new Set<BasisKey>();
   for (const ref of formulaRefs(formula)) {
+    if (ref.startsWith("aggif:")) {
+      keys.add(ref);
+      continue;
+    }
     if (!ref.startsWith("agg:")) continue;
-    const { agg, field } = parseAggRef(ref);
+    const { agg, field, source } = parseAggRef(ref);
+    // Ref com escopo NÃO abaixado (predicado de sub inexpressável / caminho sem
+    // lowering): nunca cair na basis SEM escopo — operando ausente.
+    if (source) continue;
     if (agg === "sum") keys.add(`sum:${field}`);
     else if (agg === "count") keys.add(`count:${field}`);
     else if (agg === "avg") {
@@ -322,11 +448,21 @@ export function evalCalcMoney(
   const buildCtx = (b: BasisValues): Record<string, number | null> => {
     const ctx: Record<string, number | null> = {};
     for (const ref of formulaRefs(formula)) {
+      if (ref.startsWith("aggif:")) {
+        // Operando com escopo de fonte abaixado (v2.3): a chave condicional É o
+        // ref do token — lê a basis diretamente.
+        ctx[ref] = operand(b[ref]);
+        continue;
+      }
       if (!ref.startsWith("agg:")) {
         ctx[ref] = null; // ref desconhecida (ex.: table:* legada) → operando ausente
         continue;
       }
-      const { agg, field } = parseAggRef(ref);
+      const { agg, field, source } = parseAggRef(ref);
+      if (source) {
+        ctx[ref] = null; // escopo não abaixado → ausente (nunca a basis sem escopo)
+        continue;
+      }
       if (agg === "sum") ctx[ref] = operand(b[`sum:${field}`]);
       else if (agg === "count") ctx[ref] = operand(b[`count:${field}`]);
       else {
@@ -398,14 +534,21 @@ export interface ResolvedCalcMetric {
 
 /** Resolve fórmula/moeda da métrica calculada (ad-hoc ou reutilizável). A
  * fórmula devolvida já vem com o aninhamento de agregados EXPANDIDO
- * (expandAggFormula) — todos os consumidores (basisKeysFor, evalCalcMoney,
- * fold de subtotais) enxergam só refs `agg:` e `aggif:`. */
+ * (expandAggFormula) e os operandos com escopo de fonte ABAIXADOS
+ * (lowerSourceScopedOperands) — todos os consumidores (basisKeysFor,
+ * evalCalcMoney, fold de subtotais) enxergam só refs `agg:` e `aggif:`.
+ * `sources` = catálogo de fontes; o default (builtins) resolve fontes raiz
+ * (builtin e dinâmicas, por identidade) — só sub-fontes exigem o catálogo vivo. */
 export function resolveCalcMetric(
   m: Metric,
-  fieldByKey: Map<string, FieldDefinition>
+  fieldByKey: Map<string, FieldDefinition>,
+  sources: SourceDef[] = BUILTIN_SOURCES
 ): ResolvedCalcMetric {
   const expand = (f: Formula): Formula =>
-    expandAggFormula(f, (k) => fieldByKey.get(k));
+    lowerSourceScopedOperands(
+      expandAggFormula(f, (k) => fieldByKey.get(k)),
+      sources
+    );
   if (m.formula && m.formula.tokens.length > 0) {
     // Ad-hoc: `resultCurrency` passa a ser conversão REAL para a moeda (antes
     // era só rótulo de exibição) — consistente com o modo fixo dos campos.
@@ -482,6 +625,54 @@ export function aggOperandRefs(
   ];
 }
 
+// Item de campo p/ os operandos com escopo de fonte: `appliesTo` (record_types)
+// decide sob quais fontes o campo é oferecido (ausente/vazio = todas).
+export interface ScopedAggField {
+  field: string;
+  label: string;
+  appliesTo?: string[] | null;
+}
+
+/**
+ * Operandos de agregação COM ESCOPO DE FONTE (v2.3): para cada fonte RAIZ do
+ * catálogo, uma variante `agg:<agg>:<campo>@<fonte>` de cada operando de
+ * aggOperandRefs cujo campo se aplica à fonte. O rótulo é ÚNICO e load-bearing
+ * (`… · <rótulo curto da fonte>`) — round-trip texto⇄tokens e validação do
+ * servidor casam por ele, então editores e servidor DEVEM usar o MESMO catálogo
+ * de fontes (loadSources). `chips`/`sourceHint` já saem preenchidos — NÃO
+ * passar por decorateRefOptions (o strip de `agg:` não enxerga o `@fonte`;
+ * decorate ignora refs fora do catálogo de campos, então é inofensivo).
+ */
+export function sourceScopedAggOperandRefs(
+  numericFields: ScopedAggField[],
+  countableFields: ScopedAggField[] = [],
+  sources: SourceDef[] = BUILTIN_SOURCES
+): RefOption[] {
+  const out: RefOption[] = [];
+  for (const src of rootSources(sources)) {
+    const applies = (f: ScopedAggField): boolean =>
+      fieldAppliesToSource(f.appliesTo ?? null, src.key, sources);
+    const group = `Registros · ${src.shortLabel}`;
+    const push = (ref: string, label: string) =>
+      out.push({
+        ref,
+        label: `${label} · ${src.shortLabel}`,
+        group,
+        chips: [src.key],
+        sourceHint: src.shortLabel,
+      });
+    push(`agg:count:*@${src.key}`, "Contagem de registros");
+    for (const f of countableFields.filter(applies)) {
+      push(`agg:count:${f.field}@${src.key}`, `Contagem de ${f.label}`);
+    }
+    for (const f of numericFields.filter(applies)) {
+      push(`agg:sum:${f.field}@${src.key}`, `Σ ${f.label}`);
+      push(`agg:avg:${f.field}@${src.key}`, `Média ${f.label}`);
+    }
+  }
+  return out;
+}
+
 // Grupos dos operandos extras de SOMASE/CONT.SE/MÉDIASE no catálogo agregado —
 // usados para derivar os conjuntos de validação (validateCondAggRefs) do mesmo
 // catálogo que o editor mostra, sem lista paralela.
@@ -516,16 +707,22 @@ export function aggNestedOperandRefs(
  * Operandos extras que fórmulas AGREGADAS ganham com SOMASE/CONT.SE/MÉDIASE:
  * campos numéricos CRUS (alvo do 1º argumento — diferente dos agg:*, que já
  * chegam agregados; também valem como coluna de condição, ex.:
- * CONT.SE([Valor] > 1000)) e colunas de condição (texto/seleção/booleano +
- * datas do próprio registro; a condição sempre compara com um literal, ex.:
- * [Etapa] = "Ganho"). Fora do catálogo na v1: refs match:/unified: e "Data
- * atual" (today não é coluna no banco — o filtro SQL não o conhece).
- * Compartilhado entre os editores e a validação do servidor.
+ * CONT.SE([Valor] > 1000)) e colunas de condição — texto/seleção/booleano +
+ * datas, do próprio registro E do registro CASADO (match:<fonte>:<ref> —
+ * 19/07/2026: o loop de filtro dos RPCs já resolve match:/unified: via
+ * _widget_match_expr/_widget_unified_expr, então a exclusão da v1 era só
+ * escopo). `unifiedCondFields` (unified:<key> de texto/seleção/data) entra
+ * quando o chamador tem as correspondências. "Data atual" segue FORA (today
+ * não é coluna no banco — o filtro SQL não o conhece; ver a mensagem dedicada
+ * em validateCondAggRefs). A condição sempre compara com um literal, ex.:
+ * [Etapa] = "Ganho". Compartilhado entre os editores e a validação do servidor.
  */
 export function condAggOperandRefs(
   rawNumericFields: { field: string; label: string }[],
   customCondFields: CustomCondField[],
-  customDateFields: CustomDateField[]
+  customDateFields: CustomDateField[],
+  sources: SourceDef[] = BUILTIN_SOURCES,
+  unifiedCondFields: { field: string; label: string }[] = []
 ): RefOption[] {
   return [
     ...rawNumericFields.map((f) => ({
@@ -533,18 +730,21 @@ export function condAggOperandRefs(
       label: f.label,
       group: COND_AGG_TARGET_GROUP,
     })),
-    ...ownCondOperands(customCondFields).map((o) => ({
+    ...allCondOperands(customCondFields, sources).map((o) => ({
       ref: o.ref,
       label: o.label,
       group: COND_AGG_COND_GROUP,
     })),
-    ...ownDateOperands(customDateFields)
-      .filter((o) => o.ref !== TODAY_REF)
-      .map((o) => ({
-        ref: o.ref,
-        label: o.label,
-        group: COND_AGG_COND_GROUP,
-      })),
+    ...allDateOperands(customDateFields, sources).map((o) => ({
+      ref: o.ref,
+      label: o.label,
+      group: COND_AGG_COND_GROUP,
+    })),
+    ...unifiedCondFields.map((f) => ({
+      ref: f.field,
+      label: f.label,
+      group: COND_AGG_COND_GROUP,
+    })),
   ];
 }
 
@@ -559,6 +759,17 @@ export function validateCondAggRefs(
   formula: Formula,
   catalog: RefOption[]
 ): { ok: boolean; error?: string } {
+  // "Data atual" NUNCA compila em fórmula agregada: today não é coluna no
+  // banco — como condição, o filtro SQL não o conhece (o RPC rejeitaria e o
+  // valor degradaria para "—" SILENCIOSO). Fica no catálogo (visível/tokeniza)
+  // e recebe esta mensagem dedicada em vez do genérico. (19/07/2026)
+  if (formulaRefs(formula).includes(TODAY_REF)) {
+    return {
+      ok: false,
+      error:
+        '"Data atual" não funciona em fórmulas agregadas — a comparação roda no banco, que não conhece "hoje". Compare uma coluna de data com uma data fixa (ex.: [Data de fechamento] >= "2026-01-01").',
+    };
+  }
   const targets = new Set<string>();
   const conds = new Set<string>();
   const nested = new Set<string>();
@@ -577,8 +788,11 @@ export function validateCondAggRefs(
   const info = formulaCondAggInfo(formula);
   for (const ref of info.plainRefs) {
     // Ref plano de 'calculado_agg' aninhado é válido FORA das funções
-    // condicionais (expandido em runtime); os demais planos, não.
-    if (!ref.startsWith("agg:") && !nested.has(ref)) {
+    // condicionais (expandido em runtime); os demais planos, não. Chave
+    // `aggif:` avulsa (operando com escopo JÁ abaixado) também é agregada —
+    // a validação normal roda sobre a fórmula persistida (`agg:…@fonte`), mas
+    // a forma abaixada deve permanecer válida por simetria.
+    if (!ref.startsWith("agg:") && !ref.startsWith("aggif:") && !nested.has(ref)) {
       return {
         ok: false,
         error: `[${labelOf(ref)}] só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE — fora deles, use os operandos agregados (Σ, Média, Contagem).`,

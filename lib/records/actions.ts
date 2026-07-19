@@ -47,6 +47,7 @@ import {
   currencyFieldMapsFromRows,
   customDateKeysFromRows,
   formulaDefsFromRows,
+  formulaRefs,
   type CalcFieldRow,
 } from "@/lib/records/formulas";
 import { loadCurrencyRates } from "@/lib/widgets/currency";
@@ -145,6 +146,10 @@ interface CalcCoreValues {
   closed_at: string | null;
   opened_at: string | null;
   source_created_at: string | null;
+  // Relações (UUIDs efetivos). Em fórmulas comparam por NOME — applyCalcFields
+  // resolve id→display_name quando alguma fórmula as referencia (19/07/2026).
+  responsible_id?: unknown;
+  operation_id?: unknown;
 }
 
 // Recomputa os campos calculados sobre os valores efetivos e grava em `custom`
@@ -186,6 +191,31 @@ async function applyCalcFields(
     custom,
     customDateKeysFromRows(defRows)
   );
+  // Relações por NOME (19/07/2026): [Responsável]/[Operação] comparam com o
+  // display_name — resolve o UUID efetivo só quando alguma fórmula referencia.
+  const refsAll = new Set(
+    formulaDefs.flatMap((d) => (d.formula ? formulaRefs(d.formula) : []))
+  );
+  const fkNameOf = async (
+    table: "responsibles" | "operations",
+    col: "display_name" | "name",
+    id: unknown
+  ): Promise<string | null> => {
+    if (id == null || id === "") return null;
+    const { data } = await supabase
+      .from(table)
+      .select(col)
+      .eq("id", String(id))
+      .maybeSingle();
+    const rec = data as Record<string, unknown> | null;
+    return rec ? ((rec[col] as string | null) ?? null) : null;
+  };
+  const responsibleName = refsAll.has("responsible_id")
+    ? await fkNameOf("responsibles", "display_name", core.responsible_id)
+    : null;
+  const operationName = refsAll.has("operation_id")
+    ? await fkNameOf("operations", "name", core.operation_id)
+    : null;
   const calc = computeFormulaFields(
     {
       value: numOrNull(core.value),
@@ -201,6 +231,8 @@ async function applyCalcFields(
       channel: core.channel,
       currency: core.currency,
       closed: core.closed,
+      responsible_id: responsibleName,
+      operation_id: operationName,
     },
     custom,
     formulaDefs,
@@ -393,6 +425,8 @@ export async function updateRecord(
         closed_at: existing.closed_at,
         opened_at: (eff("opened_at") as string | null) ?? null,
         source_created_at: existing.source_created_at,
+        responsible_id: eff("responsible_id"),
+        operation_id: eff("operation_id"),
       },
       custom,
       (defs ?? []) as CalcFieldRow[]
@@ -835,6 +869,8 @@ export async function createRecord(
       closed_at: (row.closed_at as string | null) ?? null,
       opened_at: (row.opened_at as string | null) ?? null,
       source_created_at: now,
+      responsible_id: row.responsible_id ?? null,
+      operation_id: row.operation_id ?? null,
     },
     custom,
     (defs ?? []) as CalcFieldRow[]

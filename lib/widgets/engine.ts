@@ -563,6 +563,62 @@ export async function fetchFkLabels(
   return map;
 }
 
+// Relações aceitas como condição de SOMASE/CONT.SE por NOME (19/07/2026):
+// [Responsável] = "Paulo" — o literal digitado é o nome, mas a coluna guarda o
+// UUID; resolveFkCondFilters troca o literal pelo id ANTES do RPC.
+const FK_COND_TABLES: Record<string, { table: string; col: string }> = {
+  responsible_id: { table: "responsibles", col: "display_name" },
+  operation_id: { table: "operations", col: "name" },
+};
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// UUID sintático impossível: nome não encontrado → recorte vazio (contagem 0,
+// mesma semântica de "= nome que não existe"); o erro amigável é do SAVE.
+const FK_NO_MATCH = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Resolve literais de NOME nos filtros de condição sobre relações
+ * (responsible_id/operation_id) para o UUID correspondente (case-insensitive +
+ * trim — mesma normalização do eq_ci). Valor já em forma de UUID passa intacto;
+ * sem filtro de relação, retorna a MESMA lista (fast path). Uma consulta por
+ * tabela referenciada.
+ */
+export async function resolveFkCondFilters(
+  supabase: SupabaseClient,
+  filters: WidgetFilter[]
+): Promise<WidgetFilter[]> {
+  const needsFor = (field: string) =>
+    filters.some(
+      (f) =>
+        f.field === field && typeof f.value === "string" && !UUID_RE.test(f.value)
+    );
+  if (!Object.keys(FK_COND_TABLES).some(needsFor)) return filters;
+  const norm = (s: string) => s.trim().toLocaleLowerCase("pt-BR");
+  const maps = new Map<string, Map<string, string>>();
+  for (const [field, cfg] of Object.entries(FK_COND_TABLES)) {
+    if (!needsFor(field)) continue;
+    // Select literal por tabela (o parser de tipos do supabase-js não entende
+    // coluna interpolada).
+    const { data } =
+      field === "responsible_id"
+        ? await supabase.from("responsibles").select("id, display_name")
+        : await supabase.from("operations").select("id, name");
+    const m = new Map<string, string>();
+    for (const r of (data ?? []) as unknown as Record<string, unknown>[]) {
+      const name = norm(String(r[cfg.col] ?? ""));
+      if (name && !m.has(name)) m.set(name, String(r.id));
+    }
+    maps.set(field, m);
+  }
+  return filters.map((f) => {
+    const m = maps.get(f.field);
+    if (!m || typeof f.value !== "string" || UUID_RE.test(f.value)) return f;
+    return { ...f, value: m.get(norm(f.value)) ?? FK_NO_MATCH };
+  });
+}
+
 // KPI com meta ou razão (Fase 6B). Retorna WidgetData.kpi.
 async function runKpi(
   supabase: SupabaseClient,
@@ -820,7 +876,9 @@ async function runWidgetByPeriod(
   period: DashboardPeriod | null | undefined,
   fieldByKey: Map<string, FieldDefinition>,
   rates: CurrencyRates,
-  conversionPeriod: ConversionYQ
+  conversionPeriod: ConversionYQ,
+  // Catálogo de fontes p/ abaixar operandos com escopo (`agg:…@<fonte>`).
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): Promise<WidgetData> {
   const dims: Dimension[] = config.splitBySource
     ? [{ field: "record_type" }, ...config.dimensions]
@@ -845,7 +903,8 @@ async function runWidgetByPeriod(
   // documentada; o fetch extra é que carrega os mocks da perna).
   const { defaultIdx, legs } = partitionMetricLegs(
     config.metrics,
-    config.sources
+    config.sources,
+    fieldByKey
   );
   const legByIdx = new Map<number, { sources: SourceKey[]; idx: number[] }>();
   for (const l of legs) for (const i of l.idx) legByIdx.set(i, l);
@@ -1042,7 +1101,8 @@ async function runWidgetByPeriod(
   // 'individual' o grupo é 1 registro (basis do próprio registro).
   const calcResolved = new Map<number, ResolvedCalcMetric>();
   config.metrics.forEach((m, mi) => {
-    if (isCalcMetric(m, fieldByKey)) calcResolved.set(mi, resolveCalcMetric(m, fieldByKey));
+    if (isCalcMetric(m, fieldByKey))
+      calcResolved.set(mi, resolveCalcMetric(m, fieldByKey, catalog));
   });
   const calcBasisKeys = [
     ...new Set(
@@ -1053,6 +1113,41 @@ async function runWidgetByPeriod(
   ];
   const calcMeta = (rc: ResolvedCalcMetric): CalcMoneyMeta =>
     calcMoneyMeta(rc, rates, conversionPeriod);
+  // Condição sobre RELAÇÃO compara por NOME (19/07/2026): pré-carrega os
+  // rótulos id→nome das relações referenciadas em condições e traduz na leitura.
+  const condFkRefs = new Set<string>();
+  for (const key of calcBasisKeys) {
+    const cond = parseCondBasisKey(key);
+    for (const c of cond?.conds ?? []) {
+      if (c.ref === "responsible_id" || c.ref === "operation_id")
+        condFkRefs.add(c.ref);
+    }
+  }
+  const condFkLabels: Record<string, string> = {};
+  for (const ref of condFkRefs) {
+    const ids = Array.from(
+      new Set(
+        [...records, ...extraRecords]
+          .map((r) => (r as unknown as Record<string, unknown>)[ref])
+          .filter((v): v is string => typeof v === "string" && v !== "")
+      )
+    );
+    Object.assign(
+      condFkLabels,
+      await fetchFkLabels(
+        supabase,
+        ref === "responsible_id" ? "responsible" : "operation",
+        ids
+      )
+    );
+  }
+  const condRawValue = (ref: string, r: RecordRow): unknown => {
+    const v = rawValue(ref, r);
+    if (ref === "responsible_id" || ref === "operation_id") {
+      return v == null ? null : (condFkLabels[String(v)] ?? v);
+    }
+    return v;
+  };
   const basisFromRecords = (rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
     for (const key of calcBasisKeys) {
@@ -1060,7 +1155,9 @@ async function runWidgetByPeriod(
       // grupo às condições e reusa a mesma lógica de contagem/soma/moeda.
       const cond = parseCondBasisKey(key);
       const recs = cond
-        ? rs.filter((r) => recordMatchesConds((ref) => rawValue(ref, r), cond.conds))
+        ? rs.filter((r) =>
+            recordMatchesConds((ref) => condRawValue(ref, r), cond.conds)
+          )
         : rs;
       const bm = cond ? cond.metric : basisMetric(key);
       if (bm.agg === "count") {
@@ -1360,7 +1457,8 @@ export async function runWidget(
       period,
       fieldByKey,
       rates,
-      conversionPeriod
+      conversionPeriod,
+      catalog
     );
   }
 
@@ -1436,7 +1534,8 @@ export async function runWidget(
   // rpcMetrics === config.metrics e nada muda.
   const calcResolved = new Map<number, ResolvedCalcMetric>();
   config.metrics.forEach((m, i) => {
-    if (isCalcMetric(m, fieldByKey)) calcResolved.set(i, resolveCalcMetric(m, fieldByKey));
+    if (isCalcMetric(m, fieldByKey))
+      calcResolved.set(i, resolveCalcMetric(m, fieldByKey, catalog));
   });
 
   // Fontes por métrica (18/07/2026): particiona as métricas entre a consulta
@@ -1445,7 +1544,8 @@ export async function runWidget(
   // legs = [] e tudo abaixo se comporta byte a byte como antes.
   const { defaultIdx, legs } = partitionMetricLegs(
     config.metrics,
-    config.sources
+    config.sources,
+    fieldByKey
   );
   const defaultIdxSet = new Set(defaultIdx);
 
@@ -1540,13 +1640,15 @@ export async function runWidget(
     const condPromise = Promise.all(
       [...condGroups.values()].map(async (g) => {
         try {
+          // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
+          const condExtra = await resolveFkCondFilters(supabase, g.filters);
           const { data: condData, error: condError } = await supabase.rpc(
             "run_widget_query",
             {
               p_source: config.source,
               p_dimensions: dims,
               p_metrics: g.keys.map(basisMetric),
-              p_filters: [...filters, ...g.filters],
+              p_filters: [...filters, ...condExtra],
               p_correspondences: correspondencesMap,
             }
           );
@@ -1743,13 +1845,16 @@ export async function runWidget(
       const legCondP = Promise.all(
         [...condGroups.values()].map(async (g) => {
           try {
+            // Condição sobre relação por NOME → resolve p/ UUID antes do RPC
+            // (mesmo tratamento da auxiliar de condição da consulta principal).
+            const condExtra = await resolveFkCondFilters(supabase, g.filters);
             const { data: condData, error: condError } = await supabase.rpc(
               "run_widget_query",
               {
                 p_source: config.source,
                 p_dimensions: dims,
                 p_metrics: g.keys.map(basisMetric),
-                p_filters: [...legFilters, ...g.filters],
+                p_filters: [...legFilters, ...condExtra],
                 p_correspondences: legCorr,
               }
             );

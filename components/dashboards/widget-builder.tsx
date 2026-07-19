@@ -164,12 +164,16 @@ import {
   metricTargetSources,
 } from "@/lib/widgets/metric-sources";
 import {
+  aggNestedOperandRefs,
   aggOperandRefs,
+  AGG_NESTED_GROUP,
+  sourceScopedAggOperandRefs,
   CALC_METRIC_FIELD,
   condAggOperandRefs,
   validateCondAggRefs,
 } from "@/lib/widgets/calc-metrics";
 import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
   BuilderSection,
   DimensionRow,
@@ -346,12 +350,6 @@ export function WidgetBuilder({
     if (typeof window !== "undefined")
       window.localStorage.setItem(PANEL_KEY, String(panelWidth));
   }
-
-  // Operandos numéricos para fórmula ao criar um campo aqui: colunas numéricas
-  // do catálogo, exceto as unificadas (não são operandos válidos).
-  const fieldFormNumericRefs = available
-    .filter((f) => f.isNumeric && !f.field.startsWith("unified:"))
-    .map((f) => ({ ref: f.field, label: f.label }));
 
   const [title, setTitle] = useState(widget?.title ?? "");
   const [visualType, setVisualType] = useState<VisualType>(
@@ -711,6 +709,24 @@ export function WidgetBuilder({
   const sourceLabels = useSourceLabels();
   const fieldSourceChips = sourceChips(sourceLabels);
 
+  // Catálogo por-registro do FieldForm inline ("Novo campo"/"Configurar campo"):
+  // o MESMO catálogo do /campos (perRecordCalcOperands — números + datas +
+  // casados + condicionais no texto), decorado localmente. Antes era
+  // numérico-only e degradava fórmulas com datas/casados p/ refs cruas
+  // irrecriáveis (ex.: [custom:data_assinatura] - [match:leads:source_created_at]).
+  const perRecordOps = useMemo(
+    () => perRecordCalcOperands(fields, catalog, editingField?.field_key),
+    [fields, catalog, editingField]
+  );
+  const fieldFormNumericRefs = useMemo(
+    () => decorateRefOptions(perRecordOps.numericRefs, available, sourceLabels),
+    [perRecordOps, available, sourceLabels]
+  );
+  const fieldFormAllRefs = useMemo(
+    () => decorateRefOptions(perRecordOps.allRefs, available, sourceLabels),
+    [perRecordOps, available, sourceLabels]
+  );
+
   // Métrica monetária (value/mrr ou campo moeda/calc-moeda): habilita as opções
   // de moeda/conversão da métrica.
   const isMoneyField = (field: string): boolean =>
@@ -743,16 +759,54 @@ export function WidgetBuilder({
     const customDate = fields
       .filter((f) => f.data_type === "data")
       .map((f) => ({ field_key: f.field_key, label: f.label }));
+    // Entradas dos operandos com ESCOPO DE FONTE (`agg:…@<fonte>`): sem match:
+    // (registro casado já embute a fonte no ref) e com appliesTo do custom
+    // (applies_to) / unificado (record_types dos membros) p/ o campo só aparecer
+    // sob as fontes onde existe.
+    const scopedInput = (list: typeof available) =>
+      list
+        .filter((f) => !f.field.startsWith("match:"))
+        .map((f) => ({
+          field: f.field,
+          label: f.label,
+          appliesTo: f.field.startsWith("custom:")
+            ? (fields.find((d) => d.field_key === f.field.slice(7))?.applies_to ??
+              null)
+            : f.unifiedMembers
+              ? Object.keys(f.unifiedMembers)
+              : null,
+        }));
+    // 'calculado_agg' salvos como operando ANINHADO (ref plano custom:<key>,
+    // expandido em runtime) — paridade com o /campos (aggNestedOperandRefs).
+    const nestedAgg = fields
+      .filter((f) => f.data_type === "calculado_agg")
+      .map((f) => ({ field_key: f.field_key, label: f.label }));
     // Decoração só de exibição (fonte/chips/tooltip) — labels seguem limpos.
     return decorateRefOptions(
       [
         ...aggOperandRefs(numeric, countable),
-        ...condAggOperandRefs(numeric, customCond, customDate),
+        ...sourceScopedAggOperandRefs(
+          scopedInput(numeric),
+          scopedInput(countable),
+          catalog
+        ),
+        ...aggNestedOperandRefs(nestedAgg),
+        ...condAggOperandRefs(
+          numeric,
+          customCond,
+          customDate,
+          catalog,
+          // Condições sobre campos UNIFICADOS (texto/seleção/data — numéricos
+          // são alvo, não condição): o RPC resolve via _widget_unified_expr.
+          available
+            .filter((f) => f.unified && !f.isNumeric)
+            .map((f) => ({ field: f.field, label: f.label }))
+        ),
       ],
       available,
       sourceLabels
     );
-  }, [available, fields, sourceLabels]);
+  }, [available, fields, sourceLabels, catalog]);
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>
@@ -2030,7 +2084,11 @@ export function WidgetBuilder({
                   {calcFormulaMode === "builder" ? (
                     <>
                       <FormulaBuilder
-                        refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+                        refs={calcRefs.filter(
+                          (r) =>
+                            r.ref.startsWith("agg:") ||
+                            r.group === AGG_NESTED_GROUP
+                        )}
                         chips={fieldSourceChips}
                         initial={widget?.settings?.formula ?? null}
                         onChange={setFormula}
@@ -3278,6 +3336,9 @@ export function WidgetBuilder({
                 key={editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}
                 field={editingField ?? undefined}
                 numericRefs={fieldFormNumericRefs}
+                allRefs={fieldFormAllRefs}
+                excludeKeys={perRecordOps.excludeKeys}
+                fieldChips={fieldSourceChips}
                 aggRefs={calcRefs}
                 currencyOptions={currencyOptions}
                 onDone={(created) => {

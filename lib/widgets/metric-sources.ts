@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 18/07/2026
+// Versão: 1.1 | Data: 19/07/2026
 // Fontes por MÉTRICA (`Metric.sources`): uma métrica pode ser calculada sobre
 // um conjunto de fontes DIFERENTE do widget (super/subconjunto ou disjunto) —
 // ex.: widget com linhas só de Deals e métrica de conversão contando Leads E
@@ -12,9 +12,19 @@
 // ("pernas") mescladas por tupla de dimensões (ver lib/widgets/engine.ts).
 // Nenhuma migração é necessária; run_widget_query fica intocado.
 //
+// v1.1 (19/07/2026): operandos com ESCOPO DE FONTE (`agg:…@<fonte>`) contam
+// como fonte da métrica para o planejamento: formulaScopedSources/
+// metricScopedSources somam o escopo às pernas (metricLegSources) e à
+// cobertura do @period (widgetQuerySources) — sem isso, um operando @leads num
+// widget só de Deals leria zero em silêncio (invariante 9).
+//
 // Módulo puro/client-safe: importado pelo engine (server), pelas páginas (RSC)
 // e pelos componentes de tabela (client).
+import { formulaRefs, type Formula } from "@/lib/records/formulas";
+import { expandAggFormula } from "@/lib/records/formula-deps";
+import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceKey } from "@/lib/sources";
+import { parseAggRef } from "./calc-metrics";
 import type { Metric } from "./types";
 
 // Fontes-alvo deduplicadas de uma métrica ([] = herda as fontes do widget).
@@ -36,25 +46,78 @@ export function metricSourcesKey(sources: SourceKey[]): string {
   return [...sources].sort().join(",");
 }
 
+/** Fontes referenciadas por operandos com escopo (`agg:…@<fonte>`) na fórmula. */
+export function formulaScopedSources(
+  formula: Formula | null | undefined
+): SourceKey[] {
+  if (!formula || formula.tokens.length === 0) return [];
+  const out = new Set<SourceKey>();
+  for (const ref of formulaRefs(formula)) {
+    if (!ref.startsWith("agg:")) continue;
+    const { source } = parseAggRef(ref);
+    if (source) out.add(source);
+  }
+  return [...out];
+}
+
+/**
+ * Fontes com escopo de uma MÉTRICA calculada: fórmula ad-hoc (m.formula) ou a
+ * do campo 'calculado_agg' salvo (via fieldByKey), expandida
+ * (expandAggFormula) para enxergar escopos em fórmulas ANINHADAS. Sem
+ * fieldByKey, cobre só a fórmula ad-hoc.
+ */
+export function metricScopedSources(
+  m: Metric,
+  fieldByKey?: Map<string, FieldDefinition>
+): SourceKey[] {
+  let formula: Formula | null | undefined = m.formula;
+  if (
+    (!formula || formula.tokens.length === 0) &&
+    m.field.startsWith("custom:") &&
+    fieldByKey
+  ) {
+    const def = fieldByKey.get(m.field.slice(7));
+    formula = def?.data_type === "calculado_agg" ? def.formula : null;
+  }
+  if (!formula || formula.tokens.length === 0) return [];
+  const expanded = fieldByKey
+    ? expandAggFormula(formula, (k) => fieldByKey.get(k))
+    : formula;
+  return formulaScopedSources(expanded);
+}
+
 /**
  * Fontes efetivas da PERNA de uma métrica: null = herda (sem alvos, ou o
  * conjunto é idêntico ao do widget — evita uma chamada RPC redundante).
  * Widget em "todas as fontes" (sem seleção) com métrica restrita → perna.
+ * Com `fieldByKey` (v1.1), os operandos com escopo (`agg:…@<fonte>`) somam suas
+ * fontes ao conjunto — um escopo fora do universo do widget força a perna, para
+ * o `record_type in (...)` base não zerar o operando.
  */
 export function metricLegSources(
   m: Metric,
-  widgetSources?: SourceKey[]
+  widgetSources?: SourceKey[],
+  fieldByKey?: Map<string, FieldDefinition>
 ): SourceKey[] | null {
   const targets = metricTargetSources(m);
-  if (targets.length === 0) return null;
+  const scoped = fieldByKey ? metricScopedSources(m, fieldByKey) : [];
+  // Base do universo da métrica: alvos explícitos, senão as fontes do widget.
+  const base = targets.length > 0 ? targets : (widgetSources ?? []);
+  const eff = [...new Set([...base, ...scoped])];
+  if (targets.length === 0 && (!widgetSources || widgetSources.length === 0)) {
+    // Widget "todas as fontes" sem alvos: nenhum record_type in (...) — os
+    // escopos já enxergam suas linhas na consulta principal.
+    return null;
+  }
+  if (eff.length === 0) return null;
   if (
     widgetSources &&
     widgetSources.length > 0 &&
-    metricSourcesKey(targets) === metricSourcesKey(widgetSources)
+    metricSourcesKey(eff) === metricSourcesKey(widgetSources)
   ) {
     return null;
   }
-  return targets;
+  return eff;
 }
 
 /**
@@ -65,7 +128,8 @@ export function metricLegSources(
  */
 export function partitionMetricLegs(
   metrics: Metric[],
-  widgetSources?: SourceKey[]
+  widgetSources?: SourceKey[],
+  fieldByKey?: Map<string, FieldDefinition>
 ): {
   defaultIdx: number[];
   legs: { sources: SourceKey[]; idx: number[] }[];
@@ -73,7 +137,7 @@ export function partitionMetricLegs(
   const defaultIdx: number[] = [];
   const byKey = new Map<string, { sources: SourceKey[]; idx: number[] }>();
   metrics.forEach((m, i) => {
-    const srcs = metricLegSources(m, widgetSources);
+    const srcs = metricLegSources(m, widgetSources, fieldByKey);
     if (!srcs) {
       defaultIdx.push(i);
       return;
@@ -95,12 +159,16 @@ export function partitionMetricLegs(
  */
 export function widgetQuerySources(
   widgetSources: SourceKey[] | undefined,
-  metrics: Metric[] | undefined
+  metrics: Metric[] | undefined,
+  // v1.1: com fieldByKey, os operandos com escopo (`agg:…@<fonte>`) também
+  // entram na cobertura — o @period byType exclui record_types fora do mapa.
+  fieldByKey?: Map<string, FieldDefinition>
 ): SourceKey[] {
   if (!widgetSources || widgetSources.length === 0) return [];
   const all = new Set<SourceKey>(widgetSources);
   for (const m of metrics ?? []) {
     for (const s of metricTargetSources(m)) all.add(s);
+    for (const s of metricScopedSources(m, fieldByKey)) all.add(s);
   }
   return [...all];
 }

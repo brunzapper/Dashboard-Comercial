@@ -41,10 +41,20 @@ This version has breaking changes — APIs, conventions, and file structure may 
   tupla de dims (`lib/widgets/metric-sources.ts` + `engine.ts`). NÃO introduza
   parâmetro de fonte-por-métrica em `run_widget_query` — exigiria migração
   espelhada (regra acima) sem necessidade. O `@period` pré-sintetizado dos
-  filtros rápidos deve cobrir fontes do widget ∪ fontes das métricas
-  (`widgetQuerySources` na page, no viewer de snapshot e no widget-scope) — sem
+  filtros rápidos deve cobrir fontes do widget ∪ fontes das métricas ∪ fontes
+  dos operandos com ESCOPO (`agg:…@<fonte>`) — `widgetQuerySources` com
+  `fieldByKey` na page, no viewer de snapshot e no widget-scope — sem
   isso as pernas perdem registros em silêncio. Ver `docs/arquitetura.md` §4.1
   e invariante 9.
+- **Operando com escopo de fonte se resolve no ENGINE, nunca no RPC:** o ref
+  `agg:<agg>:<campo>@<fonte>` é ABAIXADO em runtime para a chave condicional
+  `aggif:` já existente (predicado `record_type =` + filtro da sub) por
+  `lowerSourceScopedOperands` (`lib/widgets/calc-metrics.ts`), nos mesmos choke
+  points do `expandAggFormula` (`resolveCalcMetric`/`runCalculatedWidget`).
+  Ref bare (sem `@`) = universo em escopo (compat). NÃO recrie os RPCs para
+  isso. Catálogo por-registro dos campos calculados é ÚNICO
+  (`perRecordCalcOperands`, `lib/records/calc-operands.ts`) — os dois editores
+  e a validação do servidor derivam dele; não monte listas paralelas.
 - **Sub-fontes (0078) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
   (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
   `filter` (WidgetFilter[]), com campo de data próprio. Compartilha o

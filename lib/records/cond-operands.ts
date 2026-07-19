@@ -19,7 +19,11 @@ export interface CustomCondField {
 // Tipos de campo personalizados aceitos como operando condicional.
 export const COND_DATA_TYPES: DataType[] = ["texto", "selecao", "booleano"];
 
-// Colunas textuais/booleanas do núcleo aceitas em condicionais.
+// Colunas textuais/booleanas do núcleo aceitas em condicionais. As RELAÇÕES
+// responsible_id/operation_id (19/07/2026) comparam por NOME: no contexto
+// por-registro o display_name é injetado no lugar do UUID (recalc/actions), e
+// no agregado o literal é resolvido nome→id antes do filtro do RPC
+// (resolveFkCondFilters no engine). Ex.: CONT.SE([Responsável] = "Paulo").
 export const CORE_COND_REFS = [
   "title",
   "record_type",
@@ -31,6 +35,8 @@ export const CORE_COND_REFS = [
   "channel",
   "currency",
   "closed",
+  "responsible_id",
+  "operation_id",
 ] as const;
 
 const CORE_COND_FIELDS = CORE_FIELDS.filter((f) =>

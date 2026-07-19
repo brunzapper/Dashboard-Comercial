@@ -72,8 +72,12 @@ import {
   type ResolvedCalcMetric,
 } from "@/lib/widgets/calc-metrics";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
-import { metricTargetSources } from "@/lib/widgets/metric-sources";
-import { toRecordType } from "@/lib/sources";
+import {
+  metricScopedSources,
+  metricTargetSources,
+} from "@/lib/widgets/metric-sources";
+import { recordTypeOf, toRecordType } from "@/lib/sources";
+import { useSources } from "@/components/sources-context";
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import {
   buildRecordBreakdown,
@@ -289,6 +293,9 @@ export const RecordListTable = memo(function RecordListTable({
   // o input libera quando a action retorna e uma rajada de edições recomputa o
   // dashboard uma vez só (a action inline não revalida mais no servidor).
   const refresh = useDebouncedRefresh();
+  // Catálogo de fontes (contexto) p/ abaixar operandos com escopo de fonte na
+  // resolução client-side das métricas calculadas (resolveCalcMetric).
+  const sourcesCatalog = useSources();
   const ap = appearance ?? {};
   const t = ap.table ?? {};
   const editable = canEdit && Boolean(onAppearanceChange);
@@ -385,10 +392,21 @@ export const RecordListTable = memo(function RecordListTable({
     if (!calcCache.has(m)) {
       calcCache.set(
         m,
-        isCalcMetric(m, fieldByKey) ? resolveCalcMetric(m, fieldByKey) : null
+        isCalcMetric(m, fieldByKey)
+          ? resolveCalcMetric(m, fieldByKey, sourcesCatalog)
+          : null
       );
     }
     return calcCache.get(m)!;
+  };
+  // Condição sobre RELAÇÃO compara por NOME (19/07/2026): traduz o UUID da
+  // coluna para o rótulo (fkLabels — responsáveis + operações) antes do teste.
+  const condRawValue = (ref: string, r: RecordRow): unknown => {
+    const v = rawValue(ref, r);
+    if (ref === "responsible_id" || ref === "operation_id") {
+      return v == null ? null : (fkLabels[String(v)] ?? v);
+    }
+    return v;
   };
   const calcBasisFor = (formula: Formula, rs: RecordRow[]): BasisValues => {
     const out: BasisValues = {};
@@ -397,7 +415,9 @@ export const RecordListTable = memo(function RecordListTable({
       // escopo às condições e reusa a mesma lógica de contagem/soma/moeda.
       const cond = parseCondBasisKey(key);
       const recs = cond
-        ? rs.filter((r) => recordMatchesConds((ref) => rawValue(ref, r), cond.conds))
+        ? rs.filter((r) =>
+            recordMatchesConds((ref) => condRawValue(ref, r), cond.conds)
+          )
         : rs;
       const bm = cond ? cond.metric : basisMetric(key);
       if (bm.agg === "count") {
@@ -964,9 +984,20 @@ export const RecordListTable = memo(function RecordListTable({
 
   // --- Fontes por métrica (Metric.sources): escopo da basis dos subtotais ---
   // record_types de uma métrica com fontes próprias (null = herda o widget).
+  // Operandos com escopo (`agg:…@<fonte>`) contam como fonte da métrica — o
+  // fetch de extras (partitionMetricLegs no servidor) usa a mesma união, e sem
+  // ela os extras da fonte do escopo ficariam fora da basis do subtotal.
   const metricRts = (m: Metric): Set<string> | null => {
-    const srcs = metricTargetSources(m);
-    return srcs.length > 0 ? new Set(srcs.map((s) => toRecordType(s))) : null;
+    const srcs = [
+      ...new Set([
+        ...metricTargetSources(m),
+        ...metricScopedSources(m, fieldByKey),
+      ]),
+    ];
+    // recordTypeOf (ciente do catálogo): sub-fonte → record_type da PAI.
+    return srcs.length > 0
+      ? new Set(srcs.map((s) => recordTypeOf(s, sourcesCatalog)))
+      : null;
   };
   // Escopo de uma métrica sobre um recorte: sem fontes próprias → o recorte
   // intacto (byte a byte igual a antes); com → recorte + extras do MESMO

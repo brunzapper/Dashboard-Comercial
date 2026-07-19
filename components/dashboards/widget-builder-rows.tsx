@@ -52,6 +52,7 @@ import {
   type RefOption,
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
 import { formulaUsesFunctions } from "@/lib/records/formulas";
 import type { SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
@@ -493,7 +494,11 @@ export function MetricRow({
           </div>
           {formulaMode === "builder" ? (
             <FormulaBuilder
-              refs={calcRefs.filter((r) => r.ref.startsWith("agg:"))}
+              // agg:* + 'calculado_agg' aninhados (ref plano — token normal),
+              // como no FieldForm de /campos (aggBuilderOperands).
+              refs={calcRefs.filter(
+                (r) => r.ref.startsWith("agg:") || r.group === AGG_NESTED_GROUP
+              )}
               chips={fieldChips}
               initial={metric.formula ?? null}
               onChange={(f) => onChange({ formula: f })}

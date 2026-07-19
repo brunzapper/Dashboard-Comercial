@@ -47,13 +47,13 @@ import { buildAvailableFields, CORE_FIELDS } from "@/lib/widgets/fields";
 import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { useSources } from "@/components/sources-context";
-import { allDateOperands } from "@/lib/records/date-operands";
-import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
-import { transitiveFormulaDependents } from "@/lib/records/formula-deps";
+import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
   aggNestedOperandRefs,
   aggOperandRefs,
   condAggOperandRefs,
+  sourceScopedAggOperandRefs,
 } from "@/lib/widgets/calc-metrics";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
@@ -221,34 +221,23 @@ export function FieldsManager({
   const decorate = (refs: RefOption[]): RefOption[] =>
     decorateRefOptions(refs, availableForHints, sourceLabels);
 
-  // Operandos do construtor de fórmula: colunas numéricas (núcleo + custom,
-  // inclusive 'calculado' — aninhamento, 19/07/2026; o FieldForm filtra o
-  // campo em edição + dependentes transitivos via excludeKeys) e operandos de
-  // DATA (datas do próprio registro, custom `data` e datas do registro casado,
-  // match:<fonte>:<data>). Agrupados para o seletor.
+  // Operandos por-registro: catálogo ÚNICO compartilhado com o FieldForm inline
+  // do widget-builder e com a validação do servidor (perRecordCalcOperands em
+  // lib/records/calc-operands.ts) — números (núcleo + custom + CASADOS), datas
+  // (próprias + casadas + hoje) e, no texto, condicionais. A decoração
+  // (fonte/chips/tooltip) é local e não toca nos labels.
+  const perRecordOps = useMemo(
+    () => perRecordCalcOperands(fields, catalog, editing?.field_key),
+    [fields, catalog, editing]
+  );
+  const numericRefs: RefOption[] = decorate(perRecordOps.numericRefs);
+  const allRefs: RefOption[] = decorate(perRecordOps.allRefs);
   const customDateFields = fields
     .filter((f) => f.data_type === "data")
     .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const numericRefs: RefOption[] = decorate([
-    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-      ref: f.field,
-      label: f.label,
-      group: "Números",
-    })),
-    ...fields
-      .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
-    ...allDateOperands(customDateFields, catalog),
-  ]);
-  // Catálogo completo p/ o editor de TEXTO (SE/E/OU): números + datas + colunas
-  // de texto/seleção/booleano (próprias e do registro casado).
   const customCondFields = fields
     .filter((f) => COND_DATA_TYPES.includes(f.data_type))
     .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const allRefs: RefOption[] = [
-    ...numericRefs,
-    ...decorate(allCondOperands(customCondFields, catalog)),
-  ];
   // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
   // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
   // é materializado) + outros 'calculado_agg' como ref plano (aninhamento,
@@ -262,40 +251,51 @@ export function FieldsManager({
     })),
     ...fields
       .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
+      .map((f) => ({
+        field: `custom:${f.field_key}`,
+        label: f.label,
+        appliesTo: f.applies_to,
+      })),
+  ];
+  // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
+  // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
+  // + qualquer campo custom, exceto 'calculado_agg' (contagem de agregado
+  // não existe — o aninhamento entra como ref plano abaixo).
+  const aggCountableFields = [
+    ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
+      field: f.field,
+      label: f.label,
+    })),
+    ...fields
+      .filter((f) => f.data_type !== "calculado_agg")
+      .map((f) => ({
+        field: `custom:${f.field_key}`,
+        label: f.label,
+        appliesTo: f.applies_to,
+      })),
   ];
   const aggRefs: RefOption[] = decorate([
-    ...aggOperandRefs(
-      aggNumericFields,
-      // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
-      // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
-      // + qualquer campo custom, exceto 'calculado_agg' (contagem de agregado
-      // não existe — o aninhamento entra como ref plano abaixo).
-      [
-        ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
-          field: f.field,
-          label: f.label,
-        })),
-        ...fields
-          .filter((f) => f.data_type !== "calculado_agg")
-          .map((f) => ({ field: `custom:${f.field_key}`, label: f.label })),
-      ]
-    ),
+    ...aggOperandRefs(aggNumericFields, aggCountableFields),
+    // Variantes com ESCOPO DE FONTE (`agg:…@<fonte>`): agregam só as linhas da
+    // fonte, ex. `Contagem de Data de criação (origem) · Leads` ÷ `… · Deals`.
+    // Rótulo/chips já saem prontos (decorate ignora refs fora do catálogo).
+    ...sourceScopedAggOperandRefs(aggNumericFields, aggCountableFields, catalog),
     ...aggNestedOperandRefs(
       fields
         .filter((f) => f.data_type === "calculado_agg")
         .map((f) => ({ field_key: f.field_key, label: f.label }))
     ),
-    ...condAggOperandRefs(aggNumericFields, customCondFields, customDateFields),
+    ...condAggOperandRefs(
+      aggNumericFields,
+      customCondFields,
+      customDateFields,
+      catalog
+    ),
   ]);
   // Operandos PROIBIDOS na fórmula do campo em edição: ele próprio + quem já
-  // depende dele (referenciar criaria ciclo — mesma regra do servidor).
-  const excludeKeys = useMemo(() => {
-    if (!editing) return new Set<string>();
-    const keys = transitiveFormulaDependents(editing.field_key, fields);
-    keys.add(editing.field_key);
-    return keys;
-  }, [editing, fields]);
+  // depende dele (referenciar criaria ciclo — mesma regra do servidor). Sai do
+  // catálogo compartilhado (perRecordCalcOperands).
+  const excludeKeys = perRecordOps.excludeKeys;
 
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types

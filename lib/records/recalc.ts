@@ -97,6 +97,31 @@ export async function recalcAllFormulaFields(): Promise<number> {
   const customDateKeys = await loadCustomDateKeys(db);
   const customDateKeySet = new Set(customDateKeys);
 
+  // Relações em fórmulas (19/07/2026): [Responsável]/[Operação] comparam por
+  // NOME — o contexto recebe o display_name no lugar do UUID. Os mapas id→nome
+  // só são carregados quando alguma fórmula referencia a relação.
+  const allRefs = new Set(
+    defs.flatMap((d) => (d.formula ? formulaRefs(d.formula) : []))
+  );
+  const respNameById = new Map<string, string>();
+  const opNameById = new Map<string, string>();
+  if (allRefs.has("responsible_id")) {
+    const { data: resp } = await db
+      .from("responsibles")
+      .select("id, display_name");
+    for (const x of resp ?? []) {
+      respNameById.set(x.id as string, (x.display_name as string) ?? "");
+    }
+  }
+  if (allRefs.has("operation_id")) {
+    const { data: ops } = await db.from("operations").select("id, name");
+    for (const x of ops ?? []) {
+      opNameById.set(x.id as string, (x.name as string) ?? "");
+    }
+  }
+  const fkName = (map: Map<string, string>, id: unknown): string | null =>
+    id == null ? null : (map.get(String(id)) ?? null);
+
   // Só carrega o aparato de câmbio se algum calc-field for monetário.
   const needsCurrency = anyMoneyDef(defs);
   const materials: CurrencyMaterials = needsCurrency
@@ -117,7 +142,7 @@ export async function recalcAllFormulaFields(): Promise<number> {
     const { data } = await db
       .from("records")
       .select(
-        "id, record_type, source_system, related_lead_id, title, pipeline, stage, stage_semantic, sale_type, channel, closed, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at"
+        "id, record_type, source_system, related_lead_id, responsible_id, operation_id, title, pipeline, stage, stage_semantic, sale_type, channel, closed, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at"
       )
       .order("id", { ascending: true })
       .range(from, from + BATCH - 1);
@@ -207,6 +232,9 @@ export async function recalcAllFormulaFields(): Promise<number> {
             channel: r.channel,
             currency: r.currency,
             closed: r.closed,
+            // Relações por NOME (ver acima): condição compara com o rótulo.
+            responsible_id: fkName(respNameById, r.responsible_id),
+            operation_id: fkName(opNameById, r.operation_id),
             ...matchVals.values,
           },
           custom,

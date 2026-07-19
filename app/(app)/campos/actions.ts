@@ -33,6 +33,8 @@ import {
   type DataType,
 } from "@/lib/records/types";
 import {
+  formulaCondAggInfo,
+  formulaRefs,
   formulaUsesCondAgg,
   validateFormula,
   type Formula,
@@ -40,16 +42,19 @@ import {
 import {
   findFormulaCycle,
   formulaReferencesField,
+  refCustomKey,
   transitiveFormulaDependents,
 } from "@/lib/records/formula-deps";
-import { allDateOperands, type OperandRef } from "@/lib/records/date-operands";
-import { allCondOperands, COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import type { OperandRef } from "@/lib/records/date-operands";
+import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import {
   aggNestedOperandRefs,
   aggOperandRefs,
   condAggOperandRefs,
+  sourceScopedAggOperandRefs,
   validateCondAggRefs,
 } from "@/lib/widgets/calc-metrics";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
@@ -86,6 +91,9 @@ interface DefRow {
   label: string;
   data_type: DataType;
   formula: Formula | null;
+  // applies_to (record_types) — decide sob quais fontes o campo entra nos
+  // operandos com escopo (sourceScopedAggOperandRefs).
+  applies_to: string[] | null;
 }
 
 async function loadDefRows(
@@ -93,13 +101,14 @@ async function loadDefRows(
 ): Promise<DefRow[]> {
   const { data } = await supabase
     .from("field_definitions")
-    .select("id, field_key, label, data_type, formula");
+    .select("id, field_key, label, data_type, formula, applies_to");
   return (data ?? []).map((d) => ({
     id: d.id as string,
     field_key: d.field_key as string,
     label: ((d.label as string) ?? (d.field_key as string)),
     data_type: d.data_type as DataType,
     formula: (d.formula as Formula | null) ?? null,
+    applies_to: (d.applies_to as string[] | null) ?? null,
   }));
 }
 
@@ -116,21 +125,6 @@ function forbiddenOperandKeys(
   return forbidden;
 }
 
-// Referências numéricas que podem ser operandos de uma fórmula por registro:
-// colunas do núcleo numéricas + campos personalizados numéricos — inclusive
-// calculados (aninhamento, 19/07/2026), exceto os do conjunto proibido.
-function allowedFormulaRefs(rows: DefRow[], forbidden: Set<string>): Set<string> {
-  const refs = new Set<string>(
-    CORE_FIELDS.filter((f) => f.isNumeric).map((f) => f.field)
-  );
-  for (const d of rows) {
-    if (forbidden.has(d.field_key)) continue;
-    if (NUMERIC_DATA_TYPES.includes(d.data_type)) {
-      refs.add(`custom:${d.field_key}`);
-    }
-  }
-  return refs;
-}
 
 // Operandos de AGREGAÇÃO (campos 'calculado_agg'): contagem de registros +
 // Σ/Média das colunas numéricas do núcleo e dos custom numéricos — incluindo o
@@ -142,7 +136,8 @@ function allowedFormulaRefs(rows: DefRow[], forbidden: Set<string>): Set<string>
 // servidor concordarem.
 function aggOperandCatalog(
   rows: DefRow[],
-  forbidden: Set<string>
+  forbidden: Set<string>,
+  sources: Sources
 ): OperandRef[] {
   const allowed = rows.filter((d) => !forbidden.has(d.field_key));
   const numeric = [
@@ -152,7 +147,11 @@ function aggOperandCatalog(
     })),
     ...allowed
       .filter((d) => NUMERIC_DATA_TYPES.includes(d.data_type))
-      .map((d) => ({ field: `custom:${d.field_key}`, label: d.label })),
+      .map((d) => ({
+        field: `custom:${d.field_key}`,
+        label: d.label,
+        appliesTo: d.applies_to,
+      })),
   ];
   // Contáveis (agg:count:<campo>): datas/numéricos do núcleo + qualquer custom
   // (exceto 'calculado_agg'). Mesmo critério do editor (fields-manager) para que
@@ -164,7 +163,11 @@ function aggOperandCatalog(
     })),
     ...allowed
       .filter((d) => d.data_type !== "calculado_agg")
-      .map((d) => ({ field: `custom:${d.field_key}`, label: d.label })),
+      .map((d) => ({
+        field: `custom:${d.field_key}`,
+        label: d.label,
+        appliesTo: d.applies_to,
+      })),
   ];
   // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
   // de condição (texto/seleção/booleano e datas). Mesma montagem dos editores
@@ -180,57 +183,89 @@ function aggOperandCatalog(
     .map((d) => ({ field_key: d.field_key, label: d.label }));
   return [
     ...aggOperandRefs(numeric, countable),
+    // Variantes com ESCOPO DE FONTE (`agg:…@<fonte>`) — mesma montagem dos
+    // editores (fields-manager/widget-builder) p/ rótulo e validação concordarem.
+    ...sourceScopedAggOperandRefs(numeric, countable, sources),
     ...aggNestedOperandRefs(nestedAgg),
-    ...condAggOperandRefs(numeric, customCond, customDate),
+    ...condAggOperandRefs(numeric, customCond, customDate, sources),
   ];
 }
 
-// Operandos de DATA e CONDICIONAIS permitidos numa fórmula por registro: datas
-// e colunas de texto/seleção/booleano próprias + as do registro casado
-// (match:<fonte>:<ref>). Mesma origem dos editores (lib/records/date-operands e
-// cond-operands), para UI e validação concordarem.
 type Sources = Awaited<ReturnType<typeof loadSources>>;
 
-function formulaDateOperands(rows: DefRow[], sources: Sources): OperandRef[] {
-  return allDateOperands(
-    rows.filter((d) => d.data_type === "data"),
-    sources
-  );
-}
-
-function formulaCondOperands(rows: DefRow[], sources: Sources): OperandRef[] {
-  return allCondOperands(
-    rows.filter((d) => COND_DATA_TYPES.includes(d.data_type)),
-    sources
-  );
-}
-
-// Catálogo completo de operandos (numéricos + datas + condicionais) com rótulos,
-// para resolver [Rótulo] no editor de texto — mesma montagem da UI
-// (components/campos/fields-manager.tsx), para editor e servidor concordarem.
+// Catálogo completo de operandos por-registro (números + casados + datas +
+// condicionais) com rótulos, para resolver [Rótulo] no editor de texto E montar
+// o conjunto permitido do validateFormula. MESMA origem dos editores
+// (perRecordCalcOperands, lib/records/calc-operands.ts) — UI e validação nunca
+// divergem. O conjunto proibido (ciclo) é filtrado por refCustomKey: cobre
+// custom:<k> e agg:*:custom:<k>; match:<fonte>:custom:<k> fica DE FORA de
+// propósito (aponta p/ OUTRO registro — não cria aresta de dependência).
 function serverOperandCatalog(
   rows: DefRow[],
   forbidden: Set<string>,
   sources: Sources
 ): OperandRef[] {
-  const numeric: OperandRef[] = [
-    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-      ref: f.field,
-      label: f.label,
-      group: "Números",
-    })),
-    ...rows
-      .filter(
-        (f) =>
-          NUMERIC_DATA_TYPES.includes(f.data_type) && !forbidden.has(f.field_key)
-      )
-      .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label, group: "Números" })),
-  ];
-  return [
-    ...numeric,
-    ...formulaDateOperands(rows, sources),
-    ...formulaCondOperands(rows, sources),
-  ];
+  return perRecordCalcOperands(rows, sources).allRefs.filter((o) => {
+    const key = refCustomKey(o.ref);
+    return key == null || !forbidden.has(key);
+  });
+}
+
+const FK_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Valida os literais de NOME das condições sobre relações (responsible_id/
+// operation_id) de uma fórmula agregada contra as listas reais — espelho do
+// resolve de runtime (resolveFkCondFilters no engine). Nome desconhecido em
+// runtime vira recorte vazio (0) SILENCIOSO; no save vira erro claro.
+async function validateFkCondNames(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  formula: Formula
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const wanted: { ref: "responsible_id" | "operation_id"; value: string }[] = [];
+  for (const spec of formulaCondAggInfo(formula).specs) {
+    for (const c of spec.conds) {
+      if (
+        (c.ref === "responsible_id" || c.ref === "operation_id") &&
+        typeof c.value === "string" &&
+        !FK_UUID_RE.test(c.value)
+      ) {
+        wanted.push({ ref: c.ref, value: c.value });
+      }
+    }
+  }
+  if (wanted.length === 0) return { ok: true };
+  const norm = (s: string) => s.trim().toLocaleLowerCase("pt-BR");
+  const [resp, ops] = await Promise.all([
+    wanted.some((w) => w.ref === "responsible_id")
+      ? supabase.from("responsibles").select("display_name")
+      : Promise.resolve({ data: [] as { display_name: string | null }[] }),
+    wanted.some((w) => w.ref === "operation_id")
+      ? supabase.from("operations").select("name")
+      : Promise.resolve({ data: [] as { name: string | null }[] }),
+  ]);
+  const respNames = new Set(
+    (resp.data ?? []).map((r) =>
+      norm(String((r as { display_name?: unknown }).display_name ?? ""))
+    )
+  );
+  const opNames = new Set(
+    (ops.data ?? []).map((r) => norm(String((r as { name?: unknown }).name ?? "")))
+  );
+  for (const w of wanted) {
+    const found =
+      w.ref === "responsible_id"
+        ? respNames.has(norm(w.value))
+        : opNames.has(norm(w.value));
+    if (!found) {
+      const kind = w.ref === "responsible_id" ? "o responsável" : "a operação";
+      return {
+        ok: false,
+        message: `Não encontrei ${kind} "${w.value}" — use o nome exatamente como aparece na lista.`,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 function parseFormula(raw: string): Formula | null {
@@ -258,13 +293,15 @@ async function resolveAndValidateFormula(
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
   const isAgg = f.dataType === "calculado_agg";
-  const rows = await loadDefRows(supabase);
+  const [rows, sources] = await Promise.all([
+    loadDefRows(supabase),
+    loadSources(supabase),
+  ]);
   const forbidden = forbiddenOperandKeys(rows, fieldKey);
-  const aggCatalog = isAgg ? aggOperandCatalog(rows, forbidden) : null;
+  const aggCatalog = isAgg ? aggOperandCatalog(rows, forbidden, sources) : null;
   let formula = f.formula;
   if (f.formulaMode === "text") {
-    const catalog =
-      aggCatalog ?? serverOperandCatalog(rows, forbidden, await loadSources(supabase));
+    const catalog = aggCatalog ?? serverOperandCatalog(rows, forbidden, sources);
     const tok = tokenizeFormulaText(f.formulaText, catalog);
     if (!tok.ok) return { ok: false, message: tok.error };
     formula = tok.formula;
@@ -297,6 +334,11 @@ async function resolveAndValidateFormula(
     // funções condicionais; alvo numérico; condição sobre coluna de condição.
     const p = validateCondAggRefs(formula, aggCatalog);
     if (!p.ok) return { ok: false, message: p.error ?? "Fórmula inválida." };
+    // Condições sobre RELAÇÕES comparam por NOME (19/07/2026): valida o
+    // literal contra a lista real — nome inexistente viraria contagem 0
+    // SILENCIOSA em runtime; aqui vira erro claro.
+    const fk = await validateFkCondNames(supabase, formula);
+    if (!fk.ok) return { ok: false, message: fk.message };
     return { ok: true, formula };
   }
   // SOMASE/CONT.SE/MÉDIASE agregam VÁRIOS registros — não existem no campo
@@ -308,12 +350,21 @@ async function resolveAndValidateFormula(
         'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
     };
   }
-  const sources = await loadSources(supabase);
+  // Operando de agregação (Σ/Média/Contagem) num campo por registro: mensagem
+  // dedicada (antes caía no genérico "Coluna inválida").
+  if (formulaRefs(formula).some((r) => r.startsWith("agg:"))) {
+    return {
+      ok: false,
+      message:
+        'Operandos agregados (Σ, Média, Contagem) só funcionam em campos "Calculado (totais)" — o campo calculado por registro enxerga um registro só. Use os valores do próprio registro, ou crie um campo "Calculado (totais)".',
+    };
+  }
+  // Conjunto permitido = o MESMO catálogo do tokenizador (números + casados +
+  // datas + condicionais, sem o conjunto proibido) — validateFormula testa
+  // pertencimento à união, então um único conjunto basta.
   const v = validateFormula(
     formula,
-    allowedFormulaRefs(rows, forbidden),
-    new Set(formulaDateOperands(rows, sources).map((o) => o.ref)),
-    new Set(formulaCondOperands(rows, sources).map((o) => o.ref))
+    new Set(serverOperandCatalog(rows, forbidden, sources).map((o) => o.ref))
   );
   if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   return { ok: true, formula };

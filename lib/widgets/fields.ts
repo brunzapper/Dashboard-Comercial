@@ -128,13 +128,19 @@ function isCalcType(dataType: FieldDefinition["data_type"]): boolean {
   return dataType === "calculado" || dataType === "calculado_agg";
 }
 
-// Campo interno de um ref 'agg:<sum|avg|count>:<campo>' ('*' = contagem de
-// registros). Parser local — NÃO importar calc-metrics aqui (ciclo de import:
-// calc-metrics → cond-operands → CORE_FIELDS deste módulo).
-function aggInnerField(ref: string): string {
+// Campo interno de um ref 'agg:<sum|avg|count>:<campo>[@<fonte>]' ('*' =
+// contagem de registros). Parser local — NÃO importar calc-metrics aqui (ciclo
+// de import: calc-metrics → cond-operands → CORE_FIELDS deste módulo). Devolve
+// também a fonte do ESCOPO (`@<fonte>`, split no último '@'), quando houver.
+function aggInner(ref: string): { field: string; source?: SourceKey } {
   const rest = ref.slice("agg:".length);
   const i = rest.indexOf(":");
-  return i === -1 ? "*" : rest.slice(i + 1);
+  let field = i === -1 ? "*" : rest.slice(i + 1);
+  const at = field.lastIndexOf("@");
+  if (at === -1) return { field };
+  const source = field.slice(at + 1);
+  field = field.slice(0, at);
+  return source ? { field, source } : { field };
 }
 
 // Acumula em `out` as fontes que um ref de fórmula toca: match pina a própria
@@ -155,7 +161,10 @@ function collectRefSources(
     return;
   }
   if (ref.startsWith("agg:")) {
-    const inner = aggInnerField(ref);
+    const { field: inner, source } = aggInner(ref);
+    // Escopo de fonte (`@<fonte>`): o operando pina a própria fonte do escopo —
+    // um calculado só de operandos @leads classifica sob Leads.
+    if (source) out.add(source);
     if (inner !== "*") collectRefSources(inner, byKey, visited, out);
     return;
   }
@@ -212,13 +221,16 @@ function decorateFormulaTexts(
       const rest = ref.slice("agg:".length);
       const i = rest.indexOf(":");
       const fn = i === -1 ? rest : rest.slice(0, i);
-      const inner = i === -1 ? "*" : rest.slice(i + 1);
+      // Escopo de fonte (`@<fonte>`): sufixa "· <fonte>" (espelha o rótulo do
+      // catálogo com escopo, sem o rótulo curto — este módulo não vê o catálogo).
+      const { field: inner, source } = aggInner(ref);
+      const scope = source ? ` · ${source}` : "";
       if (fn === "count")
         return inner === "*"
-          ? "Contagem de registros"
-          : `Contagem de ${labelForRef(inner)}`;
-      if (fn === "sum") return `Σ ${labelForRef(inner)}`;
-      if (fn === "avg") return `Média ${labelForRef(inner)}`;
+          ? `Contagem de registros${scope}`
+          : `Contagem de ${labelForRef(inner)}${scope}`;
+      if (fn === "sum") return `Σ ${labelForRef(inner)}${scope}`;
+      if (fn === "avg") return `Média ${labelForRef(inner)}${scope}`;
       return ref;
     }
     return labelByRef.get(ref) ?? ref;

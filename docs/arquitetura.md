@@ -268,11 +268,54 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   entre parênteses; o formato do campo referenciado (moeda fixa,
   `allow_negative`, percentual) NÃO se aplica dentro do campo externo — valem
   os do campo externo. Refs aninhados dentro de SOMASE/CONT.SE/MÉDIASE
-  continuam proibidos (argumentos são estruturais). Catálogos ad-hoc de widgets
-  (calculadora, nota, células da tabela rápida, métrica ad-hoc) ainda não
-  oferecem o operando aninhado — a expansão nos choke points já os suportaria;
-  para habilitar, adicione `aggNestedOperandRefs` ao par catálogo client/server
-  correspondente.
+  continuam proibidos (argumentos são estruturais). O catálogo do widget-builder
+  (`calcRefs` — métrica ad-hoc, variáveis, Card e o FieldForm inline) oferece o
+  operando aninhado desde 19/07/2026 (`aggNestedOperandRefs`), como o `/campos`.
+- **Operandos com ESCOPO DE FONTE** (19/07/2026, `lib/widgets/calc-metrics.ts`):
+  um operando agregado pode mirar UMA fonte: ref `agg:<agg>:<campo>@<fonte>`
+  (rótulo `… · <Fonte>`, gerado por `sourceScopedAggOperandRefs` para cada fonte
+  RAIZ onde o campo se aplica). Resolve o clássico "Contagem de Data de criação
+  de Leads ÷ a de Deals dá 1" — antes as duas escolhas compilavam para a MESMA
+  ref agnóstica de fonte e caíam numa única chave de basis. Em runtime o ref é
+  ABAIXADO (`lowerSourceScopedOperands`, nos mesmos choke points do
+  `expandAggFormula`: `resolveCalcMetric` + `runCalculatedWidget`) para a chave
+  condicional `aggif:` com o predicado da fonte (`record_type =` da raiz; sub
+  soma o `filter` quando expressável como `[Coluna] op literal` — senão o
+  operando resolve null, nunca um recorte mais largo). Reusa TODO o caminho das
+  agregações condicionais (consulta auxiliar com filtros anexados, fold aditivo
+  exato em subtotais, viewer de snapshot) — **nada muda nos RPCs** (invariantes
+  1/9/10). Ref bare (sem `@`) segue = universo em escopo (compat total; sem
+  migração de configs). O escopo conta como fonte da métrica no planejamento:
+  `formulaScopedSources`/`metricScopedSources` entram em `widgetQuerySources`
+  (@period) e `metricLegSources` (perna própria quando a fonte está fora do
+  universo do widget). Limitações v1: soma monetária com escopo degrada p/ soma
+  crua entre moedas (mesma das condicionais) e `min`/`máx` não têm forma com
+  escopo.
+- **Catálogo por-registro ÚNICO** (19/07/2026, `lib/records/calc-operands.ts`):
+  `perRecordCalcOperands` monta os operandos do campo calculado POR-REGISTRO
+  para os DOIS editores (página `/campos` e o FieldForm inline do
+  widget-builder) e para a validação do servidor (`serverOperandCatalog` em
+  `campos/actions.ts` deriva dele; `validateFormula` recebe o MESMO conjunto).
+  Inclui números (núcleo + custom + **casados**, `matchNumericOperands` — novo),
+  datas (próprias + casadas + hoje) e condicionais no editor de texto. Antes o
+  inline era numérico-only e uma fórmula com datas/casados abria como refs cruas
+  (`[custom:…] - [match:…]`) irrecriáveis. Não monte listas de operando
+  por-registro fora deste módulo.
+- **Relações em fórmulas por NOME** (19/07/2026): `[Responsável]`/`[Operação]`
+  entram como condição (`CORE_COND_REFS` += `responsible_id`/`operation_id`) e
+  comparam pelo NOME, nunca pelo UUID: por-registro, o contexto recebe o
+  `display_name` (recalc + `applyCalcFields`); no agregado
+  (SOMASE/CONT.SE/CONT.SES), o literal é resolvido nome→id ANTES do RPC
+  (`resolveFkCondFilters` no engine; aplicado também no caminho agrupado e nos
+  folds client-side via rótulos id→nome). Nome inexistente: recorte vazio em
+  runtime e **erro claro no save** do `/campos` (`validateFkCondNames`).
+- **Condições agregadas ampliadas** (19/07/2026): `condAggOperandRefs` passou a
+  aceitar colunas do registro CASADO (`match:<fonte>:*` — o loop de filtro dos
+  RPCs já resolvia via `_widget_match_expr`; custo: subquery por linha, 0077) e
+  campos UNIFICADOS (`unified:<key>`, texto/seleção/data) como condição de
+  SOMASE/CONT.SE. "Data atual" fica no catálogo mas NUNCA compila em fórmula
+  agregada (não é coluna) — `validateCondAggRefs` devolve mensagem dedicada em
+  vez de degradar para "—" silencioso.
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.
@@ -387,9 +430,12 @@ principalmente — para mantenedores humanos.
    introduza parâmetro de fonte-por-métrica no RPC — obrigaria nova migração
    espelhada (invariante 1) sem necessidade. O universo de linhas é sempre
    `widgets.sources`; o `@period` pré-sintetizado dos filtros rápidos deve
-   cobrir fontes do widget ∪ fontes das métricas (`widgetQuerySources` — 3
-   pontos: page, viewer de snapshot e widget-scope), senão as pernas perdem
-   registros em silêncio.
+   cobrir fontes do widget ∪ fontes das métricas ∪ fontes dos operandos com
+   ESCOPO (`agg:…@<fonte>`, 19/07/2026) — `widgetQuerySources` com o
+   `fieldByKey` (3 pontos: page, viewer de snapshot e widget-scope), senão as
+   pernas perdem registros em silêncio. O mesmo vale para as pernas:
+   `metricLegSources`/`partitionMetricLegs` unem `formulaScopedSources` ao
+   conjunto da métrica.
 
 10. **Sub-fontes se resolvem no ENGINE, nunca no RPC.** Uma sub-fonte
     (`sub_sources`, 0078) compartilha o `record_type` da pai; a resolução (fonte

@@ -18,6 +18,7 @@ import { buildAvailableFields } from "@/lib/widgets/fields";
 import {
   aggOperandRefs,
   condAggOperandRefs,
+  sourceScopedAggOperandRefs,
 } from "@/lib/widgets/calc-metrics";
 import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
@@ -266,9 +267,36 @@ export async function runQuickTable(
     const customDate = allFields
       .filter((f) => f.data_type === "data")
       .map((f) => ({ field_key: f.field_key, label: f.label }));
+    // Escopo de fonte: mesma montagem dos editores (sem match:).
+    const scopedInput = (list: typeof available) =>
+      list
+        .filter((f) => !f.field.startsWith("match:"))
+        .map((f) => ({
+          field: f.field,
+          label: f.label,
+          appliesTo: f.field.startsWith("custom:")
+            ? (allFields.find((d) => d.field_key === f.field.slice(7))
+                ?.applies_to ?? null)
+            : f.unifiedMembers
+              ? Object.keys(f.unifiedMembers)
+              : null,
+        }));
     const catalog: OperandRef[] = [
       ...aggOperandRefs(numeric, countable),
-      ...condAggOperandRefs(numeric, customCond, customDate),
+      ...sourceScopedAggOperandRefs(
+        scopedInput(numeric),
+        scopedInput(countable),
+        sources
+      ),
+      ...condAggOperandRefs(
+        numeric,
+        customCond,
+        customDate,
+        sources,
+        available
+          .filter((f) => f.unified && !f.isNumeric)
+          .map((f) => ({ field: f.field, label: f.label }))
+      ),
     ];
 
     await Promise.all(
@@ -286,6 +314,7 @@ export async function runQuickTable(
           exprValues[key] = await runCalculatedWidget(supabase, {
             formula: tok.formula,
             sources: widget.sources ?? [],
+            sourceDefs: sources,
             filters,
             period,
             correspondencesMap,
