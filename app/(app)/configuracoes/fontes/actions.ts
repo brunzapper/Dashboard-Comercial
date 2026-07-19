@@ -1,5 +1,5 @@
 // Versão: 2.2 | Data: 19/07/2026
-// v2.2 (19/07/2026): SUB-FONTES (0077) — CRUD de `sub_sources` (fonte derivada
+// v2.2 (19/07/2026): SUB-FONTES (0078) — CRUD de `sub_sources` (fonte derivada
 //   de uma pai, recortada por um filtro). createSubSource/updateSubSource/
 //   deleteSubSource; o predicado chega como JSON (WidgetFilter[]) e é saneado.
 // v2.1 (16/07/2026): manual_entry (0061) — flag "Permite criação manual" por
@@ -270,7 +270,7 @@ export async function saveSourceLabels(
   return { ok: true, message: "Rótulo salvo." };
 }
 
-// ============ SUB-FONTES (0077) ============
+// ============ SUB-FONTES (0078) ============
 
 function readSubSourceForm(formData: FormData): {
   label: string;

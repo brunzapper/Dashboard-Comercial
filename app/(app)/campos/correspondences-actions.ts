@@ -38,7 +38,7 @@ async function ensureCanManage(): Promise<string | null> {
 }
 
 // Lê os membros do form: um field_ref por fonte do CATÁLOGO — inclusive
-// sub-fontes (0077). A identidade é a source-key; record_type vem do catálogo
+// sub-fontes (0078). A identidade é a source-key; record_type vem do catálogo
 // (o da PAI, para subs — recordTypeOf).
 function readMembers(
   formData: FormData,

@@ -15,7 +15,7 @@
 // v2.1 (16/07/2026): manualEntry — a fonte aceita criação MANUAL de registros
 //   no app (data_sources.manual_entry, migração 0061). Builtins (alimentados
 //   por Sync) nascem desligados.
-// v2.2 (19/07/2026): SUB-FONTES (migração 0077). Uma sub-fonte é tratada como
+// v2.2 (19/07/2026): SUB-FONTES (migração 0078). Uma sub-fonte é tratada como
 //   fonte em todo lugar, mas suas linhas são as da fonte PAI filtradas por um
 //   predicado (`filter`), com campo de data próprio. `parentKey` != undefined a
 //   marca; `recordType` é o da PAI (várias fontes podem compartilhar um
@@ -38,10 +38,10 @@ export interface SourceDef {
   // A fonte aceita registros criados manualmente no app (0061). Fontes de Sync
   // (builtins) nascem desligadas; o admin pode religar em Configurações→Fontes.
   manualEntry: boolean;
-  // SUB-FONTE (0077): key da fonte PAI. Presente => esta é uma sub-fonte, cujas
+  // SUB-FONTE (0078): key da fonte PAI. Presente => esta é uma sub-fonte, cujas
   // linhas são as da pai recortadas por `filter`. Ausente => fonte "raiz".
   parentKey?: string;
-  // SUB-FONTE (0077): predicado (WidgetFilter[]) que recorta as linhas da pai.
+  // SUB-FONTE (0078): predicado (WidgetFilter[]) que recorta as linhas da pai.
   // Resolvido no engine com record_types:[record_type da pai] (wrap por fonte).
   filter?: WidgetFilter[];
 }
@@ -162,7 +162,7 @@ export function fieldAppliesToSource(
   return appliesTo.includes(recordTypeOf(source, sources));
 }
 
-// ============ SUB-FONTES (0077) — resolvers cientes do catálogo ============
+// ============ SUB-FONTES (0078) — resolvers cientes do catálogo ============
 // toRecordType/toSourceKey por identidade NÃO servem para subs (a sub
 // compartilha o record_type da pai). Estes resolvers recebem o catálogo
 // (SourceDef[] carregado por lib/config/sources.ts) e são a fonte de verdade nos

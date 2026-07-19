@@ -153,7 +153,7 @@ function metricForMeta(metric: string): Metric {
 }
 
 // Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
-// SUB-FONTES (0077): ciente do catálogo — subs resolvem para o record_type da
+// SUB-FONTES (0078): ciente do catálogo — subs resolvem para o record_type da
 // PAI (recordTypeOf) e injetam o PREDICADO da sub (sourcePredicate), scoped ao
 // record_type da pai via `record_types` (pass-through no RPC). Assim uma consulta
 // com a sub como fonte efetiva de um record_type restringe só as linhas dela.
@@ -1247,7 +1247,7 @@ export async function runWidget(
   fields: FieldDefinition[] = [],
   rates: CurrencyRates = {},
   conversionPeriod: ConversionYQ = yearQuarterOf(null),
-  // SUB-FONTES (0077): catálogo + correspondências CRUAS para resolver a fonte
+  // SUB-FONTES (0078): catálogo + correspondências CRUAS para resolver a fonte
   // efetiva por record_type (perna). Sem sub-fonte selecionada, o comportamento
   // é byte a byte o de antes (usa `correspondencesMapIn` global).
   catalog: SourceDef[] = BUILTIN_SOURCES,
@@ -1364,7 +1364,7 @@ export async function runWidget(
     );
   }
 
-  // SUB-FONTES conviver (0077): pernas EXTRAS (sub convivendo com a pai, ou 2+
+  // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
   // uma série própria (perna independente: filtro + data + membro próprios),
   // com a fonte como dimensão LÍDER. Evita a ambiguidade de agregar linhas de

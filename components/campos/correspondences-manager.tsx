@@ -69,7 +69,7 @@ function CorrespondenceForm({
     catalog.map((s) => [s.key, ""])
   );
   for (const m of correspondence?.members ?? []) {
-    // Identidade do membro = source-key (0077); cai no record_type p/ membros
+    // Identidade do membro = source-key (0078); cai no record_type p/ membros
     // antigos (fontes dinâmicas: key === record_type).
     const src = m.source_key ?? m.record_type;
     if (src in defaultRef) defaultRef[src] = m.field_ref;

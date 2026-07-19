@@ -45,7 +45,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`widgetQuerySources` na page, no viewer de snapshot e no widget-scope) — sem
   isso as pernas perdem registros em silêncio. Ver `docs/arquitetura.md` §4.1
   e invariante 9.
-- **Sub-fontes (0077) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
+- **Sub-fontes (0078) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
   (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
   `filter` (WidgetFilter[]), com campo de data próprio. Compartilha o
   `record_type` da pai — por isso NÃO é linha de `data_sources` (quebraria o

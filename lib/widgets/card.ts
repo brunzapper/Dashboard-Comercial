@@ -110,7 +110,7 @@ export async function runCardWidget(
   // Viewer de snapshot: partner rows (match) nunca são candidatas do modo
   // record — mesmo pós-filtro das listas de registros.
   opts: { excludeRecordIds?: Set<string> } = {},
-  // SUB-FONTES (0077): repassados a runWidget (modos topn/list).
+  // SUB-FONTES (0078): repassados a runWidget (modos topn/list).
   catalog: SourceDef[] = BUILTIN_SOURCES,
   correspondences: Correspondence[] = []
 ): Promise<WidgetData> {

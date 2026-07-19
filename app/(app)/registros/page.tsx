@@ -76,7 +76,7 @@ export default async function RegistrosPage({
   const fonte: SourceKey = isKnownSource(fonteRaw, sources)
     ? fonteRaw
     : (sources[0]?.key ?? "leads");
-  // SUB-FONTES (0077): sub → record_type da PAI (recordTypeOf); a aba mostra as
+  // SUB-FONTES (0078): sub → record_type da PAI (recordTypeOf); a aba mostra as
   // linhas da pai recortadas pelo filtro da sub (aplicado abaixo).
   const recordType = recordTypeOf(fonte, sources);
   const fonteDef = sources.find((s) => s.key === fonte);

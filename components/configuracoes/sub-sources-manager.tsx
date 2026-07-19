@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 19/07/2026
-// SUB-FONTES (0077): CRUD das sub-fontes (fonte derivada de uma pai, recortada
+// SUB-FONTES (0078): CRUD das sub-fontes (fonte derivada de uma pai, recortada
 // por um filtro). Tabela + Sheet com formulário: pai (imutável na edição), nome,
 // nome curto, campo de período e um editor de CONDIÇÕES (field/op/value) que
 // serializa o predicado como JSON (WidgetFilter[]) num input escondido. Os

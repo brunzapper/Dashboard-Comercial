@@ -1,5 +1,5 @@
 <!-- Versão: 1.3 | Data: 19/07/2026 -->
-<!-- v1.3 (19/07/2026): sub-fontes (0077) — fonte derivada de uma pai, recortada
+<!-- v1.3 (19/07/2026): sub-fontes (0078) — fonte derivada de uma pai, recortada
      por um filtro, com data própria; resolvida no engine (§4.8) sem tocar nas
      RPCs; nova invariante 10. -->
 <!-- v1.2 (18/07/2026): fontes por métrica (Metric.sources) — universo de
@@ -305,7 +305,7 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 
 ### 4.8 Sub-fontes (fonte derivada, filtrada)
 
-Uma **sub-fonte** (`sub_sources`, 0077) é tratada como fonte em todo o app, mas
+Uma **sub-fonte** (`sub_sources`, 0078) é tratada como fonte em todo o app, mas
 suas linhas são as da fonte **PAI** recortadas por um `filter` (WidgetFilter[]),
 com **campo de data próprio**. Motivação: um campo unificado (`unified:<key>`)
 pode então mapear DUAS datas para o mesmo `record_type` — ex.: Leads → *Data
@@ -392,7 +392,7 @@ principalmente — para mantenedores humanos.
    registros em silêncio.
 
 10. **Sub-fontes se resolvem no ENGINE, nunca no RPC.** Uma sub-fonte
-    (`sub_sources`, 0077) compartilha o `record_type` da pai; a resolução (fonte
+    (`sub_sources`, 0078) compartilha o `record_type` da pai; a resolução (fonte
     efetiva por `record_type`, predicado da sub, data e membro de unificado
     próprios) mora no engine (`lib/sources.ts` `planSourceLegs` +
     `lib/widgets/engine.ts`/`record-list.ts`). O par

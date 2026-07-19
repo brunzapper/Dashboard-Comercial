@@ -201,7 +201,7 @@ export function resolveUnifiedPeriodField(
 ): string | null {
   if (!field.startsWith("unified:")) return field;
   const key = field.slice("unified:".length);
-  // Casa pela SOURCE-KEY (0077): uma sub-fonte tem membro próprio, distinto do
+  // Casa pela SOURCE-KEY (0078): uma sub-fonte tem membro próprio, distinto do
   // da pai, ainda que compartilhem o record_type (ex.: Leads→reunião,
   // Leads/Clientes Lite→mudança de etapa).
   const member = correspondences
@@ -222,7 +222,7 @@ export function periodFieldForSource(
 // builtins ∪ chaves do mapa por fonte do período — o resolver
 // (period-resolve) monta fieldBySource a partir do CATÁLOGO, então as fontes
 // dinâmicas chegam aqui por ele, sem precisar passar o catálogo pelo engine.
-// SUB-FONTES (0077): em "todas as fontes" cobrimos só as RAIZ — subs
+// SUB-FONTES (0078): em "todas as fontes" cobrimos só as RAIZ — subs
 // compartilham o record_type da pai, então incluí-las sobrescreveria o `byType`
 // da pai (mesma chave record_type). Subs só entram quando explicitamente
 // selecionadas (a lista `sources` já vem resolvida pelo engine nesse caso).

@@ -1,6 +1,6 @@
 // Versão: 2.1 | Data: 19/07/2026
 // Configurações → Fontes (admin).
-// v2.1 (19/07/2026): SUB-FONTES (0077) — seção de sub-fontes (fonte derivada de
+// v2.1 (19/07/2026): SUB-FONTES (0078) — seção de sub-fontes (fonte derivada de
 //   uma pai, recortada por um filtro). Carrega field_definitions p/ montar as
 //   opções de campo do editor de filtro por fonte pai (applies_to).
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo (data_sources):

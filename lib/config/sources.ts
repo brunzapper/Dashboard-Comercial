@@ -1,6 +1,6 @@
 // Versão: 1.2 | Data: 19/07/2026
 // v1.1 (16/07/2026): manual_entry (0061) — a fonte aceita criação manual.
-// v1.2 (19/07/2026): SUB-FONTES (0077) — une `data_sources` + `sub_sources` num
+// v1.2 (19/07/2026): SUB-FONTES (0078) — une `data_sources` + `sub_sources` num
 //   único SourceDef[]. Cada sub herda o record_type da PAI e carrega parentKey +
 //   filter (WidgetFilter[]); aparece após as fontes raiz. Falha ao ler
 //   sub_sources (tabela ausente pré-migração) apenas omite as subs.
@@ -42,7 +42,7 @@ export const loadSources = cache(async function loadSources(
       };
     });
 
-    // Sub-fontes (0077): herdam o record_type da pai. Tabela ausente / erro =
+    // Sub-fontes (0078): herdam o record_type da pai. Tabela ausente / erro =
     // só omite as subs (mantém as fontes raiz).
     const rtByKey = new Map(roots.map((s) => [s.key, s.recordType]));
     const { data: subData } = await supabase

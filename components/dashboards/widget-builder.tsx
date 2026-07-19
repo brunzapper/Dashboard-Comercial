@@ -407,7 +407,7 @@ export function WidgetBuilder({
   const [splitBySource, setSplitBySource] = useState<boolean>(
     widget?.split_by_source ?? false
   );
-  // SUB-FONTES (0077): subs a tratar como perna INDEPENDENTE ("conviver") em vez
+  // SUB-FONTES (0078): subs a tratar como perna INDEPENDENTE ("conviver") em vez
   // de absorvidas pela pai. Só relevante quando a sub E a pai estão selecionadas.
   const [coexistSubSources, setCoexistSubSources] = useState<SourceKey[]>(
     widget?.settings?.coexistSubSources ?? []
@@ -1689,7 +1689,7 @@ export function WidgetBuilder({
       delete settings.comparison;
     }
 
-    // SUB-FONTES (0077): só persiste "conviver" para subs efetivamente
+    // SUB-FONTES (0078): só persiste "conviver" para subs efetivamente
     // selecionadas junto da pai (senão o toggle não teria efeito); limpa o resto.
     const coexistClean = coexistSubSources.filter((k) => {
       const parent = catalog.find((s) => s.key === k)?.parentKey;

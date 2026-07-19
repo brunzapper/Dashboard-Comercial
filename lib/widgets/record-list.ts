@@ -115,7 +115,7 @@ function buildRecordListQuery(
   // record_type). Ausente = filtros unificados são ignorados (compat).
   available: AvailableField[],
   opts?: { count?: boolean },
-  // Catálogo de FONTES (0077): resolve a fonte efetiva por record_type (subs
+  // Catálogo de FONTES (0078): resolve a fonte efetiva por record_type (subs
   // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
   // (sem sub-fontes → comportamento legado idêntico).
   catalog: SourceDef[] = BUILTIN_SOURCES

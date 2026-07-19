@@ -371,6 +371,19 @@ de MOVED_TIME em `field_definitions` (chave canônica `bitrix_moved_time`, visí
 VALORES só populam após um **Backfill** com o código correspondente
 (bitrix-field-map v1.4+) deployado.
 
+## Como aplicar a 0077 (índices de performance em record_matches)
+
+Cole [`migrations/0077_record_matches_match_perf.sql`](./migrations/0077_record_matches_match_perf.sql)
+e execute. Idempotente e **seguro no SQL editor** (índice não-CONCURRENT + `analyze`
+rodam dentro de transação; `record_matches` é pequena, o lock de escrita durante o
+build é breve). Cria os compostos `(record_a_id, created_at desc)` /
+`(record_b_id, created_at desc)` que assistem a subconsulta de `match:`
+(`_widget_match_expr`, registro casado). **Não altera resultado** de query nenhuma —
+só o plano/velocidade; não toca os RPCs (sem espelhamento com snapshot). Se após isto
+um dashboard com colunas `match:` seguir com timeout, rode a PARTE C de
+[`apply/diagnostico-perf.sql`](./apply/diagnostico-perf.sql) — o EXPLAIN diz se falta a
+reescrita estrutural (espelhada) de `_widget_match_expr`.
+
 ## Criar o primeiro usuário admin (bootstrap)
 
 Os seeds criam papéis e permissões, mas **não criam usuários**. Para ter o primeiro

@@ -1,13 +1,14 @@
-<!-- Versão: 1.2 | Data: 19/07/2026 -->
-<!-- v1.2 (19/07/2026): sub-fontes (0077) — tabela `sub_sources` (fonte derivada
+<!-- Versão: 1.3 | Data: 19/07/2026 -->
+<!-- v1.3 (19/07/2026): sub-fontes (0078) — tabela `sub_sources` (fonte derivada
      de uma pai, filtrada) e `field_correspondence_members.source_key` (membro de
      campo unificado passa a ser identificado pela source-key, não pelo
      record_type). -->
+<!-- v1.2 (19/07/2026): record_matches_match_perf (0077) — índices compostos. -->
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0077), para que um
-mantenedor não precise ler as 77 migrações em ordem para reconstruir o modelo.
+Referência do estado **atual** do banco (após a migração 0078), para que um
+mantenedor não precise ler as 79 migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
 
@@ -100,7 +101,7 @@ colunas de data do núcleo), `builtin`, `manual_entry` (0061 — aceita criaçã
 builtins nascem desligados). Seed dos 3 builtins: `leads/lead`, `deals/negocio`
 (período `closed_at`), `estudo/venda_site`.
 
-**`sub_sources`** (0077) — catálogo de **sub-fontes**: uma fonte derivada de uma
+**`sub_sources`** (0078) — catálogo de **sub-fontes**: uma fonte derivada de uma
 pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
 `data_sources`), `parent_key` FK → `data_sources.key` (on delete cascade), `label`,
 `short_label`, `default_period_field` (CHECK entre as colunas de data do núcleo),
@@ -123,7 +124,7 @@ Leitura liberada a autenticados desde 0043 (só metadados de schema).
 unificados globais: uma correspondência (`key` unique, `label`, `data_type`) liga no
 máximo um `field_ref` por **source-key** (coluna do núcleo ou `custom:<key>`). O RPC
 consome como `unified:<key>` (coalesce). `record_type` (FK → `data_sources`, 0060) +
-`source_key` (0077 — pai OU sub); unicidade em `(correspondence_id, source_key)`, o
+`source_key` (0078 — pai OU sub); unicidade em `(correspondence_id, source_key)`, o
 que permite N membros por `record_type` (um por source-key — ex.: `leads` e
 `leads_clientes_lite` mapeando datas diferentes). Membros antigos: `source_key`
 retro-preenchido com a fonte cujo `record_type` casa (a própria pai).
@@ -225,7 +226,9 @@ shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 **`match_rules`** (0041) — regras de matching entre fontes: par de fontes + até 2
 pares de campos (par 2 = fallback), `enabled`, `priority`.
 **`record_matches`** (0041) — matches efetivos: `(record_a_id, record_b_id)` unique,
-`mode` (`auto|manual`), `matched_on`.
+`mode` (`auto|manual`), `matched_on`. Índices compostos `(record_a_id, created_at desc)`
+/ `(record_b_id, created_at desc)` (0077) assistem a subconsulta correlacionada de
+`match:` (`_widget_match_expr`, 0042), que resolve o registro casado por linha.
 
 **`currencies`** (0036) — moedas habilitáveis (seed: BRL/USD ligadas, EUR/GBP/ARS
 desligadas). **`currency_rates`** (0036) — taxa R$ por unidade, PK
@@ -310,7 +313,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0076)
+## 7. Histórico de migrações (0001–0078)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -392,4 +395,5 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0074 | webhooks | api_keys, endpoints, outbox, log de entrada; `audit_log.origin='api'` |
 | 0075 | fonte_implementacao_bitrix | `fonte` (SOURCE_ID) curada + `implementacao` vira campo Bitrix (UF_CRM_1778094396888) |
 | 0076 | moved_time_visivel | Reconcilia `bitrix_moved_time` (MOVED_TIME) em field_definitions: chave canônica + visível (par do bitrix-field-map v1.4) |
-| 0077 | sub_sources | Sub-fontes (`sub_sources`: fonte derivada de uma pai, filtrada) + `field_correspondence_members.source_key` (membro por source-key). Não recria as RPCs de widget |
+| 0077 | record_matches_match_perf | Performance: índices compostos `(record_a/b_id, created_at)` p/ a subconsulta `match:` (`_widget_match_expr`) |
+| 0078 | sub_sources | Sub-fontes (`sub_sources`: fonte derivada de uma pai, filtrada) + `field_correspondence_members.source_key` (membro por source-key). Não recria as RPCs de widget |
