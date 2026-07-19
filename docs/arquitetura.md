@@ -1,4 +1,7 @@
-<!-- Versão: 1.3 | Data: 19/07/2026 -->
+<!-- Versão: 1.4 | Data: 19/07/2026 -->
+<!-- v1.4 (19/07/2026): fuso da fonte (0079/0080) — data_sources.timezone;
+     datetimes ingeridos normalizam p/ Brasília na entrada (§4.5); nova
+     invariante 11. -->
 <!-- v1.3 (19/07/2026): sub-fontes (0078) — fonte derivada de uma pai, recortada
      por um filtro, com data própria; resolvida no engine (§4.8) sem tocar nas
      RPCs; nova invariante 10. -->
@@ -210,6 +213,17 @@ exceção: sempre recomputados).
   origens: `SOURCE_ID` → campo `fonte`, resolvido via `crm.status.list`
   `ENTITY_ID='SOURCE'`). "Implementação" (`implementacao`) é sincronizado de
   `UF_CRM_1778094396888` desde a 0075 (antes era campo local dos presets).
+- **Fuso da fonte (0079)**: `data_sources.timezone` (IANA, ex. `Europe/Moscow`;
+  editável em Configurações → Fontes) declara o fuso em que a ORIGEM expressa
+  datas/horas. O mapper do Bitrix normaliza valores **datetime** para
+  America/Sao_Paulo na entrada (`lib/date/normalize.ts`) — o read side inteiro é
+  prefix-based (lê o `YYYY-MM-DD` literal), então sem a conversão uma reunião às
+  18h+ BRT cai no dia seguinte (Moscou = BRT+6). Campo Bitrix tipo `date`
+  (calendário puro, ex. `data_assinatura`) NUNCA converte — recuaria um dia.
+  Date-only e fontes sem `timezone` passam inalterados. Backfill dos valores
+  antigos: 0080 (chaves datetime explícitas; o resto normaliza no próximo
+  Backfill do sync). CSV/API não carregam offset (`coerceDate` emite naive) —
+  não são afetados.
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
   faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET`.
 - **API/webhooks de entrada**: `/api/ingest/<fonte>` com chaves de API
@@ -447,6 +461,17 @@ principalmente — para mantenedores humanos.
     unificado é por `source_key`; use `correspondenceMapForSources` (um ref por
     perna) — misturar o membro da pai e o da sub no mesmo `coalesce` pega o 1º
     não-nulo (uma linha com as duas colunas preenchidas erra). Ver §4.8.
+
+11. **Datas são strings no fuso de Brasília.** Valores **datetime** ingeridos de
+    fonte com `data_sources.timezone` configurado (0079) são convertidos para
+    America/Sao_Paulo na ENTRADA (`lib/date/normalize.ts`, aplicado no mapper do
+    sync); o read side inteiro é prefix-based (display, buckets, comparação
+    textual do período) e depende do dia certo estar no prefixo. Campo Bitrix
+    tipo `date` é calendário puro — **nunca converter** (recuaria um dia);
+    date-only é sempre passthrough. O formato emitido
+    (`YYYY-MM-DDTHH:mm:ss-03:00`) deve seguir byte-idêntico ao do backfill 0080,
+    senão o reconcile reescreve tudo (churn de audit). Nada disso toca as RPCs
+    (não aciona a invariante 1).
 
 ## 6. Convenções do projeto
 

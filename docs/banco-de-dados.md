@@ -1,4 +1,6 @@
-<!-- Versão: 1.3 | Data: 19/07/2026 -->
+<!-- Versão: 1.4 | Data: 19/07/2026 -->
+<!-- v1.4 (19/07/2026): fuso da fonte — `data_sources.timezone` (0079) e backfill
+     dos datetimes do Bitrix p/ Brasília (0080). -->
 <!-- v1.3 (19/07/2026): sub-fontes (0078) — tabela `sub_sources` (fonte derivada
      de uma pai, filtrada) e `field_correspondence_members.source_key` (membro de
      campo unificado passa a ser identificado pela source-key, não pelo
@@ -7,8 +9,8 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0078), para que um
-mantenedor não precise ler as 79 migrações em ordem para reconstruir o modelo.
+Referência do estado **atual** do banco (após a migração 0080), para que um
+mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
 
@@ -98,8 +100,10 @@ do site ou linha de fonte dinâmica.
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
 key === record_type), `label`, `short_label`, `default_period_field` (CHECK entre as
 colunas de data do núcleo), `builtin`, `manual_entry` (0061 — aceita criação manual;
-builtins nascem desligados). Seed dos 3 builtins: `leads/lead`, `deals/negocio`
-(período `closed_at`), `estudo/venda_site`.
+builtins nascem desligados), `timezone` (0079 — fuso IANA da ORIGEM; datetimes
+ingeridos normalizam p/ Brasília na entrada, `lib/date/normalize.ts`; NULL = sem
+conversão; seed `Europe/Moscow` em `leads`/`deals`). Seed dos 3 builtins:
+`leads/lead`, `deals/negocio` (período `closed_at`), `estudo/venda_site`.
 
 **`sub_sources`** (0078) — catálogo de **sub-fontes**: uma fonte derivada de uma
 pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
@@ -313,7 +317,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0078)
+## 7. Histórico de migrações (0001–0080)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -397,3 +401,5 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0076 | moved_time_visivel | Reconcilia `bitrix_moved_time` (MOVED_TIME) em field_definitions: chave canônica + visível (par do bitrix-field-map v1.4) |
 | 0077 | record_matches_match_perf | Performance: índices compostos `(record_a/b_id, created_at)` p/ a subconsulta `match:` (`_widget_match_expr`) |
 | 0078 | sub_sources | Sub-fontes (`sub_sources`: fonte derivada de uma pai, filtrada) + `field_correspondence_members.source_key` (membro por source-key). Não recria as RPCs de widget |
+| 0079 | source_timezone | `data_sources.timezone` (fuso IANA da origem; seed `Europe/Moscow` em leads/deals) — datetimes ingeridos normalizam p/ Brasília na entrada |
+| 0080 | backfill_bitrix_tz | Backfill: reescreve datetimes com offset ≠ -03:00 das chaves datetime do Bitrix (Data Reunião lead/negócio, `bitrix_moved_time`) p/ horário de Brasília; `snapshot_records` fica como capturado |

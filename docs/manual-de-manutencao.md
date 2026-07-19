@@ -1,4 +1,6 @@
-<!-- Versão: 1.1 | Data: 19/07/2026 -->
+<!-- Versão: 1.2 | Data: 19/07/2026 -->
+<!-- v1.2 (19/07/2026): fuso da fonte (0079/0080) — checklist em §4.4/§4.6 e
+     linha de troubleshooting "datas do Bitrix 1 dia depois". -->
 
 # Manual de manutenção
 
@@ -118,6 +120,11 @@ npm run build      # o que a Vercel roda no deploy
   `lib/widgets/period-resolve.ts`); fontes fora do mapa são **excluídas** pelo
   `@period` do RPC.
 - [ ] `default_period_field` da fonte faz sentido (é o campo da barra de período).
+- [ ] Fonte com origem em OUTRO fuso horário? Configure o "Fuso horário da
+  origem" (Configurações → Fontes; `data_sources.timezone`, 0079) — sem isso,
+  datas/horas de 18h+ locais caem no dia seguinte no dashboard (o read side lê
+  o prefixo `YYYY-MM-DD` da string). Só afeta valores DATETIME ingeridos; campo
+  de calendário puro (Bitrix `date`) e date-only nunca convertem.
 
 ### 4.5 Mexeu em campos calculados / fórmulas
 
@@ -167,6 +174,12 @@ npm run build      # o que a Vercel roda no deploy
   enquanto a descoberta existir (precedente: 0075, `fonte`/`implementacao`).
 - [ ] O sync **nunca** toca linhas mock (`source_system='manual'`,
   `source_id='mock_reuniao_*'`).
+- [ ] Fuso (0079): o mapper converte valores **datetime** do fuso da fonte
+  (`data_sources.timezone`, portal Bitrix = `Europe/Moscow`) para Brasília via
+  `lib/date/normalize.ts` (`dateOrNull`/`resolveCustom`). Campo tipo `date`
+  NUNCA converte. Após ligar/mudar o fuso de uma fonte já populada, rode um
+  **Backfill** para reescrever os valores antigos (a 0080 só cobre as chaves
+  datetime conhecidas: Data Reunião lead/negócio e `bitrix_moved_time`).
 
 ## 5. Troubleshooting
 
@@ -180,6 +193,7 @@ npm run build      # o que a Vercel roda no deploy
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
 | Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 4 jobs; recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
+| Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |
 | Webhook de saída parou | Auto-desativado após falhas consecutivas | Configurações → Integrações: ver `disabled_reason`, corrigir o endpoint e reativar |
 | Tela de snapshots/listagens quebrou após deploy | Código selecionando coluna que a migração ainda não criou | Aplique o SQL pendente (regra "SQL antes do deploy") |
 | Erro de env em runtime | Variável ausente na Vercel | `lib/env.ts` diz qual; confira `.env.example` |

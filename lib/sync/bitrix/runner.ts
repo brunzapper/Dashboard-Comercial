@@ -7,6 +7,8 @@
 //
 // O estado completo fica em sync_jobs, então qualquer chamador retoma de onde o
 // anterior parou — é isso que permite o navegador NÃO precisar dirigir o loop.
+// v1.1 (19/07/2026): fuso da fonte (0079) — JobContext.timezones (opcional)
+//   persiste o fuso por entidade e chega ao mapDeal/mapLead de cada página.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
@@ -46,12 +48,16 @@ interface PhasePlan {
 }
 
 // Contexto do Bitrix persistido na linha do job (evita re-bater em crm.*.fields).
+// `timezones` é OPCIONAL: job criado antes do deploy da 0079 retoma com um
+// contexto serializado sem o campo — degrada p/ passthrough em vez de quebrar
+// (o reconcile seguinte normaliza).
 interface JobContext {
   lookups: SerializedLookups;
   dealMapping: CustomMapEntry[];
   leadMapping: CustomMapEntry[];
   formulaDefs: FormulaFieldDef[];
   customDateKeys: string[];
+  timezones?: { lead: string | null; negocio: string | null };
 }
 
 interface JobRow {
@@ -308,6 +314,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         leadMapping: ctx.leadMapping,
         formulaDefs: ctx.formulaDefs,
         customDateKeys: ctx.customDateKeys,
+        timezones: ctx.timezones,
       };
       await db
         .from("sync_jobs")
@@ -356,12 +363,13 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
 
     // Mapeia a página.
     const mapping = phase.entity === "negocio" ? context.dealMapping : context.leadMapping;
+    const tz = context.timezones?.[phase.entity] ?? null;
     const mapped: MappedRecord[] = [];
     for (const raw of items) {
       mapped.push(
         phase.entity === "negocio"
-          ? await mapDeal(raw, lookups, mapping)
-          : await mapLead(raw, lookups, mapping)
+          ? await mapDeal(raw, lookups, mapping, tz)
+          : await mapLead(raw, lookups, mapping, tz)
       );
     }
 

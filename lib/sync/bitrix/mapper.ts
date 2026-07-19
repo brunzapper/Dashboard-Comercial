@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 18/07/2026
+// Versão: 1.4 | Data: 19/07/2026
+// v1.4 (19/07/2026): fuso da fonte (data_sources.timezone) — valores DATETIME
+//   são normalizados para o horário de Brasília na entrada (lib/date/normalize).
+//   Campo Bitrix tipo `date` é calendário puro e NUNCA converte (recuaria um
+//   dia). Colunas timestamptz do núcleo também passam pelo normalize — no-op
+//   de instante, mantido por consistência de representação.
 // v1.3 (18/07/2026): resolveCustom trata o tipo "source" (SOURCE_ID → nome da
 //   origem via BitrixLookups.sourceName).
 // Tradução de um DEAL/LEAD cru do Bitrix para o formato do núcleo `records`,
@@ -16,6 +21,7 @@ import {
   LEAD_CORE,
   type BitrixFieldType,
 } from "@/lib/config/bitrix-field-map";
+import { normalizeDateString } from "@/lib/date/normalize";
 import type { CustomMapEntry } from "./catalog";
 import { BitrixLookups } from "./lookups";
 
@@ -70,11 +76,11 @@ function parseBool(v: unknown): boolean {
   return v === "Y" || v === "1" || v === 1 || v === true;
 }
 
-function dateOrNull(v: unknown): string | null {
+function dateOrNull(v: unknown, tz?: string | null): string | null {
   if (v == null || v === "") return null;
   const s = String(v);
   if (s.startsWith("0000-00-00")) return null;
-  return s;
+  return normalizeDateString(s, tz ?? null);
 }
 
 function mapSemantic(v: unknown): string | null {
@@ -95,7 +101,8 @@ async function resolveCustom(
   type: BitrixFieldType,
   val: unknown,
   lookups: BitrixLookups,
-  entity: "deal" | "lead"
+  entity: "deal" | "lead",
+  tz: string | null
 ): Promise<unknown> {
   if (val == null || val === "") return null;
 
@@ -123,8 +130,10 @@ async function resolveCustom(
     case "boolean":
       return parseBool(val);
     case "date":
-    case "datetime":
+      // Calendário puro: o dia escolhido no Bitrix É o dado — nunca converter.
       return dateOrNull(val);
+    case "datetime":
+      return dateOrNull(val, tz);
     default:
       // Multifields (arrays) sem tipo conhecido não viram texto útil.
       if (Array.isArray(val)) return null;
@@ -136,7 +145,8 @@ async function resolveMapping(
   raw: Raw,
   mapping: CustomMapEntry[],
   lookups: BitrixLookups,
-  entity: "deal" | "lead"
+  entity: "deal" | "lead",
+  tz: string | null
 ): Promise<Record<string, unknown>> {
   const custom_fields: Record<string, unknown> = {};
   for (const entry of mapping) {
@@ -145,7 +155,8 @@ async function resolveMapping(
       entry.type,
       raw[entry.fieldId],
       lookups,
-      entity
+      entity,
+      tz
     );
   }
   return custom_fields;
@@ -154,9 +165,10 @@ async function resolveMapping(
 export async function mapDeal(
   raw: Raw,
   lookups: BitrixLookups,
-  mapping: CustomMapEntry[]
+  mapping: CustomMapEntry[],
+  tz: string | null = null
 ): Promise<MappedRecord> {
-  const custom_fields = await resolveMapping(raw, mapping, lookups, "deal");
+  const custom_fields = await resolveMapping(raw, mapping, lookups, "deal", tz);
 
   return {
     record_type: "negocio",
@@ -175,10 +187,10 @@ export async function mapDeal(
     ),
     channel: strOrNull(raw[DEAL_CORE.channel]),
     closed: parseBool(raw[DEAL_CORE.closed]),
-    closed_at: dateOrNull(raw[DEAL_CORE.closedAt]),
-    opened_at: dateOrNull(raw[DEAL_CORE.openedAt]),
-    source_created_at: dateOrNull(raw[DEAL_CORE.sourceCreatedAt]),
-    source_modified_at: dateOrNull(raw[DEAL_CORE.sourceModifiedAt]),
+    closed_at: dateOrNull(raw[DEAL_CORE.closedAt], tz),
+    opened_at: dateOrNull(raw[DEAL_CORE.openedAt], tz),
+    source_created_at: dateOrNull(raw[DEAL_CORE.sourceCreatedAt], tz),
+    source_modified_at: dateOrNull(raw[DEAL_CORE.sourceModifiedAt], tz),
     custom_fields,
     _assignedById: strOrNull(raw[DEAL_CORE.assignedById]),
     _leadId: strOrNull(raw[DEAL_CORE.leadId]),
@@ -198,9 +210,10 @@ function firstEmail(v: unknown): string | null {
 export async function mapLead(
   raw: Raw,
   lookups: BitrixLookups,
-  mapping: CustomMapEntry[]
+  mapping: CustomMapEntry[],
+  tz: string | null = null
 ): Promise<MappedRecord> {
-  const custom_fields = await resolveMapping(raw, mapping, lookups, "lead");
+  const custom_fields = await resolveMapping(raw, mapping, lookups, "lead", tz);
   custom_fields.email = firstEmail(raw["EMAIL"]);
 
   return {
@@ -219,8 +232,8 @@ export async function mapLead(
     closed: false,
     closed_at: null,
     opened_at: null,
-    source_created_at: dateOrNull(raw[LEAD_CORE.sourceCreatedAt]),
-    source_modified_at: dateOrNull(raw[LEAD_CORE.sourceModifiedAt]),
+    source_created_at: dateOrNull(raw[LEAD_CORE.sourceCreatedAt], tz),
+    source_modified_at: dateOrNull(raw[LEAD_CORE.sourceModifiedAt], tz),
     custom_fields,
     _assignedById: strOrNull(raw[LEAD_CORE.assignedById]),
     _leadId: null,

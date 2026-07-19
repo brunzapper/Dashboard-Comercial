@@ -1,13 +1,15 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 19/07/2026
 // Gestão do catálogo de fontes (data_sources, 0060): listar, criar, editar e
 // excluir fontes dinâmicas. Fontes novas mapeiam key === record_type; a chave
 // é gerada do nome (slugify) e imutável após a criação. Excluir exige fonte
 // sem registros (FK em records.record_type restringe).
 // v1.1 (16/07/2026): flag "Permite criação manual" (manual_entry, 0061) —
 //   habilita o botão "Novo registro" (Registros/kanbans) para a fonte.
+// v1.2 (19/07/2026): fuso horário da origem (timezone, 0079) — datetimes
+//   ingeridos da fonte são convertidos desse fuso p/ Brasília na entrada.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useActionState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -53,6 +55,15 @@ function periodFieldLabel(value: string): string {
   return PERIOD_FIELD_OPTIONS.find((o) => o.value === value)?.label ?? value;
 }
 
+// Fusos IANA do runtime (guard: supportedValuesOf existe em todo alvo moderno;
+// sem ele a lista fica só com "sem conversão").
+const TZ_OPTIONS: ComboboxOption[] = [
+  { value: "", label: "— (sem conversão)" },
+  ...(typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("timeZone").map((z) => ({ value: z, label: z }))
+    : []),
+];
+
 function SourceForm({
   source,
   onDone,
@@ -68,6 +79,15 @@ function SourceForm({
   );
   // Fontes novas nascem aceitando criação manual; builtins (Sync) desligados.
   const [manualEntry, setManualEntry] = useState(source?.manualEntry ?? true);
+  const [timezone, setTimezone] = useState(source?.timezone ?? "");
+  // Valor salvo fora da lista do runtime (raro) segue selecionável.
+  const tzOptions = useMemo(
+    () =>
+      timezone && !TZ_OPTIONS.some((o) => o.value === timezone)
+        ? [...TZ_OPTIONS, { value: timezone, label: timezone }]
+        : TZ_OPTIONS,
+    [timezone]
+  );
 
   useEffect(() => {
     if (state.ok && onDone) onDone();
@@ -123,6 +143,23 @@ function SourceForm({
         <p className="text-muted-foreground text-xs">
           Onde a barra de período do dashboard busca a data desta fonte quando
           não há override configurado.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Fuso horário da origem</Label>
+        <Combobox
+          options={tzOptions}
+          value={timezone}
+          onValueChange={setTimezone}
+          name="timezone"
+          searchPlaceholder="Buscar fuso..."
+          aria-label="Fuso horário da origem"
+        />
+        <p className="text-muted-foreground text-xs">
+          Datas/horas desta fonte são convertidas deste fuso para o horário de
+          Brasília na entrada (ex.: Bitrix em Europe/Moscow). Vazio = sem
+          conversão.
         </p>
       </div>
 
@@ -223,6 +260,7 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
               <TableHead>Chave</TableHead>
               <TableHead>Nome curto</TableHead>
               <TableHead>Campo de período</TableHead>
+              <TableHead>Fuso</TableHead>
               <TableHead>Criação manual</TableHead>
               <TableHead>Origem</TableHead>
               <TableHead className="text-right">Ações</TableHead>
@@ -240,6 +278,9 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {periodFieldLabel(s.defaultPeriodField)}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs">
+                  {s.timezone || "—"}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {s.manualEntry ? "Sim" : "—"}

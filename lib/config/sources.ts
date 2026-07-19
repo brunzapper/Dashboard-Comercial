@@ -1,5 +1,7 @@
-// Versão: 1.2 | Data: 19/07/2026
+// Versão: 1.3 | Data: 19/07/2026
 // v1.1 (16/07/2026): manual_entry (0061) — a fonte aceita criação manual.
+// v1.3 (19/07/2026): timezone (0079) — fuso da ORIGEM da fonte; datetimes
+//   ingeridos normalizam p/ Brasília no sync. Subs não têm (ingestão é da pai).
 // v1.2 (19/07/2026): SUB-FONTES (0078) — une `data_sources` + `sub_sources` num
 //   único SourceDef[]. Cada sub herda o record_type da PAI e carrega parentKey +
 //   filter (WidgetFilter[]); aparece após as fontes raiz. Falha ao ler
@@ -22,7 +24,7 @@ export const loadSources = cache(async function loadSources(
     const { data, error } = await supabase
       .from("data_sources")
       .select(
-        "key, record_type, label, short_label, default_period_field, builtin, manual_entry"
+        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone"
       )
       .order("builtin", { ascending: false })
       .order("created_at", { ascending: true });
@@ -39,6 +41,7 @@ export const loadSources = cache(async function loadSources(
           (r.default_period_field as string) || "source_created_at",
         builtin: Boolean(r.builtin),
         manualEntry: Boolean(r.manual_entry),
+        timezone: (r.timezone as string | null) || null,
       };
     });
 
