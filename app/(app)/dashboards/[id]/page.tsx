@@ -1,6 +1,12 @@
-// Versão: 2.6 | Data: 18/07/2026
+// Versão: 2.7 | Data: 19/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.7 (19/07/2026): performance do load — (a) widget tasks rodam sob limitador
+//   de concorrência (WIDGET_TASK_CONCURRENCY; antes todos disparavam juntos e o
+//   pico saturava o Postgres em dashboards grandes — statement timeouts em
+//   cascata, runbook §5); (b) resumo de timing por render ([dashboard:timing]:
+//   total, buscas base, widgets com top 5 mais lentos, fkLabels, filtros
+//   rápidos) sempre logado no servidor — 1ª coisa a olhar quando "ficou lento".
 // v2.6 (18/07/2026): fontes por métrica (Metric.sources) — full fetch do modo
 //   lista via runRecordListWithExtras (recordListExtraById → basis dos
 //   subtotais no cliente, fora do export/FK) e cobertura do @period dos
@@ -105,12 +111,39 @@ import {
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
+import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
 
 function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+}
+
+// Máximo de widget tasks em voo por render. Todos os widgets disparavam ao
+// mesmo tempo; num dashboard grande o pico de consultas simultâneas satura o
+// Postgres (statement timeouts em cascata) e TODOS pioram. O teto mantém o
+// paralelismo útil e suaviza o pico; os Promise.all internos de um task
+// (pernas de métrica, variáveis de calculadora, exprs de nota) não contam.
+const WIDGET_TASK_CONCURRENCY = 8;
+
+// Limitador simples (sem dependência): até `max` execuções simultâneas, demais
+// aguardam em fila (FIFO). O wrapper devolve a promise do próprio task.
+function createTaskLimiter(max: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    while (active >= max) {
+      await new Promise<void>((resolve) => queue.push(resolve));
+    }
+    active += 1;
+    try {
+      return await fn();
+    } finally {
+      active -= 1;
+      queue.shift()?.();
+    }
+  };
 }
 
 export default async function DashboardPage({
@@ -122,6 +155,8 @@ export default async function DashboardPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  // Instrumentação: início do render (o resumo [dashboard:timing] sai no fim).
+  const timing = startDashboardLoadTiming();
   const supabase = await createClient();
   // Client com dedup de run_widget_query por render: widgets/notas/calculadoras
   // com o mesmo escopo compartilham a mesma chamada (ver lib/widgets/rpc-memo).
@@ -158,7 +193,7 @@ export default async function DashboardPage({
     enabledCurrencies,
     currencyRates,
     sources,
-  ] = await Promise.all([
+  ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
       .select(
@@ -185,7 +220,7 @@ export default async function DashboardPage({
     loadEnabledCurrencies(supabase),
     loadCurrencyRates(supabase),
     loadSources(supabase),
-  ]);
+  ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
   // Último período consultado pelo usuário neste dashboard (se houver). No modo
@@ -718,8 +753,8 @@ export default async function DashboardPage({
   const calcById: Record<string, CalcWidgetResult> = {};
   const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
   const noteById: Record<string, CalcWidgetResult[]> = {};
-  const widgetTasks =
-    dataWidgets.map(async (w) => {
+  const runLimited = createTaskLimiter(WIDGET_TASK_CONCURRENCY);
+  const computeWidget = async (w: Widget) => {
       // Métricas calculadas: resolve a fórmula com o contexto do dashboard.
       // `settings.calcField` aponta p/ um campo "Calculado (totais)" salvo em
       // /campos (campo deletado → fórmula null → valor null → "—"). Moeda:
@@ -923,7 +958,18 @@ export default async function DashboardPage({
       } catch (e) {
         fail(e);
       }
-    });
+    };
+  // Cada task roda sob o limitador; o cronômetro fica por DENTRO dele (mede a
+  // execução, não a espera na fila) e marca `error` para o resumo de timing.
+  const widgetTasks = dataWidgets.map((w) =>
+    runLimited(() =>
+      timing.widgetTask(
+        { id: w.id, title: w.title ?? w.visual_type },
+        () => computeWidget(w),
+        () => Boolean(dataById[w.id]?.error)
+      )
+    )
+  );
 
   // Rótulos das colunas FK presentes nas tabelas de registros (id→nome).
   // Helper compartilhado com a action de paginação (lib/widgets/fk-labels.ts).
@@ -935,13 +981,24 @@ export default async function DashboardPage({
     return isListWidget(w) && (w.settings?.rowSource ?? "records") === "records";
   });
   const fkLabelsPromise = Promise.all(listTasks).then(() =>
-    collectRecordFkLabels(supabase, Object.values(recordListById).flat())
+    timing.measure("fkLabels", () =>
+      collectRecordFkLabels(supabase, Object.values(recordListById).flat())
+    )
   );
-  const [fkLabels] = await Promise.all([fkLabelsPromise, ...widgetTasks]);
+  const [fkLabels] = await timing.measure("widgets", () =>
+    Promise.all([fkLabelsPromise, ...widgetTasks])
+  );
 
   // Opções de dropdown dos filtros rápidos (promise disparada antes da
   // computação; ver fillQuickFilterOptions acima).
-  if (fillQuickFilterOptions) await fillQuickFilterOptions();
+  if (fillQuickFilterOptions) {
+    await timing.measure("quickFilters", () => fillQuickFilterOptions());
+  }
+
+  // Resumo de timing do load — SEMPRE logado (1 linha por render; Vercel/dev).
+  // Primeira coisa a olhar quando o dashboard "ficou lento" (runbook §5): o
+  // top aponta o widget dominante; erro = widget que falhou (ex.: timeout).
+  timing.log(dash.name);
 
   // Opções do SELECT de responsável editável (promise disparada antes da
   // computação dos widgets). Marca os responsáveis com vínculo no Bitrix: são
