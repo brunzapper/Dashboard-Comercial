@@ -1,9 +1,9 @@
-<!-- Versão: 1.1 | Data: 19/07/2026 -->
+<!-- Versão: 1.2 | Data: 19/07/2026 -->
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0076), para que um
-mantenedor não precise ler as 77 migrações em ordem para reconstruir o modelo.
+Referência do estado **atual** do banco (após a migração 0077), para que um
+mantenedor não precise ler as 78 migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
 
@@ -207,7 +207,9 @@ shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 **`match_rules`** (0041) — regras de matching entre fontes: par de fontes + até 2
 pares de campos (par 2 = fallback), `enabled`, `priority`.
 **`record_matches`** (0041) — matches efetivos: `(record_a_id, record_b_id)` unique,
-`mode` (`auto|manual`), `matched_on`.
+`mode` (`auto|manual`), `matched_on`. Índices compostos `(record_a_id, created_at desc)`
+/ `(record_b_id, created_at desc)` (0077) assistem a subconsulta correlacionada de
+`match:` (`_widget_match_expr`, 0042), que resolve o registro casado por linha.
 
 **`currencies`** (0036) — moedas habilitáveis (seed: BRL/USD ligadas, EUR/GBP/ARS
 desligadas). **`currency_rates`** (0036) — taxa R$ por unidade, PK
@@ -292,7 +294,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0076)
+## 7. Histórico de migrações (0001–0077)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -374,3 +376,4 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0074 | webhooks | api_keys, endpoints, outbox, log de entrada; `audit_log.origin='api'` |
 | 0075 | fonte_implementacao_bitrix | `fonte` (SOURCE_ID) curada + `implementacao` vira campo Bitrix (UF_CRM_1778094396888) |
 | 0076 | moved_time_visivel | Reconcilia `bitrix_moved_time` (MOVED_TIME) em field_definitions: chave canônica + visível (par do bitrix-field-map v1.4) |
+| 0077 | record_matches_match_perf | Performance: índices compostos `(record_a/b_id, created_at)` p/ a subconsulta `match:` (`_widget_match_expr`) |
