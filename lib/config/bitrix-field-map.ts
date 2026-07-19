@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 18/07/2026
+// Versão: 1.4 | Data: 19/07/2026
+// v1.4 (19/07/2026): MOVED_TIME sai de DEAL_CORE/LEAD_CORE — não há coluna
+//   própria em `records` e a presença nos mapas do núcleo o excluía do catálogo
+//   dinâmico (coreIds em lib/sync/bitrix/catalog.ts). Como já está em
+//   FIELD_LABELS, passa a ser descoberto como campo de data visível
+//   (bitrix_moved_time), no mesmo trilho da Data Reunião.
 // v1.3 (18/07/2026): SOURCE_ID → "fonte" (novo tipo "source", resolvido via
 //   crm.status.list ENTITY_ID='SOURCE') e UF_CRM_1778094396888 → "implementacao"
 //   (campo de valor da implementação; substitui o antigo campo local homônimo —
@@ -49,7 +54,6 @@ export const DEAL_CORE = {
   openedAt: "BEGINDATE",
   sourceCreatedAt: "DATE_CREATE",
   sourceModifiedAt: "DATE_MODIFY",
-  movedTime: "MOVED_TIME",
   leadId: "LEAD_ID", // vínculo nativo com o lead de origem
   signatureDate: "UF_CRM_1729887608434", // Data da assinatura (ref. do lead time)
   channel: "UF_CRM_1755888290", // Canal → records.channel
@@ -100,7 +104,6 @@ export const LEAD_CORE = {
   assignedById: "ASSIGNED_BY_ID",
   sourceCreatedAt: "DATE_CREATE",
   sourceModifiedAt: "DATE_MODIFY",
-  movedTime: "MOVED_TIME",
   companyTitle: "COMPANY_TITLE",
 } as const;
 
