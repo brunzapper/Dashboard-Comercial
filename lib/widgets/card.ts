@@ -247,6 +247,7 @@ export async function runCardWidget(
     const res = await runCalculatedWidget(supabase, {
       formula: card.formula,
       sources: config.sources ?? [],
+      sourceDefs: catalog,
       filters: config.filters ?? [],
       period,
       correspondencesMap,

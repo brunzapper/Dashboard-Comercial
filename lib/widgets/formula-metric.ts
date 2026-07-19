@@ -36,7 +36,7 @@ import {
 } from "@/lib/records/formulas";
 import { expandAggFormula } from "@/lib/records/formula-deps";
 import type { FieldDefinition } from "@/lib/records/types";
-import type { SourceKey } from "@/lib/sources";
+import type { SourceDef, SourceKey } from "@/lib/sources";
 import {
   basisKeysFor,
   basisMetric,
@@ -44,6 +44,7 @@ import {
   evalCalcMoney,
   isCondBasisKey,
   isMoneyOperandField,
+  lowerSourceScopedOperands,
   parseCondBasisKey,
   type BasisKey,
   type BasisValues,
@@ -53,9 +54,11 @@ import {
   aggregate,
   aggregateMoneyBreakdowns,
   resolveFilters,
+  resolveFkCondFilters,
   sourceFilters,
 } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
+import { formulaScopedSources } from "./metric-sources";
 import { comparisonSpec } from "./comparison";
 import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
@@ -64,6 +67,10 @@ import type { Metric, WidgetFilter } from "./types";
 export interface CalcInput {
   formula?: Formula | null;
   sources?: SourceKey[];
+  // Catálogo de fontes (SourceDef[]) p/ abaixar operandos com escopo de fonte
+  // (`agg:…@<fonte>` → aggif:). Ausente = builtins — suficiente p/ fontes raiz;
+  // sub-fontes precisam do catálogo vivo (predicado da sub).
+  sourceDefs?: SourceDef[];
   filters?: WidgetFilter[];
   period?: DashboardPeriod | null;
   correspondencesMap?: Record<string, string[]>;
@@ -99,20 +106,32 @@ export async function runCalculatedWidget(
   // Aninhamento de agregados (19/07/2026): expande refs custom:<calculado_agg>
   // para a fórmula do campo entre parênteses ANTES de resolver bases de
   // comparação e basis — daqui para baixo tudo opera na fórmula expandida
-  // (fast path sem aninhamento devolve o mesmo objeto).
-  const formula = expandAggFormula(input.formula, (k) => fieldByKey.get(k));
+  // (fast path sem aninhamento devolve o mesmo objeto). Em seguida, abaixa os
+  // operandos com escopo de fonte (`agg:…@<fonte>` → chave aggif:) — v2.3.
+  const expanded = expandAggFormula(input.formula, (k) => fieldByKey.get(k));
+  const formula = lowerSourceScopedOperands(expanded, input.sourceDefs);
   const rates = input.rates ?? {};
   const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
+
+  // Fontes da CONSULTA: as do widget ∪ as dos operandos com escopo (invariante
+  // 9) — sem a união, o `record_type in (...)`/@period do universo do widget
+  // zeraria em silêncio um operando @fonte de fora. Widget "todas as fontes"
+  // ([]) permanece sem restrição.
+  const scopedSources = formulaScopedSources(expanded);
+  const querySources =
+    input.sources && input.sources.length > 0
+      ? [...new Set([...input.sources, ...scopedSources])]
+      : input.sources;
 
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   const baseFilters = applyFilterSourceTargets(
     resolveFilters(input.filters ?? []),
-    input.sources
+    querySources
   );
   const withPeriod = (p: DashboardPeriod | null | undefined): WidgetFilter[] => {
     let f = baseFilters;
-    if (p) f = applyPeriodToFilters(f, p, input.sources);
-    return [...sourceFilters(input.sources), ...f];
+    if (p) f = applyPeriodToFilters(f, p, querySources);
+    return [...sourceFilters(querySources), ...f];
   };
   const filters = withPeriod(input.period);
 
@@ -237,11 +256,16 @@ export async function runCalculatedWidget(
         // normalizados ainda não aplicada) degrada a chave para null (operando
         // ausente → "—") em vez de derrubar a página do dashboard.
         jobs.push(
-          resolveKeys(g.keys, [...baseFiltersFor, ...condFilters(g.conds)]).catch(
-            () => {
-              for (const key of g.keys) target[key] = null;
-            }
-          )
+          (async () => {
+            // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
+            const extra = await resolveFkCondFilters(
+              supabase,
+              condFilters(g.conds)
+            );
+            await resolveKeys(g.keys, [...baseFiltersFor, ...extra]);
+          })().catch(() => {
+            for (const key of g.keys) target[key] = null;
+          })
         );
       }
     }

@@ -118,6 +118,8 @@ export async function loadWidgetScope(
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
+  // Mapa chave→def p/ operandos com escopo de fonte (widgetQuerySources).
+  const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
 
   // ---- período efetivo do widget (resolver único da page) ----
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
@@ -197,7 +199,8 @@ export async function loadWidgetScope(
               pMap,
               widgetQuerySources(
                 (widget.sources ?? []) as SourceKey[],
-                widget.metrics
+                widget.metrics,
+                fieldByKeyAll
               )
             );
             viewFilters.push(...applied);

@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { useDragPan } from "@/lib/use-drag-pan";
 import { formatMoney } from "@/lib/widgets/currency";
+import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import { EditableCell } from "./editable-cell";
 import { RecordEditSheet } from "./record-edit-sheet";
 
@@ -102,6 +103,7 @@ export function RecordsTable({
             {showMrr ? <TableHead className="text-right">MRR</TableHead> : null}
             <TableHead className="text-right">Valor</TableHead>
             <TableHead>Moeda</TableHead>
+            <TableHead>Criado (origem)</TableHead>
             {fields.map((f) => (
               <TableHead key={f.id}>{f.label}</TableHead>
             ))}
@@ -132,6 +134,12 @@ export function RecordsTable({
                 {formatMoney(r.value, r.currency)}
               </TableCell>
               <TableCell>{r.currency ?? "—"}</TableCell>
+              {/* source_created_at (DATE_CREATE na origem) — read-only. */}
+              <TableCell className="whitespace-nowrap">
+                {r.source_created_at
+                  ? formatDateValue(r.source_created_at, DEFAULT_DATE_FORMAT)
+                  : "—"}
+              </TableCell>
               {fields.map((f) => (
                 <TableCell key={f.id} className="max-w-[180px]">
                   <EditableCell

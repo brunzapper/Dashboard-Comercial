@@ -232,6 +232,9 @@ export default async function DashboardPage({
 
   const widgets = (widgetsData ?? []) as Widget[];
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
+  // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
+  const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
@@ -485,7 +488,11 @@ export default async function DashboardPage({
               filters = applyPeriodToFilters(
                 filters,
                 pMap,
-                widgetQuerySources((w.sources ?? []) as SourceKey[], w.metrics)
+                widgetQuerySources(
+                  (w.sources ?? []) as SourceKey[],
+                  w.metrics,
+                  fieldByKeyAll
+                )
               );
             }
           } else if (
@@ -773,6 +780,7 @@ export default async function DashboardPage({
           calcById[w.id] = await runCalculatedWidget(rpcClient, {
             formula,
             sources: w.sources ?? [],
+            sourceDefs: sources,
             filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
             correspondencesMap,
@@ -807,6 +815,7 @@ export default async function DashboardPage({
               out[v.id] = await runCalculatedWidget(rpcClient, {
                 formula: v.formula ?? null,
                 sources: w.sources ?? [],
+                sourceDefs: sources,
                 filters: [
                   ...(w.filters ?? []),
                   ...(viewFiltersByWidget[w.id] ?? []),
@@ -837,6 +846,7 @@ export default async function DashboardPage({
               return await runCalculatedWidget(rpcClient, {
                 formula,
                 sources: w.sources ?? [],
+                sourceDefs: sources,
                 filters: [
                   ...(w.filters ?? []),
                   ...(viewFiltersByWidget[w.id] ?? []),
@@ -938,7 +948,8 @@ export default async function DashboardPage({
               config,
               periodByWidget[w.id],
               available,
-              sources
+              sources,
+              allFields
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;

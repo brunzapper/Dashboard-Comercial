@@ -96,6 +96,7 @@ import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import {
   aggOperandRefs,
   condAggOperandRefs,
+  sourceScopedAggOperandRefs,
 } from "@/lib/widgets/calc-metrics";
 import {
   cellKey,
@@ -177,6 +178,9 @@ export default async function SnapshotPage({
 
   const widgets = cfg.widgets;
   const fields = (cfg.fields ?? []) as FieldDefinition[];
+  // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
+  // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
+  const fieldByKeyAll = new Map(fields.map((f) => [f.field_key, f]));
   const correspondences = cfg.correspondences ?? [];
   // Catálogo de fontes + rótulos curtos (dropdowns de campo do viewer) —
   // leitura VIVA via service role (config de exibição, não dado congelado;
@@ -327,7 +331,11 @@ export default async function SnapshotPage({
               filters = applyPeriodToFilters(
                 filters,
                 pMap,
-                widgetQuerySources((w.sources ?? []) as SourceKey[], w.metrics)
+                widgetQuerySources(
+                  (w.sources ?? []) as SourceKey[],
+                  w.metrics,
+                  fieldByKeyAll
+                )
               );
             }
           } else if (
@@ -543,7 +551,9 @@ export default async function SnapshotPage({
             db,
             config,
             periodByWidget[w.id],
-            available
+            available,
+            sources,
+            fields
           );
           // Partner rows nunca são linhas de dados (existem só p/ resolver
           // colunas match: — e por construção violam ≥1 restrição).
@@ -638,6 +648,7 @@ export default async function SnapshotPage({
         calcById[w.id] = await runCalculatedWidget(db, {
           formula,
           sources: (w.sources ?? []) as SourceKey[],
+          sourceDefs: sources,
           filters: effectiveFilters(w),
           period: periodByWidget[w.id],
           correspondencesMap,
@@ -673,6 +684,7 @@ export default async function SnapshotPage({
             out[v.id] = await runCalculatedWidget(db, {
               formula: v.formula ?? null,
               sources: (w.sources ?? []) as SourceKey[],
+              sourceDefs: sources,
               filters: effectiveFilters(w),
               period: periodByWidget[w.id],
               correspondencesMap,
@@ -700,6 +712,7 @@ export default async function SnapshotPage({
             return await runCalculatedWidget(db, {
               formula,
               sources: (w.sources ?? []) as SourceKey[],
+              sourceDefs: sources,
               filters: effectiveFilters(w),
               period: periodByWidget[w.id],
               correspondencesMap,
@@ -735,9 +748,36 @@ export default async function SnapshotPage({
     const customDate = fields
       .filter((f) => f.data_type === "data")
       .map((f) => ({ field_key: f.field_key, label: f.label }));
+    // Escopo de fonte: mesma montagem da action (sem match:).
+    const scopedInput = (list: typeof available) =>
+      list
+        .filter((f) => !f.field.startsWith("match:"))
+        .map((f) => ({
+          field: f.field,
+          label: f.label,
+          appliesTo: f.field.startsWith("custom:")
+            ? (fields.find((d) => d.field_key === f.field.slice(7))
+                ?.applies_to ?? null)
+            : f.unifiedMembers
+              ? Object.keys(f.unifiedMembers)
+              : null,
+        }));
     const catalog: OperandRef[] = [
       ...aggOperandRefs(numeric, countable),
-      ...condAggOperandRefs(numeric, customCond, customDate),
+      ...sourceScopedAggOperandRefs(
+        scopedInput(numeric),
+        scopedInput(countable),
+        sources
+      ),
+      ...condAggOperandRefs(
+        numeric,
+        customCond,
+        customDate,
+        sources,
+        available
+          .filter((f) => f.unified && !f.isNumeric)
+          .map((f) => ({ field: f.field, label: f.label }))
+      ),
     ];
 
     quickTablePromise = Promise.all(
@@ -813,6 +853,7 @@ export default async function SnapshotPage({
               exprValues[key] = await runCalculatedWidget(db, {
                 formula: tok.formula,
                 sources: (w.sources ?? []) as SourceKey[],
+                sourceDefs: sources,
                 filters,
                 period,
                 correspondencesMap,

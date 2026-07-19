@@ -224,6 +224,13 @@ export function RecordEditForm({
               <div className="text-muted-foreground col-span-2 text-xs">
                 Lead time (dias): {record.lead_time_days ?? "—"}
               </div>
+              {/* Timestamp de sistema (DATE_CREATE na origem) — nunca editável. */}
+              <div className="text-muted-foreground col-span-2 text-xs">
+                Data de criação (origem):{" "}
+                {record.source_created_at
+                  ? formatDateValue(record.source_created_at, DEFAULT_DATE_FORMAT)
+                  : "—"}
+              </div>
             </div>
           ) : (
             <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
@@ -239,6 +246,12 @@ export function RecordEditForm({
               <span>{record.channel ?? "—"}</span>
               <span className="text-muted-foreground">Lead time (dias)</span>
               <span>{record.lead_time_days ?? "—"}</span>
+              <span className="text-muted-foreground">Data de criação (origem)</span>
+              <span>
+                {record.source_created_at
+                  ? formatDateValue(record.source_created_at, DEFAULT_DATE_FORMAT)
+                  : "—"}
+              </span>
             </div>
           )}
 

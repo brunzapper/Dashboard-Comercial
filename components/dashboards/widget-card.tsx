@@ -106,7 +106,9 @@ import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   aggOperandRefs,
   condAggOperandRefs,
+  sourceScopedAggOperandRefs,
 } from "@/lib/widgets/calc-metrics";
+import { useSources } from "@/components/sources-context";
 import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
@@ -270,6 +272,8 @@ export const WidgetCard = memo(function WidgetCard({
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(!!autoOpenEditor);
+  // Catálogo de fontes (contexto) p/ os operandos com escopo de fonte da nota.
+  const sourcesCatalog = useSources();
   // Save do builder em andamento (painel já fechado): exibe o overlay de
   // processamento sobre o card até a revalidação entregar os dados novos.
   const [saving, setSaving] = useState(false);
@@ -400,7 +404,7 @@ export const WidgetCard = memo(function WidgetCard({
     !isFilter && !isFieldFilter && !isCalc && !isAgenda && !isImage;
 
   // Catálogo de operandos do editor in-place da nota (mesma montagem do
-  // calcRefs do builder — aggOperandRefs + condAggOperandRefs).
+  // calcRefs do builder — aggOperandRefs + escopo de fonte + condAggOperandRefs).
   const noteEditorRefs: OperandRef[] = useMemo(() => {
     if (!isNote) return [];
     const numeric = availableForBuilder.filter((f) => f.isNumeric);
@@ -413,11 +417,38 @@ export const WidgetCard = memo(function WidgetCard({
     const customDate = fields
       .filter((f) => f.data_type === "data")
       .map((f) => ({ field_key: f.field_key, label: f.label }));
+    // Escopo de fonte: mesma montagem do calcRefs do builder (sem match:).
+    const scopedInput = (list: typeof availableForBuilder) =>
+      list
+        .filter((f) => !f.field.startsWith("match:"))
+        .map((f) => ({
+          field: f.field,
+          label: f.label,
+          appliesTo: f.field.startsWith("custom:")
+            ? (fields.find((d) => d.field_key === f.field.slice(7))?.applies_to ??
+              null)
+            : f.unifiedMembers
+              ? Object.keys(f.unifiedMembers)
+              : null,
+        }));
     return [
       ...aggOperandRefs(numeric, countable),
-      ...condAggOperandRefs(numeric, customCond, customDate),
+      ...sourceScopedAggOperandRefs(
+        scopedInput(numeric),
+        scopedInput(countable),
+        sourcesCatalog
+      ),
+      ...condAggOperandRefs(
+        numeric,
+        customCond,
+        customDate,
+        sourcesCatalog,
+        availableForBuilder
+          .filter((f) => f.unified && !f.isNumeric)
+          .map((f) => ({ field: f.field, label: f.label }))
+      ),
     ];
-  }, [isNote, availableForBuilder, fields]);
+  }, [isNote, availableForBuilder, fields, sourcesCatalog]);
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,
   // que renderiza max(mínimo, medido). Altura das tabelas vem da medição real do

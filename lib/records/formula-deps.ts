@@ -34,7 +34,11 @@ export function refCustomKey(ref: string): string | null {
     const rest = ref.slice("agg:".length);
     const idx = rest.indexOf(":");
     if (idx === -1) return null;
-    const field = rest.slice(idx + 1);
+    let field = rest.slice(idx + 1);
+    // Escopo de fonte (`agg:…:<campo>@<fonte>`): o campo referenciado é o mesmo
+    // — remove o sufixo antes de extrair a chave (split no ÚLTIMO '@').
+    const at = field.lastIndexOf("@");
+    if (at !== -1) field = field.slice(0, at);
     return field.startsWith("custom:") ? field.slice("custom:".length) : null;
   }
   return null;

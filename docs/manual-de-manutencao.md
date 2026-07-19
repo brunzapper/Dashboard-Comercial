@@ -134,7 +134,25 @@ npm run build      # o que a Vercel roda no deploy
   silêncio e congelaria o valor materializado dos dependentes.
 - [ ] Aninhamento de agregados expande tokens em runtime: novo consumidor de
   fórmula de `calculado_agg` deve passar por `resolveCalcMetric` ou
-  `runCalculatedWidget` (nunca ler `def.formula` cru direto para avaliar).
+  `runCalculatedWidget` (nunca ler `def.formula` cru direto para avaliar) — o
+  mesmo par de choke points ABAIXA os operandos com escopo de fonte
+  (`agg:…@<fonte>` → chave `aggif:`; 19/07/2026). Passe o catálogo de fontes
+  (`SourceDef[]`) quando houver sub-fontes; o default (builtins) cobre raízes.
+- [ ] Operandos por-registro dos campos calculados saem SEMPRE de
+  `perRecordCalcOperands` (`lib/records/calc-operands.ts`) — os dois editores
+  (/campos e o FieldForm inline do widget-builder) e a validação do servidor
+  derivam do mesmo catálogo. Não monte lista paralela: foi exatamente essa
+  divergência que deixou fórmulas com datas/casados como refs cruas
+  irrecriáveis no editor inline.
+- [ ] Relações em fórmula comparam por NOME: por-registro o contexto recebe o
+  `display_name` (recalc/`applyCalcFields`); no agregado o literal resolve
+  nome→id antes do RPC (`resolveFkCondFilters`). Renomear um responsável exige
+  recalc (o valor materializado guarda o resultado da comparação antiga).
+- [ ] Aritmética sobre texto NÃO é bloqueada (decisão de produto, 19/07/2026):
+  texto numérico coage (`"10" * 2` = 20); não-numérico avalia null → "—". A
+  sintaxe é responsabilidade do usuário; o sistema erra claro só no
+  genuinamente impossível (SOMASE em por-registro, `agg:*` em por-registro,
+  "Data atual" em fórmula agregada, nome de responsável inexistente no save).
 
 ### 4.6 Mexeu no sync do Bitrix
 

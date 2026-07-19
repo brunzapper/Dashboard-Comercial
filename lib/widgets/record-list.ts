@@ -27,7 +27,7 @@
 // dashboard. Reaproveita os helpers de filtro/fonte/período do engine.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { RecordRow } from "@/lib/records/types";
+import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import {
   BUILTIN_SOURCES,
   isSubSource,
@@ -394,9 +394,17 @@ export async function runRecordListWithExtras(
   config: WidgetConfig,
   period?: DashboardPeriod | null,
   available: AvailableField[] = [],
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  // Defs de campo p/ as pernas enxergarem operandos com escopo (`agg:…@<fonte>`)
+  // em fórmulas de 'calculado_agg' salvas (metricScopedSources).
+  fields: FieldDefinition[] = []
 ): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
-  const { legs } = partitionMetricLegs(config.metrics ?? [], config.sources);
+  const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
+  const { legs } = partitionMetricLegs(
+    config.metrics ?? [],
+    config.sources,
+    fieldByKey
+  );
   const extraSources =
     config.sources && config.sources.length > 0
       ? [...new Set(legs.flatMap((l) => l.sources))].filter(
