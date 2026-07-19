@@ -1,4 +1,4 @@
-<!-- Versão: 1.0 | Data: 17/07/2026 -->
+<!-- Versão: 1.1 | Data: 19/07/2026 -->
 
 # Manual de manutenção
 
@@ -16,7 +16,7 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
    runbook [`../supabase/README.md`](../supabase/README.md) (fase-1 → fase-2 → ... →
    fase-14, mais as migrações avulsas citadas lá, ex.: 0038 e 0056–0059). Tudo é
    idempotente: se falhar no meio, corrija e rode de novo. Termine com as migrações
-   posteriores ao último bloco de fase (0065–0074, em ordem).
+   posteriores ao último bloco de fase (0065–0076, em ordem).
 3. **Vercel** — importe o repositório (deploy automático a cada push; não há CI).
    Configure as Environment Variables usando `.env.example` como checklist:
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
@@ -62,7 +62,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0075).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0077).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).

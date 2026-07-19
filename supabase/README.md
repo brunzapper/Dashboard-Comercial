@@ -1,4 +1,4 @@
-<!-- Versão: 1.0 | Data: 05/07/2026 -->
+<!-- Versão: 1.1 | Data: 19/07/2026 -->
 
 # Banco de dados (Supabase) — aplicação manual
 
@@ -361,6 +361,15 @@ o código seleciona as novas colunas/tabelas. O que muda:
   (vendedor só vê as próprias) e trava de exclusão `locked` (só admin/gestor
   alteram — trigger `enforce_task_lock`).
 - **`0064`** — visual_type `'kanban'` e `'agenda'` no CHECK de `widgets`.
+
+## Como aplicar a 0076 (Data da mudança de etapa visível)
+
+Cole [`migrations/0076_moved_time_visivel.sql`](./migrations/0076_moved_time_visivel.sql)
+e execute. Idempotente; pode rodar antes ou depois do deploy. Reconcilia a linha
+de MOVED_TIME em `field_definitions` (chave canônica `bitrix_moved_time`, visível)
+— o campo "Data da mudança de etapa" aparece NA HORA nos dropdowns, mas os
+VALORES só populam após um **Backfill** com o código correspondente
+(bitrix-field-map v1.4+) deployado.
 
 ## Criar o primeiro usuário admin (bootstrap)
 
