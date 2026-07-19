@@ -407,6 +407,11 @@ export function WidgetBuilder({
   const [splitBySource, setSplitBySource] = useState<boolean>(
     widget?.split_by_source ?? false
   );
+  // SUB-FONTES (0078): subs a tratar como perna INDEPENDENTE ("conviver") em vez
+  // de absorvidas pela pai. Só relevante quando a sub E a pai estão selecionadas.
+  const [coexistSubSources, setCoexistSubSources] = useState<SourceKey[]>(
+    widget?.settings?.coexistSubSources ?? []
+  );
 
   // Aparência de tabela editada já no builder (Parte 2/3): orientação (normal x
   // transposta) e "Agrupar por" (dimensão que vira seções recolhíveis c/ subtotais).
@@ -1684,6 +1689,15 @@ export function WidgetBuilder({
       delete settings.comparison;
     }
 
+    // SUB-FONTES (0078): só persiste "conviver" para subs efetivamente
+    // selecionadas junto da pai (senão o toggle não teria efeito); limpa o resto.
+    const coexistClean = coexistSubSources.filter((k) => {
+      const parent = catalog.find((s) => s.key === k)?.parentKey;
+      return sources.includes(k) && parent != null && sources.includes(parent);
+    });
+    if (coexistClean.length > 0) settings.coexistSubSources = coexistClean;
+    else delete settings.coexistSubSources;
+
     const input = {
       title: title.trim() || null,
       visual_type: visualType,
@@ -2709,15 +2723,43 @@ export function WidgetBuilder({
               entre as fontes escolhidas.
             </p>
             <div className="flex flex-col gap-2 rounded-md border p-3">
-              {catalog.map((s) => (
-                <label key={s.key} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={sources.includes(s.key)}
-                    onCheckedChange={() => toggleSource(s.key)}
-                  />
-                  {s.label}
-                </label>
-              ))}
+              {catalog.map((s) => {
+                // SUB-FONTES: quando a sub E a pai estão selecionadas, oferece o
+                // toggle "conviver" (perna independente) × absorver (padrão).
+                const parentSelected =
+                  s.parentKey != null && sources.includes(s.parentKey);
+                const coexisting = coexistSubSources.includes(s.key);
+                return (
+                  <div key={s.key} className="flex flex-col gap-1">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={sources.includes(s.key)}
+                        onCheckedChange={() => toggleSource(s.key)}
+                      />
+                      {s.parentKey ? (
+                        <span className="text-muted-foreground">↳ </span>
+                      ) : null}
+                      {s.label}
+                    </label>
+                    {sources.includes(s.key) && parentSelected ? (
+                      <label className="ml-6 flex items-center gap-2 text-xs text-muted-foreground">
+                        <Checkbox
+                          checked={coexisting}
+                          onCheckedChange={(v) =>
+                            setCoexistSubSources((prev) =>
+                              v === true
+                                ? [...new Set([...prev, s.key])]
+                                : prev.filter((k) => k !== s.key)
+                            )
+                          }
+                        />
+                        Conviver com a pai (série própria; você garante que não se
+                        sobrepõem). Padrão: somar na pai, sem duplicar.
+                      </label>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
             <label className="mt-1 flex items-center gap-2 text-sm">
               <Checkbox

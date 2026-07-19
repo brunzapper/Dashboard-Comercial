@@ -12,7 +12,12 @@
 //   linhas daquele record_type, então o disjunto não casa nada. Com o widget
 //   em "todas as fontes" NÃO há mais interseção/unwrap contra a lista fixa —
 //   o wrapper preserva a semântica mesmo com fontes criadas depois.
-import { toRecordType, type SourceKey } from "@/lib/sources";
+import {
+  BUILTIN_SOURCES,
+  recordTypeOf,
+  type SourceDef,
+  type SourceKey,
+} from "@/lib/sources";
 import type { WidgetFilter } from "./types";
 
 // Fontes-alvo deduplicadas de um filtro ([] = todas as fontes).
@@ -36,7 +41,8 @@ export function filterTargetSources(f: WidgetFilter): SourceKey[] {
 // Idempotente: filtros já normalizados (com record_types) passam intactos.
 export function applyFilterSourceTargets(
   filters: WidgetFilter[],
-  widgetSources?: SourceKey[]
+  widgetSources?: SourceKey[],
+  catalog: SourceDef[] = BUILTIN_SOURCES
 ): WidgetFilter[] {
   const covered = widgetSources?.length ? widgetSources : null;
   const out: WidgetFilter[] = [];
@@ -55,7 +61,11 @@ export function applyFilterSourceTargets(
       out.push(rest);
       continue;
     }
-    out.push({ ...rest, record_types: effective.map((s) => toRecordType(s)) });
+    // record_type ciente do catálogo: sub-fonte → record_type da pai.
+    out.push({
+      ...rest,
+      record_types: [...new Set(effective.map((s) => recordTypeOf(s, catalog)))],
+    });
   }
   return out;
 }

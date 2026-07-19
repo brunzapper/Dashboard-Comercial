@@ -55,7 +55,7 @@ export default async function CamposPage() {
       [
         ...coreOptions,
         ...fields
-          .filter((f) => fieldAppliesToSource(f.applies_to, s.key))
+          .filter((f) => fieldAppliesToSource(f.applies_to, s.key, sources))
           .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label })),
       ],
     ])

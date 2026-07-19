@@ -505,7 +505,9 @@ export default async function SnapshotPage({
             currencyRates,
             conversionPeriodById[w.id],
             correspondencesMap,
-            { excludeRecordIds: partnerIds }
+            { excludeRecordIds: partnerIds },
+            sources,
+            correspondences
           );
         } catch (e) {
           fail(e);
@@ -572,7 +574,9 @@ export default async function SnapshotPage({
           correspondencesMap,
           fields,
           currencyRates,
-          conversionPeriodById[w.id]
+          conversionPeriodById[w.id],
+          sources,
+          correspondences
         );
       } catch (e) {
         fail(e);
@@ -778,7 +782,9 @@ export default async function SnapshotPage({
               correspondencesMap,
               fields,
               currencyRates,
-              conversionPeriod
+              conversionPeriod,
+              sources,
+              correspondences
             );
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);

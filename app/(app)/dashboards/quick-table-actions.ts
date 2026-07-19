@@ -229,7 +229,9 @@ export async function runQuickTable(
         correspondencesMap,
         allFields,
         currencyRates,
-        conversionPeriod
+        conversionPeriod,
+        sources,
+        correspondences
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

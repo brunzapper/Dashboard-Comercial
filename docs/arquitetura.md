@@ -1,4 +1,7 @@
-<!-- Versão: 1.2 | Data: 18/07/2026 -->
+<!-- Versão: 1.3 | Data: 19/07/2026 -->
+<!-- v1.3 (19/07/2026): sub-fontes (0078) — fonte derivada de uma pai, recortada
+     por um filtro, com data própria; resolvida no engine (§4.8) sem tocar nas
+     RPCs; nova invariante 10. -->
 <!-- v1.2 (18/07/2026): fontes por métrica (Metric.sources) — universo de
      cálculo próprio por métrica via "pernas" no engine (§4.1); nova invariante
      em §5 (nunca resolver fonte por métrica no RPC). -->
@@ -300,6 +303,47 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   serializam por cliente e o re-render RSC da rota inteira a cada blur é o que
   travava a navegação.
 
+### 4.8 Sub-fontes (fonte derivada, filtrada)
+
+Uma **sub-fonte** (`sub_sources`, 0078) é tratada como fonte em todo o app, mas
+suas linhas são as da fonte **PAI** recortadas por um `filter` (WidgetFilter[]),
+com **campo de data próprio**. Motivação: um campo unificado (`unified:<key>`)
+pode então mapear DUAS datas para o mesmo `record_type` — ex.: Leads → *Data
+Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
+
+- **Modelo:** tabela separada de `data_sources` (a sub compartilha o
+  `record_type` da pai — não pode virar linha de `data_sources` sem quebrar o
+  `record_type unique`/FK de `records`). `loadSources` une os dois num único
+  `SourceDef[]` (`parentKey`/`filter`; `recordType` = o da pai). O membro de
+  campo unificado passa a ser identificado por `source_key`
+  (`field_correspondence_members`, unicidade `(correspondence_id, source_key)`).
+- **Resolução no ENGINE (sem tocar nas RPCs):** `planSourceLegs` decide, por
+  widget, a fonte **efetiva** de cada `record_type` na consulta PRINCIPAL — uma
+  só. Subs **absorvidas** (a pai também está no widget) somem: a pai já cobre
+  suas linhas, sem duplicar (padrão). Sub **avulsa** (pai ausente) recorta as
+  linhas da pai: o predicado entra scoped via `_widget_wrap_record_types`, o
+  `@period.byType[record_type]` usa a data da sub e o `coalesce` do unificado
+  recebe o membro da sub (`correspondenceMapForSources` — um ref por perna,
+  senão pai+sub colidiriam num mesmo coalesce). Como cada `record_type` tem UMA
+  fonte efetiva, `byType`/coalesce/`record_type in` continuam chaveados por
+  `record_type` e o par `run_widget_query`/`_snapshot` fica intocado.
+- **Conviver (toggle `settings.coexistSubSources`):** marcar uma sub como
+  "conviver" (com a pai também selecionada), ou selecionar 2+ subs da mesma pai,
+  gera **pernas EXTRAS** — no caminho agregado, cada fonte de linha vira uma
+  série própria (fonte como dimensão líder), calculada por recursão em
+  `runWidget` (filtro + data + membro próprios). O usuário assume que os
+  conjuntos são disjuntos. **Para restringir a PAI sem esvaziar a sub** (ex.:
+  pai só "Desqualificado" × sub "Clientes Lite"), o filtro do widget precisa
+  ter a PAI como fonte-alvo (`WidgetFilter.sources = [pai]`): filtros globais
+  (sem alvo) valem para TODAS as pernas e cairiam também sobre a sub. KPI/card/
+  "Agrupar período" e o modo lista ficam no **absorver** (a perna extra não vira
+  série nesses tipos) — limitação v1.
+- **Arquivos:** `lib/sources.ts` (resolvers + `planSourceLegs`),
+  `lib/widgets/engine.ts` (fonte efetiva + série por fonte), `record-list.ts`
+  (mesmo no modo lista), `lib/correspondences.ts` (`correspondenceMapForSources`),
+  UI em `components/configuracoes/sub-sources-manager.tsx` e o toggle no
+  `widget-builder.tsx`.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -346,6 +390,17 @@ principalmente — para mantenedores humanos.
    cobrir fontes do widget ∪ fontes das métricas (`widgetQuerySources` — 3
    pontos: page, viewer de snapshot e widget-scope), senão as pernas perdem
    registros em silêncio.
+
+10. **Sub-fontes se resolvem no ENGINE, nunca no RPC.** Uma sub-fonte
+    (`sub_sources`, 0078) compartilha o `record_type` da pai; a resolução (fonte
+    efetiva por `record_type`, predicado da sub, data e membro de unificado
+    próprios) mora no engine (`lib/sources.ts` `planSourceLegs` +
+    `lib/widgets/engine.ts`/`record-list.ts`). O par
+    `run_widget_query`/`run_widget_query_snapshot` **não conhece o conceito** —
+    não recrie as RPCs para isso (não acione a invariante 1). O membro de
+    unificado é por `source_key`; use `correspondenceMapForSources` (um ref por
+    perna) — misturar o membro da pai e o da sub no mesmo `coalesce` pega o 1º
+    não-nulo (uma linha com as duas colunas preenchidas erra). Ver §4.8.
 
 ## 6. Convenções do projeto
 

@@ -19,7 +19,11 @@ import {
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
-import { unifiedMemberRef } from "@/lib/correspondences";
+import {
+  unifiedMemberRef,
+  type Correspondence,
+} from "@/lib/correspondences";
+import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import { fetchFkLabels, runWidget } from "./engine";
 import { runCalculatedWidget } from "./formula-metric";
 import { runRecordList } from "./record-list";
@@ -105,7 +109,10 @@ export async function runCardWidget(
   correspondencesMap: Record<string, string[]> = {},
   // Viewer de snapshot: partner rows (match) nunca são candidatas do modo
   // record — mesmo pós-filtro das listas de registros.
-  opts: { excludeRecordIds?: Set<string> } = {}
+  opts: { excludeRecordIds?: Set<string> } = {},
+  // SUB-FONTES (0078): repassados a runWidget (modos topn/list).
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
   const card: CardConfig = config.settings?.card ?? {};
   const mode = card.mode ?? "value";
@@ -209,7 +216,9 @@ export async function runCardWidget(
       correspondencesMap,
       fields,
       rates,
-      conversionPeriod
+      conversionPeriod,
+      catalog,
+      correspondences
     );
     if (mode === "topn") {
       const asc = card.rankDir === "min";

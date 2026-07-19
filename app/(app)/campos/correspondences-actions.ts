@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
-import { toRecordType, type SourceDef } from "@/lib/sources";
+import { recordTypeOf, type SourceDef } from "@/lib/sources";
 import { slugify } from "@/lib/records/slug";
 
 export interface CorrespondenceActionState {
@@ -37,16 +37,26 @@ async function ensureCanManage(): Promise<string | null> {
   return null;
 }
 
-// Lê os membros do form: um field_ref por fonte do CATÁLOGO (vazio = sem membro).
+// Lê os membros do form: um field_ref por fonte do CATÁLOGO — inclusive
+// sub-fontes (0078). A identidade é a source-key; record_type vem do catálogo
+// (o da PAI, para subs — recordTypeOf).
 function readMembers(
   formData: FormData,
   sources: SourceDef[]
-): { record_type: string; field_ref: string }[] {
-  const members: { record_type: string; field_ref: string }[] = [];
+): { record_type: string; source_key: string; field_ref: string }[] {
+  const members: {
+    record_type: string;
+    source_key: string;
+    field_ref: string;
+  }[] = [];
   for (const s of sources) {
     const ref = String(formData.get(`member_${s.key}`) ?? "").trim();
     if (ref) {
-      members.push({ record_type: toRecordType(s.key), field_ref: ref });
+      members.push({
+        record_type: recordTypeOf(s.key, sources),
+        source_key: s.key,
+        field_ref: ref,
+      });
     }
   }
   return members;
