@@ -1,9 +1,9 @@
-<!-- Versão: 1.0 | Data: 17/07/2026 -->
+<!-- Versão: 1.1 | Data: 19/07/2026 -->
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0075), para que um
-mantenedor não precise ler as 76 migrações em ordem para reconstruir o modelo.
+Referência do estado **atual** do banco (após a migração 0076), para que um
+mantenedor não precise ler as 77 migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
 
@@ -292,7 +292,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0075)
+## 7. Histórico de migrações (0001–0076)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -373,3 +373,4 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0073 | widget_image_type | visual_type `imagem` |
 | 0074 | webhooks | api_keys, endpoints, outbox, log de entrada; `audit_log.origin='api'` |
 | 0075 | fonte_implementacao_bitrix | `fonte` (SOURCE_ID) curada + `implementacao` vira campo Bitrix (UF_CRM_1778094396888) |
+| 0076 | moved_time_visivel | Reconcilia `bitrix_moved_time` (MOVED_TIME) em field_definitions: chave canônica + visível (par do bitrix-field-map v1.4) |

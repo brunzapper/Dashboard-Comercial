@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 18/07/2026
+// Versão: 1.5 | Data: 19/07/2026
+// v1.5 (19/07/2026): loga o erro do upsert final de field_definitions (antes
+//   engolido) — uma violação do índice único (source_system, source_field_id)
+//   derruba o upsert inteiro em silêncio e nenhum campo novo aparece (0076).
 // v1.4 (18/07/2026): campos curados de tipo "source" (SOURCE_ID → `fonte`) viram
 //   data_type 'selecao' com as origens resolvidas como options (o schema diz
 //   crm_status, que cairia em texto sem options).
@@ -273,7 +276,14 @@ export async function syncFieldCatalog(
     };
   });
 
-  await db
+  const { error } = await db
     .from("field_definitions")
     .upsert(payload, { onConflict: "field_key" });
+  // Não aborta o sync: um catálogo desatualizado é preferível a um sync parado.
+  // Mas a falha precisa aparecer nos logs — um conflito com o índice único
+  // (source_system, source_field_id) da 0017 derruba o upsert INTEIRO e, calado,
+  // vira "campo novo nunca aparece" (ver manual §4.6).
+  if (error) {
+    console.error(`syncFieldCatalog: upsert de field_definitions falhou: ${error.message}`);
+  }
 }
