@@ -1,4 +1,4 @@
--- Versão: 1.1 | Data: 19/07/2026
+-- Versão: 1.2 | Data: 19/07/2026
 -- DIAGNÓSTICO + RECUPERAÇÃO DE PERFORMANCE (dashboard lento, widgets com erro
 -- 500 / "canceling statement due to statement timeout" nos logs do Supabase).
 --
@@ -15,6 +15,9 @@
 --     numa transação e "VACUUM cannot run inside a transaction block" (erro
 --     25001). Rode por fora (psql, conexão direta) ou deixe a cargo do
 --     autovacuum. Instruções no próprio passo 5.
+--   * PARTE C (passos 7–10): diagnóstico POR DASHBOARD quando UM dashboard
+--     específico segue lento após A/B — foca a subconsulta de `match:` sobre
+--     record_matches (magnitude, pg_stat_statements e EXPLAIN). Tudo leitura.
 
 -- ############################################################
 -- PARTE A — roda no SQL editor do Supabase
@@ -112,3 +115,99 @@ analyze public.snapshot_records;
 --      restart/upgrade do compute (instâncias nano/micro não sustentam
 --      dashboards grandes com listas em full-fetch).
 -- ============================================================
+
+-- ############################################################
+-- PARTE C — diagnóstico POR DASHBOARD (roda no SQL editor)
+-- ############################################################
+-- Quando usar: a Parte A/B já rodou (ou os OUTROS dashboards já voltaram) mas
+-- UM dashboard específico segue lento / com widgets em
+-- "canceling statement due to statement timeout". Aqui o alvo é a subconsulta
+-- correlacionada de `_widget_match_expr` (colunas `match:` = registro casado),
+-- que roda POR LINHA do agregado sobre `record_matches` — o custo residual
+-- típico depois que período/bloat já foram tratados. Ver docs §5.
+
+-- ============================================================
+-- 7) PRIMEIRO SINAL (não é SQL): a linha `[dashboard:timing]` nos logs da
+--    Vercel ao abrir o dashboard —
+--      [dashboard:timing] "<nome>" total=…ms widgets=…ms (N widgets)
+--        | top: <widget>#<id>=…ms(erro?) | …
+--    O `top` aponta o(s) widget(s) dominante(s); `(erro)` = falhou (timeout).
+--    Anote quais widgets dominam antes de seguir — os passos abaixo confirmam
+--    a CAUSA (subconsulta de match vs volume de linhas do recorte).
+-- ============================================================
+
+-- ============================================================
+-- 8) Magnitude de `record_matches` (o `match:` custa proporcional a isto POR
+--    LINHA do agregado). Muitos matches por registro = subconsulta cara.
+-- ============================================================
+select count(*) as total_matches,
+       count(distinct record_a_id) as com_match_a,
+       count(*) filter (where mode = 'manual') as manuais
+from public.record_matches;
+
+-- Distribuição de matches por registro (cauda longa = registros com muitos
+-- parceiros → o `order by … limit 1` por linha fica caro):
+select n_matches, count(*) as qtd_registros
+from (
+  select r.id,
+         (select count(*) from public.record_matches rm
+          where rm.record_a_id = r.id or rm.record_b_id = r.id) as n_matches
+  from public.records r
+  where not r.is_mock
+) s
+group by n_matches
+order by n_matches desc
+limit 20;
+
+-- ============================================================
+-- 9) pg_stat_statements: custo real por chamada das SELECTs geradas pelo RPC
+--    que tocam record_matches. (Extensão padrão no Supabase; se vazio, habilite
+--    em Database → Extensions e aguarde acumular chamadas.)
+-- ============================================================
+select calls,
+       round(mean_exec_time::numeric, 1) as mean_ms,
+       round(total_exec_time::numeric, 1) as total_ms,
+       left(query, 140) as query
+from pg_stat_statements
+where query ilike '%record_matches%'
+order by total_exec_time desc
+limit 20;
+
+-- ============================================================
+-- 10) EXPLAIN da subconsulta de `match:` (decide "índice basta" vs "reescrever
+--     o RPC"). Reconstrução representativa de _widget_match_expr para UMA
+--     coluna match: agregada sobre o recorte do dashboard (AJUSTE record_type,
+--     a coluna/valores de data e a fonte alvo 'lead'/'negocio'/'venda_site'
+--     conforme o widget dominante do passo 7).
+--
+--     O QUE PROCURAR no plano:
+--     - o SubPlan correlacionado deve usar `Index Scan using
+--       idx_record_matches_a_created / _b_created` (0077). Se aparecer
+--       `Seq Scan on record_matches` ou um `BitmapOr` caro, os índices não
+--       estão ajudando → candidato à reescrita (union all de dois ramos).
+--     - `loops=` do SubPlan ≈ nº de linhas do recorte: se o tempo TOTAL é
+--       loops × (tempo por loop) e o recorte já está limitado por período, o
+--       gargalo é o padrão POR LINHA — a correção é estrutural (reescrever
+--       `_widget_match_expr`/`_widget_match_expr_snap` numa migração ESPELHADA),
+--       não mais índice.
+-- ============================================================
+explain (analyze, buffers)
+select
+  count(*) as metric_1,
+  count(nullif((
+    select mm.title from public.records mm where mm.id = (
+      select case when rm.record_a_id = records.id then rm.record_b_id
+                   else rm.record_a_id end
+      from public.record_matches rm
+      join public.records p on p.id = (case when rm.record_a_id = records.id
+                                            then rm.record_b_id else rm.record_a_id end)
+      where (rm.record_a_id = records.id or rm.record_b_id = records.id)
+        and p.record_type = 'lead'          -- << fonte alvo do match: (ajuste)
+      order by (rm.mode = 'manual') desc, rm.created_at desc
+      limit 1)
+  ), '')) as metric_2
+from public.records
+where not is_mock
+  and record_type = 'negocio'               -- << fonte das LINHAS do widget (ajuste)
+  and closed_at >= '2026-01-01'             -- << recorte do período (ajuste col/datas)
+  and closed_at <= '2026-12-31';
