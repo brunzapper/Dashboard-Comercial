@@ -1,4 +1,9 @@
-// Versão: 1.5 | Data: 18/07/2026
+// Versão: 1.6 | Data: 19/07/2026
+// v1.6 (19/07/2026): attachMatches com chunks em PARALELO (Promise.all) nas
+//   duas fases (record_matches e registros parceiros) — antes eram awaits
+//   seriais (~2×N/200 round-trips em sequência numa lista grande). Resultado
+//   idêntico: a escolha do melhor match por fonte é por rank, indiferente à
+//   ordem de chegada dos lotes.
 // v1.5 (18/07/2026): fontes por métrica — runRecordListWithExtras busca, além
 //   dos registros de EXIBIÇÃO (fontes do widget, intactos), os registros das
 //   fontes extras das pernas (Metric.sources) p/ a basis dos subtotais no
@@ -471,18 +476,28 @@ async function attachMatches(
     mode: "auto" | "manual";
     created_at: string;
   };
-  const matches: MatchRow[] = [];
+  // Chunks em PARALELO (antes eram awaits seriais: ~2×N/200 round-trips em
+  // sequência numa lista grande — custo real de latência no load). A ordem de
+  // chegada não importa: o melhor match por fonte é escolhido por `rank`.
   const CHUNK = 200;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const slice = ids.slice(i, i + CHUNK);
-    const { data } = await supabase
-      .from("record_matches")
-      .select("record_a_id, record_b_id, mode, created_at")
-      .or(
-        `record_a_id.in.(${slice.join(",")}),record_b_id.in.(${slice.join(",")})`
-      );
-    for (const m of (data ?? []) as MatchRow[]) matches.push(m);
-  }
+  const chunksOf = (list: string[]): string[][] => {
+    const out: string[][] = [];
+    for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK));
+    return out;
+  };
+  const matches: MatchRow[] = (
+    await Promise.all(
+      chunksOf(ids).map(async (slice) => {
+        const { data } = await supabase
+          .from("record_matches")
+          .select("record_a_id, record_b_id, mode, created_at")
+          .or(
+            `record_a_id.in.(${slice.join(",")}),record_b_id.in.(${slice.join(",")})`
+          );
+        return (data ?? []) as MatchRow[];
+      })
+    )
+  ).flat();
 
   // Ids dos registros casados + leads relacionados (fallback).
   const partnerOf = (m: MatchRow, self: string) =>
@@ -496,15 +511,17 @@ async function attachMatches(
   for (const id of ids) wanted.delete(id); // já temos os próprios
 
   const partnerById = new Map<string, RecordRow>();
-  const wantedIds = [...wanted];
-  for (let i = 0; i < wantedIds.length; i += CHUNK) {
-    const slice = wantedIds.slice(i, i + CHUNK);
-    if (slice.length === 0) continue;
-    const { data } = await supabase
-      .from("records")
-      .select(RECORD_COLS)
-      .in("id", slice);
-    for (const p of (data ?? []) as unknown as RecordRow[]) partnerById.set(p.id, p);
+  const partnerChunks = await Promise.all(
+    chunksOf([...wanted]).map(async (slice) => {
+      const { data } = await supabase
+        .from("records")
+        .select(RECORD_COLS)
+        .in("id", slice);
+      return (data ?? []) as unknown as RecordRow[];
+    })
+  );
+  for (const chunk of partnerChunks) {
+    for (const p of chunk) partnerById.set(p.id, p);
   }
 
   // Matches por registro (para escolher o melhor por fonte).

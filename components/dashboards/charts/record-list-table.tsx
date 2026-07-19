@@ -1,4 +1,8 @@
-// Versão: 3.6 | Data: 18/07/2026
+// Versão: 3.7 | Data: 19/07/2026
+// v3.7 (19/07/2026): performance — resolução das colunas unificadas
+//   pré-computada por render (mapas membros/hierarquia); antes cada rawValue
+//   refazia available.find + cols.find POR CÉLULA (render, sort, grupos,
+//   condicional, basis de calculadas), fator constante caro em listas grandes.
 // v3.6 (18/07/2026): colunas unificadas — célula de dados resolve o membro via
 //   displayValue (o fallback coreDisplay mostrava "—") e hierarquia de fontes
 //   com fallback (RecordListColumn.unifiedSources): por registro, 1ª fonte da
@@ -318,10 +322,31 @@ export const RecordListTable = memo(function RecordListTable({
   // válido (célula "—"). Os demais campos delegam ao resolvedor concreto.
   // Obs.: o pós-filtro de quick-filters (quick-filters.ts) segue resolvendo
   // pela fonte do registro — config independente da coluna.
+  // Pré-resolução por render (mesmo padrão do fieldByKey acima): membros do
+  // catálogo de TODO campo unificado + hierarquia de fontes das colunas do
+  // widget. rawValue é chamado por célula (render, sort, grupos, condicional,
+  // basis de calculadas) — find() por chamada não escala em listas grandes.
+  const unifiedMembersByField = new Map<
+    string,
+    AvailableField["unifiedMembers"]
+  >();
+  for (const a of available) {
+    // 1ª ocorrência vence — mesma semântica do available.find() anterior.
+    if (a.field.startsWith("unified:") && !unifiedMembersByField.has(a.field))
+      unifiedMembersByField.set(a.field, a.unifiedMembers);
+  }
+  const unifiedOrderByField = new Map<
+    string,
+    RecordListColumn["unifiedSources"]
+  >();
+  for (const c of cols) {
+    if (c.field.startsWith("unified:") && !unifiedOrderByField.has(c.field))
+      unifiedOrderByField.set(c.field, c.unifiedSources);
+  }
   const resolveUnifiedRef = (field: string, r: RecordRow): string | null => {
     if (!field.startsWith("unified:")) return field;
-    const members = available.find((a) => a.field === field)?.unifiedMembers;
-    const order = cols.find((c) => c.field === field)?.unifiedSources;
+    const members = unifiedMembersByField.get(field);
+    const order = unifiedOrderByField.get(field);
     if (order?.length) {
       let first: string | null = null;
       for (const src of order) {
