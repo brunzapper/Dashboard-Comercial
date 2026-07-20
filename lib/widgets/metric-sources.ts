@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 19/07/2026
+// Versão: 1.2 | Data: 20/07/2026
 // Fontes por MÉTRICA (`Metric.sources`): uma métrica pode ser calculada sobre
 // um conjunto de fontes DIFERENTE do widget (super/subconjunto ou disjunto) —
 // ex.: widget com linhas só de Deals e métrica de conversão contando Leads E
@@ -12,6 +12,9 @@
 // ("pernas") mescladas por tupla de dimensões (ver lib/widgets/engine.ts).
 // Nenhuma migração é necessária; run_widget_query fica intocado.
 //
+// v1.2 (20/07/2026): coveredLegSources — fontes de perna COBERTAS pelo widget
+// (complemento do extraSources dos call sites), para o top-up de mocks das
+// pernas cobertas (runCoveredLegMockTopUp em ./record-list.ts).
 // v1.1 (19/07/2026): operandos com ESCOPO DE FONTE (`agg:…@<fonte>`) contam
 // como fonte da métrica para o planejamento: formulaScopedSources/
 // metricScopedSources somam o escopo às pernas (metricLegSources) e à
@@ -148,6 +151,24 @@ export function partitionMetricLegs(
     byKey.set(key, leg);
   });
   return { defaultIdx, legs: [...byKey.values()] };
+}
+
+/**
+ * Fontes de perna COBERTAS pelo universo do widget — o complemento do
+ * `extraSources` dos call sites (engine.runWidgetByPeriod e
+ * runRecordListWithExtras): pernas cobertas reusam os registros de EXIBIÇÃO,
+ * cuja regra dos mocks nunca vê as métricas das pernas — o top-up de mocks
+ * (runCoveredLegMockTopUp) busca só o que falta. Widget em "todas as fontes"
+ * (sem seleção) cobre toda perna.
+ */
+export function coveredLegSources(
+  legs: { sources: SourceKey[] }[],
+  widgetSources?: SourceKey[]
+): SourceKey[] {
+  const all = [...new Set(legs.flatMap((l) => l.sources))];
+  return widgetSources && widgetSources.length > 0
+    ? all.filter((s) => widgetSources.includes(s))
+    : all;
 }
 
 /**

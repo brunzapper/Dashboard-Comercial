@@ -1,4 +1,7 @@
-<!-- Versão: 1.4 | Data: 19/07/2026 -->
+<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- v1.5 (20/07/2026): top-up de mocks das pernas COBERTAS — fontes da métrica
+     dentro das do widget (inclusive "todas as fontes") recebem os mocks de
+     Data Reunião via fetch is_mock=true no engine (§4.1; invariante 9). -->
 <!-- v1.4 (19/07/2026): fuso da fonte (0079/0080) — data_sources.timezone;
      datetimes ingeridos normalizam p/ Brasília na entrada (§4.5); nova
      invariante 11. -->
@@ -141,7 +144,17 @@ A basis das calculadas de perna vai em `WidgetRow.__calcOpsBy` (por métrica;
 os renderizadores leem `__calcOpsBy[key] ?? __calcOps`). No modo registros, o
 fetch extra (`runRecordListWithExtras`) traz os registros das fontes que
 faltam SÓ para a basis dos subtotais (nunca como linha; a regra dos mocks do
-fetch extra inspeciona as métricas das pernas). Restrições `allowed_sources`
+fetch extra inspeciona as métricas das pernas). Pernas com fontes JÁ COBERTAS
+pelo widget (subconjunto das fontes dele, inclusive widget em "todas as
+fontes") reusam os registros de exibição — cuja regra dos mocks nunca vê as
+métricas das pernas — e recebem um **top-up de mocks** (20/07/2026,
+`runCoveredLegMockTopUp` em `lib/widgets/record-list.ts`): fetch só de
+`is_mock = true` com o mesmo pipeline, mesclado ao stream de extras nos dois
+caminhos client-side (`runWidgetByPeriod` e `runRecordListWithExtras`), com
+gates que exigem que a config das pernas referencie Data Reunião
+(`recordListIncludesMocks`) e que a exibição NÃO tenha servido os mocks (senão
+duplicaria). Assim "fonte na métrica" = "fonte no widget" também nos caminhos
+sem RPC — mocks na basis sem virar linha. Restrições `allowed_sources`
 de snapshot podem excluir fontes de uma métrica — ela degrada para "—"
 (comportamento documentado, não é bug). KPI razão ignora
 `numerator/denominator.sources` no v1.
@@ -516,7 +529,11 @@ principalmente — para mantenedores humanos.
    `fieldByKey` (3 pontos: page, viewer de snapshot e widget-scope), senão as
    pernas perdem registros em silêncio. O mesmo vale para as pernas:
    `metricLegSources`/`partitionMetricLegs` unem `formulaScopedSources` ao
-   conjunto da métrica.
+   conjunto da métrica. A regra dos mocks das pernas COBERTAS (fontes dentro
+   das do widget) também se resolve no engine: top-up `is_mock = true`
+   (`recordListIncludesMocks`/`runCoveredLegMockTopUp`, 20/07/2026) mesclado
+   ao stream de extras — não a resolva via RPC nem re-inspecione a regra fora
+   de `resolveListFilters` (record-list.ts).
 
 10. **Sub-fontes se resolvem no ENGINE, nunca no RPC.** Uma sub-fonte
     (`sub_sources`, 0078) compartilha o `record_type` da pai; a resolução (fonte

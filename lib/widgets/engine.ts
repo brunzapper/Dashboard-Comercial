@@ -1,4 +1,10 @@
-// Versão: 1.4 | Data: 18/07/2026
+// Versão: 1.5 | Data: 20/07/2026
+// v1.5 (20/07/2026): "Agrupar período" — top-up de mocks das pernas COBERTAS
+//   (runCoveredLegMockTopUp): a regra dos mocks da exibição não vê as métricas
+//   das pernas e o fetch extra só cobre fontes que faltam; sem o top-up, mocks
+//   de Data Reunião sumiam da basis de métrica com fontes dentro das do widget
+//   (ex.: widget em "todas as fontes"). legScope resolve record_type ciente do
+//   catálogo (recordTypeOf — sub-fonte apontava p/ chave inexistente e zerava).
 // v1.4 (18/07/2026): fontes por MÉTRICA (Metric.sources) — métricas com fontes
 //   próprias viram "pernas": chamadas RPC separadas com o pipeline de filtros
 //   (segmentação + @period + record_type in) reconstruído para AQUELAS fontes,
@@ -62,7 +68,7 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { partitionMetricLegs } from "./metric-sources";
+import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
   collapseMedianRows,
@@ -72,7 +78,11 @@ import {
   uniquePeriodField,
   type ComparisonSpec,
 } from "./comparison";
-import { runRecordList } from "./record-list";
+import {
+  dedupeById,
+  runCoveredLegMockTopUp,
+  runRecordList,
+} from "./record-list";
 import {
   buildRecordBreakdown,
   calcCurrencyKey,
@@ -108,7 +118,6 @@ import {
   SOURCE_LABELS,
   sourceLabel,
   sourcePredicate,
-  toRecordType,
   toSourceKey,
   type SourceDef,
   type SourceKey,
@@ -899,8 +908,10 @@ async function runWidgetByPeriod(
   // fontes que faltam e inspeciona as métricas das pernas — mocks entram na
   // basis sem virar linha. Fontes de perna já cobertas pelo widget reusam os
   // registros de exibição (filtrados por record_type no escopo, adiante) —
-  // nesse recorte a regra dos mocks é a da consulta principal (limitação
-  // documentada; o fetch extra é que carrega os mocks da perna).
+  // como a regra dos mocks da exibição não vê as métricas das pernas, o
+  // TOP-UP (v1.5, runCoveredLegMockTopUp) busca só is_mock=true dessas fontes
+  // e entra no MESMO stream de extras (sem virar linha; gates evitam duplicar
+  // quando a própria exibição já serviu os mocks).
   const { defaultIdx, legs } = partitionMetricLegs(
     config.metrics,
     config.sources,
@@ -914,25 +925,28 @@ async function runWidgetByPeriod(
           (s) => !config.sources!.includes(s)
         )
       : [];
-  // Falha do fetch extra degrada as métricas de perna p/ null ("—") — nunca
-  // derruba o widget (mesma postura das pernas do caminho RPC).
+  // No "individual" os extras não são usados (grupo = 1 registro) — sem top-up.
+  const covered =
+    fn === "individual" ? [] : coveredLegSources(legs, config.sources);
+  const displayConfig =
+    legs.length > 0
+      ? { ...config, metrics: defaultIdx.map((i) => config.metrics[i]) }
+      : config;
+  const legMetrics = legs.flatMap((l) => l.idx.map((i) => config.metrics[i]));
+  // Falha do fetch extra/top-up degrada as métricas de perna p/ null ("—") —
+  // nunca derruba o widget (mesma postura das pernas do caminho RPC).
   let extraOk = true;
-  const [records, extraRecords] = await Promise.all([
-    runRecordList(
-      supabase,
-      legs.length > 0
-        ? { ...config, metrics: defaultIdx.map((i) => config.metrics[i]) }
-        : config,
-      period,
-      available
-    ) as Promise<RecordRow[]>,
+  const [records, extraFetched, topUp] = await Promise.all([
+    runRecordList(supabase, displayConfig, period, available) as Promise<
+      RecordRow[]
+    >,
     extraSources.length > 0
       ? (runRecordList(
           supabase,
           {
             ...config,
             sources: extraSources,
-            metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
+            metrics: legMetrics,
             settings: { ...config.settings, limit: undefined },
           },
           period,
@@ -942,7 +956,25 @@ async function runWidgetByPeriod(
           return [] as RecordRow[];
         })
       : Promise.resolve([] as RecordRow[]),
+    covered.length > 0
+      ? runCoveredLegMockTopUp(
+          supabase,
+          displayConfig,
+          {
+            ...config,
+            sources: covered,
+            metrics: legMetrics,
+            settings: { ...config.settings, limit: undefined },
+          },
+          period,
+          available
+        ).catch(() => {
+          extraOk = false;
+          return [] as RecordRow[];
+        })
+      : Promise.resolve([] as RecordRow[]),
   ]);
+  const extraRecords = dedupeById(extraFetched, topUp);
 
   // Campo unificado: resolve o MEMBRO da fonte do registro (espelha o coalesce
   // que o RPC monta); fonte sem membro → undefined (fica fora do bucket/soma).
@@ -1201,9 +1233,11 @@ async function runWidgetByPeriod(
     const money: Record<string, MoneyBreakdown> = {};
     // Escopo de uma PERNA neste grupo: registros do grupo + extras do grupo,
     // filtrados pelas fontes da métrica (no "individual", só o próprio
-    // registro — extras não casam com grupo de 1 registro).
+    // registro — extras não casam com grupo de 1 registro). recordTypeOf
+    // ciente do catálogo: sub-fonte conta as linhas da PAI (paridade com
+    // metricRts da tabela de registros).
     const legScope = (leg: { sources: SourceKey[] }): RecordRow[] => {
-      const rts = new Set(leg.sources.map((s) => toRecordType(s)));
+      const rts = new Set(leg.sources.map((s) => recordTypeOf(s, catalog)));
       const extras =
         fn === "individual" ? [] : (extrasByGroup.get(g.key) ?? []);
       return [...g.records, ...extras].filter((r) => rts.has(r.record_type));
