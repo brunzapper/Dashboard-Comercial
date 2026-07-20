@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 20/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): métrica ad-hoc ganha receita "Taxa de conversão", prévia
+//   agregada (previewAdapter) e "Salvar como campo reutilizável…"
+//   (onSaveAsField).
 // v2.0 (20/07/2026): métrica ad-hoc usa o FormulaEditor unificado (visual com
 //   cursor + paleta de funções + validação viva no card) no lugar do toggle
 //   Construtor/Texto; MetricRow ganha sourceDefs (warnings de escopo @fonte).
@@ -385,6 +388,7 @@ export function MetricRow({
   calcRefs,
   sourceDefs,
   previewAdapter,
+  onSaveAsField,
   resultFormatOptions,
   defaultLabel,
   fieldMenu,
@@ -406,6 +410,9 @@ export function MetricRow({
   // Prévia agregada da fórmula ad-hoc (montada pelo builder, que conhece
   // fontes/filtros do widget) — opt-in por clique (custa RPCs).
   previewAdapter?: FormulaPreviewAdapter;
+  // "Salvar como campo reutilizável…": abre o FieldForm inline pré-preenchido
+  // com esta fórmula (só quando o usuário pode gerenciar campos).
+  onSaveAsField?: () => void;
   resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
@@ -537,6 +544,17 @@ export function MetricRow({
             CONVERTE o resultado para a moeda escolhida (taxa do período do
             dashboard).
           </p>
+          {onSaveAsField ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={onSaveAsField}
+            >
+              Salvar como campo reutilizável…
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {metric.field ? (

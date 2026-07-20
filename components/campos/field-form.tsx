@@ -1,4 +1,9 @@
-// Versão: 2.0 | Data: 20/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): receitas guiadas na criação (RecipeStrip — a receita
+//   escolhe tipo/fórmula/formato), prévias ao vivo (registros reais no
+//   'calculado'; runCalculatedWidget no 'calculado_agg') e preset
+//   initialDataType/initialFormula ("Salvar como campo reutilizável" do
+//   builder de widgets).
 // v2.0 (20/07/2026): editor de fórmula UNIFICADO (FormulaEditor) nos dois tipos
 //   calculados — substitui o toggle Construtor/Texto + FormulaBuilder/
 //   FormulaTextEditor; validação ao vivo com as regras do servidor, funções
@@ -97,6 +102,8 @@ export function FieldForm({
   fieldChips,
   sources,
   currencyOptions,
+  initialDataType,
+  initialFormula,
   onDone,
 }: {
   field?: FieldDefinition;
@@ -119,6 +126,10 @@ export function FieldForm({
   sources?: SourceDef[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
   currencyOptions?: ComboboxOption[];
+  // Preset de CRIAÇÃO (ex.: "Salvar como campo reutilizável" de uma métrica
+  // ad-hoc do widget): tipo e fórmula já preenchidos, tudo editável.
+  initialDataType?: DataType;
+  initialFormula?: Formula | null;
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
   onDone?: (created?: FieldActionState["field"]) => void;
 }) {
@@ -126,7 +137,7 @@ export function FieldForm({
   const action = isEdit ? updateField : createField;
   const [state, formAction, pending] = useActionState(action, initial);
   const [dataType, setDataType] = useState<DataType>(
-    field?.data_type ?? "texto"
+    field?.data_type ?? initialDataType ?? "texto"
   );
   const currencyChoices =
     currencyOptions && currencyOptions.length > 0
@@ -318,7 +329,7 @@ export function FieldForm({
             catalog={aggRefs ?? []}
             chips={fieldChips}
             sources={sources}
-            initial={recipeFormula ?? field?.formula ?? null}
+            initial={recipeFormula ?? field?.formula ?? initialFormula ?? null}
             formInputs
             excludeKeys={forbidden}
             preview={{
@@ -389,7 +400,7 @@ export function FieldForm({
             catalog={allRefs ?? numericRefs}
             chips={fieldChips}
             sources={sources}
-            initial={recipeFormula ?? field?.formula ?? null}
+            initial={recipeFormula ?? field?.formula ?? initialFormula ?? null}
             formInputs
             excludeKeys={forbidden}
             preview={{

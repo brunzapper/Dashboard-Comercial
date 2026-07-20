@@ -1,4 +1,9 @@
-// Versão: 1.17 | Data: 20/07/2026
+// Versão: 1.18 | Data: 20/07/2026
+// v1.18 (20/07/2026): receita "Taxa de conversão" no widget calculado e na
+//   métrica ad-hoc; prévia agregada (previewAggregateFormula, opt-in) nos
+//   editores de fórmula; "Salvar como campo reutilizável…" promove a métrica
+//   ad-hoc a campo calculado_agg (FieldForm pré-preenchido; a métrica passa a
+//   apontar p/ o campo salvo).
 // v1.17 (20/07/2026): widget "calculado" e variáveis da calculadora usam o
 //   FormulaEditor unificado (visual com cursor + paleta de funções + validação
 //   viva); as variáveis ganharam o editor completo (antes texto-only).
@@ -81,7 +86,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldForm } from "@/components/campos/field-form";
-import type { FieldDefinition } from "@/lib/records/types";
+import type { DataType, FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
@@ -567,6 +572,13 @@ export function WidgetBuilder({
     null
   );
   const [calcRecipeNonce, setCalcRecipeNonce] = useState(0);
+  // "Salvar como campo reutilizável": preset do FieldForm inline (tipo +
+  // fórmula) e, ao criar, qual métrica ad-hoc passa a apontar p/ o campo salvo.
+  const [fieldPreset, setFieldPreset] = useState<{
+    dataType: DataType;
+    formula: Formula | null;
+    replaceMetricIndex?: number;
+  } | null>(null);
   // Prévia AGREGADA (opt-in; custa RPCs como um widget): fórmula avaliada por
   // runCalculatedWidget com as fontes/filtros correntes do builder, sem o
   // período da barra (o builder não o conhece — o selo avisa).
@@ -2906,6 +2918,22 @@ export function WidgetBuilder({
                   m.resultPercent === true,
                   m.resultCurrency ?? null
                 )}
+                onSaveAsField={
+                  canManageFields
+                    ? () => {
+                        // Promove a fórmula ad-hoc a campo reutilizável: abre o
+                        // FieldForm pré-preenchido; ao criar, a métrica passa a
+                        // apontar p/ o campo salvo (onDone abaixo).
+                        setFieldPreset({
+                          dataType: "calculado_agg",
+                          formula: m.formula ?? null,
+                          replaceMetricIndex: i,
+                        });
+                        setEditingField(null);
+                        setFieldSheetOpen(true);
+                      }
+                    : undefined
+                }
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
                   { value: "percent", label: "Percentual (%) — exibe ×100" },
@@ -3280,7 +3308,10 @@ export function WidgetBuilder({
           open={fieldSheetOpen}
           onOpenChange={(o) => {
             setFieldSheetOpen(o);
-            if (!o) setEditingField(null);
+            if (!o) {
+              setEditingField(null);
+              setFieldPreset(null);
+            }
           }}
         >
           <SheetContent className="overflow-y-auto">
@@ -3291,12 +3322,14 @@ export function WidgetBuilder({
               <SheetDescription>
                 {editingField
                   ? "Edite este campo sem sair do construtor. As mudanças refletem no widget ao salvar."
-                  : "A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos a lista automaticamente ao salvar."}
+                  : fieldPreset
+                    ? "A fórmula da métrica veio pré-preenchida — dê um rótulo e salve para reutilizá-la em vários widgets. A métrica passa a apontar para o campo salvo."
+                    : "A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos a lista automaticamente ao salvar."}
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-4">
               <FieldForm
-                key={editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}
+                key={`${editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}-${fieldPreset ? "preset" : "blank"}`}
                 field={editingField ?? undefined}
                 numericRefs={fieldFormNumericRefs}
                 allRefs={fieldFormAllRefs}
@@ -3305,20 +3338,42 @@ export function WidgetBuilder({
                 aggRefs={calcRefs}
                 sources={catalog}
                 currencyOptions={currencyOptions}
+                initialDataType={fieldPreset?.dataType}
+                initialFormula={fieldPreset?.formula}
                 onDone={(created) => {
                   const wasEditing = Boolean(editingField);
+                  const replaceIdx = fieldPreset?.replaceMetricIndex;
                   setFieldSheetOpen(false);
                   setEditingField(null);
+                  setFieldPreset(null);
                   // Só na CRIAÇÃO o campo recém-criado entra na config: campo
-                  // comum vira dimensão; "Calculado (totais)" vira métrica.
+                  // comum vira dimensão; "Calculado (totais)" vira métrica —
+                  // e, vindo de "Salvar como campo reutilizável", SUBSTITUI a
+                  // métrica ad-hoc de origem (rótulo/fontes preservados).
                   if (!wasEditing && created?.field_key) {
                     const ref = `custom:${created.field_key}`;
                     if (created.data_type === "calculado_agg") {
-                      setMetrics((prev) =>
-                        prev.some((m) => m.field === ref)
+                      setMetrics((prev) => {
+                        if (
+                          replaceIdx != null &&
+                          prev[replaceIdx]?.field === CALC_METRIC_FIELD
+                        ) {
+                          const next = [...prev];
+                          next[replaceIdx] = {
+                            ...next[replaceIdx],
+                            field: ref,
+                            agg: "sum",
+                            calc: true,
+                            formula: undefined,
+                            resultPercent: undefined,
+                            resultCurrency: undefined,
+                          };
+                          return next;
+                        }
+                        return prev.some((m) => m.field === ref)
                           ? prev
-                          : [...prev, { field: ref, agg: "sum", calc: true }]
-                      );
+                          : [...prev, { field: ref, agg: "sum", calc: true }];
+                      });
                     } else {
                       setDimensions((prev) =>
                         prev.some((d) => d.field === ref)
