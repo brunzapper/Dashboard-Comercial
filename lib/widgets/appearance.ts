@@ -1,11 +1,16 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Fase 10: helpers puros de render de aparência, compartilhados entre o fundo do
 // dashboard, os charts e as tabelas. Sem estado/UI — só transforma config em CSS.
+// v1.1 (20/07/2026): top-N configurável (AppearanceSettings.categoryLimit) —
+//   topWithOther ganha o limite por parâmetro e limitCategories generaliza o
+//   corte p/ linhas completas de barra (soma métricas/__cmp e funde __money).
+import { foldBreakdowns } from "@/lib/widgets/currency";
 import type {
   AppearanceSettings,
   DashboardSettings,
   GridLines,
   TableAlign,
+  WidgetRow,
 } from "@/lib/widgets/types";
 
 export const MAX_CATEGORIES = 5;
@@ -20,22 +25,83 @@ export function groupByLevels(gb?: string | string[]): string[] {
 
 // Reduz categorias a top-N por valor + "Outros" (pizza/funil). Compartilhado
 // entre o chart e o editor de aparência p/ que a ordem/índice das fatias case.
+// `limit` (AppearanceSettings.categoryLimit) configura N e o bucket "Outros";
+// ausente = defaults clássicos (teto 5 com "Outros").
 export function topWithOther(
   rows: Record<string, unknown>[],
   dimKey: string,
-  metricKey: string
+  metricKey: string,
+  limit?: AppearanceSettings["categoryLimit"]
 ): { name: string; value: number }[] {
+  const n = Math.max(1, Math.floor(limit?.n ?? MAX_CATEGORIES));
+  const others = limit?.others ?? true;
   const mapped = rows.map((r) => ({
     name: String(r[dimKey] ?? "—"),
     value: Number(r[metricKey]) || 0,
   }));
-  if (mapped.length <= MAX_CATEGORIES) return mapped;
+  if (mapped.length <= n) return mapped;
   const sorted = [...mapped].sort((a, b) => b.value - a.value);
-  const top = sorted.slice(0, MAX_CATEGORIES - 1);
-  const other = sorted
-    .slice(MAX_CATEGORIES - 1)
-    .reduce((s, x) => s + x.value, 0);
+  if (!others) return sorted.slice(0, n);
+  const top = sorted.slice(0, n - 1);
+  const other = sorted.slice(n - 1).reduce((s, x) => s + x.value, 0);
   return [...top, { name: "Outros", value: other }];
+}
+
+// Top-N p/ gráficos de barra: corta as LINHAS completas pela 1ª métrica
+// (desc) e, opcionalmente, agrega o resto numa linha sintética "Outros" —
+// somando cada métrica e o valor comparado (__cmp) e fundindo o detalhamento
+// monetário (__money). Métricas intensivas (média/razão calculada) somam
+// numericamente no "Outros" — aproximação de exibição, documentada. Só ativa
+// com categoryLimit configurado (sem config = sem corte; barra clássica).
+export function limitCategories(
+  rows: Record<string, unknown>[],
+  dimKey: string,
+  metricKeys: string[],
+  limit: NonNullable<AppearanceSettings["categoryLimit"]>
+): Record<string, unknown>[] {
+  const n = Math.max(1, Math.floor(limit.n ?? MAX_CATEGORIES));
+  const others = limit.others ?? true;
+  if (rows.length <= n) return rows;
+  const first = metricKeys[0];
+  const sorted = [...rows].sort(
+    (a, b) => (Number(b[first]) || 0) - (Number(a[first]) || 0)
+  );
+  if (!others) return sorted.slice(0, n);
+  const top = sorted.slice(0, n - 1);
+  const rest = sorted.slice(n - 1) as WidgetRow[];
+  const other: WidgetRow = { [dimKey]: "Outros" };
+  for (const key of metricKeys) {
+    let sum = 0;
+    let has = false;
+    let cmpSum = 0;
+    let cmpHas = false;
+    const moneys = [];
+    for (const r of rest) {
+      const v = Number(r[key]);
+      if (r[key] != null && Number.isFinite(v)) {
+        sum += v;
+        has = true;
+      }
+      const cv = r.__cmp?.[key];
+      if (cv != null && Number.isFinite(Number(cv))) {
+        cmpSum += Number(cv);
+        cmpHas = true;
+      }
+      const bd = r.__money?.[key];
+      if (bd) moneys.push(bd);
+    }
+    other[key] = has ? sum : null;
+    if (cmpHas) {
+      other.__cmp = { ...(other.__cmp ?? {}), [key]: cmpSum };
+    }
+    if (moneys.length > 0) {
+      other.__money = {
+        ...(other.__money ?? {}),
+        [key]: foldBreakdowns(moneys),
+      };
+    }
+  }
+  return [...top, other];
 }
 
 // CSS de fundo do dashboard (sólido ou gradiente). undefined = sem override.

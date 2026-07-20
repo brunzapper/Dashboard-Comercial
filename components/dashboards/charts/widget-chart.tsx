@@ -81,6 +81,7 @@ import {
   fracDigits,
   gridFlags,
   groupByLevels,
+  limitCategories,
   reorderKeys,
   resolveAlign,
   resolveDecimals,
@@ -758,7 +759,7 @@ export const WidgetChart = memo(function WidgetChart({
   if (visualType === "pizza" || visualType === "funil") {
     const metricKey = metrics[0]?.key;
     if (!metricKey) return <EmptyState />;
-    const pieData = topWithOther(rows, dimKey, metricKey);
+    const pieData = topWithOther(rows, dimKey, metricKey, ap.categoryLimit);
     // Fatia: cor manual > regra/escala condicional (sobre o valor plotado) >
     // paleta.
     const pieDomains = chartCondActive
@@ -863,9 +864,22 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- categorias (barra/linha): ordem manual ou ordenação, e chips editáveis ---
   const catName = (r: Record<string, unknown>) => String(r[dimKey] ?? "—");
+  // Top-N + "Outros" (categoryLimit) nas barras, ANTES de ordenar — a linha
+  // sintética "Outros" participa da ordenação/cores pelo nome. Linha (série
+  // temporal) fica de fora do corte.
+  const limitedRows =
+    ap.categoryLimit?.n != null &&
+    (visualType === "barra" || visualType === "barra_horizontal")
+      ? limitCategories(
+          plotRows,
+          dimKey,
+          metrics.map((m) => m.key),
+          ap.categoryLimit
+        )
+      : plotRows;
   const chartRows = ap.categorySort
     ? sortRows(
-        plotRows,
+        limitedRows,
         {
           column: dimKey,
           dir: ap.categorySort.dir,
@@ -874,8 +888,8 @@ export const WidgetChart = memo(function WidgetChart({
         (r) => ap.categoryColors?.[catName(r)]?.fill
       )
     : ap.categoryOrder
-      ? applyManualOrder(plotRows, ap.categoryOrder, catName)
-      : plotRows;
+      ? applyManualOrder(limitedRows, ap.categoryOrder, catName)
+      : limitedRows;
   const catNames = chartRows.map(catName);
 
   // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
@@ -1092,6 +1106,7 @@ export const WidgetChart = memo(function WidgetChart({
             <Bar
               key={`${m.key}__cmp`}
               {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
+              {...(ap.stacked ? { stackId: "cmp" } : {})}
               dataKey={`${m.key}__cmp`}
               name={`${m.label} (comparação)`}
               fill={resolveSeriesColor(ap, m.key, i)}
@@ -1106,14 +1121,23 @@ export const WidgetChart = memo(function WidgetChart({
         const perColumn =
           singleSeries &&
           (ap.fillMode === "gradient" || hasCatColors || chartCondActive);
+        // Empilhado: um stack único com as séries de métricas; só o segmento
+        // do topo (última métrica) mantém o canto arredondado.
+        const radius: [number, number, number, number] =
+          ap.stacked && i < metrics.length - 1
+            ? [0, 0, 0, 0]
+            : horizontal
+              ? [0, 4, 4, 0]
+              : [4, 4, 0, 0];
         return (
           <Bar
             key={m.key}
             {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
+            {...(ap.stacked ? { stackId: "s" } : {})}
             dataKey={m.key}
             name={m.label}
             fill={base}
-            radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+            radius={radius}
             isAnimationActive={false}
           >
             {perColumn
