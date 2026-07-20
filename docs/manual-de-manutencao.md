@@ -151,6 +151,15 @@ npm run build      # o que a Vercel roda no deploy
   derivam do mesmo catálogo. Não monte lista paralela: foi exatamente essa
   divergência que deixou fórmulas com datas/casados como refs cruas
   irrecriáveis no editor inline.
+- [ ] Operandos AGREGADOS de registro casado (`agg:*:match:<fonte>:<ref>`) valem
+  nos DOIS lados do catálogo (20/07/2026): `defsAggCatalogInput` os deriva do
+  `buildMatchFields` exportado (`lib/widgets/fields.ts`) — a mesma construção
+  do lado widget; ref+rótulo `↪` idênticos byte a byte. Foi a ausência deles no
+  lado defs que fazia o save de campo `calculado_agg` rejeitar ("Coluna
+  inválida na fórmula: agg:count:match:…") fórmulas legítimas dos editores de
+  widget. Lacuna conhecida: `agg:*:unified:<key>` segue rejeitado no save de
+  campo reutilizável (o lado defs não carrega correspondências) — se aparecer,
+  é follow-up, não regressão.
 - [ ] Relações em fórmula comparam por NOME: por-registro o contexto recebe o
   `display_name` (recalc/`applyCalcFields`); no agregado o literal resolve
   nome→id antes do RPC (`resolveFkCondFilters`). Renomear um responsável exige

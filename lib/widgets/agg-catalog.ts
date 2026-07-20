@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Builder ÚNICO do catálogo de operandos AGREGADOS (fórmulas 'calculado_agg' e
 // métricas/expressões de widget). Antes esta montagem estava copiada em SEIS
 // sítios (widget-builder, fields-manager, campos/actions, quick-table-actions,
@@ -9,9 +9,14 @@
 // Duas formas de derivar o input:
 // - availableAggCatalogInput: dos `available` do builder (buildAvailableFields)
 //   + defs — sítios de widget (builder, Nota, quick-table, snapshot).
-// - defsAggCatalogInput: só das defs (field_definitions) + CORE_FIELDS — página
-//   /campos e validação do servidor.
+// - defsAggCatalogInput: das defs (field_definitions) + CORE_FIELDS + campos
+//   CASADOS (match:<fonte>:<ref>, via buildMatchFields) — página /campos e
+//   validação do servidor.
 // Módulo puro (client+server).
+// v1.1 (20/07/2026): defsAggCatalogInput passa a incluir os campos casados em
+//   numeric/countable — sem isso o servidor rejeitava ("Coluna inválida na
+//   fórmula: agg:*:match:…") operandos que os sítios de widget oferecem e o
+//   RPC suporta (count/sum/avg sobre _widget_match_expr, 0042).
 import {
   COND_DATA_TYPES,
   type CustomCondField,
@@ -30,7 +35,11 @@ import {
   sourceScopedAggOperandRefs,
   type ScopedAggField,
 } from "./calc-metrics";
-import { CORE_FIELDS, type AvailableField } from "./fields";
+import {
+  CORE_FIELDS,
+  buildMatchFields,
+  type AvailableField,
+} from "./fields";
 
 // Motivo exibido no seletor para "Data atual" no contexto agregado — o operando
 // tokeniza mas nunca compila (mensagem dedicada em validateCondAggRefs);
@@ -152,6 +161,19 @@ export function defsAggCatalogInput(
   forbidden: Set<string> = new Set()
 ): AggCatalogInput {
   const allowed = defs.filter((d) => !forbidden.has(d.field_key));
+  // Campos do registro CASADO (match:<fonte>:<ref>): MESMA construção dos
+  // sítios de widget (buildMatchFields) — ref+rótulo idênticos byte a byte
+  // (rótulo é load-bearing no round-trip texto⇄tokens). De TODAS as defs, não
+  // só `allowed`: match: não cria aresta de dependência (refCustomKey → null)
+  // e o filtro de ciclo dos editores também não os remove — servidor e UI
+  // devem concordar. (buildMatchFields já pula 'calculado_agg'.)
+  const match = buildMatchFields(defs, sources);
+  const matchScoped = (
+    pred: (f: AvailableField) => boolean
+  ): ScopedAggField[] =>
+    match
+      .filter(pred)
+      .map((f) => ({ field: f.field, label: f.label, appliesTo: null }));
   return {
     numeric: [
       ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
@@ -165,10 +187,13 @@ export function defsAggCatalogInput(
           label: d.label,
           appliesTo: d.applies_to,
         })),
+      ...matchScoped((f) => f.isNumeric),
     ],
     // Contáveis: datas/numéricos do núcleo (podem ser nulos) + qualquer custom,
     // exceto 'calculado_agg' (contagem de agregado não existe — o aninhamento
-    // entra como ref plano em `nested`).
+    // entra como ref plano em `nested`) + casados numéricos/data — equivale ao
+    // filtro do lado widget ((isNumeric||isDate) && !aggCalc && !displayOnly;
+    // buildMatchFields nunca emite aggCalc/displayOnly).
     countable: [
       ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
         field: f.field,
@@ -181,6 +206,7 @@ export function defsAggCatalogInput(
           label: d.label,
           appliesTo: d.applies_to,
         })),
+      ...matchScoped((f) => f.isNumeric || f.isDate),
     ],
     nested: allowed
       .filter((d) => d.data_type === "calculado_agg")

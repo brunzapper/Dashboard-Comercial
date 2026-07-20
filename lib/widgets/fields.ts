@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 15/07/2026
+// Versão: 1.4 | Data: 20/07/2026
 // Campos disponíveis no construtor de widgets: colunas do núcleo (com rótulos
 // PT) + campos personalizados (custom:<key>). Marca quais são numéricos
 // (métricas), quais são datas (aceitam transform) e quais são FK (resolver
@@ -12,7 +12,14 @@
 //   fórmula), `calc` (indicador ƒ), `formulaText` (tooltip com a fórmula em
 //   rótulos client-side) e `baseLabel` (match: rótulo sem o prefixo de fonte).
 //   `label` segue LIMPO — prefixos só na camada de opções (filter-ops).
-import { NUMERIC_DATA_TYPES, type FieldDefinition } from "@/lib/records/types";
+// v1.4 (20/07/2026): buildMatchFields exportado com parâmetro estrutural mínimo
+//   (MatchFieldDef) — o catálogo agregado do lado defs (defsAggCatalogInput)
+//   passa a derivar os operandos de registro casado da MESMA construção.
+import {
+  NUMERIC_DATA_TYPES,
+  type DataType,
+  type FieldDefinition,
+} from "@/lib/records/types";
 import { formulaRefs, formulaToText } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
@@ -334,11 +341,26 @@ const MATCH_CORE_FIELDS = CORE_FIELDS.filter((f) =>
   ].includes(f.field)
 );
 
+// Linha mínima p/ construir os campos do registro casado — FieldDefinition
+// (client), AggCatalogDefRow e o DefRow do servidor são todos atribuíveis.
+// currency_* só alimentam isMoney (resolveFieldMoney) — irrelevante p/ o
+// catálogo agregado (ScopedAggField não tem isMoney).
+export interface MatchFieldDef {
+  field_key: string;
+  label: string;
+  data_type: DataType;
+  applies_to?: string[] | null;
+  currency_code?: string | null;
+  currency_mode?: string | null;
+}
+
 // Campos do registro casado, por fonte: `match:<fonte>:<ref>`. Não são editáveis
 // (vêm do outro registro) nem de write-back. Ficam disponíveis em
-// dimensões/métricas/filtros e como colunas do modo lista.
-function buildMatchFields(
-  customFields: FieldDefinition[],
+// dimensões/métricas/filtros e como colunas do modo lista. Exportado: é a
+// construção ÚNICA de ref+rótulo `↪ <Fonte>: <Campo>` — o catálogo agregado do
+// lado defs (defsAggCatalogInput) deriva daqui, nunca remonta os rótulos.
+export function buildMatchFields(
+  customFields: MatchFieldDef[],
   sources: SourceDef[] = BUILTIN_SOURCES
 ): AvailableField[] {
   const out: AvailableField[] = [];
