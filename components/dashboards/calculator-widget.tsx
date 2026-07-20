@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): "=" emite decimal puro (sem notação científica/milhar —
+//   "1e-7" quebrava o tokenizer) e a expressão adota o valor REMOTO quando o
+//   local não está sujo (padrão seed da Nota — antes dois usuários divergiam).
 // Widget Calculadora: expressão avaliada AO VIVO no cliente (tokenizeFormulaText
 // + evaluateFormula — ágil p/ contas básicas: + - * / e parênteses) com
 // variáveis de campos ([Nome] → var:<id>, valores computados no servidor com
@@ -110,16 +113,37 @@ export function CalculatorWidget({
   const [suggestIndex, setSuggestIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // Último valor persistido/adotado — referência do "não sujo" da
+  // reconciliação abaixo e do debounce de save (declarado antes por isso).
+  const lastSaved = useRef(initialExpr ?? "");
+  // Espelho do texto p/ o flush no desmonte (sincronizado no setter — todo
+  // caminho de escrita passa por setExpression ou pela adoção do remoto).
+  const exprRef = useRef(expr);
+
+  // v1.1: reconciliação com o servidor (análoga ao seed da Nota) — um refresh
+  // que traga initialExpr novo (outro usuário editou) adota o remoto QUANDO o
+  // local não tem edição pendente; edição em andamento nunca é sobrescrita.
+  const seedRef = useRef(initialExpr ?? "");
+  useEffect(() => {
+    const remote = initialExpr ?? "";
+    if (remote === seedRef.current) return;
+    seedRef.current = remote;
+    if (exprRef.current === lastSaved.current) {
+       
+      setExpr(remote);
+      exprRef.current = remote;
+      exprCache.set(widget.id, remote);
+    }
+    lastSaved.current = remote;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialExpr]);
+
   // Persistência compartilhada com debounce (fire-and-forget) + flush no
   // desmonte. O cache em memória cobre a remontagem por troca de aba.
   // Modo snapshot (viewer público): a avaliação continua local, mas a
   // expressão NUNCA é persistida (sem sessão; estado por visitante).
   const { snapshot } = useSnapshotMode();
   const saveTimer = useRef<number | null>(null);
-  const lastSaved = useRef(initialExpr ?? "");
-  // Espelho do texto p/ o flush no desmonte (sincronizado no setter — todo
-  // caminho de escrita passa por setExpression).
-  const exprRef = useRef(expr);
   const setExpression = (next: string, nextCursor?: number) => {
     setExpr(next);
     exprRef.current = next;
@@ -233,8 +257,14 @@ export function CalculatorWidget({
       backspace();
     } else if (k.label === "=") {
       // "=": substitui a expressão pelo resultado (vírgula decimal).
+      // v20/07/2026: decimal PURO — String() emitia notação científica
+      // ("1e-7"), que o tokenizer lê como 1 + identificador "e" e vira erro;
+      // useGrouping:false evita o milhar (o parser não o entende).
       if (typeof evalState.value === "number") {
-        const asText = String(evalState.value).replace(".", ",");
+        const asText = evalState.value.toLocaleString("pt-BR", {
+          useGrouping: false,
+          maximumFractionDigits: 12,
+        });
         setExpression(asText, asText.length);
         focusAt(asText.length);
       }

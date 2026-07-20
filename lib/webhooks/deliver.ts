@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): claim atômico no dreno (CAS via next_attempt_at) — ticks
+//   sobrepostos não entregam mais a mesma delivery em duplicata.
 // Entrega de webhooks de SAÍDA — SÓ NO SERVIDOR (tick e "evento de teste").
 // Assinatura estilo Stripe: header x-webhook-signature: t=<unix>,v1=<hmac hex>,
 // onde v1 = HMAC-SHA256(secret, `${t}.${corpo}`) — o timestamp assinado mata
@@ -22,6 +24,8 @@ const BACKOFF_MINUTES = [1, 5, 15, 60, 240, 720, 1440];
 export const MAX_ATTEMPTS = 8;
 export const AUTO_DISABLE_AFTER = 20; // falhas CONSECUTIVAS do endpoint
 const REQUEST_TIMEOUT_MS = 10_000;
+// Lease do claim atômico do dreno (v1.1) — cobre com folga o timeout de 10s.
+const CLAIM_LEASE_MS = 2 * 60_000;
 
 // ============ Assinatura ============
 
@@ -269,6 +273,21 @@ export async function drainDeliveries(
         active: boolean;
       };
       if (!ep.active) continue; // desativado por uma entrega anterior do lote
+      // v20/07/2026: claim atômico — dois ticks sobrepostos selecionavam as
+      // MESMAS entregas e entregavam o webhook em duplicata. O claim empurra
+      // next_attempt_at um lease à frente SÓ se a entrega ainda está vencida e
+      // pendente; quem perde pula. Crash pós-claim: a entrega volta sozinha
+      // quando o lease vence (sem contar attempt).
+      const { data: claimed } = await db
+        .from("webhook_deliveries")
+        .update({
+          next_attempt_at: new Date(Date.now() + CLAIM_LEASE_MS).toISOString(),
+        })
+        .eq("id", row.id)
+        .eq("status", "pending")
+        .lte("next_attempt_at", new Date().toISOString())
+        .select("id");
+      if (!claimed || claimed.length === 0) continue;
       const outcome = await attemptDelivery(
         db,
         { id: row.id as string, attempts: row.attempts as number, event: ev },

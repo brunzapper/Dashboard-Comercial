@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 17/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): pending no checkbox de concluir (double-click disparava a
+//   action 2x) e fechar com reload em voo não zera mais o badge.
 // Sino de ALERTAS de tarefas (in-app): botão flutuante fixo no topo-direito
 // (o shell não tem header; segue o padrão dos controles flutuantes).
 // v2.0 (17/07/2026): duas seções — "Novas" (tarefas criadas/reatribuídas p/
@@ -39,21 +41,30 @@ function BellTaskRow({
   onDone: () => void;
 }) {
   const status = classifyDue(task);
+  // v2.1: pending no concluir — cliques rápidos disparavam completeTask 2x.
+  const [completing, setCompleting] = useState(false);
   return (
     <div className="flex items-center gap-2 rounded-md border px-2 py-1.5">
       <input
         type="checkbox"
-        checked={false}
+        checked={completing}
+        disabled={completing}
         onChange={async () => {
-          const res = await completeTask(task.id);
-          if (res.ok) {
-            emitDataChanged({
-              kind: "task",
-              taskId: task.id,
-              recordId: task.record_id,
-              boardId: task.board_id,
-            });
-            onDone();
+          if (completing) return;
+          setCompleting(true);
+          try {
+            const res = await completeTask(task.id);
+            if (res.ok) {
+              emitDataChanged({
+                kind: "task",
+                taskId: task.id,
+                recordId: task.record_id,
+                boardId: task.board_id,
+              });
+              onDone();
+            }
+          } finally {
+            setCompleting(false);
           }
         }}
         className="accent-primary size-4 shrink-0"
@@ -127,7 +138,9 @@ export function TaskBell({ initialCount }: { initialCount: number }) {
         setOpen(v);
         if (v) reload();
         // Fechar: as "Novas" já foram carimbadas — badge volta a só prazo.
-        else setCount(due?.length ?? 0);
+        // v2.1: com `due` ainda em voo (null), mantém o count atual em vez de
+        // zerar o badge indevidamente.
+        else if (due) setCount(due.length);
       }}
     >
       <PopoverTrigger asChild>

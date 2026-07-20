@@ -1,4 +1,5 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 20/07/2026
+// v1.2 (20/07/2026): inputs ressincronizam com a URL (voltar/troca de fonte).
 // v1.1 (09/07/2026): Fase 8 — o seletor "Tipo" saiu (virou aba de fonte); a
 //   barra preserva o parâmetro `fonte` ao filtrar/limpar.
 // Barra de filtros da listagem de registros. Reflete/atualiza a URL
@@ -6,7 +7,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -24,6 +25,18 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
   const [de, setDe] = useState(sp.get("de") ?? "");
   const [ate, setAte] = useState(sp.get("ate") ?? "");
   const [busca, setBusca] = useState(sp.get("busca") ?? "");
+
+  // v20/07/2026: ressincroniza com a URL (voltar do navegador, troca de aba de
+  // fonte) — os useState iniciais não reagiam e "Filtrar" reaplicava os
+  // valores da navegação anterior.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEtapa(sp.get("etapa") ?? "");
+    setResponsavel(sp.get("responsavel") ?? "");
+    setDe(sp.get("de") ?? "");
+    setAte(sp.get("ate") ?? "");
+    setBusca(sp.get("busca") ?? "");
+  }, [sp]);
 
   function apply(e: React.FormEvent) {
     e.preventDefault();

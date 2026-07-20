@@ -317,8 +317,10 @@ export async function saveLastPeriod(
 }
 
 // Preferências GLOBAIS do usuário (user_settings), não por dashboard.
-// Read-modify-write para preservar chaves futuras. RLS garante que cada
-// usuário só toca a própria linha. Fire-and-forget no cliente.
+// Merge ATÔMICO no banco (user_settings_merge, 0083) — preserva chaves
+// futuras SEM a janela de corrida do read-modify-write (duas gravações
+// concorrentes perdiam uma). RLS garante que cada usuário só toca a própria
+// linha. Fire-and-forget no cliente.
 export interface UserAppSettings {
   sidebarPinned?: boolean;
   // Marca d'água da seção "Novas" do sino de tarefas (ISO): tarefas
@@ -336,19 +338,7 @@ export async function updateUserSettings(
   const session = await getSessionInfo();
   if (!session) return;
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("user_settings")
-    .select("settings")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
-  const current = (data?.settings as UserAppSettings | null) ?? {};
-  await supabase.from("user_settings").upsert(
-    {
-      user_id: session.user.id,
-      settings: { ...current, ...patch },
-    },
-    { onConflict: "user_id" }
-  );
+  await supabase.rpc("user_settings_merge", { p_patch: patch });
 }
 
 // ---------------- Widgets ----------------

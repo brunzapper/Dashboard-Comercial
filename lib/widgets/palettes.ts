@@ -60,13 +60,21 @@ export function gradientVariation(base: string, i: number, n: number): string {
 }
 
 // Cor de uma série (barra/linha) i, respeitando override por métrica.
+// v1.1 (20/07/2026): honra a paleta escolhida (appearance.palette — antes só a
+// pizza a usava) e, esgotada a paleta, varia o TOM da cor reaproveitada — a
+// 6ª+ série não repete cor idêntica à 1ª.
 export function resolveSeriesColor(
   appearance: AppearanceSettings | undefined,
   metricKey: string,
   index: number
 ): string {
-  return (
-    appearance?.seriesColors?.[metricKey] ??
-    CHART_COLORS[index % CHART_COLORS.length]
-  );
+  const override = appearance?.seriesColors?.[metricKey];
+  if (override) return override;
+  const p =
+    PALETTES[appearance?.palette ?? DEFAULT_PALETTE_KEY] ?? PALETTES.design;
+  const base = p.colors[index % p.colors.length];
+  const lap = Math.floor(index / p.colors.length); // voltas completas na paleta
+  if (lap === 0) return base;
+  const towardWhite = Math.min(24 * lap, 60);
+  return `color-mix(in oklch, ${base} ${100 - towardWhite}%, white)`;
 }

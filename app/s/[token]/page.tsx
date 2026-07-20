@@ -495,7 +495,14 @@ export default async function SnapshotPage({
       const fail = (e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[snapshot] widget ${w.id} falhou:`, msg);
-        dataById[w.id] = { rows: [], dimensions: [], metrics: [], error: msg };
+        // v20/07/2026: o detalhe fica SÓ no log — a mensagem crua do RPC
+        // (nomes de coluna/SQL) não vaza para o visitante anônimo.
+        dataById[w.id] = {
+          rows: [],
+          dimensions: [],
+          metrics: [],
+          error: "Não foi possível carregar este widget.",
+        };
       };
       // Card em modo novo (record/topn/list/formula): mesmo motor do dashboard
       // (lib/widgets/card.ts) sobre o dataset congelado; partner rows excluídas
@@ -787,7 +794,13 @@ export default async function SnapshotPage({
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.error(`[snapshot] tabela livre ${w.id} falhou:`, msg);
-            data = { rows: [], dimensions: [], metrics: [], error: msg };
+            // Detalhe só no log (não vaza ao visitante) — ver fail() acima.
+            data = {
+              rows: [],
+              dimensions: [],
+              metrics: [],
+              error: "Não foi possível carregar este widget.",
+            };
           }
         }
 

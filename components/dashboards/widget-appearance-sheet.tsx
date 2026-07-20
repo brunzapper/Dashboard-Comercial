@@ -574,6 +574,17 @@ export function WidgetAppearanceSheet({
               </BuilderSection>
 
               <BuilderSection value="series" title="Cores das séries">
+                {/* v20/07/2026: a paleta também vale p/ barras/linhas (antes o
+                    seletor só existia na pizza e a escolha era ignorada aqui). */}
+                <SelectRow
+                  label="Paleta"
+                  value={ap.palette ?? "design"}
+                  onChange={(v) => patch({ palette: v })}
+                  options={Object.entries(PALETTES).map(([k, p]) => ({
+                    value: k,
+                    label: p.label,
+                  }))}
+                />
                 {metrics.map((m) => (
                   <ColorField
                     key={m.key}

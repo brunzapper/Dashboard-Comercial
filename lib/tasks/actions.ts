@@ -54,18 +54,22 @@ function notifyMeFilter(userId: string, respIds: string[]): string {
   return legs.join(",");
 }
 
-// Coage o responsável de quem NÃO vê tudo (vendedor) a um responsável do
+// Valida o responsável de quem NÃO vê tudo (vendedor): só um responsável do
 // próprio usuário. Null é permitido (tarefa sem atribuição — visível ao criador).
+// v1.1 (20/07/2026): responsável alheio vira ERRO — antes era trocado em
+// silêncio pelo 1º responsável próprio (o form dizia X e salvava Y).
 async function coerceResponsible(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   viewAll: boolean,
   responsibleId: string | null
-): Promise<string | null> {
-  if (viewAll || responsibleId == null) return responsibleId;
+): Promise<{ ok: boolean; value: string | null }> {
+  if (viewAll || responsibleId == null) {
+    return { ok: true, value: responsibleId };
+  }
   const ownIds = await ownResponsibleIds(supabase, userId);
-  if (ownIds.includes(responsibleId)) return responsibleId;
-  return ownIds[0] ?? null;
+  if (ownIds.includes(responsibleId)) return { ok: true, value: responsibleId };
+  return { ok: false, value: null };
 }
 
 function readTaskForm(formData: FormData): {
@@ -121,12 +125,19 @@ export async function createTask(
   if (parsed.error) return { ok: false, message: parsed.error };
 
   const supabase = await createClient();
-  const responsibleId = await coerceResponsible(
+  const coerced = await coerceResponsible(
     supabase,
     session.user.id,
     viewAll,
     parsed.responsible_id
   );
+  if (!coerced.ok) {
+    return {
+      ok: false,
+      message: "Você só pode atribuir tarefas aos seus responsáveis.",
+    };
+  }
+  const responsibleId = coerced.value;
 
   const boardId = cleanStr(formData.get("board_id"), 40) || null;
   const phase = cleanStr(formData.get("phase"), 80) || "a_fazer";
@@ -189,12 +200,19 @@ export async function updateTask(
   if (parsed.error) return { ok: false, message: parsed.error };
 
   const supabase = await createClient();
-  const responsibleId = await coerceResponsible(
+  const coerced = await coerceResponsible(
     supabase,
     session.user.id,
     viewAll,
     parsed.responsible_id
   );
+  if (!coerced.ok) {
+    return {
+      ok: false,
+      message: "Você só pode atribuir tarefas aos seus responsáveis.",
+    };
+  }
+  const responsibleId = coerced.value;
 
   const updates: Record<string, unknown> = {
     title: parsed.title,
@@ -439,6 +457,9 @@ export async function listTaskAlerts(
       .from("tasks")
       .select(TASK_COLS_WITH_RECORD)
       .is("completed_at", null)
+      // v1.1: mesmo critério da seção "Novas" — o sino não lista subtarefas
+      // soltas (elas vivem no feed da tarefa pai).
+      .is("parent_task_id", null)
       .not("due_date", "is", null)
       .lte("due_date", limitIso)
       .or(notify)
@@ -474,19 +495,12 @@ export async function markTasksSeen(): Promise<void> {
   const session = await getSessionInfo();
   if (!session) return;
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("user_settings")
-    .select("settings")
-    .eq("user_id", session.user.id)
-    .maybeSingle();
-  const current = (data?.settings as Record<string, unknown> | null) ?? {};
-  await supabase.from("user_settings").upsert(
-    {
-      user_id: session.user.id,
-      settings: { ...current, tasksSeenAt: new Date().toISOString() },
-    },
-    { onConflict: "user_id" }
-  );
+  // v1.1: merge atômico no banco (user_settings_merge, 0083) — o
+  // read-modify-write anterior perdia gravações concorrentes de outras chaves
+  // (ex.: sidebarPinned salvo pelo layout na mesma janela).
+  await supabase.rpc("user_settings_merge", {
+    p_patch: { tasksSeenAt: new Date().toISOString() },
+  });
 }
 
 /**
@@ -505,6 +519,7 @@ export async function listDueTasks(
     .from("tasks")
     .select(TASK_COLS_WITH_RECORD)
     .is("completed_at", null)
+    .is("parent_task_id", null)
     .not("due_date", "is", null)
     .lte("due_date", limitIso)
     .or(notifyMeFilter(session.user.id, respIds))

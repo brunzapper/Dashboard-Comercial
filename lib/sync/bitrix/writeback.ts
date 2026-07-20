@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): claim atômico no dreno (CAS via attempts) — ticks
+//   sobrepostos não mandam mais o mesmo crm.*.update em duplicata.
 // Write-back configurável para o Bitrix (fila em background). Ao editar um campo
 // marcado (field_definitions.write_back), a edição salva no Supabase e uma linha
 // 'pending' entra em bitrix_writeback_queue (enqueueWriteBacks). O tick agendado
@@ -7,9 +9,10 @@
 // crm.deal/lead.update. A edição local nunca é perdida por falha do Bitrix — o
 // erro fica registrado (last_error/attempts) e vira 'error' após MAX_ATTEMPTS.
 //
-// Colisão read/write: após o write-back OK, o valor local == Bitrix, então o
-// próximo reconcile adota o valor do Bitrix (idempotente). isProtected preserva a
-// edição local até lá — nenhuma limpeza extra de field_modified_at é necessária.
+// Colisão read/write: após o write-back OK, o valor local == Bitrix; no próximo
+// reconcile o releaseCaughtUpMarker (lib/sync/shared v1.2) solta o marcador de
+// edição manual e o campo volta ao controle do sync. isProtected (permanente)
+// preserva a edição local até lá.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
@@ -147,6 +150,20 @@ export async function drainWritebackQueue(
   for (const row of rows) {
     if (Date.now() >= deadline) break;
 
+    // v20/07/2026: claim atômico (CAS em attempts) — dois ticks sobrepostos
+    // selecionavam os MESMOS itens e mandavam crm.*.update em duplicata. Quem
+    // perde o CAS pula o item; em crash pós-claim o item segue 'pending' (com
+    // attempts já contado) e volta no próximo tick.
+    const { data: claimed } = await db
+      .from("bitrix_writeback_queue")
+      .update({ attempts: row.attempts + 1 })
+      .eq("id", row.id)
+      .eq("status", "pending")
+      .eq("attempts", row.attempts)
+      .select("id");
+    if (!claimed || claimed.length === 0) continue;
+    row.attempts += 1;
+
     try {
       const meta = metaByEntity[row.entity].get(row.source_field_id);
       if (!meta) {
@@ -167,7 +184,8 @@ export async function drainWritebackQueue(
       done += 1;
     } catch (e) {
       const msg = (e as Error).message;
-      const attempts = row.attempts + 1;
+      // O claim acima já contou esta tentativa em attempts.
+      const attempts = row.attempts;
       // Erro fatal (conversão/somente-leitura): não adianta repetir.
       const terminal = e instanceof WriteBackFatal || attempts >= MAX_ATTEMPTS;
       await db

@@ -656,24 +656,9 @@ export async function ingestRows(
         recordError(result, entity, (e as Error).message);
       }
     }
-  } else if (insertable.length > 0) {
-    const insertRows = insertable.map(buildInsertRow);
-    const { error: insertError } = await db.from("records").insert(insertRows);
-    if (insertError) {
-      // Isola a(s) linha(s) problemática(s) sem derrubar o lote inteiro.
-      for (const row of insertRows) {
-        const { error: rowError } = await db.from("records").insert(row);
-        if (rowError) recordError(result, entity, rowError.message);
-        else recordOutcome(result, entity, "inserted");
-      }
-    } else {
-      for (let i = 0; i < insertRows.length; i++) {
-        recordOutcome(result, entity, "inserted");
-      }
-    }
   }
 
-  // 5) Updates pontuais com conflito por campo.
+  // Deps dos updates com conflito por campo (também do fallback 23505 abaixo).
   const audits: UpdateDeps["audits"] = [];
   const deps: UpdateDeps = {
     now,
@@ -683,6 +668,56 @@ export async function ingestRows(
     operationByResponsible,
     audits,
   };
+
+  if (!wbEntity && insertable.length > 0) {
+    const insertRows = insertable.map(buildInsertRow);
+    const { error: insertError } = await db.from("records").insert(insertRows);
+    if (insertError) {
+      // Isola a(s) linha(s) problemática(s) sem derrubar o lote inteiro.
+      for (let i = 0; i < insertable.length; i++) {
+        const { error: rowError } = await db.from("records").insert(insertRows[i]);
+        if (!rowError) {
+          recordOutcome(result, entity, "inserted");
+          continue;
+        }
+        // v20/07/2026: 23505 = outra requisição inseriu o MESMO source_id
+        // entre o select dos existentes e este insert. Antes a linha era
+        // descartada como erro; agora recai para o caminho de UPDATE com
+        // conflito por campo (idempotente, como o upsert normal).
+        if (rowError.code === "23505") {
+          try {
+            const { data: dupRow } = await db
+              .from("records")
+              .select(EXISTING_COLS)
+              .eq("source_system", IMPORT_SOURCE_SYSTEM)
+              .eq("source_id", insertable[i].sourceId)
+              .maybeSingle();
+            if (dupRow) {
+              const changed = await applyUpdateToExisting(
+                db,
+                opts,
+                insertable[i],
+                dupRow as unknown as ExistingRecord,
+                deps
+              );
+              recordOutcome(result, entity, changed ? "updated" : "skipped");
+              continue;
+            }
+          } catch (e2) {
+            recordError(result, entity, (e2 as Error).message);
+            continue;
+          }
+        }
+        recordError(result, entity, rowError.message);
+      }
+    } else {
+      for (let i = 0; i < insertRows.length; i++) {
+        recordOutcome(result, entity, "inserted");
+      }
+    }
+  }
+
+  // 5) Updates pontuais com conflito por campo.
   for (const b of built) {
     const candidates = existingOf(b);
     if (candidates.length === 0) continue;

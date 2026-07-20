@@ -8,6 +8,7 @@
 //      um novo reconcile incremental (janela de AUTO_SYNC_WINDOW_DAYS, padrão 1).
 // Assim o sync horário sai do próprio tick e nada trava a navegação do usuário.
 import { NextResponse } from "next/server";
+import { timingSafeSecretEqual } from "@/lib/auth/secret-compare";
 
 import { getSyncSecret, optionalEnv } from "@/lib/env";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -35,7 +36,8 @@ function authorized(request: Request): boolean {
     request.headers.get("x-sync-secret") ??
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
     null;
-  return header !== null && header === secret;
+  // v20/07/2026: comparação timing-safe (padrão do /api/ingest).
+  return timingSafeSecretEqual(header, secret);
 }
 
 function autoWindowDays(): number {

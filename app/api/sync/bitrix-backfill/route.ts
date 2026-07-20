@@ -3,6 +3,7 @@
 // ou Authorization: Bearer). Roda no ambiente da Vercel — nunca depende de
 // credencial local.
 import { NextResponse } from "next/server";
+import { timingSafeSecretEqual } from "@/lib/auth/secret-compare";
 
 import { getSyncSecret } from "@/lib/env";
 import { bitrixAdapter } from "@/lib/sync/bitrix/adapter";
@@ -16,7 +17,8 @@ function authorized(request: Request): boolean {
     request.headers.get("x-sync-secret") ??
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
     null;
-  return header !== null && header === secret;
+  // v20/07/2026: comparação timing-safe (padrão do /api/ingest).
+  return timingSafeSecretEqual(header, secret);
 }
 
 export async function POST(request: Request) {
