@@ -91,7 +91,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   AGREGADO sai SEMPRE de `buildAggOperandCatalog`
   (`lib/widgets/agg-catalog.ts`, inputs `availableAggCatalogInput`/
   `defsAggCatalogInput`) — não recrie as montagens chamando
-  `aggOperandRefs`/`sourceScopedAggOperandRefs`/… na mão. A validação de
+  `aggOperandRefs`/`sourceScopedAggOperandRefs`/… na mão. Os DOIS inputs
+  incluem os campos do registro CASADO (`match:<fonte>:<ref>`; no defs desde
+  20/07/2026) — refs/rótulos `↪` são construídos SÓ por `buildMatchFields`
+  (`lib/widgets/fields.ts`), nunca remontados à mão. A validação de
   contexto (estrutura + refs + colocação de SOMASE/… + mensagens dedicadas)
   vive em `validateFormulaForContext` (`lib/records/formula-validate.ts`) —
   editores e servidor rodam o MESMO módulo. Edição de fórmula só pelo

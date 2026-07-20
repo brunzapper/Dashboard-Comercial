@@ -340,6 +340,19 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
     ref|label|group verificada por script na migração. NÃO monte o catálogo
     agregado chamando as quatro funções de calc-metrics na mão — derive o input
     e chame o builder.
+    - **Casados no lado defs** (20/07/2026): `defsAggCatalogInput` inclui os
+      campos do registro CASADO (`match:<fonte>:<ref>`) em `numeric`/
+      `countable`, derivados do `buildMatchFields` exportado
+      (`lib/widgets/fields.ts`) — a MESMA construção dos sítios de widget, para
+      ref+rótulo (`↪ <Fonte>: <Campo>`) idênticos byte a byte; nunca remonte
+      esses rótulos à mão. Antes o servidor rejeitava ("Coluna inválida na
+      fórmula: agg:*:match:…") fórmulas que os editores de widget ofereciam e o
+      RPC suporta (count/sum/avg sobre `_widget_match_expr`, 0042). Os casados
+      entram de TODAS as defs, não só das não-proibidas: `match:` não cria
+      aresta de dependência/ciclo (`refCustomKey` → null), como já valia no
+      catálogo por-registro. Lacuna conhecida (deferida): agregado sobre campo
+      UNIFICADO (`agg:*:unified:<key>`) segue rejeitado no save de campo
+      reutilizável — o lado defs não carrega correspondências.
   - **Validação de contexto única** (`lib/records/formula-validate.ts`):
     `validateFormulaForContext(formula, {kind: "record"|"aggregate", catalog,
     sources?})` concentra estrutura+refs (`validateFormula`), colocação de
