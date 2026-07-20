@@ -1,4 +1,11 @@
-// Versão: 1.5 | Data: 20/07/2026
+// Versão: 1.6 | Data: 20/07/2026
+// v1.6 (20/07/2026): dia útil e metas nos gráficos — (a) businessDayAlign:
+//   pernas por mês via computeRows com o range recortado no N-ésimo dia útil
+//   (comparação ignorada com o align ativo); (b) base previous_period_bd (a
+//   comparação recebe o contexto de feriados); (c) goalLine: série __goal por
+//   bucket mensal via resolveGoal (modo pace usa dias úteis); (d) KPI modo
+//   meta usa a métrica do próprio widget como realizado. Tudo no ENGINE —
+//   RPCs intocados. Ver lib/date/business-days.ts e docs/arquitetura.md §4.9.
 // v1.5 (20/07/2026): "Agrupar período" — top-up de mocks das pernas COBERTAS
 //   (runCoveredLegMockTopUp): a regra dos mocks da exibição não vê as métricas
 //   das pernas e o fetch extra só cobre fontes que faltam; sem o top-up, mocks
@@ -103,6 +110,14 @@ import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import { applyPeriodToFilters, type DashboardPeriod } from "./period";
 import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import {
+  businessDayIndexInMonth,
+  businessDaysInMonth,
+  daysInMonth,
+  nthBusinessDayOfMonth,
+} from "@/lib/date/business-days";
+import { loadNonWorkingDays } from "@/lib/config/non-working-days";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import {
   correspondenceMapForSources,
   unifiedMemberRef,
@@ -1448,7 +1463,20 @@ export async function runWidget(
   // de data do período atual (regra dos mocks 0052 preservada) e nasce dos
   // filtros do próprio widget — nunca de filtros de restrição externos.
   const cmpSettings = config.settings?.comparison;
-  const cmpSpec = comparisonSpec(period, cmpSettings);
+  let cmpSpec = comparisonSpec(period, cmpSettings);
+  // Base "mesmo dia útil": recomputa o spec com o contexto de feriados (o
+  // módulo de comparação segue puro). Falha ao carregar feriados degrada p/ o
+  // range cheio de previous_period (spec já resolvido acima).
+  if (cmpSpec?.base === "previous_period_bd") {
+    try {
+      cmpSpec = comparisonSpec(period, cmpSettings, {
+        holidays: await loadNonWorkingDays(supabase),
+        todayIso: todayBrasiliaIso(),
+      });
+    } catch {
+      // mantém o spec degradado
+    }
+  }
   // Parametrizado por fontes (mesmo pipeline da principal): a rodada de
   // comparação também reconstrói os filtros por perna.
   const cmpFiltersFor = (
@@ -2173,9 +2201,88 @@ export async function runWidget(
     }
   };
 
+  // ---- Alinhamento "mesmo dia útil" (settings.businessDayAlign, 20/07/2026) --
+  // Pernas POR MÊS: cada mês do período roda uma rodada COMPLETA (computeRows)
+  // com o range recortado no N-ésimo dia útil do mês (N = dia útil corrente da
+  // referência). Como cada rodada só devolve linhas do próprio mês, o concat é
+  // o resultado final — todas as métricas (normais/calculadas/moeda/pernas)
+  // funcionam sem código novo e os RPCs ficam intocados. Meses ENCERRADOS no
+  // alinhamento (N ≥ dias úteis do mês) usam o mês cheio (não perde registro
+  // datado em fim de semana após o último dia útil — paridade com o KPI).
+  // null = align inativo (fallback byte-idêntico). Precedências: KPI/card e
+  // "Agrupar período" (dateAgg) retornaram antes deste ponto (align não se
+  // aplica); pernas de sub-fonte "conviver" recursam runWidget por fonte e o
+  // align roda DENTRO de cada perna. Com align ativo, settings.comparison é
+  // ignorada (exclusão mútua — o próprio gráfico é a comparação).
+  const MAX_BD_ALIGN_MONTHS = 13;
+  const bdAlignLegs = await (async (): Promise<DashboardPeriod[] | null> => {
+    const cfg = config.settings?.businessDayAlign;
+    if (!cfg?.enabled) return null;
+    if (!period?.from || !period.to || !period.field) return null;
+    const monthly = dims.some(
+      (d) =>
+        d.transform === "month" ||
+        d.transform === "month_name" ||
+        d.transform === "month_year"
+    );
+    if (!monthly) return null;
+    const fm = period.from.match(/^(\d{4})-(\d{2})/);
+    const tm = period.to.match(/^(\d{4})-(\d{2})/);
+    if (!fm || !tm) return null;
+    const [fy, fmo] = [Number(fm[1]), Number(fm[2])];
+    const [ty, tmo] = [Number(tm[1]), Number(tm[2])];
+    const monthCount = (ty - fy) * 12 + (tmo - fmo) + 1;
+    // Períodos longos demais viram fallback silencioso (custo: 1 rodada/mês).
+    if (monthCount < 1 || monthCount > MAX_BD_ALIGN_MONTHS) return null;
+    let holidays: Set<string>;
+    try {
+      holidays = await loadNonWorkingDays(supabase);
+    } catch {
+      holidays = new Set();
+    }
+    const todayIso = todayBrasiliaIso();
+    const ref =
+      cfg.reference === "period_end"
+        ? period.to
+        : todayIso < period.to
+          ? todayIso
+          : period.to;
+    const n = businessDayIndexInMonth(ref, holidays);
+    const legs: DashboardPeriod[] = [];
+    // N = 0 (nenhum dia útil decorrido no mês da referência): acumulado
+    // alinhado é vazio — align ativo com zero pernas (gráfico sem dados).
+    for (let i = 0; n > 0 && i < monthCount; i++) {
+      const y = fy + Math.floor((fmo - 1 + i) / 12);
+      const m = ((fmo - 1 + i) % 12) + 1;
+      const mm = String(m).padStart(2, "0");
+      const monthStart = `${y}-${mm}-01`;
+      const monthEnd = `${y}-${mm}-${String(daysInMonth(y, m)).padStart(2, "0")}`;
+      const cut =
+        n >= businessDaysInMonth(y, m, holidays)
+          ? monthEnd
+          : nthBusinessDayOfMonth(y, m, n, holidays);
+      const legFrom = monthStart > period.from ? monthStart : period.from;
+      const legTo = cut < period.to ? cut : period.to;
+      if (legFrom > legTo) continue;
+      legs.push({
+        field: period.field,
+        from: legFrom,
+        to: legTo,
+        fieldBySource: period.fieldBySource,
+      });
+    }
+    return legs;
+  })();
+
   const [rows, cmpRun] = await Promise.all([
-    computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
-    runComparison(),
+    bdAlignLegs
+      ? Promise.all(
+          bdAlignLegs.map((leg) =>
+            computeRows(dims, (srcs) => legFiltersFor(leg, srcs))
+          )
+        ).then((parts) => parts.flat())
+      : computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
+    bdAlignLegs ? Promise.resolve(null) : runComparison(),
   ]);
 
   let comparisonMeta: WidgetData["comparison"] | undefined;

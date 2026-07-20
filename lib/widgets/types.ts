@@ -419,12 +419,18 @@ export interface CardSettings {
 // comparação e a variação fica indisponível.
 export type ComparisonBase =
   | "previous_period" // período imediatamente anterior de mesma duração
+  // Período anterior recortado no MESMO dia útil (20/07/2026): o `to` do range
+  // anterior é clampado no N-ésimo dia útil do seu último mês, com N = dia
+  // útil corrente do período atual (feriados de non_working_days, 0081).
+  // Sem contexto de feriados (chamador antigo), degrada p/ previous_period.
+  | "previous_period_bd"
   | "previous_year" // mesmo período do ano anterior
   | "window_avg" // média por bucket de uma janela anterior maior
   | "window_median"; // mediana por bucket de uma janela anterior maior
 export type ComparisonWindow = "quarter" | "semester" | "ytd" | "last_12m";
 export const COMPARISON_BASE_LABELS: Record<ComparisonBase, string> = {
   previous_period: "Período anterior",
+  previous_period_bd: "Período anterior (mesmo dia útil)",
   previous_year: "Mesmo período do ano passado",
   window_avg: "Média de uma janela anterior",
   window_median: "Mediana de uma janela anterior",
@@ -452,6 +458,42 @@ export interface ComparisonSettings {
 }
 export interface ComparisonWidgetSettings {
   comparison?: ComparisonSettings;
+}
+
+// --- Alinhamento "mesmo dia útil" (20/07/2026) ---
+// Para widgets com dimensão de data MENSAL e período ativo: cada mês do
+// período é consultado só até o seu N-ésimo dia útil (N = dia útil corrente),
+// permitindo comparar meses no mesmo estágio de progresso ("Mês x Mês" do
+// acompanhamento diário). Resolvido no ENGINE como uma perna de consulta por
+// mês (RPCs intocados; ver lib/widgets/engine.ts). Dia útil = seg–sex fora de
+// non_working_days (0081; lib/date/business-days.ts). Mutuamente exclusivo
+// com settings.comparison (com o align ativo, a comparação é ignorada — o
+// próprio gráfico É a comparação). Sem período ativo, sem dimensão mensal ou
+// com "Agrupar período" (dateAgg), o setting é ignorado em silêncio.
+export interface BusinessDayAlignSettings {
+  enabled?: boolean;
+  // Data de referência do N: "today" (default) = hoje em Brasília, limitado ao
+  // fim do período; "period_end" = sempre o fim do período selecionado.
+  reference?: "today" | "period_end";
+}
+
+// --- Linha de meta nos gráficos (20/07/2026) ---
+// Série extra `__goal` anexada pelo engine a widgets de gráfico com dimensão
+// de data MENSAL: a meta de cada mês vem de resolveGoal (lib/metas/resolve.ts,
+// roll-up responsável → operação → global) pela chave do registry de métricas
+// de meta (lib/metas/metrics.ts). Modo "monthly" = meta mensal cheia; "pace" =
+// meta ideal acumulada até o dia útil corrente (meta ÷ dias úteis do mês × N —
+// meses passados = cheia, futuros = null). Snapshots leem meta/feriados AO
+// VIVO (passthrough), como o KPI modo meta.
+export interface GoalLineSettings {
+  enabled?: boolean;
+  metric?: string; // chave do registry de metas (default 'mrr')
+  scope?: "global" | "operation" | "responsible";
+  operationId?: string | null;
+  responsibleId?: string | null;
+  mode?: "monthly" | "pace"; // default "monthly"
+  label?: string; // default "Meta"
+  color?: string; // cor da linha tracejada
 }
 
 // Endereço de um widget-alvo de atalho (formas e links de nota). dashboardId
@@ -695,6 +737,15 @@ export interface AppearanceSettings {
   categoryColors?: Record<string, ColorPair>;
   categoryOrder?: string[]; // ordem manual das categorias (eixo X)
   categorySort?: { dir: TableSortDir; colorOrder?: string[] };
+  // Top-N de categorias (20/07/2026): mantém as N maiores pela 1ª métrica e,
+  // opcionalmente, agrega o resto numa categoria sintética "Outros" (barra,
+  // barra horizontal, pizza e funil; pizza/funil sem config usam o teto padrão
+  // de 5 com "Outros" — comportamento clássico). Ordem manual ignora "Outros"
+  // (fica no fim); cor manual de "Outros" é permitida (chave pelo nome).
+  categoryLimit?: { n?: number; others?: boolean };
+  // Barras empilhadas (20/07/2026): as séries de MÉTRICAS do widget 'barra'
+  // empilham num único stack (fantasmas da comparação empilham à parte).
+  stacked?: boolean;
   seriesAxis?: Record<string, AxisSide>; // metricKey -> eixo esq/dir (combo)
   dataLabels?: { show?: boolean; position?: "inside" | "top"; color?: string };
   legend?: { show?: boolean; color?: string }; // legenda do gráfico (séries)
@@ -826,6 +877,10 @@ export type WidgetSettings = KpiSettings &
   QuickTableSettings &
   CardSettings &
   ComparisonWidgetSettings & {
+    // Alinhamento "mesmo dia útil" (gráficos mensais; ver acima).
+    businessDayAlign?: BusinessDayAlignSettings;
+    // Linha de meta/ritmo nos gráficos (ver acima).
+    goalLine?: GoalLineSettings;
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
@@ -1000,6 +1055,10 @@ export interface WidgetRow {
     string,
     Record<string, number | null | MoneyBreakdown>
   >;
+  // Meta do bucket (linha de meta, settings.goalLine): valor da meta do mês
+  // desta linha (modo pace = ideal acumulada até o dia útil de corte). null =
+  // sem meta cadastrada p/ o mês; ausente = goalLine desligada/inaplicável.
+  __goal?: number | null;
 }
 
 /** Resultado já pronto para os charts. */
@@ -1042,6 +1101,15 @@ export interface WidgetData {
     to: string;
     label: string;
     settings: ComparisonSettings;
+  };
+  // Linha de meta ATIVA neste resultado (settings.goalLine): metadado de
+  // exibição — os valores por bucket estão em WidgetRow.__goal. `money` marca
+  // meta monetária (formata R$ no tooltip/legenda).
+  goalLine?: {
+    label: string;
+    mode: "monthly" | "pace";
+    color?: string;
+    money?: boolean;
   };
   // Erro ao computar o widget (RPC/consulta): rows/dimensions/metrics vêm
   // vazios e o card exibe o estado de erro em vez de ficar em branco.

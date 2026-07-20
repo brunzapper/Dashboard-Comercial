@@ -141,6 +141,8 @@ import {
   type Metric,
   type CardConfig,
   type ComparisonSettings,
+  type BusinessDayAlignSettings,
+  type GoalLineSettings,
   type QuickFilterEntry,
   type GroupDateFormat,
   type RecordListColumn,
@@ -186,6 +188,7 @@ import {
   MetricRow,
 } from "@/components/dashboards/widget-builder-rows";
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
+import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
@@ -508,6 +511,21 @@ export function WidgetBuilder({
   const [comparison, setComparison] = useState<ComparisonSettings>(
     widget?.settings?.comparison ?? {}
   );
+  // Dia útil e meta (20/07/2026): alinhamento "mesmo dia útil" (gráficos e
+  // tabela agregada com dimensão mensal) e linha de meta (gráficos de
+  // barra/linha). Resolvidos no engine; ver lib/widgets/types.ts.
+  const [bdAlign, setBdAlign] = useState<BusinessDayAlignSettings>(
+    widget?.settings?.businessDayAlign ?? {}
+  );
+  const [goalLine, setGoalLine] = useState<GoalLineSettings>(
+    widget?.settings?.goalLine ?? {}
+  );
+  const supportsGoalLine =
+    visualType === "barra" ||
+    visualType === "barra_horizontal" ||
+    visualType === "linha";
+  const supportsBdAlign =
+    supportsGoalLine || (visualType === "tabela" && !isRecordList);
   // (o Card de "Data atual" fica de fora — gate `!kpiToday` nos usos, pois o
   // estado kpiToday é declarado mais abaixo.)
   const supportsComparison =
@@ -1725,6 +1743,19 @@ export function WidgetBuilder({
       settings.comparison = comparison;
     } else {
       delete settings.comparison;
+    }
+
+    // Dia útil e meta: mesma política (grava só quando habilitado no tipo
+    // suportado; senão limpa).
+    if (supportsBdAlign && bdAlign.enabled) {
+      settings.businessDayAlign = bdAlign;
+    } else {
+      delete settings.businessDayAlign;
+    }
+    if (supportsGoalLine && goalLine.enabled) {
+      settings.goalLine = goalLine;
+    } else {
+      delete settings.goalLine;
     }
 
     // SUB-FONTES (0078): só persiste "conviver" para subs efetivamente
@@ -3253,6 +3284,23 @@ export function WidgetBuilder({
               value={comparison}
               onChange={setComparison}
               visualType={visualType}
+            />
+          ) : null}
+
+          {/* Dia útil e meta (alinhar meses + linha de meta) */}
+          {supportsBdAlign ? (
+            <GoalsSection
+              bdAlign={bdAlign}
+              onBdAlignChange={setBdAlign}
+              goalLine={goalLine}
+              onGoalLineChange={setGoalLine}
+              supportsGoalLine={supportsGoalLine}
+              hasMonthlyDim={dimensions.some(
+                (d) =>
+                  d.transform === "month" ||
+                  d.transform === "month_name" ||
+                  d.transform === "month_year"
+              )}
             />
           ) : null}
 
