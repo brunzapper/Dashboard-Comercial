@@ -1,4 +1,13 @@
-// Versão: 1.8 | Data: 18/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): métrica ad-hoc ganha receita "Taxa de conversão", prévia
+//   agregada (previewAdapter) e "Salvar como campo reutilizável…"
+//   (onSaveAsField).
+// v2.0 (20/07/2026): métrica ad-hoc usa o FormulaEditor unificado (visual com
+//   cursor + paleta de funções + validação viva no card) no lugar do toggle
+//   Construtor/Texto; MetricRow ganha sourceDefs (warnings de escopo @fonte).
+// v1.9 (20/07/2026): UX de fórmulas — ajuda da moeda do calc ad-hoc corrigida
+//   (moeda CONVERTE via resolveCalcMetric, não é só exibição) e hint "?" dos
+//   três escopos de fonte (SourceConceptsHint) no bloco "Fontes da métrica".
 // v1.8 (18/07/2026): DimensionRow ganha a lista "Fonte do dado" (colunas
 //   unificadas no modo registros, 2+ fontes candidatas): hierarquia ordenada
 //   de fontes com fallback (RecordListColumn.unifiedSources).
@@ -47,14 +56,12 @@ import {
 } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  FormulaBuilder,
-  type RefOption,
-} from "@/components/campos/formula-builder";
-import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
-import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
-import { formulaUsesFunctions } from "@/lib/records/formulas";
-import type { SourceKey } from "@/lib/sources";
+import type { RefOption } from "@/lib/records/date-operands";
+import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
+import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
+import type { SourceDef, SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type {
   Aggregation,
@@ -379,6 +386,9 @@ export function MetricRow({
   isAggCalc,
   isCalcSentinel,
   calcRefs,
+  sourceDefs,
+  previewAdapter,
+  onSaveAsField,
   resultFormatOptions,
   defaultLabel,
   fieldMenu,
@@ -395,6 +405,14 @@ export function MetricRow({
   isAggCalc: boolean;
   isCalcSentinel: boolean;
   calcRefs: RefOption[];
+  // Catálogo de fontes vivo — warnings de escopo @fonte do FormulaEditor.
+  sourceDefs?: SourceDef[];
+  // Prévia agregada da fórmula ad-hoc (montada pelo builder, que conhece
+  // fontes/filtros do widget) — opt-in por clique (custa RPCs).
+  previewAdapter?: FormulaPreviewAdapter;
+  // "Salvar como campo reutilizável…": abre o FieldForm inline pré-preenchido
+  // com esta fórmula (só quando o usuário pode gerenciar campos).
+  onSaveAsField?: () => void;
   resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
@@ -419,12 +437,9 @@ export function MetricRow({
         metric.grandTotalMode
     )
   );
-  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
-  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
-  // não a representa).
-  const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
-    formulaUsesFunctions(metric.formula) ? "text" : "builder"
-  );
+  // Remonta o FormulaEditor quando uma receita aplica fórmula nova (o editor
+  // lê `initial` só na montagem).
+  const [recipeNonce, setRecipeNonce] = useState(0);
   // Fontes da métrica: aberto por padrão só quando já há fontes marcadas
   // (config existente nunca fica escondida; métrica nova nasce limpa).
   const srcTargets = metric.sources ?? [];
@@ -470,50 +485,40 @@ export function MetricRow({
       </div>
       {isCalcSentinel ? (
         <div className="flex flex-col gap-1.5 rounded-md border p-2">
-          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-            {(
-              [
-                ["builder", "Construtor"],
-                ["text", "Texto (funções)"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setFormulaMode(k)}
-                className={cn(
-                  "rounded-sm px-2 py-1 text-xs",
-                  formulaMode === k
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {formulaMode === "builder" ? (
-            <FormulaBuilder
-              // agg:* + 'calculado_agg' aninhados (ref plano — token normal),
-              // como no FieldForm de /campos (aggBuilderOperands).
-              refs={calcRefs.filter(
-                (r) => r.ref.startsWith("agg:") || r.group === AGG_NESTED_GROUP
-              )}
-              chips={fieldChips}
-              initial={metric.formula ?? null}
-              onChange={(f) => onChange({ formula: f })}
-            />
-          ) : (
-            <FormulaTextEditor
-              refs={calcRefs}
-              initial={
-                metric.formula && metric.formula.tokens.length > 0
-                  ? metric.formula
-                  : null
-              }
-              onChange={(f) => onChange({ formula: f })}
-            />
-          )}
+          <FormulaEditor
+            key={`calc-${recipeNonce}`}
+            context="aggregate"
+            catalog={calcRefs}
+            chips={fieldChips}
+            sources={sourceDefs}
+            initial={
+              metric.formula && metric.formula.tokens.length > 0
+                ? metric.formula
+                : null
+            }
+            onChange={(f) => onChange({ formula: f })}
+            preview={previewAdapter}
+            header={
+              <RecipeStrip
+                recipes={["conversion_rate"]}
+                aggCatalog={calcRefs}
+                sources={sourceDefs ?? []}
+                onApply={(r) => {
+                  // Receita aplica fórmula + formato % + nome sugerido (se
+                  // vazio); o editor remonta (nonce) já preenchido e editável.
+                  onChange({
+                    formula: r.formula,
+                    resultPercent: r.format === "percent",
+                    resultCurrency: null,
+                    label: metric.label?.trim()
+                      ? metric.label
+                      : r.suggestedLabel,
+                  });
+                  setRecipeNonce((n) => n + 1);
+                }}
+              />
+            }
+          />
           <div className="flex items-center gap-2">
             <Label className="text-muted-foreground shrink-0 text-xs">
               Formato do resultado
@@ -536,8 +541,20 @@ export function MetricRow({
           <p className="text-muted-foreground text-xs">
             Fórmula sobre os totais do recorte, recalculada por grupo,
             subtotal e Total geral. Percentual exibe ×100 (0,35 → 35%); moeda
-            é só exibição (sem conversão).
+            CONVERTE o resultado para a moeda escolhida (taxa do período do
+            dashboard).
           </p>
+          {onSaveAsField ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={onSaveAsField}
+            >
+              Salvar como campo reutilizável…
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {metric.field ? (
@@ -649,20 +666,23 @@ export function MetricRow({
       ) : null}
       {metric.field && sourceOptions && sourceOptions.length > 1 ? (
         <div className="flex flex-col gap-2 rounded-md border p-2">
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs font-medium"
-            onClick={() => setSourcesOpen((o) => !o)}
-            aria-expanded={sourcesOpen}
-          >
-            {sourcesOpen ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
-            )}
-            Fontes da métrica
-            {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
-          </button>
+          <div className="flex items-center gap-1.5 self-start">
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs font-medium"
+              onClick={() => setSourcesOpen((o) => !o)}
+              aria-expanded={sourcesOpen}
+            >
+              {sourcesOpen ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+              Fontes da métrica
+              {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
+            </button>
+            <SourceConceptsHint />
+          </div>
           {sourcesOpen ? (
             <div className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

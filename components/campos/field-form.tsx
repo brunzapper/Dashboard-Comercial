@@ -1,4 +1,15 @@
-// Versão: 1.5 | Data: 19/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): receitas guiadas na criação (RecipeStrip — a receita
+//   escolhe tipo/fórmula/formato), prévias ao vivo (registros reais no
+//   'calculado'; runCalculatedWidget no 'calculado_agg') e preset
+//   initialDataType/initialFormula ("Salvar como campo reutilizável" do
+//   builder de widgets).
+// v2.0 (20/07/2026): editor de fórmula UNIFICADO (FormulaEditor) nos dois tipos
+//   calculados — substitui o toggle Construtor/Texto + FormulaBuilder/
+//   FormulaTextEditor; validação ao vivo com as regras do servidor, funções
+//   montáveis por clique e operandos de ciclo desabilitados COM motivo (antes
+//   escondidos). Contrato de hidden inputs (formula/formula_text/formula_mode)
+//   preservado — o servidor fica intocado. Nova prop `sources` (warnings).
 // v1.5 (19/07/2026): aninhamento de campos calculados — excludeKeys (o campo
 //   em edição + dependentes transitivos, calculado pelo FieldsManager) filtra
 //   dos catálogos os operandos que criariam ciclo; o construtor de botões do
@@ -34,17 +45,18 @@ import {
   type FieldDefinition,
 } from "@/lib/records/types";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
-import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
-import { formulaUsesFunctions } from "@/lib/records/formulas";
-import { refCustomKey } from "@/lib/records/formula-deps";
-import { cn } from "@/lib/utils";
+import type { SourceDef } from "@/lib/sources";
 import {
   createField,
   updateField,
   type FieldActionState,
 } from "@/app/(app)/campos/actions";
-import { FormulaBuilder, type RefOption } from "./formula-builder";
-import { FormulaTextEditor } from "./formula-text-editor";
+import { previewRecordFormula } from "@/app/(app)/campos/preview-actions";
+import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
+import type { RefOption } from "@/lib/records/date-operands";
+import type { Formula } from "@/lib/records/formulas";
+import { FormulaEditor } from "@/components/formula/formula-editor";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const DATA_TYPE_OPTIONS: ComboboxOption[] = (
@@ -88,25 +100,36 @@ export function FieldForm({
   aggRefs,
   excludeKeys,
   fieldChips,
+  sources,
   currencyOptions,
+  initialDataType,
+  initialFormula,
   onDone,
 }: {
   field?: FieldDefinition;
   numericRefs: RefOption[];
-  // Catálogo completo p/ o editor de TEXTO (números + datas + texto/seleção/
-  // booleano p/ condicionais). Ausente → cai no numericRefs.
+  // Catálogo completo do contexto POR-REGISTRO (números + datas + texto/
+  // seleção/booleano p/ condicionais). Ausente → cai no numericRefs.
   allRefs?: RefOption[];
-  // Operandos de AGREGAÇÃO (agg:*) p/ o tipo "Calculado (totais)". Ausente →
-  // o tipo ainda aparece, mas sem operandos (caller deve passar).
+  // Catálogo de AGREGAÇÃO (agg:* + SOMASE/…) p/ o tipo "Calculado (totais do
+  // recorte)". Ausente → o tipo ainda aparece, mas sem operandos.
   aggRefs?: RefOption[];
   // Chaves PROIBIDAS como operando da fórmula: o campo em edição + seus
   // dependentes transitivos (referenciá-los criaria ciclo — aninhamento,
-  // 19/07/2026). Ausente → só o próprio campo fica de fora.
+  // 19/07/2026). Ausente → só o próprio campo fica de fora. O FormulaEditor as
+  // exibe DESABILITADAS com o motivo (nunca escondidas) e as exclui da
+  // validação — mesma regra do servidor.
   excludeKeys?: Set<string>;
   // Chips de fonte dos seletores de coluna das fórmulas (ver Combobox.chips).
   fieldChips?: ComboboxChip[];
+  // Catálogo de fontes vivo — habilita os warnings de escopo do FormulaEditor.
+  sources?: SourceDef[];
   // Moedas habilitadas para os seletores de moeda (default: Real/Dólar).
   currencyOptions?: ComboboxOption[];
+  // Preset de CRIAÇÃO (ex.: "Salvar como campo reutilizável" de uma métrica
+  // ad-hoc do widget): tipo e fórmula já preenchidos, tudo editável.
+  initialDataType?: DataType;
+  initialFormula?: Formula | null;
   // Recebe o campo recém-criado (só no create) para quem quiser usá-lo na hora.
   onDone?: (created?: FieldActionState["field"]) => void;
 }) {
@@ -114,7 +137,7 @@ export function FieldForm({
   const action = isEdit ? updateField : createField;
   const [state, formAction, pending] = useActionState(action, initial);
   const [dataType, setDataType] = useState<DataType>(
-    field?.data_type ?? "texto"
+    field?.data_type ?? initialDataType ?? "texto"
   );
   const currencyChoices =
     currencyOptions && currencyOptions.length > 0
@@ -170,24 +193,9 @@ export function FieldForm({
 
   // Ao editar um campo calculado, nem ele nem quem depende dele (transitivos)
   // podem ser operandos — criariam ciclo. Mesmo conjunto do servidor
-  // (forbiddenOperandKeys em campos/actions.ts).
+  // (forbiddenOperandKeys em campos/actions.ts). O FormulaEditor os exibe
+  // desabilitados com o motivo e os exclui da validação.
   const forbidden = excludeKeys ?? new Set(field ? [field.field_key] : []);
-  const allowedRef = (ref: string) => {
-    const key = refCustomKey(ref);
-    return key == null || !forbidden.has(key);
-  };
-  const operandRefs = numericRefs.filter((r) => allowedRef(r.ref));
-  const textRefs = (allRefs ?? numericRefs).filter((r) => allowedRef(r.ref));
-  // Operandos de agregação (calculado_agg): Σ/Média/Contagem e ref plano
-  // aninhado do próprio campo (e dependentes) fora.
-  const aggOperands = (aggRefs ?? []).filter((r) => allowedRef(r.ref));
-  // O construtor de botões só expressa + − × ÷ — recebe os operandos agregados
-  // (agg:*) e os 'calculado_agg' aninhados (ref plano — token de campo normal).
-  // Os operandos de SOMASE/CONT.SE/MÉDIASE (campos crus e colunas de condição)
-  // ficam só no editor de texto, que sabe usá-los.
-  const aggBuilderOperands = aggOperands.filter(
-    (r) => r.ref.startsWith("agg:") || r.group === AGG_NESTED_GROUP
-  );
   // Formato do resultado do calculado_agg: número, moeda automática (preserva a
   // dos operandos; misturou → Real) ou moeda fixa (converte).
   const aggResultOptions: ComboboxOption[] = [
@@ -199,13 +207,11 @@ export function FieldForm({
       label: `Moeda — ${o.label}`,
     })),
   ];
-  // Editor da fórmula: construtor por botões (fórmulas simples) ou texto estilo
-  // Sheets (obrigatório p/ SE/E/OU — o construtor não representa funções).
-  const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
-    field?.formula && (field.formula.source || formulaUsesFunctions(field.formula))
-      ? "text"
-      : "builder"
-  );
+  // Fórmula vinda de uma RECEITA (Ciclo de vendas / Taxa de conversão): decide
+  // o tipo do campo, pré-preenche o editor (remontado via nonce) e sugere o
+  // formato — o usuário segue editando livremente a partir daí.
+  const [recipeFormula, setRecipeFormula] = useState<Formula | null>(null);
+  const [recipeNonce, setRecipeNonce] = useState(0);
 
   useEffect(() => {
     if (state.ok && onDone) onDone(state.field);
@@ -243,6 +249,23 @@ export function FieldForm({
           aria-label="Tipo"
         />
       </div>
+
+      {/* Receitas: geram a fórmula E escolhem o tipo certo (por-registro ou
+          totais) — o usuário não precisa conhecer a distinção de antemão. */}
+      {!isEdit ? (
+        <RecipeStrip
+          recipes={["sales_cycle", "conversion_rate"]}
+          recordCatalog={allRefs ?? numericRefs}
+          aggCatalog={aggRefs ?? []}
+          sources={sources ?? []}
+          onApply={(r) => {
+            setDataType(r.target);
+            setRecipeFormula(r.formula);
+            setCalcCurrency(r.format === "percent" ? "percent" : "number");
+            setRecipeNonce((n) => n + 1);
+          }}
+        />
+      ) : null}
 
       {dataType === "selecao" ? (
         <div className="flex flex-col gap-1.5">
@@ -300,45 +323,38 @@ export function FieldForm({
       {dataType === "calculado_agg" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula (sobre os totais)</Label>
-          <input type="hidden" name="formula_mode" value={formulaMode} />
-          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-            {(
-              [
-                ["builder", "Construtor"],
-                ["text", "Texto (funções)"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setFormulaMode(k)}
-                className={cn(
-                  "rounded-sm px-2 py-1 text-xs",
-                  formulaMode === k
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {formulaMode === "builder" ? (
-            <FormulaBuilder
-              refs={aggBuilderOperands}
-              chips={fieldChips}
-              initial={field?.formula ?? null}
-            />
-          ) : (
-            <FormulaTextEditor refs={aggOperands} initial={field?.formula ?? null} />
-          )}
+          <FormulaEditor
+            key={`agg-${recipeNonce}`}
+            context="aggregate"
+            catalog={aggRefs ?? []}
+            chips={fieldChips}
+            sources={sources}
+            initial={recipeFormula ?? field?.formula ?? initialFormula ?? null}
+            formInputs
+            excludeKeys={forbidden}
+            preview={{
+              title: "Prévia do resultado (todas as fontes)",
+              manualStart: true,
+              // Mesmo choke point dos widgets (runCalculatedWidget) — sem
+              // período/filtros: o campo salvo respeita o recorte de cada
+              // widget onde for usado.
+              run: (f) =>
+                previewAggregateFormula({
+                  formulaJson: JSON.stringify(f),
+                  sources: [],
+                  filters: [],
+                  resultPercent: calcCurrency === "percent",
+                  resultCurrency: calcCurrency.startsWith("fixed:")
+                    ? calcCurrency.slice("fixed:".length)
+                    : null,
+                }),
+            }}
+          />
           <p className="text-muted-foreground text-xs">
-            Opere entre <strong>agregações</strong> (Σ soma, média e contagem
-            dos campos) e constantes — ex.: ticket médio ={" "}
-            <code>Σ MRR ÷ Contagem de registros</code>. O resultado é calculado
-            sobre os <strong>totais do recorte</strong> (filtros/período do
-            widget) e recalculado em cada grupo, subtotal e Total geral — não
-            por registro.
+            O resultado é calculado sobre os <strong>totais do recorte</strong>{" "}
+            (filtros/período do widget) e recalculado em cada grupo, subtotal e
+            Total geral — não por registro. Ex.: ticket médio ={" "}
+            <code>Σ MRR ÷ Contagem de registros</code>.
           </p>
           <Label className="mt-1">Formato do resultado</Label>
           <Combobox
@@ -378,49 +394,33 @@ export function FieldForm({
       {dataType === "calculado" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
-          <input type="hidden" name="formula_mode" value={formulaMode} />
-          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-            {(
-              [
-                ["builder", "Construtor"],
-                ["text", "Texto (funções)"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setFormulaMode(k)}
-                className={cn(
-                  "rounded-sm px-2 py-1 text-xs",
-                  formulaMode === k
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {formulaMode === "builder" ? (
-            <>
-              <FormulaBuilder
-                refs={operandRefs}
-                chips={fieldChips}
-                initial={field?.formula ?? null}
-              />
-              <p className="text-muted-foreground text-xs">
-                Opere entre colunas numéricas e datas (+ − × ÷) e constantes.{" "}
-                <strong>data − data</strong> resulta em dias (ex.: lead time).
-                Você pode usar datas do registro casado (↪) via conexões entre
-                fontes. Para condicionais (SE/E/OU), use a aba{" "}
-                <strong>Texto (funções)</strong>. O resultado é calculado por
-                registro a cada sincronização/edição (os que usam ↪ são
-                atualizados no auto-match/recálculo).
-              </p>
-            </>
-          ) : (
-            <FormulaTextEditor refs={textRefs} initial={field?.formula ?? null} />
-          )}
+          <FormulaEditor
+            key={`rec-${recipeNonce}`}
+            context="record"
+            catalog={allRefs ?? numericRefs}
+            chips={fieldChips}
+            sources={sources}
+            initial={recipeFormula ?? field?.formula ?? initialFormula ?? null}
+            formInputs
+            excludeKeys={forbidden}
+            preview={{
+              title: "Prévia (registros reais)",
+              // Mesma montagem da materialização (record-eval-context +
+              // computeFormulaFields) — o que a prévia mostra é o que o save
+              // gravará em cada registro.
+              run: (f) =>
+                previewRecordFormula({
+                  formulaJson: JSON.stringify(f),
+                  formulaMode: "builder",
+                  editingKey: field?.field_key,
+                }),
+            }}
+          />
+          <p className="text-muted-foreground text-xs">
+            O resultado é calculado por registro a cada sincronização/edição
+            (fórmulas com ↪ registro casado são atualizadas no
+            auto-match/recálculo).
+          </p>
           <Label className="mt-1">Formato do resultado</Label>
           <Combobox
             options={calcResultOptions}

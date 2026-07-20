@@ -1,4 +1,16 @@
-// Versão: 1.15 | Data: 18/07/2026
+// Versão: 1.18 | Data: 20/07/2026
+// v1.18 (20/07/2026): receita "Taxa de conversão" no widget calculado e na
+//   métrica ad-hoc; prévia agregada (previewAggregateFormula, opt-in) nos
+//   editores de fórmula; "Salvar como campo reutilizável…" promove a métrica
+//   ad-hoc a campo calculado_agg (FieldForm pré-preenchido; a métrica passa a
+//   apontar p/ o campo salvo).
+// v1.17 (20/07/2026): widget "calculado" e variáveis da calculadora usam o
+//   FormulaEditor unificado (visual com cursor + paleta de funções + validação
+//   viva); as variáveis ganharam o editor completo (antes texto-only).
+// v1.16 (20/07/2026): UX de fórmulas — rótulos claros ("Escrever a fórmula
+//   neste widget", "ƒ Métrica calculada (fórmula própria)…"), ajuda do campo
+//   salvo com o trade-off reutilizável×local e hint "?" dos escopos de fonte
+//   junto ao rótulo Fórmula do widget calculado (movido p/ dentro do editor).
 // v1.15 (18/07/2026): "Formato do grupo" estendido à tabela AGREGADA (níveis
 //   dim_<n> de data sem transform "por nome" — groupFormatEligible) e lista
 //   "Fonte do dado" por dimensão unificada no modo registros (hierarquia de
@@ -74,24 +86,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldForm } from "@/components/campos/field-form";
-import type { FieldDefinition } from "@/lib/records/types";
-import {
-  FormulaBuilder,
-  type RefOption,
-} from "@/components/campos/formula-builder";
-import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import type { DataType, FieldDefinition } from "@/lib/records/types";
+import type { RefOption } from "@/lib/records/date-operands";
+import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
+import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   type KanbanSettings,
 } from "@/lib/kanban/types";
 import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
-import { cn } from "@/lib/utils";
-import {
-  formulaUsesFunctions,
-  validateFormula,
-  type Formula,
-} from "@/lib/records/formulas";
+import { validateFormula, type Formula } from "@/lib/records/formulas";
 import { fieldAppliesToSource, toSourceKey, type SourceKey } from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import {
@@ -164,15 +171,13 @@ import {
   metricTargetSources,
 } from "@/lib/widgets/metric-sources";
 import {
-  aggNestedOperandRefs,
-  aggOperandRefs,
-  AGG_NESTED_GROUP,
-  sourceScopedAggOperandRefs,
   CALC_METRIC_FIELD,
-  condAggOperandRefs,
   validateCondAggRefs,
 } from "@/lib/widgets/calc-metrics";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import {
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
   BuilderSection,
@@ -556,17 +561,43 @@ export function WidgetBuilder({
   const [formula, setFormula] = useState<Formula>(
     widget?.settings?.formula ?? { tokens: [] }
   );
-  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
-  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
-  // não a representa).
-  const [calcFormulaMode, setCalcFormulaMode] = useState<"builder" | "text">(
-    formulaUsesFunctions(widget?.settings?.formula) ? "text" : "builder"
-  );
   // Widget 'calculado' apontando p/ um campo "Calculado (totais)" salvo em
   // /campos ('custom:<key>'); vazio = fórmula própria (formula acima).
   const [calcField, setCalcField] = useState<string>(
     widget?.settings?.calcField ?? ""
   );
+  // Fórmula aplicada por uma RECEITA (o editor lê `initial` só na montagem —
+  // o nonce o remonta já preenchido).
+  const [calcRecipeFormula, setCalcRecipeFormula] = useState<Formula | null>(
+    null
+  );
+  const [calcRecipeNonce, setCalcRecipeNonce] = useState(0);
+  // "Salvar como campo reutilizável": preset do FieldForm inline (tipo +
+  // fórmula) e, ao criar, qual métrica ad-hoc passa a apontar p/ o campo salvo.
+  const [fieldPreset, setFieldPreset] = useState<{
+    dataType: DataType;
+    formula: Formula | null;
+    replaceMetricIndex?: number;
+  } | null>(null);
+  // Prévia AGREGADA (opt-in; custa RPCs como um widget): fórmula avaliada por
+  // runCalculatedWidget com as fontes/filtros correntes do builder, sem o
+  // período da barra (o builder não o conhece — o selo avisa).
+  const aggPreview = (
+    previewSources: SourceKey[],
+    resultPercent: boolean,
+    resultCurrency: string | null
+  ): FormulaPreviewAdapter => ({
+    title: "Prévia do resultado",
+    manualStart: true,
+    run: (f) =>
+      previewAggregateFormula({
+        formulaJson: JSON.stringify(f),
+        sources: previewSources,
+        filters,
+        resultPercent,
+        resultCurrency,
+      }),
+  });
 
   // Calculadora: variáveis nomeadas (fórmulas agregadas computadas no servidor
   // com filtros+período do widget; inseridas na expressão do card como [Nome]).
@@ -740,73 +771,26 @@ export function WidgetBuilder({
       return next;
     });
 
-  // Refs disponíveis para as métricas/widget calculados: agregações de registros.
-  // Contáveis (agg:count:<campo>): datas/numéricos reais (não aggCalc/sintéticos)
-  // — permite razões como reunião→venda (Contagem de datas por tipo de registro).
-  // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
-  // de condição (texto/seleção/booleano e datas dos campos personalizados).
-  // Mesma montagem do servidor (aggOperandCatalog em campos/actions.ts).
+  // Refs disponíveis para as métricas/widget calculados: catálogo agregado via
+  // builder ÚNICO (lib/widgets/agg-catalog.ts) — mesma montagem do servidor e
+  // dos demais editores por construção; inclui aninhados ('calculado_agg'
+  // salvos) e condições sobre unificados. Decoração só de exibição
+  // (fonte/chips/tooltip) — labels seguem limpos (load-bearing).
   // Memoizado: os editores de fórmula derivam a validação da identidade de
   // `refs`; um array novo por render disparava reemissão de onChange em cadeia.
-  const calcRefs: RefOption[] = useMemo(() => {
-    const numeric = available.filter((f) => f.isNumeric);
-    const countable = available.filter(
-      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
-    );
-    const customCond = fields
-      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    const customDate = fields
-      .filter((f) => f.data_type === "data")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Entradas dos operandos com ESCOPO DE FONTE (`agg:…@<fonte>`): sem match:
-    // (registro casado já embute a fonte no ref) e com appliesTo do custom
-    // (applies_to) / unificado (record_types dos membros) p/ o campo só aparecer
-    // sob as fontes onde existe.
-    const scopedInput = (list: typeof available) =>
-      list
-        .filter((f) => !f.field.startsWith("match:"))
-        .map((f) => ({
-          field: f.field,
-          label: f.label,
-          appliesTo: f.field.startsWith("custom:")
-            ? (fields.find((d) => d.field_key === f.field.slice(7))?.applies_to ??
-              null)
-            : f.unifiedMembers
-              ? Object.keys(f.unifiedMembers)
-              : null,
-        }));
-    // 'calculado_agg' salvos como operando ANINHADO (ref plano custom:<key>,
-    // expandido em runtime) — paridade com o /campos (aggNestedOperandRefs).
-    const nestedAgg = fields
-      .filter((f) => f.data_type === "calculado_agg")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Decoração só de exibição (fonte/chips/tooltip) — labels seguem limpos.
-    return decorateRefOptions(
-      [
-        ...aggOperandRefs(numeric, countable),
-        ...sourceScopedAggOperandRefs(
-          scopedInput(numeric),
-          scopedInput(countable),
-          catalog
+  const calcRefs: RefOption[] = useMemo(
+    () =>
+      decorateRefOptions(
+        buildAggOperandCatalog(
+          availableAggCatalogInput(available, fields, catalog, {
+            withNested: true,
+          })
         ),
-        ...aggNestedOperandRefs(nestedAgg),
-        ...condAggOperandRefs(
-          numeric,
-          customCond,
-          customDate,
-          catalog,
-          // Condições sobre campos UNIFICADOS (texto/seleção/data — numéricos
-          // são alvo, não condição): o RPC resolve via _widget_unified_expr.
-          available
-            .filter((f) => f.unified && !f.isNumeric)
-            .map((f) => ({ field: f.field, label: f.label }))
-        ),
-      ],
-      available,
-      sourceLabels
-    );
-  }, [available, fields, sourceLabels, catalog]);
+        available,
+        sourceLabels
+      ),
+    [available, fields, sourceLabels, catalog]
+  );
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>
@@ -874,7 +858,7 @@ export function WidgetBuilder({
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields, sourceLabels),
     ...toFieldOptions(aggCalcFields, sourceLabels),
-    { value: CALC_METRIC_FIELD, label: "ƒ Fórmula personalizada…" },
+    { value: CALC_METRIC_FIELD, label: "ƒ Métrica calculada (fórmula própria)…" },
   ];
   // Modos do Card (settings.card): campos ranqueáveis (números e datas) e
   // métricas simples do ranking (sem ƒ ad-hoc — fórmula tem modo próprio).
@@ -2042,7 +2026,7 @@ export function WidgetBuilder({
                   <Combobox
                     searchable={false}
                     options={[
-                      { value: "", label: "— fórmula própria (abaixo) —" },
+                      { value: "", label: "Escrever a fórmula neste widget" },
                       ...toFieldOptions(aggCalcFields, sourceLabels),
                     ]}
                     value={calcField}
@@ -2051,61 +2035,39 @@ export function WidgetBuilder({
                     aria-label="Usar campo salvo"
                   />
                   <p className="text-muted-foreground text-xs">
-                    Campos &quot;Calculado (totais)&quot; definidos em Campos.
-                    Selecionado, a fórmula/moeda vêm do campo.
+                    Campo salvo (&quot;Calculado — totais do recorte&quot;, de
+                    Campos) = reutilizável em vários widgets; a fórmula/moeda
+                    vêm do campo. Fórmula escrita aqui vale só neste widget.
                   </p>
                 </>
               ) : null}
               {!calcField ? (
                 <>
                   <Label>Fórmula</Label>
-                  <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-                    {(
-                      [
-                        ["builder", "Construtor"],
-                        ["text", "Texto (funções)"],
-                      ] as const
-                    ).map(([k, label]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setCalcFormulaMode(k)}
-                        className={cn(
-                          "rounded-sm px-2 py-1 text-xs",
-                          calcFormulaMode === k
-                            ? "bg-background shadow-sm"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {calcFormulaMode === "builder" ? (
-                    <>
-                      <FormulaBuilder
-                        refs={calcRefs.filter(
-                          (r) =>
-                            r.ref.startsWith("agg:") ||
-                            r.group === AGG_NESTED_GROUP
-                        )}
-                        chips={fieldSourceChips}
-                        initial={widget?.settings?.formula ?? null}
-                        onChange={setFormula}
+                  <FormulaEditor
+                    key={`calcw-${calcRecipeNonce}`}
+                    context="aggregate"
+                    catalog={calcRefs}
+                    chips={fieldSourceChips}
+                    sources={catalog}
+                    initial={
+                      calcRecipeFormula ?? widget?.settings?.formula ?? null
+                    }
+                    onChange={(f) => setFormula(f)}
+                    preview={aggPreview(sources, false, null)}
+                    header={
+                      <RecipeStrip
+                        recipes={["conversion_rate"]}
+                        aggCatalog={calcRefs}
+                        sources={catalog}
+                        onApply={(r) => {
+                          setFormula(r.formula);
+                          setCalcRecipeFormula(r.formula);
+                          setCalcRecipeNonce((n) => n + 1);
+                        }}
                       />
-                      <p className="text-muted-foreground text-xs">
-                        Combine agregações dos registros (+ − × ÷ e constantes).
-                        Para condicionais (SOMASE/CONT.SE/MÉDIASE), use a aba{" "}
-                        <strong>Texto (funções)</strong>.
-                      </p>
-                    </>
-                  ) : (
-                    <FormulaTextEditor
-                      refs={calcRefs}
-                      initial={formula.tokens.length > 0 ? formula : null}
-                      onChange={setFormula}
-                    />
-                  )}
+                    }
+                  />
                 </>
               ) : null}
               {/* Filtros rápidos (o calculado não usa o Accordion de dados). */}
@@ -2158,10 +2120,17 @@ export function WidgetBuilder({
                       <Trash2 className="size-4" />
                     </Button>
                   </div>
-                  <FormulaTextEditor
-                    refs={calcRefs}
+                  {/* Editor completo (visual+texto) — antes as variáveis eram
+                      texto-only; ganharam paleta de funções, validação viva e
+                      prévia. */}
+                  <FormulaEditor
+                    context="aggregate"
+                    catalog={calcRefs}
+                    chips={fieldSourceChips}
+                    sources={catalog}
                     initial={v.formula ?? null}
                     onChange={(f) => updateVariable(i, { formula: f })}
+                    preview={aggPreview(sources, false, null)}
                   />
                 </div>
               ))}
@@ -2943,6 +2912,28 @@ export function WidgetBuilder({
                 isAggCalc={isAggCalcField(m.field)}
                 isCalcSentinel={m.field === CALC_METRIC_FIELD}
                 calcRefs={calcRefs}
+                sourceDefs={catalog}
+                previewAdapter={aggPreview(
+                  m.sources && m.sources.length > 0 ? m.sources : sources,
+                  m.resultPercent === true,
+                  m.resultCurrency ?? null
+                )}
+                onSaveAsField={
+                  canManageFields
+                    ? () => {
+                        // Promove a fórmula ad-hoc a campo reutilizável: abre o
+                        // FieldForm pré-preenchido; ao criar, a métrica passa a
+                        // apontar p/ o campo salvo (onDone abaixo).
+                        setFieldPreset({
+                          dataType: "calculado_agg",
+                          formula: m.formula ?? null,
+                          replaceMetricIndex: i,
+                        });
+                        setEditingField(null);
+                        setFieldSheetOpen(true);
+                      }
+                    : undefined
+                }
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
                   { value: "percent", label: "Percentual (%) — exibe ×100" },
@@ -3317,7 +3308,10 @@ export function WidgetBuilder({
           open={fieldSheetOpen}
           onOpenChange={(o) => {
             setFieldSheetOpen(o);
-            if (!o) setEditingField(null);
+            if (!o) {
+              setEditingField(null);
+              setFieldPreset(null);
+            }
           }}
         >
           <SheetContent className="overflow-y-auto">
@@ -3328,33 +3322,58 @@ export function WidgetBuilder({
               <SheetDescription>
                 {editingField
                   ? "Edite este campo sem sair do construtor. As mudanças refletem no widget ao salvar."
-                  : "A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos a lista automaticamente ao salvar."}
+                  : fieldPreset
+                    ? "A fórmula da métrica veio pré-preenchida — dê um rótulo e salve para reutilizá-la em vários widgets. A métrica passa a apontar para o campo salvo."
+                    : "A coluna nasce disponível nos seletores (Exibir ligado). Atualizamos a lista automaticamente ao salvar."}
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-4">
               <FieldForm
-                key={editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}
+                key={`${editingField?.id ?? (fieldSheetOpen ? "open" : "closed")}-${fieldPreset ? "preset" : "blank"}`}
                 field={editingField ?? undefined}
                 numericRefs={fieldFormNumericRefs}
                 allRefs={fieldFormAllRefs}
                 excludeKeys={perRecordOps.excludeKeys}
                 fieldChips={fieldSourceChips}
                 aggRefs={calcRefs}
+                sources={catalog}
                 currencyOptions={currencyOptions}
+                initialDataType={fieldPreset?.dataType}
+                initialFormula={fieldPreset?.formula}
                 onDone={(created) => {
                   const wasEditing = Boolean(editingField);
+                  const replaceIdx = fieldPreset?.replaceMetricIndex;
                   setFieldSheetOpen(false);
                   setEditingField(null);
+                  setFieldPreset(null);
                   // Só na CRIAÇÃO o campo recém-criado entra na config: campo
-                  // comum vira dimensão; "Calculado (totais)" vira métrica.
+                  // comum vira dimensão; "Calculado (totais)" vira métrica —
+                  // e, vindo de "Salvar como campo reutilizável", SUBSTITUI a
+                  // métrica ad-hoc de origem (rótulo/fontes preservados).
                   if (!wasEditing && created?.field_key) {
                     const ref = `custom:${created.field_key}`;
                     if (created.data_type === "calculado_agg") {
-                      setMetrics((prev) =>
-                        prev.some((m) => m.field === ref)
+                      setMetrics((prev) => {
+                        if (
+                          replaceIdx != null &&
+                          prev[replaceIdx]?.field === CALC_METRIC_FIELD
+                        ) {
+                          const next = [...prev];
+                          next[replaceIdx] = {
+                            ...next[replaceIdx],
+                            field: ref,
+                            agg: "sum",
+                            calc: true,
+                            formula: undefined,
+                            resultPercent: undefined,
+                            resultCurrency: undefined,
+                          };
+                          return next;
+                        }
+                        return prev.some((m) => m.field === ref)
                           ? prev
-                          : [...prev, { field: ref, agg: "sum", calc: true }]
-                      );
+                          : [...prev, { field: ref, agg: "sum", calc: true }];
+                      });
                     } else {
                       setDimensions((prev) =>
                         prev.some((d) => d.field === ref)

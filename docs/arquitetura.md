@@ -330,6 +330,60 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   SOMASE/CONT.SE. "Data atual" fica no catálogo mas NUNCA compila em fórmula
   agregada (não é coluna) — `validateCondAggRefs` devolve mensagem dedicada em
   vez de degradar para "—" silencioso.
+- **Redesign do editor de fórmulas** (20/07/2026 — UX de campos/métricas
+  calculadas; nenhum RPC tocado, formato `Formula {tokens, source}` intacto):
+  - **Catálogo AGREGADO com builder único** (`lib/widgets/agg-catalog.ts`):
+    `buildAggOperandCatalog` + `availableAggCatalogInput` (sítios de widget) /
+    `defsAggCatalogInput` (/campos e servidor) substituem as SEIS montagens
+    copiadas (widget-builder, fields-manager, campos/actions,
+    quick-table-actions, Nota/widget-card, viewer de snapshot). Paridade
+    ref|label|group verificada por script na migração. NÃO monte o catálogo
+    agregado chamando as quatro funções de calc-metrics na mão — derive o input
+    e chame o builder.
+  - **Validação de contexto única** (`lib/records/formula-validate.ts`):
+    `validateFormulaForContext(formula, {kind: "record"|"aggregate", catalog,
+    sources?})` concentra estrutura+refs (`validateFormula`), colocação de
+    SOMASE/… (`validateCondAggRefs`) e as mensagens dedicadas do por-registro
+    (agg:/SOMASE proibidos). O servidor (`resolveAndValidateFormula`) e os
+    editores rodam O MESMO módulo — validação AO VIVO com as mensagens do save.
+    `warnings` (não bloqueiam) apontam operandos que degradariam para "—"
+    (escopo `@fonte` não abaixável).
+  - **FormulaEditor unificado** (`components/formula/`): substitui o par
+    FormulaBuilder/FormulaTextEditor (removidos) e o toggle Construtor/Texto
+    copiado em 6 superfícies (FieldForm calculado/calculado_agg, widget
+    "calculado", métrica ad-hoc, variáveis da calculadora, Card-fórmula).
+    Views Visual|Texto sobre UM estado (trocar de aba nunca perde conteúdo;
+    texto inválido segura a aba); visual com CURSOR de inserção; paleta de
+    funções (SE/SOMASE/…/ANTERIOR montáveis por clique — antes só digitando);
+    ref não resolvida vira chip "⚠" (ref bruta só em tooltip); operandos
+    proibidos (ciclo, "Data atual" no agregado) aparecem DESABILITADOS com o
+    motivo (`disabledReason` em OperandRef/ComboboxOption) — política:
+    explicar, nunca esconder. O tipo `RefOption` agora é alias de `OperandRef`
+    em `lib/records/date-operands.ts` (a lib não importa mais de componente).
+    Contrato de form do FieldForm preservado (`formula`/`formula_text`/
+    `formula_mode`).
+  - **Prévia ao vivo pelos choke points** (nunca caminho paralelo):
+    por-registro via `app/(app)/campos/preview-actions.previewRecordFormula`
+    — usa `lib/records/record-eval-context.ts` (montagem de contexto EXTRAÍDA
+    do recalc; `recalcAllFormulaFields` consome o mesmo módulo, então prévia e
+    materialização são idênticas) + `computeFormulaFields` sobre até 30
+    registros reais, com nota "sem registro casado de <fonte>"; agregada via
+    `app/(app)/dashboards/formula-preview-actions.previewAggregateFormula` —
+    `runCalculatedWidget` com fontes/filtros do builder, SEM o período da
+    barra (selo avisa), opt-in por clique (custa RPCs como um widget).
+  - **Receitas guiadas** (`lib/records/formula-recipes.ts` +
+    `components/formula/recipe-strip.tsx`): "Ciclo de vendas" ([data fim] −
+    [`match:<fonte>:<data início>`], campo por-registro) e "Taxa de conversão"
+    (`agg:count:…@A ÷ agg:count:…@B`, agregado, %). São ATALHOS por cima do
+    editor livre — geram fórmula normal, 100% editável; opções derivadas dos
+    catálogos vivos (nada de lista paralela). A de ciclo consulta
+    `getMatchCoverage` e orienta para Campos → Conexões quando o casamento não
+    existe (nunca bloqueia). Entradas: FieldForm (a receita escolhe o TIPO do
+    campo), métrica ad-hoc e widget calculado.
+  - **Promoção de fórmula ad-hoc a campo**: "Salvar como campo reutilizável…"
+    na métrica ad-hoc abre o FieldForm inline pré-preenchido
+    (`initialDataType`/`initialFormula`); ao criar, a métrica de origem passa a
+    apontar para o campo salvo (rótulo/fontes preservados).
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.

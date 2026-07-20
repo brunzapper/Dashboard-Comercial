@@ -87,3 +87,20 @@ This version has breaking changes — APIs, conventions, and file structure may 
   subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
   caminho agregado); nesse caso o usuário garante que os conjuntos são
   disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.
+- **Editor/validação/catálogo de fórmulas são ÚNICOS (20/07/2026):** o catálogo
+  AGREGADO sai SEMPRE de `buildAggOperandCatalog`
+  (`lib/widgets/agg-catalog.ts`, inputs `availableAggCatalogInput`/
+  `defsAggCatalogInput`) — não recrie as montagens chamando
+  `aggOperandRefs`/`sourceScopedAggOperandRefs`/… na mão. A validação de
+  contexto (estrutura + refs + colocação de SOMASE/… + mensagens dedicadas)
+  vive em `validateFormulaForContext` (`lib/records/formula-validate.ts`) —
+  editores e servidor rodam o MESMO módulo. Edição de fórmula só pelo
+  `FormulaEditor` (`components/formula/`), que preserva o contrato
+  `formula`/`formula_text`/`formula_mode` do FieldForm. Prévias calculam pelos
+  CHOKE POINTS existentes — por-registro:
+  `lib/records/record-eval-context.ts` (compartilhado com o recalc) +
+  `computeFormulaFields`; agregada: `runCalculatedWidget` — nunca crie caminho
+  paralelo de consulta (RPCs intocados). Operando proibido no contexto é
+  DESABILITADO com motivo (`disabledReason`), nunca escondido — e receitas
+  (`formula-recipes.ts`) são atalhos que geram fórmula normal editável, nunca
+  substituem o editor livre.

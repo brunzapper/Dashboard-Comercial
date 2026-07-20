@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 20/07/2026
+// v1.2 (20/07/2026): modo Fórmula usa o FormulaEditor unificado (visual +
+//   texto + validação viva) no lugar do FormulaTextEditor texto-only.
 // v1.1 (17/07/2026): caixa com bg-card (painel do editor ficou bg-muted).
 // Seção "Modo do Card" do builder (settings.card): além do número agregado
 // (comportamento original), o Card exibe o valor de um registro (maior/menor),
@@ -19,8 +21,8 @@ import {
   type ComboboxChip,
   type ComboboxOption,
 } from "@/components/ui/combobox";
-import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
-import type { RefOption } from "@/components/campos/formula-builder";
+import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { RefOption } from "@/lib/records/date-operands";
 import {
   AGG_LABELS,
   CARD_MODE_LABELS,
@@ -231,8 +233,10 @@ export function CardModeSection({
       {mode === "formula" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
-          <FormulaTextEditor
-            refs={calcRefs}
+          <FormulaEditor
+            context="aggregate"
+            catalog={calcRefs}
+            chips={fieldChips}
             initial={
               value.formula && value.formula.tokens.length > 0
                 ? value.formula

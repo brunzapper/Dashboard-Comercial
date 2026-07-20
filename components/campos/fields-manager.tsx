@@ -1,4 +1,6 @@
-// Versão: 2.2 | Data: 19/07/2026
+// Versão: 2.3 | Data: 20/07/2026
+// v2.3 (20/07/2026): catálogo agregado via builder ÚNICO (lib/widgets/
+//   agg-catalog.defsAggCatalogInput) — montagem idêntica, sem cópia local.
 // Gerenciador de campos personalizados: busca + ABAS por fonte (Leads/Deals/
 // Estudo de Fechamentos/Gerais) + tabela com toggle do olho (show_in_builder).
 // v2.2 (19/07/2026): aninhamento de campos calculados — numericRefs inclui os
@@ -37,27 +39,20 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
-import {
-  DATA_TYPE_LABELS,
-  NUMERIC_DATA_TYPES,
-  type FieldDefinition,
-} from "@/lib/records/types";
+import { DATA_TYPE_LABELS, type FieldDefinition } from "@/lib/records/types";
 import { toRecordType } from "@/lib/sources";
-import { buildAvailableFields, CORE_FIELDS } from "@/lib/widgets/fields";
+import { buildAvailableFields } from "@/lib/widgets/fields";
 import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { useSources } from "@/components/sources-context";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
-  aggNestedOperandRefs,
-  aggOperandRefs,
-  condAggOperandRefs,
-  sourceScopedAggOperandRefs,
-} from "@/lib/widgets/calc-metrics";
+  buildAggOperandCatalog,
+  defsAggCatalogInput,
+} from "@/lib/widgets/agg-catalog";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
-import type { RefOption } from "./formula-builder";
+import type { RefOption } from "@/lib/records/date-operands";
 
 function roleLabels(keys: string[]): string {
   if (keys.length === 0) return "—";
@@ -232,66 +227,14 @@ export function FieldsManager({
   );
   const numericRefs: RefOption[] = decorate(perRecordOps.numericRefs);
   const allRefs: RefOption[] = decorate(perRecordOps.allRefs);
-  const customDateFields = fields
-    .filter((f) => f.data_type === "data")
-    .map((f) => ({ field_key: f.field_key, label: f.label }));
-  const customCondFields = fields
-    .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-    .map((f) => ({ field_key: f.field_key, label: f.label }));
-  // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais)": Σ/Média/Contagem das
-  // colunas numéricas (núcleo + custom, incluindo 'calculado' por-registro, que
-  // é materializado) + outros 'calculado_agg' como ref plano (aninhamento,
-  // 19/07/2026 — expandido em runtime pelo engine) + operandos de
-  // SOMASE/CONT.SE/MÉDIASE (campos crus alvo + colunas de condição). Mesmos
-  // critérios do servidor (aggOperandCatalog em campos/actions.ts).
-  const aggNumericFields = [
-    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-      field: f.field,
-      label: f.label,
-    })),
-    ...fields
-      .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({
-        field: `custom:${f.field_key}`,
-        label: f.label,
-        appliesTo: f.applies_to,
-      })),
-  ];
-  // Contáveis ("registros com o campo preenchido"): datas/numéricos do núcleo
-  // (podem ser nulos; os de texto sempre-preenchidos = count(*), viram ruído)
-  // + qualquer campo custom, exceto 'calculado_agg' (contagem de agregado
-  // não existe — o aninhamento entra como ref plano abaixo).
-  const aggCountableFields = [
-    ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
-      field: f.field,
-      label: f.label,
-    })),
-    ...fields
-      .filter((f) => f.data_type !== "calculado_agg")
-      .map((f) => ({
-        field: `custom:${f.field_key}`,
-        label: f.label,
-        appliesTo: f.applies_to,
-      })),
-  ];
-  const aggRefs: RefOption[] = decorate([
-    ...aggOperandRefs(aggNumericFields, aggCountableFields),
-    // Variantes com ESCOPO DE FONTE (`agg:…@<fonte>`): agregam só as linhas da
-    // fonte, ex. `Contagem de Data de criação (origem) · Leads` ÷ `… · Deals`.
-    // Rótulo/chips já saem prontos (decorate ignora refs fora do catálogo).
-    ...sourceScopedAggOperandRefs(aggNumericFields, aggCountableFields, catalog),
-    ...aggNestedOperandRefs(
-      fields
-        .filter((f) => f.data_type === "calculado_agg")
-        .map((f) => ({ field_key: f.field_key, label: f.label }))
-    ),
-    ...condAggOperandRefs(
-      aggNumericFields,
-      customCondFields,
-      customDateFields,
-      catalog
-    ),
-  ]);
+  // Operandos de AGREGAÇÃO p/ o tipo "Calculado (totais do recorte)": builder
+  // ÚNICO (lib/widgets/agg-catalog.ts) — mesma montagem do servidor e dos
+  // demais editores por construção. Sem forbidden aqui: o FieldForm filtra
+  // pelo excludeKeys (o servidor filtra no save). A decoração (fonte/chips/
+  // tooltip) é local e não toca nos labels (load-bearing).
+  const aggRefs: RefOption[] = decorate(
+    buildAggOperandCatalog(defsAggCatalogInput(fields, catalog))
+  );
   // Operandos PROIBIDOS na fórmula do campo em edição: ele próprio + quem já
   // depende dele (referenciar criaria ciclo — mesma regra do servidor). Sai do
   // catálogo compartilhado (perRecordCalcOperands).
@@ -431,6 +374,7 @@ export function FieldsManager({
               aggRefs={aggRefs}
               excludeKeys={excludeKeys}
               fieldChips={fieldSourceChips}
+              sources={catalog}
               currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}
             />

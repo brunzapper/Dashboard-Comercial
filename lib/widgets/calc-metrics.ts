@@ -75,7 +75,7 @@ import {
   type CustomDateField,
 } from "@/lib/records/date-operands";
 import { isPercentField, type FieldDefinition } from "@/lib/records/types";
-import type { RefOption } from "@/components/campos/formula-builder";
+import type { RefOption } from "@/lib/records/date-operands";
 import {
   foldBreakdowns,
   resolveCurrencyCode,
