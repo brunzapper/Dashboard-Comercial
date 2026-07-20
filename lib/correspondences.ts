@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 19/07/2026
+// Versão: 1.2 | Data: 20/07/2026
 // Fase 8: correspondências de colunas GLOBAIS. Um "campo unificado" liga colunas
 // equivalentes de fontes diferentes (por source-key) para que o widget as trate
 // como a mesma coluna. Tipos + carregamento + o mapa passado ao RPC
@@ -9,9 +9,16 @@
 //   sub Leads/Clientes Lite→Data da mudança de etapa). `correspondenceMapForSources`
 //   monta o coalesce por PERNA (um ref por source-key), evitando misturar o membro
 //   da pai com o da sub no mesmo coalesce.
+// v1.2 (20/07/2026): `correspondenceMapForSources` vira o builder de TODOS os
+//   caminhos de consulta (o gate "só quando há sub selecionada" deixava o mapa
+//   global poluído vazar p/ widget só-pai — o membro da sub entrava no coalesce
+//   da pai). Ganha fallback perna→raízes→todos (o RPC ergue erro p/ chave
+//   referenciada ausente) + membros ordenados por source_key (coalesce
+//   determinístico). `buildCorrespondenceMap` fica SÓ p/ opções de bucket.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { DataType } from "@/lib/records/types";
+import type { SourceDef } from "@/lib/sources";
 
 export interface CorrespondenceMember {
   // record_type da fonte (o da PAI, quando a fonte é sub).
@@ -44,28 +51,33 @@ export async function loadCorrespondences(
     key: c.key as string,
     label: c.label as string,
     data_type: c.data_type as DataType,
-    members: ((c.members ?? []) as CorrespondenceMember[]).map((m) => ({
-      record_type: m.record_type,
-      // Membros antigos (antes do backfill 0078) podem vir sem source_key; cai
-      // no record_type (fontes dinâmicas: key === record_type; builtins são
-      // retro-preenchidos pela migração).
-      source_key: m.source_key ?? m.record_type,
-      field_ref: m.field_ref,
-    })),
+    members: ((c.members ?? []) as CorrespondenceMember[])
+      .map((m) => ({
+        record_type: m.record_type,
+        // Membros antigos (antes do backfill 0078) podem vir sem source_key; cai
+        // no record_type (fontes dinâmicas: key === record_type; builtins são
+        // retro-preenchidos pela migração).
+        source_key: m.source_key ?? m.record_type,
+        field_ref: m.field_ref,
+      }))
+      // Ordem estável por source_key: qualquer coalesce que una 2+ membros
+      // (multi-raiz ou fallback) sai determinístico entre carregamentos.
+      .sort((a, b) => a.source_key.localeCompare(b.source_key)),
   }));
 }
 
 /**
- * Mapa para o RPC: { "<key>": [refs distintos] }. Usado pelo run_widget_query
- * para montar coalesce(...) das colunas correspondidas. Refs vazios são
- * ignorados; chaves sem membros não entram (o RPC ergueria erro).
+ * Mapa GLOBAL { "<key>": [refs distintos] } — SÓ para as RPCs de OPÇÕES de
+ * bucket/display (ex.: valores distintos de um unificado no editor), nunca para
+ * consultas de widget.
  *
- * ATENÇÃO (0078): este mapa GLOBAL junta TODOS os membros de cada correspondência
+ * ATENÇÃO (0078/v1.2): este mapa junta TODOS os membros de cada correspondência
  * — inclusive membros de sub-fontes do MESMO record_type (ex.: Leads→reunião E
  * Leads/Clientes Lite→mudança). Num coalesce, uma linha de lead que tenha as duas
- * colunas preenchidas pegaria a 1ª — ambíguo. Por isso os caminhos de consulta
- * usam `correspondenceMapForSources` (um ref por SOURCE-KEY da perna). Mantido só
- * para caminhos legados sem sub-fontes.
+ * colunas preenchidas pegaria a 1ª — ambíguo, e foi exatamente o bug do widget
+ * só-pai. TODOS os caminhos de consulta (runWidget, runCalculatedWidget, pernas)
+ * usam `correspondenceMapForSources` (um ref por SOURCE-KEY da perna). Não passe
+ * este mapa a `aggregate`/`run_widget_query`.
  */
 export function buildCorrespondenceMap(
   correspondences: Correspondence[]
@@ -87,21 +99,36 @@ export function buildCorrespondenceMap(
  * escolhe o membro certo por linha (o da própria source-key), sem o membro da
  * sub e o da pai colidirem. `sourceKeys` são as fontes efetivas da perna (para a
  * consulta principal, as fontes RAIZ do widget; para uma perna de sub, [subKey]).
+ *
+ * Fallback (v1.2) — perna → RAÍZES (via `catalog`) → todos os membros: uma
+ * correspondência referenciada na consulta mas sem membro nas fontes da perna
+ * não pode simplesmente sumir do mapa (`_widget_unified_expr` ergue
+ * "Correspondência sem colunas"), e snapshots congelados pré-0078 têm membros
+ * sem `source_key` real. O caso pai+sub nunca cai no fallback: a perna sempre
+ * tem o próprio membro, então o da sub fica DE FORA do coalesce da pai.
  */
 export function correspondenceMapForSources(
   correspondences: Correspondence[],
-  sourceKeys: string[]
+  sourceKeys: string[],
+  catalog: SourceDef[] = []
 ): Record<string, string[]> {
   const want = new Set(sourceKeys);
+  const subKeys = new Set(
+    catalog.filter((s) => s.parentKey).map((s) => s.key)
+  );
+  const refsOf = (
+    c: Correspondence,
+    pick: (m: CorrespondenceMember) => boolean
+  ): string[] =>
+    Array.from(
+      new Set(c.members.filter((m) => m.field_ref && pick(m)).map((m) => m.field_ref))
+    );
   const map: Record<string, string[]> = {};
   for (const c of correspondences) {
-    const refs = Array.from(
-      new Set(
-        c.members
-          .filter((m) => want.has(m.source_key) && m.field_ref)
-          .map((m) => m.field_ref)
-      )
-    );
+    let refs = refsOf(c, (m) => want.has(m.source_key));
+    if (refs.length === 0)
+      refs = refsOf(c, (m) => !subKeys.has(m.source_key));
+    if (refs.length === 0) refs = refsOf(c, () => true);
     if (refs.length > 0) map[c.key] = refs;
   }
   return map;

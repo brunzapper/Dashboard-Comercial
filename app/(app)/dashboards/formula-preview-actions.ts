@@ -13,10 +13,7 @@
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
-import {
-  buildCorrespondenceMap,
-  loadCorrespondences,
-} from "@/lib/correspondences";
+import { loadCorrespondences } from "@/lib/correspondences";
 import { validateFormulaForContext } from "@/lib/records/formula-validate";
 import type { Formula } from "@/lib/records/formulas";
 import type { FieldDefinition } from "@/lib/records/types";
@@ -102,7 +99,7 @@ export async function previewAggregateFormula(
       sourceDefs: sources,
       filters: input.filters ?? [],
       period: null,
-      correspondencesMap: buildCorrespondenceMap(correspondences),
+      correspondences,
       currencyMode: input.resultCurrency ? "fixed" : "auto",
       currencyCode: input.resultCurrency ?? null,
       fields: allFields,
