@@ -55,6 +55,7 @@ import { focusWidgetWithRetry } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
+import type { WidgetPeriodWindowState } from "./period-window-control";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
@@ -147,7 +148,9 @@ export function DashboardClient({
   periodDefaultsByTab,
   periodDefaultFieldByTab,
   filterOptionsById,
+  fieldFilterSeedById,
   quickFiltersById,
+  periodWindowById,
   initialTabId,
   focusWidgetId,
 }: {
@@ -198,7 +201,13 @@ export function DashboardClient({
   periodDefaultsByTab?: Record<string, PeriodSelection>;
   periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
+  // Seed dos controles "Filtro por campo" quando a URL não traz o ff_: valor
+  // salvo do usuário (lastFieldFilters). URL sempre vence.
+  fieldFilterSeedById?: Record<string, string>;
   quickFiltersById?: Record<string, WidgetQuickFilters>;
+  // Janela de períodos (settings.periodWindow) resolvida no servidor: estado
+  // efetivo do dropdown do card (seleção compartilhada __pw__ ?? default).
+  periodWindowById?: Record<string, WidgetPeriodWindowState>;
   // Aba vinda da URL (?tab=), para restaurar a aba ativa ao recarregar. Chega
   // crua da page (sem validação) — validada aqui contra as abas efetivas.
   initialTabId?: string;
@@ -903,7 +912,9 @@ export function DashboardClient({
             conversionPeriodById={conversionPeriodById}
             editMode={editMode}
             filterOptionsById={filterOptionsById}
+            fieldFilterSeedById={fieldFilterSeedById}
             quickFiltersById={quickFiltersById}
+            periodWindowById={periodWindowById}
             layoutById={layoutById}
             applyLayoutPatch={applyLayoutPatch}
             connectors={connectors}

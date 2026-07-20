@@ -276,7 +276,7 @@ export async function createJob(
     .select("id")
     .single();
   if (error || !data) {
-    // v20/07/2026 (0084): índice único parcial garante 1 job 'running' — uma
+    // v20/07/2026 (0086): índice único parcial garante 1 job 'running' — uma
     // corrida com outro tick cai em 23505; reusa o job vencedor em vez de
     // falhar (o find-then-insert acima não é atômico).
     if (error?.code === "23505") {

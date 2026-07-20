@@ -251,6 +251,59 @@ function coveredSources(
 }
 
 /**
+ * Período da consulta AUXILIAR de um operando escopado (`agg:…@<fonte>`,
+ * 20/07/2026): devolve o período com `fieldBySource` sobrescrito para que
+ * TODA fonte do mesmo record_type do escopo aponte para a coluna de data do
+ * PRÓPRIO escopo — o `byType[rt]` da aux fica determinístico (a data da sub,
+ * não a da pai/irmã), resolvendo "2 subs do mesmo record_type com datas
+ * diferentes". Sem `fieldBySource` no período (usuário escolheu um campo
+ * concreto na barra — semântica retro), devolve o período INALTERADO: a aux
+ * respeita a escolha do usuário como o resto do widget.
+ */
+export function scopedAuxPeriod(
+  period: DashboardPeriod | null | undefined,
+  scope: SourceKey,
+  catalog: SourceDef[] = BUILTIN_SOURCES
+): DashboardPeriod | null | undefined {
+  if (!period?.fieldBySource) return period;
+  const scopeField =
+    period.fieldBySource[scope] ??
+    catalog.find((s) => s.key === scope)?.defaultPeriodField ??
+    period.field;
+  const rt = recordTypeOf(scope, catalog);
+  const fieldBySource: Partial<Record<SourceKey, string>> = {
+    ...period.fieldBySource,
+  };
+  for (const s of catalog) {
+    if (recordTypeOf(s.key, catalog) === rt) fieldBySource[s.key] = scopeField;
+  }
+  fieldBySource[scope] = scopeField;
+  return { ...period, fieldBySource };
+}
+
+/**
+ * Par do scopedAuxPeriod p/ o `@period` PRÉ-sintetizado (filtros que chegam
+ * prontos — filtros rápidos): reescreve `value.byType[recordType]` do filtro
+ * sentinela para a coluna do escopo. Filtros sem sentinela (caminho uniforme
+ * pré-sintetizado) ficam como estão — limitação documentada.
+ */
+export function patchAuxPeriodByType(
+  filters: WidgetFilter[],
+  recordType: string,
+  field: string
+): WidgetFilter[] {
+  return filters.map((f) => {
+    if (f.field !== PERIOD_FIELD_SENTINEL) return f;
+    const v = f.value as PeriodBetweenValue | null | undefined;
+    if (!v || typeof v !== "object" || !("byType" in v)) return f;
+    return {
+      ...f,
+      value: { ...v, byType: { ...v.byType, [recordType]: field } },
+    } as WidgetFilter;
+  });
+}
+
+/**
  * Aplica o período aos filtros de um widget. Sem mapa por fonte (ou quando todas
  * as fontes cobertas resolvem para o MESMO campo), remove os intervalos do widget
  * sobre esse campo e anexa os limites — comportamento retrocompatível, sem exigir

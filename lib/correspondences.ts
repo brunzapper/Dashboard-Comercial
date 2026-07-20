@@ -116,13 +116,25 @@ export function correspondenceMapForSources(
   const subKeys = new Set(
     catalog.filter((s) => s.parentKey).map((s) => s.key)
   );
+  // Ordem do coalesce (20/07/2026): refs `custom:` (ESPARSOS — um campo custom
+  // só existe nas linhas do próprio record_type) vêm ANTES das colunas do
+  // núcleo (DENSAS — preenchidas em todo record_type). Sem isso, uma coluna
+  // densa como `source_created_at` (membro do lead) sombrearia o membro
+  // `custom:` de outro record_type na MESMA perna (ex.: data_assinatura do
+  // deal), e a linha bucketizaria pela coluna errada. Limitação restante,
+  // documentada: DOIS membros de coluna de núcleo distintos (ex.:
+  // source_created_at + closed_at) ainda se sombreiam — a correção definitiva
+  // seria CASE por record_type no RPC (migração espelhada, fase futura).
   const refsOf = (
     c: Correspondence,
     pick: (m: CorrespondenceMember) => boolean
-  ): string[] =>
-    Array.from(
+  ): string[] => {
+    const refs = Array.from(
       new Set(c.members.filter((m) => m.field_ref && pick(m)).map((m) => m.field_ref))
     );
+    const isCustom = (r: string) => r.startsWith("custom:");
+    return [...refs.filter(isCustom), ...refs.filter((r) => !isCustom(r))];
+  };
   const map: Record<string, string[]> = {};
   for (const c of correspondences) {
     let refs = refsOf(c, (m) => want.has(m.source_key));

@@ -125,6 +125,10 @@ import { EntityListTable } from "./charts/entity-list-table";
 import { PeriodControls } from "./period-controls";
 import { TableFilterBar } from "./table-filter-bar";
 import { QuickFiltersBar } from "./quick-filters-bar";
+import {
+  PeriodWindowControl,
+  type WidgetPeriodWindowState,
+} from "./period-window-control";
 import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
@@ -197,7 +201,9 @@ export const WidgetCard = memo(function WidgetCard({
   conversionPeriod,
   editMode,
   filterOptions,
+  fieldFilterSeed,
   quickFilters,
+  periodWindow,
   autoSize,
   cellW = 0,
   rowH = 0,
@@ -250,9 +256,16 @@ export const WidgetCard = memo(function WidgetCard({
   canManageFields?: boolean;
   editMode: boolean;
   filterOptions?: FieldFilterOptions;
+  // Seed do "Filtro por campo" quando a URL não traz o ff_: valor salvo do
+  // usuário (lastFieldFilters). URL sempre vence.
+  fieldFilterSeed?: string;
   // Filtros rápidos do widget (config + valores efetivos + opções), montados no
   // servidor (page.tsx). Presente só quando o widget configura quickFilters.
   quickFilters?: WidgetQuickFilters;
+  // Janela de períodos (settings.periodWindow): estado efetivo do dropdown do
+  // card, resolvido no servidor (__pw__ ?? default). Presente só quando o
+  // widget configura periodWindow com options.
+  periodWindow?: WidgetPeriodWindowState;
   // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
   // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
   // métricas de célula do grid (p/ converter px → unidades).
@@ -917,6 +930,15 @@ export const WidgetCard = memo(function WidgetCard({
             available={available}
           />
         ) : null}
+        {/* Janela de períodos (settings.periodWindow): dropdown "3 meses/Este
+            trimestre/…" + toggle dia útil × dia cheio, seleção compartilhada. */}
+        {periodWindow && periodWindow.options.length > 0 ? (
+          <PeriodWindowControl
+            dashboardId={dashboardId}
+            widgetId={widget.id}
+            state={periodWindow}
+          />
+        ) : null}
         <div ref={contentRef} className="min-h-0 flex-1">
           {isFilter ? (
             <div className="flex h-full items-center p-1">
@@ -936,6 +958,9 @@ export const WidgetCard = memo(function WidgetCard({
               searchFields={widget.settings?.searchFields}
               available={available}
               options={filterOptions}
+              savedValue={fieldFilterSeed}
+              dashboardId={dashboardId}
+              widgetId={widget.id}
             />
           ) : isQuickTable ? (
             <QuickTableWidget

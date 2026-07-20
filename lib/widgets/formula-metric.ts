@@ -50,6 +50,7 @@ import {
 import {
   BUILTIN_SOURCES,
   planSourceLegs,
+  recordTypeOf,
   rootSources,
   type SourceDef,
   type SourceKey,
@@ -78,7 +79,12 @@ import { applyFilterSourceTargets } from "./filter-sources";
 import { formulaScopedSources } from "./metric-sources";
 import { comparisonSpec } from "./comparison";
 import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
-import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import {
+  applyPeriodToFilters,
+  patchAuxPeriodByType,
+  scopedAuxPeriod,
+  type DashboardPeriod,
+} from "./period";
 import type { Metric, WidgetFilter } from "./types";
 
 export interface CalcInput {
@@ -176,18 +182,24 @@ export async function runCalculatedWidget(
   // fora do v1 das fórmulas) e vira contexto alternativo do avaliador. Sem
   // período ativo (todo o período) → base indisponível → null ("—").
   const cmpFiltersByBase: Partial<Record<ComparisonFuncBase, WidgetFilter[]>> = {};
+  // Período de cada base (mesmo objeto passado ao withPeriod) — insumo das
+  // auxes de operandos ESCOPADOS (período pela data da fonte do escopo).
+  const cmpPeriodByBase: Partial<Record<ComparisonFuncBase, DashboardPeriod>> =
+    {};
   for (const b of formulaComparisonBases(formula)) {
     const spec = comparisonSpec(input.period, {
       enabled: true,
       base: b === "ano" ? "previous_year" : "previous_period",
     });
     if (!spec || !input.period) continue;
-    cmpFiltersByBase[b] = withPeriod({
+    const cmpPeriod: DashboardPeriod = {
       field: input.period.field,
       from: spec.from,
       to: spec.to,
       fieldBySource: input.period.fieldBySource,
-    });
+    };
+    cmpPeriodByBase[b] = cmpPeriod;
+    cmpFiltersByBase[b] = withPeriod(cmpPeriod);
   }
 
   // Basis numérica via RPC agregado — é o valor final das contagens/campos
@@ -208,18 +220,51 @@ export async function runCalculatedWidget(
     Record<ComparisonFuncBase, Record<string, number | null>>
   > = {};
 
+  // Aux de operando ESCOPADO (20/07/2026): perna SÓ da fonte do escopo —
+  // período pela coluna de data DELA (scopedAuxPeriod + patch do sentinel
+  // pré-sintetizado) e correspondências com o membro DELA. Mesma regra do
+  // engine (computeRows.scopedAuxInputs).
+  const scopedAuxInputs = (
+    scope: SourceKey,
+    runPeriod: DashboardPeriod | null | undefined
+  ): { filters: WidgetFilter[]; corr: Record<string, string[]> } => {
+    const rt = recordTypeOf(scope, catalog);
+    const scopeField =
+      runPeriod?.fieldBySource?.[scope] ??
+      catalog.find((s) => s.key === scope)?.defaultPeriodField ??
+      runPeriod?.field ??
+      "source_created_at";
+    let f = applyFilterSourceTargets(
+      resolveFilters(input.filters ?? []),
+      [scope],
+      catalog
+    );
+    const p = scopedAuxPeriod(runPeriod, scope, catalog);
+    if (p) f = applyPeriodToFilters(f, p, [scope], catalog);
+    f = [...sourceFilters([scope], catalog), ...f];
+    return {
+      filters: patchAuxPeriodByType(f, rt, scopeField),
+      corr: correspondenceMapForSources(
+        input.correspondences ?? [],
+        [scope],
+        catalog
+      ),
+    };
+  };
+
   // Resolve `keys` sob `keyFilters` escrevendo nos alvos dados — a mesma rodada
-  // serve a basis principal e as de comparação.
+  // serve a basis principal e as de comparação. `corrOverride` = mapa de
+  // correspondências da aux escopada (default: o da consulta principal).
   const makeResolver =
     (target: BasisValues, rawTarget: Record<string, number | null>) =>
-    async (keys: BasisKey[], keyFilters: WidgetFilter[]) => {
+    async (
+      keys: BasisKey[],
+      keyFilters: WidgetFilter[],
+      corrOverride?: Record<string, string[]>
+    ) => {
+      const corr = corrOverride ?? correspondencesMap;
       const metrics: Metric[] = keys.map(basisMetric);
-      const values = await aggregate(
-        supabase,
-        metrics,
-        keyFilters,
-        correspondencesMap
-      );
+      const values = await aggregate(supabase, metrics, keyFilters, corr);
       keys.forEach((key, i) => {
         target[key] = Number.isFinite(values[i]) ? values[i] : null;
         rawTarget[key] = Number.isFinite(values[i]) ? values[i] : null;
@@ -239,7 +284,7 @@ export async function runCalculatedWidget(
             supabase,
             moneyKeys.map(basisMetric),
             keyFilters,
-            correspondencesMap,
+            corr,
             fieldByKey,
             rates,
             conversionPeriod
@@ -258,6 +303,9 @@ export async function runCalculatedWidget(
     target: BasisValues,
     rawTarget: Record<string, number | null>,
     baseFiltersFor: WidgetFilter[],
+    // Período DESTA rodada (principal ou base de comparação) — insumo das
+    // auxes de operandos escopados.
+    runPeriod: DashboardPeriod | null | undefined,
     // Basis de comparação degrada TUDO para null em falha (widget segue sem
     // variação); a principal preserva o comportamento original (plain propaga).
     lenient: boolean
@@ -274,16 +322,26 @@ export async function runCalculatedWidget(
       );
     }
     if (condKeys.length > 0) {
-      // Uma consulta por conjunto distinto de condições.
-      const groups = new Map<string, { conds: AggCondition[]; keys: BasisKey[] }>();
+      // Uma consulta por conjunto distinto de condições (+ escopo — specs
+      // idênticos com escopos diferentes têm auxes diferentes).
+      const groups = new Map<
+        string,
+        { conds: AggCondition[]; keys: BasisKey[]; scope?: string }
+      >();
       for (const key of condKeys) {
         const parsed = parseCondBasisKey(key);
         if (!parsed) {
           target[key] = null;
           continue;
         }
-        const gk = JSON.stringify(parsed.conds);
-        const g = groups.get(gk) ?? { conds: parsed.conds, keys: [] };
+        const gk = JSON.stringify([parsed.conds, parsed.scope ?? null]);
+        const g =
+          groups.get(gk) ??
+          ({ conds: parsed.conds, keys: [], scope: parsed.scope } as {
+            conds: AggCondition[];
+            keys: BasisKey[];
+            scope?: string;
+          });
         g.keys.push(key);
         groups.set(gk, g);
       }
@@ -298,7 +356,14 @@ export async function runCalculatedWidget(
               supabase,
               condFilters(g.conds)
             );
-            await resolveKeys(g.keys, [...baseFiltersFor, ...extra]);
+            const scoped = g.scope
+              ? scopedAuxInputs(g.scope, runPeriod)
+              : null;
+            await resolveKeys(
+              g.keys,
+              [...(scoped ? scoped.filters : baseFiltersFor), ...extra],
+              scoped?.corr
+            );
           })().catch(() => {
             for (const key of g.keys) target[key] = null;
           })
@@ -308,7 +373,7 @@ export async function runCalculatedWidget(
   };
 
   const jobs: Promise<void>[] = [];
-  enqueueBasis(jobs, basis, rawBasis, filters, false);
+  enqueueBasis(jobs, basis, rawBasis, filters, input.period, false);
   for (const [b, f] of Object.entries(cmpFiltersByBase) as [
     ComparisonFuncBase,
     WidgetFilter[],
@@ -317,7 +382,7 @@ export async function runCalculatedWidget(
     const rawTarget: Record<string, number | null> = {};
     cmpBasis[b] = target;
     cmpRawBasis[b] = rawTarget;
-    enqueueBasis(jobs, target, rawTarget, f, true);
+    enqueueBasis(jobs, target, rawTarget, f, cmpPeriodByBase[b], true);
   }
   await Promise.all(jobs);
 

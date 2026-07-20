@@ -1,5 +1,5 @@
-<!-- Versão: 1.8 | Data: 20/07/2026 -->
-<!-- v1.8 (20/07/2026): correções da auditoria — (a) presets de período e
+<!-- Versão: 1.12 | Data: 20/07/2026 -->
+<!-- v1.12 (20/07/2026): correções da auditoria — (a) presets de período e
      tokens @today no fuso de BRASÍLIA (todayBrasiliaIso; o relógio UTC do
      servidor virava o dia às ~21h BRT); (b) separador U+0001 na chave de
      grupo do "Agrupar período"; (c) proteção de edição manual PERMANENTE no
@@ -7,9 +7,30 @@
      (d) efeitos de edição (audit/write-back/webhook) só após persistência
      confirmada (.select no UPDATE); (e) exclusões destrutivas de configuração
      com confirmação + erro visível (ConfirmDeleteButton); (f) migrações
-     0083 (user_settings_merge) e 0084 (1 job de sync running); (g) paridade
+     0085 (user_settings_merge) e 0086 (1 job de sync running); (g) paridade
      por perna da regra dos mocks no modo lista quando as correspondências
      cruas estão disponíveis (§4.4). RPCs intocados em tudo. -->
+<!-- v1.11 (20/07/2026): mocks × predicados de sub-fonte (§4.4) — a regra 0052
+     não isenta os mocks dos predicados (AND puro); 0084 dá custom:fonte aos
+     mocks Inbound p/ contarem na sub sqls. Preset Inbound v4: Mês x Mês abre
+     em "dia cheio" (reuniões agendadas visíveis; toggle p/ dia útil). -->
+<!-- v1.10 (20/07/2026): (a) periodWindow (§4.9) — janela de períodos
+     equivalentes com dropdown no card ("3 meses"/"Este trimestre"…), corte
+     por dia útil OU dia cheio, seleção compartilhada na célula __pw__;
+     windowMonths vira alias legado; (b) persistência por usuário do widget
+     "Filtro por campo" (user_preferences.lastFieldFilters, §4.7 — URL vence). -->
+<!-- v1.9 (20/07/2026): correções pós-preset — (a) coalesce dos unificados
+     ordena refs `custom:` (esparsos) antes das colunas do núcleo (densas;
+     §4.8 — coluna densa sombreava o membro custom de outro record_type);
+     (b) businessDayAlign.windowMonths = janela própria "últimos N meses" do
+     card (§4.9); (c) filtro de OPERAÇÃO da visualização resolve vínculo +
+     PERFIL no server (operations.filter, 0083; lib/config/operation-scope.ts)
+     — nunca a coluna derivada records.operation_id (§4.7). -->
+<!-- v1.8 (20/07/2026): operandos escopados estendidos (§4.7 — predicado de sub
+     com in/is_null/*_ci; aux como perna da fonte do escopo: período pela data
+     DELA + correspondências DELA; chave aggif com 4º elemento scope) + preset
+     Inbound (lib/presets/inbound.ts) e deps novas do aplicador (campos
+     calculados com fórmula, correspondências). RPCs intocados. -->
 <!-- v1.7 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
      utilitários de dia útil; businessDayAlign (pernas por mês no engine);
      base de comparação previous_period_bd; goalLine (meta/ritmo como série);
@@ -237,6 +258,18 @@ unificado inspecionados saem de `correspondenceMapForSources` (POR PERNA —
 paridade exata com o `p_correspondences` do RPC; 20/07/2026). Sem elas, o
 espelho por `AvailableField.unifiedMembers` (raiz-primeiro) permanece.
 
+**A regra só remove o gate `not is_mock`** — ela NÃO isenta os mocks dos
+demais predicados do WHERE (filtros do widget, predicado de sub-fonte via
+`_widget_wrap_record_types`, tudo em AND puro). Consequência prática: um mock
+precisa CARREGAR os campos usados na segmentação das sub-fontes que devem
+contá-lo. A 0084 dá `custom:fonte = "Formulário de CRM"` aos 270 mocks
+Inbound (lote 0051) para satisfazerem a sub `sqls` do preset
+(`custom:fonte in (…)`); os 32 Outbound (0053) ficam SEM fonte de propósito —
+não podem vazar no SQL Inbound — e receberão a deles com o preset Outbound.
+(As subs mqls/sals não passam a contá-los: consultam por `source_created_at`,
+NULL nos mocks, e sem referência a Data Reunião o gate `not is_mock` segue
+ativo.)
+
 Um trigger no banco (`enforce_reuniao_freeze`) **congela o campo**: sync, recálculo e
 edição não conseguem gravar Data Reunião anterior a 01/06/2026 (tentativas são
 descartadas em silêncio; pode gerar ruído inofensivo no `audit_log`). Undo previsto:
@@ -309,17 +342,59 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do
   registry (`lib/metas/metrics.ts` + `sync_config` `goal_metrics`) — arbitrárias
   desde 20/07/2026 (ver §4.9).
+- **Operações como SEGMENTO (20/07/2026):** `records.operation_id` é uma cópia
+  DERIVADA (operação priority=1 do responsável no momento do sync; update só
+  preenche quando NULL) — pode estar NULL/defasada. Por isso o **filtro de
+  Operação da visualização** (filtro_campo/filtro rápido) NUNCA compara a
+  coluna literal: a page e o widget-scope resolvem no server
+  (`lib/config/operation-scope.ts`) para `responsible_id in (vínculo vivo da
+  subárvore — responsible_operations, qualquer priority)` + os **FILTROS DE
+  PERFIL** da operação (`operations.filter`, 0083 — WidgetFilter[] com
+  fonte-alvo opcional por condição, editados em Configurações → Operações;
+  listas de exclusão serializam como `neq_ci` por valor, null conta). Com 2+
+  operações selecionadas aplica-se só a união dos vínculos (perfis de
+  operações diferentes não se combinam em AND). Dimensões/agrupamentos "por
+  Operação" e restrições de snapshot seguem na coluna derivada — rode
+  `supabase/apply/backfill-operation-id.sql` após mexer nos vínculos.
+- **Persistência do "Filtro por campo" POR USUÁRIO (20/07/2026):** o estado
+  vivo continua na URL (`ff_<widgetId>`), mas o debounce do
+  `FieldFilterControls` também grava
+  `user_preferences.settings.lastFieldFilters[widgetId]`
+  (`saveLastFieldFilter`; valor vazio LIMPA a chave — filtro removido não
+  ressuscita). Ao abrir o dashboard SEM o parâmetro na URL, page e
+  `widget-scope` reidratam desse mapa (**URL sempre vence**) e a page manda o
+  seed ao cliente (`fieldFilterSeedById`) p/ os controles montarem
+  preenchidos — o primeiro debounce sincroniza a URL. Viewer de snapshot:
+  URL-only (gate `useSnapshotMode` — visitante não tem sessão e usuário
+  autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
+  do card e a janela de períodos (`__qf__`/`__pw__` em
+  `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
+  campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
 - **Presets de dashboard** (`lib/presets/definitions.ts` + `applyPreset`/
   `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
   `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,
   canvas, background), widgets com `WidgetSettings` completo e dependências
-  (campos, sub-fontes; chaves de métrica de meta são registradas no registry).
-  Aplicação IDEMPOTENTE: dashboard identificado por `settings.preset.key`
-  (adoção por nome p/ legado), widgets por `settings.presetKey` com UPDATE
-  in-place (ids preservados → conectores/links/células sobrevivem), GC dos
-  presetKeys órfãos do próprio preset; widgets sem `presetKey` e sub-fontes/
-  campos já existentes NUNCA são tocados. Sem UI ainda — a futura aba
-  "Presets" das Configurações chama essas actions.
+  (campos — inclusive CALCULADOS com `formula`/`applies_to`, que disparam
+  `recalcAllFormulaFields` best-effort ao serem criados —, sub-fontes e
+  CORRESPONDÊNCIAS `PresetCorrespondence` — criadas após as subs, com o
+  `record_type` dos membros resolvido pelo catálogo; chaves de métrica de meta
+  são registradas no registry). Aplicação IDEMPOTENTE: dashboard identificado
+  por `settings.preset.key` (adoção por nome p/ legado), widgets por
+  `settings.presetKey` com UPDATE in-place (ids preservados →
+  conectores/links/células sobrevivem), GC dos presetKeys órfãos do próprio
+  preset; widgets sem `presetKey` e sub-fontes/campos/correspondências já
+  existentes NUNCA são tocados. UI: **Configurações → Presets**
+  (`configuracoes/presets/page.tsx` + `presets-manager.tsx`) — status por
+  preset (marcador `settings.preset`) e botões Gerar/Atualizar (por preset e
+  global). **Preset "Inbound"** (`lib/presets/inbound.ts`): porta as abas
+  inbound do dashboard legado de pré-vendas — 7 sub-fontes com data própria
+  (SQLs por Data Reunião aciona os mocks 0052), campo calculado
+  `mrr_contrato`, correspondências `data_ref`/`fonte_venda`/`mrr_venda` e 22
+  widgets (KPIs com `previous_period_bd`, SQL total/% de conversão via Card
+  fórmula com operandos escopados, Mês x Mês com `periodWindow` (dropdown de
+  janela, padrão 6 meses) + `businessDayAlign` + `goalLine` métrica `sql` em
+  modo pace, coorte via dimensão `match:`).
+  Pré-requisitos de DADO no runbook (manual §4.7).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -369,6 +444,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   universo do widget). Limitações v1: soma monetária com escopo degrada p/ soma
   crua entre moedas (mesma das condicionais) e `min`/`máx` não têm forma com
   escopo.
+  **Extensão 20/07/2026 (base do preset Inbound):** (a) o predicado da sub
+  aceita também `in` (lista), `is_null`/`not_null` e `eq_ci`/`neq_ci` — só
+  `ilike`/op desconhecido degradam (aviso no validador); (b) a chave `aggif:`
+  ganha um 4º elemento OPCIONAL `scope` (source-key — chaves sem escopo
+  seguem byte-idênticas); (c) a consulta AUXILIAR de um operando escopado
+  roda como perna SÓ da fonte do escopo: período aplicado na coluna de DATA
+  dela (`scopedAuxPeriod` reescreve o `fieldBySource`; `patchAuxPeriodByType`
+  cobre o `@period` pré-sintetizado) e `p_correspondences` com o membro DELA
+  (um `unified:` de data bucketiza pela data da sub, não da pai). Isso permite
+  no MESMO widget operandos de duas subs do mesmo `record_type` com datas
+  diferentes (ex.: `@sqls` por Data Reunião + `@clientes_lite` por mudança de
+  etapa — o "SQL total" e os % de conversão do Inbound). Implementado nos 3
+  choke points com o período DA RODADA (atual/perna do businessDayAlign/
+  comparação): `computeRows`+pernas por métrica (`engine.ts`) e
+  `runCalculatedWidget` (`formula-metric.ts`). O catálogo de operandos
+  escopados passa a ofertar sub-fontes (`sourceScopedAggOperandRefs`).
+  Caminhos client-side (`dateAgg`/listas) avaliam o predicado estendido mas
+  NÃO rejanelam pela data da sub (limitação documentada); a aux do `@sqls`
+  referencia a chave de Data Reunião no filtro → regra dos mocks 0052 segue
+  valendo.
 - **Catálogo por-registro ÚNICO** (19/07/2026, `lib/records/calc-operands.ts`):
   `perRecordCalcOperands` monta os operandos do campo calculado POR-REGISTRO
   para os DOIS editores (página `/campos` e o FieldForm inline do
@@ -544,6 +639,14 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   (mesmo no modo lista), `lib/correspondences.ts` (`correspondenceMapForSources`),
   UI em `components/configuracoes/sub-sources-manager.tsx` e o toggle no
   `widget-builder.tsx`.
+- **Ordem do coalesce dos unificados (20/07/2026):**
+  `correspondenceMapForSources` ordena os refs com os `custom:` (ESPARSOS —
+  só existem nas linhas do próprio record_type) ANTES das colunas do núcleo
+  (DENSAS — preenchidas em todo record_type). Sem isso, `source_created_at`
+  (membro do lead) sombreava `custom:data_assinatura` (membro do deal) na
+  MESMA perna e o deal bucketizava pelo mês de criação. Limitação restante:
+  dois membros de coluna de NÚCLEO distintos ainda se sombreiam (correção
+  definitiva = CASE por record_type no RPC, migração espelhada futura).
 - **Campo de período `custom:` (0082):** `sub_sources.default_period_field`
   aceita também um campo personalizado de DATA (`custom:<field_key>` — ex.: sub
   "SQLs" da pai Leads datada pela *Data Reunião*). O read side já suportava
@@ -585,6 +688,29 @@ invariantes 9/10).
   "conviver" recursam `runWidget` e o align roda DENTRO de cada perna. Com o
   align ativo, `settings.comparison` é IGNORADA (exclusão mútua — o gráfico já
   é a comparação).
+- **Janela de períodos equivalentes** (`WidgetSettings.periodWindow`,
+  20/07/2026): "traz o equivalente ao período apurado nos meses anteriores"
+  como FILTRO RÁPIDO do card. `options` (subconjunto ordenado de `3m |
+  trimestre | 6m | semestre | 12m | ano`) define o dropdown no card
+  (`PeriodWindowControl`); `default` é a janela sem seleção;
+  `showAlignToggle` expõe o seletor "dia útil × dia cheio". Semântica:
+  rolling `3m/6m/12m` = N meses terminando no mês do `to` da barra;
+  `trimestre/semestre/ano` = calendário do `to`. Cada mês recebe o RECORTE
+  equivalente ao período da barra — com align, o corte no N-ésimo dia útil
+  (regras acima); em "dia cheio", o span de DIAS equivalente quando a barra
+  cabe num único mês (dia(from)–dia(to), clampado; "Este mês" → meses
+  cheios), senão meses cheios — e o mês final respeita o `to`. A SELEÇÃO do
+  card é COMPARTILHADA entre usuários (célula `__pw__`/`sel` de
+  `dashboard_table_cells`, `savePeriodWindowChoice`), como os filtros
+  rápidos; page e `widget-scope` mesclam a escolha nos settings EFETIVOS
+  antes do engine (`applyPeriodWindowChoice` → `periodWindow.active` +
+  `businessDayAlign.enabled`); o engine só lê o resolvido
+  (`active ?? default`) — por isso o viewer de snapshot (que congela os
+  settings) cai no default. `businessDayAlign.windowMonths` (2–13) segue
+  como alias LEGADO (janela fixa rolling), fora do builder. Assimetria
+  estrutural documentada: o universo de meses (linhas) vem da consulta
+  PRINCIPAL (fontes do widget) — mês com registro só em fonte de perna
+  (`Metric.sources`) não vira barra; incluir a fonte no widget resolve.
 - **Base de comparação `previous_period_bd`**: período anterior com o `to`
   recortado no N-ésimo dia útil do último mês do range ("vs. mês anterior no
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto

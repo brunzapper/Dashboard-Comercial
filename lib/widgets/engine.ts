@@ -55,6 +55,7 @@ import {
   type DateAgg,
   type Dimension,
   type Metric,
+  type PeriodWindowKey,
   type WidgetConfig,
   type WidgetData,
   type WidgetFilter,
@@ -116,7 +117,12 @@ import {
   type MoneyBreakdown,
 } from "./currency";
 import { formatBucketLabel, isLabelTransform } from "./date-buckets";
-import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import {
+  applyPeriodToFilters,
+  patchAuxPeriodByType,
+  scopedAuxPeriod,
+  type DashboardPeriod,
+} from "./period";
 import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
@@ -1682,14 +1688,43 @@ export async function runWidget(
   );
   const defaultIdxSet = new Set(defaultIdx);
 
+  // Aux de operando ESCOPADO (`aggif:` com scope, 20/07/2026): a consulta
+  // auxiliar roda como perna SÓ da fonte do escopo — período pela coluna de
+  // data DELA (scopedAuxPeriod; patch p/ o @period pré-sintetizado) e
+  // correspondências com o membro DELA (unified bucketiza pela data da sub).
+  // Usar a lista de fontes do widget contaminaria o AND com o predicado de uma
+  // sub-irmã do mesmo record_type. O predicado do escopo também vem nos
+  // condFilters (record_type = rt + filtro da sub) — duplicação inofensiva.
+  const scopedAuxInputs = (
+    scope: SourceKey,
+    runPeriod: DashboardPeriod | null | undefined
+  ): { filters: WidgetFilter[]; corr: Record<string, string[]> } => {
+    const rt = recordTypeOf(scope, catalog);
+    const scopeField =
+      runPeriod?.fieldBySource?.[scope] ??
+      catalog.find((s) => s.key === scope)?.defaultPeriodField ??
+      runPeriod?.field ??
+      "source_created_at";
+    const f = legFiltersFor(scopedAuxPeriod(runPeriod, scope, catalog), [
+      scope,
+    ]);
+    return {
+      filters: patchAuxPeriodByType(f, rt, scopeField),
+      corr: corrMapForKeys([scope]),
+    };
+  };
+
   // Uma rodada COMPLETA da consulta agregada (RPC principal + auxiliares de
   // condição/moeda + pernas por fonte + remapeamento e avaliação das métricas
   // calculadas) para um par dims/pipeline-de-filtros. A mesma rodada serve o
   // período atual e o de comparação — `dims` SOMBREIA o de fora de propósito;
-  // `filtersOf` reconstrói os filtros para as fontes de cada perna.
+  // `filtersOf` reconstrói os filtros para as fontes de cada perna;
+  // `runPeriod` é o período DESTA rodada (atual/perna do align/comparação) —
+  // insumo das auxes de operandos escopados (período pela data do escopo).
   const computeRows = async (
     dims: Dimension[],
-    filtersOf: (srcs?: SourceKey[]) => WidgetFilter[]
+    filtersOf: (srcs?: SourceKey[]) => WidgetFilter[],
+    runPeriod?: DashboardPeriod | null
   ): Promise<WidgetRow[]> => {
     const filters = filtersOf(effMainSources);
     const rpcMetrics: Metric[] = [];
@@ -1759,14 +1794,22 @@ export async function runWidget(
     const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
     const condGroups = new Map<
       string,
-      { filters: WidgetFilter[]; keys: BasisKey[] }
+      { filters: WidgetFilter[]; keys: BasisKey[]; scope?: string }
     >();
     for (const key of condBasisKeys) {
       const parsed = parseCondBasisKey(key);
       if (!parsed) continue;
       const extra = condFilters(parsed.conds);
-      const gk = JSON.stringify(extra);
-      const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+      // Escopo entra na chave do grupo: specs idênticos com escopos diferentes
+      // têm auxes diferentes (período/correspondências da fonte do escopo).
+      const gk = JSON.stringify([extra, parsed.scope ?? null]);
+      const g =
+        condGroups.get(gk) ??
+        ({ filters: extra, keys: [], scope: parsed.scope } as {
+          filters: WidgetFilter[];
+          keys: BasisKey[];
+          scope?: string;
+        });
       g.keys.push(key);
       condGroups.set(gk, g);
     }
@@ -1775,14 +1818,15 @@ export async function runWidget(
         try {
           // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
           const condExtra = await resolveFkCondFilters(supabase, g.filters);
+          const scoped = g.scope ? scopedAuxInputs(g.scope, runPeriod) : null;
           const { data: condData, error: condError } = await supabase.rpc(
             "run_widget_query",
             {
               p_source: config.source,
               p_dimensions: dims,
               p_metrics: g.keys.map(basisMetric),
-              p_filters: [...filters, ...condExtra],
-              p_correspondences: correspondencesMap,
+              p_filters: [...(scoped ? scoped.filters : filters), ...condExtra],
+              p_correspondences: scoped ? scoped.corr : correspondencesMap,
             }
           );
           if (condError) throw new Error(condError.message);
@@ -1964,14 +2008,21 @@ export async function runWidget(
           : Promise.resolve({ data: [] as unknown, error: null });
       const condGroups = new Map<
         string,
-        { filters: WidgetFilter[]; keys: BasisKey[] }
+        { filters: WidgetFilter[]; keys: BasisKey[]; scope?: string }
       >();
       for (const key of condKeys) {
         const parsed = parseCondBasisKey(key);
         if (!parsed) continue;
         const extra = condFilters(parsed.conds);
-        const gk = JSON.stringify(extra);
-        const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+        // Escopo na chave do grupo (mesma regra da principal).
+        const gk = JSON.stringify([extra, parsed.scope ?? null]);
+        const g =
+          condGroups.get(gk) ??
+          ({ filters: extra, keys: [], scope: parsed.scope } as {
+            filters: WidgetFilter[];
+            keys: BasisKey[];
+            scope?: string;
+          });
         g.keys.push(key);
         condGroups.set(gk, g);
       }
@@ -1981,14 +2032,20 @@ export async function runWidget(
             // Condição sobre relação por NOME → resolve p/ UUID antes do RPC
             // (mesmo tratamento da auxiliar de condição da consulta principal).
             const condExtra = await resolveFkCondFilters(supabase, g.filters);
+            const scoped = g.scope
+              ? scopedAuxInputs(g.scope, runPeriod)
+              : null;
             const { data: condData, error: condError } = await supabase.rpc(
               "run_widget_query",
               {
                 p_source: config.source,
                 p_dimensions: dims,
                 p_metrics: g.keys.map(basisMetric),
-                p_filters: [...legFilters, ...condExtra],
-                p_correspondences: legCorr,
+                p_filters: [
+                  ...(scoped ? scoped.filters : legFilters),
+                  ...condExtra,
+                ],
+                p_correspondences: scoped ? scoped.corr : legCorr,
               }
             );
             if (condError) throw new Error(condError.message);
@@ -2257,8 +2314,16 @@ export async function runWidget(
           divide = true;
         }
       }
-      const cmpRows = await computeRows(cmpDims, (srcs) =>
-        cmpFiltersFor(cmpSpec, srcs)
+      const cmpRows = await computeRows(
+        cmpDims,
+        (srcs) => cmpFiltersFor(cmpSpec, srcs),
+        // Período DESTA rodada (range de comparação) — auxes escopadas.
+        {
+          field: period!.field,
+          from: cmpSpec.from,
+          to: cmpSpec.to,
+          fieldBySource: period?.fieldBySource,
+        }
       );
       return { cmpRows, sharedIdx, bucketed, divide };
     } catch {
@@ -2282,11 +2347,19 @@ export async function runWidget(
   const MAX_BD_ALIGN_MONTHS = 13;
   const bdAlignCtx = await (async (): Promise<{
     legs: DashboardPeriod[];
-    n: number; // dia útil de corte (reusado pela goalLine 'pace')
+    // Dia útil de corte (reusado pela goalLine 'pace'); null = janela em
+    // modo "dia cheio" (sem alinhamento por dia útil).
+    n: number | null;
     holidays: Set<string>;
   } | null> => {
     const cfg = config.settings?.businessDayAlign;
-    if (!cfg?.enabled) return null;
+    const pw = config.settings?.periodWindow;
+    // Janela efetiva: seleção do card/default (periodWindow.active, mesclado
+    // pela page/widget-scope) ou o alias legado windowMonths.
+    const activeWindow: PeriodWindowKey | null = pw?.active ?? pw?.default ?? null;
+    const legacyMonths = Math.floor(cfg?.windowMonths ?? 0);
+    const alignEnabled = Boolean(cfg?.enabled);
+    if (!alignEnabled && !activeWindow && legacyMonths < 2) return null;
     if (!period?.from || !period.to || !period.field) return null;
     const monthly = dims.some(
       (d) =>
@@ -2295,43 +2368,86 @@ export async function runWidget(
         d.transform === "month_year"
     );
     if (!monthly) return null;
-    const fm = period.from.match(/^(\d{4})-(\d{2})/);
+
     const tm = period.to.match(/^(\d{4})-(\d{2})/);
-    if (!fm || !tm) return null;
-    const [fy, fmo] = [Number(fm[1]), Number(fm[2])];
+    if (!tm) return null;
     const [ty, tmo] = [Number(tm[1]), Number(tm[2])];
+    // Início da janela (1º dia do mês inicial) pela chave; sem janela = `from`
+    // da barra (alinhamento puro sobre o range da barra).
+    const monthsBack = (n: number) => {
+      const idx = ty * 12 + (tmo - 1) - (n - 1);
+      return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}-01`;
+    };
+    let rangeFrom = period.from;
+    const rangeTo = period.to;
+    if (activeWindow === "3m") rangeFrom = monthsBack(3);
+    else if (activeWindow === "6m") rangeFrom = monthsBack(6);
+    else if (activeWindow === "12m") rangeFrom = monthsBack(12);
+    else if (activeWindow === "trimestre")
+      rangeFrom = `${ty}-${String(Math.floor((tmo - 1) / 3) * 3 + 1).padStart(2, "0")}-01`;
+    else if (activeWindow === "semestre")
+      rangeFrom = `${ty}-${tmo <= 6 ? "01" : "07"}-01`;
+    else if (activeWindow === "ano") rangeFrom = `${ty}-01-01`;
+    else if (legacyMonths >= 2)
+      rangeFrom = monthsBack(Math.min(MAX_BD_ALIGN_MONTHS, legacyMonths));
+
+    const fm = rangeFrom.match(/^(\d{4})-(\d{2})/);
+    if (!fm) return null;
+    const [fy, fmo] = [Number(fm[1]), Number(fm[2])];
     const monthCount = (ty - fy) * 12 + (tmo - fmo) + 1;
     // Períodos longos demais viram fallback silencioso (custo: 1 rodada/mês).
     if (monthCount < 1 || monthCount > MAX_BD_ALIGN_MONTHS) return null;
     let holidays: Set<string>;
     try {
-      holidays = await loadNonWorkingDays(supabase);
+      holidays = alignEnabled ? await loadNonWorkingDays(supabase) : new Set();
     } catch {
       holidays = new Set();
     }
     const todayIso = todayBrasiliaIso();
     const ref =
-      cfg.reference === "period_end"
+      cfg?.reference === "period_end"
         ? period.to
         : todayIso < period.to
           ? todayIso
           : period.to;
-    const n = businessDayIndexInMonth(ref, holidays);
+    // Recorte de cada mês:
+    //  - dia ÚTIL (align): até o N-ésimo dia útil (N da referência); mês com
+    //    N ≥ total de dias úteis = mês cheio;
+    //  - dia CHEIO (sem align): recorte de DIAS equivalente ao período apurado
+    //    quando a barra cabe num único mês (dia(from)–dia(to) clampados ao
+    //    tamanho do mês; "Este mês" = 1–31 → meses cheios); barra multi-mês =
+    //    meses cheios. O mês final sempre respeita o `to` da barra.
+    const n = alignEnabled ? businessDayIndexInMonth(ref, holidays) : null;
+    const pf = period.from.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const pt = period.to.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const barSingleMonth =
+      pf && pt && pf[1] === pt[1] && pf[2] === pt[2];
+    const dayFrom = barSingleMonth ? Number(pf![3]) : 1;
+    const dayTo = barSingleMonth ? Number(pt![3]) : 31;
     const legs: DashboardPeriod[] = [];
-    // N = 0 (nenhum dia útil decorrido no mês da referência): acumulado
-    // alinhado é vazio — align ativo com zero pernas (gráfico sem dados).
-    for (let i = 0; n > 0 && i < monthCount; i++) {
+    // N = 0 com align (nenhum dia útil decorrido no mês da referência):
+    // acumulado alinhado é vazio — ativo com zero pernas (gráfico sem dados).
+    if (alignEnabled && (n ?? 0) <= 0) return { legs, n, holidays };
+    for (let i = 0; i < monthCount; i++) {
       const y = fy + Math.floor((fmo - 1 + i) / 12);
       const m = ((fmo - 1 + i) % 12) + 1;
       const mm = String(m).padStart(2, "0");
-      const monthStart = `${y}-${mm}-01`;
-      const monthEnd = `${y}-${mm}-${String(daysInMonth(y, m)).padStart(2, "0")}`;
-      const cut =
-        n >= businessDaysInMonth(y, m, holidays)
-          ? monthEnd
-          : nthBusinessDayOfMonth(y, m, n, holidays);
-      const legFrom = monthStart > period.from ? monthStart : period.from;
-      const legTo = cut < period.to ? cut : period.to;
+      const dim = daysInMonth(y, m);
+      const monthEnd = `${y}-${mm}-${String(dim).padStart(2, "0")}`;
+      let legFrom: string;
+      let legTo: string;
+      if (alignEnabled) {
+        legFrom = `${y}-${mm}-01`;
+        legTo =
+          (n ?? 0) >= businessDaysInMonth(y, m, holidays)
+            ? monthEnd
+            : nthBusinessDayOfMonth(y, m, n ?? 1, holidays);
+      } else {
+        legFrom = `${y}-${mm}-${String(Math.min(dayFrom, dim)).padStart(2, "0")}`;
+        legTo = `${y}-${mm}-${String(Math.min(dayTo, dim)).padStart(2, "0")}`;
+      }
+      if (legFrom < rangeFrom) legFrom = rangeFrom;
+      if (legTo > rangeTo) legTo = rangeTo;
       if (legFrom > legTo) continue;
       legs.push({
         field: period.field,
@@ -2347,10 +2463,10 @@ export async function runWidget(
     bdAlignCtx
       ? Promise.all(
           bdAlignCtx.legs.map((leg) =>
-            computeRows(dims, (srcs) => legFiltersFor(leg, srcs))
+            computeRows(dims, (srcs) => legFiltersFor(leg, srcs), leg)
           )
         ).then((parts) => parts.flat())
-      : computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
+      : computeRows(dims, (srcs) => legFiltersFor(period, srcs), period),
     bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);
 
@@ -2441,7 +2557,9 @@ export async function runWidget(
       if (monthIdx >= 0) {
         const metricKey = glCfg.metric?.trim() || "mrr";
         const pace = glCfg.mode === "pace";
-        let holidays = bdAlignCtx?.holidays ?? null;
+        // Feriados do align só quando o align está ATIVO (n != null) — janela
+        // em "dia cheio" carrega um Set vazio que não serve ao pace.
+        let holidays = bdAlignCtx?.n != null ? bdAlignCtx.holidays : null;
         if (pace && !holidays) {
           try {
             holidays = await loadNonWorkingDays(supabase);
@@ -2490,7 +2608,7 @@ export async function runWidget(
             // N do corte deste mês: align ativo = mesmo N p/ todos; senão só
             // o mês corrente é rateado.
             let n: number | null;
-            if (bdAlignCtx) {
+            if (bdAlignCtx?.n != null) {
               n = bdAlignCtx.n;
             } else if (ym < todayYm) {
               n = totalBd; // mês encerrado: meta cheia

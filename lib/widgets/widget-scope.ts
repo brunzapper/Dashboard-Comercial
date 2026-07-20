@@ -29,14 +29,23 @@ import {
   type DashboardPeriod,
 } from "@/lib/widgets/period";
 import {
+  PW_COL_KEY,
+  PW_ROW_KEY,
   QF_ROW_KEY,
+  applyPeriodWindowChoice,
   hasQuickValue,
   isPeriodEntry,
+  parsePeriodWindowChoice,
   parseQuickFilterValue,
   quickOptionsFilter,
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
+import {
+  collectOperationFilterIds,
+  loadOperationScopes,
+  translateOperationFilters,
+} from "@/lib/config/operation-scope";
 import type {
   DashboardSettings,
   Widget,
@@ -241,7 +250,10 @@ export async function loadWidgetScope(
     return a.some((s) => b.includes(s));
   };
   for (const fw of fieldFilterWidgets) {
-    const raw = str(sp[`ff_${fw.id}`]);
+    // Espelho da page: URL vence; sem parâmetro, reidrata da preferência do
+    // usuário (lastFieldFilters) — export/paginação enxergam o mesmo recorte.
+    const raw =
+      str(sp[`ff_${fw.id}`]) || (prefSettings.lastFieldFilters?.[fw.id] ?? "");
     if (!raw) continue;
     const fs = viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields);
     if (fs.length === 0) continue;
@@ -266,6 +278,36 @@ export async function loadWidgetScope(
     viewFilters.push(...targeted);
   }
 
+  // Filtro de OPERAÇÃO (20/07/2026): mesmo tratamento da page — nunca a
+  // coluna derivada records.operation_id; resolve vínculo + perfil
+  // (lib/config/operation-scope.ts).
+  const opIds = collectOperationFilterIds(viewFilters);
+  const resolvedViewFilters =
+    opIds.length > 0
+      ? translateOperationFilters(
+          viewFilters,
+          await loadOperationScopes(supabase, opIds)
+        )
+      : viewFilters;
+
+  // Janela de períodos (settings.periodWindow): a seleção compartilhada do
+  // card (célula __pw__) entra nos settings EFETIVOS antes do engine — mesmo
+  // resolvido que a page entrega (applyPeriodWindowChoice).
+  let effSettings = widget.settings;
+  if (widget.settings?.periodWindow) {
+    const { data: pwCell } = await supabase
+      .from("dashboard_table_cells")
+      .select("value")
+      .eq("widget_id", widget.id)
+      .eq("row_key", PW_ROW_KEY)
+      .eq("col_key", PW_COL_KEY)
+      .maybeSingle();
+    effSettings = applyPeriodWindowChoice(
+      widget.settings,
+      parsePeriodWindowChoice(pwCell?.value)
+    );
+  }
+
   // ---- config final (mesma da page) ----
   const config = {
     source: "records" as const,
@@ -273,9 +315,9 @@ export async function loadWidgetScope(
     splitBySource: widget.split_by_source ?? false,
     dimensions: widget.dimensions ?? [],
     metrics: widget.metrics ?? [],
-    filters: [...(widget.filters ?? []), ...viewFilters],
+    filters: [...(widget.filters ?? []), ...resolvedViewFilters],
     visual_type: widget.visual_type,
-    settings: widget.settings,
+    settings: effSettings,
   } as unknown as WidgetConfig;
 
   return {

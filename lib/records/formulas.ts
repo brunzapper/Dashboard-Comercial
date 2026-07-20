@@ -443,8 +443,12 @@ function parseTokens(tokens: FormulaToken[]): FormulaNode {
 
 export interface AggCondition {
   ref: string;
-  op: FormulaCmpOp;
-  value: number | string | boolean;
+  // Ops "estendidos" (20/07/2026): `in` (lista), `is_null`/`not_null` (sem
+  // valor). O PARSER de SOMASE/CONT.SE segue emitindo só FormulaCmpOp — os
+  // estendidos são produzidos exclusivamente pelo abaixamento de operandos
+  // com escopo de fonte (lowerSourceScopedOperands, predicado da sub-fonte).
+  op: FormulaCmpOp | "in" | "is_null" | "not_null";
+  value?: number | string | boolean | (number | string | boolean)[] | null;
 }
 
 export interface CondAggSpec {
@@ -452,6 +456,11 @@ export interface CondAggSpec {
   // Ref do campo alvo (soma/contagem por campo) ou "*" (contagem de registros).
   field: string;
   conds: AggCondition[];
+  // Escopo de FONTE (20/07/2026): source-key do operando escopado
+  // (`agg:…@<fonte>`), preenchido SÓ pelo lowering. A consulta auxiliar de um
+  // spec com scope aplica o período pela coluna de DATA da própria fonte do
+  // escopo e usa o mapa de correspondências dela (ver engine/formula-metric).
+  scope?: string;
 }
 
 const COND_AGG_FUNCS = new Set<FormulaFuncName>([
@@ -473,15 +482,18 @@ export function formulaUsesCondAgg(formula: Formula | null | undefined): boolean
   return formula.tokens.some((t) => t.kind === "func" && isCondAggFunc(t.name));
 }
 
-/** Chave de basis canônica e determinística de uma agregação condicional. */
+/** Chave de basis canônica e determinística de uma agregação condicional.
+ * O 4º elemento (scope) SÓ entra quando presente — chaves de specs sem escopo
+ * (SOMASE/CONT.SE e escopos antigos eq-only) seguem byte-idênticas. */
 export function condAggKey(spec: CondAggSpec): string {
+  const triples = spec.conds.map((c) => [c.ref, c.op, c.value ?? null]);
   return (
     "aggif:" +
-    JSON.stringify([
-      spec.agg,
-      spec.field,
-      spec.conds.map((c) => [c.ref, c.op, c.value]),
-    ])
+    JSON.stringify(
+      spec.scope != null
+        ? [spec.agg, spec.field, triples, spec.scope]
+        : [spec.agg, spec.field, triples]
+    )
   );
 }
 

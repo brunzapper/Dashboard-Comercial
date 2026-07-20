@@ -1,7 +1,18 @@
-<!-- Versão: 1.4 | Data: 20/07/2026 -->
-<!-- v1.4 (20/07/2026): auditoria — proteção de edição manual permanente
-     (release do marcador quando a fonte alcança o local), migrações 0083/0084,
+<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- v1.8 (20/07/2026): auditoria — proteção de edição manual permanente
+     (release do marcador quando a fonte alcança o local), migrações 0085/0086,
      confirmações nas exclusões de configuração, períodos no fuso de Brasília. -->
+<!-- v1.7 (20/07/2026): §4.7/§5 — mocks no SQL: migração 0084 (fonte nos mocks
+     Inbound), preset v4 (Mês x Mês abre em "dia cheio") e linha de
+     troubleshooting. -->
+<!-- v1.6 (20/07/2026): §4.7 — janela de períodos equivalentes (periodWindow):
+     receita p/ novos acompanhamentos + nota do preset Inbound v3 (reaplicar);
+     filtro por campo agora persiste por usuário (lastFieldFilters). -->
+<!-- v1.5 (20/07/2026): operações — filtro por vínculo+perfil, rename inline,
+     runbook do backfill de records.operation_id. -->
+<!-- v1.4 (20/07/2026): §4.7 — runbook do preset Inbound (pré-requisitos de
+     dado: rótulos dos predicados, metas sql, feriados, operações, match
+     rules, campos de licença do deal). -->
 <!-- v1.3 (20/07/2026): §4.7 — runbook de dias não úteis (cadastro/import CSV),
      métricas de meta custom e geração/atualização de presets. -->
 <!-- v1.2 (19/07/2026): fuso da fonte (0079/0080) — checklist em §4.4/§4.6 e
@@ -181,7 +192,7 @@ npm run build      # o que a Vercel roda no deploy
   `field_modified_at`). A proteção é PERMANENTE (20/07/2026): o marcador só é
   solto quando o valor da FONTE iguala o local (`releaseCaughtUpMarker`,
   lib/sync/shared) — não reintroduza a expiração por `last_synced_at`.
-- [ ] Há no máximo 1 job `running` (índice único 0084); corrida no createJob
+- [ ] Há no máximo 1 job `running` (índice único 0086); corrida no createJob
   reusa o vencedor (23505).
 - [ ] Jobs continuam resumíveis (uma página por requisição; estado em `sync_jobs`).
 - [ ] Mapper/catalog: rótulos visuais vêm de `FIELD_LABELS`
@@ -219,11 +230,93 @@ métrica → "+ Nova métrica…". Isso só registra a CHAVE (rótulo → slug) 
 do próprio widget (ex.: contagem sobre a sub-fonte de SQLs). A meta em si é
 cadastrada normalmente por período/escopo.
 
-**Gerar/atualizar presets**: `generatePresets()` (todos) e
-`applyPreset(presetKey)` (um) em `app/(app)/dashboards/actions.ts` — ainda sem
-UI. São idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
+**Gerar/atualizar presets**: **Configurações → Presets** — botão por preset
+("Gerar" vira "Atualizar" com link p/ o dashboard) e "Gerar/atualizar todos".
+As actions (`applyPreset`/`generatePresets`, `app/(app)/dashboards/actions.ts`)
+são idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
 `settings.presetKey`, ids preservados) sem tocar widgets adicionados à mão;
-sub-fontes/campos já existentes nunca são sobrescritos.
+sub-fontes/campos/correspondências já existentes nunca são sobrescritos.
+Dashboard homônimo sem marcador é ADOTADO (carimbado) em vez de duplicado.
+
+**Gerar o preset "Inbound"** (`lib/presets/inbound.ts`) — pré-requisitos de
+DADO antes de gerar (o preset cria estrutura, não dados):
+
+1. **Rótulos dos predicados**: as sub-fontes usam os rótulos legíveis do
+   Bitrix — `custom:fonte` ∈ {"Formulário de CRM", "Site"}, etapas
+   ("Lead Qualificado", "Clientes Lite", "Contrato assinado", "Inacessível",
+   "Desqualificado Marketing", "Novos Leads", "1º contato", "Em
+   qualificação"), motivos ("Monitoramento pessoal", "Sem resposta",
+   "Outros") e "DSQ" no Estudo. Se os rótulos do portal divergirem
+   (caixa/acento), ajuste as sub-fontes geradas em Configurações → Fontes
+   (o preset nunca sobrescreve subs existentes).
+2. **Metas**: métrica `sql` é registrada automaticamente; cadastre as metas
+   MENSAIS em Configurações → Metas (a linha "Meta SQL" do Mês x Mês usa o
+   modo ritmo/pace por dia útil).
+3. **Feriados**: Configurações → Metas → Dias não úteis (alimenta o
+   alinhamento "mesmo dia útil" e o pace).
+4. **Operações BR/INTL**: cadastre as operações e vincule os responsáveis.
+   O widget "Operação (todas as abas)" filtra o dashboard inteiro pelo
+   VÍNCULO vivo (responsáveis da subárvore) + o PERFIL da operação
+   (Configurações → Operações → botão "Perfil": condições de
+   inclusão/exclusão com fonte-alvo opcional) — não pela coluna derivada
+   `records.operation_id`. Para dimensões "por Operação" e restrições de
+   snapshot, rode `supabase/apply/backfill-operation-id.sql` após
+   criar/alterar vínculos. Renomear operação: direto no nome, na tabela.
+5. **Match rules** (widget "Evolução por Criação do Lead"): crie em /campos →
+   Matching as regras lead↔negócio e lead↔venda do site (par primário
+   `custom:email` dos dois lados) e rode o auto-match. Sem elas o widget
+   mostra o bucket "—" (degrada, não quebra).
+6. **Campos do deal**: o MRR usa o campo calculado `mrr_contrato` = "Valor
+   por licença do contrato (R$)" × "Número de licenças contratadas"
+   (UF_CRM_1715111926953 × UF_CRM_1715258133683) — confira que esse par está
+   preenchido nos deals assinados; a geração dispara o recálculo global.
+
+Conferências pós-geração: mocks de Data Reunião aparecendo no SQL (período
+que referencia a Data Reunião), moedas no MRR (BRL/USD via `currency` do
+deal), linha de meta no Mês x Mês, e comparação dos números com o dashboard
+antigo no MESMO período.
+
+> **Preset v3 (20/07/2026):** o Mês x Mês trocou a janela fixa
+> (`windowMonths: 6`) pelo **dropdown de janela no card** (`periodWindow` —
+> "3 meses" … "Este ano", padrão 6 meses, com o toggle dia útil × dia
+> cheio). Rode **Configurações → Presets → Atualizar** para o widget do
+> banco receber a config nova; sem isso o card segue no comportamento
+> antigo.
+
+> **Preset v4 + migração 0084 (20/07/2026) — mocks no SQL:** aplique a
+> migração `0084_mock_fonte_inbound.sql` (SQL editor) — ela dá
+> `custom:fonte = "Formulário de CRM"` aos 270 mocks Inbound, exigido pelo
+> predicado da sub-fonte `sqls` (predicados de sub valem em AND para mocks;
+> a regra 0052 só remove o gate `not is_mock`). Conferência:
+> `select count(*) from public.records where is_mock and custom_fields ? 'fonte';`
+> → 270 (os 32 Outbound ficam sem, de propósito). Depois rode
+> **Configurações → Presets → Atualizar**: o v4 abre o Mês x Mês em **"dia
+> cheio"** (mês corrente inteiro — reuniões AGENDADAS, mocks inclusive,
+> visíveis já; o toggle do card alterna para "dia útil"). Quem já tocou o
+> toggle no card não é afetado (a escolha compartilhada vence o default).
+> Regra geral ao criar NOVOS mocks ou NOVAS sub-fontes: o mock precisa
+> carregar os campos usados na segmentação da sub que deve contá-lo.
+
+**Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
+qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,
+ex.: "Mês/ano"):
+
+1. Editar o widget → seção **"Dia útil e meta"** → marcar **"Janela de meses
+   no card (períodos equivalentes)"**.
+2. Escolher quais opções aparecem no dropdown ("3 meses", "Este trimestre",
+   "6 meses", "Este semestre", "Últimos 12 meses", "Este ano"), a **janela
+   padrão** e se o card expõe o seletor **"dia útil × dia cheio"**.
+3. Opcional: marcar **"Alinhar meses pelo mesmo dia útil"** para o corte por
+   estágio ser o modo inicial (o toggle do card alterna depois).
+4. Salvar. O dropdown aparece no topo do card; a seleção é COMPARTILHADA
+   entre os usuários do dashboard (como os filtros rápidos) e cada mês da
+   janela mostra o recorte EQUIVALENTE ao período da barra global — a barra
+   continua mandando no mês final. Em snapshots, vale a janela padrão
+   congelada.
+
+Limitação estrutural: os meses (barras) vêm das FONTES DO WIDGET — mês com
+registro só em fonte de perna (`Metric.sources`) não vira barra; inclua a
+fonte no widget se precisar do mês.
 
 ## 5. Troubleshooting
 
@@ -233,6 +326,7 @@ sub-fontes/campos já existentes nunca são sobrescritos.
 | UM dashboard específico segue lento (statement timeout em alguns widgets) mesmo após a correção global e após limitar o período | Widgets com colunas `match:` (registro casado): `_widget_match_expr` (0042) roda uma subconsulta correlacionada sobre `record_matches` POR LINHA do agregado; "todo o período" agrava (varre `records` inteira). As linhas de `record_matches` persistem após excluir a tabela que as gerou | 1) fixe um período padrão limitado na barra (`defaultPreset`); 2) aplique a migração `0077` (índices em `record_matches`); 3) se persistir, rode a **Parte C** de `supabase/apply/diagnostico-perf.sql` — o `[dashboard:timing]` aponta o widget e o `EXPLAIN` diz se falta a reescrita ESPELHADA de `_widget_match_expr`/`_widget_match_expr_snap` (nova migração recriando ambos os RPCs) |
 | Snapshot mostra números ≠ dashboard | RPCs divergiram (espelhamento esquecido) ou snapshot sem refresh após migração | Compare `pg_get_functiondef` das duas funções; refaça o espelhamento; "Atualizar agora" |
 | Mocks sumiram de um widget/snapshot | A consulta deixou de referenciar Data Reunião (ex.: snapshot sem `default_period`, período "todo o período") | Confira o campo de período; para snapshots antigos, defina `default_period` (SQL de exemplo no `supabase/README.md`, seção 0059) |
+| Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
 | Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 4 jobs; recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |

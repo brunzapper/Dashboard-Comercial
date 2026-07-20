@@ -495,7 +495,7 @@ export async function markTasksSeen(): Promise<void> {
   const session = await getSessionInfo();
   if (!session) return;
   const supabase = await createClient();
-  // v1.1: merge atômico no banco (user_settings_merge, 0083) — o
+  // v1.1: merge atômico no banco (user_settings_merge, 0085) — o
   // read-modify-write anterior perdia gravações concorrentes de outras chaves
   // (ex.: sidebarPinned salvo pelo layout na mesma janela).
   await supabase.rpc("user_settings_merge", {

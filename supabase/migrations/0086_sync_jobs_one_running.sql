@@ -13,7 +13,7 @@
 update public.sync_jobs
 set status = 'error',
     finished_at = now(),
-    error = coalesce(error, 'encerrado pela 0084: havia mais de um job running'
+    error = coalesce(error, 'encerrado pela 0086: havia mais de um job running'
     )
 where status = 'running'
   and id not in (

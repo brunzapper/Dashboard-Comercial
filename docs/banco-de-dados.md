@@ -1,7 +1,12 @@
-<!-- Versão: 1.6 | Data: 20/07/2026 -->
-<!-- v1.6 (20/07/2026): auditoria — user_settings_merge (0083, merge atômico de
+<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- v1.8 (20/07/2026): auditoria — user_settings_merge (0085, merge atômico de
      user_settings.settings) e índice único parcial uq_sync_jobs_one_running
-     (0084, no máximo 1 job de sync 'running'). -->
+     (0086, no máximo 1 job de sync 'running'). -->
+<!-- v1.7 (20/07/2026): 0084 (só dados) — `custom_fields.fonte` nos mocks
+     Inbound p/ satisfazer o predicado da sub `sqls`. -->
+<!-- v1.6 (20/07/2026): `operations.filter` (0083 — perfil da operação) + nota
+     da coluna derivada records.operation_id e do backfill
+     (supabase/apply/backfill-operation-id.sql). -->
 <!-- v1.5 (20/07/2026): dias não úteis (`non_working_days`, 0081), campo de
      período `custom:` em sub-fontes (0082), metas por métrica arbitrária
      (registry em sync_config 'goal_metrics'). -->
@@ -15,7 +20,7 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0082), para que um
+Referência do estado **atual** do banco (após a migração 0083), para que um
 mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -100,7 +105,7 @@ do site ou linha de fonte dinâmica.
 | `field_modified_at` jsonb | `{campo: timestamp}` das edições manuais — protege do sync (conflito por campo) |
 | `created_at`, `updated_at`, `last_synced_at`, `locally_modified_at` | |
 | `responsible_id`, `operation_id`, `related_lead_id` uuid, `lead_time_days` numeric | (0012) |
-| `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5 |
+| `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5. Mocks Inbound carregam `custom_fields.fonte = "Formulário de CRM"` (0084 — predicados de sub-fonte valem em AND p/ mocks); Outbound (0053) ficam sem fonte de propósito |
 
 **`data_sources`** (0060) — catálogo de fontes (dinâmicas, criáveis via UI).
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
@@ -162,9 +167,17 @@ Fase 12 (usado pelo `undo-mock-reuniao.sql`).
 `auth.users` (**o vínculo que dá visibilidade RLS ao vendedor**), `active`.
 
 **`operations`** (0012) — operações comerciais; `parent_operation_id` (0016) permite
-aninhamento (subárvore via função `operation_subtree`).
+aninhamento (subárvore via função `operation_subtree`); `filter` jsonb (0083) —
+FILTROS DE PERFIL (WidgetFilter[], com fonte-alvo opcional por condição) que
+definem o recorte de dados da operação, editados em Configurações → Operações.
 
 **`responsible_operations`** (0012) — N:N com `priority` (1 = operação primária).
+
+> **`records.operation_id` é DERIVADA** (operação priority=1 do responsável no
+> momento do sync; updates só preenchem quando NULL). O filtro de Operação da
+> visualização NÃO usa a coluna (resolve vínculo+perfil no server —
+> `lib/config/operation-scope.ts`); dimensões e restrições de snapshot usam —
+> rode `supabase/apply/backfill-operation-id.sql` após mexer nos vínculos.
 
 **`bitrix_user_map`** (0007) — mapeia usuário Bitrix → `auth.users`.
 
@@ -340,7 +353,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0084)
+## 7. Histórico de migrações (0001–0086)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -428,5 +441,13 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0080 | backfill_bitrix_tz | Backfill: reescreve datetimes com offset ≠ -03:00 das chaves datetime do Bitrix (Data Reunião lead/negócio, `bitrix_moved_time`) p/ horário de Brasília; `snapshot_records` fica como capturado |
 | 0081 | non_working_days | Dias não úteis (feriados) — calendário global dos utilitários de dia útil (meta ideal/pace, businessDayAlign, previous_period_bd) |
 | 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
-| 0083 | user_settings_merge | Função `user_settings_merge(p_patch jsonb)` (SECURITY INVOKER, RLS escopa ao próprio usuário): merge atômico `settings || p_patch` — remove a corrida do read-modify-write de markTasksSeen/updateUserSettings |
-| 0084 | sync_jobs_one_running | Índice único parcial `uq_sync_jobs_one_running` (status='running'): no máximo 1 job de sync ativo; encerra excedentes pré-existentes. createJob trata 23505 reusando o vencedor |
+| 0083 | operations_filter | `operations.filter` jsonb (FILTROS DE PERFIL da operação — WidgetFilter[]); consumido no server pelo filtro de Operação (vínculo+perfil). Não recria as RPCs |
+| 0084 | mock_fonte_inbound | Só dados: mocks Inbound (0051) ganham `custom_fields.fonte = "Formulário de CRM"` p/ satisfazer o predicado da sub `sqls` (regra 0052 não isenta predicados); Outbound intocados. Não recria as RPCs |
+| 0085 | user_settings_merge | Função `user_settings_merge(p_patch jsonb)` (SECURITY INVOKER, RLS escopa ao próprio usuário): merge atômico `settings || p_patch` — remove a corrida do read-modify-write de markTasksSeen/updateUserSettings |
+| 0086 | sync_jobs_one_running | Índice único parcial `uq_sync_jobs_one_running` (status='running'): no máximo 1 job de sync ativo; encerra excedentes pré-existentes. createJob trata 23505 reusando o vencedor |
+
+Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
+Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
+(7), `field_correspondences`(+membros) (3), `field_definitions`
+(`mrr_contrato`, calculado) e a chave `sql` no `sync_config.goal_metrics`.
+Nenhuma migração envolvida; itens já existentes nunca são sobrescritos.

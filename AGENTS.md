@@ -24,7 +24,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   SEMPRE no dataset congelado, ignorando as restrições do snapshot (0057); a
   regra 0052 (mock só conta em consulta que referencia Data Reunião) segue
   valendo. Não reintroduza filtros de restrição injetados pelo viewer — eles
-  derrubariam os mocks (AND puro).
+  derrubariam os mocks (AND puro). A regra 0052 só remove o gate
+  `not is_mock` — NÃO isenta os mocks dos predicados de sub-fonte nem dos
+  filtros do widget (AND puro): mocks precisam CARREGAR os campos usados na
+  segmentação das subs que devem contá-los (0084 dá `custom:fonte` inbound
+  aos mocks do lote 0051; os Outbound de 0053 ficam sem, de propósito).
 - **Período congelado do snapshot (0059):** `snapshots.default_period` guarda
   o filtro de período do dashboard capturado na criação (SnapshotsPanel →
   `capturePeriod`) e o viewer o aplica via resolver padrão (periodBar sintético
@@ -58,7 +62,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lowerSourceScopedOperands` (`lib/widgets/calc-metrics.ts`), nos mesmos choke
   points do `expandAggFormula` (`resolveCalcMetric`/`runCalculatedWidget`).
   Ref bare (sem `@`) = universo em escopo (compat). NÃO recrie os RPCs para
-  isso. Catálogo por-registro dos campos calculados é ÚNICO
+  isso. Desde 20/07/2026: o predicado da sub aceita também `in`/`is_null`/
+  `not_null`/`*_ci` (só `ilike` degrada), a chave `aggif:` ganha um 4º
+  elemento OPCIONAL `scope` (chaves sem escopo seguem byte-idênticas) e a
+  consulta AUXILIAR de um operando escopado roda como perna SÓ da fonte do
+  escopo — período pela coluna de DATA dela (`scopedAuxPeriod`/
+  `patchAuxPeriodByType`, `lib/widgets/period.ts`) e `p_correspondences` com o
+  membro DELA (senão um `unified:` bucketizaria pela data da pai). Vale nos 3
+  choke points (computeRows/pernas por métrica/`runCalculatedWidget`, com o
+  período DA RODADA — atual, perna do businessDayAlign ou comparação);
+  caminhos client-side (`dateAgg`/listas) não rejanelam pela data da sub
+  (limitação documentada). Catálogo por-registro dos campos calculados é ÚNICO
   (`perRecordCalcOperands`, `lib/records/calc-operands.ts`) — os dois editores
   e a validação do servidor derivam dele; não monte listas paralelas.
 - **Datas são strings no fuso de Brasília (0079/0080):** valores DATETIME
@@ -102,11 +116,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
   caminho agregado); nesse caso o usuário garante que os conjuntos são
   disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.
+- **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
+  `records.operation_id` é derivada (priority=1 do responsável no sync) e pode
+  estar NULL/defasada. Filtros de visualização por operação
+  (filtro_campo/filtro rápido) são TRADUZIDOS no server — page e widget-scope
+  — por `lib/config/operation-scope.ts` (vínculo vivo `responsible_id in` da
+  subárvore + FILTROS DE PERFIL `operations.filter`, 0083). Não reintroduza
+  `operation_id eq` literal nesses caminhos. Dimensões e restrições de
+  snapshot seguem na coluna derivada (runbook do backfill:
+  `supabase/apply/backfill-operation-id.sql`). Unificados: o coalesce ordena
+  refs `custom:` antes de colunas do núcleo (ver §4.8 da arquitetura).
 - **Dia útil/meta se resolvem no ENGINE, nunca no RPC (20/07/2026):** feriados
   (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)
   alimentam o alinhamento "mesmo dia útil" (`businessDayAlign` — pernas por mês
   via `computeRows`), a base de comparação `previous_period_bd` e a linha de
-  meta (`goalLine` — `row.__goal` via `resolveGoal`). NÃO recrie as RPCs para
+  meta (`goalLine` — `row.__goal` via `resolveGoal`). A janela de períodos
+  equivalentes (`periodWindow` — dropdown "3 meses"/"Este trimestre"… no card,
+  corte por dia útil OU dia cheio) também é 100% engine: a seleção
+  compartilhada vive na célula `__pw__` de `dashboard_table_cells` e page/
+  `widget-scope` a mesclam nos settings EFETIVOS via
+  `applyPeriodWindowChoice` ANTES do engine (que só lê `active ?? default`;
+  `businessDayAlign.windowMonths` é alias legado). NÃO recrie as RPCs para
   nada disso; snapshots leem metas/feriados AO VIVO pelo adapter
   (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca

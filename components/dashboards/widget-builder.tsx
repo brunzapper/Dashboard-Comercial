@@ -143,6 +143,7 @@ import {
   type ComparisonSettings,
   type BusinessDayAlignSettings,
   type GoalLineSettings,
+  type PeriodWindowSettings,
   type QuickFilterEntry,
   type GroupDateFormat,
   type RecordListColumn,
@@ -517,6 +518,11 @@ export function WidgetBuilder({
   const [bdAlign, setBdAlign] = useState<BusinessDayAlignSettings>(
     widget?.settings?.businessDayAlign ?? {}
   );
+  // Janela de períodos equivalentes (settings.periodWindow): dropdown de meses
+  // no card. undefined = janela desligada.
+  const [periodWindow, setPeriodWindow] = useState<
+    PeriodWindowSettings | undefined
+  >(widget?.settings?.periodWindow ?? undefined);
   const [goalLine, setGoalLine] = useState<GoalLineSettings>(
     widget?.settings?.goalLine ?? {}
   );
@@ -1751,6 +1757,18 @@ export function WidgetBuilder({
       settings.businessDayAlign = bdAlign;
     } else {
       delete settings.businessDayAlign;
+    }
+    // Janela de períodos: grava quando configurada (default e/ou options);
+    // runtime `active` nunca persiste no widget (vive na célula __pw__).
+    if (
+      supportsBdAlign &&
+      periodWindow &&
+      ((periodWindow.options?.length ?? 0) > 0 || periodWindow.default)
+    ) {
+      const { active: _active, ...pw } = periodWindow;
+      settings.periodWindow = pw;
+    } else {
+      delete settings.periodWindow;
     }
     if (supportsGoalLine && goalLine.enabled) {
       settings.goalLine = goalLine;
@@ -3292,6 +3310,8 @@ export function WidgetBuilder({
             <GoalsSection
               bdAlign={bdAlign}
               onBdAlignChange={setBdAlign}
+              periodWindow={periodWindow}
+              onPeriodWindowChange={setPeriodWindow}
               goalLine={goalLine}
               onGoalLineChange={setGoalLine}
               supportsGoalLine={supportsGoalLine}

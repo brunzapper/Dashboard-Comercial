@@ -73,6 +73,10 @@ import {
 import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
+  applyPeriodWindowChoice,
+  parsePeriodWindowChoice,
+  PW_COL_KEY,
+  PW_ROW_KEY,
   QF_ROW_KEY,
   bucketKeyFromRpcValue,
   hasQuickValue,
@@ -81,6 +85,7 @@ import {
   parseQuickFilterValue,
   quickOptionsFilter,
   staticBucketOptions,
+  type PeriodWindowChoice,
   type QuickFilterValue,
   type WidgetQuickFilters,
 } from "@/lib/widgets/quick-filters";
@@ -91,10 +96,12 @@ import type {
   CalcWidgetResult,
   DashboardSettings,
   FieldFilterOptions,
+  PeriodWindowKey,
   Transform,
   Widget,
   WidgetData,
   WidgetFilter,
+  WidgetSettings,
 } from "@/lib/widgets/types";
 import {
   isKnownSource,
@@ -102,6 +109,11 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  collectOperationFilterIds,
+  loadOperationScopes,
+  translateOperationFilters,
+} from "@/lib/config/operation-scope";
 import {
   RECORD_LIST_PAGE_SIZE,
   parseViewFilter,
@@ -228,6 +240,9 @@ export default async function DashboardPage({
   const prefSettings = (prefData?.settings ?? {}) as {
     lastPeriod?: SavedPeriod;
     lastPeriodByTab?: Record<string, SavedPeriod>;
+    // Último estado dos widgets "Filtro por campo" (por widget id, encoded
+    // ff_). Reidratado quando a URL não traz o parâmetro; URL sempre vence.
+    lastFieldFilters?: Record<string, string>;
   };
 
   const widgets = (widgetsData ?? []) as Widget[];
@@ -320,6 +335,52 @@ export default async function DashboardPage({
   );
   const quickFiltersById: Record<string, WidgetQuickFilters> = {};
   const qfFiltersByWidget: Record<string, WidgetFilter[]> = {};
+
+  // ===================== Janela de períodos do widget (__pw__) ===============
+  // Seleção do dropdown de meses do card (settings.periodWindow) — persistida
+  // compartilhada em dashboard_table_cells (row __pw__), como os quick
+  // filters. Mesclada nos settings EFETIVOS antes do engine
+  // (applyPeriodWindowChoice); o payload periodWindowById alimenta o controle
+  // no card.
+  const pwWidgets = dataWidgets.filter((w) => w.settings?.periodWindow);
+  const pwChoiceById = new Map<string, PeriodWindowChoice>();
+  if (pwWidgets.length > 0) {
+    const { data: pwCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, value")
+      .in(
+        "widget_id",
+        pwWidgets.map((w) => w.id)
+      )
+      .eq("row_key", PW_ROW_KEY)
+      .eq("col_key", PW_COL_KEY);
+    for (const c of pwCells ?? []) {
+      const v = parsePeriodWindowChoice(c.value);
+      if (v) pwChoiceById.set(c.widget_id as string, v);
+    }
+  }
+  const effSettingsFor = (w: Widget): WidgetSettings | undefined =>
+    applyPeriodWindowChoice(w.settings, pwChoiceById.get(w.id));
+  const periodWindowById: Record<
+    string,
+    {
+      options: PeriodWindowKey[];
+      value: PeriodWindowKey | null;
+      bd: boolean;
+      showAlignToggle: boolean;
+    }
+  > = {};
+  for (const w of pwWidgets) {
+    const pw = w.settings?.periodWindow;
+    if (!pw?.options || pw.options.length === 0) continue;
+    const eff = effSettingsFor(w);
+    periodWindowById[w.id] = {
+      options: pw.options,
+      value: eff?.periodWindow?.active ?? null,
+      bd: Boolean(eff?.businessDayAlign?.enabled),
+      showAlignToggle: Boolean(pw.showAlignToggle),
+    };
+  }
   // Preenchimento adiado das OPÇÕES dos dropdowns (só exibição): definido no
   // bloco abaixo e chamado depois da onda de widgets, fora do caminho crítico.
   let fillQuickFilterOptions: (() => Promise<void>) | null = null;
@@ -618,8 +679,17 @@ export default async function DashboardPage({
     return a.some((s) => b.includes(s));
   };
 
+  // Seed por widget dos controles "Filtro por campo" quando a URL não traz o
+  // ff_: o valor salvo do usuário (lastFieldFilters). Vai ao cliente para o
+  // controle montar já preenchido (e sincronizar a URL no primeiro debounce).
+  const fieldFilterSeedById: Record<string, string> = {};
   for (const fw of fieldFilterWidgets) {
-    const raw = str(sp[`ff_${fw.id}`]);
+    // URL vence; sem parâmetro na URL, reidrata da preferência do usuário
+    // (lastFieldFilters — gravada pelo debounce do FieldFilterControls).
+    const fromUrl = str(sp[`ff_${fw.id}`]);
+    const saved = prefSettings.lastFieldFilters?.[fw.id] ?? "";
+    if (!fromUrl && saved) fieldFilterSeedById[fw.id] = saved;
+    const raw = fromUrl || saved;
     if (!raw) continue;
     const fs = viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields);
     if (fs.length === 0) continue;
@@ -646,6 +716,25 @@ export default async function DashboardPage({
       if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
         continue;
       addViewFilters(w.id, targeted);
+    }
+  }
+
+  // Filtro de OPERAÇÃO (20/07/2026): NUNCA compara a coluna derivada
+  // records.operation_id (pode estar NULL/defasada — zeraria o dashboard).
+  // Resolve para o VÍNCULO vivo (responsáveis da subárvore) + filtros de
+  // PERFIL da operação (operations.filter, 0083). Ver
+  // lib/config/operation-scope.ts; espelho em widget-scope.
+  {
+    const opIds = [
+      ...new Set(
+        Object.values(viewFiltersByWidget).flatMap(collectOperationFilterIds)
+      ),
+    ];
+    if (opIds.length > 0) {
+      const scopes = await loadOperationScopes(supabase, opIds);
+      for (const [id, fs] of Object.entries(viewFiltersByWidget)) {
+        viewFiltersByWidget[id] = translateOperationFilters(fs, scopes);
+      }
     }
   }
 
@@ -878,7 +967,9 @@ export default async function DashboardPage({
         metrics: w.metrics ?? [],
         filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
         visual_type: w.visual_type,
-        settings: w.settings,
+        // Settings EFETIVOS: janela de períodos/dia útil selecionados no card
+        // mesclados (periodWindow.active + businessDayAlign.enabled).
+        settings: effSettingsFor(w),
       };
       // Erro ao computar o widget: loga no servidor e propaga a mensagem no
       // `data` do card (WidgetData.error) — o card exibe o estado de erro em
@@ -1092,7 +1183,10 @@ export default async function DashboardPage({
     // ('__calc__') ficam fora do histórico de Desfazer/Refazer (não são
     // edição de dashboard).
     (cellsData ?? []).filter(
-      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+      (c) =>
+        c.row_key !== QF_ROW_KEY &&
+        c.row_key !== CALC_ROW_KEY &&
+        c.row_key !== PW_ROW_KEY
     )
   );
 
@@ -1168,7 +1262,9 @@ export default async function DashboardPage({
         periodDefaultsByTab={periodDefaultsByTab}
         periodDefaultFieldByTab={periodDefaultFieldByTab}
         filterOptionsById={filterOptionsById}
+        fieldFilterSeedById={fieldFilterSeedById}
         quickFiltersById={quickFiltersById}
+        periodWindowById={periodWindowById}
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
       />

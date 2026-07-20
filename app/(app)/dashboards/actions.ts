@@ -19,16 +19,24 @@ import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
   PRESET_FIELDS,
+  type PresetCorrespondence,
   type PresetDashboard,
   type PresetField,
   type PresetSubSource,
 } from "@/lib/presets/definitions";
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
+import { loadSources } from "@/lib/config/sources";
+import { recordTypeOf } from "@/lib/sources";
+import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
+  parsePeriodWindowChoice,
+  PW_COL_KEY,
+  PW_ROW_KEY,
   QF_ROW_KEY,
+  type PeriodWindowChoice,
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
@@ -316,8 +324,45 @@ export async function saveLastPeriod(
   );
 }
 
+// Salva o último estado do widget "Filtro por campo" (ff_<widgetId>) do
+// usuário NESTE dashboard (user_preferences.settings.lastFieldFilters).
+// Fire-and-forget no debounce do FieldFilterControls; a page/widget-scope
+// reidratam quando a URL não traz o parâmetro (URL sempre vence). `null`
+// LIMPA a chave — o usuário removeu o filtro e a preferência não pode
+// ressuscitá-lo na próxima visita.
+export async function saveLastFieldFilter(
+  dashboardId: string,
+  widgetId: string,
+  encoded: string | null
+): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  // Read-modify-write para preservar as demais chaves (lastPeriod etc.).
+  const { data } = await supabase
+    .from("user_preferences")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  const current = (data?.settings ?? {}) as {
+    lastFieldFilters?: Record<string, string>;
+  };
+  const map = { ...(current.lastFieldFilters ?? {}) };
+  if (encoded) map[widgetId] = encoded;
+  else delete map[widgetId];
+  await supabase.from("user_preferences").upsert(
+    {
+      user_id: session.user.id,
+      dashboard_id: dashboardId,
+      settings: { ...current, lastFieldFilters: map },
+    },
+    { onConflict: "user_id,dashboard_id" }
+  );
+}
+
 // Preferências GLOBAIS do usuário (user_settings), não por dashboard.
-// Merge ATÔMICO no banco (user_settings_merge, 0083) — preserva chaves
+// Merge ATÔMICO no banco (user_settings_merge, 0085) — preserva chaves
 // futuras SEM a janela de corrida do read-modify-write (duas gravações
 // concorrentes perdiam uma). RLS garante que cada usuário só toca a própria
 // linha. Fire-and-forget no cliente.
@@ -590,6 +635,44 @@ export async function saveQuickFilterValue(
         row_key: QF_ROW_KEY,
         col_key: entryId,
         value,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// Grava a seleção da JANELA DE PERÍODOS do widget (settings.periodWindow —
+// dropdown de meses + toggle dia útil no card). Mesma tabela/semântica dos
+// filtros rápidos: compartilhada entre usuários (RLS 0026). null/vazio apaga
+// (volta ao default do widget).
+export async function savePeriodWindowChoice(
+  dashboardId: string,
+  widgetId: string,
+  choice: PeriodWindowChoice | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const clean = parsePeriodWindowChoice(choice);
+  if (!clean) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", PW_ROW_KEY)
+      .eq("col_key", PW_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: PW_ROW_KEY,
+        col_key: PW_COL_KEY,
+        value: clean,
         updated_by: session.user.id,
       },
       { onConflict: "widget_id,row_key,col_key" }
@@ -922,23 +1005,26 @@ export async function deleteWidget(
 export interface PresetApplyResult {
   presetKey: string;
   dashboard: "created" | "updated";
+  dashboardId: string; // p/ a aba Presets linkar "Abrir dashboard"
   widgets: { created: number; updated: number; deleted: number };
   fieldsCreated: number;
   subSourcesCreated: number;
   subSourcesSkipped: number;
+  correspondencesCreated: number;
+  correspondencesSkipped: number;
 }
 
 async function ensurePresetFields(
   supabase: Awaited<ReturnType<typeof createClient>>,
   fields: PresetField[]
-): Promise<number> {
-  if (fields.length === 0) return 0;
+): Promise<{ created: number; createdCalc: boolean }> {
+  if (fields.length === 0) return { created: 0, createdCalc: false };
   const { data: existingFields } = await supabase
     .from("field_definitions")
     .select("field_key");
   const have = new Set((existingFields ?? []).map((f) => f.field_key as string));
   const toCreate = fields.filter((f) => !have.has(f.field_key));
-  if (toCreate.length === 0) return 0;
+  if (toCreate.length === 0) return { created: 0, createdCalc: false };
   const { error } = await supabase.from("field_definitions").insert(
     toCreate.map((f, i) => ({
       field_key: f.field_key,
@@ -951,9 +1037,76 @@ async function ensurePresetFields(
       sort_order: 100 + i,
       currency_mode: f.currency_mode ?? null,
       currency_code: null,
+      // Campos calculados de preset (20/07/2026): fórmula + escopo de fonte.
+      formula: f.formula ?? null,
+      applies_to: f.applies_to ?? null,
     }))
   );
-  return error ? 0 : toCreate.length;
+  if (error) return { created: 0, createdCalc: false };
+  return {
+    created: toCreate.length,
+    // 'calculado' por-registro materializa em custom_fields → o chamador
+    // dispara recalcAllFormulaFields (mesmo gatilho do createField em /campos).
+    createdCalc: toCreate.some((f) => f.data_type === "calculado"),
+  };
+}
+
+// Correspondências (campos unificados) do preset: cria as ausentes por `key`;
+// existentes NUNCA são sobrescritas (o admin pode tê-las ajustado). Chamar
+// DEPOIS de ensurePresetSubSources — o record_type de cada membro sai do
+// catálogo (loadSources), que precisa enxergar as subs recém-criadas.
+async function ensurePresetCorrespondences(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  corrs: PresetCorrespondence[]
+): Promise<{ created: number; skipped: number }> {
+  if (corrs.length === 0) return { created: 0, skipped: 0 };
+  const catalog = await loadSources(supabase);
+  const known = new Set(catalog.map((s) => s.key));
+  let created = 0;
+  let skipped = 0;
+  for (const corr of corrs) {
+    const { data: existing } = await supabase
+      .from("field_correspondences")
+      .select("id")
+      .eq("key", corr.key)
+      .maybeSingle();
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+    const members = corr.members.filter((m) => known.has(m.source_key));
+    if (members.length < 2) {
+      skipped += 1; // membros insuficientes (fonte fora do catálogo)
+      continue;
+    }
+    const { data: inserted, error } = await supabase
+      .from("field_correspondences")
+      .insert({ key: corr.key, label: corr.label, data_type: corr.data_type })
+      .select("id")
+      .maybeSingle();
+    if (error || !inserted?.id) {
+      skipped += 1;
+      continue;
+    }
+    const { error: memberError } = await supabase
+      .from("field_correspondence_members")
+      .insert(
+        members.map((m) => ({
+          correspondence_id: inserted.id as string,
+          record_type: recordTypeOf(m.source_key, catalog),
+          source_key: m.source_key,
+          field_ref: m.field_ref,
+        }))
+      );
+    if (memberError) {
+      // Membros falharam: remove a correspondência órfã (cascade nos membros).
+      await supabase.from("field_correspondences").delete().eq("id", inserted.id);
+      skipped += 1;
+      continue;
+    }
+    created += 1;
+  }
+  return { created, skipped };
 }
 
 async function ensurePresetSubSources(
@@ -1032,9 +1185,12 @@ async function applyPresetDefinition(
   userId: string,
   preset: PresetDashboard
 ): Promise<PresetApplyResult | null> {
-  // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes e
-  //    chaves de métrica de meta.
-  const fieldsCreated = await ensurePresetFields(supabase, [
+  // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes,
+  //    correspondências (depois das subs — o record_type dos membros sai do
+  //    catálogo) e chaves de métrica de meta. Campo 'calculado' novo dispara o
+  //    recálculo global (materializa em custom_fields; best-effort — mesmo
+  //    gatilho do createField em /campos).
+  const fieldsResult = await ensurePresetFields(supabase, [
     ...PRESET_FIELDS,
     ...(preset.fields ?? []),
   ]);
@@ -1042,7 +1198,19 @@ async function applyPresetDefinition(
     supabase,
     preset.subSources ?? []
   );
+  const corrResult = await ensurePresetCorrespondences(
+    supabase,
+    preset.correspondences ?? []
+  );
   await ensureGoalMetricKeys(supabase, preset);
+  if (fieldsResult.createdCalc) {
+    try {
+      await recalcAllFormulaFields();
+    } catch {
+      // registros ficam sem o valor materializado até o próximo recálculo
+      // (diário/da tela de Campos) — não derruba a geração do preset.
+    }
+  }
 
   // 2) Dashboard: identidade pelo marcador settings.preset.key; fallback de
   //    ADOÇÃO por nome (dashboard gerado pelo motor antigo, sem marcador).
@@ -1165,10 +1333,13 @@ async function applyPresetDefinition(
   return {
     presetKey: preset.presetKey,
     dashboard: dashboardAction,
+    dashboardId: dashId,
     widgets: counts,
-    fieldsCreated,
+    fieldsCreated: fieldsResult.created,
     subSourcesCreated: subResult.created,
     subSourcesSkipped: subResult.skipped,
+    correspondencesCreated: corrResult.created,
+    correspondencesSkipped: corrResult.skipped,
   };
 }
 
@@ -1187,6 +1358,8 @@ export async function applyPreset(
   const result = await applyPresetDefinition(supabase, session.user.id, preset);
   if (!result) return { ok: false, message: "Falha ao aplicar o preset." };
   revalidatePath("/");
+  revalidatePath("/configuracoes/presets");
+  revalidatePath(`/dashboards/${result.dashboardId}`);
   const w = result.widgets;
   return {
     ok: true,
@@ -1215,6 +1388,7 @@ export async function generatePresets(): Promise<ActionState> {
     else if (result?.dashboard === "updated") updated += 1;
   }
   revalidatePath("/");
+  revalidatePath("/configuracoes/presets");
   return {
     ok: true,
     message: `${created} dashboard(s) preset criado(s), ${updated} atualizado(s).`,
