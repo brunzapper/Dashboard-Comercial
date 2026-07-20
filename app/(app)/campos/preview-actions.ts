@@ -308,3 +308,49 @@ export async function getMatchStatus(
   }
   return { ok: true, configured: false };
 }
+
+/** Cobertura de casamento de UMA fonte (a receita "Ciclo de vendas" não sabe a
+ *  fonte do registro — o campo materializa para todos): existe ALGUMA regra
+ *  habilitada envolvendo a fonte, ou o fallback related_lead_id quando ela é a
+ *  fonte de leads. Orienta, nunca bloqueia. */
+export async function getMatchCoverage(
+  source: string
+): Promise<MatchStatusResult> {
+  const denied = await ensureCanManage();
+  if (denied) return { ok: false, message: denied, configured: false };
+  const supabase = await createClient();
+  const sources = await loadSources(supabase);
+  const rt = recordTypeOf(source, sources);
+
+  const rules = await loadMatchRules(supabase);
+  const rule = rules.find(
+    (r) => r.enabled && (r.source_a === rt || r.source_b === rt)
+  );
+  if (rule) {
+    const { count } = await supabase
+      .from("record_matches")
+      .select("id", { count: "exact", head: true })
+      .eq("rule_id", rule.id);
+    return {
+      ok: true,
+      configured: true,
+      ruleLabel: rule.label,
+      pairCount: count ?? 0,
+    };
+  }
+  if (rt === "lead") {
+    const { count } = await supabase
+      .from("records")
+      .select("id", { count: "exact", head: true })
+      .not("related_lead_id", "is", null);
+    if ((count ?? 0) > 0) {
+      return {
+        ok: true,
+        configured: true,
+        ruleLabel: "vínculo direto com o lead (related_lead_id)",
+        pairCount: count ?? 0,
+      };
+    }
+  }
+  return { ok: true, configured: false };
+}

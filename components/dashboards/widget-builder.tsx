@@ -84,6 +84,7 @@ import { FieldForm } from "@/components/campos/field-form";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   type KanbanSettings,
@@ -558,6 +559,12 @@ export function WidgetBuilder({
   const [calcField, setCalcField] = useState<string>(
     widget?.settings?.calcField ?? ""
   );
+  // Fórmula aplicada por uma RECEITA (o editor lê `initial` só na montagem —
+  // o nonce o remonta já preenchido).
+  const [calcRecipeFormula, setCalcRecipeFormula] = useState<Formula | null>(
+    null
+  );
+  const [calcRecipeNonce, setCalcRecipeNonce] = useState(0);
 
   // Calculadora: variáveis nomeadas (fórmulas agregadas computadas no servidor
   // com filtros+período do widget; inseridas na expressão do card como [Nome]).
@@ -2005,12 +2012,27 @@ export function WidgetBuilder({
                 <>
                   <Label>Fórmula</Label>
                   <FormulaEditor
+                    key={`calcw-${calcRecipeNonce}`}
                     context="aggregate"
                     catalog={calcRefs}
                     chips={fieldSourceChips}
                     sources={catalog}
-                    initial={widget?.settings?.formula ?? null}
+                    initial={
+                      calcRecipeFormula ?? widget?.settings?.formula ?? null
+                    }
                     onChange={(f) => setFormula(f)}
+                    header={
+                      <RecipeStrip
+                        recipes={["conversion_rate"]}
+                        aggCatalog={calcRefs}
+                        sources={catalog}
+                        onApply={(r) => {
+                          setFormula(r.formula);
+                          setCalcRecipeFormula(r.formula);
+                          setCalcRecipeNonce((n) => n + 1);
+                        }}
+                      />
+                    }
                   />
                 </>
               ) : null}

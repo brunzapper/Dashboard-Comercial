@@ -48,7 +48,9 @@ import {
 } from "@/app/(app)/campos/actions";
 import { previewRecordFormula } from "@/app/(app)/campos/preview-actions";
 import type { RefOption } from "@/lib/records/date-operands";
+import type { Formula } from "@/lib/records/formulas";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const DATA_TYPE_OPTIONS: ComboboxOption[] = (
@@ -193,6 +195,12 @@ export function FieldForm({
       label: `Moeda — ${o.label}`,
     })),
   ];
+  // Fórmula vinda de uma RECEITA (Ciclo de vendas / Taxa de conversão): decide
+  // o tipo do campo, pré-preenche o editor (remontado via nonce) e sugere o
+  // formato — o usuário segue editando livremente a partir daí.
+  const [recipeFormula, setRecipeFormula] = useState<Formula | null>(null);
+  const [recipeNonce, setRecipeNonce] = useState(0);
+
   useEffect(() => {
     if (state.ok && onDone) onDone(state.field);
   }, [state.ok, state.field, onDone]);
@@ -229,6 +237,23 @@ export function FieldForm({
           aria-label="Tipo"
         />
       </div>
+
+      {/* Receitas: geram a fórmula E escolhem o tipo certo (por-registro ou
+          totais) — o usuário não precisa conhecer a distinção de antemão. */}
+      {!isEdit ? (
+        <RecipeStrip
+          recipes={["sales_cycle", "conversion_rate"]}
+          recordCatalog={allRefs ?? numericRefs}
+          aggCatalog={aggRefs ?? []}
+          sources={sources ?? []}
+          onApply={(r) => {
+            setDataType(r.target);
+            setRecipeFormula(r.formula);
+            setCalcCurrency(r.format === "percent" ? "percent" : "number");
+            setRecipeNonce((n) => n + 1);
+          }}
+        />
+      ) : null}
 
       {dataType === "selecao" ? (
         <div className="flex flex-col gap-1.5">
@@ -287,11 +312,12 @@ export function FieldForm({
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula (sobre os totais)</Label>
           <FormulaEditor
+            key={`agg-${recipeNonce}`}
             context="aggregate"
             catalog={aggRefs ?? []}
             chips={fieldChips}
             sources={sources}
-            initial={field?.formula ?? null}
+            initial={recipeFormula ?? field?.formula ?? null}
             formInputs
             excludeKeys={forbidden}
           />
@@ -340,11 +366,12 @@ export function FieldForm({
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
           <FormulaEditor
+            key={`rec-${recipeNonce}`}
             context="record"
             catalog={allRefs ?? numericRefs}
             chips={fieldChips}
             sources={sources}
-            initial={field?.formula ?? null}
+            initial={recipeFormula ?? field?.formula ?? null}
             formInputs
             excludeKeys={forbidden}
             preview={{

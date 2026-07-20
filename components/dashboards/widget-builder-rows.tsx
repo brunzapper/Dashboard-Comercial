@@ -55,6 +55,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import type { SourceDef, SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
@@ -424,6 +425,9 @@ export function MetricRow({
         metric.grandTotalMode
     )
   );
+  // Remonta o FormulaEditor quando uma receita aplica fórmula nova (o editor
+  // lê `initial` só na montagem).
+  const [recipeNonce, setRecipeNonce] = useState(0);
   // Fontes da métrica: aberto por padrão só quando já há fontes marcadas
   // (config existente nunca fica escondida; métrica nova nasce limpa).
   const srcTargets = metric.sources ?? [];
@@ -470,6 +474,7 @@ export function MetricRow({
       {isCalcSentinel ? (
         <div className="flex flex-col gap-1.5 rounded-md border p-2">
           <FormulaEditor
+            key={`calc-${recipeNonce}`}
             context="aggregate"
             catalog={calcRefs}
             chips={fieldChips}
@@ -480,6 +485,26 @@ export function MetricRow({
                 : null
             }
             onChange={(f) => onChange({ formula: f })}
+            header={
+              <RecipeStrip
+                recipes={["conversion_rate"]}
+                aggCatalog={calcRefs}
+                sources={sourceDefs ?? []}
+                onApply={(r) => {
+                  // Receita aplica fórmula + formato % + nome sugerido (se
+                  // vazio); o editor remonta (nonce) já preenchido e editável.
+                  onChange({
+                    formula: r.formula,
+                    resultPercent: r.format === "percent",
+                    resultCurrency: null,
+                    label: metric.label?.trim()
+                      ? metric.label
+                      : r.suggestedLabel,
+                  });
+                  setRecipeNonce((n) => n + 1);
+                }}
+              />
+            }
           />
           <div className="flex items-center gap-2">
             <Label className="text-muted-foreground shrink-0 text-xs">
