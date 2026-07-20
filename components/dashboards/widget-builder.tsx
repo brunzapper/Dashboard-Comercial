@@ -1,4 +1,8 @@
-// Versão: 1.15 | Data: 18/07/2026
+// Versão: 1.16 | Data: 20/07/2026
+// v1.16 (20/07/2026): UX de fórmulas — rótulos claros ("Escrever a fórmula
+//   neste widget", "ƒ Métrica calculada (fórmula própria)…"), ajuda do campo
+//   salvo com o trade-off reutilizável×local e hint "?" dos escopos de fonte
+//   (SourceConceptsHint) junto ao rótulo Fórmula do widget calculado.
 // v1.15 (18/07/2026): "Formato do grupo" estendido à tabela AGREGADA (níveis
 //   dim_<n> de data sem transform "por nome" — groupFormatEligible) e lista
 //   "Fonte do dado" por dimensão unificada no modo registros (hierarquia de
@@ -80,6 +84,7 @@ import {
   type RefOption,
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   type KanbanSettings,
@@ -874,7 +879,7 @@ export function WidgetBuilder({
     { value: "*", label: "Contagem de registros" },
     ...toFieldOptions(numericFields, sourceLabels),
     ...toFieldOptions(aggCalcFields, sourceLabels),
-    { value: CALC_METRIC_FIELD, label: "ƒ Fórmula personalizada…" },
+    { value: CALC_METRIC_FIELD, label: "ƒ Métrica calculada (fórmula própria)…" },
   ];
   // Modos do Card (settings.card): campos ranqueáveis (números e datas) e
   // métricas simples do ranking (sem ƒ ad-hoc — fórmula tem modo próprio).
@@ -2042,7 +2047,7 @@ export function WidgetBuilder({
                   <Combobox
                     searchable={false}
                     options={[
-                      { value: "", label: "— fórmula própria (abaixo) —" },
+                      { value: "", label: "Escrever a fórmula neste widget" },
                       ...toFieldOptions(aggCalcFields, sourceLabels),
                     ]}
                     value={calcField}
@@ -2051,14 +2056,18 @@ export function WidgetBuilder({
                     aria-label="Usar campo salvo"
                   />
                   <p className="text-muted-foreground text-xs">
-                    Campos &quot;Calculado (totais)&quot; definidos em Campos.
-                    Selecionado, a fórmula/moeda vêm do campo.
+                    Campo salvo (&quot;Calculado — totais do recorte&quot;, de
+                    Campos) = reutilizável em vários widgets; a fórmula/moeda
+                    vêm do campo. Fórmula escrita aqui vale só neste widget.
                   </p>
                 </>
               ) : null}
               {!calcField ? (
                 <>
-                  <Label>Fórmula</Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label>Fórmula</Label>
+                    <SourceConceptsHint />
+                  </div>
                   <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
                     {(
                       [

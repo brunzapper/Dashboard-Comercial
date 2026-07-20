@@ -347,7 +347,7 @@ async function resolveAndValidateFormula(
     return {
       ok: false,
       message:
-        'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
+        'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais do recorte)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
     };
   }
   // Operando de agregação (Σ/Média/Contagem) num campo por registro: mensagem
@@ -356,7 +356,7 @@ async function resolveAndValidateFormula(
     return {
       ok: false,
       message:
-        'Operandos agregados (Σ, Média, Contagem) só funcionam em campos "Calculado (totais)" — o campo calculado por registro enxerga um registro só. Use os valores do próprio registro, ou crie um campo "Calculado (totais)".',
+        'Operandos agregados (Σ, Média, Contagem) só funcionam em campos "Calculado (totais do recorte)" — o campo calculado por registro enxerga um registro só. Use os valores do próprio registro, ou crie um campo "Calculado (totais do recorte)".',
     };
   }
   // Conjunto permitido = o MESMO catálogo do tokenizador (números + casados +

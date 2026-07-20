@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 15/07/2026
+// Versão: 1.5 | Data: 20/07/2026
+// v1.5 (20/07/2026): rótulos dos tipos calculados mais claros — "Calculado
+//   (por registro)" e "Calculado (totais do recorte)" (keys intactas).
 // v1.4 (15/07/2026): exibição percentual — FieldDefinition.show_as_percent,
 //   PERCENT_DATA_TYPES, isPercentField e isPercentFieldRef (refs custom:/match:).
 // Tipos compartilhados de registros e definições de campo (UI da Fase 4).
@@ -30,8 +32,8 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
   selecao: "Seleção",
   moeda: "Moeda",
   booleano: "Booleano",
-  calculado: "Calculado",
-  calculado_agg: "Calculado (totais)",
+  calculado: "Calculado (por registro)",
+  calculado_agg: "Calculado (totais do recorte)",
 };
 
 // Tipos numéricos: podem ser métrica (soma/média) e operando de fórmula.

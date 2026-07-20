@@ -1,4 +1,7 @@
-// Versão: 1.8 | Data: 18/07/2026
+// Versão: 1.9 | Data: 20/07/2026
+// v1.9 (20/07/2026): UX de fórmulas — ajuda da moeda do calc ad-hoc corrigida
+//   (moeda CONVERTE via resolveCalcMetric, não é só exibição) e hint "?" dos
+//   três escopos de fonte (SourceConceptsHint) no bloco "Fontes da métrica".
 // v1.8 (18/07/2026): DimensionRow ganha a lista "Fonte do dado" (colunas
 //   unificadas no modo registros, 2+ fontes candidatas): hierarquia ordenada
 //   de fontes com fallback (RecordListColumn.unifiedSources).
@@ -52,6 +55,7 @@ import {
   type RefOption,
 } from "@/components/campos/formula-builder";
 import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
 import { formulaUsesFunctions } from "@/lib/records/formulas";
 import type { SourceKey } from "@/lib/sources";
@@ -536,7 +540,8 @@ export function MetricRow({
           <p className="text-muted-foreground text-xs">
             Fórmula sobre os totais do recorte, recalculada por grupo,
             subtotal e Total geral. Percentual exibe ×100 (0,35 → 35%); moeda
-            é só exibição (sem conversão).
+            CONVERTE o resultado para a moeda escolhida (taxa do período do
+            dashboard).
           </p>
         </div>
       ) : null}
@@ -649,20 +654,23 @@ export function MetricRow({
       ) : null}
       {metric.field && sourceOptions && sourceOptions.length > 1 ? (
         <div className="flex flex-col gap-2 rounded-md border p-2">
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs font-medium"
-            onClick={() => setSourcesOpen((o) => !o)}
-            aria-expanded={sourcesOpen}
-          >
-            {sourcesOpen ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
-            )}
-            Fontes da métrica
-            {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
-          </button>
+          <div className="flex items-center gap-1.5 self-start">
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs font-medium"
+              onClick={() => setSourcesOpen((o) => !o)}
+              aria-expanded={sourcesOpen}
+            >
+              {sourcesOpen ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
+              Fontes da métrica
+              {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
+            </button>
+            <SourceConceptsHint />
+          </div>
           {sourcesOpen ? (
             <div className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
