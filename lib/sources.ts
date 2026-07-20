@@ -44,6 +44,11 @@ export interface SourceDef {
   // SUB-FONTE (0078): predicado (WidgetFilter[]) que recorta as linhas da pai.
   // Resolvido no engine com record_types:[record_type da pai] (wrap por fonte).
   filter?: WidgetFilter[];
+  // Fuso horário da ORIGEM (IANA, ex. "Europe/Moscow"; 0079). Datetimes
+  // ingeridos desta fonte são normalizados p/ Brasília na ENTRADA
+  // (lib/date/normalize.ts, aplicado no sync). null/ausente = sem conversão.
+  // Subs não têm (herdam a ingestão da pai).
+  timezone?: string | null;
 }
 
 // Fallback/default: as 3 fontes históricas do produto.
@@ -56,6 +61,7 @@ export const BUILTIN_SOURCES: SourceDef[] = [
     defaultPeriodField: "source_created_at",
     builtin: true,
     manualEntry: false,
+    timezone: "Europe/Moscow",
   },
   {
     key: "deals",
@@ -65,6 +71,7 @@ export const BUILTIN_SOURCES: SourceDef[] = [
     defaultPeriodField: "closed_at",
     builtin: true,
     manualEntry: false,
+    timezone: "Europe/Moscow",
   },
   {
     key: "estudo",

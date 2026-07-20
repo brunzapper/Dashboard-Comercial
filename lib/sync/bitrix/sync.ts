@@ -17,6 +17,8 @@
 //   materializa os campos calculados (computeFormulaFields) em custom_fields.
 // v1.3 (09/07/2026): Fase 8 — contabiliza resultado por entidade (lead/negócio)
 //   e captura a mensagem do erro (recordOutcome/recordError) em vez de engolir.
+// v1.4 (19/07/2026): fuso da fonte — SyncContext.timezones (data_sources.timezone
+//   por record_type) chega ao mapper; datetimes normalizam p/ Brasília (0079).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
@@ -588,6 +590,32 @@ export interface SyncContext {
   leadMapping: CustomMapEntry[];
   formulaDefs: FormulaFieldDef[];
   customDateKeys: string[];
+  // Fuso da ORIGEM por record_type (data_sources.timezone): datetimes são
+  // normalizados p/ Brasília no mapper. null = sem conversão.
+  timezones: SourceTimezones;
+}
+
+export interface SourceTimezones {
+  lead: string | null;
+  negocio: string | null;
+}
+
+// Fuso configurado das fontes Bitrix. Erro de select (ex.: migração 0079 ainda
+// não aplicada) degrada para passthrough — sync nunca para por causa disso.
+async function loadSourceTimezones(db: SupabaseClient): Promise<SourceTimezones> {
+  const tz: SourceTimezones = { lead: null, negocio: null };
+  const { data, error } = await db
+    .from("data_sources")
+    .select("record_type, timezone")
+    .in("record_type", ["lead", "negocio"]);
+  if (error || !data) return tz;
+  for (const row of data) {
+    const rt = row.record_type as keyof SourceTimezones;
+    if (rt === "lead" || rt === "negocio") {
+      tz[rt] = (row.timezone as string | null) || null;
+    }
+  }
+  return tz;
 }
 
 /** `since` (YYYY-MM-DDTHH:MM:SS) para uma janela corrida de N dias. */
@@ -610,7 +638,7 @@ async function fetchAndSyncDeals(
   });
   for (const raw of deals) {
     try {
-      const mapped = await mapDeal(raw, lookups, ctx.dealMapping);
+      const mapped = await mapDeal(raw, lookups, ctx.dealMapping, ctx.timezones.negocio);
       const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs, ctx.customDateKeys);
       recordOutcome(result, "negocio", outcome);
     } catch (e) {
@@ -633,7 +661,7 @@ async function fetchAndSyncLeads(
   });
   for (const raw of leads) {
     try {
-      const mapped = await mapLead(raw, lookups, ctx.leadMapping);
+      const mapped = await mapLead(raw, lookups, ctx.leadMapping, ctx.timezones.lead);
       const outcome = await upsertRecord(db, mapped, lookups, ctx.formulaDefs, ctx.customDateKeys);
       recordOutcome(result, "lead", outcome);
     } catch (e) {
@@ -653,6 +681,7 @@ export async function buildSyncContext(
     leadMapping: buildCustomMapping(lookups, "lead"),
     formulaDefs: await loadFormulaDefs(db),
     customDateKeys: await loadCustomDateKeys(db),
+    timezones: await loadSourceTimezones(db),
   };
 }
 

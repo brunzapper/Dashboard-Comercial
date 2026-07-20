@@ -55,6 +55,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   isso. Catálogo por-registro dos campos calculados é ÚNICO
   (`perRecordCalcOperands`, `lib/records/calc-operands.ts`) — os dois editores
   e a validação do servidor derivam dele; não monte listas paralelas.
+- **Datas são strings no fuso de Brasília (0079/0080):** valores DATETIME
+  ingeridos de fonte com `data_sources.timezone` configurado (Bitrix =
+  `Europe/Moscow`) são convertidos para America/Sao_Paulo na ENTRADA
+  (`lib/date/normalize.ts`, aplicado no mapper do sync — `dateOrNull`/
+  `resolveCustom`). O read side inteiro é prefix-based (lê o `YYYY-MM-DD`
+  literal) e depende disso. Campo Bitrix tipo `date` é calendário puro — NUNCA
+  converter (recuaria um dia); date-only é sempre passthrough. O formato
+  emitido (`YYYY-MM-DDTHH:mm:ss-03:00`) deve seguir byte-idêntico ao do
+  backfill 0080, senão o reconcile churna. Nada disso toca as RPCs (não aciona
+  a invariante de espelhamento). Ver `docs/arquitetura.md` §4.5 e invariante 11.
 - **Sub-fontes (0078) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
   (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
   `filter` (WidgetFilter[]), com campo de data próprio. Compartilha o

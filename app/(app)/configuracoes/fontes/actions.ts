@@ -1,4 +1,6 @@
-// Versão: 2.2 | Data: 19/07/2026
+// Versão: 2.3 | Data: 19/07/2026
+// v2.3 (19/07/2026): timezone (0079) — fuso da ORIGEM da fonte (IANA), validado
+//   com Intl; vazio = sem conversão. Datetimes ingeridos normalizam p/ Brasília.
 // v2.2 (19/07/2026): SUB-FONTES (0078) — CRUD de `sub_sources` (fonte derivada
 //   de uma pai, recortada por um filtro). createSubSource/updateSubSource/
 //   deleteSubSource; o predicado chega como JSON (WidgetFilter[]) e é saneado.
@@ -94,23 +96,36 @@ function cleanText(v: FormDataEntryValue | null, max: number): string {
     .slice(0, max);
 }
 
+// Nome IANA real? (o CHECK da 0079 só valida o formato; aqui o Intl decide.)
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readSourceForm(formData: FormData): {
   label: string;
   shortLabel: string;
   periodField: string;
   manualEntry: boolean;
+  timezone: string | null;
   error?: string;
 } {
   const label = cleanText(formData.get("label"), 60);
   const shortLabel = cleanText(formData.get("short_label"), 40);
   const periodField = cleanText(formData.get("default_period_field"), 40);
   const manualEntry = String(formData.get("manual_entry") ?? "") === "1";
+  const timezone = cleanText(formData.get("timezone"), 64) || null;
   if (label.length < 2) {
     return {
       label,
       shortLabel,
       periodField,
       manualEntry,
+      timezone,
       error: "Informe o nome da fonte.",
     };
   }
@@ -120,10 +135,21 @@ function readSourceForm(formData: FormData): {
       shortLabel,
       periodField,
       manualEntry,
+      timezone,
       error: "Campo de período inválido.",
     };
   }
-  return { label, shortLabel, periodField, manualEntry };
+  if (timezone && !isValidTimezone(timezone)) {
+    return {
+      label,
+      shortLabel,
+      periodField,
+      manualEntry,
+      timezone,
+      error: "Fuso horário inválido (use um nome IANA, ex.: Europe/Moscow).",
+    };
+  }
+  return { label, shortLabel, periodField, manualEntry, timezone };
 }
 
 export async function createSource(
@@ -131,7 +157,7 @@ export async function createSource(
   formData: FormData
 ): Promise<SourceActionState> {
   await requireRole("admin");
-  const { label, shortLabel, periodField, manualEntry, error } =
+  const { label, shortLabel, periodField, manualEntry, timezone, error } =
     readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
@@ -164,6 +190,7 @@ export async function createSource(
     default_period_field: periodField,
     builtin: false,
     manual_entry: manualEntry,
+    timezone,
   });
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
@@ -178,7 +205,7 @@ export async function updateSource(
 ): Promise<SourceActionState> {
   await requireRole("admin");
   const key = cleanText(formData.get("key"), 40);
-  const { label, shortLabel, periodField, manualEntry, error } =
+  const { label, shortLabel, periodField, manualEntry, timezone, error } =
     readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
@@ -190,6 +217,7 @@ export async function updateSource(
       short_label: shortLabel || label,
       default_period_field: periodField,
       manual_entry: manualEntry,
+      timezone,
     })
     .eq("key", key);
   if (updateError) {
