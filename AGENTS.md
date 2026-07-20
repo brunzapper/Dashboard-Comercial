@@ -44,8 +44,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   filtros rápidos deve cobrir fontes do widget ∪ fontes das métricas ∪ fontes
   dos operandos com ESCOPO (`agg:…@<fonte>`) — `widgetQuerySources` com
   `fieldByKey` na page, no viewer de snapshot e no widget-scope — sem
-  isso as pernas perdem registros em silêncio. Ver `docs/arquitetura.md` §4.1
-  e invariante 9.
+  isso as pernas perdem registros em silêncio. Pernas com fontes COBERTAS pelo
+  widget (inclusive widget em "todas as fontes") reusam os registros de
+  exibição + top-up de mocks `is_mock = true`
+  (`runCoveredLegMockTopUp`/`recordListIncludesMocks`,
+  `lib/widgets/record-list.ts`) mesclado ao stream de extras — a regra 0052
+  client-side decide-se SÓ em `resolveListFilters` (record-list.ts); não a
+  duplique nem a resolva via RPC. Ver `docs/arquitetura.md` §4.1 e
+  invariante 9.
 - **Operando com escopo de fonte se resolve no ENGINE, nunca no RPC:** o ref
   `agg:<agg>:<campo>@<fonte>` é ABAIXADO em runtime para a chave condicional
   `aggif:` já existente (predicado `record_type =` + filtro da sub) por

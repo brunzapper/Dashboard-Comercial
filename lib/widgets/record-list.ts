@@ -1,4 +1,11 @@
-// Versão: 1.6 | Data: 19/07/2026
+// Versão: 1.7 | Data: 20/07/2026
+// v1.7 (20/07/2026): top-up de mocks das pernas COBERTAS — quando as fontes da
+//   métrica (Metric.sources) já estão dentro das do widget (inclusive widget em
+//   "todas as fontes"), não há fetch extra e a regra dos mocks da EXIBIÇÃO não
+//   vê as métricas das pernas → mocks de Data Reunião sumiam da basis. Agora um
+//   fetch adicional só de is_mock=true (runCoveredLegMockTopUp; pipeline
+//   idêntico via resolveListFilters/recordListIncludesMocks) entra no stream de
+//   extras — mocks na basis sem virar linha, paridade com o caminho RPC.
 // v1.6 (19/07/2026): attachMatches com chunks em PARALELO (Promise.all) nas
 //   duas fases (record_matches e registros parceiros) — antes eram awaits
 //   seriais (~2×N/200 round-trips em sequência numa lista grande). Resultado
@@ -37,7 +44,7 @@ import {
 } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { partitionMetricLegs } from "./metric-sources";
+import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
 import { includesMockReuniaoRef } from "./mock-reuniao";
 import {
@@ -103,22 +110,16 @@ function postgrestCond(col: string, op: string, value: unknown): string | null {
 }
 
 /**
- * Constrói a consulta de registros de um widget em modo lista (fontes/período/
- * filtros — mesma semântica de runWidget) SEM executá-la. Compartilhado por
- * runRecordList (conjunto completo) e runRecordListPage (página + count).
+ * Pipeline de filtros efetivos do modo lista + regra dos mocks (0052) — o
+ * ÚNICO ponto client-side que decide se uma config "referencia Data Reunião"
+ * (paridade com o RPC; ver ./mock-reuniao). Compartilhado por
+ * buildRecordListQuery e recordListIncludesMocks — não duplique esta decisão.
  */
-function buildRecordListQuery(
-  supabase: SupabaseClient,
+function resolveListFilters(
   config: WidgetConfig,
   period: DashboardPeriod | null | undefined,
-  // Catálogo de campos: usado só p/ resolver filtros unified:* (membros por
-  // record_type). Ausente = filtros unificados são ignorados (compat).
   available: AvailableField[],
-  opts?: { count?: boolean },
-  // Catálogo de FONTES (0078): resolve a fonte efetiva por record_type (subs
-  // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
-  // (sem sub-fontes → comportamento legado idêntico).
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[]
 ) {
   // SUB-FONTES: fontes efetivas da consulta (uma por record_type). Ativa só
   // quando há sub selecionada — senão usa config.sources cru (legado).
@@ -153,6 +154,49 @@ function buildRecordListQuery(
       ? [filters, config.settings?.columns ?? []]
       : [filters, config.dimensions ?? [], config.metrics ?? []];
   const includeMocks = includesMockReuniaoRef(refParts, available);
+  return { filters, includeMocks };
+}
+
+/**
+ * Regra dos mocks (0052) de uma config de modo lista SEM executar a consulta:
+ * true = o fetch serviria os mocks de Data Reunião. Usada nos gates do top-up
+ * das pernas cobertas (runCoveredLegMockTopUp).
+ */
+export function recordListIncludesMocks(
+  config: WidgetConfig,
+  period: DashboardPeriod | null | undefined,
+  available: AvailableField[],
+  catalog: SourceDef[] = BUILTIN_SOURCES
+): boolean {
+  return resolveListFilters(config, period, available, catalog).includeMocks;
+}
+
+/**
+ * Constrói a consulta de registros de um widget em modo lista (fontes/período/
+ * filtros — mesma semântica de runWidget) SEM executá-la. Compartilhado por
+ * runRecordList (conjunto completo) e runRecordListPage (página + count).
+ */
+function buildRecordListQuery(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  period: DashboardPeriod | null | undefined,
+  // Catálogo de campos: usado só p/ resolver filtros unified:* (membros por
+  // record_type). Ausente = filtros unificados são ignorados (compat).
+  available: AvailableField[],
+  // onlyMocks: SÓ is_mock=true (top-up das pernas cobertas) — o chamador
+  // (runCoveredLegMockTopUp) garante que a config referencia Data Reunião.
+  opts?: { count?: boolean; onlyMocks?: boolean },
+  // Catálogo de FONTES (0078): resolve a fonte efetiva por record_type (subs
+  // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
+  // (sem sub-fontes → comportamento legado idêntico).
+  catalog: SourceDef[] = BUILTIN_SOURCES
+) {
+  const { filters, includeMocks } = resolveListFilters(
+    config,
+    period,
+    available,
+    catalog
+  );
 
   const unifiedMembersOf = (field: string) =>
     available.find((a) => a.field === field)?.unifiedMembers;
@@ -175,7 +219,8 @@ function buildRecordListQuery(
   let q = supabase
     .from("records")
     .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
-  if (!includeMocks) q = q.eq("is_mock", false);
+  if (opts?.onlyMocks) q = q.eq("is_mock", true);
+  else if (!includeMocks) q = q.eq("is_mock", false);
   for (const f of filters as WidgetFilter[]) {
     if (f.field === BUCKET_FIELD_SENTINEL) {
       const bf = bucketFilterValue(f);
@@ -349,14 +394,15 @@ export async function runRecordList(
   config: WidgetConfig,
   period?: DashboardPeriod | null,
   available: AvailableField[] = [],
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  opts?: { onlyMocks?: boolean }
 ): Promise<RecordRow[]> {
   const { q, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,
     period,
     available,
-    undefined,
+    opts,
     catalog
   );
 
@@ -378,6 +424,47 @@ export async function runRecordList(
 }
 
 /**
+ * TOP-UP de mocks das pernas COBERTAS (fontes da métrica dentro das do widget,
+ * inclusive widget em "todas as fontes"): pernas cobertas reusam os registros
+ * de EXIBIÇÃO, cuja regra dos mocks nunca inspeciona as métricas das pernas
+ * (paridade com o RPC) — sem isto, mocks de Data Reunião somem da basis. Busca
+ * SÓ is_mock=true com o mesmo pipeline (topUpConfig = a config do fetch extra
+ * do chamador, com as fontes cobertas) quando:
+ *  (a) a config das pernas referenciaria Data Reunião (0052) — inspeção em
+ *      CONJUNTO das métricas das pernas, a mesma aproximação do fetch extra; e
+ *  (b) a config de EXIBIÇÃO não referenciou — senão os mocks já estão nos
+ *      registros de exibição e duplicariam.
+ * Mocks seguem sem virar linha: entram só pelos streams de extras.
+ */
+export async function runCoveredLegMockTopUp(
+  supabase: SupabaseClient,
+  displayConfig: WidgetConfig,
+  topUpConfig: WidgetConfig,
+  period: DashboardPeriod | null | undefined,
+  available: AvailableField[],
+  catalog: SourceDef[] = BUILTIN_SOURCES
+): Promise<RecordRow[]> {
+  if (!topUpConfig.sources || topUpConfig.sources.length === 0) return [];
+  if (!recordListIncludesMocks(topUpConfig, period, available, catalog))
+    return [];
+  if (recordListIncludesMocks(displayConfig, period, available, catalog))
+    return [];
+  return runRecordList(supabase, topUpConfig, period, available, catalog, {
+    onlyMocks: true,
+  });
+}
+
+/**
+ * Mescla extras + top-up sem duplicar por id: com sub-fontes, fontes distintas
+ * compartilham record_type e um mock poderia vir nos dois fetches.
+ */
+export function dedupeById(a: RecordRow[], b: RecordRow[]): RecordRow[] {
+  if (b.length === 0) return a;
+  const seen = new Set(a.map((r) => r.id));
+  return [...a, ...b.filter((r) => !seen.has(r.id))];
+}
+
+/**
  * runRecordList + registros EXTRAS das fontes das pernas (Metric.sources):
  * o conjunto de exibição fica INTACTO (fontes do widget, mesma regra dos
  * mocks de sempre — filtros + colunas); `extra` traz os registros das fontes
@@ -386,8 +473,9 @@ export async function runRecordList(
  * remove rowMode/columns/limit: sem rowMode, a regra dos mocks inspeciona
  * filtros + dimensões + MÉTRICAS (as das pernas) — mocks de Data Reunião
  * entram na basis sem nunca virar linha. Fontes de perna já cobertas pelo
- * widget não são re-buscadas (o cliente filtra os registros de exibição por
- * record_type ao compor o escopo).
+ * widget reusam os registros de exibição (o cliente filtra por record_type ao
+ * compor o escopo) e recebem só o top-up de mocks (runCoveredLegMockTopUp),
+ * mesclado em `extra`.
  */
 export async function runRecordListWithExtras(
   supabase: SupabaseClient,
@@ -411,30 +499,38 @@ export async function runRecordListWithExtras(
           (s) => !config.sources!.includes(s)
         )
       : [];
-  const [records, extra] = await Promise.all([
+  const covered = coveredLegSources(legs, config.sources);
+  // Config dos fetches auxiliares: sem rowMode/columns a regra dos mocks
+  // inspeciona filtros + dimensões + MÉTRICAS (as das pernas).
+  const auxConfig = (sources: typeof extraSources): WidgetConfig => ({
+    ...config,
+    sources,
+    dimensions: [],
+    metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
+    settings: {
+      ...config.settings,
+      rowMode: undefined,
+      columns: undefined,
+      limit: undefined,
+    },
+  });
+  const [records, extra, topUp] = await Promise.all([
     runRecordList(supabase, config, period, available, catalog),
     extraSources.length > 0
-      ? runRecordList(
+      ? runRecordList(supabase, auxConfig(extraSources), period, available, catalog)
+      : Promise.resolve([] as RecordRow[]),
+    covered.length > 0
+      ? runCoveredLegMockTopUp(
           supabase,
-          {
-            ...config,
-            sources: extraSources,
-            dimensions: [],
-            metrics: legs.flatMap((l) => l.idx.map((i) => config.metrics[i])),
-            settings: {
-              ...config.settings,
-              rowMode: undefined,
-              columns: undefined,
-              limit: undefined,
-            },
-          },
+          config,
+          auxConfig(covered),
           period,
           available,
           catalog
         )
       : Promise.resolve([] as RecordRow[]),
   ]);
-  return { records, extra };
+  return { records, extra: dedupeById(extra, topUp) };
 }
 
 /**
