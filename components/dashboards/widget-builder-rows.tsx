@@ -55,6 +55,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
 import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import type { SourceDef, SourceKey } from "@/lib/sources";
@@ -383,6 +384,7 @@ export function MetricRow({
   isCalcSentinel,
   calcRefs,
   sourceDefs,
+  previewAdapter,
   resultFormatOptions,
   defaultLabel,
   fieldMenu,
@@ -401,6 +403,9 @@ export function MetricRow({
   calcRefs: RefOption[];
   // Catálogo de fontes vivo — warnings de escopo @fonte do FormulaEditor.
   sourceDefs?: SourceDef[];
+  // Prévia agregada da fórmula ad-hoc (montada pelo builder, que conhece
+  // fontes/filtros do widget) — opt-in por clique (custa RPCs).
+  previewAdapter?: FormulaPreviewAdapter;
   resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
@@ -485,6 +490,7 @@ export function MetricRow({
                 : null
             }
             onChange={(f) => onChange({ formula: f })}
+            preview={previewAdapter}
             header={
               <RecipeStrip
                 recipes={["conversion_rate"]}

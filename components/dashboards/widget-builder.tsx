@@ -84,7 +84,9 @@ import { FieldForm } from "@/components/campos/field-form";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
 import { RecipeStrip } from "@/components/formula/recipe-strip";
+import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   type KanbanSettings,
@@ -565,6 +567,25 @@ export function WidgetBuilder({
     null
   );
   const [calcRecipeNonce, setCalcRecipeNonce] = useState(0);
+  // Prévia AGREGADA (opt-in; custa RPCs como um widget): fórmula avaliada por
+  // runCalculatedWidget com as fontes/filtros correntes do builder, sem o
+  // período da barra (o builder não o conhece — o selo avisa).
+  const aggPreview = (
+    previewSources: SourceKey[],
+    resultPercent: boolean,
+    resultCurrency: string | null
+  ): FormulaPreviewAdapter => ({
+    title: "Prévia do resultado",
+    manualStart: true,
+    run: (f) =>
+      previewAggregateFormula({
+        formulaJson: JSON.stringify(f),
+        sources: previewSources,
+        filters,
+        resultPercent,
+        resultCurrency,
+      }),
+  });
 
   // Calculadora: variáveis nomeadas (fórmulas agregadas computadas no servidor
   // com filtros+período do widget; inseridas na expressão do card como [Nome]).
@@ -2021,6 +2042,7 @@ export function WidgetBuilder({
                       calcRecipeFormula ?? widget?.settings?.formula ?? null
                     }
                     onChange={(f) => setFormula(f)}
+                    preview={aggPreview(sources, false, null)}
                     header={
                       <RecipeStrip
                         recipes={["conversion_rate"]}
@@ -2087,7 +2109,8 @@ export function WidgetBuilder({
                     </Button>
                   </div>
                   {/* Editor completo (visual+texto) — antes as variáveis eram
-                      texto-only; ganharam paleta de funções e validação viva. */}
+                      texto-only; ganharam paleta de funções, validação viva e
+                      prévia. */}
                   <FormulaEditor
                     context="aggregate"
                     catalog={calcRefs}
@@ -2095,6 +2118,7 @@ export function WidgetBuilder({
                     sources={catalog}
                     initial={v.formula ?? null}
                     onChange={(f) => updateVariable(i, { formula: f })}
+                    preview={aggPreview(sources, false, null)}
                   />
                 </div>
               ))}
@@ -2877,6 +2901,11 @@ export function WidgetBuilder({
                 isCalcSentinel={m.field === CALC_METRIC_FIELD}
                 calcRefs={calcRefs}
                 sourceDefs={catalog}
+                previewAdapter={aggPreview(
+                  m.sources && m.sources.length > 0 ? m.sources : sources,
+                  m.resultPercent === true,
+                  m.resultCurrency ?? null
+                )}
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
                   { value: "percent", label: "Percentual (%) — exibe ×100" },

@@ -47,6 +47,7 @@ import {
   type FieldActionState,
 } from "@/app/(app)/campos/actions";
 import { previewRecordFormula } from "@/app/(app)/campos/preview-actions";
+import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import type { RefOption } from "@/lib/records/date-operands";
 import type { Formula } from "@/lib/records/formulas";
 import { FormulaEditor } from "@/components/formula/formula-editor";
@@ -320,6 +321,23 @@ export function FieldForm({
             initial={recipeFormula ?? field?.formula ?? null}
             formInputs
             excludeKeys={forbidden}
+            preview={{
+              title: "Prévia do resultado (todas as fontes)",
+              manualStart: true,
+              // Mesmo choke point dos widgets (runCalculatedWidget) — sem
+              // período/filtros: o campo salvo respeita o recorte de cada
+              // widget onde for usado.
+              run: (f) =>
+                previewAggregateFormula({
+                  formulaJson: JSON.stringify(f),
+                  sources: [],
+                  filters: [],
+                  resultPercent: calcCurrency === "percent",
+                  resultCurrency: calcCurrency.startsWith("fixed:")
+                    ? calcCurrency.slice("fixed:".length)
+                    : null,
+                }),
+            }}
           />
           <p className="text-muted-foreground text-xs">
             O resultado é calculado sobre os <strong>totais do recorte</strong>{" "}
