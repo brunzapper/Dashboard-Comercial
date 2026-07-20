@@ -143,6 +143,8 @@ export const PRESET_FIELDS: PresetField[] = [
   },
 ];
 
+import { INBOUND_PRESET } from "./inbound";
+
 // Filtros reutilizáveis
 const closedThisMonth: WidgetFilter[] = [
   { field: "closed", op: "eq", value: true },
@@ -155,6 +157,7 @@ const closedThisYear: WidgetFilter[] = [
 ];
 
 export const PRESETS: PresetDashboard[] = [
+  INBOUND_PRESET,
   {
     presetKey: "performance_mes",
     version: 1,
