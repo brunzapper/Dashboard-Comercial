@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 20/07/2026
+// Versão: 1.5 | Data: 20/07/2026
+// v1.5 (20/07/2026): unifiedMembers RAIZ primeiro — pai e sub (0078) compartilham
+//   o record_type e o Object.fromEntries deixava o membro da SUB sobrescrever o
+//   da pai (last-wins) nos caminhos client-side de widget só-pai.
 // Campos disponíveis no construtor de widgets: colunas do núcleo (com rótulos
 // PT) + campos personalizados (custom:<key>). Marca quais são numéricos
 // (métricas), quais são datas (aceitam transform) e quais são FK (resolver
@@ -52,7 +55,9 @@ export interface AvailableField {
   // Só p/ unificados: membro por record_type (ex.: { negocio: 'closed_at',
   // venda_site: 'custom:data' }). Permite resolver o valor POR REGISTRO nos
   // caminhos client-side (modo registros, "Agrupar período"), espelhando o
-  // coalesce que o RPC monta.
+  // coalesce que o RPC monta. RAIZ primeiro (0078/v1.5): pai e sub compartilham
+  // o record_type — o membro da sub NUNCA sobrescreve o da raiz; só entra p/
+  // record_type que não tem membro raiz (correspondência só-sub).
   unifiedMembers?: Record<string, string>;
   // Pode ser editável inline na tabela de registros (custom não calculado, ou
   // coluna do núcleo suportada). O toggle "Editável" do builder só aparece p/ estes.
@@ -304,19 +309,32 @@ export function buildAvailableFields(
           source: singleFieldSource(f, byKey),
         }
   );
-  const unified = correspondences.map((c) => ({
-    field: `unified:${c.key}`,
-    label: `↔ ${c.label}`,
-    isNumeric: NUMERIC_DATA_TYPES.includes(c.data_type),
-    isDate: c.data_type === "data",
-    isMoney: c.data_type === "moeda",
-    unified: true,
-    unifiedMembers: Object.fromEntries(
-      c.members
-        .filter((m) => m.field_ref)
-        .map((m) => [m.record_type, m.field_ref])
-    ),
-  }));
+  // SUB-FONTES (0078): pai e sub compartilham o record_type, então o mapa por
+  // record_type colidiria — RAIZ primeiro (first-wins), membro de sub só
+  // preenche record_type SEM membro raiz. Assim o caminho client-side espelha a
+  // consulta principal (fonte efetiva = raiz); o membro da sub em perna própria
+  // resolve por source_key (correspondenceMapForSources), não por este mapa.
+  const subKeys = new Set(sources.filter((s) => s.parentKey).map((s) => s.key));
+  const unified = correspondences.map((c) => {
+    const members: Record<string, string> = {};
+    const withRef = c.members.filter((m) => m.field_ref);
+    for (const m of withRef) {
+      if (!subKeys.has(m.source_key) && !(m.record_type in members))
+        members[m.record_type] = m.field_ref;
+    }
+    for (const m of withRef) {
+      if (!(m.record_type in members)) members[m.record_type] = m.field_ref;
+    }
+    return {
+      field: `unified:${c.key}`,
+      label: `↔ ${c.label}`,
+      isNumeric: NUMERIC_DATA_TYPES.includes(c.data_type),
+      isDate: c.data_type === "data",
+      isMoney: c.data_type === "moeda",
+      unified: true,
+      unifiedMembers: members,
+    };
+  });
   const match = buildMatchFields(customFields, sources);
   const all = [...core, TODAY_FIELD, ...custom, ...unified, ...match];
   decorateFormulaTexts(all, byKey);

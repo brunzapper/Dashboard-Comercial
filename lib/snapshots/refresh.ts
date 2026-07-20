@@ -138,6 +138,8 @@ async function doRefresh(
   const fields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dashData.settings ?? {}) as DashboardSettings;
   const available = buildAvailableFields(fields, correspondences, sources);
+  // SÓ para o RPC de OPÇÕES dos filtros rápidos congelados (display) —
+  // consultas de widget montam o mapa por perna (correspondenceMapForSources).
   const correspondencesMap = buildCorrespondenceMap(correspondences);
 
   // 2) Aba efetiva e widgets da aba (mesma semântica de widgetTab da page).

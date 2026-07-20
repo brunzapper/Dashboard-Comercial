@@ -61,7 +61,6 @@ import {
   type EntityRowSource,
 } from "@/lib/widgets/entity-list";
 import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
-import { buildCorrespondenceMap } from "@/lib/correspondences";
 import {
   applyPeriodToFilters,
   resolvePeriodSelection,
@@ -208,7 +207,6 @@ export default async function SnapshotPage({
   );
   const available = buildAvailableFields(fields, correspondences, sources);
   const sourceLabels = mergeSourceLabels(sourceLabelsValue, sources);
-  const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
   const allowQuickFilters = snap.allow_quick_filters;
@@ -512,7 +510,6 @@ export default async function SnapshotPage({
             fields,
             currencyRates,
             conversionPeriodById[w.id],
-            correspondencesMap,
             { excludeRecordIds: partnerIds },
             sources,
             correspondences
@@ -581,7 +578,6 @@ export default async function SnapshotPage({
           config,
           available,
           periodByWidget[w.id],
-          correspondencesMap,
           fields,
           currencyRates,
           conversionPeriodById[w.id],
@@ -651,7 +647,7 @@ export default async function SnapshotPage({
           sourceDefs: sources,
           filters: effectiveFilters(w),
           period: periodByWidget[w.id],
-          correspondencesMap,
+          correspondences,
           currencyMode:
             def?.currency_mode === "fixed"
               ? "fixed"
@@ -687,7 +683,7 @@ export default async function SnapshotPage({
               sourceDefs: sources,
               filters: effectiveFilters(w),
               period: periodByWidget[w.id],
-              correspondencesMap,
+              correspondences,
               currencyMode: "auto",
               fields,
               rates: currencyRates,
@@ -715,7 +711,7 @@ export default async function SnapshotPage({
               sourceDefs: sources,
               filters: effectiveFilters(w),
               period: periodByWidget[w.id],
-              correspondencesMap,
+              correspondences,
               currencyMode: "auto",
               fields,
               rates: currencyRates,
@@ -782,7 +778,6 @@ export default async function SnapshotPage({
               config,
               available,
               period,
-              correspondencesMap,
               fields,
               currencyRates,
               conversionPeriod,
@@ -819,7 +814,7 @@ export default async function SnapshotPage({
                 sourceDefs: sources,
                 filters,
                 period,
-                correspondencesMap,
+                correspondences,
                 currencyMode: "auto",
                 fields,
                 rates: currencyRates,

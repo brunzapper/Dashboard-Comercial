@@ -1,10 +1,15 @@
-<!-- Versão: 1.6 | Data: 20/07/2026 -->
-<!-- v1.6 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
+<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- v1.7 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
      utilitários de dia útil; businessDayAlign (pernas por mês no engine);
      base de comparação previous_period_bd; goalLine (meta/ritmo como série);
      metas por métrica arbitrária (registry goal_metrics); preset engine v2
      (§4.7 — aplicação idempotente por presetKey); sub-fonte com campo de
      período custom (0082, §4.8). RPCs intocados em tudo. -->
+<!-- v1.6 (20/07/2026): unificados SEMPRE por perna — o mapa p_correspondences
+     de TODA consulta sai de correspondenceMapForSources (fallback perna →
+     raízes → todos); buildCorrespondenceMap fica só p/ opções de bucket;
+     unifiedMembers é raiz-primeiro (§4.8; invariante 10). Corrige o membro de
+     sub-fonte vazando no coalesce de widget só-pai. -->
 <!-- v1.5 (20/07/2026): top-up de mocks das pernas COBERTAS — fontes da métrica
      dentro das do widget (inclusive "todas as fontes") recebem os mocks de
      Data Reunião via fetch is_mock=true no engine (§4.1; invariante 9). -->
@@ -483,6 +488,19 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   senão pai+sub colidiriam num mesmo coalesce). Como cada `record_type` tem UMA
   fonte efetiva, `byType`/coalesce/`record_type in` continuam chaveados por
   `record_type` e o par `run_widget_query`/`_snapshot` fica intocado.
+- **Mapa de unificados SEMPRE por perna (v1.6):** TODA consulta (`runWidget`,
+  `runCalculatedWidget` — calc/calculadora/nota/card/`{=…}` — e as pernas por
+  métrica) monta `p_correspondences` com `correspondenceMapForSources(corrs,
+  fontes efetivas, catálogo)` — nunca com o mapa global. Não é só quando há sub
+  selecionada: como a sub compartilha o `record_type` da pai, o membro dela num
+  campo unificado entraria no `coalesce` de um widget SÓ-PAI (o `record_type
+  in` não o exclui — as linhas são as mesmas) e mudaria resultados
+  silenciosamente. Fallback perna → membros de fontes RAIZ → todos (o RPC ergue
+  "Correspondência sem colunas" p/ chave referenciada ausente; snapshots
+  pré-0078 têm membros sem `source_key`). `buildCorrespondenceMap` (união
+  global) sobrevive SÓ nos RPCs de opções de bucket (display). O espelho
+  client-side `AvailableField.unifiedMembers` (por `record_type`) é
+  RAIZ-primeiro: membro de sub só preenche `record_type` sem membro raiz.
 - **Conviver (toggle `settings.coexistSubSources`):** marcar uma sub como
   "conviver" (com a pai também selecionada), ou selecionar 2+ subs da mesma pai,
   gera **pernas EXTRAS** — no caminho agregado, cada fonte de linha vira uma
@@ -623,9 +641,14 @@ principalmente — para mantenedores humanos.
     `lib/widgets/engine.ts`/`record-list.ts`). O par
     `run_widget_query`/`run_widget_query_snapshot` **não conhece o conceito** —
     não recrie as RPCs para isso (não acione a invariante 1). O membro de
-    unificado é por `source_key`; use `correspondenceMapForSources` (um ref por
-    perna) — misturar o membro da pai e o da sub no mesmo `coalesce` pega o 1º
-    não-nulo (uma linha com as duas colunas preenchidas erra). Ver §4.8.
+    unificado é por `source_key`; o `p_correspondences` de TODA consulta sai de
+    `correspondenceMapForSources` (um ref por perna, fallback perna → raízes →
+    todos; v1.6) — misturar o membro da pai e o da sub no mesmo `coalesce` pega
+    o 1º não-nulo (uma linha com as duas colunas preenchidas erra), e isso vale
+    TAMBÉM para widget que nem selecionou a sub (mesmas linhas, mesmo
+    `record_type`). Nunca passe `buildCorrespondenceMap` (união global) a uma
+    consulta — ele é só das opções de bucket. `AvailableField.unifiedMembers`
+    (por `record_type`) é RAIZ-primeiro pelo mesmo motivo. Ver §4.8.
 
 11. **Datas são strings no fuso de Brasília.** Valores **datetime** ingeridos de
     fonte com `data_sources.timezone` configurado (0079) são convertidos para

@@ -88,7 +88,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   membro de campo unificado passa a ser identificado pela SOURCE-KEY
   (`field_correspondence_members.source_key`) — `correspondenceMapForSources`
   monta um ref por perna (não misture o membro da pai e o da sub no mesmo
-  coalesce: uma linha com as duas colunas preenchidas pegaria a 1ª). Só quando
+  coalesce: uma linha com as duas colunas preenchidas pegaria a 1ª). O
+  `p_correspondences` de TODA consulta (`runWidget`, `runCalculatedWidget`,
+  pernas por métrica) sai de `correspondenceMapForSources(corrs, fontes
+  efetivas, catálogo)` — SEMPRE, não só quando há sub selecionada: o membro da
+  sub num unificado vazaria pro coalesce de widget SÓ-PAI (mesmas linhas, mesmo
+  `record_type`). Fallback interno perna → raízes → todos (o RPC ergue erro p/
+  chave referenciada ausente). NUNCA passe `buildCorrespondenceMap` (união
+  global) a uma consulta — só às opções de bucket.
+  `AvailableField.unifiedMembers` (client-side, por `record_type`) é
+  RAIZ-primeiro: sub nunca sobrescreve o membro da pai. Só quando
   o toggle `settings.coexistSubSources` marca uma sub como "conviver" (ou há 2+
   subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
   caminho agregado); nesse caso o usuário garante que os conjuntos são

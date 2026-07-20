@@ -1,11 +1,16 @@
-// Versão: 1.6 | Data: 20/07/2026
-// v1.6 (20/07/2026): dia útil e metas nos gráficos — (a) businessDayAlign:
+// Versão: 1.7 | Data: 20/07/2026
+// v1.7 (20/07/2026): dia útil e metas nos gráficos — (a) businessDayAlign:
 //   pernas por mês via computeRows com o range recortado no N-ésimo dia útil
 //   (comparação ignorada com o align ativo); (b) base previous_period_bd (a
 //   comparação recebe o contexto de feriados); (c) goalLine: série __goal por
 //   bucket mensal via resolveGoal (modo pace usa dias úteis); (d) KPI modo
 //   meta usa a métrica do próprio widget como realizado. Tudo no ENGINE —
 //   RPCs intocados. Ver lib/date/business-days.ts e docs/arquitetura.md §4.9.
+// v1.6 (20/07/2026): mapa de unificados SEMPRE por perna — runWidget perde o
+//   param do mapa global e monta correspondenceMapForSources(correspondências,
+//   fontes efetivas, catálogo) incondicionalmente. O gate involvesSub deixava o
+//   mapa global (com o membro da sub) vazar p/ widget só-pai: o coalesce da pai
+//   passava a ler a coluna da sub (mesmo record_type) e alterava cálculos.
 // v1.5 (20/07/2026): "Agrupar período" — top-up de mocks das pernas COBERTAS
 //   (runCoveredLegMockTopUp): a regra dos mocks da exibição não vê as métricas
 //   das pernas e o fetch extra só cobre fontes que faltam; sem o top-up, mocks
@@ -1395,13 +1400,13 @@ export async function runWidget(
   config: WidgetConfig,
   available: AvailableField[],
   period?: DashboardPeriod | null,
-  correspondencesMapIn: Record<string, string[]> = {},
   fields: FieldDefinition[] = [],
   rates: CurrencyRates = {},
   conversionPeriod: ConversionYQ = yearQuarterOf(null),
   // SUB-FONTES (0078): catálogo + correspondências CRUAS para resolver a fonte
-  // efetiva por record_type (perna). Sem sub-fonte selecionada, o comportamento
-  // é byte a byte o de antes (usa `correspondencesMapIn` global).
+  // efetiva por record_type (perna) e montar o mapa de unificados POR PERNA
+  // (correspondenceMapForSources) — o mapa global poluiria o coalesce da pai
+  // com o membro da sub (mesmo record_type).
   catalog: SourceDef[] = BUILTIN_SOURCES,
   correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
@@ -1428,12 +1433,15 @@ export async function runWidget(
     const p = planSourceLegs(srcs, coexist, catalog);
     return p.allMain ? rootSources(catalog).map((s) => s.key) : p.mainSources;
   };
+  // Mapa de unificados SEMPRE escopado às fontes efetivas da perna (v1.2): o
+  // membro de uma sub NÃO entra no coalesce da pai só por existir na
+  // correspondência — ele só entra quando a sub é a fonte efetiva da perna.
+  // (Fallback perna→raízes→todos dentro do builder cobre correspondências sem
+  // membro nas fontes da perna — o RPC ergueria erro p/ chave ausente.)
   const corrMapForKeys = (keys: SourceKey[]): Record<string, string[]> =>
-    involvesSub
-      ? correspondenceMapForSources(correspondences, keys)
-      : correspondencesMapIn;
+    correspondenceMapForSources(correspondences, keys, catalog);
   // Mapa de correspondências da consulta PRINCIPAL (um ref por record_type, da
-  // fonte efetiva) — sombreia o param p/ que todos os caminhos "default" o usem.
+  // fonte efetiva) — todos os caminhos "default" o usam.
   const correspondencesMap = corrMapForKeys(effKeysOf(config.sources));
 
   // Segmentação por fonte ANTES do @period/sourceFilters: os filtros
@@ -1550,7 +1558,6 @@ export async function runWidget(
           },
           available,
           period,
-          correspondencesMapIn,
           fields,
           rates,
           conversionPeriod,
@@ -1827,7 +1834,7 @@ export async function runWidget(
     }): Promise<LegRun> => {
       const legFilters = filtersOf(leg.sources);
       // Correspondências da perna: um ref por record_type das fontes DELA (subs
-      // resolvem o membro próprio). Sem sub, é o mapa global (corrMapForKeys).
+      // resolvem o membro próprio; raízes, o seu — nunca o da sub).
       const legCorr = corrMapForKeys(effKeysOf(leg.sources));
       const legMetrics: Metric[] = [];
       const idxOfConfig = new Map<number, number>();
