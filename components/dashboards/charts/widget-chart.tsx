@@ -24,6 +24,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Funnel,
   FunnelChart,
   LabelList,
@@ -80,6 +81,7 @@ import {
   fracDigits,
   gridFlags,
   groupByLevels,
+  limitCategories,
   reorderKeys,
   resolveAlign,
   resolveDecimals,
@@ -440,6 +442,8 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- Comparação com período anterior (WidgetData.comparison) ---
   const cmp = data.comparison;
+  // --- Linha de meta (WidgetData.goalLine): valores por linha em __goal ---
+  const goal = data.goalLine;
   // Série fantasma nos gráficos: config explícita; default acompanha "exibir
   // valor do período de comparação".
   const ghost = Boolean(
@@ -458,6 +462,14 @@ export const WidgetChart = memo(function WidgetChart({
   // Texto de tooltip com a variação anexada ("R$ 12 mil · ▲ 8% vs. período
   // anterior"). Séries fantasma (dataKey __cmp) formatam na escala da métrica.
   const chartTooltipText = (v: unknown, dk: string, payload: unknown): string => {
+    // Linha de meta: número puro (ou R$ p/ métrica de meta monetária).
+    if (dk === "__goal") {
+      const n = numOrNull(v);
+      if (n == null) return "—";
+      return goal?.money
+        ? formatMoney(n, "BRL")
+        : n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    }
     const isCmpKey = dk.endsWith("__cmp");
     const baseKey = isCmpKey ? dk.slice(0, -5) : dk;
     const text = moneyChartText(v, baseKey);
@@ -747,7 +759,7 @@ export const WidgetChart = memo(function WidgetChart({
   if (visualType === "pizza" || visualType === "funil") {
     const metricKey = metrics[0]?.key;
     if (!metricKey) return <EmptyState />;
-    const pieData = topWithOther(rows, dimKey, metricKey);
+    const pieData = topWithOther(rows, dimKey, metricKey, ap.categoryLimit);
     // Fatia: cor manual > regra/escala condicional (sobre o valor plotado) >
     // paleta.
     const pieDomains = chartCondActive
@@ -852,9 +864,22 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- categorias (barra/linha): ordem manual ou ordenação, e chips editáveis ---
   const catName = (r: Record<string, unknown>) => String(r[dimKey] ?? "—");
+  // Top-N + "Outros" (categoryLimit) nas barras, ANTES de ordenar — a linha
+  // sintética "Outros" participa da ordenação/cores pelo nome. Linha (série
+  // temporal) fica de fora do corte.
+  const limitedRows =
+    ap.categoryLimit?.n != null &&
+    (visualType === "barra" || visualType === "barra_horizontal")
+      ? limitCategories(
+          plotRows,
+          dimKey,
+          metrics.map((m) => m.key),
+          ap.categoryLimit
+        )
+      : plotRows;
   const chartRows = ap.categorySort
     ? sortRows(
-        plotRows,
+        limitedRows,
         {
           column: dimKey,
           dir: ap.categorySort.dir,
@@ -863,8 +888,8 @@ export const WidgetChart = memo(function WidgetChart({
         (r) => ap.categoryColors?.[catName(r)]?.fill
       )
     : ap.categoryOrder
-      ? applyManualOrder(plotRows, ap.categoryOrder, catName)
-      : plotRows;
+      ? applyManualOrder(limitedRows, ap.categoryOrder, catName)
+      : limitedRows;
   const catNames = chartRows.map(catName);
 
   // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
@@ -981,6 +1006,20 @@ export const WidgetChart = memo(function WidgetChart({
             isAnimationActive={false}
           />
         ))}
+        {goal ? (
+          <Line
+            key="__goal"
+            yAxisId="left"
+            type="monotone"
+            dataKey="__goal"
+            name={goal.label}
+            stroke={goal.color ?? "var(--muted-foreground)"}
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            dot={false}
+            isAnimationActive={false}
+          />
+        ) : null}
       </LineChart>
     );
   }
@@ -1011,8 +1050,12 @@ export const WidgetChart = memo(function WidgetChart({
     })?.fill;
   };
 
+  // Com linha de meta ativa, o container vira ComposedChart (o BarChart do
+  // Recharts não desenha <Line>); sem meta, BarChart original — troca
+  // condicional p/ zero risco de regressão nos widgets existentes.
+  const BarContainer = goal ? ComposedChart : BarChart;
   return wrapCat(
-    <BarChart
+    <BarContainer
       data={chartRows}
       layout={horizontal ? "vertical" : "horizontal"}
       margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
@@ -1063,6 +1106,7 @@ export const WidgetChart = memo(function WidgetChart({
             <Bar
               key={`${m.key}__cmp`}
               {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
+              {...(ap.stacked ? { stackId: "cmp" } : {})}
               dataKey={`${m.key}__cmp`}
               name={`${m.label} (comparação)`}
               fill={resolveSeriesColor(ap, m.key, i)}
@@ -1077,14 +1121,23 @@ export const WidgetChart = memo(function WidgetChart({
         const perColumn =
           singleSeries &&
           (ap.fillMode === "gradient" || hasCatColors || chartCondActive);
+        // Empilhado: um stack único com as séries de métricas; só o segmento
+        // do topo (última métrica) mantém o canto arredondado.
+        const radius: [number, number, number, number] =
+          ap.stacked && i < metrics.length - 1
+            ? [0, 0, 0, 0]
+            : horizontal
+              ? [0, 4, 4, 0]
+              : [4, 4, 0, 0];
         return (
           <Bar
             key={m.key}
             {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
+            {...(ap.stacked ? { stackId: "s" } : {})}
             dataKey={m.key}
             name={m.label}
             fill={base}
-            radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+            radius={radius}
             isAnimationActive={false}
           >
             {perColumn
@@ -1128,7 +1181,21 @@ export const WidgetChart = memo(function WidgetChart({
           </Bar>
         );
       })}
-    </BarChart>
+      {goal ? (
+        <Line
+          key="__goal"
+          {...(horizontal ? {} : { yAxisId: "left" })}
+          type="monotone"
+          dataKey="__goal"
+          name={goal.label}
+          stroke={goal.color ?? "var(--muted-foreground)"}
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          dot={false}
+          isAnimationActive={false}
+        />
+      ) : null}
+    </BarContainer>
   );
 });
 

@@ -1,6 +1,8 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Gerência de Metas (goals) — admin. Escopo global/operação/responsável,
 // período (mês/ano), métrica e alvo. As metas "se comunicam" (roll-up) na leitura.
+// v1.1 (20/07/2026): métricas de meta arbitrárias — as opções vêm do registry
+// (builtins + sync_config 'goal_metrics') e o combobox ganha "+ Nova métrica…".
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
@@ -19,8 +21,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { OptionItem } from "@/lib/records/types";
+import type { GoalMetricDef } from "@/lib/metas/metrics";
+import { goalMetricKeyFromLabel, goalMetricLabel } from "@/lib/metas/metrics";
 import {
   createGoal,
+  createGoalMetric,
   deleteGoal,
   type GoalState,
 } from "@/app/(app)/configuracoes/metas/actions";
@@ -40,7 +45,6 @@ const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
-const METRIC_LABELS: Record<string, string> = { mrr: "MRR", clientes: "Clientes" };
 const MONTH_OPTIONS: ComboboxOption[] = [
   { value: "", label: "Anual" },
   ...MONTHS.map((m, i) => ({ value: String(i + 1), label: m })),
@@ -50,10 +54,8 @@ const SCOPE_OPTIONS: ComboboxOption[] = [
   { value: "operation", label: "Operação" },
   { value: "responsible", label: "Responsável" },
 ];
-const METRIC_OPTIONS: ComboboxOption[] = [
-  { value: "mrr", label: "MRR" },
-  { value: "clientes", label: "Clientes" },
-];
+// Sentinela do combobox de métrica que abre o formulário de métrica nova.
+const NEW_METRIC = "__new__";
 const initial: GoalState = {};
 
 function periodLabel(g: GoalRow): string {
@@ -69,10 +71,12 @@ export function GoalsManager({
   goals,
   operations,
   responsibles,
+  metrics,
 }: {
   goals: GoalRow[];
   operations: OptionItem[];
   responsibles: OptionItem[];
+  metrics: GoalMetricDef[];
 }) {
   const [state, formAction, pending] = useActionState(createGoal, initial);
   const [scope, setScope] = useState("global");
@@ -80,8 +84,15 @@ export function GoalsManager({
   const [operationId, setOperationId] = useState("");
   const [responsibleId, setResponsibleId] = useState("");
   const [metric, setMetric] = useState("mrr");
+  const [newMetricLabel, setNewMetricLabel] = useState("");
+  const [metricMsg, setMetricMsg] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const year = new Date().getFullYear();
+
+  const metricOptions: ComboboxOption[] = [
+    ...metrics.map((m) => ({ value: m.key, label: m.label })),
+    { value: NEW_METRIC, label: "+ Nova métrica…" },
+  ];
 
   return (
     <div className="flex flex-col gap-4">
@@ -152,21 +163,57 @@ export function GoalsManager({
           <Label>Métrica</Label>
           <Combobox
             name="metric"
-            options={METRIC_OPTIONS}
+            options={metricOptions}
             value={metric}
-            onValueChange={setMetric}
+            onValueChange={(v) => {
+              setMetric(v);
+              setMetricMsg(null);
+            }}
             searchable={false}
             aria-label="Métrica"
           />
         </div>
+        {metric === NEW_METRIC ? (
+          <div className="col-span-2 flex items-end gap-2 sm:col-span-3 lg:col-span-3">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <Label htmlFor="new-metric-label">Nome da nova métrica</Label>
+              <Input
+                id="new-metric-label"
+                value={newMetricLabel}
+                placeholder="Ex.: SQL"
+                onChange={(e) => setNewMetricLabel(e.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending || !newMetricLabel.trim()}
+              onClick={() =>
+                startTransition(async () => {
+                  const res = await createGoalMetric(newMetricLabel);
+                  setMetricMsg(res.message ?? null);
+                  if (res.ok) {
+                    setMetric(goalMetricKeyFromLabel(newMetricLabel));
+                    setNewMetricLabel("");
+                  }
+                })
+              }
+            >
+              Criar métrica
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1.5">
           <Label>Alvo</Label>
           <Input name="target" type="number" step="0.01" required />
         </div>
         <div className="col-span-2 flex items-center gap-3 sm:col-span-3 lg:col-span-6">
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" disabled={pending || metric === NEW_METRIC}>
             <Plus className="size-4" /> Salvar meta
           </Button>
+          {metricMsg ? (
+            <span className="text-muted-foreground text-sm">{metricMsg}</span>
+          ) : null}
           {state.message ? (
             <span
               className={state.ok ? "text-muted-foreground text-sm" : "text-destructive text-sm"}
@@ -200,7 +247,7 @@ export function GoalsManager({
                 <TableRow key={g.id}>
                   <TableCell>{periodLabel(g)}</TableCell>
                   <TableCell>{scopeLabel(g)}</TableCell>
-                  <TableCell>{METRIC_LABELS[g.metric] ?? g.metric}</TableCell>
+                  <TableCell>{goalMetricLabel(g.metric, metrics)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {g.target.toLocaleString("pt-BR")}
                   </TableCell>

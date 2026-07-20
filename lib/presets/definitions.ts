@@ -1,5 +1,21 @@
-// Versão: 1.1 | Data: 18/07/2026
+// Versão: 2.0 | Data: 20/07/2026
 // Definições declarativas dos dashboards preset (Fase 6B) + campos de apoio.
+// v2.0 (20/07/2026): preset engine v2 — shapes COMPLETOS e identidade estável:
+//   - PresetDashboard ganha presetKey/version, settings (DashboardSettings:
+//     abas, periodBar/fieldBySource, canvas, background) e dependências
+//     declaráveis: fields (por preset) e subSources (sub-fontes, 0078/0082).
+//   - PresetWidget ganha presetKey (OBRIGATÓRIO, prefixado com o presetKey do
+//     dashboard + ".": ex. "inbound.geral.kpi_mql" — a identidade do update e
+//     do garbage-collect), sources/split_by_source e settings completo
+//     (WidgetSettings: tab, quickFilters, comparison, goalLine,
+//     businessDayAlign, appearance…).
+//   O aplicador (applyPreset em app/(app)/dashboards/actions.ts) CRIA e
+//   ATUALIZA idempotentemente: dashboard identificado por
+//   settings.preset.key, widgets por settings.presetKey (update in-place
+//   preserva ids → conectores/links/células); widgets sem presetKey
+//   (adicionados à mão) nunca são tocados. Metas/feriados NÃO são deps de
+//   preset (dados operacionais); o aplicador apenas registra as chaves de
+//   métrica de meta usadas no registry goal_metrics.
 // v1.1 (18/07/2026): remove `implementacao` dos campos locais de apoio — passou a
 //   ser campo sincronizado do Bitrix (UF_CRM_1778094396888; ver migração 0075).
 // Observação: o motor de widgets AGREGA (group by) — não lista registros linha a
@@ -7,13 +23,15 @@
 // aproximando o print ("mais ou menos"). Filtros usam tokens de período
 // (@month_start/@year_start...) resolvidos no engine.
 import type {
+  DashboardSettings,
   Dimension,
   GridPosition,
-  KpiSettings,
   Metric,
   VisualType,
   WidgetFilter,
+  WidgetSettings,
 } from "@/lib/widgets/types";
+import type { SourceKey } from "@/lib/sources";
 import type { DataType } from "@/lib/records/types";
 
 export interface PresetField {
@@ -28,19 +46,47 @@ export interface PresetField {
   currency_mode?: string;
 }
 
+// Sub-fonte declarada como dependência do preset (criada se ausente; uma
+// sub-fonte já existente com a mesma key NUNCA é sobrescrita — o admin pode
+// tê-la ajustado). default_period_field aceita coluna core ou 'custom:<key>'
+// (0082 — ex.: Data Reunião).
+export interface PresetSubSource {
+  key: string;
+  parent_key: string;
+  label: string;
+  short_label?: string;
+  default_period_field: string;
+  filter: WidgetFilter[];
+}
+
 export interface PresetWidget {
+  // Identidade estável do widget dentro do preset (convenção:
+  // "<presetKey do dashboard>.<aba>.<nome>"). Persistida em
+  // widgets.settings.presetKey; é a chave do update/GC do aplicador.
+  presetKey: string;
   title: string;
   visual_type: VisualType;
+  sources?: SourceKey[];
+  split_by_source?: boolean;
   dimensions: Dimension[];
   metrics: Metric[];
   filters: WidgetFilter[];
-  settings?: KpiSettings;
+  settings?: WidgetSettings;
   grid_position: GridPosition;
 }
 
 export interface PresetDashboard {
+  presetKey: string; // identidade estável (dashboards.settings.preset.key)
+  version: number; // bump a cada mudança relevante (auditoria/futuro diff)
   name: string;
   visible_to_roles: string[];
+  // Seções GERIDAS pelo preset (sobrescritas no update quando presentes):
+  // periodBar, canvas, background, dateFormat; `tabs` faz merge por id
+  // preservando abas criadas pelo usuário. Demais chaves (connectors…) são
+  // preservadas.
+  settings?: DashboardSettings;
+  fields?: PresetField[]; // campos de apoio específicos deste preset
+  subSources?: PresetSubSource[]; // sub-fontes de que os widgets dependem
   widgets: PresetWidget[];
 }
 
@@ -90,10 +136,13 @@ const closedThisYear: WidgetFilter[] = [
 
 export const PRESETS: PresetDashboard[] = [
   {
+    presetKey: "performance_mes",
+    version: 1,
     name: "Performance comercial do mês",
     visible_to_roles: ["admin", "gestor"],
     widgets: [
       {
+        presetKey: "performance_mes.kpi_mrr",
         title: "MRR do mês",
         visual_type: "kpi",
         dimensions: [],
@@ -103,6 +152,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 0, y: 0, w: 3, h: 4 },
       },
       {
+        presetKey: "performance_mes.kpi_clientes",
         title: "Clientes do mês",
         visual_type: "kpi",
         dimensions: [],
@@ -112,6 +162,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 3, y: 0, w: 3, h: 4 },
       },
       {
+        presetKey: "performance_mes.kpi_ticket",
         title: "Ticket médio",
         visual_type: "kpi",
         dimensions: [],
@@ -126,6 +177,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 6, y: 0, w: 3, h: 4 },
       },
       {
+        presetKey: "performance_mes.kpi_mrr_ano",
         title: "Novo MRR no ano",
         visual_type: "kpi",
         dimensions: [],
@@ -134,6 +186,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 9, y: 0, w: 3, h: 4 },
       },
       {
+        presetKey: "performance_mes.mrr_vendedor",
         title: "MRR por vendedor (mês)",
         visual_type: "barra",
         dimensions: [{ field: "responsible_id" }],
@@ -142,6 +195,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 0, y: 4, w: 6, h: 8 },
       },
       {
+        presetKey: "performance_mes.mrr_mes",
         title: "MRR por mês (ano)",
         visual_type: "linha",
         dimensions: [{ field: "closed_at", transform: "month" }],
@@ -150,6 +204,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 6, y: 4, w: 6, h: 8 },
       },
       {
+        presetKey: "performance_mes.sql_operacao",
         title: "SQL por operação",
         visual_type: "funil",
         dimensions: [{ field: "operation_id" }],
@@ -161,6 +216,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 0, y: 12, w: 6, h: 8 },
       },
       {
+        presetKey: "performance_mes.fechamentos",
         title: "Fechamentos por operação e vendedor (mês)",
         visual_type: "tabela",
         dimensions: [{ field: "operation_id" }, { field: "responsible_id" }],
@@ -174,10 +230,13 @@ export const PRESETS: PresetDashboard[] = [
     ],
   },
   {
+    presetKey: "forecast_mes",
+    version: 1,
     name: "Forecast do mês",
     visible_to_roles: ["admin", "gestor", "vendedor"],
     widgets: [
       {
+        presetKey: "forecast_mes.kpi_total",
         title: "Forecast total (aberto)",
         visual_type: "kpi",
         dimensions: [],
@@ -189,6 +248,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 0, y: 0, w: 4, h: 4 },
       },
       {
+        presetKey: "forecast_mes.tabela",
         title: "Forecast por vendedor e etapa",
         visual_type: "tabela",
         dimensions: [{ field: "responsible_id" }, { field: "stage" }],
@@ -205,10 +265,13 @@ export const PRESETS: PresetDashboard[] = [
     ],
   },
   {
+    presetKey: "mrr_vendedor",
+    version: 1,
     name: "MRR por vendedor",
     visible_to_roles: ["admin", "gestor"],
     widgets: [
       {
+        presetKey: "mrr_vendedor.barra",
         title: "MRR por vendedor (ano)",
         visual_type: "barra",
         dimensions: [{ field: "responsible_id" }],
@@ -219,10 +282,13 @@ export const PRESETS: PresetDashboard[] = [
     ],
   },
   {
+    presetKey: "mrr_canal",
+    version: 1,
     name: "MRR por canal",
     visible_to_roles: ["admin", "gestor"],
     widgets: [
       {
+        presetKey: "mrr_canal.pizza",
         title: "MRR por canal (ano)",
         visual_type: "pizza",
         dimensions: [{ field: "channel" }],
@@ -231,6 +297,7 @@ export const PRESETS: PresetDashboard[] = [
         grid_position: { x: 0, y: 0, w: 6, h: 8 },
       },
       {
+        presetKey: "mrr_canal.tipo_venda",
         title: "MRR por tipo de venda (ano)",
         visual_type: "barra",
         dimensions: [{ field: "sale_type" }],

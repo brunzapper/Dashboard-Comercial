@@ -102,6 +102,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
   caminho agregado); nesse caso o usuário garante que os conjuntos são
   disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.
+- **Dia útil/meta se resolvem no ENGINE, nunca no RPC (20/07/2026):** feriados
+  (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)
+  alimentam o alinhamento "mesmo dia útil" (`businessDayAlign` — pernas por mês
+  via `computeRows`), a base de comparação `previous_period_bd` e a linha de
+  meta (`goalLine` — `row.__goal` via `resolveGoal`). NÃO recrie as RPCs para
+  nada disso; snapshots leem metas/feriados AO VIVO pelo adapter
+  (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
+  `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca
+  duplicar nem tocar widgets sem presetKey). Ver `docs/arquitetura.md` §4.9.
 - **Editor/validação/catálogo de fórmulas são ÚNICOS (20/07/2026):** o catálogo
   AGREGADO sai SEMPRE de `buildAggOperandCatalog`
   (`lib/widgets/agg-catalog.ts`, inputs `availableAggCatalogInput`/

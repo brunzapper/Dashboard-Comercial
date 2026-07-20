@@ -1,25 +1,39 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Tela de Metas (admin) — Fase 6B.
+// v1.1 (20/07/2026): seção "Dias não úteis" (non_working_days, 0081) —
+// calendário global consumido pelos utilitários de dia útil.
 import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { OptionItem } from "@/lib/records/types";
 import { GoalsManager, type GoalRow } from "@/components/admin/goals-manager";
+import { NonWorkingDaysManager } from "@/components/configuracoes/non-working-days-manager";
+import { loadNonWorkingDayRows } from "@/lib/config/non-working-days";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 
 export default async function MetasPage() {
   await requireRole("admin");
   const supabase = await createClient();
 
-  const [{ data: goalsData }, { data: ops }, { data: resps }] = await Promise.all([
-    supabase
-      .from("goals")
-      .select(
-        "id, period_year, period_month, scope, metric, target, operations(name), responsibles(display_name)"
-      )
-      .order("period_year", { ascending: false })
-      .order("period_month", { ascending: true, nullsFirst: true }),
-    supabase.from("operations").select("id, name").order("name"),
-    supabase.from("responsibles").select("id, display_name").eq("active", true).order("display_name"),
-  ]);
+  const [
+    { data: goalsData },
+    { data: ops },
+    { data: resps },
+    nonWorkingDays,
+    goalMetrics,
+  ] =
+    await Promise.all([
+      supabase
+        .from("goals")
+        .select(
+          "id, period_year, period_month, scope, metric, target, operations(name), responsibles(display_name)"
+        )
+        .order("period_year", { ascending: false })
+        .order("period_month", { ascending: true, nullsFirst: true }),
+      supabase.from("operations").select("id, name").order("name"),
+      supabase.from("responsibles").select("id, display_name").eq("active", true).order("display_name"),
+      loadNonWorkingDayRows(supabase),
+      loadGoalMetrics(supabase),
+    ]);
 
   const goals: GoalRow[] = (goalsData ?? []).map((g) => ({
     id: g.id as string,
@@ -51,7 +65,13 @@ export default async function MetasPage() {
           Na leitura, elas se comunicam por roll-up (responsáveis → operação → global).
         </p>
       </div>
-      <GoalsManager goals={goals} operations={operations} responsibles={responsibles} />
+      <GoalsManager
+        goals={goals}
+        operations={operations}
+        responsibles={responsibles}
+        metrics={goalMetrics}
+      />
+      <NonWorkingDaysManager rows={nonWorkingDays} />
     </div>
   );
 }

@@ -1,12 +1,19 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Comparação com período anterior (Frente "variação"): matemática PURA de
 // ranges e alinhamento de linhas — sem I/O. O engine (runWidget) usa
 // `comparisonSpec` para montar a segunda consulta (mesmos filtros, datas
 // deslocadas) e `alignComparisonRows` para anexar `__cmp` às linhas.
+// v1.1 (20/07/2026): base previous_period_bd — período anterior recortado no
+//   mesmo dia útil. O módulo segue puro: o contexto de feriados/hoje chega por
+//   parâmetro opcional (o engine o carrega); sem contexto, degrada para
+//   previous_period.
 //
 // Bases:
 //  - previous_period: período imediatamente anterior; presets deslocam
 //    SEMANTICAMENTE (este_mes → mês passado cheio), custom desloca pela duração.
+//  - previous_period_bd: mesmo range de previous_period, com o `to` clampado
+//    no N-ésimo dia útil do último mês do range (N = dia útil corrente do
+//    período atual). N além do total de dias úteis do mês = range cheio.
 //  - previous_year: mesmo intervalo um ano antes (29/02 → 28/02).
 //  - window_avg / window_median: média/mediana "por bucket equivalente ao
 //    período atual" sobre uma janela anterior maior (trimestre/semestre/ano até
@@ -14,6 +21,12 @@
 //    período atual (dia/semana/mês/trimestre). A média dispensa bucketização
 //    (total da janela ÷ nº de buckets — buckets vazios contam 0); a mediana
 //    exige a dimensão extra de bucket na consulta e colapso no cliente.
+import {
+  businessDayIndexInMonth,
+  businessDaysInMonth,
+  nthBusinessDayOfMonth,
+} from "@/lib/date/business-days";
+
 import type { DashboardPeriod } from "./period";
 import type {
   ComparisonBase,
@@ -23,6 +36,13 @@ import type {
   Transform,
   WidgetRow,
 } from "./types";
+
+// Contexto p/ a base previous_period_bd (o engine carrega feriados + hoje;
+// o módulo continua sem I/O).
+export interface BusinessDayContext {
+  holidays: Set<string>;
+  todayIso: string; // "YYYY-MM-DD" em Brasília
+}
 
 export type ComparisonBucket = "day" | "week" | "month" | "quarter";
 
@@ -163,13 +183,37 @@ function windowRange(
  */
 export function comparisonSpec(
   period: DashboardPeriod | null | undefined,
-  cmp: ComparisonSettings | undefined
+  cmp: ComparisonSettings | undefined,
+  bdCtx?: BusinessDayContext
 ): ComparisonSpec | null {
   if (!cmp?.enabled || !period?.from || !period?.to) return null;
   const full = period as DashboardPeriod & { from: string; to: string };
   const base = cmp.base ?? "previous_period";
   if (base === "previous_period") {
     return { base, ...previousPeriodRange(full) };
+  }
+  if (base === "previous_period_bd") {
+    const range = previousPeriodRange(full);
+    // Sem contexto (chamador antigo/sem feriados) degrada p/ o range cheio.
+    if (!bdCtx) return { base, ...range };
+    const ref = bdCtx.todayIso < full.to ? bdCtx.todayIso : full.to;
+    const n = businessDayIndexInMonth(ref, bdCtx.holidays);
+    // N = 0 (ainda sem dia útil no mês da referência): nada a recortar de
+    // forma útil — mantém o range cheio.
+    if (n <= 0) return { base, ...range };
+    const end = parseYmd(range.to)!;
+    // O recorte vale p/ o ÚLTIMO mês do range anterior; N além do total de
+    // dias úteis desse mês = mês/range completos (mantém fins de semana do
+    // fim do mês — não perde registro datado em dia não útil).
+    if (n >= businessDaysInMonth(end.y, end.m + 1, bdCtx.holidays)) {
+      return { base, ...range };
+    }
+    const cut = nthBusinessDayOfMonth(end.y, end.m + 1, n, bdCtx.holidays);
+    return {
+      base,
+      from: range.from,
+      to: cut < range.to ? cut : range.to,
+    };
   }
   if (base === "previous_year") {
     return {
@@ -205,6 +249,8 @@ export function comparisonLabel(
 ): string {
   const base = cmp.base ?? "previous_period";
   if (base === "previous_period") return "vs. período anterior";
+  if (base === "previous_period_bd")
+    return "vs. período anterior (mesmo dia útil)";
   if (base === "previous_year") return "vs. mesmo período do ano passado";
   const stat = base === "window_avg" ? "média" : "mediana";
   const gran =

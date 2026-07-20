@@ -24,6 +24,7 @@ import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { BuilderSection } from "@/components/dashboards/widget-builder-rows";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -101,7 +102,7 @@ export function WidgetAppearanceSheet({
   const dimKey = data.dimensions[0]?.key;
   const slices =
     isPie && dimKey && metrics[0]
-      ? topWithOther(data.rows, dimKey, metrics[0].key)
+      ? topWithOther(data.rows, dimKey, metrics[0].key, ap.categoryLimit)
       : [];
 
   // Alvos da formatação condicional (ver lib/widgets/conditional.ts): tabela
@@ -517,15 +518,58 @@ export function WidgetAppearanceSheet({
                   ]}
                 />
                 {isBar ? (
-                  <SelectRow
-                    label="Preenchimento das barras"
-                    value={ap.fillMode ?? "solid"}
-                    onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
-                    options={[
-                      { value: "solid", label: "Sólido" },
-                      { value: "gradient", label: "Gradiente (sutil)" },
-                    ]}
-                  />
+                  <>
+                    <SelectRow
+                      label="Preenchimento das barras"
+                      value={ap.fillMode ?? "solid"}
+                      onChange={(v) => patch({ fillMode: v as "solid" | "gradient" })}
+                      options={[
+                        { value: "solid", label: "Sólido" },
+                        { value: "gradient", label: "Gradiente (sutil)" },
+                      ]}
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs">
+                        Limite de categorias (Top-N)
+                      </Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        className="h-8 w-20"
+                        value={ap.categoryLimit?.n ?? ""}
+                        placeholder="—"
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          patch({
+                            categoryLimit:
+                              e.target.value === "" || !Number.isFinite(n)
+                                ? undefined
+                                : { ...ap.categoryLimit, n: Math.max(1, n) },
+                          });
+                        }}
+                      />
+                    </div>
+                    {ap.categoryLimit?.n != null ? (
+                      <CheckRow
+                        label={'Agrupar o resto em "Outros"'}
+                        checked={ap.categoryLimit?.others ?? true}
+                        onChange={(c) =>
+                          patch({
+                            categoryLimit: { ...ap.categoryLimit, others: c },
+                          })
+                        }
+                      />
+                    ) : null}
+                    {metrics.length >= 2 ? (
+                      <CheckRow
+                        label="Empilhar as séries (barras empilhadas)"
+                        checked={ap.stacked ?? false}
+                        onChange={(c) =>
+                          patch({ stacked: c ? true : undefined })
+                        }
+                      />
+                    ) : null}
+                  </>
                 ) : null}
               </BuilderSection>
 
@@ -646,6 +690,38 @@ export function WidgetAppearanceSheet({
                     { value: "gradient", label: "Gradiente (sutil)" },
                   ]}
                 />
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs">
+                    Limite de fatias (Top-N; padrão 5)
+                  </Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    className="h-8 w-20"
+                    value={ap.categoryLimit?.n ?? ""}
+                    placeholder="5"
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      patch({
+                        categoryLimit:
+                          e.target.value === "" || !Number.isFinite(n)
+                            ? undefined
+                            : { ...ap.categoryLimit, n: Math.max(1, n) },
+                      });
+                    }}
+                  />
+                </div>
+                {ap.categoryLimit?.n != null ? (
+                  <CheckRow
+                    label={'Agrupar o resto em "Outros"'}
+                    checked={ap.categoryLimit?.others ?? true}
+                    onChange={(c) =>
+                      patch({
+                        categoryLimit: { ...ap.categoryLimit, others: c },
+                      })
+                    }
+                  />
+                ) : null}
               </BuilderSection>
               <BuilderSection value="fatias" title="Cor por fatia">
                 {slices.map((s, i) => (

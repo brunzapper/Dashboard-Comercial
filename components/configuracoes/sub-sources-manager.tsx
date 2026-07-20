@@ -104,11 +104,14 @@ function SubSourceForm({
   sub,
   roots,
   fieldOptionsByParent,
+  dateFieldOptionsByParent,
   onDone,
 }: {
   sub?: SourceDef;
   roots: SourceDef[];
   fieldOptionsByParent: Record<string, ComboboxOption[]>;
+  // Campos personalizados de DATA da pai (0082): opções extras do período.
+  dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
   onDone?: () => void;
 }) {
   const isEdit = Boolean(sub);
@@ -194,7 +197,10 @@ function SubSourceForm({
       <div className="flex flex-col gap-1.5">
         <Label>Campo de data do filtro de período</Label>
         <Combobox
-          options={PERIOD_FIELD_OPTIONS}
+          options={[
+            ...PERIOD_FIELD_OPTIONS,
+            ...(dateFieldOptionsByParent?.[parentKey] ?? []),
+          ]}
           value={periodField}
           onValueChange={setPeriodField}
           searchable={false}
@@ -297,9 +303,11 @@ function DeleteSubButton({ subKey }: { subKey: string }) {
 export function SubSourcesManager({
   sources,
   fieldOptionsByParent,
+  dateFieldOptionsByParent,
 }: {
   sources: SourceDef[];
   fieldOptionsByParent: Record<string, ComboboxOption[]>;
+  dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
@@ -401,6 +409,7 @@ export function SubSourcesManager({
               sub={editing}
               roots={roots}
               fieldOptionsByParent={fieldOptionsByParent}
+              dateFieldOptionsByParent={dateFieldOptionsByParent}
               onDone={() => setOpen(false)}
             />
           </div>

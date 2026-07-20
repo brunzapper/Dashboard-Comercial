@@ -6,6 +6,11 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import {
+  GOAL_METRICS_CONFIG_KEY,
+  loadGoalMetrics,
+} from "@/lib/config/goal-metrics";
+import { goalMetricKeyFromLabel } from "@/lib/metas/metrics";
 
 export interface GoalState {
   ok?: boolean;
@@ -83,5 +88,89 @@ export async function deleteGoal(id: string): Promise<void> {
   if (err) return;
   const supabase = await createClient();
   await supabase.from("goals").delete().eq("id", id);
+  revalidatePath("/configuracoes/metas");
+}
+
+// ===================== Métricas de meta (registry) =====================
+// `goals.metric` sempre foi texto livre (0016). O registry dá vocabulário às
+// chaves: builtins + custom em sync_config 'goal_metrics'. Criar uma métrica
+// aqui NÃO cria consulta — o realizado é sempre a consulta do próprio widget.
+
+export async function createGoalMetric(label: string): Promise<GoalState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const clean = String(label ?? "").trim();
+  if (!clean) return { ok: false, message: "Informe o nome da métrica." };
+  const key = goalMetricKeyFromLabel(clean);
+  if (!key) return { ok: false, message: "Nome inválido para gerar a chave." };
+
+  const supabase = await createClient();
+  const registry = await loadGoalMetrics(supabase);
+  if (registry.some((m) => m.key === key))
+    return { ok: false, message: `Métrica "${key}" já existe.` };
+
+  const { data } = await supabase
+    .from("sync_config")
+    .select("value")
+    .eq("key", GOAL_METRICS_CONFIG_KEY)
+    .maybeSingle();
+  const current = Array.isArray(data?.value) ? (data.value as unknown[]) : [];
+  const { error } = await supabase
+    .from("sync_config")
+    .upsert(
+      {
+        key: GOAL_METRICS_CONFIG_KEY,
+        value: [...current, { key, label: clean }],
+      },
+      { onConflict: "key" }
+    );
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/configuracoes/metas");
+  return { ok: true, message: `Métrica "${clean}" criada (chave ${key}).` };
+}
+
+// ===================== Dias não úteis (0081) =====================
+// Calendário global de feriados/paradas consumido pelos utilitários de dia
+// útil (lib/date/business-days.ts). Upsert por dia; o import CSV do manager
+// chama esta mesma action com o lote já parseado no browser.
+
+const MAX_NON_WORKING_ROWS = 500;
+
+export async function upsertNonWorkingDays(
+  rows: { day: string; label?: string }[]
+): Promise<GoalState> {
+  const err = await ensureAdmin();
+  if (err) return { ok: false, message: err };
+  const clean = rows
+    .map((r) => ({
+      day: String(r.day ?? "").slice(0, 10),
+      label: String(r.label ?? "").trim().slice(0, 200),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day));
+  if (clean.length === 0)
+    return { ok: false, message: "Nenhuma data válida para salvar." };
+  if (clean.length > MAX_NON_WORKING_ROWS)
+    return {
+      ok: false,
+      message: `Máximo de ${MAX_NON_WORKING_ROWS} datas por importação.`,
+    };
+  // Última ocorrência de um dia duplicado no lote vence.
+  const byDay = new Map(clean.map((r) => [r.day, r]));
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("non_working_days")
+    .upsert(Array.from(byDay.values()), { onConflict: "day" });
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/configuracoes/metas");
+  return { ok: true, message: `${byDay.size} dia(s) não útil(eis) salvo(s).` };
+}
+
+export async function deleteNonWorkingDay(day: string): Promise<void> {
+  const err = await ensureAdmin();
+  if (err) return;
+  const iso = String(day ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+  const supabase = await createClient();
+  await supabase.from("non_working_days").delete().eq("day", iso);
   revalidatePath("/configuracoes/metas");
 }

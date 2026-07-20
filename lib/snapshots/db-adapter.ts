@@ -25,6 +25,10 @@ const PASSTHROUGH_TABLES = new Set([
   "responsible_operations",
   "goals",
   "entity_custom_values",
+  // Dias não úteis (0081): cálculo de dia útil (goalLine 'pace',
+  // businessDayAlign, previous_period_bd) usa o calendário AO VIVO, como as
+  // metas — cadastrar um feriado não exige refresh do snapshot.
+  "non_working_days",
 ]);
 
 // RPCs de apoio: subárvore de operações (resolução de metas, lib/metas).

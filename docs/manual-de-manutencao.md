@@ -1,4 +1,6 @@
-<!-- Versão: 1.2 | Data: 19/07/2026 -->
+<!-- Versão: 1.3 | Data: 20/07/2026 -->
+<!-- v1.3 (20/07/2026): §4.7 — runbook de dias não úteis (cadastro/import CSV),
+     métricas de meta custom e geração/atualização de presets. -->
 <!-- v1.2 (19/07/2026): fuso da fonte (0079/0080) — checklist em §4.4/§4.6 e
      linha de troubleshooting "datas do Bitrix 1 dia depois". -->
 
@@ -189,6 +191,32 @@ npm run build      # o que a Vercel roda no deploy
   NUNCA converte. Após ligar/mudar o fuso de uma fonte já populada, rode um
   **Backfill** para reescrever os valores antigos (a 0080 só cobre as chaves
   datetime conhecidas: Data Reunião lead/negócio e `bitrix_moved_time`).
+
+### 4.7 Dias não úteis, métricas de meta e presets (20/07/2026)
+
+**Cadastrar/importar feriados** (afeta meta ideal/ritmo, alinhamento "mesmo dia
+útil" e a comparação "mesmo dia útil"):
+
+- Configurações → Metas → seção **Dias não úteis**: cadastro manual (data +
+  rótulo), edição do rótulo inline e exclusão.
+- **Importar CSV**: 1ª coluna = data (`dd/mm/aaaa` ou `aaaa-mm-dd`), 2ª coluna
+  opcional = rótulo; linha de cabeçalho é detectada e ignorada; linhas sem data
+  válida são reportadas e puladas. Reimportar o mesmo arquivo é seguro (upsert
+  por dia). Teto de 500 datas por importação.
+- Sem nenhum cadastro, dia útil = seg–sex (a feature degrada, não quebra).
+- O viewer público de snapshots lê o calendário AO VIVO — não precisa refresh.
+
+**Criar métrica de meta** (ex.: SQL): Configurações → Metas → combobox de
+métrica → "+ Nova métrica…". Isso só registra a CHAVE (rótulo → slug) no
+`sync_config` `goal_metrics` — o realizado de um KPI meta é sempre a consulta
+do próprio widget (ex.: contagem sobre a sub-fonte de SQLs). A meta em si é
+cadastrada normalmente por período/escopo.
+
+**Gerar/atualizar presets**: `generatePresets()` (todos) e
+`applyPreset(presetKey)` (um) em `app/(app)/dashboards/actions.ts` — ainda sem
+UI. São idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
+`settings.presetKey`, ids preservados) sem tocar widgets adicionados à mão;
+sub-fontes/campos já existentes nunca são sobrescritos.
 
 ## 5. Troubleshooting
 
