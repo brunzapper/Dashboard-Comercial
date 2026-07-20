@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 20/07/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -7,10 +7,15 @@
 // v1.1: persiste o estado por usuário (user_preferences.lastFieldFilters via
 // saveLastFieldFilter, fire-and-forget no mesmo debounce) — a page reidrata
 // quando a URL não traz o parâmetro; a URL sempre vence.
+// v1.2: o primeiro sync de URL (seed savedValue sem parâmetro na URL) é RASO
+// (history.replaceState, sem navegação RSC): o servidor já aplicou esse valor;
+// navegar aqui recomputava o dashboard à toa e o overlay "Carregando…" da
+// montagem ficava preso sob rajadas de router.refresh() do realtime. `run`/
+// overlay + persistência só quando o usuário muda algo de fato.
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
@@ -115,21 +120,37 @@ export function FieldFilterControls({
   const [values, setValues] = useState<string[]>(() =>
     initialValues(fields, initial.filters)
   );
+  // Último estado que o SERVIDOR já aplicou, na forma canônica encode∘parse do
+  // valor inicial bruto (URL ou seed — a page renderizou com ele). Enquanto
+  // `encoded` for igual a ele, o debounce só espelha a URL (replaceState raso);
+  // qualquer diferença — mudança do usuário, ou seed que não round-tripa numa
+  // config antiga dos `fields` — navega de verdade e atualiza o ref.
+  const serverAppliedRef = useRef(encodeViewFilter(initial));
 
   const showSearch = (searchFields?.length ?? 0) > 0 || fields.length === 0;
 
   const encoded = encodeViewFilter({ q, filters: buildFilters(fields, values) });
   useEffect(() => {
-    const currentVal = sp.get(paramKey) ?? "";
+    // URL lida de window.location (não do `sp` capturado): escrita de URL de
+    // outro controle entre o agendamento e o disparo não é sobrescrita.
+    const currentVal =
+      new URLSearchParams(window.location.search).get(paramKey) ?? "";
     if (encoded === currentVal) return;
     const timer = setTimeout(() => {
-      const params = new URLSearchParams(sp.toString());
+      const params = new URLSearchParams(window.location.search);
       if (encoded) params.set(paramKey, encoded);
       else params.delete(paramKey);
       const qs = params.toString();
-      run(() =>
-        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-      );
+      const url = qs ? `${pathname}?${qs}` : pathname;
+      if (encoded === serverAppliedRef.current) {
+        // O servidor já renderizou com este valor — só sincroniza a URL, sem
+        // recomputar o dashboard nem ligar o overlay, e sem persistir (o valor
+        // veio da própria preferência/URL).
+        window.history.replaceState(null, "", url);
+        return;
+      }
+      serverAppliedRef.current = encoded;
+      run(() => router.replace(url, { scroll: false }));
       // Persistência por usuário (fire-and-forget): encoded vazio LIMPA a
       // preferência (o usuário removeu o filtro — não pode ressuscitar).
       if (!snapshot && dashboardId && widgetId) {
