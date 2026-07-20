@@ -361,7 +361,7 @@ const GERAL: PresetWidget[] = [
   },
   {
     presetKey: "inbound.geral.mes_x_mes",
-    title: "Mês x Mês (mesmo dia útil)",
+    title: "Mês x Mês",
     visual_type: "barra",
     // As fontes definem o UNIVERSO de meses (linhas); as métricas de MQL e
     // Vendas rodam como pernas com fontes próprias e o SQL como calculada de
@@ -390,7 +390,10 @@ const GERAL: PresetWidget[] = [
         default: "6m",
         showAlignToggle: true,
       },
-      businessDayAlign: { enabled: true },
+      // Padrão "dia cheio" (v4): o mês corrente mostra o mês inteiro —
+      // reuniões AGENDADAS (mocks inclusive) aparecem já, como no dashboard
+      // antigo. O toggle do card alterna p/ "dia útil" (mesmo estágio).
+      businessDayAlign: { enabled: false },
       goalLine: {
         enabled: true,
         metric: "sql",
@@ -595,7 +598,7 @@ const VENDAS: PresetWidget[] = [
 
 export const INBOUND_PRESET: PresetDashboard = {
   presetKey: "inbound",
-  version: 3, // v3 (20/07/2026): periodWindow (dropdown de janela) no Mês x Mês
+  version: 4, // v4 (20/07/2026): Mês x Mês abre em "dia cheio" (reuniões agendadas visíveis)
   name: "Inbound",
   visible_to_roles: ["admin", "gestor"],
   settings: {

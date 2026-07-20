@@ -1,4 +1,7 @@
-<!-- Versão: 1.6 | Data: 20/07/2026 -->
+<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- v1.7 (20/07/2026): §4.7/§5 — mocks no SQL: migração 0084 (fonte nos mocks
+     Inbound), preset v4 (Mês x Mês abre em "dia cheio") e linha de
+     troubleshooting. -->
 <!-- v1.6 (20/07/2026): §4.7 — janela de períodos equivalentes (periodWindow):
      receita p/ novos acompanhamentos + nota do preset Inbound v3 (reaplicar);
      filtro por campo agora persiste por usuário (lastFieldFilters). -->
@@ -273,6 +276,20 @@ antigo no MESMO período.
 > banco receber a config nova; sem isso o card segue no comportamento
 > antigo.
 
+> **Preset v4 + migração 0084 (20/07/2026) — mocks no SQL:** aplique a
+> migração `0084_mock_fonte_inbound.sql` (SQL editor) — ela dá
+> `custom:fonte = "Formulário de CRM"` aos 270 mocks Inbound, exigido pelo
+> predicado da sub-fonte `sqls` (predicados de sub valem em AND para mocks;
+> a regra 0052 só remove o gate `not is_mock`). Conferência:
+> `select count(*) from public.records where is_mock and custom_fields ? 'fonte';`
+> → 270 (os 32 Outbound ficam sem, de propósito). Depois rode
+> **Configurações → Presets → Atualizar**: o v4 abre o Mês x Mês em **"dia
+> cheio"** (mês corrente inteiro — reuniões AGENDADAS, mocks inclusive,
+> visíveis já; o toggle do card alterna para "dia útil"). Quem já tocou o
+> toggle no card não é afetado (a escolha compartilhada vence o default).
+> Regra geral ao criar NOVOS mocks ou NOVAS sub-fontes: o mock precisa
+> carregar os campos usados na segmentação da sub que deve contá-lo.
+
 **Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
 qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,
 ex.: "Mês/ano"):
@@ -302,6 +319,7 @@ fonte no widget se precisar do mês.
 | UM dashboard específico segue lento (statement timeout em alguns widgets) mesmo após a correção global e após limitar o período | Widgets com colunas `match:` (registro casado): `_widget_match_expr` (0042) roda uma subconsulta correlacionada sobre `record_matches` POR LINHA do agregado; "todo o período" agrava (varre `records` inteira). As linhas de `record_matches` persistem após excluir a tabela que as gerou | 1) fixe um período padrão limitado na barra (`defaultPreset`); 2) aplique a migração `0077` (índices em `record_matches`); 3) se persistir, rode a **Parte C** de `supabase/apply/diagnostico-perf.sql` — o `[dashboard:timing]` aponta o widget e o `EXPLAIN` diz se falta a reescrita ESPELHADA de `_widget_match_expr`/`_widget_match_expr_snap` (nova migração recriando ambos os RPCs) |
 | Snapshot mostra números ≠ dashboard | RPCs divergiram (espelhamento esquecido) ou snapshot sem refresh após migração | Compare `pg_get_functiondef` das duas funções; refaça o espelhamento; "Atualizar agora" |
 | Mocks sumiram de um widget/snapshot | A consulta deixou de referenciar Data Reunião (ex.: snapshot sem `default_period`, período "todo o período") | Confira o campo de período; para snapshots antigos, defina `default_period` (SQL de exemplo no `supabase/README.md`, seção 0059) |
+| Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
 | Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 4 jobs; recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |

@@ -1,4 +1,8 @@
-<!-- Versão: 1.10 | Data: 20/07/2026 -->
+<!-- Versão: 1.11 | Data: 20/07/2026 -->
+<!-- v1.11 (20/07/2026): mocks × predicados de sub-fonte (§4.4) — a regra 0052
+     não isenta os mocks dos predicados (AND puro); 0084 dá custom:fonte aos
+     mocks Inbound p/ contarem na sub sqls. Preset Inbound v4: Mês x Mês abre
+     em "dia cheio" (reuniões agendadas visíveis; toggle p/ dia útil). -->
 <!-- v1.10 (20/07/2026): (a) periodWindow (§4.9) — janela de períodos
      equivalentes com dropdown no card ("3 meses"/"Este trimestre"…), corte
      por dia útil OU dia cheio, seleção compartilhada na célula __pw__;
@@ -232,6 +236,18 @@ idênticos**:
 1. `run_widget_query` (SQL, 0052+);
 2. `run_widget_query_snapshot` (SQL, 0057+);
 3. `lib/widgets/mock-reuniao.ts` (TypeScript, client-side).
+
+**A regra só remove o gate `not is_mock`** — ela NÃO isenta os mocks dos
+demais predicados do WHERE (filtros do widget, predicado de sub-fonte via
+`_widget_wrap_record_types`, tudo em AND puro). Consequência prática: um mock
+precisa CARREGAR os campos usados na segmentação das sub-fontes que devem
+contá-lo. A 0084 dá `custom:fonte = "Formulário de CRM"` aos 270 mocks
+Inbound (lote 0051) para satisfazerem a sub `sqls` do preset
+(`custom:fonte in (…)`); os 32 Outbound (0053) ficam SEM fonte de propósito —
+não podem vazar no SQL Inbound — e receberão a deles com o preset Outbound.
+(As subs mqls/sals não passam a contá-los: consultam por `source_created_at`,
+NULL nos mocks, e sem referência a Data Reunião o gate `not is_mock` segue
+ativo.)
 
 Um trigger no banco (`enforce_reuniao_freeze`) **congela o campo**: sync, recálculo e
 edição não conseguem gravar Data Reunião anterior a 01/06/2026 (tentativas são
