@@ -2215,7 +2215,11 @@ export async function runWidget(
   // align roda DENTRO de cada perna. Com align ativo, settings.comparison é
   // ignorada (exclusão mútua — o próprio gráfico é a comparação).
   const MAX_BD_ALIGN_MONTHS = 13;
-  const bdAlignLegs = await (async (): Promise<DashboardPeriod[] | null> => {
+  const bdAlignCtx = await (async (): Promise<{
+    legs: DashboardPeriod[];
+    n: number; // dia útil de corte (reusado pela goalLine 'pace')
+    holidays: Set<string>;
+  } | null> => {
     const cfg = config.settings?.businessDayAlign;
     if (!cfg?.enabled) return null;
     if (!period?.from || !period.to || !period.field) return null;
@@ -2271,18 +2275,18 @@ export async function runWidget(
         fieldBySource: period.fieldBySource,
       });
     }
-    return legs;
+    return { legs, n, holidays };
   })();
 
   const [rows, cmpRun] = await Promise.all([
-    bdAlignLegs
+    bdAlignCtx
       ? Promise.all(
-          bdAlignLegs.map((leg) =>
+          bdAlignCtx.legs.map((leg) =>
             computeRows(dims, (srcs) => legFiltersFor(leg, srcs))
           )
         ).then((parts) => parts.flat())
       : computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
-    bdAlignLegs ? Promise.resolve(null) : runComparison(),
+    bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);
 
   let comparisonMeta: WidgetData["comparison"] | undefined;
@@ -2349,6 +2353,106 @@ export async function runWidget(
       label: comparisonLabel(cmpSettings, cmpSpec),
       settings: cmpSettings,
     };
+  }
+
+  // ---- Linha de meta (settings.goalLine, 20/07/2026) ----------------------
+  // Anexa `row.__goal` por bucket MENSAL — ANTES da rotulagem (que muta os
+  // dim_*; o bucket cru "YYYY-MM-..." é o que dá ano/mês). Meta AO VIVO via
+  // resolveGoal (mesmo caminho/passthrough do KPI meta nos snapshots). Modo
+  // 'pace' = meta ÷ dias úteis do mês × N, com N do businessDayAlign quando
+  // ativo (linha ideal no MESMO estágio de todos os meses); sem align, só o
+  // mês corrente é rateado (passados = cheia, futuros = sem linha). Qualquer
+  // falha degrada em silêncio (gráfico sem a linha).
+  let goalLineMeta: WidgetData["goalLine"];
+  const glCfg = config.settings?.goalLine;
+  if (glCfg?.enabled && rows.length > 0) {
+    try {
+      const monthIdx = dims.findIndex(
+        (d) =>
+          d.transform === "month" ||
+          d.transform === "month_name" ||
+          d.transform === "month_year"
+      );
+      if (monthIdx >= 0) {
+        const metricKey = glCfg.metric?.trim() || "mrr";
+        const pace = glCfg.mode === "pace";
+        let holidays = bdAlignCtx?.holidays ?? null;
+        if (pace && !holidays) {
+          try {
+            holidays = await loadNonWorkingDays(supabase);
+          } catch {
+            holidays = new Set();
+          }
+        }
+        const todayIso = todayBrasiliaIso();
+        const todayYm = todayIso.slice(0, 7);
+        const goalCache = new Map<string, Promise<number | null>>();
+        const goalFor = (y: number, m: number): Promise<number | null> => {
+          const k = `${y}-${m}`;
+          let p = goalCache.get(k);
+          if (!p) {
+            p = resolveGoal(supabase, {
+              scope: glCfg.scope ?? "global",
+              operationId: glCfg.operationId ?? null,
+              responsibleId: glCfg.responsibleId ?? null,
+              year: y,
+              month: m,
+              metric: metricKey,
+            }).then((g) => g.target);
+            goalCache.set(k, p);
+          }
+          return p;
+        };
+        const dimKey = `dim_${monthIdx + 1}`;
+        await Promise.all(
+          rows.map(async (r) => {
+            const bucket = String(r[dimKey] ?? "");
+            const bm = bucket.match(/^(\d{4})-(\d{2})/);
+            if (!bm) return;
+            const y = Number(bm[1]);
+            const m = Number(bm[2]);
+            const target = await goalFor(y, m);
+            if (target == null) {
+              r.__goal = null;
+              return;
+            }
+            if (!pace || !holidays) {
+              r.__goal = target;
+              return;
+            }
+            const totalBd = businessDaysInMonth(y, m, holidays);
+            const ym = `${bm[1]}-${bm[2]}`;
+            // N do corte deste mês: align ativo = mesmo N p/ todos; senão só
+            // o mês corrente é rateado.
+            let n: number | null;
+            if (bdAlignCtx) {
+              n = bdAlignCtx.n;
+            } else if (ym < todayYm) {
+              n = totalBd; // mês encerrado: meta cheia
+            } else if (ym === todayYm) {
+              n = businessDayIndexInMonth(todayIso, holidays);
+            } else {
+              n = null; // mês futuro: sem linha
+            }
+            r.__goal =
+              n == null || totalBd === 0
+                ? null
+                : n >= totalBd
+                  ? target
+                  : (target / totalBd) * n;
+          })
+        );
+        const registry = await loadGoalMetrics(supabase);
+        goalLineMeta = {
+          label: glCfg.label?.trim() || "Meta",
+          mode: pace ? "pace" : "monthly",
+          ...(glCfg.color ? { color: glCfg.color } : {}),
+          money: registry.find((m) => m.key === metricKey)?.money === true,
+        };
+      }
+    } catch {
+      goalLineMeta = undefined; // degrada sem a linha
+    }
   }
 
   // Transforms de data "por nome" (mês/semana): o RPC devolve um bucket ISO. Antes
@@ -2461,5 +2565,6 @@ export async function runWidget(
     dimensions,
     metrics,
     ...(comparisonMeta ? { comparison: comparisonMeta } : {}),
+    ...(goalLineMeta ? { goalLine: goalLineMeta } : {}),
   };
 }

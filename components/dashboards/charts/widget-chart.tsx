@@ -24,6 +24,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Funnel,
   FunnelChart,
   LabelList,
@@ -440,6 +441,8 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- Comparação com período anterior (WidgetData.comparison) ---
   const cmp = data.comparison;
+  // --- Linha de meta (WidgetData.goalLine): valores por linha em __goal ---
+  const goal = data.goalLine;
   // Série fantasma nos gráficos: config explícita; default acompanha "exibir
   // valor do período de comparação".
   const ghost = Boolean(
@@ -458,6 +461,14 @@ export const WidgetChart = memo(function WidgetChart({
   // Texto de tooltip com a variação anexada ("R$ 12 mil · ▲ 8% vs. período
   // anterior"). Séries fantasma (dataKey __cmp) formatam na escala da métrica.
   const chartTooltipText = (v: unknown, dk: string, payload: unknown): string => {
+    // Linha de meta: número puro (ou R$ p/ métrica de meta monetária).
+    if (dk === "__goal") {
+      const n = numOrNull(v);
+      if (n == null) return "—";
+      return goal?.money
+        ? formatMoney(n, "BRL")
+        : n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+    }
     const isCmpKey = dk.endsWith("__cmp");
     const baseKey = isCmpKey ? dk.slice(0, -5) : dk;
     const text = moneyChartText(v, baseKey);
@@ -981,6 +992,20 @@ export const WidgetChart = memo(function WidgetChart({
             isAnimationActive={false}
           />
         ))}
+        {goal ? (
+          <Line
+            key="__goal"
+            yAxisId="left"
+            type="monotone"
+            dataKey="__goal"
+            name={goal.label}
+            stroke={goal.color ?? "var(--muted-foreground)"}
+            strokeWidth={2}
+            strokeDasharray="6 4"
+            dot={false}
+            isAnimationActive={false}
+          />
+        ) : null}
       </LineChart>
     );
   }
@@ -1011,8 +1036,12 @@ export const WidgetChart = memo(function WidgetChart({
     })?.fill;
   };
 
+  // Com linha de meta ativa, o container vira ComposedChart (o BarChart do
+  // Recharts não desenha <Line>); sem meta, BarChart original — troca
+  // condicional p/ zero risco de regressão nos widgets existentes.
+  const BarContainer = goal ? ComposedChart : BarChart;
   return wrapCat(
-    <BarChart
+    <BarContainer
       data={chartRows}
       layout={horizontal ? "vertical" : "horizontal"}
       margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
@@ -1128,7 +1157,21 @@ export const WidgetChart = memo(function WidgetChart({
           </Bar>
         );
       })}
-    </BarChart>
+      {goal ? (
+        <Line
+          key="__goal"
+          {...(horizontal ? {} : { yAxisId: "left" })}
+          type="monotone"
+          dataKey="__goal"
+          name={goal.label}
+          stroke={goal.color ?? "var(--muted-foreground)"}
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          dot={false}
+          isAnimationActive={false}
+        />
+      ) : null}
+    </BarContainer>
   );
 });
 
