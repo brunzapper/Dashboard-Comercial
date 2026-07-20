@@ -36,6 +36,10 @@ function str(v: string | string[] | undefined): string {
 export interface PeriodPrefs {
   lastPeriod?: SavedPeriod;
   lastPeriodByTab?: Record<string, SavedPeriod>;
+  // Último estado dos widgets "Filtro por campo" (por widget id, encoded ff_).
+  // Não é usado pelo resolver de período — vive aqui por ser o shape de
+  // user_preferences.settings (page e widget-scope leem a mesma linha).
+  lastFieldFilters?: Record<string, string>;
 }
 
 export interface WidgetPeriods {

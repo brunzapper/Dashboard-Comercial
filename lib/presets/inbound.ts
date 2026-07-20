@@ -383,8 +383,14 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
-      // Janela própria de 6 meses (histórico do card, independente da barra).
-      businessDayAlign: { enabled: true, windowMonths: 6 },
+      // Janela de períodos equivalentes: dropdown no card com todas as
+      // opções, padrão 6 meses, toggle dia útil × dia cheio exposto.
+      periodWindow: {
+        options: ["3m", "trimestre", "6m", "semestre", "12m", "ano"],
+        default: "6m",
+        showAlignToggle: true,
+      },
+      businessDayAlign: { enabled: true },
       goalLine: {
         enabled: true,
         metric: "sql",
@@ -589,7 +595,7 @@ const VENDAS: PresetWidget[] = [
 
 export const INBOUND_PRESET: PresetDashboard = {
   presetKey: "inbound",
-  version: 2, // v2 (20/07/2026): windowMonths 6 no Mês x Mês
+  version: 3, // v3 (20/07/2026): periodWindow (dropdown de janela) no Mês x Mês
   name: "Inbound",
   visible_to_roles: ["admin", "gestor"],
   settings: {

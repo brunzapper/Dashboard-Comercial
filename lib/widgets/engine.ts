@@ -51,6 +51,7 @@ import {
   type DateAgg,
   type Dimension,
   type Metric,
+  type PeriodWindowKey,
   type WidgetConfig,
   type WidgetData,
   type WidgetFilter,
@@ -2288,11 +2289,19 @@ export async function runWidget(
   const MAX_BD_ALIGN_MONTHS = 13;
   const bdAlignCtx = await (async (): Promise<{
     legs: DashboardPeriod[];
-    n: number; // dia útil de corte (reusado pela goalLine 'pace')
+    // Dia útil de corte (reusado pela goalLine 'pace'); null = janela em
+    // modo "dia cheio" (sem alinhamento por dia útil).
+    n: number | null;
     holidays: Set<string>;
   } | null> => {
     const cfg = config.settings?.businessDayAlign;
-    if (!cfg?.enabled) return null;
+    const pw = config.settings?.periodWindow;
+    // Janela efetiva: seleção do card/default (periodWindow.active, mesclado
+    // pela page/widget-scope) ou o alias legado windowMonths.
+    const activeWindow: PeriodWindowKey | null = pw?.active ?? pw?.default ?? null;
+    const legacyMonths = Math.floor(cfg?.windowMonths ?? 0);
+    const alignEnabled = Boolean(cfg?.enabled);
+    if (!alignEnabled && !activeWindow && legacyMonths < 2) return null;
     if (!period?.from || !period.to || !period.field) return null;
     const monthly = dims.some(
       (d) =>
@@ -2301,62 +2310,86 @@ export async function runWidget(
         d.transform === "month_year"
     );
     if (!monthly) return null;
-    // Janela PRÓPRIA do card (windowMonths 2–13): ignora o `from` da barra e
-    // cobre os N meses de calendário que terminam no mês do `to` — o
-    // "histórico de N meses" do card, independente do filtro global.
-    const win = Math.min(
-      MAX_BD_ALIGN_MONTHS,
-      Math.max(0, Math.floor(cfg.windowMonths ?? 0))
-    );
+
+    const tm = period.to.match(/^(\d{4})-(\d{2})/);
+    if (!tm) return null;
+    const [ty, tmo] = [Number(tm[1]), Number(tm[2])];
+    // Início da janela (1º dia do mês inicial) pela chave; sem janela = `from`
+    // da barra (alinhamento puro sobre o range da barra).
+    const monthsBack = (n: number) => {
+      const idx = ty * 12 + (tmo - 1) - (n - 1);
+      return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}-01`;
+    };
     let rangeFrom = period.from;
     const rangeTo = period.to;
-    if (win >= 2) {
-      const wtm = rangeTo.match(/^(\d{4})-(\d{2})/);
-      if (wtm) {
-        const startIdx =
-          Number(wtm[1]) * 12 + (Number(wtm[2]) - 1) - (win - 1);
-        const wy = Math.floor(startIdx / 12);
-        const wm = (startIdx % 12) + 1;
-        rangeFrom = `${wy}-${String(wm).padStart(2, "0")}-01`;
-      }
-    }
+    if (activeWindow === "3m") rangeFrom = monthsBack(3);
+    else if (activeWindow === "6m") rangeFrom = monthsBack(6);
+    else if (activeWindow === "12m") rangeFrom = monthsBack(12);
+    else if (activeWindow === "trimestre")
+      rangeFrom = `${ty}-${String(Math.floor((tmo - 1) / 3) * 3 + 1).padStart(2, "0")}-01`;
+    else if (activeWindow === "semestre")
+      rangeFrom = `${ty}-${tmo <= 6 ? "01" : "07"}-01`;
+    else if (activeWindow === "ano") rangeFrom = `${ty}-01-01`;
+    else if (legacyMonths >= 2)
+      rangeFrom = monthsBack(Math.min(MAX_BD_ALIGN_MONTHS, legacyMonths));
+
     const fm = rangeFrom.match(/^(\d{4})-(\d{2})/);
-    const tm = rangeTo.match(/^(\d{4})-(\d{2})/);
-    if (!fm || !tm) return null;
+    if (!fm) return null;
     const [fy, fmo] = [Number(fm[1]), Number(fm[2])];
-    const [ty, tmo] = [Number(tm[1]), Number(tm[2])];
     const monthCount = (ty - fy) * 12 + (tmo - fmo) + 1;
     // Períodos longos demais viram fallback silencioso (custo: 1 rodada/mês).
     if (monthCount < 1 || monthCount > MAX_BD_ALIGN_MONTHS) return null;
     let holidays: Set<string>;
     try {
-      holidays = await loadNonWorkingDays(supabase);
+      holidays = alignEnabled ? await loadNonWorkingDays(supabase) : new Set();
     } catch {
       holidays = new Set();
     }
     const todayIso = todayBrasiliaIso();
     const ref =
-      cfg.reference === "period_end"
+      cfg?.reference === "period_end"
         ? period.to
         : todayIso < period.to
           ? todayIso
           : period.to;
-    const n = businessDayIndexInMonth(ref, holidays);
+    // Recorte de cada mês:
+    //  - dia ÚTIL (align): até o N-ésimo dia útil (N da referência); mês com
+    //    N ≥ total de dias úteis = mês cheio;
+    //  - dia CHEIO (sem align): recorte de DIAS equivalente ao período apurado
+    //    quando a barra cabe num único mês (dia(from)–dia(to) clampados ao
+    //    tamanho do mês; "Este mês" = 1–31 → meses cheios); barra multi-mês =
+    //    meses cheios. O mês final sempre respeita o `to` da barra.
+    const n = alignEnabled ? businessDayIndexInMonth(ref, holidays) : null;
+    const pf = period.from.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const pt = period.to.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const barSingleMonth =
+      pf && pt && pf[1] === pt[1] && pf[2] === pt[2];
+    const dayFrom = barSingleMonth ? Number(pf![3]) : 1;
+    const dayTo = barSingleMonth ? Number(pt![3]) : 31;
     const legs: DashboardPeriod[] = [];
-    // N = 0 (nenhum dia útil decorrido no mês da referência): acumulado
-    // alinhado é vazio — align ativo com zero pernas (gráfico sem dados).
-    for (let i = 0; n > 0 && i < monthCount; i++) {
+    // N = 0 com align (nenhum dia útil decorrido no mês da referência):
+    // acumulado alinhado é vazio — ativo com zero pernas (gráfico sem dados).
+    if (alignEnabled && (n ?? 0) <= 0) return { legs, n, holidays };
+    for (let i = 0; i < monthCount; i++) {
       const y = fy + Math.floor((fmo - 1 + i) / 12);
       const m = ((fmo - 1 + i) % 12) + 1;
       const mm = String(m).padStart(2, "0");
-      const monthStart = `${y}-${mm}-01`;
-      const monthEnd = `${y}-${mm}-${String(daysInMonth(y, m)).padStart(2, "0")}`;
-      const cut =
-        n >= businessDaysInMonth(y, m, holidays)
-          ? monthEnd
-          : nthBusinessDayOfMonth(y, m, n, holidays);
-      const legFrom = monthStart > rangeFrom ? monthStart : rangeFrom;
-      const legTo = cut < rangeTo ? cut : rangeTo;
+      const dim = daysInMonth(y, m);
+      const monthEnd = `${y}-${mm}-${String(dim).padStart(2, "0")}`;
+      let legFrom: string;
+      let legTo: string;
+      if (alignEnabled) {
+        legFrom = `${y}-${mm}-01`;
+        legTo =
+          (n ?? 0) >= businessDaysInMonth(y, m, holidays)
+            ? monthEnd
+            : nthBusinessDayOfMonth(y, m, n ?? 1, holidays);
+      } else {
+        legFrom = `${y}-${mm}-${String(Math.min(dayFrom, dim)).padStart(2, "0")}`;
+        legTo = `${y}-${mm}-${String(Math.min(dayTo, dim)).padStart(2, "0")}`;
+      }
+      if (legFrom < rangeFrom) legFrom = rangeFrom;
+      if (legTo > rangeTo) legTo = rangeTo;
       if (legFrom > legTo) continue;
       legs.push({
         field: period.field,
@@ -2466,7 +2499,9 @@ export async function runWidget(
       if (monthIdx >= 0) {
         const metricKey = glCfg.metric?.trim() || "mrr";
         const pace = glCfg.mode === "pace";
-        let holidays = bdAlignCtx?.holidays ?? null;
+        // Feriados do align só quando o align está ATIVO (n != null) — janela
+        // em "dia cheio" carrega um Set vazio que não serve ao pace.
+        let holidays = bdAlignCtx?.n != null ? bdAlignCtx.holidays : null;
         if (pace && !holidays) {
           try {
             holidays = await loadNonWorkingDays(supabase);
@@ -2515,7 +2550,7 @@ export async function runWidget(
             // N do corte deste mês: align ativo = mesmo N p/ todos; senão só
             // o mês corrente é rateado.
             let n: number | null;
-            if (bdAlignCtx) {
+            if (bdAlignCtx?.n != null) {
               n = bdAlignCtx.n;
             } else if (ym < todayYm) {
               n = totalBd; // mês encerrado: meta cheia

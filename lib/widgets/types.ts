@@ -475,12 +475,51 @@ export interface BusinessDayAlignSettings {
   // Data de referência do N: "today" (default) = hoje em Brasília, limitado ao
   // fim do período; "period_end" = sempre o fim do período selecionado.
   reference?: "today" | "period_end";
-  // Janela PRÓPRIA do card (20/07/2026): com 2–13, o widget ignora o `from`
-  // da barra e cobre os N meses de calendário que terminam no mês do `to`
-  // (ex.: barra em "Este mês" + windowMonths 6 = jul + 5 anteriores, cada um
-  // recortado no mesmo dia útil). Ausente = range da barra (comportamento
-  // original). Equivalente ao seletor de histórico do card "Mês x Mês".
+  // LEGADO (v2 do preset): janela fixa de N meses. Substituído por
+  // settings.periodWindow (dropdown no card); o engine ainda lê como alias
+  // (N meses rolling) quando periodWindow está ausente.
   windowMonths?: number;
+}
+
+// --- Janela de períodos equivalentes (20/07/2026) ---
+// FILTRO RÁPIDO de período do PRÓPRIO widget (dropdown no card): replica o
+// "período apurado" da barra nos meses anteriores. Chaves rolling (3m/6m/12m
+// = N meses terminando no mês do `to` da barra) e de calendário (trimestre/
+// semestre/ano do `to`). Cada mês recebe o recorte EQUIVALENTE: com
+// businessDayAlign = corte no mesmo dia útil; sem = mesmo intervalo de DIAS
+// (barra num único mês; senão meses cheios), com o mês final respeitando o
+// `to`. Resolvido no ENGINE como pernas por mês (RPCs intocados). A seleção
+// do card persiste COMPARTILHADA em dashboard_table_cells (row __pw__), como
+// os filtros rápidos; o viewer público usa o default congelado.
+export type PeriodWindowKey =
+  | "3m"
+  | "trimestre"
+  | "6m"
+  | "semestre"
+  | "12m"
+  | "ano";
+export const PERIOD_WINDOW_LABELS: Record<PeriodWindowKey, string> = {
+  "3m": "3 meses",
+  trimestre: "Este trimestre",
+  "6m": "6 meses",
+  semestre: "Este semestre",
+  "12m": "Últimos 12 meses",
+  ano: "Este ano",
+};
+export interface PeriodWindowSettings {
+  // Chaves expostas no dropdown do card, NA ORDEM. Vazio/ausente = sem
+  // dropdown (janela fixa pelo default, se houver).
+  options?: PeriodWindowKey[];
+  // Janela inicial (sem seleção persistida). Ausente + sem seleção = sem
+  // janela (range da barra).
+  default?: PeriodWindowKey;
+  // Expõe no card o seletor "dia útil × dia cheio" (sobrepõe o
+  // businessDayAlign.enabled do widget para quem estiver vendo).
+  showAlignToggle?: boolean;
+  // RUNTIME-ONLY (nunca persistido no widget): janela efetiva desta
+  // renderização — seleção persistida do card ?? default. Preenchido pela
+  // page/widget-scope antes do engine (como WidgetFilter.record_types).
+  active?: PeriodWindowKey;
 }
 
 // --- Linha de meta nos gráficos (20/07/2026) ---
@@ -885,6 +924,8 @@ export type WidgetSettings = KpiSettings &
   ComparisonWidgetSettings & {
     // Alinhamento "mesmo dia útil" (gráficos mensais; ver acima).
     businessDayAlign?: BusinessDayAlignSettings;
+    // Janela de períodos equivalentes (dropdown de meses no card; ver acima).
+    periodWindow?: PeriodWindowSettings;
     // Linha de meta/ritmo nos gráficos (ver acima).
     goalLine?: GoalLineSettings;
     // Identidade de widget de PRESET (20/07/2026): chave estável dentro do

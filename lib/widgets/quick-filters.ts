@@ -18,11 +18,74 @@ import type { RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "./fields";
 import { MONTH_NAMES_PT, WEEKDAY_NAMES_PT } from "./date-buckets";
 import { unifiedMemberRef } from "@/lib/correspondences";
-import type { QuickFilterEntry, Transform, WidgetFilter } from "./types";
+import type {
+  PeriodWindowKey,
+  QuickFilterEntry,
+  Transform,
+  WidgetFilter,
+  WidgetSettings,
+} from "./types";
 
 // row_key reservado em dashboard_table_cells para os valores dos filtros
 // rápidos (col_key = id do entry). Excluído do snapshot de Desfazer/Refazer.
 export const QF_ROW_KEY = "__qf__";
+
+// row_key reservado p/ a seleção da JANELA DE PERÍODOS do widget
+// (settings.periodWindow — dropdown de meses no card). col_key fixo "sel";
+// valor `PeriodWindowChoice`. Mesma RLS/semântica compartilhada do __qf__;
+// também fica fora do snapshot de Desfazer/Refazer.
+export const PW_ROW_KEY = "__pw__";
+export const PW_COL_KEY = "sel";
+
+/** Seleção persistida da janela: chave escolhida e/ou override do dia útil. */
+export interface PeriodWindowChoice {
+  w?: PeriodWindowKey;
+  bd?: boolean; // true = dia útil; false = dia cheio; ausente = config
+}
+
+const PW_KEYS: PeriodWindowKey[] = [
+  "3m",
+  "trimestre",
+  "6m",
+  "semestre",
+  "12m",
+  "ano",
+];
+
+export function parsePeriodWindowChoice(v: unknown): PeriodWindowChoice | null {
+  if (v == null || typeof v !== "object") return null;
+  const raw = v as { w?: unknown; bd?: unknown };
+  const out: PeriodWindowChoice = {};
+  if (typeof raw.w === "string" && PW_KEYS.includes(raw.w as PeriodWindowKey)) {
+    out.w = raw.w as PeriodWindowKey;
+  }
+  if (typeof raw.bd === "boolean") out.bd = raw.bd;
+  return out.w != null || out.bd != null ? out : null;
+}
+
+/**
+ * Mescla a seleção do card nos settings do widget ANTES do engine: a janela
+ * efetiva vai em periodWindow.active (runtime-only) e o override de dia útil
+ * em businessDayAlign.enabled. Sem periodWindow configurado, devolve os
+ * settings inalterados (choice órfã é ignorada).
+ */
+export function applyPeriodWindowChoice(
+  settings: WidgetSettings | undefined,
+  choice: PeriodWindowChoice | null | undefined
+): WidgetSettings | undefined {
+  const pw = settings?.periodWindow;
+  if (!pw) return settings;
+  const active = choice?.w ?? pw.default;
+  const bd =
+    pw.showAlignToggle && choice?.bd != null
+      ? choice.bd
+      : settings?.businessDayAlign?.enabled;
+  return {
+    ...settings,
+    periodWindow: { ...pw, ...(active ? { active } : {}) },
+    businessDayAlign: { ...settings?.businessDayAlign, enabled: bd },
+  };
+}
 
 // Campo sintético do filtro por bucket de data ('mês do ano', 'trimestre'…).
 // Só o RPC (0048) e o pós-filtro do modo lista o reconhecem.
