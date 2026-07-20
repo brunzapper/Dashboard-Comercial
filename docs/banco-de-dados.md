@@ -425,3 +425,9 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0080 | backfill_bitrix_tz | Backfill: reescreve datetimes com offset ≠ -03:00 das chaves datetime do Bitrix (Data Reunião lead/negócio, `bitrix_moved_time`) p/ horário de Brasília; `snapshot_records` fica como capturado |
 | 0081 | non_working_days | Dias não úteis (feriados) — calendário global dos utilitários de dia útil (meta ideal/pace, businessDayAlign, previous_period_bd) |
 | 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
+
+Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
+Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
+(7), `field_correspondences`(+membros) (3), `field_definitions`
+(`mrr_contrato`, calculado) e a chave `sql` no `sync_config.goal_metrics`.
+Nenhuma migração envolvida; itens já existentes nunca são sobrescritos.

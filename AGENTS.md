@@ -58,7 +58,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lowerSourceScopedOperands` (`lib/widgets/calc-metrics.ts`), nos mesmos choke
   points do `expandAggFormula` (`resolveCalcMetric`/`runCalculatedWidget`).
   Ref bare (sem `@`) = universo em escopo (compat). NÃO recrie os RPCs para
-  isso. Catálogo por-registro dos campos calculados é ÚNICO
+  isso. Desde 20/07/2026: o predicado da sub aceita também `in`/`is_null`/
+  `not_null`/`*_ci` (só `ilike` degrada), a chave `aggif:` ganha um 4º
+  elemento OPCIONAL `scope` (chaves sem escopo seguem byte-idênticas) e a
+  consulta AUXILIAR de um operando escopado roda como perna SÓ da fonte do
+  escopo — período pela coluna de DATA dela (`scopedAuxPeriod`/
+  `patchAuxPeriodByType`, `lib/widgets/period.ts`) e `p_correspondences` com o
+  membro DELA (senão um `unified:` bucketizaria pela data da pai). Vale nos 3
+  choke points (computeRows/pernas por métrica/`runCalculatedWidget`, com o
+  período DA RODADA — atual, perna do businessDayAlign ou comparação);
+  caminhos client-side (`dateAgg`/listas) não rejanelam pela data da sub
+  (limitação documentada). Catálogo por-registro dos campos calculados é ÚNICO
   (`perRecordCalcOperands`, `lib/records/calc-operands.ts`) — os dois editores
   e a validação do servidor derivam dele; não monte listas paralelas.
 - **Datas são strings no fuso de Brasília (0079/0080):** valores DATETIME

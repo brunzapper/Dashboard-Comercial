@@ -87,8 +87,9 @@ export function validateFormulaForContext(
 
 // Operandos `agg:…@<fonte>` que o lowering NÃO consegue abaixar viram operando
 // AUSENTE em runtime ("—", nunca a basis sem escopo — lowerSourceScopedOperands
-// /basisKeysFor). O catálogo atual só oferece variantes abaixáveis, então isto
-// só dispara em fórmula antiga ou futura oferta de subs; avisa em vez de calar.
+// /basisKeysFor). Desde 20/07/2026 o catálogo oferta também SUB-fontes e os
+// predicados aceitam in/is_null/not_null/*_ci — só `ilike`/op desconhecido
+// degradam; avisa em vez de calar.
 function scopeWarnings(formula: Formula, ctx: FormulaContext): string[] {
   if (!ctx.sources) return [];
   const labelOf = (ref: string) =>
@@ -114,7 +115,7 @@ function scopeWarnings(formula: Formula, ctx: FormulaContext): string[] {
     }
     if (conds === null) {
       warnings.push(
-        `"${labelOf(ref)}": o filtro dessa sub-fonte não é expressável dentro da fórmula — o operando ficará ausente ("—"). Ajuste o filtro da sub-fonte (=, ≠, >, ≥, <, ≤) ou use a fonte pai.`
+        `"${labelOf(ref)}": o filtro dessa sub-fonte não é expressável dentro da fórmula — o operando ficará ausente ("—"). Ajuste o filtro da sub-fonte (=, ≠, >, ≥, <, ≤, "está em", vazio/não vazio) ou use a fonte pai.`
       );
     }
   }

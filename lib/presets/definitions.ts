@@ -33,6 +33,7 @@ import type {
 } from "@/lib/widgets/types";
 import type { SourceKey } from "@/lib/sources";
 import type { DataType } from "@/lib/records/types";
+import type { Formula } from "@/lib/records/formulas";
 
 export interface PresetField {
   field_key: string;
@@ -44,6 +45,24 @@ export interface PresetField {
   is_local: boolean;
   // Campos 'moeda': 'inherit' = moeda do registro (padrão do sistema).
   currency_mode?: string;
+  // Campos 'calculado'/'calculado_agg' (20/07/2026): fórmula persistida
+  // (tokens — mesmo shape de field_definitions.formula). Criar um campo
+  // 'calculado' dispara o recálculo global (materialização em custom_fields).
+  formula?: Formula;
+  // record_types a que o campo se aplica (field_definitions.applies_to);
+  // ausente = todas as fontes.
+  applies_to?: string[];
+}
+
+// Correspondência (campo unificado) declarada como dependência do preset:
+// criada se ausente (por key); existente NUNCA é sobrescrita. O record_type de
+// cada membro é resolvido pelo catálogo a partir da source_key (sub-fonte →
+// record_type da pai) — por isso as sub-fontes do preset são criadas ANTES.
+export interface PresetCorrespondence {
+  key: string;
+  label: string;
+  data_type: DataType;
+  members: { source_key: string; field_ref: string }[];
 }
 
 // Sub-fonte declarada como dependência do preset (criada se ausente; uma
@@ -87,6 +106,7 @@ export interface PresetDashboard {
   settings?: DashboardSettings;
   fields?: PresetField[]; // campos de apoio específicos deste preset
   subSources?: PresetSubSource[]; // sub-fontes de que os widgets dependem
+  correspondences?: PresetCorrespondence[]; // campos unificados dependidos
   widgets: PresetWidget[];
 }
 
@@ -123,6 +143,8 @@ export const PRESET_FIELDS: PresetField[] = [
   },
 ];
 
+import { INBOUND_PRESET } from "./inbound";
+
 // Filtros reutilizáveis
 const closedThisMonth: WidgetFilter[] = [
   { field: "closed", op: "eq", value: true },
@@ -135,6 +157,7 @@ const closedThisYear: WidgetFilter[] = [
 ];
 
 export const PRESETS: PresetDashboard[] = [
+  INBOUND_PRESET,
   {
     presetKey: "performance_mes",
     version: 1,
