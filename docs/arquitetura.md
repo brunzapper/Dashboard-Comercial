@@ -1,4 +1,9 @@
-<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- v1.8 (20/07/2026): operandos escopados estendidos (§4.7 — predicado de sub
+     com in/is_null/*_ci; aux como perna da fonte do escopo: período pela data
+     DELA + correspondências DELA; chave aggif com 4º elemento scope) + preset
+     Inbound (lib/presets/inbound.ts) e deps novas do aplicador (campos
+     calculados com fórmula, correspondências). RPCs intocados. -->
 <!-- v1.7 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
      utilitários de dia útil; businessDayAlign (pernas por mês no engine);
      base de comparação previous_period_bd; goalLine (meta/ritmo como série);
@@ -286,15 +291,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
   `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,
   canvas, background), widgets com `WidgetSettings` completo e dependências
-  (campos, sub-fontes; chaves de métrica de meta são registradas no registry).
-  Aplicação IDEMPOTENTE: dashboard identificado por `settings.preset.key`
-  (adoção por nome p/ legado), widgets por `settings.presetKey` com UPDATE
-  in-place (ids preservados → conectores/links/células sobrevivem), GC dos
-  presetKeys órfãos do próprio preset; widgets sem `presetKey` e sub-fontes/
-  campos já existentes NUNCA são tocados. UI: **Configurações → Presets**
+  (campos — inclusive CALCULADOS com `formula`/`applies_to`, que disparam
+  `recalcAllFormulaFields` best-effort ao serem criados —, sub-fontes e
+  CORRESPONDÊNCIAS `PresetCorrespondence` — criadas após as subs, com o
+  `record_type` dos membros resolvido pelo catálogo; chaves de métrica de meta
+  são registradas no registry). Aplicação IDEMPOTENTE: dashboard identificado
+  por `settings.preset.key` (adoção por nome p/ legado), widgets por
+  `settings.presetKey` com UPDATE in-place (ids preservados →
+  conectores/links/células sobrevivem), GC dos presetKeys órfãos do próprio
+  preset; widgets sem `presetKey` e sub-fontes/campos/correspondências já
+  existentes NUNCA são tocados. UI: **Configurações → Presets**
   (`configuracoes/presets/page.tsx` + `presets-manager.tsx`) — status por
   preset (marcador `settings.preset`) e botões Gerar/Atualizar (por preset e
-  global).
+  global). **Preset "Inbound"** (`lib/presets/inbound.ts`): porta as abas
+  inbound do dashboard legado de pré-vendas — 7 sub-fontes com data própria
+  (SQLs por Data Reunião aciona os mocks 0052), campo calculado
+  `mrr_contrato`, correspondências `data_ref`/`fonte_venda`/`mrr_venda` e 22
+  widgets (KPIs com `previous_period_bd`, SQL total/% de conversão via Card
+  fórmula com operandos escopados, Mês x Mês com `businessDayAlign` +
+  `goalLine` métrica `sql` em modo pace, coorte via dimensão `match:`).
+  Pré-requisitos de DADO no runbook (manual §4.7).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -344,6 +360,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   universo do widget). Limitações v1: soma monetária com escopo degrada p/ soma
   crua entre moedas (mesma das condicionais) e `min`/`máx` não têm forma com
   escopo.
+  **Extensão 20/07/2026 (base do preset Inbound):** (a) o predicado da sub
+  aceita também `in` (lista), `is_null`/`not_null` e `eq_ci`/`neq_ci` — só
+  `ilike`/op desconhecido degradam (aviso no validador); (b) a chave `aggif:`
+  ganha um 4º elemento OPCIONAL `scope` (source-key — chaves sem escopo
+  seguem byte-idênticas); (c) a consulta AUXILIAR de um operando escopado
+  roda como perna SÓ da fonte do escopo: período aplicado na coluna de DATA
+  dela (`scopedAuxPeriod` reescreve o `fieldBySource`; `patchAuxPeriodByType`
+  cobre o `@period` pré-sintetizado) e `p_correspondences` com o membro DELA
+  (um `unified:` de data bucketiza pela data da sub, não da pai). Isso permite
+  no MESMO widget operandos de duas subs do mesmo `record_type` com datas
+  diferentes (ex.: `@sqls` por Data Reunião + `@clientes_lite` por mudança de
+  etapa — o "SQL total" e os % de conversão do Inbound). Implementado nos 3
+  choke points com o período DA RODADA (atual/perna do businessDayAlign/
+  comparação): `computeRows`+pernas por métrica (`engine.ts`) e
+  `runCalculatedWidget` (`formula-metric.ts`). O catálogo de operandos
+  escopados passa a ofertar sub-fontes (`sourceScopedAggOperandRefs`).
+  Caminhos client-side (`dateAgg`/listas) avaliam o predicado estendido mas
+  NÃO rejanelam pela data da sub (limitação documentada); a aux do `@sqls`
+  referencia a chave de Data Reunião no filtro → regra dos mocks 0052 segue
+  valendo.
 - **Catálogo por-registro ÚNICO** (19/07/2026, `lib/records/calc-operands.ts`):
   `perRecordCalcOperands` monta os operandos do campo calculado POR-REGISTRO
   para os DOIS editores (página `/campos` e o FieldForm inline do

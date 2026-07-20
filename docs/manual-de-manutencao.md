@@ -1,4 +1,7 @@
-<!-- Versão: 1.3 | Data: 20/07/2026 -->
+<!-- Versão: 1.4 | Data: 20/07/2026 -->
+<!-- v1.4 (20/07/2026): §4.7 — runbook do preset Inbound (pré-requisitos de
+     dado: rótulos dos predicados, metas sql, feriados, operações, match
+     rules, campos de licença do deal). -->
 <!-- v1.3 (20/07/2026): §4.7 — runbook de dias não úteis (cadastro/import CSV),
      métricas de meta custom e geração/atualização de presets. -->
 <!-- v1.2 (19/07/2026): fuso da fonte (0079/0080) — checklist em §4.4/§4.6 e
@@ -217,8 +220,41 @@ cadastrada normalmente por período/escopo.
 As actions (`applyPreset`/`generatePresets`, `app/(app)/dashboards/actions.ts`)
 são idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
 `settings.presetKey`, ids preservados) sem tocar widgets adicionados à mão;
-sub-fontes/campos já existentes nunca são sobrescritos. Dashboard homônimo sem
-marcador é ADOTADO (carimbado) em vez de duplicado.
+sub-fontes/campos/correspondências já existentes nunca são sobrescritos.
+Dashboard homônimo sem marcador é ADOTADO (carimbado) em vez de duplicado.
+
+**Gerar o preset "Inbound"** (`lib/presets/inbound.ts`) — pré-requisitos de
+DADO antes de gerar (o preset cria estrutura, não dados):
+
+1. **Rótulos dos predicados**: as sub-fontes usam os rótulos legíveis do
+   Bitrix — `custom:fonte` ∈ {"Formulário de CRM", "Site"}, etapas
+   ("Lead Qualificado", "Clientes Lite", "Contrato assinado", "Inacessível",
+   "Desqualificado Marketing", "Novos Leads", "1º contato", "Em
+   qualificação"), motivos ("Monitoramento pessoal", "Sem resposta",
+   "Outros") e "DSQ" no Estudo. Se os rótulos do portal divergirem
+   (caixa/acento), ajuste as sub-fontes geradas em Configurações → Fontes
+   (o preset nunca sobrescreve subs existentes).
+2. **Metas**: métrica `sql` é registrada automaticamente; cadastre as metas
+   MENSAIS em Configurações → Metas (a linha "Meta SQL" do Mês x Mês usa o
+   modo ritmo/pace por dia útil).
+3. **Feriados**: Configurações → Metas → Dias não úteis (alimenta o
+   alinhamento "mesmo dia útil" e o pace).
+4. **Operações BR/INTL**: cadastre as operações e vincule os responsáveis
+   (o widget "Operação (todas as abas)" filtra o dashboard inteiro por
+   `operation_id`).
+5. **Match rules** (widget "Evolução por Criação do Lead"): crie em /campos →
+   Matching as regras lead↔negócio e lead↔venda do site (par primário
+   `custom:email` dos dois lados) e rode o auto-match. Sem elas o widget
+   mostra o bucket "—" (degrada, não quebra).
+6. **Campos do deal**: o MRR usa o campo calculado `mrr_contrato` = "Valor
+   por licença do contrato (R$)" × "Número de licenças contratadas"
+   (UF_CRM_1715111926953 × UF_CRM_1715258133683) — confira que esse par está
+   preenchido nos deals assinados; a geração dispara o recálculo global.
+
+Conferências pós-geração: mocks de Data Reunião aparecendo no SQL (período
+que referencia a Data Reunião), moedas no MRR (BRL/USD via `currency` do
+deal), linha de meta no Mês x Mês, e comparação dos números com o dashboard
+antigo no MESMO período.
 
 ## 5. Troubleshooting
 
