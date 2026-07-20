@@ -1,4 +1,6 @@
-<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- v1.8 (20/07/2026): §5 — linha "dashboard abre preso em Carregando…"
+     (sync inicial do Filtro por campo agora é raso, sem navegação RSC). -->
 <!-- v1.7 (20/07/2026): §4.7/§5 — mocks no SQL: migração 0084 (fonte nos mocks
      Inbound), preset v4 (Mês x Mês abre em "dia cheio") e linha de
      troubleshooting. -->
@@ -325,6 +327,7 @@ fonte no widget se precisar do mês.
 | Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 4 jobs; recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
 | Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |
+| Dashboard abre com o grid esmaecido e "Carregando…" preso (só hard refresh resolve) | O widget "Filtro por campo" com valor salvo (`lastFieldFilters`) disparava uma navegação RSC na montagem só p/ sincronizar a URL; sob rajadas de `router.refresh()` do realtime (ex.: pós-recalc do preset, sync do Bitrix) a fila do router nunca drenava e o overlay nunca fechava | Corrigido em 20/07/2026 (`FieldFilterControls` v1.2: sync raso via `history.replaceState`, sem navegação). Se reaparecer, procure QUEM liga o overlay (`useNavPending().run`) na montagem — nenhum efeito de mount deve navegar |
 | Webhook de saída parou | Auto-desativado após falhas consecutivas | Configurações → Integrações: ver `disabled_reason`, corrigir o endpoint e reativar |
 | Tela de snapshots/listagens quebrou após deploy | Código selecionando coluna que a migração ainda não criou | Aplique o SQL pendente (regra "SQL antes do deploy") |
 | Erro de env em runtime | Variável ausente na Vercel | `lib/env.ts` diz qual; confira `.env.example` |

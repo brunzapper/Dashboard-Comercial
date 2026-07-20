@@ -1,4 +1,9 @@
-<!-- Versão: 1.11 | Data: 20/07/2026 -->
+<!-- Versão: 1.12 | Data: 20/07/2026 -->
+<!-- v1.12 (20/07/2026): sync inicial do "Filtro por campo" é RASO (§4.7) —
+     seed lastFieldFilters sem parâmetro na URL espelha a URL com
+     history.replaceState, sem navegação RSC (o servidor já aplicou o seed);
+     overlay/persistência só em mudança do usuário. Corrige o dashboard de
+     preset preso em "Carregando…" na montagem sob refreshes do realtime. -->
 <!-- v1.11 (20/07/2026): mocks × predicados de sub-fonte (§4.4) — a regra 0052
      não isenta os mocks dos predicados (AND puro); 0084 dá custom:fonte aos
      mocks Inbound p/ contarem na sub sqls. Preset Inbound v4: Mês x Mês abre
@@ -337,7 +342,15 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   ressuscita). Ao abrir o dashboard SEM o parâmetro na URL, page e
   `widget-scope` reidratam desse mapa (**URL sempre vence**) e a page manda o
   seed ao cliente (`fieldFilterSeedById`) p/ os controles montarem
-  preenchidos — o primeiro debounce sincroniza a URL. Viewer de snapshot:
+  preenchidos — o primeiro debounce só ESPELHA a URL com
+  `history.replaceState` raso (integrado ao router; sem navegação RSC nem
+  persistência: o servidor já aplicou o seed). Navegar na montagem recomputava
+  o dashboard à toa e, sob rajadas de `router.refresh()` do realtime (ex.:
+  pós-recalc do preset), prendia o overlay "Carregando…" indefinidamente. O
+  controle guarda a forma canônica encode∘parse do valor inicial
+  (`serverAppliedRef`): `run(router.replace)` + `saveLastFieldFilter` só quando
+  `encoded` diverge dela (mudança real do usuário — ou seed que não round-tripa
+  numa config antiga dos fields, que precisa mesmo renavegar). Viewer de snapshot:
   URL-only (gate `useSnapshotMode` — visitante não tem sessão e usuário
   autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
   do card e a janela de períodos (`__qf__`/`__pw__` em
