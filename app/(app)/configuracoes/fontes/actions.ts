@@ -84,6 +84,15 @@ const PERIOD_FIELDS = new Set([
   "updated_at",
 ]);
 
+// Sub-fontes (0082) também aceitam campo personalizado de DATA como campo de
+// período ('custom:<field_key>' — ex.: Data Reunião). Formato validado aqui;
+// a existência/tipo do campo é conferida na action (validateCustomPeriodField).
+const CUSTOM_PERIOD_RE = /^custom:[A-Za-z0-9_]{1,60}$/;
+
+function isSubPeriodField(v: string): boolean {
+  return PERIOD_FIELDS.has(v) || CUSTOM_PERIOD_RE.test(v);
+}
+
 // Keys que não podem virar fonte: rótulo reservado dos campos gerais e
 // palavras que colidiriam com semânticas internas.
 const RESERVED_KEYS = new Set(["geral", "gerais", "records", "todas"]);
@@ -319,13 +328,31 @@ function readSubSourceForm(formData: FormData): {
   if (!parentKey) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a fonte pai." };
   }
-  if (!PERIOD_FIELDS.has(periodField)) {
+  if (!isSubPeriodField(periodField)) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Campo de período inválido." };
   }
   if (filter.length === 0) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Defina ao menos uma condição de filtro." };
   }
   return { label, shortLabel, periodField, parentKey, filter };
+}
+
+// Campo 'custom:<key>' como período: o campo precisa existir e ser de DATA.
+async function validateCustomPeriodField(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  periodField: string
+): Promise<string | null> {
+  if (!periodField.startsWith("custom:")) return null;
+  const fieldKey = periodField.slice("custom:".length);
+  const { data } = await supabase
+    .from("field_definitions")
+    .select("data_type")
+    .eq("field_key", fieldKey)
+    .maybeSingle();
+  if (!data) return `Campo personalizado "${fieldKey}" não encontrado.`;
+  if (data.data_type !== "data")
+    return `O campo "${fieldKey}" não é um campo de data.`;
+  return null;
 }
 
 export async function createSubSource(
@@ -347,6 +374,8 @@ export async function createSubSource(
   }
 
   const supabase = await createClient();
+  const periodError = await validateCustomPeriodField(supabase, periodField);
+  if (periodError) return { ok: false, message: periodError };
   // A pai precisa existir como fonte RAIZ (data_sources).
   const { data: parent } = await supabase
     .from("data_sources")
@@ -394,6 +423,8 @@ export async function updateSubSource(
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
+  const periodError = await validateCustomPeriodField(supabase, periodField);
+  if (periodError) return { ok: false, message: periodError };
   // parent_key é imutável na edição (troca de pai = record_type diferente).
   const { error: updateError } = await supabase
     .from("sub_sources")

@@ -16,7 +16,15 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { PRESETS, PRESET_FIELDS } from "@/lib/presets/definitions";
+import {
+  PRESETS,
+  PRESET_FIELDS,
+  type PresetDashboard,
+  type PresetField,
+  type PresetSubSource,
+} from "@/lib/presets/definitions";
+import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
+import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
@@ -910,8 +918,294 @@ export async function deleteWidget(
   revalidatePath(`/dashboards/${dashboardId}`);
 }
 
-// Gera os dashboards preset (idempotente): cria campos de apoio que faltam e
-// os dashboards que ainda não existem para este usuário. Só admin.
+// ============ Presets (motor v2, 20/07/2026) ============
+// Aplicação IDEMPOTENTE de PresetDashboard (lib/presets/definitions.ts):
+// cria/ATUALIZA o dashboard do usuário (identidade settings.preset.key) e os
+// widgets (identidade settings.presetKey — update in-place preserva ids →
+// conectores/links/células sobrevivem). Widgets sem presetKey (adicionados à
+// mão) nunca são tocados; presetKey do preset que sumiu da definição é
+// removido (GC). Dependências: campos e sub-fontes ausentes são criados
+// (existentes nunca sobrescritos) e as chaves de métrica de meta usadas são
+// registradas no registry goal_metrics. Sem UI nesta entrega — a futura aba
+// "Presets" das Configurações chama applyPreset/generatePresets.
+
+export interface PresetApplyResult {
+  presetKey: string;
+  dashboard: "created" | "updated";
+  widgets: { created: number; updated: number; deleted: number };
+  fieldsCreated: number;
+  subSourcesCreated: number;
+  subSourcesSkipped: number;
+}
+
+async function ensurePresetFields(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  fields: PresetField[]
+): Promise<number> {
+  if (fields.length === 0) return 0;
+  const { data: existingFields } = await supabase
+    .from("field_definitions")
+    .select("field_key");
+  const have = new Set((existingFields ?? []).map((f) => f.field_key as string));
+  const toCreate = fields.filter((f) => !have.has(f.field_key));
+  if (toCreate.length === 0) return 0;
+  const { error } = await supabase.from("field_definitions").insert(
+    toCreate.map((f, i) => ({
+      field_key: f.field_key,
+      label: f.label,
+      data_type: f.data_type,
+      options: f.options,
+      visible_to_roles: f.visible_to_roles,
+      editable_by_roles: f.editable_by_roles,
+      is_local: f.is_local,
+      sort_order: 100 + i,
+      currency_mode: f.currency_mode ?? null,
+      currency_code: null,
+    }))
+  );
+  return error ? 0 : toCreate.length;
+}
+
+async function ensurePresetSubSources(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  subs: PresetSubSource[]
+): Promise<{ created: number; skipped: number }> {
+  let created = 0;
+  let skipped = 0;
+  for (const sub of subs) {
+    const { data: existing } = await supabase
+      .from("sub_sources")
+      .select("key")
+      .eq("key", sub.key)
+      .maybeSingle();
+    if (existing) {
+      skipped += 1; // já existe (possivelmente ajustada) — nunca sobrescrever
+      continue;
+    }
+    const { data: parent } = await supabase
+      .from("data_sources")
+      .select("key")
+      .eq("key", sub.parent_key)
+      .maybeSingle();
+    if (!parent) {
+      skipped += 1; // pai fora do catálogo — reportado no resultado
+      continue;
+    }
+    const { error } = await supabase.from("sub_sources").insert({
+      key: sub.key,
+      parent_key: sub.parent_key,
+      label: sub.label,
+      short_label: sub.short_label ?? sub.label,
+      default_period_field: sub.default_period_field,
+      filter: sub.filter,
+    });
+    if (!error) created += 1;
+    else skipped += 1;
+  }
+  return { created, skipped };
+}
+
+// Chaves de métrica de meta referenciadas pelo preset (KPI modo meta e
+// goalLine) que ainda não existem no registry → registradas com rótulo = key
+// (o admin renomeia depois se quiser). Builtins nunca duplicam.
+async function ensureGoalMetricKeys(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  preset: PresetDashboard
+): Promise<void> {
+  const keys = new Set<string>();
+  for (const w of preset.widgets) {
+    const s = w.settings;
+    if (s?.mode === "meta" && s.metric) keys.add(s.metric);
+    if (s?.goalLine?.enabled && s.goalLine.metric) keys.add(s.goalLine.metric);
+  }
+  if (keys.size === 0) return;
+  const { data } = await supabase
+    .from("sync_config")
+    .select("value")
+    .eq("key", GOAL_METRICS_CONFIG_KEY)
+    .maybeSingle();
+  const registry = mergeGoalMetrics(data?.value);
+  const missing = [...keys].filter((k) => !registry.some((m) => m.key === k));
+  if (missing.length === 0) return;
+  const current = Array.isArray(data?.value) ? (data.value as unknown[]) : [];
+  await supabase.from("sync_config").upsert(
+    {
+      key: GOAL_METRICS_CONFIG_KEY,
+      value: [...current, ...missing.map((k) => ({ key: k, label: k }))],
+    },
+    { onConflict: "key" }
+  );
+}
+
+async function applyPresetDefinition(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  preset: PresetDashboard
+): Promise<PresetApplyResult | null> {
+  // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes e
+  //    chaves de métrica de meta.
+  const fieldsCreated = await ensurePresetFields(supabase, [
+    ...PRESET_FIELDS,
+    ...(preset.fields ?? []),
+  ]);
+  const subResult = await ensurePresetSubSources(
+    supabase,
+    preset.subSources ?? []
+  );
+  await ensureGoalMetricKeys(supabase, preset);
+
+  // 2) Dashboard: identidade pelo marcador settings.preset.key; fallback de
+  //    ADOÇÃO por nome (dashboard gerado pelo motor antigo, sem marcador).
+  const { data: dashRows } = await supabase
+    .from("dashboards")
+    .select("id, name, settings")
+    .eq("owner_user_id", userId)
+    .eq("kind", "dashboard");
+  const rows = (dashRows ?? []) as {
+    id: string;
+    name: string;
+    settings: DashboardSettings | null;
+  }[];
+  const target =
+    rows.find((d) => d.settings?.preset?.key === preset.presetKey) ??
+    rows.find((d) => d.name === preset.name && !d.settings?.preset);
+
+  const marker = { key: preset.presetKey, version: preset.version };
+  let dashboardAction: "created" | "updated";
+  let dashId: string;
+
+  if (!target) {
+    const { data: dash, error } = await supabase
+      .from("dashboards")
+      .insert({
+        name: preset.name,
+        owner_user_id: userId,
+        visible_to_roles: preset.visible_to_roles,
+        is_shared: preset.visible_to_roles.length > 0,
+        settings: { ...(preset.settings ?? {}), preset: marker },
+      })
+      .select("id")
+      .maybeSingle();
+    if (error || !dash?.id) return null;
+    dashId = dash.id as string;
+    dashboardAction = "created";
+  } else {
+    // Update: sobrescreve só as seções GERIDAS presentes no preset; `tabs`
+    // faz merge por id (abas do preset na ordem do preset + abas do usuário
+    // ao final); chaves desconhecidas (connectors…) são preservadas.
+    const current = (target.settings ?? {}) as DashboardSettings;
+    const managed = preset.settings ?? {};
+    const next: DashboardSettings = { ...current };
+    if (managed.periodBar !== undefined) next.periodBar = managed.periodBar;
+    if (managed.canvas !== undefined) next.canvas = managed.canvas;
+    if (managed.background !== undefined) next.background = managed.background;
+    if (managed.dateFormat !== undefined) next.dateFormat = managed.dateFormat;
+    if (managed.tabs) {
+      const presetTabIds = new Set(managed.tabs.map((t) => t.id));
+      next.tabs = [
+        ...managed.tabs,
+        ...(current.tabs ?? []).filter((t) => !presetTabIds.has(t.id)),
+      ];
+    }
+    next.preset = marker;
+    const { error } = await supabase
+      .from("dashboards")
+      .update({
+        name: preset.name,
+        visible_to_roles: preset.visible_to_roles,
+        is_shared: preset.visible_to_roles.length > 0,
+        settings: next,
+      })
+      .eq("id", target.id);
+    if (error) return null;
+    dashId = target.id;
+    dashboardAction = "updated";
+  }
+
+  // 3) Widgets: update in-place por presetKey; insert dos novos; GC dos
+  //    presetKeys deste preset que sumiram da definição.
+  const { data: widgetRows } = await supabase
+    .from("widgets")
+    .select("id, settings")
+    .eq("dashboard_id", dashId);
+  const existingByKey = new Map<string, string>(); // presetKey → widget id
+  for (const w of widgetRows ?? []) {
+    const pk = (w.settings as WidgetSettings | null)?.presetKey;
+    if (pk) existingByKey.set(pk, w.id as string);
+  }
+  const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
+  const counts = { created: 0, updated: 0, deleted: 0 };
+  for (let i = 0; i < preset.widgets.length; i++) {
+    const w = preset.widgets[i];
+    const row = {
+      title: w.title,
+      visual_type: w.visual_type,
+      source: "records",
+      sources: w.sources ?? [],
+      split_by_source: w.split_by_source ?? false,
+      dimensions: w.dimensions,
+      metrics: w.metrics,
+      filters: w.filters,
+      settings: { ...(w.settings ?? {}), presetKey: w.presetKey },
+      grid_position: w.grid_position,
+      sort_order: i,
+    };
+    const existingId = existingByKey.get(w.presetKey);
+    if (existingId) {
+      const { error } = await supabase
+        .from("widgets")
+        .update(row)
+        .eq("id", existingId);
+      if (!error) counts.updated += 1;
+    } else {
+      const { error } = await supabase
+        .from("widgets")
+        .insert({ ...row, dashboard_id: dashId });
+      if (!error) counts.created += 1;
+    }
+  }
+  const prefix = `${preset.presetKey}.`;
+  for (const [pk, id] of existingByKey) {
+    if (!wantedKeys.has(pk) && pk.startsWith(prefix)) {
+      await supabase.from("widgets").delete().eq("id", id);
+      counts.deleted += 1;
+    }
+  }
+
+  return {
+    presetKey: preset.presetKey,
+    dashboard: dashboardAction,
+    widgets: counts,
+    fieldsCreated,
+    subSourcesCreated: subResult.created,
+    subSourcesSkipped: subResult.skipped,
+  };
+}
+
+/** Aplica UM preset pela chave (pronto p/ a futura aba "Presets"). Só admin. */
+export async function applyPreset(
+  presetKey: string
+): Promise<ActionState & { result?: PresetApplyResult }> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.roles.includes("admin")) {
+    return { ok: false, message: "Apenas administradores podem gerar presets." };
+  }
+  const preset = PRESETS.find((p) => p.presetKey === presetKey);
+  if (!preset) return { ok: false, message: `Preset "${presetKey}" não existe.` };
+  const supabase = await createClient();
+  const result = await applyPresetDefinition(supabase, session.user.id, preset);
+  if (!result) return { ok: false, message: "Falha ao aplicar o preset." };
+  revalidatePath("/");
+  const w = result.widgets;
+  return {
+    ok: true,
+    result,
+    message: `Preset "${preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"} (${w.created} widget(s) novo(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)).`,
+  };
+}
+
+// Gera/atualiza TODOS os dashboards preset (idempotente). Só admin.
 export async function generatePresets(): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -919,75 +1213,21 @@ export async function generatePresets(): Promise<ActionState> {
     return { ok: false, message: "Apenas administradores podem gerar presets." };
   }
   const supabase = await createClient();
-
-  // 1) Campos de apoio (pula os que já existem)
-  const { data: existingFields } = await supabase
-    .from("field_definitions")
-    .select("field_key");
-  const have = new Set((existingFields ?? []).map((f) => f.field_key as string));
-  const toCreate = PRESET_FIELDS.filter((f) => !have.has(f.field_key));
-  if (toCreate.length > 0) {
-    await supabase.from("field_definitions").insert(
-      toCreate.map((f, i) => ({
-        field_key: f.field_key,
-        label: f.label,
-        data_type: f.data_type,
-        options: f.options,
-        visible_to_roles: f.visible_to_roles,
-        editable_by_roles: f.editable_by_roles,
-        is_local: f.is_local,
-        sort_order: 100 + i,
-        currency_mode: f.currency_mode ?? null,
-        currency_code: null,
-      }))
-    );
-  }
-
-  // 2) Dashboards (pula os que já existem por nome, deste usuário)
-  const { data: existingDash } = await supabase
-    .from("dashboards")
-    .select("name")
-    .eq("owner_user_id", session.user.id);
-  const haveDash = new Set((existingDash ?? []).map((d) => d.name as string));
-
   let created = 0;
+  let updated = 0;
   for (const preset of PRESETS) {
-    if (haveDash.has(preset.name)) continue;
-    const { data: dash, error } = await supabase
-      .from("dashboards")
-      .insert({
-        name: preset.name,
-        owner_user_id: session.user.id,
-        visible_to_roles: preset.visible_to_roles,
-        is_shared: preset.visible_to_roles.length > 0,
-      })
-      .select("id")
-      .maybeSingle();
-    if (error || !dash?.id) continue;
-    await supabase.from("widgets").insert(
-      preset.widgets.map((w, i) => ({
-        dashboard_id: dash.id as string,
-        title: w.title,
-        visual_type: w.visual_type,
-        source: "records",
-        dimensions: w.dimensions,
-        metrics: w.metrics,
-        filters: w.filters,
-        settings: w.settings ?? {},
-        grid_position: w.grid_position,
-        sort_order: i,
-      }))
+    const result = await applyPresetDefinition(
+      supabase,
+      session.user.id,
+      preset
     );
-    created += 1;
+    if (result?.dashboard === "created") created += 1;
+    else if (result?.dashboard === "updated") updated += 1;
   }
-
   revalidatePath("/");
   return {
     ok: true,
-    message:
-      created > 0
-        ? `${created} dashboard(s) preset criado(s).`
-        : "Presets já existiam (nada a criar).",
+    message: `${created} dashboard(s) preset criado(s), ${updated} atualizado(s).`,
   };
 }
 

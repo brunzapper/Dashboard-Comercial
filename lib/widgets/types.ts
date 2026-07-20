@@ -881,6 +881,10 @@ export type WidgetSettings = KpiSettings &
     businessDayAlign?: BusinessDayAlignSettings;
     // Linha de meta/ritmo nos gráficos (ver acima).
     goalLine?: GoalLineSettings;
+    // Identidade de widget de PRESET (20/07/2026): chave estável dentro do
+    // preset dono ("<presetKey>.<aba>.<nome>"), gravada pelo aplicador
+    // (applyPreset). Widgets sem presetKey nunca são tocados por ele.
+    presetKey?: string;
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
@@ -954,6 +958,10 @@ export interface DashboardSettings {
   tabs?: { id: string; name: string; color?: string }[];
   // Conectores entre widgets (linhas retas/curvas estilo n8n). Ver Connector.
   connectors?: Connector[];
+  // Marcador de PRESET (20/07/2026): identifica um dashboard gerado por preset
+  // (lib/presets/definitions.ts) para o aplicador atualizar em vez de duplicar.
+  // Gravado/gerido só por applyPreset (app/(app)/dashboards/actions.ts).
+  preset?: { key: string; version: number };
 }
 
 export interface WidgetConfig {

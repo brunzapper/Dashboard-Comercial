@@ -54,6 +54,27 @@ export default async function FontesPage() {
         ])
     );
 
+  // Campos personalizados de DATA por pai: opções extras do campo de período
+  // da sub-fonte (0082 — 'custom:<key>'; ex.: Data Reunião).
+  const dateFieldOptionsByParent: Record<string, ComboboxOption[]> =
+    Object.fromEntries(
+      sources
+        .filter((s) => !s.parentKey)
+        .map((s) => [
+          s.key,
+          fields
+            .filter(
+              (f) =>
+                f.data_type === "data" &&
+                fieldAppliesToSource(f.applies_to, s.key, sources)
+            )
+            .map((f) => ({
+              value: `custom:${f.field_key}`,
+              label: f.label,
+            })),
+        ])
+    );
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -68,6 +89,7 @@ export default async function FontesPage() {
       <SubSourcesManager
         sources={sources}
         fieldOptionsByParent={fieldOptionsByParent}
+        dateFieldOptionsByParent={dateFieldOptionsByParent}
       />
       <div>
         <h2 className="text-lg font-semibold">Rótulos</h2>
