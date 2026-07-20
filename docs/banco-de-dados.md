@@ -1,4 +1,7 @@
-<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- Versão: 1.6 | Data: 20/07/2026 -->
+<!-- v1.6 (20/07/2026): auditoria — user_settings_merge (0083, merge atômico de
+     user_settings.settings) e índice único parcial uq_sync_jobs_one_running
+     (0084, no máximo 1 job de sync 'running'). -->
 <!-- v1.5 (20/07/2026): dias não úteis (`non_working_days`, 0081), campo de
      período `custom:` em sub-fontes (0082), metas por métrica arbitrária
      (registry em sync_config 'goal_metrics'). -->
@@ -337,7 +340,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0082)
+## 7. Histórico de migrações (0001–0084)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -425,3 +428,5 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0080 | backfill_bitrix_tz | Backfill: reescreve datetimes com offset ≠ -03:00 das chaves datetime do Bitrix (Data Reunião lead/negócio, `bitrix_moved_time`) p/ horário de Brasília; `snapshot_records` fica como capturado |
 | 0081 | non_working_days | Dias não úteis (feriados) — calendário global dos utilitários de dia útil (meta ideal/pace, businessDayAlign, previous_period_bd) |
 | 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
+| 0083 | user_settings_merge | Função `user_settings_merge(p_patch jsonb)` (SECURITY INVOKER, RLS escopa ao próprio usuário): merge atômico `settings || p_patch` — remove a corrida do read-modify-write de markTasksSeen/updateUserSettings |
+| 0084 | sync_jobs_one_running | Índice único parcial `uq_sync_jobs_one_running` (status='running'): no máximo 1 job de sync ativo; encerra excedentes pré-existentes. createJob trata 23505 reusando o vencedor |

@@ -1,4 +1,15 @@
-<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- v1.8 (20/07/2026): correções da auditoria — (a) presets de período e
+     tokens @today no fuso de BRASÍLIA (todayBrasiliaIso; o relógio UTC do
+     servidor virava o dia às ~21h BRT); (b) separador U+0001 na chave de
+     grupo do "Agrupar período"; (c) proteção de edição manual PERMANENTE no
+     sync (§4.5 — marcador solto só quando a fonte alcança o valor local);
+     (d) efeitos de edição (audit/write-back/webhook) só após persistência
+     confirmada (.select no UPDATE); (e) exclusões destrutivas de configuração
+     com confirmação + erro visível (ConfirmDeleteButton); (f) migrações
+     0083 (user_settings_merge) e 0084 (1 job de sync running); (g) paridade
+     por perna da regra dos mocks no modo lista quando as correspondências
+     cruas estão disponíveis (§4.4). RPCs intocados em tudo. -->
 <!-- v1.7 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
      utilitários de dia útil; businessDayAlign (pernas por mês no engine);
      base de comparação previous_period_bd; goalLine (meta/ritmo como série);
@@ -172,7 +183,11 @@ de snapshot podem excluir fontes de uma métrica — ela degrada para "—"
 
 ### 4.2 Filtros de período
 
-`lib/widgets/period.ts` + `lib/widgets/period-resolve.ts`. O período efetivo de cada
+`lib/widgets/period.ts` + `lib/widgets/period-resolve.ts`. Os presets relativos
+("hoje", "este mês"…) e os tokens `@today`/`@month_start` resolvem sobre o dia
+em **Brasília** (`todayBrasiliaIso`), nunca sobre o relógio do servidor — na
+Vercel (UTC) o dia virava às ~21h BRT e "este mês" apontava o mês seguinte na
+última noite do mês (corrigido 20/07/2026). O período efetivo de cada
 widget combina: **barra global** (URL > preferência do usuário > config do dashboard),
 escopo por aba e **widgets de filtro de período** que sobrescrevem alvos vinculados.
 A mesma lógica roda na página do dashboard, na action da Tabela Rápida e no viewer de
@@ -216,6 +231,12 @@ idênticos**:
 2. `run_widget_query_snapshot` (SQL, 0057+);
 3. `lib/widgets/mock-reuniao.ts` (TypeScript, client-side).
 
+No lado client (modo lista), quando as correspondências CRUAS chegam ao
+`resolveListFilters` (record-list.ts) e há sub-fonte em jogo, os membros de
+unificado inspecionados saem de `correspondenceMapForSources` (POR PERNA —
+paridade exata com o `p_correspondences` do RPC; 20/07/2026). Sem elas, o
+espelho por `AvailableField.unifiedMembers` (raiz-primeiro) permanece.
+
 Um trigger no banco (`enforce_reuniao_freeze`) **congela o campo**: sync, recálculo e
 edição não conseguem gravar Data Reunião anterior a 01/06/2026 (tentativas são
 descartadas em silêncio; pode gerar ruído inofensivo no `audit_log`). Undo previsto:
@@ -227,7 +248,13 @@ Todos os caminhos de entrada convergem no motor único `lib/import/ingest.ts`
 (`ingestRows`): upsert idempotente por `(source_system, source_id)`, dedup por hash e
 **conflito por campo** — `records.field_modified_at` guarda o timestamp de cada edição
 manual, e o sync **não sobrescreve** campos editados manualmente (campos calculados são
-exceção: sempre recomputados).
+exceção: sempre recomputados). A proteção é **PERMANENTE** (20/07/2026,
+`lib/sync/shared.ts` v1.2): o marcador só é solto por `releaseCaughtUpMarker`
+quando o valor da FONTE alcança o valor local (write-back confirmado ou
+igualdade) — antes ela expirava no sync seguinte (comparação com
+`last_synced_at`, que avança em todo upsert) e a 2ª modificação vinda da fonte
+sobrescrevia a edição manual em silêncio. Vale nos três gravadores (Bitrix,
+Sheets, ingestão).
 
 - **Bitrix**: backfill/reconcile resumíveis por cursor (`sync_jobs`, uma página por
   requisição — cabe nos 60s da Vercel). O tick por minuto (`/api/sync/tick`, via

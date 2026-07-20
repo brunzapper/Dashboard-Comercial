@@ -1,4 +1,7 @@
-<!-- Versão: 1.3 | Data: 20/07/2026 -->
+<!-- Versão: 1.4 | Data: 20/07/2026 -->
+<!-- v1.4 (20/07/2026): auditoria — proteção de edição manual permanente
+     (release do marcador quando a fonte alcança o local), migrações 0083/0084,
+     confirmações nas exclusões de configuração, períodos no fuso de Brasília. -->
 <!-- v1.3 (20/07/2026): §4.7 — runbook de dias não úteis (cadastro/import CSV),
      métricas de meta custom e geração/atualização de presets. -->
 <!-- v1.2 (19/07/2026): fuso da fonte (0079/0080) — checklist em §4.4/§4.6 e
@@ -175,7 +178,11 @@ npm run build      # o que a Vercel roda no deploy
 ### 4.6 Mexeu no sync do Bitrix
 
 - [ ] Edições manuais continuam protegidas (conflito por campo via
-  `field_modified_at`).
+  `field_modified_at`). A proteção é PERMANENTE (20/07/2026): o marcador só é
+  solto quando o valor da FONTE iguala o local (`releaseCaughtUpMarker`,
+  lib/sync/shared) — não reintroduza a expiração por `last_synced_at`.
+- [ ] Há no máximo 1 job `running` (índice único 0084); corrida no createJob
+  reusa o vencedor (23505).
 - [ ] Jobs continuam resumíveis (uma página por requisição; estado em `sync_jobs`).
 - [ ] Mapper/catalog: rótulos visuais vêm de `FIELD_LABELS`
   (`lib/sync/bitrix/catalog.ts`); após mudar catálogo, rode um Backfill.
