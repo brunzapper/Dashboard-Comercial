@@ -441,11 +441,19 @@ export async function updateRecord(
   updates.field_modified_at = fmod;
   updates.locally_modified_at = now;
 
-  const { error } = await supabase
+  // v20/07/2026: .select("id") — UPDATE filtrado pela RLS (USING) devolve 0
+  // linhas SEM erro; sem esta checagem, audit/write-back/webhook disparavam
+  // para uma edição que nunca persistiu (auditoria falsa + write-back levando
+  // ao Bitrix uma mudança recusada localmente, reimportada no reconcile).
+  const { data: updatedRows, error } = await supabase
     .from("records")
     .update(updates)
-    .eq("id", recordId);
+    .eq("id", recordId)
+    .select("id");
   if (error) return { ok: false, message: error.message };
+  if (!updatedRows || updatedRows.length === 0) {
+    return { ok: false, message: "Sem permissão para editar este registro." };
+  }
 
   // Efeitos pós-UPDATE em paralelo (não dependem um do outro; nenhum leitor da
   // fila lê audit_log): audit + enfileirar write-back + emitir webhook. Todos

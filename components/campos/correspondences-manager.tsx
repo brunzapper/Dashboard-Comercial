@@ -5,9 +5,10 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -251,17 +252,12 @@ export function CorrespondencesManager({
                       >
                         <Pencil className="size-4" />
                       </Button>
-                      <form action={deleteCorrespondence}>
-                        <input type="hidden" name="id" value={c.id} />
-                        <Button
-                          type="submit"
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Excluir"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </form>
+                      <ConfirmDeleteButton
+                        action={deleteCorrespondence}
+                        values={{ id: c.id }}
+                        title={`Excluir a correspondência "${c.label}"?`}
+                        description="Correspondências são globais: o campo unificado desaparece de TODOS os widgets e dashboards que o usam (as colunas de cada fonte continuam existindo). Esta ação não pode ser desfeita."
+                      />
                     </div>
                   </TableCell>
                 </TableRow>

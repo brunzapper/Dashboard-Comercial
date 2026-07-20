@@ -5,9 +5,10 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { Pencil, Plus, Trash2, Zap } from "lucide-react";
+import { Pencil, Plus, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -320,17 +321,12 @@ export function MatchesManager({
                       >
                         <Pencil className="size-4" />
                       </Button>
-                      <form action={deleteMatchRule}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <Button
-                          type="submit"
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Excluir"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </form>
+                      <ConfirmDeleteButton
+                        action={deleteMatchRule}
+                        values={{ id: r.id }}
+                        title={`Excluir a regra "${r.label}"?`}
+                        description="A regra vale para todos os dashboards; novas conexões automáticas param de ser criadas por ela. As conexões já existentes são mantidas. Esta ação não pode ser desfeita."
+                      />
                     </div>
                   </TableCell>
                 </TableRow>

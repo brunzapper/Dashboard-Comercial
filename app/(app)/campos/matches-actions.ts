@@ -147,16 +147,30 @@ export async function updateMatchRule(
   };
 }
 
-export async function deleteMatchRule(formData: FormData): Promise<void> {
+// v20/07/2026: devolve estado (confirmação + erro visível no ConfirmDeleteButton)
+// — antes era Promise<void> e a recusa (permissão/RLS) sumia em silêncio.
+export async function deleteMatchRule(
+  _prev: MatchActionState,
+  formData: FormData
+): Promise<MatchActionState> {
   const err = await ensureCanManage();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const id = String(formData.get("id") ?? "");
-  if (!id) return;
+  if (!id) return { ok: false, message: "Regra não identificada." };
   const supabase = await createClient();
   // Os matches auto ficam com rule_id = null (ON DELETE SET NULL); não apagamos
   // os matches para não perder o que já foi curado manualmente.
-  await supabase.from("match_rules").delete().eq("id", id);
+  const { data, error } = await supabase
+    .from("match_rules")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para excluir esta regra." };
+  }
   revalidatePath("/campos");
+  return { ok: true };
 }
 
 export async function runAutoMatchAction(

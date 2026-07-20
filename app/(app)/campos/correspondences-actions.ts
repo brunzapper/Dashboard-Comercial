@@ -142,13 +142,27 @@ export async function updateCorrespondence(
   return { ok: true, message: `Correspondência "${label}" atualizada.` };
 }
 
-export async function deleteCorrespondence(formData: FormData): Promise<void> {
+// v20/07/2026: devolve estado (confirmação + erro visível no ConfirmDeleteButton)
+// — antes era Promise<void> e a recusa (permissão/RLS) sumia em silêncio.
+export async function deleteCorrespondence(
+  _prev: CorrespondenceActionState,
+  formData: FormData
+): Promise<CorrespondenceActionState> {
   const err = await ensureCanManage();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const id = String(formData.get("id") ?? "");
-  if (!id) return;
+  if (!id) return { ok: false, message: "Correspondência não identificada." };
   const supabase = await createClient();
   // members caem por ON DELETE CASCADE.
-  await supabase.from("field_correspondences").delete().eq("id", id);
+  const { data, error } = await supabase
+    .from("field_correspondences")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para excluir esta correspondência." };
+  }
   revalidatePath("/campos");
+  return { ok: true };
 }

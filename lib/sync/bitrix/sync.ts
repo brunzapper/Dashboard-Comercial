@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 05/07/2026
+// Versão: 1.5 | Data: 20/07/2026
+// v1.5 (20/07/2026): proteção de edição manual permanente — computeRecordUpsert
+//   trabalha sobre CÓPIA de field_modified_at e solta o marcador via
+//   releaseCaughtUpMarker quando a fonte alcança o valor local (shared v1.2).
 // Orquestração do sync Bitrix → records: upsert com CONFLITO POR CAMPO
 // (campos editados manualmente após o último sync não são sobrescritos),
 // auditoria (origin 'sync_bitrix'), e resolução de owner (RLS), responsável
@@ -35,12 +38,12 @@ import {
 } from "@/lib/records/formulas";
 import {
   emptyResult,
-  isProtected,
   leadTimeDays,
   normalizeName,
   primaryOperationId,
   recordError,
   recordOutcome,
+  releaseCaughtUpMarker,
   valuesDiffer,
   type ExistingRecord,
   type SyncResult,
@@ -241,19 +244,28 @@ export function computeRecordUpsert(
   }
 
   const audits: AuditEntry[] = [];
+  // v1.2 (20/07/2026): proteção de edição manual PERMANENTE (lib/sync/shared).
+  // fmod é uma CÓPIA de field_modified_at; release() solta o marcador quando a
+  // FONTE alcançou o valor local (write-back confirmado / igualdade) — a linha
+  // upsertada carrega o estado já limpo. prot() lê a cópia (pós-release).
+  const fmod: Record<string, string> = { ...(existing.field_modified_at ?? {}) };
+  const release = (field: string, local: unknown, incoming: unknown) =>
+    releaseCaughtUpMarker(fmod, field, local, incoming);
+  const prot = (field: string) => Boolean(fmod[field]);
   // Linha uniforme: começa com os valores existentes; só troca o que muda e não
   // está protegido. record_type/source_* são iguais aos existentes (no-op).
   const row: Record<string, unknown> = {
     record_type: mapped.record_type,
     source_system: mapped.source_system,
     source_id: mapped.source_id,
-    field_modified_at: existing.field_modified_at ?? {},
+    field_modified_at: fmod,
     last_synced_at: now,
   };
 
   // Núcleo
   for (const f of CORE_SYNC_FIELDS) {
-    if (!isProtected(f, existing) && valuesDiffer(existing[f], mapped[f])) {
+    release(f, existing[f], mapped[f]);
+    if (!prot(f) && valuesDiffer(existing[f], mapped[f])) {
       audits.push({ record_id: existing.id, field: f, old_value: existing[f], new_value: mapped[f] });
       row[f] = mapped[f];
     } else {
@@ -264,7 +276,8 @@ export function computeRecordUpsert(
   // custom_fields (preserva chaves locais e protegidas)
   const mergedCustom: Record<string, unknown> = { ...(existing.custom_fields ?? {}) };
   for (const [key, val] of Object.entries(mapped.custom_fields)) {
-    if (isProtected(key, existing)) continue;
+    release(key, mergedCustom[key], val);
+    if (prot(key)) continue;
     if (valuesDiffer(mergedCustom[key], val)) {
       audits.push({ record_id: existing.id, field: key, old_value: mergedCustom[key] ?? null, new_value: val ?? null });
       mergedCustom[key] = val;
@@ -274,14 +287,21 @@ export function computeRecordUpsert(
   // Owner (derivado; não protegido). Só sobrescreve quando resolvido.
   row.owner_user_id = resolved.ownerUserId ?? existing.owner_user_id ?? null;
 
-  // Responsável / Operação (protegíveis)
+  // Responsável / Operação (protegíveis; release só com valor resolvido — null
+  // aqui significa "não mapeado", não "limpo na origem").
   let responsibleId = (existing.responsible_id as string | null) ?? null;
   let operationId = (existing.operation_id as string | null) ?? null;
-  if (!isProtected("responsible_id", existing) && resolved.responsibleId) {
+  if (resolved.responsibleId) {
+    release("responsible_id", existing.responsible_id, resolved.responsibleId);
+  }
+  if (resolved.operationId) {
+    release("operation_id", existing.operation_id, resolved.operationId);
+  }
+  if (!prot("responsible_id") && resolved.responsibleId) {
     if (valuesDiffer(existing.responsible_id, resolved.responsibleId)) {
       responsibleId = resolved.responsibleId;
     }
-    if (!isProtected("operation_id", existing) && !existing.operation_id && resolved.operationId) {
+    if (!prot("operation_id") && !existing.operation_id && resolved.operationId) {
       operationId = resolved.operationId;
     }
   }
@@ -289,7 +309,10 @@ export function computeRecordUpsert(
   row.operation_id = operationId;
 
   // Lead relacionado + lead time (protegíveis via related_lead_id)
-  if (!isProtected("related_lead_id", existing) && resolved.relatedLead) {
+  if (resolved.relatedLead) {
+    release("related_lead_id", existing.related_lead_id, resolved.relatedLead.id);
+  }
+  if (!prot("related_lead_id") && resolved.relatedLead) {
     row.related_lead_id = resolved.relatedLead.id;
     row.lead_time_days = resolved.computedLeadTime;
   } else {

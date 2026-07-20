@@ -29,7 +29,7 @@ import {
 } from "@/lib/records/formulas";
 import {
   emptyResult,
-  isProtected,
+  releaseCaughtUpMarker,
   normalizeName,
   primaryOperationId,
   recordError,
@@ -287,9 +287,18 @@ async function applyUpdateToExisting(
   const { now, formulaDefs, customDateKeys, responsibleIdOf, operationByResponsible, audits } = deps;
   const updates: Record<string, unknown> = { last_synced_at: now };
   const changed: { field: string; newValue: unknown }[] = [];
+  // v20/07/2026: proteção de edição manual PERMANENTE (lib/sync/shared v1.2).
+  // fmod é CÓPIA de field_modified_at; release() solta o marcador quando a
+  // fonte alcançou o valor local; prot() lê a cópia (pós-release).
+  const fmod: Record<string, string> = { ...(existing.field_modified_at ?? {}) };
+  const fmodBefore = Object.keys(fmod).length;
+  const release = (field: string, local: unknown, incoming: unknown) =>
+    releaseCaughtUpMarker(fmod, field, local, incoming);
+  const prot = (field: string) => Boolean(fmod[field]);
 
   for (const [col, value] of Object.entries(b.core)) {
-    if (isProtected(col, existing)) continue;
+    release(col, existing[col], value);
+    if (prot(col)) continue;
     if (valuesDiffer(existing[col], value)) {
       audits.push({
         record_id: existing.id,
@@ -306,7 +315,8 @@ async function applyUpdateToExisting(
     ...(existing.custom_fields ?? {}),
   };
   for (const [key, value] of Object.entries(b.custom)) {
-    if (isProtected(key, existing)) continue;
+    release(key, mergedCustom[key], value);
+    if (prot(key)) continue;
     if (valuesDiffer(mergedCustom[key], value)) {
       audits.push({
         record_id: existing.id,
@@ -320,19 +330,26 @@ async function applyUpdateToExisting(
   }
 
   const responsibleId = responsibleIdOf(b);
+  if (responsibleId) {
+    release("responsible_id", existing.responsible_id, responsibleId);
+  }
   if (
     responsibleId &&
-    !isProtected("responsible_id", existing) &&
+    !prot("responsible_id") &&
     valuesDiffer(existing.responsible_id, responsibleId)
   ) {
     updates.responsible_id = responsibleId;
     changed.push({ field: "responsible_id", newValue: responsibleId });
-    if (!isProtected("operation_id", existing) && !existing.operation_id) {
+    if (!prot("operation_id") && !existing.operation_id) {
       updates.operation_id = operationByResponsible.get(responsibleId) ?? null;
     }
   }
 
-  if (changed.length === 0) return null;
+  // Marcadores soltos persistem MESMO sem mudança de valor (é o caso típico:
+  // fonte igualou o local) — senão a proteção nunca expiraria.
+  const fmodChanged = Object.keys(fmod).length !== fmodBefore;
+  if (fmodChanged) updates.field_modified_at = fmod;
+  if (changed.length === 0 && !fmodChanged) return null;
 
   // Campos calculados: recomputados sobre os valores efetivos.
   if (formulaDefs.length > 0) {
@@ -360,7 +377,8 @@ async function applyUpdateToExisting(
     .update(updates)
     .eq("id", existing.id);
   if (updateError) throw new Error(updateError.message);
-  return changed;
+  // Só marcador solto (sem mudança de dado) conta como "skipped" no resultado.
+  return changed.length > 0 ? changed : null;
 }
 
 // Campos alterados que gravam de volta no Bitrix: custom marcado (write_back +

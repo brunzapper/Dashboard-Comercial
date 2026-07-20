@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 20/07/2026
+// v1.2 (20/07/2026): proteção de edição manual permanente + releaseCaughtUpMarker
+//   (shared v1.2) — marcador solto quando a fonte alcança o valor local.
 // Sync da planilha "Estudo de Fechamentos" (aba Site) → records. Fonte PUSH
 // (o Apps Script empurra a cada hora via /api/sync/sheets) — por isso não
 // implementa o contrato SyncAdapter (backfill/reconcile) de lib/sync/adapter;
@@ -24,7 +26,7 @@ import {
 } from "@/lib/records/formulas";
 import {
   emptyResult,
-  isProtected,
+  releaseCaughtUpMarker,
   leadTimeDays,
   normalizeName,
   primaryOperationId,
@@ -231,9 +233,17 @@ async function upsertSheetRow(
     old_value: unknown;
     new_value: unknown;
   }[] = [];
+  // v20/07/2026: proteção de edição manual PERMANENTE (lib/sync/shared v1.2) —
+  // fmod é CÓPIA; release() solta o marcador quando a fonte alcançou o local.
+  const fmod: Record<string, string> = { ...(existing.field_modified_at ?? {}) };
+  const fmodBefore = Object.keys(fmod).length;
+  const release = (field: string, local: unknown, incoming: unknown) =>
+    releaseCaughtUpMarker(fmod, field, local, incoming);
+  const prot = (field: string) => Boolean(fmod[field]);
 
   for (const f of CORE_SYNC_FIELDS) {
-    if (isProtected(f, existing)) continue;
+    release(f, existing[f], mapped[f]);
+    if (prot(f)) continue;
     if (valuesDiffer(existing[f], mapped[f])) {
       audits.push({ record_id: existing.id, field: f, old_value: existing[f], new_value: mapped[f] });
       updates[f] = mapped[f];
@@ -242,7 +252,8 @@ async function upsertSheetRow(
 
   const mergedCustom: Record<string, unknown> = { ...(existing.custom_fields ?? {}) };
   for (const [key, val] of Object.entries(custom_fields)) {
-    if (isProtected(key, existing)) continue;
+    release(key, mergedCustom[key], val);
+    if (prot(key)) continue;
     if (valuesDiffer(mergedCustom[key], val)) {
       audits.push({ record_id: existing.id, field: key, old_value: mergedCustom[key] ?? null, new_value: val ?? null });
       mergedCustom[key] = val;
@@ -250,20 +261,32 @@ async function upsertSheetRow(
   }
   updates.custom_fields = mergedCustom;
 
-  if (!isProtected("responsible_id", existing) && responsibleId) {
+  if (responsibleId) {
+    release("responsible_id", existing.responsible_id, responsibleId);
+  }
+  if (operationId) {
+    release("operation_id", existing.operation_id, operationId);
+  }
+  if (!prot("responsible_id") && responsibleId) {
     if (valuesDiffer(existing.responsible_id, responsibleId)) {
       updates.responsible_id = responsibleId;
     }
-    if (!isProtected("operation_id", existing) && !existing.operation_id && operationId) {
+    if (!prot("operation_id") && !existing.operation_id && operationId) {
       updates.operation_id = operationId;
     }
   }
 
-  if (!isProtected("related_lead_id", existing) && relatedLead) {
+  if (relatedLead) {
+    release("related_lead_id", existing.related_lead_id, relatedLead.id);
+  }
+  if (!prot("related_lead_id") && relatedLead) {
     updates.related_lead_id = relatedLead.id;
     updates.lead_time_days = computedLeadTime;
-  } else if (!isProtected("related_lead_id", existing) && !existing.related_lead_id) {
+  } else if (!prot("related_lead_id") && !existing.related_lead_id) {
     updates.lead_time_days = computedLeadTime;
+  }
+  if (Object.keys(fmod).length !== fmodBefore) {
+    updates.field_modified_at = fmod;
   }
 
   // Campos calculados: sempre recomputados a partir dos valores efetivos.
