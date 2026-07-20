@@ -212,11 +212,13 @@ métrica → "+ Nova métrica…". Isso só registra a CHAVE (rótulo → slug) 
 do próprio widget (ex.: contagem sobre a sub-fonte de SQLs). A meta em si é
 cadastrada normalmente por período/escopo.
 
-**Gerar/atualizar presets**: `generatePresets()` (todos) e
-`applyPreset(presetKey)` (um) em `app/(app)/dashboards/actions.ts` — ainda sem
-UI. São idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
+**Gerar/atualizar presets**: **Configurações → Presets** — botão por preset
+("Gerar" vira "Atualizar" com link p/ o dashboard) e "Gerar/atualizar todos".
+As actions (`applyPreset`/`generatePresets`, `app/(app)/dashboards/actions.ts`)
+são idempotentes: rodar de novo ATUALIZA os widgets do preset (identidade
 `settings.presetKey`, ids preservados) sem tocar widgets adicionados à mão;
-sub-fontes/campos já existentes nunca são sobrescritos.
+sub-fontes/campos já existentes nunca são sobrescritos. Dashboard homônimo sem
+marcador é ADOTADO (carimbado) em vez de duplicado.
 
 ## 5. Troubleshooting
 

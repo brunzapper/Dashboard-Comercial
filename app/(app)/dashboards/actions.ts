@@ -932,6 +932,7 @@ export async function deleteWidget(
 export interface PresetApplyResult {
   presetKey: string;
   dashboard: "created" | "updated";
+  dashboardId: string; // p/ a aba Presets linkar "Abrir dashboard"
   widgets: { created: number; updated: number; deleted: number };
   fieldsCreated: number;
   subSourcesCreated: number;
@@ -1175,6 +1176,7 @@ async function applyPresetDefinition(
   return {
     presetKey: preset.presetKey,
     dashboard: dashboardAction,
+    dashboardId: dashId,
     widgets: counts,
     fieldsCreated,
     subSourcesCreated: subResult.created,
@@ -1197,6 +1199,8 @@ export async function applyPreset(
   const result = await applyPresetDefinition(supabase, session.user.id, preset);
   if (!result) return { ok: false, message: "Falha ao aplicar o preset." };
   revalidatePath("/");
+  revalidatePath("/configuracoes/presets");
+  revalidatePath(`/dashboards/${result.dashboardId}`);
   const w = result.widgets;
   return {
     ok: true,
@@ -1225,6 +1229,7 @@ export async function generatePresets(): Promise<ActionState> {
     else if (result?.dashboard === "updated") updated += 1;
   }
   revalidatePath("/");
+  revalidatePath("/configuracoes/presets");
   return {
     ok: true,
     message: `${created} dashboard(s) preset criado(s), ${updated} atualizado(s).`,

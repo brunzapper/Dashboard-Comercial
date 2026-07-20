@@ -291,8 +291,10 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   (adoção por nome p/ legado), widgets por `settings.presetKey` com UPDATE
   in-place (ids preservados → conectores/links/células sobrevivem), GC dos
   presetKeys órfãos do próprio preset; widgets sem `presetKey` e sub-fontes/
-  campos já existentes NUNCA são tocados. Sem UI ainda — a futura aba
-  "Presets" das Configurações chama essas actions.
+  campos já existentes NUNCA são tocados. UI: **Configurações → Presets**
+  (`configuracoes/presets/page.tsx` + `presets-manager.tsx`) — status por
+  preset (marcador `settings.preset`) e botões Gerar/Atualizar (por preset e
+  global).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
