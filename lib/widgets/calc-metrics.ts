@@ -117,6 +117,8 @@ export function parseAggRef(ref: string): {
 // filtros anexados; fold aditivo exato em subtotais) — os RPCs ficam intocados.
 
 // Operadores de WidgetFilter expressáveis como condição `[Coluna] op literal`.
+// eq_ci/neq_ci (normalizados) mapeiam p/ =/<> — o condFilters reemite eq_ci/
+// neq_ci p/ texto, então o round-trip é consistente.
 const SCOPE_FILTER_OPS: Partial<Record<FilterOp, FormulaCmpOp>> = {
   eq: "=",
   neq: "<>",
@@ -124,12 +126,22 @@ const SCOPE_FILTER_OPS: Partial<Record<FilterOp, FormulaCmpOp>> = {
   gte: ">=",
   lt: "<",
   lte: "<=",
+  eq_ci: "=",
+  neq_ci: "<>",
 };
+
+function scalarValue(v: unknown): v is string | number | boolean {
+  return (
+    typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+  );
+}
 
 /**
  * Predicado de escopo de uma fonte como AggCondition[] — ou null quando o
- * filtro da sub-fonte usa operador não expressável (in/is_null/ilike…): melhor
- * operando ausente ("—") do que recorte silenciosamente mais largo que a sub.
+ * filtro da sub-fonte usa operador não expressável (`ilike`/desconhecido):
+ * melhor operando ausente ("—") do que recorte silenciosamente mais largo que
+ * a sub. Desde 20/07/2026, `in` (lista de escalares) e `is_null`/`not_null`
+ * também são expressáveis (a consulta auxiliar os aplica como filtros do RPC).
  */
 export function sourceScopeConds(
   key: SourceKey,
@@ -139,14 +151,19 @@ export function sourceScopeConds(
     { ref: "record_type", op: "=", value: recordTypeOf(key, sources) },
   ];
   for (const f of sourcePredicate(key, sources)) {
+    if (f.op === "in") {
+      const list = Array.isArray(f.value) ? f.value.filter(scalarValue) : null;
+      if (!list || list.length === 0) return null;
+      conds.push({ ref: f.field, op: "in", value: list });
+      continue;
+    }
+    if (f.op === "is_null" || f.op === "not_null") {
+      conds.push({ ref: f.field, op: f.op });
+      continue;
+    }
     const op = SCOPE_FILTER_OPS[f.op];
     const v = f.value;
-    if (
-      !op ||
-      (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean")
-    ) {
-      return null;
-    }
+    if (!op || !scalarValue(v)) return null;
     conds.push({ ref: f.field, op, value: v });
   }
   return conds;
@@ -185,14 +202,26 @@ export function lowerSourceScopedOperands(
       tokens.push(t);
       continue;
     }
+    // `scope` na chave (20/07/2026): a aux deste spec aplica período/
+    // correspondências pela PRÓPRIA fonte do escopo (data da sub) — specs
+    // idênticos com escopos diferentes não podem colidir na mesma basis.
     if (agg === "avg") {
       tokens.push({ kind: "lparen" });
-      tokens.push({ kind: "field", ref: condAggKey({ agg: "sum", field, conds }) });
+      tokens.push({
+        kind: "field",
+        ref: condAggKey({ agg: "sum", field, conds, scope: source }),
+      });
       tokens.push({ kind: "op", op: "/" });
-      tokens.push({ kind: "field", ref: condAggKey({ agg: "count", field, conds }) });
+      tokens.push({
+        kind: "field",
+        ref: condAggKey({ agg: "count", field, conds, scope: source }),
+      });
       tokens.push({ kind: "rparen" });
     } else {
-      tokens.push({ kind: "field", ref: condAggKey({ agg, field, conds }) });
+      tokens.push({
+        kind: "field",
+        ref: condAggKey({ agg, field, conds, scope: source }),
+      });
     }
   }
   return { tokens };
@@ -284,17 +313,31 @@ export function isCondBasisKey(key: BasisKey): boolean {
 
 export function parseCondBasisKey(
   key: BasisKey
-): { metric: Metric; conds: AggCondition[] } | null {
+): { metric: Metric; conds: AggCondition[]; scope?: string } | null {
   if (!isCondBasisKey(key)) return null;
   try {
-    const [agg, field, conds] = JSON.parse(key.slice("aggif:".length)) as [
+    const [agg, field, conds, scope] = JSON.parse(
+      key.slice("aggif:".length)
+    ) as [
       "sum" | "count",
       string,
-      [string, FormulaCmpOp, number | string | boolean][],
+      [
+        string,
+        AggCondition["op"],
+        number | string | boolean | (number | string | boolean)[] | null,
+      ][],
+      string | undefined, // scope (operando escopado; ausente = SOMASE etc.)
     ];
     return {
       metric: { field, agg },
-      conds: conds.map(([ref, op, value]) => ({ ref, op, value })),
+      conds: conds.map(([ref, op, value]) => ({
+        ref,
+        op,
+        ...(value == null && (op === "is_null" || op === "not_null")
+          ? {}
+          : { value: value as AggCondition["value"] }),
+      })),
+      ...(typeof scope === "string" && scope ? { scope } : {}),
     };
   } catch {
     return null;
@@ -329,7 +372,19 @@ const NUM_OPS: Record<FormulaCmpOp, FilterOp> = {
  * ''; booleano serializado "true"/"false"). Ordenação com literal de texto
  * (datas ISO) segue a comparação de texto plain. */
 export function condFilters(conds: AggCondition[]): WidgetFilter[] {
-  return conds.map((c) => {
+  return conds.map((c): WidgetFilter => {
+    // Ops estendidos (predicado de sub-fonte em operando escopado): passam
+    // direto — o RPC já aceita `in` (lista) e `is_null`/`not_null`.
+    if (c.op === "in") {
+      return {
+        field: c.ref,
+        op: "in",
+        value: Array.isArray(c.value) ? c.value : [c.value],
+      };
+    }
+    if (c.op === "is_null" || c.op === "not_null") {
+      return { field: c.ref, op: c.op };
+    }
     if (typeof c.value === "number") {
       return { field: c.ref, op: NUM_OPS[c.op], value: c.value };
     }
@@ -352,7 +407,19 @@ export function recordMatchesConds(
   raw: (ref: string) => unknown,
   conds: AggCondition[]
 ): boolean {
-  return conds.every((c) => evalCondition(raw(c.ref), c.op, c.value));
+  return conds.every((c) => {
+    // Ops estendidos (não existem no SE()): espelho local do RPC —
+    // `in` = igualdade textual exata com a lista; null nunca casa.
+    if (c.op === "in") {
+      const v = raw(c.ref);
+      if (v == null) return false;
+      const list = Array.isArray(c.value) ? c.value : [c.value];
+      return list.map(String).includes(String(v));
+    }
+    if (c.op === "is_null") return raw(c.ref) == null;
+    if (c.op === "not_null") return raw(c.ref) != null;
+    return evalCondition(raw(c.ref), c.op, c.value as string | number | boolean);
+  });
 }
 
 /**
@@ -649,7 +716,16 @@ export function sourceScopedAggOperandRefs(
   sources: SourceDef[] = BUILTIN_SOURCES
 ): RefOption[] {
   const out: RefOption[] = [];
-  for (const src of rootSources(sources)) {
+  // Raízes E sub-fontes (20/07/2026): o escopo por sub é abaixável desde que o
+  // predicado use ops expressáveis (eq/neq/desigualdades/in/is_null/not_null;
+  // ver sourceScopeConds) — sub com `ilike` continua ofertada e degrada p/
+  // operando ausente com aviso do validador. Rótulo curto da sub é ÚNICO no
+  // catálogo (mesma regra load-bearing das raízes).
+  const scopables = [
+    ...rootSources(sources),
+    ...sources.filter((s) => s.parentKey),
+  ];
+  for (const src of scopables) {
     const applies = (f: ScopedAggField): boolean =>
       fieldAppliesToSource(f.appliesTo ?? null, src.key, sources);
     const group = `Registros · ${src.shortLabel}`;

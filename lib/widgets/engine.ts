@@ -112,7 +112,12 @@ import {
   type MoneyBreakdown,
 } from "./currency";
 import { formatBucketLabel, isLabelTransform } from "./date-buckets";
-import { applyPeriodToFilters, type DashboardPeriod } from "./period";
+import {
+  applyPeriodToFilters,
+  patchAuxPeriodByType,
+  scopedAuxPeriod,
+  type DashboardPeriod,
+} from "./period";
 import { DEFAULT_DATE_FORMAT, formatDateValue, formatPercent } from "./format";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
@@ -1624,14 +1629,43 @@ export async function runWidget(
   );
   const defaultIdxSet = new Set(defaultIdx);
 
+  // Aux de operando ESCOPADO (`aggif:` com scope, 20/07/2026): a consulta
+  // auxiliar roda como perna SÓ da fonte do escopo — período pela coluna de
+  // data DELA (scopedAuxPeriod; patch p/ o @period pré-sintetizado) e
+  // correspondências com o membro DELA (unified bucketiza pela data da sub).
+  // Usar a lista de fontes do widget contaminaria o AND com o predicado de uma
+  // sub-irmã do mesmo record_type. O predicado do escopo também vem nos
+  // condFilters (record_type = rt + filtro da sub) — duplicação inofensiva.
+  const scopedAuxInputs = (
+    scope: SourceKey,
+    runPeriod: DashboardPeriod | null | undefined
+  ): { filters: WidgetFilter[]; corr: Record<string, string[]> } => {
+    const rt = recordTypeOf(scope, catalog);
+    const scopeField =
+      runPeriod?.fieldBySource?.[scope] ??
+      catalog.find((s) => s.key === scope)?.defaultPeriodField ??
+      runPeriod?.field ??
+      "source_created_at";
+    const f = legFiltersFor(scopedAuxPeriod(runPeriod, scope, catalog), [
+      scope,
+    ]);
+    return {
+      filters: patchAuxPeriodByType(f, rt, scopeField),
+      corr: corrMapForKeys([scope]),
+    };
+  };
+
   // Uma rodada COMPLETA da consulta agregada (RPC principal + auxiliares de
   // condição/moeda + pernas por fonte + remapeamento e avaliação das métricas
   // calculadas) para um par dims/pipeline-de-filtros. A mesma rodada serve o
   // período atual e o de comparação — `dims` SOMBREIA o de fora de propósito;
-  // `filtersOf` reconstrói os filtros para as fontes de cada perna.
+  // `filtersOf` reconstrói os filtros para as fontes de cada perna;
+  // `runPeriod` é o período DESTA rodada (atual/perna do align/comparação) —
+  // insumo das auxes de operandos escopados (período pela data do escopo).
   const computeRows = async (
     dims: Dimension[],
-    filtersOf: (srcs?: SourceKey[]) => WidgetFilter[]
+    filtersOf: (srcs?: SourceKey[]) => WidgetFilter[],
+    runPeriod?: DashboardPeriod | null
   ): Promise<WidgetRow[]> => {
     const filters = filtersOf(effMainSources);
     const rpcMetrics: Metric[] = [];
@@ -1701,14 +1735,22 @@ export async function runWidget(
     const condValueByKey = new Map<BasisKey, Record<string, number | null>>();
     const condGroups = new Map<
       string,
-      { filters: WidgetFilter[]; keys: BasisKey[] }
+      { filters: WidgetFilter[]; keys: BasisKey[]; scope?: string }
     >();
     for (const key of condBasisKeys) {
       const parsed = parseCondBasisKey(key);
       if (!parsed) continue;
       const extra = condFilters(parsed.conds);
-      const gk = JSON.stringify(extra);
-      const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+      // Escopo entra na chave do grupo: specs idênticos com escopos diferentes
+      // têm auxes diferentes (período/correspondências da fonte do escopo).
+      const gk = JSON.stringify([extra, parsed.scope ?? null]);
+      const g =
+        condGroups.get(gk) ??
+        ({ filters: extra, keys: [], scope: parsed.scope } as {
+          filters: WidgetFilter[];
+          keys: BasisKey[];
+          scope?: string;
+        });
       g.keys.push(key);
       condGroups.set(gk, g);
     }
@@ -1717,14 +1759,15 @@ export async function runWidget(
         try {
           // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
           const condExtra = await resolveFkCondFilters(supabase, g.filters);
+          const scoped = g.scope ? scopedAuxInputs(g.scope, runPeriod) : null;
           const { data: condData, error: condError } = await supabase.rpc(
             "run_widget_query",
             {
               p_source: config.source,
               p_dimensions: dims,
               p_metrics: g.keys.map(basisMetric),
-              p_filters: [...filters, ...condExtra],
-              p_correspondences: correspondencesMap,
+              p_filters: [...(scoped ? scoped.filters : filters), ...condExtra],
+              p_correspondences: scoped ? scoped.corr : correspondencesMap,
             }
           );
           if (condError) throw new Error(condError.message);
@@ -1906,14 +1949,21 @@ export async function runWidget(
           : Promise.resolve({ data: [] as unknown, error: null });
       const condGroups = new Map<
         string,
-        { filters: WidgetFilter[]; keys: BasisKey[] }
+        { filters: WidgetFilter[]; keys: BasisKey[]; scope?: string }
       >();
       for (const key of condKeys) {
         const parsed = parseCondBasisKey(key);
         if (!parsed) continue;
         const extra = condFilters(parsed.conds);
-        const gk = JSON.stringify(extra);
-        const g = condGroups.get(gk) ?? { filters: extra, keys: [] };
+        // Escopo na chave do grupo (mesma regra da principal).
+        const gk = JSON.stringify([extra, parsed.scope ?? null]);
+        const g =
+          condGroups.get(gk) ??
+          ({ filters: extra, keys: [], scope: parsed.scope } as {
+            filters: WidgetFilter[];
+            keys: BasisKey[];
+            scope?: string;
+          });
         g.keys.push(key);
         condGroups.set(gk, g);
       }
@@ -1923,14 +1973,20 @@ export async function runWidget(
             // Condição sobre relação por NOME → resolve p/ UUID antes do RPC
             // (mesmo tratamento da auxiliar de condição da consulta principal).
             const condExtra = await resolveFkCondFilters(supabase, g.filters);
+            const scoped = g.scope
+              ? scopedAuxInputs(g.scope, runPeriod)
+              : null;
             const { data: condData, error: condError } = await supabase.rpc(
               "run_widget_query",
               {
                 p_source: config.source,
                 p_dimensions: dims,
                 p_metrics: g.keys.map(basisMetric),
-                p_filters: [...legFilters, ...condExtra],
-                p_correspondences: legCorr,
+                p_filters: [
+                  ...(scoped ? scoped.filters : legFilters),
+                  ...condExtra,
+                ],
+                p_correspondences: scoped ? scoped.corr : legCorr,
               }
             );
             if (condError) throw new Error(condError.message);
@@ -2199,8 +2255,16 @@ export async function runWidget(
           divide = true;
         }
       }
-      const cmpRows = await computeRows(cmpDims, (srcs) =>
-        cmpFiltersFor(cmpSpec, srcs)
+      const cmpRows = await computeRows(
+        cmpDims,
+        (srcs) => cmpFiltersFor(cmpSpec, srcs),
+        // Período DESTA rodada (range de comparação) — auxes escopadas.
+        {
+          field: period!.field,
+          from: cmpSpec.from,
+          to: cmpSpec.to,
+          fieldBySource: period?.fieldBySource,
+        }
       );
       return { cmpRows, sharedIdx, bucketed, divide };
     } catch {
@@ -2289,10 +2353,10 @@ export async function runWidget(
     bdAlignCtx
       ? Promise.all(
           bdAlignCtx.legs.map((leg) =>
-            computeRows(dims, (srcs) => legFiltersFor(leg, srcs))
+            computeRows(dims, (srcs) => legFiltersFor(leg, srcs), leg)
           )
         ).then((parts) => parts.flat())
-      : computeRows(dims, (srcs) => legFiltersFor(period, srcs)),
+      : computeRows(dims, (srcs) => legFiltersFor(period, srcs), period),
     bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);
 
