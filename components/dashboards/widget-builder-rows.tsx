@@ -1,4 +1,7 @@
-// Versão: 1.9 | Data: 20/07/2026
+// Versão: 2.0 | Data: 20/07/2026
+// v2.0 (20/07/2026): métrica ad-hoc usa o FormulaEditor unificado (visual com
+//   cursor + paleta de funções + validação viva no card) no lugar do toggle
+//   Construtor/Texto; MetricRow ganha sourceDefs (warnings de escopo @fonte).
 // v1.9 (20/07/2026): UX de fórmulas — ajuda da moeda do calc ad-hoc corrigida
 //   (moeda CONVERTE via resolveCalcMetric, não é só exibição) e hint "?" dos
 //   três escopos de fonte (SourceConceptsHint) no bloco "Fontes da métrica".
@@ -50,15 +53,10 @@ import {
 } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  FormulaBuilder,
-  type RefOption,
-} from "@/components/campos/formula-builder";
-import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
+import type { RefOption } from "@/lib/records/date-operands";
+import { FormulaEditor } from "@/components/formula/formula-editor";
 import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
-import { AGG_NESTED_GROUP } from "@/lib/widgets/calc-metrics";
-import { formulaUsesFunctions } from "@/lib/records/formulas";
-import type { SourceKey } from "@/lib/sources";
+import type { SourceDef, SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 import type {
   Aggregation,
@@ -383,6 +381,7 @@ export function MetricRow({
   isAggCalc,
   isCalcSentinel,
   calcRefs,
+  sourceDefs,
   resultFormatOptions,
   defaultLabel,
   fieldMenu,
@@ -399,6 +398,8 @@ export function MetricRow({
   isAggCalc: boolean;
   isCalcSentinel: boolean;
   calcRefs: RefOption[];
+  // Catálogo de fontes vivo — warnings de escopo @fonte do FormulaEditor.
+  sourceDefs?: SourceDef[];
   resultFormatOptions: ComboboxOption[];
   defaultLabel: string;
   fieldMenu: React.ReactNode;
@@ -422,12 +423,6 @@ export function MetricRow({
         metric.currencyMultiMode ||
         metric.grandTotalMode
     )
-  );
-  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
-  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
-  // não a representa).
-  const [formulaMode, setFormulaMode] = useState<"builder" | "text">(
-    formulaUsesFunctions(metric.formula) ? "text" : "builder"
   );
   // Fontes da métrica: aberto por padrão só quando já há fontes marcadas
   // (config existente nunca fica escondida; métrica nova nasce limpa).
@@ -474,50 +469,18 @@ export function MetricRow({
       </div>
       {isCalcSentinel ? (
         <div className="flex flex-col gap-1.5 rounded-md border p-2">
-          <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-            {(
-              [
-                ["builder", "Construtor"],
-                ["text", "Texto (funções)"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setFormulaMode(k)}
-                className={cn(
-                  "rounded-sm px-2 py-1 text-xs",
-                  formulaMode === k
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {formulaMode === "builder" ? (
-            <FormulaBuilder
-              // agg:* + 'calculado_agg' aninhados (ref plano — token normal),
-              // como no FieldForm de /campos (aggBuilderOperands).
-              refs={calcRefs.filter(
-                (r) => r.ref.startsWith("agg:") || r.group === AGG_NESTED_GROUP
-              )}
-              chips={fieldChips}
-              initial={metric.formula ?? null}
-              onChange={(f) => onChange({ formula: f })}
-            />
-          ) : (
-            <FormulaTextEditor
-              refs={calcRefs}
-              initial={
-                metric.formula && metric.formula.tokens.length > 0
-                  ? metric.formula
-                  : null
-              }
-              onChange={(f) => onChange({ formula: f })}
-            />
-          )}
+          <FormulaEditor
+            context="aggregate"
+            catalog={calcRefs}
+            chips={fieldChips}
+            sources={sourceDefs}
+            initial={
+              metric.formula && metric.formula.tokens.length > 0
+                ? metric.formula
+                : null
+            }
+            onChange={(f) => onChange({ formula: f })}
+          />
           <div className="flex items-center gap-2">
             <Label className="text-muted-foreground shrink-0 text-xs">
               Formato do resultado

@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 20/07/2026
+// v1.2 (20/07/2026): option.disabledReason — opção visível porém não
+//   selecionável, acinzentada, com o motivo no tooltip (nunca escondida).
 // Combobox pesquisável reutilizável para listas de opções ESTÁTICAS (Popover +
 // Command/cmdk). Substitui os <select>/<Select> do app dando barra de busca a
 // qualquer dropdown. Filtragem client-side pelo próprio cmdk (rótulo + valor).
@@ -42,6 +44,9 @@ export interface ComboboxOption {
   chips?: string[];
   // Tooltip da opção (ex.: fórmula legível de um campo calculado).
   title?: string;
+  // Presente = opção visível porém NÃO selecionável, com o motivo no tooltip
+  // (política: explicar, nunca esconder — ex.: operando que criaria ciclo).
+  disabledReason?: string;
 }
 
 export interface ComboboxChip {
@@ -172,6 +177,7 @@ export function Combobox({
                 {group.items.map((opt) => {
                   const shown =
                     chipActive && opt.cleanLabel ? opt.cleanLabel : opt.label;
+                  const tooltip = opt.disabledReason ?? opt.title;
                   return (
                     <CommandItem
                       // Inclui rótulo completo + valor no texto de busca (permite
@@ -179,7 +185,15 @@ export function Combobox({
                       // com separador nulo para não poluir o rótulo exibido.
                       key={opt.value}
                       value={`${opt.label}\u0000${opt.value}`}
+                      // Desabilitada COM motivo: visível, acinzentada, tooltip
+                      // explica; selecionar não faz nada (política do app:
+                      // explicar a restrição, nunca esconder a opção).
+                      aria-disabled={Boolean(opt.disabledReason)}
+                      className={cn(
+                        opt.disabledReason && "cursor-not-allowed opacity-50"
+                      )}
                       onSelect={() => {
+                        if (opt.disabledReason) return;
                         onValueChange(opt.value);
                         setOpen(false);
                       }}
@@ -190,7 +204,7 @@ export function Combobox({
                           opt.value === value ? "opacity-100" : "opacity-0"
                         )}
                       />
-                      {opt.title ? (
+                      {tooltip ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span className="truncate">{shown}</span>
@@ -198,9 +212,9 @@ export function Combobox({
                           <TooltipContent
                             side="right"
                             align="start"
-                            className="whitespace-pre-wrap"
+                            className="max-w-72 whitespace-pre-wrap"
                           >
-                            {opt.title}
+                            {tooltip}
                           </TooltipContent>
                         </Tooltip>
                       ) : (

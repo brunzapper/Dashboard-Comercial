@@ -52,7 +52,7 @@ import {
 } from "@/lib/widgets/agg-catalog";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
-import type { RefOption } from "./formula-builder";
+import type { RefOption } from "@/lib/records/date-operands";
 
 function roleLabels(keys: string[]): string {
   if (keys.length === 0) return "—";
@@ -374,6 +374,7 @@ export function FieldsManager({
               aggRefs={aggRefs}
               excludeKeys={excludeKeys}
               fieldChips={fieldSourceChips}
+              sources={catalog}
               currencyOptions={currencyOptions}
               onDone={() => setOpen(false)}
             />

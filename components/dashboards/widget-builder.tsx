@@ -1,8 +1,11 @@
-// Versão: 1.16 | Data: 20/07/2026
+// Versão: 1.17 | Data: 20/07/2026
+// v1.17 (20/07/2026): widget "calculado" e variáveis da calculadora usam o
+//   FormulaEditor unificado (visual com cursor + paleta de funções + validação
+//   viva); as variáveis ganharam o editor completo (antes texto-only).
 // v1.16 (20/07/2026): UX de fórmulas — rótulos claros ("Escrever a fórmula
 //   neste widget", "ƒ Métrica calculada (fórmula própria)…"), ajuda do campo
 //   salvo com o trade-off reutilizável×local e hint "?" dos escopos de fonte
-//   (SourceConceptsHint) junto ao rótulo Fórmula do widget calculado.
+//   junto ao rótulo Fórmula do widget calculado (movido p/ dentro do editor).
 // v1.15 (18/07/2026): "Formato do grupo" estendido à tabela AGREGADA (níveis
 //   dim_<n> de data sem transform "por nome" — groupFormatEligible) e lista
 //   "Fonte do dado" por dimensão unificada no modo registros (hierarquia de
@@ -79,24 +82,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldForm } from "@/components/campos/field-form";
 import type { FieldDefinition } from "@/lib/records/types";
-import {
-  FormulaBuilder,
-  type RefOption,
-} from "@/components/campos/formula-builder";
-import { FormulaTextEditor } from "@/components/campos/formula-text-editor";
-import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
+import type { RefOption } from "@/lib/records/date-operands";
+import { FormulaEditor } from "@/components/formula/formula-editor";
 import {
   DEFAULT_CUSTOM_COLUMNS,
   type KanbanSettings,
 } from "@/lib/kanban/types";
 import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
-import { cn } from "@/lib/utils";
-import {
-  formulaUsesFunctions,
-  validateFormula,
-  type Formula,
-} from "@/lib/records/formulas";
+import { validateFormula, type Formula } from "@/lib/records/formulas";
 import { fieldAppliesToSource, toSourceKey, type SourceKey } from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import {
@@ -169,7 +163,6 @@ import {
   metricTargetSources,
 } from "@/lib/widgets/metric-sources";
 import {
-  AGG_NESTED_GROUP,
   CALC_METRIC_FIELD,
   validateCondAggRefs,
 } from "@/lib/widgets/calc-metrics";
@@ -559,12 +552,6 @@ export function WidgetBuilder({
   // Fórmula da "Métrica calculada" (visual_type 'calculado').
   const [formula, setFormula] = useState<Formula>(
     widget?.settings?.formula ?? { tokens: [] }
-  );
-  // Construtor de botões (+ − × ÷) ou editor de texto (funções: SOMASE/CONT.SE/
-  // MÉDIASE). Fórmula existente com função abre direto no texto (o construtor
-  // não a representa).
-  const [calcFormulaMode, setCalcFormulaMode] = useState<"builder" | "text">(
-    formulaUsesFunctions(widget?.settings?.formula) ? "text" : "builder"
   );
   // Widget 'calculado' apontando p/ um campo "Calculado (totais)" salvo em
   // /campos ('custom:<key>'); vazio = fórmula própria (formula acima).
@@ -2016,57 +2003,15 @@ export function WidgetBuilder({
               ) : null}
               {!calcField ? (
                 <>
-                  <div className="flex items-center gap-1.5">
-                    <Label>Fórmula</Label>
-                    <SourceConceptsHint />
-                  </div>
-                  <div className="bg-muted flex gap-1 self-start rounded-md p-0.5">
-                    {(
-                      [
-                        ["builder", "Construtor"],
-                        ["text", "Texto (funções)"],
-                      ] as const
-                    ).map(([k, label]) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setCalcFormulaMode(k)}
-                        className={cn(
-                          "rounded-sm px-2 py-1 text-xs",
-                          calcFormulaMode === k
-                            ? "bg-background shadow-sm"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {calcFormulaMode === "builder" ? (
-                    <>
-                      <FormulaBuilder
-                        refs={calcRefs.filter(
-                          (r) =>
-                            r.ref.startsWith("agg:") ||
-                            r.group === AGG_NESTED_GROUP
-                        )}
-                        chips={fieldSourceChips}
-                        initial={widget?.settings?.formula ?? null}
-                        onChange={setFormula}
-                      />
-                      <p className="text-muted-foreground text-xs">
-                        Combine agregações dos registros (+ − × ÷ e constantes).
-                        Para condicionais (SOMASE/CONT.SE/MÉDIASE), use a aba{" "}
-                        <strong>Texto (funções)</strong>.
-                      </p>
-                    </>
-                  ) : (
-                    <FormulaTextEditor
-                      refs={calcRefs}
-                      initial={formula.tokens.length > 0 ? formula : null}
-                      onChange={setFormula}
-                    />
-                  )}
+                  <Label>Fórmula</Label>
+                  <FormulaEditor
+                    context="aggregate"
+                    catalog={calcRefs}
+                    chips={fieldSourceChips}
+                    sources={catalog}
+                    initial={widget?.settings?.formula ?? null}
+                    onChange={(f) => setFormula(f)}
+                  />
                 </>
               ) : null}
               {/* Filtros rápidos (o calculado não usa o Accordion de dados). */}
@@ -2119,8 +2064,13 @@ export function WidgetBuilder({
                       <Trash2 className="size-4" />
                     </Button>
                   </div>
-                  <FormulaTextEditor
-                    refs={calcRefs}
+                  {/* Editor completo (visual+texto) — antes as variáveis eram
+                      texto-only; ganharam paleta de funções e validação viva. */}
+                  <FormulaEditor
+                    context="aggregate"
+                    catalog={calcRefs}
+                    chips={fieldSourceChips}
+                    sources={catalog}
                     initial={v.formula ?? null}
                     onChange={(f) => updateVariable(i, { formula: f })}
                   />
@@ -2904,6 +2854,7 @@ export function WidgetBuilder({
                 isAggCalc={isAggCalcField(m.field)}
                 isCalcSentinel={m.field === CALC_METRIC_FIELD}
                 calcRefs={calcRefs}
+                sourceDefs={catalog}
                 resultFormatOptions={[
                   { value: "", label: "Número (sem moeda)" },
                   { value: "percent", label: "Percentual (%) — exibe ×100" },
@@ -3301,6 +3252,7 @@ export function WidgetBuilder({
                 excludeKeys={perRecordOps.excludeKeys}
                 fieldChips={fieldSourceChips}
                 aggRefs={calcRefs}
+                sources={catalog}
                 currencyOptions={currencyOptions}
                 onDone={(created) => {
                   const wasEditing = Boolean(editingField);

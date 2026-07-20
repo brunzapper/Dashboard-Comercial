@@ -27,6 +27,12 @@ export interface OperandRef {
   disabledReason?: string;
 }
 
+// Alias histórico: RefOption (nascido no FormulaBuilder antigo) e OperandRef
+// sempre tiveram a mesma forma; com o FormulaEditor unificado o tipo vive
+// aqui (lib pura) — antes lib/widgets/calc-metrics importava o tipo de um
+// componente (inversão de dependência corrigida em 20/07/2026).
+export type RefOption = OperandRef;
+
 export interface CustomDateField {
   field_key: string;
   label: string;
