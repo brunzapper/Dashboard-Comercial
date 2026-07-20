@@ -16,10 +16,11 @@
 //   toggle de exibir/ocultar (ícone do olho) já era inline e foi preservado.
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
-import { Eye, EyeOff, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Eye, EyeOff, Pencil, Plus, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -78,7 +79,6 @@ function FieldRow({
   field: FieldDefinition;
   onEdit: (f: FieldDefinition) => void;
 }) {
-  const [delState, deleteAction] = useActionState(deleteField, {});
   const shown = field.show_in_builder ?? true;
   return (
     <TableRow>
@@ -122,25 +122,16 @@ function FieldRow({
           >
             <Pencil className="size-4" />
           </Button>
-          <form action={deleteAction}>
-            <input type="hidden" name="id" value={field.id} />
-            <Button
-              type="submit"
-              variant="ghost"
-              size="icon"
-              aria-label="Excluir"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </form>
+          {/* Confirmação (20/07/2026) + guarda de referência do servidor (campo
+              usado em fórmula não pode ser excluído — a mensagem aparece na
+              própria linha, via ConfirmDeleteButton). */}
+          <ConfirmDeleteButton
+            action={deleteField}
+            values={{ id: field.id }}
+            title={`Excluir o campo "${field.label}"?`}
+            description="O campo some de todos os widgets e os valores já gravados nos registros deixam de ser exibidos. Esta ação não pode ser desfeita."
+          />
         </div>
-        {/* Guarda de referência: campo usado em fórmula não pode ser excluído —
-            a mensagem do servidor aparece aqui, na própria linha. */}
-        {delState.message && !delState.ok && (
-          <p className="text-destructive mt-1 text-right text-xs">
-            {delState.message}
-          </p>
-        )}
       </TableCell>
     </TableRow>
   );

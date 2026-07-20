@@ -768,7 +768,7 @@ export function KanbanBoard({
                       title={data.metricLabel}
                       style={{ color: kap.metricColor }}
                     >
-                      {formatMetric(col.metricSum, data.metricIsMoney)}
+                      {col.metricSumText ?? formatMetric(col.metricSum, data.metricIsMoney)}
                     </span>
                   ) : null}
                   {columnExtra ? columnExtra(col) : null}

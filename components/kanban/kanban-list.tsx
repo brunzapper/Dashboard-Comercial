@@ -98,7 +98,7 @@ export function KanbanList({
                     {card.metricValue == null
                       ? "—"
                       : data.metricIsMoney
-                        ? formatMoney(card.metricValue, null)
+                        ? formatMoney(card.metricValue, card.metricCurrency)
                         : new Intl.NumberFormat("pt-BR", {
                             maximumFractionDigits: 2,
                           }).format(card.metricValue)}

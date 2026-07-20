@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): métrica monetária soma POR MOEDA na coluna (metricSumText
+//   + metricCurrency por card) — antes BRL+USD entravam numa soma crua e o
+//   isMoney era decidido pelo 1º registro.
 // Montagem dos dados de um kanban de REGISTROS: consulta via runRecordList
 // (RLS, período, fontes — mesma semântica dos widgets de registros), calcula a
 // chave de grupo por card (valor do campo ou bucket de data), deriva as
@@ -14,7 +17,7 @@ import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import { runRecordList } from "@/lib/widgets/record-list";
 import type { DashboardPeriod } from "@/lib/widgets/period";
 import type { WidgetConfig } from "@/lib/widgets/types";
-import { resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
+import { formatMoney, resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
 import {
   recordCellValue,
   recordFieldDef,
@@ -47,6 +50,9 @@ export interface KanbanCard {
   colorValue: string | null;
   fields: KanbanCardField[];
   metricValue: number | null;
+  // Moeda do metricValue quando a métrica é monetária (v20/07/2026) — permite
+  // somar por moeda na coluna em vez de misturar BRL+USD numa soma crua.
+  metricCurrency: string | null;
   isMock: boolean;
   // Tarefas ABERTAS vinculadas ao registro (badge do card).
   openTasks: number;
@@ -60,6 +66,9 @@ export interface KanbanColumnCards extends KanbanColumn {
   cards: KanbanCard[];
   count: number;
   metricSum: number | null;
+  // Texto pronto do agregado monetário por moeda ("R$ 10.000,00 · US$ 2.000,00");
+  // null = métrica não-monetária (a UI formata metricSum como número).
+  metricSumText: string | null;
 }
 
 export interface KanbanBoardData {
@@ -174,6 +183,21 @@ export async function runKanban(
   const extraRefs = (settings.card?.extraFields ?? []).slice(0, 4);
   const metricRef = settings.metric || null;
 
+  // v20/07/2026: métrica monetária decide-se pela DEFINIÇÃO (não pelo 1º
+  // registro) e cada card carrega a própria moeda — a coluna soma POR moeda.
+  const metricDef = metricRef ? recordFieldDef(metricRef, defs) : null;
+  const metricIsMoney =
+    metricRef === "value" ||
+    metricRef === "mrr" ||
+    (metricDef
+      ? resolveFieldMoneyFromRecord(metricDef, {} as RecordRow).isMoney
+      : false);
+  const metricCurrencyOf = (r: RecordRow): string | null => {
+    if (!metricIsMoney) return null;
+    if (metricRef === "value" || metricRef === "mrr") return r.currency ?? null;
+    return metricDef ? (resolveFieldMoneyFromRecord(metricDef, r).code ?? null) : null;
+  };
+
   const groupKeys: string[] = [];
   const cards: Omit<KanbanCard, "columnKey">[] = records.map((r) => {
     // Personalizar: a "chave de grupo" é a coluna posicionada ("" = 1ª coluna).
@@ -201,6 +225,7 @@ export async function runKanban(
         value: recordCellValue(r, ref, defs, labels),
       })),
       metricValue: Number.isFinite(metricNum) ? metricNum : null,
+      metricCurrency: metricCurrencyOf(r),
       isMock: Boolean((r as unknown as { is_mock?: boolean }).is_mock),
       openTasks: taskCounts.get(r.id) ?? 0,
       record: r,
@@ -240,25 +265,33 @@ export async function runKanban(
   const columnCards: KanbanColumnCards[] = columns.map((c) => {
     const list = byColumn.get(c.key) ?? [];
     let metricSum: number | null = null;
+    let metricSumText: string | null = null;
     if (metricRef) {
       metricSum = 0;
-      for (const card of list) metricSum += card.metricValue ?? 0;
+      const byCurrency = new Map<string, number>();
+      for (const card of list) {
+        const v = card.metricValue;
+        if (v == null) continue;
+        metricSum += v;
+        if (metricIsMoney) {
+          // Sem moeda no registro → BRL (mesmo default do formatMoney(v, null)).
+          const code = card.metricCurrency ?? "BRL";
+          byCurrency.set(code, (byCurrency.get(code) ?? 0) + v);
+        }
+      }
+      if (metricIsMoney) {
+        // BRL primeiro, demais em ordem alfabética; coluna vazia = R$ 0,00.
+        const codes = [...byCurrency.keys()].sort((a, b) =>
+          a === "BRL" ? -1 : b === "BRL" ? 1 : a.localeCompare(b)
+        );
+        metricSumText =
+          codes.length === 0
+            ? formatMoney(0, "BRL")
+            : codes.map((code) => formatMoney(byCurrency.get(code), code)).join(" · ");
+      }
     }
-    return { ...c, cards: list, count: list.length, metricSum };
+    return { ...c, cards: list, count: list.length, metricSum, metricSumText };
   });
-
-  const metricIsMoney =
-    metricRef === "value" ||
-    metricRef === "mrr" ||
-    (metricRef
-      ? Boolean(
-          recordFieldDef(metricRef, defs) &&
-            resolveFieldMoneyFromRecord(
-              recordFieldDef(metricRef, defs)!,
-              (records[0] as RecordRow | undefined) ?? ({} as RecordRow)
-            ).isMoney
-        )
-      : false);
 
   return {
     mode: settings.mode,

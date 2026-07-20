@@ -41,6 +41,7 @@ export function taskBoardData(
       colorValue: null,
       fields: [],
       metricValue: null,
+      metricCurrency: null,
       isMock: false,
       openTasks: 0,
       task: {
@@ -55,7 +56,7 @@ export function taskBoardData(
 
   const columnCards: KanbanColumnCards[] = columns.map((c) => {
     const cards = byColumn.get(c.key) ?? [];
-    return { ...c, cards, count: cards.length, metricSum: null };
+    return { ...c, cards, count: cards.length, metricSum: null, metricSumText: null };
   });
 
   return {

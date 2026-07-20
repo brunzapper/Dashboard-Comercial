@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 20/07/2026
+// v1.2 (20/07/2026): reabrir reseta os estados controlados (responsável/
+//   operação/moeda/"criar no Bitrix" ficavam da criação anterior) e fechar com
+//   form sujo (Esc/clique fora) pede confirmação antes de descartar.
 // Painel lateral de CRIAÇÃO manual de registro (fontes com manual_entry, 0061).
 // Espelha record-edit-sheet: núcleo (nome obrigatório + colunas editáveis) +
 // responsável/operação + campos personalizados editáveis pelo papel. O server
@@ -12,6 +15,16 @@
 import { useActionState, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
@@ -132,6 +145,30 @@ export function RecordCreateSheet({
   const [operationId, setOperationId] = useState(dv("operation_id"));
   const [currencyCode, setCurrencyCode] = useState(dv("core__currency"));
   const [createInBitrix, setCreateInBitrix] = useState(false);
+  // v20/07/2026 (auditoria): fechar com form sujo pede confirmação; e reabrir
+  // SEMPRE parte dos defaults — os estados controlados sobreviviam ao
+  // fechamento e a criação seguinte herdava responsável/operação/moeda e o
+  // "Criar também no Bitrix" marcado (risco de criar no Bitrix sem perceber).
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const markDirty = () => setDirty(true);
+
+  function openSheet() {
+    setResponsibleId(dv("responsible_id"));
+    setOperationId(dv("operation_id"));
+    setCurrencyCode(dv("core__currency"));
+    setCreateInBitrix(false);
+    setDirty(false);
+    setOpen(true);
+  }
+
+  function handleOpenChange(next: boolean) {
+    if (!next && dirty && !pending) {
+      setConfirmDiscard(true);
+      return;
+    }
+    setOpen(next);
+  }
 
   const isBitrixEntity = recordType === "lead" || recordType === "negocio";
 
@@ -140,6 +177,7 @@ export function RecordCreateSheet({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (state.ok) setOpen(false);
     if (state.ok) {
+      setDirty(false);
       emitDataChanged({ kind: "record", recordId: state.id ?? null });
       if (state.id && onCreated) onCreated(state.id);
     }
@@ -155,19 +193,19 @@ export function RecordCreateSheet({
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       {iconTrigger ? (
         <Button
           variant="ghost"
           size="icon"
           className="size-6"
           aria-label={triggerLabel}
-          onClick={() => setOpen(true)}
+          onClick={openSheet}
         >
           <Plus className="size-4" />
         </Button>
       ) : (
-        <Button variant={triggerVariant} onClick={() => setOpen(true)}>
+        <Button variant={triggerVariant} onClick={openSheet}>
           <Plus className="size-4" />
           {triggerLabel}
         </Button>
@@ -180,7 +218,12 @@ export function RecordCreateSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
+        <form
+          action={formAction}
+          className="flex flex-col gap-5 px-4 pb-6"
+          onInputCapture={markDirty}
+          onChangeCapture={markDirty}
+        >
           <input type="hidden" name="source" value={source.key} />
           {isBitrixEntity ? (
             <input
@@ -239,7 +282,10 @@ export function RecordCreateSheet({
                 name="core__currency"
                 options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
                 value={currencyCode}
-                onValueChange={setCurrencyCode}
+                onValueChange={(v) => {
+                  markDirty();
+                  setCurrencyCode(v);
+                }}
                 placeholder="—"
                 className="w-full"
                 aria-label="Moeda"
@@ -277,7 +323,10 @@ export function RecordCreateSheet({
                   ...responsibles.map((r) => ({ value: r.id, label: r.label })),
                 ]}
                 value={responsibleId}
-                onValueChange={setResponsibleId}
+                onValueChange={(v) => {
+                  markDirty();
+                  setResponsibleId(v);
+                }}
                 placeholder="— nenhum —"
                 className="w-full"
                 aria-label="Responsável"
@@ -292,7 +341,10 @@ export function RecordCreateSheet({
                   ...operations.map((o) => ({ value: o.id, label: o.label })),
                 ]}
                 value={operationId}
-                onValueChange={setOperationId}
+                onValueChange={(v) => {
+                  markDirty();
+                  setOperationId(v);
+                }}
                 placeholder="— automática (do responsável) —"
                 className="w-full"
                 aria-label="Operação"
@@ -318,7 +370,10 @@ export function RecordCreateSheet({
             <label className="flex items-start gap-2 border-t pt-4 text-sm">
               <Checkbox
                 checked={createInBitrix}
-                onCheckedChange={(v) => setCreateInBitrix(v === true)}
+                onCheckedChange={(v) => {
+                  markDirty();
+                  setCreateInBitrix(v === true);
+                }}
                 className="mt-0.5"
               />
               <span>
@@ -343,6 +398,28 @@ export function RecordCreateSheet({
           </Button>
         </form>
       </SheetContent>
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Descartar o novo registro?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O que você preencheu neste formulário será perdido.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDiscard(false);
+                setDirty(false);
+                setOpen(false);
+              }}
+            >
+              Descartar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

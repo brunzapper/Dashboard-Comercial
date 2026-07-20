@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 17/07/2026
+// Versão: 1.4 | Data: 20/07/2026
+// v1.4 (20/07/2026): fechar com form sujo pede confirmação (onDirty no
+//   RecordEditForm + AlertDialog no wrapper).
 // v1.3 (17/07/2026): formulário extraído em RecordEditForm (exportado) — a aba
 //   "Dados" do CardDetailSheet (feed dos cards do kanban) embute o mesmo form;
 //   este Sheet segue funcionando igual para os call sites existentes. Sucesso
@@ -14,6 +16,16 @@
 import { useActionState, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
@@ -146,7 +158,8 @@ export function RecordEditForm({
   canEditValues,
   canManageFields,
   onSaved,
-}: RecordEditFormProps & { onSaved?: () => void }) {
+  onDirty,
+}: RecordEditFormProps & { onSaved?: () => void; onDirty?: () => void }) {
   const [state, formAction, pending] = useActionState(updateRecord, initial);
   const [responsibleId, setResponsibleId] = useState(record.responsible_id ?? "");
   const [operationId, setOperationId] = useState(record.operation_id ?? "");
@@ -174,7 +187,12 @@ export function RecordEditForm({
   const readOnlyFields = fields.filter((f) => !editableFields.includes(f));
 
   return (
-    <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
+    <form
+      action={formAction}
+      className="flex flex-col gap-5 px-4 pb-6"
+      onInputCapture={onDirty}
+      onChangeCapture={onDirty}
+    >
           <input type="hidden" name="record_id" value={record.id} />
           {/* Edições dos Registros gravam sempre no Bitrix (campos de Sync). */}
           <input type="hidden" name="force_sync_write_back" value="1" />
@@ -215,7 +233,10 @@ export function RecordEditForm({
                   name="core__currency"
                   options={[{ value: "", label: "—" }, ...CURRENCY_OPTIONS]}
                   value={currencyCode}
-                  onValueChange={setCurrencyCode}
+                  onValueChange={(v) => {
+                    onDirty?.();
+                    setCurrencyCode(v);
+                  }}
                   placeholder="—"
                   className="w-full"
                   aria-label="Moeda"
@@ -271,7 +292,10 @@ export function RecordEditForm({
                       .map((r) => ({ value: r.id, label: r.label })),
                   ]}
                   value={responsibleId}
-                  onValueChange={setResponsibleId}
+                  onValueChange={(v) => {
+                    onDirty?.();
+                    setResponsibleId(v);
+                  }}
                   placeholder="— nenhum —"
                   className="w-full"
                   aria-label="Responsável"
@@ -287,7 +311,10 @@ export function RecordEditForm({
                     ...operations.map((o) => ({ value: o.id, label: o.label })),
                   ]}
                   value={operationId}
-                  onValueChange={setOperationId}
+                  onValueChange={(v) => {
+                    onDirty?.();
+                    setOperationId(v);
+                  }}
                   placeholder="— nenhuma —"
                   className="w-full"
                   aria-label="Operação"
@@ -378,17 +405,54 @@ export function RecordEditForm({
 export function RecordEditSheet(props: RecordEditFormProps) {
   const { record, responsibles, userRoles } = props;
   const [open, setOpen] = useState(false);
+  // v20/07/2026 (auditoria): fechar com form sujo (Esc/clique fora) pede
+  // confirmação — antes descartava a digitação sem aviso.
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  function handleOpenChange(next: boolean) {
+    if (!next && dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    setOpen(next);
+  }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <Button
         variant="ghost"
         size="icon"
         aria-label="Editar registro"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setDirty(false);
+          setOpen(true);
+        }}
       >
         <Pencil className="size-4" />
       </Button>
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Descartar alterações?</AlertDialogTitle>
+            <AlertDialogDescription>
+              As alterações não salvas deste registro serão perdidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDiscard(false);
+                setDirty(false);
+                setOpen(false);
+              }}
+            >
+              Descartar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <SheetContent className="overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{record.title ?? "(sem título)"}</SheetTitle>
@@ -397,7 +461,14 @@ export function RecordEditSheet(props: RecordEditFormProps) {
           </SheetDescription>
         </SheetHeader>
 
-        <RecordEditForm {...props} onSaved={() => setOpen(false)} />
+        <RecordEditForm
+          {...props}
+          onDirty={() => setDirty(true)}
+          onSaved={() => {
+            setDirty(false);
+            setOpen(false);
+          }}
+        />
 
         {/* Tarefas vinculadas — FORA do form (os botões internos da seção não
             podem submeter a edição do registro). Carrega só com o painel aberto. */}

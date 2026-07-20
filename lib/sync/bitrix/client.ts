@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): timeout de fetch (15s) — requisição travada não segura
+//   mais a rota até o teto da Vercel.
 // Client HTTP do Bitrix24 (webhook de entrada). Retry com backoff exponencial
 // em QUERY_LIMIT_EXCEEDED (3s → 6s → 12s), paginação de 50 itens (parâmetro
 // `start`) e pausa entre páginas para respeitar o rate limit.
@@ -13,6 +15,7 @@ export interface BitrixResponse<T> {
 }
 
 const RETRY_DELAYS_MS = [3000, 6000, 12000];
+const FETCH_TIMEOUT_MS = 15_000;
 const PAGE_PAUSE_MS = 600;
 
 function sleep(ms: number): Promise<void> {
@@ -36,11 +39,26 @@ export class BitrixClient {
     let attempt = 0;
 
     for (;;) {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params),
-      });
+      // v20/07/2026: timeout de fetch — sem ele, uma requisição travada
+      // segurava a rota inteira até o teto da Vercel (60/300s), estourando o
+      // orçamento do runner e sobrepondo o tick seguinte do pg_cron.
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+      } catch (e) {
+        const name = (e as Error)?.name;
+        if (name === "TimeoutError" || name === "AbortError") {
+          throw new Error(
+            `Bitrix ${method}: timeout após ${FETCH_TIMEOUT_MS / 1000}s`
+          );
+        }
+        throw e;
+      }
 
       const text = await res.text();
       let data: BitrixResponse<T>;

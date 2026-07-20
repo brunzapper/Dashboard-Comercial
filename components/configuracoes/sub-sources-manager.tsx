@@ -11,6 +11,7 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -277,26 +278,17 @@ function SubSourceForm({
   );
 }
 
-function DeleteSubButton({ subKey }: { subKey: string }) {
-  const [state, formAction, pending] = useActionState(deleteSubSource, initial);
+// v20/07/2026: exclusão com confirmação (ConfirmDeleteButton) — a mensagem de
+// erro do servidor continua aparecendo na linha, como antes.
+function DeleteSubButton({ subKey, label }: { subKey: string; label: string }) {
   return (
-    <form action={formAction} className="flex items-center gap-1">
-      <input type="hidden" name="key" value={subKey} />
-      <Button
-        type="submit"
-        variant="ghost"
-        size="icon"
-        disabled={pending}
-        aria-label="Excluir sub-fonte"
-      >
-        <Trash2 className="size-4" />
-      </Button>
-      {state.message && !state.ok ? (
-        <span className="text-destructive text-xs" role="status">
-          {state.message}
-        </span>
-      ) : null}
-    </form>
+    <ConfirmDeleteButton
+      action={deleteSubSource}
+      values={{ key: subKey }}
+      title={`Excluir a sub-fonte "${label}"?`}
+      description="Widgets e campos unificados que usam esta sub-fonte deixam de encontrá-la (as linhas da fonte pai não são afetadas). Esta ação não pode ser desfeita."
+      ariaLabel="Excluir sub-fonte"
+    />
   );
 }
 
@@ -383,7 +375,7 @@ export function SubSourcesManager({
                       >
                         <Pencil className="size-4" />
                       </Button>
-                      <DeleteSubButton subKey={s.key} />
+                      <DeleteSubButton subKey={s.key} label={s.label} />
                     </div>
                   </TableCell>
                 </TableRow>
