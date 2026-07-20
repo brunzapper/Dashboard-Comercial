@@ -1,4 +1,11 @@
-// Versão: 3.3 | Data: 19/07/2026
+// Versão: 3.4 | Data: 20/07/2026
+// v3.4 (20/07/2026): unificados por PERNA — o input troca o mapa pronto
+//   (`correspondencesMap`) pelas correspondências CRUAS; o mapa passa a ser
+//   montado aqui via correspondenceMapForSources(fontes efetivas da consulta,
+//   catálogo). O mapa global levava o membro da sub-fonte pro coalesce da pai
+//   (mesmo record_type) e alterava cálculos de widget só-pai. Os filtros
+//   (segmentação/@period/sourceFilters) também passam a receber o catálogo
+//   (sub-fonte resolvia sem predicado/data próprios no caminho calc).
 // v3.3 (19/07/2026): aninhamento de agregados — a fórmula de entrada é
 //   expandida (expandAggFormula: ref custom:<calculado_agg> → fórmula do campo
 //   entre parênteses) antes de qualquer resolução. Cobre widget calculado
@@ -36,7 +43,17 @@ import {
 } from "@/lib/records/formulas";
 import { expandAggFormula } from "@/lib/records/formula-deps";
 import type { FieldDefinition } from "@/lib/records/types";
-import type { SourceDef, SourceKey } from "@/lib/sources";
+import {
+  correspondenceMapForSources,
+  type Correspondence,
+} from "@/lib/correspondences";
+import {
+  BUILTIN_SOURCES,
+  planSourceLegs,
+  rootSources,
+  type SourceDef,
+  type SourceKey,
+} from "@/lib/sources";
 import {
   basisKeysFor,
   basisMetric,
@@ -73,7 +90,10 @@ export interface CalcInput {
   sourceDefs?: SourceDef[];
   filters?: WidgetFilter[];
   period?: DashboardPeriod | null;
-  correspondencesMap?: Record<string, string[]>;
+  // Correspondências CRUAS (não o mapa global): o mapa do RPC é montado aqui,
+  // escopado às fontes efetivas da consulta (correspondenceMapForSources) —
+  // senão o membro de uma sub-fonte entraria no coalesce da pai.
+  correspondences?: Correspondence[];
   // Moeda do resultado: 'auto' preserva a moeda dos operandos (misturou → BRL);
   // 'fixed' converte p/ `code`; ausente/'none' = número puro (soma crua, v1).
   currencyMode?: "none" | "auto" | "fixed";
@@ -123,15 +143,31 @@ export async function runCalculatedWidget(
       ? [...new Set([...input.sources, ...scopedSources])]
       : input.sources;
 
+  // Fontes EFETIVAS da consulta (mesma resolução do engine): subs absorvidas
+  // somem, sub avulsa é a fonte efetiva do seu record_type; "todas as fontes"
+  // = raízes do catálogo. O mapa de unificados sai escopado a elas — o membro
+  // da sub NÃO entra no coalesce da pai (bug do widget só-pai, v3.4).
+  const catalog = input.sourceDefs ?? BUILTIN_SOURCES;
+  const plan = planSourceLegs(querySources, undefined, catalog);
+  const effKeys = plan.allMain
+    ? rootSources(catalog).map((s) => s.key)
+    : plan.mainSources;
+  const correspondencesMap = correspondenceMapForSources(
+    input.correspondences ?? [],
+    effKeys,
+    catalog
+  );
+
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   const baseFilters = applyFilterSourceTargets(
     resolveFilters(input.filters ?? []),
-    querySources
+    querySources,
+    catalog
   );
   const withPeriod = (p: DashboardPeriod | null | undefined): WidgetFilter[] => {
     let f = baseFilters;
-    if (p) f = applyPeriodToFilters(f, p, querySources);
-    return [...sourceFilters(querySources), ...f];
+    if (p) f = applyPeriodToFilters(f, p, querySources, catalog);
+    return [...sourceFilters(querySources, catalog), ...f];
   };
   const filters = withPeriod(input.period);
 
@@ -182,7 +218,7 @@ export async function runCalculatedWidget(
         supabase,
         metrics,
         keyFilters,
-        input.correspondencesMap ?? {}
+        correspondencesMap
       );
       keys.forEach((key, i) => {
         target[key] = Number.isFinite(values[i]) ? values[i] : null;
@@ -203,7 +239,7 @@ export async function runCalculatedWidget(
             supabase,
             moneyKeys.map(basisMetric),
             keyFilters,
-            input.correspondencesMap ?? {},
+            correspondencesMap,
             fieldByKey,
             rates,
             conversionPeriod

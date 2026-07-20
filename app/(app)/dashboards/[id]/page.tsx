@@ -248,6 +248,8 @@ export default async function DashboardPage({
   const availableForBuilder = isAdmin
     ? available
     : buildAvailableFields(builderFields, correspondences, sources);
+  // SÓ para as opções de bucket dos filtros rápidos (display) — consultas de
+  // widget montam o mapa POR PERNA (correspondenceMapForSources) no engine.
   const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
@@ -783,7 +785,7 @@ export default async function DashboardPage({
             sourceDefs: sources,
             filters: [...(w.filters ?? []), ...(viewFiltersByWidget[w.id] ?? [])],
             period: periodByWidget[w.id],
-            correspondencesMap,
+            correspondences,
             currencyMode:
               def?.currency_mode === "fixed"
                 ? "fixed"
@@ -821,7 +823,7 @@ export default async function DashboardPage({
                   ...(viewFiltersByWidget[w.id] ?? []),
                 ],
                 period: periodByWidget[w.id],
-                correspondencesMap,
+                correspondences,
                 currencyMode: "auto",
                 fields: allFields,
                 rates: currencyRates,
@@ -852,7 +854,7 @@ export default async function DashboardPage({
                   ...(viewFiltersByWidget[w.id] ?? []),
                 ],
                 period: periodByWidget[w.id],
-                correspondencesMap,
+                correspondences,
                 currencyMode: "auto",
                 fields: allFields,
                 rates: currencyRates,
@@ -901,7 +903,6 @@ export default async function DashboardPage({
             allFields,
             currencyRates,
             conversionPeriodById[w.id],
-            correspondencesMap,
             {},
             sources,
             correspondences
@@ -966,7 +967,6 @@ export default async function DashboardPage({
           config,
           available,
           periodByWidget[w.id],
-          correspondencesMap,
           (fieldsData ?? []) as FieldDefinition[],
           currencyRates,
           conversionPeriodById[w.id],

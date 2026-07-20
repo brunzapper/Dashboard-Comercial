@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): sem o param do mapa global de unificados — runWidget e
+//   runCalculatedWidget montam o mapa POR PERNA a partir das correspondências
+//   cruas (o mapa global misturava o membro da sub no coalesce da pai).
 // Modos novos do Card (ex-KPI): resolvidos no SERVIDOR (RSC do dashboard e
 // viewer de snapshot — o client injetado decide o dataset) e entregues via
 // WidgetData.card + rows. Modos:
@@ -106,11 +109,11 @@ export async function runCardWidget(
   fields: FieldDefinition[] = [],
   rates: CurrencyRates = {},
   conversionPeriod: { year: number; quarter: number } = yearQuarterOf(null),
-  correspondencesMap: Record<string, string[]> = {},
   // Viewer de snapshot: partner rows (match) nunca são candidatas do modo
   // record — mesmo pós-filtro das listas de registros.
   opts: { excludeRecordIds?: Set<string> } = {},
-  // SUB-FONTES (0078): repassados a runWidget (modos topn/list).
+  // SUB-FONTES (0078): catálogo + correspondências CRUAS — runWidget e
+  // runCalculatedWidget montam o mapa de unificados por perna a partir delas.
   catalog: SourceDef[] = BUILTIN_SOURCES,
   correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
@@ -213,7 +216,6 @@ export async function runCardWidget(
       derived,
       available,
       period,
-      correspondencesMap,
       fields,
       rates,
       conversionPeriod,
@@ -250,7 +252,7 @@ export async function runCardWidget(
       sourceDefs: catalog,
       filters: config.filters ?? [],
       period,
-      correspondencesMap,
+      correspondences,
       currencyMode: "auto",
       fields,
       rates,

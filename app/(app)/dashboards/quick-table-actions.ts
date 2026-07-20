@@ -23,10 +23,7 @@ import {
 import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
-import {
-  buildCorrespondenceMap,
-  loadCorrespondences,
-} from "@/lib/correspondences";
+import { loadCorrespondences } from "@/lib/correspondences";
 import {
   createPeriodResolver,
   type PeriodPrefs,
@@ -132,7 +129,6 @@ export async function runQuickTable(
   const sources = await loadSources(supabase);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
-  const correspondencesMap = buildCorrespondenceMap(correspondences);
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
 
@@ -227,7 +223,6 @@ export async function runQuickTable(
         config,
         available,
         period,
-        correspondencesMap,
         allFields,
         currencyRates,
         conversionPeriod,
@@ -281,7 +276,7 @@ export async function runQuickTable(
             sourceDefs: sources,
             filters,
             period,
-            correspondencesMap,
+            correspondences,
             currencyMode: "auto",
             fields: allFields,
             rates: currencyRates,
