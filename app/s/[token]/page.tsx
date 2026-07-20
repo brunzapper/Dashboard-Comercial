@@ -1,4 +1,6 @@
-// Versão: 1.3 | Data: 18/07/2026
+// Versão: 1.4 | Data: 20/07/2026
+// v1.4 (20/07/2026): catálogo das expressões {=…} via builder ÚNICO
+//   (lib/widgets/agg-catalog.availableAggCatalogInput) — montagem idêntica.
 // v1.3 (18/07/2026): fontes por métrica (Metric.sources) — modo lista via
 //   runRecordListWithExtras (extras saem do dataset congelado; allowed_sources
 //   pode zerá-los → métrica degrada p/ "—") e @period dos filtros rápidos
@@ -92,12 +94,10 @@ import {
 } from "@/lib/widgets/view-filters";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import {
-  aggOperandRefs,
-  condAggOperandRefs,
-  sourceScopedAggOperandRefs,
-} from "@/lib/widgets/calc-metrics";
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
 import {
   cellKey,
   classifyCellRaw,
@@ -737,48 +737,11 @@ export default async function SnapshotPage({
   const quickTableWidgets = dataWidgets.filter(isQuickTableWidget);
   let quickTablePromise: Promise<unknown> = Promise.resolve();
   if (quickTableWidgets.length > 0) {
-    // Catálogo de operandos das expressões {=…} — mesma montagem da action.
-    const numeric = available.filter((f) => f.isNumeric);
-    const countable = available.filter(
-      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+    // Catálogo de operandos das expressões {=…} — builder ÚNICO
+    // (lib/widgets/agg-catalog.ts), mesma montagem da action do quick-table.
+    const catalog: OperandRef[] = buildAggOperandCatalog(
+      availableAggCatalogInput(available, fields, sources)
     );
-    const customCond = fields
-      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    const customDate = fields
-      .filter((f) => f.data_type === "data")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Escopo de fonte: mesma montagem da action (sem match:).
-    const scopedInput = (list: typeof available) =>
-      list
-        .filter((f) => !f.field.startsWith("match:"))
-        .map((f) => ({
-          field: f.field,
-          label: f.label,
-          appliesTo: f.field.startsWith("custom:")
-            ? (fields.find((d) => d.field_key === f.field.slice(7))
-                ?.applies_to ?? null)
-            : f.unifiedMembers
-              ? Object.keys(f.unifiedMembers)
-              : null,
-        }));
-    const catalog: OperandRef[] = [
-      ...aggOperandRefs(numeric, countable),
-      ...sourceScopedAggOperandRefs(
-        scopedInput(numeric),
-        scopedInput(countable),
-        sources
-      ),
-      ...condAggOperandRefs(
-        numeric,
-        customCond,
-        customDate,
-        sources,
-        available
-          .filter((f) => f.unified && !f.isNumeric)
-          .map((f) => ({ field: f.field, label: f.label }))
-      ),
-    ];
 
     quickTablePromise = Promise.all(
       quickTableWidgets.map(async (w) => {

@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): catálogo agregado via builder ÚNICO (lib/widgets/
+//   agg-catalog.availableAggCatalogInput) — montagem idêntica, sem cópia local.
 // Tabela Livre — computação DEFERIDA (server action chamada pelo widget após
 // o mount, para a página abrir sem esse custo): dados BI (dimensões/métricas
 // via runWidget) + expressões {=…} das células (runCalculatedWidget), com o
@@ -13,13 +15,11 @@ import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import {
-  aggOperandRefs,
-  condAggOperandRefs,
-  sourceScopedAggOperandRefs,
-} from "@/lib/widgets/calc-metrics";
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
 import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
@@ -256,48 +256,12 @@ export async function runQuickTable(
     .slice(0, QT_MAX_EXPRS);
 
   if (exprCells.length > 0) {
-    // Catálogo agregado — mesma montagem do editor da Nota (widget-card).
-    const numeric = available.filter((f) => f.isNumeric);
-    const countable = available.filter(
-      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+    // Catálogo agregado — builder ÚNICO (lib/widgets/agg-catalog.ts), mesma
+    // montagem do editor da Nota (widget-card) e do viewer de snapshot; sem
+    // aninhados (comportamento vigente das expressões {=…}).
+    const catalog: OperandRef[] = buildAggOperandCatalog(
+      availableAggCatalogInput(available, allFields, sources)
     );
-    const customCond = allFields
-      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    const customDate = allFields
-      .filter((f) => f.data_type === "data")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Escopo de fonte: mesma montagem dos editores (sem match:).
-    const scopedInput = (list: typeof available) =>
-      list
-        .filter((f) => !f.field.startsWith("match:"))
-        .map((f) => ({
-          field: f.field,
-          label: f.label,
-          appliesTo: f.field.startsWith("custom:")
-            ? (allFields.find((d) => d.field_key === f.field.slice(7))
-                ?.applies_to ?? null)
-            : f.unifiedMembers
-              ? Object.keys(f.unifiedMembers)
-              : null,
-        }));
-    const catalog: OperandRef[] = [
-      ...aggOperandRefs(numeric, countable),
-      ...sourceScopedAggOperandRefs(
-        scopedInput(numeric),
-        scopedInput(countable),
-        sources
-      ),
-      ...condAggOperandRefs(
-        numeric,
-        customCond,
-        customDate,
-        sources,
-        available
-          .filter((f) => f.unified && !f.isNumeric)
-          .map((f) => ({ field: f.field, label: f.label }))
-      ),
-    ];
 
     await Promise.all(
       exprCells.map(async (c) => {

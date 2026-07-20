@@ -1,4 +1,6 @@
-// Versão: 2.7 | Data: 18/07/2026
+// Versão: 2.8 | Data: 20/07/2026
+// v2.8 (20/07/2026): catálogo do editor da Nota via builder ÚNICO
+//   (lib/widgets/agg-catalog.availableAggCatalogInput) — montagem idêntica.
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
 // modo edição) e o chart.
 // v2.7 (18/07/2026): fontes por métrica — prop recordListExtra repassada à
@@ -104,12 +106,10 @@ import { fracDigits } from "@/lib/widgets/appearance";
 import { evalConditional } from "@/lib/widgets/conditional";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
-  aggOperandRefs,
-  condAggOperandRefs,
-  sourceScopedAggOperandRefs,
-} from "@/lib/widgets/calc-metrics";
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
 import { useSources } from "@/components/sources-context";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
@@ -403,51 +403,14 @@ export const WidgetCard = memo(function WidgetCard({
   const canStyle =
     !isFilter && !isFieldFilter && !isCalc && !isAgenda && !isImage;
 
-  // Catálogo de operandos do editor in-place da nota (mesma montagem do
-  // calcRefs do builder — aggOperandRefs + escopo de fonte + condAggOperandRefs).
+  // Catálogo de operandos do editor in-place da nota — builder ÚNICO
+  // (lib/widgets/agg-catalog.ts), mesma montagem do calcRefs do builder e da
+  // action do quick-table; sem aninhados (comportamento vigente da Nota).
   const noteEditorRefs: OperandRef[] = useMemo(() => {
     if (!isNote) return [];
-    const numeric = availableForBuilder.filter((f) => f.isNumeric);
-    const countable = availableForBuilder.filter(
-      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
+    return buildAggOperandCatalog(
+      availableAggCatalogInput(availableForBuilder, fields, sourcesCatalog)
     );
-    const customCond = fields
-      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    const customDate = fields
-      .filter((f) => f.data_type === "data")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Escopo de fonte: mesma montagem do calcRefs do builder (sem match:).
-    const scopedInput = (list: typeof availableForBuilder) =>
-      list
-        .filter((f) => !f.field.startsWith("match:"))
-        .map((f) => ({
-          field: f.field,
-          label: f.label,
-          appliesTo: f.field.startsWith("custom:")
-            ? (fields.find((d) => d.field_key === f.field.slice(7))?.applies_to ??
-              null)
-            : f.unifiedMembers
-              ? Object.keys(f.unifiedMembers)
-              : null,
-        }));
-    return [
-      ...aggOperandRefs(numeric, countable),
-      ...sourceScopedAggOperandRefs(
-        scopedInput(numeric),
-        scopedInput(countable),
-        sourcesCatalog
-      ),
-      ...condAggOperandRefs(
-        numeric,
-        customCond,
-        customDate,
-        sourcesCatalog,
-        availableForBuilder
-          .filter((f) => f.unified && !f.isNumeric)
-          .map((f) => ({ field: f.field, label: f.label }))
-      ),
-    ];
   }, [isNote, availableForBuilder, fields, sourcesCatalog]);
 
   // Dimensões dinâmicas: mede o tamanho natural do conteúdo e reporta ao grid,

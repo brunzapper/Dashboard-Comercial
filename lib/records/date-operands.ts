@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 12/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): OperandRef ganha disabledReason — operando visível porém
+//   desabilitado com explicação no seletor (nunca escondido).
 // Fase 3: operandos de DATA dos campos calculados. Um único lugar que define
 // quais refs de data podem entrar numa fórmula (e seus rótulos), para o
 // construtor (components/campos/fields-manager.tsx) e a validação no servidor
@@ -18,6 +20,11 @@ export interface OperandRef {
   sourceHint?: string;
   chips?: string[];
   title?: string;
+  // Presente = o operando não funciona NESTE contexto e o seletor o exibe
+  // desabilitado com este motivo (política: explicar, nunca esconder — ex.:
+  // "Data atual" em fórmula agregada, ref que criaria ciclo). A validação
+  // (validateFormulaForContext / servidor) segue sendo a trava real.
+  disabledReason?: string;
 }
 
 export interface CustomDateField {

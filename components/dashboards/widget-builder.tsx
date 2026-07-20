@@ -169,15 +169,14 @@ import {
   metricTargetSources,
 } from "@/lib/widgets/metric-sources";
 import {
-  aggNestedOperandRefs,
-  aggOperandRefs,
   AGG_NESTED_GROUP,
-  sourceScopedAggOperandRefs,
   CALC_METRIC_FIELD,
-  condAggOperandRefs,
   validateCondAggRefs,
 } from "@/lib/widgets/calc-metrics";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
+import {
+  availableAggCatalogInput,
+  buildAggOperandCatalog,
+} from "@/lib/widgets/agg-catalog";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
   BuilderSection,
@@ -745,73 +744,26 @@ export function WidgetBuilder({
       return next;
     });
 
-  // Refs disponíveis para as métricas/widget calculados: agregações de registros.
-  // Contáveis (agg:count:<campo>): datas/numéricos reais (não aggCalc/sintéticos)
-  // — permite razões como reunião→venda (Contagem de datas por tipo de registro).
-  // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
-  // de condição (texto/seleção/booleano e datas dos campos personalizados).
-  // Mesma montagem do servidor (aggOperandCatalog em campos/actions.ts).
+  // Refs disponíveis para as métricas/widget calculados: catálogo agregado via
+  // builder ÚNICO (lib/widgets/agg-catalog.ts) — mesma montagem do servidor e
+  // dos demais editores por construção; inclui aninhados ('calculado_agg'
+  // salvos) e condições sobre unificados. Decoração só de exibição
+  // (fonte/chips/tooltip) — labels seguem limpos (load-bearing).
   // Memoizado: os editores de fórmula derivam a validação da identidade de
   // `refs`; um array novo por render disparava reemissão de onChange em cadeia.
-  const calcRefs: RefOption[] = useMemo(() => {
-    const numeric = available.filter((f) => f.isNumeric);
-    const countable = available.filter(
-      (f) => (f.isNumeric || f.isDate) && !f.aggCalc && !f.displayOnly
-    );
-    const customCond = fields
-      .filter((f) => COND_DATA_TYPES.includes(f.data_type))
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    const customDate = fields
-      .filter((f) => f.data_type === "data")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Entradas dos operandos com ESCOPO DE FONTE (`agg:…@<fonte>`): sem match:
-    // (registro casado já embute a fonte no ref) e com appliesTo do custom
-    // (applies_to) / unificado (record_types dos membros) p/ o campo só aparecer
-    // sob as fontes onde existe.
-    const scopedInput = (list: typeof available) =>
-      list
-        .filter((f) => !f.field.startsWith("match:"))
-        .map((f) => ({
-          field: f.field,
-          label: f.label,
-          appliesTo: f.field.startsWith("custom:")
-            ? (fields.find((d) => d.field_key === f.field.slice(7))?.applies_to ??
-              null)
-            : f.unifiedMembers
-              ? Object.keys(f.unifiedMembers)
-              : null,
-        }));
-    // 'calculado_agg' salvos como operando ANINHADO (ref plano custom:<key>,
-    // expandido em runtime) — paridade com o /campos (aggNestedOperandRefs).
-    const nestedAgg = fields
-      .filter((f) => f.data_type === "calculado_agg")
-      .map((f) => ({ field_key: f.field_key, label: f.label }));
-    // Decoração só de exibição (fonte/chips/tooltip) — labels seguem limpos.
-    return decorateRefOptions(
-      [
-        ...aggOperandRefs(numeric, countable),
-        ...sourceScopedAggOperandRefs(
-          scopedInput(numeric),
-          scopedInput(countable),
-          catalog
+  const calcRefs: RefOption[] = useMemo(
+    () =>
+      decorateRefOptions(
+        buildAggOperandCatalog(
+          availableAggCatalogInput(available, fields, catalog, {
+            withNested: true,
+          })
         ),
-        ...aggNestedOperandRefs(nestedAgg),
-        ...condAggOperandRefs(
-          numeric,
-          customCond,
-          customDate,
-          catalog,
-          // Condições sobre campos UNIFICADOS (texto/seleção/data — numéricos
-          // são alvo, não condição): o RPC resolve via _widget_unified_expr.
-          available
-            .filter((f) => f.unified && !f.isNumeric)
-            .map((f) => ({ field: f.field, label: f.label }))
-        ),
-      ],
-      available,
-      sourceLabels
-    );
-  }, [available, fields, sourceLabels, catalog]);
+        available,
+        sourceLabels
+      ),
+    [available, fields, sourceLabels, catalog]
+  );
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);
   const isAggCalcField = (field: string): boolean =>

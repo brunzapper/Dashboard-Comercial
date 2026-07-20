@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 19/07/2026
+// Versão: 1.5 | Data: 20/07/2026
+// v1.5 (20/07/2026): catálogo agregado via builder ÚNICO (lib/widgets/
+//   agg-catalog.defsAggCatalogInput) e validação de contexto via
+//   validateFormulaForContext (lib/records/formula-validate.ts) — mesmas
+//   regras/mensagens que os editores rodam ao vivo; comportamento idêntico.
 // v1.4 (19/07/2026): aninhamento de campos calculados — os catálogos passam a
 //   incluir calculados (por-registro) e calculado_agg (ref plano custom:<key>)
 //   como operandos, excluindo o campo em edição + dependentes transitivos;
@@ -27,18 +31,8 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
-import {
-  NUMERIC_DATA_TYPES,
-  PERCENT_DATA_TYPES,
-  type DataType,
-} from "@/lib/records/types";
-import {
-  formulaCondAggInfo,
-  formulaRefs,
-  formulaUsesCondAgg,
-  validateFormula,
-  type Formula,
-} from "@/lib/records/formulas";
+import { PERCENT_DATA_TYPES, type DataType } from "@/lib/records/types";
+import { formulaCondAggInfo, type Formula } from "@/lib/records/formulas";
 import {
   findFormulaCycle,
   formulaReferencesField,
@@ -46,18 +40,14 @@ import {
   transitiveFormulaDependents,
 } from "@/lib/records/formula-deps";
 import type { OperandRef } from "@/lib/records/date-operands";
-import { COND_DATA_TYPES } from "@/lib/records/cond-operands";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
+import { validateFormulaForContext } from "@/lib/records/formula-validate";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import {
-  aggNestedOperandRefs,
-  aggOperandRefs,
-  condAggOperandRefs,
-  sourceScopedAggOperandRefs,
-  validateCondAggRefs,
-} from "@/lib/widgets/calc-metrics";
-import { CORE_FIELDS } from "@/lib/widgets/fields";
+  buildAggOperandCatalog,
+  defsAggCatalogInput,
+} from "@/lib/widgets/agg-catalog";
 
 export interface FieldActionState {
   ok?: boolean;
@@ -126,69 +116,16 @@ function forbiddenOperandKeys(
 }
 
 
-// Operandos de AGREGAÇÃO (campos 'calculado_agg'): contagem de registros +
-// Σ/Média das colunas numéricas do núcleo e dos custom numéricos — incluindo o
-// 'calculado' por-registro (é materializado, o RPC agrega) — + outros campos
-// 'calculado_agg' como ref plano custom:<key> (aninhamento, 19/07/2026;
-// expandido em runtime pelo engine), exceto os do conjunto proibido
-// (self + dependentes transitivos). Mesma origem da UI
-// (lib/widgets/calc-metrics.aggOperandRefs/aggNestedOperandRefs) para editor e
-// servidor concordarem.
+// Operandos de AGREGAÇÃO (campos 'calculado_agg'): builder ÚNICO compartilhado
+// com os editores (lib/widgets/agg-catalog.ts) — servidor e UI montam o MESMO
+// catálogo por construção (rótulo é load-bearing no round-trip texto⇄tokens).
+// `forbidden` = self + dependentes transitivos (referenciá-los criaria ciclo).
 function aggOperandCatalog(
   rows: DefRow[],
   forbidden: Set<string>,
   sources: Sources
 ): OperandRef[] {
-  const allowed = rows.filter((d) => !forbidden.has(d.field_key));
-  const numeric = [
-    ...CORE_FIELDS.filter((f) => f.isNumeric).map((f) => ({
-      field: f.field,
-      label: f.label,
-    })),
-    ...allowed
-      .filter((d) => NUMERIC_DATA_TYPES.includes(d.data_type))
-      .map((d) => ({
-        field: `custom:${d.field_key}`,
-        label: d.label,
-        appliesTo: d.applies_to,
-      })),
-  ];
-  // Contáveis (agg:count:<campo>): datas/numéricos do núcleo + qualquer custom
-  // (exceto 'calculado_agg'). Mesmo critério do editor (fields-manager) para que
-  // o construtor e a validação concordem.
-  const countable = [
-    ...CORE_FIELDS.filter((f) => f.isNumeric || f.isDate).map((f) => ({
-      field: f.field,
-      label: f.label,
-    })),
-    ...allowed
-      .filter((d) => d.data_type !== "calculado_agg")
-      .map((d) => ({
-        field: `custom:${d.field_key}`,
-        label: d.label,
-        appliesTo: d.applies_to,
-      })),
-  ];
-  // Operandos de SOMASE/CONT.SE/MÉDIASE: campos numéricos crus (alvo) + colunas
-  // de condição (texto/seleção/booleano e datas). Mesma montagem dos editores
-  // (fields-manager/widget-builder) para catálogo e validação concordarem.
-  const customCond = allowed
-    .filter((d) => COND_DATA_TYPES.includes(d.data_type))
-    .map((d) => ({ field_key: d.field_key, label: d.label }));
-  const customDate = allowed
-    .filter((d) => d.data_type === "data")
-    .map((d) => ({ field_key: d.field_key, label: d.label }));
-  const nestedAgg = allowed
-    .filter((d) => d.data_type === "calculado_agg")
-    .map((d) => ({ field_key: d.field_key, label: d.label }));
-  return [
-    ...aggOperandRefs(numeric, countable),
-    // Variantes com ESCOPO DE FONTE (`agg:…@<fonte>`) — mesma montagem dos
-    // editores (fields-manager/widget-builder) p/ rótulo e validação concordarem.
-    ...sourceScopedAggOperandRefs(numeric, countable, sources),
-    ...aggNestedOperandRefs(nestedAgg),
-    ...condAggOperandRefs(numeric, customCond, customDate, sources),
-  ];
+  return buildAggOperandCatalog(defsAggCatalogInput(rows, sources, forbidden));
 }
 
 type Sources = Awaited<ReturnType<typeof loadSources>>;
@@ -298,10 +235,13 @@ async function resolveAndValidateFormula(
     loadSources(supabase),
   ]);
   const forbidden = forbiddenOperandKeys(rows, fieldKey);
-  const aggCatalog = isAgg ? aggOperandCatalog(rows, forbidden, sources) : null;
+  // Catálogo do CONTEXTO (agregado ou por-registro) — builder único
+  // compartilhado com os editores; tokenização e validação usam o mesmo.
+  const catalog = isAgg
+    ? aggOperandCatalog(rows, forbidden, sources)
+    : serverOperandCatalog(rows, forbidden, sources);
   let formula = f.formula;
   if (f.formulaMode === "text") {
-    const catalog = aggCatalog ?? serverOperandCatalog(rows, forbidden, sources);
     const tok = tokenizeFormulaText(f.formulaText, catalog);
     if (!tok.ok) return { ok: false, message: tok.error };
     formula = tok.formula;
@@ -327,46 +267,23 @@ async function resolveAndValidateFormula(
         "Um campo calculado não pode depender, direta ou indiretamente, de si mesmo.",
     };
   }
-  if (isAgg && aggCatalog) {
-    const v = validateFormula(formula, new Set(aggCatalog.map((o) => o.ref)));
-    if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
-    // Colocação dos refs de SOMASE/CONT.SE/MÉDIASE: campo cru só dentro das
-    // funções condicionais; alvo numérico; condição sobre coluna de condição.
-    const p = validateCondAggRefs(formula, aggCatalog);
-    if (!p.ok) return { ok: false, message: p.error ?? "Fórmula inválida." };
+  // Regras e mensagens do CONTEXTO (estrutura + refs, colocação de
+  // SOMASE/CONT.SE/MÉDIASE, mensagens dedicadas do por-registro e do "today")
+  // vivem em validateFormulaForContext (lib/records/formula-validate.ts) — o
+  // MESMO módulo que os editores rodam ao vivo; warnings não bloqueiam o save.
+  const v = validateFormulaForContext(formula, {
+    kind: isAgg ? "aggregate" : "record",
+    catalog,
+  });
+  if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
+  if (isAgg) {
     // Condições sobre RELAÇÕES comparam por NOME (19/07/2026): valida o
     // literal contra a lista real — nome inexistente viraria contagem 0
-    // SILENCIOSA em runtime; aqui vira erro claro.
+    // SILENCIOSA em runtime; aqui vira erro claro. (Consulta o banco, por isso
+    // fica fora do módulo puro.)
     const fk = await validateFkCondNames(supabase, formula);
     if (!fk.ok) return { ok: false, message: fk.message };
-    return { ok: true, formula };
   }
-  // SOMASE/CONT.SE/MÉDIASE agregam VÁRIOS registros — não existem no campo
-  // calculado por registro (que enxerga um registro só).
-  if (formulaUsesCondAgg(formula)) {
-    return {
-      ok: false,
-      message:
-        'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais do recorte)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).',
-    };
-  }
-  // Operando de agregação (Σ/Média/Contagem) num campo por registro: mensagem
-  // dedicada (antes caía no genérico "Coluna inválida").
-  if (formulaRefs(formula).some((r) => r.startsWith("agg:"))) {
-    return {
-      ok: false,
-      message:
-        'Operandos agregados (Σ, Média, Contagem) só funcionam em campos "Calculado (totais do recorte)" — o campo calculado por registro enxerga um registro só. Use os valores do próprio registro, ou crie um campo "Calculado (totais do recorte)".',
-    };
-  }
-  // Conjunto permitido = o MESMO catálogo do tokenizador (números + casados +
-  // datas + condicionais, sem o conjunto proibido) — validateFormula testa
-  // pertencimento à união, então um único conjunto basta.
-  const v = validateFormula(
-    formula,
-    new Set(serverOperandCatalog(rows, forbidden, sources).map((o) => o.ref))
-  );
-  if (!v.ok) return { ok: false, message: v.error ?? "Fórmula inválida." };
   return { ok: true, formula };
 }
 

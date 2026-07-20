@@ -24,6 +24,9 @@ export interface RefOption {
   sourceHint?: string;
   chips?: string[];
   title?: string;
+  // Presente = operando desabilitado NESTE contexto, com o motivo exibido no
+  // seletor (nunca escondido). A validação segue sendo a trava real.
+  disabledReason?: string;
 }
 
 const OPS: { op: "+" | "-" | "*" | "/"; glyph: string }[] = [
