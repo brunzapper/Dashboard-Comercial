@@ -72,12 +72,14 @@ export async function POST(request: Request) {
           purged += old.length;
         }
       }
-      // Eventos órfãos (sem nenhuma entrega restante) antigos.
+      // Eventos órfãos (sem nenhuma entrega restante) antigos. v20/07/2026:
+      // janela alinhada à das entregas expurgadas (RETAIN_DELIVERED_DAYS) —
+      // com RETAIN_DEAD_DAYS o órfão sobrevivia 30–90 dias além das entregas.
       if (Date.now() < deadline) {
         const { data: orphans } = await db
           .from("webhook_events")
           .select("id, webhook_deliveries(id)")
-          .lt("created_at", daysAgoIso(RETAIN_DEAD_DAYS))
+          .lt("created_at", daysAgoIso(RETAIN_DELIVERED_DAYS))
           .limit(PURGE_BATCH);
         const orphanIds = (orphans ?? [])
           .filter(

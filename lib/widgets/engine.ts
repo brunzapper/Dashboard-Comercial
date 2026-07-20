@@ -672,7 +672,11 @@ async function runKpi(
     spec: ComparisonSpec;
     settings: ComparisonSettings;
     filters: WidgetFilter[];
-  } | null
+  } | null,
+  // v20/07/2026: catálogo + correspondências CRUAS p/ o realizado de métrica
+  // CALCULADA no modo meta (choke point runCalculatedWidget).
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
   const s = config.settings ?? {};
   const empty = { rows: [], dimensions: [], metrics: [] };
@@ -816,25 +820,56 @@ async function runKpi(
   const metaMoney = isMoneyMetric(metaMetric, available);
   let realizado: number;
   let realizadoText: string | undefined;
-  const metaBd = metaMoney ? await moneyBreakdown(metaMetric) : null;
-  if (metaBd) {
-    // Realizado numérico em R$ (compara com a meta, também em R$).
-    realizado =
-      metaMetric.agg === "avg" && metaBd.count > 0
-        ? metaBd.brl / metaBd.count
-        : metaBd.brl;
-    realizadoText = formatMoneyAggregate(
-      metaBd,
-      kpiCfg(metaMetric.agg),
-      false,
-      decimals
-    );
+  // v20/07/2026 (auditoria): métrica CALCULADA como realizado passa pelo choke
+  // point runCalculatedWidget — antes ia crua ao aggregate/RPC ("Coluna de
+  // métrica não permitida" ou 0 silencioso). Import dinâmico: formula-metric
+  // importa deste módulo (evita ciclo estático).
+  const metaCalc = resolveCalcMetric(metaMetric, fieldByKey, catalog);
+  if (metaCalc.formula) {
+    const { runCalculatedWidget } = await import("./formula-metric");
+    const calcRes = await runCalculatedWidget(supabase, {
+      formula: metaCalc.formula,
+      sources: config.sources,
+      sourceDefs: catalog,
+      filters,
+      period,
+      correspondences,
+      currencyMode: metaCalc.mode,
+      currencyCode: metaCalc.code,
+      allowNegative: metaCalc.allowNegative,
+      fields: [...fieldByKey.values()],
+      rates,
+      conversionPeriod,
+    });
+    realizado = calcRes.value ?? 0;
+    if (calcRes.value != null && calcRes.currency) {
+      realizadoText = formatMoney(calcRes.value, calcRes.currency, decimals);
+    } else if (metaCalc.percent && calcRes.value != null) {
+      realizadoText = formatPercent(calcRes.value, true, decimals);
+    }
   } else {
-    [realizado] = await aggregate(supabase, [metaMetric], filters, correspondencesMap);
+    const metaBd = metaMoney ? await moneyBreakdown(metaMetric) : null;
+    if (metaBd) {
+      // Realizado numérico em R$ (compara com a meta, também em R$).
+      realizado =
+        metaMetric.agg === "avg" && metaBd.count > 0
+          ? metaBd.brl / metaBd.count
+          : metaBd.brl;
+      realizadoText = formatMoneyAggregate(
+        metaBd,
+        kpiCfg(metaMetric.agg),
+        false,
+        decimals
+      );
+    } else {
+      [realizado] = await aggregate(supabase, [metaMetric], filters, correspondencesMap);
+    }
   }
-  const now = new Date();
-  let year = now.getFullYear();
-  let month: number | null = s.period === "year" ? null : now.getMonth() + 1;
+  // Ano/mês da meta em BRASÍLIA (mesma regra do item 1 da auditoria — o
+  // relógio UTC do servidor virava o ano/mês às ~21h BRT).
+  const [tbY, tbM] = todayBrasiliaIso().split("-").map(Number);
+  let year = tbY;
+  let month: number | null = s.period === "year" ? null : tbM;
   // Com período global ativo, a meta acompanha o período: meta do mês quando o
   // intervalo cabe num único mês; senão, meta anual do ano da data inicial.
   if (period?.from) {
@@ -865,10 +900,12 @@ async function runKpi(
       meta,
       pct: meta ? realizado / meta : null,
       falta: meta != null ? meta - realizado : null,
-      // Textos monetários (realizado honra a config; meta/falta são sempre R$).
+      // Textos monetários (realizado honra a config; meta/falta são sempre
+      // R$). realizadoText também sai do caminho de métrica calculada (moeda/
+      // percentual) — presente = exibe.
+      ...(realizadoText ? { realizadoText } : {}),
       ...(metaMoney
         ? {
-            realizadoText,
             metaText:
               meta != null ? formatMoney(meta, "BRL", decimals) : undefined,
             faltaText:
@@ -919,7 +956,10 @@ async function runWidgetByPeriod(
   rates: CurrencyRates,
   conversionPeriod: ConversionYQ,
   // Catálogo de fontes p/ abaixar operandos com escopo (`agg:…@<fonte>`).
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  // v20/07/2026: correspondências CRUAS p/ a regra dos mocks por perna
+  // (sub-fontes) nos fetches deste caminho (record-list).
+  correspondences: Correspondence[] = []
 ): Promise<WidgetData> {
   const dims: Dimension[] = config.splitBySource
     ? [{ field: "record_type" }, ...config.dimensions]
@@ -968,10 +1008,13 @@ async function runWidgetByPeriod(
   // Falha do fetch extra/top-up degrada as métricas de perna p/ null ("—") —
   // nunca derruba o widget (mesma postura das pernas do caminho RPC).
   let extraOk = true;
+  // v20/07/2026: catalog + correspondences repassados aos fetches — sem o
+  // catálogo, sub-fonte neste caminho caía no legado (builtins) e o predicado
+  // da sub não era aplicado.
   const [records, extraFetched, topUp] = await Promise.all([
-    runRecordList(supabase, displayConfig, period, available) as Promise<
-      RecordRow[]
-    >,
+    runRecordList(supabase, displayConfig, period, available, catalog, {
+      correspondences,
+    }) as Promise<RecordRow[]>,
     extraSources.length > 0
       ? (runRecordList(
           supabase,
@@ -982,7 +1025,9 @@ async function runWidgetByPeriod(
             settings: { ...config.settings, limit: undefined },
           },
           period,
-          available
+          available,
+          catalog,
+          { correspondences }
         ) as Promise<RecordRow[]>).catch(() => {
           extraOk = false;
           return [] as RecordRow[];
@@ -999,7 +1044,9 @@ async function runWidgetByPeriod(
             settings: { ...config.settings, limit: undefined },
           },
           period,
-          available
+          available,
+          catalog,
+          correspondences
         ).catch(() => {
           extraOk = false;
           return [] as RecordRow[];
@@ -1527,7 +1574,9 @@ export async function runWidget(
             settings: cmpSettings,
             filters: cmpFiltersFor(cmpSpec),
           }
-        : null
+        : null,
+      catalog,
+      correspondences
     );
   }
 
@@ -1542,7 +1591,8 @@ export async function runWidget(
       fieldByKey,
       rates,
       conversionPeriod,
-      catalog
+      catalog,
+      correspondences
     );
   }
 

@@ -24,6 +24,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { coerceNumber } from "@/lib/import/csv";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -76,8 +77,11 @@ function coerce(dataType: DataType, raw: FormDataEntryValue | null): unknown {
   const s = raw == null ? "" : String(raw).trim();
   if (s === "") return null;
   if (dataType === "numero" || dataType === "moeda") {
-    const n = Number(s.replace(/\./g, "").replace(",", "."));
-    return Number.isNaN(Number(s)) ? (Number.isNaN(n) ? null : n) : Number(s);
+    // v20/07/2026: MESMO parser do import CSV (coerceNumber) — o parser local
+    // lia "1.234" como 1,234 (decimal en-US vencia) enquanto o import lia
+    // 1234 (milhar pt-BR): o mesmo texto gravava valores diferentes conforme
+    // a porta de entrada.
+    return coerceNumber(s);
   }
   if (dataType === "booleano") {
     return s === "true" ? true : s === "false" ? false : null;
@@ -116,8 +120,8 @@ function coerceCore(dataType: DataType, raw: FormDataEntryValue | null): unknown
   const s = raw == null ? "" : String(raw).trim();
   if (s === "") return null;
   if (dataType === "numero" || dataType === "moeda") {
-    const n = Number(s);
-    return Number.isFinite(n) ? n : null;
+    // v20/07/2026: parser único (coerceNumber) — ver comentário em coerce().
+    return coerceNumber(s);
   }
   if (dataType === "booleano") {
     return s === "true" ? true : s === "false" ? false : null;

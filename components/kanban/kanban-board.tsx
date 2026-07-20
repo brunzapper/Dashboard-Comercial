@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 20/07/2026
+// v1.3 (20/07/2026): refresh concorrente durante um move otimista não desfaz
+//   mais o move na tela (adoção de props adiada enquanto há move em voo).
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -523,8 +525,18 @@ export function KanbanBoard({
   }
 
   // Re-sincroniza com o servidor após router.refresh() (novas props).
+  // v20/07/2026: com um move OTIMISTA em voo (pendingMoves > 0), um refresh
+  // concorrente (realtime/outro usuário) trazia colunas antigas e desfazia o
+  // move na tela — adia a adoção; o refresh pós-move re-sincroniza.
+  const pendingMoves = useRef(0);
+  const deferredData = useRef<KanbanBoardData | null>(null);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (pendingMoves.current > 0) {
+      deferredData.current = data;
+      return;
+    }
+    deferredData.current = null;
+     
     setColumns(data.columns);
   }, [data]);
 
@@ -574,26 +586,35 @@ export function KanbanBoard({
     setError(null);
     applyLocalMove(payload.cardId, payload.fromKey, toKey);
 
-    const res = onMove
-      ? await onMove(payload, toKey, target)
-      : await moveRecordCard({
-          recordId: payload.cardId,
-          groupField: settings.groupField,
-          dateField: settings.dateField,
-          dateBucket: settings.dateBucket,
-          currentDateValue: payload.dateValue,
-          targetKey: toKey,
-          writeBack: settings.writeBack,
-          // Colunas "Personalizar": posiciona na visão (não edita o registro).
-          ...(settings.columnSource === "custom" && owner
-            ? { custom: { ownerKind: owner.kind, ownerId: owner.id } }
-            : {}),
-        });
+    pendingMoves.current += 1;
+    let res: { ok?: boolean; message?: string };
+    try {
+      res = onMove
+        ? await onMove(payload, toKey, target)
+        : await moveRecordCard({
+            recordId: payload.cardId,
+            groupField: settings.groupField,
+            dateField: settings.dateField,
+            dateBucket: settings.dateBucket,
+            currentDateValue: payload.dateValue,
+            targetKey: toKey,
+            writeBack: settings.writeBack,
+            // Colunas "Personalizar": posiciona na visão (não edita o registro).
+            ...(settings.columnSource === "custom" && owner
+              ? { custom: { ownerKind: owner.kind, ownerId: owner.id } }
+              : {}),
+          });
+    } finally {
+      pendingMoves.current -= 1;
+    }
     if (!res.ok) {
       if (beforeMove.current) setColumns(beforeMove.current);
       setError(res.message ?? "Falha ao mover o card.");
       return;
     }
+    // Dados adiados durante o move (refresh concorrente) já estão velhos em
+    // relação ao move persistido — descarta; o refresh abaixo re-sincroniza.
+    deferredData.current = null;
     emitDataChanged(
       settings.mode === "tarefas"
         ? { kind: "task", taskId: payload.cardId }

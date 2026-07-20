@@ -192,7 +192,7 @@ export const PERIOD_FIELD_SENTINEL = "@period";
 /** Valor do filtro sintético `@period`: limites + coluna de data por record_type. */
 export interface PeriodBetweenValue {
   from: string | null;
-  to: string | null; // já com o limite superior inclusivo do dia (…T23:59:59)
+  to: string | null; // já com o limite superior inclusivo do dia (…T23:59:59.999999)
   byType: Record<string, string>; // record_type → coluna de data
 }
 
@@ -264,7 +264,12 @@ export function applyPeriodToFilters(
   sources?: SourceKey[],
   catalog: SourceDef[] = BUILTIN_SOURCES
 ): WidgetFilter[] {
-  const to = period.to ? `${period.to}T23:59:59` : null;
+  // v2.1: sufixo .999999 — na comparação TEXTUAL (custom), um datetime
+  // "…T23:59:59-03:00" é lexicograficamente MAIOR que "…T23:59:59" ("-" vem
+  // depois do fim da string) e o último segundo do dia era excluído; ".999999"
+  // vence o "-03:00" ("." > "-") e continua um timestamp válido para as
+  // colunas core.
+  const to = period.to ? `${period.to}T23:59:59.999999` : null;
 
   // Mapa por fonte → campo de data das fontes cobertas por este widget.
   // record_type ciente do catálogo (sub-fonte → record_type da pai).

@@ -39,9 +39,14 @@ import {
   BUILTIN_SOURCES,
   isSubSource,
   planSourceLegs,
+  rootSources,
   toSourceKey,
   type SourceDef,
 } from "@/lib/sources";
+import {
+  correspondenceMapForSources,
+  type Correspondence,
+} from "@/lib/correspondences";
 import { resolveFilters, sourceFilters } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
@@ -119,7 +124,12 @@ function resolveListFilters(
   config: WidgetConfig,
   period: DashboardPeriod | null | undefined,
   available: AvailableField[],
-  catalog: SourceDef[]
+  catalog: SourceDef[],
+  // v20/07/2026 (auditoria): correspondências CRUAS opcionais — com sub-fonte
+  // em jogo, a regra dos mocks inspeciona os membros POR PERNA
+  // (correspondenceMapForSources), como o RPC faz com p_correspondences.
+  // Ausentes = espelho por `available` (raiz-primeiro; compatível).
+  correspondences?: Correspondence[]
 ) {
   // SUB-FONTES: fontes efetivas da consulta (uma por record_type). Ativa só
   // quando há sub selecionada — senão usa config.sources cru (legado).
@@ -153,7 +163,27 @@ function resolveListFilters(
     config.settings?.rowMode === "records"
       ? [filters, config.settings?.columns ?? []]
       : [filters, config.dimensions ?? [], config.metrics ?? []];
-  const includeMocks = includesMockReuniaoRef(refParts, available);
+  // Paridade com o RPC nos MEMBROS de unificado: `available.unifiedMembers` é
+  // RAIZ-primeiro e divergia quando só o membro da SUB contém a chave de Data
+  // Reunião (o RPC vê o p_correspondences por perna). Com as correspondências
+  // cruas e sub em jogo, inspeciona o mapa por perna.
+  let mockMembers: Pick<AvailableField, "field" | "unifiedMembers">[] =
+    available;
+  if (correspondences && correspondences.length > 0 && involvesSub) {
+    const effKeys = plan.allMain
+      ? rootSources(catalog).map((s) => s.key)
+      : plan.mainSources;
+    const legMap = correspondenceMapForSources(
+      correspondences,
+      effKeys,
+      catalog
+    );
+    mockMembers = Object.entries(legMap).map(([key, refs]) => ({
+      field: `unified:${key}`,
+      unifiedMembers: Object.fromEntries(refs.map((r, i) => [`m${i}`, r])),
+    }));
+  }
+  const includeMocks = includesMockReuniaoRef(refParts, mockMembers);
   return { filters, includeMocks };
 }
 
@@ -166,9 +196,11 @@ export function recordListIncludesMocks(
   config: WidgetConfig,
   period: DashboardPeriod | null | undefined,
   available: AvailableField[],
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences?: Correspondence[]
 ): boolean {
-  return resolveListFilters(config, period, available, catalog).includeMocks;
+  return resolveListFilters(config, period, available, catalog, correspondences)
+    .includeMocks;
 }
 
 /**
@@ -185,7 +217,12 @@ function buildRecordListQuery(
   available: AvailableField[],
   // onlyMocks: SÓ is_mock=true (top-up das pernas cobertas) — o chamador
   // (runCoveredLegMockTopUp) garante que a config referencia Data Reunião.
-  opts?: { count?: boolean; onlyMocks?: boolean },
+  opts?: {
+    count?: boolean;
+    onlyMocks?: boolean;
+    // Correspondências CRUAS p/ a regra dos mocks por perna (sub-fontes).
+    correspondences?: Correspondence[];
+  },
   // Catálogo de FONTES (0078): resolve a fonte efetiva por record_type (subs
   // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
   // (sem sub-fontes → comportamento legado idêntico).
@@ -195,7 +232,8 @@ function buildRecordListQuery(
     config,
     period,
     available,
-    catalog
+    catalog,
+    opts?.correspondences
   );
 
   const unifiedMembersOf = (field: string) =>
@@ -395,7 +433,7 @@ export async function runRecordList(
   period?: DashboardPeriod | null,
   available: AvailableField[] = [],
   catalog: SourceDef[] = BUILTIN_SOURCES,
-  opts?: { onlyMocks?: boolean }
+  opts?: { onlyMocks?: boolean; correspondences?: Correspondence[] }
 ): Promise<RecordRow[]> {
   const { q, applyBucketFilters } = buildRecordListQuery(
     supabase,
@@ -442,15 +480,33 @@ export async function runCoveredLegMockTopUp(
   topUpConfig: WidgetConfig,
   period: DashboardPeriod | null | undefined,
   available: AvailableField[],
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences?: Correspondence[]
 ): Promise<RecordRow[]> {
   if (!topUpConfig.sources || topUpConfig.sources.length === 0) return [];
-  if (!recordListIncludesMocks(topUpConfig, period, available, catalog))
+  if (
+    !recordListIncludesMocks(
+      topUpConfig,
+      period,
+      available,
+      catalog,
+      correspondences
+    )
+  )
     return [];
-  if (recordListIncludesMocks(displayConfig, period, available, catalog))
+  if (
+    recordListIncludesMocks(
+      displayConfig,
+      period,
+      available,
+      catalog,
+      correspondences
+    )
+  )
     return [];
   return runRecordList(supabase, topUpConfig, period, available, catalog, {
     onlyMocks: true,
+    correspondences,
   });
 }
 
@@ -485,7 +541,9 @@ export async function runRecordListWithExtras(
   catalog: SourceDef[] = BUILTIN_SOURCES,
   // Defs de campo p/ as pernas enxergarem operandos com escopo (`agg:…@<fonte>`)
   // em fórmulas de 'calculado_agg' salvas (metricScopedSources).
-  fields: FieldDefinition[] = []
+  fields: FieldDefinition[] = [],
+  // Correspondências CRUAS p/ a regra dos mocks por perna (sub-fontes).
+  correspondences?: Correspondence[]
 ): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
   const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
   const { legs } = partitionMetricLegs(
@@ -515,9 +573,13 @@ export async function runRecordListWithExtras(
     },
   });
   const [records, extra, topUp] = await Promise.all([
-    runRecordList(supabase, config, period, available, catalog),
+    runRecordList(supabase, config, period, available, catalog, {
+      correspondences,
+    }),
     extraSources.length > 0
-      ? runRecordList(supabase, auxConfig(extraSources), period, available, catalog)
+      ? runRecordList(supabase, auxConfig(extraSources), period, available, catalog, {
+          correspondences,
+        })
       : Promise.resolve([] as RecordRow[]),
     covered.length > 0
       ? runCoveredLegMockTopUp(
@@ -526,7 +588,8 @@ export async function runRecordListWithExtras(
           auxConfig(covered),
           period,
           available,
-          catalog
+          catalog,
+          correspondences
         )
       : Promise.resolve([] as RecordRow[]),
   ]);
@@ -547,14 +610,15 @@ export async function runRecordListPage(
   period: DashboardPeriod | null | undefined,
   available: AvailableField[],
   opts: { pageIndex: number; pageSize: number },
-  catalog: SourceDef[] = BUILTIN_SOURCES
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  correspondences?: Correspondence[]
 ): Promise<{ rows: RecordRow[]; total: number }> {
   const { q, hasBucketFilters, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,
     period,
     available,
-    { count: true },
+    { count: true, correspondences },
     catalog
   );
   const sort = config.settings?.appearance?.table?.sort;

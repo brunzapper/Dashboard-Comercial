@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): gatilhos de editar visíveis no foco e em telas touch
+//   (pointer-coarse) — antes eram hover-only, inacessíveis sem mouse.
 // Calendário da AGENDA (client): visão mês (grade de semanas) ou semana (7
 // colunas), com chips de REGISTROS (alocados pelo campo de data) e TAREFAS
 // (vencimento, com destaque atrasada/em breve e checkbox de concluir).
@@ -90,7 +92,7 @@ function TaskChip({
         {item.title}
       </span>
       {!readOnly ? (
-        <span className="opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
           <TaskSheet task={task} ctx={taskCtx} editTrigger />
         </span>
       ) : null}
@@ -114,7 +116,7 @@ function RecordChip({
     >
       <span className="min-w-0 flex-1 truncate">{item.title}</span>
       {!readOnly && item.record ? (
-        <span className="opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
           <RecordEditSheet
             record={item.record}
             fields={recordCtx.fields}

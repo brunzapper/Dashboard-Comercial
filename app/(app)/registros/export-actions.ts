@@ -97,7 +97,8 @@ export async function exportRecordsCsv(
     }
     if (params.de) query = query.gte("source_created_at", params.de);
     if (params.ate) {
-      query = query.lte("source_created_at", `${params.ate}T23:59:59`);
+      // .999999: inclui o último segundo do dia (ver lib/widgets/period.ts).
+      query = query.lte("source_created_at", `${params.ate}T23:59:59.999999`);
     }
     if (params.busca) query = query.ilike("title", `%${params.busca}%`);
 

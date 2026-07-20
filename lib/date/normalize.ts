@@ -1,4 +1,9 @@
 // Versão: 1.0 | Data: 19/07/2026
+// PREMISSA (auditoria 20/07/2026): o offset emitido é o do INSTANTE do valor —
+// para America/Sao_Paulo, valores anteriores a 2019 (era do horário de verão)
+// sairiam "-02:00" e divergiriam do "-03:00" fixo do backfill 0080. O dataset
+// é ≥2026 (premissa da 0080), então isso não ocorre; se um dia entrarem datas
+// pré-2019, alinhar aqui com o formato do backfill antes de sincronizá-las.
 // Normalização de fuso para strings de data/hora vindas de fontes externas
 // (data_sources.timezone — ex.: portal Bitrix em Europe/Moscow). O read side
 // inteiro é prefix-based (lê o "YYYY-MM-DD" literal da string: format.ts,

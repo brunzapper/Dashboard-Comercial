@@ -130,6 +130,10 @@ export function CardDetailSheet({
           </div>
         ) : isRecord ? (
           <RecordEditForm
+            // v20/07/2026: key por registro — trocar de card com o painel
+            // aberto não pode herdar responsável/operação/moeda do anterior
+            // (useState inicial só roda na montagem).
+            key={target.record.id}
             record={target.record}
             fields={recordCtx.fields}
             responsibles={recordCtx.responsibles}
@@ -142,6 +146,7 @@ export function CardDetailSheet({
           />
         ) : (
           <TaskForm
+            key={target.task.id}
             task={target.task}
             ctx={effTaskCtx}
             onDone={() => onOpenChange(false)}

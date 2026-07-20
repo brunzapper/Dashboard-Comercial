@@ -59,10 +59,13 @@ export function snapshotClient(
       // engine (.eq/.in/.or/.order/.range/.limit) continuam válidos.
       if (table === "records") {
         return {
-          select: (cols: string) =>
+          // v20/07/2026: repassa as OPÇÕES do select ({ count: "exact" } do
+          // caminho paginado) — antes eram descartadas e `total` degradava
+          // para o tamanho da página.
+          select: (cols: string, opts?: { count?: "exact" | "planned" | "estimated" }) =>
             service
               .from("snapshot_records")
-              .select(cols)
+              .select(cols, opts)
               .eq("snapshot_id", snapshotId),
         };
       }

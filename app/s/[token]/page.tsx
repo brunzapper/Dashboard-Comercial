@@ -390,18 +390,40 @@ export default async function SnapshotPage({
   };
   for (const [id, fs] of Object.entries(qfFiltersByWidget)) addViewFilters(id, fs);
 
+  // v20/07/2026: o visitante do snapshot só filtra pelos campos que o widget
+  // EXPÕE (colunas/dimensões/métricas/busca do tf_; campos configurados do
+  // ff_) — um estado forjado na URL podia mirar qualquer coluna aceita pelo
+  // RPC e fatiar o dataset congelado por campos não exibidos.
+  const restrictToFields = (
+    fs: WidgetFilter[],
+    allowed: Set<string>
+  ): WidgetFilter[] =>
+    fs.filter((f) => f.field.split("|").every((part) => allowed.has(part)));
+
   if (allowWidgetFilters) {
     for (const w of dataWidgets) {
       if (w.visual_type !== "tabela") continue;
       const raw = str(sp[`tf_${w.id}`]);
       if (!raw) continue;
+      const allowedTf = new Set<string>([
+        "title",
+        ...(w.settings?.searchFields ?? []),
+        ...((w.settings?.columns ?? []) as { field: string }[]).map(
+          (c) => c.field
+        ),
+        ...(w.dimensions ?? []).map((d) => d.field),
+        ...(w.metrics ?? []).map((m) => m.field),
+      ]);
       addViewFilters(
         w.id,
         // Lista de registros sem limit: o q roda no CLIENTE (mesmo critério do
         // dashboard — ver searchHandledOnClient); estruturados seguem aqui.
-        viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields, {
-          skipSearch: searchHandledOnClient(w.settings),
-        })
+        restrictToFields(
+          viewStateToFilters(parseViewFilter(raw), w.settings?.searchFields, {
+            skipSearch: searchHandledOnClient(w.settings),
+          }),
+          allowedTf
+        )
       );
     }
 
@@ -412,9 +434,16 @@ export default async function SnapshotPage({
     for (const fw of fieldFilterWidgets) {
       const raw = str(sp[`ff_${fw.id}`]);
       if (!raw) continue;
-      const fs = viewStateToFilters(
-        parseViewFilter(raw),
-        fw.settings?.searchFields
+      const allowedFf = new Set<string>([
+        "title",
+        ...(fw.settings?.searchFields ?? []),
+        ...(
+          (fw.settings?.fields ?? []) as { field: string }[]
+        ).map((e) => e.field),
+      ]);
+      const fs = restrictToFields(
+        viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields),
+        allowedFf
       );
       if (fs.length === 0) continue;
       const excluded = new Set(fw.settings?.excludedTargets ?? []);
@@ -557,7 +586,8 @@ export default async function SnapshotPage({
             periodByWidget[w.id],
             available,
             sources,
-            fields
+            fields,
+            correspondences
           );
           // Partner rows nunca são linhas de dados (existem só p/ resolver
           // colunas match: — e por construção violam ≥1 restrição).

@@ -939,7 +939,8 @@ export default async function DashboardPage({
               periodByWidget[w.id],
               available,
               { pageIndex: 0, pageSize: RECORD_LIST_PAGE_SIZE },
-              sources
+              sources,
+              correspondences
             );
             recordListById[w.id] = rows;
             recordListTotalById[w.id] = total;
@@ -950,7 +951,8 @@ export default async function DashboardPage({
               periodByWidget[w.id],
               available,
               sources,
-              allFields
+              allFields,
+              correspondences
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;

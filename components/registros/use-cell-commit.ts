@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 18/07/2026
+// Versão: 1.1 | Data: 20/07/2026
+// v1.1 (20/07/2026): digitação em andamento não é mais sobrescrita por
+//   serverValue novo (edição concorrente) — reconciliação no commit/revert.
 // Hook do commit OTIMISTA das células editáveis inline (EditableCell,
 // CoreEditableCell, RelationEditableCell — o LeadEditableCell mantém o padrão
 // próprio de remount por key). Extrai o bloco repetido: estado local + valor
@@ -30,30 +32,46 @@ export function useCellCommit(
   error: boolean;
   errorMessage: string | null;
 } {
-  const [value, setValue] = useState(serverValue);
+  const [value, setValueState] = useState(serverValue);
   const savedRef = useRef(serverValue);
+  // v1.1 (20/07/2026): edição local NÃO confirmada em andamento (dirtyRef) —
+  // um refresh trazendo serverValue novo (edição concorrente de outro usuário)
+  // não sobrescreve mais a digitação; o servidor entra no próximo
+  // commit/revert (savedRef sempre acompanha o servidor).
+  const dirtyRef = useRef(false);
   const [pending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
+  const setValue = (v: string) => {
+    dirtyRef.current = v !== savedRef.current;
+    setValueState(v);
+  };
+
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue(serverValue);
     savedRef.current = serverValue;
+    if (dirtyRef.current) return;
+     
+    setValueState(serverValue);
   }, [serverValue]);
 
   function commit(raw: string) {
-    if (raw === savedRef.current) return;
-    setValue(raw);
+    if (raw === savedRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    setValueState(raw);
     setError(false);
     setErrorMessage(null);
     startTransition(async () => {
       const res = await save(raw);
       if (res.ok) {
         savedRef.current = raw;
+        dirtyRef.current = false;
         onSaved?.();
       } else {
-        setValue(savedRef.current);
+        dirtyRef.current = false;
+        setValueState(savedRef.current);
         setError(true);
         setErrorMessage(res.message ?? null);
       }
@@ -64,7 +82,10 @@ export function useCellCommit(
     value,
     setValue,
     commit,
-    revert: () => setValue(savedRef.current),
+    revert: () => {
+      dirtyRef.current = false;
+      setValueState(savedRef.current);
+    },
     pending,
     error,
     errorMessage,

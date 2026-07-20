@@ -164,12 +164,12 @@ export async function POST(
       inboundId = inserted.id;
     }
 
-    // Carimbo de uso (best-effort; corrida entre requests é aceitável).
-    void db
+    // Carimbo de uso (corrida entre requests é aceitável; v20/07/2026: await —
+    // fire-and-forget podia não persistir antes do freeze da lambda).
+    await db
       .from("api_keys")
       .update({ last_used_at: new Date().toISOString() })
-      .eq("id", key.id)
-      .then(() => undefined);
+      .eq("id", key.id);
 
     if (!isRowsMode) {
       // Evento genérico: só armazenado, processamento futuro.
