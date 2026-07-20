@@ -1,4 +1,6 @@
-<!-- Versão: 1.6 | Data: 20/07/2026 -->
+<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- v1.7 (20/07/2026): 0084 (só dados) — `custom_fields.fonte` nos mocks
+     Inbound p/ satisfazer o predicado da sub `sqls`. -->
 <!-- v1.6 (20/07/2026): `operations.filter` (0083 — perfil da operação) + nota
      da coluna derivada records.operation_id e do backfill
      (supabase/apply/backfill-operation-id.sql). -->
@@ -100,7 +102,7 @@ do site ou linha de fonte dinâmica.
 | `field_modified_at` jsonb | `{campo: timestamp}` das edições manuais — protege do sync (conflito por campo) |
 | `created_at`, `updated_at`, `last_synced_at`, `locally_modified_at` | |
 | `responsible_id`, `operation_id`, `related_lead_id` uuid, `lead_time_days` numeric | (0012) |
-| `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5 |
+| `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5. Mocks Inbound carregam `custom_fields.fonte = "Formulário de CRM"` (0084 — predicados de sub-fonte valem em AND p/ mocks); Outbound (0053) ficam sem fonte de propósito |
 
 **`data_sources`** (0060) — catálogo de fontes (dinâmicas, criáveis via UI).
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
@@ -437,6 +439,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0081 | non_working_days | Dias não úteis (feriados) — calendário global dos utilitários de dia útil (meta ideal/pace, businessDayAlign, previous_period_bd) |
 | 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
 | 0083 | operations_filter | `operations.filter` jsonb (FILTROS DE PERFIL da operação — WidgetFilter[]); consumido no server pelo filtro de Operação (vínculo+perfil). Não recria as RPCs |
+| 0084 | mock_fonte_inbound | Só dados: mocks Inbound (0051) ganham `custom_fields.fonte = "Formulário de CRM"` p/ satisfazer o predicado da sub `sqls` (regra 0052 não isenta predicados); Outbound intocados. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

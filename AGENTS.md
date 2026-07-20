@@ -24,7 +24,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   SEMPRE no dataset congelado, ignorando as restrições do snapshot (0057); a
   regra 0052 (mock só conta em consulta que referencia Data Reunião) segue
   valendo. Não reintroduza filtros de restrição injetados pelo viewer — eles
-  derrubariam os mocks (AND puro).
+  derrubariam os mocks (AND puro). A regra 0052 só remove o gate
+  `not is_mock` — NÃO isenta os mocks dos predicados de sub-fonte nem dos
+  filtros do widget (AND puro): mocks precisam CARREGAR os campos usados na
+  segmentação das subs que devem contá-los (0084 dá `custom:fonte` inbound
+  aos mocks do lote 0051; os Outbound de 0053 ficam sem, de propósito).
 - **Período congelado do snapshot (0059):** `snapshots.default_period` guarda
   o filtro de período do dashboard capturado na criação (SnapshotsPanel →
   `capturePeriod`) e o viewer o aplica via resolver padrão (periodBar sintético
