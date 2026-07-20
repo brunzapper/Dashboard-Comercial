@@ -780,7 +780,13 @@ async function runKpi(
 
   // modo meta
   const metric = s.metric ?? "mrr";
-  const metaMetric = metricForMeta(metric);
+  // Realizado (20/07/2026): a métrica configurada no PRÓPRIO widget tem
+  // precedência — com metas por métrica arbitrária ('sql', 'mql'…, registry de
+  // lib/metas/metrics.ts) o realizado é o que a consulta do widget contar
+  // (ex.: contagem sobre a sub-fonte SQLs). Sem métrica no widget, cai no
+  // legado por chave ('clientes' = contagem; demais = soma do campo homônimo).
+  // Presets antigos já traziam a métrica equivalente — resultado idêntico.
+  const metaMetric = config.metrics[0] ?? metricForMeta(metric);
   const metaMoney = isMoneyMetric(metaMetric, available);
   let realizado: number;
   let realizadoText: string | undefined;

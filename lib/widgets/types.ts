@@ -248,7 +248,12 @@ export interface WidgetFilter {
 export interface KpiSettings {
   // 'data_atual' = card sintético que mostra o dia de hoje (Brasília), sem RPC.
   mode?: "meta" | "ratio" | "data_atual";
-  metric?: string; // modo meta: 'mrr' | 'clientes'
+  // Modo meta: chave do registry de métricas de meta (lib/metas/metrics.ts —
+  // builtins 'mrr'/'clientes' + custom do sync_config 'goal_metrics', ex.
+  // 'sql'). O realizado vem da métrica configurada no PRÓPRIO widget
+  // (config.metrics[0]); sem ela, legado por chave ('clientes' = contagem,
+  // demais = soma do campo homônimo).
+  metric?: string;
   scope?: "global" | "operation" | "responsible";
   operationId?: string | null;
   responsibleId?: string | null;
