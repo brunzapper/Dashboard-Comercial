@@ -46,6 +46,7 @@ import {
   updateField,
   type FieldActionState,
 } from "@/app/(app)/campos/actions";
+import { previewRecordFormula } from "@/app/(app)/campos/preview-actions";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 
@@ -346,6 +347,18 @@ export function FieldForm({
             initial={field?.formula ?? null}
             formInputs
             excludeKeys={forbidden}
+            preview={{
+              title: "Prévia (registros reais)",
+              // Mesma montagem da materialização (record-eval-context +
+              // computeFormulaFields) — o que a prévia mostra é o que o save
+              // gravará em cada registro.
+              run: (f) =>
+                previewRecordFormula({
+                  formulaJson: JSON.stringify(f),
+                  formulaMode: "builder",
+                  editingKey: field?.field_key,
+                }),
+            }}
           />
           <p className="text-muted-foreground text-xs">
             O resultado é calculado por registro a cada sincronização/edição

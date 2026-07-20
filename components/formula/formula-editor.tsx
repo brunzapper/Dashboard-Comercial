@@ -27,6 +27,10 @@ import { Check, CircleAlert, TriangleAlert } from "lucide-react";
 
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaChips } from "./formula-chips";
+import {
+  FormulaPreviewPanel,
+  type FormulaPreviewAdapter,
+} from "./formula-preview";
 import { FormulaTextView } from "./formula-text-view";
 import { FunctionPalette } from "./function-palette";
 import { SourceConceptsHint } from "./source-concepts-hint";
@@ -77,7 +81,10 @@ export interface FormulaEditorProps {
   // transitivos): entram DESABILITADAS no seletor (com motivo) e fora do
   // conjunto de validação — mesma regra do servidor (forbiddenOperandKeys).
   excludeKeys?: Set<string>;
-  // Slots opcionais: receitas acima (Fase 2) e prévia abaixo (Fase 4).
+  // Prévia ao vivo (FormulaPreviewPanel): o adapter calcula pelo MESMO caminho
+  // da materialização/engine; o editor chama com a fórmula válida (debounce).
+  preview?: FormulaPreviewAdapter;
+  // Slots opcionais: receitas acima (Fase 2) e conteúdo extra abaixo.
   header?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
@@ -96,6 +103,7 @@ export function FormulaEditor({
   onChange,
   formInputs,
   excludeKeys,
+  preview,
   header,
   footer,
   className,
@@ -232,6 +240,12 @@ export function FormulaEditor({
   };
 
   // ---- Troca de view (nunca destrutiva) --------------------------------------
+  // Fórmula corrente para a prévia (null = vazia ou texto não tokenizável).
+  const currentFormula: Formula | null = useMemo(() => {
+    if (mode === "text") return textTok?.ok ? textTok.formula : null;
+    return tokens.length > 0 ? { tokens } : null;
+  }, [mode, textTok, tokens]);
+
   const textBlocked = mode === "text" && textTok != null && !textTok.ok;
   const switchTo = (next: "visual" | "text") => {
     if (next === mode) return;
@@ -566,6 +580,14 @@ export function FormulaEditor({
           comparam como número; datas no formato{" "}
           <code>&quot;2026-01-31&quot;</code>.
         </p>
+      ) : null}
+
+      {preview ? (
+        <FormulaPreviewPanel
+          adapter={preview}
+          formula={currentFormula}
+          valid={Boolean(validation?.ok)}
+        />
       ) : null}
 
       {footer}
