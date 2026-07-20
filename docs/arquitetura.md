@@ -1,4 +1,10 @@
-<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- Versão: 1.6 | Data: 20/07/2026 -->
+<!-- v1.6 (20/07/2026): dias úteis e metas (§4.9) — non_working_days (0081) +
+     utilitários de dia útil; businessDayAlign (pernas por mês no engine);
+     base de comparação previous_period_bd; goalLine (meta/ritmo como série);
+     metas por métrica arbitrária (registry goal_metrics); preset engine v2
+     (§4.7 — aplicação idempotente por presetKey); sub-fonte com campo de
+     período custom (0082, §4.8). RPCs intocados em tudo. -->
 <!-- v1.5 (20/07/2026): top-up de mocks das pernas COBERTAS — fontes da métrica
      dentro das do widget (inclusive "todas as fontes") recebem os mocks de
      Data Reunião via fetch is_mock=true no engine (§4.1; invariante 9). -->
@@ -268,7 +274,20 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 
 - **Metas** (`goals`): escopo global/operação/responsável; comunicam-se por
   **roll-up na leitura** (`lib/metas/`); operações aninham via
-  `parent_operation_id` + `operation_subtree`.
+  `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do
+  registry (`lib/metas/metrics.ts` + `sync_config` `goal_metrics`) — arbitrárias
+  desde 20/07/2026 (ver §4.9).
+- **Presets de dashboard** (`lib/presets/definitions.ts` + `applyPreset`/
+  `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
+  `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,
+  canvas, background), widgets com `WidgetSettings` completo e dependências
+  (campos, sub-fontes; chaves de métrica de meta são registradas no registry).
+  Aplicação IDEMPOTENTE: dashboard identificado por `settings.preset.key`
+  (adoção por nome p/ legado), widgets por `settings.presetKey` com UPDATE
+  in-place (ids preservados → conectores/links/células sobrevivem), GC dos
+  presetKeys órfãos do próprio preset; widgets sem `presetKey` e sub-fontes/
+  campos já existentes NUNCA são tocados. Sem UI ainda — a futura aba
+  "Presets" das Configurações chama essas actions.
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -480,6 +499,68 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   (mesmo no modo lista), `lib/correspondences.ts` (`correspondenceMapForSources`),
   UI em `components/configuracoes/sub-sources-manager.tsx` e o toggle no
   `widget-builder.tsx`.
+- **Campo de período `custom:` (0082):** `sub_sources.default_period_field`
+  aceita também um campo personalizado de DATA (`custom:<field_key>` — ex.: sub
+  "SQLs" da pai Leads datada pela *Data Reunião*). O read side já suportava
+  (`@period.byType` aceita `custom:` e a regra dos mocks 0052 inspeciona o
+  byType serializado); a validação semântica (campo existe e é `data`) fica na
+  server action de fontes.
+
+### 4.9 Dias úteis, meta ideal e alinhamento por dia útil (20/07/2026)
+
+Peças genéricas para acompanhamento diário (base do futuro preset "Inbound"):
+tudo resolvido no **ENGINE** — o par de RPCs fica intocado (mesma família das
+invariantes 9/10).
+
+- **Dias não úteis** (`non_working_days`, 0081): calendário único global —
+  dia útil = seg–sex fora da tabela. Utilitários PUROS em
+  `lib/date/business-days.ts` (`businessDaysInMonth`, `businessDayIndexInMonth`,
+  `nthBusinessDayOfMonth`…), loader resiliente em
+  `lib/config/non-working-days.ts` (falha → Set vazio = só fim de semana). UI em
+  Configurações → Metas (cadastro manual, edição de rótulo e import CSV parseado
+  no browser — `Papa.parse` + `coerceDate`). No viewer público, a tabela entra
+  em `PASSTHROUGH_TABLES` (leitura AO VIVO, precedente das metas — cadastrar um
+  feriado não exige refresh do snapshot).
+- **Metas por métrica arbitrária:** `goals.metric` sempre foi texto livre; o
+  vocabulário vem do registry (`lib/metas/metrics.ts` — builtins `mrr`
+  monetária/`clientes` + custom do `sync_config` `goal_metrics`, criadas na tela
+  de Metas). O REALIZADO do KPI modo meta é a métrica configurada no PRÓPRIO
+  widget (`config.metrics[0]`; sem ela, legado por chave) — criar a métrica de
+  meta "sql" não cria consulta nenhuma.
+- **Alinhamento "mesmo dia útil"** (`WidgetSettings.businessDayAlign`): com
+  dimensão de data MENSAL e período ativo, cada mês vira uma perna
+  `computeRows` com o range recortado no N-ésimo dia útil do mês (N = dia útil
+  corrente da referência — hoje limitado ao fim do período, ou o fim do
+  período). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
+  mês CHEIO (não perde registro datado em fim de semana). Como cada rodada só
+  devolve linhas do próprio mês, o concat é o resultado — todas as métricas
+  (normais/calculadas/moeda/pernas por fonte) funcionam sem código novo. Teto
+  de 13 meses (acima disso o align é ignorado). Precedências: KPI/card e
+  "Agrupar período" (`dateAgg`) não passam pelo align; pernas de sub-fonte
+  "conviver" recursam `runWidget` e o align roda DENTRO de cada perna. Com o
+  align ativo, `settings.comparison` é IGNORADA (exclusão mútua — o gráfico já
+  é a comparação).
+- **Base de comparação `previous_period_bd`**: período anterior com o `to`
+  recortado no N-ésimo dia útil do último mês do range ("vs. mês anterior no
+  mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto
+  (feriados + hoje) chega por parâmetro opcional; sem contexto (chamador
+  antigo, ex.: widget calculado) degrada para `previous_period`.
+- **Linha de meta** (`WidgetSettings.goalLine`): o engine anexa `row.__goal`
+  por bucket mensal ANTES da rotulagem, via `resolveGoal` (mesmo roll-up do
+  KPI meta), e `WidgetData.goalLine` leva o metadado de exibição. Modo
+  `monthly` = meta cheia; `pace` = meta ÷ dias úteis do mês × N (N do
+  businessDayAlign quando ativo — linha ideal no mesmo estágio de todos os
+  meses; sem align, só o mês corrente é rateado, passados = cheia, futuros =
+  null). Render: linha tracejada no `linha`; em barra, o container troca p/
+  `ComposedChart` SÓ com a meta ativa. Falha em qualquer ponto degrada sem a
+  linha. Snapshots: meta e feriados AO VIVO pelo adapter (paridade com KPI
+  meta).
+- **Coorte por registro casado:** "vendas por mês de criação do lead" é uma
+  dimensão `match:<fonte>:<campo>` com transform de data — suportada pelo RPC
+  desde a 0042 (`_widget_match_expr`, espelhada no `_snap`) e ofertada pelo
+  builder. Pré-requisito é DADO (match_rules venda→lead), não código. `match:`
+  NÃO serve como campo de PERÍODO (restrição proposital —
+  `period-resolve.ts`).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

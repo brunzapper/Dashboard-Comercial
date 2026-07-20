@@ -1,4 +1,7 @@
-<!-- Versão: 1.4 | Data: 19/07/2026 -->
+<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- v1.5 (20/07/2026): dias não úteis (`non_working_days`, 0081), campo de
+     período `custom:` em sub-fontes (0082), metas por métrica arbitrária
+     (registry em sync_config 'goal_metrics'). -->
 <!-- v1.4 (19/07/2026): fuso da fonte — `data_sources.timezone` (0079) e backfill
      dos datetimes do Bitrix p/ Brasília (0080). -->
 <!-- v1.3 (19/07/2026): sub-fontes (0078) — tabela `sub_sources` (fonte derivada
@@ -9,7 +12,7 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0080), para que um
+Referência do estado **atual** do banco (após a migração 0082), para que um
 mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -108,7 +111,9 @@ conversão; seed `Europe/Moscow` em `leads`/`deals`). Seed dos 3 builtins:
 **`sub_sources`** (0078) — catálogo de **sub-fontes**: uma fonte derivada de uma
 pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
 `data_sources`), `parent_key` FK → `data_sources.key` (on delete cascade), `label`,
-`short_label`, `default_period_field` (CHECK entre as colunas de data do núcleo),
+`short_label`, `default_period_field` (CHECK: colunas de data do núcleo OU, desde
+a 0082, um campo personalizado de data `custom:<field_key>` — ex.: sub "SQLs"
+datada pela Data Reunião; a action valida que o campo existe e é de data),
 `filter` jsonb (`WidgetFilter[]` — o recorte). A sub COMPARTILHA o `record_type` da
 pai (por isso mora em tabela separada, para não quebrar `data_sources.record_type
 unique`/FK de `records`). Resolvida no ENGINE (perna por source-key); NÃO toca nas
@@ -183,6 +188,18 @@ visualizador do dashboard (propositalmente mais amplo que `widgets_write`).
 **`goals`** (0016) — metas: `period_year`, `period_month` (null = anual), `scope`
 (`global|operation|responsible`) + alvo, `metric` livre (`mrr`, `clientes`...),
 `target` numeric. Única por período/escopo/alvo/métrica. O roll-up é na leitura.
+Desde 20/07/2026 `metric` aceita chaves arbitrárias (ex.: `sql`) — o vocabulário
+vem do registry (builtins em `lib/metas/metrics.ts` + custom no `sync_config`
+chave `goal_metrics`); o REALIZADO de um KPI meta é a consulta do próprio widget.
+
+**`non_working_days`** (0081) — dias não úteis (feriados/paradas): `day` date PK,
+`label`. Calendário ÚNICO global dos utilitários de dia útil
+(`lib/date/business-days.ts` — dia útil = seg–sex fora desta tabela), usados por
+meta ideal/ritmo (`goalLine` modo `pace`), alinhamento "mesmo dia útil"
+(`businessDayAlign`) e base de comparação `previous_period_bd`. Leitura
+`authenticated`, escrita admin; sem policy `anon` (o viewer de snapshots lê ao
+vivo via service role — `PASSTHROUGH_TABLES`). UI: Configurações → Metas
+(cadastro manual + import CSV).
 
 **`tasks`** (0063) — tarefas: vínculos opcionais a `record_id`/`board_id`, `phase`,
 `due_date`/`due_time`, `completed_at/by`, `responsible_id` (mesma entidade dos
@@ -214,7 +231,10 @@ shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 
 ### 3.5 Sync e integrações
 
-**`sync_config`** (0007) — key-value jsonb de configuração.
+**`sync_config`** (0007) — key-value jsonb de configuração. Chaves notáveis:
+`source_labels` (rótulos de fonte) e `goal_metrics` (20/07/2026 — métricas de
+meta custom `[{key,label,money?}]`, mescladas aos builtins por
+`lib/metas/metrics.ts`).
 **`bitrix_lookup_cache`** (0007) — labels de status/usuários/enums do Bitrix.
 
 **`sync_jobs`** (0023) — estado resumível de backfill/reconcile: `kind`, `params`,
@@ -317,7 +337,7 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0080)
+## 7. Histórico de migrações (0001–0082)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -403,3 +423,5 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0078 | sub_sources | Sub-fontes (`sub_sources`: fonte derivada de uma pai, filtrada) + `field_correspondence_members.source_key` (membro por source-key). Não recria as RPCs de widget |
 | 0079 | source_timezone | `data_sources.timezone` (fuso IANA da origem; seed `Europe/Moscow` em leads/deals) — datetimes ingeridos normalizam p/ Brasília na entrada |
 | 0080 | backfill_bitrix_tz | Backfill: reescreve datetimes com offset ≠ -03:00 das chaves datetime do Bitrix (Data Reunião lead/negócio, `bitrix_moved_time`) p/ horário de Brasília; `snapshot_records` fica como capturado |
+| 0081 | non_working_days | Dias não úteis (feriados) — calendário global dos utilitários de dia útil (meta ideal/pace, businessDayAlign, previous_period_bd) |
+| 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
