@@ -1,4 +1,7 @@
-<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- Versão: 1.6 | Data: 20/07/2026 -->
+<!-- v1.6 (20/07/2026): §4.7 — janela de períodos equivalentes (periodWindow):
+     receita p/ novos acompanhamentos + nota do preset Inbound v3 (reaplicar);
+     filtro por campo agora persiste por usuário (lastFieldFilters). -->
 <!-- v1.5 (20/07/2026): operações — filtro por vínculo+perfil, rename inline,
      runbook do backfill de records.operation_id. -->
 <!-- v1.4 (20/07/2026): §4.7 — runbook do preset Inbound (pré-requisitos de
@@ -262,6 +265,34 @@ Conferências pós-geração: mocks de Data Reunião aparecendo no SQL (período
 que referencia a Data Reunião), moedas no MRR (BRL/USD via `currency` do
 deal), linha de meta no Mês x Mês, e comparação dos números com o dashboard
 antigo no MESMO período.
+
+> **Preset v3 (20/07/2026):** o Mês x Mês trocou a janela fixa
+> (`windowMonths: 6`) pelo **dropdown de janela no card** (`periodWindow` —
+> "3 meses" … "Este ano", padrão 6 meses, com o toggle dia útil × dia
+> cheio). Rode **Configurações → Presets → Atualizar** para o widget do
+> banco receber a config nova; sem isso o card segue no comportamento
+> antigo.
+
+**Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
+qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,
+ex.: "Mês/ano"):
+
+1. Editar o widget → seção **"Dia útil e meta"** → marcar **"Janela de meses
+   no card (períodos equivalentes)"**.
+2. Escolher quais opções aparecem no dropdown ("3 meses", "Este trimestre",
+   "6 meses", "Este semestre", "Últimos 12 meses", "Este ano"), a **janela
+   padrão** e se o card expõe o seletor **"dia útil × dia cheio"**.
+3. Opcional: marcar **"Alinhar meses pelo mesmo dia útil"** para o corte por
+   estágio ser o modo inicial (o toggle do card alterna depois).
+4. Salvar. O dropdown aparece no topo do card; a seleção é COMPARTILHADA
+   entre os usuários do dashboard (como os filtros rápidos) e cada mês da
+   janela mostra o recorte EQUIVALENTE ao período da barra global — a barra
+   continua mandando no mês final. Em snapshots, vale a janela padrão
+   congelada.
+
+Limitação estrutural: os meses (barras) vêm das FONTES DO WIDGET — mês com
+registro só em fonte de perna (`Metric.sources`) não vira barra; inclua a
+fonte no widget se precisar do mês.
 
 ## 5. Troubleshooting
 

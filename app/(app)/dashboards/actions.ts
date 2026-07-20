@@ -32,7 +32,11 @@ import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
+  parsePeriodWindowChoice,
+  PW_COL_KEY,
+  PW_ROW_KEY,
   QF_ROW_KEY,
+  type PeriodWindowChoice,
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { CALC_COL_KEY, CALC_ROW_KEY } from "@/lib/widgets/calculator";
@@ -315,6 +319,43 @@ export async function saveLastPeriod(
       user_id: session.user.id,
       dashboard_id: dashboardId,
       settings: next,
+    },
+    { onConflict: "user_id,dashboard_id" }
+  );
+}
+
+// Salva o último estado do widget "Filtro por campo" (ff_<widgetId>) do
+// usuário NESTE dashboard (user_preferences.settings.lastFieldFilters).
+// Fire-and-forget no debounce do FieldFilterControls; a page/widget-scope
+// reidratam quando a URL não traz o parâmetro (URL sempre vence). `null`
+// LIMPA a chave — o usuário removeu o filtro e a preferência não pode
+// ressuscitá-lo na próxima visita.
+export async function saveLastFieldFilter(
+  dashboardId: string,
+  widgetId: string,
+  encoded: string | null
+): Promise<void> {
+  const session = await getSessionInfo();
+  if (!session) return;
+  const supabase = await createClient();
+  // Read-modify-write para preservar as demais chaves (lastPeriod etc.).
+  const { data } = await supabase
+    .from("user_preferences")
+    .select("settings")
+    .eq("user_id", session.user.id)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  const current = (data?.settings ?? {}) as {
+    lastFieldFilters?: Record<string, string>;
+  };
+  const map = { ...(current.lastFieldFilters ?? {}) };
+  if (encoded) map[widgetId] = encoded;
+  else delete map[widgetId];
+  await supabase.from("user_preferences").upsert(
+    {
+      user_id: session.user.id,
+      dashboard_id: dashboardId,
+      settings: { ...current, lastFieldFilters: map },
     },
     { onConflict: "user_id,dashboard_id" }
   );
@@ -604,6 +645,44 @@ export async function saveQuickFilterValue(
         row_key: QF_ROW_KEY,
         col_key: entryId,
         value,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// Grava a seleção da JANELA DE PERÍODOS do widget (settings.periodWindow —
+// dropdown de meses + toggle dia útil no card). Mesma tabela/semântica dos
+// filtros rápidos: compartilhada entre usuários (RLS 0026). null/vazio apaga
+// (volta ao default do widget).
+export async function savePeriodWindowChoice(
+  dashboardId: string,
+  widgetId: string,
+  choice: PeriodWindowChoice | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const clean = parsePeriodWindowChoice(choice);
+  if (!clean) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", PW_ROW_KEY)
+      .eq("col_key", PW_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: PW_ROW_KEY,
+        col_key: PW_COL_KEY,
+        value: clean,
         updated_by: session.user.id,
       },
       { onConflict: "widget_id,row_key,col_key" }

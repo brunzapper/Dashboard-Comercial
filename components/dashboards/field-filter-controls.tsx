@@ -1,9 +1,12 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 20/07/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
 // a todos os widgets de dados com fonte sobreposta (menos os desmarcados),
 // recomputando-os. Espelha o padrão de URL do filtro de período.
+// v1.1: persiste o estado por usuário (user_preferences.lastFieldFilters via
+// saveLastFieldFilter, fire-and-forget no mesmo debounce) — a page reidrata
+// quando a URL não traz o parâmetro; a URL sempre vence.
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -24,6 +27,8 @@ import type {
 } from "@/lib/widgets/types";
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
+import { saveLastFieldFilter } from "@/app/(app)/dashboards/actions";
+import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 
 // Reconstrói os valores iniciais dos controles a partir dos filtros da URL,
@@ -77,6 +82,9 @@ export function FieldFilterControls({
   searchFields,
   available,
   options,
+  savedValue,
+  dashboardId,
+  widgetId,
 }: {
   paramKey: string;
   fields: FieldFilterEntry[];
@@ -84,13 +92,25 @@ export function FieldFilterControls({
   available: AvailableField[];
   // Opções de dropdown por campo (responsável/operação/etapa). Ausente = <Input>.
   options?: FieldFilterOptions;
+  // Valor salvo do usuário (lastFieldFilters), usado como seed quando a URL
+  // não traz o parâmetro — o servidor já aplicou este mesmo valor aos widgets;
+  // o primeiro debounce sincroniza a URL. URL presente vence.
+  savedValue?: string;
+  // Presentes no dashboard autenticado: habilitam a persistência por usuário
+  // (lastFieldFilters). O viewer público de snapshots não os passa (URL-only).
+  dashboardId?: string;
+  widgetId?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
   const { run } = useNavPending();
+  // Viewer de snapshot: filtros seguem funcionando via URL, mas NUNCA
+  // persistem preferência (visitante pode nem ter sessão; e um usuário
+  // autenticado vendo o snapshot não pode poluir o dashboard vivo).
+  const { snapshot } = useSnapshotMode();
 
-  const initial = parseViewFilter(sp.get(paramKey));
+  const initial = parseViewFilter(sp.get(paramKey) ?? savedValue ?? null);
   const [q, setQ] = useState(initial.q ?? "");
   const [values, setValues] = useState<string[]>(() =>
     initialValues(fields, initial.filters)
@@ -110,6 +130,11 @@ export function FieldFilterControls({
       run(() =>
         router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
       );
+      // Persistência por usuário (fire-and-forget): encoded vazio LIMPA a
+      // preferência (o usuário removeu o filtro — não pode ressuscitar).
+      if (!snapshot && dashboardId && widgetId) {
+        void saveLastFieldFilter(dashboardId, widgetId, encoded || null);
+      }
     }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

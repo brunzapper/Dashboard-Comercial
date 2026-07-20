@@ -1,4 +1,9 @@
-<!-- Versão: 1.9 | Data: 20/07/2026 -->
+<!-- Versão: 1.10 | Data: 20/07/2026 -->
+<!-- v1.10 (20/07/2026): (a) periodWindow (§4.9) — janela de períodos
+     equivalentes com dropdown no card ("3 meses"/"Este trimestre"…), corte
+     por dia útil OU dia cheio, seleção compartilhada na célula __pw__;
+     windowMonths vira alias legado; (b) persistência por usuário do widget
+     "Filtro por campo" (user_preferences.lastFieldFilters, §4.7 — URL vence). -->
 <!-- v1.9 (20/07/2026): correções pós-preset — (a) coalesce dos unificados
      ordena refs `custom:` (esparsos) antes das colunas do núcleo (densas;
      §4.8 — coluna densa sombreava o membro custom de outro record_type);
@@ -308,6 +313,20 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   operações diferentes não se combinam em AND). Dimensões/agrupamentos "por
   Operação" e restrições de snapshot seguem na coluna derivada — rode
   `supabase/apply/backfill-operation-id.sql` após mexer nos vínculos.
+- **Persistência do "Filtro por campo" POR USUÁRIO (20/07/2026):** o estado
+  vivo continua na URL (`ff_<widgetId>`), mas o debounce do
+  `FieldFilterControls` também grava
+  `user_preferences.settings.lastFieldFilters[widgetId]`
+  (`saveLastFieldFilter`; valor vazio LIMPA a chave — filtro removido não
+  ressuscita). Ao abrir o dashboard SEM o parâmetro na URL, page e
+  `widget-scope` reidratam desse mapa (**URL sempre vence**) e a page manda o
+  seed ao cliente (`fieldFilterSeedById`) p/ os controles montarem
+  preenchidos — o primeiro debounce sincroniza a URL. Viewer de snapshot:
+  URL-only (gate `useSnapshotMode` — visitante não tem sessão e usuário
+  autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
+  do card e a janela de períodos (`__qf__`/`__pw__` em
+  `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
+  campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
 - **Presets de dashboard** (`lib/presets/definitions.ts` + `applyPreset`/
   `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
   `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,
@@ -329,8 +348,9 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   (SQLs por Data Reunião aciona os mocks 0052), campo calculado
   `mrr_contrato`, correspondências `data_ref`/`fonte_venda`/`mrr_venda` e 22
   widgets (KPIs com `previous_period_bd`, SQL total/% de conversão via Card
-  fórmula com operandos escopados, Mês x Mês com `businessDayAlign` +
-  `goalLine` métrica `sql` em modo pace, coorte via dimensão `match:`).
+  fórmula com operandos escopados, Mês x Mês com `periodWindow` (dropdown de
+  janela, padrão 6 meses) + `businessDayAlign` + `goalLine` métrica `sql` em
+  modo pace, coorte via dimensão `match:`).
   Pré-requisitos de DADO no runbook (manual §4.7).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
@@ -616,10 +636,7 @@ invariantes 9/10).
   dimensão de data MENSAL e período ativo, cada mês vira uma perna
   `computeRows` com o range recortado no N-ésimo dia útil do mês (N = dia útil
   corrente da referência — hoje limitado ao fim do período, ou o fim do
-  período). `windowMonths` (2–13, 20/07/2026) dá ao card uma JANELA PRÓPRIA:
-  ignora o `from` da barra e cobre os N meses de calendário que terminam no
-  mês do `to` (o "histórico de 6 meses" do Mês x Mês, com a barra em "Este
-  mês"). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
+  período). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
   mês CHEIO (não perde registro datado em fim de semana). Como cada rodada só
   devolve linhas do próprio mês, o concat é o resultado — todas as métricas
   (normais/calculadas/moeda/pernas por fonte) funcionam sem código novo. Teto
@@ -628,6 +645,29 @@ invariantes 9/10).
   "conviver" recursam `runWidget` e o align roda DENTRO de cada perna. Com o
   align ativo, `settings.comparison` é IGNORADA (exclusão mútua — o gráfico já
   é a comparação).
+- **Janela de períodos equivalentes** (`WidgetSettings.periodWindow`,
+  20/07/2026): "traz o equivalente ao período apurado nos meses anteriores"
+  como FILTRO RÁPIDO do card. `options` (subconjunto ordenado de `3m |
+  trimestre | 6m | semestre | 12m | ano`) define o dropdown no card
+  (`PeriodWindowControl`); `default` é a janela sem seleção;
+  `showAlignToggle` expõe o seletor "dia útil × dia cheio". Semântica:
+  rolling `3m/6m/12m` = N meses terminando no mês do `to` da barra;
+  `trimestre/semestre/ano` = calendário do `to`. Cada mês recebe o RECORTE
+  equivalente ao período da barra — com align, o corte no N-ésimo dia útil
+  (regras acima); em "dia cheio", o span de DIAS equivalente quando a barra
+  cabe num único mês (dia(from)–dia(to), clampado; "Este mês" → meses
+  cheios), senão meses cheios — e o mês final respeita o `to`. A SELEÇÃO do
+  card é COMPARTILHADA entre usuários (célula `__pw__`/`sel` de
+  `dashboard_table_cells`, `savePeriodWindowChoice`), como os filtros
+  rápidos; page e `widget-scope` mesclam a escolha nos settings EFETIVOS
+  antes do engine (`applyPeriodWindowChoice` → `periodWindow.active` +
+  `businessDayAlign.enabled`); o engine só lê o resolvido
+  (`active ?? default`) — por isso o viewer de snapshot (que congela os
+  settings) cai no default. `businessDayAlign.windowMonths` (2–13) segue
+  como alias LEGADO (janela fixa rolling), fora do builder. Assimetria
+  estrutural documentada: o universo de meses (linhas) vem da consulta
+  PRINCIPAL (fontes do widget) — mês com registro só em fonte de perna
+  (`Metric.sources`) não vira barra; incluir a fonte no widget resolve.
 - **Base de comparação `previous_period_bd`**: período anterior com o `to`
   recortado no N-ésimo dia útil do último mês do range ("vs. mês anterior no
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto

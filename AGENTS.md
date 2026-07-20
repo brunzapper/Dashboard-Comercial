@@ -126,7 +126,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)
   alimentam o alinhamento "mesmo dia útil" (`businessDayAlign` — pernas por mês
   via `computeRows`), a base de comparação `previous_period_bd` e a linha de
-  meta (`goalLine` — `row.__goal` via `resolveGoal`). NÃO recrie as RPCs para
+  meta (`goalLine` — `row.__goal` via `resolveGoal`). A janela de períodos
+  equivalentes (`periodWindow` — dropdown "3 meses"/"Este trimestre"… no card,
+  corte por dia útil OU dia cheio) também é 100% engine: a seleção
+  compartilhada vive na célula `__pw__` de `dashboard_table_cells` e page/
+  `widget-scope` a mesclam nos settings EFETIVOS via
+  `applyPeriodWindowChoice` ANTES do engine (que só lê `active ?? default`;
+  `businessDayAlign.windowMonths` é alias legado). NÃO recrie as RPCs para
   nada disso; snapshots leem metas/feriados AO VIVO pelo adapter
   (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca

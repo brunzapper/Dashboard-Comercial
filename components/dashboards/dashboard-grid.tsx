@@ -92,6 +92,7 @@ import { widgetDomId } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
 import type { WidgetQuickFilters } from "@/lib/widgets/quick-filters";
+import type { WidgetPeriodWindowState } from "./period-window-control";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   createWidget,
@@ -242,7 +243,9 @@ export function DashboardGrid({
   conversionPeriodById = {},
   editMode,
   filterOptionsById,
+  fieldFilterSeedById,
   quickFiltersById,
+  periodWindowById,
   layoutById,
   applyLayoutPatch,
   calcVarsById = {},
@@ -298,7 +301,13 @@ export function DashboardGrid({
   conversionPeriodById?: Record<string, { year: number; quarter: number }>;
   editMode: boolean;
   filterOptionsById?: Record<string, FieldFilterOptions>;
+  // Seed dos controles "Filtro por campo" quando a URL não traz o ff_: valor
+  // salvo do usuário (lastFieldFilters). URL sempre vence.
+  fieldFilterSeedById?: Record<string, string>;
   quickFiltersById?: Record<string, WidgetQuickFilters>;
+  // Janela de períodos (settings.periodWindow): estado efetivo do dropdown do
+  // card, resolvido no servidor (__pw__ ?? default). Ausente = sem dropdown.
+  periodWindowById?: Record<string, WidgetPeriodWindowState>;
   // Estado otimista de layout (vive no shell — dashboard-client): posições BASE
   // por widget, fonte de verdade entre um saveLayout (que não revalida) e o
   // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
@@ -910,7 +919,9 @@ export function DashboardGrid({
                     canManageFields={canManageFields}
                     editMode={editMode}
                     filterOptions={filterOptionsById?.[w.id]}
+                    fieldFilterSeed={fieldFilterSeedById?.[w.id]}
                     quickFilters={quickFiltersById?.[w.id]}
+                    periodWindow={periodWindowById?.[w.id]}
                     autoSize={w.settings?.autoSize}
                     cellW={cellW}
                     rowH={ROW_H}
