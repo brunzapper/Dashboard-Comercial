@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 09/07/2026
+// Versão: 2.1 | Data: 20/07/2026
+// v2.1 (20/07/2026): presets resolvidos no fuso de Brasília (todayBrasiliaIso)
+// — antes usavam o relógio do servidor (UTC) e viravam o dia às ~21h BRT.
 // Filtro de período dos dashboards: presets relativos (resolvidos no momento da
 // consulta) + intervalo personalizado. Usado em dois lugares:
 //  - barra global (searchParams periodo/de/ate/campo);
@@ -10,6 +12,7 @@
 // do próprio widget no mesmo campo.
 import type { WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
+import { todayBrasiliaIso } from "@/lib/date/today";
 import {
   BUILTIN_SOURCES,
   recordTypeOf,
@@ -92,52 +95,58 @@ export function periodKeys(scope: PeriodScope | undefined, tabId: string) {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function iso(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function iso(utcMs: number): string {
+  return new Date(utcMs).toISOString().slice(0, 10);
 }
 
+// v2.1 (20/07/2026): presets relativos a "hoje" em BRASÍLIA (todayBrasiliaIso),
+// nunca ao relógio do servidor — na Vercel (UTC) entre ~21h e meia-noite BRT o
+// dia UTC já é o seguinte: "hoje" apontava para amanhã e, na última noite do
+// mês, "este mês" virava o mês seguinte inteiro. Aritmética pura em Date.UTC
+// sobre o y/m/d de Brasília (Date.UTC normaliza estouros: dia 0, mês 12 etc.).
 function presetRange(
   preset: PeriodPresetKey,
-  now = new Date()
+  todayIso: string = todayBrasiliaIso()
 ): { from: string; to: string } {
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  const dow = now.getDay(); // 0=domingo
+  const [y, m1, d] = todayIso.split("-").map(Number);
+  const m = m1 - 1; // 0-indexado, como Date.UTC
+  const utc = (yy: number, mo: number, dd: number) => Date.UTC(yy, mo, dd);
+  const today = utc(y, m, d);
+  const dow = new Date(today).getUTCDay(); // 0=domingo
   const mondayOffset = (dow + 6) % 7; // dias desde a última segunda
   switch (preset) {
     case "hoje":
-      return { from: iso(now), to: iso(now) };
+      return { from: iso(today), to: iso(today) };
     case "ultimos_7":
-      return { from: iso(new Date(y, m, d - 6)), to: iso(now) };
+      return { from: iso(utc(y, m, d - 6)), to: iso(today) };
     case "ultimos_30":
-      return { from: iso(new Date(y, m, d - 29)), to: iso(now) };
+      return { from: iso(utc(y, m, d - 29)), to: iso(today) };
     case "ultimos_90":
-      return { from: iso(new Date(y, m, d - 89)), to: iso(now) };
+      return { from: iso(utc(y, m, d - 89)), to: iso(today) };
     case "esta_semana":
       return {
-        from: iso(new Date(y, m, d - mondayOffset)),
-        to: iso(new Date(y, m, d - mondayOffset + 6)),
+        from: iso(utc(y, m, d - mondayOffset)),
+        to: iso(utc(y, m, d - mondayOffset + 6)),
       };
     case "semana_passada":
       return {
-        from: iso(new Date(y, m, d - mondayOffset - 7)),
-        to: iso(new Date(y, m, d - mondayOffset - 1)),
+        from: iso(utc(y, m, d - mondayOffset - 7)),
+        to: iso(utc(y, m, d - mondayOffset - 1)),
       };
     case "este_mes":
-      return { from: iso(new Date(y, m, 1)), to: iso(new Date(y, m + 1, 0)) };
+      return { from: iso(utc(y, m, 1)), to: iso(utc(y, m + 1, 0)) };
     case "mes_passado":
-      return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) };
+      return { from: iso(utc(y, m - 1, 1)), to: iso(utc(y, m, 0)) };
     case "este_trimestre": {
       const q = Math.floor(m / 3) * 3;
-      return { from: iso(new Date(y, q, 1)), to: iso(new Date(y, q + 3, 0)) };
+      return { from: iso(utc(y, q, 1)), to: iso(utc(y, q + 3, 0)) };
     }
     case "este_ano":
-      return { from: iso(new Date(y, 0, 1)), to: iso(new Date(y, 11, 31)) };
+      return { from: iso(utc(y, 0, 1)), to: iso(utc(y, 11, 31)) };
     case "ano_passado":
       return {
-        from: iso(new Date(y - 1, 0, 1)),
-        to: iso(new Date(y - 1, 11, 31)),
+        from: iso(utc(y - 1, 0, 1)),
+        to: iso(utc(y - 1, 11, 31)),
       };
   }
 }

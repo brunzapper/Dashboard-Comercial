@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 20/07/2026
+// Versão: 1.8 | Data: 20/07/2026
+// v1.8 (20/07/2026): correções da auditoria — resolveToken (@today etc.) no
+//   fuso de Brasília (antes: relógio UTC do servidor virava o dia às ~21h BRT)
+//   e separador U+0001 na chave de grupo do "Agrupar período" (join("") fazia
+//   tuplas distintas colidirem por prefixo).
 // v1.7 (20/07/2026): dia útil e metas nos gráficos — (a) businessDayAlign:
 //   pernas por mês via computeRows com o range recortado no N-ésimo dia útil
 //   (comparação ignorada com o align ativo); (b) base previous_period_bd (a
@@ -145,23 +149,25 @@ import {
 
 // Resolve tokens de período (@month_start, @year_start, ...) para datas ISO,
 // deixando os presets "do mês/ano" relativos ao momento da consulta.
+// "Agora" é o dia em BRASÍLIA (todayBrasiliaIso), nunca o relógio do servidor
+// (UTC na Vercel viraria o dia às ~21h BRT) — mesma regra do presetRange de
+// period.ts (v20/07/2026).
 function resolveToken(v: unknown): unknown {
   if (typeof v !== "string" || !v.startsWith("@")) return v;
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const [y, m1, d] = todayBrasiliaIso().split("-").map(Number);
+  const m = m1 - 1; // 0-indexado, como Date.UTC
+  const iso = (utcMs: number) => new Date(utcMs).toISOString().slice(0, 10);
   switch (v) {
     case "@today":
-      return iso(now);
+      return iso(Date.UTC(y, m, d));
     case "@month_start":
-      return iso(new Date(y, m, 1));
+      return iso(Date.UTC(y, m, 1));
     case "@month_end":
-      return iso(new Date(y, m + 1, 0));
+      return iso(Date.UTC(y, m + 1, 0));
     case "@year_start":
-      return iso(new Date(y, 0, 1));
+      return iso(Date.UTC(y, 0, 1));
     case "@year_end":
-      return iso(new Date(y, 11, 31));
+      return iso(Date.UTC(y, 11, 31));
     default:
       return v;
   }
@@ -1084,8 +1090,10 @@ async function runWidgetByPeriod(
   // Agrupa: "individual" = 1 grupo por registro; senão pela tupla das dimensões.
   // Chave de grupo: tupla das dimensões unida por U+0001 (separador que não
   // colide com valores reais) — compartilhada com a atribuição dos extras.
+  // v20/07/2026: o separador ESTAVA ausente (join("")) — "m1"+"0abc" colidia
+  // com "m10"+"abc" e somava grupos distintos como um só.
   const groupKeyOf = (dvs: DV[]): string =>
-    dvs.map((x) => x.key).join("");
+    dvs.map((x) => x.key).join("\u0001");
   const groups = new Map<
     string,
     { key: string; dv: DV[]; records: RecordRow[] }
