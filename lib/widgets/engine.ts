@@ -2301,8 +2301,27 @@ export async function runWidget(
         d.transform === "month_year"
     );
     if (!monthly) return null;
-    const fm = period.from.match(/^(\d{4})-(\d{2})/);
-    const tm = period.to.match(/^(\d{4})-(\d{2})/);
+    // Janela PRÓPRIA do card (windowMonths 2–13): ignora o `from` da barra e
+    // cobre os N meses de calendário que terminam no mês do `to` — o
+    // "histórico de N meses" do card, independente do filtro global.
+    const win = Math.min(
+      MAX_BD_ALIGN_MONTHS,
+      Math.max(0, Math.floor(cfg.windowMonths ?? 0))
+    );
+    let rangeFrom = period.from;
+    const rangeTo = period.to;
+    if (win >= 2) {
+      const wtm = rangeTo.match(/^(\d{4})-(\d{2})/);
+      if (wtm) {
+        const startIdx =
+          Number(wtm[1]) * 12 + (Number(wtm[2]) - 1) - (win - 1);
+        const wy = Math.floor(startIdx / 12);
+        const wm = (startIdx % 12) + 1;
+        rangeFrom = `${wy}-${String(wm).padStart(2, "0")}-01`;
+      }
+    }
+    const fm = rangeFrom.match(/^(\d{4})-(\d{2})/);
+    const tm = rangeTo.match(/^(\d{4})-(\d{2})/);
     if (!fm || !tm) return null;
     const [fy, fmo] = [Number(fm[1]), Number(fm[2])];
     const [ty, tmo] = [Number(tm[1]), Number(tm[2])];
@@ -2336,8 +2355,8 @@ export async function runWidget(
         n >= businessDaysInMonth(y, m, holidays)
           ? monthEnd
           : nthBusinessDayOfMonth(y, m, n, holidays);
-      const legFrom = monthStart > period.from ? monthStart : period.from;
-      const legTo = cut < period.to ? cut : period.to;
+      const legFrom = monthStart > rangeFrom ? monthStart : rangeFrom;
+      const legTo = cut < rangeTo ? cut : rangeTo;
       if (legFrom > legTo) continue;
       legs.push({
         field: period.field,

@@ -112,6 +112,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
   caminho agregado); nesse caso o usuário garante que os conjuntos são
   disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.
+- **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
+  `records.operation_id` é derivada (priority=1 do responsável no sync) e pode
+  estar NULL/defasada. Filtros de visualização por operação
+  (filtro_campo/filtro rápido) são TRADUZIDOS no server — page e widget-scope
+  — por `lib/config/operation-scope.ts` (vínculo vivo `responsible_id in` da
+  subárvore + FILTROS DE PERFIL `operations.filter`, 0083). Não reintroduza
+  `operation_id eq` literal nesses caminhos. Dimensões e restrições de
+  snapshot seguem na coluna derivada (runbook do backfill:
+  `supabase/apply/backfill-operation-id.sql`). Unificados: o coalesce ordena
+  refs `custom:` antes de colunas do núcleo (ver §4.8 da arquitetura).
 - **Dia útil/meta se resolvem no ENGINE, nunca no RPC (20/07/2026):** feriados
   (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)
   alimentam o alinhamento "mesmo dia útil" (`businessDayAlign` — pernas por mês

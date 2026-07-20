@@ -475,6 +475,12 @@ export interface BusinessDayAlignSettings {
   // Data de referência do N: "today" (default) = hoje em Brasília, limitado ao
   // fim do período; "period_end" = sempre o fim do período selecionado.
   reference?: "today" | "period_end";
+  // Janela PRÓPRIA do card (20/07/2026): com 2–13, o widget ignora o `from`
+  // da barra e cobre os N meses de calendário que terminam no mês do `to`
+  // (ex.: barra em "Este mês" + windowMonths 6 = jul + 5 anteriores, cada um
+  // recortado no mesmo dia útil). Ausente = range da barra (comportamento
+  // original). Equivalente ao seletor de histórico do card "Mês x Mês".
+  windowMonths?: number;
 }
 
 // --- Linha de meta nos gráficos (20/07/2026) ---

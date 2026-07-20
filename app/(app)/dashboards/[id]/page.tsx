@@ -103,6 +103,11 @@ import {
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import {
+  collectOperationFilterIds,
+  loadOperationScopes,
+  translateOperationFilters,
+} from "@/lib/config/operation-scope";
+import {
   RECORD_LIST_PAGE_SIZE,
   parseViewFilter,
   searchHandledOnClient,
@@ -646,6 +651,25 @@ export default async function DashboardPage({
       if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
         continue;
       addViewFilters(w.id, targeted);
+    }
+  }
+
+  // Filtro de OPERAÇÃO (20/07/2026): NUNCA compara a coluna derivada
+  // records.operation_id (pode estar NULL/defasada — zeraria o dashboard).
+  // Resolve para o VÍNCULO vivo (responsáveis da subárvore) + filtros de
+  // PERFIL da operação (operations.filter, 0083). Ver
+  // lib/config/operation-scope.ts; espelho em widget-scope.
+  {
+    const opIds = [
+      ...new Set(
+        Object.values(viewFiltersByWidget).flatMap(collectOperationFilterIds)
+      ),
+    ];
+    if (opIds.length > 0) {
+      const scopes = await loadOperationScopes(supabase, opIds);
+      for (const [id, fs] of Object.entries(viewFiltersByWidget)) {
+        viewFiltersByWidget[id] = translateOperationFilters(fs, scopes);
+      }
     }
   }
 
