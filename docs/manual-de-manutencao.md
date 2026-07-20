@@ -1,4 +1,6 @@
-<!-- Versão: 1.4 | Data: 20/07/2026 -->
+<!-- Versão: 1.5 | Data: 20/07/2026 -->
+<!-- v1.5 (20/07/2026): operações — filtro por vínculo+perfil, rename inline,
+     runbook do backfill de records.operation_id. -->
 <!-- v1.4 (20/07/2026): §4.7 — runbook do preset Inbound (pré-requisitos de
      dado: rótulos dos predicados, metas sql, feriados, operações, match
      rules, campos de licença do deal). -->
@@ -239,9 +241,14 @@ DADO antes de gerar (o preset cria estrutura, não dados):
    modo ritmo/pace por dia útil).
 3. **Feriados**: Configurações → Metas → Dias não úteis (alimenta o
    alinhamento "mesmo dia útil" e o pace).
-4. **Operações BR/INTL**: cadastre as operações e vincule os responsáveis
-   (o widget "Operação (todas as abas)" filtra o dashboard inteiro por
-   `operation_id`).
+4. **Operações BR/INTL**: cadastre as operações e vincule os responsáveis.
+   O widget "Operação (todas as abas)" filtra o dashboard inteiro pelo
+   VÍNCULO vivo (responsáveis da subárvore) + o PERFIL da operação
+   (Configurações → Operações → botão "Perfil": condições de
+   inclusão/exclusão com fonte-alvo opcional) — não pela coluna derivada
+   `records.operation_id`. Para dimensões "por Operação" e restrições de
+   snapshot, rode `supabase/apply/backfill-operation-id.sql` após
+   criar/alterar vínculos. Renomear operação: direto no nome, na tabela.
 5. **Match rules** (widget "Evolução por Criação do Lead"): crie em /campos →
    Matching as regras lead↔negócio e lead↔venda do site (par primário
    `custom:email` dos dois lados) e rode o auto-match. Sem elas o widget

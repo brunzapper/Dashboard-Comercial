@@ -383,7 +383,8 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
-      businessDayAlign: { enabled: true },
+      // Janela própria de 6 meses (histórico do card, independente da barra).
+      businessDayAlign: { enabled: true, windowMonths: 6 },
       goalLine: {
         enabled: true,
         metric: "sql",
@@ -588,7 +589,7 @@ const VENDAS: PresetWidget[] = [
 
 export const INBOUND_PRESET: PresetDashboard = {
   presetKey: "inbound",
-  version: 1,
+  version: 2, // v2 (20/07/2026): windowMonths 6 no Mês x Mês
   name: "Inbound",
   visible_to_roles: ["admin", "gestor"],
   settings: {

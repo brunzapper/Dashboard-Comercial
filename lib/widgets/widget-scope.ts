@@ -37,6 +37,11 @@ import {
   type QuickFilterValue,
 } from "@/lib/widgets/quick-filters";
 import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
+import {
+  collectOperationFilterIds,
+  loadOperationScopes,
+  translateOperationFilters,
+} from "@/lib/config/operation-scope";
 import type {
   DashboardSettings,
   Widget,
@@ -266,6 +271,18 @@ export async function loadWidgetScope(
     viewFilters.push(...targeted);
   }
 
+  // Filtro de OPERAÇÃO (20/07/2026): mesmo tratamento da page — nunca a
+  // coluna derivada records.operation_id; resolve vínculo + perfil
+  // (lib/config/operation-scope.ts).
+  const opIds = collectOperationFilterIds(viewFilters);
+  const resolvedViewFilters =
+    opIds.length > 0
+      ? translateOperationFilters(
+          viewFilters,
+          await loadOperationScopes(supabase, opIds)
+        )
+      : viewFilters;
+
   // ---- config final (mesma da page) ----
   const config = {
     source: "records" as const,
@@ -273,7 +290,7 @@ export async function loadWidgetScope(
     splitBySource: widget.split_by_source ?? false,
     dimensions: widget.dimensions ?? [],
     metrics: widget.metrics ?? [],
-    filters: [...(widget.filters ?? []), ...viewFilters],
+    filters: [...(widget.filters ?? []), ...resolvedViewFilters],
     visual_type: widget.visual_type,
     settings: widget.settings,
   } as unknown as WidgetConfig;

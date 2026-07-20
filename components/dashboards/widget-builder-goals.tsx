@@ -96,6 +96,32 @@ export function GoalsSection({
               </SelectContent>
             </Select>
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">Janela própria (meses, 2–13)</Label>
+            <Input
+              type="number"
+              min={2}
+              max={13}
+              className="h-8 w-20"
+              value={bdAlign.windowMonths ?? ""}
+              placeholder="—"
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                patchAlign({
+                  windowMonths:
+                    e.target.value === "" || !Number.isFinite(n)
+                      ? undefined
+                      : Math.min(13, Math.max(2, Math.floor(n))),
+                });
+              }}
+            />
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Com a janela definida, o card ignora o início do período da barra
+            e mostra os últimos N meses terminando no mês selecionado (ex.:
+            barra em &quot;Este mês&quot; + janela 6 = mês atual + 5
+            anteriores).
+          </p>
         </>
       ) : null}
 

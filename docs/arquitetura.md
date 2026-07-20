@@ -1,4 +1,11 @@
-<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- Versão: 1.9 | Data: 20/07/2026 -->
+<!-- v1.9 (20/07/2026): correções pós-preset — (a) coalesce dos unificados
+     ordena refs `custom:` (esparsos) antes das colunas do núcleo (densas;
+     §4.8 — coluna densa sombreava o membro custom de outro record_type);
+     (b) businessDayAlign.windowMonths = janela própria "últimos N meses" do
+     card (§4.9); (c) filtro de OPERAÇÃO da visualização resolve vínculo +
+     PERFIL no server (operations.filter, 0083; lib/config/operation-scope.ts)
+     — nunca a coluna derivada records.operation_id (§4.7). -->
 <!-- v1.8 (20/07/2026): operandos escopados estendidos (§4.7 — predicado de sub
      com in/is_null/*_ci; aux como perna da fonte do escopo: período pela data
      DELA + correspondências DELA; chave aggif com 4º elemento scope) + preset
@@ -287,6 +294,20 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do
   registry (`lib/metas/metrics.ts` + `sync_config` `goal_metrics`) — arbitrárias
   desde 20/07/2026 (ver §4.9).
+- **Operações como SEGMENTO (20/07/2026):** `records.operation_id` é uma cópia
+  DERIVADA (operação priority=1 do responsável no momento do sync; update só
+  preenche quando NULL) — pode estar NULL/defasada. Por isso o **filtro de
+  Operação da visualização** (filtro_campo/filtro rápido) NUNCA compara a
+  coluna literal: a page e o widget-scope resolvem no server
+  (`lib/config/operation-scope.ts`) para `responsible_id in (vínculo vivo da
+  subárvore — responsible_operations, qualquer priority)` + os **FILTROS DE
+  PERFIL** da operação (`operations.filter`, 0083 — WidgetFilter[] com
+  fonte-alvo opcional por condição, editados em Configurações → Operações;
+  listas de exclusão serializam como `neq_ci` por valor, null conta). Com 2+
+  operações selecionadas aplica-se só a união dos vínculos (perfis de
+  operações diferentes não se combinam em AND). Dimensões/agrupamentos "por
+  Operação" e restrições de snapshot seguem na coluna derivada — rode
+  `supabase/apply/backfill-operation-id.sql` após mexer nos vínculos.
 - **Presets de dashboard** (`lib/presets/definitions.ts` + `applyPreset`/
   `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
   `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,
@@ -555,6 +576,14 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   (mesmo no modo lista), `lib/correspondences.ts` (`correspondenceMapForSources`),
   UI em `components/configuracoes/sub-sources-manager.tsx` e o toggle no
   `widget-builder.tsx`.
+- **Ordem do coalesce dos unificados (20/07/2026):**
+  `correspondenceMapForSources` ordena os refs com os `custom:` (ESPARSOS —
+  só existem nas linhas do próprio record_type) ANTES das colunas do núcleo
+  (DENSAS — preenchidas em todo record_type). Sem isso, `source_created_at`
+  (membro do lead) sombreava `custom:data_assinatura` (membro do deal) na
+  MESMA perna e o deal bucketizava pelo mês de criação. Limitação restante:
+  dois membros de coluna de NÚCLEO distintos ainda se sombreiam (correção
+  definitiva = CASE por record_type no RPC, migração espelhada futura).
 - **Campo de período `custom:` (0082):** `sub_sources.default_period_field`
   aceita também um campo personalizado de DATA (`custom:<field_key>` — ex.: sub
   "SQLs" da pai Leads datada pela *Data Reunião*). O read side já suportava
@@ -587,7 +616,10 @@ invariantes 9/10).
   dimensão de data MENSAL e período ativo, cada mês vira uma perna
   `computeRows` com o range recortado no N-ésimo dia útil do mês (N = dia útil
   corrente da referência — hoje limitado ao fim do período, ou o fim do
-  período). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
+  período). `windowMonths` (2–13, 20/07/2026) dá ao card uma JANELA PRÓPRIA:
+  ignora o `from` da barra e cobre os N meses de calendário que terminam no
+  mês do `to` (o "histórico de 6 meses" do Mês x Mês, com a barra em "Este
+  mês"). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
   mês CHEIO (não perde registro datado em fim de semana). Como cada rodada só
   devolve linhas do próprio mês, o concat é o resultado — todas as métricas
   (normais/calculadas/moeda/pernas por fonte) funcionam sem código novo. Teto
