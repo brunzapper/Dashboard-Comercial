@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 09/07/2026
+// Versão: 2.1 | Data: 21/07/2026
+// v2.1 (21/07/2026): dia de Brasília (0085) — CORE_DATE_COLS (espelho do
+// v_date_cols dos RPCs) + anchorCoreDateBound; o caminho uniforme do
+// applyPeriodToFilters ancora bounds de coluna do núcleo com -03:00.
 // Filtro de período dos dashboards: presets relativos (resolvidos no momento da
 // consulta) + intervalo personalizado. Usado em dois lugares:
 //  - barra global (searchParams periodo/de/ate/campo);
@@ -175,6 +178,44 @@ export function resolvePeriodSelection(
 // campo.
 const RANGE_OPS = new Set(["eq", "gt", "gte", "lt", "lte"]);
 
+// Colunas de data do NÚCLEO (timestamptz no banco) — espelho do v_date_cols
+// dos RPCs (0085). Bounds de período/filtros nessas colunas precisam de offset
+// EXPLÍCITO: a sessão do banco é UTC e um literal naive deslocaria o limite do
+// dia em 3h. Campos custom (texto ISO) ficam FORA — comparam lexicográfico e
+// um offset no lower bound excluiria valores date-only.
+export const CORE_DATE_COLS = new Set([
+  "closed_at",
+  "opened_at",
+  "source_created_at",
+  "source_modified_at",
+  "created_at",
+  "updated_at",
+  "last_synced_at",
+]);
+
+const TZ_OFFSET_RE = /(Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * Ancora um bound de data no dia de BRASÍLIA para comparação com coluna
+ * timestamptz: date-only ganha o início/fim do dia com offset; datetime naive
+ * ganha o offset; valor já com offset/Z volta intacto (idempotente). Brasil
+ * não tem DST desde 2019 — offset fixo -03:00, mesma convenção de
+ * lib/date/normalize.ts e do backfill 0080.
+ */
+export function anchorCoreDateBound(
+  value: string,
+  kind: "from" | "to"
+): string {
+  if (!value) return value;
+  if (DATE_RE.test(value)) {
+    return kind === "from"
+      ? `${value}T00:00:00-03:00`
+      : `${value}T23:59:59-03:00`;
+  }
+  if (TZ_OFFSET_RE.test(value)) return value;
+  return `${value}-03:00`;
+}
+
 // Campo sintético do filtro de período por fonte: o valor carrega os limites e o
 // mapa record_type → coluna de data. Resolvido pelo RPC (run_widget_query, ramo
 // '@period'/'between') e pelo modo lista (record-list.ts, via PostgREST .or()).
@@ -328,8 +369,21 @@ export function applyPeriodToFilters(
     const next = filters.filter(
       (f) => !(f.field === field && RANGE_OPS.has(f.op))
     );
-    if (period.from) next.push({ field, op: "gte", value: period.from });
-    if (to) next.push({ field, op: "lte", value: to });
+    // Coluna do núcleo (timestamptz): bounds ancorados no dia de Brasília;
+    // custom/unified: bounds naive (comparação textual, semântica intacta).
+    const core = CORE_DATE_COLS.has(field);
+    if (period.from)
+      next.push({
+        field,
+        op: "gte",
+        value: core ? anchorCoreDateBound(period.from, "from") : period.from,
+      });
+    if (to)
+      next.push({
+        field,
+        op: "lte",
+        value: core ? anchorCoreDateBound(to, "to") : to,
+      });
     return next;
   }
 

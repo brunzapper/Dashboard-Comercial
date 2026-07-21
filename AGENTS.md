@@ -13,8 +13,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > Ao alterar schema ou invariantes, atualize esses docs na mesma entrega.
 
 - **RPC de widgets duplicado (Snapshots):** `run_widget_query_snapshot`
-  (versão vigente na 0072; introduzido na 0056) é uma cópia de
-  `run_widget_query` (vigente na 0072; base 0054) apontada para
+  (versão vigente na 0085; introduzido na 0056) é uma cópia de
+  `run_widget_query` (vigente na 0085; base 0054) apontada para
   `snapshot_records`, acrescida das
   restrições do snapshot aplicadas internamente (mock-aware). Toda mudança em
   `run_widget_query` (nova migração que o recrie) DEVE ser espelhada em
@@ -83,8 +83,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   literal) e depende disso. Campo Bitrix tipo `date` é calendário puro — NUNCA
   converter (recuaria um dia); date-only é sempre passthrough. O formato
   emitido (`YYYY-MM-DDTHH:mm:ss-03:00`) deve seguir byte-idêntico ao do
-  backfill 0080, senão o reconcile churna. Nada disso toca as RPCs (não aciona
-  a invariante de espelhamento). Ver `docs/arquitetura.md` §4.5 e invariante 11.
+  backfill 0080, senão o reconcile churna. **Dia de Brasília no read side
+  (0085):** colunas `timestamptz` do NÚCLEO comparam com bounds de offset
+  explícito `-03:00` (`anchorCoreDateBound` em `lib/widgets/period.ts` +
+  ancoragem por coluna no ramo `@period` das RPCs) e bucketizam via
+  `_widget_local_ts` (timestamptz → wall time America/Sao_Paulo; text →
+  prefixo de 10 chars, byte-igual ao `parseYmd`). NUNCA ancore bounds de campo
+  custom (texto — o offset no lower bound excluiria date-only) e NUNCA aplique
+  `at time zone` a valor texto (naive de CSV recuaria um dia). Ver
+  `docs/arquitetura.md` §4.1/§4.5 e invariante 11.
 - **Sub-fontes (0078) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
   (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
   `filter` (WidgetFilter[]), com campo de data próprio. Compartilha o
@@ -136,7 +143,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   compartilhada vive na célula `__pw__` de `dashboard_table_cells` e page/
   `widget-scope` a mesclam nos settings EFETIVOS via
   `applyPeriodWindowChoice` ANTES do engine (que só lê `active ?? default`;
-  `businessDayAlign.windowMonths` é alias legado). NÃO recrie as RPCs para
+  `businessDayAlign.windowMonths` é alias legado). O N de corte do align sai
+  no resultado como `WidgetData.businessDayRef` (badge "Nº dia útil" —
+  `BusinessDayBadge`, rótulo único em `businessDayOrdinalLabel`; compartilhado
+  entre os meses, mesmo N da goalLine "pace") — exiba-o a partir do RESULTADO,
+  não recompute na UI. NÃO recrie as RPCs para
   nada disso; snapshots leem metas/feriados AO VIVO pelo adapter
   (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca

@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): businessDayOrdinalLabel — rótulo único do badge
+// "Nº dia útil".
 // Utilitários PUROS de dia útil: dia útil = segunda a sexta que NÃO está no
 // conjunto de dias não úteis (tabela non_working_days, carregada por
 // lib/config/non-working-days.ts). Todas as funções trabalham sobre strings
@@ -72,6 +74,14 @@ export function businessDayIndexInMonth(
     if (isBusinessDay(toIso(p.y, p.m, d), holidays)) count++;
   }
   return count;
+}
+
+/**
+ * Rótulo ordinal do dia útil ("14º dia útil") — ponto ÚNICO do texto, usado
+ * pelo badge do card (BusinessDayBadge) e por qualquer superfície futura.
+ */
+export function businessDayOrdinalLabel(n: number): string {
+  return `${n}º dia útil`;
 }
 
 /**

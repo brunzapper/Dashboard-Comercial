@@ -1,4 +1,16 @@
-<!-- Versão: 1.12 | Data: 20/07/2026 -->
+<!-- Versão: 1.13 | Data: 21/07/2026 -->
+<!-- v1.13 (21/07/2026): dia de BRASÍLIA no read side dos widgets (0085, §4.1/
+     §4.2/§4.5; invariantes 7/11) — colunas timestamptz do núcleo comparavam/
+     bucketizavam na sessão UTC do banco (limites de dia deslocados 3h; registro
+     21h+ BRT caía no dia/mês seguinte). RPCs recriados (par espelhado):
+     bounds do @period ancorados com -03:00 SÓ p/ colunas do núcleo, bucketing
+     via _widget_local_ts (núcleo = wall time BRT; custom = prefixo de 10
+     chars, casando com o parseYmd do client), coalesce de unificados idem;
+     client ancora bounds core em period.ts/engine.ts/record-list.ts. Campos
+     custom (texto) seguem byte-idênticos. Badge "Nº dia útil" (§4.9):
+     WidgetData.businessDayRef expõe o N de corte do businessDayAlign
+     (compartilhado entre os meses) e o card exibe ao lado do toggle
+     (BusinessDayBadge; funciona também no viewer de snapshot). -->
 <!-- v1.12 (20/07/2026): sync inicial do "Filtro por campo" é RASO (§4.7) —
      seed lastFieldFilters sem parâmetro na URL espelha a URL com
      history.replaceState, sem navegação RSC (o servidor já aplicou o seed);
@@ -164,8 +176,22 @@ O subsistema mais crítico. A config do widget (JSONB: `p_source`, `p_dimensions
 - agregações (sum/avg/count/count não-vazio/min/max) e conversão de moeda.
 
 O lado TypeScript é `lib/widgets/engine.ts` (chama o RPC, resolve rótulos de FK,
-pós-processa). A função foi **recriada 17 vezes** ao longo das migrações — a versão
-vigente é a da migração `0072_widget_rpc_min_max.sql`.
+pós-processa). A função foi **recriada 18 vezes** ao longo das migrações — a versão
+vigente é a da migração `0085_widget_rpc_brasilia_day.sql`.
+
+**Dia de Brasília no read side (0085):** a sessão do banco é UTC, então colunas
+`timestamptz` do núcleo (`source_created_at`…) comparadas a literais naive
+deslocavam o limite do dia em 3h, e o `date_trunc` bucketizava registros de
+21h+ BRT no dia/mês seguinte — divergindo do cliente (prefix-based). Desde a
+0085: bounds do `@period` em coluna do núcleo ganham offset explícito
+(`-03:00`) DENTRO do RPC (e no client — ver §4.2); todo transform de data passa
+por `_widget_local_ts` (overload timestamptz → wall time de
+America/Sao_Paulo; overload text → prefixo de 10 chars, byte-igual ao
+`parseYmd`); e o coalesce textual dos unificados serializa coluna de data do
+núcleo via o mesmo helper. Comparações de campos **custom seguem textuais e
+byte-idênticas** (valores já normalizados p/ `-03:00` na entrada — invariante
+11). `transform: none` em coluna crua do núcleo/match ainda serializa em UTC
+(agrupamento por instante é bijetivo; só o rótulo cru — follow-up conhecido).
 
 **Fontes por métrica (`Metric.sources`, 18/07/2026):** o universo de LINHAS/
 dimensões/registros de um widget é sempre `widgets.sources`; cada métrica pode
@@ -209,6 +235,17 @@ confia em config vinda do client.
 Fontes dinâmicas (`data_sources`, criáveis via UI sem migração) precisam estar
 cobertas no mapa `fieldBySource` do resolver — o `@period` do RPC **exclui**
 `record_types` fora do mapa.
+
+**Bounds ancorados no dia de Brasília (0085):** quando o campo de período é
+coluna do núcleo (`CORE_DATE_COLS`, espelho do `v_date_cols` do RPC), os bounds
+saem com offset explícito (`anchorCoreDateBound`: from → `T00:00:00-03:00`,
+to → `T23:59:59-03:00`; idempotente) em TRÊS pontos: caminho uniforme do
+`applyPeriodToFilters` (period.ts), filtros salvos gt/gte/lt/lte em
+`resolveFilters` (engine.ts — choke point do RPC E do modo lista) e o ramo
+`@period` do PostgREST (record-list.ts). Campos custom ficam NAIVE de
+propósito: a comparação é textual e um offset no lower bound excluiria valores
+date-only. O sentinel `@period` (caminho misto) viaja naive — RPC e record-list
+ancoram POR COLUNA ao expandir o byType.
 
 ### 4.3 Snapshots públicos (`app/s/[token]`)
 
@@ -285,7 +322,10 @@ exceção: sempre recomputados).
   Date-only e fontes sem `timezone` passam inalterados. Backfill dos valores
   antigos: 0080 (chaves datetime explícitas; o resto normaliza no próximo
   Backfill do sync). CSV/API não carregam offset (`coerceDate` emite naive) —
-  não são afetados.
+  não são afetados. Desde a 0085, as colunas `timestamptz` do NÚCLEO também
+  leem no dia de Brasília (bounds ancorados + `_widget_local_ts`, §4.1) — os
+  dois regimes (texto custom e instante do núcleo) finalmente concordam no
+  mesmo dia.
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
   faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET`.
 - **API/webhooks de entrada**: `/api/ingest/<fonte>` com chaves de API
@@ -673,7 +713,15 @@ invariantes 9/10).
   "Agrupar período" (`dateAgg`) não passam pelo align; pernas de sub-fonte
   "conviver" recursam `runWidget` e o align roda DENTRO de cada perna. Com o
   align ativo, `settings.comparison` é IGNORADA (exclusão mútua — o gráfico já
-  é a comparação).
+  é a comparação). **Badge "Nº dia útil" (21/07/2026):** com o align ativo e
+  N ≥ 1, o engine expõe `WidgetData.businessDayRef` (`{ n, reference, date }` —
+  o MESMO N de corte das pernas e da goalLine "pace", único e compartilhado
+  entre os meses comparados) e o card exibe o badge (`BusinessDayBadge`,
+  rótulo por `businessDayOrdinalLabel` em `lib/date/business-days.ts`) ao lado
+  do toggle do `PeriodWindowControl` — ou sozinho no mesmo slot quando não há
+  dropdown (align direto nos settings, viewer de snapshot). Metadado 100%
+  engine (RPCs intocados); no snapshot funciona porque o viewer roda o mesmo
+  `runWidget` (feriados AO VIVO via `PASSTHROUGH_TABLES`).
 - **Janela de períodos equivalentes** (`WidgetSettings.periodWindow`,
   20/07/2026): "traz o equivalente ao período apurado nos meses anteriores"
   como FILTRO RÁPIDO do card. `options` (subconjunto ordenado de `3m |
@@ -752,7 +800,10 @@ principalmente — para mantenedores humanos.
    coluna, as telas quebram. Confira o aviso no cabeçalho de cada migração.
 7. **Bucket canônico.** A chave de bucket de data gerada no SQL deve bater com
    `canonicalBucketKey` no cliente (`lib/widgets/`) — divergência quebra rótulos e
-   filtros rápidos.
+   filtros rápidos. Desde a 0085 a ATRIBUIÇÃO de dia é a de Brasília nos dois
+   lados (`_widget_local_ts` no SQL ↔ prefixo `parseYmd` no cliente); os
+   FORMATOS de chave seguem os mesmos — mudar um formato ou a âncora de fuso de
+   um lado só quebra a paridade em silêncio.
 8. **Autorização pelo vínculo vivo.** Use `records.responsible_id →
    responsibles.user_id` para visibilidade; `owner_user_id` é legado (0037).
 9. **Fonte por métrica se resolve no ENGINE, nunca no RPC.** `Metric.sources`
@@ -797,8 +848,15 @@ principalmente — para mantenedores humanos.
     tipo `date` é calendário puro — **nunca converter** (recuaria um dia);
     date-only é sempre passthrough. O formato emitido
     (`YYYY-MM-DDTHH:mm:ss-03:00`) deve seguir byte-idêntico ao do backfill 0080,
-    senão o reconcile reescreve tudo (churn de audit). Nada disso toca as RPCs
-    (não aciona a invariante 1).
+    senão o reconcile reescreve tudo (churn de audit). Desde a 0085 o read side
+    dos RPCs também é dia de Brasília para as colunas `timestamptz` do NÚCLEO:
+    bounds de período/filtro em coluna do núcleo levam offset explícito
+    `-03:00` (`anchorCoreDateBound` no client + ancoragem por coluna no ramo
+    `@period` do RPC) e o bucketing passa por `_widget_local_ts` (núcleo =
+    `at time zone 'America/Sao_Paulo'`; texto = prefixo de 10 chars). NUNCA
+    ancore bounds de campo custom (texto): a comparação é lexicográfica e o
+    offset no lower bound excluiria valores date-only. NUNCA aplique
+    `at time zone` a valor texto: um naive (CSV) recuaria um dia.
 
 ## 6. Convenções do projeto
 
