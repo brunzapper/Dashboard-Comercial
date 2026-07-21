@@ -1,21 +1,23 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 2.0 | Data: 21/07/2026
+// v2.0 (21/07/2026): escopo via loadWidgetScope (assembly ÚNICA do
+//   widget-scope) — a action passa a aplicar o MESMO recorte da page: filtros
+//   rápidos do card (__qf__), ?ff_ com fallback lastFieldFilters e tradução de
+//   OPERAÇÃO (operation-scope). Antes só período + ?ff_ da URL, e o
+//   multi-select de operação era ignorado (dado obsoleto/incompleto até F5).
 // v1.1 (20/07/2026): catálogo agregado via builder ÚNICO (lib/widgets/
 //   agg-catalog.availableAggCatalogInput) — montagem idêntica, sem cópia local.
 // Tabela Livre — computação DEFERIDA (server action chamada pelo widget após
 // o mount, para a página abrir sem esse custo): dados BI (dimensões/métricas
 // via runWidget) + expressões {=…} das células (runCalculatedWidget), com o
 // MESMO período efetivo que a page resolveria (lib/widgets/period-resolve.ts,
-// implementação única) e os filtros de visão dos widgets "Filtro por campo"
-// (?ff_<id>) que atingem este widget. RLS cobre o acesso (select de widgets/
-// células exige visualizador do dashboard).
+// implementação única) e os filtros de visualização da page. RLS cobre o
+// acesso (select de widgets/células exige visualizador do dashboard).
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import type { FieldDefinition } from "@/lib/records/types";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import type { OperandRef } from "@/lib/records/date-operands";
-import { buildAvailableFields } from "@/lib/widgets/fields";
 import {
   availableAggCatalogInput,
   buildAggOperandCatalog,
@@ -23,28 +25,18 @@ import {
 import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
 import { runWidget } from "@/lib/widgets/engine";
 import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
-import { loadCorrespondences } from "@/lib/correspondences";
-import {
-  createPeriodResolver,
-  type PeriodPrefs,
-} from "@/lib/widgets/period-resolve";
 import {
   cellKey,
   classifyCellRaw,
   exprSource,
   quickTableBI,
 } from "@/lib/widgets/quick-table/model";
-import { parseViewFilter, viewStateToFilters } from "@/lib/widgets/view-filters";
-import { isKnownSource } from "@/lib/sources";
-import { loadSources } from "@/lib/config/sources";
+import { loadWidgetScope } from "@/lib/widgets/widget-scope";
 import type {
   CalcWidgetResult,
-  DashboardSettings,
   Dimension,
-  Widget,
   WidgetConfig,
   WidgetData,
-  WidgetFilter,
 } from "@/lib/widgets/types";
 
 // Teto de expressões {=…} por tabela (cada SOMASE pode gerar consulta extra).
@@ -56,10 +48,6 @@ export interface QuickTableResult {
   // Resultado de cada expressão {=…} por chave de célula ("rowKey:colKey").
   exprValues: Record<string, CalcWidgetResult>;
   error?: string;
-}
-
-function str(v: string | string[] | undefined): string {
-  return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
 export async function runQuickTable(
@@ -74,124 +62,25 @@ export async function runQuickTable(
   if (!session) return { ...empty, error: "Sessão expirada." };
   const supabase = await createClient();
 
-  // Query string → mesmo shape do searchParams da page.
-  const sp: Record<string, string | string[] | undefined> = {};
-  for (const [k, v] of new URLSearchParams(search ?? "")) {
-    const cur = sp[k];
-    sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
-  }
-
-  const [
-    { data: dash },
-    { data: widgetsData },
-    { data: fieldsData },
-    correspondences,
-    { data: prefData },
-    currencyRates,
-  ] = await Promise.all([
-    supabase
-      .from("dashboards")
-      .select("id, settings")
-      .eq("id", dashboardId)
-      .maybeSingle(),
-    supabase
-      .from("widgets")
-      .select(
-        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
-      )
-      .eq("dashboard_id", dashboardId),
-    supabase
-      .from("field_definitions")
-      .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
-      )
-      .eq("show_in_builder", true)
-      .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
-    supabase
-      .from("user_preferences")
-      .select("settings")
-      .eq("user_id", session.user.id)
-      .eq("dashboard_id", dashboardId)
-      .maybeSingle(),
+  // Escopo efetivo (widget + período + filtros de visualização) — a MESMA
+  // assembly da page/paginação/export (lib/widgets/widget-scope.ts).
+  const [scoped, currencyRates] = await Promise.all([
+    loadWidgetScope(supabase, session, dashboardId, widgetId, search),
     loadCurrencyRates(supabase),
   ]);
-  if (!dash) return { ...empty, error: "Dashboard não encontrado." };
-
-  const widgets = (widgetsData ?? []) as Widget[];
-  const widget = widgets.find((w) => w.id === widgetId);
-  if (!widget || widget.visual_type !== "tabela_editavel") {
+  if (!scoped.ok) return { ...empty, error: scoped.message };
+  const { widget, config, period, available, allFields, sources, correspondences } =
+    scoped.scope;
+  if (widget.visual_type !== "tabela_editavel") {
     return { ...empty, error: "Widget não encontrado." };
   }
   const qt = widget.settings?.quickTable;
   if (!qt) return empty;
 
-  const sources = await loadSources(supabase);
-  const allFields = (fieldsData ?? []) as FieldDefinition[];
-  const available = buildAvailableFields(allFields, correspondences, sources);
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
-  const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
-
-  // Período efetivo deste widget (barra global + widgets de filtro) — mesma
-  // implementação da page.
-  const resolver = createPeriodResolver({
-    sp,
-    available,
-    correspondences,
-    dashSettings,
-    prefSettings,
-    sources,
-  });
-  const dataWidgets = widgets.filter(
-    (w) =>
-      w.visual_type !== "filtro" &&
-      w.visual_type !== "filtro_campo" &&
-      w.visual_type !== "forma" &&
-      w.visual_type !== "imagem"
-  );
-  const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
-  const { periodByWidget } = resolver.computeWidgetPeriods(
-    dataWidgets,
-    filterWidgets
-  );
-  const period = periodByWidget[widgetId] ?? null;
   const conversionPeriod = yearQuarterOf(period?.to ?? period?.from ?? null);
-
-  // Filtros de visão dos widgets "Filtro por campo" (?ff_<id>) que atingem
-  // este widget — mesma regra de alvo/fonte da page.
-  const sourcesOverlap = (a: string[], b: string[]) => {
-    if (a.length === 0 || b.length === 0) return true;
-    return a.some((s) => b.includes(s));
-  };
-  const viewFilters: WidgetFilter[] = [];
-  for (const fw of widgets.filter((w) => w.visual_type === "filtro_campo")) {
-    const raw = str(sp[`ff_${fw.id}`]);
-    if (!raw) continue;
-    if ((fw.settings?.excludedTargets ?? []).includes(widgetId)) continue;
-    const fs = viewStateToFilters(
-      parseViewFilter(raw),
-      fw.settings?.searchFields
-    );
-    if (fs.length === 0) continue;
-    const fwSources = (fw.sources ?? []) as string[];
-    const isUnifiedFilter = (f: WidgetFilter) =>
-      f.field.split("|").some((p) => p.startsWith("unified:"));
-    const unified = fs.some(isUnifiedFilter);
-    if (
-      !unified &&
-      !sourcesOverlap(fwSources, (widget.sources ?? []) as string[])
-    )
-      continue;
-    const fwSourceKeys = fwSources.filter((s) => isKnownSource(s, sources));
-    viewFilters.push(
-      ...(fwSourceKeys.length > 0
-        ? fs.map((f) =>
-            isUnifiedFilter(f) ? f : { ...f, sources: fwSourceKeys }
-          )
-        : fs)
-    );
-  }
-  const filters = [...(widget.filters ?? []), ...viewFilters];
+  // widget.filters + filtros de visualização resolvidos (inclui __qf__/ff_/
+  // operação traduzida) — mesmos das demais consultas do widget.
+  const filters = config.filters ?? [];
 
   // ---- dados BI (dimensões/métricas nas colunas) ----
   const bi = quickTableBI(qt);
@@ -203,7 +92,7 @@ export async function runQuickTable(
         ? { transform: c.transform, weekMode: c.weekMode }
         : {}),
     });
-    const config: WidgetConfig = {
+    const biConfig: WidgetConfig = {
       source: "records",
       sources: widget.sources ?? [],
       splitBySource: false,
@@ -215,12 +104,12 @@ export async function runQuickTable(
       metrics: bi.metricCols.map((c) => c.metric!),
       filters,
       visual_type: "tabela",
-      settings: widget.settings,
+      settings: config.settings,
     };
     try {
       data = await runWidget(
         supabase,
-        config,
+        biConfig,
         available,
         period,
         allFields,

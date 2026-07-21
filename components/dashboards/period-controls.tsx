@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): intervalo personalizado em RASCUNHO (PeriodRangeDraft) —
+// escolher "Personalizado" NÃO navega mais (os widgets seguem no período
+// anterior) e digitar as datas não dispara consulta: o commit (navegação +
+// persist, 1× por commit) acontece com o intervalo completo ou pelo botão
+// "Aplicar" (intervalo aberto deliberado). Antes, cada tecla navegava e
+// persistia — os widgets recomputavam com período parcial (só "De").
 // Controle de período reutilizável (client): seletor preset/personalizado +
 // inputs de data, opcionalmente com seletor de campo de data. Reflete/atualiza
 // a URL sob os nomes de parâmetro informados em `keys` — o server recomputa os
@@ -9,8 +15,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
 import { useNavPending } from "./pending-context";
+import { PeriodRangeDraft } from "./period-range-inputs";
 import { useSourceLabels } from "@/components/source-labels-context";
 import type { AvailableField } from "@/lib/widgets/fields";
 import { sourceChips, toFieldOptions } from "@/lib/widgets/filter-ops";
@@ -114,8 +120,9 @@ export function PeriodControls({
 
   function onModeChange(value: string) {
     if (value === CUSTOM) {
+      // Só abre os inputs de rascunho — NADA navega/persiste até o commit do
+      // intervalo (os widgets seguem exibindo o período anterior).
       setCustomOpen(true);
-      navigate({ [keys.preset]: "", [keys.de]: "", [keys.ate]: "" });
       return;
     }
     setCustomOpen(false);
@@ -143,23 +150,15 @@ export function PeriodControls({
       />
 
       {mode === CUSTOM ? (
-        <>
-          <Input
-            type="date"
-            value={sel.de ?? ""}
-            onChange={(e) => navigate({ [keys.de]: e.target.value })}
-            className="w-auto"
-            aria-label="De"
-          />
-          <span className="text-muted-foreground text-sm">até</span>
-          <Input
-            type="date"
-            value={sel.ate ?? ""}
-            onChange={(e) => navigate({ [keys.ate]: e.target.value })}
-            className="w-auto"
-            aria-label="Até"
-          />
-        </>
+        // Rascunho: digitar não navega; o commit navega UMA vez (intervalo
+        // completo auto, ou aberto via "Aplicar") e zera o preset.
+        <PeriodRangeDraft
+          de={sel.de ?? ""}
+          ate={sel.ate ?? ""}
+          onCommit={({ de, ate }) =>
+            navigate({ [keys.preset]: "", [keys.de]: de, [keys.ate]: ate })
+          }
+        />
       ) : null}
 
       {fieldControl ? (

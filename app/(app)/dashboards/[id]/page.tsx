@@ -1,6 +1,10 @@
-// Versão: 2.7 | Data: 19/07/2026
+// Versão: 2.8 | Data: 21/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.8 (21/07/2026): deferredScopeById — fingerprint (período + filtros de
+//   visualização + __pw__) por widget DEFERIDO (Tabela Livre/kanban): o effect
+//   do cliente re-busca quando o escopo efetivo muda, cobrindo também os
+//   filtros persistidos no banco (__qf__), que não passam pela URL.
 // v2.7 (19/07/2026): performance do load — (a) widget tasks rodam sob limitador
 //   de concorrência (WIDGET_TASK_CONCURRENCY; antes todos disparavam juntos e o
 //   pico saturava o Postgres em dashboards grandes — statement timeouts em
@@ -757,6 +761,21 @@ export default async function DashboardPage({
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
   const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
 
+  // Fingerprint de ESCOPO dos widgets deferidos (Tabela Livre/kanban): o
+  // effect do cliente re-busca quando período/filtros EFETIVOS mudam —
+  // inclusive os persistidos no banco (__qf__/__pw__), que não passam pela
+  // URL (a action revalida, o RSC re-renderiza e a prop nova re-dispara o
+  // effect). Agenda fica FORA (ignora os filtros do dashboard por design).
+  const deferredScopeById: Record<string, string> = {};
+  for (const w of dataWidgets) {
+    if (!isQuickTableWidget(w) && !isKanbanWidget(w)) continue;
+    deferredScopeById[w.id] = JSON.stringify({
+      p: periodByWidget[w.id] ?? null,
+      f: viewFiltersByWidget[w.id] ?? [],
+      pw: pwChoiceById.get(w.id) ?? null,
+    });
+  }
+
   // Buscas que NÃO dependem do resultado dos widgets: disparadas AGORA para
   // correrem em paralelo com a computação (antes eram ondas seriais depois
   // dela). Cada uma é aguardada no ponto onde o resultado é consumido.
@@ -1263,6 +1282,7 @@ export default async function DashboardPage({
         fieldFilterSeedById={fieldFilterSeedById}
         quickFiltersById={quickFiltersById}
         periodWindowById={periodWindowById}
+        deferredScopeById={deferredScopeById}
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
       />

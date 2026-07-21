@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): modo registros aplica os filtros de VISUALIZAÇÃO do
+//   dashboard via resolveWidgetViewScope (assembly única do widget-scope):
+//   filtros rápidos do card (__qf__), ?ff_ com fallback lastFieldFilters e
+//   tradução de OPERAÇÃO. O quadro passa a respeitar o mesmo recorte dos
+//   demais widgets (colunas continuam derivadas das opções do campo — filtro
+//   só reduz cards). Modo tarefas segue fora (tasks não são registros).
 // Widget KANBAN — computação DEFERIDA (server action chamada pelo widget após
 // o mount, padrão da Tabela Livre/runQuickTable): resolve o período efetivo do
 // widget com o MESMO resolver da page (lib/widgets/period-resolve.ts) e monta
@@ -20,6 +26,7 @@ import {
   type PeriodPrefs,
 } from "@/lib/widgets/period-resolve";
 import type { DashboardSettings, Widget } from "@/lib/widgets/types";
+import { resolveWidgetViewScope } from "@/lib/widgets/widget-scope";
 import { runKanban, type KanbanBoardData } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
@@ -235,20 +242,35 @@ export async function runKanbanWidget(
     dataWidgets,
     filterWidgets
   );
-  const period = periodByWidget[widgetId] ?? null;
+
+  // Filtros de visualização do dashboard (__qf__/?ff_/operação) + período
+  // possivelmente anulado pelo filtro rápido do card — assembly ÚNICA
+  // (lib/widgets/widget-scope.ts), espelho da page.
+  const view = await resolveWidgetViewScope(supabase, session, {
+    widget,
+    widgets,
+    available,
+    allFields,
+    sources,
+    prefSettings,
+    sp,
+    resolver,
+    period: periodByWidget[widgetId] ?? null,
+  });
 
   try {
     const data = await runKanban(
       supabase,
       kanban,
-      period,
+      view.period,
       fields,
       {
         responsibles: responsibleLabels,
         operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
       },
       // Colunas "Personalizar": posicionamentos escopados a ESTE widget.
-      { kind: "widget", id: widgetId }
+      { kind: "widget", id: widgetId },
+      { filters: view.filters, available, catalog: sources }
     );
     const sourceDef = sources.find((s) => s.key === kanban.source);
     const canEditValues = session.permissions.includes("edit_record_values");

@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 18/07/2026
+// Versão: 1.2 | Data: 21/07/2026
+// v1.2 (21/07/2026): montagem dos filtros de visualização extraída para
+//   resolveWidgetViewScope (export) — as actions DEFERIDAS (runQuickTable/
+//   runKanbanWidget) passam a montar o MESMO escopo da page (filtros rápidos
+//   __qf__, ?tf_, ?ff_ com fallback lastFieldFilters, tradução de operação e
+//   __pw__), em vez de cópias parciais que divergiam. O escopo devolve também
+//   `correspondences` (evita recarga nos consumidores).
 // v1.1 (18/07/2026): fontes por métrica — @period dos filtros rápidos cobre
 //   também as fontes das métricas (widgetQuerySources), espelho da page.
 // Reconstrói, no servidor, o ESCOPO efetivo de um widget de dashboard a partir
@@ -18,7 +24,11 @@ import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
 import { widgetQuerySources } from "@/lib/widgets/metric-sources";
-import { loadCorrespondences } from "@/lib/correspondences";
+import { quickTableBI } from "@/lib/widgets/quick-table/model";
+import {
+  loadCorrespondences,
+  type Correspondence,
+} from "@/lib/correspondences";
 import {
   createPeriodResolver,
   type PeriodPrefs,
@@ -51,6 +61,7 @@ import type {
   Widget,
   WidgetConfig,
   WidgetFilter,
+  WidgetSettings,
 } from "@/lib/widgets/types";
 
 const FIELD_DEF_COLS =
@@ -63,100 +74,97 @@ export interface WidgetScope {
   available: AvailableField[];
   allFields: FieldDefinition[];
   sources: SourceDef[];
+  correspondences: Correspondence[];
 }
 
 export type WidgetScopeResult =
   | { ok: true; scope: WidgetScope }
   | { ok: false; message: string };
 
-export async function loadWidgetScope(
+// ============================================================================
+// Filtros de visualização de UM widget (assembly ÚNICA, espelho da page):
+// filtros rápidos do card (__qf__, com exceção do vendedor e interação do
+// filtro de período com o período geral), barra embutida da tabela (?tf_),
+// widgets "Filtro por campo" (?ff_ com fallback lastFieldFilters), tradução
+// de OPERAÇÃO (operation-scope) e janela de períodos (__pw__ → settings
+// efetivos). Usada por loadWidgetScope e pelas actions deferidas (kanban) —
+// NUNCA remonte esses filtros à mão em uma action nova.
+// ============================================================================
+
+export interface WidgetViewScopeArgs {
+  widget: Widget;
+  // Todos os widgets do dashboard (p/ localizar os "Filtro por campo").
+  widgets: Widget[];
+  available: AvailableField[];
+  allFields: FieldDefinition[];
+  sources: SourceDef[];
+  prefSettings: PeriodPrefs;
+  // searchParams já no shape da page (valores string | string[]).
+  sp: Record<string, string | string[] | undefined>;
+  // Resolver de período da MESMA renderização (resolveFieldBySource p/ o mapa
+  // por fonte dos campos unificados).
+  resolver: Pick<
+    ReturnType<typeof createPeriodResolver>,
+    "resolveFieldBySource"
+  >;
+  // Período efetivo do widget JÁ resolvido (periodByWidget) — pode ser anulado
+  // aqui quando um filtro rápido de período assume o mesmo campo.
+  period: DashboardPeriod | null;
+}
+
+export interface WidgetViewScope {
+  // Filtros de visualização resolvidos (SEM widget.filters — o chamador
+  // decide mesclá-los; a page/loadWidgetScope sempre mesclam).
+  filters: WidgetFilter[];
+  period: DashboardPeriod | null;
+  // settings com a escolha __pw__ aplicada (applyPeriodWindowChoice).
+  effSettings: WidgetSettings | undefined;
+}
+
+export async function resolveWidgetViewScope(
   supabase: SupabaseClient,
   session: SessionInfo,
-  dashboardId: string,
-  widgetId: string,
-  // window.location.search do cliente — período/aba/filtros são parâmetros de
-  // URL, e o escopo os resolve exatamente como a page (resolver único).
-  search: string
-): Promise<WidgetScopeResult> {
-  const sp: Record<string, string | string[] | undefined> = {};
-  for (const [k, v] of new URLSearchParams(search ?? "")) {
-    const cur = sp[k];
-    sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
-  }
+  args: WidgetViewScopeArgs
+): Promise<WidgetViewScope> {
+  const { widget, widgets, available, allFields, sources, prefSettings, sp } =
+    args;
+  let period = args.period;
+
   const str = (v: string | string[] | undefined): string =>
     Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 
-  const [
-    { data: dash },
-    { data: widgetsData },
-    { data: fieldsData },
-    correspondences,
-    { data: prefData },
-    sources,
-  ] = await Promise.all([
-    supabase
-      .from("dashboards")
-      .select("id, settings")
-      .eq("id", dashboardId)
-      .maybeSingle(),
-    supabase
-      .from("widgets")
-      .select(
-        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
-      )
-      .eq("dashboard_id", dashboardId),
-    supabase
-      .from("field_definitions")
-      .select(FIELD_DEF_COLS)
-      .eq("show_in_builder", true)
-      .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
-    supabase
-      .from("user_preferences")
-      .select("settings")
-      .eq("user_id", session.user.id)
-      .eq("dashboard_id", dashboardId)
-      .maybeSingle(),
-    loadSources(supabase),
-  ]);
-  if (!dash) return { ok: false, message: "Dashboard não encontrado." };
-
-  const widgets = (widgetsData ?? []) as Widget[];
-  const widget = widgets.find((w) => w.id === widgetId);
-  if (!widget) return { ok: false, message: "Widget não encontrado." };
-
-  const allFields = (fieldsData ?? []) as FieldDefinition[];
-  const available = buildAvailableFields(allFields, correspondences, sources);
   // Mapa chave→def p/ operandos com escopo de fonte (widgetQuerySources).
   const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
 
-  // ---- período efetivo do widget (resolver único da page) ----
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
-  const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
-  const resolver = createPeriodResolver({
-    sp,
-    available,
-    correspondences,
-    dashSettings,
-    prefSettings,
-    sources,
-  });
-  const dataWidgets = widgets.filter(
-    (w) =>
-      w.visual_type !== "filtro" &&
-      w.visual_type !== "filtro_campo" &&
-      w.visual_type !== "forma" &&
-      w.visual_type !== "imagem"
-  );
-  const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
+  // Fontes de COBERTURA do @period pré-sintetizado (invariante 9): fontes do
+  // widget ∪ fontes das métricas EFETIVAS. Tabela Livre guarda as métricas
+  // nas colunas BI (settings.quickTable); kanban consulta SÓ a fonte do
+  // quadro (settings.kanban.source).
+  const coverageSources = (): SourceKey[] => {
+    if (widget.visual_type === "kanban") {
+      const s = widget.settings?.kanban?.source;
+      return s && isKnownSource(s, sources)
+        ? [s as SourceKey]
+        : ((widget.sources ?? []) as SourceKey[]);
+    }
+    const qt = widget.visual_type === "tabela_editavel"
+      ? widget.settings?.quickTable
+      : undefined;
+    const metrics = qt
+      ? quickTableBI(qt)
+          .metricCols.map((c) => c.metric)
+          .filter((m): m is NonNullable<typeof m> => Boolean(m))
+      : widget.metrics;
+    return widgetQuerySources(
+      (widget.sources ?? []) as SourceKey[],
+      metrics,
+      fieldByKeyAll
+    );
+  };
+
   const fieldFilterWidgets = widgets.filter(
     (w) => w.visual_type === "filtro_campo"
   );
-  const { periodByWidget } = resolver.computeWidgetPeriods(
-    dataWidgets,
-    filterWidgets
-  );
-  let period = periodByWidget[widgetId] ?? null;
 
   // ---- filtros de visualização (espelho do bloco da page) ----
   const viewFilters: WidgetFilter[] = [];
@@ -199,18 +207,19 @@ export async function loadWidgetScope(
           );
           if (p) {
             const pMap = entry.field.startsWith("unified:")
-              ? { ...p, fieldBySource: resolver.resolveFieldBySource(entry.field) }
+              ? {
+                  ...p,
+                  fieldBySource: args.resolver.resolveFieldBySource(
+                    entry.field
+                  ),
+                }
               : p;
             // Cobertura = fontes do widget ∪ fontes das métricas (mesma regra
             // da page): as pernas por métrica reusam este @period.
             const applied = applyPeriodToFilters(
               viewFilters.splice(0),
               pMap,
-              widgetQuerySources(
-                (widget.sources ?? []) as SourceKey[],
-                widget.metrics,
-                fieldByKeyAll
-              )
+              coverageSources()
             );
             viewFilters.push(...applied);
           }
@@ -308,6 +317,103 @@ export async function loadWidgetScope(
     );
   }
 
+  return { filters: resolvedViewFilters, period, effSettings };
+}
+
+export async function loadWidgetScope(
+  supabase: SupabaseClient,
+  session: SessionInfo,
+  dashboardId: string,
+  widgetId: string,
+  // window.location.search do cliente — período/aba/filtros são parâmetros de
+  // URL, e o escopo os resolve exatamente como a page (resolver único).
+  search: string
+): Promise<WidgetScopeResult> {
+  const sp: Record<string, string | string[] | undefined> = {};
+  for (const [k, v] of new URLSearchParams(search ?? "")) {
+    const cur = sp[k];
+    sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
+  }
+
+  const [
+    { data: dash },
+    { data: widgetsData },
+    { data: fieldsData },
+    correspondences,
+    { data: prefData },
+    sources,
+  ] = await Promise.all([
+    supabase
+      .from("dashboards")
+      .select("id, settings")
+      .eq("id", dashboardId)
+      .maybeSingle(),
+    supabase
+      .from("widgets")
+      .select(
+        "id, dashboard_id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+      )
+      .eq("dashboard_id", dashboardId),
+    supabase
+      .from("field_definitions")
+      .select(FIELD_DEF_COLS)
+      .eq("show_in_builder", true)
+      .order("sort_order", { ascending: true }),
+    loadCorrespondences(supabase),
+    supabase
+      .from("user_preferences")
+      .select("settings")
+      .eq("user_id", session.user.id)
+      .eq("dashboard_id", dashboardId)
+      .maybeSingle(),
+    loadSources(supabase),
+  ]);
+  if (!dash) return { ok: false, message: "Dashboard não encontrado." };
+
+  const widgets = (widgetsData ?? []) as Widget[];
+  const widget = widgets.find((w) => w.id === widgetId);
+  if (!widget) return { ok: false, message: "Widget não encontrado." };
+
+  const allFields = (fieldsData ?? []) as FieldDefinition[];
+  const available = buildAvailableFields(allFields, correspondences, sources);
+
+  // ---- período efetivo do widget (resolver único da page) ----
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
+  const resolver = createPeriodResolver({
+    sp,
+    available,
+    correspondences,
+    dashSettings,
+    prefSettings,
+    sources,
+  });
+  const dataWidgets = widgets.filter(
+    (w) =>
+      w.visual_type !== "filtro" &&
+      w.visual_type !== "filtro_campo" &&
+      w.visual_type !== "forma" &&
+      w.visual_type !== "imagem"
+  );
+  const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");
+  const { periodByWidget } = resolver.computeWidgetPeriods(
+    dataWidgets,
+    filterWidgets
+  );
+
+  // ---- filtros de visualização + __pw__ (assembly única) ----
+  const view = await resolveWidgetViewScope(supabase, session, {
+    widget,
+    widgets,
+    available,
+    allFields,
+    sources,
+    prefSettings,
+    sp,
+    resolver,
+    period: periodByWidget[widgetId] ?? null,
+  });
+
   // ---- config final (mesma da page) ----
   const config = {
     source: "records" as const,
@@ -315,13 +421,21 @@ export async function loadWidgetScope(
     splitBySource: widget.split_by_source ?? false,
     dimensions: widget.dimensions ?? [],
     metrics: widget.metrics ?? [],
-    filters: [...(widget.filters ?? []), ...resolvedViewFilters],
+    filters: [...(widget.filters ?? []), ...view.filters],
     visual_type: widget.visual_type,
-    settings: effSettings,
+    settings: view.effSettings,
   } as unknown as WidgetConfig;
 
   return {
     ok: true,
-    scope: { widget, config, period, available, allFields, sources },
+    scope: {
+      widget,
+      config,
+      period: view.period,
+      available,
+      allFields,
+      sources,
+      correspondences,
+    },
   };
 }

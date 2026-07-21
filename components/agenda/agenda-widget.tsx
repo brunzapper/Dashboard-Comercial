@@ -1,11 +1,15 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): guarda de resposta obsoleta (contador de geração) — em
+// navegação rápida de mês/semana, só a ÚLTIMA resposta aterrissa (antes uma
+// resposta antiga podia sobrescrever a mais nova).
 // Widget AGENDA no dashboard: fetch deferido do range visível
 // (fetchAgendaWidget) com navegação própria por mês/semana — a agenda não
-// participa da barra de período do dashboard. No snapshot público mostra
-// placeholder (tarefas são privadas e a navegação exige sessão).
+// participa da barra de período do dashboard (nem dos filtros/quick filters —
+// decisão de design; ver docs/arquitetura.md §4.10). No snapshot público
+// mostra placeholder (tarefas são privadas e a navegação exige sessão).
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Widget } from "@/lib/widgets/types";
 import {
@@ -49,9 +53,15 @@ export function AgendaWidget({
   const [anchor, setAnchor] = useState(todayBrasiliaIso());
   const [result, setResult] = useState<AgendaResult | null>(null);
 
+  // Guarda de resposta obsoleta: só a resposta da ÚLTIMA chamada aterrissa
+  // (navegação rápida de mês/semana dispara chamadas concorrentes).
+  const reqRef = useRef(0);
   const reload = useCallback(() => {
     const { from, to } = rangeOf(anchor, view);
-    void fetchAgendaWidget(dashboardId, widget.id, from, to).then(setResult);
+    const id = ++reqRef.current;
+    void fetchAgendaWidget(dashboardId, widget.id, from, to).then((res) => {
+      if (reqRef.current === id) setResult(res);
+    });
   }, [dashboardId, widget.id, anchor, view]);
 
   useEffect(() => {
