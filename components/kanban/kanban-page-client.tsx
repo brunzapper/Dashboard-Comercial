@@ -1,8 +1,12 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.3 | Data: 21/07/2026
 // Shell client da página dedicada de kanban (/kanbans/[id]): cabeçalho (nome,
 // visões kanban|lista, barra de período simples, config de colunas, criação) +
 // o quadro/lista. Os dados chegam computados do RSC; navegação de período muda
 // a URL (?periodo/?de/?ate) e o servidor recomputa.
+// v1.3 (21/07/2026): intervalo De/Até em RASCUNHO (PeriodRangeDraft, mesmo
+//   componente da barra de período dos dashboards) — digitar não navega mais a
+//   cada tecla com intervalo parcial; commit com o intervalo completo (auto)
+//   ou via "Aplicar" (aberto deliberado).
 // v1.1 (16/07/2026): modo TAREFAS — quadro por fase (mover conclui na coluna
 //   `completesTask`), quick-create de tarefa por coluna e lista de tarefas.
 // v1.2 (16/07/2026): 3ª visão AGENDA — calendário do board (registros pelo
@@ -17,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
+import { PeriodRangeDraft } from "@/components/dashboards/period-range-inputs";
 import { PERIOD_PRESETS } from "@/lib/widgets/period";
 import { updateBoardSettings } from "@/app/(app)/dashboards/actions";
 import type { DashboardSettings } from "@/lib/widgets/types";
@@ -280,19 +284,15 @@ export function KanbanPageClient({
                 className="w-40"
                 aria-label="Período"
               />
-              <Input
-                type="date"
-                value={de}
-                onChange={(e) => setPeriod({ periodo: "", de: e.target.value, ate })}
-                className="h-8 w-36"
-                aria-label="De"
-              />
-              <Input
-                type="date"
-                value={ate}
-                onChange={(e) => setPeriod({ periodo: "", de, ate: e.target.value })}
-                className="h-8 w-36"
-                aria-label="Até"
+              {/* Rascunho: digitar não navega; o commit navega UMA vez
+                  (intervalo completo auto, ou aberto via "Aplicar"). */}
+              <PeriodRangeDraft
+                compact
+                de={de}
+                ate={ate}
+                onCommit={({ de: nextDe, ate: nextAte }) =>
+                  setPeriod({ periodo: "", de: nextDe, ate: nextAte })
+                }
               />
             </>
           ) : null}

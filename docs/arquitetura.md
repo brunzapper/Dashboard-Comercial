@@ -821,8 +821,9 @@ precisam de duas garantias, ambas desta entrega:
   widgets.
 
 **Período personalizado é rascunho + commit** (`PeriodRangeDraft`,
-`components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls` e
-`PeriodQuickFilter`): escolher "Personalizado" só abre os inputs (nada navega
+`components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls`,
+`PeriodQuickFilter` e pela barra da página dedicada `/kanbans/[id]` —
+`kanban-page-client.tsx`): escolher "Personalizado" só abre os inputs (nada navega
 ou persiste — os widgets seguem no período anterior) e digitar as datas só
 atualiza o rascunho. O commit — navegação/emissão + persist, UMA vez — sai
 quando o intervalo está COMPLETO (auto, debounce ~500ms) ou pelo botão
