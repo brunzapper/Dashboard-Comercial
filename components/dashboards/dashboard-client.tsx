@@ -151,6 +151,7 @@ export function DashboardClient({
   fieldFilterSeedById,
   quickFiltersById,
   periodWindowById,
+  deferredScopeById,
   initialTabId,
   focusWidgetId,
 }: {
@@ -208,6 +209,10 @@ export function DashboardClient({
   // Janela de períodos (settings.periodWindow) resolvida no servidor: estado
   // efetivo do dropdown do card (seleção compartilhada __pw__ ?? default).
   periodWindowById?: Record<string, WidgetPeriodWindowState>;
+  // Fingerprint do escopo efetivo dos widgets DEFERIDOS (Tabela Livre/kanban),
+  // computado na page: muda → o widget re-busca (cobre filtros persistidos no
+  // banco, que não passam pela URL). Ausente no viewer de snapshot.
+  deferredScopeById?: Record<string, string>;
   // Aba vinda da URL (?tab=), para restaurar a aba ativa ao recarregar. Chega
   // crua da page (sem validação) — validada aqui contra as abas efetivas.
   initialTabId?: string;
@@ -915,6 +920,7 @@ export function DashboardClient({
             fieldFilterSeedById={fieldFilterSeedById}
             quickFiltersById={quickFiltersById}
             periodWindowById={periodWindowById}
+            deferredScopeById={deferredScopeById}
             layoutById={layoutById}
             applyLayoutPatch={applyLayoutPatch}
             connectors={connectors}

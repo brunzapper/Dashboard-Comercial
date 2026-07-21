@@ -1,4 +1,17 @@
-<!-- Versão: 1.13 | Data: 21/07/2026 -->
+<!-- Versão: 1.14 | Data: 21/07/2026 -->
+<!-- v1.14 (21/07/2026): sincronia filtros → widgets deferidos + rascunho do
+     período personalizado (§4.10; invariante 12) — (a) intervalo
+     personalizado (barra global e filtro rápido do card) vira RASCUNHO com
+     commit (completo auto-debounced / aberto via "Aplicar"): digitar não
+     dispara mais consulta com período parcial; (b) escopo das actions
+     deferidas (runQuickTable/runKanbanWidget) sai da assembly ÚNICA do
+     widget-scope (resolveWidgetViewScope) — quick-table e kanban passam a
+     aplicar __qf__/ff_ (com lastFieldFilters)/operação traduzida; (c)
+     re-fetch dos deferidos por FINGERPRINT de escopo da page
+     (deferredScopeById → prop scopeKey), cobrindo filtros persistidos no
+     banco que não mudam a URL; (d) feedback: estado "Atualizando…" (dim +
+     spinner) nos deferidos, period-window/nota no transition compartilhado;
+     (e) guards de resposta obsoleta (agenda, pager server-side). -->
 <!-- v1.13 (21/07/2026): dia de BRASÍLIA no read side dos widgets (0085, §4.1/
      §4.2/§4.5; invariantes 7/11) — colunas timestamptz do núcleo comparavam/
      bucketizavam na sessão UTC do banco (limites de dia deslocados 3h; registro
@@ -767,6 +780,83 @@ invariantes 9/10).
   NÃO serve como campo de PERÍODO (restrição proposital —
   `period-resolve.ts`).
 
+### 4.10 Filtros → widgets deferidos e feedback de carregamento (21/07/2026)
+
+O dashboard tem DOIS transportes de filtro com gatilhos de recompute
+diferentes:
+
+- **URL** (`periodo/de/ate/campo`, `ff_`, `tf_`, `pf_*`): `router.replace`
+  dentro do transition compartilhado (`pending-context.tsx`) → re-render RSC +
+  mudança de `useSearchParams`.
+- **Banco** (`__qf__` filtros rápidos do card — inclusive operação — e
+  `__pw__` janela de períodos, em `dashboard_table_cells`): server action +
+  `revalidatePath` → re-render RSC **sem** mudança de URL.
+
+Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
+os dois transportes por construção (props novas a cada render). Os widgets
+**DEFERIDOS** (Tabela Livre e kanban, fetch client-side via server action)
+precisam de duas garantias, ambas desta entrega:
+
+- **Escopo ÚNICO:** as actions deferidas (`runQuickTable`,
+  `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
+  page — `resolveWidgetViewScope`/`loadWidgetScope`
+  (`lib/widgets/widget-scope.ts`): filtros rápidos `__qf__` (com exceção do
+  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters`, tradução de
+  OPERAÇÃO (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
+  cobertura do `@period` (invariante 9) usa as métricas EFETIVAS (Tabela
+  Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
+  O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
+  derivadas das opções do campo — filtro só reduz cards); a **Agenda ignora
+  os filtros do dashboard POR DESIGN** (range próprio mês/semana).
+- **Gatilho de re-fetch por FINGERPRINT:** a page computa
+  `deferredScopeById[widgetId] = JSON.stringify({ p: período efetivo,
+  f: filtros de visualização, pw: escolha __pw__ })` e o widget recebe como
+  prop `scopeKey`, que é a dep REAL do effect de fetch (a URL é lida em
+  call-time, `window.location.search`). Como o RSC re-renderiza em TODOS os
+  caminhos (navegação, `revalidatePath`, `router.refresh` do realtime), o
+  fingerprint cobre também mudanças feitas por OUTRO usuário. Não volte a
+  keyar o fetch deferido em `useSearchParams` — filtro persistido no banco
+  não muda a URL e o widget ficava obsoleto até F5. Mudança de DADO (sem
+  mudança de filtro) chega pelo event bus (`useDataChanged` → tick), nos dois
+  widgets.
+
+**Período personalizado é rascunho + commit** (`PeriodRangeDraft`,
+`components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls`,
+`PeriodQuickFilter` e pela barra da página dedicada `/kanbans/[id]` —
+`kanban-page-client.tsx`): escolher "Personalizado" só abre os inputs (nada navega
+ou persiste — os widgets seguem no período anterior) e digitar as datas só
+atualiza o rascunho. O commit — navegação/emissão + persist, UMA vez — sai
+quando o intervalo está COMPLETO (auto, debounce ~500ms) ou pelo botão
+"Aplicar"/Enter (intervalo ABERTO deliberado, "de X em diante"). Commit em
+blur foi rejeitado: tabular de "De" para "Até" emitiria o intervalo parcial
+que era o bug. Efeito colateral corrigido: abrir "Personalizado" e desistir
+não apaga mais o `lastPeriod` salvo do usuário.
+
+**Feedback de carregamento (política):**
+
+- Recompute RSC (qualquer filtro): overlay global "Carregando…" + dim do grid
+  (`dashboard-grid.tsx`), via transition compartilhado (`useNavPending().run`
+  em TODO caminho que muda filtro/recorte — barra de período, filtros
+  rápidos, filtro por campo, barra da tabela, `PeriodWindowControl` e o
+  refresh pós-save da Nota).
+- Widgets deferidos re-buscando com dados antigos em tela: estado
+  `refreshing` próprio (dim `opacity-60` + "Atualizando…" com spinner), sem
+  bloquear interação (drag do kanban continua; um resultado que aterrisse
+  logo após um move é reconciliado pelo `data-changed` → novo fetch). O
+  overlay global pode sumir antes de o fetch deferido terminar — o estado
+  local cobre esse rabo.
+- Silenciosos POR DECISÃO: `realtime-refresher` (dado de fundo, mesmo
+  recorte — overlay a cada rajada de sync seria ruído), reconciliações
+  cosméticas (aparência, células da Tabela Livre).
+- Respostas obsoletas: fetches concorrentes usam flag `cancelled` no cleanup
+  (quick-table/kanban) ou contador de geração (agenda, pager server-side do
+  modo lista) — só a ÚLTIMA resposta aterrissa.
+
+Snapshot (`app/s/[token]`): nada disso se aplica — quick filters do visitante
+vão à URL (`qf_*`), kanban/Tabela Livre chegam PRECOMPUTADOS pelo RSC público
+(`snapshot-mode`) e `deferredScopeById` nem é passado (o fetch é pulado por
+`readOnly`).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -857,6 +947,17 @@ principalmente — para mantenedores humanos.
     ancore bounds de campo custom (texto): a comparação é lexicográfica e o
     offset no lower bound excluiria valores date-only. NUNCA aplique
     `at time zone` a valor texto: um naive (CSV) recuaria um dia.
+
+12. **Escopo de widget em server action sai SEMPRE do widget-scope.** Toda
+    server action que consulta dados de um widget do dashboard (paginação,
+    export, Tabela Livre, kanban — e qualquer action deferida futura) monta o
+    recorte por `loadWidgetScope`/`resolveWidgetViewScope`
+    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`tf_`/
+    tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
+    bug de widgets deferidos ignorando o filtro de operação até F5. No
+    cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
+    (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
+    persistido no banco não muda a URL). Ver §4.10.
 
 ## 6. Convenções do projeto
 

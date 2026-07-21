@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): o refresh pós-save roda no transition COMPARTILHADO do
+// dashboard (useNavPending) — o overlay global cobre o recompute dos valores
+// {=…} em vez de trocá-los silenciosamente.
 // Widget Nota (post-it): texto dinâmico com expressões {=fórmula} (campos,
 // campos calculados, totais e condicionais — avaliadas no servidor, ver
 // page.tsx noteById) e hyperlinks [rótulo](@destino) para widgets (mesmo
@@ -42,6 +45,7 @@ import type {
 } from "@/lib/widgets/types";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { useFocusWidget } from "./focus-context";
+import { useNavPending } from "./pending-context";
 import { WidgetLinkPicker } from "./widget-link-picker";
 
 const DEFAULT_NOTE_BG = "#fef9c3"; // amarelo post-it
@@ -77,6 +81,7 @@ export function NoteWidget({
 }) {
   const focus = useFocusWidget();
   const router = useRouter();
+  const { run } = useNavPending();
   const [saving, startSaving] = useTransition();
 
   // Texto otimista: após salvar, o texto novo vale até o refresh trazer a prop
@@ -223,7 +228,9 @@ export function NoteWidget({
       }
       setOptimistic(draft);
       setEditing(false);
-      router.refresh(); // valores novos das expressões vêm do servidor
+      // Transition compartilhado: overlay global cobre o recompute dos {=…}
+      // (agregações SQL não são avaliáveis no cliente).
+      run(() => router.refresh());
     });
   };
 

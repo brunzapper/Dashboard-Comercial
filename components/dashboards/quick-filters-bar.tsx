@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 14/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): intervalo personalizado do filtro de período em RASCUNHO
+// (PeriodRangeDraft) — escolher "Personalizado" não emite mais valor (não
+// apaga o preset persistido) e digitar as datas não grava/consulta: o commit
+// (onChange → persist debounced) sai com o intervalo completo ou pelo
+// "Aplicar" (intervalo aberto deliberado).
 // Barra de filtros rápidos de um widget: dropdowns lado a lado no card (onde
 // fica a barra de busca das tabelas, ou no topo dos gráficos/KPI/calculado).
 // - Responsável/Operação/data com formato → Popover com multi-seleção.
@@ -20,7 +25,6 @@ import { ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -44,6 +48,7 @@ import { TRANSFORM_LABELS, type QuickFilterEntry } from "@/lib/widgets/types";
 import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
+import { PeriodRangeDraft } from "./period-range-inputs";
 
 const CUSTOM = "__custom__";
 
@@ -265,8 +270,9 @@ function PeriodQuickFilter({
 
   function onModeChange(v: string) {
     if (v === CUSTOM) {
+      // Só abre os inputs de rascunho — nada é emitido/persistido até o
+      // commit do intervalo (o valor anterior segue filtrando).
       setCustomOpen(true);
-      onChange({ kind: "period", preset: "", de: sel?.de ?? "", ate: sel?.ate ?? "" });
       return;
     }
     setCustomOpen(false);
@@ -294,27 +300,17 @@ function PeriodQuickFilter({
         aria-label={`Período — ${label}`}
       />
       {mode === CUSTOM ? (
-        <>
-          <Input
-            type="date"
-            value={sel?.de ?? ""}
-            onChange={(e) =>
-              onChange({ kind: "period", preset: "", de: e.target.value, ate: sel?.ate ?? "" })
-            }
-            className="h-8 w-auto text-xs"
-            aria-label={`De — ${label}`}
-          />
-          <span className="text-muted-foreground text-xs">até</span>
-          <Input
-            type="date"
-            value={sel?.ate ?? ""}
-            onChange={(e) =>
-              onChange({ kind: "period", preset: "", de: sel?.de ?? "", ate: e.target.value })
-            }
-            className="h-8 w-auto text-xs"
-            aria-label={`Até — ${label}`}
-          />
-        </>
+        // Rascunho: digitar não emite; o commit emite UMA vez (intervalo
+        // completo auto, ou aberto via "Aplicar") e o persist do pai grava.
+        <PeriodRangeDraft
+          compact
+          de={sel?.de ?? ""}
+          ate={sel?.ate ?? ""}
+          ariaPrefix={label}
+          onCommit={({ de, ate }) =>
+            onChange({ kind: "period", preset: "", de, ate })
+          }
+        />
       ) : null}
     </div>
   );

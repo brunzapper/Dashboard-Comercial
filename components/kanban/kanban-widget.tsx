@@ -1,15 +1,18 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): fetch re-dispara pelo FINGERPRINT de escopo da page
+//   (prop scopeKey — cobre filtros persistidos no banco, __qf__, que não
+//   mudam a URL); enquanto re-busca com o quadro antigo em tela, exibe
+//   "Atualizando…" (dim + spinner, sem bloquear interações/drag).
 // Widget KANBAN no dashboard: a page NÃO computa nada — o widget busca via
 // runKanbanWidget após o mount (padrão da Tabela Livre), com o período/filtros
-// da URL resolvidos no servidor. Toggle quadro|lista; moves pelas mesmas
+// resolvidos no servidor. Toggle quadro|lista; moves pelas mesmas
 // actions da página dedicada. No snapshot público (sem sessão) usa o resultado
 // precomputado (snapshotMode.kanbanResults) e fica somente-leitura; modo
 // tarefas nunca entra no snapshot (dados privados) → placeholder.
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { Download, List, SquareKanban } from "lucide-react";
+import { Download, List, Loader2, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -57,6 +60,7 @@ export function KanbanWidget({
   canEditValues,
   canManageFields,
   canConfig,
+  scopeKey,
 }: {
   widget: Widget;
   dashboardId: string;
@@ -65,11 +69,15 @@ export function KanbanWidget({
   canManageFields: boolean;
   // Pode configurar colunas do quadro (dono do dashboard/admin — canEdit).
   canConfig?: boolean;
+  // Fingerprint do escopo efetivo (page → deferredScopeById): re-dispara o
+  // fetch quando período/filtros mudam — inclusive __qf__ (banco, sem URL).
+  scopeKey?: string;
 }) {
   const snapshotMode = useSnapshotMode();
   const readOnly = snapshotMode.snapshot;
-  const search = useSearchParams().toString();
   const [fetched, setFetched] = useState<KanbanWidgetResult | null>(null);
+  // Re-busca com o quadro antigo em tela: dim + spinner até o novo aterrissar.
+  const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState<"kanban" | "lista">("kanban");
 
   // Event bus: tarefa/registro/comentário mudou em qualquer superfície →
@@ -84,15 +92,26 @@ export function KanbanWidget({
     // 250ms: coalesce rajadas de eventos do bus (uma mutação pode emitir vários
     // e cada re-busca é uma server action inteira) sem atrasar perceptivelmente.
     const timer = setTimeout(() => {
-      void runKanbanWidget(dashboardId, widget.id, search).then((res) => {
-        if (!cancelled) setFetched(res);
+      setRefreshing(true);
+      // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
+      // scopeKey — fingerprint do escopo efetivo computado pela page, que
+      // muda tanto por navegação (período/ff_) quanto por revalidação
+      // (__qf__ persistido no banco, sem mudança de URL).
+      void runKanbanWidget(
+        dashboardId,
+        widget.id,
+        window.location.search
+      ).then((res) => {
+        if (cancelled) return;
+        setFetched(res);
+        setRefreshing(false);
       });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [readOnly, dashboardId, widget.id, search, cfgKey, tick]);
+  }, [readOnly, dashboardId, widget.id, scopeKey, cfgKey, tick]);
 
   // Snapshot: resultado precomputado (só modo registros; tarefas ficam fora).
   const result: KanbanWidgetResult | null = readOnly
@@ -260,9 +279,17 @@ export function KanbanWidget({
     color: active ? sw?.activeText : sw?.inactiveText,
   });
 
+  // "Atualizando…" só quando há quadro antigo em tela (1º load tem placeholder).
+  const staleRefreshing = refreshing && !readOnly;
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-1">
       <div className="flex items-center justify-end gap-1.5">
+        {staleRefreshing ? (
+          <span className="text-muted-foreground mr-auto flex items-center gap-1 text-xs">
+            <Loader2 className="size-3 animate-spin" /> Atualizando…
+          </span>
+        ) : null}
         {!readOnly ? (
           <Button
             variant="ghost"
@@ -307,6 +334,15 @@ export function KanbanWidget({
           </Button>
         </div>
       </div>
+      {/* Dim durante a re-busca (sem bloquear interações — drag continua; um
+          resultado antigo que aterrisse após um move é reconciliado pelo
+          data-changed → tick → novo fetch). */}
+      <div
+        className={cn(
+          "min-h-0 flex-1 transition-opacity",
+          staleRefreshing && "opacity-60"
+        )}
+      >
       {view === "kanban" ? (
         <KanbanBoard
           data={result.data}
@@ -352,6 +388,7 @@ export function KanbanWidget({
           appearance={kanban.appearance}
         />
       )}
+      </div>
     </div>
   );
 }

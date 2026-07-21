@@ -1,4 +1,8 @@
-// Versão: 2.9 | Data: 21/07/2026
+// Versão: 2.10 | Data: 21/07/2026
+// v2.10 (21/07/2026): prop deferredScopeKey (fingerprint de escopo da page)
+//   repassada a QuickTableWidget/KanbanWidget — re-fetch quando os filtros
+//   efetivos mudam (inclusive __qf__, sem URL); guarda de resposta obsoleta
+//   no pager server-side (pageReqRef — só a última resposta aterrissa).
 // v2.9 (21/07/2026): badge "Nº dia útil" (WidgetData.businessDayRef) — via
 // PeriodWindowControl ou standalone no mesmo slot (snapshot/align sem janela).
 // v2.8 (20/07/2026): catálogo do editor da Nota via builder ÚNICO
@@ -207,6 +211,7 @@ export const WidgetCard = memo(function WidgetCard({
   fieldFilterSeed,
   quickFilters,
   periodWindow,
+  deferredScopeKey,
   autoSize,
   cellW = 0,
   rowH = 0,
@@ -269,6 +274,11 @@ export const WidgetCard = memo(function WidgetCard({
   // card, resolvido no servidor (__pw__ ?? default). Presente só quando o
   // widget configura periodWindow com options.
   periodWindow?: WidgetPeriodWindowState;
+  // Fingerprint do escopo efetivo (período + filtros de visualização + __pw__)
+  // dos widgets DEFERIDOS (Tabela Livre/kanban), computado na page: o effect
+  // de fetch re-dispara quando muda — inclusive filtros persistidos no banco
+  // (__qf__), que não passam pela URL. Ausente no snapshot (precomputado).
+  deferredScopeKey?: string;
   // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
   // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
   // métricas de célula do grid (p/ converter px → unidades).
@@ -368,12 +378,18 @@ export const WidgetCard = memo(function WidgetCard({
     fkLabels: Record<string, string>;
   } | null>(null);
   const [srvLoading, setSrvLoading] = useState(false);
+  // Guarda de resposta obsoleta: cliques rápidos no pager (ou o re-fetch do
+  // effect abaixo) disparam chamadas concorrentes — só a ÚLTIMA aterrissa.
+  const pageReqRef = useRef(0);
   const handleServerPage = useCallback(
     (page: number) => {
+      pageReqRef.current++;
       if (page <= 1) {
         setSrvPage(null); // página 1 = props do RSC (sempre atuais)
+        setSrvLoading(false);
         return;
       }
+      const id = pageReqRef.current;
       setSrvLoading(true);
       void fetchWidgetRecordsPage(
         dashboardId,
@@ -382,12 +398,14 @@ export const WidgetCard = memo(function WidgetCard({
         page - 1
       )
         .then((res) => {
-          if (!res.ok) return;
+          if (pageReqRef.current !== id || !res.ok) return;
           // Recorte encolheu (página pedida ficou vazia): volta à página 1.
           if (res.rows.length === 0) setSrvPage(null);
           else setSrvPage({ page, rows: res.rows, fkLabels: res.fkLabels });
         })
-        .finally(() => setSrvLoading(false));
+        .finally(() => {
+          if (pageReqRef.current === id) setSrvLoading(false);
+        });
     },
     [dashboardId, widget.id]
   );
@@ -985,6 +1003,7 @@ export const WidgetCard = memo(function WidgetCard({
               editMode={editMode}
               appearance={appearance}
               onAppearanceChange={saveAppearance}
+              scopeKey={deferredScopeKey}
             />
           ) : isKanban ? (
             <KanbanWidget
@@ -994,6 +1013,7 @@ export const WidgetCard = memo(function WidgetCard({
               canEditValues={canEditValues}
               canManageFields={canManageFields}
               canConfig={canEdit}
+              scopeKey={deferredScopeKey}
             />
           ) : isAgenda ? (
             <AgendaWidget

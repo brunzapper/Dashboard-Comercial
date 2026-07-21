@@ -126,13 +126,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
   `records.operation_id` é derivada (priority=1 do responsável no sync) e pode
   estar NULL/defasada. Filtros de visualização por operação
-  (filtro_campo/filtro rápido) são TRADUZIDOS no server — page e widget-scope
-  — por `lib/config/operation-scope.ts` (vínculo vivo `responsible_id in` da
+  (filtro_campo/filtro rápido) são TRADUZIDOS no server — page, widget-scope
+  e as actions deferidas (que passam pelo widget-scope, regra abaixo) — por
+  `lib/config/operation-scope.ts` (vínculo vivo `responsible_id in` da
   subárvore + FILTROS DE PERFIL `operations.filter`, 0083). Não reintroduza
   `operation_id eq` literal nesses caminhos. Dimensões e restrições de
   snapshot seguem na coluna derivada (runbook do backfill:
   `supabase/apply/backfill-operation-id.sql`). Unificados: o coalesce ordena
   refs `custom:` antes de colunas do núcleo (ver §4.8 da arquitetura).
+- **Escopo de widget em server action sai SEMPRE do widget-scope
+  (21/07/2026):** toda action que consulta dados de um widget (paginação,
+  export, `runQuickTable`, `runKanbanWidget` e futuras) monta o recorte por
+  `loadWidgetScope`/`resolveWidgetViewScope` (`lib/widgets/widget-scope.ts`) —
+  nunca remonte `__qf__`/`ff_`/`tf_`/operação/`__pw__` à mão (cópias parciais
+  = widget deferido ignorando filtro até F5). No cliente, o fetch deferido
+  re-dispara pelo fingerprint `scopeKey` (`deferredScopeById` da page), nunca
+  por `useSearchParams` (filtro persistido no banco não muda a URL); com dado
+  antigo em tela exibe "Atualizando…" (dim + spinner). Período personalizado
+  é RASCUNHO + commit (`PeriodRangeDraft` — completo auto / aberto via
+  "Aplicar"); não reintroduza navegação por tecla nos inputs de data. Agenda
+  ignora filtros do dashboard POR DESIGN. Ver `docs/arquitetura.md` §4.10 e
+  invariante 12.
 - **Dia útil/meta se resolvem no ENGINE, nunca no RPC (20/07/2026):** feriados
   (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)
   alimentam o alinhamento "mesmo dia útil" (`businessDayAlign` — pernas por mês

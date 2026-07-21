@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): opts { filters, available, catalog } — o widget kanban
+//   passa os filtros de VISUALIZAÇÃO do dashboard (__qf__/?ff_/operação, via
+//   resolveWidgetViewScope) e o catálogo p/ resolvê-los (unified:/@bucket).
+//   Sem opts, comportamento idêntico (página dedicada /kanbans/[id]).
 // Montagem dos dados de um kanban de REGISTROS: consulta via runRecordList
 // (RLS, período, fontes — mesma semântica dos widgets de registros), calcula a
 // chave de grupo por card (valor do campo ou bucket de data), deriva as
@@ -10,10 +14,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { TaskRow } from "@/lib/tasks/types";
+import type { SourceDef } from "@/lib/sources";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
+import type { AvailableField } from "@/lib/widgets/fields";
 import { runRecordList } from "@/lib/widgets/record-list";
 import type { DashboardPeriod } from "@/lib/widgets/period";
-import type { WidgetConfig } from "@/lib/widgets/types";
+import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
 import { resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
 import {
   recordCellValue,
@@ -105,17 +111,30 @@ export async function runKanban(
   period: DashboardPeriod | null,
   defs: FieldDefinition[],
   labels: KanbanLabels = {},
-  owner?: KanbanOwner
+  owner?: KanbanOwner,
+  // Filtros de visualização do dashboard (widget kanban) + catálogo p/
+  // resolvê-los; ausente = quadro sem recorte extra (página dedicada).
+  opts?: {
+    filters?: WidgetFilter[];
+    available?: AvailableField[];
+    catalog?: SourceDef[];
+  }
 ): Promise<KanbanBoardData> {
   const config: WidgetConfig = {
     sources: settings.source ? [settings.source] : [],
     dimensions: [],
     metrics: [],
-    filters: [],
+    filters: opts?.filters ?? [],
     settings: {},
   } as unknown as WidgetConfig;
 
-  const records = await runRecordList(supabase, config, period ?? undefined);
+  const records = await runRecordList(
+    supabase,
+    config,
+    period ?? undefined,
+    opts?.available,
+    opts?.catalog
+  );
 
   // Colunas "Personalizar": posição do card é dado da visão
   // (kanban_placements por widget/board). Falha silenciosa (migração 0067

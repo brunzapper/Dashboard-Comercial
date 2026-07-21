@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.3 | Data: 21/07/2026
+// v1.3 (21/07/2026): fetch deferido re-dispara pelo FINGERPRINT de escopo da
+//   page (prop scopeKey — cobre filtros persistidos no banco, __qf__, que não
+//   mudam a URL) + pelo event bus de dados (realtime/mutações); enquanto
+//   re-busca com dados antigos em tela, exibe estado "Atualizando…" (dim +
+//   spinner) p/ o usuário não confundir dado obsoleto com o recorte novo.
 // Widget "Tabela Livre" (visual_type 'tabela_editavel'): planilha editável no
 // dashboard. Renderiza a matriz de lib/widgets/quick-table/model.ts; células
 // livres são digitáveis por qualquer visualizador (bloqueio por papel via
@@ -25,7 +30,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Copy, Eraser, Loader2, Palette, Plus, Settings2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -57,6 +62,7 @@ import {
   type CellFormulaOutput,
 } from "@/lib/widgets/quick-table/cell-formulas";
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import {
   runQuickTable,
   type QuickTableResult,
@@ -99,6 +105,7 @@ export function QuickTableWidget({
   editMode = false,
   appearance,
   onAppearanceChange,
+  scopeKey,
 }: {
   widget: Widget;
   dashboardId: string;
@@ -111,6 +118,9 @@ export function QuickTableWidget({
   editMode?: boolean; // modo "Editar layout" do dashboard
   appearance?: AppearanceSettings;
   onAppearanceChange?: (a: AppearanceSettings) => void;
+  // Fingerprint do escopo efetivo (page → deferredScopeById): re-dispara o
+  // fetch quando período/filtros mudam — inclusive __qf__ (banco, sem URL).
+  scopeKey?: string;
 }) {
   const router = useRouter();
   // Modo snapshot (viewer público): dados BI chegam precomputados do servidor
@@ -200,9 +210,18 @@ export function QuickTableWidget({
       ),
     [effectiveCells]
   );
-  const search = useSearchParams().toString();
   const needsServer = bi.hasBI || exprKey !== "[]";
   const [fetched, setFetched] = useState<QuickTableResult | null>(null);
+  // Re-busca com dados antigos em tela (stale-while-refetch): dim + spinner
+  // até o resultado novo aterrissar — sem isso o usuário confunde o dado
+  // obsoleto com o recorte novo (o overlay global do grid pode sumir antes).
+  const [refreshing, setRefreshing] = useState(false);
+  // Event bus: registro mudou (mutação local ou realtime) → re-busca o BI
+  // (paridade com o kanban; o fingerprint sozinho não cobre mudança de DADO).
+  const [dataTick, setDataTick] = useState(0);
+  useDataChanged((d) => {
+    if (d.kind === "record") setDataTick((t) => t + 1);
+  });
   useEffect(() => {
     // Modo snapshot: sem sessão a action falharia; o resultado vem
     // precomputado pela page pública (snapshotMode.quickTableResults).
@@ -210,19 +229,30 @@ export function QuickTableWidget({
     let cancelled = false;
     // Pequeno atraso coalesce mudanças rápidas (digitação de {=…}, painel).
     const timer = setTimeout(() => {
-      void runQuickTable(dashboardId, widget.id, search).then((res) => {
-        if (!cancelled) setFetched(res);
-      });
+      setRefreshing(true);
+      // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
+      // scopeKey — fingerprint do escopo efetivo computado pela page, que
+      // muda tanto por navegação (período/ff_) quanto por revalidação
+      // (__qf__/__pw__ persistidos no banco, sem mudança de URL).
+      void runQuickTable(dashboardId, widget.id, window.location.search).then(
+        (res) => {
+          if (cancelled) return;
+          setFetched(res);
+          setRefreshing(false);
+        }
+      );
     }, 60);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
     // biKey/exprKey resumem a config/expressões — são as deps reais.
-  }, [needsServer, readOnly, biKey, exprKey, search, dashboardId, widget.id]);
+  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id]);
   const deferred = readOnly
     ? (snapshotMode.quickTableResults?.[widget.id] ?? null)
     : fetched;
+  // "Atualizando…" só quando há dado antigo em tela (o 1º load tem skeleton).
+  const staleRefreshing = refreshing && deferred != null && !readOnly;
 
   // ---- matriz renderizada ----
   const matrix: QTMatrix = useMemo(() => {
@@ -815,7 +845,12 @@ export function QuickTableWidget({
         aria-label={widget.title ?? "Tabela Livre"}
       >
         <table
-          className="w-full border-collapse text-sm"
+          className={cn(
+            "w-full border-collapse text-sm transition-opacity",
+            // Re-busca em voo com dados antigos em tela: esmaece até o
+            // resultado novo (interação segue liberada — sem pointer-events).
+            staleRefreshing && "opacity-60"
+          )}
           style={{ background: t.bodyBg }}
         >
           {matrix.headerRow || structureEdit ? (
@@ -1172,6 +1207,10 @@ export function QuickTableWidget({
         {matrix.loading ? (
           <div className="text-muted-foreground flex items-center gap-1.5 px-2 py-1 text-xs">
             <Loader2 className="size-3 animate-spin" /> Carregando dados…
+          </div>
+        ) : staleRefreshing ? (
+          <div className="text-muted-foreground flex items-center gap-1.5 px-2 py-1 text-xs">
+            <Loader2 className="size-3 animate-spin" /> Atualizando…
           </div>
         ) : null}
         {matrix.error ? (

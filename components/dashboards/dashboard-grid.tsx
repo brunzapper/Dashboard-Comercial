@@ -246,6 +246,7 @@ export function DashboardGrid({
   fieldFilterSeedById,
   quickFiltersById,
   periodWindowById,
+  deferredScopeById,
   layoutById,
   applyLayoutPatch,
   calcVarsById = {},
@@ -308,6 +309,9 @@ export function DashboardGrid({
   // Janela de períodos (settings.periodWindow): estado efetivo do dropdown do
   // card, resolvido no servidor (__pw__ ?? default). Ausente = sem dropdown.
   periodWindowById?: Record<string, WidgetPeriodWindowState>;
+  // Fingerprint do escopo efetivo dos widgets DEFERIDOS (Tabela Livre/kanban):
+  // muda → o widget re-busca. Ausente no viewer de snapshot (precomputado).
+  deferredScopeById?: Record<string, string>;
   // Estado otimista de layout (vive no shell — dashboard-client): posições BASE
   // por widget, fonte de verdade entre um saveLayout (que não revalida) e o
   // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
@@ -922,6 +926,7 @@ export function DashboardGrid({
                     fieldFilterSeed={fieldFilterSeedById?.[w.id]}
                     quickFilters={quickFiltersById?.[w.id]}
                     periodWindow={periodWindowById?.[w.id]}
+                    deferredScopeKey={deferredScopeById?.[w.id]}
                     autoSize={w.settings?.autoSize}
                     cellW={cellW}
                     rowH={ROW_H}
