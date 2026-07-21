@@ -82,6 +82,7 @@ import {
   gridFlags,
   groupByLevels,
   limitCategories,
+  orderCategories,
   reorderKeys,
   resolveAlign,
   resolveDecimals,
@@ -310,6 +311,7 @@ export const WidgetChart = memo(function WidgetChart({
   metricsConfig = [],
   canEdit = false,
   onAppearanceChange,
+  dimChrono = false,
 }: {
   visualType: VisualType;
   data: WidgetData;
@@ -319,6 +321,9 @@ export const WidgetChart = memo(function WidgetChart({
   metricsConfig?: Metric[];
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
+  // Eixo cronológico (1ª dimensão com transform de data): os chips não
+  // oferecem ordenação por valor (o eixo segue cronológico por padrão).
+  dimChrono?: boolean;
 }) {
   const { rows, dimensions, metrics } = data;
   const dimKey = dimensions[0]?.key;
@@ -584,21 +589,55 @@ export const WidgetChart = memo(function WidgetChart({
         );
       }
       const cs = cardCondStyle(c.valueText);
+      // Comparação do card de fórmula (value/cmpValue anexados pelo servidor);
+      // cards de registro não trazem value e seguem sem badge.
+      const cardCmp = cmp && c.value !== undefined ? cmp : null;
+      const cardOnly = Boolean(cardCmp?.settings.onlyVariation);
+      const fmtCardAbs = (n: number): string =>
+        c.currency ? formatMoney(n, c.currency, apDecimals) : fmt(n, apDecimals);
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
-          <span
-            className="text-3xl font-semibold"
-            style={{
-              color: cs?.text,
-              background: cs?.fill,
-              ...(cs?.bold ? { fontWeight: 700 } : {}),
-            }}
-          >
-            <CondIcon style={cs} />
-            {c.valueText ?? "—"}
-          </span>
+          {cardCmp && cardOnly ? (
+            <VariationBadge
+              cur={c.value}
+              prev={c.cmpValue}
+              settings={cardCmp.settings}
+              fmtAbs={fmtCardAbs}
+              className="text-3xl font-semibold"
+            />
+          ) : (
+            <span
+              className="text-3xl font-semibold"
+              style={{
+                color: cs?.text,
+                background: cs?.fill,
+                ...(cs?.bold ? { fontWeight: 700 } : {}),
+              }}
+            >
+              <CondIcon style={cs} />
+              {c.valueText ?? "—"}
+            </span>
+          )}
           {c.subText ? (
             <span className="text-muted-foreground text-xs">{c.subText}</span>
+          ) : null}
+          {cardCmp ? (
+            <span className="flex flex-wrap items-center gap-x-2 text-xs">
+              {!cardOnly ? (
+                <VariationBadge
+                  cur={c.value}
+                  prev={c.cmpValue}
+                  settings={cardCmp.settings}
+                  fmtAbs={fmtCardAbs}
+                />
+              ) : null}
+              {cardCmp.settings.showBaseValue && c.cmpValueText ? (
+                <span className="text-muted-foreground">
+                  vs. {c.cmpValueText}
+                </span>
+              ) : null}
+              <span className="text-muted-foreground/70">{cardCmp.label}</span>
+            </span>
           ) : null}
         </div>
       );
@@ -759,7 +798,17 @@ export const WidgetChart = memo(function WidgetChart({
   if (visualType === "pizza" || visualType === "funil") {
     const metricKey = metrics[0]?.key;
     if (!metricKey) return <EmptyState />;
-    const pieData = topWithOther(rows, dimKey, metricKey, ap.categoryLimit);
+    // Ordenação das fatias (categorySort, exceto "por cor" — sliceColors são
+    // indexadas e não há fill por nome): por valor ou rótulo, MESMO helper do
+    // sheet de aparência p/ os índices de fatia baterem.
+    const pieBase = topWithOther(rows, dimKey, metricKey, ap.categoryLimit);
+    const pieData =
+      ap.categorySort && ap.categorySort.dir !== "color"
+        ? (orderCategories(pieBase, ap.categorySort, {
+            dimKey: "name",
+            valueKey: "value",
+          }) as typeof pieBase)
+        : pieBase;
     // Fatia: cor manual > regra/escala condicional (sobre o valor plotado) >
     // paleta.
     const pieDomains = chartCondActive
@@ -878,15 +927,11 @@ export const WidgetChart = memo(function WidgetChart({
         )
       : plotRows;
   const chartRows = ap.categorySort
-    ? sortRows(
-        limitedRows,
-        {
-          column: dimKey,
-          dir: ap.categorySort.dir,
-          colorOrder: ap.categorySort.colorOrder,
-        },
-        (r) => ap.categoryColors?.[catName(r)]?.fill
-      )
+    ? orderCategories(limitedRows, ap.categorySort, {
+        dimKey,
+        valueKey: ap.categorySort.metric ?? metrics[0]?.key,
+        fillOf: (r) => ap.categoryColors?.[catName(r)]?.fill,
+      })
     : ap.categoryOrder
       ? applyManualOrder(limitedRows, ap.categoryOrder, catName)
       : limitedRows;
@@ -936,7 +981,12 @@ export const WidgetChart = memo(function WidgetChart({
     if (!editable) return withBg(chartEl);
     return (
       <div className="group flex h-full flex-col">
-        <CategoryEditor names={catNames} appearance={ap} onChange={change} />
+        <CategoryEditor
+          names={catNames}
+          appearance={ap}
+          onChange={change}
+          allowValueSort={!dimChrono}
+        />
         <div className="min-h-0 flex-1">{withBg(chartEl)}</div>
       </div>
     );
@@ -1118,9 +1168,17 @@ export const WidgetChart = memo(function WidgetChart({
         : null}
       {metrics.map((m, i) => {
         const base = resolveSeriesColor(ap, m.key, i);
+        // Cor por categoria (colorByCategory, série única): cada barra pega a
+        // cor do seu ÍNDICE na paleta do widget (mesmo mecanismo das fatias de
+        // pizza) — barras de fontes/categorias diferentes ficam distinguíveis.
+        // Off por padrão; cor manual (categoryColors) e condicional vencem.
+        const colorByCat = Boolean(ap.colorByCategory) && singleSeries;
         const perColumn =
           singleSeries &&
-          (ap.fillMode === "gradient" || hasCatColors || chartCondActive);
+          (colorByCat ||
+            ap.fillMode === "gradient" ||
+            hasCatColors ||
+            chartCondActive);
         // Empilhado: um stack único com as séries de métricas; só o segmento
         // do topo (última métrica) mantém o canto arredondado.
         const radius: [number, number, number, number] =
@@ -1147,7 +1205,7 @@ export const WidgetChart = memo(function WidgetChart({
                     fill={
                       ap.categoryColors?.[catName(r)]?.fill ??
                       barCondFill(r, m.key) ??
-                      base
+                      (colorByCat ? paletteColor(ap.palette, idx) : base)
                     }
                     fillOpacity={
                       ap.fillMode === "gradient"

@@ -1,4 +1,7 @@
-<!-- Versão: 1.9 | Data: 21/07/2026 -->
+<!-- Versão: 1.10 | Data: 21/07/2026 -->
+<!-- v1.10 (21/07/2026): §4.7 — callout do preset Inbound v5 (SAL removido da
+     exibição, comparação em todos os cards, cores da marca como dados de
+     aparência; re-apply sobrescreve settings dos widgets geridos). -->
 <!-- v1.9 (21/07/2026): §4.1 — checklist do dia de Brasília (0085): probes de
      ancoragem/bucket p/ colunas timestamptz do núcleo; par de RPCs agora parte
      da 0085. -->
@@ -307,6 +310,20 @@ antigo no MESMO período.
 > toggle no card não é afetado (a escolha compartilhada vence o default).
 > Regra geral ao criar NOVOS mocks ou NOVAS sub-fontes: o mock precisa
 > carregar os campos usados na segmentação da sub que deve contá-lo.
+
+> **Preset v5 (21/07/2026) — sem SAL, comparação em todos os cards, cores da
+> marca:** rode **Configurações → Presets → Atualizar**. O GC do aplicador
+> DELETA os cards "SAL" e "Conv. MQL → SAL" dos dashboards já aplicados (a
+> sub-fonte `sals` e os dados ficam; links/atalhos de nota apontando p/ esses
+> dois widgets ficam órfãos — baixa probabilidade, revise se houver). Todos
+> os cards passam a exibir o badge "vs. período anterior (mesmo dia útil)" —
+> os de fórmula (SQL total e conversões) dependem do deploy desta entrega
+> (comparação no `runCardWidget`). A identidade visual (canvas cinza, faixa
+> roxa nos cards, séries roxo/verde/âmbar, paleta "inbound" nas barras por
+> categoria e na pizza) entra como DADOS de aparência. ATENÇÃO: o update por
+> `presetKey` sobrescreve o `settings` inteiro dos widgets do preset —
+> ajustes manuais de aparência feitos neles se perdem no re-apply (widgets
+> criados à mão não são tocados).
 
 **Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
 qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,

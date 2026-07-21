@@ -27,6 +27,9 @@ import {
   type Correspondence,
 } from "@/lib/correspondences";
 import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
+import { loadNonWorkingDays } from "@/lib/config/non-working-days";
+import { todayBrasiliaIso } from "@/lib/date/today";
+import { comparisonLabel, comparisonSpec } from "./comparison";
 import { fetchFkLabels, runWidget } from "./engine";
 import { runCalculatedWidget } from "./formula-metric";
 import { runRecordList } from "./record-list";
@@ -246,28 +249,93 @@ export async function runCardWidget(
     if (!card.formula || card.formula.tokens.length === 0) {
       return { ...empty, error: "Configure a fórmula do Card." };
     }
-    const res = await runCalculatedWidget(supabase, {
+    const calcInput = {
       formula: card.formula,
       sources: config.sources ?? [],
       sourceDefs: catalog,
       filters: config.filters ?? [],
       period,
       correspondences,
-      currencyMode: "auto",
+      currencyMode: "auto" as const,
       fields,
       rates,
       conversionPeriod,
-    });
-    const valueText =
-      res.text ??
-      (res.value == null
+    };
+    // Comparação (settings.comparison): a MESMA fórmula roda sob o range
+    // deslocado — padrão do runComparison do engine; runCalculatedWidget
+    // rejanela operandos escopados pela data da própria sub. Bases de janela
+    // (window_*) ficam de fora: o card é um escalar único e fórmulas típicas
+    // são razões (intensivas) — média/mediana por bucket não se aplica.
+    const cmp = config.settings?.comparison;
+    const cmpBase = cmp?.base ?? "previous_period";
+    let cmpSpec =
+      cmp?.enabled && cmpBase !== "window_avg" && cmpBase !== "window_median"
+        ? comparisonSpec(period, cmp)
+        : null;
+    if (cmpSpec?.base === "previous_period_bd") {
+      // Mesmo dia útil: recomputa com feriados + hoje (espelha o engine);
+      // falha ao carregar feriados mantém o range cheio já resolvido.
+      try {
+        cmpSpec = comparisonSpec(period, cmp, {
+          holidays: await loadNonWorkingDays(supabase),
+          todayIso: todayBrasiliaIso(),
+        });
+      } catch {
+        // mantém o spec degradado
+      }
+    }
+    const cmpPeriod: DashboardPeriod | null =
+      cmpSpec && period
+        ? {
+            field: period.field,
+            from: cmpSpec.from,
+            to: cmpSpec.to,
+            fieldBySource: period.fieldBySource,
+          }
+        : null;
+    // Perna de comparação falhou → sem meta (o card renderiza como hoje);
+    // value null de uma perna OK ainda anexa meta (badge exibe "—").
+    const [res, cmpRes] = await Promise.all([
+      runCalculatedWidget(supabase, calcInput),
+      cmpPeriod
+        ? runCalculatedWidget(supabase, { ...calcInput, period: cmpPeriod }).catch(
+            () => undefined
+          )
+        : Promise.resolve(undefined),
+    ]);
+    const fmtCalc = (r: {
+      value: number | null;
+      currency: string | null;
+      text?: string;
+    }): string =>
+      r.text ??
+      (r.value == null
         ? "—"
-        : res.currency
-          ? formatMoney(res.value, res.currency, decimals)
-          : fmt(res.value, decimals));
+        : r.currency
+          ? formatMoney(r.value, r.currency, decimals)
+          : fmt(r.value, decimals));
     return {
       ...empty,
-      card: { mode, valueText: wrap(valueText), subText: card.secondaryText },
+      ...(cmpSpec && cmp && cmpRes !== undefined
+        ? {
+            comparison: {
+              base: cmpSpec.base,
+              from: cmpSpec.from,
+              to: cmpSpec.to,
+              label: comparisonLabel(cmp, cmpSpec),
+              settings: cmp,
+            },
+          }
+        : {}),
+      card: {
+        mode,
+        valueText: wrap(fmtCalc(res)),
+        subText: card.secondaryText,
+        value: res.value,
+        cmpValue: cmpRes ? cmpRes.value : undefined,
+        cmpValueText: cmpRes ? wrap(fmtCalc(cmpRes)) : undefined,
+        currency: res.currency,
+      },
     };
   }
 

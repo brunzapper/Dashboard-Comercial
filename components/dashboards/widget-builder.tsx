@@ -3296,12 +3296,26 @@ export function WidgetBuilder({
             </BuilderSection>
           ) : null}
 
-          {/* Comparação com período anterior (variação) */}
-          {supportsComparison && !(visualType === "kpi" && kpiToday) ? (
+          {/* Comparação com período anterior (variação). Modos do Card:
+              fórmula compara (escalar re-consultado no range deslocado) mas
+              sem bases de janela; registro não tem valor agregado p/ comparar
+              (seção oculta). meta/razão têm precedência (settings.mode). */}
+          {supportsComparison &&
+          !(visualType === "kpi" && kpiToday) &&
+          !(
+            visualType === "kpi" &&
+            !widget?.settings?.mode &&
+            (cardCfg.mode ?? "value") === "record"
+          ) ? (
             <ComparisonSection
               value={comparison}
               onChange={setComparison}
               visualType={visualType}
+              excludeWindowBases={
+                visualType === "kpi" &&
+                !widget?.settings?.mode &&
+                (cardCfg.mode ?? "value") === "formula"
+              }
             />
           ) : null}
 

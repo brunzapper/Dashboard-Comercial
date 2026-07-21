@@ -109,6 +109,7 @@ import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import { fracDigits } from "@/lib/widgets/appearance";
+import { isChronoDim } from "@/lib/widgets/comparison";
 import { evalConditional } from "@/lib/widgets/conditional";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
@@ -1142,6 +1143,9 @@ export const WidgetCard = memo(function WidgetCard({
               }
               canEdit={canEdit}
               onAppearanceChange={saveAppearance}
+              dimChrono={Boolean(
+                widget.dimensions?.[0] && isChronoDim(widget.dimensions[0])
+              )}
             />
           )}
         </div>

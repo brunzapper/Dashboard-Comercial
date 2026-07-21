@@ -208,6 +208,35 @@ export function sortRows(
   return copy;
 }
 
+// Ordena categorias de gráfico (barra/pizza/funil) conforme categorySort:
+// por rótulo (by ausente/"label" — compat com salvos) ou pelo VALOR da métrica
+// (by "value"). Delegado a sortRows (auto numérico/texto; dir "color" via
+// fillOf). ÚNICO caminho de ordenação por valor — chart e sheet de aparência
+// usam o mesmo helper p/ os índices de fatia baterem. No sort por valor, a
+// categoria sintética "Outros" (topWithOther/limitCategories) fica no fim.
+export function orderCategories(
+  rows: Record<string, unknown>[],
+  sort: AppearanceSettings["categorySort"] | undefined,
+  opts: {
+    dimKey: string;
+    valueKey?: string;
+    fillOf?: (row: Record<string, unknown>) => string | undefined;
+  }
+): Record<string, unknown>[] {
+  if (!sort) return rows;
+  const byValue = sort.by === "value" && sort.dir !== "color" && opts.valueKey;
+  const column = byValue ? opts.valueKey! : opts.dimKey;
+  const sorted = sortRows(
+    rows,
+    { column, dir: sort.dir, colorOrder: sort.colorOrder },
+    opts.fillOf
+  );
+  if (!byValue) return sorted;
+  const others = sorted.filter((r) => String(r[opts.dimKey]) === "Outros");
+  if (others.length === 0) return sorted;
+  return [...sorted.filter((r) => String(r[opts.dimKey]) !== "Outros"), ...others];
+}
+
 // Move dragKey para a posição de targetKey dentro da ordem atual de chaves,
 // retornando a nova ordem completa (usado pelas alças de arraste).
 export function reorderKeys(
