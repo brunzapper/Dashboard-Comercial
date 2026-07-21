@@ -1,4 +1,9 @@
-// Versão: 1.7 | Data: 20/07/2026
+// Versão: 1.8 | Data: 21/07/2026
+// v1.8 (21/07/2026): dia de Brasília (0085) — resolveFilters ancora bounds
+// gt/gte/lt/lte de coluna de data do NÚCLEO com offset -03:00
+// (anchorCoreDateBound; choke point do RPC e do modo lista); bdAlignCtx expõe
+// refIso/reference e o resultado carrega WidgetData.businessDayRef (badge
+// "Nº dia útil" — N de corte compartilhado entre os meses).
 // v1.7 (20/07/2026): dia útil e metas nos gráficos — (a) businessDayAlign:
 //   pernas por mês via computeRows com o range recortado no N-ésimo dia útil
 //   (comparação ignorada com o align ativo); (b) base previous_period_bd (a
@@ -114,7 +119,9 @@ import {
 } from "./currency";
 import { formatBucketLabel, isLabelTransform } from "./date-buckets";
 import {
+  anchorCoreDateBound,
   applyPeriodToFilters,
+  CORE_DATE_COLS,
   patchAuxPeriodByType,
   scopedAuxPeriod,
   type DashboardPeriod,
@@ -174,12 +181,26 @@ function resolveToken(v: unknown): unknown {
 }
 
 export function resolveFilters(filters: WidgetFilter[]): WidgetFilter[] {
-  return filters.map((f) => ({
-    ...f,
-    value: Array.isArray(f.value)
+  return filters.map((f) => {
+    const value = Array.isArray(f.value)
       ? f.value.map(resolveToken)
-      : resolveToken(f.value),
-  }));
+      : resolveToken(f.value);
+    // Intervalo em coluna de data do NÚCLEO (timestamptz): ancora o bound no
+    // dia de Brasília (0085) — RPC e PostgREST compartilham este choke point.
+    // eq/neq ficam de fora (igualdade de instante — degenerada, documentada).
+    if (
+      typeof value === "string" &&
+      CORE_DATE_COLS.has(f.field) &&
+      (f.op === "gt" || f.op === "gte" || f.op === "lt" || f.op === "lte")
+    ) {
+      // Date-only: só `lte` fecha no fim do dia ("até 31/07" inclui o dia);
+      // `lt` exclui o dia inteiro e `gt`/`gte` abrem no início — mesma
+      // semântica da comparação textual dos campos custom.
+      const kind = f.op === "lte" ? "to" : "from";
+      return { ...f, value: anchorCoreDateBound(value, kind) };
+    }
+    return { ...f, value };
+  });
 }
 
 function metricForMeta(metric: string): Metric {
@@ -2289,10 +2310,14 @@ export async function runWidget(
   const MAX_BD_ALIGN_MONTHS = 13;
   const bdAlignCtx = await (async (): Promise<{
     legs: DashboardPeriod[];
-    // Dia útil de corte (reusado pela goalLine 'pace'); null = janela em
-    // modo "dia cheio" (sem alinhamento por dia útil).
+    // Dia útil de corte (reusado pela goalLine 'pace' e exposto como
+    // WidgetData.businessDayRef); null = janela em modo "dia cheio" (sem
+    // alinhamento por dia útil).
     n: number | null;
     holidays: Set<string>;
+    // Referência que gerou o N (badge "Nº dia útil" no card).
+    refIso: string;
+    reference: "today" | "period_end";
   } | null> => {
     const cfg = config.settings?.businessDayAlign;
     const pw = config.settings?.periodWindow;
@@ -2346,8 +2371,10 @@ export async function runWidget(
       holidays = new Set();
     }
     const todayIso = todayBrasiliaIso();
+    const reference: "today" | "period_end" =
+      cfg?.reference === "period_end" ? "period_end" : "today";
     const ref =
-      cfg?.reference === "period_end"
+      reference === "period_end"
         ? period.to
         : todayIso < period.to
           ? todayIso
@@ -2369,7 +2396,7 @@ export async function runWidget(
     const legs: DashboardPeriod[] = [];
     // N = 0 com align (nenhum dia útil decorrido no mês da referência):
     // acumulado alinhado é vazio — ativo com zero pernas (gráfico sem dados).
-    if (alignEnabled && (n ?? 0) <= 0) return { legs, n, holidays };
+    if (alignEnabled && (n ?? 0) <= 0) return { legs, n, holidays, refIso: ref, reference };
     for (let i = 0; i < monthCount; i++) {
       const y = fy + Math.floor((fmo - 1 + i) / 12);
       const m = ((fmo - 1 + i) % 12) + 1;
@@ -2398,7 +2425,7 @@ export async function runWidget(
         fieldBySource: period.fieldBySource,
       });
     }
-    return { legs, n, holidays };
+    return { legs, n, holidays, refIso: ref, reference };
   })();
 
   const [rows, cmpRun] = await Promise.all([
@@ -2691,5 +2718,17 @@ export async function runWidget(
     metrics,
     ...(comparisonMeta ? { comparison: comparisonMeta } : {}),
     ...(goalLineMeta ? { goalLine: goalLineMeta } : {}),
+    // Badge "Nº dia útil": N do corte compartilhado das pernas mensais (o
+    // mesmo da goalLine "pace"). Só com align ATIVO e N >= 1 (N=0 = nenhum
+    // dia útil decorrido — gráfico vazio, sem badge).
+    ...(bdAlignCtx && bdAlignCtx.n != null && bdAlignCtx.n >= 1
+      ? {
+          businessDayRef: {
+            n: bdAlignCtx.n,
+            reference: bdAlignCtx.reference,
+            date: bdAlignCtx.refIso,
+          },
+        }
+      : {}),
   };
 }

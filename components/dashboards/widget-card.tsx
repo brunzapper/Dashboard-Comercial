@@ -1,4 +1,6 @@
-// Versão: 2.8 | Data: 20/07/2026
+// Versão: 2.9 | Data: 21/07/2026
+// v2.9 (21/07/2026): badge "Nº dia útil" (WidgetData.businessDayRef) — via
+// PeriodWindowControl ou standalone no mesmo slot (snapshot/align sem janela).
 // v2.8 (20/07/2026): catálogo do editor da Nota via builder ÚNICO
 //   (lib/widgets/agg-catalog.availableAggCatalogInput) — montagem idêntica.
 // Card de um widget no grid: cabeçalho (título + menu "⋮" + alça de arraste no
@@ -129,6 +131,7 @@ import {
   PeriodWindowControl,
   type WidgetPeriodWindowState,
 } from "./period-window-control";
+import { BusinessDayBadge } from "./business-day-badge";
 import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
@@ -937,7 +940,15 @@ export const WidgetCard = memo(function WidgetCard({
             dashboardId={dashboardId}
             widgetId={widget.id}
             state={periodWindow}
+            bdRef={data.businessDayRef}
           />
+        ) : data.businessDayRef ? (
+          // Sem o controle da janela (align direto nos settings, ou viewer de
+          // snapshot — que congela settings e não monta o dropdown), o badge
+          // "Nº dia útil" aparece sozinho no mesmo slot.
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5">
+            <BusinessDayBadge bdRef={data.businessDayRef} />
+          </div>
         ) : null}
         <div ref={contentRef} className="min-h-0 flex-1">
           {isFilter ? (

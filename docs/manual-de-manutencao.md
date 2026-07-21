@@ -1,4 +1,7 @@
-<!-- Versão: 1.8 | Data: 20/07/2026 -->
+<!-- Versão: 1.9 | Data: 21/07/2026 -->
+<!-- v1.9 (21/07/2026): §4.1 — checklist do dia de Brasília (0085): probes de
+     ancoragem/bucket p/ colunas timestamptz do núcleo; par de RPCs agora parte
+     da 0085. -->
 <!-- v1.8 (20/07/2026): §5 — linha "dashboard abre preso em Carregando…"
      (sync inicial do Filtro por campo agora é raso, sem navegação RSC). -->
 <!-- v1.7 (20/07/2026): §4.7/§5 — mocks no SQL: migração 0084 (fonte nos mocks
@@ -99,11 +102,24 @@ npm run build      # o que a Vercel roda no deploy
 
 - [ ] A migração recria **também** `run_widget_query_snapshot` (e
   `_widget_match_expr` ↔ `_widget_match_expr_snap`) **no mesmo arquivo** — parta da
-  0072, que contém o par completo.
+  0085, que contém o par completo.
 - [ ] A regra dos mocks (substring das chaves `bitrix_uf_crm_1743441331` /
   `bitrix_uf_crm_67eacefcccd98`) permanece idêntica nos dois lados **e** em
   `lib/widgets/mock-reuniao.ts`.
 - [ ] Buckets de data continuam batendo com `canonicalBucketKey` no cliente.
+- [ ] Dia de BRASÍLIA preservado (0085): comparações/buckets de coluna
+  `timestamptz` do núcleo seguem ancorados/convertidos (a sessão do banco é
+  UTC — literal naive desloca o dia em 3h). Probes no SQL Editor:
+
+  ```sql
+  show timezone;  -- esperado: UTC (por isso a ancoragem existe)
+  -- bucket: 30/06 22h BRT deve cair em JUNHO
+  select date_trunc('month', public._widget_local_ts('2026-06-30T22:00:00-03:00'::timestamptz));
+  -- limite: 30/06 22h BRT NÃO pode entrar em "julho"
+  select '2026-06-30T22:00:00-03:00'::timestamptz >= '2026-07-01T00:00:00-03:00'::timestamptz; -- false
+  -- texto: prefixo preserva naive e date-only
+  select public._widget_local_ts('2026-07-01T01:00:00'), public._widget_local_ts('2026-07-01');
+  ```
 - [ ] EXECUTE da versão snapshot continua restrito à service role.
 - [ ] Teste manual: um mesmo widget no dashboard e num snapshot recém-refrescado
   mostra os mesmos números (crie um snapshot de teste; "Atualizar agora" no menu ⋮).

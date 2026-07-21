@@ -1,4 +1,8 @@
-<!-- Versão: 1.7 | Data: 20/07/2026 -->
+<!-- Versão: 1.8 | Data: 21/07/2026 -->
+<!-- v1.8 (21/07/2026): 0085 — RPCs de widget no dia de BRASÍLIA (par completo
+     recriado; novo helper `_widget_local_ts` com 2 overloads;
+     `_widget_col_date_expr`/`_widget_unified_expr` recriados;
+     `_widget_safe_ts` vira legado). -->
 <!-- v1.7 (20/07/2026): 0084 (só dados) — `custom_fields.fonte` nos mocks
      Inbound p/ satisfazer o predicado da sub `sqls`. -->
 <!-- v1.6 (20/07/2026): `operations.filter` (0083 — perfil da operação) + nota
@@ -294,16 +298,20 @@ entregas por endpoint: `status` (`pending|delivered|dead`), `attempts`,
 
 | Função | Versão vigente | Papel |
 |---|---|---|
-| `run_widget_query` | **0072** (recriada 17×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget |
-| `run_widget_query_snapshot` | **0072** (0056, 0057, 0072) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
+| `run_widget_query` | **0085** (recriada 18×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget |
+| `run_widget_query_snapshot` | **0085** (0056, 0057, 0072, 0085) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
 
 **Invariante:** toda migração que recriar `run_widget_query` DEVE recriar
 `run_widget_query_snapshot` (e `_widget_match_expr` ↔ `_widget_match_expr_snap`) no
 mesmo arquivo. Ver `arquitetura.md` §5.
 
-Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_expr`,
-`_widget_col_date_expr`, `_widget_unified_date_expr`, `_widget_safe_ts`,
-`_widget_norm_text`, `_widget_safe_numeric`, `_widget_match_expr`(`_snap`),
+Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_expr`
+(0085 — data do núcleo serializa em dia de Brasília), `_widget_col_date_expr`
+(0085 — emite `_widget_local_ts`), `_widget_unified_date_expr`,
+`_widget_local_ts` (0085, 2 overloads: timestamptz → wall time
+America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
+(legado desde a 0085 — sem chamadores nos RPCs), `_widget_norm_text`,
+`_widget_safe_numeric`, `_widget_match_expr`(`_snap`),
 `_widget_wrap_record_types`.
 
 ### 4.2 Demais funções
@@ -427,7 +435,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0069 | records_indexes | Performance: índices de `records` |
 | 0070 | recalc_batch | Performance: `recalc_apply_updates` |
 | 0071 | realtime_publication | Realtime em records/tasks/comments |
-| 0072 | widget_rpc_min_max | RPC (par completo): agregações min/max — **versão vigente** |
+| 0072 | widget_rpc_min_max | RPC (par completo): agregações min/max |
 | 0073 | widget_image_type | visual_type `imagem` |
 | 0074 | webhooks | api_keys, endpoints, outbox, log de entrada; `audit_log.origin='api'` |
 | 0075 | fonte_implementacao_bitrix | `fonte` (SOURCE_ID) curada + `implementacao` vira campo Bitrix (UF_CRM_1778094396888) |
@@ -440,6 +448,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0082 | sub_sources_custom_period_field | CHECK de `sub_sources.default_period_field` aceita também `custom:<field_key>` (campo personalizado de data). Não recria as RPCs de widget |
 | 0083 | operations_filter | `operations.filter` jsonb (FILTROS DE PERFIL da operação — WidgetFilter[]); consumido no server pelo filtro de Operação (vínculo+perfil). Não recria as RPCs |
 | 0084 | mock_fonte_inbound | Só dados: mocks Inbound (0051) ganham `custom_fields.fonte = "Formulário de CRM"` p/ satisfazer o predicado da sub `sqls` (regra 0052 não isenta predicados); Outbound intocados. Não recria as RPCs |
+| 0085 | widget_rpc_brasilia_day | RPC (par completo): dia de BRASÍLIA no read side — bounds do `@period` em coluna do núcleo ancorados com `-03:00`, bucketing/unificados via `_widget_local_ts` (novo helper, 2 overloads) — **versão vigente** |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (21/07/2026): badge "Nº dia útil" (bdRef — WidgetData.businessDayRef)
+// ao lado do toggle quando o alinhamento está ativo.
 // Controle da JANELA DE PERÍODOS do widget (settings.periodWindow): dropdown
 // de meses ("3 meses", "Este trimestre"…) + toggle "dia útil × dia cheio" no
 // próprio card. A seleção persiste COMPARTILHADA entre usuários
@@ -20,9 +22,11 @@ import {
 import {
   PERIOD_WINDOW_LABELS,
   type PeriodWindowKey,
+  type WidgetData,
 } from "@/lib/widgets/types";
 import { savePeriodWindowChoice } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
+import { BusinessDayBadge } from "./business-day-badge";
 
 export interface WidgetPeriodWindowState {
   options: PeriodWindowKey[];
@@ -35,10 +39,15 @@ export function PeriodWindowControl({
   dashboardId,
   widgetId,
   state,
+  bdRef,
 }: {
   dashboardId: string;
   widgetId: string;
   state: WidgetPeriodWindowState;
+  // Referência de dia útil do RESULTADO (WidgetData.businessDayRef) — badge
+  // "Nº dia útil" ao lado do toggle. Server-derived: aparece/atualiza após o
+  // refresh (o spinner de pending cobre o gap do toggle otimista).
+  bdRef?: WidgetData["businessDayRef"] | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -108,6 +117,7 @@ export function PeriodWindowControl({
           {bd ? "Dia útil" : "Dia cheio"}
         </button>
       ) : null}
+      {bd && bdRef ? <BusinessDayBadge bdRef={bdRef} /> : null}
       {pending ? (
         <Loader2 className="text-muted-foreground size-3 animate-spin" />
       ) : null}

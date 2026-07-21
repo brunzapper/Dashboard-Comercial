@@ -1,4 +1,6 @@
-// Versão: 1.9 | Data: 18/07/2026
+// Versão: 1.10 | Data: 21/07/2026
+// v1.10 (21/07/2026): WidgetData.businessDayRef — N de corte do
+// businessDayAlign (compartilhado entre os meses; badge "Nº dia útil").
 // v1.9 (18/07/2026): groupDateFormats estendido à tabela AGREGADA (keys
 //   dim_<n>; só dims de data sem transform "por nome") e
 //   RecordListColumn.unifiedSources — hierarquia de fontes com fallback das
@@ -1165,6 +1167,16 @@ export interface WidgetData {
     mode: "monthly" | "pace";
     color?: string;
     money?: boolean;
+  };
+  // Alinhamento por dia útil ATIVO neste resultado (businessDayAlign): N é o
+  // dia útil de CORTE das pernas mensais — único, compartilhado por todos os
+  // meses comparados (o mesmo N da goalLine "pace"). `date` é o dia (ISO
+  // YYYY-MM-DD) da referência que gerou o N. Metadado de exibição (badge
+  // "Nº dia útil" no card); ausente = align inativo ou N < 1.
+  businessDayRef?: {
+    n: number;
+    reference: "today" | "period_end";
+    date: string;
   };
   // Erro ao computar o widget (RPC/consulta): rows/dimensions/metrics vêm
   // vazios e o card exibe o estado de erro em vez de ficar em branco.

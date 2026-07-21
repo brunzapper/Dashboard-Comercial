@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 20/07/2026
+// Versão: 1.8 | Data: 21/07/2026
+// v1.8 (21/07/2026): dia de Brasília (0085) — o ramo @period ancora bounds de
+// coluna do núcleo (timestamptz) com -03:00 (anchorCoreDateBound); custom
+// (texto) segue naive. Os ops simples já chegam ancorados via resolveFilters.
 // v1.7 (20/07/2026): top-up de mocks das pernas COBERTAS — quando as fontes da
 //   métrica (Metric.sources) já estão dentro das do widget (inclusive widget em
 //   "todas as fontes"), não há fetch extra e a regra dos mocks da EXIBIÇÃO não
@@ -48,7 +51,9 @@ import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
 import { includesMockReuniaoRef } from "./mock-reuniao";
 import {
+  anchorCoreDateBound,
   applyPeriodToFilters,
+  CORE_DATE_COLS,
   PERIOD_FIELD_SENTINEL,
   type DashboardPeriod,
   type PeriodBetweenValue,
@@ -243,9 +248,19 @@ function buildRecordListQuery(
           : CORE_COLS.has(dateCol)
             ? dateCol
             : null;
+        // Coluna do núcleo (timestamptz): bound ancorado no dia de Brasília
+        // (0085) — sem offset o PostgREST casta o literal em UTC e desloca o
+        // limite do dia em 3h. Custom (texto): bounds naive verbatim.
+        const core = CORE_DATE_COLS.has(dateCol);
         const conds = [`record_type.eq.${rt}`];
-        if (col && v.from) conds.push(`${col}.gte.${v.from}`);
-        if (col && v.to) conds.push(`${col}.lte.${v.to}`);
+        if (col && v.from)
+          conds.push(
+            `${col}.gte.${core ? anchorCoreDateBound(v.from, "from") : v.from}`
+          );
+        if (col && v.to)
+          conds.push(
+            `${col}.lte.${core ? anchorCoreDateBound(v.to, "to") : v.to}`
+          );
         groups.push(`and(${conds.join(",")})`);
       }
       if (groups.length > 0) q = q.or(groups.join(","));
