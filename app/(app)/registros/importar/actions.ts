@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { ingestRows } from "@/lib/import/ingest";
 import {
   CORE_IMPORT_COLUMNS,
@@ -95,10 +96,19 @@ export async function prepareImportFields(
   const allKeys = [...new Set(keyed.map((k) => k.key))];
   const { data: existingRows, error: selectError } = await supabase
     .from("field_definitions")
-    .select("field_key, applies_to")
+    .select("field_key, applies_to, source_system")
     .in("field_key", allKeys);
   if (selectError) {
     return { ok: false, message: `Falha ao consultar campos: ${selectError.message}` };
+  }
+  // Chave reservada às colunas núcleo (0086): reutilizá-la gravaria em
+  // custom_fields.<key> à sombra da coluna núcleo homônima.
+  const coreHit = (existingRows ?? []).find((r) => isCoreDef(r));
+  if (coreHit) {
+    return {
+      ok: false,
+      message: `"${coreHit.field_key as string}" é coluna do núcleo — mapeie a coluna do CSV para ela diretamente ou renomeie o campo novo.`,
+    };
   }
   const existingByKey = new Map(
     (existingRows ?? []).map((r) => [r.field_key as string, r])

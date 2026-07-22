@@ -41,6 +41,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import {
   currencyOptionsFrom,
@@ -251,9 +252,13 @@ export default async function DashboardPage({
 
   const widgets = (widgetsData ?? []) as Widget[];
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Linhas core (0086) são overrides das colunas núcleo: entram em
+  // buildAvailableFields (que particiona internamente) e nos guards do /campos,
+  // mas NUNCA nos caminhos que tratam defs como campos de custom_fields.
+  const { custom: customFields, core: coreDefs } = splitCoreDefs(allFields);
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
-  const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
+  const fieldByKeyAll = new Map(customFields.map((f) => [f.field_key, f]));
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
@@ -261,9 +266,14 @@ export default async function DashboardPage({
   // Construtor de widgets respeita o ACL por papel (visible_to_roles): quem edita
   // só escolhe colunas visíveis ao seu papel (admin vê tudo). Assim a RLS
   // afrouxada não deixa um dono não-admin montar widgets com colunas restritas.
+  // Linhas core ficam sempre (papéis não se aplicam a colunas do núcleo) —
+  // sem isso, um core oculto pelo olho REAPARECERIA para não-admin.
   const builderFields = isAdmin
     ? allFields
-    : allFields.filter((f) => hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]));
+    : allFields.filter(
+        (f) =>
+          isCoreDef(f) || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[])
+      );
   const availableForBuilder = isAdmin
     ? available
     : buildAvailableFields(builderFields, correspondences, sources);
@@ -880,7 +890,7 @@ export default async function DashboardPage({
         try {
           const calcKey = w.settings?.calcField;
           const def = calcKey?.startsWith("custom:")
-            ? allFields.find(
+            ? customFields.find(
                 (f) =>
                   f.field_key === calcKey.slice(7) &&
                   f.data_type === "calculado_agg"
@@ -905,7 +915,7 @@ export default async function DashboardPage({
                 ? resolveCurrencyCode(def.currency_code)
                 : null,
             allowNegative: def?.allow_negative !== false,
-            fields: allFields,
+            fields: customFields,
             rates: currencyRates,
             conversionPeriod: conversionPeriodById[w.id],
           });
@@ -933,7 +943,7 @@ export default async function DashboardPage({
                 period: periodByWidget[w.id],
                 correspondences,
                 currencyMode: "auto",
-                fields: allFields,
+                fields: customFields,
                 rates: currencyRates,
                 conversionPeriod: conversionPeriodById[w.id],
               });
@@ -964,7 +974,7 @@ export default async function DashboardPage({
                 period: periodByWidget[w.id],
                 correspondences,
                 currencyMode: "auto",
-                fields: allFields,
+                fields: customFields,
                 rates: currencyRates,
                 conversionPeriod: conversionPeriodById[w.id],
               });
@@ -1010,7 +1020,7 @@ export default async function DashboardPage({
             config,
             periodByWidget[w.id],
             available,
-            allFields,
+            customFields,
             currencyRates,
             conversionPeriodById[w.id],
             {},
@@ -1060,7 +1070,7 @@ export default async function DashboardPage({
               periodByWidget[w.id],
               available,
               sources,
-              allFields
+              customFields
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;

@@ -16,6 +16,7 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   recordCellValue,
   recordRefLabel,
@@ -133,6 +134,8 @@ export async function exportRecordsCsv(
   const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
     (f) =>
       f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
+      !isCoreDef(f) &&
       fieldAppliesToSource(f.applies_to, fonte) &&
       (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
   );

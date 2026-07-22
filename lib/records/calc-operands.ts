@@ -14,6 +14,7 @@
 // por registro (oferecê-lo = null silencioso).
 // Módulo puro (client+server).
 import { CORE_FIELDS } from "@/lib/widgets/fields";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
 import type { Formula } from "@/lib/records/formulas";
@@ -71,6 +72,9 @@ export interface CalcOperandDef {
   label: string;
   data_type: DataType;
   formula?: Formula | null;
+  // Linhas core (0086) chegam junto nos loaders — filtradas na entrada do
+  // catálogo (as colunas núcleo já entram por CORE_FIELDS, nunca como custom:).
+  source_system?: string | null;
 }
 
 export interface PerRecordOperands {
@@ -88,10 +92,11 @@ export interface PerRecordOperands {
  *  widget-builder e o servidor. Refs saem SEM decoração (sourceHint/chips) —
  *  cada sítio decora com o próprio `available` (decorateRefOptions). */
 export function perRecordCalcOperands(
-  fields: CalcOperandDef[],
+  allFields: CalcOperandDef[],
   sources: SourceDef[] = BUILTIN_SOURCES,
   editingKey?: string
 ): PerRecordOperands {
+  const fields = allFields.filter((f) => !isCoreDef(f));
   const customNumeric: CustomNumericField[] = fields
     .filter((f) => NUMERIC_DATA_TYPES.includes(f.data_type))
     .map((f) => ({ field_key: f.field_key, label: f.label }));

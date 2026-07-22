@@ -14,6 +14,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   fieldAppliesToSource,
   isKnownSource,
@@ -158,6 +159,8 @@ export default async function RegistrosPage({
       // 'calculado_agg' não tem valor por registro (é métrica de dashboard) —
       // nunca vira coluna de Registros.
       f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
+      !isCoreDef(f) &&
       fieldAppliesToSource(f.applies_to, fonte, sources) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );

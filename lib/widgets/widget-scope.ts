@@ -19,6 +19,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { SessionInfo } from "@/lib/auth/session";
 import type { FieldDefinition } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
@@ -134,7 +135,10 @@ export async function resolveWidgetViewScope(
     Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 
   // Mapa chave→def p/ operandos com escopo de fonte (widgetQuerySources).
-  const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
+  // Sem linhas core (0086): refs custom:<key> nunca apontam p/ coluna núcleo.
+  const fieldByKeyAll = new Map(
+    allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
 
   // Fontes de COBERTURA do @period pré-sintetizado (invariante 9): fontes do
   // widget ∪ fontes das métricas EFETIVAS. Tabela Livre guarda as métricas

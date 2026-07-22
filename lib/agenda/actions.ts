@@ -15,6 +15,7 @@ import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import { runAgenda } from "./data";
 import type { AgendaData, AgendaSettings } from "./types";
@@ -67,6 +68,8 @@ async function loadContext(
   const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
     (f) =>
       f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca campo custom.
+      !isCoreDef(f) &&
       (!source || fieldAppliesToSource(f.applies_to, source)) &&
       (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
   );

@@ -84,6 +84,9 @@ interface DefRow {
   // applies_to (record_types) — decide sob quais fontes o campo entra nos
   // operandos com escopo (sourceScopedAggOperandRefs).
   applies_to: string[] | null;
+  // Linhas core (0086) ficam na lista (guardas de update/delete as encontram);
+  // os catálogos de operandos as filtram internamente (isCoreDef).
+  source_system: string | null;
 }
 
 async function loadDefRows(
@@ -91,7 +94,7 @@ async function loadDefRows(
 ): Promise<DefRow[]> {
   const { data } = await supabase
     .from("field_definitions")
-    .select("id, field_key, label, data_type, formula, applies_to");
+    .select("id, field_key, label, data_type, formula, applies_to, source_system");
   return (data ?? []).map((d) => ({
     id: d.id as string,
     field_key: d.field_key as string,
@@ -99,6 +102,7 @@ async function loadDefRows(
     data_type: d.data_type as DataType,
     formula: (d.formula as Formula | null) ?? null,
     applies_to: (d.applies_to as string[] | null) ?? null,
+    source_system: (d.source_system as string | null) ?? null,
   }));
 }
 

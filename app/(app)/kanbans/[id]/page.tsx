@@ -17,6 +17,7 @@ import { fieldAppliesToSource } from "@/lib/sources";
 import { resolvePeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
+import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { runKanban } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
@@ -71,8 +72,12 @@ export default async function KanbanPage({
     .eq("show_in_builder", true)
     .order("sort_order", { ascending: true });
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Linhas core (0086) fora da lista de campos custom (edit sheet/colunas do
+  // card leem custom_fields); entram à parte no runKanban (groupDef/labels).
+  const { core: coreDefs } = splitCoreDefs(allFields);
   const fields = allFields.filter(
     (f) =>
+      !isCoreDef(f) &&
       f.data_type !== "calculado_agg" &&
       (!kanban.source || fieldAppliesToSource(f.applies_to, kanban.source)) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
@@ -149,7 +154,9 @@ export default async function KanbanPage({
       supabase,
       kanban,
       period,
-      fields,
+      // Core rows junto: groupDef de coluna núcleo selecao (ex.: pipeline)
+      // ordena as colunas pelas options; recordFieldDef (custom:) as ignora.
+      [...fields, ...coreDefs.values()],
       {
         responsibles: responsibleLabels,
         operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
