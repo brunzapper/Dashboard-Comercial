@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 16/07/2026
+// Versão: 1.4 | Data: 22/07/2026
+// v1.4 (22/07/2026): listFilterOptionCandidates — opções candidatas p/ o
+//   picker "Opções visíveis" do construtor (filtro_campo/filtros rápidos),
+//   espelhando as consultas de opções da page (responsáveis/operações ativos;
+//   etapas distintas via RPC existente). Nenhum RPC novo.
 // v1.3 (16/07/2026): kanbans dedicados (dashboards.kind 'kanban', 0062) —
 //   createBoard (seed de settings.kanban), updateBoardSettings (revalida
 //   /kanbans/[id]) e listWidgetLinkTargets filtra kind 'dashboard'.
@@ -653,6 +657,71 @@ export async function saveQuickFilterValue(
   }
   revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
+}
+
+// Opções candidatas p/ o picker "Opções visíveis" do construtor (blacklist
+// hiddenOptions do filtro_campo/filtros rápidos). Espelha as consultas de
+// opções da page: responsáveis/operações ATIVOS; etapas = pares distintos
+// record_type × stage do RPC run_widget_query existente, recortados pelas
+// fontes do widget quando informadas (subs resolvem para o record_type da
+// pai via catálogo). Chamado lazy, só quando o autor abre o picker.
+export async function listFilterOptionCandidates(
+  kind: "responsible" | "operation" | "stage",
+  sources?: SourceKey[]
+): Promise<{ value: string; label: string }[]> {
+  const session = await getSessionInfo();
+  if (!session) return [];
+  const supabase = await createClient();
+  if (kind === "responsible") {
+    const { data } = await supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .eq("active", true)
+      .order("display_name");
+    return (data ?? []).map((r) => ({
+      value: r.id as string,
+      label: (r.display_name as string) ?? "—",
+    }));
+  }
+  if (kind === "operation") {
+    const { data } = await supabase
+      .from("operations")
+      .select("id, name")
+      .eq("active", true)
+      .order("name");
+    return (data ?? []).map((o) => ({
+      value: o.id as string,
+      label: (o.name as string) ?? "—",
+    }));
+  }
+  const [{ data }, catalog] = await Promise.all([
+    supabase.rpc("run_widget_query", {
+      p_source: "records",
+      p_dimensions: [{ field: "record_type" }, { field: "stage" }],
+      p_metrics: [],
+      p_filters: [],
+      p_correspondences: {},
+    }),
+    loadSources(supabase),
+  ]);
+  const wanted =
+    sources && sources.length > 0
+      ? new Set(sources.map((s) => recordTypeOf(s, catalog)))
+      : null;
+  const set = new Set<string>();
+  for (const row of (Array.isArray(data) ? data : []) as Record<
+    string,
+    unknown
+  >[]) {
+    const rt = String(row.dim_1 ?? "");
+    const st = row.dim_2 == null ? "" : String(row.dim_2);
+    if (!rt || !st) continue;
+    if (wanted && !wanted.has(rt)) continue;
+    set.add(st);
+  }
+  return [...set]
+    .sort((a, b) => a.localeCompare(b, "pt-BR"))
+    .map((s) => ({ value: s, label: s }));
 }
 
 // Grava a seleção da JANELA DE PERÍODOS do widget (settings.periodWindow —

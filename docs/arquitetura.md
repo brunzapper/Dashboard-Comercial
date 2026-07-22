@@ -431,6 +431,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   do card e a janela de períodos (`__qf__`/`__pw__` em
   `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
   campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
+- **Opções visíveis dos dropdowns de filtro (22/07/2026):** `hiddenOptions`
+  (blacklist por entry em `FieldFilterEntry`/`QuickFilterEntry`,
+  `widgets.settings` jsonb — sem migração) oculta opções dos dropdowns do
+  Filtro por campo (responsável/operação/etapa/campos `selecao`, inclusive a
+  lista do op `in`) e dos filtros rápidos de responsável/operação (buckets de
+  data ficam de fora — `cleanQuickFilters` descarta a chave p/ outros campos).
+  SÓ exibição: nunca entra na consulta ("— todos —" segue sem filtro); valor
+  selecionado que ficou oculto SEGUE aplicando e permanece na lista (conjunto
+  `keep`) até o usuário trocar; opção nova (novo responsável, options do
+  pipeline reescritas no sync) entra visível por padrão. A filtragem é no
+  CLIENTE (`lib/widgets/hidden-options.ts`, aplicada em
+  `field-filter-controls`/`quick-filters-bar` DEPOIS da decisão dropdown×texto
+  pela lista crua — "tudo oculto" nunca degrada p/ input livre) — o viewer de
+  snapshot herda de graça (settings congelados em `cfg.widgets`). O picker
+  "Opções visíveis" do construtor (`VisibleOptionsPicker`,
+  widget-builder-rows) carrega as candidatas lazy: `selecao` sai das defs
+  locais; responsável/operação/etapa via `listFilterOptionCandidates`
+  (dashboards/actions — espelha as consultas de opções da page, RPC existente;
+  nenhum RPC novo); valores da blacklist que sumiram da lista aparecem como
+  "(valor antigo)" p/ limpeza; trocar o campo/op zera a blacklist.
 - **Presets de dashboard** (`lib/presets/definitions.ts` + `applyPreset`/
   `generatePresets` em `app/(app)/dashboards/actions.ts`, motor v2 20/07/2026):
   `PresetDashboard` declara settings completos (abas, periodBar/fieldBySource,

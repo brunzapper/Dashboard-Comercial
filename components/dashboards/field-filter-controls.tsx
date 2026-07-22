@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 20/07/2026
+// Versão: 1.3 | Data: 22/07/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -12,6 +12,9 @@
 // navegar aqui recomputava o dashboard à toa e o overlay "Carregando…" da
 // montagem ficava preso sob rajadas de router.refresh() do realtime. `run`/
 // overlay + persistência só quando o usuário muda algo de fato.
+// v1.3: entry.hiddenOptions oculta opções do dropdown/checklist (só exibição —
+// visibleOptions com `keep` = valor selecionado; a decisão dropdown×texto segue
+// pela lista CRUA, então "tudo oculto" nunca degrada para input livre).
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -31,6 +34,7 @@ import type {
   WidgetFilter,
 } from "@/lib/widgets/types";
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
+import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
 import { saveLastFieldFilter } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
@@ -206,6 +210,7 @@ export function FieldFilterControls({
             const chosen = new Set(
               (values[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
             );
+            const shown = visibleOptions(opts, entry.hiddenOptions, chosen);
             const toggle = (v: string) => {
               const next = new Set(chosen);
               if (next.has(v)) next.delete(v);
@@ -216,27 +221,38 @@ export function FieldFilterControls({
               <div key={i} className="flex flex-col gap-1">
                 <Label className="text-xs">{label}</Label>
                 <div className="flex max-h-40 flex-col gap-1 overflow-auto rounded-md border p-2">
-                  {opts.map((o) => (
-                    <label
-                      key={o.value}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <Checkbox
-                        checked={chosen.has(o.value)}
-                        onCheckedChange={() => toggle(o.value)}
-                      />
-                      <span className="truncate">{o.label}</span>
-                    </label>
-                  ))}
+                  {shown.length === 0 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Nenhuma opção visível.
+                    </p>
+                  ) : (
+                    shown.map((o) => (
+                      <label
+                        key={o.value}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={chosen.has(o.value)}
+                          onCheckedChange={() => toggle(o.value)}
+                        />
+                        <span className="truncate">{o.label}</span>
+                      </label>
+                    ))
+                  )}
                 </div>
               </div>
             );
           }
+          const shown = visibleOptions(
+            opts,
+            entry.hiddenOptions,
+            values[i] ? [values[i]] : []
+          );
           return (
             <div key={i} className="flex flex-col gap-1">
               <Label className="text-xs">{label}</Label>
               <Combobox
-                options={[{ value: "", label: "— todos —" }, ...opts]}
+                options={[{ value: "", label: "— todos —" }, ...shown]}
                 value={values[i] ?? ""}
                 onValueChange={(v) => setValue(i, v)}
                 placeholder="— todos —"

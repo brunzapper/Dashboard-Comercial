@@ -1,4 +1,10 @@
-// Versão: 1.18 | Data: 20/07/2026
+// Versão: 1.19 | Data: 22/07/2026
+// v1.19 (22/07/2026): picker "Opções visíveis" (blacklist hiddenOptions) nas
+//   linhas do Filtro por campo (campos com dropdown: responsável/operação/
+//   etapa/selecao) e dos filtros rápidos de responsável/operação — listas
+//   buscadas lazy (listFilterOptionCandidates; selecao sai das defs locais);
+//   poda no save (entry sem ocultas não grava a chave) e cleanQuickFilters
+//   propaga hiddenOptions SÓ p/ responsável/operação.
 // v1.18 (20/07/2026): receita "Taxa de conversão" no widget calculado e na
 //   métrica ad-hoc; prévia agregada (previewAggregateFormula, opt-in) nos
 //   editores de fórmula; "Salvar como campo reutilizável…" promove a métrica
@@ -164,9 +170,11 @@ import {
   FILTER_OPS,
   fieldOptionLabel,
   fieldOptionTitle,
+  opHasNoValue,
   sourceChips,
   toFieldOptions,
 } from "@/lib/widgets/filter-ops";
+import { splitCoreDefs } from "@/lib/records/core-defs";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { filterTargetSources } from "@/lib/widgets/filter-sources";
 import {
@@ -187,6 +195,7 @@ import {
   DimensionRow,
   FilterRow,
   MetricRow,
+  VisibleOptionsPicker,
 } from "@/components/dashboards/widget-builder-rows";
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
@@ -196,6 +205,7 @@ import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
 import { isLabelTransform } from "@/lib/widgets/date-buckets";
 import {
   createWidget,
+  listFilterOptionCandidates,
   updateWidget,
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
@@ -476,6 +486,15 @@ export function WidgetBuilder({
           if (e.transform === "week_month") out.weekMode = e.weekMode;
         }
         if (e.label?.trim()) out.label = e.label.trim();
+        // Blacklist de opções ocultas: SÓ p/ responsável/operação (escopo do
+        // picker) — este rebuild é whitelist de chaves, então sem esta linha a
+        // config se perderia em todo save.
+        if (
+          (e.field === "responsible_id" || e.field === "operation_id") &&
+          e.hiddenOptions &&
+          e.hiddenOptions.length > 0
+        )
+          out.hiddenOptions = e.hiddenOptions.filter(Boolean);
         return out;
       });
   // Tipos que exibem filtros rápidos: tabelas, gráficos, KPI e calculado.
@@ -754,6 +773,58 @@ export function WidgetBuilder({
     );
   }
 
+  // Fonte da lista de opções candidatas do picker "Opções visíveis" (blacklist
+  // hiddenOptions). Espelha a precedência da page ao montar filterOptionsById:
+  // responsável/operação/etapa explícitos (busca no servidor, lazy); senão a
+  // def EFETIVA 'selecao' com options — core via override 0086 (ex.: pipeline;
+  // ref = nome cru da coluna, nunca custom:) ou custom. Campo sem lista
+  // (datas, unified:, match:, texto livre) → null (sem picker).
+  const fieldDefSplit = useMemo(() => splitCoreDefs(fields), [fields]);
+  const customDefsByKey = useMemo(
+    () => new Map(fieldDefSplit.custom.map((f) => [f.field_key, f])),
+    [fieldDefSplit]
+  );
+  type OptionCandidatesSource =
+    | { kind: "responsible" | "operation" | "stage" }
+    | { kind: "static"; options: { value: string; label: string }[] };
+  function optionSourceFor(ref: string): OptionCandidatesSource | null {
+    if (ref === "responsible_id") return { kind: "responsible" };
+    if (ref === "operation_id") return { kind: "operation" };
+    if (ref === "stage") return { kind: "stage" };
+    const def = ref.startsWith("custom:")
+      ? customDefsByKey.get(ref.slice("custom:".length))
+      : fieldDefSplit.core.get(ref);
+    if (def?.data_type !== "selecao") return null;
+    const opts = def.options ?? [];
+    if (opts.length === 0) return null;
+    return {
+      kind: "static",
+      options: opts.map((o) => ({ value: o, label: o })),
+    };
+  }
+  // Cache das listas buscadas no servidor (por render do builder): o picker só
+  // dispara a action no primeiro open; etapas variam com as fontes marcadas.
+  const optionCandidatesCache = useRef(
+    new Map<string, Promise<{ value: string; label: string }[]>>()
+  );
+  const loadOptionCandidates =
+    (src: OptionCandidatesSource) =>
+    (): Promise<{ value: string; label: string }[]> => {
+      if (src.kind === "static") return Promise.resolve(src.options);
+      const key =
+        src.kind === "stage"
+          ? `stage:${[...sources].sort().join(",")}`
+          : src.kind;
+      const cached = optionCandidatesCache.current.get(key);
+      if (cached) return cached;
+      const p = listFilterOptionCandidates(
+        src.kind,
+        src.kind === "stage" ? sources : undefined
+      );
+      optionCandidatesCache.current.set(key, p);
+      return p;
+    };
+
   const numericFields = available.filter((f) => f.isNumeric);
 
   // Catálogo de fontes (data_sources) + rótulos de exibição (Configurações →
@@ -993,6 +1064,8 @@ export function WidgetBuilder({
                     // Campo não-data não tem formato; data nasce no padrão.
                     transform: undefined,
                     weekMode: undefined,
+                    // Domínio de valores mudou — blacklist de opções zera.
+                    hiddenOptions: undefined,
                   })
                 }
                 aria-label="Campo do filtro rápido"
@@ -1048,6 +1121,20 @@ export function WidgetBuilder({
               }`}
               aria-label="Rótulo do filtro rápido"
             />
+            {e.field === "responsible_id" || e.field === "operation_id" ? (
+              <VisibleOptionsPicker
+                hidden={e.hiddenOptions ?? []}
+                onChange={(next) =>
+                  updateQuickFilter(i, {
+                    hiddenOptions: next.length ? next : undefined,
+                  })
+                }
+                load={loadOptionCandidates({
+                  kind:
+                    e.field === "responsible_id" ? "responsible" : "operation",
+                })}
+              />
+            ) : null}
           </div>
         );
       })}
@@ -1333,7 +1420,15 @@ export function WidgetBuilder({
     // desmarcados. Sem dimensões/métricas/filtros próprios.
     if (visualType === "filtro_campo") {
       const settings: FieldFilterSettings = {
-        fields: filterFields.filter((f) => f.field),
+        // Entry sem opções ocultas não grava a chave (settings enxutos).
+        fields: filterFields
+          .filter((f) => f.field)
+          .map((f) => {
+            const out: FieldFilterEntry = { ...f };
+            if (!out.hiddenOptions || out.hiddenOptions.length === 0)
+              delete out.hiddenOptions;
+            return out;
+          }),
         searchFields: searchFieldRows.filter(Boolean),
         excludedTargets,
       };
@@ -1995,45 +2090,73 @@ export function WidgetBuilder({
                   Cada campo vira um controle no widget; o valor é digitado na
                   visualização.
                 </p>
-                {filterFields.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Combobox
-                      className="flex-1"
-                      options={rpcFieldOptions}
-                      chips={fieldSourceChips}
-                      value={f.field}
-                      placeholder="— campo —"
-                      onValueChange={(field) => {
-                        const next = [...filterFields];
-                        next[i] = { ...f, field };
-                        setFilterFields(next);
-                      }}
-                      aria-label="Campo filtrável"
-                    />
-                    <Combobox
-                      className="w-28 shrink-0"
-                      searchable={false}
-                      options={FILTER_OP_OPTIONS}
-                      value={f.op ?? "eq"}
-                      onValueChange={(op) => {
-                        const next = [...filterFields];
-                        next[i] = { ...f, op: op as FilterOp };
-                        setFilterFields(next);
-                      }}
-                      aria-label="Operador"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setFilterFields(filterFields.filter((_, j) => j !== i))
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))}
+                {filterFields.map((f, i) => {
+                  // Picker de opções visíveis: só p/ campo com dropdown de
+                  // opções e operador com valor (o domínio muda com o campo —
+                  // trocar campo/op p/ vazio zera a blacklist).
+                  const optSrc = opHasNoValue(f.op ?? "eq")
+                    ? null
+                    : optionSourceFor(f.field);
+                  return (
+                    <div key={i} className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <Combobox
+                          className="flex-1"
+                          options={rpcFieldOptions}
+                          chips={fieldSourceChips}
+                          value={f.field}
+                          placeholder="— campo —"
+                          onValueChange={(field) => {
+                            const next = [...filterFields];
+                            next[i] = { ...f, field, hiddenOptions: undefined };
+                            setFilterFields(next);
+                          }}
+                          aria-label="Campo filtrável"
+                        />
+                        <Combobox
+                          className="w-28 shrink-0"
+                          searchable={false}
+                          options={FILTER_OP_OPTIONS}
+                          value={f.op ?? "eq"}
+                          onValueChange={(op) => {
+                            const next = [...filterFields];
+                            next[i] = { ...f, op: op as FilterOp };
+                            if (opHasNoValue(op as FilterOp))
+                              next[i].hiddenOptions = undefined;
+                            setFilterFields(next);
+                          }}
+                          aria-label="Operador"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            setFilterFields(
+                              filterFields.filter((_, j) => j !== i)
+                            )
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                      {optSrc ? (
+                        <VisibleOptionsPicker
+                          hidden={f.hiddenOptions ?? []}
+                          onChange={(next) => {
+                            const rows = [...filterFields];
+                            rows[i] = {
+                              ...f,
+                              hiddenOptions: next.length ? next : undefined,
+                            };
+                            setFilterFields(rows);
+                          }}
+                          load={loadOptionCandidates(optSrc)}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="flex flex-col gap-2 border-t pt-4">
