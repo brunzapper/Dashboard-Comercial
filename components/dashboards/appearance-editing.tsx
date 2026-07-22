@@ -23,7 +23,9 @@ import {
   AlignLeft,
   AlignRight,
   ArrowDownAZ,
+  ArrowDownWideNarrow,
   ArrowUpAZ,
+  ArrowUpNarrowWide,
   CalendarDays,
   Check,
   GripVertical,
@@ -161,6 +163,11 @@ export function ContextMenu({
   ordering?: {
     onAsc: () => void;
     onDesc: () => void;
+    // Ordenação dinâmica pelo VALOR da métrica (chips de categoria; a tabela
+    // ordena pela própria coluna e não usa estes). Presentes, os rótulos de
+    // asc/desc ganham "(rótulo)" p/ desambiguar.
+    onValueDesc?: () => void;
+    onValueAsc?: () => void;
     onByColor?: () => void;
   };
   coloring?: {
@@ -185,11 +192,21 @@ export function ContextMenu({
         <>
           <p className="text-muted-foreground px-2 pb-1 text-xs">Ordem</p>
           <MenuBtn onClick={ordering.onAsc}>
-            <ArrowUpAZ /> Crescente
+            <ArrowUpAZ /> {ordering.onValueDesc ? "Crescente (rótulo)" : "Crescente"}
           </MenuBtn>
           <MenuBtn onClick={ordering.onDesc}>
-            <ArrowDownAZ /> Decrescente
+            <ArrowDownAZ /> {ordering.onValueDesc ? "Decrescente (rótulo)" : "Decrescente"}
           </MenuBtn>
+          {ordering.onValueDesc ? (
+            <MenuBtn onClick={ordering.onValueDesc}>
+              <ArrowDownWideNarrow /> Maior → menor
+            </MenuBtn>
+          ) : null}
+          {ordering.onValueAsc ? (
+            <MenuBtn onClick={ordering.onValueAsc}>
+              <ArrowUpNarrowWide /> Menor → maior
+            </MenuBtn>
+          ) : null}
           {ordering.onByColor ? (
             <MenuBtn onClick={ordering.onByColor}>
               <Palette /> Por cor
@@ -394,10 +411,14 @@ export function CategoryEditor({
   names,
   appearance,
   onChange,
+  allowValueSort = false,
 }: {
   names: string[];
   appearance: import("@/lib/widgets/types").AppearanceSettings;
   onChange: (a: import("@/lib/widgets/types").AppearanceSettings) => void;
+  // Ordenação dinâmica por valor (categorySort.by = "value"): oferecida só em
+  // eixo NÃO cronológico — série temporal segue cronológica por padrão.
+  allowValueSort?: boolean;
 }) {
   const [drag, setDrag] = useState<string | null>(null);
   const [menu, setMenu] = useState<
@@ -463,6 +484,27 @@ export function CategoryEditor({
               onChange({ ...appearance, categorySort: { dir: "desc" }, categoryOrder: undefined });
               setMenu(null);
             },
+            // Por valor (dinâmica — se ajusta aos dados): métrica default = 1ª.
+            onValueDesc: allowValueSort
+              ? () => {
+                  onChange({
+                    ...appearance,
+                    categorySort: { dir: "desc", by: "value" },
+                    categoryOrder: undefined,
+                  });
+                  setMenu(null);
+                }
+              : undefined,
+            onValueAsc: allowValueSort
+              ? () => {
+                  onChange({
+                    ...appearance,
+                    categorySort: { dir: "asc", by: "value" },
+                    categoryOrder: undefined,
+                  });
+                  setMenu(null);
+                }
+              : undefined,
             onByColor: canByColor
               ? () => setMenu({ kind: "colorOrder", x: menu.x, y: menu.y })
               : undefined,

@@ -32,13 +32,26 @@ export function ComparisonSection({
   value,
   onChange,
   visualType,
+  excludeWindowBases,
 }: {
   value: ComparisonSettings;
   onChange: (v: ComparisonSettings) => void;
   visualType: VisualType;
+  /** Card de fórmula: escalar único não comporta média/mediana por bucket. */
+  excludeWindowBases?: boolean;
 }) {
   const patch = (p: Partial<ComparisonSettings>) => onChange({ ...value, ...p });
-  const base = value.base ?? "previous_period";
+  const bases = excludeWindowBases
+    ? BASES.filter((b) => b !== "window_avg" && b !== "window_median")
+    : BASES;
+  const savedBase = value.base ?? "previous_period";
+  // Base de janela salva num contexto que não a suporta: exibe (e regrava ao
+  // tocar) como período anterior.
+  const base =
+    excludeWindowBases &&
+    (savedBase === "window_avg" || savedBase === "window_median")
+      ? "previous_period"
+      : savedBase;
   const isWindow = base === "window_avg" || base === "window_median";
   const isTable = visualType === "tabela";
   const isChart =
@@ -80,7 +93,7 @@ export function ComparisonSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {BASES.map((b) => (
+                {bases.map((b) => (
                   <SelectItem key={b} value={b}>
                     {COMPARISON_BASE_LABELS[b]}
                   </SelectItem>

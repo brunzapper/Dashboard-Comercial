@@ -1,4 +1,16 @@
-<!-- Versão: 1.15 | Data: 22/07/2026 -->
+<!-- Versão: 1.16 | Data: 22/07/2026 -->
+<!-- v1.16 (22/07/2026): (a) comparação nos Cards de FÓRMULA (§4.9) — o
+     runCardWidget roda a mesma fórmula no range deslocado (comparisonSpec,
+     inclusive previous_period_bd com feriados; bases de janela ficam de fora
+     — escalar único) e anexa WidgetData.comparison + card.value/cmpValue p/ o
+     VariationBadge; RPCs intocados; snapshot herda (mesmo runCardWidget +
+     PASSTHROUGH de feriados). (b) ordenação DINÂMICA por valor
+     (categorySort.by/metric — barra/pizza/funil; helper único orderCategories;
+     eixo cronológico não oferece; "Outros" fica no fim) e colorByCategory
+     (barra de série única colore por índice da paleta; off por padrão).
+     (c) Preset Inbound v5: cards de SAL removidos (sub `sals` fica),
+     comparação em TODOS os cards, cores da marca como dados de aparência +
+     paleta nomeada "inbound" (validada p/ contraste/CVD). -->
 <!-- v1.15 (22/07/2026): linhas core de field_definitions (0086 — invariante 13:
      overrides das colunas núcleo, split em lib/records/core-defs.ts) e nota de
      terminologia "Base" (= fonte de dados do sistema, na UI). -->
@@ -435,15 +447,23 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   existentes NUNCA são tocados. UI: **Configurações → Presets**
   (`configuracoes/presets/page.tsx` + `presets-manager.tsx`) — status por
   preset (marcador `settings.preset`) e botões Gerar/Atualizar (por preset e
-  global). **Preset "Inbound"** (`lib/presets/inbound.ts`): porta as abas
-  inbound do dashboard legado de pré-vendas — 7 sub-fontes com data própria
-  (SQLs por Data Reunião aciona os mocks 0052), campo calculado
-  `mrr_contrato`, correspondências `data_ref`/`fonte_venda`/`mrr_venda` e 22
-  widgets (KPIs com `previous_period_bd`, SQL total/% de conversão via Card
-  fórmula com operandos escopados, Mês x Mês com `periodWindow` (dropdown de
-  janela, padrão 6 meses) + `businessDayAlign` + `goalLine` métrica `sql` em
-  modo pace, coorte via dimensão `match:`).
-  Pré-requisitos de DADO no runbook (manual §4.7).
+  global). **Preset "Inbound"** (`lib/presets/inbound.ts`, v5 21/07/2026):
+  porta as abas inbound do dashboard legado de pré-vendas — 7 sub-fontes com
+  data própria (SQLs por Data Reunião aciona os mocks 0052; a sub `sals`
+  segue existindo SEM cards desde a v5), campo calculado `mrr_contrato`,
+  correspondências `data_ref`/`fonte_venda`/`mrr_venda` e 20 widgets (TODOS
+  os cards com badge `previous_period_bd` — inclusive os de fórmula e o de
+  razão, ver §4.9; SQL total/% de conversão via Card fórmula com operandos
+  escopados, Mês x Mês com `periodWindow` (dropdown de janela, padrão 6
+  meses) + `businessDayAlign` + `goalLine` métrica `sql` em modo pace, coorte
+  via dimensão `match:`). Desde a v5 a identidade VISUAL é dado do preset:
+  `settings.background` cinza `#E9ECEF`, faixa `appearance.kpi.accent` roxa
+  `#A98AC0` nos cards, `seriesColors` roxo/verde/âmbar nos gráficos e paleta
+  nomeada `inbound` (`lib/widgets/palettes.ts` — matizes da marca
+  aprofundados, validados p/ contraste/CVD) nas barras `colorByCategory` e na
+  pizza. ATENÇÃO: o update por `presetKey` sobrescreve o `settings` INTEIRO
+  do widget gerido — ajustes manuais de aparência em widgets do preset se
+  perdem no re-apply. Pré-requisitos de DADO no runbook (manual §4.7).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -773,6 +793,35 @@ invariantes 9/10).
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto
   (feriados + hoje) chega por parâmetro opcional; sem contexto (chamador
   antigo, ex.: widget calculado) degrada para `previous_period`.
+- **Comparação nos Cards de FÓRMULA** (21/07/2026, `lib/widgets/card.ts`):
+  com `settings.comparison` ativa, o `runCardWidget` roda a MESMA
+  `runCalculatedWidget` uma segunda vez com o período deslocado pelo
+  `comparisonSpec` (mesmo padrão do `runComparison` do engine — operandos
+  escopados rejanelam pela data da própria sub; `previous_period_bd` carrega
+  feriados como o engine, com a mesma degradação) e devolve
+  `WidgetData.comparison` + `card.value/cmpValue/cmpValueText/currency` p/ o
+  `VariationBadge` do chart. Bases de JANELA (`window_avg`/`window_median`)
+  ficam DE FORA por design (o card é um escalar único e fórmulas típicas são
+  razões — intensivas; o builder as oculta via `excludeWindowBases`); modo
+  `record` segue sem comparação (seção oculta no builder); `topn`/`list` já
+  herdavam `__cmp` via `runWidget`. RPCs intocados; o viewer de snapshot herda
+  (mesmo `runCardWidget`; feriados AO VIVO por `PASSTHROUGH_TABLES`). As
+  funções `ANTERIOR`/`VARPCT`/`VARABS` seguem um mecanismo SEPARADO, limitado
+  a `previous_period`/`previous_year` (formula-metric.ts).
+- **Ordenação dinâmica por valor + cor por categoria** (21/07/2026, client):
+  `AppearanceSettings.categorySort` ganha `by: "label" | "value"` (ausente =
+  rótulo, compat) e `metric` (chave `metric_<n>`; ausente = 1ª) — aplicado
+  pelo helper ÚNICO `orderCategories` (`lib/widgets/appearance.ts`, delega a
+  `sortRows`) no pipeline de barra/linha E nas fatias de pizza/funil (após o
+  `topWithOther`; o sheet de aparência usa o MESMO helper p/ os índices de
+  `sliceColors` baterem; "Outros" fica no fim do sort por valor). Eixo
+  CRONOLÓGICO (`isChronoDim` na 1ª dimensão) não oferece as opções na UI
+  (chips e sheet) — o default segue cronológico; sort salvo explícito ainda é
+  honrado. `colorByCategory` (barra de SÉRIE ÚNICA) colore cada barra pelo
+  índice na paleta do widget (`appearance.palette`, mesmo vocabulário
+  `PALETTES` da pizza) — `categoryColors` manual e formatação condicional
+  vencem; OFF por padrão (gráficos existentes não repintam). Tudo
+  client-side em `widget-chart.tsx` — snapshots herdam de graça.
 - **Linha de meta** (`WidgetSettings.goalLine`): o engine anexa `row.__goal`
   por bucket mensal ANTES da rotulagem, via `resolveGoal` (mesmo roll-up do
   KPI meta), e `WidgetData.goalLine` leva o metadado de exibição. Modo

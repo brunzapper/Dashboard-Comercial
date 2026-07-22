@@ -782,8 +782,25 @@ export interface AppearanceSettings {
   // Cor por categoria (barra, série única), chaveada pelo NOME da categoria
   // (sobrevive à reordenação): fill = barra, text = rótulo de dados.
   categoryColors?: Record<string, ColorPair>;
+  // Colorir barras por categoria (21/07/2026, série única): cada barra pega a
+  // cor do seu índice na paleta do widget (`palette`, mesmo vocabulário
+  // PALETTES da pizza) — distingue barras de fontes/categorias diferentes.
+  // OFF por padrão (gráficos existentes não repintam); categoryColors manual e
+  // formatação condicional continuam vencendo.
+  colorByCategory?: boolean;
   categoryOrder?: string[]; // ordem manual das categorias (eixo X)
-  categorySort?: { dir: TableSortDir; colorOrder?: string[] };
+  // Ordenação dinâmica das categorias (21/07/2026): `by` ausente = "label"
+  // (compat com salvos — ordena pelo rótulo); "value" ordena pelo VALOR da
+  // métrica (`metric` = chave metric_<n>; ausente = 1ª métrica), se ajustando
+  // aos dados a cada consulta. Vale p/ barra/barra_horizontal/linha e pizza/
+  // funil (fatias); dir "color" ignora `by`. Eixos cronológicos seguem
+  // cronológicos por padrão (a UI não oferece "por valor" neles).
+  categorySort?: {
+    dir: TableSortDir;
+    by?: "label" | "value";
+    metric?: string;
+    colorOrder?: string[];
+  };
   // Top-N de categorias (20/07/2026): mantém as N maiores pela 1ª métrica e,
   // opcionalmente, agrega o resto numa categoria sintética "Outros" (barra,
   // barra horizontal, pizza e funil; pizza/funil sem config usam o teto padrão
@@ -1146,8 +1163,18 @@ export interface WidgetData {
   kpi?: KpiResult; // preenchido só quando o KPI tem settings (meta/razão)
   // Modos novos do Card (lib/widgets/card.ts): "record"/"formula" trazem o
   // texto pronto; "topn"/"list" usam as próprias rows (rótulo + métrica) já
-  // ordenadas/cortadas no servidor.
-  card?: { mode: CardMode; valueText?: string; subText?: string };
+  // ordenadas/cortadas no servidor. No modo formula com comparação ativa,
+  // value/cmpValue alimentam o VariationBadge (cmpValueText = valor comparado
+  // formatado p/ showBaseValue; currency = moeda do resultado p/ o fmtAbs).
+  card?: {
+    mode: CardMode;
+    valueText?: string;
+    subText?: string;
+    value?: number | null;
+    cmpValue?: number | null;
+    cmpValueText?: string;
+    currency?: string | null;
+  };
   // Comparação com período anterior ATIVA neste resultado: range consultado +
   // rótulo pronto ("vs. período anterior") + a config de exibição. Ausente =
   // sem comparação (desligada, "todo o período" ou base indisponível) — os

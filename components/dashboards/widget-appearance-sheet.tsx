@@ -45,7 +45,12 @@ import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-s
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
-import { recordListMetricKey, topWithOther } from "@/lib/widgets/appearance";
+import {
+  orderCategories,
+  recordListMetricKey,
+  topWithOther,
+} from "@/lib/widgets/appearance";
+import { isChronoDim } from "@/lib/widgets/comparison";
 import { AGG_LABELS } from "@/lib/widgets/types";
 import type { KanbanAppearance } from "@/lib/kanban/types";
 import { PALETTES } from "@/lib/widgets/palettes";
@@ -100,10 +105,24 @@ export function WidgetAppearanceSheet({
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
-  const slices =
+  // Fatias na MESMA ordem do chart (orderCategories compartilhado) — senão os
+  // índices de sliceColors apontariam p/ fatias trocadas.
+  const slicesBase =
     isPie && dimKey && metrics[0]
       ? topWithOther(data.rows, dimKey, metrics[0].key, ap.categoryLimit)
       : [];
+  const slices =
+    ap.categorySort && ap.categorySort.dir !== "color"
+      ? (orderCategories(slicesBase, ap.categorySort, {
+          dimKey: "name",
+          valueKey: "value",
+        }) as typeof slicesBase)
+      : slicesBase;
+  // Eixo cronológico (1ª dimensão com transform de data): segue cronológico —
+  // a UI não oferece ordenação por valor (sort salvo explícito ainda vale).
+  const dimChrono = Boolean(
+    widget.dimensions?.[0] && isChronoDim(widget.dimensions[0])
+  );
 
   // Alvos da formatação condicional (ver lib/widgets/conditional.ts): tabela
   // agregada/gráficos usam as chaves de data (dim_n/metric_n, + Δ quando a
@@ -185,6 +204,42 @@ export function WidgetAppearanceSheet({
     });
   const patchTable = (p: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     setAp((prev) => ({ ...prev, table: { ...prev.table, ...p } }));
+
+  // Ordenação das categorias/fatias (categorySort) como valor único do select.
+  // "Por cor" só é criada nos chips (janela "Por cor") — aqui aparece como
+  // opção corrente e é desfeita ao escolher outra.
+  const sortChoice = !ap.categorySort
+    ? "none"
+    : ap.categorySort.dir === "color"
+      ? "color"
+      : `${ap.categorySort.by === "value" ? "value" : "label"}_${ap.categorySort.dir}`;
+  const setSortChoice = (v: string) => {
+    if (v === "color") return;
+    if (v === "none") {
+      patch({ categorySort: undefined });
+      return;
+    }
+    const [by, dir] = v.split("_") as ["label" | "value", "asc" | "desc"];
+    // Mutuamente exclusivo com a ordem manual (mesma regra dos chips).
+    patch({
+      categorySort: {
+        dir,
+        by,
+        metric: by === "value" ? ap.categorySort?.metric : undefined,
+      },
+      categoryOrder: undefined,
+    });
+  };
+  const sortOptions = [
+    { value: "none", label: "Padrão (sem ordenação)" },
+    { value: "label_asc", label: "Crescente (A→Z)" },
+    { value: "label_desc", label: "Decrescente (Z→A)" },
+    { value: "value_desc", label: "Maior → menor (valor)" },
+    { value: "value_asc", label: "Menor → maior (valor)" },
+    ...(sortChoice === "color"
+      ? [{ value: "color", label: "Por cor (definida nos chips)" }]
+      : []),
+  ];
 
   function save() {
     const input: WidgetInput = {
@@ -571,6 +626,55 @@ export function WidgetAppearanceSheet({
                     ) : null}
                   </>
                 ) : null}
+                {isBar && metrics.length === 1 ? (
+                  <>
+                    <CheckRow
+                      label="Colorir barras por categoria (paleta)"
+                      checked={ap.colorByCategory ?? false}
+                      onChange={(c) =>
+                        patch({ colorByCategory: c ? true : undefined })
+                      }
+                    />
+                    {ap.colorByCategory ? (
+                      <SelectRow
+                        label="Paleta"
+                        value={ap.palette ?? "design"}
+                        onChange={(v) => patch({ palette: v })}
+                        options={Object.entries(PALETTES).map(([k, p]) => ({
+                          value: k,
+                          label: p.label,
+                        }))}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
+                {isBar && !dimChrono ? (
+                  <>
+                    <SelectRow
+                      label="Ordenação das categorias"
+                      value={sortChoice}
+                      onChange={setSortChoice}
+                      options={sortOptions}
+                    />
+                    {metrics.length >= 2 && sortChoice.startsWith("value") ? (
+                      <SelectRow
+                        label="Métrica da ordenação"
+                        value={ap.categorySort?.metric ?? metrics[0].key}
+                        onChange={(v) =>
+                          patch({
+                            categorySort: ap.categorySort
+                              ? { ...ap.categorySort, metric: v }
+                              : ap.categorySort,
+                          })
+                        }
+                        options={metrics.map((m) => ({
+                          value: m.key,
+                          label: m.label,
+                        }))}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
               </BuilderSection>
 
               <BuilderSection value="series" title="Cores das séries">
@@ -720,6 +824,14 @@ export function WidgetAppearanceSheet({
                         categoryLimit: { ...ap.categoryLimit, others: c },
                       })
                     }
+                  />
+                ) : null}
+                {!dimChrono ? (
+                  <SelectRow
+                    label="Ordenação das fatias"
+                    value={sortChoice === "color" ? "none" : sortChoice}
+                    onChange={setSortChoice}
+                    options={sortOptions.filter((o) => o.value !== "color")}
                   />
                 ) : null}
               </BuilderSection>

@@ -38,6 +38,14 @@ export const PALETTES: Record<string, { label: string; colors: string[] }> = {
     label: "Tons de cinza",
     colors: ["#111827", "#374151", "#6b7280", "#9ca3af", "#d1d5db", "#4b5563"],
   },
+  // Identidade do preset Inbound (roxo #A98AC0 / verde #01ae84): matizes da
+  // marca aprofundados p/ contraste em fundo claro e separação CVD entre
+  // vizinhos (validados com scripts de acessibilidade em 21/07/2026). Os hex
+  // literais da marca ficam no CHROME (canvas/faixa dos cards do preset).
+  inbound: {
+    label: "Inbound (roxo & verde)",
+    colors: ["#8E5DB8", "#0E9A78", "#B8791F", "#3E7CB1", "#C0637F", "#6B4E8E"],
+  },
 };
 
 export const DEFAULT_PALETTE_KEY = "design";

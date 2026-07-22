@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 21/07/2026
+// v1.1 (preset v5): SAL sai da EXIBIÇÃO (cards removidos; sub-fonte `sals` e
+//   dados preservados), comparação em todos os cards e cores da marca como
+//   dados de aparência (paleta "inbound" em lib/widgets/palettes.ts).
 // Preset "Inbound": reprodução das abas inbound do dashboard antigo de
 // pré-vendas (Geral, Marketing/Fonte SQL e Vendas) como DADOS de configuração
 // — nada aqui toca engine/RPC. Regras portadas do dashboard legado:
@@ -51,16 +54,12 @@ const RP: FormulaToken = { kind: "rparen" };
 // Operandos escopados por sub-fonte (contagem de registros da sub, com
 // período/predicado da própria sub — peça de engine de 20/07/2026).
 const AT_MQLS = fld("agg:count:*@mqls");
-const AT_SALS = fld("agg:count:*@sals");
 const AT_SQLS = fld("agg:count:*@sqls");
 const AT_LITE = fld("agg:count:*@clientes_lite");
 const AT_VENDAS_AE = fld("agg:count:*@vendas_assinadas");
 const AT_VENDAS_SITE = fld("agg:count:*@vendas_site");
 
 const SQL_TOTAL: Formula = { tokens: [AT_SQLS, op("+"), AT_LITE] };
-const CONV_MQL_SAL: Formula = {
-  tokens: [LP, AT_SALS, op("/"), AT_MQLS, RP, op("*"), num(100)],
-};
 const CONV_MQL_SQL: Formula = {
   tokens: [LP, LP, AT_SQLS, op("+"), AT_LITE, RP, op("/"), AT_MQLS, RP, op("*"), num(100)],
 };
@@ -239,6 +238,9 @@ const CORRESPONDENCES: PresetCorrespondence[] = [
 // ---- widgets ----------------------------------------------------------------
 
 // Badge "vs. mês anterior no mesmo dia útil" dos KPIs (dashboard antigo).
+// v5: TODOS os cards carregam o badge — os de fórmula comparam via
+// runCardWidget (segunda rodada do runCalculatedWidget no range deslocado) e o
+// de razão via runKpi; nada disso recria RPC.
 const CMP_BD = {
   comparison: {
     enabled: true,
@@ -248,6 +250,23 @@ const CMP_BD = {
   },
 };
 
+// ---- cores da marca (v5) ----------------------------------------------------
+// Identidade visual do preset: roxo #A98AC0 / cinza #E9ECEF / verde #01ae84.
+// O CHROME usa os hex literais da marca (canvas cinza + faixa roxa dos cards);
+// séries/fatias usam os passos da paleta "inbound" (lib/widgets/palettes.ts) —
+// mesmos matizes, aprofundados p/ contraste em fundo claro e separação CVD.
+const BRAND_ACCENT = "#A98AC0"; // faixa superior dos cards KPI
+const BRAND_CANVAS = "#E9ECEF"; // fundo do dashboard
+const S_ROXO = "#8E5DB8";
+const S_VERDE = "#0E9A78";
+const S_AMBAR = "#B8791F";
+const S_ROXO_ESCURO = "#6B4E8E";
+// Aparência compartilhada dos cards KPI (faixa de destaque da marca).
+const KPI_AP = { kpi: { accent: BRAND_ACCENT } };
+
+// v5: sem os cards de SAL (KPI e Conv. MQL → SAL) — a sub-fonte `sals` segue
+// existindo (dados intactos); o GC do applyPreset remove os cards nos
+// dashboards já aplicados. As linhas de KPIs reacomodam em 3 colunas (w4).
 const GERAL: PresetWidget[] = [
   {
     presetKey: "inbound.geral.kpi_mql",
@@ -257,19 +276,8 @@ const GERAL: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
-    settings: { tab: "geral", ...CMP_BD },
-    grid_position: { x: 0, y: 0, w: 3, h: 4 },
-  },
-  {
-    presetKey: "inbound.geral.kpi_sal",
-    title: "SAL",
-    visual_type: "kpi",
-    sources: ["sals"],
-    dimensions: [],
-    metrics: [{ field: "*", agg: "count" }],
-    filters: [],
-    settings: { tab: "geral", ...CMP_BD },
-    grid_position: { x: 3, y: 0, w: 3, h: 4 },
+    settings: { tab: "geral", ...CMP_BD, appearance: { ...KPI_AP } },
+    grid_position: { x: 0, y: 0, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.kpi_sql",
@@ -281,13 +289,15 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
+      ...CMP_BD,
       card: {
         mode: "formula",
         formula: SQL_TOTAL,
         secondaryText: "AE (Data Reunião) + Clientes Lite",
       },
+      appearance: { ...KPI_AP },
     },
-    grid_position: { x: 6, y: 0, w: 3, h: 4 },
+    grid_position: { x: 4, y: 0, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.kpi_vendas",
@@ -297,8 +307,8 @@ const GERAL: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
-    settings: { tab: "geral", ...CMP_BD },
-    grid_position: { x: 9, y: 0, w: 3, h: 4 },
+    settings: { tab: "geral", ...CMP_BD, appearance: { ...KPI_AP } },
+    grid_position: { x: 8, y: 0, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.filtro_operacao",
@@ -312,22 +322,7 @@ const GERAL: PresetWidget[] = [
       tab: "geral",
       fields: [{ field: "operation_id", label: "Operação" }],
     },
-    grid_position: { x: 0, y: 4, w: 3, h: 4 },
-  },
-  {
-    presetKey: "inbound.geral.conv_mql_sal",
-    title: "Conv. MQL → SAL",
-    visual_type: "kpi",
-    sources: [],
-    dimensions: [],
-    metrics: [],
-    filters: [],
-    settings: {
-      tab: "geral",
-      card: { mode: "formula", formula: CONV_MQL_SAL, suffix: "%" },
-      appearance: { decimals: 1 },
-    },
-    grid_position: { x: 3, y: 4, w: 3, h: 4 },
+    grid_position: { x: 0, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.conv_mql_sql",
@@ -339,10 +334,11 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
+      ...CMP_BD,
       card: { mode: "formula", formula: CONV_MQL_SQL, suffix: "%" },
-      appearance: { decimals: 1 },
+      appearance: { decimals: 1, ...KPI_AP },
     },
-    grid_position: { x: 6, y: 4, w: 3, h: 4 },
+    grid_position: { x: 4, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.conv_sql_venda",
@@ -354,10 +350,11 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
+      ...CMP_BD,
       card: { mode: "formula", formula: CONV_SQL_VENDA, suffix: "%" },
-      appearance: { decimals: 1 },
+      appearance: { decimals: 1, ...KPI_AP },
     },
-    grid_position: { x: 9, y: 4, w: 3, h: 4 },
+    grid_position: { x: 8, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "inbound.geral.mes_x_mes",
@@ -400,8 +397,12 @@ const GERAL: PresetWidget[] = [
         mode: "pace",
         scope: "global",
         label: "Meta SQL",
+        color: S_ROXO_ESCURO,
       },
-      appearance: { legend: { show: true } },
+      appearance: {
+        legend: { show: true },
+        seriesColors: { metric_1: S_ROXO, metric_2: S_VERDE, metric_3: S_AMBAR },
+      },
     },
     grid_position: { x: 0, y: 8, w: 8, h: 9 },
   },
@@ -418,7 +419,13 @@ const GERAL: PresetWidget[] = [
       METRIC_SQL_CALC,
     ],
     filters: [],
-    settings: { tab: "geral", appearance: { legend: { show: true } } },
+    settings: {
+      tab: "geral",
+      appearance: {
+        legend: { show: true },
+        seriesColors: { metric_1: S_ROXO, metric_2: S_VERDE },
+      },
+    },
     grid_position: { x: 8, y: 8, w: 4, h: 9 },
   },
   {
@@ -431,7 +438,12 @@ const GERAL: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "geral",
-      appearance: { categoryLimit: { n: 5, others: false } },
+      // Barras multicoloridas (colorByCategory): um motivo por cor da paleta.
+      appearance: {
+        categoryLimit: { n: 5, others: false },
+        colorByCategory: true,
+        palette: "inbound",
+      },
     },
     grid_position: { x: 0, y: 17, w: 4, h: 9 },
   },
@@ -449,7 +461,10 @@ const GERAL: PresetWidget[] = [
     ],
     metrics: [{ field: "*", agg: "count", label: "SQLs" }],
     filters: [],
-    settings: { tab: "geral" },
+    settings: {
+      tab: "geral",
+      appearance: { seriesColors: { metric_1: S_VERDE } },
+    },
     grid_position: { x: 4, y: 17, w: 4, h: 9 },
   },
   {
@@ -460,7 +475,7 @@ const GERAL: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
-    settings: { tab: "geral" },
+    settings: { tab: "geral", ...CMP_BD, appearance: { ...KPI_AP } },
     grid_position: { x: 8, y: 17, w: 2, h: 4 },
   },
   {
@@ -471,7 +486,7 @@ const GERAL: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
-    settings: { tab: "geral" },
+    settings: { tab: "geral", ...CMP_BD, appearance: { ...KPI_AP } },
     grid_position: { x: 10, y: 17, w: 2, h: 4 },
   },
 ];
@@ -487,7 +502,12 @@ const MARKETING: PresetWidget[] = [
     filters: [],
     settings: {
       tab: "marketing",
-      appearance: { categoryLimit: { n: 8, others: true } },
+      // Cada fonte com a própria cor (colorByCategory + paleta da marca).
+      appearance: {
+        categoryLimit: { n: 8, others: true },
+        colorByCategory: true,
+        palette: "inbound",
+      },
     },
     grid_position: { x: 0, y: 0, w: 8, h: 10 },
   },
@@ -502,7 +522,7 @@ const VENDAS: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
-    settings: { tab: "vendas", ...CMP_BD },
+    settings: { tab: "vendas", ...CMP_BD, appearance: { ...KPI_AP } },
     grid_position: { x: 0, y: 0, w: 4, h: 4 },
   },
   {
@@ -513,7 +533,7 @@ const VENDAS: PresetWidget[] = [
     dimensions: [],
     metrics: [{ field: "unified:mrr_venda", agg: "sum" }],
     filters: [],
-    settings: { tab: "vendas" },
+    settings: { tab: "vendas", ...CMP_BD, appearance: { ...KPI_AP } },
     grid_position: { x: 4, y: 0, w: 4, h: 4 },
   },
   {
@@ -530,6 +550,8 @@ const VENDAS: PresetWidget[] = [
       numerator: { field: "unified:mrr_venda", agg: "sum" },
       denominator: { field: "*", agg: "count" },
       label: "Ticket médio",
+      ...CMP_BD,
+      appearance: { ...KPI_AP },
     },
     grid_position: { x: 8, y: 0, w: 4, h: 4 },
   },
@@ -541,7 +563,7 @@ const VENDAS: PresetWidget[] = [
     dimensions: [{ field: "unified:fonte_venda", label: "Fonte" }],
     metrics: [{ field: "*", agg: "count", label: "Vendas" }],
     filters: [],
-    settings: { tab: "vendas" },
+    settings: { tab: "vendas", appearance: { palette: "inbound" } },
     grid_position: { x: 0, y: 4, w: 4, h: 9 },
   },
   {
@@ -552,7 +574,11 @@ const VENDAS: PresetWidget[] = [
     dimensions: [{ field: "unified:fonte_venda", label: "Fonte" }],
     metrics: [{ field: "unified:mrr_venda", agg: "sum", label: "MRR" }],
     filters: [],
-    settings: { tab: "vendas" },
+    settings: {
+      tab: "vendas",
+      // Cada fonte com a própria cor, alinhada às fatias da pizza ao lado.
+      appearance: { colorByCategory: true, palette: "inbound" },
+    },
     grid_position: { x: 4, y: 4, w: 4, h: 9 },
   },
   {
@@ -573,6 +599,7 @@ const VENDAS: PresetWidget[] = [
       appearance: {
         legend: { show: true },
         seriesAxis: { metric_2: "right" },
+        seriesColors: { metric_1: S_ROXO, metric_2: S_VERDE },
       },
     },
     grid_position: { x: 8, y: 4, w: 4, h: 9 },
@@ -591,14 +618,22 @@ const VENDAS: PresetWidget[] = [
     ],
     metrics: [{ field: "*", agg: "count", label: "Vendas" }],
     filters: [],
-    settings: { tab: "vendas" },
+    settings: {
+      tab: "vendas",
+      appearance: { seriesColors: { metric_1: S_ROXO } },
+    },
     grid_position: { x: 0, y: 13, w: 12, h: 9 },
   },
 ];
 
 export const INBOUND_PRESET: PresetDashboard = {
   presetKey: "inbound",
-  version: 4, // v4 (20/07/2026): Mês x Mês abre em "dia cheio" (reuniões agendadas visíveis)
+  // v4 (20/07/2026): Mês x Mês abre em "dia cheio" (reuniões agendadas visíveis)
+  // v5 (21/07/2026): sem os cards de SAL (sub-fonte `sals` mantida); badge de
+  //   comparação (mesmo dia útil) em TODOS os cards — fórmula/razão inclusive;
+  //   cores da marca (roxo/cinza/verde) como dados de aparência + paleta
+  //   "inbound" nas barras por categoria e na pizza.
+  version: 5,
   name: "Inbound",
   visible_to_roles: ["admin", "gestor"],
   settings: {
@@ -609,6 +644,7 @@ export const INBOUND_PRESET: PresetDashboard = {
     ],
     periodBar: { enabled: true, defaultPreset: "este_mes", scope: "global" },
     canvas: { cols: 12, rowHeight: 30 },
+    background: { mode: "solid", color: BRAND_CANVAS },
   },
   fields: FIELDS,
   subSources: SUB_SOURCES,
