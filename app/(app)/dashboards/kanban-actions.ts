@@ -116,7 +116,9 @@ export async function runKanbanWidget(
       .select(
         "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
       )
-      .eq("show_in_builder", true)
+      // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
     loadCorrespondences(supabase),
     supabase

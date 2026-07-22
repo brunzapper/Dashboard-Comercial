@@ -361,7 +361,9 @@ export async function loadWidgetScope(
     supabase
       .from("field_definitions")
       .select(FIELD_DEF_COLS)
-      .eq("show_in_builder", true)
+      // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
     loadCorrespondences(supabase),
     supabase
