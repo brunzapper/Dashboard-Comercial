@@ -72,6 +72,8 @@ import type {
 } from "@/lib/widgets/types";
 import { updateEntityField } from "@/app/(app)/dashboards/actions";
 import { ColorPopover, ContextMenu, ResizeHandle } from "../appearance-editing";
+import { useFontScale } from "../font-scale-context";
+import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 
 // Célula editável de um valor ligado à entidade. Reusa o padrão da EditableCell
 // de Registros, mas grava via updateEntityField (entity_custom_values).
@@ -297,6 +299,9 @@ export function EntityListTable({
   const refresh = useDebouncedRefresh();
   const ap = appearance ?? {};
   const t = ap.table ?? {};
+  // Fonte do corpo (fonts.table × escala do dashboard); th/td herdam do <table>.
+  const fontScale = useFontScale();
+  const tableStyle = fontStyle(ap.fonts?.table, FONT_DEFAULTS.table, fontScale);
   const editable = canEdit && Boolean(onAppearanceChange);
   const change = onAppearanceChange ?? (() => {});
   const dashFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
@@ -659,7 +664,7 @@ export function EntityListTable({
 
   return (
     <div className="h-full overflow-auto [scrollbar-gutter:stable]">
-      <Table>
+      <Table style={tableStyle}>
         <TableHeader>
           <TableRow
             className={rowBorder}

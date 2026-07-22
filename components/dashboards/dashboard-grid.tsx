@@ -114,6 +114,7 @@ import { DrawToCreateOverlay } from "./draw-to-create";
 import { PlaceWidgetOverlay } from "./place-widget-overlay";
 import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
+import { FontScaleProvider } from "./font-scale-context";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -892,51 +893,55 @@ export function DashboardGrid({
                   id={widgetDomId(w.id)}
                   className="pointer-events-auto cursor-auto"
                 >
-                  <WidgetCard
-                    widget={w}
-                    data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
-                    recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
-                    recordListExtra={recordListExtraById?.[w.id]}
-                    recordListTotal={recordListTotalById?.[w.id]}
-                    entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
-                    calcValue={calcById[w.id] ?? null}
-                    calcVars={calcVarsById[w.id]}
-                    noteValues={noteById[w.id]}
-                    calcExpr={calcExprById[w.id]}
-                    tableCells={tableCellsById[w.id]}
-                    fields={fields}
-                    currencyOptions={currencyOptions}
-                    currencyRates={currencyRates}
-                    conversionPeriod={conversionPeriodById[w.id]}
-                    fkLabels={fkLabels}
-                    responsibleOptions={responsibleOptions}
-                    userRoles={userRoles}
-                    canEditValues={canEditValues}
-                    available={available}
-                    availableForBuilder={availableForBuilder}
-                    dashboardId={dashboardId}
-                    dateFormat={dateFormat}
-                    siblings={widgets}
-                    tabs={tabs}
-                    canEdit={canEdit}
-                    canExport={canExport}
-                    canManageFields={canManageFields}
-                    editMode={editMode}
-                    filterOptions={filterOptionsById?.[w.id]}
-                    fieldFilterSeed={fieldFilterSeedById?.[w.id]}
-                    quickFilters={quickFiltersById?.[w.id]}
-                    periodWindow={periodWindowById?.[w.id]}
-                    deferredScopeKey={deferredScopeById?.[w.id]}
-                    autoSize={w.settings?.autoSize}
-                    cellW={cellW}
-                    rowH={ROW_H}
-                    mx={MX}
-                    my={MY}
-                    onMeasure={onMeasure}
-                    onWidgetDeleted={onWidgetDeleted}
-                    autoOpenEditor={w.id === autoEditWidgetId}
-                    onAutoEditConsumed={onAutoEditConsumed}
-                  />
+                  {/* Escala de fonte do dashboard: só o conteúdo dos widgets
+                      escala (o cromo do canvas — chips, overlays — não). */}
+                  <FontScaleProvider value={settings.fontScale ?? 1}>
+                    <WidgetCard
+                      widget={w}
+                      data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
+                      recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
+                      recordListExtra={recordListExtraById?.[w.id]}
+                      recordListTotal={recordListTotalById?.[w.id]}
+                      entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
+                      calcValue={calcById[w.id] ?? null}
+                      calcVars={calcVarsById[w.id]}
+                      noteValues={noteById[w.id]}
+                      calcExpr={calcExprById[w.id]}
+                      tableCells={tableCellsById[w.id]}
+                      fields={fields}
+                      currencyOptions={currencyOptions}
+                      currencyRates={currencyRates}
+                      conversionPeriod={conversionPeriodById[w.id]}
+                      fkLabels={fkLabels}
+                      responsibleOptions={responsibleOptions}
+                      userRoles={userRoles}
+                      canEditValues={canEditValues}
+                      available={available}
+                      availableForBuilder={availableForBuilder}
+                      dashboardId={dashboardId}
+                      dateFormat={dateFormat}
+                      siblings={widgets}
+                      tabs={tabs}
+                      canEdit={canEdit}
+                      canExport={canExport}
+                      canManageFields={canManageFields}
+                      editMode={editMode}
+                      filterOptions={filterOptionsById?.[w.id]}
+                      fieldFilterSeed={fieldFilterSeedById?.[w.id]}
+                      quickFilters={quickFiltersById?.[w.id]}
+                      periodWindow={periodWindowById?.[w.id]}
+                      deferredScopeKey={deferredScopeById?.[w.id]}
+                      autoSize={w.settings?.autoSize}
+                      cellW={cellW}
+                      rowH={ROW_H}
+                      mx={MX}
+                      my={MY}
+                      onMeasure={onMeasure}
+                      onWidgetDeleted={onWidgetDeleted}
+                      autoOpenEditor={w.id === autoEditWidgetId}
+                      onAutoEditConsumed={onAutoEditConsumed}
+                    />
+                  </FontScaleProvider>
                 </div>
               ))}
             </RGL>

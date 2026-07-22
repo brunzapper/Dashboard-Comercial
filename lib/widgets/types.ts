@@ -933,6 +933,17 @@ export interface AppearanceSettings {
   // rótulos de dados e tooltip de gráficos; eixos e visor da calculadora ficam
   // fora. Overrides por coluna/linha/célula em table.colDecimals etc.
   decimals?: number;
+  // Tamanhos de fonte por elemento (22/07/2026), em px; undefined = "Auto"
+  // (default atual do elemento × DashboardSettings.fontScale). Px explícito é
+  // ABSOLUTO — não multiplica pela escala global. Defaults e resolução em
+  // lib/widgets/fonts.ts. Nota/forma/kanban seguem com seus fontSize próprios.
+  fonts?: {
+    title?: number; // título do card (default 14)
+    value?: number; // número grande KPI/Card/calculado (default 30; multi 24)
+    labels?: number; // sub-rótulos do KPI/Card (default 12)
+    table?: number; // corpo das tabelas (default 14; th/td herdam)
+    chart?: number; // textos do gráfico: eixos, legenda, rótulos (default 11)
+  };
 }
 
 // settings de um widget é jsonb frouxo: KPI (meta/razão), filtro, o modo lista
@@ -1007,6 +1018,11 @@ export interface DashboardSettings {
   // Formato padrão das datas exibidas nas tabelas deste dashboard (pode ser
   // sobrescrito por coluna em AppearanceSettings.table.dateFormats).
   dateFormat?: DateFormat;
+  // Escala de fonte do dashboard (22/07/2026): 1 = 100% (ausente = 1).
+  // Multiplica os DEFAULTS dos textos dos widgets (título, valores, rótulos,
+  // tabelas, textos de gráfico); px explícito em AppearanceSettings.fonts NÃO
+  // multiplica. Propagada via FontScaleProvider (dashboard-grid.tsx).
+  fontScale?: number;
   // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil.
   background?: {
     mode: "solid" | "gradient";

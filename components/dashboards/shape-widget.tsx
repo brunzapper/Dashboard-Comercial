@@ -14,6 +14,7 @@ import type {
   WidgetSettings,
 } from "@/lib/widgets/types";
 import { useFocusWidget } from "./focus-context";
+import { useFontScale } from "./font-scale-context";
 
 const DEFAULT_FILL = "color-mix(in oklch, var(--color-primary) 15%, transparent)";
 const DEFAULT_STROKE = "var(--color-primary)";
@@ -114,6 +115,7 @@ export function ShapeWidget({
   editMode: boolean;
 }) {
   const focus = useFocusWidget();
+  const fontScale = useFontScale();
   const [size, setSize] = useState({ w: 0, h: 0 });
   const roRef = useRef<ResizeObserver | null>(null);
   // Callback ref (padrão do grid): re-liga o observer a cada remontagem.
@@ -150,7 +152,8 @@ export function ShapeWidget({
           className="absolute inset-0 flex items-center justify-center p-2 text-center break-words"
           style={{
             color: appearance?.textColor ?? "var(--color-foreground)",
-            fontSize: appearance?.fontSize ?? 14,
+            // Px explícito é absoluto; Auto acompanha a escala do dashboard.
+            fontSize: appearance?.fontSize ?? Math.round(14 * fontScale),
           }}
         >
           {shape.text}

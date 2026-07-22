@@ -31,6 +31,7 @@ import { moveRecordCard } from "@/lib/kanban/actions";
 import { completeTask, reopenTask } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
+import { useFontScale } from "@/components/dashboards/font-scale-context";
 import {
   KANBAN_MAX_COLUMNS,
   KANBAN_NO_VALUE_KEY,
@@ -309,6 +310,7 @@ function CardView({
 }) {
   // Detalhe só para cards com entidade carregada (registro ou tarefa).
   const canOpen = !readOnly && Boolean(card.record ?? card.task);
+  const fontScale = useFontScale();
   const open = (tab: CardDetailTab, focusComposer?: boolean) => {
     if (canOpen) onOpenDetail(card, tab, focusComposer);
   };
@@ -336,7 +338,11 @@ function CardView({
         color: cardAp?.text,
         borderColor: cardAp?.border,
         borderRadius: cardAp?.radius,
-        fontSize: cardAp?.fontSize,
+        // Px explícito é absoluto; Auto acompanha a escala do dashboard (na
+        // página dedicada de kanban o context default 1 mantém tudo como era).
+        fontSize:
+          cardAp?.fontSize ??
+          (fontScale !== 1 ? Math.round(14 * fontScale) : undefined),
       }}
     >
       {card.colorValue && cardAp?.showStripe !== false ? (

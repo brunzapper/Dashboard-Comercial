@@ -117,6 +117,10 @@ export function DashboardMenu({
   const [dateFmt, setDateFmt] = useState<DateFormat>(
     settings.dateFormat ?? DEFAULT_DATE_FORMAT
   );
+  // Escala de fonte do dashboard (1 = 100%; guardada como string p/ o Select).
+  const [fontScale, setFontScale] = useState<string>(
+    String(settings.fontScale ?? 1)
+  );
 
   function save() {
     const nextBg: DashboardSettings["background"] | undefined =
@@ -125,11 +129,14 @@ export function DashboardMenu({
         : mode === "solid"
           ? { mode: "solid", color: solid }
           : { mode: "gradient", from, to, angle };
+    const nextScale = Number(fontScale);
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
         background: nextBg,
         dateFormat: dateFmt,
+        fontScale:
+          Number.isFinite(nextScale) && nextScale !== 1 ? nextScale : undefined,
       });
       setBgOpen(false);
     });
@@ -265,6 +272,26 @@ export function DashboardMenu({
               <p className="text-muted-foreground text-xs">
                 Aplicado a todas as datas das tabelas. Cada coluna pode
                 sobrescrever (duplo-clique no cabeçalho na edição de layout).
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Escala da fonte</Label>
+              <Select value={fontScale} onValueChange={setFontScale}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0.9">90%</SelectItem>
+                  <SelectItem value="1">100% (padrão)</SelectItem>
+                  <SelectItem value="1.15">115%</SelectItem>
+                  <SelectItem value="1.3">130%</SelectItem>
+                  <SelectItem value="1.5">150%</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                Multiplica o tamanho dos textos de todos os widgets. Ajustes em
+                px por widget (Aparência ▸ Texto) não são afetados.
               </p>
             </div>
 

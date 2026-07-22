@@ -75,6 +75,8 @@ import {
   ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
+import { useFontScale } from "../font-scale-context";
+import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 import { ColumnPanel, RowPanel, useQuickTableConfig } from "./column-panel";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 
@@ -405,6 +407,13 @@ export function QuickTableWidget({
 
   // ---- aparência (cores/alinhamento/tamanhos) ----
   const t = appearance?.table ?? {};
+  // Fonte do corpo (fonts.table × escala do dashboard); células herdam do <table>.
+  const fontScale = useFontScale();
+  const tableFontStyle = fontStyle(
+    appearance?.fonts?.table,
+    FONT_DEFAULTS.table,
+    fontScale
+  );
   const changeAp = (patch: Partial<NonNullable<AppearanceSettings["table"]>>) =>
     onAppearanceChange?.({
       ...(appearance ?? {}),
@@ -851,7 +860,7 @@ export function QuickTableWidget({
             // resultado novo (interação segue liberada — sem pointer-events).
             staleRefreshing && "opacity-60"
           )}
-          style={{ background: t.bodyBg }}
+          style={{ background: t.bodyBg, ...tableFontStyle }}
         >
           {matrix.headerRow || structureEdit ? (
             <thead>

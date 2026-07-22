@@ -45,6 +45,7 @@ import type {
 } from "@/lib/widgets/types";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { useFocusWidget } from "./focus-context";
+import { useFontScale } from "./font-scale-context";
 import { useNavPending } from "./pending-context";
 import { WidgetLinkPicker } from "./widget-link-picker";
 
@@ -80,6 +81,7 @@ export function NoteWidget({
   editorRefs: OperandRef[];
 }) {
   const focus = useFocusWidget();
+  const fontScale = useFontScale();
   const router = useRouter();
   const { run } = useNavPending();
   const [saving, startSaving] = useTransition();
@@ -237,7 +239,8 @@ export function NoteWidget({
   const style: React.CSSProperties = {
     background: appearance?.bg ?? DEFAULT_NOTE_BG,
     color: appearance?.color ?? "#1f2937",
-    fontSize: appearance?.fontSize ?? 14,
+    // Px explícito é absoluto; Auto acompanha a escala de fonte do dashboard.
+    fontSize: appearance?.fontSize ?? Math.round(14 * fontScale),
   };
 
   if (editing) {
