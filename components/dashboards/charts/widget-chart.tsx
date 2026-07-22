@@ -540,6 +540,25 @@ export const WidgetChart = memo(function WidgetChart({
     fontSize: chartPx,
     ...(ap.legend?.color ? { color: ap.legend.color } : {}),
   };
+  // Texto do rótulo de dados (dataLabels.format): percentual = participação no
+  // total da série exibida (barra/linha: soma da métrica nas categorias
+  // plotadas; pizza/funil: soma das fatias) — total inválido cai p/ o valor.
+  const dataLabelText = (
+    v: unknown,
+    key: string,
+    total: number | null
+  ): string => {
+    const fmt = ap.dataLabels?.format ?? "value";
+    const base = moneyChartText(v, key);
+    if (fmt === "value") return base;
+    const n = numOrNull(v);
+    const pct =
+      n != null && total != null && total !== 0
+        ? formatPercent(n / total, true)
+        : null;
+    if (fmt === "percent") return pct ?? base;
+    return pct ? `${base} · ${pct}` : base;
+  };
   const grid = gridFlags(ap.gridLines);
   const bg = ap.chartBackground;
 
@@ -900,6 +919,26 @@ export const WidgetChart = memo(function WidgetChart({
       }
       return map;
     })();
+    const pieTotal = pieData.reduce(
+      (s, p) => s + (Number.isFinite(p.value) ? p.value : 0),
+      0
+    );
+    const pieLabelList = ap.dataLabels?.show ? (
+      <LabelList
+        dataKey="value"
+        position={
+          visualType === "funil"
+            ? "center"
+            : ap.dataLabels.position === "inside"
+              ? "inside"
+              : "outside"
+        }
+        stroke="none"
+        fill={ap.dataLabels.color ?? "var(--foreground)"}
+        fontSize={chartPx}
+        formatter={(v: unknown) => dataLabelText(v, metricKey, pieTotal)}
+      />
+    ) : null;
     const pieTooltip = (v: unknown, payload: unknown): string => {
       const text = moneyChartText(v, metricKey);
       if (!cmp || !cmpByName) return text;
@@ -931,6 +970,7 @@ export const WidgetChart = memo(function WidgetChart({
               fill="var(--foreground)"
               fontSize={chartPx}
             />
+            {pieLabelList}
             {pieData.map((_, i) => (
               <Cell key={i} fill={sliceFill(i)} fillOpacity={sliceOpacity(i)} />
             ))}
@@ -946,7 +986,11 @@ export const WidgetChart = memo(function WidgetChart({
             pieTooltip(v, (item as { payload?: unknown })?.payload)
           }
         />
-        <Legend wrapperStyle={legendStyle} />
+        {/* Pizza: legenda default LIGADA (?? true) — o default por nº de
+            métricas do showLegend apagaria a legenda das pizzas existentes. */}
+        {(ap.legend?.show ?? true) ? (
+          <Legend wrapperStyle={legendStyle} />
+        ) : null}
         <Pie
           data={pieData}
           dataKey="value"
@@ -956,6 +1000,7 @@ export const WidgetChart = memo(function WidgetChart({
           paddingAngle={2}
           isAnimationActive={false}
         >
+          {pieLabelList}
           {pieData.map((_, i) => (
             <Cell key={i} fill={sliceFill(i)} fillOpacity={sliceOpacity(i)} />
           ))}
@@ -989,6 +1034,13 @@ export const WidgetChart = memo(function WidgetChart({
       ? applyManualOrder(limitedRows, ap.categoryOrder, catName)
       : limitedRows;
   const catNames = chartRows.map(catName);
+  // Total da série sobre as categorias plotadas — denominador do formato
+  // percentual dos rótulos de dados (barra/linha).
+  const seriesTotal = (key: string): number =>
+    chartRows.reduce((s, r) => {
+      const n = numOrNull(r[key]);
+      return n == null ? s : s + n;
+    }, 0);
 
   // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
   // como <text> SVG posicionado pelo LabelList (content custom) e colorido pelo
@@ -1107,7 +1159,21 @@ export const WidgetChart = memo(function WidgetChart({
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}
-          />
+          >
+            {ap.dataLabels?.show ? (
+              <LabelList
+                dataKey={m.key}
+                position={
+                  ap.dataLabels.position === "bottom" ? "bottom" : "top"
+                }
+                fill={ap.dataLabels.color ?? "var(--foreground)"}
+                fontSize={chartPx}
+                formatter={(v: unknown) =>
+                  dataLabelText(v, m.key, seriesTotal(m.key))
+                }
+              />
+            ) : null}
+          </Line>
         ))}
         {goal ? (
           <Line
@@ -1280,7 +1346,9 @@ export const WidgetChart = memo(function WidgetChart({
                 }
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
                 fontSize={chartPx}
-                formatter={(v: unknown) => moneyChartText(v, m.key)}
+                formatter={(v: unknown) =>
+                  dataLabelText(v, m.key, seriesTotal(m.key))
+                }
               />
             ) : null}
             {cmp?.settings.chartLabels ? (

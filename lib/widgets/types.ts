@@ -820,7 +820,16 @@ export interface AppearanceSettings {
   // empilham num único stack (fantasmas da comparação empilham à parte).
   stacked?: boolean;
   seriesAxis?: Record<string, AxisSide>; // metricKey -> eixo esq/dir (combo)
-  dataLabels?: { show?: boolean; position?: "inside" | "top"; color?: string };
+  // Legenda de dados (rótulos de valores) — barra/linha/pizza/funil. `position`
+  // por tipo: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|
+  // "inside"; funil ignora. `format` ausente = "value"; percentual =
+  // participação no total da série exibida.
+  dataLabels?: {
+    show?: boolean;
+    position?: "inside" | "top" | "bottom";
+    format?: "value" | "percent" | "both";
+    color?: string;
+  };
   legend?: { show?: boolean; color?: string }; // legenda do gráfico (séries)
   // --- pizza ---
   palette?: string; // chave de paleta nomeada (PALETTES)
