@@ -712,46 +712,7 @@ export function WidgetAppearanceSheet({
                 </BuilderSection>
               ) : null}
 
-              {isBar ? (
-                <BuilderSection
-                  value="rotulos"
-                  title="Legenda de dados (rótulos nas barras)"
-                  badge={ap.dataLabels?.show ? "Ativos" : null}
-                >
-                  <CheckRow
-                    label="Exibir valores"
-                    checked={ap.dataLabels?.show ?? false}
-                    onChange={(c) => patch({ dataLabels: { ...ap.dataLabels, show: c } })}
-                  />
-                  {ap.dataLabels?.show ? (
-                    <>
-                      <SelectRow
-                        label="Posição"
-                        value={ap.dataLabels?.position ?? "top"}
-                        onChange={(v) =>
-                          patch({
-                            dataLabels: {
-                              ...ap.dataLabels,
-                              position: v as "inside" | "top",
-                            },
-                          })
-                        }
-                        options={[
-                          { value: "top", label: "Acima" },
-                          { value: "inside", label: "Dentro" },
-                        ]}
-                      />
-                      <ColorField
-                        label="Cor do rótulo"
-                        value={ap.dataLabels?.color}
-                        onChange={(v) =>
-                          patch({ dataLabels: { ...ap.dataLabels, color: v } })
-                        }
-                      />
-                    </>
-                  ) : null}
-                </BuilderSection>
-              ) : null}
+              <DataLabelsSection vt={vt} ap={ap} patch={patch} />
 
               <BuilderSection
                 value="legenda"
@@ -835,6 +796,29 @@ export function WidgetAppearanceSheet({
                   />
                 ) : null}
               </BuilderSection>
+              <DataLabelsSection vt={vt} ap={ap} patch={patch} />
+              {vt === "pizza" ? (
+                // Legenda da pizza: default LIGADA (?? true) — pizzas
+                // existentes sempre exibiram a legenda (era fixa no chart).
+                <BuilderSection
+                  value="legenda"
+                  title="Legenda do gráfico (fatias)"
+                  badge={(ap.legend?.show ?? true) ? "Ativa" : null}
+                >
+                  <CheckRow
+                    label="Exibir legenda"
+                    checked={ap.legend?.show ?? true}
+                    onChange={(c) =>
+                      patch({ legend: { ...ap.legend, show: c } })
+                    }
+                  />
+                  <ColorField
+                    label="Cor do texto da legenda"
+                    value={ap.legend?.color}
+                    onChange={(v) => patch({ legend: { ...ap.legend, color: v } })}
+                  />
+                </BuilderSection>
+              ) : null}
               <BuilderSection value="fatias" title="Cor por fatia">
                 {slices.map((s, i) => (
                   <ColorField
@@ -961,6 +945,97 @@ export function WidgetAppearanceSheet({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// Seção "Legenda de dados" (rótulos de valores) — compartilhada pelos blocos
+// de barra/linha (isChart) e pizza/funil (isPie). Opções de posição por tipo
+// de gráfico; funil posiciona sempre ao centro (sem select). Valor de posição
+// salvo em outro tipo (ex.: "inside" da barra numa linha) exibe o fallback
+// "top" — o chart aplica a mesma coerção.
+function DataLabelsSection({
+  vt,
+  ap,
+  patch,
+}: {
+  vt: string;
+  ap: AppearanceSettings;
+  patch: (p: Partial<AppearanceSettings>) => void;
+}) {
+  const dl = ap.dataLabels;
+  const positions =
+    vt === "linha"
+      ? [
+          { value: "top", label: "Acima" },
+          { value: "bottom", label: "Abaixo" },
+        ]
+      : vt === "pizza"
+        ? [
+            { value: "top", label: "Fora" },
+            { value: "inside", label: "Dentro" },
+          ]
+        : vt === "funil"
+          ? null
+          : [
+              { value: "top", label: "Acima" },
+              { value: "inside", label: "Dentro" },
+            ];
+  const position = dl?.position ?? "top";
+  return (
+    <BuilderSection
+      value="rotulos"
+      title="Legenda de dados (rótulos de valores)"
+      badge={dl?.show ? "Ativos" : null}
+    >
+      <CheckRow
+        label="Exibir valores"
+        checked={dl?.show ?? false}
+        onChange={(c) => patch({ dataLabels: { ...dl, show: c } })}
+      />
+      {dl?.show ? (
+        <>
+          <SelectRow
+            label="Formato"
+            value={dl?.format ?? "value"}
+            onChange={(v) =>
+              patch({
+                dataLabels: {
+                  ...dl,
+                  format: v as "value" | "percent" | "both",
+                },
+              })
+            }
+            options={[
+              { value: "value", label: "Valor" },
+              { value: "percent", label: "Percentual" },
+              { value: "both", label: "Valor + percentual" },
+            ]}
+          />
+          {positions ? (
+            <SelectRow
+              label="Posição"
+              value={
+                positions.some((o) => o.value === position) ? position : "top"
+              }
+              onChange={(v) =>
+                patch({
+                  dataLabels: {
+                    ...dl,
+                    position: v as "inside" | "top" | "bottom",
+                  },
+                })
+              }
+              options={positions}
+            />
+          ) : null}
+          <ColorField
+            label="Cor do rótulo"
+            value={dl?.color}
+            onChange={(v) => patch({ dataLabels: { ...dl, color: v } })}
+          />
+        </>
+      ) : null}
+    </BuilderSection>
   );
 }
 
