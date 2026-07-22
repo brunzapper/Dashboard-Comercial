@@ -111,7 +111,7 @@ async function doRefresh(
     await Promise.all([
       service
         .from("dashboards")
-        .select("id, name, settings")
+        .select("id, name, settings, status")
         .eq("id", snap.dashboard_id)
         .maybeSingle(),
       service
@@ -135,6 +135,11 @@ async function doRefresh(
       loadCurrencyRates(service),
     ]);
   if (!dashData) throw new Error("Dashboard do snapshot não existe mais.");
+  // Board na Lixeira (0087): não gasta refresh — o erro fica registrado e
+  // next_refresh_at avança (sem hot loop). Arquivado segue refrescando.
+  if ((dashData.status as string) === "trashed") {
+    throw new Error("Dashboard na Lixeira.");
+  }
 
   const sources = await loadSources(service);
   const widgets = (widgetsData ?? []) as Widget[];

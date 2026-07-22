@@ -1,12 +1,16 @@
-// Versão: 2.2 | Data: 17/07/2026
+// Versão: 2.3 | Data: 22/07/2026
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
+// v2.3 (22/07/2026): ciclo de vida (0087) — menu "⋮" nos cards (Duplicar/
+//   Arquivar/Excluir via BoardCardMenu, no lugar do botão de lixeira) e
+//   seções recolhidas "Arquivados" (segue abrindo) e "Lixeira" (não abre;
+//   purga em 14 dias — o hub esconde vencidos mesmo sem o cron).
 // v2.2 (17/07/2026): <RestoreLastView /> — ao REABRIR o app (sessão nova do
 //   navegador), redireciona ao último board visitado (user_settings.lastView,
 //   gravado pelo TrackLastView); visita in-session à Home limpa o lastView.
 // v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo;
 //   seções separadas p/ dashboards e kanbans (mesma tabela, kinds distintos).
 import Link from "next/link";
-import { SquareKanban, Trash2 } from "lucide-react";
+import { SquareKanban } from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -14,7 +18,6 @@ import { loadSources } from "@/lib/config/sources";
 import { loadUserSettings } from "@/lib/config/user-settings";
 import { RestoreLastView } from "@/components/layout/restore-last-view";
 import type { FieldDefinition } from "@/lib/records/types";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
@@ -23,7 +26,12 @@ import {
 } from "@/components/ui/card";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { CreateMenu } from "@/components/dashboards/create-menu";
-import { deleteDashboard } from "@/app/(app)/dashboards/actions";
+import {
+  BoardCardMenu,
+  type BoardStatus,
+} from "@/components/dashboards/board-card-menu";
+
+const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
 
 interface DashboardRow {
   id: string;
@@ -31,12 +39,15 @@ interface DashboardRow {
   owner_user_id: string | null;
   visible_to_roles: string[];
   kind: "dashboard" | "kanban";
+  status: BoardStatus;
+  trashed_at: string | null;
 }
 
 // Valida o lastView gravado (user_settings): só /dashboards/<uuid> ou
 // /kanbans/<uuid> (+ ?tab= opcional), e o board precisa estar na lista visível
 // (RLS) com o kind da rota — board excluído/sem acesso não redireciona, e
 // nenhum outro valor vira alvo de router.replace (sem open redirect).
+// Receber só linhas ABRÍVEIS (ativas + arquivadas): board na Lixeira não abre.
 function validateLastView(
   view: string | null,
   rows: DashboardRow[]
@@ -51,49 +62,65 @@ function validateLastView(
   return view;
 }
 
+// Item da Lixeira ainda dentro da janela de 14 dias? (Vencidos somem do hub
+// mesmo antes de o cron de purga removê-los fisicamente.)
+function withinTrashTtl(trashedAt: string | null): boolean {
+  return Date.now() - new Date(trashedAt ?? 0).getTime() < TRASH_TTL_MS;
+}
+
+// "Expira em N dias" do card na Lixeira (teto: recém-excluído = 14 dias).
+function trashExpiryLabel(trashedAt: string | null): string {
+  const at = trashedAt ? new Date(trashedAt).getTime() : Date.now();
+  const days = Math.ceil((at + TRASH_TTL_MS - Date.now()) / 86_400_000);
+  if (days <= 0) return "Expira hoje";
+  return days === 1 ? "Expira em 1 dia" : `Expira em ${days} dias`;
+}
+
 function BoardCard({
   row,
-  href,
-  isOwner,
-  kanban,
+  canManage,
+  canDuplicate,
 }: {
   row: DashboardRow;
-  href: string;
-  isOwner: boolean;
-  kanban?: boolean;
+  canManage: boolean;
+  canDuplicate: boolean;
 }) {
+  const kanban = row.kind === "kanban";
+  const trashed = row.status === "trashed";
+  const href = kanban ? `/kanbans/${row.id}` : `/dashboards/${row.id}`;
   return (
-    <Card className="relative">
+    <Card className={`relative${trashed ? " opacity-70" : ""}`}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {kanban ? (
             <SquareKanban className="text-muted-foreground size-4 shrink-0" />
           ) : null}
-          <Link href={href} className="hover:underline">
-            {row.name}
-          </Link>
+          {trashed ? (
+            // Na Lixeira o board NÃO abre: título sem link (rotas dão 404).
+            <span className="text-muted-foreground">{row.name}</span>
+          ) : (
+            <Link href={href} className="hover:underline">
+              {row.name}
+            </Link>
+          )}
         </CardTitle>
         <CardDescription>
-          {row.visible_to_roles.length > 0
-            ? `Compartilhado: ${row.visible_to_roles
-                .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
-                .join(", ")}`
-            : "Pessoal"}
+          {trashed
+            ? trashExpiryLabel(row.trashed_at)
+            : row.visible_to_roles.length > 0
+              ? `Compartilhado: ${row.visible_to_roles
+                  .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
+                  .join(", ")}`
+              : "Pessoal"}
         </CardDescription>
       </CardHeader>
-      {isOwner ? (
-        <form action={deleteDashboard} className="absolute top-3 right-3">
-          <input type="hidden" name="id" value={row.id} />
-          <Button
-            type="submit"
-            variant="ghost"
-            size="icon"
-            aria-label={kanban ? "Excluir kanban" : "Excluir dashboard"}
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        </form>
-      ) : null}
+      <BoardCardMenu
+        id={row.id}
+        kanban={kanban}
+        status={row.status}
+        canManage={canManage}
+        canDuplicate={canDuplicate}
+      />
     </Card>
   );
 }
@@ -101,22 +128,36 @@ function BoardCard({
 export default async function HomePage() {
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
+  const isAdmin = session?.roles.includes("admin") ?? false;
 
   const supabase = await createClient();
   const { data } = await supabase
     .from("dashboards")
-    .select("id, name, owner_user_id, visible_to_roles, kind")
+    .select("id, name, owner_user_id, visible_to_roles, kind, status, trashed_at")
     .order("created_at", { ascending: false });
   const rows = (data ?? []) as DashboardRow[];
-  const dashboards = rows.filter((r) => r.kind !== "kanban");
-  const kanbans = rows.filter((r) => r.kind === "kanban");
+  const canManageRow = (r: DashboardRow) =>
+    isAdmin || r.owner_user_id === session?.user.id;
+
+  const active = rows.filter((r) => r.status === "active");
+  const dashboards = active.filter((r) => r.kind !== "kanban");
+  const kanbans = active.filter((r) => r.kind === "kanban");
+  const archived = rows.filter((r) => r.status === "archived");
+  // Lixeira: só de quem pode geri-la (dono/admin), e nunca itens vencidos —
+  // mesmo antes de o cron de purga (pg-cron-purge-trash.sql) removê-los.
+  const trashed = rows.filter(
+    (r) => r.status === "trashed" && canManageRow(r) && withinTrashTtl(r.trashed_at)
+  );
 
   // Última view p/ restaurar na REABERTURA do app (RestoreLastView). Leitura
   // de custo zero: o layout já chamou loadUserSettings (React cache()).
   const settings = session ? await loadUserSettings(session.user.id) : {};
   const storedView =
     typeof settings.lastView === "string" ? settings.lastView : null;
-  const restoreTarget = validateLastView(storedView, rows);
+  const restoreTarget = validateLastView(
+    storedView,
+    rows.filter((r) => r.status !== "trashed")
+  );
 
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
@@ -133,6 +174,19 @@ export default async function HomePage() {
       .order("sort_order", { ascending: true });
     fields = (fieldsData ?? []) as FieldDefinition[];
   }
+
+  const cardGrid = (list: DashboardRow[]) => (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {list.map((r) => (
+        <BoardCard
+          key={r.id}
+          row={r}
+          canManage={canManageRow(r)}
+          canDuplicate={canCreate}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -158,16 +212,7 @@ export default async function HomePage() {
           {canCreate ? " Use o botão Criar acima." : ""}
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {dashboards.map((d) => (
-            <BoardCard
-              key={d.id}
-              row={d}
-              href={`/dashboards/${d.id}`}
-              isOwner={d.owner_user_id === session?.user.id}
-            />
-          ))}
-        </div>
+        cardGrid(dashboards)
       )}
 
       {kanbans.length > 0 ? (
@@ -179,18 +224,35 @@ export default async function HomePage() {
               altera o valor do campo no registro.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {kanbans.map((k) => (
-              <BoardCard
-                key={k.id}
-                row={k}
-                href={`/kanbans/${k.id}`}
-                isOwner={k.owner_user_id === session?.user.id}
-                kanban
-              />
-            ))}
-          </div>
+          {cardGrid(kanbans)}
         </>
+      ) : null}
+
+      {/* Seções recolhidas do ciclo de vida (0087): arquivados seguem abrindo;
+          a Lixeira não abre e é purgada em 14 dias. <details> = RSC puro. */}
+      {archived.length > 0 ? (
+        <details className="group">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
+            Arquivados ({archived.length})
+          </summary>
+          <p className="text-muted-foreground mt-1 mb-3 text-sm">
+            Fora da tela principal, mas ainda podem ser abertos.
+          </p>
+          {cardGrid(archived)}
+        </details>
+      ) : null}
+
+      {trashed.length > 0 ? (
+        <details className="group">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
+            Lixeira ({trashed.length})
+          </summary>
+          <p className="text-muted-foreground mt-1 mb-3 text-sm">
+            Excluídos automaticamente após 14 dias. Itens aqui não podem ser
+            abertos — restaure para voltar a usar.
+          </p>
+          {cardGrid(trashed)}
+        </details>
       ) : null}
     </div>
   );
