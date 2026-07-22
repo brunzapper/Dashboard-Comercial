@@ -92,7 +92,7 @@ type Step = "upload" | "fonte" | "mapeamento" | "dedup" | "revisao" | "concluido
 
 const STEP_LABELS: Record<Step, string> = {
   upload: "1. Arquivo",
-  fonte: "2. Fonte",
+  fonte: "2. Base",
   mapeamento: "3. Mapeamento",
   dedup: "4. Match & dedup",
   revisao: "5. Revisão",
@@ -215,7 +215,7 @@ export function ImportWizard({
     fd.set("manual_entry", "1");
     const state = await createSource({}, fd);
     if (!state.ok || !state.key) {
-      setSourceMessage(state.message ?? "Falha ao criar a fonte.");
+      setSourceMessage(state.message ?? "Falha ao criar a base.");
       return;
     }
     const created: SourceDef = {
@@ -263,7 +263,7 @@ export function ImportWizard({
             .map((f) => ({
               value: `custom:${f.key}`,
               label: f.label,
-              group: "Campos de outras fontes",
+              group: "Campos de outras bases",
             }))
         : []),
     ];
@@ -325,7 +325,7 @@ export function ImportWizard({
       .map((f) => ({
         value: `custom:${f.key}`,
         label: f.label,
-        group: "Campos da fonte",
+        group: "Campos da base",
       })),
   ];
 
@@ -555,7 +555,7 @@ export function ImportWizard({
             {fileName}: {rows.length} linha(s), {headers.length} coluna(s).
           </p>
           <div className="flex flex-col gap-1.5">
-            <Label>Importar para a fonte</Label>
+            <Label>Importar para a base</Label>
             <Combobox
               options={sources.map((s) => ({ value: s.key, label: s.label }))}
               value={sourceKey}
@@ -563,8 +563,8 @@ export function ImportWizard({
                 setSourceKey(v);
                 setCreatingSource(false);
               }}
-              placeholder="Escolha a fonte"
-              aria-label="Fonte alvo do import"
+              placeholder="Escolha a base"
+              aria-label="Base alvo do import"
             />
           </div>
           {!creatingSource ? (
@@ -574,12 +574,12 @@ export function ImportWizard({
               className="w-fit"
               onClick={() => setCreatingSource(true)}
             >
-              Criar fonte nova
+              Criar base nova
             </Button>
           ) : (
             <div className="flex flex-col gap-3 rounded-lg border p-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="new-source-label">Nome da fonte nova</Label>
+                <Label htmlFor="new-source-label">Nome da base nova</Label>
                 <Input
                   id="new-source-label"
                   value={newSourceLabel}
@@ -604,7 +604,7 @@ export function ImportWizard({
                 disabled={newSourceLabel.trim().length < 2}
                 onClick={handleCreateSource}
               >
-                Criar fonte
+                Criar base
               </Button>
             </div>
           )}
@@ -631,7 +631,7 @@ export function ImportWizard({
           <p className="text-muted-foreground text-sm">
             Diga para onde vai cada coluna do CSV em{" "}
             <span className="font-medium">{source.label}</span>. Campos novos
-            são criados na fonte; campos existentes têm a fonte adicionada.
+            são criados na base; campos existentes têm a base adicionada.
           </p>
           <div className="rounded-lg border">
             <Table>
@@ -908,10 +908,10 @@ export function ImportWizard({
           {!hasPeriodDate ? (
             <p className="text-sm text-amber-600" role="status">
               Nenhuma coluna mapeia para “{periodField}”, o campo de data que o
-              filtro de período desta fonte usa — com um período ativo no
+              filtro de período desta base usa — com um período ativo no
               dashboard, estes registros ficariam de fora. Mapeie uma coluna de
-              data para ele (ou ajuste o campo de período da fonte em
-              Configurações → Fontes).
+              data para ele (ou ajuste o campo de período da base em
+              Configurações → Bases).
             </p>
           ) : null}
           {busy || runError ? (

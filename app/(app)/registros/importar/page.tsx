@@ -7,6 +7,7 @@ import Link from "next/link";
 
 import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,15 +28,19 @@ export default async function ImportarPage() {
   // importados) — oferecidos como destino de reuso no mapeamento.
   const { data } = await supabase
     .from("field_definitions")
-    .select("field_key, label, data_type, applies_to")
+    .select("field_key, label, data_type, applies_to, source_system")
     .not("data_type", "in", "(calculado,calculado_agg)")
     .order("label");
-  const fields: ImportFieldOption[] = (data ?? []).map((f) => ({
-    key: f.field_key as string,
-    label: (f.label as string) ?? (f.field_key as string),
-    dataType: (f.data_type as string) ?? "texto",
-    appliesTo: (f.applies_to as string[] | null) ?? [],
-  }));
+  // Linhas core (0086) fora dos destinos de reuso: import grava em
+  // custom_fields, e a key core apontaria para a coluna núcleo homônima.
+  const fields: ImportFieldOption[] = (data ?? [])
+    .filter((f) => !isCoreDef(f))
+    .map((f) => ({
+      key: f.field_key as string,
+      label: (f.label as string) ?? (f.field_key as string),
+      dataType: (f.data_type as string) ?? "texto",
+      appliesTo: (f.applies_to as string[] | null) ?? [],
+    }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -44,7 +49,7 @@ export default async function ImportarPage() {
         <div>
           <h1 className="text-2xl font-semibold">Importar CSV</h1>
           <p className="text-muted-foreground text-sm">
-            Importe dados em massa para uma fonte existente ou crie uma fonte
+            Importe dados em massa para uma base existente ou crie uma base
             nova a partir do arquivo. Re-importar o mesmo arquivo atualiza em
             vez de duplicar, e edições feitas no app são preservadas.
           </p>

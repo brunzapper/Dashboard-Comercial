@@ -38,6 +38,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   BUILTIN_SOURCES,
   isSubSource,
@@ -502,7 +503,10 @@ export async function runRecordListWithExtras(
   // em fórmulas de 'calculado_agg' salvas (metricScopedSources).
   fields: FieldDefinition[] = []
 ): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
-  const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
+  // Linhas core (0086) fora: refs custom:<key> nunca apontam p/ coluna núcleo.
+  const fieldByKey = new Map(
+    fields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
   const { legs } = partitionMetricLegs(
     config.metrics ?? [],
     config.sources,

@@ -14,6 +14,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { CORE_IMPORT_COLUMNS, type ColumnMapping } from "@/lib/import/csv";
 import { generateApiKey, generateWebhookSecret } from "@/lib/integrations/keys";
 import { encryptSecret } from "@/lib/crypto/secretbox";
@@ -116,7 +117,7 @@ export async function createApiKey(
   const db = createServiceClient();
   const sources = await loadSources(db);
   const source = sources.find((s) => s.key === input.sourceKey);
-  if (!source) return { ok: false, message: "Fonte inválida." };
+  if (!source) return { ok: false, message: "Base inválida." };
 
   const parsed = parseMapping(input.mappingJson);
   if (!parsed.ok) return { ok: false, message: parsed.message };
@@ -129,14 +130,27 @@ export async function createApiKey(
     if (customKeys.length > 0) {
       const { data: defs } = await db
         .from("field_definitions")
-        .select("field_key")
+        .select("field_key, source_system")
         .in("field_key", customKeys);
+      // Linhas core (0086) não valem como alvo custom: o valor iria para
+      // custom_fields, não para a coluna núcleo homônima.
+      const coreHit = (defs ?? []).filter((d) => isCoreDef(d));
+      if (coreHit.length > 0) {
+        return {
+          ok: false,
+          message: `Colunas do núcleo não são alvo custom: ${coreHit
+            .map((d) => `custom:${d.field_key as string}`)
+            .join(", ")} — use o alvo de coluna direta (ex.: "${
+            coreHit[0].field_key as string
+          }").`,
+        };
+      }
       const found = new Set((defs ?? []).map((d) => d.field_key as string));
       const missing = customKeys.filter((k) => !found.has(k));
       if (missing.length > 0) {
         return {
           ok: false,
-          message: `Campos inexistentes: ${missing.join(", ")} — crie-os antes (import de CSV ou Fontes).`,
+          message: `Campos inexistentes: ${missing.join(", ")} — crie-os antes (import de CSV ou Bases).`,
         };
       }
     }

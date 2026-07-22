@@ -64,7 +64,7 @@ const GROUP_KIND_OPTIONS: ComboboxOption[] = [
 ];
 
 const MODE_OPTIONS: ComboboxOption[] = [
-  { value: "registros", label: "Registros de uma fonte" },
+  { value: "registros", label: "Registros de uma base" },
   { value: "tarefas", label: "Tarefas (fases de execução)" },
 ];
 
@@ -171,13 +171,13 @@ function NewBoardForm({
       {mode === "registros" ? (
         <>
           <div className="flex flex-col gap-1.5">
-            <Label>Fonte dos registros</Label>
+            <Label>Base dos registros</Label>
             <Combobox
               options={sources.map((s) => ({ value: s.key, label: s.label }))}
               value={source}
               onValueChange={setSource}
               className="w-full"
-              aria-label="Fonte dos registros"
+              aria-label="Base dos registros"
             />
           </div>
 

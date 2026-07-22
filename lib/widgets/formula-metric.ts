@@ -43,6 +43,7 @@ import {
 } from "@/lib/records/formulas";
 import { expandAggFormula } from "@/lib/records/formula-deps";
 import type { FieldDefinition } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   correspondenceMapForSources,
   type Correspondence,
@@ -126,8 +127,12 @@ export async function runCalculatedWidget(
     return { value: null, currency: null };
 
   const mode = input.currencyMode ?? "none";
+  // Linhas core (0086) fora do mapa por chave: refs custom:<key> nunca apontam
+  // p/ coluna núcleo (blindagem no choke point — cobre todos os callers).
   const fieldByKey = new Map(
-    (input.fields ?? []).map((f) => [f.field_key, f])
+    (input.fields ?? [])
+      .filter((f) => !isCoreDef(f))
+      .map((f) => [f.field_key, f])
   );
   // Aninhamento de agregados (19/07/2026): expande refs custom:<calculado_agg>
   // para a fórmula do campo entre parênteses ANTES de resolver bases de

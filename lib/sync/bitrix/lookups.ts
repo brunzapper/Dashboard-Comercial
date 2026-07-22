@@ -255,6 +255,12 @@ export class BitrixLookups {
     return this.categories.get(String(categoryId)) ?? String(categoryId);
   }
 
+  /** Nomes dos funis (categorias de deal), deduplicados — options da coluna
+   *  núcleo `pipeline` virada 'selecao' (0086; ver syncFieldCatalog). */
+  categoryNames(): string[] {
+    return [...new Set(this.categories.values())];
+  }
+
   findCategoryIdByName(name: string): string | null {
     const target = name.toLowerCase();
     for (const [id, n] of this.categories) {

@@ -22,7 +22,7 @@ async function ensureCanManage(): Promise<string | null> {
   const session = await getSessionInfo();
   if (!session) return "Sessão expirada.";
   if (!session.permissions.includes("manage_field_definitions")) {
-    return "Apenas administradores podem gerenciar conexões entre fontes.";
+    return "Apenas administradores podem gerenciar conexões entre bases.";
   }
   return null;
 }
@@ -53,12 +53,12 @@ function readRule(formData: FormData): {
   if (!label) return { error: "Informe o rótulo." };
   const source_a = recordTypeFromForm(formData, "source_a");
   const source_b = recordTypeFromForm(formData, "source_b");
-  if (!source_a || !source_b) return { error: "Escolha as duas fontes." };
-  if (source_a === source_b) return { error: "As fontes devem ser diferentes." };
+  if (!source_a || !source_b) return { error: "Escolha as duas bases." };
+  if (source_a === source_b) return { error: "As bases devem ser diferentes." };
   const field_a_1 = String(formData.get("field_a_1") ?? "").trim();
   const field_b_1 = String(formData.get("field_b_1") ?? "").trim();
   if (!field_a_1 || !field_b_1) {
-    return { error: "Defina o primeiro par de campos (um de cada fonte)." };
+    return { error: "Defina o primeiro par de campos (um de cada base)." };
   }
   const fa2 = String(formData.get("field_a_2") ?? "").trim();
   const fb2 = String(formData.get("field_b_2") ?? "").trim();

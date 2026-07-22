@@ -12,6 +12,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { CORE_IMPORT_TARGETS } from "@/lib/import/csv";
 import { WEBHOOK_EVENT_TYPES } from "@/lib/webhooks/events";
 import { ApiDocs, type ApiDocsSource } from "@/components/admin/api-docs";
@@ -25,10 +26,11 @@ export default async function ApiDocsPage() {
     loadSources(supabase),
     supabase
       .from("field_definitions")
-      .select("field_key, label, data_type, applies_to")
+      .select("field_key, label, data_type, applies_to, source_system")
       .order("label", { ascending: true }),
   ]);
-  const defs = defsRes.data ?? [];
+  // Linhas core (0086) fora dos alvos custom: já listadas em CORE_IMPORT_TARGETS.
+  const defs = (defsRes.data ?? []).filter((d) => !isCoreDef(d));
 
   // Alvos de mapeamento por fonte: responsável + colunas core (catálogo do
   // import) + campos personalizados aplicáveis (applies_to nulo = todas as
@@ -73,7 +75,7 @@ export default async function ApiDocsPage() {
           <p className="text-muted-foreground text-sm">
             Como conectar sistemas externos: enviar dados para o dashboard
             (entrada) e receber notificações assinadas (saída). Os exemplos
-            abaixo já usam as fontes e campos do seu ambiente.
+            abaixo já usam as bases e campos do seu ambiente.
           </p>
         </div>
         <Button asChild variant="outline" size="sm">

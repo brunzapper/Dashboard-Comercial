@@ -31,6 +31,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
+import { CORE_SELECT_CAPABLE, isCoreDef } from "@/lib/records/core-defs";
 import { PERCENT_DATA_TYPES, type DataType } from "@/lib/records/types";
 import { formulaCondAggInfo, type Formula } from "@/lib/records/formulas";
 import {
@@ -84,6 +85,9 @@ interface DefRow {
   // applies_to (record_types) — decide sob quais fontes o campo entra nos
   // operandos com escopo (sourceScopedAggOperandRefs).
   applies_to: string[] | null;
+  // Linhas core (0086) ficam na lista (guardas de update/delete as encontram);
+  // os catálogos de operandos as filtram internamente (isCoreDef).
+  source_system: string | null;
 }
 
 async function loadDefRows(
@@ -91,7 +95,7 @@ async function loadDefRows(
 ): Promise<DefRow[]> {
   const { data } = await supabase
     .from("field_definitions")
-    .select("id, field_key, label, data_type, formula, applies_to");
+    .select("id, field_key, label, data_type, formula, applies_to, source_system");
   return (data ?? []).map((d) => ({
     id: d.id as string,
     field_key: d.field_key as string,
@@ -99,6 +103,7 @@ async function loadDefRows(
     data_type: d.data_type as DataType,
     formula: (d.formula as Formula | null) ?? null,
     applies_to: (d.applies_to as string[] | null) ?? null,
+    source_system: (d.source_system as string | null) ?? null,
   }));
 }
 
@@ -411,6 +416,20 @@ export async function createField(
 
   const supabase = await createClient();
 
+  // Chave reservada a uma coluna do núcleo (0086): mensagem clara em vez do
+  // 23505 genérico do índice único.
+  const { data: coreClash } = await supabase
+    .from("field_definitions")
+    .select("field_key, source_system")
+    .eq("field_key", fieldKey)
+    .maybeSingle();
+  if (coreClash && isCoreDef(coreClash)) {
+    return {
+      ok: false,
+      message: `"${fieldKey}" é uma coluna do núcleo — use outro rótulo (a coluna já existe na aba Núcleo).`,
+    };
+  }
+
   let calcFormula: Formula | null = null;
   if (FORMULA_DATA_TYPES.includes(f.dataType)) {
     const r = await resolveAndValidateFormula(supabase, f, fieldKey);
@@ -474,10 +493,45 @@ export async function updateField(
 
   const { data: existing } = await supabase
     .from("field_definitions")
-    .select("field_key")
+    .select("field_key, source_system, data_type")
     .eq("id", id)
     .maybeSingle();
   const fieldKey = (existing?.field_key as string | undefined) ?? undefined;
+
+  // Linha core (0086): branch dedicado — persiste APENAS rótulo/olho/ordem e,
+  // na whitelist (pipeline/etapa/...), texto↔selecao + options. Nunca formula,
+  // write_back, is_local, moeda, percent, papéis ou applies_to.
+  if (existing && isCoreDef(existing)) {
+    const key = existing.field_key as string;
+    const currentType = existing.data_type as string;
+    const typeCapable =
+      CORE_SELECT_CAPABLE.has(key) &&
+      (f.dataType === "texto" || f.dataType === "selecao");
+    if (f.dataType !== currentType && !typeCapable) {
+      return {
+        ok: false,
+        message: "O tipo desta coluna do núcleo é fixo (só as colunas de texto elegíveis alternam entre Texto e Seleção).",
+      };
+    }
+    const patch: Record<string, unknown> = {
+      label: f.label,
+      show_in_builder: f.showInBuilder,
+      sort_order: f.sortOrder,
+    };
+    if (typeCapable) {
+      patch.data_type = f.dataType;
+      patch.options = f.dataType === "selecao" ? f.options : [];
+    }
+    const { error } = await supabase
+      .from("field_definitions")
+      .update(patch)
+      .eq("id", id);
+    if (error) return { ok: false, message: error.message };
+    revalidatePath("/campos");
+    revalidatePath("/registros");
+    revalidatePath("/dashboards/[id]", "page");
+    return { ok: true, message: `Campo "${f.label}" atualizado.` };
+  }
 
   let calcFormula: Formula | null = null;
   if (FORMULA_DATA_TYPES.includes(f.dataType)) {
@@ -549,6 +603,12 @@ export async function deleteField(
   // exclusão não dispara recalc).
   const rows = await loadDefRows(supabase);
   const target = rows.find((r) => r.id === id);
+  if (target && isCoreDef(target)) {
+    return {
+      ok: false,
+      message: "Colunas do núcleo não podem ser excluídas.",
+    };
+  }
   const dependents = target
     ? rows.filter(
         (r) => r.id !== id && formulaReferencesField(r.formula, target.field_key)

@@ -48,6 +48,7 @@ import {
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   AGG_LABELS,
   DATE_AGG_LABELS,
@@ -1374,7 +1375,7 @@ async function runWidgetByPeriod(
   });
 
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
+    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`
@@ -1490,7 +1491,10 @@ export async function runWidget(
   };
   const filters = legFiltersFor(period, effMainSources);
 
-  const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
+  // Linhas core (0086) fora: refs custom:<key> nunca apontam p/ coluna núcleo.
+  const fieldByKey = new Map(
+    fields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
   const today = yearQuarterOf(null);
 
   // Comparação com período anterior (settings.comparison): resolve o range da
@@ -1611,7 +1615,7 @@ export async function runWidget(
     return {
       rows: seriesRows,
       dimensions: [
-        { key: "dim_1", label: "Fonte" },
+        { key: "dim_1", label: "Base" },
         ...(base?.dimensions ?? []).map((d, i) => ({
           key: `dim_${i + 2}`,
           label: d.label,
@@ -2669,7 +2673,7 @@ export async function runWidget(
   });
 
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
+    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`

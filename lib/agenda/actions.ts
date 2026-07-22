@@ -15,6 +15,7 @@ import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import { runAgenda } from "./data";
 import type { AgendaData, AgendaSettings } from "./types";
@@ -51,7 +52,9 @@ async function loadContext(
         .select(
           "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
         )
-        .eq("show_in_builder", true)
+        // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
         .order("sort_order", { ascending: true }),
       supabase
         .from("responsibles")
@@ -67,6 +70,8 @@ async function loadContext(
   const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
     (f) =>
       f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca campo custom.
+      !isCoreDef(f) &&
       (!source || fieldAppliesToSource(f.applies_to, source)) &&
       (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
   );

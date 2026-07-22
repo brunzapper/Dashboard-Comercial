@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { DATA_TYPE_LABELS, type FieldDefinition } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { toRecordType } from "@/lib/sources";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
@@ -60,6 +61,7 @@ function roleLabels(keys: string[]): string {
 }
 
 function SourceBadge({ field }: { field: FieldDefinition }) {
+  if (isCoreDef(field)) return <Badge>Núcleo</Badge>;
   if (field.source_system === "bitrix") return <Badge variant="outline">Bitrix</Badge>;
   if (field.is_local) return <Badge variant="secondary">Local</Badge>;
   return <Badge variant="secondary">App</Badge>;
@@ -69,7 +71,11 @@ function SourceBadge({ field }: { field: FieldDefinition }) {
 // campos sem applies_to (valem p/ todas as fontes: locais/app); as demais
 // mapeiam para um record_type via applies_to.
 const GERAIS_SECTION = "gerais";
-const GERAIS_LABEL = "Gerais (todas as fontes)";
+const GERAIS_LABEL = "Gerais (todas as bases)";
+// Colunas do núcleo de `records` (linhas source_system='core', 0086): aba
+// própria — applies_to vazio as jogaria em "Gerais" junto dos campos locais.
+const NUCLEO_SECTION = "nucleo";
+const NUCLEO_LABEL = "Núcleo";
 
 function FieldRow({
   field,
@@ -122,17 +128,20 @@ function FieldRow({
           >
             <Pencil className="size-4" />
           </Button>
-          <form action={deleteAction}>
-            <input type="hidden" name="id" value={field.id} />
-            <Button
-              type="submit"
-              variant="ghost"
-              size="icon"
-              aria-label="Excluir"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </form>
+          {/* Colunas do núcleo não podem ser excluídas (o server também barra). */}
+          {!isCoreDef(field) && (
+            <form action={deleteAction}>
+              <input type="hidden" name="id" value={field.id} />
+              <Button
+                type="submit"
+                variant="ghost"
+                size="icon"
+                aria-label="Excluir"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </form>
+          )}
         </div>
         {/* Guarda de referência: campo usado em fórmula não pode ser excluído —
             a mensagem do servidor aparece aqui, na própria linha. */}
@@ -254,10 +263,15 @@ export function FieldsManager({
       : fields;
 
     const bySection: Record<string, FieldDefinition[]> = {
+      [NUCLEO_SECTION]: [],
       [GERAIS_SECTION]: [],
     };
     for (const s of catalog) bySection[s.key] = [];
     for (const f of filtered) {
+      if (isCoreDef(f)) {
+        bySection[NUCLEO_SECTION].push(f);
+        continue;
+      }
       const appliesTo = f.applies_to ?? [];
       if (appliesTo.length === 0) {
         bySection[GERAIS_SECTION].push(f);
@@ -271,6 +285,7 @@ export function FieldsManager({
   }, [fields, query, catalog]);
 
   const sectionOrder: { key: string; label: string }[] = [
+    { key: NUCLEO_SECTION, label: NUCLEO_LABEL },
     ...catalog.map((s) => ({ key: s.key, label: s.label })),
     { key: GERAIS_SECTION, label: GERAIS_LABEL },
   ];
@@ -349,8 +364,8 @@ export function FieldsManager({
             onEdit={openEdit}
             emptyMessage={
               query
-                ? "Nenhum campo corresponde à busca nesta fonte."
-                : "Nenhum campo nesta fonte."
+                ? "Nenhum campo corresponde à busca nesta base."
+                : "Nenhum campo nesta base."
             }
           />
         </>

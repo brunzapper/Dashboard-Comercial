@@ -166,6 +166,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca
   duplicar nem tocar widgets sem presetKey). Ver `docs/arquitetura.md` §4.9.
+- **Linhas core de `field_definitions` são OVERRIDES, nunca campos custom
+  (0086, 22/07/2026):** as colunas do núcleo de `records` existem no catálogo
+  como linhas `source_system='core'` (`field_key` = nome da coluna) só para a
+  aba Campos exibi-las/geri-las (rótulo/olho/ordem; texto↔selecao na whitelist
+  `CORE_SELECT_CAPABLE`). O ref de widget segue sendo o nome CRU da coluna
+  (`pipeline`) — linha core JAMAIS vira `custom:<key>` em catálogo, operando,
+  coluna ou `fieldByKey`. Split ÚNICO em `lib/records/core-defs.ts`
+  (`isCoreDef`/`splitCoreDefs`); `buildAvailableFields` particiona e aplica
+  rótulo/olho. NUNCA exclua core com `.neq("source_system",'core')` (campos
+  locais/app têm `source_system` NULL — o `<>` os derrubaria); filtre em JS.
+  Loaders de builder usam `show_in_builder OR source_system='core'` (a linha
+  core precisa chegar ao merge mesmo oculta). Options do `pipeline` são
+  reescritas a cada sync (`lookups.categoryNames()` em `syncFieldCatalog`) —
+  não as edite à mão esperando que sobrevivam. Terminologia de UI: fonte de
+  dados do sistema = "Base"/"Sub-base"; "Fonte" ficou só para o campo CRM
+  (`custom:fonte`). Ver `docs/arquitetura.md` invariante 13.
 - **Editor/validação/catálogo de fórmulas são ÚNICOS (20/07/2026):** o catálogo
   AGREGADO sai SEMPRE de `buildAggOperandCatalog`
   (`lib/widgets/agg-catalog.ts`, inputs `availableAggCatalogInput`/

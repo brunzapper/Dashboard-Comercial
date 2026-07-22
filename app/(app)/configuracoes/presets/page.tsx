@@ -58,7 +58,7 @@ export default async function PresetsPage() {
         <h1 className="text-2xl font-semibold">Presets de dashboard</h1>
         <p className="text-muted-foreground text-sm">
           Dashboards pré-montados do catálogo. Gerar cria o dashboard (com
-          abas, widgets e dependências — campos e sub-fontes ausentes);
+          abas, widgets e dependências — campos e sub-bases ausentes);
           atualizar reaplica a definição sobre o dashboard já gerado:
           sobrescreve os widgets DO preset (mantendo os ids — conectores e
           links sobrevivem) e nunca toca widgets que você adicionou à mão.

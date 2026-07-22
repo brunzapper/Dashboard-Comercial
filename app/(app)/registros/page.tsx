@@ -14,6 +14,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   fieldAppliesToSource,
   isKnownSource,
@@ -133,7 +134,9 @@ export default async function RegistrosPage({
         .select(
           "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
         )
-        .eq("show_in_builder", true)
+        // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
         .order("sort_order", { ascending: true }),
       supabase
         .from("responsibles")
@@ -158,6 +161,8 @@ export default async function RegistrosPage({
       // 'calculado_agg' não tem valor por registro (é métrica de dashboard) —
       // nunca vira coluna de Registros.
       f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
+      !isCoreDef(f) &&
       fieldAppliesToSource(f.applies_to, fonte, sources) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
