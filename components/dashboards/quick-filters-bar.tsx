@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 22/07/2026
+// v1.2 (22/07/2026): entry.hiddenOptions oculta opções do dropdown de
+// multi-seleção (só exibição — visibleOptions com `keep` = valores
+// selecionados, p/ o rótulo do chip resolver e dar para desmarcar).
 // v1.1 (21/07/2026): intervalo personalizado do filtro de período em RASCUNHO
 // (PeriodRangeDraft) — escolher "Personalizado" não emite mais valor (não
 // apaga o preset persistido) e digitar as datas não grava/consulta: o commit
@@ -44,6 +47,7 @@ import {
   type QuickFilterValue,
   type WidgetQuickFilters,
 } from "@/lib/widgets/quick-filters";
+import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { TRANSFORM_LABELS, type QuickFilterEntry } from "@/lib/widgets/types";
 import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
@@ -150,7 +154,13 @@ export function QuickFiltersBar({
           <MultiQuickFilter
             key={entry.id}
             label={entryLabel(entry, available)}
-            options={qf.options[entry.id] ?? []}
+            options={visibleOptions(
+              qf.options[entry.id] ?? [],
+              entry.hiddenOptions,
+              values[entry.id]?.kind === "options"
+                ? (values[entry.id] as { values: string[] }).values
+                : []
+            )}
             value={values[entry.id]}
             onChange={(v) => setValue(entry.id, v)}
           />

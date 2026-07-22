@@ -297,6 +297,11 @@ export interface FieldFilterEntry {
   field: string; // campo exposto para filtrar ('stage' | 'custom:xxx' | ...)
   op?: FilterOp; // operador (default 'eq'); 'ilike' faz busca parcial
   label?: string; // rótulo opcional (fallback = rótulo do campo)
+  // Blacklist de opções OCULTAS no dropdown da visualização (só exibição —
+  // nunca muda a consulta; valor selecionado que ficou oculto segue aplicando
+  // até o usuário trocar). Ausente/vazio = todas visíveis; opção nova entra
+  // visível por padrão. Ver lib/widgets/hidden-options.ts.
+  hiddenOptions?: string[];
 }
 export interface FieldFilterSettings {
   fields?: FieldFilterEntry[]; // campos que o widget expõe como controles
@@ -326,6 +331,10 @@ export interface QuickFilterEntry {
   transform?: Transform;
   weekMode?: "full" | "restricted"; // só p/ transform 'week_month'
   label?: string; // rótulo exibido no chip; ausente = rótulo do campo
+  // Blacklist de opções OCULTAS no dropdown (só responsible_id/operation_id —
+  // cleanQuickFilters descarta p/ outros campos). Só exibição, nunca consulta;
+  // opção nova entra visível por padrão. Ver lib/widgets/hidden-options.ts.
+  hiddenOptions?: string[];
 }
 
 // Config do widget de Tabela no modo "registros individuais" (Fase 1): a tabela

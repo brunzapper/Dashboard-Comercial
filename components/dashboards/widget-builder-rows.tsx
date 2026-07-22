@@ -1,4 +1,8 @@
-// Versão: 2.1 | Data: 20/07/2026
+// Versão: 2.2 | Data: 22/07/2026
+// v2.2 (22/07/2026): VisibleOptionsPicker — popover com checklist das opções
+//   do dropdown (blacklist hiddenOptions do filtro_campo/filtros rápidos),
+//   carregadas lazy no primeiro open; valores antigos da blacklist aparecem
+//   como "(valor antigo)" para limpeza.
 // v2.1 (20/07/2026): métrica ad-hoc ganha receita "Taxa de conversão", prévia
 //   agregada (previewAdapter) e "Salvar como campo reutilizável…"
 //   (onSaveAsField).
@@ -56,6 +60,11 @@ import {
 } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { RefOption } from "@/lib/records/date-operands";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
@@ -817,5 +826,108 @@ export function FilterRow({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Picker "Opções visíveis" (blacklist `hiddenOptions` do Filtro por campo e
+// dos filtros rápidos): popover com checklist das opções candidatas do
+// dropdown, carregadas LAZY no primeiro open (load() — cache no pai). Checked
+// = visível; desmarcar oculta. Valores da blacklist que sumiram da lista
+// (sync/edição do campo) aparecem no fim como "(valor antigo)" — remarcar
+// limpa. Só exibição: nunca muda a consulta (ver lib/widgets/hidden-options).
+export function VisibleOptionsPicker({
+  hidden,
+  onChange,
+  load,
+}: {
+  hidden: string[];
+  onChange: (next: string[]) => void;
+  load: () => Promise<{ value: string; label: string }[]>;
+}) {
+  const [options, setOptions] = useState<
+    { value: string; label: string }[] | null
+  >(null);
+
+  const ensureLoaded = () => {
+    if (options) return;
+    load().then(setOptions);
+  };
+
+  const toggle = (v: string, visible: boolean) =>
+    onChange(visible ? hidden.filter((h) => h !== v) : [...hidden, v]);
+
+  const stale = options
+    ? hidden.filter((h) => !options.some((o) => o.value === h))
+    : [];
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 w-fit gap-1 px-2 text-xs"
+          onClick={ensureLoaded}
+        >
+          Opções visíveis
+          {hidden.length > 0
+            ? ` · ${hidden.length} ${hidden.length === 1 ? "oculta" : "ocultas"}`
+            : ""}
+          <ChevronDown className="size-3.5 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="flex w-64 flex-col gap-2 p-2">
+        <div className="flex max-h-56 flex-col gap-1 overflow-auto">
+          {options == null ? (
+            <p className="text-muted-foreground p-1 text-xs">Carregando…</p>
+          ) : options.length === 0 && stale.length === 0 ? (
+            <p className="text-muted-foreground p-1 text-xs">
+              Nenhuma opção disponível.
+            </p>
+          ) : (
+            <>
+              {options.map((o) => (
+                <label
+                  key={o.value}
+                  className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm"
+                >
+                  <Checkbox
+                    checked={!hidden.includes(o.value)}
+                    onCheckedChange={(c) => toggle(o.value, c === true)}
+                  />
+                  <span className="truncate">{o.label}</span>
+                </label>
+              ))}
+              {stale.map((v) => (
+                <label
+                  key={v}
+                  className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm"
+                >
+                  <Checkbox
+                    checked={false}
+                    onCheckedChange={() => toggle(v, true)}
+                  />
+                  <span className="text-muted-foreground truncate">
+                    {v} (valor antigo)
+                  </span>
+                </label>
+              ))}
+            </>
+          )}
+        </div>
+        {hidden.length > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => onChange([])}
+          >
+            Mostrar todas
+          </Button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
   );
 }
