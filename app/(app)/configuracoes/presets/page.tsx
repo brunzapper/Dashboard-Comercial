@@ -24,7 +24,10 @@ export default async function PresetsPage() {
     .from("dashboards")
     .select("id, name, settings")
     .eq("owner_user_id", session.user.id)
-    .eq("kind", "dashboard");
+    .eq("kind", "dashboard")
+    // Espelho do lookup do aplicador: preset na Lixeira (0087) não conta como
+    // aplicado — gerar de novo cria um dashboard fresco.
+    .neq("status", "trashed");
   const dashboards = (data ?? []) as {
     id: string;
     name: string;

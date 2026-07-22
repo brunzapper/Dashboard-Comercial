@@ -185,11 +185,12 @@ export default async function DashboardPage({
     getSessionInfo(),
     supabase
       .from("dashboards")
-      .select("id, name, owner_user_id, visible_to_roles, settings")
+      .select("id, name, owner_user_id, visible_to_roles, settings, status")
       .eq("id", id)
       .maybeSingle(),
   ]);
-  if (!dash) notFound();
+  // Board na Lixeira (0087) não abre — mesmo 404 de board inexistente.
+  if (!dash || dash.status === "trashed") notFound();
 
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;

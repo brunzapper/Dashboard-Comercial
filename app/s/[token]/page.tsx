@@ -151,6 +151,15 @@ export default async function SnapshotPage({
   if (!snapData || snapData.status !== "active") notFound();
   const snap = snapData as unknown as SnapshotRow;
 
+  // Board na Lixeira (0087) não abre — nem pelo link público (arquivado
+  // segue). Mesmo 404 uniforme.
+  const { data: dashRow } = await service
+    .from("dashboards")
+    .select("status")
+    .eq("id", snap.dashboard_id)
+    .maybeSingle();
+  if (!dashRow || (dashRow.status as string) === "trashed") notFound();
+
   // Auditoria de acesso (contagem aproximada; corrida entre requests é ok).
   // Roda DEPOIS da resposta (after) — o UPDATE não bloqueia a renderização.
   after(async () => {

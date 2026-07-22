@@ -1,6 +1,14 @@
-// Versão: 2.11 | Data: 18/07/2026
+// Versão: 2.12 | Data: 22/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.12 (22/07/2026): NADA se move durante o gesto — allowOverlap no RGL (o
+//   moveElement interno retorna cedo em colisão: só o item manipulado anda; o
+//   placeholder segue o cursor). O "abrir espaço" acontece SÓ ao soltar:
+//   resolveDropCollisions (novo, ao lado de pushApart) move cada vizinho
+//   sobreposto o MÍNIMO necessário (direção de menor custo, desempate
+//   baixo→direita→esquerda→cima; cascata determinística), e persist() grava o
+//   item solto + esses vizinhos. Substitui o empurrão ao vivo do RGL (delta de
+//   vizinhos do v2.3) que espalhava widgets além do necessário.
 // v2.11 (18/07/2026): fontes por métrica — recordListExtraById repassado ao
 //   WidgetCard (extras p/ basis de subtotais; ver runRecordListWithExtras).
 // v2.10 (17/07/2026): arraste das alças da área de trabalho fluido — guard de
@@ -214,6 +222,105 @@ function pushApart(items: readonly ResolveItem[]): ResolveItem[] {
   }
 
   return placedY;
+}
+
+// Retângulo simples do resolvedor de DROP (sem pegada base: aqui tudo opera
+// sobre as bases persistidas — a inflação fica com o pushApart acima).
+type DropRect = { i: string; x: number; y: number; w: number; h: number };
+
+function rectsOverlap(a: DropRect, b: DropRect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// Resolve as sobreposições criadas por um DROP (arraste/resize solto sobre
+// vizinhos, com allowOverlap ligado): o item solto fica EXATAMENTE onde foi
+// solto (âncora) e cada vizinho sobreposto move o MÍNIMO necessário — a
+// distância para liberar todos os bloqueadores é medida nas 4 direções e vence
+// a de menor custo dentro dos limites (empate: baixo → direita → esquerda →
+// cima). Vizinho movido vira âncora e a cascata segue transitivamente (fila em
+// ordem de leitura) — determinística. Limites: X preso às colunas atuais
+// (largura do canvas estável); Y até maxRows — empurrar além das linhas atuais
+// é permitido de propósito: o canvas auto-cresce (propRows pisa em
+// contentBottom). Grade cheia (sem direção válida): desce clampado, podendo
+// restar sobreposição (caso patológico; o próximo gesto resolve).
+function resolveDropCollisions(
+  rects: readonly DropRect[],
+  fixedId: string,
+  cols: number,
+  maxRows: number
+): Map<string, { x: number; y: number }> {
+  const byId = new Map(rects.map((r) => [r.i, { ...r }]));
+  const fixed = byId.get(fixedId);
+  const moved = new Map<string, { x: number; y: number }>();
+  if (!fixed) return moved;
+
+  const reading = (a: DropRect, b: DropRect) =>
+    a.y - b.y || a.x - b.x || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0);
+
+  const anchored = new Set<string>([fixedId]);
+  const queue = rects
+    .map((r) => byId.get(r.i)!)
+    .filter((r) => r.i !== fixedId && rectsOverlap(r, fixed))
+    .sort(reading)
+    .map((r) => r.i);
+  const queued = new Set(queue);
+
+  const n = rects.length;
+  let guard = 0;
+  while (queue.length > 0 && guard++ < 4 * n * n + 16) {
+    const id = queue.shift()!;
+    queued.delete(id);
+    const r = byId.get(id)!;
+    const from = { x: r.x, y: r.y };
+
+    // Liberar um bloqueador âncora pode revelar outro — repete até limpar
+    // (bounded: cada âncora força no máximo um passo extra).
+    for (let inner = 0; inner <= n; inner++) {
+      const blockers = [...anchored]
+        .map((a) => byId.get(a)!)
+        .filter((b) => rectsOverlap(r, b));
+      if (blockers.length === 0) break;
+      let dRight = 0;
+      let dLeft = 0;
+      let dDown = 0;
+      let dUp = 0;
+      for (const b of blockers) {
+        dRight = Math.max(dRight, b.x + b.w - r.x);
+        dLeft = Math.max(dLeft, r.x + r.w - b.x);
+        dDown = Math.max(dDown, b.y + b.h - r.y);
+        dUp = Math.max(dUp, r.y + r.h - b.y);
+      }
+      const candidates = [
+        { x: r.x, y: r.y + dDown, cost: dDown, ok: r.y + dDown + r.h <= maxRows },
+        { x: r.x + dRight, y: r.y, cost: dRight, ok: r.x + dRight + r.w <= cols },
+        { x: r.x - dLeft, y: r.y, cost: dLeft, ok: r.x - dLeft >= 0 },
+        { x: r.x, y: r.y - dUp, cost: dUp, ok: r.y - dUp >= 0 },
+      ].filter((c) => c.ok);
+      // sort estável: empate de custo mantém a prioridade da ordem acima.
+      candidates.sort((a, b) => a.cost - b.cost);
+      const best =
+        candidates[0] ??
+        { x: r.x, y: Math.min(r.y + dDown, Math.max(0, maxRows - r.h)) };
+      r.x = best.x;
+      r.y = best.y;
+    }
+
+    if (r.x !== from.x || r.y !== from.y) moved.set(id, { x: r.x, y: r.y });
+    anchored.add(id);
+
+    // Cascata: quem o recém-ancorado passou a sobrepor entra na fila.
+    const hit = rects
+      .map((o) => byId.get(o.i)!)
+      .filter(
+        (o) => !anchored.has(o.i) && !queued.has(o.i) && rectsOverlap(o, r)
+      )
+      .sort(reading);
+    for (const o of hit) {
+      queue.push(o.i);
+      queued.add(o.i);
+    }
+  }
+  return moved;
 }
 
 export function DashboardGrid({
@@ -592,52 +699,57 @@ export function DashboardGrid({
   // (que é derivado a cada render e sumiria/derivaria se fosse "assado" na base).
   //   • item manipulado: arraste → nova x/y + w/h da base; redimensiona → novo
   //     w/h + x/y da base (o handle é inferior/direito);
-  //   • vizinhos empurrados pelo RGL durante o gesto: delta entre o layout final
-  //     (next) e o que entregamos ao RGL (layout do render) aplicado à base de
-  //     cada um — o empurrão do usuário persiste, o automático não.
+  //   • vizinhos: com allowOverlap o RGL NÃO empurra ninguém durante o gesto
+  //     (`next` chega com só o item manipulado alterado) — quem abre espaço é o
+  //     resolveDropCollisions AQUI, no drop: cada vizinho sobreposto move o
+  //     mínimo necessário, em cascata determinística sobre as bases.
   // O patch aplica no estado otimista do shell (applyLayoutPatch) na hora — como
   // saveLayout não revalida (edição fluida), a prop do servidor fica obsoleta e
   // era ela que fazia os widgets "voltarem" no próximo re-render. Após persistir,
   // registra no histórico. Obs.: widgets com autoSize podem "assentar" um render
   // depois do drop (a base nova repassa por inflação+pushApart) — determinístico.
   function persist(
-    next: Layout,
+    _next: Layout,
     changed: LayoutItem | null,
     kind: "drag" | "resize"
   ) {
-    if (!editMode) return;
+    if (!editMode || !changed) return;
+    const idx = widgets.findIndex((w) => w.id === changed.i);
+    if (idx < 0) return;
+    const base = basePos(widgets[idx], idx);
+    const dropped: GridPosition =
+      kind === "resize"
+        ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
+        : { x: changed.x, y: changed.y, w: base.w, h: base.h };
+
+    // Bases + item solto na posição do drop → deslocamento mínimo dos vizinhos.
+    const rects: DropRect[] = widgets.map((w, i) =>
+      w.id === changed.i
+        ? { i: w.id, ...dropped }
+        : { i: w.id, ...basePos(w, i) }
+    );
+    const movedNeighbors = resolveDropCollisions(
+      rects,
+      changed.i,
+      cols,
+      MAX_ROWS
+    );
+
     const patch: Record<string, GridPosition> = {};
-    widgets.forEach((w, i) => {
-      const base = basePos(w, i);
-      let nb: GridPosition | null = null;
-      if (changed && changed.i === w.id) {
-        nb =
-          kind === "resize"
-            ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
-            : { x: changed.x, y: changed.y, w: base.w, h: base.h };
-      } else {
-        const given = layout.find((l) => l.i === w.id);
-        const nl = next.find((l) => l.i === w.id);
-        if (given && nl) {
-          const dx = nl.x - given.x;
-          const dy = nl.y - given.y;
-          if (dx !== 0 || dy !== 0) {
-            nb = {
-              x: Math.max(0, base.x + dx),
-              y: Math.max(0, base.y + dy),
-              w: base.w,
-              h: base.h,
-            };
-          }
-        }
-      }
-      if (
-        nb &&
-        (nb.x !== base.x || nb.y !== base.y || nb.w !== base.w || nb.h !== base.h)
-      ) {
-        patch[w.id] = nb;
-      }
-    });
+    if (
+      dropped.x !== base.x ||
+      dropped.y !== base.y ||
+      dropped.w !== base.w ||
+      dropped.h !== base.h
+    ) {
+      patch[changed.i] = dropped;
+    }
+    for (const [id, p] of movedNeighbors) {
+      const i = widgets.findIndex((w) => w.id === id);
+      if (i < 0) continue;
+      const b = basePos(widgets[i], i);
+      patch[id] = { x: p.x, y: p.y, w: b.w, h: b.h };
+    }
     if (Object.keys(patch).length === 0) return;
     applyLayoutPatch(patch);
     void saveLayout(
@@ -873,6 +985,13 @@ export function DashboardGrid({
               maxRows={rows}
               rowHeight={ROW_H}
               compactType={null}
+              // Nada se move durante o gesto: em colisão o moveElement interno
+              // retorna cedo (só o item manipulado anda; placeholder segue o
+              // cursor) e o compactor vira identidade. O espaço é aberto SÓ no
+              // drop, por resolveDropCollisions (persist). NÃO trocar por
+              // preventCollision: ele impede o placeholder de ENTRAR em área
+              // ocupada (soltar no meio de um grupo ficaria impossível).
+              allowOverlap
               margin={[MX, MY]}
               containerPadding={[MX, MY]}
               autoSize={false}

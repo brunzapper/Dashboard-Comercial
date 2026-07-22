@@ -51,11 +51,12 @@ export default async function KanbanPage({
   const supabase = await createClient();
   const { data: board } = await supabase
     .from("dashboards")
-    .select("id, name, owner_user_id, settings, kind")
+    .select("id, name, owner_user_id, settings, kind, status")
     .eq("id", id)
     .eq("kind", "kanban")
     .maybeSingle();
-  if (!board) notFound();
+  // Board na Lixeira (0087) não abre — mesmo 404 de board inexistente.
+  if (!board || board.status === "trashed") notFound();
 
   const settings = (board.settings ?? {}) as DashboardSettings;
   const kanban: KanbanSettings = settings.kanban ?? { mode: "registros" };

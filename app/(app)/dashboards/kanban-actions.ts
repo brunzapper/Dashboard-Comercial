@@ -63,6 +63,8 @@ export async function listTaskBoards(): Promise<{ id: string; name: string }[]> 
     .from("dashboards")
     .select("id, name, settings")
     .eq("kind", "kanban")
+    // Board na Lixeira (0087) não abre — fora dos destinos.
+    .neq("status", "trashed")
     .order("name");
   return (data ?? [])
     .filter(

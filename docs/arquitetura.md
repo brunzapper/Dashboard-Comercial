@@ -1,4 +1,10 @@
-<!-- Versão: 1.16 | Data: 22/07/2026 -->
+<!-- Versão: 1.17 | Data: 22/07/2026 -->
+<!-- v1.17 (22/07/2026): ciclo de vida de boards no hub (0087 — §4.7 +
+     invariante 14): menu ⋮ com Duplicar/Arquivar/Excluir (soft → Lixeira,
+     purga 14d via pg-cron-purge-trash; trashed não abre em rota nenhuma),
+     duplicateBoard com remap de ids + strip de preset. Grid: allowOverlap —
+     nada se move durante o gesto; resolveDropCollisions abre espaço MÍNIMO só
+     no drop (dashboard-grid v2.12). -->
 <!-- v1.16 (22/07/2026): (a) comparação nos Cards de FÓRMULA (§4.9) — o
      runCardWidget roda a mesma fórmula no range deslocado (comparisonSpec,
      inclusive previous_period_bd com feriados; bases de janela ficam de fora
@@ -648,6 +654,24 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.
+- **Ciclo de vida de boards no hub (22/07/2026, 0087):** o card do hub
+  (`app/(app)/page.tsx` + `board-card-menu.tsx`) tem menu "⋮" com Duplicar/
+  Arquivar/Excluir (dashboards E kanbans). **Excluir é SOFT** (`trashBoard` →
+  `status='trashed'` + `trashed_at`): o board cai na seção recolhida "Lixeira",
+  não abre (404 em `/dashboards/[id]`, `/kanbans/[id]` e `/s/[token]`; fora de
+  `validateLastView`, dos pickers `listWidgetLinkTargets`/`listTaskBoards`, do
+  lookup de preset e o refresh de snapshot aborta), pode ser restaurado ou
+  excluído em definitivo (`deleteBoardPermanently`, só `status='trashed'`) e é
+  purgado após 14 dias (`apply/pg-cron-purge-trash.sql`; o hub esconde vencidos
+  mesmo sem o cron). **Arquivar** (`archiveBoard`) só tira da tela principal —
+  segue abrindo por tempo indeterminado (seção "Arquivados"). **Duplicar**
+  (`duplicateBoard`): qualquer usuário que ENXERGA o board e tem
+  `create_dashboards` — a cópia nasce privada/ativa do usuário, com ids NOVOS
+  de widgets e settings REMAPEADOS (connectors, `shape.link`, links de nota
+  `[..](@id)`, `excludedTargets` — substituição literal de uuids no JSON),
+  identidade de preset REMOVIDA (`settings.preset`/`presetKey` — o applyPreset
+  nunca adota/sobrescreve a cópia), células (`dashboard_table_cells`) e
+  `kanban_placements` copiados; snapshots/user_preferences/tasks NÃO.
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
@@ -1056,6 +1080,20 @@ principalmente — para mantenedores humanos.
     sync com os funis vivos (`lookups.categoryNames()` em `syncFieldCatalog`);
     edição manual das options não sobrevive ao sync (mesmo trato do campo
     curado `fonte`).
+
+14. **Board na Lixeira não abre; duplicação sempre remapeia.** `dashboards.status
+    = 'trashed'` (0087) significa 404 em `/dashboards/[id]`, `/kanbans/[id]` E
+    `/s/[token]` (a RLS `dashboards_select` NÃO filtra por status — o "não
+    abre" vive nas pages/actions; não afrouxe esses guards), fora dos pickers
+    (`listWidgetLinkTargets`/`listTaskBoards`), do lookup de preset e do
+    refresh de snapshots. Exclusão definitiva SÓ de dentro da Lixeira
+    (`deleteBoardPermanently` exige `status='trashed'` no predicado); a purga
+    física é o cron `apply/pg-cron-purge-trash.sql` (14 dias) e o hub esconde
+    vencidos por conta própria. `duplicateBoard` SEMPRE remapeia os uuids de
+    widget/dashboard dentro dos settings copiados e REMOVE
+    `settings.preset`/`settings.presetKey` — sem isso, conectores/links da
+    cópia apontariam para os widgets do original e o `applyPreset` adotaria/
+    sobrescreveria a cópia.
 
 ## 6. Convenções do projeto
 
