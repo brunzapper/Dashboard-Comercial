@@ -58,6 +58,7 @@ import {
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import type { Formula } from "@/lib/records/formulas";
 import {
   basisKeysFor,
@@ -317,7 +318,15 @@ export const RecordListTable = memo(function RecordListTable({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const baseCols = columns.filter((c) => c.field);
-  const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
+  // Linhas core (0086) separadas: overrides das colunas núcleo (ex.: pipeline
+  // 'selecao' → dropdown na edição inline). O mapa por chave custom fica SEM
+  // elas — refs custom:<key> nunca apontam p/ coluna núcleo.
+  const coreDefByField = new Map(
+    fields.filter((f) => isCoreDef(f)).map((f) => [f.field_key, f])
+  );
+  const fieldByKey = new Map(
+    fields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
   const cols = applyManualOrder(baseCols, t.columnOrder, (c) => c.field);
 
   // Campo unificado: por padrão resolve o MEMBRO da fonte de cada registro
@@ -1568,7 +1577,18 @@ export const RecordListTable = memo(function RecordListTable({
                 <CoreEditableCell
                   recordId={r.id}
                   field={c.field}
-                  dataType={EDITABLE_CORE_COLUMNS[c.field]}
+                  // Coluna núcleo virada 'selecao' no /campos (0086): dropdown
+                  // com as options do override; senão o tipo fixo da coluna.
+                  dataType={
+                    coreDefByField.get(c.field)?.data_type === "selecao"
+                      ? "selecao"
+                      : EDITABLE_CORE_COLUMNS[c.field]
+                  }
+                  options={
+                    coreDefByField.get(c.field)?.data_type === "selecao"
+                      ? coreDefByField.get(c.field)?.options
+                      : undefined
+                  }
                   value={coreString(c.field, r)}
                   currency={r.currency}
                   writeBack={c.writeBack}

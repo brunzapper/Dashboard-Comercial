@@ -1154,28 +1154,46 @@ export default async function DashboardPage({
   // ativos (value = id, corrige o filtro que não casava com texto livre) e as
   // etapas distintas da(s) fonte(s) de cada widget (value = texto da etapa).
   const filterOptionsById: Record<string, FieldFilterOptions> = {};
-  if (filterOptionsFetchPromise) {
-    // Promise disparada antes da computação dos widgets — aqui só consome.
-    const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
-
-    const responsibleOptions = (respRes.data ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-    }));
-    const operationOptions = (opsRes.data ?? []).map((o) => ({
-      value: o.id as string,
-      label: (o.name as string) ?? "—",
-    }));
-    // Etapas por record_type (a partir dos pares distintos do RPC).
+  if (fieldFilterWidgets.length > 0) {
+    // resp/op/etapas dependem do fetch (só disparado quando expostos); os
+    // selecao (core como pipeline, e custom) saem das próprias defs — sempre.
+    let responsibleOptions: { value: string; label: string }[] = [];
+    let operationOptions: { value: string; label: string }[] = [];
     const stagesByRt: Record<string, Set<string>> = {};
-    for (const row of (Array.isArray(stageRes.data)
-      ? stageRes.data
-      : []) as Record<string, unknown>[]) {
-      const rt = String(row.dim_1 ?? "");
-      const st = row.dim_2 == null ? "" : String(row.dim_2);
-      if (!rt || !st) continue;
-      (stagesByRt[rt] ??= new Set()).add(st);
+    if (filterOptionsFetchPromise) {
+      // Promise disparada antes da computação dos widgets — aqui só consome.
+      const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
+      responsibleOptions = (respRes.data ?? []).map((r) => ({
+        value: r.id as string,
+        label: (r.display_name as string) ?? "—",
+      }));
+      operationOptions = (opsRes.data ?? []).map((o) => ({
+        value: o.id as string,
+        label: (o.name as string) ?? "—",
+      }));
+      // Etapas por record_type (a partir dos pares distintos do RPC).
+      for (const row of (Array.isArray(stageRes.data)
+        ? stageRes.data
+        : []) as Record<string, unknown>[]) {
+        const rt = String(row.dim_1 ?? "");
+        const st = row.dim_2 == null ? "" : String(row.dim_2);
+        if (!rt || !st) continue;
+        (stagesByRt[rt] ??= new Set()).add(st);
+      }
     }
+
+    // Campo cuja def efetiva é selecao com options (core via override 0086 —
+    // ex.: pipeline — ou custom) → dropdown com as options. Os handlers
+    // explícitos acima (resp/op/etapa) têm precedência.
+    const selectOptions = (ref: string) => {
+      const def = ref.startsWith("custom:")
+        ? fieldByKeyAll.get(ref.slice("custom:".length))
+        : coreDefs.get(ref);
+      if (def?.data_type !== "selecao") return null;
+      const opts = def.options ?? [];
+      if (opts.length === 0) return null;
+      return opts.map((o) => ({ value: o, label: o }));
+    };
 
     for (const fw of fieldFilterWidgets) {
       const map: FieldFilterOptions = {};
@@ -1194,6 +1212,11 @@ export default async function DashboardPage({
         map.stage = [...set]
           .sort((a, b) => a.localeCompare(b, "pt-BR"))
           .map((s) => ({ value: s, label: s }));
+      }
+      for (const e of fwFields) {
+        if (map[e.field]) continue;
+        const opts = selectOptions(e.field);
+        if (opts) map[e.field] = opts;
       }
       if (Object.keys(map).length > 0) filterOptionsById[fw.id] = map;
     }

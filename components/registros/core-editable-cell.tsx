@@ -28,6 +28,7 @@ export function CoreEditableCell({
   recordId,
   field,
   dataType,
+  options,
   value: serverValue,
   currency,
   writeBack = false,
@@ -37,6 +38,9 @@ export function CoreEditableCell({
   recordId: string;
   field: string; // nome da coluna do núcleo
   dataType: DataType;
+  // Options de uma coluna núcleo virada 'selecao' no /campos (0086 — ex.:
+  // pipeline). Presentes + dataType 'selecao' → dropdown em vez de texto livre.
+  options?: string[];
   value: string; // valor atual (string)
   currency?: string | null; // moeda do registro (formata value/mrr)
   writeBack?: boolean;
@@ -145,6 +149,25 @@ export function CoreEditableCell({
               : undefined
         }
         className={cn("text-right", error && "border-destructive")}
+      />
+    );
+  }
+
+  // Coluna núcleo 'selecao' (0086): dropdown com as options do /campos —
+  // mesma receita da EditableCell dos campos personalizados.
+  if (dataType === "selecao" && options && options.length > 0) {
+    return (
+      <Combobox
+        options={[
+          { value: "", label: "—" },
+          ...options.map((o) => ({ value: o, label: o })),
+        ]}
+        value={value}
+        onValueChange={commit}
+        placeholder="—"
+        disabled={pending}
+        className={cn("w-full", error && "border-destructive")}
+        aria-label={field}
       />
     );
   }

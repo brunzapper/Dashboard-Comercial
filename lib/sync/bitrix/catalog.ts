@@ -286,4 +286,23 @@ export async function syncFieldCatalog(
   if (error) {
     console.error(`syncFieldCatalog: upsert de field_definitions falhou: ${error.message}`);
   }
+
+  // Coluna núcleo `pipeline` virada 'selecao' no /campos (linha core da 0086):
+  // options sempre frescas com os funis vivos (crm.dealcategory.list), como o
+  // campo curado `fonte` (sourceNames). SÓ as options — rótulo/olho/ordem do
+  // admin ficam intactos; se o admin voltou o tipo p/ texto, nada é tocado.
+  const pipelineOptions = lookups.categoryNames();
+  if (pipelineOptions.length > 0) {
+    const { error: pipeErr } = await db
+      .from("field_definitions")
+      .update({ options: pipelineOptions })
+      .eq("field_key", "pipeline")
+      .eq("source_system", "core")
+      .eq("data_type", "selecao");
+    if (pipeErr) {
+      console.error(
+        `syncFieldCatalog: refresh das options do pipeline falhou: ${pipeErr.message}`
+      );
+    }
+  }
 }

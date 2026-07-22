@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition } from "@/lib/records/types";
+import { splitCoreDefs } from "@/lib/records/core-defs";
 import {
   buildCorrespondenceMap,
   loadCorrespondences,
@@ -305,6 +306,21 @@ async function doRefresh(
         // sem etapas — dropdown fica vazio
       }
     }
+    // Campo cuja def efetiva é selecao com options (core via override 0086 —
+    // ex.: pipeline — ou custom): dropdown com as options das defs congeladas.
+    // ESPELHO da page (filterOptionsById) — mantenha os dois juntos.
+    const { custom: customDefs, core: coreDefs } = splitCoreDefs(fields);
+    const customByKey = new Map(customDefs.map((f) => [f.field_key, f]));
+    const selectOptions = (ref: string) => {
+      const def = ref.startsWith("custom:")
+        ? customByKey.get(ref.slice("custom:".length))
+        : coreDefs.get(ref);
+      if (def?.data_type !== "selecao") return null;
+      const opts = def.options ?? [];
+      if (opts.length === 0) return null;
+      return opts.slice(0, MAX_OPTIONS).map((o) => ({ value: o, label: o }));
+    };
+
     for (const fw of fieldFilterWidgets) {
       const map: FieldFilterOptions = {};
       const fwFields = fw.settings?.fields ?? [];
@@ -323,6 +339,11 @@ async function doRefresh(
           .sort((a, b) => a.localeCompare(b, "pt-BR"))
           .slice(0, MAX_OPTIONS)
           .map((s) => ({ value: s, label: s }));
+      }
+      for (const e of fwFields) {
+        if (map[e.field]) continue;
+        const opts = selectOptions(e.field);
+        if (opts) map[e.field] = opts;
       }
       if (Object.keys(map).length > 0) fieldFilterOptions[fw.id] = map;
     }
