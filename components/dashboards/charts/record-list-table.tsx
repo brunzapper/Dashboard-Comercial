@@ -153,6 +153,8 @@ import {
   ResizeHandle,
   type ColorScope,
 } from "../appearance-editing";
+import { useFontScale } from "../font-scale-context";
+import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 
 const FK_FIELDS = new Set(["responsible_id", "operation_id", "related_lead_id"]);
 const MONEY_FIELDS = new Set(["value", "mrr"]);
@@ -299,6 +301,9 @@ export const RecordListTable = memo(function RecordListTable({
   const sourcesCatalog = useSources();
   const ap = appearance ?? {};
   const t = ap.table ?? {};
+  // Fonte do corpo (fonts.table × escala do dashboard); th/td herdam do <table>.
+  const fontScale = useFontScale();
+  const tableStyle = fontStyle(ap.fonts?.table, FONT_DEFAULTS.table, fontScale);
   const editable = canEdit && Boolean(onAppearanceChange);
   const change = onAppearanceChange ?? (() => {});
   const dashFmt = dateFormat ?? DEFAULT_DATE_FORMAT;
@@ -1701,7 +1706,7 @@ export const RecordListTable = memo(function RecordListTable({
 
     return (
       <div className="h-full overflow-auto [scrollbar-gutter:stable]">
-        <Table>
+        <Table style={tableStyle}>
           <TableHeader>
             <TableRow
               className={rowBorder}
@@ -1813,7 +1818,7 @@ export const RecordListTable = memo(function RecordListTable({
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto [scrollbar-gutter:stable]">
-      <Table>
+      <Table style={tableStyle}>
         <TableHeader>
           <TableRow
             className={rowBorder}

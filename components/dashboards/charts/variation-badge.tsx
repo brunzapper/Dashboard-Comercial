@@ -27,6 +27,7 @@ export function VariationBadge({
   settings,
   fmtAbs,
   className,
+  style: styleProp,
   hideWhenUnavailable,
 }: {
   cur: number | null | undefined;
@@ -35,6 +36,8 @@ export function VariationBadge({
   /** Formata o valor absoluto na escala da métrica (moeda/percentual). */
   fmtAbs?: (n: number) => string;
   className?: string;
+  /** Estilos extras (ex.: fontSize dos controles de fonte do widget). */
+  style?: React.CSSProperties;
   /** Sem variação disponível: não renderiza nada (em vez de "—"). */
   hideWhenUnavailable?: boolean;
 }) {
@@ -42,7 +45,9 @@ export function VariationBadge({
   if (!v) {
     if (hideWhenUnavailable) return null;
     return (
-      <span className={cn("text-muted-foreground", className)}>—</span>
+      <span className={cn("text-muted-foreground", className)} style={styleProp}>
+        —
+      </span>
     );
   }
   const style = settings.style ?? "both";
@@ -56,6 +61,7 @@ export function VariationBadge({
         style !== "arrow" && TONE_CLASS[tone],
         className
       )}
+      style={styleProp}
       title={text}
     >
       {style !== "color" ? (

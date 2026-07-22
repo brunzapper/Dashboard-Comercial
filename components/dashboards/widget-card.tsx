@@ -109,6 +109,7 @@ import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
 import { fracDigits } from "@/lib/widgets/appearance";
+import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 import { isChronoDim } from "@/lib/widgets/comparison";
 import { evalConditional } from "@/lib/widgets/conditional";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
@@ -121,6 +122,7 @@ import type { OperandRef } from "@/lib/records/date-operands";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
+import { useFontScale } from "./font-scale-context";
 import { ImageWidget } from "./image-widget";
 import { NoteWidget } from "./note-widget";
 import { ShapeWidget } from "./shape-widget";
@@ -320,6 +322,8 @@ export const WidgetCard = memo(function WidgetCard({
     widget,
     dashboardId
   );
+  const fontScale = useFontScale();
+  const fonts = appearance?.fonts;
 
   // Refs p/ medir o tamanho natural do conteúdo (dimensões dinâmicas).
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -903,7 +907,10 @@ export const WidgetCard = memo(function WidgetCard({
         ) : null}
         <span
           className="flex-1 truncate text-sm font-medium"
-          style={{ color: title?.color }}
+          style={{
+            color: title?.color,
+            ...fontStyle(fonts?.title, FONT_DEFAULTS.title, fontScale),
+          }}
         >
           {widget.title ?? "Sem título"}
         </span>
@@ -1110,6 +1117,7 @@ export const WidgetCard = memo(function WidgetCard({
                       color: cs?.text,
                       background: cs?.fill,
                       ...(cs?.bold ? { fontWeight: 700 } : {}),
+                      ...fontStyle(fonts?.value, FONT_DEFAULTS.value, fontScale),
                     }}
                   >
                     {calcValue?.value == null

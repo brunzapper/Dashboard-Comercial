@@ -65,6 +65,20 @@ import type {
 import type { WidgetInput } from "@/app/(app)/dashboards/actions";
 import { updateWidget } from "@/app/(app)/dashboards/actions";
 
+// Opções da seção "Texto": Auto (default do elemento × escala do dashboard)
+// ou px fixo (absoluto — não multiplica pela escala).
+const FONT_SIZE_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  ...[10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64].map((n) => ({
+    value: String(n),
+    label: `${n} px`,
+  })),
+];
+const fontValue = (px: number | undefined): string =>
+  px != null ? String(px) : "auto";
+const fontPx = (v: string): number | undefined =>
+  v === "auto" ? undefined : Number(v);
+
 export function WidgetAppearanceSheet({
   dashboardId,
   widget,
@@ -191,6 +205,13 @@ export function WidgetAppearanceSheet({
 
   const patch = (p: Partial<AppearanceSettings>) =>
     setAp((prev) => ({ ...prev, ...p }));
+  // Tamanhos de fonte por elemento (fonts): undefined = Auto (o JSON do save
+  // descarta chaves undefined).
+  const patchFonts = (
+    k: keyof NonNullable<AppearanceSettings["fonts"]>,
+    v: number | undefined
+  ) => setAp((prev) => ({ ...prev, fonts: { ...prev.fonts, [k]: v } }));
+  const fontsCustom = Object.values(ap.fonts ?? {}).some((v) => v != null);
   const patchRecord = (
     field: "seriesColors" | "sliceColors" | "seriesAxis",
     key: string | number,
@@ -326,6 +347,58 @@ export function WidgetAppearanceSheet({
                   { value: "4", label: "4" },
                 ]}
               />
+            </BuilderSection>
+          ) : null}
+          {/* ---------- Texto (tamanho da fonte por elemento) ---------- */}
+          {!isShape ? (
+            <BuilderSection
+              value="texto"
+              title="Texto"
+              badge={fontsCustom ? "Personalizado" : null}
+            >
+              <p className="text-muted-foreground text-xs">
+                Tamanhos em px. Auto acompanha a escala de fonte do dashboard
+                (menu do dashboard ▸ Aparência); um valor fixo não é afetado
+                pela escala.
+              </p>
+              <SelectRow
+                label="Título do widget"
+                value={fontValue(ap.fonts?.title)}
+                onChange={(v) => patchFonts("title", fontPx(v))}
+                options={FONT_SIZE_OPTIONS}
+              />
+              {isKpi || vt === "calculado" ? (
+                <SelectRow
+                  label="Valor (número grande)"
+                  value={fontValue(ap.fonts?.value)}
+                  onChange={(v) => patchFonts("value", fontPx(v))}
+                  options={FONT_SIZE_OPTIONS}
+                />
+              ) : null}
+              {isKpi ? (
+                <SelectRow
+                  label="Rótulos"
+                  value={fontValue(ap.fonts?.labels)}
+                  onChange={(v) => patchFonts("labels", fontPx(v))}
+                  options={FONT_SIZE_OPTIONS}
+                />
+              ) : null}
+              {isChart || isPie ? (
+                <SelectRow
+                  label="Textos do gráfico"
+                  value={fontValue(ap.fonts?.chart)}
+                  onChange={(v) => patchFonts("chart", fontPx(v))}
+                  options={FONT_SIZE_OPTIONS}
+                />
+              ) : null}
+              {isTable ? (
+                <SelectRow
+                  label="Corpo da tabela"
+                  value={fontValue(ap.fonts?.table)}
+                  onChange={(v) => patchFonts("table", fontPx(v))}
+                  options={FONT_SIZE_OPTIONS}
+                />
+              ) : null}
             </BuilderSection>
           ) : null}
           {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}

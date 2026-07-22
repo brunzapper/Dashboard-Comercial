@@ -117,6 +117,8 @@ import {
   scaleDomains,
   type ResolvedCondStyle,
 } from "@/lib/widgets/conditional";
+import { useFontScale } from "../font-scale-context";
+import { FONT_DEFAULTS, fontStyle, resolveFontNum } from "@/lib/widgets/fonts";
 import { VariationBadge } from "./variation-badge";
 
 // Glyphs dos ícones de regra condicional (células/valores).
@@ -282,11 +284,6 @@ function moneyAxis(v: unknown, code: string): string {
   });
 }
 
-const axisProps = {
-  tick: { fontSize: 11, fill: "var(--muted-foreground)" },
-  stroke: "var(--border)",
-} as const;
-
 // Opacidade decrescente p/ o modo gradiente (variação sutil entre colunas).
 function gradientOpacity(i: number, n: number): number {
   if (n <= 1) return 1;
@@ -327,6 +324,27 @@ export const WidgetChart = memo(function WidgetChart({
 }) {
   const { rows, dimensions, metrics } = data;
   const dimKey = dimensions[0]?.key;
+
+  // Tamanhos de fonte efetivos (appearance.fonts × escala do dashboard).
+  // Auto + escala 1 ⇒ styles undefined (render idêntico ao anterior).
+  const fontScale = useFontScale();
+  const fonts = appearance?.fonts;
+  const chartPx = resolveFontNum(fonts?.chart, FONT_DEFAULTS.chart, fontScale);
+  const valueStyle = fontStyle(fonts?.value, FONT_DEFAULTS.value, fontScale);
+  const valueMultiStyle = fontStyle(
+    fonts?.value,
+    FONT_DEFAULTS.valueMulti,
+    fontScale
+  );
+  const labelsStyle = fontStyle(fonts?.labels, FONT_DEFAULTS.labels, fontScale);
+  const axisProps = {
+    tick: { fontSize: chartPx, fill: "var(--muted-foreground)" },
+    stroke: "var(--border)",
+  };
+  // Largura dos eixos Y acompanha ticks maiores p/ não cortar os rótulos.
+  const axisScale = Math.max(1, chartPx / FONT_DEFAULTS.chart);
+  const axisW = Math.round(48 * axisScale);
+  const axisWCat = Math.round(90 * axisScale);
 
   // --- Moeda: config por métrica + helpers de formatação (paridade c/ registros) ---
   const metricByKey: Record<string, Metric> = useMemo(() => {
@@ -519,7 +537,7 @@ export const WidgetChart = memo(function WidgetChart({
     chartCondActive ? evalConditional(chartCond, "value", value) : null;
   const showLegend = ap.legend?.show ?? metrics.length > 1;
   const legendStyle = {
-    fontSize: 11,
+    fontSize: chartPx,
     ...(ap.legend?.color ? { color: ap.legend.color } : {}),
   };
   // Texto do rótulo de dados (dataLabels.format): percentual = participação no
@@ -572,7 +590,11 @@ export const WidgetChart = memo(function WidgetChart({
         return (
           <div className="flex h-full flex-col justify-center gap-1 overflow-auto p-1">
             {rows.map((r, i) => (
-              <div key={i} className="flex items-baseline gap-2 text-sm">
+              <div
+                key={i}
+                className="flex items-baseline gap-2 text-sm"
+                style={fontStyle(fonts?.value, 14, fontScale)}
+              >
                 <span className="text-muted-foreground w-4 shrink-0 text-right text-xs tabular-nums">
                   {i + 1}.
                 </span>
@@ -597,7 +619,9 @@ export const WidgetChart = memo(function WidgetChart({
               </div>
             ))}
             {c.subText ? (
-              <span className="text-muted-foreground text-xs">{c.subText}</span>
+              <span className="text-muted-foreground text-xs" style={labelsStyle}>
+                {c.subText}
+              </span>
             ) : null}
             {cmp ? (
               <span className="text-muted-foreground/70 text-[10px]">
@@ -623,6 +647,7 @@ export const WidgetChart = memo(function WidgetChart({
               settings={cardCmp.settings}
               fmtAbs={fmtCardAbs}
               className="text-3xl font-semibold"
+              style={valueStyle}
             />
           ) : (
             <span
@@ -631,6 +656,7 @@ export const WidgetChart = memo(function WidgetChart({
                 color: cs?.text,
                 background: cs?.fill,
                 ...(cs?.bold ? { fontWeight: 700 } : {}),
+                ...valueStyle,
               }}
             >
               <CondIcon style={cs} />
@@ -638,10 +664,15 @@ export const WidgetChart = memo(function WidgetChart({
             </span>
           )}
           {c.subText ? (
-            <span className="text-muted-foreground text-xs">{c.subText}</span>
+            <span className="text-muted-foreground text-xs" style={labelsStyle}>
+              {c.subText}
+            </span>
           ) : null}
           {cardCmp ? (
-            <span className="flex flex-wrap items-center gap-x-2 text-xs">
+            <span
+              className="flex flex-wrap items-center gap-x-2 text-xs"
+              style={labelsStyle}
+            >
               {!cardOnly ? (
                 <VariationBadge
                   cur={c.value}
@@ -666,10 +697,12 @@ export const WidgetChart = memo(function WidgetChart({
       if (k.mode === "data_atual") {
         return (
           <div className="flex h-full flex-col justify-center p-1">
-            <span className="text-3xl font-semibold tabular-nums">
+            <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
               {k.valueText ?? "—"}
             </span>
-            <span className="text-muted-foreground text-xs">{k.label}</span>
+            <span className="text-muted-foreground text-xs" style={labelsStyle}>
+              {k.label}
+            </span>
           </div>
         );
       }
@@ -683,15 +716,21 @@ export const WidgetChart = memo(function WidgetChart({
                 prev={k.cmpValue}
                 settings={cmp.settings}
                 className="text-3xl font-semibold"
+                style={valueStyle}
               />
             ) : (
-              <span className="text-3xl font-semibold tabular-nums">
+              <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
                 {k.valueText ?? (k.value == null ? "—" : fmt(k.value, apDecimals))}
               </span>
             )}
-            <span className="text-muted-foreground text-xs">{k.label}</span>
+            <span className="text-muted-foreground text-xs" style={labelsStyle}>
+              {k.label}
+            </span>
             {cmp ? (
-              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+              <span
+                className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs"
+                style={labelsStyle}
+              >
                 {!only ? (
                   <VariationBadge
                     cur={k.value}
@@ -713,12 +752,17 @@ export const WidgetChart = memo(function WidgetChart({
       const pct = k.pct == null ? null : Math.round(k.pct * 100);
       return (
         <div className="flex h-full flex-col justify-center gap-1 p-1">
-          <span className="text-3xl font-semibold tabular-nums">
+          <span className="text-3xl font-semibold tabular-nums" style={valueStyle}>
             {k.realizadoText ?? fmt(k.realizado, apDecimals)}
           </span>
-          <span className="text-muted-foreground text-xs">{k.label}</span>
+          <span className="text-muted-foreground text-xs" style={labelsStyle}>
+            {k.label}
+          </span>
           {k.meta != null ? (
-            <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 text-xs">
+            <div
+              className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 text-xs"
+              style={labelsStyle}
+            >
               <span>Meta: {k.metaText ?? fmt(k.meta, apDecimals)}</span>
               {pct != null ? (
                 <span className={pct >= 100 ? "text-chart-2" : ""}>{pct}%</span>
@@ -728,7 +772,9 @@ export const WidgetChart = memo(function WidgetChart({
               ) : null}
             </div>
           ) : (
-            <span className="text-muted-foreground text-xs">Sem meta configurada</span>
+            <span className="text-muted-foreground text-xs" style={labelsStyle}>
+              Sem meta configurada
+            </span>
           )}
         </div>
       );
@@ -759,6 +805,7 @@ export const WidgetChart = memo(function WidgetChart({
                   settings={cmp.settings}
                   fmtAbs={fmtAbs}
                   className="text-2xl font-semibold"
+                  style={valueMultiStyle}
                 />
               ) : (
                 <span
@@ -767,15 +814,21 @@ export const WidgetChart = memo(function WidgetChart({
                     color: cs?.text,
                     background: cs?.fill,
                     ...(cs?.bold ? { fontWeight: 700 } : {}),
+                    ...valueMultiStyle,
                   }}
                 >
                   <CondIcon style={cs} />
                   {moneyCellText(row, m.key)}
                 </span>
               )}
-              <span className="text-muted-foreground text-xs">{m.label}</span>
+              <span className="text-muted-foreground text-xs" style={labelsStyle}>
+                {m.label}
+              </span>
               {cmp ? (
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                <span
+                  className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs"
+                  style={labelsStyle}
+                >
                   {!only ? (
                     <VariationBadge
                       cur={cur}
@@ -882,7 +935,7 @@ export const WidgetChart = memo(function WidgetChart({
         }
         stroke="none"
         fill={ap.dataLabels.color ?? "var(--foreground)"}
-        fontSize={11}
+        fontSize={chartPx}
         formatter={(v: unknown) => dataLabelText(v, metricKey, pieTotal)}
       />
     ) : null;
@@ -915,7 +968,7 @@ export const WidgetChart = memo(function WidgetChart({
               dataKey="name"
               stroke="none"
               fill="var(--foreground)"
-              fontSize={11}
+              fontSize={chartPx}
             />
             {pieLabelList}
             {pieData.map((_, i) => (
@@ -1015,7 +1068,7 @@ export const WidgetChart = memo(function WidgetChart({
       const tx = (x ?? 0) + (width ?? 0) + (hasDataLabels ? 44 : 4);
       const ty = (y ?? 0) + (height ?? 0) / 2 + 3;
       return (
-        <text x={tx} y={ty} fontSize={10} fill={fill}>
+        <text x={tx} y={ty} fontSize={Math.max(9, chartPx - 1)} fill={fill}>
           {text}
         </text>
       );
@@ -1023,7 +1076,7 @@ export const WidgetChart = memo(function WidgetChart({
     const tx = (x ?? 0) + (width ?? 0) / 2;
     const ty = (y ?? 0) - (hasDataLabels ? 16 : 4);
     return (
-      <text x={tx} y={ty} textAnchor="middle" fontSize={10} fill={fill}>
+      <text x={tx} y={ty} textAnchor="middle" fontSize={Math.max(9, chartPx - 1)} fill={fill}>
         {text}
       </text>
     );
@@ -1057,7 +1110,7 @@ export const WidgetChart = memo(function WidgetChart({
         <YAxis
           yAxisId="left"
           {...axisProps}
-          width={48}
+          width={axisW}
           tickFormatter={yTickFormatter}
         />
         {hasRightAxis ? (
@@ -1065,7 +1118,7 @@ export const WidgetChart = memo(function WidgetChart({
             yAxisId="right"
             orientation="right"
             {...axisProps}
-            width={48}
+            width={axisW}
           />
         ) : null}
         <Tooltip
@@ -1114,7 +1167,7 @@ export const WidgetChart = memo(function WidgetChart({
                   ap.dataLabels.position === "bottom" ? "bottom" : "top"
                 }
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
-                fontSize={11}
+                fontSize={chartPx}
                 formatter={(v: unknown) =>
                   dataLabelText(v, m.key, seriesTotal(m.key))
                 }
@@ -1185,7 +1238,7 @@ export const WidgetChart = memo(function WidgetChart({
       {horizontal ? (
         <>
           <XAxis type="number" {...axisProps} tickFormatter={yTickFormatter} />
-          <YAxis type="category" dataKey={dimKey} {...axisProps} width={90} />
+          <YAxis type="category" dataKey={dimKey} {...axisProps} width={axisWCat} />
         </>
       ) : (
         <>
@@ -1193,7 +1246,7 @@ export const WidgetChart = memo(function WidgetChart({
           <YAxis
             yAxisId="left"
             {...axisProps}
-            width={48}
+            width={axisW}
             tickFormatter={yTickFormatter}
           />
           {hasRightAxis ? (
@@ -1201,7 +1254,7 @@ export const WidgetChart = memo(function WidgetChart({
               yAxisId="right"
               orientation="right"
               {...axisProps}
-              width={48}
+              width={axisW}
             />
           ) : null}
         </>
@@ -1292,7 +1345,7 @@ export const WidgetChart = memo(function WidgetChart({
                       : "top"
                 }
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
-                fontSize={11}
+                fontSize={chartPx}
                 formatter={(v: unknown) =>
                   dataLabelText(v, m.key, seriesTotal(m.key))
                 }
@@ -1347,6 +1400,14 @@ function AppearanceTable({
   onChange: (a: AppearanceSettings) => void;
 }) {
   const t = appearance.table ?? {};
+  // Fonte do corpo da tabela (appearance.fonts.table × escala do dashboard):
+  // aplicada no <table>; th/td herdam. Auto + escala 1 ⇒ undefined.
+  const fontScale = useFontScale();
+  const tableStyle = fontStyle(
+    appearance.fonts?.table,
+    FONT_DEFAULTS.table,
+    fontScale
+  );
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragRow, setDragRow] = useState<string | null>(null);
   const [menu, setMenu] = useState<TableMenu | null>(null);
@@ -2085,7 +2146,7 @@ function AppearanceTable({
         dimCols.map((c) => dimDisplay(r[c.key], c.key)).join(" · ");
       return (
         <div className="h-full overflow-auto [scrollbar-gutter:stable]">
-          <Table>
+          <Table style={tableStyle}>
             <TableHeader>
               <TableRow
                 className={rowBorder}
@@ -2245,7 +2306,7 @@ function AppearanceTable({
 
     return (
       <div className="h-full overflow-auto [scrollbar-gutter:stable]">
-        <Table>
+        <Table style={tableStyle}>
           <TableHeader>
             <TableRow
               className={rowBorder}
@@ -2351,7 +2412,7 @@ function AppearanceTable({
 
   return (
     <div className="h-full overflow-auto [scrollbar-gutter:stable]">
-      <Table>
+      <Table style={tableStyle}>
         <TableHeader>
           <TableRow
             className={rowBorder}
