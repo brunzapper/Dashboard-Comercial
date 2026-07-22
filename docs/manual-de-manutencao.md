@@ -1,4 +1,6 @@
-<!-- Versão: 1.9 | Data: 21/07/2026 -->
+<!-- Versão: 1.10 | Data: 22/07/2026 -->
+<!-- v1.10 (22/07/2026): 0086 (linhas core no catálogo) — checklist do sync em
+     §4.6 (options do pipeline; "coluna núcleo sumiu" = olho da aba Núcleo). -->
 <!-- v1.9 (21/07/2026): §4.1 — checklist do dia de Brasília (0085): probes de
      ancoragem/bucket p/ colunas timestamptz do núcleo; par de RPCs agora parte
      da 0085. -->
@@ -220,6 +222,13 @@ npm run build      # o que a Vercel roda no deploy
   NUNCA converte. Após ligar/mudar o fuso de uma fonte já populada, rode um
   **Backfill** para reescrever os valores antigos (a 0080 só cobre as chaves
   datetime conhecidas: Data Reunião lead/negócio e `bitrix_moved_time`).
+- [ ] Linhas core (0086): `syncFieldCatalog` NÃO upserta as linhas
+  `source_system='core'` (chaves distintas), mas reescreve as `options` do
+  `pipeline` (quando `data_type='selecao'`) com `lookups.categoryNames()` —
+  rótulo/olho/ordem do admin ficam intactos. "Coluna núcleo sumiu dos
+  seletores" = olho desligado na aba **Núcleo** do /campos (a linha core
+  oculta remove o campo de todos os dropdowns; religue o olho). "Options do
+  pipeline erradas" = conferir `crm.dealcategory.list` e rodar um sync.
 
 ### 4.7 Dias não úteis, métricas de meta e presets (20/07/2026)
 
