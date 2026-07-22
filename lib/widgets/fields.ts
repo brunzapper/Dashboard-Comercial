@@ -107,7 +107,9 @@ export const TODAY_FIELD: AvailableField = {
 export const CORE_FIELDS: AvailableField[] = [
   { field: "title", label: "Nome (título)", isNumeric: false, isDate: false },
   { field: "record_type", label: "Tipo de registro", isNumeric: false, isDate: false },
-  { field: "source_system", label: "Fonte", isNumeric: false, isDate: false },
+  // "Base" = fonte de dados do sistema (data_sources) — renomeado na UI p/
+  // desambiguar do campo CRM "Fonte" (custom `fonte`, SOURCE_ID do Bitrix).
+  { field: "source_system", label: "Base", isNumeric: false, isDate: false },
   { field: "pipeline", label: "Pipeline", isNumeric: false, isDate: false },
   { field: "stage", label: "Etapa", isNumeric: false, isDate: false },
   { field: "stage_semantic", label: "Situação (aberto/ganho/perdido)", isNumeric: false, isDate: false },

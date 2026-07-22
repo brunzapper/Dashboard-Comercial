@@ -193,7 +193,7 @@ export function ApiDocs({
     return { mapping, row };
   }, [source]);
 
-  const ingestUrl = `${origin}/api/ingest/${source?.key ?? "<fonte>"}`;
+  const ingestUrl = `${origin}/api/ingest/${source?.key ?? "<base>"}`;
   const curlRows = example
     ? `curl -X POST '${ingestUrl}' \\
   -H 'Authorization: Bearer dck_SUA_CHAVE' \\
@@ -215,7 +215,7 @@ export function ApiDocs({
           <ol className="list-decimal space-y-1 pl-5">
             <li>
               Em <strong>Configurações → Integrações</strong>, crie uma chave de
-              API escolhendo a fonte de destino e o mapeamento de colunas. A
+              API escolhendo a base de destino e o mapeamento de colunas. A
               chave <code className="text-xs">dck_...</code> aparece uma única
               vez — copie na hora.
             </li>
@@ -238,7 +238,7 @@ export function ApiDocs({
         <CardHeader>
           <CardTitle>API de entrada — receber dados</CardTitle>
           <CardDescription>
-            <code>POST {origin}/api/ingest/&lt;fonte&gt;</code> · autenticação
+            <code>POST {origin}/api/ingest/&lt;base&gt;</code> · autenticação
             por chave de integração (Bearer).
           </CardDescription>
         </CardHeader>
@@ -248,8 +248,8 @@ export function ApiDocs({
             <p className="text-muted-foreground">
               Header <code className="text-xs">Authorization: Bearer dck_...</code>.
               Falhas de autenticação respondem <strong>401 uniforme</strong> —
-              a API não distingue fonte inexistente, chave errada, revogada ou
-              de outra fonte (anti-enumeração). Revogar uma chave na UI tem
+              a API não distingue base inexistente, chave errada, revogada ou
+              de outra base (anti-enumeração). Revogar uma chave na UI tem
               efeito imediato.
             </p>
           </div>
@@ -331,10 +331,10 @@ export function ApiDocs({
       {/* ============ 3. Fontes e alvos de mapeamento ============ */}
       <Card>
         <CardHeader>
-          <CardTitle>Fontes e alvos de mapeamento</CardTitle>
+          <CardTitle>Bases e alvos de mapeamento</CardTitle>
           <CardDescription>
             O mapeamento (salvo na chave de API) liga as colunas do seu payload
-            aos campos do dashboard. Escolha uma fonte para ver os alvos
+            aos campos do dashboard. Escolha uma base para ver os alvos
             disponíveis e um exemplo pronto.
           </CardDescription>
         </CardHeader>
@@ -342,7 +342,7 @@ export function ApiDocs({
           <div className="max-w-xs">
             <Select value={source?.key ?? ""} onValueChange={setSourceKey}>
               <SelectTrigger>
-                <SelectValue placeholder="Escolha a fonte" />
+                <SelectValue placeholder="Escolha a base" />
               </SelectTrigger>
               <SelectContent>
                 {sources.map((s) => (
@@ -385,7 +385,7 @@ export function ApiDocs({
               <p className="text-muted-foreground">
                 O alvo especial <code className="text-xs">ignore</code> descarta
                 a coluna. Campos personalizados novos são criados no import de
-                CSV ou em Configurações → Fontes — a chave só referencia campos
+                CSV ou em Configurações → Bases — a chave só referencia campos
                 existentes.
               </p>
               {example ? (
@@ -407,8 +407,8 @@ export function ApiDocs({
             </>
           ) : (
             <p className="text-muted-foreground">
-              Nenhuma fonte cadastrada ainda — crie uma em Configurações →
-              Fontes.
+              Nenhuma base cadastrada ainda — crie uma em Configurações →
+              Bases.
             </p>
           )}
         </CardContent>

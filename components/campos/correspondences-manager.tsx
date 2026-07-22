@@ -116,10 +116,10 @@ function CorrespondenceForm({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Colunas por fonte</Label>
+        <Label>Colunas por base</Label>
         <p className="text-muted-foreground text-xs">
-          Escolha a coluna equivalente em cada fonte. Deixe em branco onde não se
-          aplica (mínimo de duas fontes).
+          Escolha a coluna equivalente em cada base. Deixe em branco onde não se
+          aplica (mínimo de duas bases).
         </p>
         {catalog.map((s) => (
           <div key={s.key} className="flex flex-col gap-1">

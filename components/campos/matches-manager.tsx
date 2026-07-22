@@ -113,23 +113,23 @@ function MatchRuleForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <Label>Fonte A</Label>
+          <Label>Base A</Label>
           <Combobox
             options={sourceOptions}
             value={sourceA}
             onValueChange={(v) => setSourceA(v as SourceKey)}
             searchable={false}
-            aria-label="Fonte A"
+            aria-label="Base A"
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>Fonte B</Label>
+          <Label>Base B</Label>
           <Combobox
             options={sourceOptions}
             value={sourceB}
             onValueChange={(v) => setSourceB(v as SourceKey)}
             searchable={false}
-            aria-label="Fonte B"
+            aria-label="Base B"
           />
         </div>
       </div>
@@ -254,9 +254,9 @@ export function MatchesManager({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Conexões entre fontes</h2>
+          <h2 className="text-lg font-semibold">Conexões entre bases</h2>
           <p className="text-muted-foreground text-sm">
-            Case registros de fontes diferentes (ex.: um lead do Bitrix com sua
+            Case registros de bases diferentes (ex.: um lead do Bitrix com sua
             compra no site) por até 2 pares de campos com fallback. Os campos do
             registro casado ficam disponíveis nos widgets como{" "}
             <code className="text-xs">match:&lt;fonte&gt;:&lt;campo&gt;</code>.
@@ -276,7 +276,7 @@ export function MatchesManager({
           <TableHeader>
             <TableRow>
               <TableHead>Rótulo</TableHead>
-              <TableHead>Fontes</TableHead>
+              <TableHead>Bases</TableHead>
               <TableHead>Par 1</TableHead>
               <TableHead>Par 2</TableHead>
               <TableHead>Situação</TableHead>

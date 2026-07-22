@@ -674,11 +674,11 @@ export async function createRecord(
   const sources = await loadSources(supabase);
   const sourceKey = String(formData.get("source") ?? "");
   const sourceDef = sources.find((s) => s.key === sourceKey);
-  if (!sourceDef) return { ok: false, message: "Fonte inválida." };
+  if (!sourceDef) return { ok: false, message: "Base inválida." };
   if (!sourceDef.manualEntry) {
     return {
       ok: false,
-      message: "Esta fonte não aceita criação manual de registros.",
+      message: "Esta base não aceita criação manual de registros.",
     };
   }
 

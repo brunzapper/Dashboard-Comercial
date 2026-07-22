@@ -90,7 +90,7 @@ export async function exportWidgetRecordsCsv(
   }
 
   // Colunas: core + custom visíveis das fontes do widget (união; applies_to
-  // vazio = todas). Multi-fonte ganha a coluna "Fonte" na frente.
+  // vazio = todas). Multi-fonte ganha a coluna "Base" na frente.
   const widgetSources = ((widget.sources ?? []) as string[]).filter((s) =>
     isKnownSource(s, sources)
   ) as SourceKey[];
@@ -140,7 +140,7 @@ export async function exportWidgetRecordsCsv(
   };
 
   const headers = [
-    ...(multiSource ? ["Fonte"] : []),
+    ...(multiSource ? ["Base"] : []),
     ...CORE_EXPORT_REFS.map((ref) => recordRefLabel(ref, fields)),
     ...fields.map((f) => f.label),
   ];

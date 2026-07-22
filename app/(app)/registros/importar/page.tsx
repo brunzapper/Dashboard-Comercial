@@ -49,7 +49,7 @@ export default async function ImportarPage() {
         <div>
           <h1 className="text-2xl font-semibold">Importar CSV</h1>
           <p className="text-muted-foreground text-sm">
-            Importe dados em massa para uma fonte existente ou crie uma fonte
+            Importe dados em massa para uma base existente ou crie uma base
             nova a partir do arquivo. Re-importar o mesmo arquivo atualiza em
             vez de duplicar, e edições feitas no app são preservadas.
           </p>

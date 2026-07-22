@@ -151,23 +151,23 @@ function SubSourceForm({
       <input type="hidden" name="filter" value={filterJson} />
 
       <div className="flex flex-col gap-1.5">
-        <Label>Fonte pai</Label>
+        <Label>Base pai</Label>
         <Combobox
           options={roots.map((r) => ({ value: r.key, label: r.label }))}
           value={parentKey}
           onValueChange={setParentKey}
           searchable={false}
           disabled={isEdit}
-          aria-label="Fonte pai"
+          aria-label="Base pai"
         />
         <p className="text-muted-foreground text-xs">
-          As linhas da sub-fonte são as da pai que satisfazem o filtro abaixo. A
+          As linhas da sub-base são as da pai que satisfazem o filtro abaixo. A
           pai não muda depois de criada.
         </p>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sub-label">Nome da sub-fonte</Label>
+        <Label htmlFor="sub-label">Nome da sub-base</Label>
         <Input
           id="sub-label"
           name="label"
@@ -271,7 +271,7 @@ function SubSourceForm({
       ) : null}
 
       <Button type="submit" disabled={pending} className="w-full">
-        {pending ? "Salvando..." : isEdit ? "Salvar alterações" : "Criar sub-fonte"}
+        {pending ? "Salvando..." : isEdit ? "Salvar alterações" : "Criar sub-base"}
       </Button>
     </form>
   );
@@ -287,7 +287,7 @@ function DeleteSubButton({ subKey }: { subKey: string }) {
         variant="ghost"
         size="icon"
         disabled={pending}
-        aria-label="Excluir sub-fonte"
+        aria-label="Excluir sub-base"
       >
         <Trash2 className="size-4" />
       </Button>
@@ -327,18 +327,18 @@ export function SubSourcesManager({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Sub-fontes</h2>
+          <h2 className="text-lg font-semibold">Sub-bases</h2>
           <p className="text-muted-foreground text-sm">
-            Uma sub-fonte é a fonte pai recortada por um filtro (ex.: Leads só da
+            Uma sub-base é a base pai recortada por um filtro (ex.: Leads só da
             etapa &quot;Clientes Lite&quot;), com campo de data próprio. Aparece
-            como fonte no construtor de widgets e nos campos unificados. Quando a
+            como base no construtor de widgets e nos campos unificados. Quando a
             pai também está no widget, a sub é absorvida (sem duplicar) — salvo se
             você marcar &quot;conviver&quot; no widget.
           </p>
         </div>
         <Button onClick={openCreate} disabled={roots.length === 0}>
           <Plus className="size-4" />
-          Nova sub-fonte
+          Nova sub-base
         </Button>
       </div>
 
@@ -357,7 +357,7 @@ export function SubSourcesManager({
             {subs.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center">
-                  Nenhuma sub-fonte ainda.
+                  Nenhuma sub-base ainda.
                 </TableCell>
               </TableRow>
             ) : (
@@ -379,7 +379,7 @@ export function SubSourcesManager({
                         variant="ghost"
                         size="icon"
                         onClick={() => openEdit(s)}
-                        aria-label="Editar sub-fonte"
+                        aria-label="Editar sub-base"
                       >
                         <Pencil className="size-4" />
                       </Button>
@@ -397,10 +397,10 @@ export function SubSourcesManager({
         <SheetContent className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle>
-              {editing ? "Editar sub-fonte" : "Nova sub-fonte"}
+              {editing ? "Editar sub-base" : "Nova sub-base"}
             </SheetTitle>
             <SheetDescription>
-              As linhas são as da fonte pai que satisfazem o filtro.
+              As linhas são as da base pai que satisfazem o filtro.
             </SheetDescription>
           </SheetHeader>
           <div className="px-4 pb-4">

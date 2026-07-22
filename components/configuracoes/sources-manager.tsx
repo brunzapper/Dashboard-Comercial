@@ -99,7 +99,7 @@ function SourceForm({
       <input type="hidden" name="default_period_field" value={periodField} />
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="source-label">Nome da fonte</Label>
+        <Label htmlFor="source-label">Nome da base</Label>
         <Input
           id="source-label"
           name="label"
@@ -177,7 +177,7 @@ function SourceForm({
         </label>
         <p className="text-muted-foreground text-xs">
           Habilita o botão &quot;Novo registro&quot; para esta fonte (Registros e
-          kanbans). Fontes alimentadas por Sync normalmente ficam desligadas.
+          kanbans). Bases alimentadas por Sync normalmente ficam desligadas.
         </p>
       </div>
 
@@ -193,7 +193,7 @@ function SourceForm({
       ) : null}
 
       <Button type="submit" disabled={pending} className="w-full">
-        {pending ? "Salvando..." : isEdit ? "Salvar alterações" : "Criar fonte"}
+        {pending ? "Salvando..." : isEdit ? "Salvar alterações" : "Criar base"}
       </Button>
     </form>
   );
@@ -209,7 +209,7 @@ function DeleteSourceButton({ sourceKey }: { sourceKey: string }) {
         variant="ghost"
         size="icon"
         disabled={pending}
-        aria-label="Excluir fonte"
+        aria-label="Excluir base"
       >
         <Trash2 className="size-4" />
       </Button>
@@ -239,7 +239,7 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Catálogo de fontes</h2>
+          <h2 className="text-lg font-semibold">Catálogo de bases</h2>
           <p className="text-muted-foreground text-sm">
             Cada fonte agrupa registros próprios e aparece nas abas de
             Registros, no construtor de widgets e no import de CSV. Fontes
@@ -294,7 +294,7 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => openEdit(s)}
-                      aria-label="Editar fonte"
+                      aria-label="Editar base"
                     >
                       <Pencil className="size-4" />
                     </Button>
@@ -312,11 +312,11 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent className="overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>{editing ? "Editar fonte" : "Nova fonte"}</SheetTitle>
+            <SheetTitle>{editing ? "Editar base" : "Nova base"}</SheetTitle>
             <SheetDescription>
               {editing
                 ? "Nome, nome curto e campo de período. A chave não muda."
-                : "A fonte nasce vazia — importe um CSV ou conecte uma integração para populá-la."}
+                : "A base nasce vazia — importe um CSV ou conecte uma integração para populá-la."}
             </SheetDescription>
           </SheetHeader>
           <div className="px-4 pb-4">

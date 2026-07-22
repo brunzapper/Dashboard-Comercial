@@ -103,7 +103,7 @@ function scopeWarnings(formula: Formula, ctx: FormulaContext): string[] {
     if (!source) continue;
     if (agg !== "sum" && agg !== "count" && agg !== "avg") {
       warnings.push(
-        `"${labelOf(ref)}": Mín/Máx não têm forma com escopo de fonte — o operando ficará ausente ("—"). Use Σ, Média ou Contagem, ou remova a fonte do operando.`
+        `"${labelOf(ref)}": Mín/Máx não têm forma com escopo de base — o operando ficará ausente ("—"). Use Σ, Média ou Contagem, ou remova a base do operando.`
       );
       continue;
     }
@@ -115,7 +115,7 @@ function scopeWarnings(formula: Formula, ctx: FormulaContext): string[] {
     }
     if (conds === null) {
       warnings.push(
-        `"${labelOf(ref)}": o filtro dessa sub-fonte não é expressável dentro da fórmula — o operando ficará ausente ("—"). Ajuste o filtro da sub-fonte (=, ≠, >, ≥, <, ≤, "está em", vazio/não vazio) ou use a fonte pai.`
+        `"${labelOf(ref)}": o filtro dessa sub-base não é expressável dentro da fórmula — o operando ficará ausente ("—"). Ajuste o filtro da sub-base (=, ≠, >, ≥, <, ≤, "está em", vazio/não vazio) ou use a base pai.`
       );
     }
   }

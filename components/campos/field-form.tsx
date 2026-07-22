@@ -364,7 +364,7 @@ export function FieldForm({
             formInputs
             excludeKeys={forbidden}
             preview={{
-              title: "Prévia do resultado (todas as fontes)",
+              title: "Prévia do resultado (todas as bases)",
               manualStart: true,
               // Mesmo choke point dos widgets (runCalculatedWidget) — sem
               // período/filtros: o campo salvo respeita o recorte de cada

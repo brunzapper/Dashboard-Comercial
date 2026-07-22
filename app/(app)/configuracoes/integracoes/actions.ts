@@ -117,7 +117,7 @@ export async function createApiKey(
   const db = createServiceClient();
   const sources = await loadSources(db);
   const source = sources.find((s) => s.key === input.sourceKey);
-  if (!source) return { ok: false, message: "Fonte inválida." };
+  if (!source) return { ok: false, message: "Base inválida." };
 
   const parsed = parseMapping(input.mappingJson);
   if (!parsed.ok) return { ok: false, message: parsed.message };
@@ -150,7 +150,7 @@ export async function createApiKey(
       if (missing.length > 0) {
         return {
           ok: false,
-          message: `Campos inexistentes: ${missing.join(", ")} — crie-os antes (import de CSV ou Fontes).`,
+          message: `Campos inexistentes: ${missing.join(", ")} — crie-os antes (import de CSV ou Bases).`,
         };
       }
     }

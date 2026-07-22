@@ -183,7 +183,7 @@ export function PresetsManager({ rows }: { rows: PresetRow[] }) {
       </div>
 
       <p className="text-muted-foreground text-xs">
-        Sub-fontes e campos que o preset declara são criados só quando ausentes
+        Sub-bases e campos que o preset declara são criados só quando ausentes
         — os já existentes nunca são sobrescritos. Widgets sem identidade de
         preset (adicionados à mão no dashboard) não são tocados na atualização.
       </p>

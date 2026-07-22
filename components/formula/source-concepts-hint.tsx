@@ -25,26 +25,26 @@ export function SourceConceptsHint({ className }: { className?: string }) {
             "text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center",
             className
           )}
-          aria-label="Como as fontes afetam o cálculo"
+          aria-label="Como as bases afetam o cálculo"
         >
           <CircleHelp className="size-3.5" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">
         <div className="flex flex-col gap-2 text-xs">
-          <p className="font-medium">Três escopos de fonte convivem aqui:</p>
+          <p className="font-medium">Três escopos de base convivem aqui:</p>
           <p>
-            <strong>Fontes do widget</strong> — de onde vêm as linhas e os
+            <strong>Bases do widget</strong> — de onde vêm as linhas e os
             registros exibidos (e as dimensões).
           </p>
           <p>
-            <strong>Fontes da métrica</strong> — sobre quais fontes ESTA
+            <strong>Bases da métrica</strong> — sobre quais bases ESTA
             métrica é calculada. Pode ampliar ou restringir em relação ao
             widget (ex.: linhas só de Deals, métrica contando Leads e Deals).
-            Nenhuma marcada = as fontes do widget.
+            Nenhuma marcada = as bases do widget.
           </p>
           <p>
-            <strong>Fonte no operando</strong> — dentro da fórmula, um operando
+            <strong>Base no operando</strong> — dentro da fórmula, um operando
             &quot;Contagem · Leads&quot; recorta SÓ aquele operando para a
             fonte, permitindo razões entre fontes (ex.: Contagem de Deals ÷
             Contagem de Leads = conversão).

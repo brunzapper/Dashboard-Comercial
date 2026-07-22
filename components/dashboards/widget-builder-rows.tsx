@@ -282,7 +282,7 @@ export function DimensionRow({
       unifiedSourceOptions &&
       unifiedSourceOptions.length > 1 ? (
         <div className="flex flex-col gap-1">
-          <Label className="text-muted-foreground text-xs">Fonte do dado</Label>
+          <Label className="text-muted-foreground text-xs">Base do dado</Label>
           {(unifiedSourcesValue ?? []).map((src, idx) => {
             const list = unifiedSourcesValue ?? [];
             const used = new Set(list.filter((_, i) => i !== idx));
@@ -304,7 +304,7 @@ export function DimensionRow({
                       list.map((s, i) => (i === idx ? v : s))
                     )
                   }
-                  aria-label={`Fonte do dado — prioridade ${idx + 1}`}
+                  aria-label={`Base do dado — prioridade ${idx + 1}`}
                 />
                 <Button
                   type="button"
@@ -314,8 +314,8 @@ export function DimensionRow({
                   onClick={() =>
                     onUnifiedSourcesChange?.(list.filter((_, i) => i !== idx))
                   }
-                  title="Remover fonte"
-                  aria-label={`Remover fonte ${idx + 1}`}
+                  title="Remover base"
+                  aria-label={`Remover base ${idx + 1}`}
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -338,14 +338,14 @@ export function DimensionRow({
                 }
               >
                 <Plus className="size-4" />
-                {list.length === 0 ? "Escolher fonte…" : "Adicionar fallback"}
+                {list.length === 0 ? "Escolher base…" : "Adicionar fallback"}
               </Button>
             );
           })()}
           <p className="text-muted-foreground text-xs">
             {(unifiedSourcesValue ?? []).length === 0
-              ? "Padrão: cada registro mostra o dado da própria fonte."
-              : "Busca o dado na 1ª fonte (do próprio registro ou do registro casado dela); vazio cai para a próxima."}
+              ? "Padrão: cada registro mostra o dado da própria base."
+              : "Busca o dado na 1ª base (do próprio registro ou do registro casado dela); vazio cai para a próxima."}
           </p>
         </div>
       ) : null}
@@ -678,7 +678,7 @@ export function MetricRow({
               ) : (
                 <ChevronRight className="size-3.5" />
               )}
-              Fontes da métrica
+              Bases da métrica
               {srcTargets.length > 0 ? ` (${srcTargets.length})` : ""}
             </button>
             <SourceConceptsHint />
@@ -699,7 +699,7 @@ export function MetricRow({
                       onCheckedChange={(c) =>
                         toggleMetricSource(opt.key, c === true)
                       }
-                      aria-label={`Calcular a métrica sobre a fonte ${opt.label}`}
+                      aria-label={`Calcular a métrica sobre a base ${opt.label}`}
                     />
                     {opt.label}
                     {opt.stale ? " (fora do catálogo)" : null}
@@ -708,8 +708,8 @@ export function MetricRow({
               </div>
               <span className="text-muted-foreground text-xs">
                 {srcTargets.length === 0
-                  ? "Nenhuma marcada = as fontes do widget."
-                  : "A métrica é calculada sobre as fontes marcadas; as linhas e os registros do widget continuam seguindo as fontes do widget."}
+                  ? "Nenhuma marcada = as bases do widget."
+                  : "A métrica é calculada sobre as bases marcadas; as linhas e os registros do widget continuam seguindo as bases do widget."}
               </span>
             </div>
           ) : null}
@@ -789,7 +789,7 @@ export function FilterRow({
       </div>
       {sourceOptions && sourceOptions.length > 1 ? (
         <div className="flex flex-col gap-1">
-          <Label className="text-muted-foreground text-xs">Fontes</Label>
+          <Label className="text-muted-foreground text-xs">Bases</Label>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {sourceOptions.map((opt) => (
               <label
@@ -802,17 +802,17 @@ export function FilterRow({
                 <Checkbox
                   checked={targets.includes(opt.key)}
                   onCheckedChange={(c) => toggleSource(opt.key, c === true)}
-                  aria-label={`Aplicar filtro à fonte ${opt.label}`}
+                  aria-label={`Aplicar filtro à base ${opt.label}`}
                 />
                 {opt.label}
-                {opt.stale ? " (fora das fontes do widget)" : null}
+                {opt.stale ? " (fora das bases do widget)" : null}
               </label>
             ))}
           </div>
           <span className="text-muted-foreground text-xs">
             {targets.length === 0
-              ? "Nenhuma marcada = todas as fontes."
-              : "Só as fontes marcadas são restringidas; as demais entregam seus dados normalmente."}
+              ? "Nenhuma marcada = todas as bases."
+              : "Só as bases marcadas são restringidas; as demais entregam seus dados normalmente."}
           </span>
         </div>
       ) : null}

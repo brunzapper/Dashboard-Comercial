@@ -75,7 +75,7 @@ export default async function ApiDocsPage() {
           <p className="text-muted-foreground text-sm">
             Como conectar sistemas externos: enviar dados para o dashboard
             (entrada) e receber notificações assinadas (saída). Os exemplos
-            abaixo já usam as fontes e campos do seu ambiente.
+            abaixo já usam as bases e campos do seu ambiente.
           </p>
         </div>
         <Button asChild variant="outline" size="sm">

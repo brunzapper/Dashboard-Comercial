@@ -78,9 +78,9 @@ export default async function FontesPage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold">Fontes</h1>
+        <h1 className="text-2xl font-semibold">Bases</h1>
         <p className="text-muted-foreground text-sm">
-          Catálogo das fontes de dados do produto: as internas (Bitrix e
+          Catálogo das bases de dados do produto: as internas (Bitrix e
           planilha do Estudo) e as personalizadas, criadas aqui ou pelo import
           de CSV em Registros.
         </p>
@@ -94,7 +94,7 @@ export default async function FontesPage() {
       <div>
         <h2 className="text-lg font-semibold">Rótulos</h2>
         <p className="text-muted-foreground text-sm">
-          O nome curto de cada fonte é editado na própria fonte, acima.
+          O nome curto de cada base é editado na própria base, acima.
         </p>
       </div>
       <SourceLabelsManager geral={labels.geral} />

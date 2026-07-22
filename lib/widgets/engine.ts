@@ -1375,7 +1375,7 @@ async function runWidgetByPeriod(
   });
 
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
+    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`
@@ -1615,7 +1615,7 @@ export async function runWidget(
     return {
       rows: seriesRows,
       dimensions: [
-        { key: "dim_1", label: "Fonte" },
+        { key: "dim_1", label: "Base" },
         ...(base?.dimensions ?? []).map((d, i) => ({
           key: `dim_${i + 2}`,
           label: d.label,
@@ -2673,7 +2673,7 @@ export async function runWidget(
   });
 
   const dimensions = dims.map((d, i) => {
-    const base = d.field === "record_type" ? "Fonte" : fieldLabel(d.field, available);
+    const base = d.field === "record_type" ? "Base" : fieldLabel(d.field, available);
     const suffix =
       d.transform && d.transform !== "none"
         ? ` (${TRANSFORM_LABELS[d.transform]})`

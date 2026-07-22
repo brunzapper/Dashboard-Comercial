@@ -230,7 +230,7 @@ export function SnapshotForm({
       ) : null}
 
       <CheckList
-        label="Fontes visíveis"
+        label="Bases visíveis"
         options={options.sources}
         selected={sources}
         onToggle={toggle(sources, setSources)}

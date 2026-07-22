@@ -154,8 +154,8 @@ function ProfileEditor({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-muted-foreground text-xs">
-        As condições valem em conjunto (E). Use a fonte-alvo quando o campo só
-        existe numa fonte — sem isso, a condição zeraria as demais fontes dos
+        As condições valem em conjunto (E). Use a base-alvo quando o campo só
+        existe numa base — sem isso, a condição zeraria as demais bases dos
         widgets. Os responsáveis vinculados à operação continuam valendo junto
         do perfil.
       </p>
@@ -196,13 +196,13 @@ function ProfileEditor({
             </div>
           ) : null}
           <div className="flex min-w-40 flex-col gap-1">
-            <Label className="text-xs">Fonte-alvo (opcional)</Label>
+            <Label className="text-xs">Base-alvo (opcional)</Label>
             <Combobox
               options={[{ value: "", label: "— todas —" }, ...sourceOptions]}
               value={c.source}
               onValueChange={(v) => patch(i, { source: v })}
               placeholder="— todas —"
-              aria-label="Fonte-alvo"
+              aria-label="Base-alvo"
             />
           </div>
           <Button
