@@ -1,4 +1,7 @@
-<!-- Versão: 1.14 | Data: 21/07/2026 -->
+<!-- Versão: 1.15 | Data: 22/07/2026 -->
+<!-- v1.15 (22/07/2026): linhas core de field_definitions (0086 — invariante 13:
+     overrides das colunas núcleo, split em lib/records/core-defs.ts) e nota de
+     terminologia "Base" (= fonte de dados do sistema, na UI). -->
 <!-- v1.14 (21/07/2026): sincronia filtros → widgets deferidos + rascunho do
      período personalizado (§4.10; invariante 12) — (a) intervalo
      personalizado (barra global e filtro rápido do card) vira RASCUNHO com
@@ -103,6 +106,13 @@ externas apenas a alimentam:
 - **Planilha "Estudo de Fechamentos"** — push horário via Google Apps Script;
 - **CSV** — wizard de importação na página Registros;
 - **API de ingestão** (`/api/ingest/<fonte>` + chaves de API) — webhooks de entrada.
+
+> **Terminologia (21/07/2026):** na **UI**, o conceito de fonte de dados do
+> sistema (`data_sources`/`sub_sources`) chama-se **"Base"** ("Sub-base",
+> "todas as bases") — renomeado para desfazer a ambiguidade com o campo CRM
+> **"Fonte"** (SOURCE_ID do Bitrix → `custom_fields.fonte`, que mantém o nome).
+> No código, no schema e nesta documentação o termo interno segue sendo
+> "fonte"/"sub-fonte" — só os rótulos visíveis mudaram.
 
 ## 2. Stack e infraestrutura
 
@@ -958,6 +968,25 @@ principalmente — para mantenedores humanos.
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
     persistido no banco não muda a URL). Ver §4.10.
+
+13. **Linhas core de `field_definitions` são OVERRIDES, nunca campos custom.**
+    A migração 0086 seeda as colunas do núcleo de `records` como linhas
+    `source_system='core'` (`field_key` = nome da coluna) para a aba Campos
+    exibi-las/geri-las (rótulo, olho, ordem; texto↔selecao na whitelist
+    `CORE_SELECT_CAPABLE` — pipeline/etapa/tipo de venda/canal). O ref de
+    widget segue sendo o nome CRU da coluna (`pipeline`) — uma linha core
+    JAMAIS pode virar `custom:<key>` em catálogo, operando, coluna ou mapa
+    `fieldByKey`. O split é feito por `lib/records/core-defs.ts`
+    (`isCoreDef`/`splitCoreDefs`): `buildAvailableFields` particiona e aplica
+    rótulo/olho; todos os consumidores de defs-como-custom filtram com
+    `isCoreDef` (nunca com `.neq("source_system",'core')` — campos locais/app
+    têm `source_system` NULL e o `<>` os derrubaria). Os loaders de builder
+    usam `show_in_builder OR source_system='core'` — a linha core precisa
+    chegar ao merge mesmo oculta, senão o hardcoded de `CORE_FIELDS`
+    reapareceria. As options do `pipeline` (selecao) são reescritas a cada
+    sync com os funis vivos (`lookups.categoryNames()` em `syncFieldCatalog`);
+    edição manual das options não sobrevive ao sync (mesmo trato do campo
+    curado `fonte`).
 
 ## 6. Convenções do projeto
 

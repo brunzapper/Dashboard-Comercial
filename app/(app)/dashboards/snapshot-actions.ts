@@ -78,7 +78,7 @@ function cleanSources(
   if (!raw || raw.length === 0) return { ok: true, value: null };
   const vals = raw.map(String);
   if (vals.some((v) => !validRecordTypes.has(v))) {
-    return { ok: false, message: "Restrição de fontes inválida." };
+    return { ok: false, message: "Restrição de bases inválida." };
   }
   return { ok: true, value: [...new Set(vals)] };
 }

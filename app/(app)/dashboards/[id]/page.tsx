@@ -41,6 +41,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import {
   currencyOptionsFrom,
@@ -222,7 +223,9 @@ export default async function DashboardPage({
       .select(
         "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
       )
-      .eq("show_in_builder", true)
+      // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
     loadCorrespondences(supabase),
     session
@@ -251,9 +254,13 @@ export default async function DashboardPage({
 
   const widgets = (widgetsData ?? []) as Widget[];
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Linhas core (0086) são overrides das colunas núcleo: entram em
+  // buildAvailableFields (que particiona internamente) e nos guards do /campos,
+  // mas NUNCA nos caminhos que tratam defs como campos de custom_fields.
+  const { custom: customFields, core: coreDefs } = splitCoreDefs(allFields);
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
-  const fieldByKeyAll = new Map(allFields.map((f) => [f.field_key, f]));
+  const fieldByKeyAll = new Map(customFields.map((f) => [f.field_key, f]));
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
@@ -261,9 +268,14 @@ export default async function DashboardPage({
   // Construtor de widgets respeita o ACL por papel (visible_to_roles): quem edita
   // só escolhe colunas visíveis ao seu papel (admin vê tudo). Assim a RLS
   // afrouxada não deixa um dono não-admin montar widgets com colunas restritas.
+  // Linhas core ficam sempre (papéis não se aplicam a colunas do núcleo) —
+  // sem isso, um core oculto pelo olho REAPARECERIA para não-admin.
   const builderFields = isAdmin
     ? allFields
-    : allFields.filter((f) => hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]));
+    : allFields.filter(
+        (f) =>
+          isCoreDef(f) || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[])
+      );
   const availableForBuilder = isAdmin
     ? available
     : buildAvailableFields(builderFields, correspondences, sources);
@@ -880,7 +892,7 @@ export default async function DashboardPage({
         try {
           const calcKey = w.settings?.calcField;
           const def = calcKey?.startsWith("custom:")
-            ? allFields.find(
+            ? customFields.find(
                 (f) =>
                   f.field_key === calcKey.slice(7) &&
                   f.data_type === "calculado_agg"
@@ -905,7 +917,7 @@ export default async function DashboardPage({
                 ? resolveCurrencyCode(def.currency_code)
                 : null,
             allowNegative: def?.allow_negative !== false,
-            fields: allFields,
+            fields: customFields,
             rates: currencyRates,
             conversionPeriod: conversionPeriodById[w.id],
           });
@@ -933,7 +945,7 @@ export default async function DashboardPage({
                 period: periodByWidget[w.id],
                 correspondences,
                 currencyMode: "auto",
-                fields: allFields,
+                fields: customFields,
                 rates: currencyRates,
                 conversionPeriod: conversionPeriodById[w.id],
               });
@@ -964,7 +976,7 @@ export default async function DashboardPage({
                 period: periodByWidget[w.id],
                 correspondences,
                 currencyMode: "auto",
-                fields: allFields,
+                fields: customFields,
                 rates: currencyRates,
                 conversionPeriod: conversionPeriodById[w.id],
               });
@@ -1010,7 +1022,7 @@ export default async function DashboardPage({
             config,
             periodByWidget[w.id],
             available,
-            allFields,
+            customFields,
             currencyRates,
             conversionPeriodById[w.id],
             {},
@@ -1060,7 +1072,7 @@ export default async function DashboardPage({
               periodByWidget[w.id],
               available,
               sources,
-              allFields
+              customFields
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;
@@ -1142,28 +1154,46 @@ export default async function DashboardPage({
   // ativos (value = id, corrige o filtro que não casava com texto livre) e as
   // etapas distintas da(s) fonte(s) de cada widget (value = texto da etapa).
   const filterOptionsById: Record<string, FieldFilterOptions> = {};
-  if (filterOptionsFetchPromise) {
-    // Promise disparada antes da computação dos widgets — aqui só consome.
-    const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
-
-    const responsibleOptions = (respRes.data ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-    }));
-    const operationOptions = (opsRes.data ?? []).map((o) => ({
-      value: o.id as string,
-      label: (o.name as string) ?? "—",
-    }));
-    // Etapas por record_type (a partir dos pares distintos do RPC).
+  if (fieldFilterWidgets.length > 0) {
+    // resp/op/etapas dependem do fetch (só disparado quando expostos); os
+    // selecao (core como pipeline, e custom) saem das próprias defs — sempre.
+    let responsibleOptions: { value: string; label: string }[] = [];
+    let operationOptions: { value: string; label: string }[] = [];
     const stagesByRt: Record<string, Set<string>> = {};
-    for (const row of (Array.isArray(stageRes.data)
-      ? stageRes.data
-      : []) as Record<string, unknown>[]) {
-      const rt = String(row.dim_1 ?? "");
-      const st = row.dim_2 == null ? "" : String(row.dim_2);
-      if (!rt || !st) continue;
-      (stagesByRt[rt] ??= new Set()).add(st);
+    if (filterOptionsFetchPromise) {
+      // Promise disparada antes da computação dos widgets — aqui só consome.
+      const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
+      responsibleOptions = (respRes.data ?? []).map((r) => ({
+        value: r.id as string,
+        label: (r.display_name as string) ?? "—",
+      }));
+      operationOptions = (opsRes.data ?? []).map((o) => ({
+        value: o.id as string,
+        label: (o.name as string) ?? "—",
+      }));
+      // Etapas por record_type (a partir dos pares distintos do RPC).
+      for (const row of (Array.isArray(stageRes.data)
+        ? stageRes.data
+        : []) as Record<string, unknown>[]) {
+        const rt = String(row.dim_1 ?? "");
+        const st = row.dim_2 == null ? "" : String(row.dim_2);
+        if (!rt || !st) continue;
+        (stagesByRt[rt] ??= new Set()).add(st);
+      }
     }
+
+    // Campo cuja def efetiva é selecao com options (core via override 0086 —
+    // ex.: pipeline — ou custom) → dropdown com as options. Os handlers
+    // explícitos acima (resp/op/etapa) têm precedência.
+    const selectOptions = (ref: string) => {
+      const def = ref.startsWith("custom:")
+        ? fieldByKeyAll.get(ref.slice("custom:".length))
+        : coreDefs.get(ref);
+      if (def?.data_type !== "selecao") return null;
+      const opts = def.options ?? [];
+      if (opts.length === 0) return null;
+      return opts.map((o) => ({ value: o, label: o }));
+    };
 
     for (const fw of fieldFilterWidgets) {
       const map: FieldFilterOptions = {};
@@ -1182,6 +1212,11 @@ export default async function DashboardPage({
         map.stage = [...set]
           .sort((a, b) => a.localeCompare(b, "pt-BR"))
           .map((s) => ({ value: s, label: s }));
+      }
+      for (const e of fwFields) {
+        if (map[e.field]) continue;
+        const opts = selectOptions(e.field);
+        if (opts) map[e.field] = opts;
       }
       if (Object.keys(map).length > 0) filterOptionsById[fw.id] = map;
     }

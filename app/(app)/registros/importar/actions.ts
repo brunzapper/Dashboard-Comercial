@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { ingestRows } from "@/lib/import/ingest";
 import {
   CORE_IMPORT_COLUMNS,
@@ -70,7 +71,7 @@ export async function prepareImportFields(
   const supabase = await createClient();
   const sources = await loadSources(supabase);
   const source = sources.find((s) => s.key === sourceKey);
-  if (!source) return { ok: false, message: `Fonte "${sourceKey}" não encontrada.` };
+  if (!source) return { ok: false, message: `Base "${sourceKey}" não encontrada.` };
   const rt = source.recordType;
 
   // 1) Resolve/valida as chaves (puro, sem I/O).
@@ -95,10 +96,19 @@ export async function prepareImportFields(
   const allKeys = [...new Set(keyed.map((k) => k.key))];
   const { data: existingRows, error: selectError } = await supabase
     .from("field_definitions")
-    .select("field_key, applies_to")
+    .select("field_key, applies_to, source_system")
     .in("field_key", allKeys);
   if (selectError) {
     return { ok: false, message: `Falha ao consultar campos: ${selectError.message}` };
+  }
+  // Chave reservada às colunas núcleo (0086): reutilizá-la gravaria em
+  // custom_fields.<key> à sombra da coluna núcleo homônima.
+  const coreHit = (existingRows ?? []).find((r) => isCoreDef(r));
+  if (coreHit) {
+    return {
+      ok: false,
+      message: `"${coreHit.field_key as string}" é coluna do núcleo — mapeie a coluna do CSV para ela diretamente ou renomeie o campo novo.`,
+    };
   }
   const existingByKey = new Map(
     (existingRows ?? []).map((r) => [r.field_key as string, r])
@@ -210,7 +220,7 @@ export async function importCsvChunk(
   const db = createServiceClient();
   const sources = await loadSources(db);
   const source = sources.find((s) => s.key === sourceKey);
-  if (!source) return { ok: false, message: `Fonte "${sourceKey}" não encontrada.` };
+  if (!source) return { ok: false, message: `Base "${sourceKey}" não encontrada.` };
 
   // Modo match: valida o alvo, os checkboxes e o write-back no servidor (a UI
   // também valida, mas o payload vem do client).
@@ -245,7 +255,7 @@ export async function importCsvChunk(
         message:
           source.recordType === "venda_site"
             ? "Write-back indisponível: a integração da planilha é somente de entrada."
-            : "Write-back só está disponível para as fontes sincronizadas do Bitrix (Leads e Negócios).",
+            : "Write-back só está disponível para as bases sincronizadas do Bitrix (Leads e Negócios).",
       };
     }
   }

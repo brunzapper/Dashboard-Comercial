@@ -7,6 +7,7 @@
 // percentual/número saem crus com vírgula decimal e moeda sai sem símbolo.
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { isPercentField } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { unifiedMemberRef } from "@/lib/correspondences";
 import { CORE_FIELDS, type AvailableField } from "@/lib/widgets/fields";
 import {
@@ -46,7 +47,12 @@ export function recordFieldDef(
 }
 
 export function recordRefLabel(ref: string, defs: FieldDefinition[]): string {
-  return recordFieldDef(ref, defs)?.label ?? CORE_LABELS.get(ref) ?? ref;
+  const custom = recordFieldDef(ref, defs)?.label;
+  if (custom) return custom;
+  // Ref cru de coluna núcleo: rótulo renomeado no /campos (linha core 0086,
+  // quando presente em defs) vence o estático de CORE_FIELDS.
+  const core = defs.find((d) => isCoreDef(d) && d.field_key === ref)?.label;
+  return core ?? CORE_LABELS.get(ref) ?? ref;
 }
 
 export interface RecordCellOptions {

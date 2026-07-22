@@ -1067,7 +1067,7 @@ export function WidgetBuilder({
   // runtime do engine (`dim_<n>`), com deslocamento quando "Quebrar por fonte".
   const allGroupByOptions: ComboboxOption[] = [
     ...(!isRecordList && splitBySource
-      ? [{ value: "dim_1", label: "Fonte" }]
+      ? [{ value: "dim_1", label: "Base" }]
       : []),
     ...dimensions
       .filter((d) => d.field)
@@ -1246,7 +1246,7 @@ export function WidgetBuilder({
       const isCustomCols = k.mode === "registros" && k.columnSource === "custom";
       if (k.mode === "registros") {
         if (!k.source) {
-          setError("Escolha a fonte dos registros do kanban.");
+          setError("Escolha a base dos registros do kanban.");
           return;
         }
         // "Personalizar": as colunas são do usuário — não exigem campo.
@@ -1820,7 +1820,7 @@ export function WidgetBuilder({
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>
           <SheetDescription>
-            Escolha as fontes, dimensões, métricas, filtros e o visual.
+            Escolha as bases, dimensões, métricas, filtros e o visual.
           </SheetDescription>
         </SheetHeader>
 
@@ -1911,12 +1911,12 @@ export function WidgetBuilder({
           {visualType === "filtro_campo" ? (
             <>
               <div className="flex flex-col gap-2">
-                <Label>Fontes</Label>
+                <Label>Bases</Label>
                 <p className="text-muted-foreground text-xs">
-                  Sem seleção = todas as fontes. Este filtro atinge os widgets
-                  cujas fontes se sobrepõem às escolhidas aqui — e neles só
-                  restringe os registros das fontes escolhidas; registros de
-                  outras fontes dos widgets-alvo não são afetados.
+                  Sem seleção = todas as bases. Este filtro atinge os widgets
+                  cujas bases se sobrepõem às escolhidas aqui — e neles só
+                  restringe os registros das bases escolhidas; registros de
+                  outras bases dos widgets-alvo não são afetados.
                 </p>
                 <div className="flex flex-col gap-2 rounded-md border p-3">
                   {catalog.map((s) => (
@@ -2039,7 +2039,7 @@ export function WidgetBuilder({
               <div className="flex flex-col gap-2 border-t pt-4">
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
-                  Por padrão atinge todos os widgets com fonte sobreposta.
+                  Por padrão atinge todos os widgets com base sobreposta.
                   Desmarque os que não devem reagir.
                 </p>
                 {affectedSiblings.length === 0 ? (
@@ -2306,7 +2306,7 @@ export function WidgetBuilder({
                     <Combobox
                       searchable={false}
                       options={[
-                        { value: "registros", label: "Registros de uma fonte" },
+                        { value: "registros", label: "Registros de uma base" },
                         { value: "tarefas", label: "Tarefas (fases de execução)" },
                       ]}
                       value={k.mode}
@@ -2346,7 +2346,7 @@ export function WidgetBuilder({
                   ) : (
                     <>
                       <div className="flex flex-col gap-1.5">
-                        <Label>Fonte dos registros</Label>
+                        <Label>Base dos registros</Label>
                         <Combobox
                           options={catalog.map((s) => ({
                             value: s.key,
@@ -2355,7 +2355,7 @@ export function WidgetBuilder({
                           value={src}
                           onValueChange={(v) => patchKanban({ source: v })}
                           className="w-full"
-                          aria-label="Fonte dos registros"
+                          aria-label="Base dos registros"
                         />
                       </div>
                       <div className="flex flex-col gap-1.5">
@@ -2549,7 +2549,7 @@ export function WidgetBuilder({
               return (
                 <div className="flex flex-col gap-3 rounded-md border p-3">
                   <div className="flex flex-col gap-1.5">
-                    <Label>Fonte dos registros</Label>
+                    <Label>Base dos registros</Label>
                     <Combobox
                       options={[
                         { value: "", label: "— nenhuma (só tarefas) —" },
@@ -2565,7 +2565,7 @@ export function WidgetBuilder({
                         })
                       }
                       className="w-full"
-                      aria-label="Fonte dos registros"
+                      aria-label="Base dos registros"
                     />
                   </div>
                   {a.source ? (
@@ -2789,14 +2789,14 @@ export function WidgetBuilder({
           {/* Fontes + modo de combinação */}
           <BuilderSection
             value="fontes"
-            title="Fontes de dados"
+            title="Bases de dados"
             badge={
               sources.length === 0 ? "Todas" : `${sources.length} selecionada(s)`
             }
           >
             <p className="text-muted-foreground text-xs">
-              Sem seleção = todas as fontes. Colunas correspondidas (↔) somam
-              entre as fontes escolhidas.
+              Sem seleção = todas as bases. Colunas correspondidas (↔) somam
+              entre as bases escolhidas.
             </p>
             <div className="flex flex-col gap-2 rounded-md border p-3">
               {catalog.map((s) => {
@@ -2842,7 +2842,7 @@ export function WidgetBuilder({
                 checked={splitBySource}
                 onCheckedChange={(v) => setSplitBySource(v === true)}
               />
-              Quebrar por fonte (uma série por fonte)
+              Quebrar por base (uma série por base)
             </label>
           </BuilderSection>
 
@@ -3140,7 +3140,7 @@ export function WidgetBuilder({
               </label>
               {isRecordList ? (
                 <div className="flex flex-col gap-1.5">
-                  <Label>Fonte das linhas</Label>
+                  <Label>Base das linhas</Label>
                   <Combobox
                     searchable={false}
                     options={[
@@ -3150,7 +3150,7 @@ export function WidgetBuilder({
                     ]}
                     value={rowSource}
                     onValueChange={(v) => setRowSource(v as RowSource)}
-                    aria-label="Fonte das linhas"
+                    aria-label="Base das linhas"
                   />
                   <p className="text-muted-foreground text-xs">
                     As colunas são as Dimensões acima (na ordem). Campos

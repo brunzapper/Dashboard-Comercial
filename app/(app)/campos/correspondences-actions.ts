@@ -80,7 +80,7 @@ export async function createCorrespondence(
   const supabase = await createClient();
   const members = readMembers(formData, await loadSources(supabase));
   if (members.length < 2) {
-    return { ok: false, message: "Ligue colunas de pelo menos duas fontes." };
+    return { ok: false, message: "Ligue colunas de pelo menos duas bases." };
   }
 
   const { data: created, error } = await supabase
@@ -120,7 +120,7 @@ export async function updateCorrespondence(
   const supabase = await createClient();
   const members = readMembers(formData, await loadSources(supabase));
   if (members.length < 2) {
-    return { ok: false, message: "Ligue colunas de pelo menos duas fontes." };
+    return { ok: false, message: "Ligue colunas de pelo menos duas bases." };
   }
 
   const { error } = await supabase

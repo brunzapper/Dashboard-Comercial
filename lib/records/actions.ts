@@ -52,6 +52,7 @@ import {
 } from "@/lib/records/formulas";
 import { loadCurrencyRates } from "@/lib/widgets/currency";
 import type { DataType } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   EDITABLE_CORE_COLUMNS,
   coreWriteBackFieldId,
@@ -345,7 +346,9 @@ export async function updateRecord(
   let customChanged = false;
   for (const def of defs ?? []) {
     // Calculados são derivados — nunca editados manualmente. Os de agregados
-    // nem sequer têm valor por registro.
+    // nem sequer têm valor por registro. Linhas core (0086) editam pela coluna
+    // núcleo (core__<col>), nunca por custom_fields.
+    if (isCoreDef(def)) continue;
     if ((def.data_type as DataType) === "calculado") continue;
     if ((def.data_type as DataType) === "calculado_agg") continue;
     const isBitrixSync =
@@ -671,11 +674,11 @@ export async function createRecord(
   const sources = await loadSources(supabase);
   const sourceKey = String(formData.get("source") ?? "");
   const sourceDef = sources.find((s) => s.key === sourceKey);
-  if (!sourceDef) return { ok: false, message: "Fonte inválida." };
+  if (!sourceDef) return { ok: false, message: "Base inválida." };
   if (!sourceDef.manualEntry) {
     return {
       ok: false,
-      message: "Esta fonte não aceita criação manual de registros.",
+      message: "Esta base não aceita criação manual de registros.",
     };
   }
 
@@ -773,6 +776,8 @@ export async function createRecord(
   const bitrixCustoms: BitrixCreateCustom[] = [];
   for (const def of defs ?? []) {
     const dt = def.data_type as DataType;
+    // Linhas core (0086) gravam pela coluna núcleo (core__<col>), nunca aqui.
+    if (isCoreDef(def)) continue;
     if (dt === "calculado" || dt === "calculado_agg") continue;
     if (!fieldAppliesToSource(def.applies_to as string[] | null, sourceDef.key)) {
       continue;

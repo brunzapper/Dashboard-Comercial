@@ -112,7 +112,7 @@ export function ApiKeysManager({
           <h2 className="text-lg font-semibold">Chaves de API (entrada)</h2>
           <p className="text-muted-foreground text-sm">
             Sistemas externos enviam dados com{" "}
-            <code className="text-xs">POST /api/ingest/&lt;fonte&gt;</code> e{" "}
+            <code className="text-xs">POST /api/ingest/&lt;base&gt;</code> e{" "}
             <code className="text-xs">Authorization: Bearer dck_...</code>
           </p>
         </div>
@@ -162,10 +162,10 @@ export function ApiKeysManager({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Fonte</Label>
+            <Label>Base</Label>
             <Select value={sourceKey} onValueChange={setSourceKey}>
               <SelectTrigger>
-                <SelectValue placeholder="Escolha a fonte de destino" />
+                <SelectValue placeholder="Escolha a base de destino" />
               </SelectTrigger>
               <SelectContent>
                 {sources.map((s) => (
@@ -218,7 +218,7 @@ export function ApiKeysManager({
             <TableRow>
               <TableHead>Nome</TableHead>
               <TableHead>Prefixo</TableHead>
-              <TableHead>Fonte</TableHead>
+              <TableHead>Base</TableHead>
               <TableHead>Mapeamento</TableHead>
               <TableHead>Último uso</TableHead>
               <TableHead>Status</TableHead>

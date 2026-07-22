@@ -74,7 +74,7 @@ export function RecipeStrip({
               )
             }
           >
-            <Percent className="size-3.5" /> Taxa de conversão (fonte ÷ fonte)
+            <Percent className="size-3.5" /> Taxa de conversão (base ÷ base)
           </Button>
         ) : null}
       </div>
@@ -205,7 +205,7 @@ function SalesCycleWizard({
     <div className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3">
       <p className="text-xs font-medium">
         Ciclo de vendas — dias entre uma data deste registro e uma data do
-        registro relacionado (casado) de outra fonte.
+        registro relacionado (casado) de outra base.
       </p>
       <div className="flex flex-col gap-1.5">
         <span className="text-muted-foreground text-xs">
@@ -222,7 +222,7 @@ function SalesCycleWizard({
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-muted-foreground text-xs">
-          2. Fonte do registro relacionado
+          2. Base do registro relacionado
         </span>
         <Combobox
           options={sourceOptions}
@@ -232,7 +232,7 @@ function SalesCycleWizard({
             setStartRef("");
           }}
           placeholder="Ex.: Leads do Bitrix"
-          aria-label="Fonte relacionada"
+          aria-label="Base relacionada"
           className="w-full"
         />
         {coverage?.configured ? (
@@ -244,7 +244,7 @@ function SalesCycleWizard({
         ) : coverage && !coverage.configured ? (
           <p className="flex items-start gap-1 text-xs text-amber-600">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> Nenhuma
-            conexão com esta fonte ainda. O campo será criado, mas ficará vazio
+            conexão com esta base ainda. O campo será criado, mas ficará vazio
             até você configurar o casamento em <strong>Campos → Conexões</strong>
             {" "}(o recálculo preenche automaticamente depois).
           </p>
@@ -260,7 +260,7 @@ function SalesCycleWizard({
             value={startRef}
             onValueChange={setStartRef}
             placeholder="Ex.: ↪ Leads: Criado em (origem)"
-            emptyText="Nenhuma data disponível nesta fonte."
+            emptyText="Nenhuma data disponível nesta base."
             aria-label="Data inicial"
             className="w-full"
           />
@@ -333,7 +333,7 @@ function ConversionWizard({
   return (
     <div className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3">
       <p className="text-xs font-medium">
-        Taxa de conversão — contagem de uma fonte dividida pela contagem de
+        Taxa de conversão — contagem de uma base dividida pela contagem de
         outra (ex.: Deals ÷ Leads), exibida como percentual.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -348,8 +348,8 @@ function ConversionWizard({
               setNumSource(v);
               setNumRef("");
             }}
-            placeholder="Fonte — ex.: Deals"
-            aria-label="Fonte do numerador"
+            placeholder="Base — ex.: Deals"
+            aria-label="Base do numerador"
             className="w-full"
           />
           {numSource ? (
@@ -375,8 +375,8 @@ function ConversionWizard({
               setDenSource(v);
               setDenRef("");
             }}
-            placeholder="Fonte — ex.: Leads"
-            aria-label="Fonte do denominador"
+            placeholder="Base — ex.: Leads"
+            aria-label="Base do denominador"
             className="w-full"
           />
           {denSource ? (

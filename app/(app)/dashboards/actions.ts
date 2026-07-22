@@ -138,7 +138,7 @@ export async function createBoard(
     kanban.columns = DEFAULT_TASK_PHASES;
   } else {
     const source = String(formData.get("source") ?? "").trim();
-    if (!source) return { ok: false, message: "Escolha a fonte dos registros." };
+    if (!source) return { ok: false, message: "Escolha a base dos registros." };
     kanban.source = source;
     const groupKind = String(formData.get("group_kind") ?? "field");
     if (groupKind === "custom") {

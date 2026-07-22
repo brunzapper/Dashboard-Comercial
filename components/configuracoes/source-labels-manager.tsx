@@ -24,7 +24,7 @@ export function SourceLabelsManager({ geral }: { geral: string }) {
     <form action={formAction} className="flex max-w-md flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="source-label-geral">
-          Campos gerais (todas as fontes)
+          Campos gerais (todas as bases)
         </Label>
         <Input
           id="source-label-geral"
@@ -36,7 +36,7 @@ export function SourceLabelsManager({ geral }: { geral: string }) {
         />
         <p className="text-muted-foreground text-xs">
           Rótulo usado nos dropdowns de campo para os campos que existem em
-          todas as fontes.
+          todas as bases.
         </p>
       </div>
       <div className="flex items-center gap-3">

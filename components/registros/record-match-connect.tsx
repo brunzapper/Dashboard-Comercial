@@ -66,7 +66,7 @@ export function RecordMatchConnect({
 
   return (
     <div className="flex flex-col gap-2 border-t pt-4">
-      <Label>Registros conectados (outras fontes)</Label>
+      <Label>Registros conectados (outras bases)</Label>
 
       {matches.length > 0 ? (
         <ul className="flex flex-col gap-1">
@@ -105,7 +105,7 @@ export function RecordMatchConnect({
           value={source}
           onValueChange={(v) => setSource(v as SourceKey)}
           searchable={false}
-          aria-label="Fonte para conectar"
+          aria-label="Base para conectar"
           className="w-40 shrink-0"
         />
         <Input

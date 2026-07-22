@@ -23,6 +23,7 @@ import {
   type DataType,
   type FieldDefinition,
 } from "@/lib/records/types";
+import { splitCoreDefs } from "@/lib/records/core-defs";
 import { formulaRefs, formulaToText } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
@@ -106,7 +107,9 @@ export const TODAY_FIELD: AvailableField = {
 export const CORE_FIELDS: AvailableField[] = [
   { field: "title", label: "Nome (título)", isNumeric: false, isDate: false },
   { field: "record_type", label: "Tipo de registro", isNumeric: false, isDate: false },
-  { field: "source_system", label: "Fonte", isNumeric: false, isDate: false },
+  // "Base" = fonte de dados do sistema (data_sources) — renomeado na UI p/
+  // desambiguar do campo CRM "Fonte" (custom `fonte`, SOURCE_ID do Bitrix).
+  { field: "source_system", label: "Base", isNumeric: false, isDate: false },
   { field: "pipeline", label: "Pipeline", isNumeric: false, isDate: false },
   { field: "stage", label: "Etapa", isNumeric: false, isDate: false },
   { field: "stage_semantic", label: "Situação (aberto/ganho/perdido)", isNumeric: false, isDate: false },
@@ -265,16 +268,25 @@ function decorateFormulaTexts(
 /**
  * Junta os campos do núcleo + personalizados (field_definitions) + unificados
  * (correspondências globais). Os unificados aparecem como `unified:<key>`.
+ * Linhas core (source_system='core', 0086) são OVERRIDES das colunas núcleo —
+ * aplicam rótulo/visibilidade e NUNCA viram `custom:<key>` (split aqui, no
+ * único ponto de montagem; ver lib/records/core-defs.ts).
  */
 export function buildAvailableFields(
-  customFields: FieldDefinition[],
+  fields: FieldDefinition[],
   correspondences: Correspondence[] = [],
   // Catálogo de fontes (data_sources); ausente = builtins. Define quais fontes
   // geram campos match:<fonte>:* e seus rótulos.
   sources: SourceDef[] = BUILTIN_SOURCES
 ): AvailableField[] {
-  const core = CORE_FIELDS.map((f) => ({
+  const { custom: customFields, core: coreOverrides } = splitCoreDefs(fields);
+  const core = CORE_FIELDS.filter(
+    // Olho do /campos: override core com show_in_builder=false oculta a coluna
+    // de todos os seletores (mesma degradação dos custom ocultos).
+    (f) => coreOverrides.get(f.field)?.show_in_builder !== false
+  ).map((f) => ({
     ...f,
+    label: coreOverrides.get(f.field)?.label ?? f.label,
     // Colunas do núcleo editáveis inline: as colunas suportadas (write-back) OU as
     // relações editáveis (ex.: responsável). `writable` (a caixa "Gravar no Bitrix")
     // vale para as colunas do núcleo mapeadas ao Bitrix e para as relações com
@@ -344,6 +356,8 @@ export function buildAvailableFields(
 // Colunas do núcleo úteis de puxar do registro CASADO (match:<fonte>:<ref>).
 // Foca em datas/numéricos/texto identificador — evita ruído (FKs/timestamps de
 // sistema). Custom entram por fonte (applies_to).
+// Gap aceito (0086): os rótulos `↪ <Fonte>: <Campo>` do casado seguem os labels
+// ESTÁTICOS de CORE_FIELDS — rótulo renomeado no /campos não propaga aqui.
 const MATCH_CORE_FIELDS = CORE_FIELDS.filter((f) =>
   [
     "title",

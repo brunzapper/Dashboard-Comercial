@@ -554,14 +554,14 @@ export function FormulaEditor({
         <p className="text-muted-foreground text-xs">
           Opere entre colunas numéricas e datas: <strong>data − data</strong>{" "}
           resulta em dias (ex.: ciclo de vendas). Colunas com ↪ vêm do registro
-          casado de outra fonte (conexões entre fontes). Condições usam{" "}
+          casado de outra base (conexões entre bases). Condições usam{" "}
           <code>ƒ SE</code> + uma comparação (ex.: SE( [Etapa] = &quot;Ganho&quot;
           ; [Valor] ; 0 )).
         </p>
       ) : (
         <p className="text-muted-foreground text-xs">
           Opere entre <strong>agregações</strong> (Σ soma, média, contagem) e
-          constantes. Operandos &quot;· Fonte&quot; contam SÓ aquela fonte —
+          constantes. Operandos &quot;· Base&quot; contam SÓ aquela base —
           ex.: taxa de conversão = Contagem de registros · Deals ÷ Contagem de
           registros · Leads. Condicionais: <code>ƒ SOMASE/CONT.SE</code> com
           condição <code>[Coluna] = valor</code>.

@@ -44,6 +44,7 @@ import {
   type DataType,
   type FieldDefinition,
 } from "@/lib/records/types";
+import { CORE_SELECT_CAPABLE, isCoreDef } from "@/lib/records/core-defs";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
 import type { SourceDef } from "@/lib/sources";
 import {
@@ -67,6 +68,10 @@ const DEFAULT_CURRENCY_OPTIONS: ComboboxOption[] = CURRENCY_OPTIONS.filter(
   (o) => o.value === "BRL" || o.value === "USD"
 );
 const initial: FieldActionState = {};
+// Colunas núcleo de texto da whitelist (pipeline/etapa/...): texto ↔ seleção.
+const CORE_TYPE_OPTIONS: ComboboxOption[] = (["texto", "selecao"] as DataType[]).map(
+  (t) => ({ value: t, label: DATA_TYPE_LABELS[t] })
+);
 
 function RoleChecks({
   name,
@@ -134,6 +139,10 @@ export function FieldForm({
   onDone?: (created?: FieldActionState["field"]) => void;
 }) {
   const isEdit = Boolean(field);
+  // Linha core (0086): coluna do núcleo de `records` — form em modo reduzido
+  // (rótulo/olho/ordem; tipo travado, exceto texto↔seleção na whitelist).
+  const isCore = Boolean(field && isCoreDef(field));
+  const coreSelectable = isCore && CORE_SELECT_CAPABLE.has(field!.field_key);
   const action = isEdit ? updateField : createField;
   const [state, formAction, pending] = useActionState(action, initial);
   const [dataType, setDataType] = useState<DataType>(
@@ -239,15 +248,31 @@ export function FieldForm({
 
       <div className="flex flex-col gap-1.5">
         <Label>Tipo</Label>
-        <Combobox
-          name="data_type"
-          options={DATA_TYPE_OPTIONS}
-          value={dataType}
-          onValueChange={(v) => setDataType(v as DataType)}
-          searchable={false}
-          className="w-full"
-          aria-label="Tipo"
-        />
+        {isCore && !coreSelectable ? (
+          <>
+            <p className="text-sm">{DATA_TYPE_LABELS[dataType]}</p>
+            <input type="hidden" name="data_type" value={dataType} />
+            <p className="text-muted-foreground text-xs">
+              Coluna do núcleo — o tipo é fixo.
+            </p>
+          </>
+        ) : (
+          <Combobox
+            name="data_type"
+            options={isCore ? CORE_TYPE_OPTIONS : DATA_TYPE_OPTIONS}
+            value={dataType}
+            onValueChange={(v) => setDataType(v as DataType)}
+            searchable={false}
+            className="w-full"
+            aria-label="Tipo"
+          />
+        )}
+        {isCore && coreSelectable ? (
+          <p className="text-muted-foreground text-xs">
+            Coluna do núcleo — pode alternar entre Texto e Seleção (as opções
+            viram dropdown nos filtros e na edição inline).
+          </p>
+        ) : null}
       </div>
 
       {/* Receitas: geram a fórmula E escolhem o tipo certo (por-registro ou
@@ -277,10 +302,16 @@ export function FieldForm({
             placeholder={"Quente\nMorno\nFrio"}
             rows={4}
           />
+          {isCore && field?.field_key === "pipeline" ? (
+            <p className="text-muted-foreground text-xs">
+              As opções são atualizadas automaticamente a cada sincronização
+              (funis do Bitrix) — edições manuais serão sobrescritas.
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {dataType === "numero" ? (
+      {!isCore && dataType === "numero" ? (
         <div className="flex flex-col gap-1.5">
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -298,7 +329,7 @@ export function FieldForm({
         </div>
       ) : null}
 
-      {dataType === "moeda" ? (
+      {!isCore && dataType === "moeda" ? (
         <div className="flex flex-col gap-1.5">
           <Label>Moeda</Label>
           <Combobox
@@ -333,7 +364,7 @@ export function FieldForm({
             formInputs
             excludeKeys={forbidden}
             preview={{
-              title: "Prévia do resultado (todas as fontes)",
+              title: "Prévia do resultado (todas as bases)",
               manualStart: true,
               // Mesmo choke point dos widgets (runCalculatedWidget) — sem
               // período/filtros: o campo salvo respeita o recorte de cada
@@ -457,15 +488,23 @@ export function FieldForm({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-1.5">
-        <Label>Visível para os papéis</Label>
-        <RoleChecks name="visible_to_roles" selected={field?.visible_to_roles ?? []} />
-      </div>
+      {isCore ? (
+        <p className="text-muted-foreground text-xs">
+          Colunas do núcleo são visíveis a todos os papéis.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <Label>Visível para os papéis</Label>
+            <RoleChecks name="visible_to_roles" selected={field?.visible_to_roles ?? []} />
+          </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label>Editável pelos papéis</Label>
-        <RoleChecks name="editable_by_roles" selected={field?.editable_by_roles ?? []} />
-      </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>Editável pelos papéis</Label>
+            <RoleChecks name="editable_by_roles" selected={field?.editable_by_roles ?? []} />
+          </div>
+        </>
+      )}
 
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -489,16 +528,26 @@ export function FieldForm({
         </label>
       ) : null}
 
+      {isCore && (field?.field_key === "pipeline" || field?.field_key === "stage") ? (
+        <p className="text-muted-foreground text-xs">
+          Edição inline com &quot;Gravar no Bitrix&quot; nesta coluna ainda não
+          converte nome→id — o item fica com erro na fila e a edição local é
+          preservada.
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            name="is_local"
-            defaultChecked={field?.is_local ?? false}
-            className="size-4 accent-primary"
-          />
-          Campo só do app (nunca vem de sync)
-        </label>
+        {!isCore ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="is_local"
+              defaultChecked={field?.is_local ?? false}
+              className="size-4 accent-primary"
+            />
+            Campo só do app (nunca vem de sync)
+          </label>
+        ) : null}
         <div className="flex items-center gap-2">
           <Label htmlFor="sort_order" className="text-sm">
             Ordem

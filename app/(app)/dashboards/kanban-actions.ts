@@ -16,6 +16,7 @@
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
+import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
@@ -115,7 +116,9 @@ export async function runKanbanWidget(
       .select(
         "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
       )
-      .eq("show_in_builder", true)
+      // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
     loadCorrespondences(supabase),
     supabase
@@ -144,8 +147,12 @@ export async function runKanbanWidget(
 
   const isAdmin = session.roles.includes("admin");
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Linhas core (0086) fora da lista de campos custom (edit sheet/colunas do
+  // card leem custom_fields); entram à parte no runKanban (groupDef/labels).
+  const { core: coreDefs } = splitCoreDefs(allFields);
   const fields = allFields.filter(
     (f) =>
+      !isCoreDef(f) &&
       f.data_type !== "calculado_agg" &&
       (!kanban.source || fieldAppliesToSource(f.applies_to, kanban.source)) &&
       (isAdmin || hasAnyRole(session.roles, f.visible_to_roles as RoleKey[]))
@@ -263,7 +270,9 @@ export async function runKanbanWidget(
       supabase,
       kanban,
       view.period,
-      fields,
+      // Core rows junto: groupDef de coluna núcleo selecao (ex.: pipeline)
+      // ordena as colunas pelas options; recordFieldDef (custom:) as ignora.
+      [...fields, ...coreDefs.values()],
       {
         responsibles: responsibleLabels,
         operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),

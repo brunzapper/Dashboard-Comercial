@@ -78,7 +78,7 @@ export function CardModeSection({
         </Select>
         {mode !== "value" ? (
           <p className="text-muted-foreground text-xs">
-            Fontes, filtros e período continuam valendo; Dimensões/Métricas do
+            Bases, filtros e período continuam valendo; Dimensões/Métricas do
             bloco abaixo são ignoradas neste modo.
           </p>
         ) : null}

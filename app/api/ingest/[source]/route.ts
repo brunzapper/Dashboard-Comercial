@@ -183,10 +183,10 @@ export async function POST(
       // FK garante a fonte no catálogo; aqui só se caiu no fallback builtin.
       await db
         .from("webhook_inbound_events")
-        .update({ status: "error", error: "fonte não encontrada no catálogo" })
+        .update({ status: "error", error: "base não encontrada no catálogo" })
         .eq("id", inboundId);
       return NextResponse.json(
-        { ok: false, error: "fonte não encontrada" },
+        { ok: false, error: "base não encontrada" },
         { status: 500 }
       );
     }

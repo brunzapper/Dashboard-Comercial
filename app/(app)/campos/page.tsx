@@ -8,6 +8,7 @@
 import { requirePermission } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
+import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { loadMatchRules } from "@/lib/matching";
 import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
@@ -44,10 +45,13 @@ export default async function CamposPage() {
   const currencyOptions = currencyOptionsFrom(currencies);
 
   // Candidatos por fonte p/ correspondências: colunas do núcleo + campos
-  // personalizados que se aplicam àquela fonte (applies_to).
+  // personalizados que se aplicam àquela fonte (applies_to). Linhas core (0086)
+  // entram pelo lado do núcleo (ref cru, com o rótulo do override) — nunca
+  // como `custom:<key>`.
+  const { core: coreDefs } = splitCoreDefs(fields);
   const coreOptions: RefOption[] = CORE_FIELDS.map((f) => ({
     ref: f.field,
-    label: f.label,
+    label: coreDefs.get(f.field)?.label ?? f.label,
   }));
   const candidatesBySource = Object.fromEntries(
     sources.map((s) => [
@@ -55,7 +59,10 @@ export default async function CamposPage() {
       [
         ...coreOptions,
         ...fields
-          .filter((f) => fieldAppliesToSource(f.applies_to, s.key, sources))
+          .filter(
+            (f) =>
+              !isCoreDef(f) && fieldAppliesToSource(f.applies_to, s.key, sources)
+          )
           .map((f) => ({ ref: `custom:${f.field_key}`, label: f.label })),
       ],
     ])

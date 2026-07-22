@@ -22,6 +22,7 @@ import {
   type FieldDefinition,
   type RecordRow,
 } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import {
   unifiedMemberRef,
   type Correspondence,
@@ -120,7 +121,10 @@ export async function runCardWidget(
   const card: CardConfig = config.settings?.card ?? {};
   const mode = card.mode ?? "value";
   const empty: WidgetData = { rows: [], dimensions: [], metrics: [] };
-  const fieldByKey = new Map(fields.map((f) => [f.field_key, f]));
+  // Linhas core (0086) fora: refs custom:<key> nunca apontam p/ coluna núcleo.
+  const fieldByKey = new Map(
+    fields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
   const wrap = (t: string) => `${card.prefix ?? ""}${t}${card.suffix ?? ""}`;
   const af = (f: string) => available.find((a) => a.field === f);
   // Casas decimais do widget (aparência) — aplicadas aos textos do servidor.

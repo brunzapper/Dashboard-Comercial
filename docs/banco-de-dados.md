@@ -1,4 +1,7 @@
-<!-- Versão: 1.8 | Data: 21/07/2026 -->
+<!-- Versão: 1.9 | Data: 22/07/2026 -->
+<!-- v1.9 (22/07/2026): 0086 — colunas núcleo como linhas core de
+     field_definitions (overrides p/ a aba Campos; pipeline selecao com options
+     dos funis, reescritas no sync). -->
 <!-- v1.8 (21/07/2026): 0085 — RPCs de widget no dia de BRASÍLIA (par completo
      recriado; novo helper `_widget_local_ts` com 2 overloads;
      `_widget_col_date_expr`/`_widget_unified_expr` recriados;
@@ -21,7 +24,7 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0083), para que um
+Referência do estado **atual** do banco (após a migração 0086), para que um
 mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -137,6 +140,15 @@ num único `SourceDef[]`.
 `applies_to` text[] (0018), `write_back` (0031), `currency_code`/`currency_mode`
 (0036; `inherit` na 0046), `allow_negative` (0044), `show_as_percent` (0049).
 Leitura liberada a autenticados desde 0043 (só metadados de schema).
+**Linhas core (0086):** as colunas do núcleo de `records` são seedadas como
+linhas `source_system='core'` (`field_key` = nome da coluna,
+`applies_to='{}'` = todas as bases, `source_field_id` NULL) — são OVERRIDES
+de exibição (rótulo/olho/ordem; texto↔selecao na whitelist) das colunas
+hardcoded, nunca campos de `custom_fields` (invariante 13 da arquitetura;
+split em `lib/records/core-defs.ts`). `pipeline` nasce `selecao` com os funis
+como `options`, reescritas a cada sync (`syncFieldCatalog` →
+`lookups.categoryNames()`). O seed é idempotente (`on conflict do nothing`) e
+a migração deve rodar DEPOIS do deploy do código que a acompanha.
 
 **`field_correspondences`** + **`field_correspondence_members`** (0019) — campos
 unificados globais: uma correspondência (`key` unique, `label`, `data_type`) liga no
@@ -449,6 +461,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0083 | operations_filter | `operations.filter` jsonb (FILTROS DE PERFIL da operação — WidgetFilter[]); consumido no server pelo filtro de Operação (vínculo+perfil). Não recria as RPCs |
 | 0084 | mock_fonte_inbound | Só dados: mocks Inbound (0051) ganham `custom_fields.fonte = "Formulário de CRM"` p/ satisfazer o predicado da sub `sqls` (regra 0052 não isenta predicados); Outbound intocados. Não recria as RPCs |
 | 0085 | widget_rpc_brasilia_day | RPC (par completo): dia de BRASÍLIA no read side — bounds do `@period` em coluna do núcleo ancorados com `-03:00`, bucketing/unificados via `_widget_local_ts` (novo helper, 2 overloads) — **versão vigente** |
+| 0086 | core_field_definitions | Seed idempotente das colunas do NÚCLEO como linhas `field_definitions` `source_system='core'` (overrides de exibição p/ a aba Campos; `pipeline` nasce selecao com os funis como options). Aplicar DEPOIS do deploy do código. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

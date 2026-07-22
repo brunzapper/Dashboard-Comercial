@@ -27,6 +27,7 @@ import {
   type OperandRef,
 } from "@/lib/records/date-operands";
 import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import type { SourceDef } from "@/lib/sources";
 import {
   aggNestedOperandRefs,
@@ -99,6 +100,9 @@ export interface AggCatalogDefRow {
   label: string;
   data_type: DataType;
   applies_to?: string[] | null;
+  // Linhas core (0086) chegam junto nos loaders — filtradas na entrada dos
+  // derivadores (as colunas núcleo já entram por CORE_FIELDS/`available`).
+  source_system?: string | null;
 }
 
 /** Input derivado dos `available` do builder (sítios de widget). `defs` fornece
@@ -107,10 +111,11 @@ export interface AggCatalogDefRow {
  *  sim; Nota/quick-table/snapshot mantêm o comportamento atual, sem). */
 export function availableAggCatalogInput(
   available: AvailableField[],
-  defs: AggCatalogDefRow[],
+  allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
   opts?: { withNested?: boolean }
 ): AggCatalogInput {
+  const defs = allDefs.filter((d) => !isCoreDef(d));
   // appliesTo decide sob quais fontes o campo ganha variante @fonte: custom usa
   // applies_to; unificado usa os record_types dos membros; núcleo vale em todas.
   const appliesToOf = (f: AvailableField): string[] | null =>
@@ -156,10 +161,11 @@ export function availableAggCatalogInput(
  *  o servidor filtra aqui, a página /campos passa vazio e filtra no FieldForm
  *  (excludeKeys). */
 export function defsAggCatalogInput(
-  defs: AggCatalogDefRow[],
+  allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
   forbidden: Set<string> = new Set()
 ): AggCatalogInput {
+  const defs = allDefs.filter((d) => !isCoreDef(d));
   const allowed = defs.filter((d) => !forbidden.has(d.field_key));
   // Campos do registro CASADO (match:<fonte>:<ref>): MESMA construção dos
   // sítios de widget (buildMatchFields) — ref+rótulo idênticos byte a byte

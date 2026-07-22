@@ -13,6 +13,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import type { TaskRow } from "@/lib/tasks/types";
 import type { SourceDef } from "@/lib/sources";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
@@ -226,8 +227,14 @@ export async function runKanban(
     };
   });
 
+  // Agrupamento por coluna núcleo 'selecao' (linha core 0086, ex.: pipeline):
+  // a def core entra como groupDef p/ as colunas seguirem a ordem das options.
   const groupDef = settings.groupField
-    ? recordFieldDef(settings.groupField, defs)
+    ? (recordFieldDef(settings.groupField, defs) ??
+      defs.find(
+        (d) => isCoreDef(d) && d.field_key === settings.groupField
+      ) ??
+      null)
     : null;
   const columns = deriveColumns(settings, groupKeys, groupDef);
 

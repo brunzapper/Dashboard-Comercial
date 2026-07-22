@@ -242,9 +242,9 @@ function PeriodBarConfig({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>Campo de data por fonte</Label>
+          <Label>Campo de data por base</Label>
           <p className="text-muted-foreground text-xs">
-            A mesma seleção do calendário filtra cada fonte pela sua coluna de
+            A mesma seleção do calendário filtra cada base pela sua coluna de
             data (ex.: negócios por assinatura e Estudo por Created At).
           </p>
           {catalog.map((s) => (

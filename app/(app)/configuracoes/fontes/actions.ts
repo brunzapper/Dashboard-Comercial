@@ -135,7 +135,7 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
-      error: "Informe o nome da fonte.",
+      error: "Informe o nome da base.",
     };
   }
   if (!PERIOD_FIELDS.has(periodField)) {
@@ -175,7 +175,7 @@ export async function createSource(
     return {
       ok: false,
       message:
-        "Nome inválido para gerar a chave da fonte: comece com uma letra e use ao menos 2 caracteres.",
+        "Nome inválido para gerar a chave da base: comece com uma letra e use ao menos 2 caracteres.",
     };
   }
 
@@ -188,7 +188,7 @@ export async function createSource(
     .or(`key.eq.${key},record_type.eq.${key}`)
     .limit(1);
   if (existing && existing.length > 0) {
-    return { ok: false, message: `Já existe uma fonte com a chave "${key}".` };
+    return { ok: false, message: `Já existe uma base com a chave "${key}".` };
   }
 
   const { error: insertError } = await supabase.from("data_sources").insert({
@@ -205,7 +205,7 @@ export async function createSource(
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: `Fonte "${label}" criada (chave: ${key}).`, key };
+  return { ok: true, message: `Base "${label}" criada (chave: ${key}).`, key };
 }
 
 export async function updateSource(
@@ -233,7 +233,7 @@ export async function updateSource(
     return { ok: false, message: `Falha ao salvar: ${updateError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: "Fonte atualizada." };
+  return { ok: true, message: "Base atualizada." };
 }
 
 export async function deleteSource(
@@ -249,9 +249,9 @@ export async function deleteSource(
     .select("key, record_type, builtin")
     .eq("key", key)
     .maybeSingle();
-  if (!row) return { ok: false, message: "Fonte não encontrada." };
+  if (!row) return { ok: false, message: "Base não encontrada." };
   if (row.builtin) {
-    return { ok: false, message: "Fontes internas não podem ser excluídas." };
+    return { ok: false, message: "Bases internas não podem ser excluídas." };
   }
 
   const { count } = await supabase
@@ -274,7 +274,7 @@ export async function deleteSource(
     return { ok: false, message: `Falha ao excluir: ${deleteError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: "Fonte excluída." };
+  return { ok: true, message: "Base excluída." };
 }
 
 /** Grava o rótulo dos campos "gerais" (sync_config; nomes curtos por fonte
@@ -323,10 +323,10 @@ function readSubSourceForm(formData: FormData): {
   const parentKey = cleanText(formData.get("parent_key"), 40);
   const filter = parseSubFilter(formData.get("filter"));
   if (label.length < 2) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Informe o nome da sub-fonte." };
+    return { label, shortLabel, periodField, parentKey, filter, error: "Informe o nome da sub-base." };
   }
   if (!parentKey) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a fonte pai." };
+    return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a base pai." };
   }
   if (!isSubPeriodField(periodField)) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Campo de período inválido." };
@@ -382,7 +382,7 @@ export async function createSubSource(
     .select("key")
     .eq("key", parentKey)
     .maybeSingle();
-  if (!parent) return { ok: false, message: "Fonte pai não encontrada." };
+  if (!parent) return { ok: false, message: "Base pai não encontrada." };
 
   // Colisão de key com fonte raiz OU outra sub-fonte.
   const [{ data: rootHit }, { data: subHit }] = await Promise.all([
@@ -394,7 +394,7 @@ export async function createSubSource(
     supabase.from("sub_sources").select("key").eq("key", key).limit(1),
   ]);
   if ((rootHit && rootHit.length > 0) || (subHit && subHit.length > 0)) {
-    return { ok: false, message: `Já existe uma fonte com a chave "${key}".` };
+    return { ok: false, message: `Já existe uma base com a chave "${key}".` };
   }
 
   const { error: insertError } = await supabase.from("sub_sources").insert({
@@ -409,7 +409,7 @@ export async function createSubSource(
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: `Sub-fonte "${label}" criada (chave: ${key}).`, key };
+  return { ok: true, message: `Sub-base "${label}" criada (chave: ${key}).`, key };
 }
 
 export async function updateSubSource(
@@ -439,7 +439,7 @@ export async function updateSubSource(
     return { ok: false, message: `Falha ao salvar: ${updateError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: "Sub-fonte atualizada." };
+  return { ok: true, message: "Sub-base atualizada." };
 }
 
 export async function deleteSubSource(
@@ -452,5 +452,5 @@ export async function deleteSubSource(
   const { error } = await supabase.from("sub_sources").delete().eq("key", key);
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
   revalidatePath("/", "layout");
-  return { ok: true, message: "Sub-fonte excluída." };
+  return { ok: true, message: "Sub-base excluída." };
 }

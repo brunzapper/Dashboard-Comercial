@@ -44,6 +44,7 @@ import {
   type CurrencyRates,
 } from "@/lib/widgets/currency";
 import { todayBrasiliaMs } from "@/lib/date/today";
+import { isCoreDef } from "@/lib/records/core-defs";
 // Import circular seguro com formula-deps (que importa formulaRefs/
 // isCondAggFunc daqui): ambos só chamam funções um do outro em tempo de
 // avaliação de fórmula, nunca no top-level do módulo.
@@ -1024,17 +1025,22 @@ export interface CalcFieldRow {
   currency_mode?: string | null;
   currency_code?: string | null;
   allow_negative?: boolean | null;
+  // Linhas core (0086) chegam junto quando o chamador leu a tabela inteira —
+  // os builders as filtram (colunas núcleo não são chaves de custom_fields).
+  source_system?: string | null;
 }
 
 /** Deriva as chaves dos campos `data` de linhas já carregadas. */
 export function customDateKeysFromRows(rows: CalcFieldRow[]): string[] {
-  return rows.filter((r) => r.data_type === "data").map((r) => r.field_key);
+  return rows
+    .filter((r) => !isCoreDef(r) && r.data_type === "data")
+    .map((r) => r.field_key);
 }
 
 /** Deriva as defs de campos calculados de linhas já carregadas. */
 export function formulaDefsFromRows(rows: CalcFieldRow[]): FormulaFieldDef[] {
   return rows
-    .filter((r) => r.data_type === "calculado")
+    .filter((r) => !isCoreDef(r) && r.data_type === "calculado")
     .map((r) => ({
       field_key: r.field_key,
       formula: (r.formula as Formula | null) ?? null,
@@ -1051,13 +1057,18 @@ export async function loadCustomDateKeys(
 ): Promise<string[]> {
   const { data } = await db
     .from("field_definitions")
-    .select("field_key")
+    .select("field_key, source_system")
     .eq("data_type", "data");
+  // Linhas core (0086) fora: closed_at/opened_at/... são colunas núcleo, não
+  // chaves de custom_fields. Filtro em JS — `.neq` derrubaria source_system
+  // NULL (campos locais/app).
   return customDateKeysFromRows(
-    (data ?? []).map((r) => ({
-      field_key: r.field_key as string,
-      data_type: "data",
-    }))
+    (data ?? [])
+      .filter((r) => !isCoreDef(r))
+      .map((r) => ({
+        field_key: r.field_key as string,
+        data_type: "data",
+      }))
   );
 }
 
@@ -1067,10 +1078,14 @@ export async function loadFormulaDefs(
 ): Promise<FormulaFieldDef[]> {
   const { data } = await db
     .from("field_definitions")
-    .select("field_key, formula, currency_mode, currency_code, allow_negative")
+    .select(
+      "field_key, formula, currency_mode, currency_code, allow_negative, source_system"
+    )
     .eq("data_type", "calculado");
   return formulaDefsFromRows(
-    (data ?? []).map((r) => ({
+    (data ?? [])
+      .filter((r) => !isCoreDef(r))
+      .map((r) => ({
       field_key: r.field_key as string,
       data_type: "calculado",
       formula: r.formula,
@@ -1107,7 +1122,7 @@ export function currencyFieldMapsFromRows(rows: CalcFieldRow[]): CurrencyFieldMa
   const moedaCurrency: Record<string, string> = {};
   const inheritMoedaRefs: string[] = [];
   for (const f of rows) {
-    if (f.data_type !== "moeda") continue;
+    if (isCoreDef(f) || f.data_type !== "moeda") continue;
     const ref = `custom:${f.field_key}`;
     if ((f.currency_mode ?? null) === "inherit") {
       inheritMoedaRefs.push(ref);
@@ -1132,12 +1147,15 @@ export async function loadCurrencyMaterials(
   const rates = await loadCurrencyRates(db);
   const { data } = await db
     .from("field_definitions")
-    .select("field_key, currency_code, currency_mode")
+    .select("field_key, currency_code, currency_mode, source_system")
     .eq("data_type", "moeda");
+  // Linhas core (0086: value/mrr são 'moeda') fora — não são campos custom.
   return {
     rates,
     ...currencyFieldMapsFromRows(
-      (data ?? []).map((r) => ({
+      (data ?? [])
+        .filter((r) => !isCoreDef(r))
+        .map((r) => ({
         field_key: r.field_key as string,
         data_type: "moeda",
         currency_mode: (r.currency_mode as string | null) ?? null,
