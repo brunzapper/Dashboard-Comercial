@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 23/07/2026
+// v1.2 (23/07/2026): guardas de qualidade contra os erros observados na IA —
+//   (a) Sub-base declarada com o MESMO recorte de uma existente é descartada
+//   e as referências REMAPEADAS p/ a key existente (fim das variantes _v2);
+//   Sub-bases processadas ANTES dos fields (fórmulas enxergam @sub declarado;
+//   pré-scan de campos declarados cobre refs adiantados); (b) "dateAgg" fora
+//   de tabela de registros (ou com métrica de fórmula) é REMOVIDO com aviso;
+//   (c) aviso quando o escopo @sub da fórmula diverge do sources da métrica;
+//   (d) aviso sobre "resultCurrency" (exige taxas; sem taxa vira "—").
 // v1.1 (23/07/2026): envelope multi-Base — aceita `bases: string[]` além do
 //   `base` singular (união não-vazia de keys existentes no catálogo).
 // Validador/materializador PURO do import de dashboard via JSON (modo IA):
@@ -224,8 +232,42 @@ export function validateDashboardImport(
     ctx.operationNames.map((n) => n.trim().toLocaleLowerCase("pt-BR"))
   );
 
+  // Pré-scan dos campos DECLARADOS no JSON (key → data_type): as Sub-bases
+  // são processadas ANTES do bloco de fields (para as fórmulas dos campos
+  // enxergarem escopos @sub declarados), então refs a campos declarados
+  // precisam resolver por aqui antes de entrarem em workingDefs.
+  const declaredFieldTypes = new Map<string, string>();
+  for (const f of asArray(parsed.fields)) {
+    if (!isRecord(f)) continue;
+    const k = asString(f.field_key);
+    if (k) declaredFieldTypes.set(k, asString(f.data_type));
+  }
   const defKeyExists = (key: string) =>
+    declaredFieldTypes.has(key) ||
     workingDefs.some((d) => !isCoreDef(d) && d.field_key === key);
+
+  // Remap de Sub-bases duplicadas (mesma pai + mesmo recorte + mesmo campo de
+  // período que uma existente): a declarada é DESCARTADA e todas as
+  // referências (sources de widget/métrica, escopos @key de fórmula,
+  // periodBar.fieldBySource) apontam para a key existente — evita a
+  // proliferação de variantes (_v2, _v3) entre iterações da IA.
+  const subRemap = new Map<string, string>();
+  const remapSourceKey = (k: string): string => subRemap.get(k) ?? k;
+  const remapFormulaText = (text: string): string => {
+    let out = text;
+    for (const [from, to] of subRemap) {
+      out = out.split(`@${from}]`).join(`@${to}]`);
+    }
+    return out;
+  };
+  const remapFormulaSpec = <T extends { formula_text?: unknown }>(
+    spec: T
+  ): T => {
+    if (subRemap.size === 0) return spec;
+    const text = asString(spec.formula_text);
+    if (!text) return spec;
+    return { ...spec, formula_text: remapFormulaText(text) };
+  };
 
   // Valida um ref de campo usado em dimensão/filtro/coluna. `where` entra na
   // mensagem. Retorna false quando inválido (erro já registrado).
@@ -363,106 +405,13 @@ export function validateDashboardImport(
     return formula;
   };
 
-  // --- fields (campos declarados) ---
-  const fieldSpecs = asArray(parsed.fields);
-  const declaredFieldKeys = new Set<string>();
-  const presetFields: PresetField[] = [];
-  fieldSpecs.forEach((f, i) => {
-    const where = `fields[${i}]`;
-    if (!isRecord(f)) {
-      errors.push(`${where}: precisa ser um objeto.`);
-      return;
-    }
-    const key = asString(f.field_key);
-    const label = asString(f.label) || key;
-    const dataType = asString(f.data_type);
-    if (!FIELD_KEY_RE.test(key)) {
-      errors.push(
-        `${where}: "field_key" inválido ("${key}") — use minúsculas/números/underscore, começando por letra.`
-      );
-      return;
-    }
-    if (coreColNames.has(key)) {
-      errors.push(
-        `${where}: "${key}" colide com uma coluna do núcleo — escolha outra key.`
-      );
-      return;
-    }
-    if (declaredFieldKeys.has(key)) {
-      errors.push(`${where}: field_key duplicado no JSON ("${key}").`);
-      return;
-    }
-    if (!DATA_TYPES.has(dataType)) {
-      errors.push(
-        `${where}: "data_type" inválido ("${dataType}"). Válidos: ${[...DATA_TYPES].join(", ")}.`
-      );
-      return;
-    }
-    declaredFieldKeys.add(key);
-    if (existingFieldKeys.has(key)) {
-      const existing = ctx.defs.find(
-        (d) => !isCoreDef(d) && d.field_key === key
-      );
-      warnings.push(
-        existing && existing.data_type !== dataType
-          ? `${where}: o campo "${key}" JÁ EXISTE com tipo "${existing.data_type}" (o JSON pede "${dataType}") — será reutilizado como está, sem alteração.`
-          : `${where}: o campo "${key}" já existe — será reutilizado como está.`
-      );
-      return; // não recria nem valida fórmula de campo que não será criado
-    }
-    let formula: Formula | undefined;
-    if (dataType === "calculado" || dataType === "calculado_agg") {
-      const resolved = resolveFormula(
-        f,
-        dataType === "calculado_agg" ? "aggregate" : "record",
-        where,
-        key
-      );
-      if (!resolved) return;
-      const cycle = findFormulaCycle(key, resolved, workingDefs);
-      if (cycle) {
-        errors.push(
-          `${where}: dependência circular na fórmula (${cycle.join(" → ")}).`
-        );
-        return;
-      }
-      formula = resolved;
-    }
-    if (dataType === "moeda" && asString(f.currency_mode) === "fixed") {
-      warnings.push(
-        `${where}: moeda fixa não é suportada no import — o campo será criado com moeda herdada do registro.`
-      );
-    }
-    const applies = asArray(f.applies_to).map(String).filter(Boolean);
-    presetFields.push({
-      field_key: key,
-      label,
-      data_type: dataType as DataType,
-      options: asArray(f.options).map(String).filter(Boolean),
-      visible_to_roles:
-        asArray(f.visible_to_roles).length > 0
-          ? cleanRoles(f.visible_to_roles, warnings, where)
-          : [...ROLE_KEYS],
-      editable_by_roles: cleanRoles(f.editable_by_roles, warnings, where),
-      is_local: f.is_local !== false,
-      currency_mode: dataType === "moeda" ? "inherit" : undefined,
-      formula,
-      applies_to: applies.length > 0 ? applies : undefined,
-    });
-    workingDefs.push({
-      id: `import:${key}`,
-      field_key: key,
-      label,
-      data_type: dataType as DataType,
-      formula: formula ?? null,
-      applies_to: applies.length > 0 ? applies : null,
-      source_system: null,
-    });
-  });
-
   // --- subSources (sub-bases declaradas) ---
+  // Processadas ANTES dos fields: fórmulas de campos calculados podem usar
+  // escopo @sub declarado neste mesmo JSON.
   const subSpecs = asArray(parsed.subSources);
   const presetSubs: PresetSubSource[] = [];
+  const normSubFilter = (f: WidgetFilter[]) =>
+    JSON.stringify(f.map((c) => [c.field, c.op, c.value ?? null]));
   subSpecs.forEach((s, i) => {
     const where = `subSources[${i}]`;
     if (!isRecord(s)) {
@@ -515,14 +464,30 @@ export function validateDashboardImport(
     const periodOk =
       PERIOD_FIELDS.has(period) ||
       (period.startsWith("custom:") &&
-        workingDefs.some(
+        (workingDefs.some(
           (d) =>
             d.field_key === period.slice("custom:".length) &&
             d.data_type === "data"
-        ));
+        ) ||
+          declaredFieldTypes.get(period.slice("custom:".length)) === "data"));
     if (!periodOk) {
       errors.push(
         `${where}: "default_period_field" inválido ("${period}") — use uma coluna core de data (${[...PERIOD_FIELDS].join(", ")}) ou "custom:<key>" de um campo tipo data.`
+      );
+      return;
+    }
+    // Recorte IGUAL ao de uma Sub-base existente (ou declarada acima)?
+    // Reutiliza a existente e remapeia as referências — nunca duplicar.
+    const dup = workingSources.find(
+      (x) =>
+        x.parentKey === parent &&
+        x.defaultPeriodField === period &&
+        normSubFilter(x.filter ?? []) === normSubFilter(filter)
+    );
+    if (dup) {
+      subRemap.set(key, dup.key);
+      warnings.push(
+        `${where}: a Sub-base "${key}" tem o MESMO recorte de "${dup.key}" — a existente foi reutilizada (todas as referências do JSON apontam para "${dup.key}").`
       );
       return;
     }
@@ -544,6 +509,103 @@ export function validateDashboardImport(
       manualEntry: false,
       parentKey: parent,
       filter,
+    });
+  });
+
+  // --- fields (campos declarados) ---
+  const fieldSpecs = asArray(parsed.fields);
+  const declaredFieldKeys = new Set<string>();
+  const presetFields: PresetField[] = [];
+  fieldSpecs.forEach((f, i) => {
+    const where = `fields[${i}]`;
+    if (!isRecord(f)) {
+      errors.push(`${where}: precisa ser um objeto.`);
+      return;
+    }
+    const key = asString(f.field_key);
+    const label = asString(f.label) || key;
+    const dataType = asString(f.data_type);
+    if (!FIELD_KEY_RE.test(key)) {
+      errors.push(
+        `${where}: "field_key" inválido ("${key}") — use minúsculas/números/underscore, começando por letra.`
+      );
+      return;
+    }
+    if (coreColNames.has(key)) {
+      errors.push(
+        `${where}: "${key}" colide com uma coluna do núcleo — escolha outra key.`
+      );
+      return;
+    }
+    if (declaredFieldKeys.has(key)) {
+      errors.push(`${where}: field_key duplicado no JSON ("${key}").`);
+      return;
+    }
+    if (!DATA_TYPES.has(dataType)) {
+      errors.push(
+        `${where}: "data_type" inválido ("${dataType}"). Válidos: ${[...DATA_TYPES].join(", ")}.`
+      );
+      return;
+    }
+    declaredFieldKeys.add(key);
+    if (existingFieldKeys.has(key)) {
+      const existing = ctx.defs.find(
+        (d) => !isCoreDef(d) && d.field_key === key
+      );
+      warnings.push(
+        existing && existing.data_type !== dataType
+          ? `${where}: o campo "${key}" JÁ EXISTE com tipo "${existing.data_type}" (o JSON pede "${dataType}") — será reutilizado como está, sem alteração.`
+          : `${where}: o campo "${key}" já existe — será reutilizado como está.`
+      );
+      return; // não recria nem valida fórmula de campo que não será criado
+    }
+    let formula: Formula | undefined;
+    if (dataType === "calculado" || dataType === "calculado_agg") {
+      const resolved = resolveFormula(
+        remapFormulaSpec(f),
+        dataType === "calculado_agg" ? "aggregate" : "record",
+        where,
+        key
+      );
+      if (!resolved) return;
+      const cycle = findFormulaCycle(key, resolved, workingDefs);
+      if (cycle) {
+        errors.push(
+          `${where}: dependência circular na fórmula (${cycle.join(" → ")}).`
+        );
+        return;
+      }
+      formula = resolved;
+    }
+    if (dataType === "moeda" && asString(f.currency_mode) === "fixed") {
+      warnings.push(
+        `${where}: moeda fixa não é suportada no import — o campo será criado com moeda herdada do registro.`
+      );
+    }
+    const applies = asArray(f.applies_to).map(String).filter(Boolean);
+    presetFields.push({
+      field_key: key,
+      label,
+      data_type: dataType as DataType,
+      options: asArray(f.options).map(String).filter(Boolean),
+      visible_to_roles:
+        asArray(f.visible_to_roles).length > 0
+          ? cleanRoles(f.visible_to_roles, warnings, where)
+          : [...ROLE_KEYS],
+      editable_by_roles: cleanRoles(f.editable_by_roles, warnings, where),
+      is_local: f.is_local !== false,
+      currency_mode: dataType === "moeda" ? "inherit" : undefined,
+      formula,
+      applies_to: applies.length > 0 ? applies : undefined,
+    });
+    workingDefs.push({
+      id: `import:${key}`,
+      field_key: key,
+      label,
+      data_type: dataType as DataType,
+      formula: formula ?? null,
+      applies_to: applies.length > 0 ? applies : null,
+      source_system: null,
     });
   });
 
@@ -620,6 +682,15 @@ export function validateDashboardImport(
     tabIds.add(id);
   });
   const pb = settings.periodBar;
+  if (pb?.fieldBySource && subRemap.size > 0) {
+    // Keys de Sub-bases remapeadas também no campo de data por Base.
+    pb.fieldBySource = Object.fromEntries(
+      Object.entries(pb.fieldBySource).map(([sk, f]) => [
+        remapSourceKey(sk),
+        f,
+      ])
+    );
+  }
   if (pb) {
     if (pb.field) checkRef(pb.field, "dashboard.settings.periodBar.field");
     if (pb.defaultPreset != null && !PERIOD_PRESET_KEYS.has(pb.defaultPreset)) {
@@ -672,7 +743,10 @@ export function validateDashboardImport(
     usedWidgetKeys.add(wKeySlug);
 
     // Bases do widget: todas precisam existir (ou terem sido declaradas).
-    const sources = asArray(w.sources).map(String).filter(Boolean);
+    const sources = asArray(w.sources)
+      .map(String)
+      .filter(Boolean)
+      .map(remapSourceKey);
     for (const sk of sources) {
       if (!sourceKeySet().has(sk)) {
         errors.push(
@@ -680,6 +754,24 @@ export function validateDashboardImport(
         );
       }
     }
+
+    // "dateAgg" (Agrupar período) só faz sentido em tabela de registros
+    // individuais SEM métrica de fórmula — em widget agregado o agrupamento
+    // por período já é automático (RPC/merge por bucket) e com fórmula o
+    // caminho client-side degrada. Removido com aviso.
+    const wSettingsRaw = isRecord(w.settings)
+      ? (w.settings as Record<string, unknown>)
+      : {};
+    const isListTable =
+      visualType === "tabela" && wSettingsRaw.rowMode === "records";
+    const hasCalcMetric = asArray(w.metrics).some(
+      (m) =>
+        isRecord(m) &&
+        (m.calc === true ||
+          asString(m.field) === CALC_METRIC_FIELD ||
+          asString(m.formula_text) !== "" ||
+          isRecord(m.formula))
+    );
 
     // Dimensões
     const dimensions: Dimension[] = [];
@@ -695,12 +787,18 @@ export function validateDashboardImport(
         );
         return;
       }
-      const dateAgg = asString(d.dateAgg);
+      let dateAgg = asString(d.dateAgg);
       if (dateAgg && !DATE_AGGS.has(dateAgg)) {
         errors.push(
           `${dw}: "dateAgg" inválido ("${dateAgg}"). Válidos: ${[...DATE_AGGS].join(", ")}.`
         );
         return;
+      }
+      if (dateAgg && (!isListTable || hasCalcMetric)) {
+        warnings.push(
+          `${dw}: "dateAgg" removido — só é suportado em tabela de registros individuais (rowMode "records") sem métricas de fórmula; em widget agregado o agrupamento por período já é automático.`
+        );
+        dateAgg = "";
       }
       dimensions.push({
         field,
@@ -732,8 +830,34 @@ export function validateDashboardImport(
         return;
       }
       if (isCalc) {
-        const formula = resolveFormula(m, "aggregate", mw);
+        const formula = resolveFormula(remapFormulaSpec(m), "aggregate", mw);
         if (!formula) return;
+        const mSources = asArray(m.sources)
+          .map(String)
+          .filter(Boolean)
+          .map(remapSourceKey);
+        // Escopos @base usados na fórmula devem casar com o "sources" da
+        // métrica — divergência costuma ser key inventada em outra iteração.
+        if (mSources.length > 0) {
+          const scopes = new Set<string>();
+          for (const t of formula.tokens) {
+            if (t.kind !== "field" || !t.ref.startsWith("agg:")) continue;
+            const at = t.ref.lastIndexOf("@");
+            if (at > 0) scopes.add(t.ref.slice(at + 1));
+          }
+          for (const sc of scopes) {
+            if (!mSources.includes(sc)) {
+              warnings.push(
+                `${mw}: o escopo "@${sc}" da fórmula não está em "sources" (${mSources.join(", ")}) — confira se as duas listas apontam para as mesmas Sub-bases.`
+              );
+            }
+          }
+        }
+        if (typeof m.resultCurrency === "string" && m.resultCurrency) {
+          warnings.push(
+            `${mw}: "resultCurrency" converte o resultado para ${m.resultCurrency} e exige taxas cadastradas (Configurações → Moedas) — sem taxa o widget exibe "—". Para valores já em R$, prefira omitir.`
+          );
+        }
         metrics.push({
           field: CALC_METRIC_FIELD,
           agg: "sum",
@@ -744,10 +868,7 @@ export function validateDashboardImport(
           resultCurrency:
             typeof m.resultCurrency === "string" ? m.resultCurrency : undefined,
           percent: m.percent === true || undefined,
-          sources:
-            asArray(m.sources).length > 0
-              ? asArray(m.sources).map(String)
-              : undefined,
+          sources: mSources.length > 0 ? mSources : undefined,
         });
         return;
       }
@@ -759,7 +880,10 @@ export function validateDashboardImport(
         return;
       }
       if (field !== "*" && !checkRef(field, mw)) return;
-      const mSources = asArray(m.sources).map(String).filter(Boolean);
+      const mSources = asArray(m.sources)
+        .map(String)
+        .filter(Boolean)
+        .map(remapSourceKey);
       for (const sk of mSources) {
         if (!sourceKeySet().has(sk)) {
           errors.push(`${mw}: Base desconhecida em "sources" ("${sk}").`);
@@ -792,7 +916,10 @@ export function validateDashboardImport(
         return;
       }
       if (!checkRef(field, fw)) return;
-      const fSources = asArray(f.sources).map(String).filter(Boolean);
+      const fSources = asArray(f.sources)
+        .map(String)
+        .filter(Boolean)
+        .map(remapSourceKey);
       for (const sk of fSources) {
         if (!sourceKeySet().has(sk)) {
           errors.push(`${fw}: Base desconhecida em "sources" ("${sk}").`);

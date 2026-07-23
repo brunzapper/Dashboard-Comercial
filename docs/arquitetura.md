@@ -1,4 +1,10 @@
-<!-- Versão: 1.22 | Data: 23/07/2026 -->
+<!-- Versão: 1.23 | Data: 23/07/2026 -->
+<!-- v1.23 (23/07/2026): §4.1 — merge por bucket client-side p/ dimensão
+     custom:+transform (bucket-merge.ts em computeRows; RPC agrupava pelo
+     valor cru; canônico estilo-núcleo; avg simples aproximado). Import (IA):
+     validador remove dateAgg fora de lista, remapeia Sub-base de recorte
+     idêntico p/ a existente e avisa sobre resultCurrency/escopo≠sources;
+     spec ganha as regras 12-14. -->
 <!-- v1.22 (23/07/2026): §4.11 — REGRA: nunca `.insert(...).select()` em
      `dashboards` (a policy de SELECT auth_board_visible/0088 é função STABLE
      sobre a própria tabela e não vê a linha do próprio comando → 42501);
@@ -249,6 +255,22 @@ O subsistema mais crítico. A config do widget (JSONB: `p_source`, `p_dimensions
 O lado TypeScript é `lib/widgets/engine.ts` (chama o RPC, resolve rótulos de FK,
 pós-processa). A função foi **recriada 18 vezes** ao longo das migrações — a versão
 vigente é a da migração `0085_widget_rpc_brasilia_day.sql`.
+
+**Merge por bucket p/ dimensão `custom:` + transform (23/07/2026):** o ramo
+`custom:` da DIMENSÃO no RPC agrupa pelo VALOR CRU de `custom_fields->>key`
+(o transform é só rótulo) — valores com hora viravam um grupo POR REGISTRO
+(barras/chips duplicados, incl. snapshots). O engine funde as linhas pelo
+bucket no retorno de `computeRows` (`lib/widgets/bucket-merge.ts` — choke
+point único: principal/comparação/pernas do align/card/quick-table/snapshot),
+com a semântica do Total geral: sum/count somam, min/max reduzem, calculadas
+reavaliam sobre `foldBasis`, monetárias fundem `__money` e replotam (exato
+até p/ média — o breakdown carrega count). A dim fundida grava o valor
+CANÔNICO estilo-núcleo (`bucketCanonicalValue`, byte-compatível com o
+`date_trunc`/`extract` das colunas core), o que alinha ordenação
+cronológica, casamento ordinal da comparação e a regex mensal do goalLine.
+ÚNICA aproximação: média SIMPLES não-monetária = média das médias (a linha
+do RPC não carrega peso — mesma limitação do Total geral). RPCs INTOCADAS
+(não aciona a invariante 1).
 
 **Dia de Brasília no read side (0085):** a sessão do banco é UTC, então colunas
 `timestamptz` do núcleo (`source_created_at`…) comparadas a literais naive

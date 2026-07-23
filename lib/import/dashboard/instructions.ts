@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 23/07/2026
+// v1.2 (23/07/2026): regras 12-14 (eixo de tempo sem dateAgg; resultCurrency
+//   só p/ converter; reuso de Sub-bases existentes + escopo @sub ↔ sources) —
+//   respostas aos erros observados nos primeiros dashboards gerados por IA.
 // v1.1 (23/07/2026): multi-Base — envelope com `bases: []`, seções "MODELO
 //   DAS BASES"/"AMOSTRAS (por Base)" e regra semântica de dashboards
 //   multi-Base (fieldBySource sempre; unified: nas dimensões compartilhadas;
@@ -161,6 +164,7 @@ barra_horizontal, linha, pizza, funil, kpi, calculado.
 - "transform" (só campo de data): weekday (dia da semana), week_year (semana do
   ano), week_month (semana do mês; "weekMode": "restricted"|"full"), month_name
   (nome do mês), month_year (mês/ano), quarter (trimestre), year (ano).
+- NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 
 ### Métricas
@@ -249,6 +253,21 @@ Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
     um campo unificado ("unified:<key>" — existente no modelo ou declarado em
     "correspondences"), nunca o campo de uma Base só; refs "match:<base>:<ref>"
     só funcionam entre Bases com Conexão listada no modelo ("conexoes").
+12. EIXO DE TEMPO: para "por mês/trimestre/semana", basta a dimensão com um
+    campo de DATA + "transform" — o agrupamento pelo bucket é automático.
+    NUNCA use "dateAgg" em gráficos ou tabelas agregadas (ele é EXCLUSIVO de
+    tabela com "rowMode": "records", e nunca com métrica de fórmula) — o
+    validador o remove com aviso.
+13. MOEDA DO RESULTADO: use "resultCurrency" SOMENTE quando precisar
+    CONVERTER moedas (exige taxas cadastradas em Configurações → Moedas; sem
+    taxa o widget exibe "—"). Para razões e valores já em R$, OMITA
+    (resultado numérico é o seguro); percentual = "resultPercent": true.
+14. SUB-BASES: REUTILIZE as Sub-bases existentes do MODELO quando o recorte
+    desejado for o mesmo — use a key EXISTENTE em "sources"/escopos "@" e NÃO
+    declare de novo (nunca crie variantes tipo "_v2"). O escopo "@sub" das
+    fórmulas deve apontar para as MESMAS keys usadas em "sources" da métrica.
+    (O validador descarta Sub-bases de recorte idêntico e remapeia as
+    referências, com aviso.)
 
 ## Exemplo mínimo completo
 

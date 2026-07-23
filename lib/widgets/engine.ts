@@ -1,4 +1,15 @@
-// Versão: 1.8 | Data: 21/07/2026
+// Versão: 1.9 | Data: 23/07/2026
+// v1.9 (23/07/2026): merge por bucket p/ dimensão `custom:` + transform
+// (lib/widgets/bucket-merge.ts) — o ramo custom das RPCs agrupa pelo valor
+// CRU (0085; transform é só rótulo), então valores com hora viravam um grupo
+// por registro (barras/chips duplicados). computeRows agora funde as linhas
+// pelo bucket no retorno (choke point único: principal/comparação/pernas do
+// align/card/quick-table/snapshot), com a semântica do Total geral (sum/count
+// somam; min/max reduzem; calc reavalia sobre foldBasis; monetárias fundem
+// __money e replotam — exato incl. média; média SIMPLES não-monetária =
+// média das médias, aproximação documentada). Dim fundida grava o valor
+// CANÔNICO estilo-núcleo (conserta sort cronológico/comparação/goalLine).
+// RPCs INTOCADAS. attachMoney ganhou o helper replotMoney (reusado pós-merge).
 // v1.8 (21/07/2026): dia de Brasília (0085) — resolveFilters ancora bounds
 // gt/gte/lt/lte de coluna de data do NÚCLEO com offset -03:00
 // (anchorCoreDateBound; choke point do RPC e do modo lista); bdAlignCtx expõe
@@ -87,6 +98,7 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
+import { mergeRowsByBucket } from "./bucket-merge";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
@@ -548,11 +560,23 @@ function attachMoney(
     // attachMoney de novo com as métricas delas — chaves disjuntas por chamada.
     row.__money = { ...row.__money, ...money };
   }
+  replotMoney(rows, moneyEntries);
+}
+
+// Reescreve `metric_<n>` das métricas monetárias a partir do `__money` de cada
+// linha (decisão de moeda POR SÉRIE). Extraído de attachMoney para rodar de
+// novo após o merge por bucket (bucket-merge) — o breakdown fundido carrega
+// count, então até a média sai exata.
+function replotMoney(
+  rows: WidgetRow[],
+  moneyEntries: { m: Metric; i: number }[]
+): void {
   for (const { m, i } of moneyEntries) {
     const metricKey = `metric_${i + 1}`;
     const foreign = seriesForeignCode(rows, metricKey, m.currencyDisplay ?? "original");
     for (const row of rows) {
-      row[metricKey] = plotAmount(row.__money![metricKey], m.agg, foreign);
+      const bd = row.__money?.[metricKey];
+      if (bd) row[metricKey] = plotAmount(bd, m.agg, foreign);
     }
   }
 }
@@ -2243,7 +2267,43 @@ export async function runWidget(
       if (Object.keys(lr.bdMap).length === 0) continue;
       attachMoney(rows, dims, lr.moneyEntries, lr.bdMap);
     }
-    return rows;
+
+    // Dimensão `custom:` com transform: o RPC agrupa pelo valor CRU (0085,
+    // ramo custom — o transform é só rótulo). Funde aqui pelo bucket, no
+    // choke point único — principal, comparação, pernas do businessDayAlign,
+    // card, quick-table e snapshot (mesmo engine) recebem linhas já fundidas.
+    // Sem dim custom+transform, `merged === rows` (caminho atual intocado).
+    const merged = mergeRowsByBucket(
+      rows,
+      dims,
+      config.metrics.map((m, i) => {
+        const rc = calcResolved.get(i);
+        return {
+          key: `metric_${i + 1}`,
+          kind: rc
+            ? ("calc" as const)
+            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
+          evalBasis: rc?.formula
+            ? (b: BasisValues) =>
+                evalCalcMoney(
+                  rc.formula!,
+                  b,
+                  calcMoneyMeta(rc, rates, conversionPeriod)
+                ).value
+            : undefined,
+        };
+      })
+    );
+    if (merged !== rows) {
+      // Replot das monetárias sobre o __money FUNDIDO (exato, incl. média).
+      if (moneyEntries.length > 0 && hasBd) replotMoney(merged, moneyEntries);
+      for (const lr of legRuns) {
+        if (!lr.ok || lr.moneyEntries.length === 0) continue;
+        if (Object.keys(lr.bdMap).length === 0) continue;
+        replotMoney(merged, lr.moneyEntries);
+      }
+    }
+    return merged;
   };
 
   // Rodada de comparação em paralelo com a principal. Qualquer falha aqui
