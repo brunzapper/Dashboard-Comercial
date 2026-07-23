@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): multi-Base — envelope com `bases: []`, seções "MODELO
+//   DAS BASES"/"AMOSTRAS (por Base)" e regra semântica de dashboards
+//   multi-Base (fieldBySource sempre; unified: nas dimensões compartilhadas;
+//   match: só onde há Conexão cadastrada).
 // Manual de instruções COPIADO para o clipboard no modo "Importar dashboard
 // via JSON (IA)": especificação completa do formato + regras semânticas
 // condensadas + exemplo. O chamador (import-prompt-actions) injeta o MODELO DA
@@ -8,11 +12,10 @@
 // mudanças de UI/semântica do construtor incluem este arquivo (AGENTS.md).
 
 export interface ImportPromptParts {
-  baseKey: string;
-  baseLabel: string;
-  baseModelJson: string; // JSON do modelo da Base (campos/tipos/opções/subs)
-  sampleJson: string; // JSON das ~20 linhas de amostra (cobertura de colunas)
-  sampleNote: string; // observações da amostra (colunas sem dado etc.)
+  basesLabel: string; // ex.: 'Leads do Bitrix ("leads"), Deals do Bitrix ("deals")'
+  baseModelJson: string; // JSON do modelo das Bases (campos/tipos/opções/subs/conexões)
+  sampleJson: string; // JSON das amostras (por Base; ~20 linhas com cobertura cada)
+  sampleNote: string; // observações das amostras (colunas sem dado etc.)
   manual?: string; // variante "completo": manual de construção inteiro
 }
 
@@ -39,7 +42,7 @@ quer; você responde com O JSON e nada mais.
   "formato": "dashboard-import",
   "versao": 1,
   "chave": "meu_dashboard",            // slug estável; REIMPORTAR a mesma chave ATUALIZA o dashboard
-  "base": "<key da Base>",             // a Base principal (fornecida abaixo no MODELO DA BASE)
+  "bases": ["<keys das Bases>"],       // as Bases usadas (do MODELO DAS BASES abaixo; "base" singular também é aceito)
   "dashboard": {
     "name": "Nome do dashboard",
     "visible_to_roles": ["admin","gestor","vendedor"],   // vazio/ausente = pessoal
@@ -238,14 +241,20 @@ Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
 9. Se a análise precisa de um recorte fixo reutilizável com data própria
    (ex.: reuniões), crie uma Sub-base em "subSources" e use a key dela em
    "sources" — não replique o filtro em cada widget.
-10. Campos que os widgets referenciam DEVEM existir no MODELO DA BASE abaixo
-    ou ser declarados em "fields"/"correspondences".
+10. Campos que os widgets referenciam DEVEM existir no MODELO DAS BASES
+    abaixo ou ser declarados em "fields"/"correspondences".
+11. Dashboard com 2+ Bases: configure SEMPRE "periodBar.fieldBySource" com o
+    campo de data de CADA Base (sem isso, registros sem a data primária
+    somem); para agrupar/filtrar um conceito que existe nas duas Bases, use
+    um campo unificado ("unified:<key>" — existente no modelo ou declarado em
+    "correspondences"), nunca o campo de uma Base só; refs "match:<base>:<ref>"
+    só funcionam entre Bases com Conexão listada no modelo ("conexoes").
 
 ## Exemplo mínimo completo
 
 {
   "formato": "dashboard-import", "versao": 1,
-  "chave": "comercial_mes", "base": "deals",
+  "chave": "comercial_mes", "bases": ["deals", "leads"],
   "dashboard": {
     "name": "Comercial — Mês",
     "visible_to_roles": ["admin", "gestor"],
@@ -291,20 +300,20 @@ export function buildImportPromptText(parts: ImportPromptParts): string {
   const head = [
     "INSTRUÇÕES PARA GERAR UM DASHBOARD IMPORTÁVEL (JSON)",
     "",
-    `Base selecionada: ${parts.baseLabel} (key: "${parts.baseKey}")`,
-    "Leia a especificação, estude o MODELO DA BASE e a AMOSTRA DE DADOS ao",
-    "final, e aguarde a descrição do dashboard desejado pelo usuário. Então",
-    "responda com UM único bloco de código JSON no formato especificado.",
+    `Base(s) selecionada(s): ${parts.basesLabel}`,
+    "Leia a especificação, estude o MODELO DAS BASES e as AMOSTRAS DE DADOS",
+    "ao final, e aguarde a descrição do dashboard desejado pelo usuário.",
+    "Então responda com UM único bloco de código JSON no formato especificado.",
   ].join("\n");
   const out = [
     head,
     SPEC.trim(),
     section(
-      "MODELO DA BASE (campos disponíveis — use estas refs)",
+      "MODELO DAS BASES (campos disponíveis — use estas refs)",
       parts.baseModelJson
     ),
     section(
-      "AMOSTRA DE DADOS (~20 registros reais, escolhidos para cobrir todas as colunas)",
+      "AMOSTRAS DE DADOS (por Base; ~20 registros reais cada, escolhidos para cobrir todas as colunas)",
       `${parts.sampleNote}\n\n${parts.sampleJson}`
     ),
   ];

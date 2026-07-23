@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): envelope multi-Base — `bases: string[]` (o `base`
+//   singular segue aceito); o prompt agora cobre várias Bases marcadas.
 // Contrato do "Importar dashboard via JSON (modo IA)": um JSON declarativo
 // gerado por uma IA externa descreve um dashboard COMPLETO (abas, widgets com
 // cálculos/aparência, campos custom e sub-bases/correspondências necessárias).
@@ -89,7 +91,10 @@ export interface DashboardImportJson {
   formato: string; // DASHBOARD_IMPORT_FORMAT
   versao: number; // DASHBOARD_IMPORT_VERSION
   chave: string; // identidade do import (slug) — reimporte atualiza
-  base: SourceKey; // Base principal (precisa existir no catálogo)
+  // Bases usadas pelo dashboard (≥1, existentes no catálogo). `bases` é a
+  // forma atual; `base` (singular) segue aceito quando é uma só.
+  bases?: SourceKey[];
+  base?: SourceKey;
   dashboard: {
     name: string;
     visible_to_roles?: string[];

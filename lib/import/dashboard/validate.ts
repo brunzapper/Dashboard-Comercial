@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): envelope multi-Base — aceita `bases: string[]` além do
+//   `base` singular (união não-vazia de keys existentes no catálogo).
 // Validador/materializador PURO do import de dashboard via JSON (modo IA):
 // recebe o texto colado + um contexto carregado pelo chamador (catálogo de
 // fontes, field_definitions, correspondências, nomes de responsáveis/
@@ -186,11 +188,17 @@ export function validateDashboardImport(
       '"chave" é obrigatória (slug do import — reimportar a mesma chave atualiza o dashboard).'
     );
   }
-  const baseKey = asString(parsed.base);
   const rootSources = ctx.sources.filter((s) => !s.parentKey);
-  if (!baseKey || !ctx.sources.some((s) => s.key === baseKey)) {
+  const baseKeys = [
+    ...asArray(parsed.bases).map(String),
+    ...(asString(parsed.base) ? [asString(parsed.base)] : []),
+  ].filter(Boolean);
+  if (
+    baseKeys.length === 0 ||
+    baseKeys.some((k) => !ctx.sources.some((s) => s.key === k))
+  ) {
     errors.push(
-      `"base" precisa ser a key de uma Base existente. Disponíveis: ${rootSources.map((s) => s.key).join(", ")}.`
+      `"bases" (ou "base") precisa listar keys de Bases existentes. Disponíveis: ${rootSources.map((s) => s.key).join(", ")}.`
     );
   }
   const dash = isRecord(parsed.dashboard) ? parsed.dashboard : null;

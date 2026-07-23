@@ -1,7 +1,10 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): seleção MULTI-Base — checklist no lugar do Combobox
+//   único; o prompt cobre todas as Bases marcadas (modelo + amostra de cada,
+//   correspondências e Conexões), habilitando dashboards combinados.
 // Botão "Importar" da Home (ao lado do "Criar"): modo de criação de dashboard
 // via JSON gerado por IA. Fluxo no Sheet (padrão do projeto — não há Dialog):
-// resumo dos passos → seleção da Base (obrigatória) → copiar o prompt de
+// resumo dos passos → seleção da(s) Base(s) (≥1) → copiar o prompt de
 // instruções (2 variantes: compacto p/ IAs mais capazes; completo anexa o
 // manual de construção inteiro) → colar o JSON devolvido → importar
 // (importDashboardJson) e navegar ao dashboard. Erros do validador são
@@ -15,7 +18,7 @@ import { useRouter } from "next/navigation";
 import { Check, Copy, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
@@ -36,9 +39,9 @@ import {
 } from "@/app/(app)/dashboards/actions";
 
 const STEPS = [
-  "Importe/sincronize a Base principal (Registros → Importar CSV), se ainda não existir.",
-  "Selecione abaixo a Base que o dashboard vai usar.",
-  "Copie o prompt de instruções (o modelo da Base e uma amostra de dados vão junto).",
+  "Importe/sincronize a(s) Base(s) (Registros → Importar CSV), se ainda não existirem.",
+  "Marque abaixo a(s) Base(s) que o dashboard vai usar (uma ou várias).",
+  "Copie o prompt de instruções (o modelo e uma amostra de CADA Base vão junto).",
   "Cole o prompt na IA de sua preferência e descreva o dashboard que você quer.",
   "Cole aqui o JSON que a IA devolver.",
   "Importe: o dashboard é criado com abas, widgets, campos e sub-bases necessárias.",
@@ -47,7 +50,7 @@ const STEPS = [
 export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [base, setBase] = useState("");
+  const [bases, setBases] = useState<string[]>([]);
   const [copied, setCopied] = useState<ImportPromptVariant | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
@@ -56,16 +59,18 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
   const [copyPending, startCopy] = useTransition();
   const [importPending, startImport] = useTransition();
 
-  const rootOptions = sources
-    .filter((s) => !s.parentKey)
-    .map((s) => ({ value: s.key, label: s.label }));
+  const rootSources = sources.filter((s) => !s.parentKey);
+
+  function toggleBase(key: string, on: boolean) {
+    setBases((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
+  }
 
   function copyPrompt(variant: ImportPromptVariant) {
-    if (!base) return;
+    if (bases.length === 0) return;
     setCopyError(null);
     setManualPrompt(null);
     startCopy(async () => {
-      const res = await buildImportPrompt(base, variant);
+      const res = await buildImportPrompt(bases, variant);
       if (!res.ok || !res.prompt) {
         setCopyError(res.message ?? "Não foi possível montar o prompt.");
         return;
@@ -120,13 +125,26 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
             </ol>
 
             <div className="flex flex-col gap-2">
-              <Label>Base principal</Label>
-              <Combobox
-                options={rootOptions}
-                value={base}
-                onValueChange={setBase}
-                placeholder="Selecione a Base…"
-              />
+              <Label>Bases do dashboard (uma ou várias)</Label>
+              <div className="flex flex-col gap-1.5 rounded-md border p-3">
+                {rootSources.map((s) => (
+                  <label
+                    key={s.key}
+                    className="flex cursor-pointer items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={bases.includes(s.key)}
+                      onCheckedChange={(v) => toggleBase(s.key, v === true)}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Marcando 2+ Bases, o prompt inclui o modelo e a amostra de cada
+                uma, os campos unificados e as Conexões — a IA pode montar
+                widgets combinando as Bases (ex.: conversão lead → negócio).
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -135,7 +153,7 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={!base || copyPending}
+                  disabled={bases.length === 0 || copyPending}
                   onClick={() => copyPrompt("compacto")}
                 >
                   {copied === "compacto" ? (
@@ -148,7 +166,7 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={!base || copyPending}
+                  disabled={bases.length === 0 || copyPending}
                   onClick={() => copyPrompt("completo")}
                 >
                   {copied === "completo" ? (
@@ -168,7 +186,7 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
               </p>
               {copyPending ? (
                 <p className="text-muted-foreground text-sm" role="status">
-                  Montando o prompt (modelo da Base + amostra de dados)…
+                  Montando o prompt (modelo das Bases + amostras de dados)…
                 </p>
               ) : null}
               {copyError ? (

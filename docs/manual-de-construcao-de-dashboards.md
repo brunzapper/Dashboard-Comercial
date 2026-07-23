@@ -1,4 +1,6 @@
-<!-- Versão: 1.1 | Data: 22/07/2026 -->
+<!-- Versão: 1.2 | Data: 23/07/2026 -->
+<!-- v1.2 (23/07/2026): §3.8 — Importar aceita VÁRIAS Bases (modelo/amostra por
+     Base + Conexões no prompt; dashboards combinados). -->
 <!-- v1.1 (22/07/2026): §3.8 — modo "Importar dashboard via JSON (IA)" (botão
      Importar na Home; prompt compacto/completo; reimporte idempotente). -->
 <!-- v1.0 (22/07/2026): criação. Manual exaustivo e autossuficiente de construção
@@ -380,17 +382,20 @@ O botão **"Importar"** (ao lado do "Criar", na Home) cria um dashboard
 completo a partir de um **JSON gerado por uma IA externa** (ChatGPT, Claude
 etc.). O fluxo, guiado no próprio painel:
 
-1. Importe/sincronize a **Base principal** normalmente (Registros → Importar
-   CSV), se ela ainda não existir.
-2. No painel Importar, **selecione a Base** — obrigatório antes de copiar.
+1. Importe/sincronize a(s) **Base(s)** normalmente (Registros → Importar
+   CSV), se ainda não existirem.
+2. No painel Importar, **marque uma ou várias Bases** — obrigatório antes de
+   copiar. Marcando 2+ Bases, a IA pode montar dashboards combinados
+   (conversão entre Bases, campos unificados, registros casados).
 3. **Copie o prompt de instruções**. Duas variantes: **compacto**
    (especificação do JSON + regras essenciais — para IAs mais capazes) e
    **completo** (anexa também este manual inteiro — para IAs menos capazes).
-   O prompt copiado leva junto o **modelo da Base** (todos os campos com
-   tipos/opções, Sub-bases, campos unificados, nomes de responsáveis e
-   operações) e uma **amostra de ~20 registros reais** escolhida para que
-   TODA coluna com dado no banco apareça preenchida em pelo menos uma linha
-   (colunas totalmente vazias são listadas como tal).
+   O prompt copiado leva junto o **modelo de CADA Base marcada** (todos os
+   campos com tipos/opções, Sub-bases), os **campos unificados**, as
+   **Conexões** entre as Bases, nomes de responsáveis/operações e uma
+   **amostra de ~20 registros reais por Base** escolhida para que TODA coluna
+   com dado no banco apareça preenchida em pelo menos uma linha (colunas
+   totalmente vazias são listadas como tal).
 4. Cole o prompt na IA, **descreva o dashboard desejado** e receba o JSON.
 5. Cole o JSON no painel e clique em **"Importar dashboard"**. O sistema
    valida tudo (tipos de widget, campos referenciados, fórmulas, operadores…)
