@@ -7,20 +7,14 @@
 // tick. Agende via supabase/apply/pg-cron-recalc.sql (ex.: 05:00 UTC ≈ 02:00 BRT).
 import { NextResponse } from "next/server";
 
-import { getSyncSecret } from "@/lib/env";
+import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function authorized(request: Request): boolean {
-  const secret = getSyncSecret();
-  const header =
-    request.headers.get("x-sync-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    null;
-  return header !== null && header === secret;
-}
+// SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
+const authorized = syncSecretAuthorized;
 
 export async function POST(request: Request) {
   try {

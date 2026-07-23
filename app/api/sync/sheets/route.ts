@@ -4,7 +4,7 @@
 // padrão dos endpoints do Bitrix. Fonte PUSH: não há botão manual na UI.
 import { NextResponse } from "next/server";
 
-import { getSyncSecret } from "@/lib/env";
+import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import { syncEstudoFechamentosRows, type SheetSiteRow } from "@/lib/sync/sheets/adapter";
 import { runAutoMatch } from "@/lib/records/matching-engine";
@@ -13,14 +13,8 @@ import { recalcAllFormulaFields } from "@/lib/records/recalc";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function authorized(request: Request): boolean {
-  const secret = getSyncSecret();
-  const header =
-    request.headers.get("x-sync-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    null;
-  return header !== null && header === secret;
-}
+// SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
+const authorized = syncSecretAuthorized;
 
 interface Payload {
   source?: string;

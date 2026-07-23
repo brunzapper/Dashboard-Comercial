@@ -9,12 +9,31 @@ import Papa from "papaparse";
 
 const BOM = "\ufeff";
 
+// CSV/formula injection: Excel/Sheets interpretam como FÓRMULA toda célula que
+// começa com = + - @ TAB ou CR. Um valor vindo de CRM/CSV/API (ex.:
+// `=cmd|'/c calc'!A1`) executaria ao abrir a planilha. Neutralizamos prefixando
+// com aspa simples. Números legítimos são a ÚNICA coisa que começa com -/+ no
+// nosso formato (csvNumber → "-50,5"); datas começam com dígito. Preservamos o
+// round-trip com o import (lib/import/csv.ts) NÃO tocando nesses.
+const CSV_INJECTION_START = /^[=+\-@\t\r]/;
+const APP_NUMBER = /^-?\d+(?:,\d+)?$/; // inteiro/decimal com vírgula, ex.: -50 / 1234,56
+
+export function sanitizeCsvCell(cell: string): string {
+  if (CSV_INJECTION_START.test(cell) && !APP_NUMBER.test(cell)) {
+    return `'${cell}`;
+  }
+  return cell;
+}
+
 /** Gera o texto CSV (com BOM) a partir de cabeçalhos + linhas já em string. */
 export function buildCsv(headers: string[], rows: string[][]): string {
   return (
     BOM +
     Papa.unparse(
-      { fields: headers, data: rows },
+      {
+        fields: headers.map(sanitizeCsvCell),
+        data: rows.map((r) => r.map(sanitizeCsvCell)),
+      },
       { delimiter: ";", newline: "\r\n" }
     )
   );

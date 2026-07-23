@@ -8,7 +8,7 @@
 // last_refresh_error para a UI de gestão.
 import { NextResponse } from "next/server";
 
-import { getSyncSecret } from "@/lib/env";
+import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import { refreshSnapshot } from "@/lib/snapshots/refresh";
 
@@ -20,14 +20,8 @@ const BUDGET_MS = 45_000;
 // Teto de snapshots por tick (proteção extra além do orçamento de tempo).
 const MAX_PER_TICK = 20;
 
-function authorized(request: Request): boolean {
-  const secret = getSyncSecret();
-  const header =
-    request.headers.get("x-sync-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    null;
-  return header !== null && header === secret;
-}
+// SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
+const authorized = syncSecretAuthorized;
 
 export async function POST(request: Request) {
   try {

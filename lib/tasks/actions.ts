@@ -167,11 +167,15 @@ export async function createTask(
     .select("id")
     .single();
   if (error) return { ok: false, message: `Falha ao criar: ${error.message}` };
-  await emitWebhookEvent("task.created", {
-    taskId: data.id as string,
-    title: parsed.title,
-    recordId: parsed.record_id,
-  });
+  await emitWebhookEvent(
+    "task.created",
+    {
+      taskId: data.id as string,
+      title: parsed.title,
+      recordId: parsed.record_id,
+    },
+    await getActiveOrgId()
+  );
   revalidateTasks();
   return { ok: true, message: "Tarefa criada.", id: data.id as string };
 }
@@ -237,7 +241,7 @@ export async function updateTask(
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para editar esta tarefa." };
   }
-  await emitWebhookEvent("task.updated", { taskId: id });
+  await emitWebhookEvent("task.updated", { taskId: id }, await getActiveOrgId());
   revalidateTasks();
   return { ok: true, message: "Tarefa atualizada." };
 }
@@ -259,7 +263,7 @@ export async function completeTask(id: string): Promise<TaskActionState> {
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para concluir esta tarefa." };
   }
-  await emitWebhookEvent("task.completed", { taskId: id });
+  await emitWebhookEvent("task.completed", { taskId: id }, await getActiveOrgId());
   revalidateTasks();
   return { ok: true };
 }
@@ -278,7 +282,11 @@ export async function reopenTask(id: string): Promise<TaskActionState> {
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para reabrir esta tarefa." };
   }
-  await emitWebhookEvent("task.updated", { taskId: id, reopened: true });
+  await emitWebhookEvent(
+    "task.updated",
+    { taskId: id, reopened: true },
+    await getActiveOrgId()
+  );
   revalidateTasks();
   return { ok: true };
 }
@@ -310,10 +318,14 @@ export async function moveTaskPhase(
   if (!data || data.length === 0) {
     return { ok: false, message: "Sem permissão para mover esta tarefa." };
   }
-  await emitWebhookEvent(completes ? "task.completed" : "task.updated", {
-    taskId: id,
-    phase,
-  });
+  await emitWebhookEvent(
+    completes ? "task.completed" : "task.updated",
+    {
+      taskId: id,
+      phase,
+    },
+    await getActiveOrgId()
+  );
   revalidateTasks();
   return { ok: true };
 }
@@ -338,11 +350,15 @@ export async function deleteTask(id: string): Promise<TaskActionState> {
         "Sem permissão para excluir — a tarefa está travada ou pertence a outro usuário.",
     };
   }
-  await emitWebhookEvent("task.deleted", {
-    taskId: id,
-    title: (data[0].title as string) ?? null,
-    recordId: (data[0].record_id as string | null) ?? null,
-  });
+  await emitWebhookEvent(
+    "task.deleted",
+    {
+      taskId: id,
+      title: (data[0].title as string) ?? null,
+      recordId: (data[0].record_id as string | null) ?? null,
+    },
+    await getActiveOrgId()
+  );
   revalidateTasks();
   return { ok: true };
 }

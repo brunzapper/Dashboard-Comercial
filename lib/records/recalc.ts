@@ -15,7 +15,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { leadTimeDays } from "@/lib/sync/shared";
 import { resolveMatchedRecords } from "@/lib/records/matching-engine";
-import { computeFormulaFields, loadFormulaDefs } from "./formulas";
+import { computeFormulaFields, loadFormulaDefsByOrg } from "./formulas";
 import {
   buildRecordEvalInputs,
   loadRecordEvalMaterials,
@@ -37,12 +37,17 @@ function numOrNull(v: unknown): number | null {
  */
 export async function recalcAllFormulaFields(): Promise<number> {
   const db = createServiceClient();
-  const defs = await loadFormulaDefs(db);
+  // ISOLAMENTO multi-org (0090): as fórmulas são agrupadas por organização e
+  // cada registro recebe SÓ as da sua org (field_key é único por-org). Os
+  // insumos globais usam a UNIÃO das defs — é um superconjunto inócuo do que
+  // qualquer org precisa (refs match:/datas/câmbio a materializar).
+  const defsByOrg = await loadFormulaDefsByOrg(db);
+  const allDefs = [...defsByOrg.values()].flat();
 
   // Insumos globais (refs match:, chaves de data custom, relações por nome,
   // câmbio) — módulo COMPARTILHADO com a prévia do FormulaEditor
   // (lib/records/record-eval-context.ts): prévia e materialização idênticas.
-  const materials = await loadRecordEvalMaterials(db, defs);
+  const materials = await loadRecordEvalMaterials(db, allDefs);
 
   let from = 0;
   let updated = 0;
@@ -101,12 +106,14 @@ export async function recalcAllFormulaFields(): Promise<number> {
           ? (updates.lead_time_days as number | null)
           : numOrNull(r.lead_time_days);
 
-      if (defs.length > 0) {
+      // Só as fórmulas da org DESTE registro (isolamento multi-org).
+      const orgDefs = defsByOrg.get((r.organization_id as string) ?? "") ?? [];
+      if (orgDefs.length > 0) {
         const inputs = buildRecordEvalInputs(r, matched, materials, effLeadTime);
         const calc = computeFormulaFields(
           inputs.values,
           inputs.custom,
-          defs,
+          orgDefs,
           inputs.conv,
           inputs.dateCtx
         );

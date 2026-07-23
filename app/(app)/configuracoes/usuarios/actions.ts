@@ -44,6 +44,25 @@ async function protectedUserReason(userId: string): Promise<string | null> {
   return null;
 }
 
+// ISOLAMENTO multi-org (0089/0090): reset de senha / desativar / excluir usam a
+// service role (bypassa RLS) sobre um userId arbitrário. O alvo PRECISA ser
+// membro da org ATIVA do caller — sem esta trava, um admin de uma org agiria
+// sobre contas de outra. Consulta via service role (as memberships de outros
+// usuários não são visíveis pela RLS do caller). Sem org ativa (single-tenant
+// pré-0089) mantém o comportamento antigo.
+async function targetInActiveOrg(userId: string): Promise<boolean> {
+  const org = await getActiveOrg();
+  if (!org) return true;
+  const service = createServiceClient();
+  const { data } = await service
+    .from("organization_members")
+    .select("user_id")
+    .eq("organization_id", org.id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
 export interface ActionResult {
   error?: string;
   success?: string;
@@ -204,6 +223,9 @@ export async function resetUserPassword(
   if (newPassword.length < MIN_PASSWORD) {
     return { error: `A senha precisa ter ao menos ${MIN_PASSWORD} caracteres.` };
   }
+  if (!(await targetInActiveOrg(userId))) {
+    return { error: "Usuário não pertence à sua organização." };
+  }
 
   const service = createServiceClient();
   const { error } = await service.auth.admin.updateUserById(userId, {
@@ -225,6 +247,9 @@ export async function setUserDisabled(
 
   if (disabled && userId === session.user.id) {
     return { error: "Você não pode desativar a própria conta." };
+  }
+  if (!(await targetInActiveOrg(userId))) {
+    return { error: "Usuário não pertence à sua organização." };
   }
   if (disabled) {
     const reason = await protectedUserReason(userId);
@@ -248,6 +273,9 @@ export async function deleteUser(userId: string): Promise<ActionResult> {
 
   if (userId === session.user.id) {
     return { error: "Você não pode excluir a própria conta." };
+  }
+  if (!(await targetInActiveOrg(userId))) {
+    return { error: "Usuário não pertence à sua organização." };
   }
   // org_admin/Owner: o trigger da 0089 (cascade da membership) e a FK de
   // app_owner derrubariam o delete de qualquer forma — mensagem amigável.

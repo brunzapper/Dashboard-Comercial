@@ -22,7 +22,7 @@ import type { MatchedBySource } from "./matching-engine";
 // Colunas de `records` de que a avaliação precisa — o SELECT do recalc e o da
 // prévia derivam daqui para nunca divergirem.
 export const RECORD_EVAL_COLUMNS =
-  "id, record_type, source_system, related_lead_id, responsible_id, operation_id, title, pipeline, stage, stage_semantic, sale_type, channel, closed, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at";
+  "id, organization_id, record_type, source_system, related_lead_id, responsible_id, operation_id, title, pipeline, stage, stage_semantic, sale_type, channel, closed, value, mrr, lead_time_days, custom_fields, currency, closed_at, opened_at, source_created_at";
 
 // Linha crua do SELECT acima (tipagem frouxa de propósito — vem do supabase-js).
 export type RecordEvalRow = Record<string, unknown> & {
