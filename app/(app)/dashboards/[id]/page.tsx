@@ -1,6 +1,14 @@
-// Versão: 2.8 | Data: 21/07/2026
+// Versão: 3.0 | Data: 23/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.0 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
+//   fallback do ?ff_ (e o seed do controle) vem da célula compartilhada
+//   __ff__/sel de dashboard_table_cells em vez de lastFieldFilters; __ff__
+//   entra nas exclusões do seed de Desfazer/Refazer.
+// v2.9 (23/07/2026): escopo de BASES do board (settings.sourceScope, ⋮ →
+//   "Bases") — o catálogo efetivo (applySourceScope, lib/config/source-scope)
+//   recorta ofertas E o universo dos widgets em "todas as bases"; a page
+//   re-provê <SourcesProvider> escopado por cima do provider do layout.
 // v2.8 (21/07/2026): deferredScopeById — fingerprint (período + filtros de
 //   visualização + __pw__) por widget DEFERIDO (Tabela Livre/kanban): o effect
 //   do cliente re-busca quando o escopo efetivo muda, cobrindo também os
@@ -79,7 +87,10 @@ import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
   applyPeriodWindowChoice,
+  FF_COL_KEY,
+  FF_ROW_KEY,
   parsePeriodWindowChoice,
+  parseSharedFieldFilter,
   PW_COL_KEY,
   PW_ROW_KEY,
   QF_ROW_KEY,
@@ -114,6 +125,11 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
+import { SourcesProvider } from "@/components/sources-context";
 import {
   collectOperationFilterIds,
   loadOperationScopes,
@@ -185,15 +201,29 @@ export default async function DashboardPage({
     getSessionInfo(),
     supabase
       .from("dashboards")
-      .select("id, name, owner_user_id, visible_to_roles, settings")
+      .select(
+        "id, name, owner_user_id, visible_to_roles, settings, status, organization_id"
+      )
       .eq("id", id)
       .maybeSingle(),
   ]);
-  if (!dash) notFound();
+  // Board na Lixeira (0087) não abre — mesmo 404 de board inexistente.
+  if (!dash || dash.status === "trashed") notFound();
 
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;
-  const canEdit = isOwner || isAdmin;
+  // Override individual (board_access, 0088): 'edit' concede edição a quem
+  // não é dono/admin — espelho da RLS (auth_board_editable). 'blocked' nem
+  // chega aqui (dashboards_select nega e o board vira 404).
+  const { data: myAccess } = session
+    ? await supabase
+        .from("board_access")
+        .select("level")
+        .eq("dashboard_id", id)
+        .eq("user_id", session.user.id)
+        .maybeSingle()
+    : { data: null };
+  const canEdit = isOwner || isAdmin || myAccess?.level === "edit";
   const canManageFields =
     session?.permissions.includes("manage_field_definitions") ?? false;
   // Para as tabelas em modo "registros individuais" (Fase 1): quem pode editar
@@ -209,7 +239,7 @@ export default async function DashboardPage({
     { data: prefData },
     enabledCurrencies,
     currencyRates,
-    sources,
+    allSources,
   ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
@@ -227,7 +257,7 @@ export default async function DashboardPage({
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, dash.organization_id as string | null),
     session
       ? supabase
           .from("user_preferences")
@@ -238,7 +268,9 @@ export default async function DashboardPage({
       : Promise.resolve({ data: null }),
     loadEnabledCurrencies(supabase),
     loadCurrencyRates(supabase),
-    loadSources(supabase),
+    // Catálogo da ORG do board (multi-org): a RLS já escopa; o filtro cobre a
+    // visão de quem pertence a 2+ orgs.
+    loadSources(supabase, dash.organization_id as string | null),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
@@ -261,6 +293,16 @@ export default async function DashboardPage({
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
   const fieldByKeyAll = new Map(customFields.map((f) => [f.field_key, f]));
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  // Escopo de BASES do board (⋮ → "Bases"): catálogo EFETIVO deste dashboard —
+  // recorta ofertas dos pickers E o universo dos widgets em "todas as bases".
+  // Fontes já referenciadas por widgets existentes nunca saem do catálogo
+  // (applySourceScope), então config antiga segue renderizando.
+  const sources = applySourceScope(
+    allSources,
+    dashSettings.sourceScope,
+    collectBoardSourceKeys(widgets, dashSettings, fieldByKeyAll)
+  );
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
@@ -282,7 +324,6 @@ export default async function DashboardPage({
   // SÓ para as opções de bucket dos filtros rápidos (display) — consultas de
   // widget montam o mapa POR PERNA (correspondenceMapForSources) no engine.
   const correspondencesMap = buildCorrespondenceMap(correspondences);
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
 
   // Resolução de período por widget: lógica compartilhada com o runQuickTable
@@ -695,15 +736,45 @@ export default async function DashboardPage({
     return a.some((s) => b.includes(s));
   };
 
+  // Valor COMPARTILHADO dos "Filtro por campo" com settings.valueScope 'all'
+  // (célula __ff__/sel de dashboard_table_cells, como os __qf__). Buscado
+  // ANTES do loop abaixo: precisa existir quando viewFiltersByWidget alimenta
+  // o engine e o fingerprint deferido (deferredScopeById). NÃO reutiliza
+  // cellsDataPromise — ela nasce/é aguardada depois da computação dos widgets.
+  const sharedFfWidgets = fieldFilterWidgets.filter(
+    (w) => w.settings?.valueScope === "all"
+  );
+  const sharedFfById = new Map<string, string>();
+  if (sharedFfWidgets.length > 0) {
+    const { data: ffCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, value")
+      .in(
+        "widget_id",
+        sharedFfWidgets.map((w) => w.id)
+      )
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    for (const c of ffCells ?? []) {
+      const v = parseSharedFieldFilter(c.value);
+      if (v) sharedFfById.set(c.widget_id as string, v);
+    }
+  }
+
   // Seed por widget dos controles "Filtro por campo" quando a URL não traz o
-  // ff_: o valor salvo do usuário (lastFieldFilters). Vai ao cliente para o
-  // controle montar já preenchido (e sincronizar a URL no primeiro debounce).
+  // ff_: o valor compartilhado (valueScope 'all') ou o salvo do usuário
+  // (lastFieldFilters). Vai ao cliente para o controle montar já preenchido
+  // (e, no modo por usuário, sincronizar a URL no primeiro debounce).
   const fieldFilterSeedById: Record<string, string> = {};
   for (const fw of fieldFilterWidgets) {
-    // URL vence; sem parâmetro na URL, reidrata da preferência do usuário
-    // (lastFieldFilters — gravada pelo debounce do FieldFilterControls).
+    // URL vence; sem parâmetro na URL, reidrata da célula compartilhada ou da
+    // preferência do usuário (lastFieldFilters — gravada pelo debounce do
+    // FieldFilterControls).
     const fromUrl = str(sp[`ff_${fw.id}`]);
-    const saved = prefSettings.lastFieldFilters?.[fw.id] ?? "";
+    const saved =
+      fw.settings?.valueScope === "all"
+        ? (sharedFfById.get(fw.id) ?? "")
+        : (prefSettings.lastFieldFilters?.[fw.id] ?? "");
     if (!fromUrl && saved) fieldFilterSeedById[fw.id] = saved;
     const raw = fromUrl || saved;
     if (!raw) continue;
@@ -1231,12 +1302,13 @@ export default async function DashboardPage({
     dash.name as string,
     dashSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') e a expressão da calculadora
-    // ('__calc__') ficam fora do histórico de Desfazer/Refazer (não são
-    // edição de dashboard).
+    // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+    // ('__ff__') e a expressão da calculadora ('__calc__') ficam fora do
+    // histórico de Desfazer/Refazer (não são edição de dashboard).
     (cellsData ?? []).filter(
       (c) =>
         c.row_key !== QF_ROW_KEY &&
+        c.row_key !== FF_ROW_KEY &&
         c.row_key !== CALC_ROW_KEY &&
         c.row_key !== PW_ROW_KEY
     )
@@ -1276,7 +1348,10 @@ export default async function DashboardPage({
     : undefined;
 
   return (
-    <>
+    // Re-provê o catálogo ESCOPADO por cima do provider do layout: todos os
+    // pickers de base/sub-base deste dashboard (useSources) ofertam só o
+    // escopo do board (⋮ → "Bases") + fontes já referenciadas.
+    <SourcesProvider sources={sources}>
       {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <DashboardClient
@@ -1307,7 +1382,6 @@ export default async function DashboardPage({
         currencyRates={currencyRates}
         conversionPeriodById={conversionPeriodById}
         settings={dashSettings}
-        visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
         dateFormat={dashSettings.dateFormat}
         periodBar={periodBar}
         periodScope={scope}
@@ -1321,6 +1395,6 @@ export default async function DashboardPage({
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
       />
-    </>
+    </SourcesProvider>
   );
 }

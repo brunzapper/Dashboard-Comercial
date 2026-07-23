@@ -7,9 +7,9 @@
 // Leituras aqui usam o client do usuário — a RLS (0074) libera select só p/
 // admin; segredos nunca aparecem (o banco guarda hash/ciphertext).
 import Link from "next/link";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { BookOpen } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import {
 } from "@/components/admin/webhook-endpoints-manager";
 
 export default async function IntegracoesPage() {
-  await requireRole("admin");
+  await requireSettingsArea("integracoes");
   const supabase = await createClient();
 
   const [sources, keysRes, endpointsRes] = await Promise.all([

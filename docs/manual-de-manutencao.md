@@ -1,4 +1,8 @@
-<!-- Versão: 1.11 | Data: 22/07/2026 -->
+<!-- Versão: 1.13 | Data: 23/07/2026 -->
+<!-- v1.13 (23/07/2026): multi-org (0088–0094) — runbook de organizações,
+     Owner (env OWNER_USER_ID) e acessos customizados; ver §4.9. -->
+<!-- v1.12 (22/07/2026): job pg_cron nº 5 (purge-dashboard-trash — purga da
+     Lixeira de boards, 0087) no setup e no troubleshooting. -->
 <!-- v1.11 (22/07/2026): §4.7 — callout do preset Inbound v5 (SAL removido da
      exibição, comparação em todos os cards, cores da marca como dados de
      aparência; re-apply sobrescreve settings dos widgets geridos). -->
@@ -57,8 +61,14 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
       tick do sync a cada minuto;
    2. `apply/pg-cron-recalc.sql` — recalc diário dos campos calculados (05:00 UTC);
    3. `apply/pg-cron-snapshots.sql` — tick dos snapshots a cada 5 min;
-   4. `apply/pg-cron-webhooks.sql` — tick dos webhooks de saída a cada minuto.
-   Os três últimos **pressupõem os segredos criados pelo primeiro**.
+   4. `apply/pg-cron-webhooks.sql` — tick dos webhooks de saída a cada minuto;
+   5. `apply/pg-cron-purge-trash.sql` — purga diária (03:30 UTC) da Lixeira de
+      boards (`dashboards.status='trashed'` há mais de 14 dias; SQL puro, não
+      usa os segredos). Sem o job o hub apenas ESCONDE os vencidos — a limpeza
+      física depende dele.
+   Os ticks (2–4) **pressupõem os segredos criados pelo primeiro**.
+   Verificar/remover: `select * from cron.job;` /
+   `select cron.unschedule('purge-dashboard-trash');`.
 6. **Sync Bitrix** — logado como admin, em Registros: **Backfill inicial** (importa o
    ano) e depois **Reconciliar**. Os responsáveis são criados automaticamente; cure a
    lista em Configurações → Responsáveis e monte as Operações.
@@ -355,6 +365,35 @@ Limitação estrutural: os meses (barras) vêm das FONTES DO WIDGET — mês com
 registro só em fonte de perna (`Metric.sources`) não vira barra; inclua a
 fonte no widget se precisar do mês.
 
+### 4.9 Multi-organização, Owner e acessos (0088–0094)
+
+- **Ordem de aplicação**: 0088→0094 na MESMA janela, imediatamente antes do
+  deploy (runbook em `supabase/README.md`, com as queries de conferência e os
+  testes das proteções). Depois do deploy, configure a env `OWNER_USER_ID`
+  (User UID da conta do Owner) na Vercel — sem ela o modo Owner nega
+  sempre (fail-closed, proposital).
+- **Criar uma organização**: login como Owner → tela "Como você quer entrar?"
+  → Owner → "Nova organização" (admin = o próprio Owner ou conta nova
+  email/senha). A org nasce VAZIA (só as core defs de `seed_org_defaults`);
+  o admin loga e cria bases/campos/dashboards do zero. Excluir exige digitar
+  o nome exato; a org inicial (Zapper) só sai via SQL direto.
+- **Trocar o org_admin de uma org** (só via banco, por design):
+  `select set_config('app.allow_protected_change','on',true);` na MESMA
+  transação de um UPDATE que demova o atual e promova o novo (o índice
+  parcial exige demover antes de promover).
+- **Bitrix/planilha/pg_cron são da Zapper**: as tabelas de encanamento
+  (`bitrix_*`, `sync_jobs`, fila de write-back) têm `organization_id` default
+  Zapper — org nova usa criação manual/CSV/API de ingestão. Conectar um CRM
+  de outra org é trabalho futuro (credenciais por org).
+- **Acessos**: por board no ⋮ → Acesso (funções + pessoas Ver/Editar/
+  Bloqueado); matriz central em Configurações → Acessos (áreas allow/deny,
+  bases deny, boards). Limitação documentada: allow de ÁREA concede a
+  tela; escrita dentro dela segue o papel (RLS). Deny de área esconde
+  aba/page; as actions de escrita seguem gated por papel (um admin negado
+  ainda escreveria via chamada direta — deny mira quem não é admin).
+- **Escopo de bases do board** (⋮ → Bases) é OFERTA (listas menores), não
+  autorização — para PRIVAR use o deny de base por usuário.
+
 ## 5. Troubleshooting
 
 | Sintoma | Causa provável | Ação |
@@ -366,7 +405,8 @@ fonte no widget se precisar do mês.
 | Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
-| Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 4 jobs; recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 5 jobs (ticks + purga da Lixeira); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Board na Lixeira não some após 14 dias | Job `purge-dashboard-trash` não agendado (o hub esconde o card, mas a linha continua no banco) | Aplique `apply/pg-cron-purge-trash.sql`; para purgar já, rode o `DELETE` do arquivo à mão no SQL editor |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
 | Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |
 | Dashboard abre com o grid esmaecido e "Carregando…" preso (só hard refresh resolve) | O widget "Filtro por campo" com valor salvo (`lastFieldFilters`) disparava uma navegação RSC na montagem só p/ sincronizar a URL; sob rajadas de `router.refresh()` do realtime (ex.: pós-recalc do preset, sync do Bitrix) a fila do router nunca drenava e o overlay nunca fechava | Corrigido em 20/07/2026 (`FieldFilterControls` v1.2: sync raso via `history.replaceState`, sem navegação). Se reaparecer, procure QUEM liga o overlay (`useNavPending().run`) na montagem — nenhum efeito de mount deve navegar |

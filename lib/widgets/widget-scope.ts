@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 21/07/2026
+// Versão: 1.4 | Data: 23/07/2026
+// v1.4 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
+//   fallback do ?ff_ vem da célula compartilhada __ff__/sel de
+//   dashboard_table_cells em vez de lastFieldFilters (espelho da page).
+// v1.3 (23/07/2026): escopo de BASES do board (settings.sourceScope) aplicado
+//   ao catálogo (applySourceScope + collectBoardSourceKeys) — paridade com a
+//   page (invariante 12): as actions deferidas enxergam o mesmo universo.
 // v1.2 (21/07/2026): montagem dos filtros de visualização extraída para
 //   resolveWidgetViewScope (export) — as actions DEFERIDAS (runQuickTable/
 //   runKanbanWidget) passam a montar o MESMO escopo da page (filtros rápidos
@@ -18,9 +24,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { SessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
@@ -40,10 +51,13 @@ import {
   type DashboardPeriod,
 } from "@/lib/widgets/period";
 import {
+  FF_COL_KEY,
+  FF_ROW_KEY,
   PW_COL_KEY,
   PW_ROW_KEY,
   QF_ROW_KEY,
   applyPeriodWindowChoice,
+  parseSharedFieldFilter,
   hasQuickValue,
   isPeriodEntry,
   parsePeriodWindowChoice,
@@ -258,15 +272,40 @@ export async function resolveWidgetViewScope(
   }
 
   // Widgets "Filtro por campo" (?ff_<id>) que atingem este widget.
+  // Valor COMPARTILHADO (settings.valueScope 'all'): fallback vem da célula
+  // __ff__/sel de dashboard_table_cells (espelho da page).
+  const sharedFfWidgets = fieldFilterWidgets.filter(
+    (w) => w.settings?.valueScope === "all"
+  );
+  const sharedFfById = new Map<string, string>();
+  if (sharedFfWidgets.length > 0) {
+    const { data: ffCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, value")
+      .in(
+        "widget_id",
+        sharedFfWidgets.map((w) => w.id)
+      )
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    for (const c of ffCells ?? []) {
+      const v = parseSharedFieldFilter(c.value);
+      if (v) sharedFfById.set(c.widget_id as string, v);
+    }
+  }
   const sourcesOverlap = (a: string[], b: string[]) => {
     if (a.length === 0 || b.length === 0) return true;
     return a.some((s) => b.includes(s));
   };
   for (const fw of fieldFilterWidgets) {
-    // Espelho da page: URL vence; sem parâmetro, reidrata da preferência do
-    // usuário (lastFieldFilters) — export/paginação enxergam o mesmo recorte.
+    // Espelho da page: URL vence; sem parâmetro, reidrata da célula
+    // compartilhada (valueScope 'all') ou da preferência do usuário
+    // (lastFieldFilters) — export/paginação enxergam o mesmo recorte.
     const raw =
-      str(sp[`ff_${fw.id}`]) || (prefSettings.lastFieldFilters?.[fw.id] ?? "");
+      str(sp[`ff_${fw.id}`]) ||
+      (fw.settings?.valueScope === "all"
+        ? (sharedFfById.get(fw.id) ?? "")
+        : (prefSettings.lastFieldFilters?.[fw.id] ?? ""));
     if (!raw) continue;
     const fs = viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields);
     if (fs.length === 0) continue;
@@ -339,13 +378,17 @@ export async function loadWidgetScope(
     sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
   }
 
+  // Org ativa (multi-org): catálogo/correspondências da MESMA org da page —
+  // cross-org nem chega aqui (a RLS de dashboards nega o select do board).
+  const orgId = await getActiveOrgId();
+
   const [
     { data: dash },
     { data: widgetsData },
     { data: fieldsData },
     correspondences,
     { data: prefData },
-    sources,
+    allSources,
   ] = await Promise.all([
     supabase
       .from("dashboards")
@@ -365,14 +408,14 @@ export async function loadWidgetScope(
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, orgId),
     supabase
       .from("user_preferences")
       .select("settings")
       .eq("user_id", session.user.id)
       .eq("dashboard_id", dashboardId)
       .maybeSingle(),
-    loadSources(supabase),
+    loadSources(supabase, orgId),
   ]);
   if (!dash) return { ok: false, message: "Dashboard não encontrado." };
 
@@ -381,10 +424,24 @@ export async function loadWidgetScope(
   if (!widget) return { ok: false, message: "Widget não encontrado." };
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  // Escopo de BASES do board (⋮ → "Bases") — MESMO catálogo efetivo da page
+  // (invariante 12): widgets em "todas as bases" enxergam o escopo também nas
+  // actions deferidas (Tabela Livre/kanban/export/paginação).
+  const sources = applySourceScope(
+    allSources,
+    dashSettings.sourceScope,
+    collectBoardSourceKeys(
+      widgets,
+      dashSettings,
+      new Map(
+        allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+      )
+    )
+  );
   const available = buildAvailableFields(allFields, correspondences, sources);
 
   // ---- período efetivo do widget (resolver único da page) ----
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
   const resolver = createPeriodResolver({
     sp,

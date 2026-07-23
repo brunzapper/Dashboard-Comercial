@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 23/07/2026
+// v1.2 (23/07/2026): escopo de BASES do board (settings.sourceScope) aplicado
+//   ao catálogo (applySourceScope) — paridade com page/widget-scope.
 // v1.1 (21/07/2026): modo registros aplica os filtros de VISUALIZAÇÃO do
 //   dashboard via resolveWidgetViewScope (assembly única do widget-scope):
 //   filtros rápidos do card (__qf__), ?ff_ com fallback lastFieldFilters e
@@ -14,10 +16,15 @@
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { buildAvailableFields } from "@/lib/widgets/fields";
@@ -63,6 +70,8 @@ export async function listTaskBoards(): Promise<{ id: string; name: string }[]> 
     .from("dashboards")
     .select("id, name, settings")
     .eq("kind", "kanban")
+    // Board na Lixeira (0087) não abre — fora dos destinos.
+    .neq("status", "trashed")
     .order("name");
   return (data ?? [])
     .filter(
@@ -90,13 +99,16 @@ export async function runKanbanWidget(
     sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
   }
 
+  // Org ativa (multi-org): mesmo recorte da page/widget-scope.
+  const orgId = await getActiveOrgId();
+
   const [
     { data: dash },
     { data: widgetsData },
     { data: fieldsData },
     correspondences,
     { data: prefData },
-    sources,
+    allSources,
     { data: respData },
     { data: opsData },
   ] = await Promise.all([
@@ -120,14 +132,14 @@ export async function runKanbanWidget(
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, orgId),
     supabase
       .from("user_preferences")
       .select("settings")
       .eq("user_id", session.user.id)
       .eq("dashboard_id", dashboardId)
       .maybeSingle(),
-    loadSources(supabase),
+    loadSources(supabase, orgId),
     supabase
       .from("responsibles")
       .select("id, display_name, bitrix_user_id")
@@ -147,6 +159,20 @@ export async function runKanbanWidget(
 
   const isAdmin = session.roles.includes("admin");
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Escopo de BASES do board (⋮ → "Bases") — mesmo catálogo efetivo da page
+  // (invariante 12). A fonte do quadro nunca sai (collectBoardSourceKeys).
+  const boardSettings0 = (dash.settings ?? {}) as DashboardSettings;
+  const sources = applySourceScope(
+    allSources,
+    boardSettings0.sourceScope,
+    collectBoardSourceKeys(
+      widgets,
+      boardSettings0,
+      new Map(
+        allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+      )
+    )
+  );
   // Linhas core (0086) fora da lista de campos custom (edit sheet/colunas do
   // card leem custom_fields); entram à parte no runKanban (groupDef/labels).
   const { core: coreDefs } = splitCoreDefs(allFields);
@@ -226,7 +252,7 @@ export async function runKanbanWidget(
   }
 
   // ---- modo registros: período efetivo do widget (resolver único da page) ----
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const dashSettings = boardSettings0;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
   const available = buildAvailableFields(allFields, correspondences, sources);
   const resolver = createPeriodResolver({

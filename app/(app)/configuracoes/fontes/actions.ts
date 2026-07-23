@@ -19,6 +19,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/records/slug";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
@@ -191,21 +192,37 @@ export async function createSource(
     return { ok: false, message: `Já existe uma base com a chave "${key}".` };
   }
 
-  const { error: insertError } = await supabase.from("data_sources").insert({
-    key,
-    record_type: key, // fontes novas: mapeamento identidade
-    label,
-    short_label: shortLabel || label,
-    default_period_field: periodField,
-    builtin: false,
-    manual_entry: manualEntry,
-    timezone,
-  });
+  // key/record_type são GLOBAIS (multi-org, 0090) mas a RLS esconde as fontes
+  // de outras orgs — uma colisão invisível vira sufixo (-2, -3…), nunca erro
+  // opaco nem vazamento do nome alheio.
+  const orgId = await getActiveOrgId();
+  let finalKey = key;
+  let insertError: { code?: string; message: string } | null = null;
+  for (let n = 1; n <= 5; n++) {
+    if (n > 1) finalKey = `${key.slice(0, 37)}_${n}`;
+    const { error } = await supabase.from("data_sources").insert({
+      key: finalKey,
+      record_type: finalKey, // fontes novas: mapeamento identidade
+      label,
+      short_label: shortLabel || label,
+      default_period_field: periodField,
+      builtin: false,
+      manual_entry: manualEntry,
+      timezone,
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
+    insertError = error;
+    if (!error || error.code !== "23505") break;
+  }
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
   revalidatePath("/", "layout");
-  return { ok: true, message: `Base "${label}" criada (chave: ${key}).`, key };
+  return {
+    ok: true,
+    message: `Base "${label}" criada (chave: ${finalKey}).`,
+    key: finalKey,
+  };
 }
 
 export async function updateSource(
@@ -288,19 +305,29 @@ export async function saveSourceLabels(
   const geral = cleanText(formData.get("geral"), 40);
   if (!geral) return { ok: false, message: "Informe o rótulo." };
 
+  // sync_config tem PK (organization_id, key) desde a 0090.
+  const orgId = await getActiveOrgId();
   const supabase = await createClient();
-  const { data: current } = await supabase
+  let currentQuery = supabase
     .from("sync_config")
     .select("value")
-    .eq("key", SOURCE_LABELS_CONFIG_KEY)
-    .maybeSingle();
+    .eq("key", SOURCE_LABELS_CONFIG_KEY);
+  if (orgId) currentQuery = currentQuery.eq("organization_id", orgId);
+  const { data: current } = await currentQuery.maybeSingle();
   const value = {
     ...((current?.value ?? {}) as Record<string, unknown>),
     geral,
   };
   const { error } = await supabase
     .from("sync_config")
-    .upsert({ key: SOURCE_LABELS_CONFIG_KEY, value }, { onConflict: "key" });
+    .upsert(
+      {
+        key: SOURCE_LABELS_CONFIG_KEY,
+        value,
+        ...(orgId ? { organization_id: orgId } : {}),
+      },
+      { onConflict: "organization_id,key" }
+    );
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
   // Os rótulos entram via provider do layout raiz → revalida o app inteiro.
   revalidatePath("/", "layout");

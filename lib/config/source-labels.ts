@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 16/07/2026
+// Versão: 1.2 | Data: 23/07/2026
+// v1.2 (23/07/2026): multi-org — orgId opcional em loadSourceLabelsValue
+//   (sync_config tem PK (organization_id, key) desde a 0090; sem o filtro, um
+//   usuário multi-org receberia 2 linhas e o maybeSingle falharia).
 // Rótulos de exibição das fontes (nomes CURTOS dos prefixos/chips nos dropdowns
 // de campo + rótulo "Geral"), editados em Configurações → Fontes.
 // v1.1 (16/07/2026): fontes dinâmicas — o nome curto por fonte agora é
@@ -53,20 +56,26 @@ export function mergeSourceLabels(
  * buscar em paralelo com loadSources e mesclar depois via mergeSourceLabels.
  */
 export async function loadSourceLabelsValue(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  orgId?: string | null
 ): Promise<unknown> {
-  const { data } = await supabase
+  let query = supabase
     .from("sync_config")
     .select("value")
-    .eq("key", SOURCE_LABELS_CONFIG_KEY)
-    .maybeSingle();
+    .eq("key", SOURCE_LABELS_CONFIG_KEY);
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data } = await query.maybeSingle();
   return data?.value;
 }
 
 /** Lê os rótulos de exibição das fontes; qualquer falha cai nos defaults. */
 export async function loadSourceLabels(
   supabase: SupabaseClient,
-  sources: SourceDef[] = BUILTIN_SOURCES
+  sources: SourceDef[] = BUILTIN_SOURCES,
+  orgId?: string | null
 ): Promise<SourceDisplayLabels> {
-  return mergeSourceLabels(await loadSourceLabelsValue(supabase), sources);
+  return mergeSourceLabels(
+    await loadSourceLabelsValue(supabase, orgId),
+    sources
+  );
 }

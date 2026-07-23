@@ -1,4 +1,7 @@
-// Versão: 1.10 | Data: 21/07/2026
+// Versão: 1.11 | Data: 23/07/2026
+// v1.11 (23/07/2026): FieldFilterSettings.valueScope — escopo do VALOR do
+// "Filtro por campo": "all" = compartilhado entre usuários (célula __ff__ de
+// dashboard_table_cells); ausente/"user" = por usuário (lastFieldFilters).
 // v1.10 (21/07/2026): WidgetData.businessDayRef — N de corte do
 // businessDayAlign (compartilhado entre os meses; badge "Nº dia útil").
 // v1.9 (18/07/2026): groupDateFormats estendido à tabela AGREGADA (keys
@@ -307,6 +310,12 @@ export interface FieldFilterSettings {
   fields?: FieldFilterEntry[]; // campos que o widget expõe como controles
   searchFields?: string[]; // colunas de texto da busca livre (default ['title'])
   excludedTargets?: string[]; // ids de widgets desmarcados (padrão = todos p/ fonte)
+  // Escopo do VALOR aplicado: "all" = seleção compartilhada entre todos os
+  // usuários do dashboard (célula __ff__/sel de dashboard_table_cells, como os
+  // filtros rápidos __qf__); ausente/"user" = por usuário
+  // (user_preferences.lastFieldFilters). NÃO renomear para `scope`: colidiria
+  // com KpiSettings.scope na interseção WidgetSettings.
+  valueScope?: "all" | "user";
 }
 
 // Opções de dropdown dos controles do "Filtro por campo", por campo. O servidor
@@ -1062,6 +1071,14 @@ export interface DashboardSettings {
   // (lib/presets/definitions.ts) para o aplicador atualizar em vez de duplicar.
   // Gravado/gerido só por applyPreset (app/(app)/dashboards/actions.ts).
   preset?: { key: string; version: number };
+  // Escopo de BASES do board (23/07/2026, menu ⋮ → "Bases"): keys de
+  // fontes/sub-fontes que este dashboard/kanban usa. Ausente/vazio = todas.
+  // É o catálogo EFETIVO do board: recorta as ofertas dos pickers E o universo
+  // dos widgets em "todas as bases". Fontes já referenciadas por widgets
+  // existentes nunca são removidas do catálogo efetivo
+  // (lib/config/source-scope.ts — applySourceScope mantém referenciadas +
+  // pais de subs mantidas), então config antiga não quebra.
+  sourceScope?: { keys: SourceKey[] };
 }
 
 export interface WidgetConfig {

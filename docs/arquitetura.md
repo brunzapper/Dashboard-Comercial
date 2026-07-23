@@ -1,8 +1,32 @@
-<!-- Versão: 1.17 | Data: 22/07/2026 -->
-<!-- v1.17 (22/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
+<!-- Versão: 1.20 | Data: 23/07/2026 -->
+<!-- v1.20 (23/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
      (botão Importar na Home; validador puro em lib/import/dashboard/*;
      aplicação pelo applyPresetDefinition com identidade import:<chave>;
      prompt com modelo da Base + amostra com cobertura de colunas). -->
+<!-- v1.19 (23/07/2026): escopo do VALOR do "Filtro por campo" configurável
+     (§4.7/§4.10; invariante 12) — settings.valueScope 'all' compartilha a
+     seleção entre todos os usuários via célula __ff__/sel de
+     dashboard_table_cells (mesma semântica do __qf__; saveSharedFieldFilter;
+     fora do Desfazer/Refazer); no modo shared o cliente NÃO escreve a URL
+     (transporte = banco, padrão QuickFiltersBar) e ressincroniza do seed;
+     ausente/'user' = por usuário (lastFieldFilters), como antes. -->
+
+<!-- v1.18 (23/07/2026): MULTI-ORGANIZAÇÃO + acessos (0088–0094; §4.6
+     reescrito; invariantes 15–17): organizations/members/app_owner com
+     triggers de proteção; organization_id nas raízes + RLS org-scoped;
+     fluxo Owner (/owner, env OWNER_USER_ID, seed_org_defaults/
+     delete_organization); acesso por pessoa aos boards (board_access,
+     ⋮ → Acesso); escopo de BASES por board (settings.sourceScope, ⋮ →
+     Bases — catálogo efetivo via applySourceScope, page/widget-scope/
+     viewer); overrides individuais (user_access_overrides, Configurações →
+     Acessos); branding editável (organizations.name/app_name no sidebar). -->
+
+<!-- v1.17 (22/07/2026): ciclo de vida de boards no hub (0087 — §4.7 +
+     invariante 14): menu ⋮ com Duplicar/Arquivar/Excluir (soft → Lixeira,
+     purga 14d via pg-cron-purge-trash; trashed não abre em rota nenhuma),
+     duplicateBoard com remap de ids + strip de preset. Grid: allowOverlap —
+     nada se move durante o gesto; resolveDropCollisions abre espaço MÍNIMO só
+     no drop (dashboard-grid v2.12). -->
 <!-- v1.16 (22/07/2026): (a) comparação nos Cards de FÓRMULA (§4.9) — o
      runCardWidget roda a mesma fórmula no range deslocado (comparisonSpec,
      inclusive previous_period_bd com feriados; bases de janela ficam de fora
@@ -374,11 +398,55 @@ exceção: sempre recomputados).
   espera o Bitrix; /registros mostra um badge "N aguardando envio"
   (`components/sync/writeback-pending-badge.tsx`) com link para o Log.
 
-### 4.6 Papéis, permissões e RLS
+### 4.6 Papéis, permissões, RLS e MULTI-ORGANIZAÇÃO (0088–0094)
 
-Três papéis (`roles` + `user_roles`): **admin** (tudo), **gestor** (vê tudo, edita),
-**vendedor** (só os próprios registros). Permissões-chave: `view_all_records`,
-`edit_record_values`, `manage_field_definitions`, `view_forecast`.
+**Organizações (tenants):** o sistema atende N empresas isoladas no MESMO
+banco/deploy. `organizations` guarda o branding editável (`app_name`/`name`,
+exibidos no sidebar/título — Configurações → Organização);
+`organization_members` vincula usuários (flag `is_org_admin` = Administrador
+de Organização, ÚNICO por org e protegido por trigger); `app_owner` é o Owner
+do sistema (1 linha; + env `OWNER_USER_ID`; guard fail-closed em
+`lib/auth/owner.ts`). Isolamento: `organization_id` nas tabelas-raiz (default
+Zapper; triggers de stamp cobrem sync/CSV/API) + RLS org-gated em TUDO
+(`auth_org_ids()` prefixado, inclusive nos ramos admin) — as RPCs de widget
+são SECURITY INVOKER e herdam sem serem tocadas (invariante 15). A org ATIVA
+é um cookie httpOnly SEMPRE revalidado contra membership (`lib/auth/org.ts`);
+pós-login, usuário comum entra direto e Owner/multi-org escolhe em
+`/escolher-organizacao`. O console `/owner` (só o Owner) cria org (admin = o
+próprio ou conta nova; `seed_org_defaults` — org nasce VAZIA) e exclui
+(`delete_organization`; a org inicial só via SQL direto).
+
+Três papéis de APP (`roles` + `user_roles`, POR org desde a 0092): **admin**
+(tudo NA org), **gestor** (vê tudo, edita), **vendedor** (só os próprios
+registros). Permissões-chave: `view_all_records`, `edit_record_values`,
+`manage_field_definitions`, `view_forecast`. Só o org_admin concede/remove o
+papel `admin` (`auth_can_grant_admin`). org_admin/Owner NÃO são linhas de
+`roles` (`SPECIAL_ROLE_LABELS` é só rótulo).
+
+**Acesso por pessoa aos boards (⋮ → Acesso, 0088):** `board_access` guarda
+`view`/`edit`/`blocked` por usuário×board — override vence o papel
+(`visible_to_roles` segue como camada por função); dono/admin nunca
+bloqueáveis. Resolução ÚNICA nos helpers `auth_board_visible/editable/
+manageable` (policies de dashboards/widgets/células/placements); as pages só
+refletem (`canEdit`/`canConfig`).
+
+**Overrides individuais (Configurações → Acessos, 0094):**
+`user_access_overrides` concede (allow) ou revoga (deny) por usuário — áreas
+de Configurações (deny esconde a aba/page; allow concede além do papel;
+ESCRITA dentro da área segue o papel — limitação documentada) e bases (deny
+some dos pickers via RLS de `data_sources` e dos DADOS via `records_select`).
+Fonte única dos gates por área: `AREA_GATES` (`lib/auth/access.ts`); guard
+`requireSettingsArea` nas sub-pages.
+
+**Escopo de BASES por board (⋮ → Bases, Fase 1 desta entrega):**
+`DashboardSettings.sourceScope` define o catálogo EFETIVO do board —
+`applySourceScope`/`collectBoardSourceKeys` (`lib/config/source-scope.ts`)
+recortam as ofertas dos pickers E o universo dos widgets em "todas as bases",
+preservando fontes já referenciadas (config antiga nunca quebra). Aplicado na
+page do dashboard (re-provê `<SourcesProvider>` escopado), page do kanban,
+`loadWidgetScope` (invariante 12), kanban-actions, snapshot-form e viewer
+público. É restrição de OFERTA por board, não autorização (autorização é o
+deny por usuário da 0094).
 
 Helpers SQL (`auth_roles`, `auth_has_role`, `auth_has_permission`,
 `auth_responsible_ids`) são SECURITY DEFINER e, desde a 0068, **sempre chamados como
@@ -434,7 +502,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
   do card e a janela de períodos (`__qf__`/`__pw__` em
   `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
-  campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
+  campo é preferência INDIVIDUAL por padrão, como o último período
+  (`lastPeriod`).
+- **Escopo do VALOR do "Filtro por campo" configurável (23/07/2026):**
+  `settings.valueScope: "all"` (checkbox "Aplicar filtro para todos os
+  usuários" na edição do widget; a chave NÃO pode se chamar `scope` —
+  colidiria com `KpiSettings.scope` na interseção `WidgetSettings`) troca a
+  persistência per-user pela célula compartilhada `__ff__`/`sel` de
+  `dashboard_table_cells` (`saveSharedFieldFilter`; value = a MESMA string
+  codificada de `ff_`/`lastFieldFilters`; mesma RLS/semântica do `__qf__` —
+  quem muda o filtro muda para todos; propagação eventual, no próximo
+  re-render RSC do outro viewer). No modo shared o cliente NÃO escreve a URL
+  (transporte = banco, padrão `QuickFiltersBar`; espelhar a URL pinaria cada
+  viewer no valor do mount) e ressincroniza do seed do servidor
+  (`fieldFilterSeedById`, agora vindo da célula); um `ff_` residual de
+  bookmark é honrado naquele render (URL ainda vence no servidor) e removido
+  na primeira edição. Alternar para "all" deixa as entradas
+  `lastFieldFilters` INERTES (nunca apagadas); voltar a "user" ignora (não
+  apaga) a célula. `__ff__` fica fora do Desfazer/Refazer (como `__qf__`) e o
+  viewer de snapshot segue URL-only por visitante. Ausente/`"user"` =
+  comportamento per-user acima, byte-idêntico.
 - **Opções visíveis dos dropdowns de filtro (22/07/2026):** `hiddenOptions`
   (blacklist por entry em `FieldFilterEntry`/`QuickFilterEntry`,
   `widgets.settings` jsonb — sem migração) oculta opções dos dropdowns do
@@ -652,6 +739,24 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.
+- **Ciclo de vida de boards no hub (22/07/2026, 0087):** o card do hub
+  (`app/(app)/page.tsx` + `board-card-menu.tsx`) tem menu "⋮" com Duplicar/
+  Arquivar/Excluir (dashboards E kanbans). **Excluir é SOFT** (`trashBoard` →
+  `status='trashed'` + `trashed_at`): o board cai na seção recolhida "Lixeira",
+  não abre (404 em `/dashboards/[id]`, `/kanbans/[id]` e `/s/[token]`; fora de
+  `validateLastView`, dos pickers `listWidgetLinkTargets`/`listTaskBoards`, do
+  lookup de preset e o refresh de snapshot aborta), pode ser restaurado ou
+  excluído em definitivo (`deleteBoardPermanently`, só `status='trashed'`) e é
+  purgado após 14 dias (`apply/pg-cron-purge-trash.sql`; o hub esconde vencidos
+  mesmo sem o cron). **Arquivar** (`archiveBoard`) só tira da tela principal —
+  segue abrindo por tempo indeterminado (seção "Arquivados"). **Duplicar**
+  (`duplicateBoard`): qualquer usuário que ENXERGA o board e tem
+  `create_dashboards` — a cópia nasce privada/ativa do usuário, com ids NOVOS
+  de widgets e settings REMAPEADOS (connectors, `shape.link`, links de nota
+  `[..](@id)`, `excludedTargets` — substituição literal de uuids no JSON),
+  identidade de preset REMOVIDA (`settings.preset`/`presetKey` — o applyPreset
+  nunca adota/sobrescreve a cópia), células (`dashboard_table_cells`) e
+  `kanban_placements` copiados; snapshots/user_preferences/tasks NÃO.
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
@@ -871,8 +976,9 @@ diferentes:
 - **URL** (`periodo/de/ate/campo`, `ff_`, `tf_`, `pf_*`): `router.replace`
   dentro do transition compartilhado (`pending-context.tsx`) → re-render RSC +
   mudança de `useSearchParams`.
-- **Banco** (`__qf__` filtros rápidos do card — inclusive operação — e
-  `__pw__` janela de períodos, em `dashboard_table_cells`): server action +
+- **Banco** (`__qf__` filtros rápidos do card — inclusive operação —,
+  `__pw__` janela de períodos e `__ff__` valor compartilhado do "Filtro por
+  campo" com `valueScope: "all"`, em `dashboard_table_cells`): server action +
   `revalidatePath` → re-render RSC **sem** mudança de URL.
 
 Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
@@ -884,8 +990,9 @@ precisam de duas garantias, ambas desta entrega:
   `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
   page — `resolveWidgetViewScope`/`loadWidgetScope`
   (`lib/widgets/widget-scope.ts`): filtros rápidos `__qf__` (com exceção do
-  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters`, tradução de
-  OPERAÇÃO (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
+  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters` (ou a célula
+  `__ff__` quando `valueScope: "all"`), tradução de OPERAÇÃO
+  (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
   cobertura do `@period` (invariante 9) usa as métricas EFETIVAS (Tabela
   Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
   O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
@@ -1067,8 +1174,8 @@ principalmente — para mantenedores humanos.
     server action que consulta dados de um widget do dashboard (paginação,
     export, Tabela Livre, kanban — e qualquer action deferida futura) monta o
     recorte por `loadWidgetScope`/`resolveWidgetViewScope`
-    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`tf_`/
-    tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
+    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`__ff__`/
+    `tf_`/tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
     bug de widgets deferidos ignorando o filtro de operação até F5. No
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
@@ -1092,6 +1199,51 @@ principalmente — para mantenedores humanos.
     sync com os funis vivos (`lookups.categoryNames()` em `syncFieldCatalog`);
     edição manual das options não sobrevive ao sync (mesmo trato do campo
     curado `fonte`).
+
+14. **Board na Lixeira não abre; duplicação sempre remapeia.** `dashboards.status
+    = 'trashed'` (0087) significa 404 em `/dashboards/[id]`, `/kanbans/[id]` E
+    `/s/[token]` (a RLS `dashboards_select` NÃO filtra por status — o "não
+    abre" vive nas pages/actions; não afrouxe esses guards), fora dos pickers
+    (`listWidgetLinkTargets`/`listTaskBoards`), do lookup de preset e do
+    refresh de snapshots. Exclusão definitiva SÓ de dentro da Lixeira
+    (`deleteBoardPermanently` exige `status='trashed'` no predicado); a purga
+    física é o cron `apply/pg-cron-purge-trash.sql` (14 dias) e o hub esconde
+    vencidos por conta própria. `duplicateBoard` SEMPRE remapeia os uuids de
+    widget/dashboard dentro dos settings copiados e REMOVE
+    `settings.preset`/`settings.presetKey` — sem isso, conectores/links da
+    cópia apontariam para os widgets do original e o `applyPreset` adotaria/
+    sobrescreveria a cópia.
+
+15. **Isolamento de organização vive em RLS + loaders, NUNCA no RPC.** As
+    tabelas-raiz carregam `organization_id` (0090) e TODA policy é prefixada
+    pelo gate `auth_org_ids()` (0091) — inclusive os ramos admin/permission.
+    O par `run_widget_query`/`_snapshot` é SECURITY INVOKER e herda o
+    isolamento do chamador: NÃO introduza parâmetro de org nos RPCs (não
+    acione a invariante 1). Caminhos service-role (sync/ingest/viewer/refresh
+    de snapshots) BYPASSAM a RLS — eles escopam explicitamente (org do
+    dashboard no viewer/refresh; triggers de stamp da 0090 nos inserts).
+    NUNCA carregue catálogo/campos/correspondências com service role sem
+    filtrar por org — vazaria nomes de outras empresas.
+
+16. **org_admin e Owner são protegidos por TRIGGER + GUC, não por UI.** Um
+    org_admin por org (índice parcial), indeletável/indemovível; `app_owner`
+    imutável e com FK sem cascade; `organizations` só deleta via
+    `delete_organization`. Os triggers valem até para service role — o único
+    desbloqueio é `set_config('app.allow_protected_change','on',true)` em SQL
+    direto. Nenhuma action/tela pode ganhar esse poder; o modo Owner exige
+    ainda env `OWNER_USER_ID` == uid (fail-closed: env ausente nega sempre) e
+    `requireOwner()` em TODA page/action de `/owner`.
+
+17. **Acesso efetivo = papel × overrides, resolvido em UM lugar por família.**
+    Boards: helpers `auth_board_visible/editable/manageable` (blocked vence
+    papel; view/edit concede; dono/admin imunes) — não reimplemente a regra
+    em policy/page nova. Áreas de Configurações: `AREA_GATES` +
+    `canAccessSettingsArea` (`lib/auth/access.ts`) — deny vence tudo, allow
+    vence o papel; sub-page nova usa `requireSettingsArea`. Bases negadas:
+    RLS de `data_sources`/`sub_sources` (pickers somem via loadSources) +
+    `records_select` (dados) — não filtre "na mão" em componente. Escopo de
+    bases do board (`sourceScope`) é OFERTA, nunca autorização — não os
+    confunda.
 
 ## 6. Convenções do projeto
 

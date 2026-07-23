@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 19/07/2026
+// Versão: 1.4 | Data: 23/07/2026
+// v1.4 (23/07/2026): multi-org (0090) — parâmetro opcional orgId filtra o
+//   catálogo pela organização ATIVA. A RLS já escopa às orgs do usuário; o
+//   filtro explícito resolve a visão de quem pertence a 2+ orgs (Owner) e o
+//   viewer público (service role, que enxerga tudo). null/ausente = sem
+//   filtro (comportamento atual; caminhos pré-migração e ingest por chave).
 // v1.1 (16/07/2026): manual_entry (0061) — a fonte aceita criação manual.
 // v1.3 (19/07/2026): timezone (0079) — fuso da ORIGEM da fonte; datetimes
 //   ingeridos normalizam p/ Brasília no sync. Subs não têm (ingestão é da pai).
@@ -18,16 +23,19 @@ import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export const loadSources = cache(async function loadSources(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  orgId?: string | null
 ): Promise<SourceDef[]> {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("data_sources")
       .select(
         "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone"
       )
       .order("builtin", { ascending: false })
       .order("created_at", { ascending: true });
+    if (orgId) query = query.eq("organization_id", orgId);
+    const { data, error } = await query;
     if (error || !data || data.length === 0) return BUILTIN_SOURCES;
     const roots: SourceDef[] = data.map((r) => {
       const key = r.key as string;

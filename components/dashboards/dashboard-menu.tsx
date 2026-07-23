@@ -1,12 +1,17 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 23/07/2026
 // Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
 // (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
 // dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
+// v1.1 (23/07/2026): item "Bases" (escopo de bases do board —
+//   BoardSourcesDialog, mesmo dialog do kebab do hub) e "Compartilhamento" →
+//   "Acesso" (BoardAccessDialog: funções + pessoas com Ver/Editar/Bloqueado;
+//   o Sheet local de visible_to_roles foi absorvido pelo dialog).
 "use client";
 
 import { useState, useTransition } from "react";
 import {
   Camera,
+  Database,
   LayoutGrid,
   Maximize,
   MoreVertical,
@@ -16,7 +21,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,25 +53,20 @@ import {
   DEFAULT_DATE_FORMAT,
   type DateFormat,
 } from "@/lib/widgets/format";
-import {
-  updateDashboardSettings,
-  updateDashboardVisibility,
-} from "@/app/(app)/dashboards/actions";
+import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
 import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
+import { BoardSourcesDialog } from "./board-sources-dialog";
+import { BoardAccessDialog } from "./board-access-dialog";
 
 type BgMode = "none" | "solid" | "gradient";
-
-const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 
 export function DashboardMenu({
   dashboardId,
   settings,
-  visibleToRoles,
   snapshotPeriod,
 }: {
   dashboardId: string;
   settings: DashboardSettings;
-  visibleToRoles: string[];
   // Contexto do período do dashboard (0059): captura do período congelado na
   // criação de snapshots.
   snapshotPeriod?: SnapshotPeriodCapture;
@@ -77,18 +76,8 @@ export function DashboardMenu({
   const [shareOpen, setShareOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-
-  // Compartilhamento (visibilidade por papel).
-  const [roles, setRoles] = useState<string[]>(visibleToRoles);
-  const toggleRole = (r: string) =>
-    setRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
-  function saveShare() {
-    startTransition(async () => {
-      await updateDashboardVisibility(dashboardId, roles);
-      setShareOpen(false);
-    });
-  }
 
   // Área de trabalho (grid): nº de colunas e altura da linha + largura/altura da área.
   const canvas = settings.canvas ?? {};
@@ -180,15 +169,22 @@ export function DashboardMenu({
           >
             <LayoutGrid className="size-4" /> Área de trabalho
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setSourcesOpen(true);
+            }}
+          >
+            <Database className="size-4" /> Bases
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
-              setRoles(visibleToRoles);
               setShareOpen(true);
             }}
           >
-            <Users className="size-4" /> Compartilhamento
+            <Users className="size-4" /> Acesso
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={(e) => {
@@ -302,35 +298,21 @@ export function DashboardMenu({
         </SheetContent>
       </Sheet>
 
-      {/* Compartilhamento: visibilidade por papel (edita visible_to_roles). */}
-      <Sheet open={shareOpen} onOpenChange={setShareOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-sm">
-          <SheetHeader>
-            <SheetTitle>Compartilhamento</SheetTitle>
-            <SheetDescription>
-              Quem vê este dashboard (além de você). Sem papéis = pessoal.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-3 px-4 pb-8">
-            <div className="flex flex-col gap-2">
-              {ROLE_KEYS.map((role) => (
-                <label key={role} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={roles.includes(role)}
-                    onChange={() => toggleRole(role)}
-                  />
-                  {ROLE_LABELS[role]}
-                </label>
-              ))}
-            </div>
-            <Button size="sm" onClick={saveShare} disabled={pending}>
-              Aplicar
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      {/* Bases: escopo de bases do board (settings.sourceScope). */}
+      <BoardSourcesDialog
+        boardId={dashboardId}
+        kanban={false}
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+      />
+
+      {/* Acesso: funções (visible_to_roles) + pessoas (board_access, 0088). */}
+      <BoardAccessDialog
+        boardId={dashboardId}
+        kanban={false}
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+      />
 
       {/* Snapshots: links públicos congelados de uma aba (sem login). O painel
           carrega a lista/opções ao abrir; o link aparece só na criação. */}

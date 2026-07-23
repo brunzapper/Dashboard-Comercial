@@ -28,6 +28,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { slugify } from "@/lib/records/slug";
@@ -438,7 +439,11 @@ export async function createField(
   }
 
   const currency = resolveCurrencyColumns(f);
+  // Carimbo de org (multi-org, 0090): sem ele, o default (Zapper) falharia no
+  // WITH CHECK da RLS para um admin de outra org.
+  const orgId = await getActiveOrgId();
   const { error } = await supabase.from("field_definitions").insert({
+    ...(orgId ? { organization_id: orgId } : {}),
     field_key: fieldKey,
     label: f.label,
     data_type: f.dataType,

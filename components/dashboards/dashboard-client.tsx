@@ -141,7 +141,6 @@ export function DashboardClient({
   currencyRates = {},
   conversionPeriodById = {},
   settings,
-  visibleToRoles,
   dateFormat,
   periodBar,
   periodScope,
@@ -195,7 +194,6 @@ export function DashboardClient({
   currencyRates?: CurrencyRates;
   conversionPeriodById?: Record<string, { year: number; quarter: number }>;
   settings: DashboardSettings;
-  visibleToRoles: string[];
   dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
   periodScope?: PeriodScope;
@@ -823,7 +821,6 @@ export function DashboardClient({
             <DashboardMenu
               dashboardId={dashboardId}
               settings={settings}
-              visibleToRoles={visibleToRoles}
               snapshotPeriod={snapshotPeriod}
             />
           </div>

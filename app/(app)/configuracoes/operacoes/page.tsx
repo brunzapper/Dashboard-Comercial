@@ -3,8 +3,8 @@
 // v1.1 (20/07/2026): carrega o FILTRO DE PERFIL (operations.filter, 0083) e
 // monta as opções de campo (núcleo + custom com rótulo) e de fonte para o
 // editor de condições do perfil.
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { WidgetFilter } from "@/lib/widgets/types";
@@ -15,7 +15,7 @@ import {
 } from "@/components/admin/operations-manager";
 
 export default async function OperacoesPage() {
-  await requireRole("admin");
+  await requireSettingsArea("operacoes");
   const supabase = await createClient();
   const [{ data }, { data: fieldsData }, sources] = await Promise.all([
     supabase

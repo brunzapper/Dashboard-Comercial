@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 20/07/2026
+// Versão: 1.5 | Data: 23/07/2026
+// v1.5 (23/07/2026): escopo de BASES do board (settings.sourceScope congelado)
+//   aplicado ao catálogo vivo (applySourceScope) — paridade com o dashboard.
 // v1.4 (20/07/2026): catálogo das expressões {=…} via builder ÚNICO
 //   (lib/widgets/agg-catalog.availableAggCatalogInput) — montagem idêntica.
 // v1.3 (18/07/2026): fontes por métrica (Metric.sources) — modo lista via
@@ -78,6 +80,7 @@ import {
 import { NOTE_MAX_EXPRS } from "@/lib/widgets/note-template";
 import type {
   CalcWidgetResult,
+  DashboardSettings,
   Dimension,
   Widget,
   WidgetConfig,
@@ -86,6 +89,10 @@ import type {
 } from "@/lib/widgets/types";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import {
   parseViewFilter,
   searchHandledOnClient,
@@ -151,6 +158,18 @@ export default async function SnapshotPage({
   if (!snapData || snapData.status !== "active") notFound();
   const snap = snapData as unknown as SnapshotRow;
 
+  // Board na Lixeira (0087) não abre — nem pelo link público (arquivado
+  // segue). Mesmo 404 uniforme. organization_id (0090): o service role
+  // enxerga todas as orgs — catálogo/rótulos/metas do viewer são escopados
+  // pela org do dashboard, senão vazariam nomes de outras organizações.
+  const { data: dashRow } = await service
+    .from("dashboards")
+    .select("status, organization_id")
+    .eq("id", snap.dashboard_id)
+    .maybeSingle();
+  if (!dashRow || (dashRow.status as string) === "trashed") notFound();
+  const orgId = (dashRow.organization_id as string | null) ?? null;
+
   // Auditoria de acesso (contagem aproximada; corrida entre requests é ok).
   // Roda DEPOIS da resposta (after) — o UPDATE não bloqueia a renderização.
   after(async () => {
@@ -187,10 +206,10 @@ export default async function SnapshotPage({
   // mergeSourceLabels (mesmo split do layout autenticado) p/ buscar em
   // paralelo com loadSources; partner rows entram na mesma leva (antes: três
   // awaits seriais).
-  const [sources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
+  const [allSources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
     [
-      loadSources(service),
-      loadSourceLabelsValue(service),
+      loadSources(service, orgId),
+      loadSourceLabelsValue(service, orgId),
       // Partner rows (registros casados fora das restrições, presentes SÓ para
       // resolver colunas match:): o RPC os exclui no SQL (`not partner_only`);
       // no modo lista (PostgREST direto) eles são excluídos por pós-filtro com
@@ -205,9 +224,17 @@ export default async function SnapshotPage({
         .eq("partner_only", true),
     ]
   );
+  const dashSettings = cfg.dashboard.settings ?? {};
+  // Escopo de BASES do board (⋮ → "Bases"), congelado no settings do bundle:
+  // o viewer aplica o MESMO catálogo efetivo do dashboard vivo (paridade com
+  // a page/widget-scope) — widgets em "todas as bases" enxergam o escopo.
+  const sources = applySourceScope(
+    allSources,
+    (dashSettings as DashboardSettings).sourceScope,
+    collectBoardSourceKeys(widgets, dashSettings, fieldByKeyAll)
+  );
   const available = buildAvailableFields(fields, correspondences, sources);
   const sourceLabels = mergeSourceLabels(sourceLabelsValue, sources);
-  const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
   const allowQuickFilters = snap.allow_quick_filters;
   const allowWidgetFilters = snap.allow_widget_filters;
@@ -215,7 +242,7 @@ export default async function SnapshotPage({
   // Memoização por argumentos (a mesma do dashboard autenticado): widgets/
   // notas/calculadoras duplicados geram RPCs idênticas — o memo intercepta
   // `run_widget_query` ANTES de o adapter renomear p/ o RPC do snapshot.
-  const db = withRpcMemo(snapshotClient(service, snap.id));
+  const db = withRpcMemo(snapshotClient(service, snap.id, orgId));
   const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
   // Período congelado na criação (0059): default_period vira o período de

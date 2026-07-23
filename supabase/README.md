@@ -414,3 +414,52 @@ admin (e poder usar a tela de Usuários depois):
 As duas camadas independentes da especificação são as permissões
 `edit_record_values` (editar valor) e `manage_field_definitions` (criar/alterar
 coluna), reforçadas por políticas RLS distintas.
+
+## Multi-organização e acessos (migrações 0088–0094, 23/07/2026)
+
+Aplicar **na ordem e na MESMA janela**, imediatamente ANTES do deploy do
+código correspondente (invariante 6 — o layout passa a ler `organizations` e
+os upserts usam onConflict compostos):
+
+1. `0088_board_access.sql` — acesso por pessoa aos boards (⋮ → Acesso).
+2. `0089_organizations.sql` — organizações + org_admin + Owner. ANTES de
+   executar, substitua o placeholder `<email-do-owner>` do seed pelo email
+   real da conta (que deve existir em auth.users) — o valor não fica
+   versionado de propósito.
+3. `0090_org_columns.sql` — `organization_id` nas raízes + stamps + unicidades
+   por-org.
+4. `0091_org_rls.sql` — RLS org-scoped (a partir daqui o isolamento vale).
+5. `0092_org_roles_protections.sql` — papéis confinados à org.
+6. `0093_org_provisioning.sql` — funções do console do Owner.
+7. `0094_user_access_overrides.sql` — overrides individuais.
+
+Depois do deploy, configure na Vercel a env **`OWNER_USER_ID`** = User UID da
+conta do Owner (sem ela o modo Owner nega sempre — fail-closed).
+
+Conferências pós-migração:
+
+```sql
+-- Nenhuma linha órfã de org (deve retornar 0 em todas):
+select 'records' t, count(*) from public.records where organization_id is null
+union all select 'dashboards', count(*) from public.dashboards where organization_id is null
+union all select 'data_sources', count(*) from public.data_sources where organization_id is null
+union all select 'field_definitions', count(*) from public.field_definitions where organization_id is null;
+
+-- Proteções (todas devem FALHAR com exception):
+--   insert into public.app_owner (user_id) values (gen_random_uuid());
+--   delete from public.organization_members where is_org_admin;
+--   update public.organization_members set is_org_admin = false where is_org_admin;
+--   delete from public.organizations where id = '00000000-0000-4000-a000-000000000001';
+
+-- Segundo org_admin na mesma org deve FALHAR no índice parcial:
+--   insert into public.organization_members (organization_id, user_id, is_org_admin)
+--   values ('00000000-0000-4000-a000-000000000001', '<outro-uid>', true);
+
+-- Nenhuma policy anon nova:
+select policyname, tablename from pg_policies
+ where schemaname = 'public' and roles::text like '%anon%';
+```
+
+O `on conflict (field_key)` da 0086 deixa de existir após a 0090 (a unicidade
+virou por-org) — não re-rode a 0086 depois da 0090; o seed por org é
+`seed_org_defaults`.

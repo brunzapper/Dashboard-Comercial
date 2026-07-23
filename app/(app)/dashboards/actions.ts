@@ -1,10 +1,21 @@
-// Versão: 1.5 | Data: 22/07/2026
-// v1.5 (22/07/2026): importDashboardJson — modo "Importar dashboard via JSON
+// Versão: 1.8 | Data: 23/07/2026
+// v1.8 (23/07/2026): importDashboardJson — modo "Importar dashboard via JSON
 //   (IA)": valida o JSON colado (lib/import/dashboard/validate.ts, erros
 //   legíveis p/ devolver à IA) e o aplica pelo MESMO motor idempotente dos
 //   presets (applyPresetDefinition, identidade "import:<chave>" — reimportar
 //   atualiza em vez de duplicar). applyPresetDefinition ganha opts
 //   includeSupportFields (o import NÃO cria os campos de apoio PRESET_FIELDS).
+// v1.7 (23/07/2026): saveSharedFieldFilter — valor COMPARTILHADO do "Filtro
+//   por campo" (settings.valueScope 'all') na célula __ff__/sel de
+//   dashboard_table_cells (mesma semântica do __qf__; fora do Desfazer/Refazer).
+// v1.6 (23/07/2026): escopo de BASES do board (⋮ → "Bases") —
+//   getBoardSourcesState (catálogo completo + escopo + referenciadas, lazy no
+//   open do dialog) e saveBoardSourceScope (merge server-side SÓ da chave
+//   sourceScope — o dialog pode abrir do hub com settings defasados).
+// v1.5 (22/07/2026): ciclo de vida de boards (0087) — trashBoard/archiveBoard/
+//   restoreBoard/deleteBoardPermanently substituem o hard delete direto
+//   (deleteDashboard), e duplicateBoard clona board + widgets + células +
+//   placements com REMAP de ids em settings e remoção da identidade de preset.
 // v1.4 (22/07/2026): listFilterOptionCandidates — opções candidatas p/ o
 //   picker "Opções visíveis" do construtor (filtro_campo/filtros rápidos),
 //   espelhando as consultas de opções da page (responsáveis/operações ativos;
@@ -25,6 +36,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
@@ -37,11 +49,19 @@ import {
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { loadSources } from "@/lib/config/sources";
+import {
+  collectBoardSourceKeys,
+  type ScopeWidgetLike,
+} from "@/lib/config/source-scope";
 import { recordTypeOf } from "@/lib/sources";
+import { isCoreDef } from "@/lib/records/core-defs";
+import type { FieldDefinition } from "@/lib/records/types";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
+  FF_COL_KEY,
+  FF_ROW_KEY,
   parsePeriodWindowChoice,
   PW_COL_KEY,
   PW_ROW_KEY,
@@ -106,12 +126,16 @@ export async function createDashboard(
   if (!name) return { ok: false, message: "Informe um nome." };
   const visible = formData.getAll("visible_to_roles").map(String).filter(Boolean);
 
+  // Carimbo de org (multi-org, 0090): sem ele, o default (Zapper) faria o
+  // insert de um usuário de OUTRA org falhar no WITH CHECK da RLS.
+  const orgId = await getActiveOrgId();
   const supabase = await createClient();
   const { error } = await supabase.from("dashboards").insert({
     name,
     owner_user_id: session.user.id,
     visible_to_roles: visible,
     is_shared: visible.length > 0,
+    ...(orgId ? { organization_id: orgId } : {}),
   });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
@@ -179,6 +203,8 @@ export async function createBoard(
     kanban.card = { titleField: "title" };
   }
 
+  // Carimbo de org (multi-org, 0090) — ver createDashboard.
+  const orgId = await getActiveOrgId();
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("dashboards")
@@ -189,6 +215,7 @@ export async function createBoard(
       visible_to_roles: visible,
       is_shared: visible.length > 0,
       settings: { kanban },
+      ...(orgId ? { organization_id: orgId } : {}),
     })
     .select("id")
     .single();
@@ -217,14 +244,260 @@ export async function updateBoardSettings(
   return { ok: true };
 }
 
-export async function deleteDashboard(formData: FormData): Promise<void> {
+// ---------------- Ciclo de vida: Lixeira / Arquivar / Duplicar (0087) ----------------
+
+// "Excluir" do hub agora é SOFT: o board (dashboard ou kanban) vai para a
+// Lixeira (status 'trashed'), de onde pode ser restaurado ou excluído em
+// definitivo; a purga automática remove itens com mais de 14 dias
+// (apply/pg-cron-purge-trash.sql). Na Lixeira o board NÃO abre (404 nas rotas
+// e fora dos pickers). RLS (dashboards_update) restringe a owner/admin.
+export async function trashBoard(id: string): Promise<ActionState> {
   const session = await getSessionInfo();
-  if (!session) return;
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Board inválido." };
   const supabase = await createClient();
-  await supabase.from("dashboards").delete().eq("id", id);
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ status: "trashed", trashed_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/");
+  return { ok: true };
+}
+
+// Arquiva: sai da tela principal do hub (seção "Arquivados"), mas segue
+// abrindo normalmente, por tempo indeterminado. RLS: owner/admin.
+export async function archiveBoard(id: string): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Board inválido." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({
+      status: "archived",
+      archived_at: new Date().toISOString(),
+      trashed_at: null,
+    })
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
+// Volta ao hub: serve o "Restaurar" da Lixeira E o "Desarquivar". RLS: owner/admin.
+export async function restoreBoard(id: string): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Board inválido." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ status: "active", archived_at: null, trashed_at: null })
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
+// Exclusão DEFINITIVA — só de dentro da Lixeira (o predicado por status
+// garante: board ativo/arquivado nunca é apagado por esta action). O DELETE
+// cascateia widgets/células/snapshots/placements. RLS: owner/admin.
+export async function deleteBoardPermanently(id: string): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!id) return { ok: false, message: "Board inválido." };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("dashboards")
+    .delete()
+    .eq("id", id)
+    .eq("status", "trashed");
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  return { ok: true };
+}
+
+// Troca ids antigos → novos em QUALQUER string JSON de settings. Substituição
+// literal de substrings: uuids são colisão-seguros, e é o que cobre TODAS as
+// referências a widget conhecidas de uma vez — connectors[].from/to.widgetId,
+// shape.link.widgetId/dashboardId, links de nota "[rótulo](@<uuid>)"
+// (note-template.ts) e excludedTargets do filtro_campo.
+function remapJsonIds(json: string, map: Map<string, string>): string {
+  let out = json;
+  for (const [oldId, newId] of map) out = out.split(oldId).join(newId);
+  return out;
+}
+
+// Duplica um board (dashboard ou kanban) para o USUÁRIO ATUAL: qualquer um que
+// enxerga o board (RLS no SELECT) e tem create_dashboards pode duplicar — a
+// cópia nasce PRIVADA (visible_to_roles vazio) e ativa. Copia widgets (ids
+// novos, settings remapeados), células das tabelas editáveis e
+// kanban_placements; NÃO copia snapshots (links públicos ficam no original),
+// user_preferences (por usuário) nem tasks (kanban de tarefas duplicado leva a
+// estrutura de colunas, não as tarefas). Remove a identidade de preset
+// (settings.preset / settings.presetKey) para o applyPreset nunca adotar nem
+// sobrescrever a cópia. Sem transação (PostgREST): falha após o insert do
+// dashboard faz cleanup best-effort da cópia parcial.
+export async function duplicateBoard(
+  id: string
+): Promise<ActionState & { id?: string }> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return { ok: false, message: "Você não tem permissão para duplicar." };
+  }
+  if (!id) return { ok: false, message: "Board inválido." };
+  const supabase = await createClient();
+
+  const { data: src } = await supabase
+    .from("dashboards")
+    .select("id, name, kind, settings, status, organization_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!src) return { ok: false, message: "Board não encontrado." };
+  if ((src.status as string) === "trashed") {
+    return { ok: false, message: "Restaure o board antes de duplicar." };
+  }
+
+  const { data: widgetsData } = await supabase
+    .from("widgets")
+    .select(
+      "id, title, visual_type, source, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+    )
+    .eq("dashboard_id", id)
+    .order("sort_order", { ascending: true });
+  const srcWidgets = widgetsData ?? [];
+
+  // Ids novos gerados aqui (insert com id explícito é padrão — ver
+  // restoreDashboardSnapshot) para remapear settings ANTES dos inserts.
+  const newDashId = crypto.randomUUID();
+  const idMap = new Map<string, string>([[id, newDashId]]);
+  for (const w of srcWidgets) idMap.set(w.id as string, crypto.randomUUID());
+
+  const dashSettings = JSON.parse(
+    remapJsonIds(JSON.stringify(src.settings ?? {}), idMap)
+  ) as DashboardSettings;
+  delete dashSettings.preset;
+
+  // Nome único entre os boards que o usuário enxerga: "X (cópia)", "X (cópia 2)"…
+  const { data: nameRows } = await supabase.from("dashboards").select("name");
+  const names = new Set((nameRows ?? []).map((r) => r.name as string));
+  let copyName = `${src.name} (cópia)`;
+  for (let n = 2; names.has(copyName); n++) {
+    copyName = `${src.name} (cópia ${n})`;
+  }
+
+  const { error: dashErr } = await supabase.from("dashboards").insert({
+    id: newDashId,
+    name: copyName,
+    kind: src.kind,
+    owner_user_id: session.user.id,
+    visible_to_roles: [],
+    is_shared: false,
+    settings: dashSettings,
+    // A cópia herda a org do ORIGINAL (multi-org, 0090).
+    ...(src.organization_id
+      ? { organization_id: src.organization_id }
+      : {}),
+  });
+  if (dashErr) return { ok: false, message: dashErr.message };
+
+  // A partir daqui qualquer falha desfaz a cópia (delete cascateia os filhos).
+  const fail = async (message: string): Promise<ActionState> => {
+    await supabase.from("dashboards").delete().eq("id", newDashId);
+    return { ok: false, message };
+  };
+
+  if (srcWidgets.length > 0) {
+    const { error } = await supabase.from("widgets").insert(
+      srcWidgets.map((w) => {
+        const settings = JSON.parse(
+          remapJsonIds(JSON.stringify(w.settings ?? {}), idMap)
+        ) as WidgetSettings;
+        delete settings.presetKey;
+        return {
+          id: idMap.get(w.id as string),
+          dashboard_id: newDashId,
+          title: w.title,
+          visual_type: w.visual_type,
+          source: w.source,
+          sources: w.sources,
+          split_by_source: w.split_by_source,
+          dimensions: w.dimensions,
+          metrics: w.metrics,
+          filters: w.filters,
+          settings,
+          grid_position: w.grid_position,
+          sort_order: w.sort_order,
+        };
+      })
+    );
+    if (error) return fail(error.message);
+
+    // Células das tabelas editáveis/filtros rápidos/calculadora: cópia fiel
+    // (na cópia, o estado compartilhado nasce igual ao do original).
+    const oldIds = srcWidgets.map((w) => w.id as string);
+    const { data: cells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, row_key, col_key, value")
+      .in("widget_id", oldIds);
+    if (cells && cells.length > 0) {
+      const { error: cellErr } = await supabase
+        .from("dashboard_table_cells")
+        .insert(
+          cells.map((c) => ({
+            widget_id: idMap.get(c.widget_id as string),
+            row_key: c.row_key,
+            col_key: c.col_key,
+            value: c.value,
+            updated_by: session.user.id,
+          }))
+        );
+      if (cellErr) return fail(cellErr.message);
+    }
+
+    // Posições de kanban "Personalizar" em WIDGETS kanban do dashboard.
+    const { data: widgetPlacements } = await supabase
+      .from("kanban_placements")
+      .select("widget_id, record_id, column_key, position")
+      .in("widget_id", oldIds);
+    if (widgetPlacements && widgetPlacements.length > 0) {
+      const { error: plErr } = await supabase.from("kanban_placements").insert(
+        widgetPlacements.map((p) => ({
+          widget_id: idMap.get(p.widget_id as string),
+          record_id: p.record_id,
+          column_key: p.column_key,
+          position: p.position,
+          updated_by: session.user.id,
+        }))
+      );
+      if (plErr) return fail(plErr.message);
+    }
+  }
+
+  // Posições de um kanban DEDICADO (board_id).
+  if ((src.kind as string) === "kanban") {
+    const { data: boardPlacements } = await supabase
+      .from("kanban_placements")
+      .select("record_id, column_key, position")
+      .eq("board_id", id);
+    if (boardPlacements && boardPlacements.length > 0) {
+      const { error: plErr } = await supabase.from("kanban_placements").insert(
+        boardPlacements.map((p) => ({
+          board_id: newDashId,
+          record_id: p.record_id,
+          column_key: p.column_key,
+          position: p.position,
+          updated_by: session.user.id,
+        }))
+      );
+      if (plErr) return fail(plErr.message);
+    }
+  }
+
+  revalidatePath("/");
+  return { ok: true, id: newDashId, message: `"${copyName}" criado.` };
 }
 
 // Config por dashboard (settings jsonb). ATENÇÃO: sobrescreve a coluna `settings`
@@ -265,6 +538,111 @@ export async function updateDashboardVisibility(
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
   revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// ---------------- Escopo de BASES do board (⋮ → "Bases") ----------------
+
+export interface BoardSourcesState {
+  ok: boolean;
+  message?: string;
+  // Catálogo COMPLETO (o dialog oferece tudo, mesmo dentro de um board já
+  // escopado — o provider da page é o catálogo EFETIVO, que esconderia as
+  // bases removíveis/adicionáveis).
+  catalog: { key: string; label: string; parentKey?: string }[];
+  // Escopo atual (settings.sourceScope.keys; vazio = todas as bases).
+  scopeKeys: string[];
+  // Bases referenciadas pela config atual (widgets/kanban) — o dialog as marca
+  // como "em uso" (continuam no catálogo efetivo mesmo fora do escopo).
+  referencedKeys: string[];
+}
+
+// Estado do dialog "Bases" (lazy, no open): catálogo completo + escopo atual +
+// referenciadas. RLS de dashboards/widgets decide o que o caller enxerga.
+export async function getBoardSourcesState(
+  boardId: string
+): Promise<BoardSourcesState> {
+  const empty: BoardSourcesState = {
+    ok: false,
+    catalog: [],
+    scopeKeys: [],
+    referencedKeys: [],
+  };
+  const session = await getSessionInfo();
+  if (!session) return { ...empty, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const [{ data: dash }, { data: widgetsData }, catalog, { data: fieldsData }] =
+    await Promise.all([
+      supabase
+        .from("dashboards")
+        .select("id, settings")
+        .eq("id", boardId)
+        .maybeSingle(),
+      supabase
+        .from("widgets")
+        .select("sources, metrics, filters, settings")
+        .eq("dashboard_id", boardId),
+      loadSources(supabase),
+      supabase
+        .from("field_definitions")
+        .select("field_key, data_type, formula, source_system")
+        .or("show_in_builder.eq.true,source_system.eq.core"),
+    ]);
+  if (!dash) return { ...empty, message: "Board não encontrado." };
+  const settings = (dash.settings ?? {}) as DashboardSettings;
+  const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
+    (f) => !isCoreDef(f)
+  );
+  const referenced = collectBoardSourceKeys(
+    (widgetsData ?? []) as ScopeWidgetLike[],
+    settings,
+    new Map(fields.map((f) => [f.field_key, f]))
+  );
+  return {
+    ok: true,
+    catalog: catalog.map((s) => ({
+      key: s.key,
+      label: s.label,
+      parentKey: s.parentKey,
+    })),
+    scopeKeys: settings.sourceScope?.keys ?? [],
+    referencedKeys: [...referenced],
+  };
+}
+
+// Grava o escopo de bases com MERGE server-side (lê o settings vigente e troca
+// só a chave sourceScope) — o dialog pode abrir do hub com props defasadas e
+// um overwrite total apagaria tabs/canvas/periodBar. keys vazio = remove o
+// escopo (todas as bases). RLS restringe a owner/admin.
+export async function saveBoardSourceScope(
+  boardId: string,
+  keys: string[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("id, kind, settings")
+    .eq("id", boardId)
+    .maybeSingle();
+  if (!dash) return { ok: false, message: "Board não encontrado." };
+  const catalog = await loadSources(supabase);
+  const known = new Set(catalog.map((s) => s.key));
+  const clean = [...new Set(keys.map(String).filter((k) => known.has(k)))];
+  const settings = (dash.settings ?? {}) as DashboardSettings;
+  const next: DashboardSettings = { ...settings };
+  if (clean.length > 0) next.sourceScope = { keys: clean };
+  else delete next.sourceScope;
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ settings: next })
+    .eq("id", boardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  revalidatePath(
+    dash.kind === "kanban" ? `/kanbans/${boardId}` : `/dashboards/${boardId}`
+  );
   return { ok: true };
 }
 
@@ -770,6 +1148,45 @@ export async function savePeriodWindowChoice(
   return { ok: true };
 }
 
+// Grava o valor COMPARTILHADO de um widget "Filtro por campo" com
+// settings.valueScope 'all' (célula __ff__/sel; value = a mesma string
+// codificada de ff_<id>/lastFieldFilters). Mesma tabela/semântica dos filtros
+// rápidos: a RLS (0026/0088/0091) permite escrita por QUALQUER visualizador
+// efetivo do dashboard — é a feature (quem muda o filtro muda para todos);
+// auth aqui é só a sessão. encoded null/vazio apaga a célula.
+export async function saveSharedFieldFilter(
+  dashboardId: string,
+  widgetId: string,
+  encoded: string | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  if (!encoded) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: FF_ROW_KEY,
+        col_key: FF_COL_KEY,
+        value: encoded,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // ---------------- Calculadora (expressão compartilhada) ----------------
 
 // Grava a expressão corrente do widget Calculadora. Vive em
@@ -837,7 +1254,12 @@ export async function listWidgetLinkTargets(): Promise<LinkTargetsCatalog> {
 
   const [{ data: dashData }, { data: widgetData }] = await Promise.all([
     // Kanbans (kind 'kanban') não têm widgets/abas — fora do catálogo de atalhos.
-    supabase.from("dashboards").select("id, name, settings").eq("kind", "dashboard"),
+    // Board na Lixeira (0087) não abre — fora dos destinos (arquivado segue).
+    supabase
+      .from("dashboards")
+      .select("id, name, settings")
+      .eq("kind", "dashboard")
+      .neq("status", "trashed"),
     supabase.from("widgets").select("id, dashboard_id, title, visual_type, settings"),
   ]);
 
@@ -1249,11 +1671,16 @@ async function ensureGoalMetricKeys(
     if (s?.goalLine?.enabled && s.goalLine.metric) keys.add(s.goalLine.metric);
   }
   if (keys.size === 0) return;
-  const { data } = await supabase
+  // sync_config tem PK (organization_id, key) desde a 0090 — leitura e upsert
+  // escopados pela org ativa (sem o filtro, um usuário multi-org leria 2
+  // linhas e o maybeSingle falharia).
+  const orgId = await getActiveOrgId();
+  let regQuery = supabase
     .from("sync_config")
     .select("value")
-    .eq("key", GOAL_METRICS_CONFIG_KEY)
-    .maybeSingle();
+    .eq("key", GOAL_METRICS_CONFIG_KEY);
+  if (orgId) regQuery = regQuery.eq("organization_id", orgId);
+  const { data } = await regQuery.maybeSingle();
   const registry = mergeGoalMetrics(data?.value);
   const missing = [...keys].filter((k) => !registry.some((m) => m.key === k));
   if (missing.length === 0) return;
@@ -1262,8 +1689,9 @@ async function ensureGoalMetricKeys(
     {
       key: GOAL_METRICS_CONFIG_KEY,
       value: [...current, ...missing.map((k) => ({ key: k, label: k }))],
+      ...(orgId ? { organization_id: orgId } : {}),
     },
-    { onConflict: "key" }
+    { onConflict: "organization_id,key" }
   );
 }
 
@@ -1308,7 +1736,10 @@ async function applyPresetDefinition(
     .from("dashboards")
     .select("id, name, settings")
     .eq("owner_user_id", userId)
-    .eq("kind", "dashboard");
+    .eq("kind", "dashboard")
+    // Preset na Lixeira (0087) não é adotado nem atualizado em silêncio —
+    // reaplicar o preset cria um dashboard fresco.
+    .neq("status", "trashed");
   const rows = (dashRows ?? []) as {
     id: string;
     name: string;
@@ -1653,11 +2084,15 @@ export async function captureDashboardSnapshot(
     dash.name as string,
     (dash.settings ?? {}) as DashboardSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') e a expressão compartilhada da
-    // calculadora ('__calc__') ficam FORA do histórico: mudar um dropdown ou
-    // digitar um cálculo não é edição de dashboard (Desfazer não os reverte).
+    // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+    // ('__ff__') e a expressão compartilhada da calculadora ('__calc__') ficam
+    // FORA do histórico: mudar um dropdown ou digitar um cálculo não é edição
+    // de dashboard (Desfazer não os reverte).
     (cellsData ?? []).filter(
-      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+      (c) =>
+        c.row_key !== QF_ROW_KEY &&
+        c.row_key !== FF_ROW_KEY &&
+        c.row_key !== CALC_ROW_KEY
     )
   );
 }
@@ -1711,15 +2146,17 @@ export async function restoreDashboardSnapshot(
 
   // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
   // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
-  // Os valores de filtros rápidos ('__qf__') e a expressão da calculadora
-  // ('__calc__') ficam de fora do snapshot E do delete — Desfazer/Refazer não
-  // deve apagar estado compartilhado que não é edição de dashboard.
+  // Os valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+  // ('__ff__') e a expressão da calculadora ('__calc__') ficam de fora do
+  // snapshot E do delete — Desfazer/Refazer não deve apagar estado
+  // compartilhado que não é edição de dashboard.
   if (snapIds.length > 0) {
     const { error: delErr } = await supabase
       .from("dashboard_table_cells")
       .delete()
       .in("widget_id", snapIds)
       .neq("row_key", QF_ROW_KEY)
+      .neq("row_key", FF_ROW_KEY)
       .neq("row_key", CALC_ROW_KEY);
     if (delErr) return { ok: false, message: delErr.message };
   }

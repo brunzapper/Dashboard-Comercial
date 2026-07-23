@@ -6,8 +6,8 @@
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo (data_sources):
 //   criar/editar/excluir fontes, nome curto por fonte e campo de período;
 //   mantém o rótulo dos campos "gerais" (sync_config).
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 import { fieldAppliesToSource } from "@/lib/sources";
@@ -19,7 +19,7 @@ import { SubSourcesManager } from "@/components/configuracoes/sub-sources-manage
 import { SourceLabelsManager } from "@/components/configuracoes/source-labels-manager";
 
 export default async function FontesPage() {
-  await requireRole("admin");
+  await requireSettingsArea("fontes");
   const supabase = await createClient();
   const sources = await loadSources(supabase);
   const labels = await loadSourceLabels(supabase, sources);
