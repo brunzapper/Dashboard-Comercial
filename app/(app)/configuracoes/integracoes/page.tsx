@@ -18,6 +18,9 @@ import {
   WebhookEndpointsManager,
   type EndpointListItem,
 } from "@/components/admin/webhook-endpoints-manager";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
+import { AiProviderForm } from "@/components/configuracoes/ai-provider-form";
 
 export default async function IntegracoesPage() {
   await requireSettingsArea("integracoes");
@@ -50,6 +53,8 @@ export default async function IntegracoesPage() {
     createdAt: k.created_at as string,
   }));
 
+  const aiConfig = await loadOrgAiConfigPublic(await getActiveOrgId());
+
   const endpoints: EndpointListItem[] = (endpointsRes.data ?? []).map((e) => ({
     id: e.id as string,
     name: e.name as string,
@@ -81,6 +86,7 @@ export default async function IntegracoesPage() {
       </div>
       <ApiKeysManager keys={keys} sources={sources.map((s) => ({ key: s.key, label: s.label }))} />
       <WebhookEndpointsManager endpoints={endpoints} />
+      <AiProviderForm config={aiConfig} />
     </div>
   );
 }
