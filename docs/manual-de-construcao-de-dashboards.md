@@ -1,4 +1,6 @@
-<!-- Versão: 1.0 | Data: 22/07/2026 -->
+<!-- Versão: 1.1 | Data: 22/07/2026 -->
+<!-- v1.1 (22/07/2026): §3.8 — modo "Importar dashboard via JSON (IA)" (botão
+     Importar na Home; prompt compacto/completo; reimporte idempotente). -->
 <!-- v1.0 (22/07/2026): criação. Manual exaustivo e autossuficiente de construção
      de dashboards, escrito para ser ingerido por uma IA (Obsidian/Notion) que
      instruirá terceiros na montagem de dashboards completos pela UI. -->
@@ -279,6 +281,10 @@ dashboard é **pessoal** (só o dono vê). O dono pode excluir o dashboard na
 Home. A Home também reabre automaticamente o último painel visitado ao voltar
 ao app.
 
+Ao lado do "Criar" há um terceiro modo de criação: o botão **"Importar"** —
+um dashboard completo gerado por uma IA externa a partir de um JSON (ver
+§3.8).
+
 ### 3.2 Cabeçalho e modos
 
 No topo da página do dashboard:
@@ -367,6 +373,40 @@ Formas (§5.6) e links dentro de Notas (§5.5) podem apontar para um widget de
 qualquer dashboard/aba. Ao clicar, o sistema navega (se preciso), seleciona a
 aba e **centraliza o widget-alvo** ("modo foco"). É a ferramenta para criar
 painéis-índice ou fluxos guiados.
+
+### 3.8 Importar dashboard via JSON (modo IA)
+
+O botão **"Importar"** (ao lado do "Criar", na Home) cria um dashboard
+completo a partir de um **JSON gerado por uma IA externa** (ChatGPT, Claude
+etc.). O fluxo, guiado no próprio painel:
+
+1. Importe/sincronize a **Base principal** normalmente (Registros → Importar
+   CSV), se ela ainda não existir.
+2. No painel Importar, **selecione a Base** — obrigatório antes de copiar.
+3. **Copie o prompt de instruções**. Duas variantes: **compacto**
+   (especificação do JSON + regras essenciais — para IAs mais capazes) e
+   **completo** (anexa também este manual inteiro — para IAs menos capazes).
+   O prompt copiado leva junto o **modelo da Base** (todos os campos com
+   tipos/opções, Sub-bases, campos unificados, nomes de responsáveis e
+   operações) e uma **amostra de ~20 registros reais** escolhida para que
+   TODA coluna com dado no banco apareça preenchida em pelo menos uma linha
+   (colunas totalmente vazias são listadas como tal).
+4. Cole o prompt na IA, **descreva o dashboard desejado** e receba o JSON.
+5. Cole o JSON no painel e clique em **"Importar dashboard"**. O sistema
+   valida tudo (tipos de widget, campos referenciados, fórmulas, operadores…)
+   e lista os erros em português — basta devolvê-los à IA para corrigir.
+
+O JSON pode declarar, além de abas e widgets (com cálculos e aparência), os
+**campos personalizados**, as **Sub-bases** e as **correspondências** de que o
+dashboard precisa — criados automaticamente na importação (os já existentes
+são reutilizados como estão, nunca sobrescritos).
+
+**Reimporte é atualização**: o JSON carrega uma **chave** de identidade;
+importar de novo a mesma chave ATUALIZA o dashboard existente (widgets do
+import são atualizados no lugar; widgets adicionados à mão são preservados —
+mesma mecânica dos presets, capítulo 13). Permissões: criar dashboards exige a
+permissão de criação; JSON com campos/correspondências exige gestão de campos;
+JSON com Sub-bases exige admin.
 
 ---
 
