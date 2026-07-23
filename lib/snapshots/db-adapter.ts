@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): multi-org (0090) — orgId opcional escopa as passthroughs
+//   consultadas por PERÍODO/CHAVE (goals, non_working_days): o service role
+//   enxerga todas as orgs e uma meta de outra org com a mesma métrica vazaria
+//   no KPI meta. As passthroughs por ID (responsáveis/operações/entity_custom_
+//   values) seguem sem filtro — os ids vêm SEMPRE das linhas congeladas.
 // A costura entre o engine de widgets e o dataset CONGELADO de um snapshot,
 // sem mudar nada em lib/widgets/*: todas as funções de computação (runWidget,
 // runRecordList, runEntityList, runCalculatedWidget, fetchFkLabels,
@@ -38,9 +43,14 @@ const PASSTHROUGH_RPCS = new Set(["operation_subtree"]);
  * SupabaseClient "de snapshot": mesma interface consumida pelo engine, mas
  * toda leitura de registros sai do dataset congelado do snapshot.
  */
+// Passthroughs consultadas por período/chave (não por id congelado): com
+// multi-org precisam do filtro de organização.
+const ORG_SCOPED_PASSTHROUGH = new Set(["goals", "non_working_days"]);
+
 export function snapshotClient(
   service: SupabaseClient,
-  snapshotId: string
+  snapshotId: string,
+  orgId?: string | null
 ): SupabaseClient {
   const client = {
     rpc(fn: string, args?: Record<string, unknown>) {
@@ -75,7 +85,15 @@ export function snapshotClient(
               .eq("snapshot_id", snapshotId),
         };
       }
-      if (PASSTHROUGH_TABLES.has(table)) return service.from(table);
+      if (PASSTHROUGH_TABLES.has(table)) {
+        if (orgId && ORG_SCOPED_PASSTHROUGH.has(table)) {
+          return {
+            select: (cols: string) =>
+              service.from(table).select(cols).eq("organization_id", orgId),
+          };
+        }
+        return service.from(table);
+      }
       throw new Error(`snapshotClient: tabela não permitida: ${table}`);
     },
   };

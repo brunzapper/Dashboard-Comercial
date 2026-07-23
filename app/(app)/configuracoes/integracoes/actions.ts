@@ -11,6 +11,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
@@ -171,7 +172,11 @@ export async function createApiKey(
   }
 
   const key = generateApiKey();
+  // Carimbo de org (multi-org, 0090): o insert é via service role (bypassa a
+  // RLS) — sem o carimbo, a chave de uma org nova nasceria na Zapper.
+  const orgId = await getActiveOrgId();
   const { error } = await db.from("api_keys").insert({
+    ...(orgId ? { organization_id: orgId } : {}),
     key_hash: key.hash,
     key_prefix: key.prefix,
     label,
@@ -235,7 +240,10 @@ export async function createWebhookEndpoint(
 
   const secret = generateWebhookSecret();
   const db = createServiceClient();
+  // Carimbo de org (multi-org, 0090) — service role, ver createApiKey.
+  const orgId = await getActiveOrgId();
   const { error } = await db.from("webhook_endpoints").insert({
+    ...(orgId ? { organization_id: orgId } : {}),
     name: clean.name,
     url: clean.url,
     event_types: clean.eventTypes,

@@ -59,7 +59,7 @@ export default async function KanbanPage({
   const supabase = await createClient();
   const { data: board } = await supabase
     .from("dashboards")
-    .select("id, name, owner_user_id, settings, kind, status")
+    .select("id, name, owner_user_id, settings, kind, status, organization_id")
     .eq("id", id)
     .eq("kind", "kanban")
     .maybeSingle();
@@ -69,7 +69,10 @@ export default async function KanbanPage({
   const settings = (board.settings ?? {}) as DashboardSettings;
   const kanban: KanbanSettings = settings.kanban ?? { mode: "registros" };
 
-  const allSources = await loadSources(supabase);
+  const allSources = await loadSources(
+    supabase,
+    board.organization_id as string | null
+  );
   // Escopo de BASES do board (⋮ → "Bases"): catálogo efetivo deste kanban.
   // A fonte configurada no quadro nunca sai (collectBoardSourceKeys a mantém).
   const sources = applySourceScope(

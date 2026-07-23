@@ -21,6 +21,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { SessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
@@ -346,6 +347,10 @@ export async function loadWidgetScope(
     sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
   }
 
+  // Org ativa (multi-org): catálogo/correspondências da MESMA org da page —
+  // cross-org nem chega aqui (a RLS de dashboards nega o select do board).
+  const orgId = await getActiveOrgId();
+
   const [
     { data: dash },
     { data: widgetsData },
@@ -372,14 +377,14 @@ export async function loadWidgetScope(
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, orgId),
     supabase
       .from("user_preferences")
       .select("settings")
       .eq("user_id", session.user.id)
       .eq("dashboard_id", dashboardId)
       .maybeSingle(),
-    loadSources(supabase),
+    loadSources(supabase, orgId),
   ]);
   if (!dash) return { ok: false, message: "Dashboard não encontrado." };
 

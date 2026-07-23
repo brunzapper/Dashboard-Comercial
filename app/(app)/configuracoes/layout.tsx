@@ -1,11 +1,14 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 23/07/2026
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) + o Log de write-back como sub-abas. Cada sub-aba mantém o mesmo
 // gating de papel/permissão de quando eram itens de topo. Sub-páginas ainda
 // aplicam requireRole/requirePermission — este layout só decide quais abas mostrar.
+// v1.1 (23/07/2026): aba "Organização" (multi-org, 0089) — gate orgAdmin
+//   (flag de organization_members, não é papel de user_roles).
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrg } from "@/lib/auth/org";
 import {
   SettingsTabs,
   type SettingsTab,
@@ -13,8 +16,17 @@ import {
 
 // Moedas (só visualização p/ não-admin), Log (sincronizações) e Conta (senha
 // própria) não têm gating: valem para qualquer autenticado. As demais seguem
-// restritas por papel/permissão.
-const ALL_TABS: (SettingsTab & { role?: string; permission?: string })[] = [
+// restritas por papel/permissão; "Organização" exige org_admin (0089).
+const ALL_TABS: (SettingsTab & {
+  role?: string;
+  permission?: string;
+  orgAdmin?: boolean;
+})[] = [
+  {
+    href: "/configuracoes/organizacao",
+    label: "Organização",
+    orgAdmin: true,
+  },
   { href: "/configuracoes/operacoes", label: "Operações", role: "admin" },
   { href: "/configuracoes/responsaveis", label: "Responsáveis", role: "admin" },
   { href: "/configuracoes/metas", label: "Metas", role: "admin" },
@@ -34,12 +46,14 @@ const ALL_TABS: (SettingsTab & { role?: string; permission?: string })[] = [
 
 export function allowedSettingsTabs(
   roles: string[],
-  permissions: string[]
+  permissions: string[],
+  isOrgAdmin = false
 ): SettingsTab[] {
   return ALL_TABS.filter(
     (t) =>
       (!t.role || roles.includes(t.role)) &&
-      (!t.permission || permissions.includes(t.permission))
+      (!t.permission || permissions.includes(t.permission)) &&
+      (!t.orgAdmin || isOrgAdmin)
   ).map(({ href, label }) => ({ href, label }));
 }
 
@@ -51,7 +65,12 @@ export default async function ConfiguracoesLayout({
   const session = await getSessionInfo();
   if (!session) redirect("/login");
 
-  const tabs = allowedSettingsTabs(session.roles, session.permissions);
+  const org = await getActiveOrg();
+  const tabs = allowedSettingsTabs(
+    session.roles,
+    session.permissions,
+    org?.isOrgAdmin ?? false
+  );
   if (tabs.length === 0) redirect("/");
 
   return (

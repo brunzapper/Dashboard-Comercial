@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { toRecordType, toSourceKey } from "@/lib/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
@@ -89,9 +90,12 @@ export async function createMatchRule(
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
+  // Carimbo de org (multi-org, 0090): sem ele, o default (Zapper) falharia no
+  // WITH CHECK da RLS para um admin de outra org.
+  const orgId = await getActiveOrgId();
   const { data: created, error: insErr } = await supabase
     .from("match_rules")
-    .insert(values!)
+    .insert({ ...values!, ...(orgId ? { organization_id: orgId } : {}) })
     .select("id")
     .maybeSingle();
   if (insErr) return { ok: false, message: insErr.message };

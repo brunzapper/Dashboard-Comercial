@@ -16,6 +16,7 @@
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
@@ -98,6 +99,9 @@ export async function runKanbanWidget(
     sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
   }
 
+  // Org ativa (multi-org): mesmo recorte da page/widget-scope.
+  const orgId = await getActiveOrgId();
+
   const [
     { data: dash },
     { data: widgetsData },
@@ -128,14 +132,14 @@ export async function runKanbanWidget(
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, orgId),
     supabase
       .from("user_preferences")
       .select("settings")
       .eq("user_id", session.user.id)
       .eq("dashboard_id", dashboardId)
       .maybeSingle(),
-    loadSources(supabase),
+    loadSources(supabase, orgId),
     supabase
       .from("responsibles")
       .select("id, display_name, bitrix_user_id")

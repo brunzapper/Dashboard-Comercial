@@ -107,13 +107,36 @@ async function doRefresh(
   snap: SnapshotListItem
 ): Promise<{ config: SnapshotConfig; rows: number }> {
   // 1) Insumos vivos (nomes/estrutura) — mesmo select da page do dashboard.
-  const [{ data: dashData }, { data: widgetsData }, { data: fieldsData }, correspondences, currencies, currencyRates] =
+  // O dashboard vem PRIMEIRO: o service role enxerga TODAS as orgs, então
+  // campos/correspondências/catálogo precisam do organization_id dele
+  // (multi-org, 0090) — sem o filtro, o bundle congelaria o catálogo de
+  // outras organizações (vazamento + colisão de field_keys por-org).
+  const { data: dashData } = await service
+    .from("dashboards")
+    .select("id, name, settings, status, organization_id")
+    .eq("id", snap.dashboard_id)
+    .maybeSingle();
+  if (!dashData) throw new Error("Dashboard do snapshot não existe mais.");
+  // Board na Lixeira (0087): não gasta refresh — o erro fica registrado e
+  // next_refresh_at avança (sem hot loop). Arquivado segue refrescando.
+  if ((dashData.status as string) === "trashed") {
+    throw new Error("Dashboard na Lixeira.");
+  }
+  const orgId = (dashData.organization_id as string | null) ?? null;
+
+  let fieldsQuery = service
+    .from("field_definitions")
+    .select(
+      "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
+    )
+    // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+    // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+    .or("show_in_builder.eq.true,source_system.eq.core")
+    .order("sort_order", { ascending: true });
+  if (orgId) fieldsQuery = fieldsQuery.eq("organization_id", orgId);
+
+  const [{ data: widgetsData }, { data: fieldsData }, correspondences, currencies, currencyRates] =
     await Promise.all([
-      service
-        .from("dashboards")
-        .select("id, name, settings, status")
-        .eq("id", snap.dashboard_id)
-        .maybeSingle(),
       service
         .from("widgets")
         .select(
@@ -121,27 +144,13 @@ async function doRefresh(
         )
         .eq("dashboard_id", snap.dashboard_id)
         .order("sort_order", { ascending: true }),
-      service
-        .from("field_definitions")
-        .select(
-          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
-        )
-        // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
-      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
-      .or("show_in_builder.eq.true,source_system.eq.core")
-        .order("sort_order", { ascending: true }),
-      loadCorrespondences(service),
+      fieldsQuery,
+      loadCorrespondences(service, orgId),
       loadEnabledCurrencies(service),
       loadCurrencyRates(service),
     ]);
-  if (!dashData) throw new Error("Dashboard do snapshot não existe mais.");
-  // Board na Lixeira (0087): não gasta refresh — o erro fica registrado e
-  // next_refresh_at avança (sem hot loop). Arquivado segue refrescando.
-  if ((dashData.status as string) === "trashed") {
-    throw new Error("Dashboard na Lixeira.");
-  }
 
-  const sources = await loadSources(service);
+  const sources = await loadSources(service, orgId);
   const widgets = (widgetsData ?? []) as Widget[];
   const fields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dashData.settings ?? {}) as DashboardSettings;
@@ -172,7 +181,7 @@ async function doRefresh(
 
   // 4) Opções de filtros — computadas APÓS a cópia, sobre o dataset congelado
   //    e sempre restritas (nunca vazam nomes/valores além do permitido).
-  const db = snapshotClient(service, snap.id);
+  const db = snapshotClient(service, snap.id, orgId);
 
   const dataWidgets = tabWidgets.filter(
     (w) =>

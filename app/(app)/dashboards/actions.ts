@@ -27,6 +27,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
@@ -112,12 +113,16 @@ export async function createDashboard(
   if (!name) return { ok: false, message: "Informe um nome." };
   const visible = formData.getAll("visible_to_roles").map(String).filter(Boolean);
 
+  // Carimbo de org (multi-org, 0090): sem ele, o default (Zapper) faria o
+  // insert de um usuário de OUTRA org falhar no WITH CHECK da RLS.
+  const orgId = await getActiveOrgId();
   const supabase = await createClient();
   const { error } = await supabase.from("dashboards").insert({
     name,
     owner_user_id: session.user.id,
     visible_to_roles: visible,
     is_shared: visible.length > 0,
+    ...(orgId ? { organization_id: orgId } : {}),
   });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
@@ -185,6 +190,8 @@ export async function createBoard(
     kanban.card = { titleField: "title" };
   }
 
+  // Carimbo de org (multi-org, 0090) — ver createDashboard.
+  const orgId = await getActiveOrgId();
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("dashboards")
@@ -195,6 +202,7 @@ export async function createBoard(
       visible_to_roles: visible,
       is_shared: visible.length > 0,
       settings: { kanban },
+      ...(orgId ? { organization_id: orgId } : {}),
     })
     .select("id")
     .single();
@@ -331,7 +339,7 @@ export async function duplicateBoard(
 
   const { data: src } = await supabase
     .from("dashboards")
-    .select("id, name, kind, settings, status")
+    .select("id, name, kind, settings, status, organization_id")
     .eq("id", id)
     .maybeSingle();
   if (!src) return { ok: false, message: "Board não encontrado." };
@@ -375,6 +383,10 @@ export async function duplicateBoard(
     visible_to_roles: [],
     is_shared: false,
     settings: dashSettings,
+    // A cópia herda a org do ORIGINAL (multi-org, 0090).
+    ...(src.organization_id
+      ? { organization_id: src.organization_id }
+      : {}),
   });
   if (dashErr) return { ok: false, message: dashErr.message };
 
@@ -1607,11 +1619,16 @@ async function ensureGoalMetricKeys(
     if (s?.goalLine?.enabled && s.goalLine.metric) keys.add(s.goalLine.metric);
   }
   if (keys.size === 0) return;
-  const { data } = await supabase
+  // sync_config tem PK (organization_id, key) desde a 0090 — leitura e upsert
+  // escopados pela org ativa (sem o filtro, um usuário multi-org leria 2
+  // linhas e o maybeSingle falharia).
+  const orgId = await getActiveOrgId();
+  let regQuery = supabase
     .from("sync_config")
     .select("value")
-    .eq("key", GOAL_METRICS_CONFIG_KEY)
-    .maybeSingle();
+    .eq("key", GOAL_METRICS_CONFIG_KEY);
+  if (orgId) regQuery = regQuery.eq("organization_id", orgId);
+  const { data } = await regQuery.maybeSingle();
   const registry = mergeGoalMetrics(data?.value);
   const missing = [...keys].filter((k) => !registry.some((m) => m.key === k));
   if (missing.length === 0) return;
@@ -1620,8 +1637,9 @@ async function ensureGoalMetricKeys(
     {
       key: GOAL_METRICS_CONFIG_KEY,
       value: [...current, ...missing.map((k) => ({ key: k, label: k }))],
+      ...(orgId ? { organization_id: orgId } : {}),
     },
-    { onConflict: "key" }
+    { onConflict: "organization_id,key" }
   );
 }
 

@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import { loadUserSettings } from "@/lib/config/user-settings";
@@ -141,9 +142,12 @@ export async function createTask(
     session.roles.includes("admin") || session.roles.includes("gestor");
   const isGlobal = isManager && String(formData.get("is_global") ?? "") === "1";
 
+  // Carimbo de org (multi-org, 0090).
+  const orgId = await getActiveOrgId();
   const { data, error } = await supabase
     .from("tasks")
     .insert({
+      ...(orgId ? { organization_id: orgId } : {}),
       title: parsed.title,
       description: parsed.description,
       record_id: parsed.record_id,

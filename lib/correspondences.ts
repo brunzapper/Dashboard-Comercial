@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 20/07/2026
+// Versão: 1.3 | Data: 23/07/2026
+// v1.3 (23/07/2026): multi-org — orgId opcional filtra as correspondências da
+//   organização ativa (RLS já escopa; o filtro resolve a visão multi-org).
 // Fase 8: correspondências de colunas GLOBAIS. Um "campo unificado" liga colunas
 // equivalentes de fontes diferentes (por source-key) para que o widget as trate
 // como a mesma coluna. Tipos + carregamento + o mapa passado ao RPC
@@ -36,16 +38,19 @@ export interface Correspondence {
   members: CorrespondenceMember[];
 }
 
-/** Carrega todas as correspondências + membros (globais). */
+/** Carrega todas as correspondências + membros (da org, quando informada). */
 export async function loadCorrespondences(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  orgId?: string | null
 ): Promise<Correspondence[]> {
-  const { data } = await supabase
+  let query = supabase
     .from("field_correspondences")
     .select(
       "id, key, label, data_type, members:field_correspondence_members(record_type, source_key, field_ref)"
     )
     .order("label", { ascending: true });
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data } = await query;
   return (data ?? []).map((c) => ({
     id: c.id as string,
     key: c.key as string,

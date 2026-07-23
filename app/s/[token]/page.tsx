@@ -159,13 +159,16 @@ export default async function SnapshotPage({
   const snap = snapData as unknown as SnapshotRow;
 
   // Board na Lixeira (0087) não abre — nem pelo link público (arquivado
-  // segue). Mesmo 404 uniforme.
+  // segue). Mesmo 404 uniforme. organization_id (0090): o service role
+  // enxerga todas as orgs — catálogo/rótulos/metas do viewer são escopados
+  // pela org do dashboard, senão vazariam nomes de outras organizações.
   const { data: dashRow } = await service
     .from("dashboards")
-    .select("status")
+    .select("status, organization_id")
     .eq("id", snap.dashboard_id)
     .maybeSingle();
   if (!dashRow || (dashRow.status as string) === "trashed") notFound();
+  const orgId = (dashRow.organization_id as string | null) ?? null;
 
   // Auditoria de acesso (contagem aproximada; corrida entre requests é ok).
   // Roda DEPOIS da resposta (after) — o UPDATE não bloqueia a renderização.
@@ -205,8 +208,8 @@ export default async function SnapshotPage({
   // awaits seriais).
   const [allSources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
     [
-      loadSources(service),
-      loadSourceLabelsValue(service),
+      loadSources(service, orgId),
+      loadSourceLabelsValue(service, orgId),
       // Partner rows (registros casados fora das restrições, presentes SÓ para
       // resolver colunas match:): o RPC os exclui no SQL (`not partner_only`);
       // no modo lista (PostgREST direto) eles são excluídos por pós-filtro com
@@ -239,7 +242,7 @@ export default async function SnapshotPage({
   // Memoização por argumentos (a mesma do dashboard autenticado): widgets/
   // notas/calculadoras duplicados geram RPCs idênticas — o memo intercepta
   // `run_widget_query` ANTES de o adapter renomear p/ o RPC do snapshot.
-  const db = withRpcMemo(snapshotClient(service, snap.id));
+  const db = withRpcMemo(snapshotClient(service, snap.id, orgId));
   const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
   // Período congelado na criação (0059): default_period vira o período de

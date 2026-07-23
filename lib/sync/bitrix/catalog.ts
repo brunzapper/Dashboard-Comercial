@@ -276,9 +276,11 @@ export async function syncFieldCatalog(
     };
   });
 
+  // onConflict composto (0090): field_key é único POR ORG; o sync (service
+  // role) escreve sem org e o default da coluna (Zapper) casa com o índice.
   const { error } = await db
     .from("field_definitions")
-    .upsert(payload, { onConflict: "field_key" });
+    .upsert(payload, { onConflict: "organization_id,field_key" });
   // Não aborta o sync: um catálogo desatualizado é preferível a um sync parado.
   // Mas a falha precisa aparecer nos logs — um conflito com o índice único
   // (source_system, source_field_id) da 0017 derruba o upsert INTEIRO e, calado,

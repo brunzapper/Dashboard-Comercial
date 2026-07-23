@@ -194,7 +194,9 @@ export default async function DashboardPage({
     getSessionInfo(),
     supabase
       .from("dashboards")
-      .select("id, name, owner_user_id, visible_to_roles, settings, status")
+      .select(
+        "id, name, owner_user_id, visible_to_roles, settings, status, organization_id"
+      )
       .eq("id", id)
       .maybeSingle(),
   ]);
@@ -248,7 +250,7 @@ export default async function DashboardPage({
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, dash.organization_id as string | null),
     session
       ? supabase
           .from("user_preferences")
@@ -259,7 +261,9 @@ export default async function DashboardPage({
       : Promise.resolve({ data: null }),
     loadEnabledCurrencies(supabase),
     loadCurrencyRates(supabase),
-    loadSources(supabase),
+    // Catálogo da ORG do board (multi-org): a RLS já escopa; o filtro cobre a
+    // visão de quem pertence a 2+ orgs.
+    loadSources(supabase, dash.organization_id as string | null),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
