@@ -14,31 +14,38 @@ interface CachedEndpoint {
 }
 
 const CACHE_TTL_MS = 30_000;
-let endpointCache: { at: number; endpoints: CachedEndpoint[] } | null = null;
+// ISOLAMENTO multi-org (0090): o cache é POR organização — endpoints de uma org
+// nunca podem receber o payload de um registro de outra. A chave "" cobre o
+// caminho legado/single-tenant (organizationId ausente = todos os endpoints).
+const endpointCache = new Map<string, { at: number; endpoints: CachedEndpoint[] }>();
 
 async function loadActiveEndpoints(
-  db: ReturnType<typeof createServiceClient>
+  db: ReturnType<typeof createServiceClient>,
+  organizationId: string | null
 ): Promise<CachedEndpoint[]> {
+  const key = organizationId ?? "";
   const now = Date.now();
-  if (endpointCache && now - endpointCache.at < CACHE_TTL_MS) {
-    return endpointCache.endpoints;
+  const cached = endpointCache.get(key);
+  if (cached && now - cached.at < CACHE_TTL_MS) {
+    return cached.endpoints;
   }
-  const { data, error } = await db
-    .from("webhook_endpoints")
-    .select("id, event_types")
-    .eq("active", true);
+  let query = db.from("webhook_endpoints").select("id, event_types").eq("active", true);
+  // Sem org (pré-migração/single-tenant) mantém o comportamento antigo; com org,
+  // recorta os endpoints da própria org.
+  if (organizationId) query = query.eq("organization_id", organizationId);
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   const endpoints = (data ?? []).map((e) => ({
     id: e.id as string,
     event_types: (e.event_types as string[] | null) ?? [],
   }));
-  endpointCache = { at: now, endpoints };
+  endpointCache.set(key, { at: now, endpoints });
   return endpoints;
 }
 
 /** Invalida o cache (usado pelas actions de Integrações após criar/editar). */
 export function invalidateEndpointCache(): void {
-  endpointCache = null;
+  endpointCache.clear();
 }
 
 /**
@@ -48,11 +55,12 @@ export function invalidateEndpointCache(): void {
  */
 export async function emitWebhookEvent(
   type: WebhookEventType,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  organizationId: string | null = null
 ): Promise<void> {
   try {
     const db = createServiceClient();
-    const endpoints = await loadActiveEndpoints(db);
+    const endpoints = await loadActiveEndpoints(db, organizationId);
     const matching = endpoints.filter(
       (e) => e.event_types.length === 0 || e.event_types.includes(type)
     );
@@ -60,7 +68,13 @@ export async function emitWebhookEvent(
 
     const { data: ev, error } = await db
       .from("webhook_events")
-      .insert({ event_type: type, payload: data })
+      .insert({
+        event_type: type,
+        payload: data,
+        // Carimbo de org (0090): o insert é via service role (bypassa a RLS) —
+        // sem o carimbo o evento nasceria na org default (Zapper).
+        ...(organizationId ? { organization_id: organizationId } : {}),
+      })
       .select("id")
       .single();
     if (error || !ev) return;

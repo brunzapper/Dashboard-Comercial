@@ -9,7 +9,8 @@
 // Assim o sync horário sai do próprio tick e nada trava a navegação do usuário.
 import { NextResponse } from "next/server";
 
-import { getSyncSecret, optionalEnv } from "@/lib/env";
+import { optionalEnv } from "@/lib/env";
+import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   createJob,
@@ -29,14 +30,8 @@ const BUDGET_MS = 45_000;
 // Cria um novo reconcile automático quando o último foi há ≥ 1h.
 const AUTO_INTERVAL_MS = 60 * 60 * 1000;
 
-function authorized(request: Request): boolean {
-  const secret = getSyncSecret();
-  const header =
-    request.headers.get("x-sync-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    null;
-  return header !== null && header === secret;
-}
+// SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
+const authorized = syncSecretAuthorized;
 
 function autoWindowDays(): number {
   const n = Number(optionalEnv("AUTO_SYNC_WINDOW_DAYS") ?? "1");

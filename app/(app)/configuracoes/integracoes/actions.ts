@@ -195,11 +195,19 @@ export async function revokeApiKey(id: string): Promise<ActionState> {
   const auth = await ensureAdmin();
   if (!auth.ok) return { ok: false, message: auth.message };
   const db = createServiceClient();
-  const { error } = await db
+  // ISOLAMENTO multi-org (0090): a mutação é service role (bypassa RLS) — recorta
+  // pela org ativa para um admin não agir sobre a chave de outra org.
+  const orgId = await getActiveOrgId();
+  let q = db
     .from("api_keys")
     .update({ revoked_at: new Date().toISOString() })
     .eq("id", id);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data, error } = await q.select("id");
   if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Chave não encontrada." };
+  }
   revalidate();
   return { ok: true, message: "Chave revogada." };
 }
@@ -267,11 +275,17 @@ export async function updateWebhookEndpoint(
   if (!clean.ok) return { ok: false, message: clean.message };
 
   const db = createServiceClient();
-  const { error } = await db
+  const orgId = await getActiveOrgId();
+  let q = db
     .from("webhook_endpoints")
     .update({ name: clean.name, url: clean.url, event_types: clean.eventTypes })
     .eq("id", id);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data, error } = await q.select("id");
   if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Endpoint não encontrado." };
+  }
   invalidateEndpointCache();
   revalidate();
   return { ok: true, message: "Endpoint atualizado." };
@@ -284,7 +298,8 @@ export async function setWebhookEndpointActive(
   const auth = await ensureAdmin();
   if (!auth.ok) return { ok: false, message: auth.message };
   const db = createServiceClient();
-  const { error } = await db
+  const orgId = await getActiveOrgId();
+  let q = db
     .from("webhook_endpoints")
     .update(
       active
@@ -292,7 +307,12 @@ export async function setWebhookEndpointActive(
         : { active: false, disabled_reason: "desativado manualmente" }
     )
     .eq("id", id);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data, error } = await q.select("id");
   if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Endpoint não encontrado." };
+  }
   if (!active) {
     // Entregas pendentes de endpoint inativo nunca mais seriam drenadas.
     await db
@@ -314,11 +334,17 @@ export async function rollWebhookSecret(
   if (!auth.ok) return { ok: false, message: auth.message };
   const secret = generateWebhookSecret();
   const db = createServiceClient();
-  const { error } = await db
+  const orgId = await getActiveOrgId();
+  let q = db
     .from("webhook_endpoints")
     .update({ secret_ciphertext: encryptSecret(secret) })
     .eq("id", id);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data, error } = await q.select("id");
   if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Endpoint não encontrado." };
+  }
   revalidate();
   return { ok: true, secret };
 }
@@ -328,8 +354,14 @@ export async function deleteWebhookEndpoint(id: string): Promise<ActionState> {
   if (!auth.ok) return { ok: false, message: auth.message };
   const db = createServiceClient();
   // Cascade apaga as entregas; eventos órfãos saem na retenção do tick.
-  const { error } = await db.from("webhook_endpoints").delete().eq("id", id);
+  const orgId = await getActiveOrgId();
+  let q = db.from("webhook_endpoints").delete().eq("id", id);
+  if (orgId) q = q.eq("organization_id", orgId);
+  const { data, error } = await q.select("id");
   if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Endpoint não encontrado." };
+  }
   invalidateEndpointCache();
   revalidate();
   return { ok: true, message: "Endpoint excluído." };
@@ -388,11 +420,13 @@ export async function sendTestEvent(endpointId: string): Promise<TestEventResult
   if (!auth.ok) return { ok: false, message: auth.message };
   const db = createServiceClient();
 
-  const { data: ep } = await db
+  const orgId = await getActiveOrgId();
+  let epQuery = db
     .from("webhook_endpoints")
     .select("id, url, secret_ciphertext, consecutive_failures")
-    .eq("id", endpointId)
-    .maybeSingle();
+    .eq("id", endpointId);
+  if (orgId) epQuery = epQuery.eq("organization_id", orgId);
+  const { data: ep } = await epQuery.maybeSingle();
   if (!ep) return { ok: false, message: "Endpoint não encontrado." };
 
   const { data: ev, error: evErr } = await db

@@ -1096,6 +1096,53 @@ export async function loadFormulaDefs(
   );
 }
 
+/**
+ * Como loadFormulaDefs, mas AGRUPADO por organização. ISOLAMENTO multi-org
+ * (0090): `field_definitions.field_key` é único POR-ORG, então duas orgs podem
+ * ter a mesma chave com fórmulas diferentes. O recalc global (recalcAllFormula
+ * Fields, que varre registros de todas as orgs) precisa aplicar a CADA registro
+ * apenas as fórmulas da SUA org — senão a fórmula da org B seria gravada no
+ * custom_fields de um registro da org A. A chave do Map é o `organization_id`.
+ */
+export async function loadFormulaDefsByOrg(
+  db: import("@supabase/supabase-js").SupabaseClient
+): Promise<Map<string, FormulaFieldDef[]>> {
+  const { data } = await db
+    .from("field_definitions")
+    .select(
+      "field_key, formula, currency_mode, currency_code, allow_negative, source_system, organization_id"
+    )
+    .eq("data_type", "calculado");
+  const rowsByOrg = new Map<
+    string,
+    Array<{
+      field_key: string;
+      data_type: "calculado";
+      formula: unknown;
+      currency_mode: string | null;
+      currency_code: string | null;
+      allow_negative: boolean | null;
+    }>
+  >();
+  for (const r of data ?? []) {
+    if (isCoreDef(r)) continue;
+    const org = (r.organization_id as string | null) ?? "";
+    const list = rowsByOrg.get(org) ?? [];
+    list.push({
+      field_key: r.field_key as string,
+      data_type: "calculado",
+      formula: r.formula,
+      currency_mode: (r.currency_mode as string | null) ?? null,
+      currency_code: (r.currency_code as string | null) ?? null,
+      allow_negative: (r.allow_negative as boolean | null) ?? null,
+    });
+    rowsByOrg.set(org, list);
+  }
+  const byOrg = new Map<string, FormulaFieldDef[]>();
+  for (const [org, rows] of rowsByOrg) byOrg.set(org, formulaDefsFromRows(rows));
+  return byOrg;
+}
+
 // Contexto de conversão de moeda de um registro (para materializar calc-fields).
 export interface FormulaCurrencyContext {
   recordCurrency: string; // moeda do registro (value/mrr)

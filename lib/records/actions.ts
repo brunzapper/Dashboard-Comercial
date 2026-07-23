@@ -27,6 +27,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
@@ -562,17 +563,23 @@ export async function updateRecord(
   }
 
   // Webhook de saída (0074): emitWebhookEvent nunca lança — falha na emissão
-  // jamais derruba a edição já persistida.
+  // jamais derruba a edição já persistida. Escopo de org (0090): só endpoints
+  // da org do editor recebem o payload do registro.
   if (audits.length > 0) {
+    const orgId = await getActiveOrgId();
     effects.push(
-      emitWebhookEvent("record.updated", {
-        recordId,
-        changes: audits.map((a) => ({
-          field: a.field,
-          old_value: a.old_value ?? null,
-          new_value: a.new_value ?? null,
-        })),
-      })
+      emitWebhookEvent(
+        "record.updated",
+        {
+          recordId,
+          changes: audits.map((a) => ({
+            field: a.field,
+            old_value: a.old_value ?? null,
+            new_value: a.new_value ?? null,
+          })),
+        },
+        orgId
+      )
     );
   }
 
@@ -910,7 +917,11 @@ export async function createRecord(
     );
   }
 
-  await emitWebhookEvent("record.created", { recordId: id, source: sourceKey });
+  await emitWebhookEvent(
+    "record.created",
+    { recordId: id, source: sourceKey },
+    await getActiveOrgId()
+  );
 
   revalidatePath("/registros");
   const bitrixNote = row.source_id ? ` (criado no Bitrix, ID ${row.source_id}).` : ".";

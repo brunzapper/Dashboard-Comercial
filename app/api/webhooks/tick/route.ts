@@ -7,7 +7,7 @@
 // entrada. Tick sem nada vencido custa um único SELECT indexado.
 import { NextResponse } from "next/server";
 
-import { getSyncSecret } from "@/lib/env";
+import { syncSecretAuthorized } from "@/lib/auth/sync-secret";
 import { createServiceClient } from "@/lib/supabase/service";
 import { drainDeliveries } from "@/lib/webhooks/deliver";
 
@@ -22,14 +22,8 @@ const RETAIN_DEAD_DAYS = 90;
 const RETAIN_INBOUND_DAYS = 30;
 const PURGE_BATCH = 500;
 
-function authorized(request: Request): boolean {
-  const secret = getSyncSecret();
-  const header =
-    request.headers.get("x-sync-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    null;
-  return header !== null && header === secret;
-}
+// SYNC_SECRET com comparação constant-time — ver lib/auth/sync-secret.ts.
+const authorized = syncSecretAuthorized;
 
 function daysAgoIso(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
