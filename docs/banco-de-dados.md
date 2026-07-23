@@ -194,7 +194,7 @@ marca o **Administrador de Organização** — ÚNICO por org (índice parcial
 role, inclusive no cascade de excluir a conta). Escrita SÓ service role.
 
 **`app_owner`** (0089) — o **Owner** do sistema (1 linha; seed
-bruno.2bpl@gmail.com). Imutável por qualquer caminho de app (trigger
+bruno@zapper.to). Imutável por qualquer caminho de app (trigger
 `enforce_app_owner_guard`); FK a auth.users SEM cascade (excluir a conta
 falha). O modo Owner (`/owner`) exige também env `OWNER_USER_ID` == uid
 (guard fail-closed em `lib/auth/owner.ts`).

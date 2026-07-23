@@ -3,7 +3,7 @@
 -- o branding editável name/app_name exibido no sidebar), organization_members
 -- (vínculo usuário↔org com a flag is_org_admin — "Administrador de
 -- Organização") e app_owner (o "Owner" do sistema: 1 linha, hoje
--- bruno.2bpl@gmail.com).
+-- bruno@zapper.to).
 --
 -- PROTEÇÕES ("a menos que criado pelo banco"):
 --   * Um ÚNICO org_admin por org (índice único parcial) — segundo admin só
@@ -23,7 +23,7 @@
 --
 -- Seeds: org Zapper em uuid FIXO (referenciado pelo default das colunas
 -- organization_id na 0090), TODOS os usuários atuais como membros, e o owner
--- (bruno.2bpl@gmail.com) como org_admin da Zapper + app_owner.
+-- (bruno@zapper.to) como org_admin da Zapper + app_owner.
 -- Aplicar 0089→0090→0091 na MESMA janela, imediatamente antes do deploy do
 -- código correspondente (invariante 6). Idempotente.
 
@@ -81,13 +81,13 @@ select '00000000-0000-4000-a000-000000000001', u.id
 from auth.users u
 on conflict do nothing;
 
--- Owner + org_admin da Zapper: bruno.2bpl@gmail.com (só se ainda não houver
+-- Owner + org_admin da Zapper: bruno@zapper.to (só se ainda não houver
 -- outro org_admin — o índice parcial garante unicidade de qualquer forma).
 update public.organization_members om
 set is_org_admin = true
 where om.organization_id = '00000000-0000-4000-a000-000000000001'
   and om.user_id = (
-    select id from auth.users where lower(email) = 'bruno.2bpl@gmail.com'
+    select id from auth.users where lower(email) = 'bruno@zapper.to'
   )
   and not om.is_org_admin
   and not exists (
@@ -96,7 +96,7 @@ where om.organization_id = '00000000-0000-4000-a000-000000000001'
   );
 
 insert into public.app_owner (user_id)
-select id from auth.users where lower(email) = 'bruno.2bpl@gmail.com'
+select id from auth.users where lower(email) = 'bruno@zapper.to'
 on conflict do nothing;
 
 -- ===================== Triggers de proteção =====================

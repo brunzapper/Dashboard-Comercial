@@ -423,7 +423,7 @@ os upserts usam onConflict compostos):
 
 1. `0088_board_access.sql` — acesso por pessoa aos boards (⋮ → Acesso).
 2. `0089_organizations.sql` — organizações + org_admin + Owner (seeds Zapper
-   e bruno.2bpl@gmail.com; confira que o email existe em auth.users ANTES).
+   e bruno@zapper.to; confira que o email existe em auth.users ANTES).
 3. `0090_org_columns.sql` — `organization_id` nas raízes + stamps + unicidades
    por-org.
 4. `0091_org_rls.sql` — RLS org-scoped (a partir daqui o isolamento vale).
@@ -432,7 +432,7 @@ os upserts usam onConflict compostos):
 7. `0094_user_access_overrides.sql` — overrides individuais.
 
 Depois do deploy, configure na Vercel a env **`OWNER_USER_ID`** = User UID de
-bruno.2bpl@gmail.com (sem ela o modo Owner nega sempre — fail-closed).
+bruno@zapper.to (sem ela o modo Owner nega sempre — fail-closed).
 
 Conferências pós-migração:
 
