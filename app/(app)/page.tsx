@@ -30,12 +30,19 @@ import {
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import {
   BoardCardMenu,
   type BoardStatus,
 } from "@/components/dashboards/board-card-menu";
 
 const TRASH_TTL_MS = 14 * 86_400_000; // purga em 14 dias (0087)
+
+// A geração direta por IA (ImportDashboardSheet → generateDashboardWithAi) roda
+// como server action DESTA rota; o laço de autocorreção pode levar alguns
+// segundos. maxDuration amplia o teto da função serverless (clampado ao teto do
+// plano da Vercel).
+export const maxDuration = 300;
 
 interface DashboardRow {
   id: string;
@@ -171,8 +178,10 @@ export default async function HomePage() {
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
+  let aiConfig: Awaited<ReturnType<typeof loadOrgAiConfigPublic>> = null;
   if (canCreate) {
     sources = await loadSources(supabase, orgId);
+    aiConfig = await loadOrgAiConfigPublic(orgId);
     // Campos p/ o seletor de colunas do kanban: NÃO filtramos por show_in_builder
     // (esse gate é dos construtores BI). Definir as colunas do quadro é escolha de
     // exibição — inclusive campos LOCAIS criados só para servir de "fase" (nunca
@@ -214,7 +223,7 @@ export default async function HomePage() {
         </div>
         {canCreate ? (
           <div className="flex items-center gap-2">
-            <ImportDashboardSheet sources={sources} />
+            <ImportDashboardSheet sources={sources} ai={aiConfig} />
             <CreateMenu sources={sources} fields={fields} />
           </div>
         ) : null}

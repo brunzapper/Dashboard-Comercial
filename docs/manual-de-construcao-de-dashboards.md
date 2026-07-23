@@ -1,4 +1,8 @@
-<!-- Versão: 1.2 | Data: 23/07/2026 -->
+<!-- Versão: 1.3 | Data: 23/07/2026 -->
+<!-- v1.3 (23/07/2026): §3.8.1 — geração DIRETA por IA (via API): botão "Gerar
+     com IA" no painel Importar chama o provedor configurado (Configurações →
+     Integrações) e importa automaticamente, com autocorreção pelos erros do
+     validador. -->
 <!-- v1.2 (23/07/2026): §3.8 — Importar aceita VÁRIAS Bases (modelo/amostra por
      Base + Conexões no prompt; dashboards combinados). -->
 <!-- v1.1 (22/07/2026): §3.8 — modo "Importar dashboard via JSON (IA)" (botão
@@ -412,6 +416,23 @@ import são atualizados no lugar; widgets adicionados à mão são preservados �
 mesma mecânica dos presets, capítulo 13). Permissões: criar dashboards exige a
 permissão de criação; JSON com campos/correspondências exige gestão de campos;
 JSON com Sub-bases exige admin.
+
+#### 3.8.1 Gerar com IA direto (via API)
+
+Além do copiar/colar acima, o painel Importar traz o botão **"Gerar com IA"**:
+você **marca a(s) Base(s)**, **descreve o dashboard** em linguagem natural e o
+próprio sistema chama a IA por API, valida e **cria o dashboard
+automaticamente** — sem sair da tela. Se a IA errar o formato, o servidor
+devolve a ela os erros do validador e tenta corrigir sozinho (algumas
+tentativas); persistindo o erro, o rascunho é jogado no campo de JSON para
+ajuste manual. As mesmas permissões e regras de validação do §3.8 valem.
+
+Para habilitar, um **administrador** conecta um provedor em **Configurações →
+Integrações → "Geração de dashboards por IA"**: escolhe o **provedor** (Google
+Gemini, Anthropic Claude ou OpenAI), o **modelo** e cola a **chave de API**. A
+chave é guardada **cifrada** e por organização, e nunca sai do servidor. Sem
+provedor configurado, o botão fica indisponível e só o fluxo manual (acima)
+funciona. Sugestão: comece pelo **Gemini** (tem plano gratuito).
 
 ---
 
