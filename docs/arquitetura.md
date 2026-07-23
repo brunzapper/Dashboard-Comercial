@@ -1,4 +1,6 @@
-<!-- Versão: 1.20 | Data: 23/07/2026 -->
+<!-- Versão: 1.21 | Data: 23/07/2026 -->
+<!-- v1.21 (23/07/2026): §4.11 — Importar aceita VÁRIAS Bases (modelo/amostra
+     por Base + Conexões no prompt; envelope `bases: []`). -->
 <!-- v1.20 (23/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
      (botão Importar na Home; validador puro em lib/import/dashboard/*;
      aplicação pelo applyPresetDefinition com identidade import:<chave>;
@@ -1071,13 +1073,15 @@ dashboard completo. Peças:
   fields/correspondences; admin p/ subSources — mesmos das actions de
   cadastro.
 - **Prompt**: `buildImportPrompt` (`app/(app)/dashboards/import-prompt-actions.ts`)
-  monta espec (`lib/import/dashboard/instructions.ts`) + modelo da Base +
-  amostra de ~20 registros com COBERTURA de colunas
+  aceita VÁRIAS Bases (checklist no sheet; 23/07/2026) e monta espec
+  (`lib/import/dashboard/instructions.ts`) + modelo POR BASE + campos
+  unificados + Conexões (`match_rules` habilitadas dos pares tocados) +
+  amostra de ~20 registros POR BASE com COBERTURA de colunas
   (`lib/import/dashboard/sample.ts`, guloso + busca complementar por coluna
-  descoberta). A variante "completo" anexa
-  `docs/manual-de-construcao-de-dashboards.md` lido do disco —
-  `outputFileTracingIncludes` no `next.config.ts` garante o arquivo no bundle
-  da Vercel.
+  descoberta). O envelope do JSON aceita `bases: []` (ou `base` singular). A
+  variante "completo" anexa `docs/manual-de-construcao-de-dashboards.md` lido
+  do disco — `outputFileTracingIncludes` no `next.config.ts` garante o
+  arquivo no bundle da Vercel.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
