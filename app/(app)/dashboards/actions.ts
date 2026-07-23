@@ -101,6 +101,12 @@ import {
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
 import { loadImportContext } from "@/lib/import/dashboard/context";
+import { IMPORT_PRESET_PREFIX } from "@/lib/import/dashboard/types";
+import {
+  assignWidgetKeys,
+  importChaveForDashboard,
+} from "@/lib/import/dashboard/export";
+import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
 
 export interface ActionState {
   ok?: boolean;
@@ -1711,7 +1717,12 @@ async function applyPresetDefinition(
   preset: PresetDashboard,
   // includeSupportFields=false: o import via JSON não cria os campos de apoio
   // globais dos presets de fábrica (forecast/potencial/desconto).
-  opts: { includeSupportFields?: boolean } = {}
+  // targetDashboardId (modo EDITAR da IA, 23/07/2026): aplica NESSE dashboard
+  // — pula a busca por identidade/adoção por nome (que é escopada ao owner) e
+  // NUNCA cria um novo; e o GC de widgets é DESLIGADO (widget omitido do JSON
+  // permanece — decisão de produto: a IA não exclui widgets; a resposta pode
+  // ser PARCIAL, só com os widgets alterados/novos).
+  opts: { includeSupportFields?: boolean; targetDashboardId?: string } = {}
   // Falha retorna { error } com a mensagem REAL do banco — o genérico "Falha
   // ao aplicar" escondia o diagnóstico (ex.: o 42501 do RETURNING, abaixo).
 ): Promise<PresetApplyResult | { error: string }> {
@@ -1742,24 +1753,41 @@ async function applyPresetDefinition(
     }
   }
 
-  // 2) Dashboard: identidade pelo marcador settings.preset.key; fallback de
+  // 2) Dashboard: com targetDashboardId, o alvo é EXPLÍCITO (modo Editar da
+  //    IA) — a RLS decide o acesso e "não achou" é erro, nunca INSERT. Sem
+  //    ele: identidade pelo marcador settings.preset.key, com fallback de
   //    ADOÇÃO por nome (dashboard gerado pelo motor antigo, sem marcador).
-  const { data: dashRows } = await supabase
-    .from("dashboards")
-    .select("id, name, settings")
-    .eq("owner_user_id", userId)
-    .eq("kind", "dashboard")
-    // Preset na Lixeira (0087) não é adotado nem atualizado em silêncio —
-    // reaplicar o preset cria um dashboard fresco.
-    .neq("status", "trashed");
-  const rows = (dashRows ?? []) as {
-    id: string;
-    name: string;
-    settings: DashboardSettings | null;
-  }[];
-  const target =
-    rows.find((d) => d.settings?.preset?.key === preset.presetKey) ??
-    rows.find((d) => d.name === preset.name && !d.settings?.preset);
+  let target: { id: string; name: string; settings: DashboardSettings | null } | undefined;
+  if (opts.targetDashboardId) {
+    const { data: row } = await supabase
+      .from("dashboards")
+      .select("id, name, settings")
+      .eq("id", opts.targetDashboardId)
+      .eq("kind", "dashboard")
+      .neq("status", "trashed")
+      .maybeSingle();
+    if (!row) {
+      return { error: "Dashboard alvo não encontrado (ou sem acesso)." };
+    }
+    target = row as typeof target;
+  } else {
+    const { data: dashRows } = await supabase
+      .from("dashboards")
+      .select("id, name, settings")
+      .eq("owner_user_id", userId)
+      .eq("kind", "dashboard")
+      // Preset na Lixeira (0087) não é adotado nem atualizado em silêncio —
+      // reaplicar o preset cria um dashboard fresco.
+      .neq("status", "trashed");
+    const rows = (dashRows ?? []) as {
+      id: string;
+      name: string;
+      settings: DashboardSettings | null;
+    }[];
+    target =
+      rows.find((d) => d.settings?.preset?.key === preset.presetKey) ??
+      rows.find((d) => d.name === preset.name && !d.settings?.preset);
+  }
 
   const marker = { key: preset.presetKey, version: preset.version };
   let dashboardAction: "created" | "updated";
@@ -1797,6 +1825,9 @@ async function applyPresetDefinition(
     if (managed.canvas !== undefined) next.canvas = managed.canvas;
     if (managed.background !== undefined) next.background = managed.background;
     if (managed.dateFormat !== undefined) next.dateFormat = managed.dateFormat;
+    // fontScale gerida (23/07/2026): presets de fábrica não a definem (zero
+    // mudança); o modo Editar da IA precisa alcançá-la (export a inclui).
+    if (managed.fontScale !== undefined) next.fontScale = managed.fontScale;
     if (managed.tabs) {
       const presetTabIds = new Set(managed.tabs.map((t) => t.id));
       next.tabs = [
@@ -1861,11 +1892,15 @@ async function applyPresetDefinition(
       if (!error) counts.created += 1;
     }
   }
-  const prefix = `${preset.presetKey}.`;
-  for (const [pk, id] of existingByKey) {
-    if (!wantedKeys.has(pk) && pk.startsWith(prefix)) {
-      await supabase.from("widgets").delete().eq("id", id);
-      counts.deleted += 1;
+  // GC desligado no modo Editar (targetDashboardId): widget fora do JSON
+  // permanece — a IA nunca exclui; a resposta pode ser parcial.
+  if (!opts.targetDashboardId) {
+    const prefix = `${preset.presetKey}.`;
+    for (const [pk, id] of existingByKey) {
+      if (!wantedKeys.has(pk) && pk.startsWith(prefix)) {
+        await supabase.from("widgets").delete().eq("id", id);
+        counts.deleted += 1;
+      }
     }
   }
 
@@ -1928,6 +1963,24 @@ export interface ImportDashboardState {
  * sempre; manage_field_definitions p/ fields/correspondences; admin p/
  * subSources (mesma exigência do createSubSource).
  */
+// Gates por seção do import (mesmos das actions de cadastro correspondentes).
+// Compartilhado por importDashboardJson e applyDashboardEditJson.
+function importSectionGateError(
+  session: { permissions: string[]; roles: string[] },
+  declares: { fields: boolean; subSources: boolean; correspondences: boolean }
+): string | null {
+  if (
+    (declares.fields || declares.correspondences) &&
+    !session.permissions.includes("manage_field_definitions")
+  ) {
+    return "O JSON declara campos/correspondências — importe com um usuário que gerencia campos (admin).";
+  }
+  if (declares.subSources && !session.roles.includes("admin")) {
+    return "O JSON declara Sub-bases — apenas administradores podem criá-las.";
+  }
+  return null;
+}
+
 export async function importDashboardJson(
   raw: string
 ): Promise<ImportDashboardState> {
@@ -1951,23 +2004,8 @@ export async function importDashboardJson(
       warnings: validation.warnings,
     };
   }
-  // Gates por seção (mesmos das actions de cadastro correspondentes).
-  if (
-    (validation.declares.fields || validation.declares.correspondences) &&
-    !session.permissions.includes("manage_field_definitions")
-  ) {
-    return {
-      ok: false,
-      message:
-        "O JSON declara campos/correspondências — importe com um usuário que gerencia campos (admin).",
-    };
-  }
-  if (validation.declares.subSources && !session.roles.includes("admin")) {
-    return {
-      ok: false,
-      message: "O JSON declara Sub-bases — apenas administradores podem criá-las.",
-    };
-  }
+  const gateError = importSectionGateError(session, validation.declares);
+  if (gateError) return { ok: false, message: gateError };
 
   const result = await applyPresetDefinition(
     supabase,
@@ -1994,6 +2032,145 @@ export async function importDashboardJson(
       `${w.created} widget(s) criado(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)` +
       (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
       (result.subSourcesCreated > 0 ? `, ${result.subSourcesCreated} sub-base(s)` : "") +
+      (result.correspondencesCreated > 0
+        ? `, ${result.correspondencesCreated} correspondência(s)`
+        : "") +
+      ".",
+  };
+}
+
+export interface EditDashboardState extends ImportDashboardState {
+  // Snapshot capturado ANTES da edição — o cliente guarda o último e oferece
+  // "Desfazer edição da IA" via restoreDashboardSnapshot.
+  snapshot?: DashboardSnapshot;
+}
+
+/**
+ * Aplica um JSON dashboard-import como EDIÇÃO in-place de um dashboard
+ * existente (modo Editar da conversa com IA). Diferenças do import normal:
+ * a identidade é FORÇADA no servidor (normalizeImportRaw sobrescreve a chave
+ * pela canônica do board — a IA nunca é confiada), os widgets atuais são
+ * ADOTADOS (settings.presetKey carimbado pelo MESMO mapeamento do export,
+ * assignWidgetKeys) para o update casar 1:1, o apply roda com
+ * targetDashboardId (sem busca por identidade, SEM GC — widget omitido
+ * permanece; resposta parcial é válida) e um snapshot é capturado antes para
+ * desfazer. Gate: dono/admin do board (RLS auth_board_editable como muralha).
+ */
+export async function applyDashboardEditJson(
+  dashboardId: string,
+  raw: string
+): Promise<EditDashboardState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!raw.trim()) return { ok: false, message: "JSON vazio." };
+
+  const supabase = await createClient();
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("id, name, owner_user_id, visible_to_roles, settings, kind, status")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  if (!dash) return { ok: false, message: "Dashboard não encontrado." };
+  if ((dash.kind as string) === "kanban") {
+    return { ok: false, message: "Edição por IA é só para dashboards." };
+  }
+  if ((dash.status as string) === "trashed") {
+    return { ok: false, message: "Restaure o dashboard antes de editar." };
+  }
+  const isAdmin = session.roles.includes("admin");
+  if (!isAdmin && dash.owner_user_id !== session.user.id) {
+    return {
+      ok: false,
+      message: "Apenas o dono ou um administrador podem editar por IA.",
+    };
+  }
+
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const chave = importChaveForDashboard({
+    id: dash.id as string,
+    settings: dashSettings,
+  });
+
+  // Identidade canônica + injeções protetivas (roles/tabs) ANTES de validar.
+  const normalized = normalizeImportRaw(raw, {
+    chave,
+    currentTabs: dashSettings.tabs,
+    currentRoles: (dash.visible_to_roles as string[] | null) ?? [],
+  });
+
+  const validation = validateDashboardImport(
+    normalized,
+    await loadImportContext(supabase)
+  );
+  if (!validation.ok || !validation.preset) {
+    return {
+      ok: false,
+      message: "O JSON tem problemas — corrija (ou devolva os erros à IA).",
+      errors: validation.errors,
+      warnings: validation.warnings,
+    };
+  }
+  const gateError = importSectionGateError(session, validation.declares);
+  if (gateError) return { ok: false, message: gateError };
+
+  // Snapshot ANTES de qualquer escrita (Desfazer).
+  const snapshot = await captureDashboardSnapshot(dashboardId);
+
+  // Adoção: carimba settings.presetKey nos widgets cujo valor difere do
+  // canônico (mesmo mapeamento do export — keys do JSON casam 1:1).
+  const { data: widgetRows } = await supabase
+    .from("widgets")
+    .select("id, settings, sort_order")
+    .eq("dashboard_id", dashboardId);
+  const rows = (widgetRows ?? []) as {
+    id: string;
+    settings: WidgetSettings | null;
+    sort_order: number | null;
+  }[];
+  const keyById = assignWidgetKeys(rows, chave);
+  const prefix = `${IMPORT_PRESET_PREFIX}${chave}.`;
+  for (const row of rows) {
+    const wanted = `${prefix}${keyById.get(row.id)}`;
+    const current = row.settings?.presetKey;
+    if (current === wanted) continue;
+    const { error } = await supabase
+      .from("widgets")
+      .update({ settings: { ...(row.settings ?? {}), presetKey: wanted } })
+      .eq("id", row.id);
+    if (error) {
+      return { ok: false, message: `Falha ao preparar a edição: ${error.message}` };
+    }
+  }
+
+  const result = await applyPresetDefinition(
+    supabase,
+    session.user.id,
+    validation.preset,
+    { includeSupportFields: false, targetDashboardId: dashboardId }
+  );
+  if ("error" in result) {
+    return {
+      ok: false,
+      message: `Falha ao aplicar a edição: ${result.error}`,
+      warnings: validation.warnings,
+      snapshot: snapshot ?? undefined,
+    };
+  }
+  revalidatePath("/");
+  revalidatePath(`/dashboards/${dashboardId}`);
+  const w = result.widgets;
+  return {
+    ok: true,
+    id: dashboardId,
+    warnings: validation.warnings,
+    snapshot: snapshot ?? undefined,
+    message:
+      `Dashboard "${validation.preset.name}" atualizado: ` +
+      `${w.created} widget(s) criado(s), ${w.updated} atualizado(s)` +
+      (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
+      (result.subSourcesCreated > 0
+        ? `, ${result.subSourcesCreated} sub-base(s)`
+        : "") +
       (result.correspondencesCreated > 0
         ? `, ${result.correspondencesCreated} correspondência(s)`
         : "") +

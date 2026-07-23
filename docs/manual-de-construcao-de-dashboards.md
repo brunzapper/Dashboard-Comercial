@@ -1,4 +1,8 @@
-<!-- Versão: 1.4 | Data: 23/07/2026 -->
+<!-- Versão: 1.5 | Data: 23/07/2026 -->
+<!-- v1.5 (23/07/2026): §3.8.2 — "Exportar JSON" (⋮ do card) e a CONVERSA com a
+     IA em 3 modos (Criar novo / Criar a partir de / Editar), com switch
+     "Aplicar automaticamente", prévia por turno, Desfazer, e as regras do
+     Editar (IA nunca exclui widget; preset de fábrica se desvincula). -->
 <!-- v1.4 (23/07/2026): §6.2 — nota sobre agrupamento por bucket em campo
      personalizado de data (média simples aproximada nesse arranjo). -->
 <!-- v1.3 (23/07/2026): §3.8.1 — geração DIRETA por IA (via API): botão "Gerar
@@ -435,6 +439,47 @@ Gemini, Anthropic Claude ou OpenAI), o **modelo** e cola a **chave de API**. A
 chave é guardada **cifrada** e por organização, e nunca sai do servidor. Sem
 provedor configurado, o botão fica indisponível e só o fluxo manual (acima)
 funciona. Sugestão: comece pelo **Gemini** (tem plano gratuito).
+
+#### 3.8.2 Exportar JSON e conversar com a IA (Criar novo / Criar a partir de / Editar)
+
+**Exportar a estrutura**: no menu **⋮** do card de qualquer dashboard (Home) há
+**"Exportar JSON"** — baixa um arquivo no MESMO formato do import (§3.8). Ele
+serve de backup da estrutura, de insumo para uma IA externa (colar de volta no
+import cria um dashboard novo) e é o que a conversa com IA lê internamente.
+Estados que o export não carrega: conectores entre widgets e dados/células (o
+export é ESTRUTURA, não dados).
+
+**A conversa**: o botão da Home (antes "Importar") agora abre **"Dashboards com
+IA"**, com três modos:
+
+- **Criar novo** — o fluxo do §3.8.1 (marca Bases + descreve). A novidade: a
+  janela vira uma CONVERSA — depois do primeiro dashboard criado, as próximas
+  mensagens EDITAM o mesmo dashboard ("aumenta o gráfico X", "adiciona um
+  funil"…).
+- **Criar a partir de** — escolha um dashboard seu como REFERÊNCIA e descreva
+  as mudanças; a IA cria um dashboard NOVO baseado nele (o original fica
+  intacto; colisão de nome ganha sufixo "(cópia)").
+- **Editar** — escolha um dashboard seu e converse para melhorá-lo IN-PLACE.
+  Regras importantes: a IA **altera e adiciona** widgets, mas **NUNCA
+  exclui** (widget que ela não mencionar permanece; remoção é manual, no ⋮ do
+  widget); os widgets mantêm identidade (células de Tabela Livre e snapshots
+  sobrevivem a edições); cada edição pode ser revertida pelo botão
+  **"Desfazer edição da IA"** (restaura o estado imediatamente anterior ao
+  último turno aplicado).
+
+**Aplicar automaticamente** (switch na janela, ligado por padrão): ligado, cada
+mensagem já aplica as mudanças no dashboard; desligado, cada mensagem gera uma
+**prévia** (lista de widgets novos/atualizados) e nada acontece até você clicar
+**Aplicar** (ou Descartar).
+
+Avisos: editar por IA um dashboard criado por **preset de fábrica** o
+desvincula do preset (ele deixa de ser atualizado pelo "Gerar presets"; o
+preset pode ser recriado à parte) — o seletor avisa. Se a resposta da IA for
+cortada por limite de tokens (dashboards muito grandes), o sistema aborta com
+uma mensagem clara — peça mudanças menores/mais específicas por turno. Métrica
+calculada que REUSA um campo `calculado_agg` exporta só campo/rótulo (as
+demais opções da métrica são reconfiguráveis no editor) — única perda conhecida
+do export.
 
 ---
 

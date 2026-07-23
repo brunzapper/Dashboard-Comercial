@@ -30,3 +30,18 @@ export interface AiClientConfig {
 export interface AiTextClient {
   generateText(input: AiGenerateInput): Promise<string>;
 }
+
+/**
+ * Resposta CORTADA pelo teto de tokens do provedor (stop_reason max_tokens /
+ * finishReason MAX_TOKENS / finish_reason length). JSON truncado nunca valida
+ * — o orquestrador aborta o laço imediatamente (sem queimar tentativas) com
+ * mensagem acionável, em vez de mandar o erro de parse de volta à IA.
+ */
+export class AiTruncatedError extends Error {
+  constructor(provider: string) {
+    super(
+      `A resposta do ${provider} foi cortada pelo limite de tokens — o dashboard é grande demais para um turno; peça mudanças menores/mais específicas.`
+    );
+    this.name = "AiTruncatedError";
+  }
+}

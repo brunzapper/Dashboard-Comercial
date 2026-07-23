@@ -240,3 +240,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `collectBoardSourceKeys` (`lib/config/source-scope.ts`), aplicado em
   page/kanban/widget-scope/kanban-actions/snapshot-form/viewer — fontes já
   referenciadas por widgets NUNCA saem do catálogo efetivo.
+- **Identidade da conversa de IA é REESCRITA no servidor, nunca confiada à IA
+  (23/07/2026):** `normalizeImportRaw` (`lib/import/dashboard/rewrite.ts`)
+  sobrescreve a `chave` do JSON devolvido pela IA pela canônica ANTES de
+  `validateDashboardImport` (edit: derivada do board via
+  `importChaveForDashboard`; new/from: gerada no servidor) — uma chave copiada
+  da referência sobrescreveria o board de ORIGEM no modo "Criar a partir de".
+  O modo EDITAR (`applyDashboardEditJson`) ADOTA os widgets (carimba
+  `settings.presetKey` pelo MESMO mapa do export — `assignWidgetKeys`,
+  `lib/import/dashboard/export.ts`) e aplica com
+  `applyPresetDefinition({ targetDashboardId })`, que NÃO cria dashboard e
+  roda **SEM GC** (a IA nunca exclui widget; resposta parcial é válida —
+  não reintroduza GC nesse caminho). Snapshot pré-turno
+  (`captureDashboardSnapshot`) é o Desfazer. Export/serialização nunca emite
+  `preset`/`presetKey`/`connectors`/`kanban`. RPCs de widget INTOCADOS.
