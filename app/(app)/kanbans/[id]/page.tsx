@@ -184,7 +184,17 @@ export default async function KanbanPage({
     );
   }
 
-  const canConfig = isAdmin || board.owner_user_id === session.user.id;
+  // Override individual (board_access, 0088): 'edit' concede configuração.
+  const { data: myAccess } = await supabase
+    .from("board_access")
+    .select("level")
+    .eq("dashboard_id", id)
+    .eq("user_id", session.user.id)
+    .maybeSingle();
+  const canConfig =
+    isAdmin ||
+    board.owner_user_id === session.user.id ||
+    myAccess?.level === "edit";
   const quickCreateSource =
     kanban.mode === "registros" && canEditValues && sourceDef?.manualEntry
       ? { key: sourceDef.key, label: sourceDef.label }

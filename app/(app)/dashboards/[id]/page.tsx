@@ -203,7 +203,18 @@ export default async function DashboardPage({
 
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;
-  const canEdit = isOwner || isAdmin;
+  // Override individual (board_access, 0088): 'edit' concede edição a quem
+  // não é dono/admin — espelho da RLS (auth_board_editable). 'blocked' nem
+  // chega aqui (dashboards_select nega e o board vira 404).
+  const { data: myAccess } = session
+    ? await supabase
+        .from("board_access")
+        .select("level")
+        .eq("dashboard_id", id)
+        .eq("user_id", session.user.id)
+        .maybeSingle()
+    : { data: null };
+  const canEdit = isOwner || isAdmin || myAccess?.level === "edit";
   const canManageFields =
     session?.permissions.includes("manage_field_definitions") ?? false;
   // Para as tabelas em modo "registros individuais" (Fase 1): quem pode editar
@@ -1329,7 +1340,6 @@ export default async function DashboardPage({
         currencyRates={currencyRates}
         conversionPeriodById={conversionPeriodById}
         settings={dashSettings}
-        visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
         dateFormat={dashSettings.dateFormat}
         periodBar={periodBar}
         periodScope={scope}
