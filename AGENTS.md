@@ -9,8 +9,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > Documentação para humanos: [`docs/arquitetura.md`](./docs/arquitetura.md)
 > (fluxos + todas as invariantes, incl. as abaixo),
 > [`docs/banco-de-dados.md`](./docs/banco-de-dados.md) (schema consolidado) e
-> [`docs/manual-de-manutencao.md`](./docs/manual-de-manutencao.md) (runbook).
-> Ao alterar schema ou invariantes, atualize esses docs na mesma entrega.
+> [`docs/manual-de-manutencao.md`](./docs/manual-de-manutencao.md) (runbook) e
+> [`docs/manual-de-construcao-de-dashboards.md`](./docs/manual-de-construcao-de-dashboards.md)
+> (manual de construção de dashboards pela UI, para usuários/IAs).
+> Ao alterar schema ou invariantes, atualize esses docs na mesma entrega —
+> mudanças de UI/semântica do construtor incluem o manual de construção.
 
 - **RPC de widgets duplicado (Snapshots):** `run_widget_query_snapshot`
   (versão vigente na 0085; introduzido na 0056) é uma cópia de

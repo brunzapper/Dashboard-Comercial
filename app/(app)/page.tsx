@@ -1,5 +1,7 @@
-// Versão: 2.3 | Data: 22/07/2026
+// Versão: 2.4 | Data: 23/07/2026
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
+// v2.4 (23/07/2026): botão "Importar" ao lado do "Criar" — modo de criação de
+//   dashboard via JSON gerado por IA (ImportDashboardSheet).
 // v2.3 (22/07/2026): ciclo de vida (0087) — menu "⋮" nos cards (Duplicar/
 //   Arquivar/Excluir via BoardCardMenu, no lugar do botão de lixeira) e
 //   seções recolhidas "Arquivados" (segue abrindo) e "Lixeira" (não abre;
@@ -27,6 +29,7 @@ import {
 } from "@/components/ui/card";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { CreateMenu } from "@/components/dashboards/create-menu";
+import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import {
   BoardCardMenu,
   type BoardStatus,
@@ -209,7 +212,12 @@ export default async function HomePage() {
             registros.
           </p>
         </div>
-        {canCreate ? <CreateMenu sources={sources} fields={fields} /> : null}
+        {canCreate ? (
+          <div className="flex items-center gap-2">
+            <ImportDashboardSheet sources={sources} />
+            <CreateMenu sources={sources} fields={fields} />
+          </div>
+        ) : null}
       </div>
 
       {dashboards.length === 0 ? (

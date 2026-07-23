@@ -1,4 +1,21 @@
-// Versão: 1.6 | Data: 23/07/2026
+// Versão: 1.9 | Data: 23/07/2026
+// v1.9 (23/07/2026): FIX RETURNING × policy 0088 — `.insert(...).select()` em
+//   `dashboards` falha com 42501: a policy de SELECT (auth_board_visible)
+//   consulta a própria tabela via função STABLE e não enxerga a linha do
+//   próprio comando. createBoard e applyPresetDefinition passam ao padrão do
+//   duplicateBoard (id gerado no app + insert sem RETURNING); o insert do
+//   preset/import ganha carimbo de organization_id (0090) e
+//   applyPresetDefinition devolve { error } com a mensagem real do banco
+//   (antes retornava null e os chamadores exibiam falha genérica).
+// v1.8 (23/07/2026): importDashboardJson — modo "Importar dashboard via JSON
+//   (IA)": valida o JSON colado (lib/import/dashboard/validate.ts, erros
+//   legíveis p/ devolver à IA) e o aplica pelo MESMO motor idempotente dos
+//   presets (applyPresetDefinition, identidade "import:<chave>" — reimportar
+//   atualiza em vez de duplicar). applyPresetDefinition ganha opts
+//   includeSupportFields (o import NÃO cria os campos de apoio PRESET_FIELDS).
+// v1.7 (23/07/2026): saveSharedFieldFilter — valor COMPARTILHADO do "Filtro
+//   por campo" (settings.valueScope 'all') na célula __ff__/sel de
+//   dashboard_table_cells (mesma semântica do __qf__; fora do Desfazer/Refazer).
 // v1.6 (23/07/2026): escopo de BASES do board (⋮ → "Bases") —
 //   getBoardSourcesState (catálogo completo + escopo + referenciadas, lazy no
 //   open do dialog) e saveBoardSourceScope (merge server-side SÓ da chave
@@ -51,6 +68,8 @@ import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
+  FF_COL_KEY,
+  FF_ROW_KEY,
   parsePeriodWindowChoice,
   PW_COL_KEY,
   PW_ROW_KEY,
@@ -80,6 +99,8 @@ import {
   type DashboardSnapshot,
 } from "@/lib/widgets/history";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
+import { validateDashboardImport } from "@/lib/import/dashboard/validate";
+import type { ImportDefRow } from "@/lib/import/dashboard/types";
 
 export interface ActionState {
   ok?: boolean;
@@ -193,22 +214,24 @@ export async function createBoard(
   // Carimbo de org (multi-org, 0090) — ver createDashboard.
   const orgId = await getActiveOrgId();
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("dashboards")
-    .insert({
-      name,
-      kind: "kanban",
-      owner_user_id: session.user.id,
-      visible_to_roles: visible,
-      is_shared: visible.length > 0,
-      settings: { kanban },
-      ...(orgId ? { organization_id: orgId } : {}),
-    })
-    .select("id")
-    .single();
+  // Id gerado no APP + insert SEM RETURNING (padrão duplicateBoard): a policy
+  // de SELECT de dashboards (auth_board_visible, 0088) consulta a própria
+  // tabela via função STABLE, que não enxerga a linha do PRÓPRIO comando —
+  // `.insert(...).select()` falharia com 42501 mesmo para o dono.
+  const boardId = crypto.randomUUID();
+  const { error } = await supabase.from("dashboards").insert({
+    id: boardId,
+    name,
+    kind: "kanban",
+    owner_user_id: session.user.id,
+    visible_to_roles: visible,
+    is_shared: visible.length > 0,
+    settings: { kanban },
+    ...(orgId ? { organization_id: orgId } : {}),
+  });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
-  return { ok: true, message: `Kanban "${name}" criado.`, id: data.id as string };
+  return { ok: true, message: `Kanban "${name}" criado.`, id: boardId };
 }
 
 // Settings de um kanban dedicado. Mesma semântica de updateDashboardSettings
@@ -1135,6 +1158,45 @@ export async function savePeriodWindowChoice(
   return { ok: true };
 }
 
+// Grava o valor COMPARTILHADO de um widget "Filtro por campo" com
+// settings.valueScope 'all' (célula __ff__/sel; value = a mesma string
+// codificada de ff_<id>/lastFieldFilters). Mesma tabela/semântica dos filtros
+// rápidos: a RLS (0026/0088/0091) permite escrita por QUALQUER visualizador
+// efetivo do dashboard — é a feature (quem muda o filtro muda para todos);
+// auth aqui é só a sessão. encoded null/vazio apaga a célula.
+export async function saveSharedFieldFilter(
+  dashboardId: string,
+  widgetId: string,
+  encoded: string | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  if (!encoded) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: FF_ROW_KEY,
+        col_key: FF_COL_KEY,
+        value: encoded,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // ---------------- Calculadora (expressão compartilhada) ----------------
 
 // Grava a expressão corrente do widget Calculadora. Vive em
@@ -1646,15 +1708,20 @@ async function ensureGoalMetricKeys(
 async function applyPresetDefinition(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  preset: PresetDashboard
-): Promise<PresetApplyResult | null> {
+  preset: PresetDashboard,
+  // includeSupportFields=false: o import via JSON não cria os campos de apoio
+  // globais dos presets de fábrica (forecast/potencial/desconto).
+  opts: { includeSupportFields?: boolean } = {}
+  // Falha retorna { error } com a mensagem REAL do banco — o genérico "Falha
+  // ao aplicar" escondia o diagnóstico (ex.: o 42501 do RETURNING, abaixo).
+): Promise<PresetApplyResult | { error: string }> {
   // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes,
   //    correspondências (depois das subs — o record_type dos membros sai do
   //    catálogo) e chaves de métrica de meta. Campo 'calculado' novo dispara o
   //    recálculo global (materializa em custom_fields; best-effort — mesmo
   //    gatilho do createField em /campos).
   const fieldsResult = await ensurePresetFields(supabase, [
-    ...PRESET_FIELDS,
+    ...(opts.includeSupportFields === false ? [] : PRESET_FIELDS),
     ...(preset.fields ?? []),
   ]);
   const subResult = await ensurePresetSubSources(
@@ -1699,19 +1766,25 @@ async function applyPresetDefinition(
   let dashId: string;
 
   if (!target) {
-    const { data: dash, error } = await supabase
-      .from("dashboards")
-      .insert({
-        name: preset.name,
-        owner_user_id: userId,
-        visible_to_roles: preset.visible_to_roles,
-        is_shared: preset.visible_to_roles.length > 0,
-        settings: { ...(preset.settings ?? {}), preset: marker },
-      })
-      .select("id")
-      .maybeSingle();
-    if (error || !dash?.id) return null;
-    dashId = dash.id as string;
+    // Id gerado no APP + insert SEM RETURNING (padrão duplicateBoard): a
+    // policy de SELECT de dashboards (auth_board_visible, 0088) consulta a
+    // própria tabela via função STABLE, que não enxerga a linha do PRÓPRIO
+    // comando — `.insert(...).select("id")` falhava com 42501 mesmo para o
+    // dono (derrubava presets e o import via JSON). Carimbo de org na mesma
+    // linha do createDashboard (multi-org, 0090).
+    const orgId = await getActiveOrgId();
+    const newId = crypto.randomUUID();
+    const { error } = await supabase.from("dashboards").insert({
+      id: newId,
+      name: preset.name,
+      owner_user_id: userId,
+      visible_to_roles: preset.visible_to_roles,
+      is_shared: preset.visible_to_roles.length > 0,
+      settings: { ...(preset.settings ?? {}), preset: marker },
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
+    if (error) return { error: error.message };
+    dashId = newId;
     dashboardAction = "created";
   } else {
     // Update: sobrescreve só as seções GERIDAS presentes no preset; `tabs`
@@ -1741,7 +1814,7 @@ async function applyPresetDefinition(
         settings: next,
       })
       .eq("id", target.id);
-    if (error) return null;
+    if (error) return { error: error.message };
     dashId = target.id;
     dashboardAction = "updated";
   }
@@ -1822,7 +1895,9 @@ export async function applyPreset(
   if (!preset) return { ok: false, message: `Preset "${presetKey}" não existe.` };
   const supabase = await createClient();
   const result = await applyPresetDefinition(supabase, session.user.id, preset);
-  if (!result) return { ok: false, message: "Falha ao aplicar o preset." };
+  if ("error" in result) {
+    return { ok: false, message: `Falha ao aplicar o preset: ${result.error}` };
+  }
   revalidatePath("/");
   revalidatePath("/configuracoes/presets");
   revalidatePath(`/dashboards/${result.dashboardId}`);
@@ -1831,6 +1906,122 @@ export async function applyPreset(
     ok: true,
     result,
     message: `Preset "${preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"} (${w.created} widget(s) novo(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)).`,
+  };
+}
+
+// ---------------- Importar dashboard via JSON (modo IA) ----------------
+
+export interface ImportDashboardState {
+  ok?: boolean;
+  message?: string;
+  id?: string; // dashboard criado/atualizado (o cliente navega p/ ele)
+  errors?: string[]; // legíveis — o usuário devolve à IA corrigir
+  warnings?: string[];
+}
+
+/**
+ * Importa o JSON gerado pela IA como um dashboard completo. Validação em
+ * lib/import/dashboard/validate.ts (pura); aplicação pelo MESMO motor
+ * idempotente dos presets — identidade "import:<chave>": reimportar a mesma
+ * chave ATUALIZA o dashboard (widgets adicionados à mão são preservados).
+ * Gates granulares, espelhando as actions de cada cadastro: create_dashboards
+ * sempre; manage_field_definitions p/ fields/correspondences; admin p/
+ * subSources (mesma exigência do createSubSource).
+ */
+export async function importDashboardJson(
+  raw: string
+): Promise<ImportDashboardState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return { ok: false, message: "Você não tem permissão para criar dashboards." };
+  }
+  if (!raw.trim()) return { ok: false, message: "Cole o JSON gerado pela IA." };
+
+  const supabase = await createClient();
+  const [sources, defsRes, corrRes, respRes, opRes] = await Promise.all([
+    loadSources(supabase),
+    supabase
+      .from("field_definitions")
+      .select("id, field_key, label, data_type, formula, applies_to, source_system"),
+    supabase.from("field_correspondences").select("key"),
+    supabase.from("responsibles").select("display_name"),
+    supabase.from("operations").select("name"),
+  ]);
+  const validation = validateDashboardImport(raw, {
+    sources,
+    defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
+      id: String(d.id),
+      field_key: String(d.field_key),
+      label: String(d.label ?? d.field_key),
+      data_type: d.data_type as ImportDefRow["data_type"],
+      formula: (d.formula as ImportDefRow["formula"]) ?? null,
+      applies_to: (d.applies_to as string[] | null) ?? null,
+      source_system: (d.source_system as string | null) ?? null,
+    })),
+    correspondenceKeys: (corrRes.data ?? []).map((c) => String(c.key)),
+    responsibleNames: (respRes.data ?? [])
+      .map((r) => String((r as { display_name?: unknown }).display_name ?? ""))
+      .filter(Boolean),
+    operationNames: (opRes.data ?? [])
+      .map((o) => String((o as { name?: unknown }).name ?? ""))
+      .filter(Boolean),
+  });
+  if (!validation.ok || !validation.preset) {
+    return {
+      ok: false,
+      message: "O JSON tem problemas — corrija (ou devolva os erros à IA) e tente de novo.",
+      errors: validation.errors,
+      warnings: validation.warnings,
+    };
+  }
+  // Gates por seção (mesmos das actions de cadastro correspondentes).
+  if (
+    (validation.declares.fields || validation.declares.correspondences) &&
+    !session.permissions.includes("manage_field_definitions")
+  ) {
+    return {
+      ok: false,
+      message:
+        "O JSON declara campos/correspondências — importe com um usuário que gerencia campos (admin).",
+    };
+  }
+  if (validation.declares.subSources && !session.roles.includes("admin")) {
+    return {
+      ok: false,
+      message: "O JSON declara Sub-bases — apenas administradores podem criá-las.",
+    };
+  }
+
+  const result = await applyPresetDefinition(
+    supabase,
+    session.user.id,
+    validation.preset,
+    { includeSupportFields: false }
+  );
+  if ("error" in result) {
+    return {
+      ok: false,
+      message: `Falha ao aplicar o dashboard importado: ${result.error}`,
+      warnings: validation.warnings,
+    };
+  }
+  revalidatePath("/");
+  revalidatePath(`/dashboards/${result.dashboardId}`);
+  const w = result.widgets;
+  return {
+    ok: true,
+    id: result.dashboardId,
+    warnings: validation.warnings,
+    message:
+      `Dashboard "${validation.preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"}: ` +
+      `${w.created} widget(s) criado(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)` +
+      (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
+      (result.subSourcesCreated > 0 ? `, ${result.subSourcesCreated} sub-base(s)` : "") +
+      (result.correspondencesCreated > 0
+        ? `, ${result.correspondencesCreated} correspondência(s)`
+        : "") +
+      ".",
   };
 }
 
@@ -1850,8 +2041,9 @@ export async function generatePresets(): Promise<ActionState> {
       session.user.id,
       preset
     );
-    if (result?.dashboard === "created") created += 1;
-    else if (result?.dashboard === "updated") updated += 1;
+    if ("error" in result) continue; // relatado no contador final
+    if (result.dashboard === "created") created += 1;
+    else if (result.dashboard === "updated") updated += 1;
   }
   revalidatePath("/");
   revalidatePath("/configuracoes/presets");
@@ -1919,11 +2111,15 @@ export async function captureDashboardSnapshot(
     dash.name as string,
     (dash.settings ?? {}) as DashboardSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') e a expressão compartilhada da
-    // calculadora ('__calc__') ficam FORA do histórico: mudar um dropdown ou
-    // digitar um cálculo não é edição de dashboard (Desfazer não os reverte).
+    // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+    // ('__ff__') e a expressão compartilhada da calculadora ('__calc__') ficam
+    // FORA do histórico: mudar um dropdown ou digitar um cálculo não é edição
+    // de dashboard (Desfazer não os reverte).
     (cellsData ?? []).filter(
-      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+      (c) =>
+        c.row_key !== QF_ROW_KEY &&
+        c.row_key !== FF_ROW_KEY &&
+        c.row_key !== CALC_ROW_KEY
     )
   );
 }
@@ -1977,15 +2173,17 @@ export async function restoreDashboardSnapshot(
 
   // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
   // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
-  // Os valores de filtros rápidos ('__qf__') e a expressão da calculadora
-  // ('__calc__') ficam de fora do snapshot E do delete — Desfazer/Refazer não
-  // deve apagar estado compartilhado que não é edição de dashboard.
+  // Os valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+  // ('__ff__') e a expressão da calculadora ('__calc__') ficam de fora do
+  // snapshot E do delete — Desfazer/Refazer não deve apagar estado
+  // compartilhado que não é edição de dashboard.
   if (snapIds.length > 0) {
     const { error: delErr } = await supabase
       .from("dashboard_table_cells")
       .delete()
       .in("widget_id", snapIds)
       .neq("row_key", QF_ROW_KEY)
+      .neq("row_key", FF_ROW_KEY)
       .neq("row_key", CALC_ROW_KEY);
     if (delErr) return { ok: false, message: delErr.message };
   }

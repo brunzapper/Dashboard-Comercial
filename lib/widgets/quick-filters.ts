@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 14/07/2026
+// Versão: 1.1 | Data: 23/07/2026
+// v1.1 (23/07/2026): FF_ROW_KEY/FF_COL_KEY + parseSharedFieldFilter — valor
+// COMPARTILHADO do "Filtro por campo" (settings.valueScope 'all').
 // Filtros rápidos por widget: helpers compartilhados entre o RSC (page.tsx), o
 // runtime do card (quick-filters-bar) e o modo lista (record-list).
 //
@@ -36,6 +38,24 @@ export const QF_ROW_KEY = "__qf__";
 // também fica fora do snapshot de Desfazer/Refazer.
 export const PW_ROW_KEY = "__pw__";
 export const PW_COL_KEY = "sel";
+
+// row_key reservado p/ o VALOR COMPARTILHADO do widget "Filtro por campo"
+// (settings.valueScope 'all'). col_key fixo "sel"; value = a MESMA string
+// codificada de ff_<id>/lastFieldFilters (encodeViewFilter), plana no jsonb.
+// Mesma RLS/semântica compartilhada do __qf__; também fica fora do snapshot
+// de Desfazer/Refazer.
+export const FF_ROW_KEY = "__ff__";
+export const FF_COL_KEY = "sel";
+
+/** Parse seguro do valor compartilhado (string plana; aceita {v} por defesa). */
+export function parseSharedFieldFilter(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object") {
+    const v = (raw as { v?: unknown }).v;
+    if (typeof v === "string") return v;
+  }
+  return "";
+}
 
 /** Seleção persistida da janela: chave escolhida e/ou override do dia útil. */
 export interface PeriodWindowChoice {

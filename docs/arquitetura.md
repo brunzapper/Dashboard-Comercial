@@ -1,4 +1,24 @@
-<!-- Versão: 1.18 | Data: 23/07/2026 -->
+<!-- Versão: 1.22 | Data: 23/07/2026 -->
+<!-- v1.22 (23/07/2026): §4.11 — REGRA: nunca `.insert(...).select()` em
+     `dashboards` (a policy de SELECT auth_board_visible/0088 é função STABLE
+     sobre a própria tabela e não vê a linha do próprio comando → 42501);
+     padrão = id gerado no app + insert sem RETURNING (duplicateBoard);
+     createBoard/applyPresetDefinition corrigidos; erro real do banco passa a
+     ser propagado pelos chamadores do applyPresetDefinition. -->
+<!-- v1.21 (23/07/2026): §4.11 — Importar aceita VÁRIAS Bases (modelo/amostra
+     por Base + Conexões no prompt; envelope `bases: []`). -->
+<!-- v1.20 (23/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
+     (botão Importar na Home; validador puro em lib/import/dashboard/*;
+     aplicação pelo applyPresetDefinition com identidade import:<chave>;
+     prompt com modelo da Base + amostra com cobertura de colunas). -->
+<!-- v1.19 (23/07/2026): escopo do VALOR do "Filtro por campo" configurável
+     (§4.7/§4.10; invariante 12) — settings.valueScope 'all' compartilha a
+     seleção entre todos os usuários via célula __ff__/sel de
+     dashboard_table_cells (mesma semântica do __qf__; saveSharedFieldFilter;
+     fora do Desfazer/Refazer); no modo shared o cliente NÃO escreve a URL
+     (transporte = banco, padrão QuickFiltersBar) e ressincroniza do seed;
+     ausente/'user' = por usuário (lastFieldFilters), como antes. -->
+
 <!-- v1.18 (23/07/2026): MULTI-ORGANIZAÇÃO + acessos (0088–0094; §4.6
      reescrito; invariantes 15–17): organizations/members/app_owner com
      triggers de proteção; organization_id nas raízes + RLS org-scoped;
@@ -490,7 +510,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
   do card e a janela de períodos (`__qf__`/`__pw__` em
   `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
-  campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
+  campo é preferência INDIVIDUAL por padrão, como o último período
+  (`lastPeriod`).
+- **Escopo do VALOR do "Filtro por campo" configurável (23/07/2026):**
+  `settings.valueScope: "all"` (checkbox "Aplicar filtro para todos os
+  usuários" na edição do widget; a chave NÃO pode se chamar `scope` —
+  colidiria com `KpiSettings.scope` na interseção `WidgetSettings`) troca a
+  persistência per-user pela célula compartilhada `__ff__`/`sel` de
+  `dashboard_table_cells` (`saveSharedFieldFilter`; value = a MESMA string
+  codificada de `ff_`/`lastFieldFilters`; mesma RLS/semântica do `__qf__` —
+  quem muda o filtro muda para todos; propagação eventual, no próximo
+  re-render RSC do outro viewer). No modo shared o cliente NÃO escreve a URL
+  (transporte = banco, padrão `QuickFiltersBar`; espelhar a URL pinaria cada
+  viewer no valor do mount) e ressincroniza do seed do servidor
+  (`fieldFilterSeedById`, agora vindo da célula); um `ff_` residual de
+  bookmark é honrado naquele render (URL ainda vence no servidor) e removido
+  na primeira edição. Alternar para "all" deixa as entradas
+  `lastFieldFilters` INERTES (nunca apagadas); voltar a "user" ignora (não
+  apaga) a célula. `__ff__` fica fora do Desfazer/Refazer (como `__qf__`) e o
+  viewer de snapshot segue URL-only por visitante. Ausente/`"user"` =
+  comportamento per-user acima, byte-idêntico.
 - **Opções visíveis dos dropdowns de filtro (22/07/2026):** `hiddenOptions`
   (blacklist por entry em `FieldFilterEntry`/`QuickFilterEntry`,
   `widgets.settings` jsonb — sem migração) oculta opções dos dropdowns do
@@ -945,8 +984,9 @@ diferentes:
 - **URL** (`periodo/de/ate/campo`, `ff_`, `tf_`, `pf_*`): `router.replace`
   dentro do transition compartilhado (`pending-context.tsx`) → re-render RSC +
   mudança de `useSearchParams`.
-- **Banco** (`__qf__` filtros rápidos do card — inclusive operação — e
-  `__pw__` janela de períodos, em `dashboard_table_cells`): server action +
+- **Banco** (`__qf__` filtros rápidos do card — inclusive operação —,
+  `__pw__` janela de períodos e `__ff__` valor compartilhado do "Filtro por
+  campo" com `valueScope: "all"`, em `dashboard_table_cells`): server action +
   `revalidatePath` → re-render RSC **sem** mudança de URL.
 
 Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
@@ -958,8 +998,9 @@ precisam de duas garantias, ambas desta entrega:
   `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
   page — `resolveWidgetViewScope`/`loadWidgetScope`
   (`lib/widgets/widget-scope.ts`): filtros rápidos `__qf__` (com exceção do
-  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters`, tradução de
-  OPERAÇÃO (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
+  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters` (ou a célula
+  `__ff__` quando `valueScope: "all"`), tradução de OPERAÇÃO
+  (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
   cobertura do `@period` (invariante 9) usa as métricas EFETIVAS (Tabela
   Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
   O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
@@ -1013,6 +1054,48 @@ Snapshot (`app/s/[token]`): nada disso se aplica — quick filters do visitante
 vão à URL (`qf_*`), kanban/Tabela Livre chegam PRECOMPUTADOS pelo RSC público
 (`snapshot-mode`) e `deferredScopeById` nem é passado (o fetch é pulado por
 `readOnly`).
+
+### 4.11 Importar dashboard via JSON gerado por IA (22/07/2026)
+
+> **REGRA (23/07/2026): nunca use `.insert(...).select(...)` em
+> `dashboards`.** A policy de SELECT (`auth_board_visible`, 0088) é uma
+> função STABLE que consulta a própria tabela — no RETURNING de um INSERT
+> ela roda no snapshot de antes do comando, não vê a linha nova e o insert
+> inteiro falha com 42501, mesmo para o dono. Padrão correto (duplicateBoard/
+> createBoard/applyPresetDefinition): **id gerado no app
+> (`crypto.randomUUID()`) + insert SEM RETURNING**.
+
+Terceiro modo de criação na Home (botão "Importar" ao lado do "Criar",
+`components/dashboards/import-dashboard-sheet.tsx`): o usuário copia um prompt
+de instruções, uma IA externa devolve um JSON e a importação materializa o
+dashboard completo. Peças:
+
+- **Contrato/validação**: `lib/import/dashboard/{types,validate}.ts` —
+  validador PURO (erros em pt-BR, pensados para serem devolvidos à IA). Reusa
+  os módulos ÚNICOS de fórmula (`tokenizeFormulaText` +
+  `validateFormulaForContext` + `findFormulaCycle` sobre
+  `perRecordCalcOperands`/`buildAggOperandCatalog`) — uma fórmula aceita no
+  import é exatamente a que os editores aceitariam. `formula_text` é a forma
+  primária (tokens por compat).
+- **Aplicação**: `importDashboardJson` (`app/(app)/dashboards/actions.ts`)
+  materializa um `PresetDashboard` e chama o MESMO `applyPresetDefinition`
+  dos presets (com `includeSupportFields:false` — não cria
+  forecast/potencial/desconto). Identidade no namespace **`import:<chave>`**
+  (nunca colide com os presets de fábrica): reimportar a mesma chave ATUALIZA
+  (widgets manuais preservados; GC só no prefixo do próprio import). Gates
+  granulares: `create_dashboards` sempre; `manage_field_definitions` p/
+  fields/correspondences; admin p/ subSources — mesmos das actions de
+  cadastro.
+- **Prompt**: `buildImportPrompt` (`app/(app)/dashboards/import-prompt-actions.ts`)
+  aceita VÁRIAS Bases (checklist no sheet; 23/07/2026) e monta espec
+  (`lib/import/dashboard/instructions.ts`) + modelo POR BASE + campos
+  unificados + Conexões (`match_rules` habilitadas dos pares tocados) +
+  amostra de ~20 registros POR BASE com COBERTURA de colunas
+  (`lib/import/dashboard/sample.ts`, guloso + busca complementar por coluna
+  descoberta). O envelope do JSON aceita `bases: []` (ou `base` singular). A
+  variante "completo" anexa `docs/manual-de-construcao-de-dashboards.md` lido
+  do disco — `outputFileTracingIncludes` no `next.config.ts` garante o
+  arquivo no bundle da Vercel.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -1109,8 +1192,8 @@ principalmente — para mantenedores humanos.
     server action que consulta dados de um widget do dashboard (paginação,
     export, Tabela Livre, kanban — e qualquer action deferida futura) monta o
     recorte por `loadWidgetScope`/`resolveWidgetViewScope`
-    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`tf_`/
-    tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
+    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`__ff__`/
+    `tf_`/tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
     bug de widgets deferidos ignorando o filtro de operação até F5. No
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
