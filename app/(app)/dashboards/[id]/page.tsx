@@ -1,6 +1,10 @@
-// Versão: 2.9 | Data: 23/07/2026
+// Versão: 3.0 | Data: 23/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.0 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
+//   fallback do ?ff_ (e o seed do controle) vem da célula compartilhada
+//   __ff__/sel de dashboard_table_cells em vez de lastFieldFilters; __ff__
+//   entra nas exclusões do seed de Desfazer/Refazer.
 // v2.9 (23/07/2026): escopo de BASES do board (settings.sourceScope, ⋮ →
 //   "Bases") — o catálogo efetivo (applySourceScope, lib/config/source-scope)
 //   recorta ofertas E o universo dos widgets em "todas as bases"; a page
@@ -83,7 +87,10 @@ import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { createPeriodResolver } from "@/lib/widgets/period-resolve";
 import {
   applyPeriodWindowChoice,
+  FF_COL_KEY,
+  FF_ROW_KEY,
   parsePeriodWindowChoice,
+  parseSharedFieldFilter,
   PW_COL_KEY,
   PW_ROW_KEY,
   QF_ROW_KEY,
@@ -729,15 +736,45 @@ export default async function DashboardPage({
     return a.some((s) => b.includes(s));
   };
 
+  // Valor COMPARTILHADO dos "Filtro por campo" com settings.valueScope 'all'
+  // (célula __ff__/sel de dashboard_table_cells, como os __qf__). Buscado
+  // ANTES do loop abaixo: precisa existir quando viewFiltersByWidget alimenta
+  // o engine e o fingerprint deferido (deferredScopeById). NÃO reutiliza
+  // cellsDataPromise — ela nasce/é aguardada depois da computação dos widgets.
+  const sharedFfWidgets = fieldFilterWidgets.filter(
+    (w) => w.settings?.valueScope === "all"
+  );
+  const sharedFfById = new Map<string, string>();
+  if (sharedFfWidgets.length > 0) {
+    const { data: ffCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, value")
+      .in(
+        "widget_id",
+        sharedFfWidgets.map((w) => w.id)
+      )
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    for (const c of ffCells ?? []) {
+      const v = parseSharedFieldFilter(c.value);
+      if (v) sharedFfById.set(c.widget_id as string, v);
+    }
+  }
+
   // Seed por widget dos controles "Filtro por campo" quando a URL não traz o
-  // ff_: o valor salvo do usuário (lastFieldFilters). Vai ao cliente para o
-  // controle montar já preenchido (e sincronizar a URL no primeiro debounce).
+  // ff_: o valor compartilhado (valueScope 'all') ou o salvo do usuário
+  // (lastFieldFilters). Vai ao cliente para o controle montar já preenchido
+  // (e, no modo por usuário, sincronizar a URL no primeiro debounce).
   const fieldFilterSeedById: Record<string, string> = {};
   for (const fw of fieldFilterWidgets) {
-    // URL vence; sem parâmetro na URL, reidrata da preferência do usuário
-    // (lastFieldFilters — gravada pelo debounce do FieldFilterControls).
+    // URL vence; sem parâmetro na URL, reidrata da célula compartilhada ou da
+    // preferência do usuário (lastFieldFilters — gravada pelo debounce do
+    // FieldFilterControls).
     const fromUrl = str(sp[`ff_${fw.id}`]);
-    const saved = prefSettings.lastFieldFilters?.[fw.id] ?? "";
+    const saved =
+      fw.settings?.valueScope === "all"
+        ? (sharedFfById.get(fw.id) ?? "")
+        : (prefSettings.lastFieldFilters?.[fw.id] ?? "");
     if (!fromUrl && saved) fieldFilterSeedById[fw.id] = saved;
     const raw = fromUrl || saved;
     if (!raw) continue;
@@ -1265,12 +1302,13 @@ export default async function DashboardPage({
     dash.name as string,
     dashSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') e a expressão da calculadora
-    // ('__calc__') ficam fora do histórico de Desfazer/Refazer (não são
-    // edição de dashboard).
+    // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+    // ('__ff__') e a expressão da calculadora ('__calc__') ficam fora do
+    // histórico de Desfazer/Refazer (não são edição de dashboard).
     (cellsData ?? []).filter(
       (c) =>
         c.row_key !== QF_ROW_KEY &&
+        c.row_key !== FF_ROW_KEY &&
         c.row_key !== CALC_ROW_KEY &&
         c.row_key !== PW_ROW_KEY
     )

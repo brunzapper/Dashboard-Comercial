@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 23/07/2026
+// Versão: 1.4 | Data: 23/07/2026
+// v1.4 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
+//   fallback do ?ff_ vem da célula compartilhada __ff__/sel de
+//   dashboard_table_cells em vez de lastFieldFilters (espelho da page).
 // v1.3 (23/07/2026): escopo de BASES do board (settings.sourceScope) aplicado
 //   ao catálogo (applySourceScope + collectBoardSourceKeys) — paridade com a
 //   page (invariante 12): as actions deferidas enxergam o mesmo universo.
@@ -48,10 +51,13 @@ import {
   type DashboardPeriod,
 } from "@/lib/widgets/period";
 import {
+  FF_COL_KEY,
+  FF_ROW_KEY,
   PW_COL_KEY,
   PW_ROW_KEY,
   QF_ROW_KEY,
   applyPeriodWindowChoice,
+  parseSharedFieldFilter,
   hasQuickValue,
   isPeriodEntry,
   parsePeriodWindowChoice,
@@ -266,15 +272,40 @@ export async function resolveWidgetViewScope(
   }
 
   // Widgets "Filtro por campo" (?ff_<id>) que atingem este widget.
+  // Valor COMPARTILHADO (settings.valueScope 'all'): fallback vem da célula
+  // __ff__/sel de dashboard_table_cells (espelho da page).
+  const sharedFfWidgets = fieldFilterWidgets.filter(
+    (w) => w.settings?.valueScope === "all"
+  );
+  const sharedFfById = new Map<string, string>();
+  if (sharedFfWidgets.length > 0) {
+    const { data: ffCells } = await supabase
+      .from("dashboard_table_cells")
+      .select("widget_id, value")
+      .in(
+        "widget_id",
+        sharedFfWidgets.map((w) => w.id)
+      )
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    for (const c of ffCells ?? []) {
+      const v = parseSharedFieldFilter(c.value);
+      if (v) sharedFfById.set(c.widget_id as string, v);
+    }
+  }
   const sourcesOverlap = (a: string[], b: string[]) => {
     if (a.length === 0 || b.length === 0) return true;
     return a.some((s) => b.includes(s));
   };
   for (const fw of fieldFilterWidgets) {
-    // Espelho da page: URL vence; sem parâmetro, reidrata da preferência do
-    // usuário (lastFieldFilters) — export/paginação enxergam o mesmo recorte.
+    // Espelho da page: URL vence; sem parâmetro, reidrata da célula
+    // compartilhada (valueScope 'all') ou da preferência do usuário
+    // (lastFieldFilters) — export/paginação enxergam o mesmo recorte.
     const raw =
-      str(sp[`ff_${fw.id}`]) || (prefSettings.lastFieldFilters?.[fw.id] ?? "");
+      str(sp[`ff_${fw.id}`]) ||
+      (fw.settings?.valueScope === "all"
+        ? (sharedFfById.get(fw.id) ?? "")
+        : (prefSettings.lastFieldFilters?.[fw.id] ?? ""));
     if (!raw) continue;
     const fs = viewStateToFilters(parseViewFilter(raw), fw.settings?.searchFields);
     if (fs.length === 0) continue;

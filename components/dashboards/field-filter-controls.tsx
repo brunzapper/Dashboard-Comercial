@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 22/07/2026
+// Versão: 1.4 | Data: 23/07/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -15,6 +15,12 @@
 // v1.3: entry.hiddenOptions oculta opções do dropdown/checklist (só exibição —
 // visibleOptions com `keep` = valor selecionado; a decisão dropdown×texto segue
 // pela lista CRUA, então "tudo oculto" nunca degrada para input livre).
+// v1.4: prop `shared` (settings.valueScope 'all') — o valor vale para TODOS os
+// usuários: transporte vira o BANCO (célula __ff__ via saveSharedFieldFilter,
+// padrão QuickFiltersBar), a URL NÃO é escrita (um ff_ residual de bookmark é
+// removido na primeira edição — senão o viewer ficaria pinado no valor do
+// mount) e o estado ressincroniza do seed do servidor quando outro usuário
+// muda o valor. Em snapshot, `shared` é ignorado (URL-only por visitante).
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -36,7 +42,10 @@ import type {
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
-import { saveLastFieldFilter } from "@/app/(app)/dashboards/actions";
+import {
+  saveLastFieldFilter,
+  saveSharedFieldFilter,
+} from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 
@@ -94,6 +103,7 @@ export function FieldFilterControls({
   savedValue,
   dashboardId,
   widgetId,
+  shared,
 }: {
   paramKey: string;
   fields: FieldFilterEntry[];
@@ -109,6 +119,9 @@ export function FieldFilterControls({
   // (lastFieldFilters). O viewer público de snapshots não os passa (URL-only).
   dashboardId?: string;
   widgetId?: string;
+  // settings.valueScope 'all': o valor é COMPARTILHADO entre usuários (célula
+  // __ff__ de dashboard_table_cells) — ver header v1.4. Ignorado em snapshot.
+  shared?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -131,10 +144,58 @@ export function FieldFilterControls({
   // config antiga dos `fields` — navega de verdade e atualiza o ref.
   const serverAppliedRef = useRef(encodeViewFilter(initial));
 
+  // Modo compartilhado: ressincroniza do seed do servidor quando OUTRO usuário
+  // muda o valor (variação do padrão seedKey do app, em effect — o guard lê
+  // refs, proibido em render). sharedSeedRef só reage a MUDANÇA do seed (mount
+  // não reseta — um ff_ de bookmark segue honrado naquele render), e o compare
+  // com o último valor aplicado localmente evita clobber do que o usuário
+  // digita durante um debounce pendente e no eco do próprio save.
+  const sharedMode = Boolean(shared) && !snapshot;
+  const canonSaved = encodeViewFilter(parseViewFilter(savedValue ?? null));
+  const sharedSeedRef = useRef(canonSaved);
+  useEffect(() => {
+    if (!sharedMode || canonSaved === sharedSeedRef.current) return;
+    sharedSeedRef.current = canonSaved;
+    if (canonSaved !== serverAppliedRef.current) {
+      serverAppliedRef.current = canonSaved;
+      const parsed = parseViewFilter(savedValue ?? null);
+      setQ(parsed.q ?? "");
+      setValues(initialValues(fields, parsed.filters));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedMode, canonSaved]);
+
   const showSearch = (searchFields?.length ?? 0) > 0 || fields.length === 0;
 
   const encoded = encodeViewFilter({ q, filters: buildFilters(fields, values) });
   useEffect(() => {
+    // Modo compartilhado (não-snapshot): o transporte é o BANCO (célula
+    // __ff__), nunca a URL — espelhá-la pinaria cada viewer no valor do mount
+    // (a URL vence no servidor). A comparação de "nada mudou" é contra o
+    // último valor aplicado, não contra a URL.
+    if (sharedMode) {
+      if (encoded === serverAppliedRef.current) return;
+      const timer = setTimeout(() => {
+        // ff_ residual (bookmark antigo): removido na primeira edição, para o
+        // viewer convergir para a célula compartilhada nas próximas renders.
+        const params = new URLSearchParams(window.location.search);
+        if (params.has(paramKey)) {
+          params.delete(paramKey);
+          const qs = params.toString();
+          window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
+        }
+        serverAppliedRef.current = encoded;
+        if (dashboardId && widgetId) {
+          // Transition: o overlay cobre a gravação + a revalidação da página
+          // disparada pela action (padrão QuickFiltersBar). encoded vazio
+          // APAGA a célula (o usuário removeu o filtro — vale para todos).
+          run(async () => {
+            await saveSharedFieldFilter(dashboardId, widgetId, encoded || null);
+          });
+        }
+      }, 350);
+      return () => clearTimeout(timer);
+    }
     // URL lida de window.location (não do `sp` capturado): escrita de URL de
     // outro controle entre o agendamento e o disparo não é sobrescrita.
     const currentVal =

@@ -1,4 +1,7 @@
-// Versão: 1.6 | Data: 23/07/2026
+// Versão: 1.7 | Data: 23/07/2026
+// v1.7 (23/07/2026): saveSharedFieldFilter — valor COMPARTILHADO do "Filtro
+//   por campo" (settings.valueScope 'all') na célula __ff__/sel de
+//   dashboard_table_cells (mesma semântica do __qf__; fora do Desfazer/Refazer).
 // v1.6 (23/07/2026): escopo de BASES do board (⋮ → "Bases") —
 //   getBoardSourcesState (catálogo completo + escopo + referenciadas, lazy no
 //   open do dialog) e saveBoardSourceScope (merge server-side SÓ da chave
@@ -51,6 +54,8 @@ import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
 import {
+  FF_COL_KEY,
+  FF_ROW_KEY,
   parsePeriodWindowChoice,
   PW_COL_KEY,
   PW_ROW_KEY,
@@ -1135,6 +1140,45 @@ export async function savePeriodWindowChoice(
   return { ok: true };
 }
 
+// Grava o valor COMPARTILHADO de um widget "Filtro por campo" com
+// settings.valueScope 'all' (célula __ff__/sel; value = a mesma string
+// codificada de ff_<id>/lastFieldFilters). Mesma tabela/semântica dos filtros
+// rápidos: a RLS (0026/0088/0091) permite escrita por QUALQUER visualizador
+// efetivo do dashboard — é a feature (quem muda o filtro muda para todos);
+// auth aqui é só a sessão. encoded null/vazio apaga a célula.
+export async function saveSharedFieldFilter(
+  dashboardId: string,
+  widgetId: string,
+  encoded: string | null
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  if (!encoded) {
+    const { error } = await supabase
+      .from("dashboard_table_cells")
+      .delete()
+      .eq("widget_id", widgetId)
+      .eq("row_key", FF_ROW_KEY)
+      .eq("col_key", FF_COL_KEY);
+    if (error) return { ok: false, message: error.message };
+  } else {
+    const { error } = await supabase.from("dashboard_table_cells").upsert(
+      {
+        widget_id: widgetId,
+        row_key: FF_ROW_KEY,
+        col_key: FF_COL_KEY,
+        value: encoded,
+        updated_by: session.user.id,
+      },
+      { onConflict: "widget_id,row_key,col_key" }
+    );
+    if (error) return { ok: false, message: error.message };
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 // ---------------- Calculadora (expressão compartilhada) ----------------
 
 // Grava a expressão corrente do widget Calculadora. Vive em
@@ -1919,11 +1963,15 @@ export async function captureDashboardSnapshot(
     dash.name as string,
     (dash.settings ?? {}) as DashboardSettings,
     widgets,
-    // Valores de filtros rápidos ('__qf__') e a expressão compartilhada da
-    // calculadora ('__calc__') ficam FORA do histórico: mudar um dropdown ou
-    // digitar um cálculo não é edição de dashboard (Desfazer não os reverte).
+    // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+    // ('__ff__') e a expressão compartilhada da calculadora ('__calc__') ficam
+    // FORA do histórico: mudar um dropdown ou digitar um cálculo não é edição
+    // de dashboard (Desfazer não os reverte).
     (cellsData ?? []).filter(
-      (c) => c.row_key !== QF_ROW_KEY && c.row_key !== CALC_ROW_KEY
+      (c) =>
+        c.row_key !== QF_ROW_KEY &&
+        c.row_key !== FF_ROW_KEY &&
+        c.row_key !== CALC_ROW_KEY
     )
   );
 }
@@ -1977,15 +2025,17 @@ export async function restoreDashboardSnapshot(
 
   // 3) Células das tabelas editáveis: apaga as dos widgets do snapshot e repõe.
   // (Widgets excluídos acima já levaram suas células por ON DELETE CASCADE.)
-  // Os valores de filtros rápidos ('__qf__') e a expressão da calculadora
-  // ('__calc__') ficam de fora do snapshot E do delete — Desfazer/Refazer não
-  // deve apagar estado compartilhado que não é edição de dashboard.
+  // Os valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
+  // ('__ff__') e a expressão da calculadora ('__calc__') ficam de fora do
+  // snapshot E do delete — Desfazer/Refazer não deve apagar estado
+  // compartilhado que não é edição de dashboard.
   if (snapIds.length > 0) {
     const { error: delErr } = await supabase
       .from("dashboard_table_cells")
       .delete()
       .in("widget_id", snapIds)
       .neq("row_key", QF_ROW_KEY)
+      .neq("row_key", FF_ROW_KEY)
       .neq("row_key", CALC_ROW_KEY);
     if (delErr) return { ok: false, message: delErr.message };
   }

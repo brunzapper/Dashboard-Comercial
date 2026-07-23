@@ -1,4 +1,12 @@
-<!-- Versão: 1.18 | Data: 23/07/2026 -->
+<!-- Versão: 1.19 | Data: 23/07/2026 -->
+<!-- v1.19 (23/07/2026): escopo do VALOR do "Filtro por campo" configurável
+     (§4.7/§4.10; invariante 12) — settings.valueScope 'all' compartilha a
+     seleção entre todos os usuários via célula __ff__/sel de
+     dashboard_table_cells (mesma semântica do __qf__; saveSharedFieldFilter;
+     fora do Desfazer/Refazer); no modo shared o cliente NÃO escreve a URL
+     (transporte = banco, padrão QuickFiltersBar) e ressincroniza do seed;
+     ausente/'user' = por usuário (lastFieldFilters), como antes. -->
+
 <!-- v1.18 (23/07/2026): MULTI-ORGANIZAÇÃO + acessos (0088–0094; §4.6
      reescrito; invariantes 15–17): organizations/members/app_owner com
      triggers de proteção; organization_id nas raízes + RLS org-scoped;
@@ -490,7 +498,26 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   autenticado não pode poluir o dashboard vivo). Contraste: filtros rápidos
   do card e a janela de períodos (`__qf__`/`__pw__` em
   `dashboard_table_cells`) são COMPARTILHADOS entre usuários; o filtro por
-  campo é preferência INDIVIDUAL, como o último período (`lastPeriod`).
+  campo é preferência INDIVIDUAL por padrão, como o último período
+  (`lastPeriod`).
+- **Escopo do VALOR do "Filtro por campo" configurável (23/07/2026):**
+  `settings.valueScope: "all"` (checkbox "Aplicar filtro para todos os
+  usuários" na edição do widget; a chave NÃO pode se chamar `scope` —
+  colidiria com `KpiSettings.scope` na interseção `WidgetSettings`) troca a
+  persistência per-user pela célula compartilhada `__ff__`/`sel` de
+  `dashboard_table_cells` (`saveSharedFieldFilter`; value = a MESMA string
+  codificada de `ff_`/`lastFieldFilters`; mesma RLS/semântica do `__qf__` —
+  quem muda o filtro muda para todos; propagação eventual, no próximo
+  re-render RSC do outro viewer). No modo shared o cliente NÃO escreve a URL
+  (transporte = banco, padrão `QuickFiltersBar`; espelhar a URL pinaria cada
+  viewer no valor do mount) e ressincroniza do seed do servidor
+  (`fieldFilterSeedById`, agora vindo da célula); um `ff_` residual de
+  bookmark é honrado naquele render (URL ainda vence no servidor) e removido
+  na primeira edição. Alternar para "all" deixa as entradas
+  `lastFieldFilters` INERTES (nunca apagadas); voltar a "user" ignora (não
+  apaga) a célula. `__ff__` fica fora do Desfazer/Refazer (como `__qf__`) e o
+  viewer de snapshot segue URL-only por visitante. Ausente/`"user"` =
+  comportamento per-user acima, byte-idêntico.
 - **Opções visíveis dos dropdowns de filtro (22/07/2026):** `hiddenOptions`
   (blacklist por entry em `FieldFilterEntry`/`QuickFilterEntry`,
   `widgets.settings` jsonb — sem migração) oculta opções dos dropdowns do
@@ -945,8 +972,9 @@ diferentes:
 - **URL** (`periodo/de/ate/campo`, `ff_`, `tf_`, `pf_*`): `router.replace`
   dentro do transition compartilhado (`pending-context.tsx`) → re-render RSC +
   mudança de `useSearchParams`.
-- **Banco** (`__qf__` filtros rápidos do card — inclusive operação — e
-  `__pw__` janela de períodos, em `dashboard_table_cells`): server action +
+- **Banco** (`__qf__` filtros rápidos do card — inclusive operação —,
+  `__pw__` janela de períodos e `__ff__` valor compartilhado do "Filtro por
+  campo" com `valueScope: "all"`, em `dashboard_table_cells`): server action +
   `revalidatePath` → re-render RSC **sem** mudança de URL.
 
 Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
@@ -958,8 +986,9 @@ precisam de duas garantias, ambas desta entrega:
   `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
   page — `resolveWidgetViewScope`/`loadWidgetScope`
   (`lib/widgets/widget-scope.ts`): filtros rápidos `__qf__` (com exceção do
-  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters`, tradução de
-  OPERAÇÃO (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
+  vendedor), `?tf_`, `?ff_` com fallback `lastFieldFilters` (ou a célula
+  `__ff__` quando `valueScope: "all"`), tradução de OPERAÇÃO
+  (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
   cobertura do `@period` (invariante 9) usa as métricas EFETIVAS (Tabela
   Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
   O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
@@ -1109,8 +1138,8 @@ principalmente — para mantenedores humanos.
     server action que consulta dados de um widget do dashboard (paginação,
     export, Tabela Livre, kanban — e qualquer action deferida futura) monta o
     recorte por `loadWidgetScope`/`resolveWidgetViewScope`
-    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`tf_`/
-    tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
+    (`lib/widgets/widget-scope.ts`) — nunca remonte `__qf__`/`ff_`/`__ff__`/
+    `tf_`/tradução de operação/`__pw__` à mão: cópias parciais foram exatamente o
     bug de widgets deferidos ignorando o filtro de operação até F5. No
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
