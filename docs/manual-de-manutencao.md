@@ -370,7 +370,7 @@ fonte no widget se precisar do mês.
 - **Ordem de aplicação**: 0088→0094 na MESMA janela, imediatamente antes do
   deploy (runbook em `supabase/README.md`, com as queries de conferência e os
   testes das proteções). Depois do deploy, configure a env `OWNER_USER_ID`
-  (User UID de bruno@zapper.to) na Vercel — sem ela o modo Owner nega
+  (User UID da conta do Owner) na Vercel — sem ela o modo Owner nega
   sempre (fail-closed, proposital).
 - **Criar uma organização**: login como Owner → tela "Como você quer entrar?"
   → Owner → "Nova organização" (admin = o próprio Owner ou conta nova

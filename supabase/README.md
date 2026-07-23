@@ -422,8 +422,10 @@ código correspondente (invariante 6 — o layout passa a ler `organizations` e
 os upserts usam onConflict compostos):
 
 1. `0088_board_access.sql` — acesso por pessoa aos boards (⋮ → Acesso).
-2. `0089_organizations.sql` — organizações + org_admin + Owner (seeds Zapper
-   e bruno@zapper.to; confira que o email existe em auth.users ANTES).
+2. `0089_organizations.sql` — organizações + org_admin + Owner. ANTES de
+   executar, substitua o placeholder `<email-do-owner>` do seed pelo email
+   real da conta (que deve existir em auth.users) — o valor não fica
+   versionado de propósito.
 3. `0090_org_columns.sql` — `organization_id` nas raízes + stamps + unicidades
    por-org.
 4. `0091_org_rls.sql` — RLS org-scoped (a partir daqui o isolamento vale).
@@ -431,8 +433,8 @@ os upserts usam onConflict compostos):
 6. `0093_org_provisioning.sql` — funções do console do Owner.
 7. `0094_user_access_overrides.sql` — overrides individuais.
 
-Depois do deploy, configure na Vercel a env **`OWNER_USER_ID`** = User UID de
-bruno@zapper.to (sem ela o modo Owner nega sempre — fail-closed).
+Depois do deploy, configure na Vercel a env **`OWNER_USER_ID`** = User UID da
+conta do Owner (sem ela o modo Owner nega sempre — fail-closed).
 
 Conferências pós-migração:
 
