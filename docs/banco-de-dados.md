@@ -1,4 +1,6 @@
-<!-- Versão: 2.0 | Data: 23/07/2026 -->
+<!-- Versão: 2.1 | Data: 23/07/2026 -->
+<!-- v2.1 (23/07/2026): row_key reservado __ff__ em dashboard_table_cells —
+     valor compartilhado do "Filtro por campo" (settings.valueScope 'all'). -->
 <!-- v2.0 (23/07/2026): 0088–0094 — acesso por pessoa aos boards
      (board_access + helpers auth_board_*), MULTI-ORGANIZAÇÃO (organizations/
      organization_members/app_owner com triggers de proteção via GUC;
@@ -265,6 +267,11 @@ calculado, filtro, filtro_campo, calculadora, nota, forma, kanban, agenda, image
 **`dashboard_table_cells`** (0026) — células da "Tabela editável":
 `(widget_id, row_key, col_key)` unique, `value` jsonb. Escrita liberada a qualquer
 visualizador do dashboard (propositalmente mais amplo que `widgets_write`).
+Row_keys RESERVADOS (estado compartilhado entre usuários, fora do
+Desfazer/Refazer): `__qf__` (valores dos filtros rápidos, col = id do entry),
+`__pw__`/`sel` (janela de períodos), `__calc__` (expressão da calculadora) e
+`__ff__`/`sel` (valor do "Filtro por campo" com `settings.valueScope 'all'`,
+23/07/2026 — constantes em `lib/widgets/quick-filters.ts`/`calculator.ts`).
 
 **`goals`** (0016) — metas: `period_year`, `period_month` (null = anual), `scope`
 (`global|operation|responsible`) + alvo, `metric` livre (`mrr`, `clientes`...),

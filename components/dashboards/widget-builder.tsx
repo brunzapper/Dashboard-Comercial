@@ -1,4 +1,7 @@
-// Versão: 1.19 | Data: 22/07/2026
+// Versão: 1.20 | Data: 23/07/2026
+// v1.20 (23/07/2026): toggle "Aplicar filtro para todos os usuários" no
+//   Filtro por campo (settings.valueScope 'all' — valor compartilhado via
+//   célula __ff__; ausente = por usuário, comportamento atual).
 // v1.19 (22/07/2026): picker "Opções visíveis" (blacklist hiddenOptions) nas
 //   linhas do Filtro por campo (campos com dropdown: responsável/operação/
 //   etapa/selecao) e dos filtros rápidos de responsável/operação — listas
@@ -753,6 +756,11 @@ export function WidgetBuilder({
   const [excludedTargets, setExcludedTargets] = useState<string[]>(
     widget?.settings?.excludedTargets ?? []
   );
+  // Escopo do VALOR aplicado (settings.valueScope): marcado = compartilhado
+  // entre todos os usuários (célula __ff__); desmarcado (default) = por usuário.
+  const [ffSharedValue, setFfSharedValue] = useState(
+    widget?.settings?.valueScope === "all"
+  );
   // Widgets de dados que este filtro pode atingir (mesmas fontes; vazio = todas).
   const dataSiblings = siblings.filter(
     (s) =>
@@ -1431,6 +1439,8 @@ export function WidgetBuilder({
           }),
         searchFields: searchFieldRows.filter(Boolean),
         excludedTargets,
+        // Chave ausente = por usuário, o default (settings enxutos).
+        ...(ffSharedValue ? { valueScope: "all" as const } : {}),
       };
       const input = {
         title: title.trim() || null,
@@ -2185,6 +2195,21 @@ export function WidgetBuilder({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="flex flex-col gap-2 border-t pt-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={ffSharedValue}
+                    onCheckedChange={(v) => setFfSharedValue(v === true)}
+                  />
+                  Aplicar filtro para todos os usuários (compartilhado)
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Desmarcado (padrão), cada usuário mantém a própria seleção.
+                  Marcado, quem mudar o filtro muda para todos que veem este
+                  dashboard — como os filtros rápidos do card.
+                </p>
               </div>
             </>
           ) : null}

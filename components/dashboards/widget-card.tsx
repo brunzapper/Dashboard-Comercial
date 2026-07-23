@@ -1,4 +1,6 @@
-// Versão: 2.10 | Data: 21/07/2026
+// Versão: 2.11 | Data: 23/07/2026
+// v2.11 (23/07/2026): FieldFilterControls ganha shared (settings.valueScope
+//   'all' — valor do filtro compartilhado entre usuários via célula __ff__).
 // v2.10 (21/07/2026): prop deferredScopeKey (fingerprint de escopo da page)
 //   repassada a QuickTableWidget/KanbanWidget — re-fetch quando os filtros
 //   efetivos mudam (inclusive __qf__, sem URL); guarda de resposta obsoleta
@@ -998,6 +1000,7 @@ export const WidgetCard = memo(function WidgetCard({
               savedValue={fieldFilterSeed}
               dashboardId={dashboardId}
               widgetId={widget.id}
+              shared={widget.settings?.valueScope === "all"}
             />
           ) : isQuickTable ? (
             <QuickTableWidget
