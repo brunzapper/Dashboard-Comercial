@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 23/07/2026
 // Leitura e validação de variáveis de ambiente.
 // Não há .env.local neste projeto: os valores vivem nas Environment Variables
 // da Vercel e no painel do Supabase. Falhamos com mensagem clara quando uma
@@ -10,6 +10,8 @@
 //   `process.env[name]` do requireEnv nunca é embutido (docs: guia de
 //   environment-variables, "dynamic lookups will not be inlined"), então o
 //   primeiro consumidor client (realtime-refresher) quebrava o app inteiro.
+// v1.3 (23/07/2026): OWNER_USER_ID — uid do único usuário do modo Owner
+//   (multi-org, 0089); opcional de propósito (guard fail-closed).
 // v1.2 (17/07/2026): KEY_ENCRYPTION_KEY — chave-mestra AES-256-GCM para
 //   segredos reversíveis (assinatura de webhooks de saída; futuros conectores
 //   de pull). Ver docs/estudo-ingestao-api.md §3 e lib/crypto/secretbox.ts.
@@ -66,3 +68,9 @@ export const getSyncSecret = () => requireEnv("SYNC_SECRET");
 
 // --- Webhooks / Integrações (privada, apenas servidor) ---
 export const getKeyEncryptionKey = () => requireEnv("KEY_ENCRYPTION_KEY");
+
+// --- Owner (multi-org, 0089; privada, apenas servidor) ---
+// uid do ÚNICO usuário autorizado no modo Owner (/owner). Lida como OPCIONAL
+// de propósito: ausente ⇒ o guard (lib/auth/owner.ts) NEGA sempre
+// (fail-closed) em vez de derrubar o app inteiro no requireEnv.
+export const getOwnerUserId = () => optionalEnv("OWNER_USER_ID");
