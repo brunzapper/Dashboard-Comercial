@@ -7,9 +7,9 @@
 // eventos — para gerar curl/JSON prontos para copiar. Rotas internas
 // (SYNC_SECRET) ficam de fora: isto documenta só o que sistemas externos usam.
 import Link from "next/link";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { ArrowLeft } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -19,7 +19,7 @@ import { ApiDocs, type ApiDocsSource } from "@/components/admin/api-docs";
 import { Button } from "@/components/ui/button";
 
 export default async function ApiDocsPage() {
-  await requireRole("admin");
+  await requireSettingsArea("integracoes");
   const supabase = await createClient();
 
   const [sources, defsRes] = await Promise.all([

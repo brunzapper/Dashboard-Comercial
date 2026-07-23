@@ -4,8 +4,9 @@
 // (aplicação idempotente — ver docs/arquitetura.md §4.7). O estado por preset
 // sai do marcador dashboards.settings.preset dos dashboards DESTE usuário.
 import { redirect } from "next/navigation";
+import { requireSettingsArea } from "@/lib/auth/access";
 
-import { getSessionInfo, requireRole } from "@/lib/auth/session";
+import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { PRESETS } from "@/lib/presets/definitions";
 import type { DashboardSettings } from "@/lib/widgets/types";
@@ -15,7 +16,7 @@ import {
 } from "@/components/configuracoes/presets-manager";
 
 export default async function PresetsPage() {
-  await requireRole("admin");
+  await requireSettingsArea("presets");
   const session = await getSessionInfo();
   if (!session) redirect("/login");
   const supabase = await createClient();

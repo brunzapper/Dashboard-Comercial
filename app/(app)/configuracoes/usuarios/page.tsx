@@ -6,7 +6,7 @@
 // v2.1 (23/07/2026): multi-org (0089) — lista SÓ os membros da org ATIVA (o
 //   service role enxerga todas as contas; a interseção com
 //   organization_members faz o recorte).
-import { requirePermission } from "@/lib/auth/session";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrg } from "@/lib/auth/org";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -25,7 +25,7 @@ function isDisabled(bannedUntil: string | null | undefined): boolean {
 }
 
 export default async function UsuariosPage() {
-  const session = await requirePermission("manage_users_roles");
+  const session = await requireSettingsArea("usuarios");
   const org = await getActiveOrg();
 
   const supabase = await createClient();
