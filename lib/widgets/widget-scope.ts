@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 21/07/2026
+// Versão: 1.3 | Data: 23/07/2026
+// v1.3 (23/07/2026): escopo de BASES do board (settings.sourceScope) aplicado
+//   ao catálogo (applySourceScope + collectBoardSourceKeys) — paridade com a
+//   page (invariante 12): as actions deferidas enxergam o mesmo universo.
 // v1.2 (21/07/2026): montagem dos filtros de visualização extraída para
 //   resolveWidgetViewScope (export) — as actions DEFERIDAS (runQuickTable/
 //   runKanbanWidget) passam a montar o MESMO escopo da page (filtros rápidos
@@ -18,9 +21,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { SessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
@@ -339,13 +347,17 @@ export async function loadWidgetScope(
     sp[k] = cur === undefined ? v : Array.isArray(cur) ? [...cur, v] : [cur, v];
   }
 
+  // Org ativa (multi-org): catálogo/correspondências da MESMA org da page —
+  // cross-org nem chega aqui (a RLS de dashboards nega o select do board).
+  const orgId = await getActiveOrgId();
+
   const [
     { data: dash },
     { data: widgetsData },
     { data: fieldsData },
     correspondences,
     { data: prefData },
-    sources,
+    allSources,
   ] = await Promise.all([
     supabase
       .from("dashboards")
@@ -365,14 +377,14 @@ export async function loadWidgetScope(
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, orgId),
     supabase
       .from("user_preferences")
       .select("settings")
       .eq("user_id", session.user.id)
       .eq("dashboard_id", dashboardId)
       .maybeSingle(),
-    loadSources(supabase),
+    loadSources(supabase, orgId),
   ]);
   if (!dash) return { ok: false, message: "Dashboard não encontrado." };
 
@@ -381,10 +393,24 @@ export async function loadWidgetScope(
   if (!widget) return { ok: false, message: "Widget não encontrado." };
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  // Escopo de BASES do board (⋮ → "Bases") — MESMO catálogo efetivo da page
+  // (invariante 12): widgets em "todas as bases" enxergam o escopo também nas
+  // actions deferidas (Tabela Livre/kanban/export/paginação).
+  const sources = applySourceScope(
+    allSources,
+    dashSettings.sourceScope,
+    collectBoardSourceKeys(
+      widgets,
+      dashSettings,
+      new Map(
+        allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+      )
+    )
+  );
   const available = buildAvailableFields(allFields, correspondences, sources);
 
   // ---- período efetivo do widget (resolver único da page) ----
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
   const resolver = createPeriodResolver({
     sp,

@@ -202,3 +202,38 @@ This version has breaking changes — APIs, conventions, and file structure may 
   DESABILITADO com motivo (`disabledReason`), nunca escondido — e receitas
   (`formula-recipes.ts`) são atalhos que geram fórmula normal editável, nunca
   substituem o editor livre.
+- **Isolamento de ORGANIZAÇÃO vive em RLS + loaders, nunca no RPC
+  (0089–0091, 23/07/2026):** tabelas-raiz carregam `organization_id` (default
+  Zapper; triggers de stamp cobrem sync/CSV/API) e TODA policy é prefixada por
+  `organization_id in (select auth_org_ids())` — inclusive os ramos
+  admin/permission. O par `run_widget_query`/`_snapshot` é SECURITY INVOKER e
+  herda o isolamento — NÃO introduza parâmetro de org nos RPCs. Caminhos
+  service-role bypassam RLS: escopo EXPLÍCITO por org (viewer/refresh de
+  snapshots usam a org do dashboard; `snapshotClient` escopa
+  goals/non_working_days). Loader novo de catálogo/campos/correspondências
+  deve aceitar `orgId` e as actions de criação carimbam `organization_id`
+  (sem carimbo, usuário de outra org falha ALTO no WITH CHECK — nunca vaza
+  linha p/ a Zapper). `data_sources.key`/`record_type` seguem GLOBAIS
+  (colisão → sufixo na action). Unicidades por-org: upserts nessas tabelas
+  usam onConflict composto (`organization_id,key` etc.).
+- **org_admin e Owner protegidos por TRIGGER + GUC (0089):** um org_admin por
+  org (índice parcial), indeletável/indemovível; `app_owner` imutável; delete
+  de `organizations` só via `delete_organization`. Vale até para service role
+  — desbloqueio SÓ `set_config('app.allow_protected_change','on',true)` em
+  SQL direto. O modo Owner (`/owner`) exige env `OWNER_USER_ID` == uid
+  (fail-closed) + linha em `app_owner` + `requireOwner()` em TODA
+  page/action. NUNCA semeie org_admin/owner em `roles`/`user_roles`
+  (`SPECIAL_ROLE_LABELS` é só rótulo); só org_admin concede o papel `admin`
+  (0092).
+- **Acesso efetivo = papel × overrides, resolvido em UM lugar por família
+  (0088/0094):** boards → helpers `auth_board_visible/editable/manageable`
+  (blocked vence papel; view/edit concede; dono/admin imunes; pages só
+  refletem canEdit). Áreas de Configurações → `AREA_GATES` +
+  `requireSettingsArea` (`lib/auth/access.ts`; deny vence tudo, allow vence o
+  papel; escrita segue o papel). Bases negadas → RLS de
+  `data_sources`/`sub_sources`/`records` (pickers herdam via loadSources).
+  Escopo de BASES por board (`settings.sourceScope`, ⋮ → Bases) é OFERTA,
+  nunca autorização: catálogo efetivo via `applySourceScope`/
+  `collectBoardSourceKeys` (`lib/config/source-scope.ts`), aplicado em
+  page/kanban/widget-scope/kanban-actions/snapshot-form/viewer — fontes já
+  referenciadas por widgets NUNCA saem do catálogo efetivo.

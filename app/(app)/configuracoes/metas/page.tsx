@@ -2,8 +2,8 @@
 // Tela de Metas (admin) — Fase 6B.
 // v1.1 (20/07/2026): seção "Dias não úteis" (non_working_days, 0081) —
 // calendário global consumido pelos utilitários de dia útil.
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { requireSettingsArea } from "@/lib/auth/access";
 import type { OptionItem } from "@/lib/records/types";
 import { GoalsManager, type GoalRow } from "@/components/admin/goals-manager";
 import { NonWorkingDaysManager } from "@/components/configuracoes/non-working-days-manager";
@@ -11,7 +11,7 @@ import { loadNonWorkingDayRows } from "@/lib/config/non-working-days";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 
 export default async function MetasPage() {
-  await requireRole("admin");
+  await requireSettingsArea("metas");
   const supabase = await createClient();
 
   const [

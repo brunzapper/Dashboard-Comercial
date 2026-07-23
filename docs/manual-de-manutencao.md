@@ -1,4 +1,6 @@
-<!-- Versão: 1.12 | Data: 22/07/2026 -->
+<!-- Versão: 1.13 | Data: 23/07/2026 -->
+<!-- v1.13 (23/07/2026): multi-org (0088–0094) — runbook de organizações,
+     Owner (env OWNER_USER_ID) e acessos customizados; ver §4.9. -->
 <!-- v1.12 (22/07/2026): job pg_cron nº 5 (purge-dashboard-trash — purga da
      Lixeira de boards, 0087) no setup e no troubleshooting. -->
 <!-- v1.11 (22/07/2026): §4.7 — callout do preset Inbound v5 (SAL removido da
@@ -362,6 +364,35 @@ ex.: "Mês/ano"):
 Limitação estrutural: os meses (barras) vêm das FONTES DO WIDGET — mês com
 registro só em fonte de perna (`Metric.sources`) não vira barra; inclua a
 fonte no widget se precisar do mês.
+
+### 4.9 Multi-organização, Owner e acessos (0088–0094)
+
+- **Ordem de aplicação**: 0088→0094 na MESMA janela, imediatamente antes do
+  deploy (runbook em `supabase/README.md`, com as queries de conferência e os
+  testes das proteções). Depois do deploy, configure a env `OWNER_USER_ID`
+  (User UID de bruno.2bpl@gmail.com) na Vercel — sem ela o modo Owner nega
+  sempre (fail-closed, proposital).
+- **Criar uma organização**: login como Owner → tela "Como você quer entrar?"
+  → Owner → "Nova organização" (admin = o próprio Owner ou conta nova
+  email/senha). A org nasce VAZIA (só as core defs de `seed_org_defaults`);
+  o admin loga e cria bases/campos/dashboards do zero. Excluir exige digitar
+  o nome exato; a org inicial (Zapper) só sai via SQL direto.
+- **Trocar o org_admin de uma org** (só via banco, por design):
+  `select set_config('app.allow_protected_change','on',true);` na MESMA
+  transação de um UPDATE que demova o atual e promova o novo (o índice
+  parcial exige demover antes de promover).
+- **Bitrix/planilha/pg_cron são da Zapper**: as tabelas de encanamento
+  (`bitrix_*`, `sync_jobs`, fila de write-back) têm `organization_id` default
+  Zapper — org nova usa criação manual/CSV/API de ingestão. Conectar um CRM
+  de outra org é trabalho futuro (credenciais por org).
+- **Acessos**: por board no ⋮ → Acesso (funções + pessoas Ver/Editar/
+  Bloqueado); matriz central em Configurações → Acessos (áreas allow/deny,
+  bases deny, boards). Limitação documentada: allow de ÁREA concede a
+  tela; escrita dentro dela segue o papel (RLS). Deny de área esconde
+  aba/page; as actions de escrita seguem gated por papel (um admin negado
+  ainda escreveria via chamada direta — deny mira quem não é admin).
+- **Escopo de bases do board** (⋮ → Bases) é OFERTA (listas menores), não
+  autorização — para PRIVAR use o deny de base por usuário.
 
 ## 5. Troubleshooting
 

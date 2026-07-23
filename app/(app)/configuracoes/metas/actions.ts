@@ -1,10 +1,13 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 23/07/2026
 // Server Actions da tela de Metas (goals) — admin. RLS de goals exige admin.
+// v1.1 (23/07/2026): multi-org (0090) — carimbo de organization_id em goals/
+//   non_working_days/sync_config e onConflict das PKs compostas.
 "use server";
 
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import {
   GOAL_METRICS_CONFIG_KEY,
@@ -66,6 +69,7 @@ export async function createGoal(
     : find.is("responsible_id", null);
   const { data: existing } = await find.maybeSingle();
 
+  const orgId = await getActiveOrgId();
   const row = {
     period_year: year,
     period_month: month,
@@ -74,6 +78,7 @@ export async function createGoal(
     responsible_id: responsibleId,
     metric,
     target,
+    ...(orgId ? { organization_id: orgId } : {}),
   };
   const { error } = existing?.id
     ? await supabase.from("goals").update({ target }).eq("id", existing.id)
@@ -109,11 +114,14 @@ export async function createGoalMetric(label: string): Promise<GoalState> {
   if (registry.some((m) => m.key === key))
     return { ok: false, message: `Métrica "${key}" já existe.` };
 
-  const { data } = await supabase
+  // sync_config tem PK (organization_id, key) desde a 0090.
+  const orgId = await getActiveOrgId();
+  let regQuery = supabase
     .from("sync_config")
     .select("value")
-    .eq("key", GOAL_METRICS_CONFIG_KEY)
-    .maybeSingle();
+    .eq("key", GOAL_METRICS_CONFIG_KEY);
+  if (orgId) regQuery = regQuery.eq("organization_id", orgId);
+  const { data } = await regQuery.maybeSingle();
   const current = Array.isArray(data?.value) ? (data.value as unknown[]) : [];
   const { error } = await supabase
     .from("sync_config")
@@ -121,8 +129,9 @@ export async function createGoalMetric(label: string): Promise<GoalState> {
       {
         key: GOAL_METRICS_CONFIG_KEY,
         value: [...current, { key, label: clean }],
+        ...(orgId ? { organization_id: orgId } : {}),
       },
-      { onConflict: "key" }
+      { onConflict: "organization_id,key" }
     );
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/metas");
@@ -154,12 +163,21 @@ export async function upsertNonWorkingDays(
       ok: false,
       message: `Máximo de ${MAX_NON_WORKING_ROWS} datas por importação.`,
     };
-  // Última ocorrência de um dia duplicado no lote vence.
-  const byDay = new Map(clean.map((r) => [r.day, r]));
+  // Última ocorrência de um dia duplicado no lote vence. PK composta
+  // (organization_id, day) desde a 0090 — calendário POR org.
+  const orgId = await getActiveOrgId();
+  const byDay = new Map(
+    clean.map((r) => [
+      r.day,
+      { ...r, ...(orgId ? { organization_id: orgId } : {}) },
+    ])
+  );
   const supabase = await createClient();
   const { error } = await supabase
     .from("non_working_days")
-    .upsert(Array.from(byDay.values()), { onConflict: "day" });
+    .upsert(Array.from(byDay.values()), {
+      onConflict: "organization_id,day",
+    });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/metas");
   return { ok: true, message: `${byDay.size} dia(s) não útil(eis) salvo(s).` };

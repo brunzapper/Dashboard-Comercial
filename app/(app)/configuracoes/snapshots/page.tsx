@@ -3,12 +3,12 @@
 // congelados — todos os dashboards. Criação continua no menu ⋮ de cada
 // dashboard (o snapshot nasce de uma aba específica); aqui é visão e controle:
 // pausar/retomar, atualizar agora, editar e revogar.
-import { requireRole } from "@/lib/auth/session";
 import { listAllSnapshots } from "@/app/(app)/dashboards/snapshot-actions";
+import { requireSettingsArea } from "@/lib/auth/access";
 import { SnapshotsManager } from "@/components/admin/snapshots-manager";
 
 export default async function SnapshotsPage() {
-  await requireRole("admin");
+  await requireSettingsArea("snapshots");
   const snapshots = await listAllSnapshots();
 
   return (

@@ -1,7 +1,7 @@
 // Versão: 1.0 | Data: 05/07/2026
 // Tela de Responsáveis (admin) — Fase 6B.
-import { requireRole } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { requireSettingsArea } from "@/lib/auth/access";
 import type { OptionItem } from "@/lib/records/types";
 import {
   ResponsiblesManager,
@@ -9,7 +9,7 @@ import {
 } from "@/components/admin/responsibles-manager";
 
 export default async function ResponsaveisPage() {
-  await requireRole("admin");
+  await requireSettingsArea("responsaveis");
   const supabase = await createClient();
 
   const [{ data: resps }, { data: ops }, { data: maps }] = await Promise.all([

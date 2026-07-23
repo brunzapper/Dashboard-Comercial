@@ -10,6 +10,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
@@ -36,9 +37,15 @@ export async function createOperation(
   const parent = String(formData.get("parent_operation_id") ?? "") || null;
 
   const supabase = await createClient();
+  const orgId = await getActiveOrgId();
   const { error } = await supabase
     .from("operations")
-    .insert({ name, parent_operation_id: parent });
+    .insert({
+      name,
+      parent_operation_id: parent,
+      // Carimbo de org (multi-org, 0090).
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/operacoes");
   return { ok: true, message: `Operação "${name}" criada.` };

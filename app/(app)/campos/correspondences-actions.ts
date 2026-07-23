@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { recordTypeOf, type SourceDef } from "@/lib/sources";
@@ -83,9 +84,16 @@ export async function createCorrespondence(
     return { ok: false, message: "Ligue colunas de pelo menos duas bases." };
   }
 
+  // Carimbo de org (multi-org, 0090).
+  const orgId = await getActiveOrgId();
   const { data: created, error } = await supabase
     .from("field_correspondences")
-    .insert({ key, label, data_type: dataType })
+    .insert({
+      key,
+      label,
+      data_type: dataType,
+      ...(orgId ? { organization_id: orgId } : {}),
+    })
     .select("id")
     .maybeSingle();
   if (error) {

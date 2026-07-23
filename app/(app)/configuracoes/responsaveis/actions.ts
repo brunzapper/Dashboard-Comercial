@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 
 export interface ResponsibleState {
@@ -32,10 +33,15 @@ export async function createResponsible(
   if (!name) return { ok: false, message: "Informe o nome." };
 
   const supabase = await createClient();
+  const orgId = await getActiveOrgId();
   // bitrix_user_id fica null: responsável só do sistema.
   const { error } = await supabase
     .from("responsibles")
-    .insert({ display_name: name });
+    .insert({
+      display_name: name,
+      // Carimbo de org (multi-org, 0090).
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/responsaveis");
   return { ok: true, message: `Responsável "${name}" criado.` };

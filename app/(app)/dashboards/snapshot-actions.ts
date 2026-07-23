@@ -22,6 +22,7 @@ import {
   type SnapshotListItem,
 } from "@/lib/snapshots/types";
 import { loadSources } from "@/lib/config/sources";
+import { applySourceScope } from "@/lib/config/source-scope";
 import {
   PERIOD_ALL,
   PERIOD_PRESETS,
@@ -502,7 +503,10 @@ export async function getSnapshotFormOptions(
       label: (o.name as string) ?? "—",
     })),
     // value = record_type (o que a restrição grava); label = nome da fonte.
-    sources: catalog.map((s) => ({
+    // Escopo de BASES do board (⋮ → "Bases"): a oferta de restrição segue o
+    // catálogo efetivo do dashboard (validação em cleanSources segue global —
+    // restrição gravada antes do escopo continua válida).
+    sources: applySourceScope(catalog, access.settings.sourceScope).map((s) => ({
       value: s.recordType,
       label: s.label,
     })),

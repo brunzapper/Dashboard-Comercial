@@ -13,6 +13,7 @@ import Link from "next/link";
 import { SquareKanban } from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import { loadUserSettings } from "@/lib/config/user-settings";
@@ -129,12 +130,17 @@ export default async function HomePage() {
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
   const isAdmin = session?.roles.includes("admin") ?? false;
+  // Org ativa (multi-org): a RLS já escopa às orgs do usuário; o .eq resolve a
+  // visão de quem pertence a 2+ orgs (Owner). null pré-migração = sem filtro.
+  const orgId = await getActiveOrgId();
 
   const supabase = await createClient();
-  const { data } = await supabase
+  let boardsQuery = supabase
     .from("dashboards")
     .select("id, name, owner_user_id, visible_to_roles, kind, status, trashed_at")
     .order("created_at", { ascending: false });
+  if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
+  const { data } = await boardsQuery;
   const rows = (data ?? []) as DashboardRow[];
   const canManageRow = (r: DashboardRow) =>
     isAdmin || r.owner_user_id === session?.user.id;
@@ -163,7 +169,7 @@ export default async function HomePage() {
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
   if (canCreate) {
-    sources = await loadSources(supabase);
+    sources = await loadSources(supabase, orgId);
     // Campos p/ o seletor de colunas do kanban: NÃO filtramos por show_in_builder
     // (esse gate é dos construtores BI). Definir as colunas do quadro é escolha de
     // exibição — inclusive campos LOCAIS criados só para servir de "fase" (nunca

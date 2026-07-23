@@ -1,6 +1,10 @@
-// Versão: 2.8 | Data: 21/07/2026
+// Versão: 2.9 | Data: 23/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v2.9 (23/07/2026): escopo de BASES do board (settings.sourceScope, ⋮ →
+//   "Bases") — o catálogo efetivo (applySourceScope, lib/config/source-scope)
+//   recorta ofertas E o universo dos widgets em "todas as bases"; a page
+//   re-provê <SourcesProvider> escopado por cima do provider do layout.
 // v2.8 (21/07/2026): deferredScopeById — fingerprint (período + filtros de
 //   visualização + __pw__) por widget DEFERIDO (Tabela Livre/kanban): o effect
 //   do cliente re-busca quando o escopo efetivo muda, cobrindo também os
@@ -115,6 +119,11 @@ import {
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
+import { SourcesProvider } from "@/components/sources-context";
+import {
   collectOperationFilterIds,
   loadOperationScopes,
   translateOperationFilters,
@@ -185,7 +194,9 @@ export default async function DashboardPage({
     getSessionInfo(),
     supabase
       .from("dashboards")
-      .select("id, name, owner_user_id, visible_to_roles, settings, status")
+      .select(
+        "id, name, owner_user_id, visible_to_roles, settings, status, organization_id"
+      )
       .eq("id", id)
       .maybeSingle(),
   ]);
@@ -194,7 +205,18 @@ export default async function DashboardPage({
 
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;
-  const canEdit = isOwner || isAdmin;
+  // Override individual (board_access, 0088): 'edit' concede edição a quem
+  // não é dono/admin — espelho da RLS (auth_board_editable). 'blocked' nem
+  // chega aqui (dashboards_select nega e o board vira 404).
+  const { data: myAccess } = session
+    ? await supabase
+        .from("board_access")
+        .select("level")
+        .eq("dashboard_id", id)
+        .eq("user_id", session.user.id)
+        .maybeSingle()
+    : { data: null };
+  const canEdit = isOwner || isAdmin || myAccess?.level === "edit";
   const canManageFields =
     session?.permissions.includes("manage_field_definitions") ?? false;
   // Para as tabelas em modo "registros individuais" (Fase 1): quem pode editar
@@ -210,7 +232,7 @@ export default async function DashboardPage({
     { data: prefData },
     enabledCurrencies,
     currencyRates,
-    sources,
+    allSources,
   ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
@@ -228,7 +250,7 @@ export default async function DashboardPage({
       // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
       .or("show_in_builder.eq.true,source_system.eq.core")
       .order("sort_order", { ascending: true }),
-    loadCorrespondences(supabase),
+    loadCorrespondences(supabase, dash.organization_id as string | null),
     session
       ? supabase
           .from("user_preferences")
@@ -239,7 +261,9 @@ export default async function DashboardPage({
       : Promise.resolve({ data: null }),
     loadEnabledCurrencies(supabase),
     loadCurrencyRates(supabase),
-    loadSources(supabase),
+    // Catálogo da ORG do board (multi-org): a RLS já escopa; o filtro cobre a
+    // visão de quem pertence a 2+ orgs.
+    loadSources(supabase, dash.organization_id as string | null),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
 
@@ -262,6 +286,16 @@ export default async function DashboardPage({
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
   const fieldByKeyAll = new Map(customFields.map((f) => [f.field_key, f]));
+  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  // Escopo de BASES do board (⋮ → "Bases"): catálogo EFETIVO deste dashboard —
+  // recorta ofertas dos pickers E o universo dos widgets em "todas as bases".
+  // Fontes já referenciadas por widgets existentes nunca saem do catálogo
+  // (applySourceScope), então config antiga segue renderizando.
+  const sources = applySourceScope(
+    allSources,
+    dashSettings.sourceScope,
+    collectBoardSourceKeys(widgets, dashSettings, fieldByKeyAll)
+  );
   // Renderização usa TODOS os campos: os metadados são legíveis por qualquer
   // autenticado (RLS afrouxada em 0043), então widgets compartilhados resolvem
   // rótulos/tipos corretamente para qualquer papel.
@@ -283,7 +317,6 @@ export default async function DashboardPage({
   // SÓ para as opções de bucket dos filtros rápidos (display) — consultas de
   // widget montam o mapa POR PERNA (correspondenceMapForSources) no engine.
   const correspondencesMap = buildCorrespondenceMap(correspondences);
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   const periodBar = dashSettings.periodBar;
 
   // Resolução de período por widget: lógica compartilhada com o runQuickTable
@@ -1277,7 +1310,10 @@ export default async function DashboardPage({
     : undefined;
 
   return (
-    <>
+    // Re-provê o catálogo ESCOPADO por cima do provider do layout: todos os
+    // pickers de base/sub-base deste dashboard (useSources) ofertam só o
+    // escopo do board (⋮ → "Bases") + fontes já referenciadas.
+    <SourcesProvider sources={sources}>
       {/* Grava a view (com ?tab=) p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <DashboardClient
@@ -1308,7 +1344,6 @@ export default async function DashboardPage({
         currencyRates={currencyRates}
         conversionPeriodById={conversionPeriodById}
         settings={dashSettings}
-        visibleToRoles={(dash.visible_to_roles ?? []) as string[]}
         dateFormat={dashSettings.dateFormat}
         periodBar={periodBar}
         periodScope={scope}
@@ -1322,6 +1357,6 @@ export default async function DashboardPage({
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
       />
-    </>
+    </SourcesProvider>
   );
 }

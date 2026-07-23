@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 22/07/2026
+// Versão: 1.1 | Data: 23/07/2026
 // Menu "⋮" dos cards do hub (dashboards E kanbans): substitui o botão de
 // lixeira. Itens por status (0087): ativo → Duplicar/Arquivar/Excluir (vai à
 // Lixeira, reversível — sem confirmação); arquivado → Desarquivar/Duplicar/
@@ -6,6 +6,9 @@
 // `canManage` espelha a RLS de update/delete (owner/admin); `canDuplicate` é a
 // permissão create_dashboards (quem enxerga o board pode duplicar — a cópia
 // nasce privada do usuário).
+// v1.1 (23/07/2026): itens "Bases" (escopo de bases do board —
+//   BoardSourcesDialog) e "Acesso" (funções + pessoas — BoardAccessDialog),
+//   boards ativos/arquivados, gate canManage.
 "use client";
 
 import { useState, useTransition } from "react";
@@ -13,9 +16,11 @@ import {
   Archive,
   ArchiveRestore,
   Copy,
+  Database,
   MoreVertical,
   Trash2,
   Undo2,
+  Users,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -44,6 +49,8 @@ import {
   trashBoard,
 } from "@/app/(app)/dashboards/actions";
 import type { ActionState } from "@/app/(app)/dashboards/actions";
+import { BoardSourcesDialog } from "./board-sources-dialog";
+import { BoardAccessDialog } from "./board-access-dialog";
 
 export type BoardStatus = "active" | "archived" | "trashed";
 
@@ -62,6 +69,8 @@ export function BoardCardMenu({
 }) {
   const [pending, startTransition] = useTransition();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const noun = kanban ? "kanban" : "dashboard";
@@ -118,6 +127,26 @@ export function BoardCardMenu({
                   <ArchiveRestore className="size-4" /> Desarquivar
                 </DropdownMenuItem>
               ) : null}
+              {canManage ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setSourcesOpen(true);
+                  }}
+                >
+                  <Database className="size-4" /> Bases
+                </DropdownMenuItem>
+              ) : null}
+              {canManage ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setAccessOpen(true);
+                  }}
+                >
+                  <Users className="size-4" /> Acesso
+                </DropdownMenuItem>
+              ) : null}
               {canDuplicate ? (
                 <DropdownMenuItem onSelect={() => run(duplicateBoard)}>
                   <Copy className="size-4" /> Duplicar
@@ -149,6 +178,20 @@ export function BoardCardMenu({
           {error}
         </p>
       ) : null}
+
+      <BoardSourcesDialog
+        boardId={id}
+        kanban={kanban}
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+      />
+
+      <BoardAccessDialog
+        boardId={id}
+        kanban={kanban}
+        open={accessOpen}
+        onOpenChange={setAccessOpen}
+      />
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
