@@ -71,7 +71,21 @@ export async function saveAiProviderConfig(input: {
     model,
     updated_by: auth.userId,
   };
-  if (apiKey) row.api_key_ciphertext = encryptSecret(apiKey);
+  if (apiKey) {
+    try {
+      row.api_key_ciphertext = encryptSecret(apiKey);
+    } catch {
+      // encryptSecret lança se KEY_ENCRYPTION_KEY estiver ausente ou não for 32
+      // bytes em base64. Sem este catch, viraria um 500 opaco ("A server error
+      // occurred"); aqui devolvemos uma mensagem acionável ao admin.
+      return {
+        ok: false,
+        message:
+          "Não foi possível cifrar a chave: verifique se KEY_ENCRYPTION_KEY " +
+          "(32 bytes em base64) está configurada no ambiente e refaça o deploy.",
+      };
+    }
+  }
 
   const { error } = await db
     .from("ai_provider_config")
