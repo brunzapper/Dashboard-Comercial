@@ -82,7 +82,7 @@ export async function getBoardAccessState(
     await Promise.all([
       supabase
         .from("dashboards")
-        .select("visible_to_roles")
+        .select("visible_to_roles, organization_id")
         .eq("id", boardId)
         .maybeSingle(),
       supabase
@@ -91,6 +91,17 @@ export async function getBoardAccessState(
         .eq("dashboard_id", boardId),
       service.auth.admin.listUsers({ perPage: 1000 }),
     ]);
+
+  // Multi-org (0089): só contas da MESMA org do board podem receber override.
+  const boardOrgId = (dash?.organization_id as string | null) ?? null;
+  let memberIds: Set<string> | null = null;
+  if (boardOrgId) {
+    const { data: memberRows } = await service
+      .from("organization_members")
+      .select("user_id")
+      .eq("organization_id", boardOrgId);
+    memberIds = new Set((memberRows ?? []).map((m) => m.user_id as string));
+  }
 
   const emailById = new Map<string, string>(
     (usersData?.users ?? []).map((u) => [u.id, u.email ?? "(sem email)"])
@@ -105,6 +116,7 @@ export async function getBoardAccessState(
   // Dono fora da lista de alvos (nunca bloqueável; override seria inócuo).
   const users = (usersData?.users ?? [])
     .filter((u) => u.id !== access.ownerUserId)
+    .filter((u) => !memberIds || memberIds.has(u.id))
     .map((u) => ({ id: u.id, email: u.email ?? "(sem email)" }))
     .sort((a, b) => a.email.localeCompare(b.email));
 

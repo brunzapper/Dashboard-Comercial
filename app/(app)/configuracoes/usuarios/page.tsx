@@ -1,9 +1,13 @@
-// Versão: 2.0 | Data: 11/07/2026
+// Versão: 2.1 | Data: 23/07/2026
 // Tela de Usuários (admin): provisionamento de contas, papéis, reset/desativação
 // e mapeamento Bitrix (bitrix_user_map). Só quem tem manage_users_roles.
 // A lista de contas vem do Auth via service role (auth.users não é listável pelo
 // client autenticado); papéis/mapeamentos vêm por RLS.
+// v2.1 (23/07/2026): multi-org (0089) — lista SÓ os membros da org ATIVA (o
+//   service role enxerga todas as contas; a interseção com
+//   organization_members faz o recorte).
 import { requirePermission } from "@/lib/auth/session";
+import { getActiveOrg } from "@/lib/auth/org";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -22,11 +26,12 @@ function isDisabled(bannedUntil: string | null | undefined): boolean {
 
 export default async function UsuariosPage() {
   const session = await requirePermission("manage_users_roles");
+  const org = await getActiveOrg();
 
   const supabase = await createClient();
   const service = createServiceClient();
 
-  const [usersRes, { data: roleRows }, { data: userRoles }, { data: maps }, { data: resps }] =
+  const [usersRes, { data: roleRows }, { data: userRoles }, { data: maps }, { data: resps }, { data: memberRows }] =
     await Promise.all([
       service.auth.admin.listUsers({ perPage: 1000 }),
       supabase.from("roles").select("key, label").order("key"),
@@ -36,7 +41,17 @@ export default async function UsuariosPage() {
         .from("responsibles")
         .select("display_name, bitrix_user_id")
         .not("bitrix_user_id", "is", null),
+      org
+        ? service
+            .from("organization_members")
+            .select("user_id")
+            .eq("organization_id", org.id)
+        : Promise.resolve({ data: null }),
     ]);
+  // Recorte da org ativa: sem membership (pré-migração) mostra todas as contas.
+  const memberIds = memberRows
+    ? new Set((memberRows ?? []).map((m) => m.user_id as string))
+    : null;
 
   // Papéis por usuário.
   const rolesByUser = new Map<string, string[]>();
@@ -48,6 +63,7 @@ export default async function UsuariosPage() {
   }
 
   const users: UserRow[] = (usersRes.data?.users ?? [])
+    .filter((u) => !memberIds || memberIds.has(u.id))
     .map((u) => ({
       id: u.id,
       email: u.email ?? "—",

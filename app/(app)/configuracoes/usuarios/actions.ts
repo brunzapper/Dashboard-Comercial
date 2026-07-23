@@ -1,8 +1,12 @@
-// Versão: 1.1 | Data: 12/07/2026
+// Versão: 1.2 | Data: 23/07/2026
 // Server Actions da tela de Usuários (admin): provisionamento de contas,
 // atribuição de papéis, reset de senha, desativação/exclusão e mapeamento
 // Bitrix (bitrix_user_map). Sem signup público — só quem tem
 // manage_users_roles opera aqui.
+// v1.2 (23/07/2026): multi-org (0089/0092) — conta nova entra como membro da
+//   org ATIVA; conceder/remover o papel `admin` exige Administrador de
+//   Organização (RLS 0092 é o backstop); org_admin/Owner não podem ser
+//   desativados nem excluídos (triggers/FK da 0089 são o backstop).
 // v1.1 (12/07/2026): setBitrixMapping também grava responsibles.user_id — fonte
 //   da verdade da visibilidade (RLS de records segue o vínculo vivo responsável).
 //
@@ -14,8 +18,31 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo, type SessionInfo } from "@/lib/auth/session";
+import { getActiveOrg } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+
+// Alvo protegido? (org_admin de alguma org, ou o Owner do sistema.) Consultas
+// via service role — as memberships de outros usuários não são visíveis pela
+// RLS. Os triggers/FK da 0089 são a barreira definitiva; aqui é a mensagem
+// amigável.
+async function protectedUserReason(userId: string): Promise<string | null> {
+  const service = createServiceClient();
+  const [{ data: owner }, { data: adminRows }] = await Promise.all([
+    service.from("app_owner").select("user_id").eq("user_id", userId).maybeSingle(),
+    service
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", userId)
+      .eq("is_org_admin", true)
+      .limit(1),
+  ]);
+  if (owner) return "Esta conta é o Owner do sistema e não pode ser alterada.";
+  if (adminRows && adminRows.length > 0) {
+    return "Esta conta é Administrador de Organização e não pode ser removida/desativada.";
+  }
+  return null;
+}
 
 export interface ActionResult {
   error?: string;
@@ -76,9 +103,35 @@ export async function createUser(
     return { error: "Não foi possível criar o usuário." };
   }
 
+  // Membership na org ATIVA (multi-org, 0089): sem ela o usuário novo não
+  // enxerga NADA (RLS org-scoped). Via service role — escrita de
+  // organization_members não tem policy authenticated de propósito.
+  const org = await getActiveOrg();
+  if (org) {
+    const { error: memberErr } = await service
+      .from("organization_members")
+      .upsert(
+        { organization_id: org.id, user_id: data.user.id },
+        { onConflict: "organization_id,user_id" }
+      );
+    if (memberErr) {
+      return {
+        error: `Usuário criado, mas falhou o vínculo com a organização: ${memberErr.message}`,
+      };
+    }
+  }
+
   if (role) {
     // RLS já permite (o caller tem manage_users_roles), mas usamos o client
-    // autenticado para respeitar a política.
+    // autenticado para respeitar a política. Papel `admin` na criação exige
+    // Administrador de Organização (0092) — o insert falharia na RLS; aqui a
+    // mensagem amigável.
+    if (role === "admin" && !org?.isOrgAdmin) {
+      return {
+        error:
+          "Usuário criado, mas só o Administrador de Organização concede o papel Administrador.",
+      };
+    }
     const supabase = await createClient();
     await supabase
       .from("user_roles")
@@ -104,6 +157,18 @@ export async function setUserRole(
   // Trava anti-lockout: não deixa o próprio admin remover o próprio papel admin.
   if (!enabled && roleKey === "admin" && userId === session.user.id) {
     return { error: "Você não pode remover seu próprio papel de administrador." };
+  }
+
+  // Papel `admin` (Administrador comum) só é concedido/removido pelo
+  // Administrador de Organização (0092 — RLS é o backstop).
+  if (roleKey === "admin") {
+    const org = await getActiveOrg();
+    if (!org?.isOrgAdmin) {
+      return {
+        error:
+          "Só o Administrador de Organização concede ou remove o papel Administrador.",
+      };
+    }
   }
 
   const supabase = await createClient();
@@ -161,6 +226,10 @@ export async function setUserDisabled(
   if (disabled && userId === session.user.id) {
     return { error: "Você não pode desativar a própria conta." };
   }
+  if (disabled) {
+    const reason = await protectedUserReason(userId);
+    if (reason) return { error: reason };
+  }
 
   const service = createServiceClient();
   const { error } = await service.auth.admin.updateUserById(userId, {
@@ -180,6 +249,10 @@ export async function deleteUser(userId: string): Promise<ActionResult> {
   if (userId === session.user.id) {
     return { error: "Você não pode excluir a própria conta." };
   }
+  // org_admin/Owner: o trigger da 0089 (cascade da membership) e a FK de
+  // app_owner derrubariam o delete de qualquer forma — mensagem amigável.
+  const reason = await protectedUserReason(userId);
+  if (reason) return { error: reason };
 
   const service = createServiceClient();
   const { error } = await service.auth.admin.deleteUser(userId);
