@@ -6,6 +6,9 @@
 // `canManage` espelha a RLS de update/delete (owner/admin); `canDuplicate` é a
 // permissão create_dashboards (quem enxerga o board pode duplicar — a cópia
 // nasce privada do usuário).
+// v1.2 (23/07/2026): item "Exportar JSON" (dashboards ativos/arquivados) —
+//   baixa a estrutura no formato dashboard-import (exportDashboardStructure);
+//   é o mesmo JSON que os modos "Criar a partir de"/"Editar" da IA usam.
 // v1.1 (23/07/2026): itens "Bases" (escopo de bases do board —
 //   BoardSourcesDialog) e "Acesso" (funções + pessoas — BoardAccessDialog),
 //   boards ativos/arquivados, gate canManage.
@@ -17,6 +20,7 @@ import {
   ArchiveRestore,
   Copy,
   Database,
+  FileJson,
   MoreVertical,
   Trash2,
   Undo2,
@@ -49,6 +53,7 @@ import {
   trashBoard,
 } from "@/app/(app)/dashboards/actions";
 import type { ActionState } from "@/app/(app)/dashboards/actions";
+import { exportDashboardStructure } from "@/app/(app)/dashboards/export-structure-actions";
 import { BoardSourcesDialog } from "./board-sources-dialog";
 import { BoardAccessDialog } from "./board-access-dialog";
 
@@ -81,6 +86,27 @@ export function BoardCardMenu({
     startTransition(async () => {
       const res = await action(id);
       if (!res.ok) setError(res.message ?? "Falha na operação.");
+    });
+  }
+
+  // Baixa a estrutura do dashboard como .json (formato dashboard-import).
+  function runExportJson() {
+    setError(null);
+    startTransition(async () => {
+      const res = await exportDashboardStructure(id);
+      if (!res.ok || !res.json) {
+        setError(res.message ?? "Falha ao exportar.");
+        return;
+      }
+      const blob = new Blob([res.json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename ?? "dashboard.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     });
   }
 
@@ -150,6 +176,11 @@ export function BoardCardMenu({
               {canDuplicate ? (
                 <DropdownMenuItem onSelect={() => run(duplicateBoard)}>
                   <Copy className="size-4" /> Duplicar
+                </DropdownMenuItem>
+              ) : null}
+              {!kanban ? (
+                <DropdownMenuItem onSelect={() => runExportJson()}>
+                  <FileJson className="size-4" /> Exportar JSON
                 </DropdownMenuItem>
               ) : null}
               {status === "active" && canManage ? (

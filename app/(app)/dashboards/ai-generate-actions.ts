@@ -1,51 +1,188 @@
-// Versão: 1.0 | Data: 23/07/2026
-// Geração DIRETA de dashboard por IA (via API). Remove o "hop" manual de
-// copiar/colar: o servidor monta o MESMO prompt do fluxo manual
-// (buildImportPrompt — SPEC + modelo das Bases + amostras), chama o provedor
-// configurado por org (lib/ai), e roda um laço de AUTOCORREÇÃO usando os erros
-// pt-BR do validador (validateDashboardImport) — o mesmo contrato pensado para
-// "colar de volta na IA". Ao validar, aplica reusando importDashboardJson
-// (gates + GC + persistência idempotente intactos) e o cliente navega ao
-// dashboard. A chave da IA é decifrada só aqui (loadOrgAiConfig), nunca no
-// browser.
+// Versão: 2.0 | Data: 23/07/2026
+// v2.0 (23/07/2026): CONVERSA multi-turno + 3 modos — "new" (criar do zero),
+//   "from" (criar a partir de um dashboard existente) e "edit" (editar
+//   in-place). Desenho:
+//   - STATELESS por turno: a cada turno o servidor RE-EXPORTA o estado atual
+//     do board (modos from/edit) para o system e envia só os turnos de USUÁRIO
+//     anteriores (cap 10) — nada de acumular JSONs de assistant no histórico.
+//     Após o 1º apply em new/from, o CLIENTE troca a sessão para mode:'edit' +
+//     targetDashboardId (new/from só existem no 1º turno).
+//   - IDENTIDADE FORÇADA NO SERVIDOR: normalizeImportRaw sobrescreve a `chave`
+//     do JSON da IA pela canônica (edit: derivada do board; new/from: gerada
+//     aqui) ANTES da validação — a IA nunca é confiada com identidade (uma
+//     chave trocada poderia sobrescrever o board de ORIGEM no modo from).
+//   - Aplicação: edit → applyDashboardEditJson (adoção + apply com
+//     targetDashboardId, SEM GC — widget omitido permanece; snapshot p/
+//     Desfazer); new/from → importDashboardJson (gates por seção intactos).
+//   - Toggle "Aplicar automaticamente": OFF ⇒ o turno para após a validação e
+//     devolve pendingJson + resumo; o Aplicar chama applyGeneratedDashboard
+//     (re-valida/re-gates/re-deriva identidade — nada confiado do cliente).
+//   - Truncamento (AiTruncatedError) aborta o laço na hora, com mensagem
+//     acionável — JSON cortado nunca valida e queimaria as tentativas.
+// v1.0 (23/07/2026): geração one-shot com laço de autocorreção.
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { loadSources } from "@/lib/config/sources";
 import { loadOrgAiConfig } from "@/lib/ai/config";
-import { getAiClient, type AiMessage } from "@/lib/ai";
+import { getAiClient, AiTruncatedError, type AiMessage } from "@/lib/ai";
 import { buildImportPrompt } from "@/app/(app)/dashboards/import-prompt-actions";
 import { loadImportContext } from "@/lib/import/dashboard/context";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
-import { importDashboardJson, type ImportDashboardState } from "@/app/(app)/dashboards/actions";
+import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
+import {
+  exportDashboardJson,
+  type ExportDashRow,
+  type ExportWidgetRow,
+} from "@/lib/import/dashboard/export";
+import { IMPORT_PRESET_PREFIX } from "@/lib/import/dashboard/types";
+import type { DashboardSettings } from "@/lib/widgets/types";
+import type { DashboardSnapshot } from "@/lib/widgets/history";
+import {
+  applyDashboardEditJson,
+  importDashboardJson,
+  type ImportDashboardState,
+} from "@/app/(app)/dashboards/actions";
+
+export type AiDashboardMode = "new" | "from" | "edit";
+
+export interface GenerateDashboardInput {
+  mode: AiDashboardMode;
+  /** Modo new: Bases marcadas (obrigatório). */
+  bases?: string[];
+  /** Modo from: board de REFERÊNCIA; modo edit: board ALVO. */
+  targetDashboardId?: string;
+  /** Pedido deste turno. */
+  description: string;
+  /** Turnos de usuário anteriores da sessão (stateless; cap 10). */
+  priorTurns?: string[];
+  /** Switch "Aplicar automaticamente" da janela da sessão. */
+  autoApply?: boolean;
+}
 
 export interface GenerateDashboardState extends ImportDashboardState {
-  // Último JSON gerado quando o laço falha — o campo manual é preenchido com
-  // ele para conserto/importação à mão (degradação graciosa do auto-import).
+  // Último JSON bruto quando o laço falha — vai para o campo de import manual.
   draftJson?: string;
+  // Toggle OFF: JSON validado (já com identidade canônica) aguardando Aplicar.
+  pendingJson?: string;
+  // Resumo por widget da prévia ("novo: X" / "atualiza: Y").
+  summary?: string[];
+  // Modo edit: snapshot pré-edição (Desfazer via restoreDashboardSnapshot).
+  snapshot?: DashboardSnapshot;
+  chave?: string;
+  mode?: AiDashboardMode;
 }
 
 const MAX_ATTEMPTS = 3;
-const CALL_TIMEOUT_MS = 45_000;
+const CALL_TIMEOUT_MS = 120_000; // por chamada ao provedor
+const TURN_BUDGET_MS = 240_000; // orçamento do turno (Home tem maxDuration=300)
+const MAX_PRIOR_TURNS = 10;
 
-export async function generateDashboardWithAi(input: {
-  bases: string[];
-  description: string;
-}): Promise<GenerateDashboardState> {
+const WIDGET_COLS =
+  "id, title, visual_type, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order";
+
+function randomChave(): string {
+  return `board_${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+}
+
+function section(title: string, body: string): string {
+  return `\n\n============================================================\n# ${title}\n============================================================\n\n${body.trim()}\n`;
+}
+
+const EDIT_RULES = `
+Você está EDITANDO o dashboard mostrado em "ESTADO ATUAL DO DASHBOARD (JSON)".
+Regras deste modo (além da especificação acima):
+- Responda com UM bloco de JSON no MESMO formato do estado atual.
+- A resposta pode ser PARCIAL: inclua APENAS os widgets que você ALTEROU ou
+  CRIOU. Widgets não incluídos permanecem exatamente como estão.
+- NUNCA mude a "key" de um widget existente (é a identidade dele). Widget
+  NOVO recebe uma "key" nova (slug curto, ex.: "w_funil_2").
+- Ao alterar um widget, copie o objeto dele do estado atual NA ÍNTEGRA
+  (inclusive "settings") e mude só o que o usuário pediu — campos omitidos
+  de um widget INCLUÍDO são apagados.
+- Você NÃO exclui widgets (omitir não exclui). Se o usuário pedir remoção,
+  responda que a exclusão é manual (⋮ do widget) e siga com o resto.
+- Não mude "name", "visible_to_roles" nem "settings.tabs" sem pedido
+  explícito. Inclua "dashboard.settings" só se alterar periodBar/canvas/
+  background/dateFormat/fontScale/tabs.
+- A "chave" é fixa (o sistema a impõe) — repita a do estado atual.`;
+
+const FROM_RULES = `
+O "ESTADO ATUAL DO DASHBOARD (JSON)" abaixo é um dashboard de REFERÊNCIA: você
+vai criar um dashboard NOVO baseado nele, aplicando o que o usuário pedir.
+- Reaproveite a estrutura/widgets que fizerem sentido (pode copiar e ajustar).
+- Dê um NOME novo ao dashboard (não repita o da referência).
+- A "chave" será definida pelo sistema — pode manter a que vier no estado.`;
+
+const NEW_RULES = `
+Se o usuário continuar a conversa depois deste dashboard ser criado, os
+próximos turnos vão EDITÁ-LO (mantenha keys de widget estáveis e descritivas).`;
+
+// Carrega board + widgets para os modos from/edit (RLS decide a visibilidade).
+async function loadBoardForExport(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dashboardId: string
+): Promise<
+  | {
+      ok: true;
+      dash: ExportDashRow & {
+        owner_user_id: string | null;
+        kind: string;
+        status: string;
+      };
+      widgets: ExportWidgetRow[];
+    }
+  | { ok: false; message: string }
+> {
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("id, name, owner_user_id, visible_to_roles, settings, kind, status")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  if (!dash) return { ok: false, message: "Dashboard não encontrado." };
+  if ((dash.kind as string) === "kanban") {
+    return { ok: false, message: "A conversa com IA é só para dashboards." };
+  }
+  if ((dash.status as string) === "trashed") {
+    return { ok: false, message: "Restaure o dashboard antes de usá-lo aqui." };
+  }
+  const { data: widgetsData } = await supabase
+    .from("widgets")
+    .select(WIDGET_COLS)
+    .eq("dashboard_id", dashboardId)
+    .order("sort_order", { ascending: true });
+  return {
+    ok: true,
+    dash: dash as unknown as ExportDashRow & {
+      owner_user_id: string | null;
+      kind: string;
+      status: string;
+    },
+    widgets: (widgetsData ?? []) as unknown as ExportWidgetRow[],
+  };
+}
+
+export async function generateDashboardWithAi(
+  input: GenerateDashboardInput
+): Promise<GenerateDashboardState> {
+  const t0 = Date.now();
+  const mode: AiDashboardMode = input.mode ?? "new";
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   if (!session.permissions.includes("create_dashboards")) {
     return { ok: false, message: "Você não tem permissão para criar dashboards." };
   }
-  const bases = (input.bases ?? []).filter(Boolean);
   const description = (input.description ?? "").trim();
-  if (bases.length === 0) {
-    return { ok: false, message: "Selecione ao menos uma Base." };
-  }
   if (!description) {
-    return { ok: false, message: "Descreva o dashboard que você quer." };
+    return { ok: false, message: "Descreva o que você quer." };
   }
+  const priorTurns = (input.priorTurns ?? [])
+    .map((t) => String(t ?? "").trim())
+    .filter(Boolean)
+    .slice(-MAX_PRIOR_TURNS);
+  const autoApply = input.autoApply !== false;
 
   const orgId = await getActiveOrgId();
   const aiConfig = await loadOrgAiConfig(orgId);
@@ -57,22 +194,90 @@ export async function generateDashboardWithAi(input: {
     };
   }
 
-  // System = instruções + modelo das Bases + amostras reais (mesmo do manual).
+  const supabase = await createClient();
+
+  // ---- Contexto por modo: bases, estado atual (from/edit), chave canônica.
+  let bases: string[];
+  let stateJson: string | null = null;
+  let chave: string;
+  let modeRules: string;
+  let currentTabs: { id: string; name: string; color?: string }[] | undefined;
+  let currentRoles: string[] | undefined;
+  let avoidName: string | undefined;
+  let existingKeys = new Set<string>();
+
+  if (mode === "new") {
+    bases = (input.bases ?? []).filter(Boolean);
+    if (bases.length === 0) {
+      return { ok: false, message: "Selecione ao menos uma Base." };
+    }
+    chave = randomChave();
+    modeRules = NEW_RULES;
+  } else {
+    if (!input.targetDashboardId) {
+      return { ok: false, message: "Escolha um dashboard." };
+    }
+    const board = await loadBoardForExport(supabase, input.targetDashboardId);
+    if (!board.ok) return { ok: false, message: board.message };
+    if (mode === "edit") {
+      const isAdmin = session.roles.includes("admin");
+      if (!isAdmin && board.dash.owner_user_id !== session.user.id) {
+        return {
+          ok: false,
+          message: "Apenas o dono ou um administrador podem editar por IA.",
+        };
+      }
+    }
+    const sources = await loadSources(supabase);
+    const exported = exportDashboardJson({
+      dash: board.dash,
+      widgets: board.widgets,
+      sources,
+    });
+    bases = exported.json.bases ?? [];
+    stateJson = JSON.stringify(exported.json, null, 2);
+    existingKeys = new Set(exported.widgetKeyById.values());
+    if (mode === "edit") {
+      chave = exported.chave; // canônica do próprio board
+      modeRules = EDIT_RULES;
+      const settings = (board.dash.settings ?? {}) as DashboardSettings;
+      currentTabs = settings.tabs;
+      currentRoles = board.dash.visible_to_roles ?? [];
+    } else {
+      chave = randomChave(); // "from": identidade NOVA — nunca a da referência
+      modeRules = FROM_RULES;
+      avoidName = board.dash.name;
+    }
+  }
+
+  // ---- System: spec + modelo das Bases + amostras (reuso do fluxo manual) +
+  // estado atual + regras do modo.
   const prompt = await buildImportPrompt(bases, "compacto");
   if (!prompt.ok || !prompt.prompt) {
     return { ok: false, message: prompt.message ?? "Não foi possível montar o prompt." };
   }
-  const system = prompt.prompt;
+  let system = prompt.prompt;
+  if (stateJson) {
+    system += section("ESTADO ATUAL DO DASHBOARD (JSON)", stateJson);
+  }
+  system += section("REGRAS DESTE MODO", modeRules);
 
-  const supabase = await createClient();
   const ctx = await loadImportContext(supabase);
   const client = getAiClient(aiConfig);
 
-  const messages: AiMessage[] = [{ role: "user", content: description }];
+  // ---- Conversa stateless: turnos de usuário anteriores + o pedido atual.
+  const messages: AiMessage[] = [
+    ...priorTurns.map((t): AiMessage => ({ role: "user", content: t })),
+    { role: "user", content: description },
+  ];
+
   let lastErrors: string[] = [];
   let lastRaw = "";
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // Orçamento do turno: não inicia uma tentativa sem tempo hábil.
+    if (attempt > 0 && Date.now() - t0 > TURN_BUDGET_MS - CALL_TIMEOUT_MS) break;
+
     let raw: string;
     try {
       raw = await client.generateText({
@@ -81,19 +286,70 @@ export async function generateDashboardWithAi(input: {
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
     } catch (err) {
+      if (err instanceof AiTruncatedError) {
+        return {
+          ok: false,
+          message: err.message,
+          draftJson: lastRaw || undefined,
+          mode,
+          chave,
+        };
+      }
       const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, message: `Falha ao chamar a IA (${aiConfig.provider}): ${msg}` };
+      return {
+        ok: false,
+        message: `Falha ao chamar a IA (${aiConfig.provider}): ${msg}`,
+        mode,
+        chave,
+      };
     }
     lastRaw = raw;
 
-    const validation = validateDashboardImport(raw, ctx);
+    // Identidade canônica + injeções protetivas ANTES da validação.
+    const normalized = normalizeImportRaw(raw, {
+      chave,
+      currentTabs,
+      currentRoles,
+      avoidName,
+    });
+
+    const validation = validateDashboardImport(normalized, ctx);
     if (validation.ok && validation.preset) {
-      // Aplica reusando o caminho de import (gates por seção + GC + persistência).
-      return await importDashboardJson(raw);
+      // Resumo por widget (prévia e mensagem): novo × atualiza.
+      const prefix = `${IMPORT_PRESET_PREFIX}${chave}.`;
+      const summary = validation.preset.widgets.map((w) => {
+        const key = w.presetKey.startsWith(prefix)
+          ? w.presetKey.slice(prefix.length)
+          : w.presetKey;
+        const exists = existingKeys.has(key);
+        return `${exists ? "atualiza" : "novo"}: ${w.title}`;
+      });
+
+      if (!autoApply) {
+        return {
+          ok: true,
+          message:
+            "Prévia pronta — revise as mudanças e clique em Aplicar.",
+          pendingJson: normalized,
+          summary,
+          warnings: validation.warnings,
+          chave,
+          mode,
+        };
+      }
+
+      const applied =
+        mode === "edit"
+          ? await applyDashboardEditJson(
+              input.targetDashboardId as string,
+              normalized
+            )
+          : await importDashboardJson(normalized);
+      return { ...applied, summary, chave, mode };
     }
 
     lastErrors = validation.errors;
-    // Turno de correção: JSON anterior + erros pt-BR (contrato do fluxo manual).
+    // Turno de correção (interno à tentativa): JSON anterior + erros pt-BR.
     messages.push({ role: "assistant", content: raw });
     messages.push({
       role: "user",
@@ -105,12 +361,34 @@ export async function generateDashboardWithAi(input: {
     });
   }
 
-  // Esgotou as tentativas sem JSON válido: erros + rascunho para conserto manual.
   return {
     ok: false,
     message:
-      "A IA não conseguiu gerar um JSON válido após algumas tentativas. Revise o rascunho abaixo e ajuste/importe manualmente.",
+      "A IA não conseguiu gerar um JSON válido após algumas tentativas. Revise o rascunho e ajuste/importe manualmente.",
     errors: lastErrors,
-    draftJson: lastRaw,
+    draftJson: lastRaw || undefined,
+    mode,
+    chave: undefined,
   };
+}
+
+/**
+ * Aplicação MANUAL de um turno (switch "Aplicar automaticamente" desligado).
+ * Recebe o pendingJson devolvido pelo turno; NADA é confiado do cliente — o
+ * caminho de edit re-deriva a identidade e re-valida (applyDashboardEditJson)
+ * e o de criação passa pelos mesmos gates do import manual.
+ */
+export async function applyGeneratedDashboard(
+  raw: string,
+  ctx: { mode: AiDashboardMode; targetDashboardId?: string }
+): Promise<GenerateDashboardState> {
+  if (ctx.mode === "edit") {
+    if (!ctx.targetDashboardId) {
+      return { ok: false, message: "Dashboard alvo ausente." };
+    }
+    const res = await applyDashboardEditJson(ctx.targetDashboardId, raw);
+    return { ...res, mode: ctx.mode };
+  }
+  const res = await importDashboardJson(raw);
+  return { ...res, mode: ctx.mode };
 }

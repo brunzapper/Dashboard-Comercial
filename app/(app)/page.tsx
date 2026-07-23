@@ -52,6 +52,8 @@ interface DashboardRow {
   kind: "dashboard" | "kanban";
   status: BoardStatus;
   trashed_at: string | null;
+  // Só para o picker da IA (preset de fábrica ≠ import) — não exibido no card.
+  settings: { preset?: { key?: string } } | null;
 }
 
 // Valida o lastView gravado (user_settings): só /dashboards/<uuid> ou
@@ -147,7 +149,9 @@ export default async function HomePage() {
   const supabase = await createClient();
   let boardsQuery = supabase
     .from("dashboards")
-    .select("id, name, owner_user_id, visible_to_roles, kind, status, trashed_at")
+    .select(
+      "id, name, owner_user_id, visible_to_roles, kind, status, trashed_at, settings"
+    )
     .order("created_at", { ascending: false });
   if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
   const { data } = await boardsQuery;
@@ -176,6 +180,20 @@ export default async function HomePage() {
   );
 
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
+  // Boards elegíveis aos modos "Criar a partir de"/"Editar" da IA: dashboards
+  // ativos que o usuário pode gerir (owner/admin — espelha o motor de apply e
+  // a RLS de escrita). O flag de preset de fábrica alimenta o aviso do picker.
+  const aiBoards = dashboards
+    .filter((r) => canManageRow(r))
+    .map((r) => {
+      const presetKey = r.settings?.preset?.key;
+      return {
+        id: r.id,
+        name: r.name,
+        factoryPreset: Boolean(presetKey && !presetKey.startsWith("import:")),
+      };
+    });
+
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
   let aiConfig: Awaited<ReturnType<typeof loadOrgAiConfigPublic>> = null;
@@ -223,7 +241,11 @@ export default async function HomePage() {
         </div>
         {canCreate ? (
           <div className="flex items-center gap-2">
-            <ImportDashboardSheet sources={sources} ai={aiConfig} />
+            <ImportDashboardSheet
+              sources={sources}
+              ai={aiConfig}
+              boards={aiBoards}
+            />
             <CreateMenu sources={sources} fields={fields} />
           </div>
         ) : null}

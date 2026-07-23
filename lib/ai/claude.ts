@@ -4,6 +4,7 @@
 // — enviá-los daria 400) e sem thinking (geração de JSON não precisa; mantém a
 // extração de texto simples). Papéis: user/assistant diretos.
 
+import { AiTruncatedError } from "./types";
 import type { AiClientConfig, AiTextClient, AiMessage } from "./types";
 import { postProviderJson } from "./util";
 
@@ -40,6 +41,9 @@ export function createClaudeClient(config: AiClientConfig): AiTextClient {
 
       if (data.stop_reason === "refusal") {
         throw new Error("Claude recusou a solicitação por política de segurança.");
+      }
+      if (data.stop_reason === "max_tokens") {
+        throw new AiTruncatedError("Claude");
       }
       const text = (data.content ?? [])
         .filter((b) => b.type === "text")

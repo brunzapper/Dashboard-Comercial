@@ -19,4 +19,5 @@ export function getAiClient(config: AiClientConfig): AiTextClient {
   }
 }
 
+export { AiTruncatedError } from "./types";
 export type { AiClientConfig, AiTextClient, AiMessage, AiProvider } from "./types";

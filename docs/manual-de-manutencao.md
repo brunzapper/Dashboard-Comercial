@@ -1,4 +1,7 @@
-<!-- Versão: 1.13 | Data: 23/07/2026 -->
+<!-- Versão: 1.14 | Data: 23/07/2026 -->
+<!-- v1.14 (23/07/2026): troubleshooting da IA de dashboards — KEY_ENCRYPTION_KEY,
+     truncamento/timeout de turno, Desfazer edição, preset de fábrica
+     re-identificado como import:. -->
 <!-- v1.13 (23/07/2026): multi-org (0088–0094) — runbook de organizações,
      Owner (env OWNER_USER_ID) e acessos customizados; ver §4.9. -->
 <!-- v1.12 (22/07/2026): job pg_cron nº 5 (purge-dashboard-trash — purga da
@@ -414,6 +417,11 @@ fonte no widget se precisar do mês.
 | Tela de snapshots/listagens quebrou após deploy | Código selecionando coluna que a migração ainda não criou | Aplique o SQL pendente (regra "SQL antes do deploy") |
 | Erro de env em runtime | Variável ausente na Vercel | `lib/env.ts` diz qual; confira `.env.example` |
 | Remover os mocks de vez | — | `supabase/apply/undo-mock-reuniao.sql` (única forma prevista) |
+| Salvar chave de IA falha ("Não foi possível cifrar a chave") | `KEY_ENCRYPTION_KEY` ausente/inválida no ambiente (32 bytes base64) | Configure na Vercel (Production+Preview+Development, MESMO valor) e refaça o deploy; NUNCA troque o valor depois (invalida os ciphertexts já gravados) |
+| Conversa de IA aborta com "resposta cortada pelo limite de tokens" | Dashboard grande demais para um turno (o modo Editar aceita resposta parcial, mas "Criar a partir de" ecoa o estado inteiro) | Peça mudanças menores/mais específicas por turno; em último caso edite por partes (widget a widget) |
+| Turno da IA demorou e estourou o tempo | Provedor lento + laço de correção (timeout 120s/chamada, orçamento ~240s; Home tem `maxDuration=300`) | Reenvie o pedido (turnos são idempotentes — a identidade canônica converge); se recorrente, troque o modelo em Configurações → Integrações |
+| Edição da IA saiu errada | — | Botão "Desfazer edição da IA" na própria janela (restaura o snapshot pré-turno: widgets, settings e células); vale para o ÚLTIMO turno aplicado |
+| "Gerar presets" recriou um dashboard que eu editava por IA | Editar por IA re-identifica o board como `import:` — ele sai da gestão do preset de fábrica (comportamento esperado, avisado no seletor) | Use o board editado normalmente; o recriado é o preset de fábrica "puro" (pode arquivar/excluir um dos dois) |
 
 ## 6. Lacunas conhecidas e recomendações
 

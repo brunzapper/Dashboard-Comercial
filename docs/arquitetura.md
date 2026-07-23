@@ -6,6 +6,12 @@
      idêntico p/ a existente e avisa sobre resultCurrency/escopo≠sources;
      spec ganha as regras 12-14 (valem também p/ a geração direta, que reusa
      o mesmo prompt/validador). -->
+<!-- v1.24 (23/07/2026): §4.11.2 — export de estrutura (lib/import/dashboard/
+     export.ts + "Exportar JSON" no ⋮) e CONVERSA de IA com 3 modos (novo/a
+     partir de/editar): identidade forçada no servidor (rewrite.ts), modo
+     Editar sem GC com adoção de presetKey + snapshot p/ Desfazer
+     (applyDashboardEditJson; applyPresetDefinition ganha targetDashboardId e
+     fontScale gerida), truncamento tipado nos adapters de IA. -->
 <!-- v1.23 (23/07/2026): §4.11.1 — geração DIRETA de dashboard por IA via API:
      adaptadores multi-provedor em lib/ai/* (Gemini/Claude/OpenAI, fetch), chave
      cifrada por org (ai_provider_config, 0096), action generateDashboardWithAi
@@ -1151,6 +1157,58 @@ Elimina o "hop" manual de copiar/colar: o servidor chama a IA por API entre
   manual no campo de JSON. O contexto de validação saiu para
   `lib/import/dashboard/context.ts` (`loadImportContext`), compartilhado com
   `importDashboardJson`. O par de RPCs de widget NÃO é tocado.
+
+#### 4.11.2 Export de estrutura + CONVERSA de IA (Criar novo / a partir de / Editar) — 23/07/2026
+
+Fecha o ciclo do §4.11.1: dashboards existentes viram JSON (export) e a IA os
+lê/edita em conversa multi-turno. Sem migração de banco. Peças:
+
+- **Exportador** (`lib/import/dashboard/export.ts`, puro): dashboard+widgets →
+  JSON `dashboard-import` que passa LIMPO no validador (settings de dashboard/
+  widget são passthrough lá — o export emite quase verbatim, removendo
+  `preset`/`presetKey`/`connectors`/`kanban`). Identidade determinística:
+  `importChaveForDashboard` (sufixo do `preset.key` se `import:`; senão
+  `board_<8hex do id>`; preset de FÁBRICA não reusa chave) e `assignWidgetKeys`
+  (sufixo do presetKey sob a chave, senão `w_<8hex>`; dedupe `_2`) — o MESMO
+  mapa serve export e adoção, então keys do JSON casam 1:1 com widgets reais.
+  `bases` = raízes referenciadas (sub→`parentKey`) ∪ `periodBar.fieldBySource`
+  ∪ `sourceScope`; widget "todas as fontes" sem sourceScope ⇒ todas as raízes.
+  Métrica calc ad-hoc exporta `formula` em TOKENS (caminho B do validador);
+  `custom:`+calc degrada a field/agg/label (única perda conhecida). UI:
+  `exportDashboardStructure` (`export-structure-actions.ts`) + item
+  "Exportar JSON" no ⋮ do card (download; `issues` = erros de round-trip como
+  aviso).
+- **Identidade FORÇADA no servidor** (`lib/import/dashboard/rewrite.ts`,
+  `normalizeImportRaw`): a `chave` do JSON da IA é SEMPRE sobrescrita pela
+  canônica ANTES da validação (o validador então deriva todos os presetKeys
+  dela). Nunca confie a chave à IA — uma chave copiada da referência
+  sobrescreveria o board de ORIGEM no modo "a partir de". No modo Editar
+  também injeta `visible_to_roles`/`settings.tabs` atuais quando o JSON os
+  omite (ausência seria destrutiva: des-compartilhar / apagar o `tab` dos
+  widgets retornados).
+- **Modo Editar** (`applyDashboardEditJson`, `actions.ts`): gate dono/admin →
+  normaliza → valida → gates por seção (`importSectionGateError`) →
+  `captureDashboardSnapshot` (Desfazer) → ADOÇÃO (carimba `settings.presetKey`
+  canônico nos widgets divergentes, via `assignWidgetKeys`) →
+  `applyPresetDefinition` com **`opts.targetDashboardId`** (carrega SÓ essa
+  linha — sem busca por identidade/adoção por nome, sem INSERT) e **SEM GC**
+  (decisão de produto: a IA nunca exclui widget; omitido permanece ⇒ a
+  resposta pode ser PARCIAL, só widgets alterados/novos). `fontScale` virou
+  chave GERIDA do UPDATE (presets de fábrica não a definem — zero mudança).
+  `connectors`/`sourceScope` ficam fora do alcance da IA (preservados).
+- **Conversa** (`ai-generate-actions.ts` v2): STATELESS por turno — o servidor
+  re-exporta o estado FRESCO para o system a cada turno e recebe só os textos
+  de usuário anteriores (cap 10); nada de JSON de assistant acumulado. Após o
+  1º apply em new/from o CLIENTE troca a sessão para `edit` +
+  `targetDashboardId`. Toggle "Aplicar automaticamente": OFF ⇒ o turno devolve
+  `pendingJson`+resumo e `applyGeneratedDashboard` aplica depois
+  (re-valida/re-gates/re-deriva tudo — nada confiado do cliente). Truncamento
+  é erro TIPADO (`AiTruncatedError`, detectado nos 3 adapters; Gemini subiu a
+  32k tokens) e aborta o turno com mensagem acionável. Desfazer =
+  `restoreDashboardSnapshot` com o snapshot devolvido pelo turno.
+- **Consequência documentada**: editar por IA um dashboard de PRESET DE
+  FÁBRICA re-identifica o board como `import:` — ele deixa de ser atualizado
+  por "Gerar presets" (que recriará o de fábrica à parte). O picker avisa.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

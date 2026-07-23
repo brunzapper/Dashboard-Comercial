@@ -4,11 +4,14 @@
 // chave em logs. Pede saída em JSON (responseMimeType) para reduzir cercas.
 // Papéis: user → "user", assistant → "model".
 
+import { AiTruncatedError } from "./types";
 import type { AiClientConfig, AiTextClient, AiMessage } from "./types";
 import { postProviderJson } from "./util";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const MAX_OUTPUT_TOKENS = 16384;
+// 32k: dashboards médios/grandes exportados+reescritos cabem num turno (o
+// modo Editar aceita resposta PARCIAL, mas o "Criar a partir de" ecoa muito).
+const MAX_OUTPUT_TOKENS = 32768;
 
 interface GeminiResponse {
   candidates?: {
@@ -51,6 +54,9 @@ export function createGeminiClient(config: AiClientConfig): AiTextClient {
         throw new Error(
           `Gemini bloqueou a solicitação (${data.promptFeedback.blockReason}).`
         );
+      }
+      if (data.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+        throw new AiTruncatedError("Gemini");
       }
       const parts = data.candidates?.[0]?.content?.parts ?? [];
       const text = parts.map((p) => p.text ?? "").join("");

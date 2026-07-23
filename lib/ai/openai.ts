@@ -4,13 +4,14 @@
 // "json" no prompt, garantida pelo SPEC). Sem temperature (alguns modelos novos
 // só aceitam o default). O system vira a 1ª mensagem role:"system".
 
+import { AiTruncatedError } from "./types";
 import type { AiClientConfig, AiTextClient, AiMessage } from "./types";
 import { postProviderJson } from "./util";
 
 const ENDPOINT = "https://api.openai.com/v1/chat/completions";
 
 interface OpenAiResponse {
-  choices?: { message?: { content?: string } }[];
+  choices?: { message?: { content?: string }; finish_reason?: string }[];
 }
 
 export function createOpenAiClient(config: AiClientConfig): AiTextClient {
@@ -34,6 +35,9 @@ export function createOpenAiClient(config: AiClientConfig): AiTextClient {
         signal,
       });
 
+      if (data.choices?.[0]?.finish_reason === "length") {
+        throw new AiTruncatedError("OpenAI");
+      }
       const text = data.choices?.[0]?.message?.content ?? "";
       if (!text.trim()) {
         throw new Error("OpenAI não retornou conteúdo.");
