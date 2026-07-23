@@ -1,4 +1,12 @@
-<!-- Versão: 1.9 | Data: 22/07/2026 -->
+<!-- Versão: 2.0 | Data: 23/07/2026 -->
+<!-- v2.0 (23/07/2026): 0088–0094 — acesso por pessoa aos boards
+     (board_access + helpers auth_board_*), MULTI-ORGANIZAÇÃO (organizations/
+     organization_members/app_owner com triggers de proteção via GUC;
+     organization_id nas tabelas-raiz com default Zapper + triggers de stamp;
+     RLS org-scoped em tudo; unicidades por-org), papéis org_admin/Owner,
+     provisionamento (seed_org_defaults/delete_organization) e overrides
+     individuais (user_access_overrides + deny de bases). -->
+
 <!-- v1.9 (22/07/2026): 0086 — colunas núcleo como linhas core de
      field_definitions (overrides p/ a aba Campos; pipeline selecao com options
      dos funis, reescritas no sync). -->
@@ -24,7 +32,7 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0087), para que um
+Referência do estado **atual** do banco (após a migração 0094), para que um
 mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -171,9 +179,48 @@ Fase 12 (usado pelo `undo-mock-reuniao.sql`).
 
 ### 3.2 Pessoas e acesso
 
+**`organizations`** (0089) — MULTI-ORG: uma linha por empresa/tenant. `name`
+(empresa, ex. "Zapper") e `app_name` (nome do sistema, ex. "Dashboard
+Comercial") são o BRANDING editável do sidebar (Configurações → Organização).
+A Zapper vive no uuid FIXO `00000000-0000-4000-a000-000000000001` (default
+das colunas `organization_id` da 0090). DELETE só via `delete_organization`
+(trigger `enforce_organizations_guard` + GUC).
+
+**`organization_members`** (0089) — vínculo usuário↔org; `is_org_admin`
+marca o **Administrador de Organização** — ÚNICO por org (índice parcial
+`organization_members_single_admin`) e indeletável/indemovível (trigger
+`enforce_org_admin_guard`; o desbloqueio é o GUC transaction-local
+`app.allow_protected_change='on'`, só via SQL direto — vale até p/ service
+role, inclusive no cascade de excluir a conta). Escrita SÓ service role.
+
+**`app_owner`** (0089) — o **Owner** do sistema (1 linha; seed
+bruno.2bpl@gmail.com). Imutável por qualquer caminho de app (trigger
+`enforce_app_owner_guard`); FK a auth.users SEM cascade (excluir a conta
+falha). O modo Owner (`/owner`) exige também env `OWNER_USER_ID` == uid
+(guard fail-closed em `lib/auth/owner.ts`).
+
+**`board_access`** (0088) — acesso por PESSOA a um dashboard/kanban:
+`(dashboard_id, user_id)` PK + `level` (`view|edit|blocked`). Override vence
+o papel (`blocked` revoga o que `visible_to_roles` daria; `view`/`edit`
+concedem além); dono/admin nunca bloqueáveis. Resolução nos helpers
+`auth_board_visible`/`auth_board_editable`/`auth_board_manageable`
+(recriados na 0091 com o gate de org embutido).
+
+**`user_access_overrides`** (0094) — overrides individuais fora dos boards:
+`(organization_id, user_id, resource_type, resource_key)` PK, `effect`
+(`allow|deny`). `settings_area` (slug da aba de Configurações): deny esconde,
+allow concede além do papel (escrita segue o papel). `source` (key de
+base/sub-base): deny esconde dos pickers (RLS de `data_sources`/`sub_sources`)
+e dos DADOS (`records_select` exclui o record_type — helpers
+`auth_denied_source_keys`/`auth_denied_record_types`).
+
 **`roles`**, **`permissions`**, **`role_permissions`**, **`user_roles`** (0002 + seeds
 0010) — papéis `admin`/`gestor`/`vendedor` e permissões (`view_all_records`,
 `edit_record_values`, `manage_field_definitions`, `view_forecast`, ...).
+Desde a 0092, a gestão de `user_roles` é confinada à própria org
+(`auth_org_member_ids`) e o papel `admin` só é concedido/removido por
+org_admin (`auth_can_grant_admin`). org_admin/Owner NÃO são linhas de
+`roles` (rótulos em `SPECIAL_ROLE_LABELS`, `lib/auth/roles.ts`).
 
 **`responsibles`** (0012) — lista curada de responsáveis. `display_name`,
 `bitrix_user_id` unique (ASSIGNED_BY_ID, para o matching do sync), `user_id` →
@@ -344,6 +391,13 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 | `enforce_task_lock` | 0063 | Trigger: só admin/gestor excluem/destravam tarefa `locked` |
 | `enforce_task_global` | 0066 | Trigger: só admin/gestor alteram tarefas globais |
 | `recalc_apply_updates` | 0070 | Aplica um lote de recálculo num único UPDATE set-based |
+| `auth_board_access_level/manageable/visible/editable` | 0088 (recriadas 0091 c/ gate de org) | Resolução de acesso a boards (papel × override × dono/admin) — usadas pelas policies de dashboards/widgets/células/placements |
+| `auth_org_ids`, `auth_is_org_admin`, `auth_org_member_ids`, `auth_is_owner` | 0089 | Helpers multi-org das policies (InitPlan) |
+| `enforce_app_owner_guard`, `enforce_org_admin_guard`, `enforce_organizations_guard` | 0089 | Triggers de proteção (bloqueiam até service role; desbloqueio = GUC `app.allow_protected_change` via SQL direto) |
+| `records_set_org`, `audit_log_set_org`, `record_matches_set_org`, `entity_custom_values_set_org` | 0090 | Triggers before insert: carimbam `organization_id` derivando da fonte/registro/entidade |
+| `auth_can_grant_admin` | 0092 | Caller é org_admin de org que contém o alvo (gestão do papel `admin`) |
+| `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
+| `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
 
 ## 5. Triggers
 
@@ -353,14 +407,26 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 
 ## 6. RLS — resumo do modelo
 
-- **`records`**: vendedor vê apenas registros cujo `responsible_id` aponta para uma
-  linha de `responsibles` com `user_id` = ele (via `auth_responsible_ids`); quem tem
-  `view_all_records` (admin/gestor) vê tudo. INSERT: admin, ou `edit_record_values`
-  para registros manuais em fontes com `manual_entry` (0061; ramo Bitrix-espelho na
-  0065). `owner_user_id` NÃO é critério (0037).
-- **`dashboards`/`widgets`**: dono ou admin escrevem; visibilidade por
-  `visible_to_roles`/`is_shared`. `dashboard_table_cells`: qualquer visualizador
-  do dashboard escreve (por design).
+- **MULTI-ORG (0090/0091) — a regra transversal:** toda tabela-raiz carrega
+  `organization_id` (default = Zapper) e toda policy é prefixada por
+  `organization_id in (select auth_org_ids())` — INCLUSIVE os ramos
+  admin/permission (admin da org B nunca alcança a org A; quem cruza orgs é
+  só o service role). Filhas derivam via EXISTS na pai (a RLS dela reaplica).
+  O WITH CHECK org-gated faz insert sem carimbo explícito de um usuário de
+  outra org falhar ALTO (nunca vaza linha p/ a Zapper em silêncio); os
+  caminhos service-role (sync/CSV/API) são cobertos pelos triggers de stamp.
+- **`records`**: org do usuário E (vendedor vê apenas registros cujo
+  `responsible_id` aponta para uma linha de `responsibles` com `user_id` =
+  ele — `auth_responsible_ids`; quem tem `view_all_records` vê tudo) E
+  `record_type` fora dos negados por override (0094). INSERT: admin, ou
+  `edit_record_values` para registros manuais em fontes com `manual_entry`
+  (0061; ramo Bitrix-espelho na 0065). `owner_user_id` NÃO é critério (0037).
+- **`dashboards`/`widgets`/células/placements**: resolução ÚNICA nos helpers
+  `auth_board_visible`/`auth_board_editable`/`auth_board_manageable` (0088;
+  org-gated na 0091): dono/admin sempre; override `view`/`edit` concede além
+  do papel; `blocked` revoga; `visible_to_roles` segue como camada por
+  função. `dashboard_table_cells`: qualquer visualizador EFETIVO escreve
+  (por design).
 - **`snapshots`/`snapshot_*`**: gestão só `authenticated` (dono do dashboard ou
   admin); **NENHUMA política `anon`**; escrita das cópias e EXECUTE das funções de
   snapshot só via service role.
@@ -375,7 +441,7 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0087)
+## 7. Histórico de migrações (0001–0094)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -468,6 +534,13 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0085 | widget_rpc_brasilia_day | RPC (par completo): dia de BRASÍLIA no read side — bounds do `@period` em coluna do núcleo ancorados com `-03:00`, bucketing/unificados via `_widget_local_ts` (novo helper, 2 overloads) — **versão vigente** |
 | 0086 | core_field_definitions | Seed idempotente das colunas do NÚCLEO como linhas `field_definitions` `source_system='core'` (overrides de exibição p/ a aba Campos; `pipeline` nasce selecao com os funis como options). Aplicar DEPOIS do deploy do código. Não recria as RPCs |
 | 0087 | dashboards_status | Ciclo de vida de boards: `dashboards.status` (`active|archived|trashed`) + `archived_at`/`trashed_at` + índice. Lixeira purga em 14 dias (job `apply/pg-cron-purge-trash.sql`). Não recria as RPCs |
+| 0088 | board_access | Acesso por PESSOA aos boards (`view/edit/blocked`) + helpers `auth_board_*`; policies de dashboards/widgets/células/placements recriadas. Não recria as RPCs |
+| 0089 | organizations | MULTI-ORG: `organizations` (branding), `organization_members` (`is_org_admin` único por org), `app_owner`; triggers de proteção (GUC); helpers `auth_org_*`; seeds Zapper + owner. Aplicar 0089→0091 na MESMA janela, antes do deploy |
+| 0090 | org_columns | `organization_id` (not null default Zapper) nas tabelas-raiz + índices + triggers de stamp + unicidades POR-ORG (field_definitions, field_correspondences, goals, sync_config PK, non_working_days PK). `data_sources.key`/`record_type` seguem globais |
+| 0091 | org_rls | RLS org-scoped em todas as tabelas raiz (gate `auth_org_ids` prefixado, inclusive ramos admin); `auth_board_*` recriados com org. Não recria as RPCs de widget (SECURITY INVOKER herda tudo) |
+| 0092 | org_roles_protections | `user_roles` confinada à própria org; papel `admin` só via org_admin (`auth_can_grant_admin`) |
+| 0093 | org_provisioning | `seed_org_defaults` (core defs por org) e `delete_organization` (GUC + cascade; org inicial recusada) — EXECUTE só service role |
+| 0094 | user_access_overrides | Overrides individuais (áreas de Configurações allow/deny; bases deny) + helpers `auth_denied_*`; recria data_sources/sub_sources/records select |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
