@@ -1,4 +1,8 @@
-<!-- Versão: 1.19 | Data: 23/07/2026 -->
+<!-- Versão: 1.20 | Data: 23/07/2026 -->
+<!-- v1.20 (23/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
+     (botão Importar na Home; validador puro em lib/import/dashboard/*;
+     aplicação pelo applyPresetDefinition com identidade import:<chave>;
+     prompt com modelo da Base + amostra com cobertura de colunas). -->
 <!-- v1.19 (23/07/2026): escopo do VALOR do "Filtro por campo" configurável
      (§4.7/§4.10; invariante 12) — settings.valueScope 'all' compartilha a
      seleção entre todos os usuários via célula __ff__/sel de
@@ -1042,6 +1046,38 @@ Snapshot (`app/s/[token]`): nada disso se aplica — quick filters do visitante
 vão à URL (`qf_*`), kanban/Tabela Livre chegam PRECOMPUTADOS pelo RSC público
 (`snapshot-mode`) e `deferredScopeById` nem é passado (o fetch é pulado por
 `readOnly`).
+
+### 4.11 Importar dashboard via JSON gerado por IA (22/07/2026)
+
+Terceiro modo de criação na Home (botão "Importar" ao lado do "Criar",
+`components/dashboards/import-dashboard-sheet.tsx`): o usuário copia um prompt
+de instruções, uma IA externa devolve um JSON e a importação materializa o
+dashboard completo. Peças:
+
+- **Contrato/validação**: `lib/import/dashboard/{types,validate}.ts` —
+  validador PURO (erros em pt-BR, pensados para serem devolvidos à IA). Reusa
+  os módulos ÚNICOS de fórmula (`tokenizeFormulaText` +
+  `validateFormulaForContext` + `findFormulaCycle` sobre
+  `perRecordCalcOperands`/`buildAggOperandCatalog`) — uma fórmula aceita no
+  import é exatamente a que os editores aceitariam. `formula_text` é a forma
+  primária (tokens por compat).
+- **Aplicação**: `importDashboardJson` (`app/(app)/dashboards/actions.ts`)
+  materializa um `PresetDashboard` e chama o MESMO `applyPresetDefinition`
+  dos presets (com `includeSupportFields:false` — não cria
+  forecast/potencial/desconto). Identidade no namespace **`import:<chave>`**
+  (nunca colide com os presets de fábrica): reimportar a mesma chave ATUALIZA
+  (widgets manuais preservados; GC só no prefixo do próprio import). Gates
+  granulares: `create_dashboards` sempre; `manage_field_definitions` p/
+  fields/correspondences; admin p/ subSources — mesmos das actions de
+  cadastro.
+- **Prompt**: `buildImportPrompt` (`app/(app)/dashboards/import-prompt-actions.ts`)
+  monta espec (`lib/import/dashboard/instructions.ts`) + modelo da Base +
+  amostra de ~20 registros com COBERTURA de colunas
+  (`lib/import/dashboard/sample.ts`, guloso + busca complementar por coluna
+  descoberta). A variante "completo" anexa
+  `docs/manual-de-construcao-de-dashboards.md` lido do disco —
+  `outputFileTracingIncludes` no `next.config.ts` garante o arquivo no bundle
+  da Vercel.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

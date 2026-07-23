@@ -1,4 +1,10 @@
-// Versão: 1.7 | Data: 23/07/2026
+// Versão: 1.8 | Data: 23/07/2026
+// v1.8 (23/07/2026): importDashboardJson — modo "Importar dashboard via JSON
+//   (IA)": valida o JSON colado (lib/import/dashboard/validate.ts, erros
+//   legíveis p/ devolver à IA) e o aplica pelo MESMO motor idempotente dos
+//   presets (applyPresetDefinition, identidade "import:<chave>" — reimportar
+//   atualiza em vez de duplicar). applyPresetDefinition ganha opts
+//   includeSupportFields (o import NÃO cria os campos de apoio PRESET_FIELDS).
 // v1.7 (23/07/2026): saveSharedFieldFilter — valor COMPARTILHADO do "Filtro
 //   por campo" (settings.valueScope 'all') na célula __ff__/sel de
 //   dashboard_table_cells (mesma semântica do __qf__; fora do Desfazer/Refazer).
@@ -85,6 +91,8 @@ import {
   type DashboardSnapshot,
 } from "@/lib/widgets/history";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
+import { validateDashboardImport } from "@/lib/import/dashboard/validate";
+import type { ImportDefRow } from "@/lib/import/dashboard/types";
 
 export interface ActionState {
   ok?: boolean;
@@ -1690,7 +1698,10 @@ async function ensureGoalMetricKeys(
 async function applyPresetDefinition(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  preset: PresetDashboard
+  preset: PresetDashboard,
+  // includeSupportFields=false: o import via JSON não cria os campos de apoio
+  // globais dos presets de fábrica (forecast/potencial/desconto).
+  opts: { includeSupportFields?: boolean } = {}
 ): Promise<PresetApplyResult | null> {
   // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes,
   //    correspondências (depois das subs — o record_type dos membros sai do
@@ -1698,7 +1709,7 @@ async function applyPresetDefinition(
   //    recálculo global (materializa em custom_fields; best-effort — mesmo
   //    gatilho do createField em /campos).
   const fieldsResult = await ensurePresetFields(supabase, [
-    ...PRESET_FIELDS,
+    ...(opts.includeSupportFields === false ? [] : PRESET_FIELDS),
     ...(preset.fields ?? []),
   ]);
   const subResult = await ensurePresetSubSources(
@@ -1875,6 +1886,116 @@ export async function applyPreset(
     ok: true,
     result,
     message: `Preset "${preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"} (${w.created} widget(s) novo(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)).`,
+  };
+}
+
+// ---------------- Importar dashboard via JSON (modo IA) ----------------
+
+export interface ImportDashboardState {
+  ok?: boolean;
+  message?: string;
+  id?: string; // dashboard criado/atualizado (o cliente navega p/ ele)
+  errors?: string[]; // legíveis — o usuário devolve à IA corrigir
+  warnings?: string[];
+}
+
+/**
+ * Importa o JSON gerado pela IA como um dashboard completo. Validação em
+ * lib/import/dashboard/validate.ts (pura); aplicação pelo MESMO motor
+ * idempotente dos presets — identidade "import:<chave>": reimportar a mesma
+ * chave ATUALIZA o dashboard (widgets adicionados à mão são preservados).
+ * Gates granulares, espelhando as actions de cada cadastro: create_dashboards
+ * sempre; manage_field_definitions p/ fields/correspondences; admin p/
+ * subSources (mesma exigência do createSubSource).
+ */
+export async function importDashboardJson(
+  raw: string
+): Promise<ImportDashboardState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.permissions.includes("create_dashboards")) {
+    return { ok: false, message: "Você não tem permissão para criar dashboards." };
+  }
+  if (!raw.trim()) return { ok: false, message: "Cole o JSON gerado pela IA." };
+
+  const supabase = await createClient();
+  const [sources, defsRes, corrRes, respRes, opRes] = await Promise.all([
+    loadSources(supabase),
+    supabase
+      .from("field_definitions")
+      .select("id, field_key, label, data_type, formula, applies_to, source_system"),
+    supabase.from("field_correspondences").select("key"),
+    supabase.from("responsibles").select("display_name"),
+    supabase.from("operations").select("name"),
+  ]);
+  const validation = validateDashboardImport(raw, {
+    sources,
+    defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
+      id: String(d.id),
+      field_key: String(d.field_key),
+      label: String(d.label ?? d.field_key),
+      data_type: d.data_type as ImportDefRow["data_type"],
+      formula: (d.formula as ImportDefRow["formula"]) ?? null,
+      applies_to: (d.applies_to as string[] | null) ?? null,
+      source_system: (d.source_system as string | null) ?? null,
+    })),
+    correspondenceKeys: (corrRes.data ?? []).map((c) => String(c.key)),
+    responsibleNames: (respRes.data ?? [])
+      .map((r) => String((r as { display_name?: unknown }).display_name ?? ""))
+      .filter(Boolean),
+    operationNames: (opRes.data ?? [])
+      .map((o) => String((o as { name?: unknown }).name ?? ""))
+      .filter(Boolean),
+  });
+  if (!validation.ok || !validation.preset) {
+    return {
+      ok: false,
+      message: "O JSON tem problemas — corrija (ou devolva os erros à IA) e tente de novo.",
+      errors: validation.errors,
+      warnings: validation.warnings,
+    };
+  }
+  // Gates por seção (mesmos das actions de cadastro correspondentes).
+  if (
+    (validation.declares.fields || validation.declares.correspondences) &&
+    !session.permissions.includes("manage_field_definitions")
+  ) {
+    return {
+      ok: false,
+      message:
+        "O JSON declara campos/correspondências — importe com um usuário que gerencia campos (admin).",
+    };
+  }
+  if (validation.declares.subSources && !session.roles.includes("admin")) {
+    return {
+      ok: false,
+      message: "O JSON declara Sub-bases — apenas administradores podem criá-las.",
+    };
+  }
+
+  const result = await applyPresetDefinition(
+    supabase,
+    session.user.id,
+    validation.preset,
+    { includeSupportFields: false }
+  );
+  if (!result) return { ok: false, message: "Falha ao aplicar o dashboard importado." };
+  revalidatePath("/");
+  revalidatePath(`/dashboards/${result.dashboardId}`);
+  const w = result.widgets;
+  return {
+    ok: true,
+    id: result.dashboardId,
+    warnings: validation.warnings,
+    message:
+      `Dashboard "${validation.preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"}: ` +
+      `${w.created} widget(s) criado(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)` +
+      (result.fieldsCreated > 0 ? `, ${result.fieldsCreated} campo(s)` : "") +
+      (result.subSourcesCreated > 0 ? `, ${result.subSourcesCreated} sub-base(s)` : "") +
+      (result.correspondencesCreated > 0
+        ? `, ${result.correspondencesCreated} correspondência(s)`
+        : "") +
+      ".",
   };
 }
 

@@ -1,4 +1,5 @@
-<!-- Versão: 1.1 | Data: 17/07/2026 -->
+<!-- Versão: 1.2 | Data: 22/07/2026 -->
+<!-- v1.2 (22/07/2026): link para o novo docs/manual-de-construcao-de-dashboards.md. -->
 <!-- v1.1 (17/07/2026): escopo real (Fases 1–14+), seção Documentação com os novos
      docs de arquitetura/banco/manutenção, aviso das invariantes críticas. -->
 
@@ -18,6 +19,7 @@ Comece por aqui — especialmente para **manutenção manual, sem IA**:
 | [`docs/arquitetura.md`](./docs/arquitetura.md) | Visão geral, mapa de pastas, fluxos principais e as **invariantes críticas** que não podem ser quebradas |
 | [`docs/banco-de-dados.md`](./docs/banco-de-dados.md) | Schema consolidado (tabelas, funções, triggers, RLS) + histórico das migrações |
 | [`docs/manual-de-manutencao.md`](./docs/manual-de-manutencao.md) | Setup do zero, checklists de mudança segura e troubleshooting |
+| [`docs/manual-de-construcao-de-dashboards.md`](./docs/manual-de-construcao-de-dashboards.md) | Manual exaustivo de construção de dashboards pela UI (para usuários e IAs assistentes) |
 | [`supabase/README.md`](./supabase/README.md) | Runbook de aplicação manual das migrações + queries de conferência |
 | [`docs/webhooks.md`](./docs/webhooks.md) | Referência da API de webhooks (entrada e saída) |
 
