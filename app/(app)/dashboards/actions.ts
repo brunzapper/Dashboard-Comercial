@@ -1,4 +1,12 @@
-// Versão: 1.8 | Data: 23/07/2026
+// Versão: 1.9 | Data: 23/07/2026
+// v1.9 (23/07/2026): FIX RETURNING × policy 0088 — `.insert(...).select()` em
+//   `dashboards` falha com 42501: a policy de SELECT (auth_board_visible)
+//   consulta a própria tabela via função STABLE e não enxerga a linha do
+//   próprio comando. createBoard e applyPresetDefinition passam ao padrão do
+//   duplicateBoard (id gerado no app + insert sem RETURNING); o insert do
+//   preset/import ganha carimbo de organization_id (0090) e
+//   applyPresetDefinition devolve { error } com a mensagem real do banco
+//   (antes retornava null e os chamadores exibiam falha genérica).
 // v1.8 (23/07/2026): importDashboardJson — modo "Importar dashboard via JSON
 //   (IA)": valida o JSON colado (lib/import/dashboard/validate.ts, erros
 //   legíveis p/ devolver à IA) e o aplica pelo MESMO motor idempotente dos
@@ -206,22 +214,24 @@ export async function createBoard(
   // Carimbo de org (multi-org, 0090) — ver createDashboard.
   const orgId = await getActiveOrgId();
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("dashboards")
-    .insert({
-      name,
-      kind: "kanban",
-      owner_user_id: session.user.id,
-      visible_to_roles: visible,
-      is_shared: visible.length > 0,
-      settings: { kanban },
-      ...(orgId ? { organization_id: orgId } : {}),
-    })
-    .select("id")
-    .single();
+  // Id gerado no APP + insert SEM RETURNING (padrão duplicateBoard): a policy
+  // de SELECT de dashboards (auth_board_visible, 0088) consulta a própria
+  // tabela via função STABLE, que não enxerga a linha do PRÓPRIO comando —
+  // `.insert(...).select()` falharia com 42501 mesmo para o dono.
+  const boardId = crypto.randomUUID();
+  const { error } = await supabase.from("dashboards").insert({
+    id: boardId,
+    name,
+    kind: "kanban",
+    owner_user_id: session.user.id,
+    visible_to_roles: visible,
+    is_shared: visible.length > 0,
+    settings: { kanban },
+    ...(orgId ? { organization_id: orgId } : {}),
+  });
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
-  return { ok: true, message: `Kanban "${name}" criado.`, id: data.id as string };
+  return { ok: true, message: `Kanban "${name}" criado.`, id: boardId };
 }
 
 // Settings de um kanban dedicado. Mesma semântica de updateDashboardSettings
@@ -1702,7 +1712,9 @@ async function applyPresetDefinition(
   // includeSupportFields=false: o import via JSON não cria os campos de apoio
   // globais dos presets de fábrica (forecast/potencial/desconto).
   opts: { includeSupportFields?: boolean } = {}
-): Promise<PresetApplyResult | null> {
+  // Falha retorna { error } com a mensagem REAL do banco — o genérico "Falha
+  // ao aplicar" escondia o diagnóstico (ex.: o 42501 do RETURNING, abaixo).
+): Promise<PresetApplyResult | { error: string }> {
   // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes,
   //    correspondências (depois das subs — o record_type dos membros sai do
   //    catálogo) e chaves de métrica de meta. Campo 'calculado' novo dispara o
@@ -1754,19 +1766,25 @@ async function applyPresetDefinition(
   let dashId: string;
 
   if (!target) {
-    const { data: dash, error } = await supabase
-      .from("dashboards")
-      .insert({
-        name: preset.name,
-        owner_user_id: userId,
-        visible_to_roles: preset.visible_to_roles,
-        is_shared: preset.visible_to_roles.length > 0,
-        settings: { ...(preset.settings ?? {}), preset: marker },
-      })
-      .select("id")
-      .maybeSingle();
-    if (error || !dash?.id) return null;
-    dashId = dash.id as string;
+    // Id gerado no APP + insert SEM RETURNING (padrão duplicateBoard): a
+    // policy de SELECT de dashboards (auth_board_visible, 0088) consulta a
+    // própria tabela via função STABLE, que não enxerga a linha do PRÓPRIO
+    // comando — `.insert(...).select("id")` falhava com 42501 mesmo para o
+    // dono (derrubava presets e o import via JSON). Carimbo de org na mesma
+    // linha do createDashboard (multi-org, 0090).
+    const orgId = await getActiveOrgId();
+    const newId = crypto.randomUUID();
+    const { error } = await supabase.from("dashboards").insert({
+      id: newId,
+      name: preset.name,
+      owner_user_id: userId,
+      visible_to_roles: preset.visible_to_roles,
+      is_shared: preset.visible_to_roles.length > 0,
+      settings: { ...(preset.settings ?? {}), preset: marker },
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
+    if (error) return { error: error.message };
+    dashId = newId;
     dashboardAction = "created";
   } else {
     // Update: sobrescreve só as seções GERIDAS presentes no preset; `tabs`
@@ -1796,7 +1814,7 @@ async function applyPresetDefinition(
         settings: next,
       })
       .eq("id", target.id);
-    if (error) return null;
+    if (error) return { error: error.message };
     dashId = target.id;
     dashboardAction = "updated";
   }
@@ -1877,7 +1895,9 @@ export async function applyPreset(
   if (!preset) return { ok: false, message: `Preset "${presetKey}" não existe.` };
   const supabase = await createClient();
   const result = await applyPresetDefinition(supabase, session.user.id, preset);
-  if (!result) return { ok: false, message: "Falha ao aplicar o preset." };
+  if ("error" in result) {
+    return { ok: false, message: `Falha ao aplicar o preset: ${result.error}` };
+  }
   revalidatePath("/");
   revalidatePath("/configuracoes/presets");
   revalidatePath(`/dashboards/${result.dashboardId}`);
@@ -1979,7 +1999,13 @@ export async function importDashboardJson(
     validation.preset,
     { includeSupportFields: false }
   );
-  if (!result) return { ok: false, message: "Falha ao aplicar o dashboard importado." };
+  if ("error" in result) {
+    return {
+      ok: false,
+      message: `Falha ao aplicar o dashboard importado: ${result.error}`,
+      warnings: validation.warnings,
+    };
+  }
   revalidatePath("/");
   revalidatePath(`/dashboards/${result.dashboardId}`);
   const w = result.widgets;
@@ -2015,8 +2041,9 @@ export async function generatePresets(): Promise<ActionState> {
       session.user.id,
       preset
     );
-    if (result?.dashboard === "created") created += 1;
-    else if (result?.dashboard === "updated") updated += 1;
+    if ("error" in result) continue; // relatado no contador final
+    if (result.dashboard === "created") created += 1;
+    else if (result.dashboard === "updated") updated += 1;
   }
   revalidatePath("/");
   revalidatePath("/configuracoes/presets");

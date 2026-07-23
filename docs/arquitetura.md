@@ -1,4 +1,10 @@
-<!-- Versão: 1.21 | Data: 23/07/2026 -->
+<!-- Versão: 1.22 | Data: 23/07/2026 -->
+<!-- v1.22 (23/07/2026): §4.11 — REGRA: nunca `.insert(...).select()` em
+     `dashboards` (a policy de SELECT auth_board_visible/0088 é função STABLE
+     sobre a própria tabela e não vê a linha do próprio comando → 42501);
+     padrão = id gerado no app + insert sem RETURNING (duplicateBoard);
+     createBoard/applyPresetDefinition corrigidos; erro real do banco passa a
+     ser propagado pelos chamadores do applyPresetDefinition. -->
 <!-- v1.21 (23/07/2026): §4.11 — Importar aceita VÁRIAS Bases (modelo/amostra
      por Base + Conexões no prompt; envelope `bases: []`). -->
 <!-- v1.20 (23/07/2026): §4.11 — Importar dashboard via JSON gerado por IA
@@ -1050,6 +1056,14 @@ vão à URL (`qf_*`), kanban/Tabela Livre chegam PRECOMPUTADOS pelo RSC público
 `readOnly`).
 
 ### 4.11 Importar dashboard via JSON gerado por IA (22/07/2026)
+
+> **REGRA (23/07/2026): nunca use `.insert(...).select(...)` em
+> `dashboards`.** A policy de SELECT (`auth_board_visible`, 0088) é uma
+> função STABLE que consulta a própria tabela — no RETURNING de um INSERT
+> ela roda no snapshot de antes do comando, não vê a linha nova e o insert
+> inteiro falha com 42501, mesmo para o dono. Padrão correto (duplicateBoard/
+> createBoard/applyPresetDefinition): **id gerado no app
+> (`crypto.randomUUID()`) + insert SEM RETURNING**.
 
 Terceiro modo de criação na Home (botão "Importar" ao lado do "Criar",
 `components/dashboards/import-dashboard-sheet.tsx`): o usuário copia um prompt
