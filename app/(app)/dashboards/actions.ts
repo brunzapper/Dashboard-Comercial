@@ -100,7 +100,7 @@ import {
 } from "@/lib/widgets/history";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
-import type { ImportDefRow } from "@/lib/import/dashboard/types";
+import { loadImportContext } from "@/lib/import/dashboard/context";
 
 export interface ActionState {
   ok?: boolean;
@@ -1939,34 +1939,10 @@ export async function importDashboardJson(
   if (!raw.trim()) return { ok: false, message: "Cole o JSON gerado pela IA." };
 
   const supabase = await createClient();
-  const [sources, defsRes, corrRes, respRes, opRes] = await Promise.all([
-    loadSources(supabase),
-    supabase
-      .from("field_definitions")
-      .select("id, field_key, label, data_type, formula, applies_to, source_system"),
-    supabase.from("field_correspondences").select("key"),
-    supabase.from("responsibles").select("display_name"),
-    supabase.from("operations").select("name"),
-  ]);
-  const validation = validateDashboardImport(raw, {
-    sources,
-    defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
-      id: String(d.id),
-      field_key: String(d.field_key),
-      label: String(d.label ?? d.field_key),
-      data_type: d.data_type as ImportDefRow["data_type"],
-      formula: (d.formula as ImportDefRow["formula"]) ?? null,
-      applies_to: (d.applies_to as string[] | null) ?? null,
-      source_system: (d.source_system as string | null) ?? null,
-    })),
-    correspondenceKeys: (corrRes.data ?? []).map((c) => String(c.key)),
-    responsibleNames: (respRes.data ?? [])
-      .map((r) => String((r as { display_name?: unknown }).display_name ?? ""))
-      .filter(Boolean),
-    operationNames: (opRes.data ?? [])
-      .map((o) => String((o as { name?: unknown }).name ?? ""))
-      .filter(Boolean),
-  });
+  const validation = validateDashboardImport(
+    raw,
+    await loadImportContext(supabase)
+  );
   if (!validation.ok || !validation.preset) {
     return {
       ok: false,

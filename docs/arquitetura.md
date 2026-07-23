@@ -1,4 +1,9 @@
-<!-- Versão: 1.22 | Data: 23/07/2026 -->
+<!-- Versão: 1.23 | Data: 23/07/2026 -->
+<!-- v1.23 (23/07/2026): §4.11.1 — geração DIRETA de dashboard por IA via API:
+     adaptadores multi-provedor em lib/ai/* (Gemini/Claude/OpenAI, fetch), chave
+     cifrada por org (ai_provider_config, 0096), action generateDashboardWithAi
+     com laço de autocorreção, reuso de buildImportPrompt + validate +
+     importDashboardJson; contexto extraído p/ lib/import/dashboard/context.ts. -->
 <!-- v1.22 (23/07/2026): §4.11 — REGRA: nunca `.insert(...).select()` em
      `dashboards` (a policy de SELECT auth_board_visible/0088 é função STABLE
      sobre a própria tabela e não vê a linha do próprio comando → 42501);
@@ -1096,6 +1101,33 @@ dashboard completo. Peças:
   variante "completo" anexa `docs/manual-de-construcao-de-dashboards.md` lido
   do disco — `outputFileTracingIncludes` no `next.config.ts` garante o
   arquivo no bundle da Vercel.
+
+#### 4.11.1 Geração DIRETA por IA via API (23/07/2026)
+
+Elimina o "hop" manual de copiar/colar: o servidor chama a IA por API entre
+"montar prompt" e "validar/aplicar", reusando tudo do §4.11. Peças:
+
+- **Provedores**: `lib/ai/*` — adaptadores por `fetch` nativo (sem SDK), um por
+  provedor (`gemini.ts`/`claude.ts`/`openai.ts`) atrás de um contrato único
+  (`AiTextClient.generateText`, `types.ts`); `index.ts` é a fábrica
+  (`getAiClient`). Migrar de provedor = novo arquivo + case + entrada em
+  `models.ts`. Gemini autentica por header `x-goog-api-key` (nunca `?key=`);
+  Claude sem `temperature` (removida em Opus 4.7+).
+- **Config por org**: tabela `ai_provider_config` (0096) — provedor/modelo +
+  chave CIFRADA (AES-GCM, `secretbox.ts`). `lib/ai/config.ts` (server-only)
+  expõe `loadOrgAiConfigPublic` (provider/model/hasKey — nunca o ciphertext) e
+  `loadOrgAiConfig` (chave decifrada, SÓ na action de geração). Cadastro admin
+  em Configurações → Integrações (`ai-actions.ts` + `AiProviderForm`).
+- **Action**: `generateDashboardWithAi` (`app/(app)/dashboards/ai-generate-actions.ts`)
+  — gate `create_dashboards`, monta o system com `buildImportPrompt` (mesmo
+  modelo+amostras do manual), roda um **laço de AUTOCORREÇÃO** (máx 3): chama a
+  IA → `validateDashboardImport` → se falhar, anexa os erros pt-BR como turno de
+  correção e repete. Ao validar, aplica reusando `importDashboardJson` (gates +
+  GC + persistência intactos) e o cliente navega ao dashboard (auto-import); se
+  esgotar sem JSON válido, devolve os erros + o último rascunho para conserto
+  manual no campo de JSON. O contexto de validação saiu para
+  `lib/import/dashboard/context.ts` (`loadImportContext`), compartilhado com
+  `importDashboardJson`. O par de RPCs de widget NÃO é tocado.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

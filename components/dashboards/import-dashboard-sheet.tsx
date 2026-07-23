@@ -15,7 +15,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Upload } from "lucide-react";
+import Link from "next/link";
+import { Check, Copy, Upload, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,6 +38,7 @@ import {
   importDashboardJson,
   type ImportDashboardState,
 } from "@/app/(app)/dashboards/actions";
+import { generateDashboardWithAi } from "@/app/(app)/dashboards/ai-generate-actions";
 
 const STEPS = [
   "Importe/sincronize a(s) Base(s) (Registros → Importar CSV), se ainda não existirem.",
@@ -47,7 +49,13 @@ const STEPS = [
   "Importe: o dashboard é criado com abas, widgets, campos e sub-bases necessárias.",
 ];
 
-export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
+export function ImportDashboardSheet({
+  sources,
+  ai,
+}: {
+  sources: SourceDef[];
+  ai?: { provider: string; model: string; hasKey: boolean } | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [bases, setBases] = useState<string[]>([]);
@@ -55,9 +63,12 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
   const [copyError, setCopyError] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
   const [json, setJson] = useState("");
+  const [description, setDescription] = useState("");
   const [result, setResult] = useState<ImportDashboardState | null>(null);
   const [copyPending, startCopy] = useTransition();
   const [importPending, startImport] = useTransition();
+  const [genPending, startGenerate] = useTransition();
+  const aiReady = Boolean(ai?.hasKey);
 
   const rootSources = sources.filter((s) => !s.parentKey);
 
@@ -96,6 +107,23 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
         setOpen(false);
         router.push(`/dashboards/${res.id}`);
       }
+    });
+  }
+
+  function runGenerate() {
+    if (bases.length === 0 || !description.trim()) return;
+    setResult(null);
+    startGenerate(async () => {
+      const res = await generateDashboardWithAi({ bases, description });
+      if (res.ok && res.id) {
+        setOpen(false);
+        router.push(`/dashboards/${res.id}`);
+        return;
+      }
+      // Falha: mostra os erros e, se a IA deixou um rascunho, joga no campo de
+      // JSON para o usuário revisar/ajustar e importar manualmente.
+      setResult(res);
+      if (res.draftJson) setJson(res.draftJson);
     });
   }
 
@@ -147,8 +175,54 @@ export function ImportDashboardSheet({ sources }: { sources: SourceDef[] }) {
               </p>
             </div>
 
+            <div className="border-primary/30 bg-primary/5 flex flex-col gap-2 rounded-md border p-3">
+              <Label
+                htmlFor="ai-description"
+                className="flex items-center gap-2"
+              >
+                <Wand2 className="size-4" /> Gerar com IA (direto)
+              </Label>
+              {aiReady ? (
+                <>
+                  <Textarea
+                    id="ai-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descreva o dashboard que você quer — ex.: conversão de leads por mês, com meta e comparação vs. mês anterior."
+                    className="h-24"
+                  />
+                  <Button
+                    type="button"
+                    disabled={bases.length === 0 || !description.trim() || genPending}
+                    onClick={runGenerate}
+                  >
+                    <Wand2 className="size-4" />
+                    {genPending ? "Gerando com IA…" : "Gerar com IA"}
+                  </Button>
+                  <p className="text-muted-foreground text-xs">
+                    {genPending
+                      ? "Chamando a IA e validando o resultado — isso pode levar alguns segundos. O dashboard abre automaticamente ao concluir."
+                      : `Marque a(s) Base(s) acima e descreva o dashboard. Usa ${ai?.provider} · ${ai?.model}.`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Nenhum provedor de IA configurado para esta organização. Um
+                  administrador pode conectar Gemini, Claude ou OpenAI em{" "}
+                  <Link
+                    href="/configuracoes/integracoes"
+                    className="underline"
+                    onClick={() => setOpen(false)}
+                  >
+                    Configurações → Integrações
+                  </Link>
+                  . Você ainda pode gerar manualmente abaixo.
+                </p>
+              )}
+            </div>
+
             <div className="flex flex-col gap-2">
-              <Label>Prompt de instruções</Label>
+              <Label>Ou gere manualmente (copiar prompt → colar JSON)</Label>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"

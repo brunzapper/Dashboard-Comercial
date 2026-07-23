@@ -364,6 +364,14 @@ entregas por endpoint: `status` (`pending|delivered|dead`), `attempts`,
 `external_event_id` (dedup por índice único parcial), `kind` (`rows|event`),
 `payload`, `status` (`received|processed|error`), `result`.
 
+**`ai_provider_config`** (0096) — config de IA POR ORGANIZAÇÃO para a geração
+DIRETA de dashboards via API (`lib/ai/*`): `organization_id` (PK/unique →
+`organizations`), `provider` (`gemini|claude|openai`), `model`,
+`api_key_ciphertext` (AES-256-GCM via `KEY_ENCRYPTION_KEY`; nunca volta ao
+browser — só o servidor decifra em `loadOrgAiConfig`), `updated_by`. RLS SELECT
+só admin da própria org (`auth_org_ids` + `auth_has_role('admin')`); escrita só
+service role (sem policy), carimbando `organization_id`.
+
 ## 4. Funções
 
 ### 4.1 O par crítico de RPCs de widget
@@ -549,6 +557,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0092 | org_roles_protections | `user_roles` confinada à própria org; papel `admin` só via org_admin (`auth_can_grant_admin`) |
 | 0093 | org_provisioning | `seed_org_defaults` (core defs por org) e `delete_organization` (GUC + cascade; org inicial recusada) — EXECUTE só service role |
 | 0094 | user_access_overrides | Overrides individuais (áreas de Configurações allow/deny; bases deny) + helpers `auth_denied_*`; recria data_sources/sub_sources/records select |
+| 0096 | ai_provider_config | Config de IA por ORG (provider/model/chave cifrada AES-GCM) p/ a geração DIRETA de dashboards via API (`lib/ai`). RLS SELECT só admin da org; escrita só service role. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
