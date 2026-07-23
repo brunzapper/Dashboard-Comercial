@@ -1,12 +1,15 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 23/07/2026
 // Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
 // (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
 // dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
+// v1.1 (23/07/2026): item "Bases" (escopo de bases do board —
+//   BoardSourcesDialog, mesmo dialog do kebab do hub).
 "use client";
 
 import { useState, useTransition } from "react";
 import {
   Camera,
+  Database,
   LayoutGrid,
   Maximize,
   MoreVertical,
@@ -54,6 +57,7 @@ import {
   updateDashboardVisibility,
 } from "@/app/(app)/dashboards/actions";
 import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
+import { BoardSourcesDialog } from "./board-sources-dialog";
 
 type BgMode = "none" | "solid" | "gradient";
 
@@ -77,6 +81,7 @@ export function DashboardMenu({
   const [shareOpen, setShareOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   // Compartilhamento (visibilidade por papel).
@@ -179,6 +184,14 @@ export function DashboardMenu({
             }}
           >
             <LayoutGrid className="size-4" /> Área de trabalho
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setSourcesOpen(true);
+            }}
+          >
+            <Database className="size-4" /> Bases
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -301,6 +314,14 @@ export function DashboardMenu({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Bases: escopo de bases do board (settings.sourceScope). */}
+      <BoardSourcesDialog
+        boardId={dashboardId}
+        kanban={false}
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+      />
 
       {/* Compartilhamento: visibilidade por papel (edita visible_to_roles). */}
       <Sheet open={shareOpen} onOpenChange={setShareOpen}>

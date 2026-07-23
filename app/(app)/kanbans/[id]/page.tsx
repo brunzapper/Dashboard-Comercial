@@ -1,8 +1,11 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 23/07/2026
 // Página dedicada de um kanban (dashboards.kind 'kanban', 0062). O RSC computa
 // o quadro (lib/kanban/data.ts → runRecordList com RLS) e entrega ao client;
 // período simples via ?periodo/?de/?ate sobre o campo de data da fonte (ou do
 // bucket). RLS de dashboards decide a visibilidade (owner/papéis/admin).
+// v1.3 (23/07/2026): escopo de BASES do board (settings.sourceScope, ⋮ →
+//   "Bases") — catálogo efetivo via applySourceScope + <SourcesProvider>
+//   escopado (paridade com a page de dashboard).
 // v1.2 (17/07/2026): <TrackLastView /> — grava a rota em user_settings.lastView
 //   p/ a Home restaurar ao reabrir o app.
 // v1.1 (16/07/2026): modo TAREFAS — tasks do board agrupadas por fase
@@ -13,6 +16,11 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
+import { SourcesProvider } from "@/components/sources-context";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { resolvePeriodSelection } from "@/lib/widgets/period";
 import type { DashboardSettings } from "@/lib/widgets/types";
@@ -61,7 +69,14 @@ export default async function KanbanPage({
   const settings = (board.settings ?? {}) as DashboardSettings;
   const kanban: KanbanSettings = settings.kanban ?? { mode: "registros" };
 
-  const sources = await loadSources(supabase);
+  const allSources = await loadSources(supabase);
+  // Escopo de BASES do board (⋮ → "Bases"): catálogo efetivo deste kanban.
+  // A fonte configurada no quadro nunca sai (collectBoardSourceKeys a mantém).
+  const sources = applySourceScope(
+    allSources,
+    settings.sourceScope,
+    collectBoardSourceKeys([], settings)
+  );
   const sourceDef = sources.find((s) => s.key === kanban.source) ?? null;
 
   // Definições de campo (rótulos/opções/tipos) da fonte, visíveis ao papel.
@@ -178,7 +193,8 @@ export default async function KanbanPage({
   const isManager = isAdmin || userRoles.includes("gestor");
 
   return (
-    <>
+    // Catálogo escopado por cima do provider do layout (⋮ → "Bases").
+    <SourcesProvider sources={sources}>
       {/* Grava a view p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <KanbanPageClient
@@ -204,6 +220,6 @@ export default async function KanbanPage({
         responsibleLabels={responsibleLabels}
         canConfig={canConfig}
       />
-    </>
+    </SourcesProvider>
   );
 }

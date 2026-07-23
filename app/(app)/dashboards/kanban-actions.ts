@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 23/07/2026
+// v1.2 (23/07/2026): escopo de BASES do board (settings.sourceScope) aplicado
+//   ao catálogo (applySourceScope) — paridade com page/widget-scope.
 // v1.1 (21/07/2026): modo registros aplica os filtros de VISUALIZAÇÃO do
 //   dashboard via resolveWidgetViewScope (assembly única do widget-scope):
 //   filtros rápidos do card (__qf__), ?ff_ com fallback lastFieldFilters e
@@ -18,6 +20,10 @@ import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { buildAvailableFields } from "@/lib/widgets/fields";
@@ -98,7 +104,7 @@ export async function runKanbanWidget(
     { data: fieldsData },
     correspondences,
     { data: prefData },
-    sources,
+    allSources,
     { data: respData },
     { data: opsData },
   ] = await Promise.all([
@@ -149,6 +155,20 @@ export async function runKanbanWidget(
 
   const isAdmin = session.roles.includes("admin");
   const allFields = (fieldsData ?? []) as FieldDefinition[];
+  // Escopo de BASES do board (⋮ → "Bases") — mesmo catálogo efetivo da page
+  // (invariante 12). A fonte do quadro nunca sai (collectBoardSourceKeys).
+  const boardSettings0 = (dash.settings ?? {}) as DashboardSettings;
+  const sources = applySourceScope(
+    allSources,
+    boardSettings0.sourceScope,
+    collectBoardSourceKeys(
+      widgets,
+      boardSettings0,
+      new Map(
+        allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+      )
+    )
+  );
   // Linhas core (0086) fora da lista de campos custom (edit sheet/colunas do
   // card leem custom_fields); entram à parte no runKanban (groupDef/labels).
   const { core: coreDefs } = splitCoreDefs(allFields);
@@ -228,7 +248,7 @@ export async function runKanbanWidget(
   }
 
   // ---- modo registros: período efetivo do widget (resolver único da page) ----
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const dashSettings = boardSettings0;
   const prefSettings = (prefData?.settings ?? {}) as PeriodPrefs;
   const available = buildAvailableFields(allFields, correspondences, sources);
   const resolver = createPeriodResolver({

@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 20/07/2026
+// Versão: 1.5 | Data: 23/07/2026
+// v1.5 (23/07/2026): escopo de BASES do board (settings.sourceScope congelado)
+//   aplicado ao catálogo vivo (applySourceScope) — paridade com o dashboard.
 // v1.4 (20/07/2026): catálogo das expressões {=…} via builder ÚNICO
 //   (lib/widgets/agg-catalog.availableAggCatalogInput) — montagem idêntica.
 // v1.3 (18/07/2026): fontes por métrica (Metric.sources) — modo lista via
@@ -78,6 +80,7 @@ import {
 import { NOTE_MAX_EXPRS } from "@/lib/widgets/note-template";
 import type {
   CalcWidgetResult,
+  DashboardSettings,
   Dimension,
   Widget,
   WidgetConfig,
@@ -86,6 +89,10 @@ import type {
 } from "@/lib/widgets/types";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  applySourceScope,
+  collectBoardSourceKeys,
+} from "@/lib/config/source-scope";
 import {
   parseViewFilter,
   searchHandledOnClient,
@@ -196,7 +203,7 @@ export default async function SnapshotPage({
   // mergeSourceLabels (mesmo split do layout autenticado) p/ buscar em
   // paralelo com loadSources; partner rows entram na mesma leva (antes: três
   // awaits seriais).
-  const [sources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
+  const [allSources, sourceLabelsValue, { data: partnerRows }] = await Promise.all(
     [
       loadSources(service),
       loadSourceLabelsValue(service),
@@ -214,9 +221,17 @@ export default async function SnapshotPage({
         .eq("partner_only", true),
     ]
   );
+  const dashSettings = cfg.dashboard.settings ?? {};
+  // Escopo de BASES do board (⋮ → "Bases"), congelado no settings do bundle:
+  // o viewer aplica o MESMO catálogo efetivo do dashboard vivo (paridade com
+  // a page/widget-scope) — widgets em "todas as bases" enxergam o escopo.
+  const sources = applySourceScope(
+    allSources,
+    (dashSettings as DashboardSettings).sourceScope,
+    collectBoardSourceKeys(widgets, dashSettings, fieldByKeyAll)
+  );
   const available = buildAvailableFields(fields, correspondences, sources);
   const sourceLabels = mergeSourceLabels(sourceLabelsValue, sources);
-  const dashSettings = cfg.dashboard.settings ?? {};
   const currencyRates = (cfg.currencyRates ?? {}) as CurrencyRates;
   const allowQuickFilters = snap.allow_quick_filters;
   const allowWidgetFilters = snap.allow_widget_filters;

@@ -1062,6 +1062,14 @@ export interface DashboardSettings {
   // (lib/presets/definitions.ts) para o aplicador atualizar em vez de duplicar.
   // Gravado/gerido só por applyPreset (app/(app)/dashboards/actions.ts).
   preset?: { key: string; version: number };
+  // Escopo de BASES do board (23/07/2026, menu ⋮ → "Bases"): keys de
+  // fontes/sub-fontes que este dashboard/kanban usa. Ausente/vazio = todas.
+  // É o catálogo EFETIVO do board: recorta as ofertas dos pickers E o universo
+  // dos widgets em "todas as bases". Fontes já referenciadas por widgets
+  // existentes nunca são removidas do catálogo efetivo
+  // (lib/config/source-scope.ts — applySourceScope mantém referenciadas +
+  // pais de subs mantidas), então config antiga não quebra.
+  sourceScope?: { keys: SourceKey[] };
 }
 
 export interface WidgetConfig {

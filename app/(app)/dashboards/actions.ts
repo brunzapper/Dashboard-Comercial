@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 22/07/2026
+// Versão: 1.6 | Data: 23/07/2026
+// v1.6 (23/07/2026): escopo de BASES do board (⋮ → "Bases") —
+//   getBoardSourcesState (catálogo completo + escopo + referenciadas, lazy no
+//   open do dialog) e saveBoardSourceScope (merge server-side SÓ da chave
+//   sourceScope — o dialog pode abrir do hub com settings defasados).
 // v1.5 (22/07/2026): ciclo de vida de boards (0087) — trashBoard/archiveBoard/
 //   restoreBoard/deleteBoardPermanently substituem o hard delete direto
 //   (deleteDashboard), e duplicateBoard clona board + widgets + células +
@@ -35,7 +39,13 @@ import {
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { loadSources } from "@/lib/config/sources";
+import {
+  collectBoardSourceKeys,
+  type ScopeWidgetLike,
+} from "@/lib/config/source-scope";
 import { recordTypeOf } from "@/lib/sources";
+import { isCoreDef } from "@/lib/records/core-defs";
+import type { FieldDefinition } from "@/lib/records/types";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import type { SourceKey } from "@/lib/sources";
 import type { SavedPeriod } from "@/lib/widgets/period";
@@ -503,6 +513,111 @@ export async function updateDashboardVisibility(
   if (error) return { ok: false, message: error.message };
   revalidatePath("/");
   revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// ---------------- Escopo de BASES do board (⋮ → "Bases") ----------------
+
+export interface BoardSourcesState {
+  ok: boolean;
+  message?: string;
+  // Catálogo COMPLETO (o dialog oferece tudo, mesmo dentro de um board já
+  // escopado — o provider da page é o catálogo EFETIVO, que esconderia as
+  // bases removíveis/adicionáveis).
+  catalog: { key: string; label: string; parentKey?: string }[];
+  // Escopo atual (settings.sourceScope.keys; vazio = todas as bases).
+  scopeKeys: string[];
+  // Bases referenciadas pela config atual (widgets/kanban) — o dialog as marca
+  // como "em uso" (continuam no catálogo efetivo mesmo fora do escopo).
+  referencedKeys: string[];
+}
+
+// Estado do dialog "Bases" (lazy, no open): catálogo completo + escopo atual +
+// referenciadas. RLS de dashboards/widgets decide o que o caller enxerga.
+export async function getBoardSourcesState(
+  boardId: string
+): Promise<BoardSourcesState> {
+  const empty: BoardSourcesState = {
+    ok: false,
+    catalog: [],
+    scopeKeys: [],
+    referencedKeys: [],
+  };
+  const session = await getSessionInfo();
+  if (!session) return { ...empty, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const [{ data: dash }, { data: widgetsData }, catalog, { data: fieldsData }] =
+    await Promise.all([
+      supabase
+        .from("dashboards")
+        .select("id, settings")
+        .eq("id", boardId)
+        .maybeSingle(),
+      supabase
+        .from("widgets")
+        .select("sources, metrics, filters, settings")
+        .eq("dashboard_id", boardId),
+      loadSources(supabase),
+      supabase
+        .from("field_definitions")
+        .select("field_key, data_type, formula, source_system")
+        .or("show_in_builder.eq.true,source_system.eq.core"),
+    ]);
+  if (!dash) return { ...empty, message: "Board não encontrado." };
+  const settings = (dash.settings ?? {}) as DashboardSettings;
+  const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
+    (f) => !isCoreDef(f)
+  );
+  const referenced = collectBoardSourceKeys(
+    (widgetsData ?? []) as ScopeWidgetLike[],
+    settings,
+    new Map(fields.map((f) => [f.field_key, f]))
+  );
+  return {
+    ok: true,
+    catalog: catalog.map((s) => ({
+      key: s.key,
+      label: s.label,
+      parentKey: s.parentKey,
+    })),
+    scopeKeys: settings.sourceScope?.keys ?? [],
+    referencedKeys: [...referenced],
+  };
+}
+
+// Grava o escopo de bases com MERGE server-side (lê o settings vigente e troca
+// só a chave sourceScope) — o dialog pode abrir do hub com props defasadas e
+// um overwrite total apagaria tabs/canvas/periodBar. keys vazio = remove o
+// escopo (todas as bases). RLS restringe a owner/admin.
+export async function saveBoardSourceScope(
+  boardId: string,
+  keys: string[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("id, kind, settings")
+    .eq("id", boardId)
+    .maybeSingle();
+  if (!dash) return { ok: false, message: "Board não encontrado." };
+  const catalog = await loadSources(supabase);
+  const known = new Set(catalog.map((s) => s.key));
+  const clean = [...new Set(keys.map(String).filter((k) => known.has(k)))];
+  const settings = (dash.settings ?? {}) as DashboardSettings;
+  const next: DashboardSettings = { ...settings };
+  if (clean.length > 0) next.sourceScope = { keys: clean };
+  else delete next.sourceScope;
+  const { error } = await supabase
+    .from("dashboards")
+    .update({ settings: next })
+    .eq("id", boardId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/");
+  revalidatePath(
+    dash.kind === "kanban" ? `/kanbans/${boardId}` : `/dashboards/${boardId}`
+  );
   return { ok: true };
 }
 
