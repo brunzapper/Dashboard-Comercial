@@ -1,4 +1,6 @@
-<!-- Versão: 1.3 | Data: 23/07/2026 -->
+<!-- Versão: 1.4 | Data: 23/07/2026 -->
+<!-- v1.4 (23/07/2026): §6.2 — nota sobre agrupamento por bucket em campo
+     personalizado de data (média simples aproximada nesse arranjo). -->
 <!-- v1.3 (23/07/2026): §3.8.1 — geração DIRETA por IA (via API): botão "Gerar
      com IA" no painel Importar chama o provedor configurado (Configurações →
      Integrações) e importa automaticamente, com autocorreção pelos erros do
@@ -772,6 +774,11 @@ fatias). Por linha de dimensão:
 - **"Semana"** (só com "Semana do mês"): **"Restrita"** (padrão — a semana é
   recortada na virada do mês) ou **"Cheia"** (segunda→domingo inteira; a
   semana pertence ao mês da sua quinta-feira).
+- O agrupamento pelo bucket vale para qualquer campo de data — inclusive
+  campos personalizados com hora no valor (cada mês/trimestre vira UMA
+  categoria). Única ressalva: métrica de **Média** simples sobre dimensão de
+  campo personalizado com Formato é aproximada (média das médias diárias);
+  médias monetárias e fórmulas são exatas.
 - **"Nome exibido"** — rótulo estético da dimensão (não muda o campo).
 - **"Agrupar período"** (só campo de data COM formato): colapsa os registros
   de cada bucket usando uma agregação por período — opções: "Individual (por
