@@ -1,4 +1,10 @@
-<!-- Versão: 1.15 | Data: 24/07/2026 -->
+<!-- Versão: 1.16 | Data: 24/07/2026 -->
+<!-- v1.16 (24/07/2026): fase 2 dos testes — §2.1 ganha componentes (pragma
+     jsdom + stubs em tests/setup/dom.ts), engine com cliente fake e o runbook
+     "E2E e paridade viva" (stack Supabase local + seed + Playwright +
+     tests/live); §6 atualizada (itens 1–3 implementados, lacunas honestas
+     remanescentes). -->
+
 <!-- v1.15 (24/07/2026): painel "Editar com IA" no dashboard (0098) — sessão e
      Desfazer persistidos em dashboard_ai_sessions (linha por usuário×board,
      sobrescrita in place, cascade no delete do board — SEM job de limpeza);
@@ -111,9 +117,34 @@ npm run build      # o que a Vercel roda no deploy
 - **Como rodar**: `npm test` (uma vez) ou `npm run test:watch`. Não precisa de
   banco, env nem rede — só `npm install` antes. Config em `vitest.config.ts`
   (ambiente node, alias `@` e `TZ=America/Sao_Paulo` pinado — os presets de
-  período usam Date local).
-- **Onde vivem**: unidades colocated (`lib/**/*.test.ts`, ao lado do módulo);
-  guardas cross-cutting em `tests/` (hoje: `tests/rpc-parity.test.ts`).
+  período usam Date local). A suíte `tests/live/` aparece como *skipped* sem
+  env de banco (ver "E2E e paridade viva" abaixo).
+- **Onde vivem**: unidades colocated (`lib/**/*.test.{ts,tsx}` e
+  `components/**/*.test.tsx`, ao lado do módulo); guardas cross-cutting em
+  `tests/` (`rpc-parity.test.ts` estática; `live/` executada); specs do
+  Playwright em `e2e/` (fora do Vitest).
+- **Testes de COMPONENTE (jsdom)**: opt-in por arquivo com a pragma
+  `// @vitest-environment jsdom` na **PRIMEIRA linha** — ANTES do cabeçalho
+  `// Versão:` (invertida, a pragma é ignorada e o teste roda em node). Stubs
+  de APIs que o jsdom não tem (scrollIntoView, pointer capture,
+  ResizeObserver — Radix/cmdk) vivem SÓ em `tests/setup/dom.ts`; stub novo
+  entra lá (guardado), nunca dentro de um teste.
+- **Engine com IO**: use o cliente fake `tests/helpers/fake-supabase.ts`
+  (mesmo shape do snapshotClient: `{ rpc, from }` gravando chamadas,
+  fail-closed). `widget-scope` exige `vi.mock("@/lib/auth/org")` (o import
+  estático puxa next/headers).
+- **E2E e paridade viva (local)**: `npm run db:start` (stack Supabase local —
+  exige docker E psql; o script `scripts/db-start.sh` sobe o stack com
+  `migrations/` vazio e aplica os arquivos via psql em ordem de NOME, porque o
+  CLI registra migração por versão numérica e o repo tem prefixos duplicados
+  0017/0049 — legado válido do fluxo manual) → exporte
+  `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`/`SUPABASE_URL`/
+  `SUPABASE_SERVICE_ROLE_KEY` de `supabase status -o env` → `npm run db:seed`
+  (idempotente; recusa hosts remotos) → `npm run build` (as NEXT_PUBLIC_*
+  entram no bundle AQUI) → `npm run test:e2e` (Playwright, smokes SSR) e
+  `npm run test:live` (paridade executada das RPCs). No CI é o job `e2e`.
+  Dados/uuids/credenciais determinísticos em `tests/helpers/e2e-fixtures.ts` —
+  mudou o seed, atualize os esperados LÁ.
 - **Guarda de paridade RPC**: acha a ÚLTIMA migração que define
   `run_widget_query` e `run_widget_query_snapshot` (e o par
   `_widget_match_expr`/`_snap`), normaliza (comentários fora + substituições
@@ -456,24 +487,29 @@ fonte no widget se precisar do mês.
 
 ## 6. Lacunas conhecidas e recomendações
 
-Estado em 24/07/2026 (itens 2 e 3 da lista original foram implementados; o 1,
-parcialmente — ver §2.1 para operar os testes):
+Estado em 24/07/2026, fase 2 (itens 1–3 da lista original implementados — ver
+§2.1 para operar os testes):
 
-1. **Paridade das RPCs** — PARCIALMENTE coberta: a "alternativa mínima"
-   (comparação textual das definições, módulo nome de tabela) está implementada
-   como teste estático (`tests/rpc-parity.test.ts`, roda no CI sem banco).
-   Segue como lacuna a paridade EXECUTANDO: um script SQL que rode a mesma
-   config de widget em `run_widget_query` e, sobre um snapshot de teste, em
-   `run_widget_query_snapshot`, comparando RESULTADOS (pegaria divergência de
-   comportamento que o texto idêntico não revela, ex.: dados/índices).
-2. **CI mínimo** — IMPLEMENTADO: `.github/workflows/ci.yml` roda `lint` +
-   `typecheck` + `npm test` a cada push/PR.
-3. **Testes de unidade dos módulos puros** — IMPLEMENTADO (Vitest, colocated
-   `lib/**/*.test.ts`): period/period-resolve, formulas, mock-reuniao,
-   calc-metrics, sources/sub-fontes, date/normalize (fuso 0079/0080),
-   business-days, core-defs, formula-validate e import de IA (rewrite).
-   Lacunas remanescentes de teste: componentes/UI, E2E (Playwright) e os
-   caminhos com IO (engine/record-list/widget-scope — exigiriam
-   fixtures/mocks de Supabase).
+1. **Paridade das RPCs** — IMPLEMENTADA nas duas camadas: guarda ESTÁTICA
+   (`tests/rpc-parity.test.ts`, diff textual módulo o bloco snapshot-only,
+   roda em `npm test` sem banco) e paridade EXECUTADA
+   (`tests/live/rpc-parity-live.test.ts`: a mesma config roda em
+   `run_widget_query` e `run_widget_query_snapshot` sobre um snapshot SEM
+   restrições recongelado e os RESULTADOS devem ser idênticos — matriz cobre
+   dims, `@period` byType, unificados, operadores 0050 e o gate 0052 dos
+   mocks; job `e2e` do CI, stack local).
+2. **CI mínimo** — IMPLEMENTADO e ampliado: job `verify` (lint + typecheck +
+   `npm test`) e job `e2e` (stack Supabase local + seed + Playwright +
+   paridade executada) a cada push/PR.
+3. **Testes de unidade/componente/engine** — IMPLEMENTADOS (Vitest): módulos
+   puros (period/period-resolve, formulas, mock-reuniao, calc-metrics,
+   sources/sub-fontes, normalize, business-days, core-defs, formula-validate,
+   rewrite), componentes em jsdom (FormulaEditor/chips/preview, badges,
+   Combobox, helpers puros) e os caminhos com IO do engine com cliente FAKE
+   (pernas por métrica, correspondências por perna, businessDayAlign,
+   comparação, top-up de mocks, aux @fonte, widget-scope). E2E (Playwright)
+   cobre login, dashboard e viewer público. Lacunas honestas remanescentes:
+   widgets de gráfico/grid/card (ResizeObserver/recharts), kanban/agenda no
+   viewer e fluxos de escrita (builder/actions) no E2E.
 4. Manter **este manual e o `banco-de-dados.md` atualizados a cada migração** — eles
    substituem a leitura das 75 migrações; desatualizados, viram armadilha.

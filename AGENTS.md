@@ -7,9 +7,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # Regras do projeto
 
 > Rede de segurança: `npm run lint` + `npm run typecheck` + `npm test` (Vitest —
-> unidades dos módulos puros e a guarda de paridade das RPCs; sem banco). Rode
-> os três antes de entregar; o CI (`.github/workflows/ci.yml`) repete em todo
-> push/PR. Como operar/estender: `docs/manual-de-manutencao.md` §2.1.
+> unidades puras, componentes em jsdom, engine com cliente fake e a guarda
+> estática de paridade das RPCs; sem banco). Rode os três antes de entregar; o
+> CI (`.github/workflows/ci.yml`) repete tudo (job `verify`) e ainda roda o job
+> `e2e` (stack Supabase local + seed + Playwright + paridade RPC EXECUTADA em
+> `tests/live/`). Como operar/estender: `docs/manual-de-manutencao.md` §2.1.
 
 > Documentação para humanos: [`docs/arquitetura.md`](./docs/arquitetura.md)
 > (fluxos + todas as invariantes, incl. as abaixo),
@@ -30,7 +32,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `_widget_match_expr` ↔ `_widget_match_expr_snap`. O espelhamento é
   FISCALIZADO em CI por `tests/rpc-parity.test.ts` (`npm test` — compara o SQL
   das últimas definições, sem banco); divergência snapshot-only INTENCIONAL
-  nova entra na allowlist do teste com comentário justificando.
+  nova entra na allowlist do teste com comentário justificando. Além do texto,
+  o job `e2e` EXECUTA as duas funções com a mesma config sobre um snapshot sem
+  restrições e exige resultados idênticos (`tests/live/rpc-parity-live.test.ts`).
 - **Mocks de Data Reunião em snapshots:** mocks (`records.is_mock`) entram
   SEMPRE no dataset congelado, ignorando as restrições do snapshot (0057); a
   regra 0052 (mock só conta em consulta que referencia Data Reunião) segue

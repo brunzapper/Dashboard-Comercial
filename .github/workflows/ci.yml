@@ -1,7 +1,11 @@
-# CI mínimo (recomendação nº 2 de docs/manual-de-manutencao.md §6): lint +
-# typecheck + testes (Vitest: unidades dos módulos puros + guarda de paridade
-# das RPCs — tests/rpc-parity.test.ts, sem banco). Job único sequencial: três
-# jobs paralelos pagariam o npm ci três vezes sem ganho no volume atual.
+# CI (recomendações da §6 de docs/manual-de-manutencao.md):
+# - verify: lint + typecheck + testes sem banco (Vitest — unidades puras,
+#   componentes em jsdom, engine com cliente fake e a guarda ESTÁTICA de
+#   paridade das RPCs). Job único sequencial: três jobs pagariam npm ci 3×.
+# - e2e: stack Supabase LOCAL (CLI pinado; supabase start aplica as migrações
+#   0001..NNNN) + seed determinístico + build + Playwright (smoke SSR) +
+#   paridade EXECUTADA das RPCs (tests/live). Sem segredos: as chaves saem de
+#   `supabase status -o env` (nomes variam por versão — daí os fallbacks).
 name: CI
 
 on:
@@ -25,3 +29,43 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1 # PINADO: nomes do `status -o env` e chaves do config.toml variam entre versões
+      # NÃO usar `supabase start` cru: o CLI registra migração por VERSÃO e o
+      # repo tem prefixos duplicados (0017/0049 — fluxo manual de produção).
+      # O script sobe o stack com migrations/ vazio e aplica via psql em ordem
+      # de nome, como a produção.
+      - run: bash scripts/db-start.sh
+      - name: Exportar env do stack local
+        run: |
+          eval "$(supabase status -o env)"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=${API_URL:-$SUPABASE_URL}"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY:-$SUPABASE_ANON_KEY}"
+            echo "SUPABASE_URL=${API_URL:-$SUPABASE_URL}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY:-$SUPABASE_SERVICE_ROLE_KEY}"
+          } >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run db:seed
+      # As NEXT_PUBLIC_* PRECISAM estar no env DESTE passo (inline no bundle).
+      - run: npm run build
+      - run: npx playwright install chromium --with-deps
+      - run: npm run test:e2e
+      - run: npm run test:live
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

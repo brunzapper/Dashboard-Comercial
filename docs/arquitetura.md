@@ -205,7 +205,7 @@ externas apenas a alimentam:
 | Gráficos/Grid | Recharts 3 + react-grid-layout 2 | `components/dashboards/charts/`, `dashboard-grid.tsx` |
 | CSV | papaparse | `lib/import/csv.ts` |
 | Deploy | Vercel (plano Hobby — rotas com teto de 60s, `maxDuration = 60`) | push → deploy automático; CI versionado em `.github/workflows/ci.yml` (lint + typecheck + testes) |
-| Testes | Vitest (unidades puras `lib/**/*.test.ts` + guarda de paridade RPC `tests/rpc-parity.test.ts`) | `npm test` — sem banco, sem env |
+| Testes | Vitest (unidades puras + componentes jsdom + engine com cliente fake + guarda estática de paridade RPC) · Playwright (`e2e/`) · paridade RPC EXECUTADA (`tests/live/`, stack Supabase local) | `npm test` sem banco; `test:e2e`/`test:live` com o stack local (manual §2.1) |
 | Agendamento | `pg_cron` + `pg_net` **dentro do Postgres**, chamando rotas da Vercel | `supabase/apply/pg-cron-*.sql` |
 
 Pontos não-óbvios (conhecimento tribal — não descubra do jeito difícil):
@@ -217,15 +217,23 @@ Pontos não-óbvios (conhecimento tribal — não descubra do jeito difícil):
   `lib/env.ts` falha com erro claro em runtime se faltar variável.
 - **O código nunca conecta ao banco em build/deploy.** Toda migração é SQL aplicado
   manualmente no SQL Editor do Supabase (ver `supabase/README.md`).
-- **Testes e CI (24/07/2026).** `npm test` roda o Vitest: testes unitários dos
-  módulos puros do engine (colocated `lib/**/*.test.ts` — datas/fuso, dias
-  úteis, período, fórmulas, calc-metrics, sub-fontes, regra 0052, import de IA)
-  e a **guarda estática de paridade das RPCs** (`tests/rpc-parity.test.ts`,
-  espelho executável da invariante 1 — compara `run_widget_query` ×
-  `run_widget_query_snapshot` direto do SQL das migrações, sem banco). O CI
-  (`.github/workflows/ci.yml`) roda `lint` + `typecheck` + `test` em todo
-  push/PR. Segue SEM cobertura: componentes/UI, E2E e paridade EXECUTANDO
-  contra banco real (ver "Lacunas conhecidas" do manual de manutenção). As
+- **Testes e CI (24/07/2026).** `npm test` roda o Vitest SEM banco: unidades
+  dos módulos puros (colocated `lib/**/*.test.ts` — datas/fuso, dias úteis,
+  período, fórmulas, calc-metrics, sub-fontes, regra 0052, import de IA), a
+  **guarda estática de paridade das RPCs** (`tests/rpc-parity.test.ts`,
+  espelho executável da invariante 1), **componentes** em jsdom (opt-in por
+  arquivo — FormulaEditor/chips/preview, badges, Combobox) e o **engine com
+  cliente Supabase FAKE** (`tests/helpers/fake-supabase.ts`, mesmo shape do
+  snapshotClient — pernas por métrica, correspondências por perna,
+  businessDayAlign, comparação, top-up de mocks, aux de operando @fonte). O CI
+  (`.github/workflows/ci.yml`) tem dois jobs: `verify` (lint + typecheck +
+  `npm test`) e `e2e` — sobe um **stack Supabase LOCAL** (CLI pinado; as
+  migrações dependem só de pgcrypto), semeia dados determinísticos
+  (`scripts/e2e-seed.ts`), roda os smokes SSR do Playwright (`e2e/`: login,
+  dashboard, viewer público `/s/[token]`) e a **paridade EXECUTADA das RPCs**
+  (`tests/live/rpc-parity-live.test.ts`: mesma config nos dois lados, snapshot
+  sem restrições → resultados devem ser IDÊNTICOS). Segue SEM cobertura:
+  widgets de gráfico/grid (ResizeObserver), kanban/agenda no viewer. As
   queries de conferência do `supabase/README.md` continuam valendo.
 
 ## 3. Mapa de pastas
