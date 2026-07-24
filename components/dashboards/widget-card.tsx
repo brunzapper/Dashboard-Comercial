@@ -303,6 +303,13 @@ export const WidgetCard = memo(function WidgetCard({
 }) {
   const [pending, startTransition] = useTransition();
   const [builderOpen, setBuilderOpen] = useState(!!autoOpenEditor);
+  // Nonce que re-monta o editor a cada ABERTURA: os sheets semeiam o estado
+  // interno da prop `widget` uma única vez, e o widget pode ter mudado por fora
+  // (Editar com IA, edição in-loco) desde o último open — sem o remount, o
+  // editor reabriria com a config antiga até um F5. Reabrir sempre parte do
+  // estado SALVO (rascunho não sobrevive ao fechar). Nonces separados: abrir
+  // um editor não pode remontar o outro.
+  const [builderNonce, setBuilderNonce] = useState(0);
   // Catálogo de fontes (contexto) p/ os operandos com escopo de fonte da nota.
   const sourcesCatalog = useSources();
   // Save do builder em andamento (painel já fechado): exibe o overlay de
@@ -314,6 +321,15 @@ export const WidgetCard = memo(function WidgetCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [appearanceNonce, setAppearanceNonce] = useState(0);
+  const openBuilder = () => {
+    setBuilderNonce((n) => n + 1);
+    setBuilderOpen(true);
+  };
+  const openAppearance = () => {
+    setAppearanceNonce((n) => n + 1);
+    setAppearanceOpen(true);
+  };
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -689,14 +705,14 @@ export const WidgetCard = memo(function WidgetCard({
               {/* Sem preventDefault: o Sheet vive fora do menu, e o menu
                   precisa fechar — com o painel fechando já no salvar, um menu
                   aberto ficaria pairando sobre o card durante o processamento. */}
-              <DropdownMenuItem onSelect={() => setBuilderOpen(true)}>
+              <DropdownMenuItem onSelect={openBuilder}>
                 <Pencil className="size-4" /> Editar dados
               </DropdownMenuItem>
               {canStyle ? (
                 <DropdownMenuItem
                   onSelect={(e) => {
                     e.preventDefault();
-                    setAppearanceOpen(true);
+                    openAppearance();
                   }}
                 >
                   <Palette className="size-4" /> Aparência
@@ -762,6 +778,7 @@ export const WidgetCard = memo(function WidgetCard({
   const overlays = canEdit ? (
     <>
       <WidgetBuilder
+        key={`b${builderNonce}`}
         dashboardId={dashboardId}
         available={availableForBuilder}
         widget={widget}
@@ -776,6 +793,7 @@ export const WidgetCard = memo(function WidgetCard({
       />
       {canStyle ? (
         <WidgetAppearanceSheet
+          key={`a${appearanceNonce}`}
           dashboardId={dashboardId}
           widget={widget}
           data={data}
@@ -859,7 +877,7 @@ export const WidgetCard = memo(function WidgetCard({
             title={widget.title}
             editMode={editMode}
             canEdit={canEdit}
-            onConfigure={() => setBuilderOpen(true)}
+            onConfigure={openBuilder}
           />
         ) : (
           <div className="h-full overflow-hidden rounded-lg">
