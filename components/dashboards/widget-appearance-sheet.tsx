@@ -1036,6 +1036,10 @@ function DataLabelsSection({
   patch: (p: Partial<AppearanceSettings>) => void;
 }) {
   const dl = ap.dataLabels;
+  const isBar = vt === "barra" || vt === "barra_horizontal";
+  // Modo "total" (só barras): um único rótulo com a SOMA da barra empilhada;
+  // a posição é ignorada nele (a soma fica sempre fora da pilha).
+  const totalMode = isBar && (dl?.mode ?? "detailed") === "total";
   const positions =
     vt === "linha"
       ? [
@@ -1067,6 +1071,24 @@ function DataLabelsSection({
       />
       {dl?.show ? (
         <>
+          {isBar ? (
+            <SelectRow
+              label="Modo (barras empilhadas)"
+              value={dl?.mode ?? "detailed"}
+              onChange={(v) =>
+                patch({
+                  dataLabels: {
+                    ...dl,
+                    mode: v as "detailed" | "total",
+                  },
+                })
+              }
+              options={[
+                { value: "detailed", label: "Detalhado (por segmento)" },
+                { value: "total", label: "Total da barra (soma)" },
+              ]}
+            />
+          ) : null}
           <SelectRow
             label="Formato"
             value={dl?.format ?? "value"}
@@ -1084,7 +1106,7 @@ function DataLabelsSection({
               { value: "both", label: "Valor + percentual" },
             ]}
           />
-          {positions ? (
+          {positions && !totalMode ? (
             <SelectRow
               label="Posição"
               value={
