@@ -105,6 +105,9 @@ import { IMPORT_PRESET_PREFIX } from "@/lib/import/dashboard/types";
 import {
   assignWidgetKeys,
   importChaveForDashboard,
+  exportDashboardJson,
+  type ExportDashRow,
+  type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
 import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
 
@@ -2091,11 +2094,29 @@ export async function applyDashboardEditJson(
     settings: dashSettings,
   });
 
-  // Identidade canônica + injeções protetivas (roles/tabs) ANTES de validar.
+  // Estado atual exportado: BASE do merge por widget — a IA manda a `key` + só
+  // os campos que mudam e o servidor preenche o resto (sem depender de a IA
+  // re-emitir o widget inteiro).
+  const { data: baseWidgetData } = await supabase
+    .from("widgets")
+    .select(
+      "id, title, visual_type, sources, split_by_source, dimensions, metrics, filters, settings, grid_position, sort_order"
+    )
+    .eq("dashboard_id", dashboardId)
+    .order("sort_order", { ascending: true });
+  const exported = exportDashboardJson({
+    dash: dash as unknown as ExportDashRow,
+    widgets: (baseWidgetData ?? []) as unknown as ExportWidgetRow[],
+    sources: await loadSources(supabase),
+  });
+
+  // Identidade canônica + injeções protetivas (roles/tabs) + base do merge por
+  // widget ANTES de validar.
   const normalized = normalizeImportRaw(raw, {
     chave,
     currentTabs: dashSettings.tabs,
     currentRoles: (dash.visible_to_roles as string[] | null) ?? [],
+    baseWidgets: exported.json.widgets,
   });
 
   const validation = validateDashboardImport(

@@ -37,13 +37,18 @@ import {
   type ExportDashRow,
   type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
-import { IMPORT_PRESET_PREFIX } from "@/lib/import/dashboard/types";
+import {
+  IMPORT_PRESET_PREFIX,
+  type ImportWidgetSpec,
+} from "@/lib/import/dashboard/types";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
   applyDashboardEditJson,
   importDashboardJson,
+  duplicateBoard,
   type ImportDashboardState,
+  type EditDashboardState,
 } from "@/app/(app)/dashboards/actions";
 
 export type AiDashboardMode = "new" | "from" | "edit";
@@ -99,9 +104,11 @@ Regras deste modo (além da especificação acima):
   CRIOU. Widgets não incluídos permanecem exatamente como estão.
 - NUNCA mude a "key" de um widget existente (é a identidade dele). Widget
   NOVO recebe uma "key" nova (slug curto, ex.: "w_funil_2").
-- Ao alterar um widget, copie o objeto dele do estado atual NA ÍNTEGRA
-  (inclusive "settings") e mude só o que o usuário pediu — campos omitidos
-  de um widget INCLUÍDO são apagados.
+- Ao alterar um widget existente, inclua a "key" dele e SÓ os campos que
+  mudam — o resto do widget é preservado pelo servidor (NÃO re-emita o objeto
+  inteiro). Dentro de "settings", mande só as chaves alteradas; as demais são
+  preservadas. Para APAGAR um campo de propósito, envie-o vazio (ex.:
+  "filters": []) ou null.
 - Você NÃO exclui widgets (omitir não exclui). Se o usuário pedir remoção,
   responda que a exclusão é manual (⋮ do widget) e siga com o resto.
 - Não mude "name", "visible_to_roles" nem "settings.tabs" sem pedido
@@ -110,11 +117,21 @@ Regras deste modo (além da especificação acima):
 - A "chave" é fixa (o sistema a impõe) — repita a do estado atual.`;
 
 const FROM_RULES = `
-O "ESTADO ATUAL DO DASHBOARD (JSON)" abaixo é um dashboard de REFERÊNCIA: você
-vai criar um dashboard NOVO baseado nele, aplicando o que o usuário pedir.
-- Reaproveite a estrutura/widgets que fizerem sentido (pode copiar e ajustar).
-- Dê um NOME novo ao dashboard (não repita o da referência).
-- A "chave" será definida pelo sistema — pode manter a que vier no estado.`;
+O "ESTADO ATUAL DO DASHBOARD (JSON)" abaixo é um dashboard de REFERÊNCIA. O
+sistema já vai fazer uma CÓPIA FIEL dele para você — você NÃO precisa (nem deve)
+reproduzir os widgets existentes.
+- Mantenha o envelope (formato/versao/chave/bases/dashboard.name) e liste em
+  "widgets" APENAS os NOVOS a acrescentar (cada um com "key" nova, ex.:
+  "w_novo_card") — pelo menos um. Nada dos widgets existentes.
+- Para adicionar uma ABA, inclua em "dashboard.settings.tabs" a LISTA de abas na
+  ordem desejada — copie as abas existentes (que você vê no estado) e acrescente
+  a nova ao final — e aponte os widgets novos para o "tab" (id) da aba nova. As
+  abas existentes são preservadas pelo servidor mesmo se você omiti-las.
+- NÃO re-emita widgets existentes (viraria duplicata). Para mudar ou remover um
+  widget copiado, faça depois no modo Editar (ou manual pelo ⋮ do card).
+- Dê um "name" ao novo dashboard (obrigatório); repetir o da referência ganha o
+  sufixo "(cópia)".
+- A "chave" é definida pelo sistema — pode manter a que vier no estado.`;
 
 const NEW_RULES = `
 Se o usuário continuar a conversa depois deste dashboard ser criado, os
@@ -164,6 +181,23 @@ async function loadBoardForExport(
   };
 }
 
+// Modo "Criar a partir de": cópia FIEL da referência (duplicateBoard — clone via
+// banco, sem a IA reproduzir nada) e então o DELTA da IA aplicado como edição na
+// cópia (applyDashboardEditJson: sem GC, widgets omitidos preservados, aba nova
+// mesclada em settings.tabs). Duplica só AQUI, no apply — nunca em turnos não
+// aplicados, então não sobram cópias órfãs. O cliente troca a sessão para Editar
+// sobre a cópia usando o `id` retornado.
+async function applyFromReference(
+  referenceId: string,
+  raw: string
+): Promise<EditDashboardState> {
+  const dup = await duplicateBoard(referenceId);
+  if (!dup.ok || !dup.id) {
+    return { ok: false, message: dup.message ?? "Falha ao copiar o dashboard." };
+  }
+  return applyDashboardEditJson(dup.id, raw);
+}
+
 export async function generateDashboardWithAi(
   input: GenerateDashboardInput
 ): Promise<GenerateDashboardState> {
@@ -205,6 +239,8 @@ export async function generateDashboardWithAi(
   let currentRoles: string[] | undefined;
   let avoidName: string | undefined;
   let existingKeys = new Set<string>();
+  // Modo Editar: base do merge por widget (a IA manda só o delta).
+  let baseWidgets: ImportWidgetSpec[] | undefined;
 
   if (mode === "new") {
     bases = (input.bases ?? []).filter(Boolean);
@@ -240,6 +276,7 @@ export async function generateDashboardWithAi(
     if (mode === "edit") {
       chave = exported.chave; // canônica do próprio board
       modeRules = EDIT_RULES;
+      baseWidgets = exported.json.widgets; // base do merge por widget
       const settings = (board.dash.settings ?? {}) as DashboardSettings;
       currentTabs = settings.tabs;
       currentRoles = board.dash.visible_to_roles ?? [];
@@ -305,12 +342,14 @@ export async function generateDashboardWithAi(
     }
     lastRaw = raw;
 
-    // Identidade canônica + injeções protetivas ANTES da validação.
+    // Identidade canônica + injeções protetivas + base do merge por widget
+    // (só no modo Editar) ANTES da validação.
     const normalized = normalizeImportRaw(raw, {
       chave,
       currentTabs,
       currentRoles,
       avoidName,
+      baseWidgets,
     });
 
     const validation = validateDashboardImport(normalized, ctx);
@@ -344,7 +383,12 @@ export async function generateDashboardWithAi(
               input.targetDashboardId as string,
               normalized
             )
-          : await importDashboardJson(normalized);
+          : mode === "from"
+            ? await applyFromReference(
+                input.targetDashboardId as string,
+                normalized
+              )
+            : await importDashboardJson(normalized);
       return { ...applied, summary, chave, mode };
     }
 
@@ -387,6 +431,13 @@ export async function applyGeneratedDashboard(
       return { ok: false, message: "Dashboard alvo ausente." };
     }
     const res = await applyDashboardEditJson(ctx.targetDashboardId, raw);
+    return { ...res, mode: ctx.mode };
+  }
+  if (ctx.mode === "from") {
+    if (!ctx.targetDashboardId) {
+      return { ok: false, message: "Dashboard de referência ausente." };
+    }
+    const res = await applyFromReference(ctx.targetDashboardId, raw);
     return { ...res, mode: ctx.mode };
   }
   const res = await importDashboardJson(raw);
