@@ -1,4 +1,12 @@
-// Versão: 1.9 | Data: 23/07/2026
+// Versão: 1.10 | Data: 24/07/2026
+// v1.10 (24/07/2026): pernas de sub-base EXIBÍVEIS (§4.8) — no branch
+// multi-perna: (a) operando escopado em fonte-IRMÃ é zerado por perna
+// (zeroSiblingScopedOperands; cada perna mostra a própria contribuição) +
+// backfill 0 na basis p/ o re-eval client-side com a fórmula ORIGINAL (que
+// volta no meta das métricas); (b) settings.subSeriesMode: "total" funde as
+// pernas por tupla (foldRowGroup; sem a dim "Base") — pizza/funil com dim e
+// KPI/card fundem SEMPRE —, "stacked"/"grouped" carimbam WidgetData.subSeries
+// p/ o chart pivotar; goalLine/businessDayRef agora propagam. RPCs intocados.
 // v1.9 (23/07/2026): merge por bucket p/ dimensão `custom:` + transform
 // (lib/widgets/bucket-merge.ts) — o ramo custom das RPCs agrupa pelo valor
 // CRU (0085; transform é só rótulo), então valores com hora viravam um grupo
@@ -92,13 +100,16 @@ import {
   parseCondBasisKey,
   recordMatchesConds,
   resolveCalcMetric,
+  siblingScopedBasisKeys,
+  zeroSiblingScopedOperands,
+  zeroSiblingScopesInFields,
   type BasisKey,
   type BasisValues,
   type CalcMoneyMeta,
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { mergeRowsByBucket } from "./bucket-merge";
+import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
@@ -1593,37 +1604,200 @@ export async function runWidget(
     );
   }
 
+  // Métricas calculadas de agregados: resolvidas ANTES do branch multi-perna —
+  // ele precisa da fórmula ORIGINAL (expandida+abaixada) p/ o meta das métricas,
+  // o backfill de basis e o merge "total"; o caminho padrão (computeRows/
+  // rpcMetrics abaixo) usa o MESMO mapa.
+  const calcResolved = new Map<number, ResolvedCalcMetric>();
+  config.metrics.forEach((m, i) => {
+    if (isCalcMetric(m, fieldByKey))
+      calcResolved.set(i, resolveCalcMetric(m, fieldByKey, catalog));
+  });
+
   // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
-  // uma série própria (perna independente: filtro + data + membro próprios),
-  // com a fonte como dimensão LÍDER. Evita a ambiguidade de agregar linhas de
-  // datas/filtros diferentes no mesmo grupo (cada linha pertence a uma perna).
-  // KPI/card/"Agrupar período" já retornaram acima (ficam no absorver).
+  // uma perna independente (filtro + data + membro próprios). Evita a
+  // ambiguidade de agregar linhas de datas/filtros diferentes no mesmo grupo
+  // (cada linha pertence a uma perna). KPI modo meta/razão e "Agrupar período"
+  // já retornaram acima (ficam no absorver). Exibição (24/07/2026,
+  // settings.subSeriesMode): "stacked"/"grouped" mantêm a fonte como dimensão
+  // LÍDER ("Base") e o gráfico pivota as pernas em séries; "total" funde as
+  // pernas por tupla AQUI (sem a dim "Base") — pizza/funil com dimensão e
+  // KPI/card fundem SEMPRE (uma fatia/valor por categoria, não por perna).
   if (involvesSub && mainPlan.extraLegs.length > 0) {
     const rowSourceKeys = [...mainPlan.mainSources, ...mainPlan.extraLegs];
+    // Operando escopado numa fonte-IRMÃ (outra perna de linha deste widget) é
+    // ZERADO na perna (fórmulas das métricas E defs 'calculado_agg' aninhadas):
+    // cada perna exibe só a PRÓPRIA contribuição — sem isso, `count@a +
+    // count@b` repetiria o total global em toda perna, já que a consulta
+    // auxiliar de um escopo roda independente do universo da perna. O escopo
+    // da própria perna permanece (coincide com o universo).
+    const siblingsOf = (key: SourceKey): Set<string> =>
+      new Set<string>(rowSourceKeys.filter((k) => k !== key));
     const legData = await Promise.all(
-      rowSourceKeys.map((key) =>
-        runWidget(
+      rowSourceKeys.map((key) => {
+        const siblings = siblingsOf(key);
+        return runWidget(
           supabase,
           {
             ...config,
             sources: [key],
             splitBySource: false,
+            metrics: config.metrics.map((m) =>
+              m.formula
+                ? {
+                    ...m,
+                    formula: zeroSiblingScopedOperands(m.formula, siblings),
+                  }
+                : m
+            ),
             settings: { ...config.settings, coexistSubSources: [] },
           },
           available,
           period,
-          fields,
+          zeroSiblingScopesInFields(fields, siblings),
           rates,
           conversionPeriod,
           catalog,
           correspondences
         ).catch(
           () => ({ rows: [], dimensions: [], metrics: [] }) as WidgetData
-        )
-      )
+        );
+      })
     );
+    // Backfill: a basis das linhas de cada perna ganha `0` nas chaves das
+    // irmãs (a perna nem as consultou) — o re-eval client-side (células/
+    // subtotais) roda a fórmula ORIGINAL, e o fold entre pernas soma as
+    // contribuições complementares (Total geral exato p/ fórmulas aditivas).
+    rowSourceKeys.forEach((key, li) => {
+      const siblings = siblingsOf(key);
+      for (const [i, rc] of calcResolved) {
+        if (!rc.formula) continue;
+        const keys = siblingScopedBasisKeys(rc.formula, siblings);
+        if (keys.length === 0) continue;
+        const mk = `metric_${i + 1}`;
+        for (const r of legData[li].rows) {
+          const basis = (r.__calcOpsBy?.[mk] ?? r.__calcOps) as
+            | BasisValues
+            | undefined;
+          if (!basis) continue;
+          for (const k of keys) if (!(k in basis)) basis[k] = 0;
+        }
+      }
+    });
+    const base = legData.find((d) => d.metrics.length > 0) ?? legData[0];
+    // Meta das métricas: rótulos/flags da 1ª perna com dados, com o `calc` das
+    // CALCULADAS reapontado p/ a fórmula ORIGINAL — a fórmula de cada perna
+    // foi zerada e difere entre pernas (nunca pode sair no resultado).
+    const metricsMeta = (base?.metrics ?? []).map((mm, i) => {
+      const rc = calcResolved.get(i);
+      if (!rc || !mm.calc) return mm;
+      const meta = calcMoneyMeta(rc, rates, conversionPeriod);
+      return {
+        ...mm,
+        calc: {
+          formula: rc.formula ?? { tokens: [] },
+          currency: rc.code,
+          allowNegative: rc.allowNegative,
+          mode: meta.mode,
+          fixedRate: meta.fixedRate,
+        },
+      };
+    });
     const nDims = config.dimensions.length;
+    const forceTotal =
+      config.visual_type === "kpi" ||
+      ((config.visual_type === "pizza" || config.visual_type === "funil") &&
+        nDims >= 1);
+    const chosen = config.settings?.subSeriesMode;
+    if (
+      forceTotal ||
+      (chosen === "total" && (nDims >= 1 || config.visual_type === "kpi"))
+    ) {
+      // Merge "total": funde as linhas das pernas por tupla de dims, com a
+      // semântica do Total geral (sum/count somam; min/max reduzem; calculadas
+      // reavaliam a fórmula ORIGINAL sobre a basis fundida — razões exatas;
+      // monetárias fundem __money e replotam). __cmp soma os não-nulos
+      // (aproximação, como o "Outros" do top-N); __goal é a MESMA meta global
+      // repetida por perna — 1º não-nulo, nunca soma.
+      const specs = config.metrics.map((m, i) => {
+        const rc = calcResolved.get(i);
+        return {
+          key: `metric_${i + 1}`,
+          kind: rc
+            ? ("calc" as const)
+            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
+          evalBasis: rc?.formula
+            ? (b: BasisValues) =>
+                evalCalcMoney(
+                  rc.formula!,
+                  b,
+                  calcMoneyMeta(rc, rates, conversionPeriod)
+                ).value
+            : undefined,
+        };
+      });
+      const groups = new Map<string, WidgetRow[]>();
+      const order: string[] = [];
+      for (const d of legData) {
+        for (const r of d.rows) {
+          const tuple: unknown[] = [];
+          for (let i = 1; i <= nDims; i++) tuple.push(r[`dim_${i}`] ?? null);
+          const k = JSON.stringify(tuple);
+          const g = groups.get(k);
+          if (g) g.push(r);
+          else {
+            groups.set(k, [r]);
+            order.push(k);
+          }
+        }
+      }
+      const mergedRows: WidgetRow[] = [];
+      for (const k of order) {
+        const g = groups.get(k)!;
+        const merged = foldRowGroup(g, specs);
+        const cmp: NonNullable<WidgetRow["__cmp"]> = {};
+        let hasCmp = false;
+        for (const spec of specs) {
+          let sum = 0;
+          let has = false;
+          for (const r of g) {
+            const v = r.__cmp?.[spec.key];
+            if (v != null && Number.isFinite(Number(v))) {
+              sum += Number(v);
+              has = true;
+            }
+          }
+          if (has) {
+            cmp[spec.key] = sum;
+            hasCmp = true;
+          }
+        }
+        if (hasCmp) merged.__cmp = cmp;
+        else delete merged.__cmp;
+        const goal = g.find((r) => r.__goal != null)?.__goal;
+        if (goal != null) merged.__goal = goal;
+        mergedRows.push(merged);
+      }
+      const moneyEntries = config.metrics
+        .map((m, i) => ({ m, i }))
+        .filter(
+          ({ m, i }) =>
+            !calcResolved.has(i) &&
+            isMoneyMetric(m, available) &&
+            m.agg !== "min" &&
+            m.agg !== "max"
+        );
+      if (moneyEntries.length > 0) replotMoney(mergedRows, moneyEntries);
+      return {
+        rows: mergedRows,
+        dimensions: base?.dimensions ?? [],
+        metrics: metricsMeta,
+        comparison: base?.comparison,
+        goalLine: base?.goalLine,
+        businessDayRef: base?.businessDayRef,
+      };
+    }
     const seriesRows: WidgetRow[] = [];
     rowSourceKeys.forEach((key, li) => {
       const label = sourceLabel(key, catalog);
@@ -1635,7 +1809,6 @@ export async function runWidget(
         seriesRows.push(nr);
       }
     });
-    const base = legData.find((d) => d.metrics.length > 0) ?? legData[0];
     return {
       rows: seriesRows,
       dimensions: [
@@ -1645,8 +1818,11 @@ export async function runWidget(
           label: d.label,
         })),
       ],
-      metrics: base?.metrics ?? [],
+      metrics: metricsMeta,
       comparison: base?.comparison,
+      goalLine: base?.goalLine,
+      businessDayRef: base?.businessDayRef,
+      subSeries: { mode: chosen === "grouped" ? "grouped" : "stacked" },
     };
   }
 
@@ -1661,12 +1837,8 @@ export async function runWidget(
   // e cada linha é remapeada de volta para a ordem de config.metrics, com a
   // métrica calculada avaliada da basis do grupo (gravada em row.__calcOps para
   // os subtotais/Total geral reavaliarem no cliente). Sem métrica calculada,
-  // rpcMetrics === config.metrics e nada muda.
-  const calcResolved = new Map<number, ResolvedCalcMetric>();
-  config.metrics.forEach((m, i) => {
-    if (isCalcMetric(m, fieldByKey))
-      calcResolved.set(i, resolveCalcMetric(m, fieldByKey, catalog));
-  });
+  // rpcMetrics === config.metrics e nada muda. (`calcResolved` é resolvido
+  // acima, antes do branch multi-perna, do MESMO jeito.)
 
   // Fontes por métrica (18/07/2026): particiona as métricas entre a consulta
   // PRINCIPAL (fontes do widget — define o universo de LINHAS) e as pernas

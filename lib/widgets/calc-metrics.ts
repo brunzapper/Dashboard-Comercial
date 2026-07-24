@@ -1,4 +1,8 @@
-// Versão: 2.3 | Data: 19/07/2026
+// Versão: 2.4 | Data: 24/07/2026
+// v2.4 (24/07/2026): zeroing de operandos de fonte-IRMÃ p/ o branch multi-perna
+//   do engine (zeroSiblingScopedOperands/zeroSiblingScopesInFields/
+//   siblingScopedBasisKeys) — cada perna de sub-base exibe só a PRÓPRIA
+//   contribuição; sum/count → literal 0, avg → (0/0)=null, min/max intactos.
 // v2.3 (19/07/2026): operandos com ESCOPO DE FONTE — ref `agg:<agg>:<campo>@<fonte>`
 //   agrega SÓ as linhas daquela fonte. Em runtime o ref é ABAIXADO
 //   (lowerSourceScopedOperands, nos mesmos choke points do expandAggFormula)
@@ -225,6 +229,111 @@ export function lowerSourceScopedOperands(
     }
   }
   return { tokens };
+}
+
+// --- Pernas de sub-base × operandos escopados (24/07/2026) -------------------
+// No branch multi-perna do engine (2+ subs da mesma pai / conviver), cada perna
+// deve exibir a PRÓPRIA contribuição. Um operando escopado numa fonte-IRMÃ
+// (outra perna de linha do MESMO widget) contaria as linhas dela de novo em
+// toda perna — a coluna "por Base" viraria o total global repetido. Antes de
+// recursar, o engine ZERA esses operandos na fórmula: sum/count viram literal 0
+// (identidade aditiva — `count@a + count@b` na perna `a` = só `count@a`);
+// avg vira `( 0 / 0 )` (null pela guarda de /0 do avaliador — média de irmã
+// ausente nunca vira 0 falso); min/max ficam (não têm forma condicional e já
+// avaliam null). O escopo da PRÓPRIA perna permanece (coincide com o universo).
+
+const zeroableAgg = (agg: Aggregation): agg is "sum" | "count" | "avg" =>
+  agg === "sum" || agg === "count" || agg === "avg";
+
+function siblingScopeOf(
+  t: FormulaToken,
+  siblings: ReadonlySet<string>
+): { agg: Aggregation } | null {
+  if (t.kind !== "field") return null;
+  if (t.ref.startsWith("agg:")) {
+    const { agg, source } = parseAggRef(t.ref);
+    return source && siblings.has(source) ? { agg } : null;
+  }
+  if (t.ref.startsWith("aggif:")) {
+    // Forma JÁ abaixada (só sum/count — o avg abaixa para sum/count em par).
+    const cond = parseCondBasisKey(t.ref);
+    return cond?.scope && siblings.has(cond.scope)
+      ? { agg: cond.metric.agg }
+      : null;
+  }
+  return null;
+}
+
+/**
+ * Zera na fórmula (persistida OU já abaixada) os operandos cujo escopo é uma
+ * fonte-irmã de `siblings`. Fast path: nenhum token afetado → o MESMO objeto.
+ * Como no lowering, `source` (texto) do Formula é descartado — transiente de
+ * runtime; o round-trip do editor usa a fórmula persistida.
+ */
+export function zeroSiblingScopedOperands(
+  formula: Formula,
+  siblings: ReadonlySet<string>
+): Formula {
+  const affected = (t: FormulaToken): boolean => {
+    const hit = siblingScopeOf(t, siblings);
+    return hit != null && zeroableAgg(hit.agg);
+  };
+  if (!formula.tokens.some(affected)) return formula;
+  const tokens: FormulaToken[] = [];
+  for (const t of formula.tokens) {
+    if (!affected(t)) {
+      tokens.push(t);
+      continue;
+    }
+    const { agg } = siblingScopeOf(t, siblings)!;
+    if (agg === "avg") {
+      tokens.push({ kind: "lparen" });
+      tokens.push({ kind: "const", value: 0 });
+      tokens.push({ kind: "op", op: "/" });
+      tokens.push({ kind: "const", value: 0 });
+      tokens.push({ kind: "rparen" });
+    } else {
+      tokens.push({ kind: "const", value: 0 });
+    }
+  }
+  return { tokens };
+}
+
+/**
+ * Defs 'calculado_agg' com a fórmula zerada para as irmãs — cobre operando
+ * escopado ANINHADO (métrica `custom:` expande a fórmula do campo via
+ * expandAggFormula, que lê estas defs). Sem def afetada, devolve o MESMO array.
+ */
+export function zeroSiblingScopesInFields(
+  fields: FieldDefinition[],
+  siblings: ReadonlySet<string>
+): FieldDefinition[] {
+  let changed = false;
+  const out = fields.map((f) => {
+    if (f.data_type !== "calculado_agg" || !f.formula) return f;
+    const zeroed = zeroSiblingScopedOperands(f.formula, siblings);
+    if (zeroed === f.formula) return f;
+    changed = true;
+    return { ...f, formula: zeroed };
+  });
+  return changed ? out : fields;
+}
+
+/**
+ * Chaves de basis da fórmula RESOLVIDA original (expandida + abaixada) cujo
+ * escopo é uma fonte-irmã — alvo do backfill `0` nas linhas de cada perna: o
+ * resultado externo carrega a fórmula ORIGINAL, então o re-eval client-side
+ * (células/subtotais via foldBasis) precisa encontrar essas chaves na basis
+ * (0 na perna; o fold entre pernas soma as contribuições complementares).
+ */
+export function siblingScopedBasisKeys(
+  formula: Formula,
+  siblings: ReadonlySet<string>
+): BasisKey[] {
+  return basisKeysFor(formula).filter((k) => {
+    const scope = parseCondBasisKey(k)?.scope;
+    return scope != null && siblings.has(scope);
+  });
 }
 
 // Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando

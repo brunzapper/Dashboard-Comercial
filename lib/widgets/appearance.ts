@@ -1,6 +1,9 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 24/07/2026
 // Fase 10: helpers puros de render de aparência, compartilhados entre o fundo do
 // dashboard, os charts e as tabelas. Sem estado/UI — só transforma config em CSS.
+// v1.2 (24/07/2026): limitCategories ganha `rankKey` opcional (default = 1ª
+//   métrica, byte-compatível) — o pivot das sub-bases ranqueia pelo TOTAL da
+//   categoria (`__cat_total:<metric>`), não por uma série isolada.
 // v1.1 (20/07/2026): top-N configurável (AppearanceSettings.categoryLimit) —
 //   topWithOther ganha o limite por parâmetro e limitCategories generaliza o
 //   corte p/ linhas completas de barra (soma métricas/__cmp e funde __money).
@@ -53,18 +56,22 @@ export function topWithOther(
 // monetário (__money). Métricas intensivas (média/razão calculada) somam
 // numericamente no "Outros" — aproximação de exibição, documentada. Só ativa
 // com categoryLimit configurado (sem config = sem corte; barra clássica).
+// `rankKey` (opcional; default 1ª métrica — byte-compatível) é a chave do
+// corte: o pivot das sub-bases passa o TOTAL da categoria
+// (`__cat_total:metric_1`), p/ o top-N ranquear a categoria inteira e não uma
+// série isolada.
 export function limitCategories(
   rows: Record<string, unknown>[],
   dimKey: string,
   metricKeys: string[],
-  limit: NonNullable<AppearanceSettings["categoryLimit"]>
+  limit: NonNullable<AppearanceSettings["categoryLimit"]>,
+  rankKey: string = metricKeys[0]
 ): Record<string, unknown>[] {
   const n = Math.max(1, Math.floor(limit.n ?? MAX_CATEGORIES));
   const others = limit.others ?? true;
   if (rows.length <= n) return rows;
-  const first = metricKeys[0];
   const sorted = [...rows].sort(
-    (a, b) => (Number(b[first]) || 0) - (Number(a[first]) || 0)
+    (a, b) => (Number(b[rankKey]) || 0) - (Number(a[rankKey]) || 0)
   );
   if (!others) return sorted.slice(0, n);
   const top = sorted.slice(0, n - 1);

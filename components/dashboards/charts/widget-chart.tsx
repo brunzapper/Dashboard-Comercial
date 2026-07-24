@@ -1,4 +1,11 @@
-// Versão: 3.3 | Data: 18/07/2026
+// Versão: 3.4 | Data: 24/07/2026
+// v3.4 (24/07/2026): pernas de sub-base como SÉRIES — quando o engine carimba
+//   WidgetData.subSeries (modos "stacked"/"grouped"), buildSubSeriesPivot
+//   (lib/widgets/sub-series.ts) pivota a dim líder "Base" em uma série por
+//   sub-base (empilhada por métrica ou lado a lado) com a dimensão REAL no
+//   eixo; formatação resolve a métrica subjacente via keyMap (resolveKey) e o
+//   top-N/ordenação ranqueiam pelo total da categoria. Sem o marcador, caminho
+//   byte-idêntico.
 // v3.3 (18/07/2026): "Formato do grupo" na tabela agregada
 //   (appearance.table.groupDateFormats, keys dim_<n>) — nível de data do
 //   "Agrupar por" funde/rotula por formato próprio (bucketGroupDate) e ordena
@@ -74,6 +81,10 @@ import {
   type CalcMoneyMeta,
 } from "@/lib/widgets/calc-metrics";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
+import {
+  buildSubSeriesPivot,
+  subSeriesCatTotalKey,
+} from "@/lib/widgets/sub-series";
 import {
   alignClass,
   applyManualOrder,
@@ -323,7 +334,15 @@ export const WidgetChart = memo(function WidgetChart({
   dimChrono?: boolean;
 }) {
   const { rows, dimensions, metrics } = data;
-  const dimKey = dimensions[0]?.key;
+  // Pernas de sub-base como SÉRIES (WidgetData.subSeries, 24/07/2026): pivota
+  // a dimensão líder "Base" (dim_1) em uma série por sub-base e usa a dimensão
+  // REAL (dim_2) como eixo de categorias — barras empilhadas ou lado a lado.
+  // null = caminho clássico, byte-idêntico.
+  const pivot = useMemo(() => buildSubSeriesPivot(data), [data]);
+  const dimKey = pivot?.catKey ?? dimensions[0]?.key;
+  // Chave sintética de série do pivot → metric_<n> (formatação/moeda/percent
+  // resolvem pela métrica subjacente); fora do pivot, identidade.
+  const resolveKey = (k: string): string => pivot?.keyMap[k] ?? k;
 
   // Tamanhos de fonte efetivos (appearance.fonts × escala do dashboard).
   // Auto + escala 1 ⇒ styles undefined (render idêntico ao anterior).
@@ -355,8 +374,9 @@ export const WidgetChart = memo(function WidgetChart({
     return out;
   }, [metrics, metricsConfig]);
   const isMoneyKey = (key: string) =>
-    metrics.find((m) => m.key === key)?.isMoney ?? false;
-  const calcOf = (key: string) => metrics.find((m) => m.key === key)?.calc;
+    metrics.find((m) => m.key === resolveKey(key))?.isMoney ?? false;
+  const calcOf = (key: string) =>
+    metrics.find((m) => m.key === resolveKey(key))?.calc;
 
   // Percentual por métrica (ver buildPercentModes): pré-computado uma vez.
   const percentModeByKey = useMemo(
@@ -364,7 +384,7 @@ export const WidgetChart = memo(function WidgetChart({
     [metrics, metricByKey]
   );
   const percentModeOf = (key: string): PercentMode =>
-    percentModeByKey[key] ?? null;
+    percentModeByKey[resolveKey(key)] ?? null;
   // Casas decimais do widget (gráficos/KPI usam só o global; a AppearanceTable
   // resolve por célula via resolveDecimals).
   const apDecimals = appearance?.decimals;
@@ -418,7 +438,7 @@ export const WidgetChart = memo(function WidgetChart({
     return out;
   }, [rows, metrics, metricByKey]);
   const seriesMoneyCode = (key: string): string =>
-    seriesMoneyCodeByKey[key] ?? "BRL";
+    seriesMoneyCodeByKey[resolveKey(key)] ?? "BRL";
 
   // Moeda uniforme da série de uma métrica calculada: todas as linhas avaliadas
   // na MESMA moeda → usa-a nos rótulos; mista ou sem moeda → null (número puro,
@@ -455,7 +475,7 @@ export const WidgetChart = memo(function WidgetChart({
     if (calc) {
       const n = Number(v);
       if (v == null || !Number.isFinite(n)) return "—";
-      const code = calcCodeByKey[key];
+      const code = calcCodeByKey[resolveKey(key)];
       return code ? formatMoney(n, code, apDecimals) : pfmt(n, key);
     }
     return isMoneyKey(key)
@@ -473,15 +493,17 @@ export const WidgetChart = memo(function WidgetChart({
     cmp && (cmp.settings.ghostSeries ?? cmp.settings.showBaseValue)
   );
   // Linhas de plotagem com o valor comparado achatado (`<metric>__cmp`) — o
-  // Recharts precisa de dataKey plano p/ a série fantasma.
+  // Recharts precisa de dataKey plano p/ a série fantasma. Sob o pivot, as
+  // linhas já saem achatadas por chave sintética (buildSubSeriesPivot).
   const plotRows = useMemo(() => {
+    if (pivot) return pivot.rows;
     if (!cmp) return rows;
     return (rows as WidgetRow[]).map((r) => {
       const flat: Record<string, unknown> = {};
       for (const m of metrics) flat[`${m.key}__cmp`] = r.__cmp?.[m.key] ?? null;
       return { ...r, ...flat };
     });
-  }, [rows, metrics, cmp]);
+  }, [rows, metrics, cmp, pivot]);
   // Texto de tooltip com a variação anexada ("R$ 12 mil · ▲ 8% vs. período
   // anterior"). Séries fantasma (dataKey __cmp) formatam na escala da métrica.
   const chartTooltipText = (v: unknown, dk: string, payload: unknown): string => {
@@ -535,7 +557,9 @@ export const WidgetChart = memo(function WidgetChart({
   const chartCondActive = hasConditional(chartCond);
   const cardCondStyle = (value: unknown): ResolvedCondStyle | null =>
     chartCondActive ? evalConditional(chartCond, "value", value) : null;
-  const showLegend = ap.legend?.show ?? metrics.length > 1;
+  // Sob o pivot a legenda liga por padrão — os nomes das sub-bases são a única
+  // identificação das séries.
+  const showLegend = ap.legend?.show ?? (pivot ? true : metrics.length > 1);
   const legendStyle = {
     fontSize: chartPx,
     ...(ap.legend?.color ? { color: ap.legend.color } : {}),
@@ -1011,23 +1035,46 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- categorias (barra/linha): ordem manual ou ordenação, e chips editáveis ---
   const catName = (r: Record<string, unknown>) => String(r[dimKey] ?? "—");
+  // Séries a plotar (linha/barra): sob o pivot, uma por (sub-base × métrica);
+  // senão, uma por métrica — descritor idêntico ao mapeamento clássico.
+  const plotSeries = pivot
+    ? pivot.series
+    : metrics.map((m, i) => ({
+        dataKey: m.key,
+        cmpKey: `${m.key}__cmp`,
+        base: m.label,
+        baseIndex: i,
+        metricKey: m.key,
+        name: m.label,
+        lastInStack: i === metrics.length - 1,
+      }));
+  const pivotStacked = pivot?.mode === "stacked";
   // Top-N + "Outros" (categoryLimit) nas barras, ANTES de ordenar — a linha
   // sintética "Outros" participa da ordenação/cores pelo nome. Linha (série
-  // temporal) fica de fora do corte.
+  // temporal) fica de fora do corte. Sob o pivot, o rank/corte usa o TOTAL da
+  // categoria (soma entre sub-bases), nunca uma série isolada.
   const limitedRows =
     ap.categoryLimit?.n != null &&
     (visualType === "barra" || visualType === "barra_horizontal")
       ? limitCategories(
           plotRows,
           dimKey,
-          metrics.map((m) => m.key),
-          ap.categoryLimit
+          pivot
+            ? [
+                ...pivot.series.map((s) => s.dataKey),
+                ...metrics.map((m) => subSeriesCatTotalKey(m.key)),
+              ]
+            : metrics.map((m) => m.key),
+          ap.categoryLimit,
+          pivot ? subSeriesCatTotalKey(metrics[0]?.key ?? "metric_1") : undefined
         )
       : plotRows;
+  const sortValueKeyOf = (metricKey: string): string =>
+    pivot ? subSeriesCatTotalKey(metricKey) : metricKey;
   const chartRows = ap.categorySort
     ? orderCategories(limitedRows, ap.categorySort, {
         dimKey,
-        valueKey: ap.categorySort.metric ?? metrics[0]?.key,
+        valueKey: sortValueKeyOf(ap.categorySort.metric ?? metrics[0]?.key),
         fillOf: (r) => ap.categoryColors?.[catName(r)]?.fill,
       })
     : ap.categoryOrder
@@ -1132,14 +1179,14 @@ export const WidgetChart = memo(function WidgetChart({
         />
         {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
         {ghost
-          ? metrics.map((m, i) => (
+          ? plotSeries.map((s) => (
               <Line
-                key={`${m.key}__cmp`}
-                yAxisId={axisOf(m.key)}
+                key={s.cmpKey}
+                yAxisId={axisOf(s.metricKey)}
                 type="monotone"
-                dataKey={`${m.key}__cmp`}
-                name={`${m.label} (comparação)`}
-                stroke={resolveSeriesColor(ap, m.key, i)}
+                dataKey={s.cmpKey}
+                name={`${s.name} (comparação)`}
+                stroke={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 strokeOpacity={0.55}
@@ -1148,28 +1195,28 @@ export const WidgetChart = memo(function WidgetChart({
               />
             ))
           : null}
-        {metrics.map((m, i) => (
+        {plotSeries.map((s) => (
           <Line
-            key={m.key}
-            yAxisId={axisOf(m.key)}
+            key={s.dataKey}
+            yAxisId={axisOf(s.metricKey)}
             type="monotone"
-            dataKey={m.key}
-            name={m.label}
-            stroke={resolveSeriesColor(ap, m.key, i)}
+            dataKey={s.dataKey}
+            name={s.name}
+            stroke={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}
           >
             {ap.dataLabels?.show ? (
               <LabelList
-                dataKey={m.key}
+                dataKey={s.dataKey}
                 position={
                   ap.dataLabels.position === "bottom" ? "bottom" : "top"
                 }
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
                 fontSize={chartPx}
                 formatter={(v: unknown) =>
-                  dataLabelText(v, m.key, seriesTotal(m.key))
+                  dataLabelText(v, s.dataKey, seriesTotal(s.dataKey))
                 }
               />
             ) : null}
@@ -1195,7 +1242,9 @@ export const WidgetChart = memo(function WidgetChart({
 
   // barra + barra_horizontal
   const horizontal = visualType === "barra_horizontal";
-  const singleSeries = metrics.length === 1;
+  // Sob o pivot nunca é série única: cada sub-base tem cor de série própria
+  // (cores por categoria/condicional por coluna não se aplicam).
+  const singleSeries = metrics.length === 1 && !pivot;
   const hasCatColors = Object.keys(ap.categoryColors ?? {}).length > 0;
   // Formatação condicional nas barras (série única): regra/escala sobre o
   // valor plotado colore a barra; cor manual de categoria vence a regra.
@@ -1271,22 +1320,26 @@ export const WidgetChart = memo(function WidgetChart({
       />
       {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
       {ghost
-        ? metrics.map((m, i) => (
+        ? plotSeries.map((s) => (
             <Bar
-              key={`${m.key}__cmp`}
-              {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
-              {...(ap.stacked ? { stackId: "cmp" } : {})}
-              dataKey={`${m.key}__cmp`}
-              name={`${m.label} (comparação)`}
-              fill={resolveSeriesColor(ap, m.key, i)}
+              key={s.cmpKey}
+              {...(horizontal ? {} : { yAxisId: axisOf(s.metricKey) })}
+              {...(pivotStacked
+                ? { stackId: `cmp:${s.metricKey}` }
+                : ap.stacked
+                  ? { stackId: "cmp" }
+                  : {})}
+              dataKey={s.cmpKey}
+              name={`${s.name} (comparação)`}
+              fill={resolveSeriesColor(ap, s.dataKey, s.baseIndex)}
               fillOpacity={0.35}
               radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
               isAnimationActive={false}
             />
           ))
         : null}
-      {metrics.map((m, i) => {
-        const base = resolveSeriesColor(ap, m.key, i);
+      {plotSeries.map((s) => {
+        const base = resolveSeriesColor(ap, s.dataKey, s.baseIndex);
         // Cor por categoria (colorByCategory, série única): cada barra pega a
         // cor do seu ÍNDICE na paleta do widget (mesmo mecanismo das fatias de
         // pizza) — barras de fontes/categorias diferentes ficam distinguíveis.
@@ -1298,21 +1351,27 @@ export const WidgetChart = memo(function WidgetChart({
             ap.fillMode === "gradient" ||
             hasCatColors ||
             chartCondActive);
-        // Empilhado: um stack único com as séries de métricas; só o segmento
-        // do topo (última métrica) mantém o canto arredondado.
+        // Empilhado: um stack único (métricas) ou, sob o pivot, um stack POR
+        // MÉTRICA (as sub-bases empilham dentro dele); só o segmento do topo
+        // mantém o canto arredondado.
+        const stacked = pivotStacked || Boolean(ap.stacked);
         const radius: [number, number, number, number] =
-          ap.stacked && i < metrics.length - 1
+          stacked && !s.lastInStack
             ? [0, 0, 0, 0]
             : horizontal
               ? [0, 4, 4, 0]
               : [4, 4, 0, 0];
         return (
           <Bar
-            key={m.key}
-            {...(horizontal ? {} : { yAxisId: axisOf(m.key) })}
-            {...(ap.stacked ? { stackId: "s" } : {})}
-            dataKey={m.key}
-            name={m.label}
+            key={s.dataKey}
+            {...(horizontal ? {} : { yAxisId: axisOf(s.metricKey) })}
+            {...(pivotStacked
+              ? { stackId: `s:${s.metricKey}` }
+              : ap.stacked
+                ? { stackId: "s" }
+                : {})}
+            dataKey={s.dataKey}
+            name={s.name}
             fill={base}
             radius={radius}
             isAnimationActive={false}
@@ -1323,7 +1382,7 @@ export const WidgetChart = memo(function WidgetChart({
                     key={idx}
                     fill={
                       ap.categoryColors?.[catName(r)]?.fill ??
-                      barCondFill(r, m.key) ??
+                      barCondFill(r, s.dataKey) ??
                       (colorByCat ? paletteColor(ap.palette, idx) : base)
                     }
                     fillOpacity={
@@ -1336,7 +1395,7 @@ export const WidgetChart = memo(function WidgetChart({
               : null}
             {ap.dataLabels?.show ? (
               <LabelList
-                dataKey={m.key}
+                dataKey={s.dataKey}
                 position={
                   ap.dataLabels.position === "inside"
                     ? "inside"
@@ -1347,14 +1406,14 @@ export const WidgetChart = memo(function WidgetChart({
                 fill={ap.dataLabels.color ?? "var(--foreground)"}
                 fontSize={chartPx}
                 formatter={(v: unknown) =>
-                  dataLabelText(v, m.key, seriesTotal(m.key))
+                  dataLabelText(v, s.dataKey, seriesTotal(s.dataKey))
                 }
               />
             ) : null}
             {cmp?.settings.chartLabels ? (
               <LabelList
-                dataKey={m.key}
-                content={(p) => renderVarLabel(p, m.key)}
+                dataKey={s.dataKey}
+                content={(p) => renderVarLabel(p, s.dataKey)}
               />
             ) : null}
           </Bar>

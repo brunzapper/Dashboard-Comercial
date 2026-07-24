@@ -75,7 +75,10 @@ export async function exportWidgetRecordsCsv(
   // ---- registros por trás do widget (mesma config da page) ----
   let records: RecordRow[];
   try {
-    records = await runRecordList(supabase, config, period, available);
+    // `sources` (catálogo) é OBRIGATÓRIO p/ widget de sub-base: sem ele o
+    // resolver não reconhece a sub (predicado nunca aplicado e record_type
+    // resolvido pela própria key — a consulta voltava vazia).
+    records = await runRecordList(supabase, config, period, available, sources);
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }

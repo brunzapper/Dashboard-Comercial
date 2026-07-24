@@ -320,3 +320,212 @@ describe("relações por nome (FK)", () => {
     });
   });
 });
+
+describe("pernas de sub-base (2+ subs da mesma pai) × operandos escopados", () => {
+  // Widget do caso real "Fonte SQL": duas subs disjuntas da mesma pai como
+  // fontes de LINHA + métrica calculada somando os DOIS escopos. Sem o zeroing
+  // por perna, toda perna exibiria o total global (count@a + count@b).
+  const scopedSum = {
+    tokens: [
+      { kind: "field", ref: "agg:count:*@leads_lite" },
+      { kind: "op", op: "+" },
+      { kind: "field", ref: "agg:count:*@leads_sql" },
+    ],
+  } as NonNullable<WidgetConfig["metrics"][number]["formula"]>;
+  const subsConfig = (over: Partial<WidgetConfig>): WidgetConfig =>
+    baseConfig({
+      sources: ["leads_lite", "leads_sql"],
+      dimensions: [{ field: "pipeline" }],
+      metrics: [
+        {
+          field: "calc:formula",
+          agg: "sum",
+          calc: true,
+          label: "SQLs",
+          formula: scopedSum,
+        },
+      ],
+      visual_type: "barra_horizontal",
+      ...over,
+    });
+  // Fake por PREDICADO: aux de escopo carrega os condFilters (eq_ci) e a
+  // consulta principal de cada perna carrega o predicado da sub em formato de
+  // fio (eq + record_types). Universos: Lite = {GA 50, Meta 10}; SQL = {GA 22,
+  // NID 1}.
+  const bySubPredicate = () => {
+    const has = (
+      args: Record<string, unknown>,
+      field: string,
+      op: string,
+      value: unknown
+    ) =>
+      (args.p_filters as WidgetFilter[]).some(
+        (f) => f.field === field && f.op === op && f.value === value
+      );
+    return fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          if (has(args, "pipeline", "eq_ci", "Lite")) {
+            return {
+              data: [
+                { dim_1: "GA", metric_1: 50 },
+                { dim_1: "Meta", metric_1: 10 },
+              ],
+              error: null,
+            };
+          }
+          if (has(args, "stage", "eq_ci", "SQL")) {
+            return {
+              data: [
+                { dim_1: "GA", metric_1: 22 },
+                { dim_1: "NID", metric_1: 1 },
+              ],
+              error: null,
+            };
+          }
+          if (has(args, "pipeline", "eq", "Lite")) {
+            return { data: [{ dim_1: "GA" }, { dim_1: "Meta" }], error: null };
+          }
+          if (has(args, "stage", "eq", "SQL")) {
+            return { data: [{ dim_1: "GA" }, { dim_1: "NID" }], error: null };
+          }
+          return { data: null, error: { message: "chamada inesperada" } };
+        },
+      },
+    });
+  };
+
+  it("cada perna exibe a PRÓPRIA contribuição (irmã zerada, sem aux da irmã)", async () => {
+    const { db, rpcCalls } = bySubPredicate();
+    const data = await runWidget(
+      db,
+      subsConfig({}),
+      AVAILABLE,
+      null,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CATALOG,
+      CORRS
+    );
+
+    // 2 pernas × (principal + aux do PRÓPRIO escopo) — o aux da irmã sumiu.
+    expect(rpcCalls).toHaveLength(4);
+    // Nenhuma chamada mistura os dois predicados (interseção seria vazia).
+    for (const c of rpcCalls) {
+      const fs = c.args.p_filters as WidgetFilter[];
+      const lite = fs.some(
+        (f) => f.field === "pipeline" && String(f.value) === "Lite"
+      );
+      const sql = fs.some(
+        (f) => f.field === "stage" && String(f.value) === "SQL"
+      );
+      expect(lite && sql).toBe(false);
+    }
+    // Base como dimensão líder + valores PRÓPRIOS por perna (50/10 vs 22/1).
+    expect(data.dimensions).toEqual([
+      { key: "dim_1", label: "Base" },
+      { key: "dim_2", label: "Pipeline" },
+    ]);
+    expect(data.subSeries).toEqual({ mode: "stacked" });
+    expect(data.rows.map((r) => [r.dim_1, r.dim_2, r.metric_1])).toEqual([
+      ["Leads / Clientes Lite", "GA", 50],
+      ["Leads / Clientes Lite", "Meta", 10],
+      ["Leads / SQLs", "GA", 22],
+      ["Leads / SQLs", "NID", 1],
+    ]);
+    // Meta da métrica carrega a fórmula ORIGINAL (os dois escopos), nunca a
+    // zerada de uma perna.
+    const formulaTxt = JSON.stringify(data.metrics[0].calc?.formula);
+    expect(formulaTxt).toContain("leads_lite");
+    expect(formulaTxt).toContain("leads_sql");
+    // Basis da linha: backfill 0 na chave da irmã — o re-eval client-side com
+    // a fórmula original bate com o valor plotado e o Total geral soma 72.
+    const ops = data.rows[0].__calcOps as Record<string, number>;
+    const keys = Object.keys(ops);
+    expect(keys).toHaveLength(2);
+    expect(ops[keys.find((k) => k.includes("leads_lite"))!]).toBe(50);
+    expect(ops[keys.find((k) => k.includes("leads_sql"))!]).toBe(0);
+  });
+
+  it('subSeriesMode "total": funde por tupla sem a dim Base; calc reavalia (50+22=72)', async () => {
+    const { db } = bySubPredicate();
+    const data = await runWidget(
+      db,
+      subsConfig({ settings: { subSeriesMode: "total" } }),
+      AVAILABLE,
+      null,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CATALOG,
+      CORRS
+    );
+
+    expect(data.subSeries).toBeUndefined();
+    expect(data.dimensions).toEqual([{ key: "dim_1", label: "Pipeline" }]);
+    expect(data.rows.map((r) => [r.dim_1, r.metric_1])).toEqual([
+      ["GA", 72],
+      ["Meta", 10],
+      ["NID", 1],
+    ]);
+  });
+
+  it("pizza com dimensão força o total (uma fatia por categoria, não por perna)", async () => {
+    const { db } = bySubPredicate();
+    const data = await runWidget(
+      db,
+      subsConfig({ visual_type: "pizza" }),
+      AVAILABLE,
+      null,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CATALOG,
+      CORRS
+    );
+    expect(data.dimensions).toEqual([{ key: "dim_1", label: "Pipeline" }]);
+    expect(data.rows.map((r) => [r.dim_1, r.metric_1])).toEqual([
+      ["GA", 72],
+      ["Meta", 10],
+      ["NID", 1],
+    ]);
+  });
+
+  it("KPI simples com 2 subs funde numa linha só (antes: só a 1ª perna)", async () => {
+    const has = (
+      args: Record<string, unknown>,
+      field: string,
+      value: unknown
+    ) =>
+      (args.p_filters as WidgetFilter[]).some(
+        (f) => f.field === field && f.op === "eq" && f.value === value
+      );
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) =>
+          has(args, "pipeline", "Lite")
+            ? { data: [{ metric_1: 60 }], error: null }
+            : { data: [{ metric_1: 23 }], error: null },
+      },
+    });
+    const data = await runWidget(
+      db,
+      subsConfig({
+        visual_type: "kpi",
+        dimensions: [],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      null,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CATALOG,
+      CORRS
+    );
+    expect(rpcCalls).toHaveLength(2);
+    expect(data.rows).toEqual([{ metric_1: 83 }]);
+    expect(data.dimensions).toEqual([]);
+  });
+});

@@ -1,4 +1,8 @@
-<!-- Versão: 1.8 | Data: 24/07/2026 -->
+<!-- Versão: 1.9 | Data: 24/07/2026 -->
+<!-- v1.9 (24/07/2026): §6.1 — seletor "Exibição das sub-bases" (empilhado/
+     total somado/lado a lado) p/ widget com 2+ Sub-bases da mesma mãe ou
+     Sub-base "conviver"; cada série mostra a contagem PRÓPRIA (operando da
+     Sub-base irmã vale 0 na série da outra); Pizza/Funil/Cards sempre somam. -->
 <!-- v1.8 (24/07/2026): §3.8.2 — copiar/fazer parecido por referência (a IA vê
      o dashboard inteiro e o servidor copia a definição completa do widget,
      aplicando só a diferença pedida) e a prévia não aplicada passa a ser vista
@@ -835,6 +839,24 @@ Checklist das Bases do catálogo.
     **"Conviver com a pai (série própria…)"**: ligado, a Sub-base vira uma
     **série separada** ao lado da mãe (use quando quiser as duas como linhas/
     barras distintas; quem liga garante que a leitura faz sentido).
+  - **2+ Sub-bases da MESMA mãe** (sem a mãe): cada uma vira uma série
+    própria automaticamente, com a contagem PRÓPRIA do seu recorte.
+- **"Exibição das sub-bases"** (`settings.subSeriesMode`; aparece só quando há
+  2+ Sub-bases da mesma mãe, ou Sub-base "conviver", em Barra/Barra
+  horizontal/Linha/Tabela):
+  - **"Empilhado"** (padrão) — uma barra por categoria, dividida em segmentos
+    coloridos por Sub-base (legenda com os nomes; o total é a barra inteira).
+  - **"Total (somado)"** — uma barra/linha única por categoria com a SOMA das
+    Sub-bases; a coluna "Base" some da tabela e do CSV exportado.
+  - **"Lado a lado"** — uma barra por Sub-base, agrupadas sob a mesma
+    categoria.
+  - Pizza, Funil e Cards sempre SOMAM as Sub-bases por categoria (não há
+    série por Sub-base nesses tipos; o construtor mostra um aviso).
+  - Fórmula com operandos por Base (ex.: `Contagem@SubA + Contagem@SubB`):
+    em cada série de Sub-base, o operando da OUTRA Sub-base vale 0 — cada
+    série mostra só a própria contribuição (o "Total (somado)" reavalia a
+    fórmula sobre o conjunto todo). Razões entre Sub-bases irmãs só fazem
+    sentido no modo "Total (somado)".
 - **"Quebrar por base (uma série por base)"** (`splitBySource`): transforma a
   Base em dimensão líder — cada Base vira uma série/linha própria.
 

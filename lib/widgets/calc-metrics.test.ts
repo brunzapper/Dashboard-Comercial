@@ -19,8 +19,11 @@ import {
   parseCondBasisKey,
   recordMatchesConds,
   resolveCalcMetric,
+  siblingScopedBasisKeys,
   sourceScopeConds,
   validateCondAggRefs,
+  zeroSiblingScopedOperands,
+  zeroSiblingScopesInFields,
   type BasisValues,
 } from "@/lib/widgets/calc-metrics";
 import type { MoneyBreakdown } from "@/lib/widgets/currency";
@@ -403,5 +406,121 @@ describe("resolveCalcMetric / validateCondAggRefs", () => {
     // Ref aninhado (grupo Calculados) e agg:/aggif: fora → ok.
     expect(validateCondAggRefs(f(ref("custom:tot")), catalog).ok).toBe(true);
     expect(validateCondAggRefs(f(ref("agg:sum:value")), catalog).ok).toBe(true);
+  });
+});
+
+describe("zeroing de operandos de fonte-irmã (pernas de sub-base)", () => {
+  // Catálogo com DUAS subs da mesma pai (dispara o multi-perna no engine).
+  const CATALOG_SUBS: SourceDef[] = [
+    ...CATALOG,
+    {
+      key: "leads_sql",
+      recordType: "lead",
+      label: "Leads / SQLs",
+      shortLabel: "SQLs",
+      defaultPeriodField: "custom:data_sql",
+      builtin: false,
+      manualEntry: false,
+      parentKey: "leads",
+      filter: [{ field: "stage", op: "eq", value: "SQL" }],
+    },
+  ];
+  const siblings = new Set(["leads_sql"]);
+
+  it("sum/count de irmã vira literal 0; própria fonte e refs bare ficam", () => {
+    const out = zeroSiblingScopedOperands(
+      f(
+        ref("agg:count:*@leads_lite"),
+        { kind: "op", op: "+" },
+        ref("agg:count:*@leads_sql"),
+        { kind: "op", op: "+" },
+        ref("agg:count:*")
+      ),
+      siblings
+    );
+    expect(out.tokens).toEqual([
+      { kind: "field", ref: "agg:count:*@leads_lite" },
+      { kind: "op", op: "+" },
+      { kind: "const", value: 0 },
+      { kind: "op", op: "+" },
+      { kind: "field", ref: "agg:count:*" },
+    ]);
+  });
+
+  it("avg de irmã vira (0/0) → null (nunca 0 falso); min/max ficam", () => {
+    const out = zeroSiblingScopedOperands(
+      f(
+        ref("agg:avg:value@leads_sql"),
+        { kind: "op", op: "+" },
+        ref("agg:min:value@leads_sql")
+      ),
+      siblings
+    );
+    expect(out.tokens).toEqual([
+      { kind: "lparen" },
+      { kind: "const", value: 0 },
+      { kind: "op", op: "/" },
+      { kind: "const", value: 0 },
+      { kind: "rparen" },
+      { kind: "op", op: "+" },
+      { kind: "field", ref: "agg:min:value@leads_sql" },
+    ]);
+    // Avaliação: (0/0) cai na guarda de divisão por zero → null.
+    expect(evalCalcMoney(out, {}, { mode: "none" }).value).toBeNull();
+  });
+
+  it("chave aggif: JÁ abaixada com scope de irmã também zera", () => {
+    const key = condAggKey({
+      agg: "count",
+      field: "*",
+      conds: [{ ref: "record_type", op: "=", value: "lead" }],
+      scope: "leads_sql",
+    });
+    expect(zeroSiblingScopedOperands(f(ref(key)), siblings).tokens).toEqual([
+      { kind: "const", value: 0 },
+    ]);
+  });
+
+  it("fast path: sem token afetado devolve o MESMO objeto", () => {
+    const orig = f(ref("agg:count:*@leads_lite"), ref("agg:count:*"));
+    expect(zeroSiblingScopedOperands(orig, siblings)).toBe(orig);
+  });
+
+  it("zeroSiblingScopesInFields: só defs 'calculado_agg' afetadas clonam", () => {
+    const defs = [
+      {
+        field_key: "tot",
+        data_type: "calculado_agg",
+        formula: f(ref("agg:count:*@leads_sql")),
+      },
+      { field_key: "txt", data_type: "texto" },
+    ] as unknown as Parameters<typeof zeroSiblingScopesInFields>[0];
+    const out = zeroSiblingScopesInFields(defs, siblings);
+    expect(out).not.toBe(defs);
+    expect(out[0].formula?.tokens).toEqual([{ kind: "const", value: 0 }]);
+    expect(out[1]).toBe(defs[1]);
+    const clean = [defs[1]];
+    expect(zeroSiblingScopesInFields(clean, siblings)).toBe(clean);
+  });
+
+  it("siblingScopedBasisKeys: só as chaves aggif do escopo de irmã", () => {
+    const rc = resolveCalcMetric(
+      {
+        field: "calc:formula",
+        agg: "sum",
+        calc: true,
+        formula: f(
+          ref("agg:count:*@leads_lite"),
+          { kind: "op", op: "+" },
+          ref("agg:count:*@leads_sql")
+        ),
+      } as Metric,
+      new Map(),
+      CATALOG_SUBS
+    );
+    const keys = siblingScopedBasisKeys(rc.formula!, siblings);
+    expect(keys).toHaveLength(1);
+    expect(keys[0].startsWith("aggif:")).toBe(true);
+    expect(keys[0]).toContain("leads_sql");
   });
 });

@@ -214,6 +214,7 @@ barra_horizontal, linha, pizza, funil, kpi, calculado.
   "rowMode": "records",                      // tabela: lista de registros individuais
   "table": { "groupBy": "dim_1" },           // tabela agregada: agrupar pelo 1º nível
   "coexistSubSources": false,
+  "subSeriesMode": "stacked",                // 2+ sub-bases no widget: stacked (empilhado, default) | total (somado, some a coluna Base) | grouped (lado a lado)
   "autoSize": { "width": false, "height": false },
   "appearance": {                            // aparência (tudo opcional)
     "decimals": 0,
