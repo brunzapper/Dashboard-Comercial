@@ -123,6 +123,9 @@ export function SnapshotForm({
   const [weekday, setWeekday] = useState<number>(initial?.refresh_weekday ?? 1);
   // Edição: substituir o período congelado pelo atual do dashboard?
   const [replacePeriod, setReplacePeriod] = useState(false);
+  // TTL opcional do link (0097): dias até expirar. Vazio na criação = sem
+  // expiração; vazio na edição = manter o prazo atual; 0 = remover o prazo.
+  const [expiresDays, setExpiresDays] = useState("");
 
   // Período atual do dashboard para a aba escolhida (criação exibe/grava).
   const captured = useMemo(
@@ -166,6 +169,14 @@ export function SnapshotForm({
       refreshTime: mode === "daily" || mode === "weekly" ? time : null,
       refreshWeekday: mode === "weekly" ? weekday : null,
       defaultPeriod,
+      // Vazio: na criação = sem expiração (null); na edição = não tocar
+      // (undefined). Número (inclusive 0) = definir/remover o prazo.
+      expiresInDays:
+        expiresDays.trim() === ""
+          ? editing
+            ? undefined
+            : null
+          : Number(expiresDays),
     });
   }
 
@@ -309,6 +320,33 @@ export function SnapshotForm({
         <p className="text-muted-foreground text-xs">
           Manual: os dados só mudam quando você clicar em &quot;Atualizar
           agora&quot;. Horários no fuso de Brasília.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="snap-expiry" className="text-xs">
+          Expiração do link (opcional)
+        </Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="snap-expiry"
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={expiresDays}
+            onChange={(e) => setExpiresDays(e.target.value)}
+            className="h-8 w-24"
+            placeholder="—"
+          />
+          <span className="text-muted-foreground text-sm">dias a partir de hoje</span>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          {editing
+            ? "Em branco mantém o prazo atual; 0 remove o prazo (link não expira)."
+            : "Em branco = o link não expira. Ex.: 30 expira em 30 dias."}
+          {initial?.expires_at
+            ? ` Expira atualmente em ${new Date(initial.expires_at).toLocaleDateString("pt-BR")}.`
+            : ""}
         </p>
       </div>
 

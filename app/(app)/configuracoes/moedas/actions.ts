@@ -8,6 +8,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { computeYearAndQuarters } from "@/lib/widgets/ptax";
@@ -23,6 +24,7 @@ async function ensureCanManage(): Promise<string | null> {
   if (!session.permissions.includes("manage_field_definitions")) {
     return "Apenas administradores podem gerenciar moedas.";
   }
+  if (await isSettingsAreaDenied("moedas")) return "Acesso a esta área foi bloqueado.";
   return null;
 }
 

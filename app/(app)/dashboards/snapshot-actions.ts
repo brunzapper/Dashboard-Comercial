@@ -51,6 +51,10 @@ export interface SnapshotInput {
   // Filtro de período do dashboard congelado no snapshot (0059).
   // undefined = não tocar (edição mantém o gravado); null = todo o período.
   defaultPeriod?: SavedPeriod | null;
+  // TTL opcional do link público (0097): dias a partir de AGORA até a
+  // expiração. undefined = não tocar (edição); null/0 = sem expiração;
+  // N>0 = expira em N dias.
+  expiresInDays?: number | null;
 }
 
 const UUID_RE =
@@ -116,6 +120,30 @@ function cleanPeriod(
   if (ate) value.ate = ate;
   if (campo) value.campo = campo;
   return { ok: true, value };
+}
+
+// TTL opcional do link público (0097). Recebe DIAS a partir de agora e devolve
+// o instante absoluto (ISO) gravado em snapshots.expires_at.
+//   undefined → não tocar (edição preserva o gravado)
+//   null / 0  → sem expiração (grava null)
+//   N > 0     → expira em N dias
+const MAX_EXPIRY_DAYS = 3650; // teto de sanidade (~10 anos)
+function cleanExpiry(
+  raw: number | null | undefined
+):
+  | { ok: true; value: string | null | undefined }
+  | { ok: false; message: string } {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === null) return { ok: true, value: null };
+  const days = Number(raw);
+  if (!Number.isFinite(days) || days < 0 || days > MAX_EXPIRY_DAYS) {
+    return { ok: false, message: "Prazo de expiração inválido." };
+  }
+  if (days === 0) return { ok: true, value: null };
+  return {
+    ok: true,
+    value: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+  };
 }
 
 function cleanSchedule(input: {
@@ -246,6 +274,9 @@ export async function createSnapshot(
   if (!schedule.ok) return { ok: false, message: schedule.message };
   const period = cleanPeriod(input.defaultPeriod);
   if (!period.ok) return { ok: false, message: period.message };
+  // Na criação, ausência de prazo = sem expiração (null), não "não tocar".
+  const expiry = cleanExpiry(input.expiresInDays ?? null);
+  if (!expiry.ok) return { ok: false, message: expiry.message };
 
   const token = generateToken();
   const session = await getSessionInfo();
@@ -266,6 +297,7 @@ export async function createSnapshot(
       refresh_weekday: schedule.weekday,
       next_refresh_at: schedule.nextAt,
       default_period: period.value ?? null,
+      expires_at: expiry.value ?? null,
       created_by: session?.user.id ?? null,
     })
     .select("id")
@@ -314,6 +346,9 @@ export async function updateSnapshot(
   if (!schedule.ok) return { ok: false, message: schedule.message };
   const period = cleanPeriod(input.defaultPeriod);
   if (!period.ok) return { ok: false, message: period.message };
+  // Edição: undefined = não tocar; null/0 = limpar; N>0 = novo prazo.
+  const expiry = cleanExpiry(input.expiresInDays);
+  if (!expiry.ok) return { ok: false, message: expiry.message };
 
   const { error } = await supabase
     .from("snapshots")
@@ -331,6 +366,8 @@ export async function updateSnapshot(
       // Período congelado: só muda quando o form pede a substituição (o
       // filtro é aplicado em tempo de consulta — não exige recongelar).
       ...(period.value !== undefined ? { default_period: period.value } : {}),
+      // TTL: só muda quando o form envia expiresInDays (undefined = preserva).
+      ...(expiry.value !== undefined ? { expires_at: expiry.value } : {}),
     })
     .eq("id", snapshotId);
   if (error) return { ok: false, message: error.message };

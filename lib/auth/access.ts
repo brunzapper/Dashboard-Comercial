@@ -1,11 +1,13 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 24/07/2026
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
 // sem override vale o gate atual. AREA_GATES é a fonte ÚNICA dos gates por
 // aba (o layout de Configurações e o guard requireSettingsArea leem daqui).
-// Limitação documentada: allow/deny controlam o ACESSO à área (aba + page);
-// capacidades de ESCRITA dentro dela continuam sujeitas ao papel (a RLS de
-// goals/operations/etc. segue exigindo admin).
+// v1.1 (24/07/2026): o override `deny` de uma área agora BARRA também a ESCRITA
+//   (isSettingsAreaDenied), não só a page/aba — antes um admin negado ainda
+//   escrevia chamando a server action direto. `allow` continua NÃO concedendo
+//   escrita (segue o papel/RLS): é um estreitamento puro, nunca concede acesso
+//   novo a quem não tem o papel.
 import { cache } from "react";
 import { redirect } from "next/navigation";
 
@@ -77,6 +79,19 @@ export const loadOwnSettingsOverrides = cache(
     }
   }
 );
+
+/**
+ * A área está DENY para o usuário atual? Usado pelos guards de ESCRITA das
+ * server actions de Configurações: o override `deny` passa a barrar a escrita,
+ * não só a page (fecha o bypass da action direta). NÃO substitui o gate de
+ * papel — compõe com ele (o guard segue exigindo admin/permissão). Fail-open no
+ * erro de leitura (loadOwnSettingsOverrides já devolve mapa vazio) = status quo:
+ * jamais concede escrita a quem não tem o papel.
+ */
+export async function isSettingsAreaDenied(areaKey: string): Promise<boolean> {
+  const overrides = await loadOwnSettingsOverrides();
+  return overrides.get(areaKey) === "deny";
+}
 
 /** O gate de papel/permissão/orgAdmin da área permite este usuário? */
 export function areaRoleAllowed(

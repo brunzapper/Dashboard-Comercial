@@ -474,11 +474,12 @@ refletem (`canEdit`/`canConfig`).
 
 **Overrides individuais (Configurações → Acessos, 0094):**
 `user_access_overrides` concede (allow) ou revoga (deny) por usuário — áreas
-de Configurações (deny esconde a aba/page; allow concede além do papel;
-ESCRITA dentro da área segue o papel — limitação documentada) e bases (deny
-some dos pickers via RLS de `data_sources` e dos DADOS via `records_select`).
-Fonte única dos gates por área: `AREA_GATES` (`lib/auth/access.ts`); guard
-`requireSettingsArea` nas sub-pages.
+de Configurações (deny esconde a aba/page E barra a ESCRITA das server actions
+via `isSettingsAreaDenied`; allow concede só a VISUALIZAÇÃO além do papel, nunca
+a escrita, que segue o papel) e bases (deny some dos pickers via RLS de
+`data_sources` e dos DADOS via `records_select`). Fonte única dos gates por
+área: `AREA_GATES` (`lib/auth/access.ts`); guard `requireSettingsArea` nas
+sub-pages, `isSettingsAreaDenied` nos guards de escrita das actions.
 
 **Escopo de BASES por board (⋮ → Bases, Fase 1 desta entrega):**
 `DashboardSettings.sourceScope` define o catálogo EFETIVO do board —
