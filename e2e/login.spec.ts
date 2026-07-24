@@ -22,7 +22,10 @@ test("credencial inválida exibe a mensagem exata do servidor", async ({
   await page.getByLabel("Email").fill(E2E_USER.email);
   await page.getByLabel("Senha").fill("senha-errada");
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page.getByRole("alert")).toHaveText("Email ou senha inválidos.");
+  // getByText (e não getByRole("alert")): o Next injeta um
+  // __next-route-announcer__ com role="alert" em toda página, e o strict mode
+  // do Playwright acusaria dois elementos. A mensagem EXATA segue asserida.
+  await expect(page.getByText("Email ou senha inválidos.")).toBeVisible();
 });
 
 test("login válido entra na Home com o board semeado visível", async ({
