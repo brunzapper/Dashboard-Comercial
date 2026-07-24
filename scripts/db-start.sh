@@ -31,4 +31,19 @@ for f in supabase/migrations/*.sql; do
   echo "== $(basename "$f")"
   psql "$DB" -v ON_ERROR_STOP=1 -q -f "$f"
 done
+
+# Grants de TABELAS/SEQUÊNCIAS como no hosted (RLS é o gate real): objetos
+# criados via psql-as-postgres não herdam os default privileges do stack e o
+# PostgREST devolveria "permission denied". EXECUTE de função fica FORA de
+# propósito: um grant cego desfaria os revokes de segurança das migrações
+# (funções de snapshot são service-role-only — invariante do AGENTS.md).
+psql "$DB" -v ON_ERROR_STOP=1 -q <<'SQL'
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to anon, authenticated, service_role;
+grant all on all sequences in schema public to anon, authenticated, service_role;
+alter default privileges in schema public
+  grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public
+  grant all on sequences to anon, authenticated, service_role;
+SQL
 echo "Stack local pronto (migrações aplicadas em ordem de nome via psql)."
