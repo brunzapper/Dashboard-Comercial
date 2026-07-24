@@ -125,16 +125,29 @@ async function main() {
 
   // ---- 3. registros determinísticos ------------------------------------------
   const [d1, d2, d3, d4, l1, l2, l3, mock] = RECORD_IDS;
+  // TODAS as linhas carregam o MESMO conjunto de chaves: o insert em lote do
+  // PostgREST unifica as colunas do payload e preenche as ausentes com NULL
+  // explícito (não o default) — uma linha sem custom_fields ao lado do mock
+  // violaria o NOT NULL de custom_fields/is_mock/closed.
+  const base = (id: string) => ({
+    id,
+    source_system: "manual",
+    source_id: `e2e-${id.slice(-2)}`,
+    custom_fields: {} as Record<string, unknown>,
+    is_mock: false,
+    closed: false,
+    closed_at: null as string | null,
+    value: null as number | null,
+    currency: null as string | null,
+  });
   const deal = (
     id: string,
     pipeline: string,
     value: number,
     closedAt: string
   ) => ({
-    id,
+    ...base(id),
     record_type: "negocio",
-    source_system: "manual",
-    source_id: `e2e-${id.slice(-2)}`,
     title: `Negócio E2E ${id.slice(-2)}`,
     pipeline,
     value,
@@ -144,10 +157,8 @@ async function main() {
     source_created_at: closedAt,
   });
   const lead = (id: string, createdAt: string, extra?: object) => ({
-    id,
+    ...base(id),
     record_type: "lead",
-    source_system: "manual",
-    source_id: `e2e-${id.slice(-2)}`,
     title: `Lead E2E ${id.slice(-2)}`,
     pipeline: "Inbound",
     source_created_at: createdAt,
