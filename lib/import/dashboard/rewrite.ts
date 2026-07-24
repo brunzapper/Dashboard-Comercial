@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 24/07/2026
+// Versão: 1.2 | Data: 24/07/2026
 // Normalização do JSON BRUTO devolvido pela IA, ANTES da validação — o ponto
 // central da segurança de identidade da conversa (modos Editar/Criar a partir
 // de): a `chave` NUNCA é confiada à IA. Reescrevemos o envelope para a chave
@@ -16,6 +16,16 @@
 //   a IA não precisa re-emitir o widget inteiro (que apagaria os campos
 //   omitidos). Widget com key NOVA passa intacto; widget do estado NÃO
 //   referenciado não é adicionado (o apply SEM GC preserva a linha do banco).
+// v1.2 (24/07/2026): CÓPIA por referência (`copy_of`). Widget da IA de key
+//   NOVA pode trazer `"copy_of": "<key existente>"` — o widget do estado vira
+//   a BASE do merge (a IA manda só o delta da cópia) e o marcador é REMOVIDO
+//   antes da validação (nunca chega ao validador nem a um export). Sem
+//   `grid_position` no delta, a cópia é posicionada ABAIXO do conteúdo da aba
+//   dela (herdar a posição da origem sobreporia os dois; o auto-empilhamento
+//   do validador começa em y=0 e colidiria com widgets reais no modo Editar).
+//   `copy_of` num widget de key JÁ existente é ignorado (merge normal); para
+//   key de origem desconhecida (ou sem baseWidgets) só o marcador é removido e
+//   o validador reporta os campos faltantes.
 
 import { stripCodeFence } from "./validate";
 import type { ImportWidgetSpec } from "./types";
@@ -30,10 +40,12 @@ export interface NormalizeImportRawOpts {
   /** Modo Criar a partir de: nome a evitar (colisão ⇒ sufixo " (cópia)"). */
   avoidName?: string;
   /**
-   * Modo Editar: widgets do estado atual (exportado), keyados por `key`. Quando
-   * presentes, um widget da IA com a MESMA `key` é MESCLADO sobre o do estado —
-   * a IA manda só os campos que mudam e o resto é preservado. Widget com key
-   * NOVA (sem correspondente) passa intacto; widget do estado não referenciado
+   * Modos Editar/Criar a partir de: widgets do estado atual (exportado),
+   * keyados por `key`. Quando presentes, um widget da IA com a MESMA `key` é
+   * MESCLADO sobre o do estado — a IA manda só os campos que mudam e o resto é
+   * preservado — e `"copy_of": "<key>"` num widget de key NOVA usa o widget de
+   * origem como base do merge (cópia por delta; marcador removido). Widget com
+   * key NOVA sem `copy_of` passa intacto; widget do estado não referenciado
    * NÃO é adicionado ao JSON (o apply sem-GC já preserva a linha do banco).
    */
   baseWidgets?: ImportWidgetSpec[];
@@ -41,6 +53,37 @@ export interface NormalizeImportRawOpts {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+interface GridPos {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function gridOf(w: Record<string, unknown>): GridPos | null {
+  const gp = w.grid_position;
+  if (!isPlainObject(gp)) return null;
+  const nums = [gp.x, gp.y, gp.w, gp.h];
+  if (nums.some((n) => typeof n !== "number" || !Number.isFinite(n))) {
+    return null;
+  }
+  return {
+    x: gp.x as number,
+    y: gp.y as number,
+    w: gp.w as number,
+    h: gp.h as number,
+  };
+}
+
+// Mesma chave de aba do auto-empilhamento do validador (settings.tab ausente =
+// aba única).
+function tabOf(w: Record<string, unknown>): string {
+  const s = w.settings;
+  return isPlainObject(s) && typeof s.tab === "string" && s.tab
+    ? s.tab
+    : "__single__";
 }
 
 // Deep-merge do PATCH (widget parcial da IA) sobre a BASE (widget do estado
@@ -106,27 +149,53 @@ export function normalizeImportRaw(
     }
   }
 
-  // Merge por widget (modo Editar): a IA manda a `key` + só os campos que mudam;
-  // o resto vem do estado atual. Preserva o que não foi tocado sem depender de a
-  // IA re-emitir o widget inteiro.
-  if (
-    opts.baseWidgets &&
-    opts.baseWidgets.length > 0 &&
-    Array.isArray(obj.widgets)
-  ) {
+  // Merge por widget (modos Editar/Criar a partir de): a IA manda a `key` + só
+  // os campos que mudam; o resto vem do estado atual. Preserva o que não foi
+  // tocado sem depender de a IA re-emitir o widget inteiro. `copy_of` (cópia
+  // por referência) é resolvido aqui e SEMPRE removido — mesmo sem baseWidgets.
+  if (Array.isArray(obj.widgets)) {
     const baseByKey = new Map<string, Record<string, unknown>>();
-    for (const b of opts.baseWidgets) {
+    for (const b of opts.baseWidgets ?? []) {
       const bk = b.key;
       if (typeof bk === "string" && bk) {
         baseByKey.set(bk, b as unknown as Record<string, unknown>);
       }
     }
+    // Fundo de cada aba no estado atual: cópias sem grid próprio empilham daí
+    // para baixo (nunca sobre a origem nem sobre y=0 de uma aba ocupada).
+    const bottomByTab = new Map<string, number>();
+    for (const b of baseByKey.values()) {
+      const g = gridOf(b);
+      if (!g) continue;
+      const tab = tabOf(b);
+      bottomByTab.set(tab, Math.max(bottomByTab.get(tab) ?? 0, g.y + g.h));
+    }
     obj.widgets = (obj.widgets as unknown[]).map((w) => {
       if (!isPlainObject(w)) return w;
+      const copyOf = w.copy_of;
+      delete w.copy_of; // marcador de entrada — o validador nunca o vê
       const k = w.key;
-      if (typeof k !== "string" || !k) return w;
-      const base = baseByKey.get(k);
-      return base ? deepMergeValue(base, w) : w;
+      const base = typeof k === "string" && k ? baseByKey.get(k) : undefined;
+      if (base) return deepMergeValue(base, w);
+      const src =
+        typeof copyOf === "string" && copyOf
+          ? baseByKey.get(copyOf)
+          : undefined;
+      if (!src) return w;
+      const copyBase = { ...src };
+      delete copyBase.key; // a key NOVA do delta é a identidade da cópia
+      delete copyBase.grid_position;
+      const merged = deepMergeValue(copyBase, w) as Record<string, unknown>;
+      if (!("grid_position" in merged)) {
+        const srcGrid = gridOf(src);
+        if (srcGrid) {
+          const tab = tabOf(merged);
+          const y = bottomByTab.get(tab) ?? 0;
+          merged.grid_position = { x: srcGrid.x, y, w: srcGrid.w, h: srcGrid.h };
+          bottomByTab.set(tab, y + srcGrid.h);
+        }
+      }
+      return merged;
     });
   }
 

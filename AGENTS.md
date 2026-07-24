@@ -271,7 +271,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   estado — a IA manda só o delta do widget (`settings` mescla por chave, arrays
   substituem, `null` limpa) e o resto é preservado no SERVIDOR; NÃO exija que a
   IA re-emita o widget inteiro. Widget de key nova passa intacto; widget do
-  estado não referenciado NÃO entra no JSON (o sem-GC preserva a linha). **Modo
+  estado não referenciado NÃO entra no JSON (o sem-GC preserva a linha).
+  **Cópia por referência (24/07/2026):** widget de key NOVA com
+  `"copy_of": "<key existente>"` usa a origem como base do MESMO merge (cópia
+  por delta) — resolvido e REMOVIDO em `normalizeImportRaw` ANTES da validação;
+  sem `grid_position` no delta a cópia empilha abaixo do fundo da aba dela
+  (nunca herda a posição da origem — sobreporia). O laço de geração passa
+  `baseWidgets` nos DOIS modos com estado (from incluso) e a prévia pendente
+  não aplicada (`input.pendingJson`) entra no system do turno seguinte com a
+  semântica "a resposta SUBSTITUI a prévia inteira" — é a ÚNICA saída de
+  assistant reinjetada. **Modo
   Criar a partir de (`applyFromReference`, 24/07/2026):** cópia FIEL via
   `duplicateBoard` + o delta ADITIVO da IA aplicado como Edição na cópia
   (reusa o merge); NÃO usa mais `importDashboardJson` (que recriava tudo). Só o

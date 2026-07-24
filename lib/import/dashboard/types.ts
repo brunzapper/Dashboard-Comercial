@@ -76,6 +76,10 @@ export interface ImportWidgetSpec {
   // Identidade ESTÁVEL dentro do import (vira "import:<chave>.<key>"). Opcional
   // — ausente usa a posição (reordenar widgets no JSON muda a identidade).
   key?: string;
+  // ENTRADA apenas (conversa de IA, modos edit/from): key de um widget do
+  // estado atual a usar como BASE desta cópia — resolvido e REMOVIDO por
+  // normalizeImportRaw antes da validação; nunca aparece num export.
+  copy_of?: string;
   title: string;
   visual_type: VisualType | string;
   sources?: SourceKey[];

@@ -1,4 +1,8 @@
-<!-- Versão: 1.7 | Data: 24/07/2026 -->
+<!-- Versão: 1.8 | Data: 24/07/2026 -->
+<!-- v1.8 (24/07/2026): §3.8.2 — copiar/fazer parecido por referência (a IA vê
+     o dashboard inteiro e o servidor copia a definição completa do widget,
+     aplicando só a diferença pedida) e a prévia não aplicada passa a ser vista
+     pela IA no turno seguinte (dá para refiná-la antes de Aplicar). -->
 <!-- v1.7 (24/07/2026): §3.8.2 — painel "Editar com IA" DENTRO do dashboard
      (não-modal, recolhível), com conversa SALVA por usuário×dashboard,
      "Recomeçar" e "Desfazer edição da IA" persistente (sobrevive a F5). -->
@@ -477,12 +481,22 @@ IA"**, com três modos:
   servidor**, sem reconstruir tudo do zero; os widgets mantêm identidade (células
   de Tabela Livre e snapshots sobrevivem a edições); cada edição pode ser
   revertida pelo botão **"Desfazer edição da IA"** (restaura o estado
-  imediatamente anterior ao último turno aplicado).
+  imediatamente anterior ao último turno aplicado). **Copiar/fazer parecido
+  funciona por referência**: peça "crie um card igual ao <título> mudando só a
+  métrica" — a IA enxerga o dashboard inteiro (o JSON exportado entra no
+  contexto de cada turno) e o servidor copia a definição completa do widget de
+  origem, aplicando só a diferença pedida; a cópia nasce inteira (filtros,
+  configurações, fontes) e é posicionada abaixo do conteúdo da aba. O mesmo
+  vale no "Criar a partir de" para widgets novos "parecidos com" um da
+  referência.
 
 **Aplicar automaticamente** (switch na janela, ligado por padrão): ligado, cada
 mensagem já aplica as mudanças no dashboard; desligado, cada mensagem gera uma
 **prévia** (lista de widgets novos/atualizados) e nada acontece até você clicar
-**Aplicar** (ou Descartar).
+**Aplicar** (ou Descartar). A IA **vê a prévia pendente** no turno seguinte —
+dá para refiná-la conversando ("nesse card novo, muda o título…") antes de
+Aplicar; atenção: cada nova mensagem gera uma prévia que **substitui** a
+anterior por inteiro.
 
 **Editar com IA de dentro do dashboard** (24/07/2026): quem pode editar por IA
 (dono ou admin, com permissão de criar dashboards) vê o botão **"Editar com

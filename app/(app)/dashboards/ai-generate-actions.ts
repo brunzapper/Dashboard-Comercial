@@ -1,4 +1,9 @@
-// Versão: 2.0 | Data: 23/07/2026
+// Versão: 2.1 | Data: 24/07/2026
+// v2.1 (24/07/2026): a IA passa a LER melhor o estado — `baseWidgets` (merge
+//   por widget) também no modo "from"; `copy_of` nas regras dos modos from/edit
+//   (cópia por delta, resolvida no servidor em normalizeImportRaw); e a prévia
+//   pendente não aplicada (input.pendingJson) entra no system como seção
+//   própria (a resposta do turno substitui a prévia inteira).
 // v2.0 (23/07/2026): CONVERSA multi-turno + 3 modos — "new" (criar do zero),
 //   "from" (criar a partir de um dashboard existente) e "edit" (editar
 //   in-place). Desenho:
@@ -65,6 +70,11 @@ export interface GenerateDashboardInput {
   priorTurns?: string[];
   /** Switch "Aplicar automaticamente" da janela da sessão. */
   autoApply?: boolean;
+  /** Prévia do turno anterior AINDA não aplicada (auto-aplicar OFF): entra no
+   * system para a IA enxergar o que ela mesma propôs — a resposta do turno
+   * SUBSTITUI a prévia inteira, então ela precisa re-incluir o que continuar
+   * desejado. */
+  pendingJson?: string;
 }
 
 export interface GenerateDashboardState extends ImportDashboardState {
@@ -109,6 +119,15 @@ Regras deste modo (além da especificação acima):
   inteiro). Dentro de "settings", mande só as chaves alteradas; as demais são
   preservadas. Para APAGAR um campo de propósito, envie-o vazio (ex.:
   "filters": []) ou null.
+- Para DUPLICAR um widget existente ou criar um "parecido com" ele: widget de
+  key NOVA com "copy_of": "<key do widget de origem>" + SÓ os campos que
+  diferem — o servidor copia a definição INTEIRA da origem (métricas, filtros,
+  settings, fontes) e aplica o seu delta por cima. NÃO re-emita a definição da
+  origem. Sem "grid_position" no delta, a cópia é posicionada abaixo do
+  conteúdo da aba.
+- Localize o widget que o usuário citar pelo "title" no ESTADO ATUAL e use a
+  "key" correspondente — não invente keys nem adivinhe configurações que o
+  estado já mostra.
 - Você NÃO exclui widgets (omitir não exclui). Se o usuário pedir remoção,
   responda que a exclusão é manual (⋮ do widget) e siga com o resto.
 - Não mude "name", "visible_to_roles" nem "settings.tabs" sem pedido
@@ -129,6 +148,10 @@ reproduzir os widgets existentes.
   abas existentes são preservadas pelo servidor mesmo se você omiti-las.
 - NÃO re-emita widgets existentes (viraria duplicata). Para mudar ou remover um
   widget copiado, faça depois no modo Editar (ou manual pelo ⋮ do card).
+- Para um widget NOVO "parecido com" um da referência: key nova com
+  "copy_of": "<key do widget de origem>" + SÓ os campos que diferem — o
+  servidor copia a definição inteira da origem e aplica o seu delta por cima
+  (não re-emita a definição da origem).
 - Dê um "name" ao novo dashboard (obrigatório); repetir o da referência ganha o
   sufixo "(cópia)".
 - A "chave" é definida pelo sistema — pode manter a que vier no estado.`;
@@ -239,7 +262,8 @@ export async function generateDashboardWithAi(
   let currentRoles: string[] | undefined;
   let avoidName: string | undefined;
   let existingKeys = new Set<string>();
-  // Modo Editar: base do merge por widget (a IA manda só o delta).
+  // Modos from/edit: base do merge por widget e do `copy_of` (a IA manda só o
+  // delta).
   let baseWidgets: ImportWidgetSpec[] | undefined;
 
   if (mode === "new") {
@@ -273,10 +297,13 @@ export async function generateDashboardWithAi(
     bases = exported.json.bases ?? [];
     stateJson = JSON.stringify(exported.json, null, 2);
     existingKeys = new Set(exported.widgetKeyById.values());
+    // Base do merge por widget e do `copy_of` nos DOIS modos com estado: no
+    // "from" o apply já mescla sobre a cópia (applyDashboardEditJson) — sem a
+    // base aqui, um delta/cópia válido reprovaria na validação do laço.
+    baseWidgets = exported.json.widgets;
     if (mode === "edit") {
       chave = exported.chave; // canônica do próprio board
       modeRules = EDIT_RULES;
-      baseWidgets = exported.json.widgets; // base do merge por widget
       const settings = (board.dash.settings ?? {}) as DashboardSettings;
       currentTabs = settings.tabs;
       currentRoles = board.dash.visible_to_roles ?? [];
@@ -296,6 +323,20 @@ export async function generateDashboardWithAi(
   let system = prompt.prompt;
   if (stateJson) {
     system += section("ESTADO ATUAL DO DASHBOARD (JSON)", stateJson);
+  }
+  // Prévia pendente (auto-aplicar OFF): sem isso a IA não enxerga o que ela
+  // mesma propôs no turno anterior — "ajusta o card que você criou" falharia.
+  const pendingJson = (input.pendingJson ?? "").trim();
+  if (pendingJson) {
+    system += section(
+      "PRÉVIA PENDENTE (AINDA NÃO APLICADA)",
+      "No turno anterior você propôs as mudanças abaixo e o usuário AINDA NÃO " +
+        "as aplicou — elas NÃO fazem parte do estado atual. O usuário pode se " +
+        "referir a widgets desta prévia. Sua resposta deste turno SUBSTITUI a " +
+        "prévia INTEIRA: re-inclua as mudanças dela que continuarem desejadas " +
+        "(com as mesmas keys) e omita as que o usuário descartar.\n\n" +
+        pendingJson
+    );
   }
   system += section("REGRAS DESTE MODO", modeRules);
 
