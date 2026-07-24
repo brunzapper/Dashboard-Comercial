@@ -134,7 +134,10 @@ npm run build      # o que a Vercel roda no deploy
   fail-closed). `widget-scope` exige `vi.mock("@/lib/auth/org")` (o import
   estático puxa next/headers).
 - **E2E e paridade viva (local)**: `npm run db:start` (stack Supabase local —
-  docker; o CLI aplica `supabase/migrations/` sozinho) → exporte
+  exige docker E psql; o script `scripts/db-start.sh` sobe o stack com
+  `migrations/` vazio e aplica os arquivos via psql em ordem de NOME, porque o
+  CLI registra migração por versão numérica e o repo tem prefixos duplicados
+  0017/0049 — legado válido do fluxo manual) → exporte
   `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`/`SUPABASE_URL`/
   `SUPABASE_SERVICE_ROLE_KEY` de `supabase status -o env` → `npm run db:seed`
   (idempotente; recusa hosts remotos) → `npm run build` (as NEXT_PUBLIC_*

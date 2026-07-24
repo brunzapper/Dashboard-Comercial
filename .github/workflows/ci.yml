@@ -42,7 +42,11 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.1 # PINADO: nomes do `status -o env` e chaves do config.toml variam entre versões
-      - run: supabase start
+      # NÃO usar `supabase start` cru: o CLI registra migração por VERSÃO e o
+      # repo tem prefixos duplicados (0017/0049 — fluxo manual de produção).
+      # O script sobe o stack com migrations/ vazio e aplica via psql em ordem
+      # de nome, como a produção.
+      - run: bash scripts/db-start.sh
       - name: Exportar env do stack local
         run: |
           eval "$(supabase status -o env)"
