@@ -10,7 +10,13 @@
 // edição da IA" restaura o snapshot pré-turno persistido (sobrevive a F5).
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -42,19 +48,24 @@ import {
 type PanelState = "closed" | "open" | "collapsed";
 type Action = "load" | "turn" | "apply" | "undo" | "reset" | null;
 
+// Handle imperativo p/ o trigger externo (dropdown "Editar" da toolbar).
+export interface AiEditPanelHandle {
+  open: () => void;
+}
+
 export function AiEditPanel({
   dashboardId,
   ai,
   hideTrigger,
-  openSignal,
+  ref,
 }: {
   dashboardId: string;
   ai: { provider: string; model: string; hasKey: boolean } | null;
   // Trigger externo (dropdown "Editar" da toolbar): esconde os botões inline
-  // da toolbar (o chip flutuante do estado recolhido permanece) e abre o
-  // painel quando `openSignal` incrementa (contador; 0 inicial não abre).
+  // da toolbar (o chip flutuante do estado recolhido permanece); a abertura
+  // vem pelo handle (`ref.open()` — idempotente, reabre do estado recolhido).
   hideTrigger?: boolean;
-  openSignal?: number;
+  ref?: React.Ref<AiEditPanelHandle>;
 }) {
   const router = useRouter();
   const [panel, setPanel] = useState<PanelState>("closed");
@@ -110,14 +121,7 @@ export function AiEditPanel({
     }
   }
 
-  // Abertura pelo trigger externo: idempotente (abrir já-aberto é no-op) e
-  // reabre a partir do estado recolhido.
-  useEffect(() => {
-    if (!openSignal) return; // 0/undefined inicial: não abre no mount
-    openPanel();
-    // openPanel é recriada por render; o sinal é a única dependência real.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openSignal]);
+  useImperativeHandle(ref, () => ({ open: openPanel }));
 
   function sendTurn() {
     const text = message.trim();

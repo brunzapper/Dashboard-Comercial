@@ -86,7 +86,7 @@ import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
-import { AiEditPanel } from "./ai-edit-panel";
+import { AiEditPanel, type AiEditPanelHandle } from "./ai-edit-panel";
 import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import {
@@ -244,9 +244,9 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
-  // Sinal-contador que abre o painel "Editar com IA" pelo item do dropdown
-  // "Editar" (o painel fica montado com o trigger próprio escondido).
-  const [aiOpenSignal, setAiOpenSignal] = useState(0);
+  // Handle do painel "Editar com IA": aberto pelo item do dropdown "Editar"
+  // (o painel fica montado com o trigger próprio escondido).
+  const aiPanelRef = useRef<AiEditPanelHandle | null>(null);
   // Modo "desenhar para criar" (Tabela Livre): armado pelo builder; o título
   // digitado lá viaja junto. O retângulo desenhado dimensiona widget E tabela.
   const [drawQuick, setDrawQuick] = useState<{ title: string | null } | null>(
@@ -834,7 +834,7 @@ export function DashboardClient({
                     <Pencil className="size-4" /> Manual (Layout)
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => setAiOpenSignal((n) => n + 1)}
+                    onSelect={() => aiPanelRef.current?.open()}
                   >
                     <Wand2 className="size-4" /> IA
                   </DropdownMenuItem>
@@ -887,7 +887,7 @@ export function DashboardClient({
                 dashboardId={dashboardId}
                 ai={aiEdit ?? null}
                 hideTrigger
-                openSignal={aiOpenSignal}
+                ref={aiPanelRef}
               />
             ) : null}
             <DashboardMenu
