@@ -1,4 +1,7 @@
-<!-- Versão: 1.6 | Data: 24/07/2026 -->
+<!-- Versão: 1.7 | Data: 24/07/2026 -->
+<!-- v1.7 (24/07/2026): §3.8.2 — painel "Editar com IA" DENTRO do dashboard
+     (não-modal, recolhível), com conversa SALVA por usuário×dashboard,
+     "Recomeçar" e "Desfazer edição da IA" persistente (sobrevive a F5). -->
 <!-- v1.6 (24/07/2026): §3.8.2 — preservar conteúdo na edição/cópia por IA.
      "Criar a partir de" faz CÓPIA FIEL da referência e a IA só acrescenta o
      pedido sobre a cópia; no "Editar", alterar um widget passa a exigir só o
@@ -480,6 +483,27 @@ IA"**, com três modos:
 mensagem já aplica as mudanças no dashboard; desligado, cada mensagem gera uma
 **prévia** (lista de widgets novos/atualizados) e nada acontece até você clicar
 **Aplicar** (ou Descartar).
+
+**Editar com IA de dentro do dashboard** (24/07/2026): quem pode editar por IA
+(dono ou admin, com permissão de criar dashboards) vê o botão **"Editar com
+IA"** na barra do próprio dashboard. Ele abre um painel lateral **não-modal** —
+o dashboard continua visível e clicável atrás — sempre no modo Editar deste
+dashboard. Diferenças em relação à janela da Home:
+
+- **A conversa fica SALVA** (por usuário, por dashboard): feche o painel,
+  navegue, dê F5 — ao reabrir, o histórico volta e você continua de onde parou,
+  sem reexplicar o contexto. **Recomeçar** apaga a conversa salva e começa do
+  zero (não mexe no dashboard nem no Desfazer).
+- **"Desfazer edição da IA" também é salvo**: desfaz sempre a ÚLTIMA edição
+  inteira aplicada pela IA, mesmo depois de recarregar a página. Atenção:
+  restaura o dashboard ao estado imediatamente anterior ao turno — mudanças
+  manuais feitas DEPOIS daquela edição também voltam.
+- **O painel é recolhível**: o botão de recolher o transforma num chip
+  flutuante ("IA", canto inferior direito) para você testar o dashboard à
+  vontade — inclusive com uma geração em andamento — e voltar à conversa com um
+  clique.
+- A prévia do modo "Aplicar automaticamente" desligado também sobrevive a F5 —
+  o Aplicar/Descartar continua disponível ao reabrir.
 
 Avisos: editar por IA um dashboard criado por **preset de fábrica** o
 desvincula do preset (ele deixa de ser atualizado pelo "Gerar presets"; o

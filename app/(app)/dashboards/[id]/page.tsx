@@ -148,6 +148,13 @@ import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
+
+// O painel "Editar com IA" (AiEditPanel → runAiEditTurn) roda como server
+// action DESTA rota; o laço de autocorreção pode levar alguns segundos.
+// maxDuration amplia o teto da função serverless (clampado ao teto do plano da
+// Vercel) — espelho da Home, que hospeda o mesmo generateDashboardWithAi.
+export const maxDuration = 300;
 
 function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
@@ -231,6 +238,15 @@ export default async function DashboardPage({
   const canEditValues =
     session?.permissions.includes("edit_record_values") ?? false;
   const userRoles = session?.roles ?? [];
+  // Painel "Editar com IA": mesmo gate da geração (create_dashboards) + dono/
+  // admin do board (as actions re-checam). Config pública pela org do BOARD
+  // (consistente com os loaders da page), só quando o botão vai aparecer.
+  const canAiEdit =
+    (isOwner || isAdmin) &&
+    (session?.permissions.includes("create_dashboards") ?? false);
+  const aiEdit = canAiEdit
+    ? await loadOrgAiConfigPublic((dash.organization_id as string | null) ?? null)
+    : null;
 
   const [
     { data: widgetsData },
@@ -1378,6 +1394,8 @@ export default async function DashboardPage({
         availableForBuilder={availableForBuilder}
         canEdit={canEdit}
         canManageFields={canManageFields}
+        canAiEdit={canAiEdit}
+        aiEdit={aiEdit}
         currencyOptions={currencyOptions}
         currencyRates={currencyRates}
         conversionPeriodById={conversionPeriodById}

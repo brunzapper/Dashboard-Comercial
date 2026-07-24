@@ -1,4 +1,11 @@
-<!-- Versão: 1.25 | Data: 24/07/2026 -->
+<!-- Versão: 1.26 | Data: 24/07/2026 -->
+<!-- v1.26 (24/07/2026): §4.11.3 — painel "Editar com IA" DENTRO do dashboard
+     (AiEditPanel, não-modal/recolhível) com sessão PERSISTIDA por usuário×board
+     (dashboard_ai_sessions, 0098): turnos server-owned (cliente envia só a
+     mensagem nova), prévia pendente no banco, snapshot pré-turno persistido
+     como "Desfazer edição da IA" (sobrevive a F5), Recomeçar preserva o undo.
+     ai-session-actions.ts embrulha generateDashboardWithAi/applyGenerated-
+     Dashboard sem tocá-los; fluxo da Home inalterado. -->
 <!-- v1.25 (24/07/2026): §4.11.2 — PRESERVAR conteúdo na edição/cópia por IA.
      Modo Editar: merge por widget no estágio bruto (normalizeImportRaw ganha
      baseWidgets do export; deep-merge por key — settings mescla, arrays
@@ -1245,6 +1252,48 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
 - **Consequência documentada**: editar por IA um dashboard de PRESET DE
   FÁBRICA re-identifica o board como `import:` — ele deixa de ser atualizado
   por "Gerar presets" (que recriará o de fábrica à parte). O picker avisa.
+
+#### 4.11.3 Painel "Editar com IA" dentro do dashboard — sessão persistida (24/07/2026)
+
+A conversa do §4.11.2 também abre DENTRO de um dashboard, sempre em modo
+EDITAR (alvo = o próprio board), com a sessão persistida em banco
+(`dashboard_ai_sessions`, 0098 — uma linha por usuário×board). Peças:
+
+- **UI** (`components/dashboards/ai-edit-panel.tsx`): botão "Editar com IA" na
+  toolbar do board (page passa `canAiEdit` = dono/admin + `create_dashboards`,
+  e a config pública do provedor pela org do BOARD). O painel é uma div FIXA à
+  direita, **não-modal** (sem overlay/portal — o dashboard atrás segue
+  interativo; `z-40`, abaixo dos Sheets `z-50`) e **recolhível** para um chip
+  flutuante (dá para testar o dashboard com um turno em voo e voltar). O log de
+  chat é o `AiChatLog` (`ai-chat-log.tsx`), extraído do sheet da Home e usado
+  pelos dois. Estado do painel (aberto/recolhido) é React puro — sobrevive a
+  `router.refresh()`, e F5 recarrega o CONTEÚDO do banco (reabrir é 1 clique;
+  sem auto-abrir por design).
+- **Actions** (`app/(app)/dashboards/ai-session-actions.ts`): o SERVIDOR é a
+  fonte de verdade dos turnos — `runAiEditTurn` carrega os turnos do banco,
+  chama o MESMO `generateDashboardWithAi` (mode "edit"; cap de 10 turnos ao
+  modelo inalterado) e persiste chat + prévia + snapshot num upsert único; o
+  cliente envia só a mensagem nova e SUBSTITUI o estado pelo canônico devolvido
+  (chat/pendingSummary/hasUndo — sem merge local). A prévia pendente
+  (auto-aplicar OFF) fica no banco: `applyAiEditPending` lê o JSON de lá (nada
+  bruto viaja do cliente) e ela sobrevive a F5. Gate em TODA action (antes de
+  qualquer leitura): `create_dashboards` + dono/admin do board (espelho da
+  geração; RLS own-row + org como muralha — ver banco §3.3). Caps de
+  armazenamento: 30 turnos / 100 entradas de chat.
+- **Desfazer/Recomeçar**: o snapshot pré-turno do último apply
+  (`EditDashboardState.snapshot`) é persistido em `undo_snapshot` —
+  `undoAiEditSession` restaura via `restoreDashboardSnapshot` e limpa (sempre a
+  ÚLTIMA edição inteira da IA; edições manuais posteriores também voltam — o
+  tooltip avisa). "Recomeçar" zera turns/chat/pending mas PRESERVA o undo (a
+  última edição continua no board; apagar o snapshot deixaria o usuário sem
+  como desfazê-la). Independente do Desfazer/Refazer in-memory do board
+  (`history-context.tsx`), como já era no sheet da Home.
+- **Limitações aceitas (v1)**: duas abas do mesmo usuário no mesmo board fazem
+  last-write-wins na linha da sessão; se o upsert da sessão falhar logo após um
+  apply ok, a edição fica no board sem snapshot salvo (janela rara). O fluxo da
+  Home (`ImportDashboardSheet`) segue 100% client-state, inalterado.
+- `app/(app)/dashboards/[id]/page.tsx` exporta `maxDuration = 300` (as actions
+  do painel rodam sob o segment config DESTA rota — espelho da Home).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
