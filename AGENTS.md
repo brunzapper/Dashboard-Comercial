@@ -6,6 +6,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Regras do projeto
 
+> Rede de segurança: `npm run lint` + `npm run typecheck` + `npm test` (Vitest —
+> unidades dos módulos puros e a guarda de paridade das RPCs; sem banco). Rode
+> os três antes de entregar; o CI (`.github/workflows/ci.yml`) repete em todo
+> push/PR. Como operar/estender: `docs/manual-de-manutencao.md` §2.1.
+
 > Documentação para humanos: [`docs/arquitetura.md`](./docs/arquitetura.md)
 > (fluxos + todas as invariantes, incl. as abaixo),
 > [`docs/banco-de-dados.md`](./docs/banco-de-dados.md) (schema consolidado) e
@@ -22,7 +27,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   restrições do snapshot aplicadas internamente (mock-aware). Toda mudança em
   `run_widget_query` (nova migração que o recrie) DEVE ser espelhada em
   `run_widget_query_snapshot` na mesma migração — inclusive o helper
-  `_widget_match_expr` ↔ `_widget_match_expr_snap`.
+  `_widget_match_expr` ↔ `_widget_match_expr_snap`. O espelhamento é
+  FISCALIZADO em CI por `tests/rpc-parity.test.ts` (`npm test` — compara o SQL
+  das últimas definições, sem banco); divergência snapshot-only INTENCIONAL
+  nova entra na allowlist do teste com comentário justificando.
 - **Mocks de Data Reunião em snapshots:** mocks (`records.is_mock`) entram
   SEMPRE no dataset congelado, ignorando as restrições do snapshot (0057); a
   regra 0052 (mock só conta em consulta que referencia Data Reunião) segue

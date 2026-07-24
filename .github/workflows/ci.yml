@@ -1,0 +1,27 @@
+# CI mínimo (recomendação nº 2 de docs/manual-de-manutencao.md §6): lint +
+# typecheck + testes (Vitest: unidades dos módulos puros + guarda de paridade
+# das RPCs — tests/rpc-parity.test.ts, sem banco). Job único sequencial: três
+# jobs paralelos pagariam o npm ci três vezes sem ganho no volume atual.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Next 16 exige Node >= 20.9; 22 é o LTS ativo
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test

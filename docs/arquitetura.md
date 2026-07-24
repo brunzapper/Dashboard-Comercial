@@ -189,7 +189,8 @@ externas apenas a alimentam:
 | UI | Tailwind CSS v4 + shadcn/ui (Radix) + lucide-react | `components/ui/` |
 | Gráficos/Grid | Recharts 3 + react-grid-layout 2 | `components/dashboards/charts/`, `dashboard-grid.tsx` |
 | CSV | papaparse | `lib/import/csv.ts` |
-| Deploy | Vercel (plano Hobby — rotas com teto de 60s, `maxDuration = 60`) | push → deploy automático; não há CI versionado |
+| Deploy | Vercel (plano Hobby — rotas com teto de 60s, `maxDuration = 60`) | push → deploy automático; CI versionado em `.github/workflows/ci.yml` (lint + typecheck + testes) |
+| Testes | Vitest (unidades puras `lib/**/*.test.ts` + guarda de paridade RPC `tests/rpc-parity.test.ts`) | `npm test` — sem banco, sem env |
 | Agendamento | `pg_cron` + `pg_net` **dentro do Postgres**, chamando rotas da Vercel | `supabase/apply/pg-cron-*.sql` |
 
 Pontos não-óbvios (conhecimento tribal — não descubra do jeito difícil):
@@ -201,9 +202,16 @@ Pontos não-óbvios (conhecimento tribal — não descubra do jeito difícil):
   `lib/env.ts` falha com erro claro em runtime se faltar variável.
 - **O código nunca conecta ao banco em build/deploy.** Toda migração é SQL aplicado
   manualmente no SQL Editor do Supabase (ver `supabase/README.md`).
-- **Não há testes automatizados nem CI.** As redes de segurança são
-  `npm run typecheck`, `npm run lint` e as queries de conferência do
-  `supabase/README.md` (ver a seção "Lacunas conhecidas" do manual de manutenção).
+- **Testes e CI (24/07/2026).** `npm test` roda o Vitest: testes unitários dos
+  módulos puros do engine (colocated `lib/**/*.test.ts` — datas/fuso, dias
+  úteis, período, fórmulas, calc-metrics, sub-fontes, regra 0052, import de IA)
+  e a **guarda estática de paridade das RPCs** (`tests/rpc-parity.test.ts`,
+  espelho executável da invariante 1 — compara `run_widget_query` ×
+  `run_widget_query_snapshot` direto do SQL das migrações, sem banco). O CI
+  (`.github/workflows/ci.yml`) roda `lint` + `typecheck` + `test` em todo
+  push/PR. Segue SEM cobertura: componentes/UI, E2E e paridade EXECUTANDO
+  contra banco real (ver "Lacunas conhecidas" do manual de manutenção). As
+  queries de conferência do `supabase/README.md` continuam valendo.
 
 ## 3. Mapa de pastas
 
