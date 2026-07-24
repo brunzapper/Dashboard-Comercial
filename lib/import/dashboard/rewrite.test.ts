@@ -1,12 +1,14 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 24/07/2026
 // Testes da normalização do JSON bruto da IA — o ponto central da segurança de
 // identidade da conversa: a `chave` NUNCA é confiada à IA (uma chave copiada
 // da referência sobrescreveria o board de ORIGEM no "Criar a partir de").
 // Também cobre as injeções do modo Editar cuja ausência seria destrutiva
 // (visible_to_roles ausente = des-compartilhar; tabs ausente = widgets sem aba).
+// v1.1: merge por widget (baseWidgets) + cópia por referência (`copy_of`).
 import { describe, expect, it } from "vitest";
 
 import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
+import type { ImportWidgetSpec } from "@/lib/import/dashboard/types";
 
 const OPTS = { chave: "canonica-123" };
 
@@ -96,5 +98,129 @@ describe("normalizeImportRaw", () => {
       })
     );
     expect(diferente.dashboard.name).toBe("Outro");
+  });
+});
+
+// Estado atual exportado (base do merge/cópia). w_funil na aba t1 (fundo em
+// y=12); w_card na aba t2 (fundo em y=4).
+const BASE_WIDGETS = [
+  {
+    key: "w_funil",
+    title: "Funil de vendas",
+    visual_type: "funnel",
+    sources: ["negocios"],
+    dimensions: [{ field: "etapa" }],
+    metrics: [{ field: "id", agg: "count" }],
+    filters: [{ field: "pipeline", op: "eq", value: "Vendas" }],
+    settings: { tab: "t1", cor: "azul" },
+    grid_position: { x: 3, y: 4, w: 6, h: 8 },
+  },
+  {
+    key: "w_card",
+    title: "Card",
+    visual_type: "kpi",
+    metrics: [{ field: "id", agg: "count" }],
+    settings: { tab: "t2" },
+    grid_position: { x: 0, y: 0, w: 3, h: 4 },
+  },
+] as unknown as ImportWidgetSpec[];
+
+function normalizeWidgets(widgets: unknown[], baseWidgets = BASE_WIDGETS) {
+  return JSON.parse(
+    normalizeImportRaw(JSON.stringify({ widgets }), {
+      ...OPTS,
+      baseWidgets,
+    })
+  ).widgets as Record<string, unknown>[];
+}
+
+describe("normalizeImportRaw — merge por widget (baseWidgets)", () => {
+  it("key existente: delta mescla sobre a base (settings por chave; resto preservado)", () => {
+    const [w] = normalizeWidgets([
+      { key: "w_funil", title: "Novo título", settings: { cor: "verde" } },
+    ]);
+    expect(w.title).toBe("Novo título");
+    expect(w.visual_type).toBe("funnel");
+    expect(w.filters).toEqual([
+      { field: "pipeline", op: "eq", value: "Vendas" },
+    ]);
+    expect(w.settings).toEqual({ tab: "t1", cor: "verde" });
+  });
+
+  it("arrays do delta substituem; null limpa", () => {
+    const [w] = normalizeWidgets([
+      { key: "w_funil", filters: [], settings: { cor: null } },
+    ]);
+    expect(w.filters).toEqual([]);
+    expect((w.settings as Record<string, unknown>).cor).toBeNull();
+  });
+
+  it("key nova sem copy_of passa intacta", () => {
+    const [w] = normalizeWidgets([
+      { key: "w_novo", title: "Novo", visual_type: "kpi" },
+    ]);
+    expect(w).toEqual({ key: "w_novo", title: "Novo", visual_type: "kpi" });
+  });
+});
+
+describe("normalizeImportRaw — copy_of (cópia por referência)", () => {
+  it("copia a definição inteira da origem, aplica o delta e remove o marcador", () => {
+    const [w] = normalizeWidgets([
+      { key: "w_funil_2", copy_of: "w_funil", title: "Funil (SDR)" },
+    ]);
+    expect(w.key).toBe("w_funil_2");
+    expect(w.title).toBe("Funil (SDR)");
+    expect(w.visual_type).toBe("funnel");
+    expect(w.metrics).toEqual([{ field: "id", agg: "count" }]);
+    expect(w.settings).toEqual({ tab: "t1", cor: "azul" });
+    expect("copy_of" in w).toBe(false);
+  });
+
+  it("sem grid_position no delta: posiciona abaixo do fundo da ABA da cópia", () => {
+    const [a, b] = normalizeWidgets([
+      { key: "w_funil_2", copy_of: "w_funil", title: "A" },
+      { key: "w_funil_3", copy_of: "w_funil", title: "B" },
+    ]);
+    // Fundo da t1 = 4+8; cópias empilham a partir daí, sem sobrepor a origem.
+    expect(a.grid_position).toEqual({ x: 3, y: 12, w: 6, h: 8 });
+    expect(b.grid_position).toEqual({ x: 3, y: 20, w: 6, h: 8 });
+  });
+
+  it("grid_position do delta vence; aba trocada empilha no fundo da aba nova", () => {
+    const [comGrid] = normalizeWidgets([
+      {
+        key: "w_funil_2",
+        copy_of: "w_funil",
+        grid_position: { x: 9, y: 0, w: 3, h: 4 },
+      },
+    ]);
+    expect(comGrid.grid_position).toEqual({ x: 9, y: 0, w: 3, h: 4 });
+    const [outraAba] = normalizeWidgets([
+      { key: "w_funil_2", copy_of: "w_funil", settings: { tab: "t2" } },
+    ]);
+    expect(outraAba.grid_position).toEqual({ x: 3, y: 4, w: 6, h: 8 });
+  });
+
+  it("copy_of em key JÁ existente é ignorado (merge normal sobre a própria key)", () => {
+    const [w] = normalizeWidgets([
+      { key: "w_card", copy_of: "w_funil", title: "Card 2" },
+    ]);
+    expect(w.visual_type).toBe("kpi");
+    expect(w.title).toBe("Card 2");
+    expect("copy_of" in w).toBe(false);
+  });
+
+  it("origem desconhecida ou sem baseWidgets: só remove o marcador", () => {
+    const [semOrigem] = normalizeWidgets([
+      { key: "w_x", copy_of: "w_nao_existe", title: "X" },
+    ]);
+    expect(semOrigem).toEqual({ key: "w_x", title: "X" });
+    const semBase = JSON.parse(
+      normalizeImportRaw(
+        JSON.stringify({ widgets: [{ key: "w_x", copy_of: "w_funil" }] }),
+        OPTS
+      )
+    ).widgets as Record<string, unknown>[];
+    expect(semBase[0]).toEqual({ key: "w_x" });
   });
 });

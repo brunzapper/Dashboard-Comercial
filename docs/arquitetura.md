@@ -1,4 +1,10 @@
-<!-- Versão: 1.26 | Data: 24/07/2026 -->
+<!-- Versão: 1.27 | Data: 24/07/2026 -->
+<!-- v1.27 (24/07/2026): §4.11.2 — a IA LÊ melhor o estado: `copy_of` (cópia de
+     widget por delta, resolvida em normalizeImportRaw — key nova + key da
+     origem; grid ausente empilha abaixo do fundo da aba), `baseWidgets` também
+     no modo from (validação do laço = semântica do apply) e a prévia pendente
+     não aplicada entra no system do turno seguinte (a resposta SUBSTITUI a
+     prévia inteira). -->
 <!-- v1.26 (24/07/2026): §4.11.3 — painel "Editar com IA" DENTRO do dashboard
      (AiEditPanel, não-modal/recolhível) com sessão PERSISTIDA por usuário×board
      (dashboard_ai_sessions, 0098): turnos server-owned (cliente envia só a
@@ -1228,6 +1234,16 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
   preservado no SERVIDOR, sem re-emitir o widget inteiro (antes, campo omitido
   de um widget INCLUÍDO era apagado). Widget de key NOVA passa intacto; widget
   do estado não referenciado NÃO é adicionado (o sem-GC preserva a linha).
+  **Cópia por referência — `copy_of` (24/07/2026):** widget da IA de key NOVA
+  com `"copy_of": "<key existente>"` usa o widget de origem como BASE do mesmo
+  deep-merge (a IA manda só o delta da cópia — "igual ao X mudando Y" sem ecoar
+  a definição inteira). Resolvido e REMOVIDO em `normalizeImportRaw` ANTES da
+  validação (o validador/export nunca veem o marcador). Sem `grid_position` no
+  delta, a cópia empilha ABAIXO do fundo da aba dela (herdar a posição da
+  origem sobreporia os dois; o auto-empilhamento do validador começa em y=0 e
+  colidiria com widgets reais). `copy_of` em key JÁ existente é ignorado (merge
+  normal); origem desconhecida = só remove o marcador (o laço de correção
+  reporta os campos faltantes).
 - **Modo Criar a partir de** (`applyFromReference`, `ai-generate-actions.ts`,
   24/07/2026): cópia FIEL da referência via `duplicateBoard` (clone por banco —
   widgets/células/placements com ids novos, sem `preset`/`presetKey`; a IA não
@@ -1241,7 +1257,15 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
   em `importDashboardJson`.
 - **Conversa** (`ai-generate-actions.ts` v2): STATELESS por turno — o servidor
   re-exporta o estado FRESCO para o system a cada turno e recebe só os textos
-  de usuário anteriores (cap 10); nada de JSON de assistant acumulado. Após o
+  de usuário anteriores (cap 10); nada de JSON de assistant acumulado. A ÚNICA
+  saída de assistant reinjetada (24/07/2026) é a PRÉVIA PENDENTE não aplicada
+  (`input.pendingJson` — painel: `row.pending.json`; sheet: estado local), que
+  entra como seção própria do system com a semântica "a resposta deste turno
+  SUBSTITUI a prévia inteira" — sem ela, "ajusta o card que você propôs" falha
+  com auto-aplicar OFF (o estado re-exportado do banco não a contém). Nos modos
+  from/edit o laço de geração normaliza com `baseWidgets` (24/07/2026: também
+  no from — a validação do turno ganha a MESMA semântica de merge/`copy_of` do
+  apply, que no from mescla sobre a cópia via `applyDashboardEditJson`). Após o
   1º apply em new/from o CLIENTE troca a sessão para `edit` +
   `targetDashboardId`. Toggle "Aplicar automaticamente": OFF ⇒ o turno devolve
   `pendingJson`+resumo e `applyGeneratedDashboard` aplica depois

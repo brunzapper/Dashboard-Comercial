@@ -202,6 +202,9 @@ export async function runAiEditTurn(
     description: text,
     priorTurns: row.turns,
     autoApply,
+    // Prévia não aplicada do turno anterior: a IA precisa vê-la (a resposta
+    // nova SUBSTITUI a prévia — sem isso, "ajusta o que você propôs" falharia).
+    pendingJson: row.pending?.json,
   });
 
   const next: SessionRow = {

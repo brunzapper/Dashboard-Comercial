@@ -236,6 +236,7 @@ export function ImportDashboardSheet({
         description: text,
         priorTurns: turns,
         autoApply,
+        pendingJson: pending?.json,
       });
       if (res.pendingJson) {
         setPending({
