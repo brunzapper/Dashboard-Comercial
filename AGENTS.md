@@ -253,6 +253,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/import/dashboard/export.ts`) e aplica com
   `applyPresetDefinition({ targetDashboardId })`, que NÃO cria dashboard e
   roda **SEM GC** (a IA nunca exclui widget; resposta parcial é válida —
-  não reintroduza GC nesse caminho). Snapshot pré-turno
-  (`captureDashboardSnapshot`) é o Desfazer. Export/serialização nunca emite
-  `preset`/`presetKey`/`connectors`/`kanban`. RPCs de widget INTOCADOS.
+  não reintroduza GC nesse caminho). **Merge por widget (24/07/2026):** no
+  Editar, `normalizeImportRaw` recebe `baseWidgets` (widgets do estado
+  exportado) e faz deep-merge do widget da IA (casado por `key`) sobre o do
+  estado — a IA manda só o delta do widget (`settings` mescla por chave, arrays
+  substituem, `null` limpa) e o resto é preservado no SERVIDOR; NÃO exija que a
+  IA re-emita o widget inteiro. Widget de key nova passa intacto; widget do
+  estado não referenciado NÃO entra no JSON (o sem-GC preserva a linha). **Modo
+  Criar a partir de (`applyFromReference`, 24/07/2026):** cópia FIEL via
+  `duplicateBoard` + o delta ADITIVO da IA aplicado como Edição na cópia
+  (reusa o merge); NÃO usa mais `importDashboardJson` (que recriava tudo). Só o
+  `new` segue no `importDashboardJson`. Duplica só no APPLY (sem cópias órfãs).
+  Snapshot pré-turno (`captureDashboardSnapshot`) é o Desfazer.
+  Export/serialização nunca emite `preset`/`presetKey`/`connectors`/`kanban`.
+  RPCs de widget INTOCADOS.

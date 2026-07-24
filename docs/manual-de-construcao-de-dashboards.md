@@ -1,4 +1,8 @@
-<!-- Versão: 1.5 | Data: 23/07/2026 -->
+<!-- Versão: 1.6 | Data: 24/07/2026 -->
+<!-- v1.6 (24/07/2026): §3.8.2 — preservar conteúdo na edição/cópia por IA.
+     "Criar a partir de" faz CÓPIA FIEL da referência e a IA só acrescenta o
+     pedido sobre a cópia; no "Editar", alterar um widget passa a exigir só o
+     que muda (o resto é preservado pelo servidor). -->
 <!-- v1.5 (23/07/2026): §3.8.2 — "Exportar JSON" (⋮ do card) e a CONVERSA com a
      IA em 3 modos (Criar novo / Criar a partir de / Editar), com switch
      "Aplicar automaticamente", prévia por turno, Desfazer, e as regras do
@@ -456,16 +460,21 @@ IA"**, com três modos:
   janela vira uma CONVERSA — depois do primeiro dashboard criado, as próximas
   mensagens EDITAM o mesmo dashboard ("aumenta o gráfico X", "adiciona um
   funil"…).
-- **Criar a partir de** — escolha um dashboard seu como REFERÊNCIA e descreva
-  as mudanças; a IA cria um dashboard NOVO baseado nele (o original fica
-  intacto; colisão de nome ganha sufixo "(cópia)").
+- **Criar a partir de** — escolha um dashboard como REFERÊNCIA e descreva o que
+  acrescentar; o sistema faz uma **cópia FIEL** dele (idêntica, sem depender de a
+  IA reproduzir nada) e a IA só aplica o seu pedido (ex.: uma aba nova) sobre a
+  cópia. O original fica intacto; a cópia nasce como "… (cópia)" (ou o nome que
+  você pedir) e a conversa passa a EDITAR a cópia. Para mudar ou remover algo que
+  veio na cópia, faça no modo Editar (ou manual, no ⋮ do widget).
 - **Editar** — escolha um dashboard seu e converse para melhorá-lo IN-PLACE.
   Regras importantes: a IA **altera e adiciona** widgets, mas **NUNCA
   exclui** (widget que ela não mencionar permanece; remoção é manual, no ⋮ do
-  widget); os widgets mantêm identidade (células de Tabela Livre e snapshots
-  sobrevivem a edições); cada edição pode ser revertida pelo botão
-  **"Desfazer edição da IA"** (restaura o estado imediatamente anterior ao
-  último turno aplicado).
+  widget); ao alterar um widget ela só precisa dizer **o que muda** — o resto do
+  widget (métricas, filtros, configurações, posição) é **preservado pelo
+  servidor**, sem reconstruir tudo do zero; os widgets mantêm identidade (células
+  de Tabela Livre e snapshots sobrevivem a edições); cada edição pode ser
+  revertida pelo botão **"Desfazer edição da IA"** (restaura o estado
+  imediatamente anterior ao último turno aplicado).
 
 **Aplicar automaticamente** (switch na janela, ligado por padrão): ligado, cada
 mensagem já aplica as mudanças no dashboard; desligado, cada mensagem gera uma

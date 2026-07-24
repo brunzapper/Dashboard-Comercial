@@ -1,4 +1,12 @@
-<!-- Versão: 1.24 | Data: 23/07/2026 -->
+<!-- Versão: 1.25 | Data: 24/07/2026 -->
+<!-- v1.25 (24/07/2026): §4.11.2 — PRESERVAR conteúdo na edição/cópia por IA.
+     Modo Editar: merge por widget no estágio bruto (normalizeImportRaw ganha
+     baseWidgets do export; deep-merge por key — settings mescla, arrays
+     substituem, null limpa) ⇒ a IA manda só o delta do widget e o resto é
+     preservado. Modo Criar a partir de: applyFromReference = cópia fiel via
+     duplicateBoard + delta aditivo aplicado como Edição (FROM_RULES reescrito),
+     no lugar de importDashboardJson que recriava tudo. RPCs de widget
+     intocados; sem migração. -->
 <!-- v1.24 (23/07/2026): §4.1 — merge por bucket client-side p/ dimensão
      custom:+transform (bucket-merge.ts em computeRows; RPC agrupava pelo
      valor cru; canônico estilo-núcleo; avg simples aproximado). Import (IA):
@@ -1197,6 +1205,25 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
   resposta pode ser PARCIAL, só widgets alterados/novos). `fontScale` virou
   chave GERIDA do UPDATE (presets de fábrica não a definem — zero mudança).
   `connectors`/`sourceScope` ficam fora do alcance da IA (preservados).
+  **Merge por widget (24/07/2026):** a resposta pode ser PARCIAL também DENTRO
+  do widget — `applyDashboardEditJson` exporta o board e passa `baseWidgets` a
+  `normalizeImportRaw`, que faz deep-merge do widget da IA (casado por `key`)
+  sobre o do estado exportado: a IA manda a `key` + só os campos que mudam
+  (`settings` mescla por chave; arrays substituem; `null` limpa) e o resto é
+  preservado no SERVIDOR, sem re-emitir o widget inteiro (antes, campo omitido
+  de um widget INCLUÍDO era apagado). Widget de key NOVA passa intacto; widget
+  do estado não referenciado NÃO é adicionado (o sem-GC preserva a linha).
+- **Modo Criar a partir de** (`applyFromReference`, `ai-generate-actions.ts`,
+  24/07/2026): cópia FIEL da referência via `duplicateBoard` (clone por banco —
+  widgets/células/placements com ids novos, sem `preset`/`presetKey`; a IA não
+  reproduz nada) + o DELTA da IA aplicado como Edição na cópia
+  (`applyDashboardEditJson`, reusa o merge + SEM GC). A IA responde só com o
+  ADITIVO (widgets/abas NOVOS — `FROM_RULES`); mudar/remover um widget copiado é
+  turno de Editar seguinte. Duplica só no APPLY (nunca em turno não aplicado ⇒
+  sem cópias órfãs) e o cliente troca a sessão para Editar pelo `id` retornado.
+  Substitui o antigo `importDashboardJson` do modo from (que recriava tudo do
+  zero e dependia de a IA reproduzir a referência verbatim). O modo `new` segue
+  em `importDashboardJson`.
 - **Conversa** (`ai-generate-actions.ts` v2): STATELESS por turno — o servidor
   re-exporta o estado FRESCO para o system a cada turno e recebe só os textos
   de usuário anteriores (cap 10); nada de JSON de assistant acumulado. Após o
