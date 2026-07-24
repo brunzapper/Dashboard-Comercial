@@ -89,14 +89,37 @@ npm install
 npm run dev        # http://localhost:3000
 npm run typecheck  # tsc --noEmit  — rode SEMPRE antes de commitar
 npm run lint
+npm test           # Vitest: unidades + guarda de paridade RPC (sem banco)
+npm run test:watch # idem, em watch durante o desenvolvimento
 npm run build      # o que a Vercel roda no deploy
 ```
 
 - **Convenção de versionamento**: todo arquivo tem cabeçalho
   `Versão: X.Y | Data: DD/MM/AAAA`. Ao editar, incremente a versão menor e comente a
   mudança no local (`// vX.Y (data): ...`). Este é o único changelog do projeto.
-- Não há testes automatizados: `typecheck` + `lint` + verificação manual no app são a
-  rede de segurança (ver §6).
+- Rede de segurança: `typecheck` + `lint` + `npm test` (Vitest — ver §2.1) +
+  verificação manual no app. O CI (`.github/workflows/ci.yml`) roda os três a
+  cada push/PR.
+
+### 2.1 Testes automatizados (24/07/2026)
+
+- **Como rodar**: `npm test` (uma vez) ou `npm run test:watch`. Não precisa de
+  banco, env nem rede — só `npm install` antes. Config em `vitest.config.ts`
+  (ambiente node, alias `@` e `TZ=America/Sao_Paulo` pinado — os presets de
+  período usam Date local).
+- **Onde vivem**: unidades colocated (`lib/**/*.test.ts`, ao lado do módulo);
+  guardas cross-cutting em `tests/` (hoje: `tests/rpc-parity.test.ts`).
+- **Guarda de paridade RPC**: acha a ÚLTIMA migração que define
+  `run_widget_query` e `run_widget_query_snapshot` (e o par
+  `_widget_match_expr`/`_snap`), normaliza (comentários fora + substituições
+  snapshot→base) e exige que o diff caiba na allowlist do bloco snapshot-only
+  (escopo 0056 + restrições mock-aware 0057). **Quando falhar após uma
+  migração**: espelhe a mudança na função irmã NA MESMA migração (invariante 1
+  do AGENTS.md). Só estenda a allowlist se a divergência for snapshot-only
+  INTENCIONAL — com comentário justificando na própria regex.
+- Teste novo segue a convenção do repo: cabeçalho `// Versão | Data`,
+  comentários em pt-BR, imports explícitos de `vitest` (sem globals) e NUNCA
+  importar `lib/env.ts`/`lib/supabase/*`/`lib/auth/*` (módulos com IO/env).
 
 ## 3. Como fazer uma mudança de banco
 
@@ -416,6 +439,7 @@ fonte no widget se precisar do mês.
 | Dashboard abre com o grid esmaecido e "Carregando…" preso (só hard refresh resolve) | O widget "Filtro por campo" com valor salvo (`lastFieldFilters`) disparava uma navegação RSC na montagem só p/ sincronizar a URL; sob rajadas de `router.refresh()` do realtime (ex.: pós-recalc do preset, sync do Bitrix) a fila do router nunca drenava e o overlay nunca fechava | Corrigido em 20/07/2026 (`FieldFilterControls` v1.2: sync raso via `history.replaceState`, sem navegação). Se reaparecer, procure QUEM liga o overlay (`useNavPending().run`) na montagem — nenhum efeito de mount deve navegar |
 | Webhook de saída parou | Auto-desativado após falhas consecutivas | Configurações → Integrações: ver `disabled_reason`, corrigir o endpoint e reativar |
 | Tela de snapshots/listagens quebrou após deploy | Código selecionando coluna que a migração ainda não criou | Aplique o SQL pendente (regra "SQL antes do deploy") |
+| CI falhou no teste de paridade RPC (`tests/rpc-parity.test.ts`) | Migração nova recriou `run_widget_query` sem espelhar `run_widget_query_snapshot` (ou vice-versa), recriou os dois em migrações DIFERENTES, ou introduziu divergência snapshot-only nova | Espelhe a mudança na função irmã NA MESMA migração (invariante 1 do AGENTS.md — inclui o par `_widget_match_expr`/`_snap`); se a divergência for snapshot-only intencional, adicione-a à allowlist do teste com comentário justificando |
 | Erro de env em runtime | Variável ausente na Vercel | `lib/env.ts` diz qual; confira `.env.example` |
 | Remover os mocks de vez | — | `supabase/apply/undo-mock-reuniao.sql` (única forma prevista) |
 | Salvar chave de IA falha ("Não foi possível cifrar a chave") | `KEY_ENCRYPTION_KEY` ausente/inválida no ambiente (32 bytes base64) | Configure na Vercel (Production+Preview+Development, MESMO valor) e refaça o deploy; NUNCA troque o valor depois (invalida os ciphertexts já gravados) |
@@ -426,16 +450,24 @@ fonte no widget se precisar do mês.
 
 ## 6. Lacunas conhecidas e recomendações
 
-Registradas para o futuro — **nada disto está implementado**:
+Estado em 24/07/2026 (itens 2 e 3 da lista original foram implementados; o 1,
+parcialmente — ver §2.1 para operar os testes):
 
-1. **Testes de paridade das RPCs** (maior risco hoje): um script SQL que rode a mesma
+1. **Paridade das RPCs** — PARCIALMENTE coberta: a "alternativa mínima"
+   (comparação textual das definições, módulo nome de tabela) está implementada
+   como teste estático (`tests/rpc-parity.test.ts`, roda no CI sem banco).
+   Segue como lacuna a paridade EXECUTANDO: um script SQL que rode a mesma
    config de widget em `run_widget_query` e, sobre um snapshot de teste, em
-   `run_widget_query_snapshot`, comparando resultados. Alternativa mínima: comparar
-   `pg_get_functiondef` das duas funções módulo o nome da tabela.
-2. **CI mínimo**: GitHub Actions rodando `npm run lint` + `npm run typecheck` a cada
-   push — hoje nada impede um push que não compila.
-3. **Testes de unidade** dos módulos puros (`lib/widgets/period-resolve.ts`,
-   `lib/records/formulas.ts`, `lib/widgets/mock-reuniao.ts`) — são funções puras,
-   fáceis de testar sem banco.
+   `run_widget_query_snapshot`, comparando RESULTADOS (pegaria divergência de
+   comportamento que o texto idêntico não revela, ex.: dados/índices).
+2. **CI mínimo** — IMPLEMENTADO: `.github/workflows/ci.yml` roda `lint` +
+   `typecheck` + `npm test` a cada push/PR.
+3. **Testes de unidade dos módulos puros** — IMPLEMENTADO (Vitest, colocated
+   `lib/**/*.test.ts`): period/period-resolve, formulas, mock-reuniao,
+   calc-metrics, sources/sub-fontes, date/normalize (fuso 0079/0080),
+   business-days, core-defs, formula-validate e import de IA (rewrite).
+   Lacunas remanescentes de teste: componentes/UI, E2E (Playwright) e os
+   caminhos com IO (engine/record-list/widget-scope — exigiriam
+   fixtures/mocks de Supabase).
 4. Manter **este manual e o `banco-de-dados.md` atualizados a cada migração** — eles
    substituem a leitura das 75 migrações; desatualizados, viram armadilha.
