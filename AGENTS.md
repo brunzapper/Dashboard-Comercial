@@ -135,9 +135,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `AvailableField.unifiedMembers` (client-side, por `record_type`) é
   RAIZ-primeiro: sub nunca sobrescreve o membro da pai. Só quando
   o toggle `settings.coexistSubSources` marca uma sub como "conviver" (ou há 2+
-  subs da mesma pai) é que ela vira PERNA extra (série própria por fonte, no
-  caminho agregado); nesse caso o usuário garante que os conjuntos são
-  disjuntos. Ver `docs/arquitetura.md` §4.8 e invariante 10.
+  subs da mesma pai) é que ela vira PERNA extra (no caminho agregado); nesse
+  caso o usuário garante que os conjuntos são disjuntos. A EXIBIÇÃO das pernas
+  (24/07/2026) é `settings.subSeriesMode` ("stacked" default | "total" |
+  "grouped"), 100% engine/chart: stacked/grouped mantêm a Base como dim líder e
+  o chart pivota em séries (`lib/widgets/sub-series.ts` +
+  `WidgetData.subSeries`); "total" funde por tupla no ENGINE (`foldRowGroup`)
+  sem a dim "Base"; pizza/funil com dim e KPI/card fundem SEMPRE. No branch
+  multi-perna, operando escopado em fonte-IRMÃ é ZERADO por perna
+  (`zeroSiblingScopedOperands` + backfill 0 na basis) — cada perna exibe a
+  PRÓPRIA contribuição, nunca o total global repetido. RPCs seguem intocados.
+  Ver `docs/arquitetura.md` §4.8 e invariante 10.
 - **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
   `records.operation_id` é derivada (priority=1 do responsável no sync) e pode
   estar NULL/defasada. Filtros de visualização por operação

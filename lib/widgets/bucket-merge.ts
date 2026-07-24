@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 24/07/2026
+// v1.1 (24/07/2026): foldRowGroup extraído do laço de mergeRowsByBucket
+// (byte-compatível) — reusado pelo merge "total" das pernas de sub-base
+// (lib/widgets/engine.ts).
 // Merge client-side por BUCKET para dimensão de campo PERSONALIZADO com
 // "Formato" de data (transform): o ramo `custom:` da DIMENSÃO nas RPCs
 // (0085, run_widget_query/_snapshot) agrupa pelo VALOR CRU de
@@ -197,44 +200,60 @@ export function mergeRowsByBucket(
   const out: WidgetRow[] = [];
   for (const key of order) {
     const g = groups.get(key)!;
-    const merged: WidgetRow = { ...g.rows[0] };
+    const merged = foldRowGroup(g.rows, metrics);
     dims.forEach((_, i) => {
       merged[`dim_${i + 1}`] = g.canon[i] ?? null;
     });
-    for (const spec of metrics) {
-      merged[spec.key] = foldMetric(g.rows, spec);
-    }
-    // __money: fusão exata por métrica (o engine replota metric_<n> depois).
-    const moneyKeys = new Set<string>();
-    for (const r of g.rows) {
-      for (const k of Object.keys(r.__money ?? {})) moneyKeys.add(k);
-    }
-    if (moneyKeys.size > 0) {
-      const money: Record<string, MoneyBreakdown> = {};
-      for (const k of moneyKeys) {
-        money[k] = foldBreakdowns(g.rows.map((r) => r.__money?.[k]));
-      }
-      merged.__money = money;
-    }
-    // Basis das calculadas: fundidas para os subtotais/Total geral a jusante
-    // continuarem exatos (fold de fold = fold).
-    if (g.rows.some((r) => r.__calcOps)) {
-      merged.__calcOps = foldBasis(g.rows.map((r) => r.__calcOps));
-    }
-    const byKeys = new Set<string>();
-    for (const r of g.rows) {
-      for (const k of Object.keys(r.__calcOpsBy ?? {})) byKeys.add(k);
-    }
-    if (byKeys.size > 0) {
-      const by: NonNullable<WidgetRow["__calcOpsBy"]> = {};
-      for (const k of byKeys) {
-        by[k] = foldBasis(
-          g.rows.map((r) => r.__calcOpsBy?.[k] as BasisValues | undefined)
-        );
-      }
-      merged.__calcOpsBy = by;
-    }
     out.push(merged);
   }
   return out;
+}
+
+/**
+ * Funde UM grupo de linhas (mesmo bucket/tupla) numa linha só: métricas pelo
+ * spec (foldMetric), `__money` por foldBreakdowns e as basis das calculadas
+ * por foldBasis (fold de fold = fold — subtotais a jusante seguem exatos).
+ * Demais chaves (dims, __cmp, __goal…) vêm da 1ª linha — o chamador ajusta.
+ * Extraído de mergeRowsByBucket (byte-compatível); reusado pelo merge "total"
+ * das pernas de sub-base (lib/widgets/engine.ts, 24/07/2026).
+ */
+export function foldRowGroup(
+  rows: WidgetRow[],
+  metrics: MergeMetricSpec[]
+): WidgetRow {
+  const merged: WidgetRow = { ...rows[0] };
+  for (const spec of metrics) {
+    merged[spec.key] = foldMetric(rows, spec);
+  }
+  // __money: fusão exata por métrica (o engine replota metric_<n> depois).
+  const moneyKeys = new Set<string>();
+  for (const r of rows) {
+    for (const k of Object.keys(r.__money ?? {})) moneyKeys.add(k);
+  }
+  if (moneyKeys.size > 0) {
+    const money: Record<string, MoneyBreakdown> = {};
+    for (const k of moneyKeys) {
+      money[k] = foldBreakdowns(rows.map((r) => r.__money?.[k]));
+    }
+    merged.__money = money;
+  }
+  // Basis das calculadas: fundidas para os subtotais/Total geral a jusante
+  // continuarem exatos (fold de fold = fold).
+  if (rows.some((r) => r.__calcOps)) {
+    merged.__calcOps = foldBasis(rows.map((r) => r.__calcOps));
+  }
+  const byKeys = new Set<string>();
+  for (const r of rows) {
+    for (const k of Object.keys(r.__calcOpsBy ?? {})) byKeys.add(k);
+  }
+  if (byKeys.size > 0) {
+    const by: NonNullable<WidgetRow["__calcOpsBy"]> = {};
+    for (const k of byKeys) {
+      by[k] = foldBasis(
+        rows.map((r) => r.__calcOpsBy?.[k] as BasisValues | undefined)
+      );
+    }
+    merged.__calcOpsBy = by;
+  }
+  return merged;
 }

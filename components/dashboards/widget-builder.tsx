@@ -108,7 +108,13 @@ import {
 import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
 import { validateFormula, type Formula } from "@/lib/records/formulas";
-import { fieldAppliesToSource, toSourceKey, type SourceKey } from "@/lib/sources";
+import {
+  fieldAppliesToSource,
+  isSubSource,
+  planSourceLegs,
+  toSourceKey,
+  type SourceKey,
+} from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import {
   Sheet,
@@ -432,6 +438,12 @@ export function WidgetBuilder({
   const [coexistSubSources, setCoexistSubSources] = useState<SourceKey[]>(
     widget?.settings?.coexistSubSources ?? []
   );
+  // Exibição das sub-bases em pernas múltiplas (24/07/2026): empilhado (default),
+  // total somado (sem a coluna "Base") ou lado a lado. Só tem efeito quando a
+  // seleção gera pernas extras (2+ subs da mesma base, ou sub "conviver").
+  const [subSeriesMode, setSubSeriesMode] = useState<
+    "stacked" | "total" | "grouped"
+  >(widget?.settings?.subSeriesMode ?? "stacked");
 
   // Aparência de tabela editada já no builder (Parte 2/3): orientação (normal x
   // transposta) e "Agrupar por" (dimensão que vira seções recolhíveis c/ subtotais).
@@ -842,6 +854,17 @@ export function WidgetBuilder({
     catalog.find((s) => s.key === k)?.label ?? k;
   const sourceLabels = useSourceLabels();
   const fieldSourceChips = sourceChips(sourceLabels);
+
+  // Pernas extras de sub-base na seleção atual (2+ subs da mesma base, ou sub
+  // "conviver" junto da pai) — habilitam o seletor "Exibição das sub-bases"
+  // nos visuais que plotam as pernas (o engine força "total" em pizza/funil
+  // com dimensão e nos cards).
+  const hasSubLegs =
+    sources.some((s) => isSubSource(s, catalog)) &&
+    planSourceLegs(sources, coexistSubSources, catalog).extraLegs.length > 0;
+  const showSubSeriesMode =
+    hasSubLegs &&
+    ["barra", "barra_horizontal", "linha", "tabela"].includes(visualType);
 
   // Catálogo por-registro do FieldForm inline ("Novo campo"/"Configurar campo"):
   // o MESMO catálogo do /campos (perRecordCalcOperands — números + datas +
@@ -1889,6 +1912,14 @@ export function WidgetBuilder({
     });
     if (coexistClean.length > 0) settings.coexistSubSources = coexistClean;
     else delete settings.coexistSubSources;
+    // Exibição das sub-bases: persiste só quando difere do default ("stacked")
+    // e há pernas extras num visual que as plota; senão limpa (inclui widget
+    // que deixou de ter 2+ sub-bases).
+    if (showSubSeriesMode && subSeriesMode !== "stacked") {
+      settings.subSeriesMode = subSeriesMode;
+    } else {
+      delete settings.subSeriesMode;
+    }
 
     const input = {
       title: title.trim() || null,
@@ -2992,6 +3023,45 @@ export function WidgetBuilder({
               />
               Quebrar por base (uma série por base)
             </label>
+            {showSubSeriesMode ? (
+              <div className="mt-1 flex flex-col gap-1.5">
+                <Label>Exibição das sub-bases</Label>
+                <Combobox
+                  searchable={false}
+                  options={[
+                    {
+                      value: "stacked",
+                      label: "Empilhado (segmentos por sub-base)",
+                    },
+                    {
+                      value: "total",
+                      label: "Total (somado, sem coluna Base)",
+                    },
+                    {
+                      value: "grouped",
+                      label: "Lado a lado (uma barra por sub-base)",
+                    },
+                  ]}
+                  value={subSeriesMode}
+                  onValueChange={(v) =>
+                    setSubSeriesMode(v as "stacked" | "total" | "grouped")
+                  }
+                  aria-label="Exibição das sub-bases"
+                />
+                <p className="text-muted-foreground text-xs">
+                  Com 2+ sub-bases da mesma base, cada uma vira uma série com a
+                  contagem PRÓPRIA. &quot;Total&quot; soma as sub-bases por
+                  categoria — a coluna &quot;Base&quot; some da tabela e do CSV.
+                </p>
+              </div>
+            ) : null}
+            {hasSubLegs &&
+            ["pizza", "funil", "kpi"].includes(visualType) ? (
+              <p className="text-muted-foreground mt-1 text-xs">
+                Pizza, funil e cards sempre SOMAM as sub-bases por categoria
+                (sem série separada por sub-base).
+              </p>
+            ) : null}
           </BuilderSection>
 
           {/* Dimensões (no modo lista, definem também as colunas exibidas) */}

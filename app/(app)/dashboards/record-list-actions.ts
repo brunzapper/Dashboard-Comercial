@@ -49,13 +49,15 @@ export async function fetchWidgetRecordsPage(
     search
   );
   if (!scoped.ok) return scoped;
-  const { widget, config, period, available } = scoped.scope;
+  const { widget, config, period, available, sources } = scoped.scope;
 
   if (!serverPaginatedList(widget.settings)) {
     return { ok: false, message: "Widget não é paginado no servidor." };
   }
 
   try {
+    // `sources` (catálogo): obrigatório p/ widget de sub-base — sem ele a
+    // paginação ignorava o predicado da sub (ver runRecordListPage).
     const { rows, total } = await runRecordListPage(
       supabase,
       config,
@@ -64,7 +66,8 @@ export async function fetchWidgetRecordsPage(
       {
         pageIndex: Math.max(0, Math.floor(pageIndex)),
         pageSize: RECORD_LIST_PAGE_SIZE,
-      }
+      },
+      sources
     );
     const fkLabels = await collectRecordFkLabels(supabase, rows);
     return { ok: true, rows, total, fkLabels };

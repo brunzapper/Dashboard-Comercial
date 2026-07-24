@@ -19,6 +19,19 @@ export const CATALOG: SourceDef[] = [
     parentKey: "leads",
     filter: [{ field: "pipeline", op: "eq", value: "Lite" }],
   },
+  // 2ª sub da MESMA pai (predicado disjunto): dispara o branch multi-perna do
+  // engine quando as duas subs entram juntas nas fontes do widget.
+  {
+    key: "leads_sql",
+    recordType: "lead",
+    label: "Leads / SQLs",
+    shortLabel: "SQLs",
+    defaultPeriodField: "custom:data_sql",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq", value: "SQL" }],
+  },
 ];
 
 // Correspondência com membro na PAI e na SUB (mesmo record_type "lead") — o

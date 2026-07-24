@@ -1,4 +1,17 @@
-<!-- Versão: 1.27 | Data: 24/07/2026 -->
+<!-- Versão: 1.28 | Data: 24/07/2026 -->
+<!-- v1.28 (24/07/2026): §4.8 — pernas de sub-base EXIBÍVEIS: (a) operando
+     escopado em fonte-IRMÃ é ZERADO por perna no branch multi-perna
+     (zeroSiblingScopedOperands; cada perna mostra a própria contribuição —
+     antes toda perna repetia o total global) + backfill 0 na basis p/ o
+     re-eval client-side; (b) settings.subSeriesMode (stacked default | total |
+     grouped): stacked/grouped mantêm a Base como dim líder e o CHART pivota as
+     pernas em séries (lib/widgets/sub-series.ts + WidgetData.subSeries);
+     total funde por tupla no ENGINE (foldRowGroup) sem a dim Base; pizza/funil
+     com dim e KPI/card fundem SEMPRE (antes: KPI mostrava só a 1ª perna);
+     goalLine/businessDayRef propagados pelo branch. limitCategories ganha
+     rankKey (top-N pelo total da categoria no pivot). Fix: export/paginação
+     de registros passavam sem o catálogo (predicado de sub nunca aplicado).
+     RPCs intocados. -->
 <!-- v1.27 (24/07/2026): §4.11.2 — a IA LÊ melhor o estado: `copy_of` (cópia de
      widget por delta, resolvida em normalizeImportRaw — key nova + key da
      origem; grid ausente empilha abaixo do fundo da aba), `baseWidgets` também
@@ -904,19 +917,65 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
 - **Conviver (toggle `settings.coexistSubSources`):** marcar uma sub como
   "conviver" (com a pai também selecionada), ou selecionar 2+ subs da mesma pai,
   gera **pernas EXTRAS** — no caminho agregado, cada fonte de linha vira uma
-  série própria (fonte como dimensão líder), calculada por recursão em
-  `runWidget` (filtro + data + membro próprios). O usuário assume que os
-  conjuntos são disjuntos. **Para restringir a PAI sem esvaziar a sub** (ex.:
-  pai só "Desqualificado" × sub "Clientes Lite"), o filtro do widget precisa
-  ter a PAI como fonte-alvo (`WidgetFilter.sources = [pai]`): filtros globais
-  (sem alvo) valem para TODAS as pernas e cairiam também sobre a sub. KPI/card/
-  "Agrupar período" e o modo lista ficam no **absorver** (a perna extra não vira
-  série nesses tipos) — limitação v1.
+  perna própria, calculada por recursão em `runWidget` (filtro + data + membro
+  próprios). O usuário assume que os conjuntos são disjuntos. **Para
+  restringir a PAI sem esvaziar a sub** (ex.: pai só "Desqualificado" × sub
+  "Clientes Lite"), o filtro do widget precisa ter a PAI como fonte-alvo
+  (`WidgetFilter.sources = [pai]`): filtros globais (sem alvo) valem para
+  TODAS as pernas e cairiam também sobre a sub. "Agrupar período" e o modo
+  lista ficam no **absorver** (a perna extra não vira série nesses tipos) —
+  limitação v1.
+- **Exibição das pernas (`settings.subSeriesMode`, 24/07/2026):** como o
+  branch multi-perna apresenta as pernas — seletor "Exibição das sub-bases" no
+  builder (seção Bases), visível só quando há pernas extras num visual que as
+  plota (barra/barra_horizontal/linha/tabela).
+  - **"stacked"** (ausente = default) e **"grouped"**: o engine mantém a fonte
+    como dimensão LÍDER (`dim_1` = "Base", dims reais deslocadas) e carimba
+    `WidgetData.subSeries.mode`; o CHART pivota (`buildSubSeriesPivot`,
+    `lib/widgets/sub-series.ts`): categorias = `dim_2` (a dimensão real), uma
+    série sintética por (sub-base × métrica) — empilhadas (stack POR métrica)
+    ou lado a lado — com legenda pelos rótulos das subs, `keyMap` p/ a
+    formatação resolver a métrica subjacente e `__cat_total:<metric>` p/ o
+    top-N/ordenação ranquearem a CATEGORIA inteira (`limitCategories` ganhou o
+    param `rankKey`). Tabela agregada e CSV "dados exibidos" seguem as linhas
+    originais (coluna "Base"). Cores por categoria/condicional por coluna não
+    se aplicam no pivot (cor é por série).
+  - **"total"**: o engine funde as linhas das pernas por tupla de dims — SEM a
+    dim "Base" — com a semântica do Total geral (`foldRowGroup`,
+    `lib/widgets/bucket-merge.ts`): sum/count somam, min/max reduzem,
+    calculadas REAVALIAM a fórmula original sobre a basis fundida (razões
+    exatas), monetárias fundem `__money` e replotam; `__cmp` soma os não-nulos
+    (aproximação, como o "Outros") e `__goal` NUNCA soma (é a mesma meta
+    repetida por perna). Tabela/CSV perdem a coluna "Base" automaticamente.
+  - **Forced total:** pizza/funil com ≥1 dim e KPI/card fundem SEMPRE (uma
+    fatia/valor por categoria — antes a pizza gerava uma fatia por sub×categoria
+    e o KPI simples mostrava só a 1ª perna). Subs não-disjuntas contam em
+    dobro no total (mesma ressalva do conviver).
+- **Operando escopado em fonte-IRMÃ é ZERADO por perna (24/07/2026):** a
+  consulta auxiliar de um operando `agg:…@fonte` roda independente do universo
+  da perna (perna SÓ da fonte do escopo — §4.1), então uma fórmula
+  `count@subA + count@subB` repetiria o TOTAL global em toda perna (o bug do
+  CSV 67/67 do "Fonte SQL"). Antes de recursar, o branch multi-perna zera na
+  fórmula (métricas E defs 'calculado_agg' aninhadas —
+  `zeroSiblingScopedOperands`/`zeroSiblingScopesInFields`,
+  `lib/widgets/calc-metrics.ts`) os operandos cujo escopo é OUTRA perna de
+  linha do mesmo widget: sum/count → literal 0 (identidade aditiva); avg →
+  `(0/0)` = null (média de irmã ausente nunca vira 0 falso); min/max ficam (já
+  avaliam null). O escopo da PRÓPRIA perna permanece. Depois, cada linha da
+  perna recebe backfill `0` nas chaves de basis das irmãs
+  (`siblingScopedBasisKeys`) — o meta da métrica carrega a fórmula ORIGINAL, e
+  o re-eval client-side (células/subtotais) bate com a perna enquanto o fold
+  entre pernas soma as contribuições complementares (Total geral exato p/
+  fórmulas aditivas). Limitação documentada: RAZÃO entre escopos irmãos numa
+  perna avalia null/0 — use o modo "total", que reavalia globalmente.
 - **Arquivos:** `lib/sources.ts` (resolvers + `planSourceLegs`),
-  `lib/widgets/engine.ts` (fonte efetiva + série por fonte), `record-list.ts`
-  (mesmo no modo lista), `lib/correspondences.ts` (`correspondenceMapForSources`),
-  UI em `components/configuracoes/sub-sources-manager.tsx` e o toggle no
-  `widget-builder.tsx`.
+  `lib/widgets/engine.ts` (fonte efetiva + branch multi-perna + merge "total"),
+  `lib/widgets/sub-series.ts` (pivot p/ o chart), `lib/widgets/bucket-merge.ts`
+  (`foldRowGroup`), `lib/widgets/calc-metrics.ts` (zeroing de irmãs),
+  `record-list.ts` (mesmo no modo lista), `lib/correspondences.ts`
+  (`correspondenceMapForSources`), UI em
+  `components/configuracoes/sub-sources-manager.tsx` e os controles (conviver +
+  "Exibição das sub-bases") no `widget-builder.tsx`.
 - **Ordem do coalesce dos unificados (20/07/2026):**
   `correspondenceMapForSources` ordena os refs com os `custom:` (ESPARSOS —
   só existem nas linhas do próprio record_type) ANTES das colunas do núcleo
@@ -1398,7 +1457,11 @@ principalmente — para mantenedores humanos.
     TAMBÉM para widget que nem selecionou a sub (mesmas linhas, mesmo
     `record_type`). Nunca passe `buildCorrespondenceMap` (união global) a uma
     consulta — ele é só das opções de bucket. `AvailableField.unifiedMembers`
-    (por `record_type`) é RAIZ-primeiro pelo mesmo motivo. Ver §4.8.
+    (por `record_type`) é RAIZ-primeiro pelo mesmo motivo. Os MODOS de exibição
+    das pernas (`settings.subSeriesMode` — empilhado/total/lado a lado) e o
+    zeroing de operandos escopados em fonte-irmã também se resolvem no
+    ENGINE/chart (`zeroSiblingScopedOperands`, `foldRowGroup`,
+    `lib/widgets/sub-series.ts`) — nunca nos RPCs. Ver §4.8.
 
 11. **Datas são strings no fuso de Brasília.** Valores **datetime** ingeridos de
     fonte com `data_sources.timezone` configurado (0079) são convertidos para

@@ -1,4 +1,7 @@
-// Versão: 1.11 | Data: 23/07/2026
+// Versão: 1.12 | Data: 24/07/2026
+// v1.12 (24/07/2026): WidgetSettings.subSeriesMode (exibição das pernas de
+// sub-base: stacked default | total | grouped) e WidgetData.subSeries
+// (marcador p/ o chart pivotar as pernas em séries). Ver §4.8 da arquitetura.
 // v1.11 (23/07/2026): FieldFilterSettings.valueScope — escopo do VALOR do
 // "Filtro por campo": "all" = compartilhado entre usuários (célula __ff__ de
 // dashboard_table_cells); ausente/"user" = por usuário (lastFieldFilters).
@@ -1005,6 +1008,14 @@ export type WidgetSettings = KpiSettings &
     // (padrão, sem duplicação). Ver planSourceLegs (lib/sources.ts) e
     // lib/widgets/engine.ts. O usuário assume conjuntos disjuntos ao marcar.
     coexistSubSources?: SourceKey[];
+    // Exibição das sub-bases em pernas múltiplas (24/07/2026): como o branch
+    // multi-perna do engine apresenta as pernas. "stacked" (ausente = default) e
+    // "grouped" mantêm a Base como dimensão líder e o gráfico pivota as pernas
+    // em séries (empilhadas/lado a lado); "total" funde as pernas por tupla no
+    // ENGINE (soma; calculadas reavaliam sobre a basis fundida) e a dimensão
+    // "Base" some. Sem pernas extras, ignorado. Pizza/funil com dimensão e
+    // KPI/card sempre fundem ("total" forçado). Ver docs/arquitetura.md §4.8.
+    subSeriesMode?: "stacked" | "total" | "grouped";
     // Dimensões dinâmicas: o widget cresce p/ caber o conteúdo, sem encolher
     // abaixo do tamanho configurado (mínimo). Independente por eixo. Ausente =
     // desligado. O tamanho inflado é só de renderização, nunca é persistido
@@ -1246,6 +1257,12 @@ export interface WidgetData {
     color?: string;
     money?: boolean;
   };
+  // Pernas de sub-base APRESENTADAS como séries (24/07/2026): presente só
+  // quando o branch multi-perna emitiu a Base como dimensão líder (modos
+  // "stacked"/"grouped" de WidgetSettings.subSeriesMode) — o gráfico pivota
+  // dim_1 em séries (lib/widgets/sub-series.ts). Modo "total" nunca o emite
+  // (as pernas já saem fundidas, sem dimensão "Base").
+  subSeries?: { mode: "stacked" | "grouped" };
   // Alinhamento por dia útil ATIVO neste resultado (businessDayAlign): N é o
   // dia útil de CORTE das pernas mensais — único, compartilhado por todos os
   // meses comparados (o mesmo N da goalLine "pace"). `date` é o dia (ISO
