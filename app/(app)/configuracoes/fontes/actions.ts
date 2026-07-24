@@ -18,12 +18,22 @@
 
 import { revalidatePath } from "next/cache";
 
+import { redirect } from "next/navigation";
+
 import { requireRole } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/records/slug";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
 import type { WidgetFilter } from "@/lib/widgets/types";
+
+// Guard de escrita da área Fontes: papel admin (como sempre) + o override
+// individual `deny` da área, que agora barra também a escrita (não só a page).
+async function requireFontesWrite(): Promise<void> {
+  await requireRole("admin");
+  if (await isSettingsAreaDenied("fontes")) redirect("/");
+}
 
 // Operadores aceitos no predicado de uma sub-fonte (subconjunto de FilterOp com
 // tradução no RPC e no modo lista).
@@ -166,7 +176,7 @@ export async function createSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const { label, shortLabel, periodField, manualEntry, timezone, error } =
     readSourceForm(formData);
   if (error) return { ok: false, message: error };
@@ -229,7 +239,7 @@ export async function updateSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
   const { label, shortLabel, periodField, manualEntry, timezone, error } =
     readSourceForm(formData);
@@ -257,7 +267,7 @@ export async function deleteSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
   const supabase = await createClient();
 
@@ -301,7 +311,7 @@ export async function saveSourceLabels(
   _prev: SourceLabelsActionState,
   formData: FormData
 ): Promise<SourceLabelsActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const geral = cleanText(formData.get("geral"), 40);
   if (!geral) return { ok: false, message: "Informe o rótulo." };
 
@@ -386,7 +396,7 @@ export async function createSubSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const { label, shortLabel, periodField, parentKey, filter, error } =
     readSubSourceForm(formData);
   if (error) return { ok: false, message: error };
@@ -443,7 +453,7 @@ export async function updateSubSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
   const { label, shortLabel, periodField, filter, error } =
     readSubSourceForm(formData);
@@ -473,7 +483,7 @@ export async function deleteSubSource(
   _prev: SourceActionState,
   formData: FormData
 ): Promise<SourceActionState> {
-  await requireRole("admin");
+  await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
   const supabase = await createClient();
   const { error } = await supabase.from("sub_sources").delete().eq("key", key);

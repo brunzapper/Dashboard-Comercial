@@ -135,6 +135,12 @@ function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
+// TTL do link (0097): passado ⇒ expirado. Helper de módulo (não corpo do
+// render) para ler o relógio sem violar a regra de pureza dos componentes.
+function isSnapshotExpired(expiresAt: string | null): boolean {
+  return Boolean(expiresAt) && new Date(expiresAt as string).getTime() <= Date.now();
+}
+
 export default async function SnapshotPage({
   params,
   searchParams,
@@ -157,6 +163,11 @@ export default async function SnapshotPage({
   // 404 uniforme: inexistente e pausado são indistinguíveis para o visitante.
   if (!snapData || snapData.status !== "active") notFound();
   const snap = snapData as unknown as SnapshotRow;
+
+  // TTL opcional (0097): link expirado responde o MESMO 404 uniforme (o
+  // visitante não distingue de inexistente/pausado). expires_at NULL = sem
+  // expiração. Fail-closed: qualquer valor no passado barra o acesso.
+  if (isSnapshotExpired(snap.expires_at)) notFound();
 
   // Board na Lixeira (0087) não abre — nem pelo link público (arquivado
   // segue). Mesmo 404 uniforme. organization_id (0090): o service role

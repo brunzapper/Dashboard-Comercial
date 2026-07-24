@@ -10,6 +10,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import type { WidgetFilter } from "@/lib/widgets/types";
@@ -23,6 +24,7 @@ async function ensureAdmin(): Promise<string | null> {
   const s = await getSessionInfo();
   if (!s) return "Sessão expirada.";
   if (!s.roles.includes("admin")) return "Apenas administradores.";
+  if (await isSettingsAreaDenied("operacoes")) return "Acesso a esta área foi bloqueado.";
   return null;
 }
 

@@ -15,6 +15,36 @@ SSRF guard nos webhooks de saída, Owner guard triplo, nada sensível em
 isolamento entre organizações** (corrigidas) e itens de hardening (corrigidos ou
 documentados).
 
+## Follow-up 24/07/2026 — auditoria de comentários/docs
+
+Revisão focada em comentários e documentos que expunham fragilidades. Correções
+de código (todas estreitamentos ou aditivas — nenhuma concede acesso novo):
+
+- **Bypass de escrita em área NEGADA (corrigido).** O override `deny` de uma
+  área de Configurações agora barra também a ESCRITA das server actions, não só
+  a page — antes um admin explicitamente negado ainda escrevia chamando a action
+  direto. Helper `isSettingsAreaDenied` (`lib/auth/access.ts`) aplicado nos
+  guards de metas/operacoes/responsaveis/moedas/integracoes/fontes/usuarios.
+  `allow` continua NÃO concedendo escrita (segue o papel/RLS).
+- **Senha mínima 6 → 12** (`configuracoes/usuarios/actions.ts`): contas são
+  todas provisionadas por admin (sem signup público); mínimo forte reduz o risco
+  de credencial fraca. Combina com o Leaked Password Protection (pendente,
+  painel).
+- **TTL opcional de snapshots (0097).** `snapshots.expires_at` (nullable — NULL
+  preserva o "sem expiração" atual); o viewer público (`app/s/[token]`) responde
+  o mesmo 404 uniforme quando expirado (`isSnapshotExpired`, fail-closed). Sem
+  tocar o par `run_widget_query`/`_snapshot` (é metadado de acesso). Ajustável no
+  form de criação/edição do snapshot.
+
+**Não corrigido de propósito — PII de mock (`0051`/`0053`/`0058`).** Os nomes
+reais de vendedores nas migrações de mock são CHAVE DE JUNÇÃO com
+`responsibles.display_name` (populado pelo sync do Bitrix); anonimizá-los
+quebraria o vínculo em banco novo e a visibilidade por RLS — regressão. É dado
+da própria organização em repo privado, e o histórico do git reteria os nomes de
+qualquer forma. Se o repo for tornar-se público: refatorar o vínculo do mock
+para ID (em vez de nome) + purgar o histórico (git-filter-repo/BFG) — esforço
+deliberado e testado, não um sed apressado.
+
 ## Corrigido nesta entrega
 
 ### Isolamento entre organizações (crítico)
@@ -71,8 +101,12 @@ documentados).
 | **Leaked Password Protection** desabilitado | Ativar no painel Supabase → Auth → Password (checa HaveIBeenPwned) | Média — 1 clique |
 | **Rate limiting** ausente (login, `/s/[token]`, `api/ingest`, ticks) | Requer Upstash/edge; avaliar `@upstash/ratelimit` no login e no ingest | Média |
 | **Extensões `unaccent`/`pg_net` em `public`** | Mover para schema `extensions` (`pg_net` é gerenciado pelo Supabase — baixa prioridade) | Baixa |
-| **Snapshots sem TTL** | Só revogação manual por status; avaliar `expires_at` opcional | Baixa |
 | **Sem CI** | Workflow com `typecheck` + `lint` + `npm audit` no push | Processo |
+
+> Resolvidos no follow-up 24/07/2026 (ver seção acima): **Snapshots sem TTL**
+> (agora `expires_at` opcional) e **senha fraca** (`MIN_PASSWORD` 6 → 12). O
+> **Leaked Password Protection** segue pendente (1 clique no painel) e o **rate
+> limiting** segue como item de edge/infra.
 
 ## Avisos residuais do linter (por design — não corrigir)
 

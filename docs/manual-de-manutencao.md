@@ -390,10 +390,11 @@ fonte no widget se precisar do mês.
   de outra org é trabalho futuro (credenciais por org).
 - **Acessos**: por board no ⋮ → Acesso (funções + pessoas Ver/Editar/
   Bloqueado); matriz central em Configurações → Acessos (áreas allow/deny,
-  bases deny, boards). Limitação documentada: allow de ÁREA concede a
-  tela; escrita dentro dela segue o papel (RLS). Deny de área esconde
-  aba/page; as actions de escrita seguem gated por papel (um admin negado
-  ainda escreveria via chamada direta — deny mira quem não é admin).
+  bases deny, boards). Semântica: allow de ÁREA concede só a TELA; a escrita
+  dentro dela segue o papel (RLS + gate da action). Deny de área esconde
+  aba/page E barra a escrita das server actions (`isSettingsAreaDenied` nos
+  guards de metas/operacoes/responsaveis/moedas/integracoes/fontes/usuarios) —
+  um admin negado não escreve nem chamando a action direto.
 - **Escopo de bases do board** (⋮ → Bases) é OFERTA (listas menores), não
   autorização — para PRIVAR use o deny de base por usuário.
 

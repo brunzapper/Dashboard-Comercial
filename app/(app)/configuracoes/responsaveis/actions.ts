@@ -9,6 +9,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,7 +20,9 @@ export interface ResponsibleState {
 
 async function ensureAdmin(): Promise<boolean> {
   const s = await getSessionInfo();
-  return !!s && s.roles.includes("admin");
+  if (!s || !s.roles.includes("admin")) return false;
+  // Override individual `deny` da área barra também a escrita (não só a page).
+  return !(await isSettingsAreaDenied("responsaveis"));
 }
 
 export async function createResponsible(

@@ -18,6 +18,7 @@
 import { revalidatePath } from "next/cache";
 
 import { getSessionInfo, type SessionInfo } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrg } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -77,11 +78,16 @@ async function ensureManageUsers(): Promise<SessionInfo | null> {
   if (!session || !session.permissions.includes("manage_users_roles")) {
     return null;
   }
+  // Override individual `deny` da área de Usuários barra também a escrita.
+  if (await isSettingsAreaDenied("usuarios")) return null;
   return session;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 6;
+// Mínimo forte para contas administrativas (sem signup público — todas as
+// contas são provisionadas aqui). Combinado com o Leaked Password Protection
+// do painel (HaveIBeenPwned), reduz o risco de credencial fraca/vazada.
+const MIN_PASSWORD = 12;
 // Duração usada como "desativado" — ~100 anos de ban (soft-disable do Supabase).
 const BAN_FOREVER = "876000h";
 

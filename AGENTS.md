@@ -232,8 +232,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (0088/0094):** boards → helpers `auth_board_visible/editable/manageable`
   (blocked vence papel; view/edit concede; dono/admin imunes; pages só
   refletem canEdit). Áreas de Configurações → `AREA_GATES` +
-  `requireSettingsArea` (`lib/auth/access.ts`; deny vence tudo, allow vence o
-  papel; escrita segue o papel). Bases negadas → RLS de
+  `requireSettingsArea` (page) / `isSettingsAreaDenied` (escrita)
+  (`lib/auth/access.ts`; deny vence tudo — barra page E escrita das actions;
+  allow vence o papel só p/ VER a page, nunca concede escrita, que segue o
+  papel). Bases negadas → RLS de
   `data_sources`/`sub_sources`/`records` (pickers herdam via loadSources).
   Escopo de BASES por board (`settings.sourceScope`, ⋮ → Bases) é OFERTA,
   nunca autorização: catálogo efetivo via `applySourceScope`/

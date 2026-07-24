@@ -42,6 +42,9 @@ export interface SnapshotRow {
   // período de todos os widgets no viewer. null = todo o período.
   default_period: SavedPeriod | null;
   status: SnapshotStatus;
+  // TTL opcional do link público (0097): ISO timestamptz ou null (sem
+  // expiração). No passado ⇒ o viewer responde 404.
+  expires_at: string | null;
   config: SnapshotConfig;
   last_refreshed_at: string | null;
   last_refresh_error: string | null;
@@ -54,7 +57,7 @@ export interface SnapshotRow {
 
 // Colunas seguras p/ listagens de gestão (sem config, que pode ser grande).
 export const SNAPSHOT_LIST_COLS =
-  "id, dashboard_id, tab_id, name, allowed_responsible_ids, allowed_operation_ids, allowed_sources, allow_quick_filters, allow_widget_filters, refresh_mode, refresh_time, refresh_weekday, next_refresh_at, default_period, status, last_refreshed_at, last_refresh_error, last_accessed_at, access_count, created_by, created_at, updated_at";
+  "id, dashboard_id, tab_id, name, allowed_responsible_ids, allowed_operation_ids, allowed_sources, allow_quick_filters, allow_widget_filters, refresh_mode, refresh_time, refresh_weekday, next_refresh_at, default_period, status, expires_at, last_refreshed_at, last_refresh_error, last_accessed_at, access_count, created_by, created_at, updated_at";
 
 /** Item de listagem (gestão): SnapshotRow sem o config. */
 export type SnapshotListItem = Omit<SnapshotRow, "config">;
