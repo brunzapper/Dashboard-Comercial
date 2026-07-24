@@ -1,4 +1,12 @@
-// Versão: 1.2 | Data: 23/07/2026
+// Versão: 1.3 | Data: 24/07/2026
+// v1.3 (24/07/2026): bloco "appearance" corrigido/alinhado a AppearanceSettings
+//   (lib/widgets/types.ts): removido o sub-objeto "chart" (inexistente — tudo é
+//   plano em appearance), enabled→show em dataLabels/legend, forma real de
+//   conditional.rules (id + style{text,fill,bold,icon}), e documentadas as
+//   chaves de COR (seriesColors, categoryColors, colorByCategory, palette,
+//   sliceColors) + dataLabels.mode ("detailed"|"total") — a IA não sabia editar
+//   cores porque as chaves nunca eram mencionadas (o passthrough gravava chaves
+//   inventadas, inertes no render).
 // v1.2 (23/07/2026): regras 12-14 (eixo de tempo sem dateAgg; resultCurrency
 //   só p/ converter; reuso de Sub-bases existentes + escopo @sub ↔ sources) —
 //   respostas aos erros observados nos primeiros dashboards gerados por IA.
@@ -216,14 +224,35 @@ barra_horizontal, linha, pizza, funil, kpi, calculado.
   "coexistSubSources": false,
   "subSeriesMode": "stacked",                // 2+ sub-bases no widget: stacked (empilhado, default) | total (somado, some a coluna Base) | grouped (lado a lado)
   "autoSize": { "width": false, "height": false },
-  "appearance": {                            // aparência (tudo opcional)
-    "decimals": 0,
-    "chart": { "palette": "design", "stacked": false,
-               "categoryLimit": { "n": 8, "others": true },
-               "dataLabels": { "enabled": true, "format": "value" },
-               "legend": { "enabled": true } },
-    "conditional": { "rules": [ { "target": "metric_1", "op": "lt", "value": 0.2,
-                                  "scope": "cell", "color": "#dc2626", "bold": true } ] }
+  "appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
+    "decimals": 0,                           // casas decimais (tabelas, Card, rótulos, tooltip)
+    // gráficos (barra / barra_horizontal / linha):
+    "seriesColors": { "metric_1": "#2563eb" },   // cor POR MÉTRICA/série (chave = metric_<n>, na ordem das métricas)
+    "categoryColors": { "Instagram": { "fill": "#16a34a", "text": "#166534" } },
+                                             // cor POR BARRA (série única): chave = NOME exibido da categoria;
+                                             // "fill" = cor da barra, "text" = cor do rótulo de dados
+    "colorByCategory": true,                 // série única: cada barra pega uma cor da paleta (categoryColors vence)
+    "palette": "design",                     // paleta nomeada (pizza/funil e colorByCategory)
+    "stacked": true,                         // 2+ métricas no widget "barra": empilha num único stack
+    "chartBackground": "#0b1220",            // fundo do gráfico
+    "fillMode": "solid",                     // "solid" | "gradient"
+    "categoryLimit": { "n": 8, "others": true },  // Top-N de categorias + "Outros"
+    "dataLabels": { "show": true, "position": "top", "format": "value",
+                    "color": "#0f172a", "mode": "detailed" },
+                                             // position: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|"inside"
+                                             // format: "value" | "percent" | "both"
+                                             // mode (SÓ barras empilhadas): "detailed" (um rótulo por segmento, default)
+                                             //   | "total" (um único rótulo com a SOMA da barra; detalhe fica na tooltip)
+    "legend": { "show": true, "color": "#334155" },  // legenda das séries
+    // pizza / funil:
+    "sliceColors": { "0": "#2563eb", "1": "#f59e0b" },  // cor por fatia (índice como string) — sobrepõe a paleta
+    // formatação condicional (tabelas, listas, Card, gráficos):
+    "conditional": { "rules": [ { "id": "cr_1", "target": "metric_1", "op": "lt", "value": 0.2,
+                                  "scope": "cell",
+                                  "style": { "text": "#dc2626", "fill": "#fee2e2", "bold": true } } ],
+                     "scales": [ { "id": "cs_1", "target": "metric_1", "min": "#fee2e2", "max": "#dcfce7" } ] }
+                                             // rule.op: gt|gte|lt|lte|eq|neq|between|contains|empty|not_empty|var_up|var_down
+                                             // rule.style: { "text", "fill", "bold", "icon": "up"|"down"|"dot"|"warn" }
   }
 }
 Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
@@ -306,7 +335,9 @@ Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
       "grid_position": { "x": 0, "y": 4, "w": 8, "h": 8 },
       "settings": { "tab": "geral",
         "periodWindow": { "options": ["3m","6m","12m"], "default": "6m" },
-        "goalLine": { "enabled": true, "metric": "mrr", "mode": "pace" } } }
+        "goalLine": { "enabled": true, "metric": "mrr", "mode": "pace" },
+        "appearance": { "seriesColors": { "metric_1": "#16a34a" },
+                        "dataLabels": { "show": true, "format": "value" } } } }
   ]
 }
 `;
