@@ -45,9 +45,16 @@ type Action = "load" | "turn" | "apply" | "undo" | "reset" | null;
 export function AiEditPanel({
   dashboardId,
   ai,
+  hideTrigger,
+  openSignal,
 }: {
   dashboardId: string;
   ai: { provider: string; model: string; hasKey: boolean } | null;
+  // Trigger externo (dropdown "Editar" da toolbar): esconde os botões inline
+  // da toolbar (o chip flutuante do estado recolhido permanece) e abre o
+  // painel quando `openSignal` incrementa (contador; 0 inicial não abre).
+  hideTrigger?: boolean;
+  openSignal?: number;
 }) {
   const router = useRouter();
   const [panel, setPanel] = useState<PanelState>("closed");
@@ -103,6 +110,15 @@ export function AiEditPanel({
     }
   }
 
+  // Abertura pelo trigger externo: idempotente (abrir já-aberto é no-op) e
+  // reabre a partir do estado recolhido.
+  useEffect(() => {
+    if (!openSignal) return; // 0/undefined inicial: não abre no mount
+    openPanel();
+    // openPanel é recriada por render; o sinal é a única dependência real.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSignal]);
+
   function sendTurn() {
     const text = message.trim();
     if (!text || busy) return;
@@ -125,6 +141,7 @@ export function AiEditPanel({
   }
 
   if (panel === "closed") {
+    if (hideTrigger) return null;
     return (
       <Button variant="outline" size="sm" onClick={openPanel}>
         <Wand2 className="size-4" /> Editar com IA
@@ -135,9 +152,11 @@ export function AiEditPanel({
   if (panel === "collapsed") {
     return (
       <>
-        <Button variant="outline" size="sm" onClick={() => setPanel("open")}>
-          <Wand2 className="size-4" /> Editar com IA
-        </Button>
+        {hideTrigger ? null : (
+          <Button variant="outline" size="sm" onClick={() => setPanel("open")}>
+            <Wand2 className="size-4" /> Editar com IA
+          </Button>
+        )}
         <Button
           className="fixed right-4 bottom-4 z-40 rounded-full shadow-lg"
           onClick={() => setPanel("open")}
@@ -152,9 +171,15 @@ export function AiEditPanel({
 
   return (
     <>
-      <Button variant="default" size="sm" onClick={() => setPanel("collapsed")}>
-        <Wand2 className="size-4" /> Editar com IA
-      </Button>
+      {hideTrigger ? null : (
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => setPanel("collapsed")}
+        >
+          <Wand2 className="size-4" /> Editar com IA
+        </Button>
+      )}
       <div className="bg-background fixed inset-y-0 right-0 z-40 flex w-[400px] max-w-[90vw] flex-col gap-3 border-l p-4 shadow-lg">
         <div className="flex items-start justify-between gap-2">
           <div>
