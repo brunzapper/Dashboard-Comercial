@@ -1,4 +1,9 @@
-<!-- Versão: 1.14 | Data: 23/07/2026 -->
+<!-- Versão: 1.15 | Data: 24/07/2026 -->
+<!-- v1.15 (24/07/2026): painel "Editar com IA" no dashboard (0098) — sessão e
+     Desfazer persistidos em dashboard_ai_sessions (linha por usuário×board,
+     sobrescrita in place, cascade no delete do board — SEM job de limpeza);
+     maxDuration=300 também na página do dashboard; linhas novas no
+     troubleshooting. -->
 <!-- v1.14 (23/07/2026): troubleshooting da IA de dashboards — KEY_ENCRYPTION_KEY,
      truncamento/timeout de turno, Desfazer edição, preset de fábrica
      re-identificado como import:. -->
@@ -420,8 +425,9 @@ fonte no widget se precisar do mês.
 | Remover os mocks de vez | — | `supabase/apply/undo-mock-reuniao.sql` (única forma prevista) |
 | Salvar chave de IA falha ("Não foi possível cifrar a chave") | `KEY_ENCRYPTION_KEY` ausente/inválida no ambiente (32 bytes base64) | Configure na Vercel (Production+Preview+Development, MESMO valor) e refaça o deploy; NUNCA troque o valor depois (invalida os ciphertexts já gravados) |
 | Conversa de IA aborta com "resposta cortada pelo limite de tokens" | Dashboard grande demais para um turno (o modo Editar aceita resposta parcial, mas "Criar a partir de" ecoa o estado inteiro) | Peça mudanças menores/mais específicas por turno; em último caso edite por partes (widget a widget) |
-| Turno da IA demorou e estourou o tempo | Provedor lento + laço de correção (timeout 120s/chamada, orçamento ~240s; Home tem `maxDuration=300`) | Reenvie o pedido (turnos são idempotentes — a identidade canônica converge); se recorrente, troque o modelo em Configurações → Integrações |
-| Edição da IA saiu errada | — | Botão "Desfazer edição da IA" na própria janela (restaura o snapshot pré-turno: widgets, settings e células); vale para o ÚLTIMO turno aplicado |
+| Turno da IA demorou e estourou o tempo | Provedor lento + laço de correção (timeout 120s/chamada, orçamento ~240s; Home E a página do dashboard têm `maxDuration=300`) | Reenvie o pedido (turnos são idempotentes — a identidade canônica converge); se recorrente, troque o modelo em Configurações → Integrações |
+| Edição da IA saiu errada | — | Botão "Desfazer edição da IA" (janela da Home ou painel do dashboard) restaura o snapshot pré-turno: widgets, settings e células; vale para o ÚLTIMO turno aplicado. No painel do dashboard o snapshot é PERSISTIDO (`dashboard_ai_sessions.undo_snapshot`) — sobrevive a F5; na Home continua só em memória |
+| Conversa do painel "Editar com IA" sumiu/não carrega | A sessão é por USUÁRIO×dashboard (`dashboard_ai_sessions`, 0098) — outro usuário/board não vê a mesma conversa; RLS own-row + org | Confirme usuário e board; a linha é sobrescrita in place e some com o board (cascade) — não há job de limpeza para criar/monitorar |
 | "Gerar presets" recriou um dashboard que eu editava por IA | Editar por IA re-identifica o board como `import:` — ele sai da gestão do preset de fábrica (comportamento esperado, avisado no seletor) | Use o board editado normalmente; o recriado é o preset de fábrica "puro" (pode arquivar/excluir um dos dois) |
 
 ## 6. Lacunas conhecidas e recomendações

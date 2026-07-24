@@ -266,4 +266,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `new` segue no `importDashboardJson`. Duplica só no APPLY (sem cópias órfãs).
   Snapshot pré-turno (`captureDashboardSnapshot`) é o Desfazer.
   Export/serialização nunca emite `preset`/`presetKey`/`connectors`/`kanban`.
-  RPCs de widget INTOCADOS.
+  RPCs de widget INTOCADOS. **Painel in-dashboard (24/07/2026):** o painel
+  "Editar com IA" do board (`ai-edit-panel.tsx` + `ai-session-actions.ts`)
+  persiste a sessão em `dashboard_ai_sessions` (0098 — turns/chat/pending/
+  undo_snapshot, uma linha por usuário×board; RLS own-row + org): o SERVIDOR é
+  a fonte de verdade dos turnos e a prévia/Aplicar lê o JSON do BANCO — nada
+  bruto viaja do cliente; identidade/permissões inalteradas (embrulha
+  `generateDashboardWithAi`/`applyGeneratedDashboard` sem tocá-los; gate
+  create_dashboards + dono/admin em toda action). O snapshot pré-turno segue
+  sendo o Desfazer, agora DB-backed; "Recomeçar" zera a conversa mas PRESERVA
+  o undo. O fluxo da Home (`ImportDashboardSheet`) segue client-state.

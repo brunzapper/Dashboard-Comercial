@@ -43,6 +43,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AiChatLog,
+  type AiChatEntry,
+} from "@/components/dashboards/ai-chat-log";
 import type { SourceDef } from "@/lib/sources";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
@@ -65,13 +69,6 @@ export interface AiBoardOption {
   id: string;
   name: string;
   factoryPreset: boolean;
-}
-
-interface ChatEntry {
-  kind: "user" | "ok" | "error";
-  text: string;
-  errors?: string[];
-  summary?: string[];
 }
 
 const MODE_LABELS: Record<AiDashboardMode, string> = {
@@ -97,7 +94,7 @@ export function ImportDashboardSheet({
   const [autoApply, setAutoApply] = useState(true);
 
   // Sessão de conversa (stateless no servidor: só os textos do usuário viajam).
-  const [chat, setChat] = useState<ChatEntry[]>([]);
+  const [chat, setChat] = useState<AiChatEntry[]>([]);
   const [turns, setTurns] = useState<string[]>([]);
   const [sessionTarget, setSessionTarget] = useState<{ id: string } | null>(
     null
@@ -404,48 +401,7 @@ export function ImportDashboardSheet({
 
               {aiReady ? (
                 <>
-                  {chat.length > 0 ? (
-                    <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md border bg-background/60 p-2">
-                      {chat.map((e, i) => (
-                        <div key={i} className="text-xs">
-                          {e.kind === "user" ? (
-                            <p>
-                              <span className="font-medium">Você:</span> {e.text}
-                            </p>
-                          ) : e.kind === "ok" ? (
-                            <div className="text-muted-foreground">
-                              <p className="text-green-700 dark:text-green-500">
-                                {e.text}
-                              </p>
-                              {e.summary && e.summary.length > 0 ? (
-                                <ul className="mt-1 list-disc pl-5">
-                                  {e.summary.map((s, j) => (
-                                    <li key={j}>{s}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <div className="text-destructive">
-                              <p>{e.text}</p>
-                              {e.errors && e.errors.length > 0 ? (
-                                <ul className="mt-1 max-h-32 list-disc overflow-y-auto pl-5">
-                                  {e.errors.map((err, j) => (
-                                    <li key={j}>{err}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {genPending ? (
-                        <p className="text-muted-foreground text-xs">
-                          Gerando com IA…
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  <AiChatLog entries={chat} busy={genPending} className="max-h-72" />
 
                   {pending ? (
                     <div className="flex flex-col gap-2 rounded-md border border-amber-400/60 bg-amber-50 p-2 text-xs dark:bg-amber-950/30">

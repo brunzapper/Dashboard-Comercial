@@ -70,6 +70,7 @@ import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
+import { AiEditPanel } from "./ai-edit-panel";
 import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import {
@@ -137,6 +138,8 @@ export function DashboardClient({
   availableForBuilder,
   canEdit,
   canManageFields = false,
+  canAiEdit = false,
+  aiEdit = null,
   currencyOptions,
   currencyRates = {},
   conversionPeriodById = {},
@@ -190,6 +193,10 @@ export function DashboardClient({
   availableForBuilder: AvailableField[];
   canEdit: boolean;
   canManageFields?: boolean;
+  // Painel "Editar com IA" (dono/admin + create_dashboards; page decide) e a
+  // config pública do provedor da org do board (null = não configurado).
+  canAiEdit?: boolean;
+  aiEdit?: { provider: string; model: string; hasKey: boolean } | null;
   currencyOptions?: { value: string; label: string }[];
   currencyRates?: CurrencyRates;
   conversionPeriodById?: Record<string, { year: number; quarter: number }>;
@@ -818,6 +825,9 @@ export function DashboardClient({
                 </Button>
               }
             />
+            {canAiEdit ? (
+              <AiEditPanel dashboardId={dashboardId} ai={aiEdit ?? null} />
+            ) : null}
             <DashboardMenu
               dashboardId={dashboardId}
               settings={settings}

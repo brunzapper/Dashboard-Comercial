@@ -1,4 +1,8 @@
-<!-- Versão: 2.1 | Data: 23/07/2026 -->
+<!-- Versão: 2.2 | Data: 24/07/2026 -->
+<!-- v2.2 (24/07/2026): 0098 — dashboard_ai_sessions (sessão persistida do
+     painel "Editar com IA" no dashboard: turnos/chat/prévia/snapshot do
+     Desfazer por usuário×board; RLS linha própria + org; trigger de stamp
+     derivando a org do board). Histórico ganha 0095/0097 (faltavam). -->
 <!-- v2.1 (23/07/2026): row_key reservado __ff__ em dashboard_table_cells —
      valor compartilhado do "Filtro por campo" (settings.valueScope 'all'). -->
 <!-- v2.0 (23/07/2026): 0088–0094 — acesso por pessoa aos boards
@@ -303,6 +307,20 @@ Adicionadas na 0066: `parent_task_id` (subtarefas), `pinned`, `feed_position`,
 "Personalizar": exatamente um dono (`widget_id` XOR `board_id`) + `record_id`,
 `column_key`, `position`.
 
+**`dashboard_ai_sessions`** (0098) — sessão PERSISTIDA do painel "Editar com
+IA" dentro do dashboard: PK `(user_id, dashboard_id)` (uma linha por
+usuário×board, sobrescrita in place), `turns` jsonb (textos do usuário — o
+servidor é a fonte de verdade da conversa; caps no app: 30 guardados, 10 vão ao
+modelo), `chat` jsonb (log de exibição, cap 100), `pending` jsonb (prévia
+aguardando Aplicar com auto-aplicar OFF — `{json, summary[]}`), `undo_snapshot`
+jsonb (`DashboardSnapshot` pré-turno do último apply — o "Desfazer edição da
+IA", DB-backed) + `undo_saved_at`. `organization_id` com default Zapper +
+trigger de stamp que deriva a org do board (`dashboard_ai_sessions_set_org`).
+RLS: linha própria + gate de org (a manageability do board fica nas actions —
+`ai-session-actions.ts` — e as escritas reais no board já são muradas pela RLS
+de `dashboards`/`widgets`). Cascade no delete do board/usuário; sem cron de
+limpeza.
+
 ### 3.4 Snapshots (acesso público congelado)
 
 **`snapshots`** (0056) — metadados + config congelada: `dashboard_id`, `tab_id`,
@@ -420,6 +438,10 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 - **`trg_*_updated_at`** em ~28 tabelas → `set_updated_at` (padrão da 0001).
 - **`trg_records_reuniao_freeze`** (0051) em `records` → `enforce_reuniao_freeze`.
 - **`trg_tasks_lock`** (0063) e **`trg_tasks_global`** (0066) em `tasks`.
+- **Triggers de stamp de org** (0090; +0098): `trg_records_set_org`,
+  `trg_audit_log_set_org`, `trg_record_matches_set_org`,
+  `trg_entity_custom_values_set_org` e `trg_dashboard_ai_sessions_set_org`
+  (deriva do board) — cobrem os caminhos service-role sem carimbo explícito.
 
 ## 6. RLS — resumo do modelo
 
@@ -446,6 +468,10 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 - **`snapshots`/`snapshot_*`**: gestão só `authenticated` (dono do dashboard ou
   admin); **NENHUMA política `anon`**; escrita das cópias e EXECUTE das funções de
   snapshot só via service role.
+- **`dashboard_ai_sessions`** (0098): policy única — linha própria
+  (`user_id = auth.uid()`) + gate de org; `revoke` de `anon`. Dono/admin do
+  board é gate de ACTION, não de RLS (resolução de acesso a board continua só
+  nos helpers `auth_board_*`).
 - **Tabelas de configuração** (`field_definitions`, `currencies`, `match_rules`,
   correspondências...): leitura para autenticados; escrita exige
   `manage_field_definitions`.
@@ -457,7 +483,7 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0094)
+## 7. Histórico de migrações (0001–0098)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -557,7 +583,10 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0092 | org_roles_protections | `user_roles` confinada à própria org; papel `admin` só via org_admin (`auth_can_grant_admin`) |
 | 0093 | org_provisioning | `seed_org_defaults` (core defs por org) e `delete_organization` (GUC + cascade; org inicial recusada) — EXECUTE só service role |
 | 0094 | user_access_overrides | Overrides individuais (áreas de Configurações allow/deny; bases deny) + helpers `auth_denied_*`; recria data_sources/sub_sources/records select |
+| 0095 | security_hardening | `search_path = ''` nas funções que faltavam (linter) + EXECUTE dos helpers `auth_*` revogado de `anon` (grant explícito a `authenticated`/service role antes do revoke de PUBLIC) |
 | 0096 | ai_provider_config | Config de IA por ORG (provider/model/chave cifrada AES-GCM) p/ a geração DIRETA de dashboards via API (`lib/ai`). RLS SELECT só admin da org; escrita só service role. Não recria as RPCs |
+| 0097 | snapshot_expires_at | TTL opcional do link público: `snapshots.expires_at` (NULL = sem expiração); enforcement fail-closed no viewer (`app/s/[token]`), sem tocar RPCs/policies |
+| 0098 | dashboard_ai_sessions | Sessão persistida do painel "Editar com IA" no dashboard (turnos/chat/prévia/snapshot do Desfazer por usuário×board; RLS linha própria + org; trigger de stamp derivando a org do board) |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
