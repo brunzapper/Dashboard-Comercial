@@ -33,9 +33,25 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Clock, Pencil, Plus, Redo2, Spline, Undo2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Clock,
+  Pencil,
+  Plus,
+  Redo2,
+  Spline,
+  Undo2,
+  Wand2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -70,7 +86,7 @@ import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 import { DashboardGrid } from "./dashboard-grid";
 import type { ResponsibleOption } from "./charts/record-list-table";
 import { DashboardMenu } from "./dashboard-menu";
-import { AiEditPanel } from "./ai-edit-panel";
+import { AiEditPanel, type AiEditPanelHandle } from "./ai-edit-panel";
 import type { SnapshotPeriodCapture } from "./snapshots-panel";
 import { DashboardTabs } from "./dashboard-tabs";
 import {
@@ -228,6 +244,9 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+  // Handle do painel "Editar com IA": aberto pelo item do dropdown "Editar"
+  // (o painel fica montado com o trigger próprio escondido).
+  const aiPanelRef = useRef<AiEditPanelHandle | null>(null);
   // Modo "desenhar para criar" (Tabela Livre): armado pelo builder; o título
   // digitado lá viaja junto. O retângulo desenhado dimensiona widget E tabela.
   const [drawQuick, setDrawQuick] = useState<{ title: string | null } | null>(
@@ -785,17 +804,55 @@ export function DashboardClient({
         {canEdit ? (
           <div className="flex items-center gap-2">
             <HistoryButtons />
-            <Button
-              variant={editMode ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setEditMode((v) => !v);
-                setConnectMode(false); // conectar é um submodo da edição
-              }}
-            >
-              {editMode ? <Check className="size-4" /> : <Pencil className="size-4" />}
-              {editMode ? "Concluir" : "Editar layout"}
-            </Button>
+            {editMode ? (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => {
+                  setEditMode(false);
+                  setConnectMode(false); // conectar é um submodo da edição
+                }}
+              >
+                <Check className="size-4" /> Concluir
+              </Button>
+            ) : canAiEdit ? (
+              // Entrada única de edição: dropdown Manual (layout) / IA.
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Pencil className="size-4" /> Editar
+                    <ChevronDown className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setEditMode(true);
+                      setConnectMode(false);
+                    }}
+                  >
+                    <Pencil className="size-4" /> Manual (Layout)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => aiPanelRef.current?.open()}
+                  >
+                    <Wand2 className="size-4" /> IA
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              // Sem IA disponível, dropdown de 1 item é fricção — botão direto.
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditMode(true);
+                  setConnectMode(false);
+                }}
+              >
+                <Pencil className="size-4" /> Editar layout
+              </Button>
+            )}
             {editMode ? (
               <Button
                 variant={connectMode ? "default" : "outline"}
@@ -826,7 +883,12 @@ export function DashboardClient({
               }
             />
             {canAiEdit ? (
-              <AiEditPanel dashboardId={dashboardId} ai={aiEdit ?? null} />
+              <AiEditPanel
+                dashboardId={dashboardId}
+                ai={aiEdit ?? null}
+                hideTrigger
+                ref={aiPanelRef}
+              />
             ) : null}
             <DashboardMenu
               dashboardId={dashboardId}

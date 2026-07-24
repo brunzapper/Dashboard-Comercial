@@ -841,6 +841,12 @@ export interface AppearanceSettings {
     position?: "inside" | "top" | "bottom";
     format?: "value" | "percent" | "both";
     color?: string;
+    // Barras EMPILHADAS (24/07/2026): "detailed" (default; um rótulo por
+    // segmento) | "total" (um único rótulo com a SOMA da barra no fim/topo do
+    // stack; o detalhe por segmento fica na tooltip, que em barras empilhadas
+    // sempre exibe também a linha "Total"). Sem stack, "total" = "detailed";
+    // `position` é ignorada no modo total (rótulo sempre fora da pilha).
+    mode?: "detailed" | "total";
   };
   legend?: { show?: boolean; color?: string }; // legenda do gráfico (séries)
   // --- pizza ---

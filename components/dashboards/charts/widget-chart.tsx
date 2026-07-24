@@ -1268,6 +1268,207 @@ export const WidgetChart = memo(function WidgetChart({
     })?.fill;
   };
 
+  // --- Soma da barra empilhada: modo "total" dos rótulos + linha "Total" da
+  // tooltip (24/07/2026). Stack efetivo com 2+ segmentos por barra: pivot de
+  // sub-bases empilhado (segmentos = sub-bases) ou stack clássico de métricas.
+  const stackSegs = pivot
+    ? pivot.series.filter((e) => e.metricKey === (metrics[0]?.key ?? "")).length
+    : metrics.length;
+  const stackedBars =
+    (pivotStacked || (!pivot && Boolean(ap.stacked))) && stackSegs >= 2;
+  // Soma da BARRA (linha do chartRows): pivot lê o total pré-computado
+  // (__cat_total:<métrica>, soma entre sub-bases); stack clássico soma as
+  // métricas da linha.
+  const rowStackTotal = (r: WidgetRow, metricKey: string): number | null => {
+    if (pivot) return numOrNull(r[subSeriesCatTotalKey(metricKey)]);
+    let sum: number | null = null;
+    for (const m of metrics) {
+      const n = numOrNull(r[m.key]);
+      if (n != null) sum = (sum ?? 0) + n;
+    }
+    return sum;
+  };
+  // Denominador do formato percentual no modo total: soma dos totais das
+  // barras plotadas (participação da barra no total geral exibido).
+  const grandStackTotal = (metricKey: string): number =>
+    chartRows.reduce(
+      (s, r) => s + (rowStackTotal(r as WidgetRow, metricKey) ?? 0),
+      0
+    );
+  const totalLabelMode =
+    Boolean(ap.dataLabels?.show) &&
+    (ap.dataLabels?.mode ?? "detailed") === "total" &&
+    stackedBars;
+  // Formatação da soma: no pivot, pela métrica do stack; no clássico (métricas
+  // somadas), pela 1ª métrica quando todas compartilham o mesmo formato
+  // (moeda/percentual/calculada) — formatos mistos caem no número neutro.
+  const classicTotalKey = ((): string | null => {
+    const first = metrics[0]?.key;
+    if (!first) return null;
+    const sig = (k: string): string =>
+      calcOf(k)
+        ? `calc:${calcCodeByKey[resolveKey(k)] ?? ""}`
+        : isMoneyKey(k)
+          ? `money:${seriesMoneyCode(k)}`
+          : `num:${percentModeOf(k) ?? ""}`;
+    return metrics.every((m) => sig(m.key) === sig(first)) ? first : null;
+  })();
+  const stackTotalValueText = (total: number, metricKey: string): string => {
+    const key = pivot ? metricKey : classicTotalKey;
+    return key ? moneyChartText(total, key) : fmt(total, apDecimals);
+  };
+  // Texto do rótulo de total (aplica dataLabels.format sobre a soma).
+  const totalLabelText = (total: number, metricKey: string): string => {
+    const dlf = ap.dataLabels?.format ?? "value";
+    const base = stackTotalValueText(total, metricKey);
+    if (dlf === "value") return base;
+    const denom = grandStackTotal(metricKey);
+    const pct = denom !== 0 ? formatPercent(total / denom, true) : null;
+    if (dlf === "percent") return pct ?? base;
+    return pct ? `${base} · ${pct}` : base;
+  };
+  // Rótulo do modo total: um único <text> com a soma, ancorado no segmento do
+  // TOPO do stack (content custom — formatter não dá acesso à linha; via index
+  // lemos o total da linha). `position` dos settings é ignorada aqui (a soma
+  // fica sempre FORA da pilha); segmento do topo nulo (sem geometria) fica sem
+  // rótulo naquela barra — limitação aceita.
+  const renderTotalLabel = (
+    props: unknown,
+    metricKey: string
+  ): React.ReactElement => {
+    const { x, y, width, height, index } = props as {
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      index?: number;
+    };
+    if (index == null || x == null || y == null || !chartRows[index])
+      return <g />;
+    const total = rowStackTotal(chartRows[index] as WidgetRow, metricKey);
+    if (total == null) return <g />;
+    const text = totalLabelText(total, metricKey);
+    const fill = ap.dataLabels?.color ?? "var(--foreground)";
+    if (horizontal) {
+      return (
+        <text
+          x={x + (width ?? 0) + 4}
+          y={y + (height ?? 0) / 2 + 3}
+          fontSize={chartPx}
+          fill={fill}
+        >
+          {text}
+        </text>
+      );
+    }
+    return (
+      <text
+        x={x + (width ?? 0) / 2}
+        y={y - 4}
+        textAnchor="middle"
+        fontSize={chartPx}
+        fill={fill}
+      >
+        {text}
+      </text>
+    );
+  };
+  // Tooltip das barras EMPILHADAS: mesmas linhas por segmento do formatter
+  // clássico (chartTooltipText preserva moeda/percentual e a variação) + linha
+  // final "Total" com a soma da barra — o hover mostra o detalhado E a soma.
+  // Meta (__goal) e fantasmas (__cmp) têm linha própria e ficam fora da soma.
+  const renderStackedTooltip = (p: unknown): React.ReactElement | null => {
+    const { active, payload, label } = p as {
+      active?: boolean;
+      payload?: {
+        dataKey?: unknown;
+        name?: unknown;
+        value?: unknown;
+        color?: string;
+        payload?: unknown;
+      }[];
+      label?: unknown;
+    };
+    if (!active || !payload || payload.length === 0) return null;
+    const items = payload.filter((it) => it && it.value != null);
+    if (items.length === 0) return null;
+    const isSeg = (dk: string): boolean =>
+      dk !== "__goal" && !dk.endsWith("__cmp");
+    const segs = items.filter((it) => isSeg(String(it.dataKey ?? "")));
+    const row = (segs[0]?.payload ?? items[0]?.payload) as
+      | WidgetRow
+      | undefined;
+    const totals: { label: string; text: string }[] = [];
+    if (row) {
+      if (pivot) {
+        // Um total por métrica com 2+ segmentos presentes no hover.
+        for (const m of metrics) {
+          const n = segs.filter(
+            (it) =>
+              pivot.series.find((e) => e.dataKey === it.dataKey)?.metricKey ===
+              m.key
+          ).length;
+          if (n < 2) continue;
+          const t = rowStackTotal(row, m.key);
+          if (t == null) continue;
+          totals.push({
+            label: metrics.length > 1 ? `Total · ${m.label}` : "Total",
+            text: stackTotalValueText(t, m.key),
+          });
+        }
+      } else if (segs.length >= 2) {
+        const t = rowStackTotal(row, metrics[0]?.key ?? "");
+        if (t != null)
+          totals.push({
+            label: "Total",
+            text: stackTotalValueText(t, metrics[0]?.key ?? ""),
+          });
+      }
+    }
+    return (
+      <div
+        className="bg-background rounded-md border p-2 shadow-md"
+        style={{ fontSize: chartPx }}
+      >
+        {label != null && label !== "" ? (
+          <p className="mb-1 font-medium">{String(label)}</p>
+        ) : null}
+        <ul className="space-y-0.5">
+          {items.map((it, i) => (
+            <li key={i} className="flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-[2px]"
+                style={{ background: it.color ?? "var(--muted-foreground)" }}
+              />
+              <span className="text-muted-foreground">
+                {String(it.name ?? "")}:
+              </span>
+              <span>
+                {chartTooltipText(
+                  it.value,
+                  String(it.dataKey ?? ""),
+                  it.payload
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {totals.length > 0 ? (
+          <div className="mt-1 space-y-0.5 border-t pt-1">
+            {totals.map((t, i) => (
+              <p key={i} className="flex items-center gap-1.5 font-medium">
+                <span aria-hidden className="size-2 shrink-0" />
+                <span className="text-muted-foreground">{t.label}:</span>
+                <span>{t.text}</span>
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   // Com linha de meta ativa, o container vira ComposedChart (o BarChart do
   // Recharts não desenha <Line>); sem meta, BarChart original — troca
   // condicional p/ zero risco de regressão nos widgets existentes.
@@ -1308,16 +1509,24 @@ export const WidgetChart = memo(function WidgetChart({
           ) : null}
         </>
       )}
-      <Tooltip
-        formatter={(v, _n, item) =>
-          chartTooltipText(
-            v,
-            String((item as { dataKey?: unknown })?.dataKey ?? ""),
-            (item as { payload?: unknown })?.payload
-          )
-        }
-        cursor={{ fill: "var(--muted)" }}
-      />
+      {stackedBars ? (
+        // Empilhadas: tooltip custom com a linha "Total" (soma da barra).
+        <Tooltip
+          content={renderStackedTooltip}
+          cursor={{ fill: "var(--muted)" }}
+        />
+      ) : (
+        <Tooltip
+          formatter={(v, _n, item) =>
+            chartTooltipText(
+              v,
+              String((item as { dataKey?: unknown })?.dataKey ?? ""),
+              (item as { payload?: unknown })?.payload
+            )
+          }
+          cursor={{ fill: "var(--muted)" }}
+        />
+      )}
       {showLegend ? <Legend wrapperStyle={legendStyle} /> : null}
       {ghost
         ? plotSeries.map((s) => (
@@ -1393,7 +1602,7 @@ export const WidgetChart = memo(function WidgetChart({
                   />
                 ))
               : null}
-            {ap.dataLabels?.show ? (
+            {ap.dataLabels?.show && !totalLabelMode ? (
               <LabelList
                 dataKey={s.dataKey}
                 position={
@@ -1408,6 +1617,12 @@ export const WidgetChart = memo(function WidgetChart({
                 formatter={(v: unknown) =>
                   dataLabelText(v, s.dataKey, seriesTotal(s.dataKey))
                 }
+              />
+            ) : null}
+            {totalLabelMode && s.lastInStack ? (
+              <LabelList
+                dataKey={s.dataKey}
+                content={(p) => renderTotalLabel(p, s.metricKey)}
               />
             ) : null}
             {cmp?.settings.chartLabels ? (

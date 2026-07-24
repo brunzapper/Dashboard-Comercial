@@ -1464,7 +1464,13 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
   métricas): Esquerda / Direita — cria gráfico combo com dois eixos.
 - **"Legenda de dados (rótulos de valores)"**: exibir valores + formato
   (Valor / Percentual / Valor + percentual) + posição (Barra: Acima/Dentro;
-  Linha: Acima/Abaixo; Pizza: Fora/Dentro) + cor do rótulo.
+  Linha: Acima/Abaixo; Pizza: Fora/Dentro) + cor do rótulo. Em Barra/Barra
+  horizontal há também o **modo para barras empilhadas**: "Detalhado (por
+  segmento)" (padrão — um rótulo por segmento) ou "Total da barra (soma)" —
+  um único rótulo com a soma no fim/topo da pilha (a posição é ignorada nesse
+  modo e o detalhe por segmento fica na dica de hover). Em barras empilhadas a
+  dica de hover sempre exibe, além do detalhado por segmento, a linha
+  **"Total"** com a soma da barra — nos dois modos.
 - **"Legenda do gráfico (séries)"**: exibir (padrão: ligada com 2+ séries; em
   Pizza a legenda de fatias vem ligada) + cor do texto.
 - Pizza/Funil: **paleta**, **ordenação das fatias**, **cor por fatia**.
