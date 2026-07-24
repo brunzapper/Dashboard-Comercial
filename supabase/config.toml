@@ -1,0 +1,24 @@
+# Versão: 1.0 | Data: 24/07/2026
+# Config MÍNIMA do stack local do Supabase CLI — usada SÓ por testes (job e2e
+# do CI e desenvolvimento local; ver docs/manual-de-manutencao.md §2.1). A
+# produção segue hosted-only (SQL aplicado à mão — supabase/README.md); nada
+# aqui afeta o projeto hospedado. Mantida enxuta de propósito: chaves com
+# nome estável entre versões do CLI; o resto fica nos defaults. `supabase
+# start` aplica supabase/migrations/0001..NNNN em ordem lexical (dependem só
+# de pgcrypto — pg_cron/vault ficam em supabase/apply/, fora do schema).
+project_id = "dashboard-comercial"
+
+[db]
+major_version = 17
+
+[studio]
+enabled = false
+
+[realtime]
+enabled = false
+
+[storage]
+enabled = false
+
+[analytics]
+enabled = false
