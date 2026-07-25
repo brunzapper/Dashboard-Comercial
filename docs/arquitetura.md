@@ -1,4 +1,12 @@
-<!-- Versão: 1.29 | Data: 25/07/2026 -->
+<!-- Versão: 1.30 | Data: 25/07/2026 -->
+<!-- v1.30 (25/07/2026): §4.12 — espaço de grid v2 (grade FINA: base 120 sem
+     margens, linha quadrada default, controle "Largura da coluna"; conversão
+     runtime normalizeGridSpace keyed em canvas.gridVersion + migração lazy
+     ensureFineGrid no write-path + runbook backfill-grid-v2.sql) e PÁGINAS de
+     widget (mescla settings.pages: host renderiza a página ativa, pager acima
+     do card, diálogo "Adicionar página?" no drop quase-em-cima, ⋮ Adicionar
+     página/Desfazer mescla). Invariantes 18 e 19. RPCs intocados. -->
+
 <!-- v1.29 (25/07/2026): §4.7 — "Linha divisória" vira visual_type próprio
      (linha_divisoria, 0100 — CHECK + backfill; settings.shape inalterado);
      identidade SÓ por isLineShapeWidget (braço legado forma+kind linha é
@@ -1403,6 +1411,79 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
 - `app/(app)/dashboards/[id]/page.tsx` exporta `maxDuration = 300` (as actions
   do painel rodam sob o segment config DESTA rota — espelho da Home).
 
+### 4.12 Espaço de grid v2 (grade fina) e Páginas de widget (25/07/2026)
+
+**Grade fina (espaço v2).** A célula do grid deixou de ser ancorada em 12
+colunas com margens de 12px e passou a `canvas.baseCols` (default 120) colunas
+SEM margens, com linha default QUADRADA (`rowHeight` ausente = largura da
+célula). Unidades de `grid_position`/`ShapeLine` ficaram 10× mais finas no X e
+4× no Y. Módulo canônico: `lib/widgets/grid-space.ts` (constantes + conversões
++ `normalizeGridSpace`). Como o legado convive:
+
+- **Detecção**: `dashboards.settings.canvas.gridVersion === 2` = espaço fino;
+  AUSENTE = legado (base 12). `createDashboard` carimba o gridVersion na
+  criação (board novo nasce fino, linha quadrada).
+- **Leitura (runtime, obrigatória)**: TODA leitura de `grid_position`/settings
+  crus passa por `normalizeGridSpace` antes de usar — page do dashboard,
+  `captureDashboardSnapshot`, `exportDashboardJson` (choke dos 3 chamadores),
+  refresh de snapshot e o viewer público (`app/s/[token]`). A runtime é
+  PERMANENTE no viewer: `snapshots.config` é um jsonb CONGELADO que nenhum
+  backfill de `widgets` alcança.
+- **Escrita (migração lazy)**: `ensureFineGrid(supabase, dashboardId)`
+  (actions.ts) roda no topo de TODO escritor de geometria (`saveLayout`,
+  `saveShapeLine`, `createWidget`, `updateDashboardSettings`,
+  `applyPresetDefinition`, merge/unmerge de páginas): lê os widgets ANTES do
+  carimbo CAS (`update … where gridVersion is null`, count) e converte as
+  linhas SÓ se venceu o CAS — a ordem leitura→carimbo→conversão torna a dupla
+  conversão impossível (toda escrita fina de terceiro exige um CAS-fail, que
+  exige um carimbo commitado, posterior à nossa leitura). Runbook:
+  `supabase/apply/backfill-grid-v2.sql` converte tudo de uma vez (e é o reparo
+  do caso residual "carimbo sem conversão" — crash no meio).
+- **Matemática**: `x·10 | y·4 | w·10−1 | h·4−1` (o −1 preserva o vão visual
+  que as margens davam); linha divisória escala fracionária sem o −1 e o bbox
+  é DERIVADO do traçado fino; `rowHeight` convertido sai EXPLÍCITO
+  (`(R+12)/4`, default 30 → 10.5) — sem ele o board migrado esticaria com a
+  viewport (o legado era px fixo). Board novo (sem canvas) fica no quadrado
+  responsivo.
+- **IA/import**: JSON SEM `canvas.gridVersion` segue validado nas unidades
+  legadas (12 colunas, defaults 6×8) e o preset sai CONVERTIDO do validador;
+  com carimbo, valida em unidades finas. Nos modos Editar/Criar-a-partir-de o
+  `normalizeImportRaw` injeta o canvas do ESTADO exportado sob o da IA
+  (`currentCanvas`) — sem o carimbo herdado, o delta fino da IA seria
+  re-escalado ×10. `instructions.ts` documenta as duas escalas (regra 8).
+  Clipboard de widget idem (`gridVersion` no payload; antigo é convertido na
+  leitura).
+
+**Páginas de widget (mescla).** Dois ou mais widgets dividindo o MESMO espaço,
+alternados por setinhas acima do card (`WidgetPager`). Vínculo:
+`settings.pages: string[]` no HOST (ids dos membros; host = página 1; ordem =
+2..N). Módulo puro: `lib/widgets/pages.ts`; UI: `widget-pages.tsx` +
+`dashboard-grid.tsx` + itens do ⋮ no `widget-card.tsx`.
+
+- Membros são linhas NORMAIS de `widgets` (grid_position preservado) ocultadas
+  de `gridWidgets` no grid (layout/persist/children/conectores/extensão do
+  canvas, tudo junto — o viewer de snapshot ganha de graça). A página ativa é
+  estado EFÊMERO (`pageIndexByHost`); trocar de página REMONTA o card
+  (`key={shown.id}`) e os widgets deferidos disparam o próprio fetch — a page
+  computa dados de TODOS os widgets (não filtra por aba/visibilidade), então
+  o dado da página oculta já chega nas props.
+- **Drop quase-em-cima** (`findMergeTarget` em `persist`): sobreposição ≥65%
+  da área do menor + tamanhos com |Δ| ≤ max(folga, 25%) ⇒ diálogo "Adicionar
+  página?". Confirmar chama `mergeWidgetPages`; cancelar DESFAZ o arraste
+  (patch otimista de volta à base — o banco nunca foi tocado). O arrastado
+  não pode já ser host; o alvo pode (vira +1 página).
+- **Actions**: `mergeWidgetPages` (valida elegibilidade/duplo-vínculo, força
+  `settings.tab` do membro = aba efetiva do host — o refresh de snapshot
+  congela POR ABA — e remove conectores com ponta no membro) e
+  `unmergeWidgetPages` (devolve membros via `findFreePosition` na aba do
+  host). `deleteWidget` lê settings ANTES do delete: host excluído devolve os
+  membros ao canvas; membro excluído sai do `pages` de quem o referencia.
+- **Serialização**: `pages` NUNCA sai no export/JSON de IA nem no clipboard
+  (ids não sobrevivem — mesma razão de connectors/kanban) e é PRESERVADA pelo
+  apply de edição (`applyPresetDefinition` re-injeta do settings existente).
+  `duplicateBoard` não precisa de nada (o `remapJsonIds` já troca os uuids).
+  `validate.ts` remove `pages` vindo por JSON com warning.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -1576,6 +1657,29 @@ principalmente — para mantenedores humanos.
     `records_select` (dados) — não filtre "na mão" em componente. Escopo de
     bases do board (`sourceScope`) é OFERTA, nunca autorização — não os
     confunda.
+
+18. **Espaço de grid v2: leitura normaliza, escrita converte antes (§4.12).**
+    Unidades de `grid_position`/`ShapeLine`/`canvas` dependem de
+    `settings.canvas.gridVersion` (2 = fino base-120; ausente = legado
+    base-12). TODA leitura de linha crua passa por `normalizeGridSpace`
+    (`lib/widgets/grid-space.ts`) e TODO escritor de geometria chama
+    `ensureFineGrid` ANTES de gravar (a ordem leitura→carimbo CAS→conversão é
+    o que impede a dupla conversão — não a mude). Um caminho novo que grave
+    posição sem o ensureFineGrid pode MISTURAR escalas no banco; um que leia
+    sem normalizar renderiza um board legado 10× menor. Snapshots congelados
+    (`snapshots.config`) NUNCA são migrados por backfill — a conversão
+    runtime do viewer é permanente. RPCs de widget intocados.
+
+19. **`settings.pages` (mescla) nunca viaja por JSON e é preservada no apply
+    (§4.12).** `pages` referencia widget IDS do banco: o export/clipboard a
+    REMOVEM, o `validate.ts` a rejeita com warning e `applyPresetDefinition`
+    a RE-INJETA do settings existente no update in-place — sem isso, qualquer
+    edição por IA desfaria mesclas em silêncio (ou pior: adotaria ids de outro
+    board). `deleteWidget` mantém a integridade (host excluído devolve membros
+    ao canvas; membro excluído sai do `pages` do host). A ocultação dos
+    membros é SÓ de renderização (`collectPageMembers` no grid) — nunca
+    filtre membros da computação de dados da page (a página oculta precisa do
+    dado ao virar visível).
 
 ## 6. Convenções do projeto
 

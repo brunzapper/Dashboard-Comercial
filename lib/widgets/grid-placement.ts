@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 25/07/2026
+// v1.2 (25/07/2026): fallback do posOf em unidades FINAS (espaço base-120 —
+//   lib/widgets/grid-space). Vale para grid_position vazio ('{}') em board já
+//   fino; board legado é convertido ANTES por normalizeGridSpace.
 // v1.1 (17/07/2026): centerAnchored — posição com o CENTRO do widget na célula
 //   clicada (modo Posicionar e Inserir do menu de contexto).
 // Posicionamento no grid: helpers compartilhados entre o grid (dashboard-grid),
@@ -13,7 +16,7 @@ import type { GridPosition, Widget } from "@/lib/widgets/types";
 export function posOf(w: Widget, i: number): GridPosition {
   const p = w.grid_position as GridPosition;
   if (p && typeof p.w === "number") return p;
-  return { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 };
+  return { x: (i % 2) * 60, y: Math.floor(i / 2) * 32, w: 59, h: 31 };
 }
 
 // Sobreposição de dois retângulos do grid (bordas estritas: encostar não colide).

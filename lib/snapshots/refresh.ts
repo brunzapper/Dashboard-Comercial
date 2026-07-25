@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): espaço de grid v2 — widgets/settings normalizados
+//   (normalizeGridSpace) antes de congelar: config novo sai em unidades finas.
 // Refresh de um snapshot: congela o DATASET (via RPC snapshot_refresh_copy,
 // cópia atômica e set-based no banco) e o CONFIG (widgets da aba, settings
 // saneado, campos, correspondências, moedas e as opções de filtros — sempre
@@ -34,6 +36,7 @@ import type {
 } from "@/lib/widgets/types";
 import { toRecordType, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 
 import { snapshotClient } from "./db-adapter";
 import { computeNextRefreshAt } from "./schedule";
@@ -151,9 +154,16 @@ async function doRefresh(
     ]);
 
   const sources = await loadSources(service, orgId);
-  const widgets = (widgetsData ?? []) as Widget[];
+  // Espaço de grid v2: normaliza ANTES de congelar — o config do snapshot
+  // (widgets + settings) sai sempre em unidades finas; configs congelados
+  // ANTES desta versão são convertidos na leitura pelo viewer (app/s/[token]).
+  const gridNorm = normalizeGridSpace(
+    (dashData.settings ?? {}) as DashboardSettings,
+    (widgetsData ?? []) as Widget[]
+  );
+  const widgets = gridNorm.widgets;
   const fields = (fieldsData ?? []) as FieldDefinition[];
-  const dashSettings = (dashData.settings ?? {}) as DashboardSettings;
+  const dashSettings = gridNorm.settings;
   const available = buildAvailableFields(fields, correspondences, sources);
   // SÓ para o RPC de OPÇÕES dos filtros rápidos congelados (display) —
   // consultas de widget montam o mapa por perna (correspondenceMapForSources).

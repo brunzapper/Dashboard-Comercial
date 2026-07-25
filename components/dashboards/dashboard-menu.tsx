@@ -1,7 +1,11 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 25/07/2026
 // Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
 // (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
 // dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
+// v1.2 (25/07/2026): grade fina (espaço v2) — sheet Área de trabalho ganhou o
+//   controle "Largura da coluna" (canvas.baseCols, degraus percentuais do
+//   default 120) e "Altura da linha" aceita VAZIO = automática (quadrada =
+//   largura da célula; grava rowHeight: undefined). Faixas em unidades finas.
 // v1.1 (23/07/2026): item "Bases" (escopo de bases do board —
 //   BoardSourcesDialog, mesmo dialog do kebab do hub) e "Compartilhamento" →
 //   "Acesso" (BoardAccessDialog: funções + pessoas com Ver/Editar/Bloqueado;
@@ -54,11 +58,16 @@ import {
   type DateFormat,
 } from "@/lib/widgets/format";
 import { updateDashboardSettings } from "@/app/(app)/dashboards/actions";
+import { BASE_COLS, GRID_MAX_COLS } from "@/lib/widgets/grid-space";
 import { SnapshotsPanel, type SnapshotPeriodCapture } from "./snapshots-panel";
 import { BoardSourcesDialog } from "./board-sources-dialog";
 import { BoardAccessDialog } from "./board-access-dialog";
 
 type BgMode = "none" | "solid" | "gradient";
+
+// Degraus do controle "Largura da coluna" (canvas.baseCols): mais colunas na
+// mesma largura = coluna mais fina. 120 é o default (100%).
+const BASE_COL_CHOICES = [240, 180, 150, 120, 96, 80, 60];
 
 export function DashboardMenu({
   dashboardId,
@@ -79,18 +88,45 @@ export function DashboardMenu({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  // Área de trabalho (grid): nº de colunas e altura da linha + largura/altura da área.
+  // Área de trabalho (grid fino): largura da coluna (densidade baseCols),
+  // nº de colunas da área e altura da linha (vazio = automática/quadrada).
   const canvas = settings.canvas ?? {};
-  const [cols, setCols] = useState<number>(canvas.cols ?? 12);
-  const [rowHeight, setRowHeight] = useState<number>(canvas.rowHeight ?? 30);
+  // Degraus de densidade do controle "Largura da coluna", do mais fino ao mais
+  // grosso. O rótulo mostra a largura relativa ao default (120 → 100%).
+  const baseColsFromChoice = (idx: number) =>
+    BASE_COL_CHOICES[Math.max(0, Math.min(BASE_COL_CHOICES.length - 1, idx))];
+  const choiceFromBaseCols = (v: number) => {
+    let best = 0;
+    for (let i = 1; i < BASE_COL_CHOICES.length; i++) {
+      if (Math.abs(BASE_COL_CHOICES[i] - v) < Math.abs(BASE_COL_CHOICES[best] - v))
+        best = i;
+    }
+    return best;
+  };
+  const [colWidthIdx, setColWidthIdx] = useState<number>(() =>
+    choiceFromBaseCols(canvas.baseCols ?? BASE_COLS)
+  );
+  const [cols, setCols] = useState<number>(canvas.cols ?? BASE_COLS);
+  // String para permitir o VAZIO = altura automática (célula quadrada).
+  const [rowHeight, setRowHeight] = useState<string>(
+    canvas.rowHeight != null ? String(canvas.rowHeight) : ""
+  );
   function saveCanvas() {
+    const rh = rowHeight.trim() === "" ? undefined : Number(rowHeight);
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
         canvas: {
           ...settings.canvas,
-          cols: Math.min(48, Math.max(1, Math.round(cols) || 12)),
-          rowHeight: Math.min(200, Math.max(10, Math.round(rowHeight) || 30)),
+          baseCols: baseColsFromChoice(colWidthIdx),
+          cols: Math.min(
+            GRID_MAX_COLS,
+            Math.max(12, Math.round(cols) || BASE_COLS)
+          ),
+          rowHeight:
+            rh != null && Number.isFinite(rh) && rh > 0
+              ? Math.min(120, Math.max(3, rh))
+              : undefined,
         },
       });
       setCanvasOpen(false);
@@ -344,11 +380,29 @@ export function DashboardMenu({
           </SheetHeader>
           <div className="flex flex-col gap-3 px-4 pb-8">
             <div className="flex flex-col gap-1">
+              <Label className="text-xs">
+                Largura da coluna:{" "}
+                {Math.round((BASE_COLS / baseColsFromChoice(colWidthIdx)) * 100)}%
+              </Label>
+              <input
+                type="range"
+                min={0}
+                max={BASE_COL_CHOICES.length - 1}
+                step={1}
+                value={colWidthIdx}
+                onChange={(e) => setColWidthIdx(Number(e.target.value))}
+              />
+              <p className="text-muted-foreground text-xs">
+                Colunas mais finas dão mais precisão ao posicionar; 100% é o
+                padrão ({BASE_COLS} colunas na largura da tela).
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
               <Label className="text-xs">Colunas do grid: {cols}</Label>
               <input
                 type="range"
-                min={1}
-                max={48}
+                min={12}
+                max={GRID_MAX_COLS}
                 value={cols}
                 onChange={(e) => setCols(Number(e.target.value))}
               />
@@ -357,12 +411,18 @@ export function DashboardMenu({
               <Label className="text-xs">Altura da linha (px)</Label>
               <Input
                 type="number"
-                min={10}
-                max={200}
+                min={3}
+                max={120}
+                step="any"
+                placeholder="Automática (quadrada)"
                 value={rowHeight}
-                onChange={(e) => setRowHeight(Number(e.target.value))}
+                onChange={(e) => setRowHeight(e.target.value)}
                 className="h-8"
               />
+              <p className="text-muted-foreground text-xs">
+                Vazio = automática: a linha fica com a mesma altura que a
+                largura da coluna (células quadradas).
+              </p>
             </div>
             <Button size="sm" onClick={saveCanvas} disabled={pending}>
               Aplicar

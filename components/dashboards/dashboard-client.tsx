@@ -68,6 +68,7 @@ import type {
   WidgetLinkTarget,
 } from "@/lib/widgets/types";
 import { posOf } from "@/lib/widgets/grid-placement";
+import { BASE_COLS } from "@/lib/widgets/grid-space";
 import { isLineShapeWidget } from "@/lib/widgets/lines";
 import { focusWidgetWithRetry } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
@@ -897,7 +898,9 @@ export function DashboardClient({
               tabs={tabs}
               activeTabId={activeTabId}
               layoutById={layoutById}
-              canvasCols={settings.canvas?.cols ?? 12}
+              canvasCols={
+                settings.canvas?.cols ?? settings.canvas?.baseCols ?? BASE_COLS
+              }
               onRequestDraw={(title) => setDrawQuick({ title })}
               onRequestPlacement={beginPlacement}
               trigger={

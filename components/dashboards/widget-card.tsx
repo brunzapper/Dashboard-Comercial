@@ -1,4 +1,8 @@
-// Versão: 2.12 | Data: 25/07/2026
+// Versão: 2.13 | Data: 25/07/2026
+// v2.13 (25/07/2026): páginas de widget (mescla — lib/widgets/pages) — props
+//   pageHostId/pageCount (o grid renderiza a página ativa no slot do host) e
+//   itens ⋮ "Adicionar página" (AddPageDialog: elegíveis da aba) e "Desfazer
+//   mescla" (UnmergeDialog); host efetivo das ações = pageHostId ?? widget.id.
 // v2.12 (25/07/2026): aparência nos widgets de FILTRO (filtro/filtro_campo) —
 //   canStyle os inclui (menu ⋮ ▸ Aparência + sheet) e o cromo lê
 //   appearance.filter (bg/border/accent, espelhando o grupo kpi); título/
@@ -61,11 +65,13 @@ import {
   Copy,
   Download,
   GripVertical,
+  Layers,
   Loader2,
   MoreVertical,
   Palette,
   Pencil,
   Trash2,
+  Ungroup,
   X,
 } from "lucide-react";
 
@@ -148,6 +154,8 @@ import { BusinessDayBadge } from "./business-day-badge";
 import { FieldFilterControls } from "./field-filter-controls";
 import { WidgetBuilder } from "./widget-builder";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
+import { AddPageDialog, UnmergeDialog } from "./widget-pages";
+import { canBePage, isPageHost } from "@/lib/widgets/pages";
 import { useWidgetAppearance } from "./appearance-editing";
 
 // Chunks deferidos (next/dynamic): o chart (recharts inteiro) e os widgets de
@@ -227,6 +235,8 @@ export const WidgetCard = memo(function WidgetCard({
   mx = 0,
   my = 0,
   onMeasure,
+  pageHostId,
+  pageCount,
   onWidgetDeleted,
   autoOpenEditor = false,
   onAutoEditConsumed,
@@ -297,6 +307,12 @@ export const WidgetCard = memo(function WidgetCard({
   mx?: number;
   my?: number;
   onMeasure?: (id: string, wUnits: number, hUnits: number) => void;
+  // Páginas de widget (mescla): id do HOST quando este card renderiza dentro
+  // do espaço de um host (o próprio host OU um membro exibido) e o total de
+  // páginas do slot. Ausente = card comum. Host efetivo das ações do menu ⋮ =
+  // pageHostId ?? widget.id.
+  pageHostId?: string;
+  pageCount?: number;
   // Avisa o shell da exclusão (limpa o widget otimista da criação rápida).
   onWidgetDeleted?: (id: string) => void;
   // Inserir ▸ tipo que exige configuração: o card recém-criado monta com o
@@ -335,6 +351,20 @@ export const WidgetCard = memo(function WidgetCard({
     setAppearanceOpen(true);
   };
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Páginas de widget (mescla): host efetivo das ações = o slot em que este
+  // card renderiza (pageHostId quando é página; senão ele mesmo).
+  const [addPageOpen, setAddPageOpen] = useState(false);
+  const [unmergeOpen, setUnmergeOpen] = useState(false);
+  const pageHost = pageHostId ?? widget.id;
+  const canAddPage = canEdit && canBePage(widget);
+  const canUnmerge =
+    canEdit && (pageHostId !== undefined || isPageHost(widget));
+  const hostTitle =
+    (pageHostId && pageHostId !== widget.id
+      ? siblings.find((s) => s.id === pageHostId)?.title?.trim()
+      : widget.title?.trim()) ||
+    widget.title?.trim() ||
+    "Sem título";
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -540,7 +570,9 @@ export const WidgetCard = memo(function WidgetCard({
         const last = lastMeasureRef.current;
         if (!last || last.w !== w || last.h !== h) {
           lastMeasureRef.current = { w, h };
-          onMeasure(widget.id, w, h);
+          // Página de mescla: reporta sob o id do HOST — o layout do RGL é
+          // keyado pelo slot, e é o slot que precisa inflar.
+          onMeasure(pageHostId ?? widget.id, w, h);
         }
       });
     };
@@ -563,6 +595,7 @@ export const WidgetCard = memo(function WidgetCard({
     mx,
     my,
     widget.id,
+    pageHostId,
     widget.visual_type,
     widget.settings?.columns?.length,
     isRecordList,
@@ -736,6 +769,26 @@ export const WidgetCard = memo(function WidgetCard({
               >
                 <Copy className="size-4" /> {copied ? "Copiado!" : "Copiar widget"}
               </DropdownMenuItem>
+              {canAddPage ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setAddPageOpen(true);
+                  }}
+                >
+                  <Layers className="size-4" /> Adicionar página
+                </DropdownMenuItem>
+              ) : null}
+              {canUnmerge ? (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setUnmergeOpen(true);
+                  }}
+                >
+                  <Ungroup className="size-4" /> Desfazer mescla
+                </DropdownMenuItem>
+              ) : null}
             </>
           ) : null}
           {showExportItems ? (
@@ -808,6 +861,26 @@ export const WidgetCard = memo(function WidgetCard({
           available={availableForBuilder}
           open={appearanceOpen}
           onOpenChange={setAppearanceOpen}
+        />
+      ) : null}
+      {canAddPage ? (
+        <AddPageDialog
+          open={addPageOpen}
+          onOpenChange={setAddPageOpen}
+          dashboardId={dashboardId}
+          hostId={pageHost}
+          hostTitle={hostTitle}
+          siblings={siblings}
+        />
+      ) : null}
+      {canUnmerge ? (
+        <UnmergeDialog
+          open={unmergeOpen}
+          onOpenChange={setUnmergeOpen}
+          dashboardId={dashboardId}
+          hostId={pageHost}
+          hostTitle={hostTitle}
+          pageCount={pageCount ?? 2}
         />
       ) : null}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

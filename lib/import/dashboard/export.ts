@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): espaço de grid v2 — board legado (sem canvas.gridVersion)
+//   é exportado JÁ convertido para unidades finas (posições ×10/×4−1 + canvas
+//   carimbado, lib/widgets/grid-space). Choke point único dos 3 chamadores
+//   (export manual, ESTADO ATUAL da IA, estrutura) — o JSON nunca mistura
+//   escalas.
 // EXPORTADOR: dashboard existente (linhas de dashboards + widgets) → JSON no
 // formato "dashboard-import" (o inverso de validate.ts). Puro, sem I/O —
 // testável via npx tsx. Usado pelo botão "Exportar JSON" (⋮ do card) e pelos
@@ -26,10 +31,18 @@ import type {
   Dimension,
   GridPosition,
   Metric,
+  VisualType,
   WidgetFilter,
   WidgetSettings,
 } from "@/lib/widgets/types";
 import type { SourceDef } from "@/lib/sources";
+import {
+  GRID_VERSION,
+  convertLegacyCanvas,
+  convertLegacyLine,
+  convertLegacyPos,
+} from "@/lib/widgets/grid-space";
+import { isLineShapeWidget, lineGridBBox } from "@/lib/widgets/lines";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
 import {
   DASHBOARD_IMPORT_FORMAT,
@@ -225,15 +238,40 @@ export function exportDashboardJson(input: {
   const chave = importChaveForDashboard(dash);
   const rootKeys = sources.filter((s) => !s.parentKey).map((s) => s.key);
 
+  // ---- Espaço de grid v2: board legado sai convertido (posições finas +
+  // canvas carimbado). Board já fino passa intacto.
+  const rawSettings = (dash.settings ?? {}) as DashboardSettings;
+  const fine = rawSettings.canvas?.gridVersion === GRID_VERSION;
+  const settings: DashboardSettings = fine
+    ? rawSettings
+    : { ...rawSettings, canvas: convertLegacyCanvas(rawSettings.canvas) };
+  const toFine = (w: ExportWidgetRow): ExportWidgetRow => {
+    if (fine) return w;
+    const line = w.settings?.shape?.line;
+    const wLike = {
+      visual_type: w.visual_type as VisualType,
+      settings: w.settings ?? undefined,
+    };
+    if (isLineShapeWidget(wLike) && line) {
+      const nl = convertLegacyLine(line);
+      return {
+        ...w,
+        grid_position: lineGridBBox(nl),
+        settings: { ...w.settings, shape: { ...w.settings?.shape, line: nl } },
+      };
+    }
+    const g = validGrid(w.grid_position);
+    return g ? { ...w, grid_position: convertLegacyPos(g) } : w;
+  };
+
   // ---- Bases: raízes referenciadas por widgets/métricas/filtros +
   // periodBar.fieldBySource + sourceScope; widget "todas as fontes" sem
   // sourceScope ⇒ todas as raízes. Vazio ⇒ todas as raízes.
-  const settings = (dash.settings ?? {}) as DashboardSettings;
   const based = new Set<string>();
   let anyOpenWidget = false;
-  const widgets = [...input.widgets].sort(
-    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
-  );
+  const widgets = [...input.widgets]
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map(toFine);
   for (const w of widgets) {
     const wSources = (w.sources ?? []).filter(Boolean);
     if (wSources.length === 0) anyOpenWidget = true;
@@ -282,6 +320,10 @@ export function exportDashboardJson(input: {
 
     const wSettings = { ...(w.settings ?? {}) } as WidgetSettings;
     delete wSettings.presetKey;
+    // `pages` referencia widget ids — não sobrevive a import-como-novo (mesma
+    // razão de connectors/kanban) e o apply de edição a PRESERVA do settings
+    // existente (applyPresetDefinition).
+    delete wSettings.pages;
     const grid = validGrid(w.grid_position);
     const sourcesOut = (w.sources ?? []).filter(Boolean);
     return compact({

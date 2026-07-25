@@ -1081,6 +1081,14 @@ export type WidgetSettings = KpiSettings &
     // desligado. O tamanho inflado é só de renderização, nunca é persistido
     // (o grid_position gravado segue sendo o mínimo). Ver dashboard-grid.tsx.
     autoSize?: { width?: boolean; height?: boolean };
+    // PÁGINAS de widget (25/07/2026): ids dos widgets-MEMBRO mesclados neste
+    // espaço (este widget é a página 1; a ordem do array é 2..N). Membros são
+    // linhas normais de `widgets` (grid_position preservado) OCULTADAS da
+    // renderização do grid; as setinhas acima do card alternam a página
+    // exibida (lib/widgets/pages.ts + widget-pages.tsx). NUNCA exportada para
+    // JSON de IA/clipboard (ids não sobrevivem) e PRESERVADA pelo apply de
+    // edição por IA (applyPresetDefinition). Ver docs/arquitetura.md.
+    pages?: string[];
   };
 
 // Config por dashboard, guardada em dashboards.settings. Kanbans dedicados
@@ -1122,12 +1130,21 @@ export interface DashboardSettings {
   };
   // Área de trabalho (grid): tamanho da área em unidades do grid (colunas/linhas)
   // e altura da linha. A alça de canto (modo edição) aumenta cols/rows; o canvas
-  // ganha rolagem quando passa da tela, mantendo o tamanho de célula das 12
-  // colunas. Ausente = padrão (12 colunas, linha 30px, altura pelo conteúdo).
+  // ganha rolagem quando passa da tela, mantendo o tamanho de célula ancorado em
+  // `baseCols` colunas. Ausente = padrão (grade fina, ver lib/widgets/grid-space).
   // `width`/`height` (px) são legados de uma versão anterior e ignorados.
   canvas?: {
+    // 2 = espaço fino (base 120, sem margens). AUSENTE = espaço legado (base
+    // 12, margens 12px) — toda leitura de grid_position cru passa por
+    // normalizeGridSpace (lib/widgets/grid-space) antes de usar.
+    gridVersion?: number;
+    // Densidade: quantas colunas preenchem a largura VISÍVEL (controle
+    // "Largura da coluna" do sheet Área de trabalho). Default BASE_COLS (120).
+    baseCols?: number;
     cols?: number;
     rows?: number;
+    // px por linha; AUSENTE no espaço fino = célula quadrada (rowHeight =
+    // largura da célula). Aceita fração (a conversão legada grava 10.5).
     rowHeight?: number;
     width?: number;
     height?: number;

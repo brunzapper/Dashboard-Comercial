@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 25/07/2026
+// Versão: 1.2 | Data: 25/07/2026
+// v1.2 (25/07/2026): tamanhos no espaço FINO do grid (base 120, ×10−1/×4−1 —
+//   lib/widgets/grid-space): 6×8 → 59×31 etc. O −1 preserva o vão de 1 célula
+//   entre widgets adjacentes (as margens do grid antigo não existem mais).
 // v1.1 (25/07/2026): defaults do novo tipo 'linha_divisoria' (rect largo 6×2
 //   ⇒ lineFromRect deriva um divisor horizontal na primeira renderização).
 // Defaults de criação por tipo de widget, compartilhados entre o menu de
@@ -32,31 +35,32 @@ export interface WidgetSeed {
   settings: WidgetSettings;
 }
 
-// Tamanho inicial por tipo (unidades do grid). Calculadora 4×9 e demais 6×8
+// Tamanho inicial por tipo (unidades FINAS do grid — os equivalentes dos
+// antigos 6×8/4×4/… no espaço base-120). Calculadora e demais "grandes"
 // preservam as convenções do insertAt antigo; os tipos "pequenos" (KPI,
 // métrica calculada, forma, filtros) nascem mais compactos.
 export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
   {
-    tabela: { w: 6, h: 8 },
-    tabela_editavel: { w: 6, h: 8 },
-    barra: { w: 6, h: 8 },
-    barra_horizontal: { w: 6, h: 8 },
-    linha: { w: 6, h: 8 },
-    pizza: { w: 6, h: 8 },
-    kpi: { w: 4, h: 4 },
-    funil: { w: 6, h: 8 },
-    filtro: { w: 6, h: 3 },
-    filtro_campo: { w: 6, h: 4 },
-    calculado: { w: 4, h: 4 },
-    calculadora: { w: 4, h: 9 },
-    nota: { w: 6, h: 8 },
-    forma: { w: 4, h: 6 },
+    tabela: { w: 59, h: 31 },
+    tabela_editavel: { w: 59, h: 31 },
+    barra: { w: 59, h: 31 },
+    barra_horizontal: { w: 59, h: 31 },
+    linha: { w: 59, h: 31 },
+    pizza: { w: 59, h: 31 },
+    kpi: { w: 39, h: 15 },
+    funil: { w: 59, h: 31 },
+    filtro: { w: 59, h: 11 },
+    filtro_campo: { w: 59, h: 15 },
+    calculado: { w: 39, h: 15 },
+    calculadora: { w: 39, h: 35 },
+    nota: { w: 59, h: 31 },
+    forma: { w: 39, h: 23 },
     // Rect mais largo que alto: lineFromRect (lines.ts) deriva a linha média
     // HORIZONTAL — um divisor recém-inserido nasce horizontal.
-    linha_divisoria: { w: 6, h: 2 },
-    kanban: { w: 6, h: 8 },
-    agenda: { w: 6, h: 8 },
-    imagem: { w: 4, h: 6 },
+    linha_divisoria: { w: 59, h: 7 },
+    kanban: { w: 59, h: 31 },
+    agenda: { w: 59, h: 31 },
+    imagem: { w: 39, h: 23 },
   };
 
 // Tipos que exigem configuração para mostrar algo útil: a criação rápida abre

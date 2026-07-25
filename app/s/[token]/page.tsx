@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 23/07/2026
+// Versão: 1.6 | Data: 25/07/2026
+// v1.6 (25/07/2026): espaço de grid v2 — config congelado legado é convertido
+//   em memória (normalizeGridSpace); conversão runtime PERMANENTE aqui (o
+//   backfill de `widgets` não alcança snapshots.config congelado).
 // v1.5 (23/07/2026): escopo de BASES do board (settings.sourceScope congelado)
 //   aplicado ao catálogo vivo (applySourceScope) — paridade com o dashboard.
 // v1.4 (20/07/2026): catálogo das expressões {=…} via builder ÚNICO
@@ -89,6 +92,7 @@ import type {
 } from "@/lib/widgets/types";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import {
   applySourceScope,
   collectBoardSourceKeys,
@@ -205,7 +209,14 @@ export default async function SnapshotPage({
     );
   }
 
-  const widgets = cfg.widgets;
+  // Espaço de grid v2: config congelado ANTES da grade fina é convertido em
+  // memória (o refresh já congela normalizado; backfill não alcança jsonb
+  // congelado — por isso a conversão runtime aqui é permanente). Read-only.
+  const gridNorm = normalizeGridSpace(
+    (cfg.dashboard.settings ?? {}) as DashboardSettings,
+    cfg.widgets
+  );
+  const widgets = gridNorm.widgets;
   const fields = (cfg.fields ?? []) as FieldDefinition[];
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
@@ -235,7 +246,7 @@ export default async function SnapshotPage({
         .eq("partner_only", true),
     ]
   );
-  const dashSettings = cfg.dashboard.settings ?? {};
+  const dashSettings = gridNorm.settings;
   // Escopo de BASES do board (⋮ → "Bases"), congelado no settings do bundle:
   // o viewer aplica o MESMO catálogo efetivo do dashboard vivo (paridade com
   // a page/widget-scope) — widgets em "todas as bases" enxergam o escopo.

@@ -1,6 +1,21 @@
-// Versão: 2.13 | Data: 25/07/2026
+// Versão: 2.15 | Data: 25/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.15 (25/07/2026): PÁGINAS de widget (mescla — lib/widgets/pages): membros
+//   (settings.pages de um host) saem de gridWidgets (ocultos em TODOS os
+//   consumidores — layout/persist/children/conectores/extensão); o host
+//   renderiza a página ativa (estado efêmero pageIndexByHost + WidgetPager
+//   acima do card, também no viewer de snapshot); drop quase-em-cima de outro
+//   widget de tamanho parecido abre o diálogo "Adicionar página?"
+//   (findMergeTarget em persist → mergeWidgetPages) — confirmar mescla,
+//   cancelar DESFAZE o arraste (a posição solta nunca persiste).
+// v2.14 (25/07/2026): grade FINA (espaço v2 — lib/widgets/grid-space): célula
+//   ancorada em canvas.baseCols (default 120, 10× as 12 de antes), SEM margens
+//   (MX/MY = 0 — as fórmulas paramétricas seguem valendo) e linha default
+//   QUADRADA (ROW_H = canvas.rowHeight ?? cellW — por isso ROW_H é computado
+//   após cellW). Limites do canvas em unidades finas (480×800, mín. 32
+//   linhas). As settings/widgets chegam aqui JÁ normalizados para o espaço
+//   fino (normalizeGridSpace na page/viewer) — o grid não converte nada.
 // v2.13 (25/07/2026): paste da linha divisória via isLineShapeWidget — cobre
 //   o tipo novo ('linha_divisoria', 0100) e payloads antigos de clipboard.
 // v2.12 (22/07/2026): NADA se move durante o gesto — allowOverlap no RGL (o
@@ -107,12 +122,25 @@ import type { WidgetPeriodWindowState } from "./period-window-control";
 import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   createWidget,
+  mergeWidgetPages,
   saveLayout,
   saveShapeLine,
   updateDashboardSettings,
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
+import {
+  collectPageMembers,
+  findMergeTarget,
+  pageMembersOf,
+} from "@/lib/widgets/pages";
+import { MergePromptDialog, WidgetPager } from "./widget-pages";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
+import {
+  BASE_COLS,
+  GRID_MAX_COLS,
+  GRID_MAX_ROWS,
+  GRID_MIN_ROWS,
+} from "@/lib/widgets/grid-space";
 import { centerAnchored, posOf } from "@/lib/widgets/grid-placement";
 import {
   axisLock,
@@ -140,20 +168,21 @@ import { FontScaleProvider } from "./font-scale-context";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
-// Margens do grid e limites do canvas (mesmos valores de sempre).
-const MX = 12;
-const MY = 12;
-const DEFAULT_ROW_H = 30;
-const MIN_COLS = 12;
+// Grade fina (espaço v2): SEM margens entre células — o respiro entre widgets
+// vem das próprias posições (a conversão de layouts legados deixa 1 célula de
+// vão; ver lib/widgets/grid-space). MX/MY ficam como constantes 0 porque todas
+// as fórmulas px↔célula daqui e dos overlays são paramétricas nelas.
+const MX = 0;
+const MY = 0;
 
 // Fallbacks ESTÁVEIS para os cards sem dados: um literal novo por render
 // derrotaria o React.memo do WidgetCard (props sempre "diferentes").
 const EMPTY_WIDGET_DATA: WidgetData = { rows: [], dimensions: [], metrics: [] };
 const EMPTY_RECORD_LIST: RecordRow[] = [];
 const EMPTY_ENTITY_LIST: EntityListRow[] = [];
-const MAX_COLS = 48;
-const MIN_ROWS = 8;
-const MAX_ROWS = 200;
+const MAX_COLS = GRID_MAX_COLS;
+const MIN_ROWS = GRID_MIN_ROWS;
+const MAX_ROWS = GRID_MAX_ROWS;
 
 // Item do resolvedor de colisões: posição/tamanho corrente (x/y/w/h, com w/h já
 // inflados) mais a "pegada" base (bx/by/bw/bh, o tamanho mínimo persistido). A base
@@ -552,13 +581,23 @@ export function DashboardGrid({
   );
 
   // Partição: Formas "linha" ficam FORA do RGL (camada livre — movimento sem
-  // prender às colunas) e fora das colisões/conectores; todo o resto segue no
-  // grid. A troca widgets→gridWidgets tem que ser CONSISTENTE (layout memo,
-  // persist, children do RGL, ConnectorLayer) — parcial dessincroniza o
-  // layout↔children do RGL.
-  const gridWidgets = useMemo(
-    () => widgets.filter((w) => !isLineShapeWidget(w)),
+  // prender às colunas) e fora das colisões/conectores; widgets-MEMBRO de uma
+  // mescla (settings.pages de um host — lib/widgets/pages) ficam OCULTOS (o
+  // host renderiza a página ativa no espaço dele); todo o resto segue no grid.
+  // A troca widgets→gridWidgets tem que ser CONSISTENTE (layout memo, persist,
+  // children do RGL, ConnectorLayer) — parcial dessincroniza o layout↔children
+  // do RGL.
+  const pageMemberIds = useMemo(() => collectPageMembers(widgets), [widgets]);
+  const widgetById = useMemo(
+    () => new Map(widgets.map((w) => [w.id, w])),
     [widgets]
+  );
+  const gridWidgets = useMemo(
+    () =>
+      widgets.filter(
+        (w) => !isLineShapeWidget(w) && !pageMemberIds.has(w.id)
+      ),
+    [widgets, pageMemberIds]
   );
   const lineWidgets = useMemo(
     () => widgets.filter((w) => isLineShapeWidget(w)),
@@ -571,6 +610,23 @@ export function DashboardGrid({
       lineById[w.id] ?? lineOf(w, basePos(w, i)),
     [lineById, basePos]
   );
+
+  // Página ativa por host (EFÊMERO — trocar de página nunca persiste). Clamp
+  // na leitura: se `pages` encolher, o índice cai para a última válida.
+  const [pageIndexByHost, setPageIndexByHost] = useState<
+    Record<string, number>
+  >({});
+  // Medição de página de mescla: o PRÓPRIO WidgetCard reporta sob o id do
+  // host (pageHostId ?? widget.id) — o layout do RGL é keyado pelo slot.
+  // Diálogo "Adicionar página?" do drop quase-em-cima (persist →
+  // findMergeTarget). Enquanto aberto, o card fica NA POSIÇÃO SOLTA (patch
+  // otimista, sem saveLayout); confirmar mescla e cancelar DESFAZ o arraste.
+  const [mergePrompt, setMergePrompt] = useState<{
+    hostId: string;
+    draggedId: string;
+    base: GridPosition;
+  } | null>(null);
+  const [mergePending, startMerge] = useTransition();
 
   // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado, e
   // então um passo de resolução de colisões que empurra os vizinhos no eixo do
@@ -596,20 +652,27 @@ export function DashboardGrid({
     }));
   }, [gridWidgets, basePos, measured]);
 
+  // Densidade da célula: quantas colunas preenchem a largura VISÍVEL (controle
+  // "Largura da coluna" do sheet Área de trabalho). Clamp de sanidade — valores
+  // fora da faixa do controle não quebram a geometria.
+  const baseCols = Math.max(
+    12,
+    Math.min(240, Math.round(settings.canvas?.baseCols ?? BASE_COLS))
+  );
+
   // Extensão do conteúdo — pisos para não cortar widgets ao encolher a área.
   // As linhas (fora do layout do RGL) entram pelo bounding box do traçado.
-  let contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), MIN_COLS);
+  let contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), baseCols);
   let contentBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), MIN_ROWS);
   lineWidgets.forEach((w, i) => {
     const b = lineGridBBox(lineFor(w, i));
     contentRight = Math.max(contentRight, b.x + b.w);
     contentBottom = Math.max(contentBottom, b.y + b.h);
   });
-  const ROW_H = settings.canvas?.rowHeight ?? DEFAULT_ROW_H;
 
   // Tamanho efetivo do canvas (vindo das settings): nunca abaixo do conteúdo,
   // nunca além dos limites.
-  const propCols = Math.min(MAX_COLS, Math.max(contentRight, settings.canvas?.cols ?? MIN_COLS));
+  const propCols = Math.min(MAX_COLS, Math.max(contentRight, settings.canvas?.cols ?? baseCols));
   const propRows = Math.min(MAX_ROWS, Math.max(contentBottom, settings.canvas?.rows ?? contentBottom));
   // Override transitório durante o arraste da alça (null fora do arraste → segue
   // as settings, então mudanças pelo menu refletem na hora).
@@ -621,7 +684,7 @@ export function DashboardGrid({
   // de ajustar estado no render — sem useEffect.
   if (drag && propCols === drag.cols && propRows === drag.rows) setDrag(null);
 
-  // Largura visível (base das 12 colunas) medida do container de rolagem. Usamos
+  // Largura visível (base das `baseCols` colunas) medida do container de rolagem. Usamos
   // um callback ref (não um useEffect com deps []) porque o container do scroll é
   // DESMONTADO quando a aba fica sem widgets (early-return do estado vazio). Com o
   // effect de mount único, ao voltar para uma aba populada o novo nó nunca era
@@ -658,9 +721,13 @@ export function DashboardGrid({
       !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
-  // Célula constante: 12 colunas preenchem a largura visível (fórmula do RGL:
-  // colWidth = (width - MX*(cols+1))/cols), então widgets não mudam de tamanho.
-  const cellW = baseWidth > 0 ? (baseWidth - MX * (MIN_COLS + 1)) / MIN_COLS : 0;
+  // Célula constante: `baseCols` colunas preenchem a largura visível (sem
+  // margens), então widgets não mudam de tamanho quando o canvas cresce.
+  const cellW = baseWidth > 0 ? baseWidth / baseCols : 0;
+  // Linha default QUADRADA: altura = largura da célula (responsiva). Override
+  // por dashboard em canvas.rowHeight (a conversão de board legado grava 10.5
+  // explícito — fidelidade vertical do layout antigo de px fixos).
+  const ROW_H = settings.canvas?.rowHeight ?? cellW;
   const gridW = (c: number) => c * cellW + MX * (c + 1);
   const gridH = (r: number) => r * ROW_H + MY * (r + 1);
   // Métricas do ConnectorLayer com referência estável (objeto novo por render
@@ -782,31 +849,24 @@ export function DashboardGrid({
   // era ela que fazia os widgets "voltarem" no próximo re-render. Após persistir,
   // registra no histórico. Obs.: widgets com autoSize podem "assentar" um render
   // depois do drop (a base nova repassa por inflação+pushApart) — determinístico.
-  function persist(
-    _next: Layout,
-    changed: LayoutItem | null,
-    kind: "drag" | "resize"
+  // Cauda comum do drop: abre espaço (resolveDropCollisions), aplica o patch
+  // otimista e persiste + histórico.
+  function commitDrop(
+    changedId: string,
+    dropped: GridPosition,
+    base: GridPosition
   ) {
-    if (!editMode || !changed) return;
-    const idx = gridWidgets.findIndex((w) => w.id === changed.i);
-    if (idx < 0) return;
-    const base = basePos(gridWidgets[idx], idx);
-    const dropped: GridPosition =
-      kind === "resize"
-        ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
-        : { x: changed.x, y: changed.y, w: base.w, h: base.h };
-
     // Bases + item solto na posição do drop → deslocamento mínimo dos vizinhos.
     // Linhas ficam de fora de propósito: uma divisória decorativa não empurra
     // nem é empurrada por widgets.
     const rects: DropRect[] = gridWidgets.map((w, i) =>
-      w.id === changed.i
+      w.id === changedId
         ? { i: w.id, ...dropped }
         : { i: w.id, ...basePos(w, i) }
     );
     const movedNeighbors = resolveDropCollisions(
       rects,
-      changed.i,
+      changedId,
       cols,
       MAX_ROWS
     );
@@ -818,7 +878,7 @@ export function DashboardGrid({
       dropped.w !== base.w ||
       dropped.h !== base.h
     ) {
-      patch[changed.i] = dropped;
+      patch[changedId] = dropped;
     }
     for (const [id, p] of movedNeighbors) {
       const i = gridWidgets.findIndex((w) => w.id === id);
@@ -838,6 +898,46 @@ export function DashboardGrid({
         h: p.h,
       }))
     ).then(() => history.captureNow());
+  }
+
+  function persist(
+    _next: Layout,
+    changed: LayoutItem | null,
+    kind: "drag" | "resize"
+  ) {
+    if (!editMode || !changed) return;
+    const idx = gridWidgets.findIndex((w) => w.id === changed.i);
+    if (idx < 0) return;
+    const dragged = gridWidgets[idx];
+    const base = basePos(dragged, idx);
+    const dropped: GridPosition =
+      kind === "resize"
+        ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
+        : { x: changed.x, y: changed.y, w: base.w, h: base.h };
+
+    // Mescla por drop (páginas de widget): arraste que TERMINA quase
+    // exatamente sobre outro widget de tamanho parecido pergunta "Adicionar
+    // página?" ANTES de abrir espaço. O card fica na posição solta sob o
+    // diálogo (patch otimista, SEM saveLayout); cancelar desfaz o arraste.
+    if (
+      kind === "drag" &&
+      canEdit &&
+      (dropped.x !== base.x || dropped.y !== base.y)
+    ) {
+      const target = findMergeTarget(
+        dropped,
+        dragged,
+        gridWidgets
+          .map((w, i) => ({ widget: w, pos: basePos(w, i) }))
+          .filter((c) => c.widget.id !== dragged.id)
+      );
+      if (target) {
+        applyLayoutPatch({ [dragged.id]: dropped });
+        setMergePrompt({ hostId: target, draggedId: dragged.id, base });
+        return;
+      }
+    }
+    commitDrop(changed.i, dropped, base);
   }
 
   // Persistência do traçado de uma Forma "linha" (espelho do persist acima,
@@ -984,6 +1084,41 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
+  // Diálogo "Adicionar página?" (mescla por drop). Confirmar mescla no
+  // servidor e devolve o card à BASE (a posição solta nunca persiste — com
+  // sucesso o membro some da renderização quando o refresh trouxer `pages`);
+  // Cancelar/Esc só desfaz o arraste (o banco nunca foi tocado).
+  const mergeDialog = mergePrompt ? (
+    <MergePromptDialog
+      open
+      pending={mergePending}
+      draggedTitle={
+        widgetById.get(mergePrompt.draggedId)?.title?.trim() || "Sem título"
+      }
+      hostTitle={
+        widgetById.get(mergePrompt.hostId)?.title?.trim() || "Sem título"
+      }
+      onConfirm={() => {
+        const prompt = mergePrompt;
+        startMerge(async () => {
+          const res = await mergeWidgetPages(dashboardId, prompt.hostId, [
+            prompt.draggedId,
+          ]);
+          applyLayoutPatch({ [prompt.draggedId]: prompt.base });
+          setMergePrompt(null);
+          if (res.ok) {
+            router.refresh();
+            void history.captureNow();
+          }
+        });
+      }}
+      onCancel={() => {
+        applyLayoutPatch({ [mergePrompt.draggedId]: mergePrompt.base });
+        setMergePrompt(null);
+      }}
+    />
+  ) : null;
+
   // Em drawMode/placing o canvas renderiza mesmo vazio (é onde se desenha a
   // tabela / se clica para posicionar o widget novo).
   if (widgets.length === 0 && !drawMode && !placing) {
@@ -1117,63 +1252,104 @@ export function DashboardGrid({
               onDragStop={onDragStop}
               onResizeStop={onResizeStop}
             >
-              {gridWidgets.map((w) => (
-                <div
-                  key={w.id}
-                  id={widgetDomId(w.id)}
-                  className="pointer-events-auto cursor-auto"
-                >
-                  {/* Escala de fonte do dashboard: só o conteúdo dos widgets
+              {gridWidgets.map((w, gi) => {
+                // Páginas de widget: o HOST renderiza a página ativa no espaço
+                // dele (ids mortos em `pages` são pulados — membro excluído/
+                // movido não quebra o pager). O key do card = widget EXIBIDO:
+                // trocar de página REMONTA o card, e os deferidos (kanban/
+                // Tabela Livre/agenda) disparam o próprio fetch ao montar.
+                const memberIdsOf = pageMembersOf(w);
+                const pagesOf =
+                  memberIdsOf.length > 0
+                    ? [
+                        w,
+                        ...memberIdsOf
+                          .map((id) => widgetById.get(id))
+                          .filter((x): x is Widget => !!x),
+                      ]
+                    : null;
+                const pageIdx = pagesOf
+                  ? Math.min(pageIndexByHost[w.id] ?? 0, pagesOf.length - 1)
+                  : 0;
+                const shown = pagesOf ? pagesOf[pageIdx] : w;
+                return (
+                  <div
+                    key={w.id}
+                    id={widgetDomId(w.id)}
+                    className="pointer-events-auto cursor-auto"
+                  >
+                    {pagesOf && pagesOf.length > 1 ? (
+                      <WidgetPager
+                        count={pagesOf.length}
+                        index={pageIdx}
+                        inset={basePos(w, gi).y <= 0}
+                        onChange={(i) =>
+                          setPageIndexByHost((prev) => ({
+                            ...prev,
+                            [w.id]: i,
+                          }))
+                        }
+                      />
+                    ) : null}
+                    {/* Escala de fonte do dashboard: só o conteúdo dos widgets
                       escala (o cromo do canvas — chips, overlays — não). */}
-                  <FontScaleProvider value={settings.fontScale ?? 1}>
-                    <WidgetCard
-                      widget={w}
-                      data={dataById[w.id] ?? EMPTY_WIDGET_DATA}
-                      recordList={recordListById[w.id] ?? EMPTY_RECORD_LIST}
-                      recordListExtra={recordListExtraById?.[w.id]}
-                      recordListTotal={recordListTotalById?.[w.id]}
-                      entityList={entityListById[w.id] ?? EMPTY_ENTITY_LIST}
-                      calcValue={calcById[w.id] ?? null}
-                      calcVars={calcVarsById[w.id]}
-                      noteValues={noteById[w.id]}
-                      calcExpr={calcExprById[w.id]}
-                      tableCells={tableCellsById[w.id]}
-                      fields={fields}
-                      currencyOptions={currencyOptions}
-                      currencyRates={currencyRates}
-                      conversionPeriod={conversionPeriodById[w.id]}
-                      fkLabels={fkLabels}
-                      responsibleOptions={responsibleOptions}
-                      userRoles={userRoles}
-                      canEditValues={canEditValues}
-                      available={available}
-                      availableForBuilder={availableForBuilder}
-                      dashboardId={dashboardId}
-                      dateFormat={dateFormat}
-                      siblings={widgets}
-                      tabs={tabs}
-                      canEdit={canEdit}
-                      canExport={canExport}
-                      canManageFields={canManageFields}
-                      editMode={editMode}
-                      filterOptions={filterOptionsById?.[w.id]}
-                      fieldFilterSeed={fieldFilterSeedById?.[w.id]}
-                      quickFilters={quickFiltersById?.[w.id]}
-                      periodWindow={periodWindowById?.[w.id]}
-                      deferredScopeKey={deferredScopeById?.[w.id]}
-                      autoSize={w.settings?.autoSize}
-                      cellW={cellW}
-                      rowH={ROW_H}
-                      mx={MX}
-                      my={MY}
-                      onMeasure={onMeasure}
-                      onWidgetDeleted={onWidgetDeleted}
-                      autoOpenEditor={w.id === autoEditWidgetId}
-                      onAutoEditConsumed={onAutoEditConsumed}
-                    />
-                  </FontScaleProvider>
-                </div>
-              ))}
+                    <FontScaleProvider value={settings.fontScale ?? 1}>
+                      <WidgetCard
+                        key={shown.id}
+                        widget={shown}
+                        data={dataById[shown.id] ?? EMPTY_WIDGET_DATA}
+                        recordList={
+                          recordListById[shown.id] ?? EMPTY_RECORD_LIST
+                        }
+                        recordListExtra={recordListExtraById?.[shown.id]}
+                        recordListTotal={recordListTotalById?.[shown.id]}
+                        entityList={
+                          entityListById[shown.id] ?? EMPTY_ENTITY_LIST
+                        }
+                        calcValue={calcById[shown.id] ?? null}
+                        calcVars={calcVarsById[shown.id]}
+                        noteValues={noteById[shown.id]}
+                        calcExpr={calcExprById[shown.id]}
+                        tableCells={tableCellsById[shown.id]}
+                        fields={fields}
+                        currencyOptions={currencyOptions}
+                        currencyRates={currencyRates}
+                        conversionPeriod={conversionPeriodById[shown.id]}
+                        fkLabels={fkLabels}
+                        responsibleOptions={responsibleOptions}
+                        userRoles={userRoles}
+                        canEditValues={canEditValues}
+                        available={available}
+                        availableForBuilder={availableForBuilder}
+                        dashboardId={dashboardId}
+                        dateFormat={dateFormat}
+                        siblings={widgets}
+                        tabs={tabs}
+                        canEdit={canEdit}
+                        canExport={canExport}
+                        canManageFields={canManageFields}
+                        editMode={editMode}
+                        filterOptions={filterOptionsById?.[shown.id]}
+                        fieldFilterSeed={fieldFilterSeedById?.[shown.id]}
+                        quickFilters={quickFiltersById?.[shown.id]}
+                        periodWindow={periodWindowById?.[shown.id]}
+                        deferredScopeKey={deferredScopeById?.[shown.id]}
+                        autoSize={shown.settings?.autoSize}
+                        cellW={cellW}
+                        rowH={ROW_H}
+                        mx={MX}
+                        my={MY}
+                        onMeasure={onMeasure}
+                        pageHostId={pagesOf ? w.id : undefined}
+                        pageCount={pagesOf?.length}
+                        onWidgetDeleted={onWidgetDeleted}
+                        autoOpenEditor={shown.id === autoEditWidgetId}
+                        onAutoEditConsumed={onAutoEditConsumed}
+                      />
+                    </FontScaleProvider>
+                  </div>
+                );
+              })}
             </RGL>
             {drawMode && onDrawDone && onDrawCancel ? (
               <DrawToCreateOverlay
@@ -1256,6 +1432,7 @@ export function DashboardGrid({
         ) : null}
       </div>
       {pasteMenu}
+      {mergeDialog}
     </div>
   );
 }

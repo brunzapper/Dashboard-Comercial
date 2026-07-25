@@ -1,4 +1,12 @@
-// Versão: 1.10 | Data: 25/07/2026
+// Versão: 1.11 | Data: 25/07/2026
+// v1.11 (25/07/2026): espaço de grid v2 (grade fina — lib/widgets/grid-space):
+//   ensureFineGrid (migração lazy CAS no write-path) chamado por todo escritor
+//   de geometria (saveLayout/saveShapeLine/createWidget/updateDashboardSettings/
+//   applyPresetDefinition); captureDashboardSnapshot normaliza a leitura;
+//   presets/JSONs legados convertidos na entrada (normalizePresetGridSpace,
+//   canvas gerido só quando o preset ORIGINAL o definia); createDashboard
+//   carimba gridVersion (board novo nasce fino, linha quadrada); clamps de
+//   linha divisória nos tetos finos (480×800).
 // v1.10 (25/07/2026): saveShapeLine aceita o novo visual_type
 //   'linha_divisoria' (0100) além da identidade legada forma+kind linha.
 // v1.9 (23/07/2026): FIX RETURNING × policy 0088 — `.insert(...).select()` em
@@ -104,6 +112,24 @@ import {
   roundLine,
 } from "@/lib/widgets/lines";
 import {
+  BASE_COLS,
+  GRID_MAX_COLS,
+  GRID_MAX_ROWS,
+  GRID_VERSION,
+  convertLegacyCanvas,
+  convertLegacyWidget,
+  isFineGrid,
+  normalizeGridSpace,
+  normalizePresetGridSpace,
+} from "@/lib/widgets/grid-space";
+import {
+  canBePage,
+  collectPageMembers,
+  isPageHost,
+  pageMembersOf,
+} from "@/lib/widgets/pages";
+import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
+import {
   buildDashboardSnapshot,
   type DashboardSnapshot,
 } from "@/lib/widgets/history";
@@ -161,6 +187,10 @@ export async function createDashboard(
     owner_user_id: session.user.id,
     visible_to_roles: visible,
     is_shared: visible.length > 0,
+    // Dashboard novo nasce no espaço FINO nativo (sem rowHeight = linha
+    // quadrada) — sem o carimbo, a leitura o trataria como legado e gravaria o
+    // rowHeight de conversão 10.5 na primeira edição de settings.
+    settings: { canvas: { gridVersion: GRID_VERSION } },
     ...(orgId ? { organization_id: orgId } : {}),
   });
   if (error) return { ok: false, message: error.message };
@@ -540,6 +570,9 @@ export async function updateDashboardSettings(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // O cliente envia settings NORMALIZADOS (espaço fino, gridVersion 2) — os
+  // widgets do board precisam estar na mesma escala antes do carimbo entrar.
+  await ensureFineGrid(supabase, dashboardId);
   const { error } = await supabase
     .from("dashboards")
     .update({ settings })
@@ -814,6 +847,68 @@ export async function updateUserSettings(
   );
 }
 
+// ---------------- Espaço de grid v2 (grade fina) ----------------
+
+// Migração LAZY do write-path: converte um board legado (base 12) para o
+// espaço fino (base 120) ANTES de qualquer escrita de geometria. TODA action
+// que grava grid_position/shape.line/settings de dashboard chama isto primeiro
+// — sem a conversão, uma escrita em unidades finas misturaria escalas no banco
+// (o cliente opera SEMPRE no espaço fino, via normalizeGridSpace na page).
+//
+// Anti-corrida: os widgets são LIDOS antes do carimbo CAS. Toda escrita fina
+// de outro ator é precedida do ensureFineGrid dele, que ou venceu o CAS (então
+// NÓS perdemos e pulamos a conversão) ou perdeu (o que exige um carimbo já
+// commitado — posterior à nossa leitura). Logo o vencedor nunca lê valor já
+// fino e a dupla conversão é impossível; o pior caso residual é sobrescrever
+// uma posição recém-gravada com a conversão da anterior (stale, unidades
+// corretas — o próximo arraste corrige). Crash entre carimbo e conversão:
+// re-rodar supabase/apply/backfill-grid-v2.sql (runbook).
+async function ensureFineGrid(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dashboardId: string
+): Promise<void> {
+  const { data: dash } = await supabase
+    .from("dashboards")
+    .select("settings")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  if (!dash) return;
+  const settings = (dash.settings ?? {}) as DashboardSettings;
+  if (isFineGrid(settings)) return;
+
+  // Leitura ANTES do carimbo (prova de ordem acima).
+  const { data: rows } = await supabase
+    .from("widgets")
+    .select("id, visual_type, settings, grid_position")
+    .eq("dashboard_id", dashboardId);
+
+  // Carimbo CAS: só quem transicionar o gridVersion converte as linhas.
+  const stamped: DashboardSettings = {
+    ...settings,
+    canvas: convertLegacyCanvas(settings.canvas),
+  };
+  const { count, error } = await supabase
+    .from("dashboards")
+    .update({ settings: stamped }, { count: "exact" })
+    .eq("id", dashboardId)
+    .is("settings->canvas->>gridVersion", null);
+  if (error || !count) return;
+
+  for (const r of rows ?? []) {
+    const w = r as unknown as Widget;
+    const conv = convertLegacyWidget(w);
+    if (conv === w) continue;
+    await supabase
+      .from("widgets")
+      .update({
+        grid_position: conv.grid_position,
+        ...(conv.settings !== w.settings ? { settings: conv.settings } : {}),
+      })
+      .eq("id", r.id as string)
+      .eq("dashboard_id", dashboardId);
+  }
+}
+
 // ---------------- Widgets ----------------
 
 export async function createWidget(
@@ -827,6 +922,9 @@ export async function createWidget(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // O input chega em unidades FINAS (cliente normalizado) — converte o board
+  // legado antes para não misturar escalas.
+  await ensureFineGrid(supabase, dashboardId);
   // Fallback de posição (o builder normalmente já envia grid_position): logo
   // abaixo do widget mais fundo do dashboard, em vez de um y fixo lá no fim da
   // página. Sem noção de abas aqui — o cliente cobre o caso comum.
@@ -842,7 +940,7 @@ export async function createWidget(
         ? Math.max(m, p.y + p.h)
         : m;
     }, 0);
-    position = { x: 0, y: maxBottom, w: 6, h: 8 };
+    position = { x: 0, y: maxBottom, w: 59, h: 31 };
   }
   const { data, error } = await supabase
     .from("widgets")
@@ -1491,6 +1589,233 @@ export async function saveWidgetSettings(
   return { ok: true };
 }
 
+// ---------------- Páginas de widget (mescla) ----------------
+// Ver lib/widgets/pages.ts (módulo puro) e docs/arquitetura.md. O vínculo vive
+// em `settings.pages` do HOST; membros são linhas normais ocultadas do grid.
+
+// Devolve membros recém-liberados ao canvas: posição livre na aba EFETIVA de
+// cada um (findFreePosition), considerando só os widgets VISÍVEIS da mesma aba
+// (membros ocultos não ocupam espaço) e os já-reposicionados desta leva.
+// Chamar SEMPRE depois de atualizar/excluir o host — o cálculo de "oculto"
+// relê o banco.
+async function freePageMembers(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dashboardId: string,
+  memberIds: string[]
+): Promise<string | null> {
+  if (memberIds.length === 0) return null;
+  const [{ data: dashRow }, { data: rows }] = await Promise.all([
+    supabase
+      .from("dashboards")
+      .select("settings")
+      .eq("id", dashboardId)
+      .maybeSingle(),
+    supabase
+      .from("widgets")
+      .select("id, visual_type, settings, grid_position")
+      .eq("dashboard_id", dashboardId),
+  ]);
+  const dashSettings = (dashRow?.settings ?? {}) as DashboardSettings;
+  const widgets = (rows ?? []) as Widget[];
+  const hidden = collectPageMembers(widgets);
+  const tabs = dashSettings.tabs ?? [];
+  const tabIds = new Set(tabs.map((t) => t.id));
+  const firstTab = tabs[0]?.id ?? "";
+  const effTab = (w: Widget) => {
+    const t = w.settings?.tab;
+    return t && tabIds.has(t) ? t : firstTab;
+  };
+  const cols = Math.max(
+    dashSettings.canvas?.cols ?? 0,
+    dashSettings.canvas?.baseCols ?? 0,
+    BASE_COLS
+  );
+  const placed: { tab: string; pos: GridPosition }[] = [];
+  for (const id of memberIds) {
+    const idx = widgets.findIndex((w) => w.id === id);
+    if (idx < 0) continue;
+    const member = widgets[idx];
+    const tab = effTab(member);
+    const size = posOf(member, idx);
+    const occupied: GridPosition[] = [];
+    widgets.forEach((w2, i) => {
+      if (w2.id === id || hidden.has(w2.id) || effTab(w2) !== tab) return;
+      occupied.push(posOf(w2, i));
+    });
+    for (const p of placed) if (p.tab === tab) occupied.push(p.pos);
+    const pos = findFreePosition(occupied, cols, size.w, size.h);
+    placed.push({ tab, pos });
+    const { error } = await supabase
+      .from("widgets")
+      .update({ grid_position: pos })
+      .eq("id", id)
+      .eq("dashboard_id", dashboardId);
+    if (error) return error.message;
+  }
+  return null;
+}
+
+// Mescla: os widgets de `memberIds` viram PÁGINAS do host (ocultos do grid,
+// alternados pelas setinhas). Disparada pelo drop quase-em-cima (diálogo
+// "Adicionar página?") e pelo ⋮ → "Adicionar página". RLS (widgets_write)
+// restringe a dono/admin.
+export async function mergeWidgetPages(
+  dashboardId: string,
+  hostId: string,
+  memberIds: string[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const clean = [...new Set(memberIds.map(String).filter(Boolean))];
+  if (!hostId || clean.length === 0) {
+    return { ok: false, message: "Seleção inválida." };
+  }
+  const supabase = await createClient();
+  await ensureFineGrid(supabase, dashboardId);
+  const { data: rows } = await supabase
+    .from("widgets")
+    .select("id, visual_type, settings")
+    .eq("dashboard_id", dashboardId);
+  const widgets = (rows ?? []) as Widget[];
+  const byId = new Map(widgets.map((w) => [w.id, w]));
+  const host = byId.get(hostId);
+  if (!host) return { ok: false, message: "Widget não encontrado." };
+  if (!canBePage(host)) {
+    return { ok: false, message: "Este tipo de widget não aceita páginas." };
+  }
+  const memberOf = collectPageMembers(widgets);
+  const existing = pageMembersOf(host);
+  const additions: string[] = [];
+  for (const id of clean) {
+    if (id === hostId) {
+      return { ok: false, message: "Um widget não pode ser página dele mesmo." };
+    }
+    const m = byId.get(id);
+    if (!m) return { ok: false, message: "Widget não encontrado." };
+    if (!canBePage(m)) {
+      return { ok: false, message: "Este tipo de widget não pode virar página." };
+    }
+    if (isPageHost(m)) {
+      return {
+        ok: false,
+        message:
+          "O widget escolhido já tem páginas — desfaça a mescla dele antes.",
+      };
+    }
+    if (memberOf.has(id)) {
+      return {
+        ok: false,
+        message: "O widget escolhido já é página de outro widget.",
+      };
+    }
+    if (!existing.includes(id)) additions.push(id);
+  }
+  if (additions.length === 0) return { ok: true };
+
+  // Aba efetiva do host: membros são puxados para ela — o refresh de snapshot
+  // congela POR ABA (membro em outra aba ficaria fora do config) e o desfazer
+  // mescla devolve o membro na aba onde o host está.
+  const { data: dashRow } = await supabase
+    .from("dashboards")
+    .select("settings")
+    .eq("id", dashboardId)
+    .maybeSingle();
+  const dashSettings = (dashRow?.settings ?? {}) as DashboardSettings;
+  const tabs = dashSettings.tabs ?? [];
+  const tabIds = new Set(tabs.map((t) => t.id));
+  const hostTabRaw = host.settings?.tab;
+  const hostTab =
+    hostTabRaw && tabIds.has(hostTabRaw) ? hostTabRaw : tabs[0]?.id;
+  for (const id of additions) {
+    const m = byId.get(id)!;
+    const ms: WidgetSettings = { ...(m.settings ?? {}) };
+    if (hostTab) ms.tab = hostTab;
+    else delete ms.tab;
+    const { error } = await supabase
+      .from("widgets")
+      .update({ settings: ms })
+      .eq("id", id)
+      .eq("dashboard_id", dashboardId);
+    if (error) return { ok: false, message: error.message };
+  }
+  const { error } = await supabase
+    .from("widgets")
+    .update({
+      settings: {
+        ...(host.settings ?? {}),
+        pages: [...existing, ...additions],
+      },
+    })
+    .eq("id", hostId)
+    .eq("dashboard_id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+
+  // Conectores com ponta num membro saem (o card some do canvas) — mesmo
+  // padrão da limpeza do deleteWidget.
+  const connectors = dashSettings.connectors ?? [];
+  const memberSet = new Set(additions);
+  if (
+    connectors.some(
+      (c) => memberSet.has(c.from.widgetId) || memberSet.has(c.to.widgetId)
+    )
+  ) {
+    await supabase
+      .from("dashboards")
+      .update({
+        settings: {
+          ...dashSettings,
+          connectors: connectors.filter(
+            (c) =>
+              !memberSet.has(c.from.widgetId) && !memberSet.has(c.to.widgetId)
+          ),
+        },
+      })
+      .eq("id", dashboardId);
+  }
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
+// Desfazer mescla: devolve membros (todos, ou só os informados) ao canvas em
+// posição livre da aba do host. RLS (widgets_write) restringe a dono/admin.
+export async function unmergeWidgetPages(
+  dashboardId: string,
+  hostId: string,
+  memberIds?: string[]
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+  await ensureFineGrid(supabase, dashboardId);
+  const { data: hostRow } = await supabase
+    .from("widgets")
+    .select("id, settings")
+    .eq("id", hostId)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  if (!hostRow) return { ok: false, message: "Widget não encontrado." };
+  const hostSettings = (hostRow.settings ?? {}) as WidgetSettings;
+  const current = pageMembersOf({ settings: hostSettings });
+  const freed = memberIds
+    ? current.filter((id) => memberIds.includes(id))
+    : current;
+  if (freed.length === 0) return { ok: true };
+  const remaining = current.filter((id) => !freed.includes(id));
+  const nextSettings: WidgetSettings = { ...hostSettings };
+  if (remaining.length > 0) nextSettings.pages = remaining;
+  else delete nextSettings.pages;
+  const { error } = await supabase
+    .from("widgets")
+    .update({ settings: nextSettings })
+    .eq("id", hostId)
+    .eq("dashboard_id", dashboardId);
+  if (error) return { ok: false, message: error.message };
+  const freeErr = await freePageMembers(supabase, dashboardId, freed);
+  if (freeErr) return { ok: false, message: freeErr };
+  revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
+}
+
 export async function deleteWidget(
   widgetId: string,
   dashboardId: string
@@ -1498,7 +1823,40 @@ export async function deleteWidget(
   const session = await getSessionInfo();
   if (!session) return;
   const supabase = await createClient();
+  // Páginas de widget: as settings precisam ser lidas ANTES do delete — um
+  // HOST excluído devolve os membros (ocultos) ao canvas; um MEMBRO excluído
+  // sai do `pages` de quem o referencia (senão o pager pularia um id morto
+  // para sempre e o unmerge tentaria reposicionar um widget inexistente).
+  const { data: victim } = await supabase
+    .from("widgets")
+    .select("settings")
+    .eq("id", widgetId)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  const victimPages = pageMembersOf({
+    settings: (victim?.settings ?? {}) as WidgetSettings,
+  });
   await supabase.from("widgets").delete().eq("id", widgetId);
+  if (victimPages.length > 0) {
+    await freePageMembers(supabase, dashboardId, victimPages);
+  }
+  const { data: hostRows } = await supabase
+    .from("widgets")
+    .select("id, settings")
+    .eq("dashboard_id", dashboardId);
+  for (const row of hostRows ?? []) {
+    const s = (row.settings ?? {}) as WidgetSettings;
+    const pages = pageMembersOf({ settings: s });
+    if (!pages.includes(widgetId)) continue;
+    const rest = pages.filter((id) => id !== widgetId);
+    const next: WidgetSettings = { ...s };
+    if (rest.length > 0) next.pages = rest;
+    else delete next.pages;
+    await supabase
+      .from("widgets")
+      .update({ settings: next })
+      .eq("id", row.id as string);
+  }
 
   // Conectores órfãos (ponta no widget excluído) saem do settings do dashboard.
   const { data: dash } = await supabase
@@ -1738,6 +2096,13 @@ async function applyPresetDefinition(
   // Falha retorna { error } com a mensagem REAL do banco — o genérico "Falha
   // ao aplicar" escondia o diagnóstico (ex.: o 42501 do RETURNING, abaixo).
 ): Promise<PresetApplyResult | { error: string }> {
+  // Espaço de grid v2: preset/JSON legado (sem canvas.gridVersion) entra JÁ
+  // convertido — lib/presets/definitions segue intocado em unidades antigas.
+  // `hadCanvas` preserva a semântica de canvas GERIDO: preset de fábrica sem
+  // canvas nunca sobrescrevia o do usuário, e o carimbo que a normalização
+  // adiciona não pode mudar isso (só o dashboard CRIADO precisa nascer v2).
+  const hadCanvas = preset.settings?.canvas !== undefined;
+  preset = normalizePresetGridSpace(preset);
   // 1) Dependências: campos (globais de apoio + os do preset), sub-fontes,
   //    correspondências (depois das subs — o record_type dos membros sai do
   //    catálogo) e chaves de métrica de meta. Campo 'calculado' novo dispara o
@@ -1805,6 +2170,19 @@ async function applyPresetDefinition(
   let dashboardAction: "created" | "updated";
   let dashId: string;
 
+  // Alvo EXISTENTE legado: converte antes de gravar widgets em unidades finas
+  // e RELÊ as settings (o update abaixo parte delas — partir da leitura antiga
+  // desfaria o carimbo do ensureFineGrid).
+  if (target) {
+    await ensureFineGrid(supabase, target.id);
+    const { data: fresh } = await supabase
+      .from("dashboards")
+      .select("settings")
+      .eq("id", target.id)
+      .maybeSingle();
+    if (fresh) target.settings = (fresh.settings ?? {}) as DashboardSettings;
+  }
+
   if (!target) {
     // Id gerado no APP + insert SEM RETURNING (padrão duplicateBoard): a
     // policy de SELECT de dashboards (auth_board_visible, 0088) consulta a
@@ -1834,7 +2212,9 @@ async function applyPresetDefinition(
     const managed = preset.settings ?? {};
     const next: DashboardSettings = { ...current };
     if (managed.periodBar !== undefined) next.periodBar = managed.periodBar;
-    if (managed.canvas !== undefined) next.canvas = managed.canvas;
+    // hadCanvas: só sobrescreve o canvas do alvo se o preset ORIGINAL o
+    // definia (o carimbo v2 da normalização não conta como canvas gerido).
+    if (managed.canvas !== undefined && hadCanvas) next.canvas = managed.canvas;
     if (managed.background !== undefined) next.background = managed.background;
     if (managed.dateFormat !== undefined) next.dateFormat = managed.dateFormat;
     // fontScale gerida (23/07/2026): presets de fábrica não a definem (zero
@@ -1869,14 +2249,24 @@ async function applyPresetDefinition(
     .select("id, settings")
     .eq("dashboard_id", dashId);
   const existingByKey = new Map<string, string>(); // presetKey → widget id
+  // Páginas de widget: `pages` NUNCA viaja no JSON (export a remove — ids não
+  // sobrevivem) e por isso precisa ser PRESERVADA do settings existente no
+  // update in-place, senão qualquer edição por IA desfaria a mescla em
+  // silêncio.
+  const existingPagesByKey = new Map<string, string[]>();
   for (const w of widgetRows ?? []) {
-    const pk = (w.settings as WidgetSettings | null)?.presetKey;
-    if (pk) existingByKey.set(pk, w.id as string);
+    const s = w.settings as WidgetSettings | null;
+    const pk = s?.presetKey;
+    if (!pk) continue;
+    existingByKey.set(pk, w.id as string);
+    const pages = pageMembersOf({ settings: s ?? undefined });
+    if (pages.length > 0) existingPagesByKey.set(pk, pages);
   }
   const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
   const counts = { created: 0, updated: 0, deleted: 0 };
   for (let i = 0; i < preset.widgets.length; i++) {
     const w = preset.widgets[i];
+    const keptPages = existingPagesByKey.get(w.presetKey);
     const row = {
       title: w.title,
       visual_type: w.visual_type,
@@ -1886,7 +2276,11 @@ async function applyPresetDefinition(
       dimensions: w.dimensions,
       metrics: w.metrics,
       filters: w.filters,
-      settings: { ...(w.settings ?? {}), presetKey: w.presetKey },
+      settings: {
+        ...(w.settings ?? {}),
+        presetKey: w.presetKey,
+        ...(keptPages ? { pages: keptPages } : {}),
+      },
       grid_position: w.grid_position,
       sort_order: i,
     };
@@ -2119,13 +2513,16 @@ export async function applyDashboardEditJson(
     sources: await loadSources(supabase),
   });
 
-  // Identidade canônica + injeções protetivas (roles/tabs) + base do merge por
-  // widget ANTES de validar.
+  // Identidade canônica + injeções protetivas (roles/tabs/canvas v2) + base do
+  // merge por widget ANTES de validar.
   const normalized = normalizeImportRaw(raw, {
     chave,
     currentTabs: dashSettings.tabs,
     currentRoles: (dash.visible_to_roles as string[] | null) ?? [],
     baseWidgets: exported.json.widgets,
+    currentCanvas: exported.json.dashboard.settings?.canvas as
+      | Record<string, unknown>
+      | undefined,
   });
 
   const validation = validateDashboardImport(
@@ -2243,6 +2640,9 @@ export async function saveLayout(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // Itens em unidades FINAS: gravar sem converter o restante do board
+  // misturaria escalas (saveLayout só grava os widgets arrastados).
+  await ensureFineGrid(supabase, dashboardId);
   for (const it of items) {
     await supabase
       .from("widgets")
@@ -2271,10 +2671,13 @@ export async function saveShapeLine(
   if (nums.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
     return { ok: false, message: "Traçado inválido." };
   }
-  // Teto de sanidade nos limites MÁXIMOS do canvas (MAX_COLS/MAX_ROWS do
-  // dashboard-grid); o clamp fino pelas colunas reais é do cliente.
-  const clean = roundLine(clampLine(axisLock(line), 48, 200));
+  // Teto de sanidade nos limites MÁXIMOS do canvas (grid-space, unidades
+  // finas); o clamp fino pelas colunas reais é do cliente.
+  const clean = roundLine(
+    clampLine(axisLock(line), GRID_MAX_COLS, GRID_MAX_ROWS)
+  );
   const supabase = await createClient();
+  await ensureFineGrid(supabase, dashboardId);
   const { data: row } = await supabase
     .from("widgets")
     .select("visual_type, settings")
@@ -2339,10 +2742,19 @@ export async function captureDashboardSnapshot(
         .in("widget_id", widgetIds)
     : { data: [] as { widget_id: string; row_key: string; col_key: string; value: number | string | null }[] };
 
+  // Snapshot SEMPRE no espaço fino: o histórico precisa casar com o estado
+  // otimista do cliente (normalizado) — um snapshot legado restaurado voltaria
+  // a ser convertido na leitura (self-healing), mas o diff do Desfazer com o
+  // estado em tela ficaria falso-positivo.
+  const norm = normalizeGridSpace(
+    (dash.settings ?? {}) as DashboardSettings,
+    widgets
+  );
+
   return buildDashboardSnapshot(
     dash.name as string,
-    (dash.settings ?? {}) as DashboardSettings,
-    widgets,
+    norm.settings,
+    norm.widgets,
     // Valores de filtros rápidos ('__qf__'), o filtro por campo compartilhado
     // ('__ff__') e a expressão compartilhada da calculadora ('__calc__') ficam
     // FORA do histórico: mudar um dropdown ou digitar um cálculo não é edição

@@ -305,3 +305,20 @@ This version has breaking changes — APIs, conventions, and file structure may 
   create_dashboards + dono/admin em toda action). O snapshot pré-turno segue
   sendo o Desfazer, agora DB-backed; "Recomeçar" zera a conversa mas PRESERVA
   o undo. O fluxo da Home (`ImportDashboardSheet`) segue client-state.
+- **Espaço de grid v2 (grade fina) e páginas de widget (25/07/2026):**
+  unidades de `grid_position`/`ShapeLine`/`canvas` dependem de
+  `settings.canvas.gridVersion` (2 = fino base-120 sem margens, linha quadrada
+  default; ausente = legado base-12). TODA leitura de linha crua passa por
+  `normalizeGridSpace` (`lib/widgets/grid-space.ts` — page, snapshots,
+  export/IA, viewer público) e TODO escritor de geometria chama
+  `ensureFineGrid` ANTES de gravar (actions.ts; a ordem leitura→carimbo
+  CAS→conversão impede a dupla conversão — não a mude). Snapshots congelados
+  (`snapshots.config`) nunca são migrados por backfill — a conversão runtime
+  do viewer é permanente; runbook: `supabase/apply/backfill-grid-v2.sql`.
+  Mescla de widgets: `settings.pages` (ids dos membros no HOST) NUNCA sai em
+  export/JSON/clipboard e é PRESERVADA pelo `applyPresetDefinition` no update
+  in-place; `deleteWidget` mantém a integridade (host excluído devolve
+  membros; membro excluído sai do `pages`). A ocultação dos membros é SÓ de
+  renderização (`collectPageMembers`, `lib/widgets/pages.ts`) — não filtre
+  membros da computação de dados da page. RPCs de widget INTOCADOS.
+  Ver `docs/arquitetura.md` §4.12 e invariantes 18/19.

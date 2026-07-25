@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 24/07/2026
+// Versão: 1.3 | Data: 25/07/2026
+// v1.3 (25/07/2026): injeção do canvas do estado (currentCanvas) — carrega o
+//   carimbo do espaço de grid v2 para o JSON da IA; sem ele o validador
+//   trataria o delta como legado (base 12) e re-escalaria as posições finas.
 // Normalização do JSON BRUTO devolvido pela IA, ANTES da validação — o ponto
 // central da segurança de identidade da conversa (modos Editar/Criar a partir
 // de): a `chave` NUNCA é confiada à IA. Reescrevemos o envelope para a chave
@@ -49,6 +52,14 @@ export interface NormalizeImportRawOpts {
    * NÃO é adicionado ao JSON (o apply sem-GC já preserva a linha do banco).
    */
   baseWidgets?: ImportWidgetSpec[];
+  /**
+   * Modos Editar/Criar a partir de: canvas do ESTADO EXPORTADO (carrega o
+   * carimbo do espaço de grid v2 — gridVersion). Injetado SOB o canvas da IA
+   * quando o dela não traz gridVersion: sem o carimbo, o validador trataria o
+   * JSON como legado (base 12) e re-escalaria ×10 as posições finas herdadas
+   * do merge por widget.
+   */
+  currentCanvas?: Record<string, unknown>;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -137,6 +148,20 @@ export function normalizeImportRaw(
       const tabs = settings.tabs;
       if (!Array.isArray(tabs) || tabs.length === 0) {
         settings.tabs = opts.currentTabs;
+      }
+      dash.settings = settings;
+    }
+    // Carimbo do espaço de grid v2 (ver NormalizeImportRawOpts.currentCanvas):
+    // o canvas do estado entra POR BAIXO do da IA — chaves dela vencem.
+    if (opts.currentCanvas) {
+      const settings = isPlainObject(dash.settings)
+        ? (dash.settings as Record<string, unknown>)
+        : {};
+      const aiCanvas = isPlainObject(settings.canvas)
+        ? (settings.canvas as Record<string, unknown>)
+        : undefined;
+      if (!aiCanvas || aiCanvas.gridVersion == null) {
+        settings.canvas = { ...opts.currentCanvas, ...(aiCanvas ?? {}) };
       }
       dash.settings = settings;
     }

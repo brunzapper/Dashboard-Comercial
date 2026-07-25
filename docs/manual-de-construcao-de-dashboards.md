@@ -1,4 +1,12 @@
-<!-- Versão: 1.10 | Data: 25/07/2026 -->
+<!-- Versão: 1.11 | Data: 25/07/2026 -->
+<!-- v1.11 (25/07/2026): grade FINA (§3.4) — 120 colunas na largura visível
+     (10× a antiga), linhas quadradas por padrão e controle "Largura da
+     coluna" em ⋮ → Área de trabalho; dashboards antigos são convertidos
+     automaticamente. §3.4.1 — PÁGINAS de widget (mesclar): soltar um widget
+     quase em cima de outro de tamanho parecido pergunta "Adicionar página?";
+     setinhas acima do card alternam; ⋮ do card ganha "Adicionar página" e
+     "Desfazer mescla". Tamanhos iniciais (§3.5) em células finas. -->
+
 <!-- v1.10 (25/07/2026): 18 tipos — "Linha divisória" (linha_divisoria) vira
      widget próprio (§5.9.1; a Forma perde a opção "Linha") e "Barra" passa a
      se chamar "Barra vertical"; §9.2 — rótulos da Barra horizontal
@@ -347,18 +355,57 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
 
 ### 3.4 Grid (área de trabalho)
 
-- O dashboard é um **grid** configurável: **colunas** de 12 a 48 (padrão 12) e
-  **altura da linha** de 10 a 200 px (padrão 30), em "⋮ → Área de trabalho".
-  No modo edição, alças na borda inferior/direita da área aumentam
-  linhas/colunas diretamente (linhas de 8 a 200).
+- O dashboard é um **grid fino**: por padrão, **120 colunas** preenchem a
+  largura visível (célula ~10 px numa tela comum) e as **linhas são
+  quadradas** (altura = largura da coluna) — posicionamento quase livre, com
+  precisão de poucos pixels. Em "⋮ → Área de trabalho":
+  - **Largura da coluna** (novo): degraus de 50% a 200% do padrão — colunas
+    mais finas dão mais precisão; mais grossas, células maiores.
+  - **Colunas do grid**: largura da ÁREA em colunas, de 12 a 480 (além da
+    tela, a área ganha rolagem horizontal).
+  - **Altura da linha (px)**: vazio = **automática (quadrada)**; um número
+    fixa a altura em px (aceita fração).
+  - No modo edição, alças na borda inferior/direita aumentam linhas/colunas
+    diretamente (linhas até 800).
+- **Dashboards criados antes da grade fina** são convertidos automaticamente
+  (posições ×10 na horizontal e ×4 na vertical, com a altura de linha ajustada
+  para preservar o visual) — o layout continua praticamente idêntico, só a
+  precisão de posicionamento aumenta.
 - **Posicionamento é livre nos dois eixos** (nada "sobe" sozinho). Ao soltar
-  um widget sobre outro, o vizinho é **empurrado** na direção do movimento.
+  um widget sobre outro, o vizinho é **empurrado** na direção do movimento —
+  EXCETO quando o drop cai quase exatamente sobre um widget de tamanho
+  parecido: aí o sistema pergunta se você quer **mesclar** os dois (§3.4.1).
 - **Arrastar**: pela barra de título do widget (modo edição). **Pan**: clicar
   e arrastar uma área vazia move a viewport ("mãozinha").
 - **Redimensionar**: alças nas bordas do widget (modo edição).
 - **Tamanho dinâmico**: widgets com "Largura dinâmica"/"Altura dinâmica"
   (§6.9) crescem visualmente para caber o conteúdo; o tamanho gravado no grid
   é o mínimo.
+
+#### 3.4.1 Páginas de widget (mesclar dois widgets no mesmo espaço)
+
+Dois ou mais widgets podem **dividir o mesmo espaço** do grid, como páginas de
+um caderno — setinhas **acima do card** (‹ 1/2 ›) alternam qual aparece.
+
+- **Criar pela arrastada**: no modo edição, solte um widget **quase
+  exatamente em cima** de outro de tamanho parecido (sobreposição grande e
+  diferença de tamanho de até ~25%). Abre o diálogo **"Adicionar página?"**:
+  confirmar mescla (o arrastado vira a página 2); cancelar **desfaz o
+  arraste** (o widget volta para onde estava — nada se move).
+- **Criar pelo menu**: "⋮" do card → **"Adicionar página"** → escolha
+  qualquer widget elegível da aba atual. Pode repetir: um espaço aceita
+  várias páginas (o indicador mostra "2/3" etc.).
+- **Desfazer**: "⋮" → **"Desfazer mescla"** devolve TODAS as páginas ao
+  canvas, cada uma num espaço livre da aba.
+- As setinhas aparecem em visualização, edição e no **snapshot público**
+  (após o próximo refresh do link). A página ativa é local — não persiste
+  nem é compartilhada.
+- **Regras**: Filtros (de período/por campo), Formas, Imagens e Linhas
+  divisórias não participam de mescla; um widget que já tem páginas não pode
+  virar página de outro (desfaça a mescla dele antes). O menu "⋮" mostrado é
+  o da página ATIVA (Editar dados/Aparência editam ela); excluir uma página
+  pelo menu exclui só ela. As páginas ocultas continuam sendo widgets normais
+  do dashboard (contam nos filtros da IA/export como sempre).
 
 ### 3.5 As 5 formas de criar um widget
 
@@ -379,11 +426,12 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
    dashboard (a área de transferência sobrevive entre páginas no mesmo
    navegador).
 
-**Tamanhos iniciais por tipo** (largura×altura em células): Tabela, Tabela
-Livre, Barra vertical, Barra horizontal, Linha, Pizza, Funil, Nota, Kanban e
-Agenda = 6×8; Card e Métrica calculada = 4×4; Calculadora = 4×9; Forma e
-Imagem = 4×6; Linha divisória = 6×2; Filtro de período = 6×3; Filtro por
-campo = 6×4.
+**Tamanhos iniciais por tipo** (largura×altura em células FINAS — os
+equivalentes visuais dos antigos 6×8/4×4/…): Tabela, Tabela Livre, Barra
+vertical, Barra horizontal, Linha, Pizza, Funil, Nota, Kanban e Agenda =
+59×31; Card e Métrica calculada = 39×15; Calculadora = 39×35; Forma e
+Imagem = 39×23; Linha divisória = 59×7; Filtro de período = 59×11; Filtro por
+campo = 59×15.
 
 **Tipos que abrem o editor automaticamente ao criar**: todos, EXCETO Tabela
 Livre, Calculadora, Nota, Forma e Linha divisória (esses funcionam de
@@ -406,7 +454,8 @@ colunas do grid. Colar preserva o desenho, transladado para a célula clicada.
   - **Escala da fonte**: 90% / 100% (padrão) / 115% / 130% / 150% —
     multiplica os textos de todos os widgets. Tamanhos fixados em px num
     widget específico (§9.1) NÃO são afetados.
-- **Área de trabalho**: colunas do grid e altura da linha (§3.4).
+- **Área de trabalho**: largura da coluna, colunas do grid e altura da linha
+  (§3.4).
 - **Compartilhamento**: papéis que veem o dashboard.
 - **Snapshots**: painel de links públicos congelados (capítulo 11).
 
@@ -1621,6 +1670,7 @@ mudou para todo mundo" ou "por que só eu vejo assim":
 | Busca/filtros embutidos de tabela (§4.5) | só o link | URL (`tf_…`) |
 | Seleções do widget Filtro de período (§4.2) | só o link | URL (`pf_…`) |
 | Interações do visitante de snapshot | só o visitante | URL do visitante (nada persiste) |
+| Página ativa de um widget mesclado (§3.4.1) | só você, só a sessão | memória da página (nada persiste) |
 | Área de transferência de widget (copiar/colar) | só o navegador | armazenamento local do navegador |
 
 Regras derivadas:

@@ -265,6 +265,9 @@ export async function generateDashboardWithAi(
   // Modos from/edit: base do merge por widget e do `copy_of` (a IA manda só o
   // delta).
   let baseWidgets: ImportWidgetSpec[] | undefined;
+  // Modos from/edit: canvas do estado EXPORTADO (carimbo do espaço de grid v2)
+  // — injetado no JSON da IA quando ela o omite (rewrite.currentCanvas).
+  let currentCanvas: Record<string, unknown> | undefined;
 
   if (mode === "new") {
     bases = (input.bases ?? []).filter(Boolean);
@@ -301,6 +304,9 @@ export async function generateDashboardWithAi(
     // "from" o apply já mescla sobre a cópia (applyDashboardEditJson) — sem a
     // base aqui, um delta/cópia válido reprovaria na validação do laço.
     baseWidgets = exported.json.widgets;
+    currentCanvas = exported.json.dashboard.settings?.canvas as
+      | Record<string, unknown>
+      | undefined;
     if (mode === "edit") {
       chave = exported.chave; // canônica do próprio board
       modeRules = EDIT_RULES;
@@ -391,6 +397,7 @@ export async function generateDashboardWithAi(
       currentRoles,
       avoidName,
       baseWidgets,
+      currentCanvas,
     });
 
     const validation = validateDashboardImport(normalized, ctx);
