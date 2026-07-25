@@ -1251,7 +1251,14 @@ dashboard completo. Peças:
   descoberta). O envelope do JSON aceita `bases: []` (ou `base` singular). A
   variante "completo" anexa `docs/manual-de-construcao-de-dashboards.md` lido
   do disco — `outputFileTracingIncludes` no `next.config.ts` garante o
-  arquivo no bundle da Vercel.
+  arquivo no bundle da Vercel. **A espec é DERIVADA do código (25/07/2026)**:
+  os enums do SPEC são interpolados das constantes de runtime (as mesmas que o
+  validador já usava) e as chaves de `WidgetSettings`/`AppearanceSettings`
+  (+ `.table`)/`DashboardSettings` são renderizadas dos dicionários exaustivos
+  de `lib/import/dashboard/settings-docs.ts` (chave nova sem entrada = erro de
+  typecheck; `null` = fora do escopo da IA). Guarda textual + validação do
+  exemplo do SPEC pelo validador real em
+  `lib/import/dashboard/instructions.test.ts`. Ver invariante no AGENTS.md.
 
 #### 4.11.1 Geração DIRETA por IA via API (23/07/2026)
 

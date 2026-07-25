@@ -1,12 +1,16 @@
-<!-- Versão: 1.11 | Data: 25/07/2026 -->
-<!-- v1.11 (25/07/2026): grade FINA (§3.4) — 120 colunas na largura visível
+<!-- Versão: 1.12 | Data: 25/07/2026 -->
+<!-- v1.12 (25/07/2026): grade FINA (§3.4) — 120 colunas na largura visível
      (10× a antiga), linhas quadradas por padrão e controle "Largura da
      coluna" em ⋮ → Área de trabalho; dashboards antigos são convertidos
      automaticamente. §3.4.1 — PÁGINAS de widget (mesclar): soltar um widget
      quase em cima de outro de tamanho parecido pergunta "Adicionar página?";
      setinhas acima do card alternam; ⋮ do card ganha "Adicionar página" e
      "Desfazer mescla". Tamanhos iniciais (§3.5) em células finas. -->
-
+<!-- v1.11 (25/07/2026): §3.8 — nota de que a especificação do prompt é GERADA
+     do código (enums e chaves de settings derivados das mesmas constantes da
+     UI; lib/import/dashboard/instructions.ts + settings-docs.ts), e as
+     contagens das enumerações do §16.2 passam a ser conferidas em CI
+     (lib/import/dashboard/instructions.test.ts). -->
 <!-- v1.10 (25/07/2026): 18 tipos — "Linha divisória" (linha_divisoria) vira
      widget próprio (§5.9.1; a Forma perde a opção "Linha") e "Barra" passa a
      se chamar "Barra vertical"; §9.2 — rótulos da Barra horizontal
@@ -485,7 +489,11 @@ etc.). O fluxo, guiado no próprio painel:
    **Conexões** entre as Bases, nomes de responsáveis/operações e uma
    **amostra de ~20 registros reais por Base** escolhida para que TODA coluna
    com dado no banco apareça preenchida em pelo menos uma linha (colunas
-   totalmente vazias são listadas como tal).
+   totalmente vazias são listadas como tal). A especificação dentro do prompt
+   é **gerada do próprio código do sistema** (tipos de widget, agregações,
+   operadores, períodos, paletas e as chaves de settings/aparência saem das
+   mesmas constantes que a UI usa), então recursos novos do construtor entram
+   nela automaticamente.
 4. Cole o prompt na IA, **descreva o dashboard desejado** e receba o JSON.
 5. Cole o JSON no painel e clique em **"Importar dashboard"**. O sistema
    valida tudo (tipos de widget, campos referenciados, fórmulas, operadores…)

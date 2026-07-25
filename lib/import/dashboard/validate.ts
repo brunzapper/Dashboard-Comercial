@@ -74,7 +74,7 @@ import {
   buildAggOperandCatalog,
   defsAggCatalogInput,
 } from "@/lib/widgets/agg-catalog";
-import type { DataType } from "@/lib/records/types";
+import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
 import {
   DASHBOARD_IMPORT_FORMAT,
   DASHBOARD_IMPORT_VERSION,
@@ -97,16 +97,7 @@ const PERIOD_PRESET_KEYS = new Set<string>([
   "",
 ]);
 const ROLE_KEYS = new Set(Object.keys(ROLE_LABELS));
-const DATA_TYPES = new Set<string>([
-  "texto",
-  "numero",
-  "data",
-  "selecao",
-  "moeda",
-  "booleano",
-  "calculado",
-  "calculado_agg",
-]);
+const DATA_TYPES = new Set<string>(Object.keys(DATA_TYPE_LABELS));
 // Colunas core aceitas como campo de período (CHECK da 0060 + sub-fontes 0082).
 const PERIOD_FIELDS = new Set([
   "closed_at",

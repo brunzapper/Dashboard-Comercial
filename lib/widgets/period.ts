@@ -1,4 +1,9 @@
-// Versão: 2.1 | Data: 21/07/2026
+// Versão: 2.2 | Data: 25/07/2026
+// v2.2 (25/07/2026): DATE_TOKENS + resolveDateToken — os tokens dinâmicos de
+// valor de filtro (@today, @month_start, …) viram constante exportada com
+// resolvers exaustivos (token novo sem resolver quebra o typecheck). O engine
+// (resolveFilters) delega para cá e o prompt de importação por IA
+// (lib/import/dashboard/instructions.ts) deriva a lista daqui.
 // v2.1 (21/07/2026): dia de Brasília (0085) — CORE_DATE_COLS (espelho do
 // v_date_cols dos RPCs) + anchorCoreDateBound; o caminho uniforme do
 // applyPeriodToFilters ancora bounds de coluna do núcleo com -03:00.
@@ -41,6 +46,37 @@ export const DEFAULT_PERIOD_FIELD = "closed_at";
 
 // Sentinel de "todo o período" explícito (sobrepõe o default configurado).
 export const PERIOD_ALL = "all";
+
+// Tokens dinâmicos aceitos como VALOR de filtro de data (resolvidos no momento
+// da consulta pelo engine, em resolveFilters).
+export const DATE_TOKENS = [
+  "@today",
+  "@month_start",
+  "@month_end",
+  "@year_start",
+  "@year_end",
+] as const;
+export type DateToken = (typeof DATE_TOKENS)[number];
+
+// Resolvers exaustivos (token novo em DATE_TOKENS sem resolver = erro de
+// typecheck). Date LOCAL + toISOString, byte-igual ao switch histórico do
+// engine — o vitest pina TZ=America/Sao_Paulo pela mesma razão.
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const DATE_TOKEN_RESOLVERS = {
+  "@today": (now) => isoDay(now),
+  "@month_start": (now) => isoDay(new Date(now.getFullYear(), now.getMonth(), 1)),
+  "@month_end": (now) => isoDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  "@year_start": (now) => isoDay(new Date(now.getFullYear(), 0, 1)),
+  "@year_end": (now) => isoDay(new Date(now.getFullYear(), 11, 31)),
+} satisfies Record<DateToken, (now: Date) => string>;
+
+/** Resolve um token dinâmico para ISO YYYY-MM-DD; null quando não é token. */
+export function resolveDateToken(v: string, now = new Date()): string | null {
+  const fn = DATE_TOKEN_RESOLVERS[v as DateToken] as
+    | ((now: Date) => string)
+    | undefined;
+  return fn ? fn(now) : null;
+}
 
 /** Período ativo do dashboard, já resolvido para datas ISO (YYYY-MM-DD). */
 export interface DashboardPeriod {

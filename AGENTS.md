@@ -322,3 +322,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
   renderização (`collectPageMembers`, `lib/widgets/pages.ts`) — não filtre
   membros da computação de dados da page. RPCs de widget INTOCADOS.
   Ver `docs/arquitetura.md` §4.12 e invariantes 18/19.
+- **Prompt de importação por IA é DERIVADO do código (25/07/2026):** o SPEC
+  (`lib/import/dashboard/instructions.ts`) interpola os enums das constantes
+  de runtime (`VISUAL_TYPE_LABELS`/`AGG_LABELS`/`DATE_TRANSFORMS`/
+  `FILTER_OPS`/`PERIOD_PRESETS`/`PALETTES`/`DATA_TYPE_LABELS`/`DATE_TOKENS` —
+  este novo em `lib/widgets/period.ts`, com `resolveDateToken` consumido pelo
+  engine) e renderiza settings/appearance dos dicionários EXAUSTIVOS de
+  `lib/import/dashboard/settings-docs.ts` (`satisfies Record<keyof
+  WidgetSettings | AppearanceSettings (+ `.table`) | DashboardSettings,
+  string | null>`; funções de fórmula via `FORMULA_FUNC_GROUPS` sobre
+  `FormulaFuncName`). Chave/função NOVA nesses tipos sem entrada no dicionário
+  QUEBRA `npm run typecheck` — documente-a LÁ (valor = linha do pseudo-JSON)
+  ou marque `null` (fora do escopo da IA), NUNCA em prosa duplicada no SPEC.
+  `EDIT_RULES` (ai-generate-actions) deriva do MESMO dicionário a lista de
+  chaves editáveis de `dashboard.settings`. Fiscalizado por
+  `lib/import/dashboard/instructions.test.ts` (`npm test`): enums presentes no
+  texto, dicionários renderizados linha a linha, transforms legados fora,
+  exemplo do SPEC aceito pelo validador REAL e contagens `**Label (N)**` do
+  §16.2 do manual — o conteúdo do manual segue humano (regra do topo), só as
+  contagens são conferidas.
