@@ -1577,7 +1577,10 @@ export function WidgetBuilder({
       return;
     }
 
-    // Forma (figura geométrica): tipo, texto e atalho em settings.shape.
+    // Forma (figura geométrica): tipo, texto e atalho em settings.shape. O
+    // spread do shape anterior preserva chaves que o builder não edita — o
+    // traçado da Linha (shape.line, gravado pelo line-layer) sumia num
+    // re-save sem ele.
     if (visualType === "forma") {
       const input = {
         title: title.trim() || null,
@@ -1590,6 +1593,7 @@ export function WidgetBuilder({
         settings: {
           ...(widget?.settings ?? {}),
           shape: {
+            ...(widget?.settings?.shape ?? {}),
             kind: shapeKind,
             text: shapeText.trim() || undefined,
             link: shapeLink,
@@ -2805,6 +2809,14 @@ export function WidgetBuilder({
                   onValueChange={(v) => setShapeKind(v as ShapeKind)}
                   aria-label="Tipo de forma"
                 />
+                {shapeKind === "linha" ? (
+                  <p className="text-muted-foreground text-xs">
+                    A linha é livre: no modo edição, arraste o corpo ou as
+                    pontas direto no painel — ela não se prende às colunas do
+                    grid e fica sempre na horizontal ou na vertical (a ponta
+                    decide pelo gesto dominante).
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Texto na forma</Label>

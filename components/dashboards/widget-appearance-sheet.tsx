@@ -115,6 +115,8 @@ export function WidgetAppearanceSheet({
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";
   const isShape = vt === "forma";
+  // Forma "linha" (camada livre): só traço — sem preenchimento.
+  const isLineShape = isShape && widget.settings?.shape?.kind === "linha";
   const isKanban = vt === "kanban";
 
   const metrics = data.metrics;
@@ -558,12 +560,16 @@ export function WidgetAppearanceSheet({
           {/* ---------- Forma ---------- */}
           {isShape ? (
             <BuilderSection value="forma" title="Forma">
-              <ColorField
-                label="Preenchimento"
-                value={ap.shape?.fill}
-                onChange={(v) => patch({ shape: { ...ap.shape, fill: v } })}
-                onClear={() => patch({ shape: { ...ap.shape, fill: undefined } })}
-              />
+              {!isLineShape ? (
+                <ColorField
+                  label="Preenchimento"
+                  value={ap.shape?.fill}
+                  onChange={(v) => patch({ shape: { ...ap.shape, fill: v } })}
+                  onClear={() =>
+                    patch({ shape: { ...ap.shape, fill: undefined } })
+                  }
+                />
+              ) : null}
               <ColorField
                 label="Contorno"
                 value={ap.shape?.stroke}

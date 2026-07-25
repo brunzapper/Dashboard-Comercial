@@ -62,11 +62,13 @@ import type {
   DashboardSettings,
   FieldFilterOptions,
   GridPosition,
+  ShapeLine,
   Widget,
   WidgetData,
   WidgetLinkTarget,
 } from "@/lib/widgets/types";
 import { posOf } from "@/lib/widgets/grid-placement";
+import { isLineShapeWidget } from "@/lib/widgets/lines";
 import { focusWidgetWithRetry } from "@/lib/widgets/focus";
 import type { DateFormat } from "@/lib/widgets/format";
 import type { CurrencyRates } from "@/lib/widgets/currency";
@@ -397,6 +399,28 @@ export function DashboardClient({
     },
     []
   );
+  // Traçado otimista das Formas "linha" (settings.shape.line), mesmo padrão
+  // seedKey do layout acima: saveShapeLine não revalida (edição fluida), então
+  // a prop fica obsoleta entre a gravação e o próximo refresh real. Sem
+  // sticky — o traçado só muda por gesto direto (não há "Posicionar" de
+  // linha). Linha recém-criada (sem shape.line) fica fora do mapa: o grid
+  // deriva do grid_position via lineOf.
+  const serverLines: Record<string, ShapeLine> = {};
+  widgets.forEach((w) => {
+    const l = w.settings?.shape?.line;
+    if (isLineShapeWidget(w) && l) serverLines[w.id] = l;
+  });
+  const serverLinesKey = JSON.stringify(serverLines);
+  const [lineSeedKey, setLineSeedKey] = useState(serverLinesKey);
+  const [lineById, setLineById] = useState(serverLines);
+  if (lineSeedKey !== serverLinesKey) {
+    setLineSeedKey(serverLinesKey);
+    setLineById(serverLines);
+  }
+  const applyLinePatch = useCallback((patch: Record<string, ShapeLine>) => {
+    setLineById((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const tabIds = new Set(tabs.map((t) => t.id));
   // Aba efetiva: a do widget quando ainda existe; senão (sem aba ou aba excluída)
   // cai na primeira aba, para nenhum widget "sumir".
@@ -992,6 +1016,8 @@ export function DashboardClient({
             deferredScopeById={deferredScopeById}
             layoutById={layoutById}
             applyLayoutPatch={applyLayoutPatch}
+            lineById={lineById}
+            applyLinePatch={applyLinePatch}
             connectors={connectors}
             saveConnectors={saveConnectors}
             connectMode={editMode && connectMode}

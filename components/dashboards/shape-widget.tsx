@@ -102,6 +102,27 @@ function shapeElement(
           {...(common as React.SVGProps<SVGPolygonElement>)}
         />
       );
+    case "linha":
+      // Fallback: a "linha" normalmente é renderizada pela camada livre
+      // (line-layer, fora do RGL); aqui só cobre contextos que ainda a
+      // desenhem dentro do card — linha média H/V pelo aspecto do retângulo.
+      return W >= H ? (
+        <line
+          x1={i}
+          y1={H / 2}
+          x2={W - i}
+          y2={H / 2}
+          {...(common as React.SVGProps<SVGLineElement>)}
+        />
+      ) : (
+        <line
+          x1={W / 2}
+          y1={i}
+          x2={W / 2}
+          y2={H - i}
+          {...(common as React.SVGProps<SVGLineElement>)}
+        />
+      );
   }
 }
 

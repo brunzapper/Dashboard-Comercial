@@ -378,6 +378,12 @@ Livre, Barra, Barra horizontal, Linha, Pizza, Funil, Nota, Kanban e Agenda =
 Livre, Calculadora, Nota e Forma (esses quatro funcionam de imediato e são
 editados no próprio card).
 
+**Forma "Linha"**: cria-se como qualquer Forma (a opção "Linha" fica no campo
+"Forma" do editor). Ao virar linha, ela nasce como a linha média do retângulo
+que o widget ocupava e passa a ser ajustada livremente no painel (corpo e
+pontas — §5.9), sem se prender às colunas do grid. Colar preserva o desenho,
+transladado para a célula clicada.
+
 ### 3.6 Menu "⋮" do dashboard
 
 - **Modo tela cheia** — fullscreen do navegador.
@@ -773,10 +779,22 @@ Recursos dentro do texto:
 ### 5.9 Forma (`forma`)
 
 Elemento visual de diagramação. Opções: **"Forma"** — Retângulo, Retângulo
-arredondado (padrão), Elipse, Losango, Triângulo, Seta, Hexágono; **"Texto na
-forma"** (opcional); **"Atalho para widget"** (clique navega/foca o alvo —
-§3.7). Aparência: preenchimento, contorno (cor + espessura), texto (cor +
-tamanho).
+arredondado (padrão), Elipse, Losango, Triângulo, Seta, Hexágono, Linha;
+**"Texto na forma"** (opcional); **"Atalho para widget"** (clique navega/foca
+o alvo — §3.7). Aparência: preenchimento, contorno (cor + espessura), texto
+(cor + tamanho).
+
+**Linha** é especial: ela vive numa camada livre, sob os cards — não se prende
+às colunas do grid. No modo "Editar layout", arraste o **corpo** para mover a
+linha inteira (movimento contínuo, em pixels) e as **pontas** para alongar/
+encurtar; a linha fica sempre na horizontal ou na vertical (a ponta arrastada
+decide o eixo pelo gesto dominante, pivotando na outra) e `Esc` cancela o
+gesto. Um clique parado na linha abre o menu de ações (Editar dados /
+Aparência / Copiar widget / Excluir — a linha não tem o "⋮" de card). Fora do
+modo edição, o clique segue o "Atalho para widget", se configurado. Aparência:
+só contorno (cor + espessura) e texto (exibido no ponto médio) — sem
+preenchimento. Colar uma linha copiada preserva o desenho, transladado para a
+célula clicada.
 
 ### 5.10 Imagem (`imagem`)
 

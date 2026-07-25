@@ -89,11 +89,18 @@ import type {
   Dimension,
   GridPosition,
   Metric,
+  ShapeLine,
   VisualType,
   Widget,
   WidgetFilter,
   WidgetSettings,
 } from "@/lib/widgets/types";
+import {
+  axisLock,
+  clampLine,
+  lineGridBBox,
+  roundLine,
+} from "@/lib/widgets/lines";
 import {
   buildDashboardSnapshot,
   type DashboardSnapshot,
@@ -2241,6 +2248,50 @@ export async function saveLayout(
       .eq("id", it.id)
       .eq("dashboard_id", dashboardId);
   }
+  return { ok: true };
+}
+
+// Grava o traçado de uma Forma "linha" (settings.shape.line, unidades de grid
+// fracionárias) junto do grid_position DERIVADO (bounding box inteiro) num
+// único update. Espelho do saveLayout: sem revalidatePath (edição fluida — o
+// estado otimista do shell é a verdade até o próximo refresh real; o cliente
+// registra no histórico após o await). Normaliza no servidor com os MESMOS
+// helpers do cliente (axisLock/round/clamp), então o valor persistido é
+// byte-igual ao otimista e o reseed vira no-op.
+export async function saveShapeLine(
+  dashboardId: string,
+  widgetId: string,
+  line: ShapeLine
+): Promise<ActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const nums = [line?.x1, line?.y1, line?.x2, line?.y2];
+  if (nums.some((v) => typeof v !== "number" || !Number.isFinite(v))) {
+    return { ok: false, message: "Traçado inválido." };
+  }
+  // Teto de sanidade nos limites MÁXIMOS do canvas (MAX_COLS/MAX_ROWS do
+  // dashboard-grid); o clamp fino pelas colunas reais é do cliente.
+  const clean = roundLine(clampLine(axisLock(line), 48, 200));
+  const supabase = await createClient();
+  const { data: row } = await supabase
+    .from("widgets")
+    .select("visual_type, settings")
+    .eq("id", widgetId)
+    .eq("dashboard_id", dashboardId)
+    .maybeSingle();
+  if (!row || row.visual_type !== "forma") {
+    return { ok: false, message: "Widget não é uma forma." };
+  }
+  const settings = (row.settings ?? {}) as WidgetSettings;
+  const { error } = await supabase
+    .from("widgets")
+    .update({
+      settings: { ...settings, shape: { ...settings.shape, line: clean } },
+      grid_position: lineGridBBox(clean),
+    })
+    .eq("id", widgetId)
+    .eq("dashboard_id", dashboardId);
+  if (error) return { ok: false, message: error.message };
   return { ok: true };
 }
 
