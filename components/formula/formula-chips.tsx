@@ -9,6 +9,7 @@
 
 import { X } from "lucide-react";
 
+import { displayLabel } from "@/components/formula/operand-display";
 import type { RefOption } from "@/lib/records/date-operands";
 import type { FormulaToken } from "@/lib/records/formulas";
 import { cn } from "@/lib/utils";
@@ -31,7 +32,7 @@ function chipInfo(t: FormulaToken, catalog: RefOption[]): ChipInfo {
         };
       }
       return {
-        label: r.sourceHint ? `${r.sourceHint} · ${r.label}` : r.label,
+        label: displayLabel(r),
         title: r.title,
       };
     }

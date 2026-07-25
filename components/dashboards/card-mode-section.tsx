@@ -1,5 +1,9 @@
 "use client";
-// Versão: 1.2 | Data: 20/07/2026
+// Versão: 1.3 | Data: 25/07/2026
+// v1.3 (25/07/2026): modo Fórmula ganha a receita "Taxa de conversão", prévia
+//   e warnings de escopo @fonte (props sources/previewAdapter) — paridade com
+//   o widget calculado. Card não tem flag de percentual: a receita aplica
+//   (fórmula) × 100 + sufixo "%", o mesmo padrão persistido pelos presets.
 // v1.2 (20/07/2026): modo Fórmula usa o FormulaEditor unificado (visual +
 //   texto + validação viva) no lugar do FormulaTextEditor texto-only.
 // v1.1 (17/07/2026): caixa com bg-card (painel do editor ficou bg-muted).
@@ -7,6 +11,8 @@
 // (comportamento original), o Card exibe o valor de um registro (maior/menor),
 // um ranking Top N, uma lista de valores ou uma fórmula (motor do widget
 // calculado). Arquivo próprio para não inflar o widget-builder.
+import { useState } from "react";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -22,7 +28,10 @@ import {
   type ComboboxOption,
 } from "@/components/ui/combobox";
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
+import { RecipeStrip } from "@/components/formula/recipe-strip";
 import type { RefOption } from "@/lib/records/date-operands";
+import type { SourceDef } from "@/lib/sources";
 import {
   AGG_LABELS,
   CARD_MODE_LABELS,
@@ -40,6 +49,8 @@ export function CardModeSection({
   metricFieldOptions,
   fieldChips,
   calcRefs,
+  sources,
+  previewAdapter,
 }: {
   value: CardConfig;
   onChange: (v: CardConfig) => void;
@@ -51,8 +62,12 @@ export function CardModeSection({
   metricFieldOptions: ComboboxOption[];
   fieldChips?: ComboboxChip[];
   calcRefs: RefOption[];
+  // Catálogo de fontes vivo — receita de conversão + warnings de escopo @fonte.
+  sources?: SourceDef[];
+  previewAdapter?: FormulaPreviewAdapter;
 }) {
   const patch = (p: Partial<CardConfig>) => onChange({ ...value, ...p });
+  const [recipeNonce, setRecipeNonce] = useState(0);
   const mode = value.mode ?? "value";
   const modes = Object.keys(CARD_MODE_LABELS) as CardMode[];
   return (
@@ -234,15 +249,43 @@ export function CardModeSection({
         <div className="flex flex-col gap-1.5">
           <Label>Fórmula</Label>
           <FormulaEditor
+            key={`cardf-${recipeNonce}`}
             context="aggregate"
             catalog={calcRefs}
             chips={fieldChips}
+            sources={sources}
             initial={
               value.formula && value.formula.tokens.length > 0
                 ? value.formula
                 : null
             }
             onChange={(f) => patch({ formula: f })}
+            preview={previewAdapter}
+            header={
+              <RecipeStrip
+                recipes={["conversion_rate"]}
+                aggCatalog={calcRefs}
+                sources={sources ?? []}
+                onApply={(r) => {
+                  // Card não tem flag de %: (fórmula) × 100 + sufixo "%" — o
+                  // mesmo formato que os presets persistem; sufixo do usuário
+                  // é preservado. O editor remonta (nonce) já preenchido.
+                  patch({
+                    formula: {
+                      tokens: [
+                        { kind: "lparen" },
+                        ...r.formula.tokens,
+                        { kind: "rparen" },
+                        { kind: "op", op: "*" },
+                        { kind: "const", value: 100 },
+                      ],
+                    },
+                    ...(value.suffix ? {} : { suffix: "%" }),
+                  });
+                  setRecipeNonce((n) => n + 1);
+                }}
+              />
+            }
           />
           <p className="text-muted-foreground text-xs">
             Aceita SE/E/OU, SOMASE/CONT.SE/MÉDIASE e as funções de variação

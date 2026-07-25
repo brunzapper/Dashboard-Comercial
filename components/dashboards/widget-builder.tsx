@@ -2960,6 +2960,8 @@ export function WidgetBuilder({
               metricFieldOptions={cardMetricOptions}
               fieldChips={fieldSourceChips}
               calcRefs={calcRefs}
+              sources={catalog}
+              previewAdapter={aggPreview(sources, false, null)}
             />
           ) : null}
 

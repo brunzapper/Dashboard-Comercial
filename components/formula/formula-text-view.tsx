@@ -9,6 +9,7 @@
 
 import { useMemo, useRef, useState } from "react";
 
+import { displaySourceHint } from "@/components/formula/operand-display";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { RefOption } from "@/lib/records/date-operands";
@@ -138,9 +139,9 @@ export function FormulaTextView({
               )}
             >
               <span className="truncate">
-                {r.sourceHint ? (
+                {displaySourceHint(r) ? (
                   <span className="text-muted-foreground">
-                    {r.sourceHint} ·{" "}
+                    {displaySourceHint(r)} ·{" "}
                   </span>
                 ) : null}
                 {r.label}

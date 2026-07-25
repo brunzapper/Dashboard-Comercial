@@ -33,6 +33,7 @@ import {
 } from "./formula-preview";
 import { FormulaTextView } from "./formula-text-view";
 import { FunctionPalette } from "./function-palette";
+import { displayLabel } from "./operand-display";
 import { SourceConceptsHint } from "./source-concepts-hint";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxChip } from "@/components/ui/combobox";
@@ -431,7 +432,7 @@ export function FormulaEditor({
               options={displayCatalog.map((r) => ({
                 value: r.ref,
                 // Fonte curta só na EXIBIÇÃO — tokens/chips seguem o label limpo.
-                label: r.sourceHint ? `${r.sourceHint} · ${r.label}` : r.label,
+                label: displayLabel(r),
                 cleanLabel: r.label,
                 group: r.group,
                 chips: r.chips,
