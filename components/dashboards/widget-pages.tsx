@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 25/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): AddPageDialog aceita onMerge (performMerge do grid) —
+//   confirmar fecha na hora e a mescla aparece otimista; sem a prop, cai na
+//   action direta com erro no diálogo.
 // UI das PÁGINAS de widget (mescla — lib/widgets/pages.ts):
 //  * WidgetPager — pílula flutuante acima do card do host (‹ 1/2 ›) que
 //    alterna a página exibida. Visível em visualização, edição E no viewer de
@@ -148,7 +151,10 @@ export function MergePromptDialog({
 // ⋮ → "Adicionar página": escolhe um widget ELEGÍVEL da aba atual para virar a
 // próxima página do host. `siblings` já são os widgets da aba (o shell filtra
 // por aba antes do grid); excluímos o host, o exibido, inelegíveis, hosts com
-// páginas próprias e quem já é membro de alguém.
+// páginas próprias e quem já é membro de alguém. Com `onMerge` (performMerge
+// do grid) a mescla é OTIMISTA: confirmar fecha na hora e o efeito aparece
+// imediatamente (falha faz rollback no grid); sem a prop, cai na action
+// direta com erro exibido no diálogo.
 export function AddPageDialog({
   open,
   onOpenChange,
@@ -156,6 +162,7 @@ export function AddPageDialog({
   hostId,
   hostTitle,
   siblings,
+  onMerge,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -163,6 +170,10 @@ export function AddPageDialog({
   hostId: string;
   hostTitle: string;
   siblings: Widget[];
+  onMerge?: (
+    hostId: string,
+    memberIds: string[]
+  ) => Promise<{ ok?: boolean; message?: string }>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -221,6 +232,15 @@ export function AddPageDialog({
             onClick={(e) => {
               e.preventDefault();
               setError(null);
+              if (onMerge) {
+                const chosen = picked;
+                setPicked("");
+                onOpenChange(false);
+                startTransition(async () => {
+                  await onMerge(hostId, [chosen]);
+                });
+                return;
+              }
               startTransition(async () => {
                 const res = await mergeWidgetPages(dashboardId, hostId, [
                   picked,
