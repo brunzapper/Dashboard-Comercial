@@ -92,6 +92,7 @@ import type {
   DashboardSettings,
   FieldFilterOptions,
   GridPosition,
+  ShapeLine,
   VisualType,
   Widget,
   WidgetData,
@@ -105,11 +106,21 @@ import type { EntityListRow } from "@/lib/widgets/entity-list";
 import {
   createWidget,
   saveLayout,
+  saveShapeLine,
   updateDashboardSettings,
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { readCopiedWidget } from "@/lib/widgets/clipboard";
 import { centerAnchored, posOf } from "@/lib/widgets/grid-placement";
+import {
+  axisLock,
+  clampLine,
+  isLineShapeWidget,
+  lineAtCell,
+  lineGridBBox,
+  lineOf,
+  roundLine,
+} from "@/lib/widgets/lines";
 import {
   DEFAULT_WIDGET_SIZE,
   defaultWidgetSeed,
@@ -122,6 +133,7 @@ import { DrawToCreateOverlay } from "./draw-to-create";
 import { PlaceWidgetOverlay } from "./place-widget-overlay";
 import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
+import { LineLayer } from "./line-layer";
 import { FontScaleProvider } from "./font-scale-context";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
@@ -357,6 +369,8 @@ export function DashboardGrid({
   deferredScopeById,
   layoutById,
   applyLayoutPatch,
+  lineById = {},
+  applyLinePatch,
   calcVarsById = {},
   noteById = {},
   calcExprById = {},
@@ -425,6 +439,11 @@ export function DashboardGrid({
   // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
   layoutById: Record<string, GridPosition>;
   applyLayoutPatch: (patch: Record<string, GridPosition>) => void;
+  // Traçado otimista das Formas "linha" (shell — dashboard-client), par do
+  // layoutById: saveShapeLine não revalida. Opcionais — o viewer de snapshots
+  // não os passa (read-only, o traçado vem congelado nos settings).
+  lineById?: Record<string, ShapeLine>;
+  applyLinePatch?: (patch: Record<string, ShapeLine>) => void;
   calcVarsById?: Record<string, Record<string, CalcWidgetResult>>;
   noteById?: Record<string, CalcWidgetResult[]>;
   calcExprById?: Record<string, string>;
@@ -530,6 +549,27 @@ export function DashboardGrid({
     [layoutById]
   );
 
+  // Partição: Formas "linha" ficam FORA do RGL (camada livre — movimento sem
+  // prender às colunas) e fora das colisões/conectores; todo o resto segue no
+  // grid. A troca widgets→gridWidgets tem que ser CONSISTENTE (layout memo,
+  // persist, children do RGL, ConnectorLayer) — parcial dessincroniza o
+  // layout↔children do RGL.
+  const gridWidgets = useMemo(
+    () => widgets.filter((w) => !isLineShapeWidget(w)),
+    [widgets]
+  );
+  const lineWidgets = useMemo(
+    () => widgets.filter((w) => isLineShapeWidget(w)),
+    [widgets]
+  );
+  // Traçado efetivo de uma linha: otimista ?? settings ?? derivado do rect
+  // (linha recém-criada ainda sem shape.line).
+  const lineFor = useCallback(
+    (w: Widget, i: number): ShapeLine =>
+      lineById[w.id] ?? lineOf(w, basePos(w, i)),
+    [lineById, basePos]
+  );
+
   // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado, e
   // então um passo de resolução de colisões que empurra os vizinhos no eixo do
   // crescimento (largura → direita, altura → baixo). Determinístico: ao colapsar,
@@ -537,7 +577,7 @@ export function DashboardGrid({
   // useMemo: pushApart é O(n²) e rodava a CADA render do grid (medições,
   // baseWidth, drag da alça) — só recomputa quando widgets/base/medidas mudam.
   const layout: Layout = useMemo(() => {
-    const inflated: ResolveItem[] = widgets.map((w, i) => {
+    const inflated: ResolveItem[] = gridWidgets.map((w, i) => {
       const p = basePos(w, i);
       const a = w.settings?.autoSize;
       const m = measured[w.id];
@@ -552,11 +592,17 @@ export function DashboardGrid({
       w,
       h,
     }));
-  }, [widgets, basePos, measured]);
+  }, [gridWidgets, basePos, measured]);
 
   // Extensão do conteúdo — pisos para não cortar widgets ao encolher a área.
-  const contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), MIN_COLS);
-  const contentBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), MIN_ROWS);
+  // As linhas (fora do layout do RGL) entram pelo bounding box do traçado.
+  let contentRight = layout.reduce((m, l) => Math.max(m, l.x + l.w), MIN_COLS);
+  let contentBottom = layout.reduce((m, l) => Math.max(m, l.y + l.h), MIN_ROWS);
+  lineWidgets.forEach((w, i) => {
+    const b = lineGridBBox(lineFor(w, i));
+    contentRight = Math.max(contentRight, b.x + b.w);
+    contentBottom = Math.max(contentBottom, b.y + b.h);
+  });
   const ROW_H = settings.canvas?.rowHeight ?? DEFAULT_ROW_H;
 
   // Tamanho efetivo do canvas (vindo das settings): nunca abaixo do conteúdo,
@@ -606,7 +652,8 @@ export function DashboardGrid({
   // setPointerCapture). Sobre um widget (`.react-grid-item`) ou na UI dos
   // conectores (âncoras/linhas/painel, `[data-conn-ui]`) não pega.
   const { panning, onPointerDown: panPointerDown } = useDragPan(scrollRef, {
-    ignore: (t) => !!t.closest(".react-grid-item, [data-conn-ui]"),
+    ignore: (t) =>
+      !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
   // Célula constante: 12 colunas preenchem a largura visível (fórmula do RGL:
@@ -635,6 +682,7 @@ export function DashboardGrid({
     if (!canEdit || drawMode || placing) return;
     if ((e.target as HTMLElement).closest(".react-grid-item")) return;
     if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
+    if ((e.target as HTMLElement).closest("[data-line-ui]")) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || cellW <= 0) return;
     e.preventDefault();
@@ -655,6 +703,33 @@ export function DashboardGrid({
     const at = pasteAt;
     setPasteAt(null);
     if (!copied || !at) return;
+    let settings = {
+      ...(copied.settings ?? {}),
+      tab: activeTabId || undefined,
+    };
+    let position: GridPosition = {
+      x: Math.min(at.gridX, Math.max(0, cols - copied.w)),
+      y: at.gridY,
+      w: copied.w,
+      h: copied.h,
+    };
+    // Forma "linha": o traçado viaja nos settings — translada as PONTAS para a
+    // célula clicada (preserva o desenho) e deriva o bbox; o clamp genérico por
+    // largura acima não serve (encalharia o traçado antigo em outro lugar).
+    if (
+      copied.visual_type === "forma" &&
+      copied.settings?.shape?.kind === "linha"
+    ) {
+      const src = lineOf(
+        { settings: copied.settings },
+        { x: 0, y: 0, w: copied.w, h: copied.h }
+      );
+      const nl = roundLine(
+        clampLine(lineAtCell(src, Math.max(0, at.gridX), at.gridY), cols, rows)
+      );
+      settings = { ...settings, shape: { ...copied.settings.shape, line: nl } };
+      position = lineGridBBox(nl);
+    }
     const input: WidgetInput = {
       title: copied.title,
       visual_type: copied.visual_type,
@@ -663,13 +738,8 @@ export function DashboardGrid({
       dimensions: copied.dimensions,
       metrics: copied.metrics,
       filters: copied.filters,
-      settings: { ...(copied.settings ?? {}), tab: activeTabId || undefined },
-      grid_position: {
-        x: Math.min(at.gridX, Math.max(0, cols - copied.w)),
-        y: at.gridY,
-        w: copied.w,
-        h: copied.h,
-      },
+      settings,
+      grid_position: position,
     };
     startPaste(async () => {
       await createWidget(dashboardId, input);
@@ -714,16 +784,18 @@ export function DashboardGrid({
     kind: "drag" | "resize"
   ) {
     if (!editMode || !changed) return;
-    const idx = widgets.findIndex((w) => w.id === changed.i);
+    const idx = gridWidgets.findIndex((w) => w.id === changed.i);
     if (idx < 0) return;
-    const base = basePos(widgets[idx], idx);
+    const base = basePos(gridWidgets[idx], idx);
     const dropped: GridPosition =
       kind === "resize"
         ? { x: base.x, y: base.y, w: changed.w, h: changed.h }
         : { x: changed.x, y: changed.y, w: base.w, h: base.h };
 
     // Bases + item solto na posição do drop → deslocamento mínimo dos vizinhos.
-    const rects: DropRect[] = widgets.map((w, i) =>
+    // Linhas ficam de fora de propósito: uma divisória decorativa não empurra
+    // nem é empurrada por widgets.
+    const rects: DropRect[] = gridWidgets.map((w, i) =>
       w.id === changed.i
         ? { i: w.id, ...dropped }
         : { i: w.id, ...basePos(w, i) }
@@ -745,9 +817,9 @@ export function DashboardGrid({
       patch[changed.i] = dropped;
     }
     for (const [id, p] of movedNeighbors) {
-      const i = widgets.findIndex((w) => w.id === id);
+      const i = gridWidgets.findIndex((w) => w.id === id);
       if (i < 0) continue;
-      const b = basePos(widgets[i], i);
+      const b = basePos(gridWidgets[i], i);
       patch[id] = { x: p.x, y: p.y, w: b.w, h: b.h };
     }
     if (Object.keys(patch).length === 0) return;
@@ -762,6 +834,19 @@ export function DashboardGrid({
         h: p.h,
       }))
     ).then(() => history.captureNow());
+  }
+
+  // Persistência do traçado de uma Forma "linha" (espelho do persist acima,
+  // único escritor): normaliza (trava de eixo + clamp ao canvas + round
+  // determinístico), aplica o otimista (traçado + bbox no layout) e grava —
+  // saveShapeLine deriva o MESMO bbox no servidor. Histórico após persistir,
+  // como no saveLayout.
+  function persistLine(id: string, next: ShapeLine) {
+    if (!editMode) return;
+    const line = roundLine(clampLine(axisLock(next), cols, rows));
+    applyLinePatch?.({ [id]: line });
+    applyLayoutPatch({ [id]: lineGridBBox(line) });
+    void saveShapeLine(dashboardId, id, line).then(() => history.captureNow());
   }
   // Pontas dos conectores acompanham o gesto AO VIVO: onDrag/onResize entregam
   // o layout transitório só à camada de conectores (via apiRef) — nunca ao
@@ -959,7 +1044,7 @@ export function DashboardGrid({
               <ConnectorLayer
                 connectors={connectors}
                 layout={layout}
-                widgets={widgets}
+                widgets={gridWidgets}
                 metrics={connMetrics}
                 tabs={tabs}
                 activeTabId={activeTabId ?? ""}
@@ -967,6 +1052,28 @@ export function DashboardGrid({
                 connectMode={connectMode}
                 onChange={saveConnectors}
                 apiRef={connApiRef}
+              />
+            ) : null}
+            {/* Formas "linha": camada livre (sem prender às colunas), também
+                antes do RGL no DOM = sob os cards. */}
+            {lineWidgets.length > 0 ? (
+              <LineLayer
+                widgets={lineWidgets}
+                lineFor={lineFor}
+                metrics={connMetrics}
+                cols={cols}
+                maxRows={rows}
+                editMode={editMode && !drawMode && !placing && !connectMode}
+                canEdit={canEdit}
+                dashboardId={dashboardId}
+                onCommit={persistLine}
+                onWidgetDeleted={onWidgetDeleted}
+                availableForBuilder={availableForBuilder}
+                fields={fields}
+                currencyOptions={currencyOptions}
+                tabs={tabs}
+                siblings={widgets}
+                canManageFields={canManageFields}
               />
             ) : null}
             <RGL
@@ -1006,7 +1113,7 @@ export function DashboardGrid({
               onDragStop={onDragStop}
               onResizeStop={onResizeStop}
             >
-              {widgets.map((w) => (
+              {gridWidgets.map((w) => (
                 <div
                   key={w.id}
                   id={widgetDomId(w.id)}

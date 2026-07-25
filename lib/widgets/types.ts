@@ -642,7 +642,8 @@ export type ShapeKind =
   | "losango"
   | "triangulo"
   | "seta"
-  | "hexagono";
+  | "hexagono"
+  | "linha";
 export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   retangulo: "Retângulo",
   retangulo_arredondado: "Retângulo arredondado",
@@ -651,9 +652,27 @@ export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   triangulo: "Triângulo",
   seta: "Seta",
   hexagono: "Hexágono",
+  linha: "Linha",
 };
+// Traçado da forma "linha": extremidades em unidades de grid FRACIONÁRIAS
+// (coordenadas do canvas — floats, não presas às células), sempre horizontal
+// (y1 === y2) ou vertical (x1 === x2). Renderizada/manipulada fora do RGL numa
+// camada livre (line-layer); o grid_position vira o bounding box inteiro
+// derivado (lineGridBBox), mantido em sincronia a cada gravação. Geometria em
+// lib/widgets/lines.ts.
+export interface ShapeLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
 export interface ShapeSettings {
-  shape?: { kind?: ShapeKind; text?: string; link?: WidgetLinkTarget };
+  shape?: {
+    kind?: ShapeKind;
+    text?: string;
+    link?: WidgetLinkTarget;
+    line?: ShapeLine;
+  };
 }
 
 // --- Imagem (visual_type 'imagem', 0073) ---
