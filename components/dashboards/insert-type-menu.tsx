@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): ícone do novo tipo 'linha_divisoria' (Minus).
 // Flyout do "Inserir ▸" do menu de contexto do grid: TODOS os tipos de widget
 // (VISUAL_TYPE_LABELS) numa lista com busca (sem acento) e navegação por
 // teclado. Renderizado dentro do FloatingPanel do dashboard-grid — cliques não
@@ -16,6 +17,7 @@ import {
   Image,
   LineChart,
   ListFilter,
+  Minus,
   PieChart,
   Funnel,
   Shapes,
@@ -37,6 +39,7 @@ const TYPE_ICONS: Record<VisualType, LucideIcon> = {
   calculadora: Calculator,
   nota: StickyNote,
   forma: Shapes,
+  linha_divisoria: Minus,
   imagem: Image,
   tabela: Table,
   tabela_editavel: Table2,

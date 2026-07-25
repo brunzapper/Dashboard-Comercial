@@ -1,4 +1,6 @@
-// Versão: 1.9 | Data: 23/07/2026
+// Versão: 1.10 | Data: 25/07/2026
+// v1.10 (25/07/2026): saveShapeLine aceita o novo visual_type
+//   'linha_divisoria' (0100) além da identidade legada forma+kind linha.
 // v1.9 (23/07/2026): FIX RETURNING × policy 0088 — `.insert(...).select()` em
 //   `dashboards` falha com 42501: a policy de SELECT (auth_board_visible)
 //   consulta a própria tabela via função STABLE e não enxerga a linha do
@@ -2251,8 +2253,8 @@ export async function saveLayout(
   return { ok: true };
 }
 
-// Grava o traçado de uma Forma "linha" (settings.shape.line, unidades de grid
-// fracionárias) junto do grid_position DERIVADO (bounding box inteiro) num
+// Grava o traçado de uma Linha divisória (settings.shape.line, unidades de
+// grid fracionárias) junto do grid_position DERIVADO (bounding box inteiro) num
 // único update. Espelho do saveLayout: sem revalidatePath (edição fluida — o
 // estado otimista do shell é a verdade até o próximo refresh real; o cliente
 // registra no histórico após o await). Normaliza no servidor com os MESMOS
@@ -2279,8 +2281,13 @@ export async function saveShapeLine(
     .eq("id", widgetId)
     .eq("dashboard_id", dashboardId)
     .maybeSingle();
-  if (!row || row.visual_type !== "forma") {
-    return { ok: false, message: "Widget não é uma forma." };
+  // Identidade nova ('linha_divisoria', 0100) OU legada (forma + kind linha —
+  // linha antiga não backfillada, ex.: re-import de JSON antigo).
+  if (
+    !row ||
+    (row.visual_type !== "forma" && row.visual_type !== "linha_divisoria")
+  ) {
+    return { ok: false, message: "Widget não é uma linha divisória." };
   }
   const settings = (row.settings ?? {}) as WidgetSettings;
   const { error } = await supabase

@@ -1,5 +1,7 @@
-// Versão: 1.0 | Data: 25/07/2026
-// Testes da geometria da forma "Linha" (lib/widgets/lines.ts): traçado H/V em
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): isLineShapeWidget cobre a identidade nova
+//   ('linha_divisoria') e a legada (forma + shape.kind linha).
+// Testes da geometria da linha divisória (lib/widgets/lines.ts): traçado H/V em
 // unidades de grid fracionárias, bounding box inteiro derivado, conversão
 // px↔grid coincidindo com o itemRect dos conectores em coordenadas inteiras,
 // trava de eixo (sempre H ou V), clamp sem encurtar e round determinístico.
@@ -27,7 +29,7 @@ const widgetLike = (over: Partial<Widget>): Widget =>
   ({ visual_type: "forma", settings: { shape: { kind: "linha" } }, ...over }) as Widget;
 
 describe("isLineShapeWidget", () => {
-  it("exige visual_type forma E shape.kind linha", () => {
+  it("identidade legada: visual_type forma E shape.kind linha", () => {
     expect(isLineShapeWidget(widgetLike({}))).toBe(true);
     expect(
       isLineShapeWidget(
@@ -41,6 +43,18 @@ describe("isLineShapeWidget", () => {
       )
     ).toBe(false);
     expect(isLineShapeWidget(widgetLike({ settings: {} }))).toBe(false);
+  });
+
+  it("identidade nova (0100): visual_type linha_divisoria, com qualquer settings", () => {
+    expect(
+      isLineShapeWidget(widgetLike({ visual_type: "linha_divisoria" }))
+    ).toBe(true);
+    // Mesmo sem shape nos settings (o traçado deriva do grid_position).
+    expect(
+      isLineShapeWidget(
+        widgetLike({ visual_type: "linha_divisoria", settings: {} })
+      )
+    ).toBe(true);
   });
 });
 

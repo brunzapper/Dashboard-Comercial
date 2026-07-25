@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 24/07/2026
+// Versão: 1.4 | Data: 25/07/2026
+// v1.4 (25/07/2026): novo tipo linha_divisoria (a Forma "linha" virou widget
+//   próprio); appearance ganha barFillPct/chartInset (gráficos) e filter
+//   (fundo/borda/abinha dos widgets de filtro); comentário de dataLabels
+//   documenta a semântica da barra horizontal ("top" = Fora + auto-flip do
+//   "inside").
 // v1.3 (24/07/2026): bloco "appearance" corrigido/alinhado a AppearanceSettings
 //   (lib/widgets/types.ts): removido o sub-objeto "chart" (inexistente — tudo é
 //   plano em appearance), enabled→show em dataLabels/legend, forma real de
@@ -161,10 +166,12 @@ Ligam colunas equivalentes de Bases diferentes numa coluna só ("unified:<key>")
   "settings": { ... }                  // ver "Settings do widget"
 }
 
-### visual_type (todos): tabela, tabela_editavel (Tabela Livre), barra,
-barra_horizontal, linha, pizza, funil, kpi (Card), calculado (Métrica
-calculada), calculadora, nota, forma, imagem, filtro (Filtro de período),
-filtro_campo (Filtro por campo), kanban, agenda.
+### visual_type (todos): tabela, tabela_editavel (Tabela Livre), barra
+(Barra vertical), barra_horizontal, linha, pizza, funil, kpi (Card), calculado
+(Métrica calculada), calculadora, nota, forma, linha_divisoria (Linha
+divisória — linha livre de separação; a forma "linha" legada foi promovida a
+este tipo), imagem, filtro (Filtro de período), filtro_campo (Filtro por
+campo), kanban, agenda.
 Tipos de DADOS (usam dimensions/metrics/filters): tabela, barra,
 barra_horizontal, linha, pizza, funil, kpi, calculado.
 
@@ -236,16 +243,22 @@ barra_horizontal, linha, pizza, funil, kpi, calculado.
     "stacked": true,                         // 2+ métricas no widget "barra": empilha num único stack
     "chartBackground": "#0b1220",            // fundo do gráfico
     "fillMode": "solid",                     // "solid" | "gradient"
+    "barFillPct": 80,                        // espessura das barras: % do slot da categoria (10-100; omitir = Auto)
+    "chartInset": 8,                         // margem interna do plot em px (barra/barra_horizontal/linha; omitir = Auto)
     "categoryLimit": { "n": 8, "others": true },  // Top-N de categorias + "Outros"
     "dataLabels": { "show": true, "position": "top", "format": "value",
                     "color": "#0f172a", "mode": "detailed" },
-                                             // position: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|"inside"
+                                             // position: barra "top"(=acima)|"inside"; barra_horizontal "top"(=FORA, à direita
+                                             //   da barra; rótulo "inside" que não cabe na barra aparece fora sozinho e a área
+                                             //   do gráfico reserva o espaço automaticamente); linha "top"|"bottom"; pizza "top"(=fora)|"inside"
                                              // format: "value" | "percent" | "both"
                                              // mode (SÓ barras empilhadas): "detailed" (um rótulo por segmento, default)
                                              //   | "total" (um único rótulo com a SOMA da barra; detalhe fica na tooltip)
     "legend": { "show": true, "color": "#334155" },  // legenda das séries
     // pizza / funil:
     "sliceColors": { "0": "#2563eb", "1": "#f59e0b" },  // cor por fatia (índice como string) — sobrepõe a paleta
+    // widgets de filtro (filtro / filtro_campo):
+    "filter": { "bg": "#f8fafc", "border": "#e2e8f0", "accent": "#2563eb" },  // fundo/borda do card + abinha superior
     // formatação condicional (tabelas, listas, Card, gráficos):
     "conditional": { "rules": [ { "id": "cr_1", "target": "metric_1", "op": "lt", "value": 0.2,
                                   "scope": "cell",

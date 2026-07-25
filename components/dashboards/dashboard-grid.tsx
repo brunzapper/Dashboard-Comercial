@@ -1,6 +1,8 @@
-// Versão: 2.12 | Data: 22/07/2026
+// Versão: 2.13 | Data: 25/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.13 (25/07/2026): paste da linha divisória via isLineShapeWidget — cobre
+//   o tipo novo ('linha_divisoria', 0100) e payloads antigos de clipboard.
 // v2.12 (22/07/2026): NADA se move durante o gesto — allowOverlap no RGL (o
 //   moveElement interno retorna cedo em colisão: só o item manipulado anda; o
 //   placeholder segue o cursor). O "abrir espaço" acontece SÓ ao soltar:
@@ -713,13 +715,12 @@ export function DashboardGrid({
       w: copied.w,
       h: copied.h,
     };
-    // Forma "linha": o traçado viaja nos settings — translada as PONTAS para a
-    // célula clicada (preserva o desenho) e deriva o bbox; o clamp genérico por
-    // largura acima não serve (encalharia o traçado antigo em outro lugar).
-    if (
-      copied.visual_type === "forma" &&
-      copied.settings?.shape?.kind === "linha"
-    ) {
+    // Linha divisória: o traçado viaja nos settings — translada as PONTAS para
+    // a célula clicada (preserva o desenho) e deriva o bbox; o clamp genérico
+    // por largura acima não serve (encalharia o traçado antigo em outro lugar).
+    // isLineShapeWidget cobre payloads novos ('linha_divisoria') e antigos de
+    // clipboard (forma + shape.kind "linha").
+    if (isLineShapeWidget(copied)) {
       const src = lineOf(
         { settings: copied.settings },
         { x: 0, y: 0, w: copied.w, h: copied.h }
@@ -727,7 +728,10 @@ export function DashboardGrid({
       const nl = roundLine(
         clampLine(lineAtCell(src, Math.max(0, at.gridX), at.gridY), cols, rows)
       );
-      settings = { ...settings, shape: { ...copied.settings.shape, line: nl } };
+      settings = {
+        ...settings,
+        shape: { ...copied.settings?.shape, line: nl },
+      };
       position = lineGridBBox(nl);
     }
     const input: WidgetInput = {

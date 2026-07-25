@@ -1,4 +1,10 @@
-<!-- Versão: 1.9 | Data: 24/07/2026 -->
+<!-- Versão: 1.10 | Data: 25/07/2026 -->
+<!-- v1.10 (25/07/2026): 18 tipos — "Linha divisória" (linha_divisoria) vira
+     widget próprio (§5.9.1; a Forma perde a opção "Linha") e "Barra" passa a
+     se chamar "Barra vertical"; §9.2 — rótulos da Barra horizontal
+     (Fora/Dentro, reserva automática de espaço e auto-flip do "Dentro") e
+     controles novos "Espessura das barras" e "Margem interna do gráfico";
+     §9.3 — aparência dos widgets de filtro (fundo/borda/abinha). -->
 <!-- v1.9 (24/07/2026): §6.1 — seletor "Exibição das sub-bases" (empilhado/
      total somado/lado a lado) p/ widget com 2+ Sub-bases da mesma mãe ou
      Sub-base "conviver"; cada série mostra a contagem PRÓPRIA (operando da
@@ -58,7 +64,7 @@
 2. [Cadastros de apoio (pré-requisitos do construtor)](#2-cadastros-de-apoio-pré-requisitos-do-construtor)
 3. [Anatomia de um dashboard](#3-anatomia-de-um-dashboard)
 4. [Período e filtros no nível do dashboard](#4-período-e-filtros-no-nível-do-dashboard)
-5. [Referência completa dos 17 tipos de widget](#5-referência-completa-dos-17-tipos-de-widget)
+5. [Referência completa dos 18 tipos de widget](#5-referência-completa-dos-18-tipos-de-widget)
 6. [O editor de widget, seção por seção](#6-o-editor-de-widget-seção-por-seção)
 7. [Como os números são calculados (semântica)](#7-como-os-números-são-calculados-semântica)
 8. [Fórmulas — referência completa](#8-fórmulas--referência-completa)
@@ -357,7 +363,7 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
 ### 3.5 As 5 formas de criar um widget
 
 1. **"Adicionar widget"** no cabeçalho → editor completo (capítulo 6).
-2. **Clique-direito em área vazia → "Inserir ▸"** → menu com os 17 tipos (com
+2. **Clique-direito em área vazia → "Inserir ▸"** → menu com os 18 tipos (com
    busca); o widget é criado centrado na célula clicada e, se o tipo exigir
    configuração, o editor abre em seguida.
 3. **Modo "Posicionar"**: ao salvar um widget novo pelo editor com o botão
@@ -374,19 +380,19 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
    navegador).
 
 **Tamanhos iniciais por tipo** (largura×altura em células): Tabela, Tabela
-Livre, Barra, Barra horizontal, Linha, Pizza, Funil, Nota, Kanban e Agenda =
-6×8; Card e Métrica calculada = 4×4; Calculadora = 4×9; Forma e Imagem =
-4×6; Filtro de período = 6×3; Filtro por campo = 6×4.
+Livre, Barra vertical, Barra horizontal, Linha, Pizza, Funil, Nota, Kanban e
+Agenda = 6×8; Card e Métrica calculada = 4×4; Calculadora = 4×9; Forma e
+Imagem = 4×6; Linha divisória = 6×2; Filtro de período = 6×3; Filtro por
+campo = 6×4.
 
 **Tipos que abrem o editor automaticamente ao criar**: todos, EXCETO Tabela
-Livre, Calculadora, Nota e Forma (esses quatro funcionam de imediato e são
-editados no próprio card).
+Livre, Calculadora, Nota, Forma e Linha divisória (esses funcionam de
+imediato e são editados no próprio card/painel).
 
-**Forma "Linha"**: cria-se como qualquer Forma (a opção "Linha" fica no campo
-"Forma" do editor). Ao virar linha, ela nasce como a linha média do retângulo
-que o widget ocupava e passa a ser ajustada livremente no painel (corpo e
-pontas — §5.9), sem se prender às colunas do grid. Colar preserva o desenho,
-transladado para a célula clicada.
+**Linha divisória**: insere-se pelo menu "Inserir ▸" como qualquer widget.
+Ela nasce como a linha média (horizontal) do retângulo inicial e passa a ser
+ajustada livremente no painel (corpo e pontas — §5.9.1), sem se prender às
+colunas do grid. Colar preserva o desenho, transladado para a célula clicada.
 
 ### 3.6 Menu "⋮" do dashboard
 
@@ -667,15 +673,15 @@ filtros rápidos etc. não afetam widgets Agenda).
 
 ---
 
-## 5. Referência completa dos 17 tipos de widget
+## 5. Referência completa dos 18 tipos de widget
 
 O campo **"Visual"** do editor define o tipo. Lista completa (rótulo na UI /
 chave interna):
 
 | Grupo | Tipos |
 |---|---|
-| Dados (consultam registros) | "Tabela" `tabela`, "Barra" `barra` (padrão de widget novo), "Barra horizontal" `barra_horizontal`, "Linha" `linha`, "Pizza" `pizza`, "Funil" `funil`, "Card" `kpi`, "Métrica calculada" `calculado` |
-| Utilitários | "Calculadora" `calculadora`, "Nota (post-it)" `nota`, "Forma" `forma`, "Imagem" `imagem`, "Tabela Livre" `tabela_editavel` |
+| Dados (consultam registros) | "Tabela" `tabela`, "Barra vertical" `barra` (padrão de widget novo), "Barra horizontal" `barra_horizontal`, "Linha" `linha`, "Pizza" `pizza`, "Funil" `funil`, "Card" `kpi`, "Métrica calculada" `calculado` |
+| Utilitários | "Calculadora" `calculadora`, "Nota (post-it)" `nota`, "Forma" `forma`, "Linha divisória" `linha_divisoria`, "Imagem" `imagem`, "Tabela Livre" `tabela_editavel` |
 | Filtros | "Filtro de período" `filtro`, "Filtro por campo" `filtro_campo` |
 | Operacionais | "Kanban" `kanban`, "Agenda" `agenda` |
 
@@ -701,14 +707,22 @@ individuais. Recursos exclusivos (seção "Opções da tabela" do editor, §6.6)
 - No modo agregado, a última linha é o **Total geral** (respeitando a
   matemática exata de fórmulas — §7.8).
 
-### 5.2 Barra (`barra`) e Barra horizontal (`barra_horizontal`)
+### 5.2 Barra vertical (`barra`) e Barra horizontal (`barra_horizontal`)
 
 Gráfico de barras vertical/horizontal. Uma dimensão vira o eixo de
 categorias; cada métrica vira uma série. Específicos (maioria na Aparência,
 §9.2): empilhar séries, colorir por categoria com paleta, limite Top-N com
 "Outros", ordenação das categorias, eixo esquerdo/direito por série (combo),
-rótulos de valores, série fantasma da comparação, rótulo de variação nas
-barras, linha de meta (§6.7 — barra/linha apenas).
+rótulos de valores, espessura das barras, margem interna do gráfico, série
+fantasma da comparação, rótulo de variação nas barras, linha de meta (§6.7 —
+barra/linha apenas).
+
+Na **Barra horizontal**, o rótulo de valores tem tratamento próprio: a área
+do gráfico **reserva automaticamente** o espaço do rótulo externo mais largo
+(nada é cortado na borda direita), e com posição "Dentro" o rótulo que não
+couber na barra **aparece automaticamente fora** (à direita do fim da barra;
+em barras empilhadas, segmento intermediário sem espaço fica sem rótulo — a
+tooltip detalha).
 
 ### 5.3 Linha (`linha`)
 
@@ -783,22 +797,28 @@ Recursos dentro do texto:
 ### 5.9 Forma (`forma`)
 
 Elemento visual de diagramação. Opções: **"Forma"** — Retângulo, Retângulo
-arredondado (padrão), Elipse, Losango, Triângulo, Seta, Hexágono, Linha;
+arredondado (padrão), Elipse, Losango, Triângulo, Seta, Hexágono;
 **"Texto na forma"** (opcional); **"Atalho para widget"** (clique navega/foca
 o alvo — §3.7). Aparência: preenchimento, contorno (cor + espessura), texto
-(cor + tamanho).
+(cor + tamanho). A antiga forma "Linha" virou o widget próprio **Linha
+divisória** (§5.9.1) e não aparece mais no seletor de formas novas.
 
-**Linha** é especial: ela vive numa camada livre, sob os cards — não se prende
-às colunas do grid. No modo "Editar layout", arraste o **corpo** para mover a
-linha inteira (movimento contínuo, em pixels) e as **pontas** para alongar/
-encurtar; a linha fica sempre na horizontal ou na vertical (a ponta arrastada
-decide o eixo pelo gesto dominante, pivotando na outra) e `Esc` cancela o
-gesto. Um clique parado na linha abre o menu de ações (Editar dados /
-Aparência / Copiar widget / Excluir — a linha não tem o "⋮" de card). Fora do
-modo edição, o clique segue o "Atalho para widget", se configurado. Aparência:
-só contorno (cor + espessura) e texto (exibido no ponto médio) — sem
+### 5.9.1 Linha divisória (`linha_divisoria`)
+
+Linha livre de separação/diagramação (era a Forma "Linha" — widgets antigos
+foram **convertidos automaticamente**; snapshots congelados continuam
+exibindo-as normalmente). Ela vive numa camada livre, sob os cards — não se
+prende às colunas do grid. No modo "Editar layout", arraste o **corpo** para
+mover a linha inteira (movimento contínuo, em pixels) e as **pontas** para
+alongar/encurtar; a linha fica sempre na horizontal ou na vertical (a ponta
+arrastada decide o eixo pelo gesto dominante, pivotando na outra) e `Esc`
+cancela o gesto. Um clique parado na linha abre o menu de ações (Editar dados
+/ Aparência / Copiar widget / Excluir — a linha não tem o "⋮" de card). Fora
+do modo edição, o clique segue o "Atalho para widget", se configurado.
+Config no editor: "Texto na forma" (exibido no ponto médio) e "Atalho para
+widget". Aparência: só contorno (cor + espessura) e texto — sem
 preenchimento. Colar uma linha copiada preserva o desenho, transladado para a
-célula clicada.
+célula clicada. Uma linha recém-inserida nasce horizontal.
 
 ### 5.10 Imagem (`imagem`)
 
@@ -1483,6 +1503,12 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
 - **"Fundo do gráfico"**; **"Linhas de grade"**: Padrão / Nenhuma /
   Horizontais / Verticais / Ambas; **"Preenchimento das barras"**: Sólido /
   Gradiente (sutil).
+- **"Margem interna do gráfico"** (Barra/Barra horizontal/Linha): Auto
+  (padrão) ou 4–32 px somados em volta do plot — controla quanto da área do
+  card o desenho ocupa.
+- **"Espessura das barras"** (Barra/Barra horizontal): Auto (padrão) ou
+  30–100% do espaço de cada categoria — barras mais grossas ou mais finas,
+  com mais ou menos vão entre elas.
 - **"Limite de categorias (Top-N)"** + **"Agrupar o resto em 'Outros'"**
   (padrão ligado). Em Pizza/Funil: "Limite de fatias" (padrão 5).
 - **"Empilhar as séries (barras empilhadas)"** (2+ métricas).
@@ -1494,8 +1520,13 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
 - **"Cores das séries"** (uma cor por métrica); **"Eixo por série"** (2+
   métricas): Esquerda / Direita — cria gráfico combo com dois eixos.
 - **"Legenda de dados (rótulos de valores)"**: exibir valores + formato
-  (Valor / Percentual / Valor + percentual) + posição (Barra: Acima/Dentro;
-  Linha: Acima/Abaixo; Pizza: Fora/Dentro) + cor do rótulo. Em Barra/Barra
+  (Valor / Percentual / Valor + percentual) + posição (Barra vertical:
+  Acima/Dentro; Barra horizontal: **Fora/Dentro**; Linha: Acima/Abaixo;
+  Pizza: Fora/Dentro) + cor do rótulo. Na Barra horizontal, a área do gráfico
+  **reserva automaticamente** espaço à direita para o rótulo externo (nada é
+  cortado) e, com "Dentro", o rótulo que não couber na barra **aparece
+  automaticamente fora** (segmento intermediário de pilha sem espaço fica sem
+  rótulo — a tooltip detalha). Em Barra/Barra
   horizontal há também o **modo para barras empilhadas**: "Detalhado (por
   segmento)" (padrão — um rótulo por segmento) ou "Total da barra (soma)" —
   um único rótulo com a soma no fim/topo da pilha (a posição é ignorada nesse
@@ -1510,7 +1541,7 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
 "Oceano", "Pôr do sol", "Floresta", "Tons de cinza", "Inbound (roxo &
 verde)".
 
-### 9.3 Tabela, Card, Calculadora, Nota, Forma, Kanban
+### 9.3 Tabela, Card, Calculadora, Nota, Forma, Filtros, Kanban
 
 - **Tabela**: cores globais (fundo/texto do cabeçalho, fundo/texto do corpo,
   bordas); "Linhas de grade" (Ambas/Horizontais/Verticais/Nenhuma); "Texto
@@ -1522,7 +1553,11 @@ verde)".
 - **Nota**: fundo do papel (padrão amarelo), cor do texto, cor dos links,
   tamanho da fonte (padrão 14 px), "Sem moldura (só o papel)".
 - **Forma**: preenchimento, contorno, espessura do contorno (padrão 2 px),
-  cor e tamanho do texto.
+  cor e tamanho do texto. **Linha divisória**: só contorno e texto — sem
+  preenchimento.
+- **Filtro de período / Filtro por campo**: fundo, borda, cor de destaque (a
+  "abinha") — espelho do Card; título e fontes vêm das seções transversais
+  ("Texto", "Título e borda").
 - **Kanban**: fundo do quadro; colunas (fundo, borda, cabeçalho, raio);
   cards (fundo, texto, borda, raio, fonte, "faixa lateral colorida");
   contadores e métrica; abas de visão.
@@ -1759,7 +1794,7 @@ global.
   `[Contagem de registros · Negócios] / [Contagem de registros · Leads]`,
   formato "Percentual".
 
-**Passo 4 — gráfico principal**: Visual "Barra", Bases = Deals, dimensão =
+**Passo 4 — gráfico principal**: Visual "Barra vertical", Bases = Deals, dimensão =
 Data de fechamento com formato "Mês/ano", métrica = Soma de MRR. Em "Dia
 útil e meta": ligar "Janela de meses no card" (opções "3 meses"/"6
 meses"/"Este ano", padrão 6 meses; expor o seletor dia útil × dia cheio),
@@ -1897,9 +1932,10 @@ referência.
 
 ### 16.2 Enumerações completas (uma linha por lista)
 
-- **Tipos de widget (17)**: Card, Métrica calculada, Calculadora, Nota
-  (post-it), Forma, Imagem, Tabela, Tabela Livre, Barra, Barra horizontal,
-  Linha, Pizza, Funil, Filtro de período, Filtro por campo, Kanban, Agenda.
+- **Tipos de widget (18)**: Card, Métrica calculada, Calculadora, Nota
+  (post-it), Forma, Linha divisória, Imagem, Tabela, Tabela Livre, Barra
+  vertical, Barra horizontal, Linha, Pizza, Funil, Filtro de período, Filtro
+  por campo, Kanban, Agenda.
 - **Agregações de métrica (5)**: Soma, Contagem, Média, Mínimo, Máximo.
 - **Agregações de "Agrupar período" (6)**: Individual (por registro), Soma,
   Contagem, Média, Mediana, Moda.
@@ -1929,7 +1965,8 @@ referência.
 - **Paletas (7)**: Design system, Vibrante, Oceano, Pôr do sol, Floresta,
   Tons de cinza, Inbound (roxo & verde).
 - **Formas (7)**: Retângulo, Retângulo arredondado, Elipse, Losango,
-  Triângulo, Seta, Hexágono.
+  Triângulo, Seta, Hexágono (a antiga forma "Linha" virou o widget próprio
+  "Linha divisória").
 - **Tokens de data em filtros (5)**: `@today`, `@month_start`, `@month_end`,
   `@year_start`, `@year_end`.
 - **Métricas de meta embutidas (2)**: `mrr`, `clientes` (+ personalizadas do

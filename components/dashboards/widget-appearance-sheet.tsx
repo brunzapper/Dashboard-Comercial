@@ -1,4 +1,11 @@
-// Versão: 2.4 | Data: 17/07/2026
+// Versão: 2.5 | Data: 25/07/2026
+// v2.5 (25/07/2026): posição do rótulo em barra HORIZONTAL vira "Fora"/
+//   "Dentro" (valores salvos inalterados; "Acima" era wording de barra
+//   vertical) + hint do auto-flip; novos controles "Espessura das barras"
+//   (barFillPct) e "Margem interna do gráfico" (chartInset); seção "Filtro"
+//   (fundo/borda/abinha — appearance.filter) p/ filtro/filtro_campo, que
+//   passam a ter aparência (canStyle no widget-card); isShape/isLineShape
+//   reconhecem o novo tipo 'linha_divisoria'.
 // v2.4 (17/07/2026): painel (SheetContent) com bg-muted — cards internos
 //   (regras de formatação condicional etc.) se destacam em branco.
 // v2.3 (17/07/2026): todas as seções recolhíveis abrem fechadas (sem
@@ -114,10 +121,15 @@ export function WidgetAppearanceSheet({
   const isKpi = vt === "kpi";
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";
-  const isShape = vt === "forma";
-  // Forma "linha" (camada livre): só traço — sem preenchimento.
-  const isLineShape = isShape && widget.settings?.shape?.kind === "linha";
+  // 'linha_divisoria' compartilha o formato/aparência da forma (shape).
+  const isShape = vt === "forma" || vt === "linha_divisoria";
+  // Linha (camada livre): só traço — sem preenchimento. Cobre o tipo próprio
+  // (0100) e a forma legada (forma + shape.kind "linha", ex.: snapshot).
+  const isLineShape =
+    vt === "linha_divisoria" ||
+    (isShape && widget.settings?.shape?.kind === "linha");
   const isKanban = vt === "kanban";
+  const isFilter = vt === "filtro" || vt === "filtro_campo";
 
   const metrics = data.metrics;
   const dimKey = data.dimensions[0]?.key;
@@ -651,6 +663,24 @@ export function WidgetAppearanceSheet({
                     { value: "both", label: "Ambas" },
                   ]}
                 />
+                <SelectRow
+                  label="Margem interna do gráfico"
+                  value={
+                    ap.chartInset != null ? String(ap.chartInset) : "auto"
+                  }
+                  onChange={(v) =>
+                    patch({
+                      chartInset: v === "auto" ? undefined : Number(v),
+                    })
+                  }
+                  options={[
+                    { value: "auto", label: "Auto" },
+                    ...[4, 8, 12, 16, 24, 32].map((n) => ({
+                      value: String(n),
+                      label: `${n} px`,
+                    })),
+                  ]}
+                />
                 {isBar ? (
                   <>
                     <SelectRow
@@ -660,6 +690,24 @@ export function WidgetAppearanceSheet({
                       options={[
                         { value: "solid", label: "Sólido" },
                         { value: "gradient", label: "Gradiente (sutil)" },
+                      ]}
+                    />
+                    <SelectRow
+                      label="Espessura das barras"
+                      value={
+                        ap.barFillPct != null ? String(ap.barFillPct) : "auto"
+                      }
+                      onChange={(v) =>
+                        patch({
+                          barFillPct: v === "auto" ? undefined : Number(v),
+                        })
+                      }
+                      options={[
+                        { value: "auto", label: "Auto" },
+                        ...[30, 40, 50, 60, 70, 80, 90, 100].map((n) => ({
+                          value: String(n),
+                          label: `${n}%`,
+                        })),
                       ]}
                     />
                     <div className="flex items-center justify-between gap-2">
@@ -1016,6 +1064,36 @@ export function WidgetAppearanceSheet({
               />
             </BuilderSection>
           ) : null}
+
+          {/* ---------- Filtros (filtro / filtro_campo) ---------- */}
+          {isFilter ? (
+            <BuilderSection value="filtro" title="Filtro">
+              <ColorField
+                label="Fundo"
+                value={ap.filter?.bg}
+                onChange={(v) => patch({ filter: { ...ap.filter, bg: v } })}
+                onClear={() =>
+                  patch({ filter: { ...ap.filter, bg: undefined } })
+                }
+              />
+              <ColorField
+                label="Borda"
+                value={ap.filter?.border}
+                onChange={(v) => patch({ filter: { ...ap.filter, border: v } })}
+                onClear={() =>
+                  patch({ filter: { ...ap.filter, border: undefined } })
+                }
+              />
+              <ColorField
+                label="Cor de destaque (abinha)"
+                value={ap.filter?.accent}
+                onChange={(v) => patch({ filter: { ...ap.filter, accent: v } })}
+                onClear={() =>
+                  patch({ filter: { ...ap.filter, accent: undefined } })
+                }
+              />
+            </BuilderSection>
+          ) : null}
           </Accordion>
 
           <Button onClick={save} disabled={pending}>
@@ -1059,10 +1137,17 @@ function DataLabelsSection({
           ]
         : vt === "funil"
           ? null
-          : [
-              { value: "top", label: "Acima" },
-              { value: "inside", label: "Dentro" },
-            ];
+          : vt === "barra_horizontal"
+            ? // Na horizontal o rótulo "top" renderiza à DIREITA da barra —
+              // o wording certo é "Fora" ("Acima" é coisa de barra vertical).
+              [
+                { value: "top", label: "Fora" },
+                { value: "inside", label: "Dentro" },
+              ]
+            : [
+                { value: "top", label: "Acima" },
+                { value: "inside", label: "Dentro" },
+              ];
   const position = dl?.position ?? "top";
   return (
     <BuilderSection
@@ -1128,6 +1213,12 @@ function DataLabelsSection({
               }
               options={positions}
             />
+          ) : null}
+          {vt === "barra_horizontal" && positions && !totalMode ? (
+            <p className="text-muted-foreground text-xs">
+              Dentro: rótulo que não couber na barra aparece automaticamente
+              fora.
+            </p>
           ) : null}
           <ColorField
             label="Cor do rótulo"
