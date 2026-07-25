@@ -1,4 +1,9 @@
-// Versão: 3.4 | Data: 24/07/2026
+// Versão: 3.5 | Data: 25/07/2026
+// v3.5 (25/07/2026): barra horizontal — margem direita dinâmica reserva a
+//   largura estimada dos rótulos EXTERNOS (valor/total e variação;
+//   lib/widgets/hbar-labels.ts): a barra do valor máximo não corta mais o
+//   texto na borda do SVG; o rótulo de variação desloca pela largura real do
+//   rótulo de valor/total da linha (o offset fixo de 44px sobrepunha moeda).
 // v3.4 (24/07/2026): pernas de sub-base como SÉRIES — quando o engine carimba
 //   WidgetData.subSeries (modos "stacked"/"grouped"), buildSubSeriesPivot
 //   (lib/widgets/sub-series.ts) pivota a dim líder "Base" em uma série por
@@ -81,6 +86,10 @@ import {
   type CalcMoneyMeta,
 } from "@/lib/widgets/calc-metrics";
 import { paletteColor, resolveSeriesColor } from "@/lib/widgets/palettes";
+import {
+  estimateChartTextWidth,
+  hbarRightMargin,
+} from "@/lib/widgets/hbar-labels";
 import {
   buildSubSeriesPivot,
   subSeriesCatTotalKey,
@@ -1091,8 +1100,13 @@ export const WidgetChart = memo(function WidgetChart({
 
   // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
   // como <text> SVG posicionado pelo LabelList (content custom) e colorido pelo
-  // tom da variação. Com dataLabels ligado, desloca p/ dentro p/ não sobrepor.
-  const renderVarLabel = (props: unknown, key: string): React.ReactElement => {
+  // tom da variação. Com dataLabels ligado, desloca p/ DEPOIS do rótulo de
+  // valor/total da própria linha (largura estimada — offset fixo sobrepunha
+  // valores longos de moeda).
+  const renderVarLabel = (
+    props: unknown,
+    s: { dataKey: string; metricKey: string; lastInStack: boolean }
+  ): React.ReactElement => {
     if (!cmp) return <g />;
     const { x, y, width, height, index } = props as {
       x?: number;
@@ -1103,6 +1117,7 @@ export const WidgetChart = memo(function WidgetChart({
     };
     if (index == null || !chartRows[index]) return <g />;
     const r = chartRows[index] as WidgetRow;
+    const key = s.dataKey;
     const vr = computeVariation(
       numOrNull(r[key]),
       r.__cmp?.[key] == null ? null : Number(r.__cmp[key])
@@ -1112,7 +1127,25 @@ export const WidgetChart = memo(function WidgetChart({
     const text = `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`;
     const hasDataLabels = Boolean(ap.dataLabels?.show);
     if (visualType === "barra_horizontal") {
-      const tx = (x ?? 0) + (width ?? 0) + (hasDataLabels ? 44 : 4);
+      // Texto exibido FORA da barra nesta linha: valor detalhado ou, no modo
+      // total, a soma (só no segmento do topo do stack). Consts do branch de
+      // barra (totalLabelMode etc.) já inicializadas quando o Recharts chama
+      // o content — este caminho só renderiza em barra_horizontal.
+      const outside = !hasDataLabels
+        ? null
+        : totalLabelMode
+          ? s.lastInStack
+            ? ((): string | null => {
+                const t = rowStackTotal(r, s.metricKey);
+                return t == null ? null : totalLabelText(t, s.metricKey);
+              })()
+            : null
+          : dataLabelText(r[key], key, seriesTotal(key));
+      const tx =
+        (x ?? 0) +
+        (width ?? 0) +
+        4 +
+        (outside ? estimateChartTextWidth(outside, chartPx) + 4 : 0);
       const ty = (y ?? 0) + (height ?? 0) / 2 + 3;
       return (
         <text x={tx} y={ty} fontSize={Math.max(9, chartPx - 1)} fill={fill}>
@@ -1469,6 +1502,54 @@ export const WidgetChart = memo(function WidgetChart({
     );
   };
 
+  // Margem direita dinâmica do HORIZONTAL (25/07/2026): os rótulos de valor/
+  // total ficam FORA da barra (position "right"/fim do stack) e o de variação
+  // depois deles — com a margem fixa de 12px, a barra do valor máximo
+  // encostava na borda do SVG e o texto saía cortado. Reserva a largura
+  // estimada dos textos efetivamente renderizados (lib/widgets/hbar-labels.ts).
+  const outsideValueLabels =
+    Boolean(ap.dataLabels?.show) &&
+    ap.dataLabels?.position !== "inside" &&
+    !totalLabelMode;
+  const hbarValueTexts: string[] = [];
+  const hbarVarTexts: string[] = [];
+  if (horizontal) {
+    for (const s of plotSeries) {
+      const total = outsideValueLabels ? seriesTotal(s.dataKey) : 0;
+      for (const r of chartRows) {
+        const row = r as WidgetRow;
+        if (outsideValueLabels && row[s.dataKey] != null)
+          hbarValueTexts.push(dataLabelText(row[s.dataKey], s.dataKey, total));
+        if (cmp?.settings.chartLabels) {
+          const vr = computeVariation(
+            numOrNull(row[s.dataKey]),
+            row.__cmp?.[s.dataKey] == null
+              ? null
+              : Number(row.__cmp[s.dataKey])
+          );
+          if (vr)
+            hbarVarTexts.push(
+              `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`
+            );
+        }
+      }
+    }
+    if (totalLabelMode) {
+      for (const m of metrics) {
+        for (const r of chartRows) {
+          const t = rowStackTotal(r as WidgetRow, m.key);
+          if (t != null) hbarValueTexts.push(totalLabelText(t, m.key));
+        }
+      }
+    }
+  }
+  const hbarRight = hbarRightMargin({
+    base: 12,
+    fontPx: chartPx,
+    valueTexts: hbarValueTexts,
+    varTexts: hbarVarTexts,
+  });
+
   // Com linha de meta ativa, o container vira ComposedChart (o BarChart do
   // Recharts não desenha <Line>); sem meta, BarChart original — troca
   // condicional p/ zero risco de regressão nos widgets existentes.
@@ -1477,7 +1558,12 @@ export const WidgetChart = memo(function WidgetChart({
     <BarContainer
       data={chartRows}
       layout={horizontal ? "vertical" : "horizontal"}
-      margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
+      margin={{
+        top: 8,
+        right: horizontal ? hbarRight : 12,
+        bottom: 4,
+        left: 0,
+      }}
     >
       <CartesianGrid
         strokeDasharray="3 3"
@@ -1628,7 +1714,7 @@ export const WidgetChart = memo(function WidgetChart({
             {cmp?.settings.chartLabels ? (
               <LabelList
                 dataKey={s.dataKey}
-                content={(p) => renderVarLabel(p, s.dataKey)}
+                content={(p) => renderVarLabel(p, s)}
               />
             ) : null}
           </Bar>
