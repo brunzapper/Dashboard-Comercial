@@ -24,7 +24,7 @@ import {
 } from "@/lib/records/formula-recipes";
 import { TODAY_REF } from "@/lib/records/date-operands";
 import { parseAggRef } from "@/lib/widgets/calc-metrics";
-import type { SourceDef } from "@/lib/sources";
+import { rootSources, type SourceDef } from "@/lib/sources";
 import { cn } from "@/lib/utils";
 
 export function RecipeStrip({
@@ -74,7 +74,7 @@ export function RecipeStrip({
               )
             }
           >
-            <Percent className="size-3.5" /> Taxa de conversão (base ÷ base)
+            <Percent className="size-3.5" /> Taxa de conversão (contagem ÷ contagem)
           </Button>
         ) : null}
       </div>
@@ -313,10 +313,27 @@ function ConversionWizard({
   const [denSource, setDenSource] = useState("");
   const [denRef, setDenRef] = useState("");
 
-  const sourceOptions: ComboboxOption[] = useMemo(
-    () => sources.filter((s) => !s.parentKey).map((s) => ({ value: s.key, label: s.label })),
-    [sources]
-  );
+  // Cada lado escolhe uma Base OU Sub-base (o catálogo escopado cobre as duas;
+  // o motor roda uma perna própria por fonte — sub ÷ pai e sub ÷ sub valem).
+  // Sub-base exibe "Pai › Sub" para o trigger fechado ficar inequívoco.
+  const sourceOptions: ComboboxOption[] = useMemo(() => {
+    const roots = rootSources(sources);
+    const rootByKey = new Map(roots.map((s) => [s.key, s]));
+    const out: ComboboxOption[] = roots.map((s) => ({
+      value: s.key,
+      label: s.label,
+      group: "Bases",
+    }));
+    for (const sub of sources.filter((s) => s.parentKey)) {
+      const parent = rootByKey.get(sub.parentKey!);
+      out.push({
+        value: sub.key,
+        label: parent ? `${parent.shortLabel} › ${sub.label}` : sub.label,
+        group: "Sub-bases",
+      });
+    }
+    return out;
+  }, [sources]);
   // Contagens da fonte: `agg:count:*@src` (registros) e `agg:count:<campo>@src`
   // (registros com o campo preenchido) — direto do catálogo agregado vivo.
   const countOptions = (src: string): ComboboxOption[] =>
@@ -333,8 +350,9 @@ function ConversionWizard({
   return (
     <div className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3">
       <p className="text-xs font-medium">
-        Taxa de conversão — contagem de uma base dividida pela contagem de
-        outra (ex.: Deals ÷ Leads), exibida como percentual.
+        Taxa de conversão — contagem de uma Base ou Sub-base dividida pela
+        contagem de outra (ex.: Deals ÷ Leads, ou uma Sub-base ÷ a Base que a
+        contém), exibida como percentual.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -348,8 +366,8 @@ function ConversionWizard({
               setNumSource(v);
               setNumRef("");
             }}
-            placeholder="Base — ex.: Deals"
-            aria-label="Base do numerador"
+            placeholder="Base ou Sub-base — ex.: Deals"
+            aria-label="Base ou Sub-base do numerador"
             className="w-full"
           />
           {numSource ? (
@@ -366,7 +384,7 @@ function ConversionWizard({
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="text-muted-foreground text-xs">
-            2. Base (denominador)
+            2. Total (denominador)
           </span>
           <Combobox
             options={sourceOptions}
@@ -375,8 +393,8 @@ function ConversionWizard({
               setDenSource(v);
               setDenRef("");
             }}
-            placeholder="Base — ex.: Leads"
-            aria-label="Base do denominador"
+            placeholder="Base ou Sub-base — ex.: Leads"
+            aria-label="Base ou Sub-base do denominador"
             className="w-full"
           />
           {denSource ? (

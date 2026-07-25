@@ -730,7 +730,7 @@ O widget de número grande. Tem **modos** (seção "Modo do Card" no editor):
 | "Valor de um registro (maior/menor)" | `record` | um campo do registro com maior/menor valor em outro campo — configura "Classificar pelo campo" (número ou data), "Maior ou menor?" e "Exibir o campo" |
 | "Ranking (Top N)" | `topn` | ranking: "Campo do rótulo" + "Métrica do ranking" + agregação + "Limite" (padrão 5) + ordem (maiores/menores primeiro) |
 | "Lista de valores" | `list` | lista simples: "Campo da lista" + "Limite" (padrão 10) |
-| "Fórmula" | `formula` | resultado de uma fórmula agregada (aceita SE/E/OU, SOMASE/CONT.SE/MÉDIASE, ANTERIOR/VARPCT/VARABS — capítulo 8) |
+| "Fórmula" | `formula` | resultado de uma fórmula agregada (aceita SE/E/OU, SOMASE/CONT.SE/MÉDIASE, ANTERIOR/VARPCT/VARABS — capítulo 8); tem a receita "Taxa de conversão" (§8.8) e avisos de escopo de Base |
 
 - Nos modos ≠ "Número": campos extras "Prefixo", "Sufixo" e "Texto
   secundário". Esses modos **ignoram** Dimensões/Métricas do bloco de dados,
@@ -1391,7 +1391,10 @@ Leads"; referência interna `agg:count:*@leads`). Semântica:
 - Operando SEM escopo agrega o universo em escopo no ponto de uso (as Bases
   do widget/campo).
 - É o mecanismo por trás da taxa de conversão entre Bases:
-  `Contagem de registros · Negócios ÷ Contagem de registros · Leads`.
+  `Contagem de registros · Negócios ÷ Contagem de registros · Leads`. Vale
+  também entre uma Sub-base e a Base que a contém (`SQL ÷ Leads`) e entre
+  duas Sub-bases (`Clientes Lite ÷ SQL`) — cada operando roda uma consulta
+  própria da SUA fonte, nunca herda a Base do widget.
 - Limitações: escopo só existe para Soma/Contagem/Média (não Mín/Máx); se o
   recorte da Sub-base usar o operador "contém", o operando escopado fica
   indisponível e a célula mostra **"—"** (o sistema nunca responde com o
@@ -1424,8 +1427,14 @@ Leads"; referência interna `agg:count:*@leads`). Semântica:
 
 Atalhos que GERAM uma fórmula normal (100% editável depois):
 
-- **"Taxa de conversão"** (contexto agregado): contagem escopada de uma Base
-  ÷ contagem escopada de outra, formato percentual.
+- **"Taxa de conversão"** (contexto agregado): contagem escopada de uma
+  fonte ÷ contagem escopada de outra, formato percentual. Cada lado escolhe
+  uma **Base OU Sub-base** — o seletor agrupa "Bases" e "Sub-bases" (sub
+  exibida como "Pai › Sub"), então dá para montar Sub-base ÷ Base
+  (`SQL ÷ Leads`) e Sub-base ÷ Sub-base direto no assistente. Disponível na
+  métrica ad-hoc, no widget "Métrica calculada", em /campos e no Card →
+  modo "Fórmula" (onde, sem flag de percentual, a receita gera
+  `(fórmula) × 100` + sufixo "%", preservando sufixo já preenchido).
 - **"Ciclo de vendas"** (por registro): data de fim do registro − data de
   início do registro casado (`↪`), resultado em dias.
 

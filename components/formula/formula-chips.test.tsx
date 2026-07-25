@@ -80,4 +80,24 @@ describe("FormulaChips", () => {
     expect(screen.getByText("×")).toBeInTheDocument();
     expect(screen.getByText("≠")).toBeInTheDocument();
   });
+
+  it("operando escopado (label já termina na fonte) não ganha prefixo de eco", () => {
+    setup({
+      tokens: [{ kind: "field", ref: "agg:count:*@sqls" }],
+      catalog: [
+        {
+          ref: "agg:count:*@sqls",
+          label: "Contagem de registros · SQL",
+          sourceHint: "SQL",
+        },
+      ],
+      caret: 1,
+    });
+    expect(
+      screen.getByText("Contagem de registros · SQL")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("SQL · Contagem de registros · SQL")
+    ).not.toBeInTheDocument();
+  });
 });
