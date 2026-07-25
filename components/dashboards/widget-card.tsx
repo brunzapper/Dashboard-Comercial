@@ -1,4 +1,6 @@
-// Versão: 2.13 | Data: 25/07/2026
+// Versão: 2.14 | Data: 25/07/2026
+// v2.14 (25/07/2026): prop onMergePages (performMerge do grid) repassada ao
+//   AddPageDialog — ⋮ → "Adicionar página" com efeito otimista imediato.
 // v2.13 (25/07/2026): páginas de widget (mescla — lib/widgets/pages) — props
 //   pageHostId/pageCount (o grid renderiza a página ativa no slot do host) e
 //   itens ⋮ "Adicionar página" (AddPageDialog: elegíveis da aba) e "Desfazer
@@ -237,6 +239,7 @@ export const WidgetCard = memo(function WidgetCard({
   onMeasure,
   pageHostId,
   pageCount,
+  onMergePages,
   onWidgetDeleted,
   autoOpenEditor = false,
   onAutoEditConsumed,
@@ -313,6 +316,13 @@ export const WidgetCard = memo(function WidgetCard({
   // pageHostId ?? widget.id.
   pageHostId?: string;
   pageCount?: number;
+  // Mescla OTIMISTA (dashboard-grid.performMerge): o ⋮ → "Adicionar página"
+  // roteia por aqui para o membro sumir/pager aparecer NA HORA (falha faz
+  // rollback no grid). Ausente = AddPageDialog cai na action direta.
+  onMergePages?: (
+    hostId: string,
+    memberIds: string[]
+  ) => Promise<{ ok?: boolean; message?: string }>;
   // Avisa o shell da exclusão (limpa o widget otimista da criação rápida).
   onWidgetDeleted?: (id: string) => void;
   // Inserir ▸ tipo que exige configuração: o card recém-criado monta com o
@@ -871,6 +881,7 @@ export const WidgetCard = memo(function WidgetCard({
           hostId={pageHost}
           hostTitle={hostTitle}
           siblings={siblings}
+          onMerge={onMergePages}
         />
       ) : null}
       {canUnmerge ? (

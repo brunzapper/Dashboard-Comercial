@@ -1,6 +1,11 @@
-// Versão: 2.15 | Data: 25/07/2026
+// Versão: 2.16 | Data: 25/07/2026
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
+// v2.16 (25/07/2026): mescla com efeito IMEDIATO — pendingMerges/effWidgets
+//   aplicam a mescla otimista no cliente (membro some, pager aparece) antes do
+//   router.refresh aterrissar; performMerge compartilhado pelo diálogo do drop
+//   e pelo ⋮ → "Adicionar página" (prop onMergePages do WidgetCard); falha da
+//   action faz rollback.
 // v2.15 (25/07/2026): PÁGINAS de widget (mescla — lib/widgets/pages): membros
 //   (settings.pages de um host) saem de gridWidgets (ocultos em TODOS os
 //   consumidores — layout/persist/children/conectores/extensão); o host
@@ -580,28 +585,71 @@ export function DashboardGrid({
     [layoutById]
   );
 
+  // MESCLA OTIMISTA: pares host→membros confirmados no cliente e ainda não
+  // refletidos pelas props do servidor. Sem isto, confirmar a mescla devolvia
+  // o membro à posição original até o router.refresh aterrissar (a page
+  // recomputa TODOS os widgets — segundos num dashboard grande) e a mescla
+  // "só aparecia no F5". O efeito entra em `effWidgets` (o settings.pages do
+  // host ganha os pendentes) e a limpeza acontece no render quando o servidor
+  // alcança (padrão de ajustar estado no render, como o `drag` das alças);
+  // falha da action faz rollback (o membro reaparece onde estava).
+  const [pendingMerges, setPendingMerges] = useState<Record<string, string[]>>(
+    {}
+  );
+  const effWidgets = useMemo(() => {
+    if (Object.keys(pendingMerges).length === 0) return widgets;
+    return widgets.map((w) => {
+      const add = pendingMerges[w.id];
+      if (!add || add.length === 0) return w;
+      const cur = pageMembersOf(w);
+      return {
+        ...w,
+        settings: {
+          ...(w.settings ?? {}),
+          pages: [...cur, ...add.filter((id) => !cur.includes(id))],
+        },
+      };
+    });
+  }, [widgets, pendingMerges]);
+  const stalePending = Object.entries(pendingMerges).filter(([hostId, ids]) => {
+    const host = widgets.find((w) => w.id === hostId);
+    if (!host) return true; // host sumiu (excluído/movido de aba)
+    const cur = pageMembersOf(host);
+    return ids.every((id) => cur.includes(id));
+  });
+  if (stalePending.length > 0) {
+    setPendingMerges((prev) => {
+      const next = { ...prev };
+      for (const [k] of stalePending) delete next[k];
+      return next;
+    });
+  }
+
   // Partição: Formas "linha" ficam FORA do RGL (camada livre — movimento sem
   // prender às colunas) e fora das colisões/conectores; widgets-MEMBRO de uma
-  // mescla (settings.pages de um host — lib/widgets/pages) ficam OCULTOS (o
-  // host renderiza a página ativa no espaço dele); todo o resto segue no grid.
-  // A troca widgets→gridWidgets tem que ser CONSISTENTE (layout memo, persist,
-  // children do RGL, ConnectorLayer) — parcial dessincroniza o layout↔children
-  // do RGL.
-  const pageMemberIds = useMemo(() => collectPageMembers(widgets), [widgets]);
+  // mescla (settings.pages de um host — lib/widgets/pages, incluindo os
+  // pendentes acima) ficam OCULTOS (o host renderiza a página ativa no espaço
+  // dele); todo o resto segue no grid. A troca widgets→gridWidgets tem que ser
+  // CONSISTENTE (layout memo, persist, children do RGL, ConnectorLayer) —
+  // parcial dessincroniza o layout↔children do RGL.
+  const pageMemberIds = useMemo(
+    () => collectPageMembers(effWidgets),
+    [effWidgets]
+  );
   const widgetById = useMemo(
-    () => new Map(widgets.map((w) => [w.id, w])),
-    [widgets]
+    () => new Map(effWidgets.map((w) => [w.id, w])),
+    [effWidgets]
   );
   const gridWidgets = useMemo(
     () =>
-      widgets.filter(
+      effWidgets.filter(
         (w) => !isLineShapeWidget(w) && !pageMemberIds.has(w.id)
       ),
-    [widgets, pageMemberIds]
+    [effWidgets, pageMemberIds]
   );
   const lineWidgets = useMemo(
-    () => widgets.filter((w) => isLineShapeWidget(w)),
-    [widgets]
+    () => effWidgets.filter((w) => isLineShapeWidget(w)),
+    [effWidgets]
   );
   // Traçado efetivo de uma linha: otimista ?? settings ?? derivado do rect
   // (linha recém-criada ainda sem shape.line).
@@ -627,6 +675,45 @@ export function DashboardGrid({
     base: GridPosition;
   } | null>(null);
   const [mergePending, startMerge] = useTransition();
+
+  // Mescla com efeito IMEDIATO: registra a pendência (o membro some e o pager
+  // aparece na hora — os dados da página oculta já estão nas props, a page
+  // computa todos os widgets), mostra a página recém-adicionada (índice alto,
+  // o clamp da leitura cai na última) e só então persiste; falha desfaz.
+  // Compartilhada pelo diálogo do drop e pelo "Adicionar página" do ⋮ (via
+  // prop onMergePages do WidgetCard).
+  const performMerge = useCallback(
+    async (hostId: string, memberIds: string[]) => {
+      setPendingMerges((prev) => {
+        const cur = prev[hostId] ?? [];
+        return {
+          ...prev,
+          [hostId]: [...cur, ...memberIds.filter((id) => !cur.includes(id))],
+        };
+      });
+      setPageIndexByHost((prev) => ({
+        ...prev,
+        [hostId]: Number.MAX_SAFE_INTEGER,
+      }));
+      const res = await mergeWidgetPages(dashboardId, hostId, memberIds);
+      if (!res.ok) {
+        setPendingMerges((prev) => {
+          const rest = (prev[hostId] ?? []).filter(
+            (id) => !memberIds.includes(id)
+          );
+          const next = { ...prev };
+          if (rest.length > 0) next[hostId] = rest;
+          else delete next[hostId];
+          return next;
+        });
+        return res;
+      }
+      router.refresh();
+      void history.captureNow();
+      return res;
+    },
+    [dashboardId, router, history]
+  );
 
   // Layout efetivo (o que vai pro RGL): max(mínimo, medido) no eixo habilitado, e
   // então um passo de resolução de colisões que empurra os vizinhos no eixo do
@@ -1084,10 +1171,10 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
-  // Diálogo "Adicionar página?" (mescla por drop). Confirmar mescla no
-  // servidor e devolve o card à BASE (a posição solta nunca persiste — com
-  // sucesso o membro some da renderização quando o refresh trouxer `pages`);
-  // Cancelar/Esc só desfaz o arraste (o banco nunca foi tocado).
+  // Diálogo "Adicionar página?" (mescla por drop). Confirmar fecha NA HORA e
+  // aplica o efeito otimista (performMerge: membro some, pager aparece, card
+  // volta à base — a posição solta nunca persiste) enquanto a action corre por
+  // trás; Cancelar/Esc só desfaz o arraste (o banco nunca foi tocado).
   const mergeDialog = mergePrompt ? (
     <MergePromptDialog
       open
@@ -1100,16 +1187,10 @@ export function DashboardGrid({
       }
       onConfirm={() => {
         const prompt = mergePrompt;
+        applyLayoutPatch({ [prompt.draggedId]: prompt.base });
+        setMergePrompt(null);
         startMerge(async () => {
-          const res = await mergeWidgetPages(dashboardId, prompt.hostId, [
-            prompt.draggedId,
-          ]);
-          applyLayoutPatch({ [prompt.draggedId]: prompt.base });
-          setMergePrompt(null);
-          if (res.ok) {
-            router.refresh();
-            void history.captureNow();
-          }
+          await performMerge(prompt.hostId, [prompt.draggedId]);
         });
       }}
       onCancel={() => {
@@ -1323,7 +1404,7 @@ export function DashboardGrid({
                         availableForBuilder={availableForBuilder}
                         dashboardId={dashboardId}
                         dateFormat={dateFormat}
-                        siblings={widgets}
+                        siblings={effWidgets}
                         tabs={tabs}
                         canEdit={canEdit}
                         canExport={canExport}
@@ -1342,6 +1423,7 @@ export function DashboardGrid({
                         onMeasure={onMeasure}
                         pageHostId={pagesOf ? w.id : undefined}
                         pageCount={pagesOf?.length}
+                        onMergePages={performMerge}
                         onWidgetDeleted={onWidgetDeleted}
                         autoOpenEditor={shown.id === autoEditWidgetId}
                         onAutoEditConsumed={onAutoEditConsumed}
