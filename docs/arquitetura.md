@@ -1496,7 +1496,8 @@ principalmente — para mantenedores humanos.
     A migração 0086 seeda as colunas do núcleo de `records` como linhas
     `source_system='core'` (`field_key` = nome da coluna) para a aba Campos
     exibi-las/geri-las (rótulo, olho, ordem; texto↔selecao na whitelist
-    `CORE_SELECT_CAPABLE` — pipeline/etapa/tipo de venda/canal). O ref de
+    `CORE_SELECT_CAPABLE` — pipeline/etapa/tipo de venda/canal/Base
+    `source_system`). O ref de
     widget segue sendo o nome CRU da coluna (`pipeline`) — uma linha core
     JAMAIS pode virar `custom:<key>` em catálogo, operando, coluna ou mapa
     `fieldByKey`. O split é feito por `lib/records/core-defs.ts`
@@ -1509,7 +1510,10 @@ principalmente — para mantenedores humanos.
     reapareceria. As options do `pipeline` (selecao) são reescritas a cada
     sync com os funis vivos (`lookups.categoryNames()` em `syncFieldCatalog`);
     edição manual das options não sobrevive ao sync (mesmo trato do campo
-    curado `fonte`).
+    curado `fonte`). A Base (`source_system`) nasce selecao desde a 0099 com
+    as origens de ingestão como options (distintos da org ∪
+    bitrix/sheet_site/manual/csv) — ao contrário do pipeline, NADA as
+    reescreve depois: origem nova entra pelo /campos.
 
 14. **Board na Lixeira não abre; duplicação sempre remapeia.** `dashboards.status
     = 'trashed'` (0087) significa 404 em `/dashboards/[id]`, `/kanbans/[id]` E

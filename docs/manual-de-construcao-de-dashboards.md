@@ -212,9 +212,13 @@ Notas importantes:
 - **Campos do núcleo na aba Campos**: as colunas do núcleo (pipeline, etapa,
   canal…) aparecem como linhas de origem "Núcleo" apenas para gestão de
   rótulo/visibilidade/ordem — não são campos personalizados, não podem ser
-  excluídas e são visíveis a todos os papéis. Pipeline, etapa, tipo de venda e
-  canal podem alternar entre texto e seleção; as opções do pipeline são
-  reescritas automaticamente a cada sync (não adianta editá-las à mão).
+  excluídas e são visíveis a todos os papéis. Pipeline, etapa, tipo de venda,
+  canal e Base podem alternar entre texto e seleção; as opções do pipeline são
+  reescritas automaticamente a cada sync (não adianta editá-las à mão). A
+  **Base** já vem como seleção com as origens de ingestão dos registros
+  (bitrix, sheet_site, manual, csv) como opções — assim o Filtro por campo
+  exibe um dropdown em vez de texto livre; essa lista não é reescrita
+  automaticamente (origem nova é adicionada na própria aba Campos).
 
 #### 2.1.2 Sub-aba Correspondências (campos unificados)
 

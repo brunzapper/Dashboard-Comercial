@@ -308,6 +308,14 @@ export function FieldForm({
               (funis do Bitrix) — edições manuais serão sobrescritas.
             </p>
           ) : null}
+          {isCore && field?.field_key === "source_system" ? (
+            <p className="text-muted-foreground text-xs">
+              Os valores são as origens de ingestão dos registros (bitrix,
+              sheet_site, manual, csv). A lista não é reescrita
+              automaticamente — uma origem nova precisa ser adicionada aqui
+              para aparecer nos filtros.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

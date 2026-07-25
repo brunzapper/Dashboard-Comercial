@@ -5,7 +5,11 @@
 // 'core')` no banco (o `<>` derrubaria os NULL); o split é feito em JS.
 import { describe, expect, it } from "vitest";
 
-import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
+import {
+  CORE_SELECT_CAPABLE,
+  isCoreDef,
+  splitCoreDefs,
+} from "@/lib/records/core-defs";
 
 describe("isCoreDef", () => {
   it("reconhece apenas source_system === 'core'", () => {
@@ -45,5 +49,19 @@ describe("splitCoreDefs", () => {
     const { custom, core } = splitCoreDefs([]);
     expect(custom).toEqual([]);
     expect(core.size).toBe(0);
+  });
+});
+
+describe("CORE_SELECT_CAPABLE", () => {
+  it("inclui a Base (source_system, 0099) além das colunas da 0086", () => {
+    for (const key of ["pipeline", "stage", "sale_type", "channel", "source_system"]) {
+      expect(CORE_SELECT_CAPABLE.has(key)).toBe(true);
+    }
+  });
+
+  it("colunas de tipo travado seguem fora da whitelist", () => {
+    for (const key of ["record_type", "closed_at", "value", "responsible_id"]) {
+      expect(CORE_SELECT_CAPABLE.has(key)).toBe(false);
+    }
   });
 });
