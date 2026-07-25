@@ -1,5 +1,7 @@
-// Versão: 1.0 | Data: 25/07/2026
-// Geometria da forma "Linha" (ShapeKind "linha"): um widget de Forma cujo
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): a linha virou widget próprio (visual_type
+//   'linha_divisoria', 0100) — isLineShapeWidget aceita as DUAS identidades.
+// Geometria da linha divisória (antes: Forma "linha"): um widget cujo
 // traçado vive em settings.shape.line como extremidades em unidades de grid
 // FRACIONÁRIAS (coordenadas do canvas — floats), sempre horizontal ou vertical.
 // A linha é renderizada/manipulada FORA do react-grid-layout (line-layer.tsx),
@@ -11,11 +13,21 @@
 import type { GridMetrics } from "./connectors";
 import type { GridPosition, ShapeLine, Widget } from "./types";
 
-/** O widget é uma Forma do tipo "linha"? */
+/**
+ * O widget é uma linha divisória? Identidade nova ('linha_divisoria', 0100)
+ * OU legada (forma + shape.kind "linha"). O braço legado é PERMANENTE: o
+ * backfill da 0100 não alcança configs congeladas de snapshot
+ * (snapshots.config.widgets) nem payloads antigos de clipboard — este
+ * predicado é o chokepoint único de identificação (grid, estado otimista,
+ * paste, aparência).
+ */
 export function isLineShapeWidget(
   w: Pick<Widget, "visual_type" | "settings">
 ): boolean {
-  return w.visual_type === "forma" && w.settings?.shape?.kind === "linha";
+  return (
+    w.visual_type === "linha_divisoria" ||
+    (w.visual_type === "forma" && w.settings?.shape?.kind === "linha")
+  );
 }
 
 const finite = (v: unknown): v is number =>

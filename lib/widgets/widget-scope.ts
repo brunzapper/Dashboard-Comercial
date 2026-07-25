@@ -456,6 +456,7 @@ export async function loadWidgetScope(
       w.visual_type !== "filtro" &&
       w.visual_type !== "filtro_campo" &&
       w.visual_type !== "forma" &&
+      w.visual_type !== "linha_divisoria" &&
       w.visual_type !== "imagem"
   );
   const filterWidgets = widgets.filter((w) => w.visual_type === "filtro");

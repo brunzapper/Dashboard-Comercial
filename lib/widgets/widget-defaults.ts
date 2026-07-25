@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): defaults do novo tipo 'linha_divisoria' (rect largo 6×2
+//   ⇒ lineFromRect deriva um divisor horizontal na primeira renderização).
 // Defaults de criação por tipo de widget, compartilhados entre o menu de
 // contexto do grid (Inserir ▸ qualquer tipo) e o construtor (tamanho do ghost
 // do modo Posicionar). Centraliza o que antes vivia inline em
@@ -49,6 +51,9 @@ export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
     calculadora: { w: 4, h: 9 },
     nota: { w: 6, h: 8 },
     forma: { w: 4, h: 6 },
+    // Rect mais largo que alto: lineFromRect (lines.ts) deriva a linha média
+    // HORIZONTAL — um divisor recém-inserido nasce horizontal.
+    linha_divisoria: { w: 6, h: 2 },
     kanban: { w: 6, h: 8 },
     agenda: { w: 6, h: 8 },
     imagem: { w: 4, h: 6 },
@@ -72,6 +77,7 @@ export const WIDGET_NEEDS_CONFIG: Record<VisualType, boolean> = {
   calculadora: false,
   nota: false,
   forma: false,
+  linha_divisoria: false,
   kanban: true,
   agenda: true,
   // Sem URL não há nada a mostrar: abre o editor direto na criação.
@@ -105,6 +111,10 @@ function seedSettings(type: VisualType): WidgetSettings {
       return { quickTable: defaultQuickTable(3, 3) };
     case "forma":
       return { shape: { kind: "retangulo_arredondado" } };
+    // O traçado (shape.line) NÃO é gravado no create: lineOf/lineFromRect o
+    // derivam preguiçosamente do grid_position (mesma regra da forma antiga).
+    case "linha_divisoria":
+      return { shape: { kind: "linha" } };
     case "filtro":
       return {
         kind: "period",

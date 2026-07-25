@@ -1,4 +1,8 @@
-// Versão: 2.11 | Data: 23/07/2026
+// Versão: 2.12 | Data: 25/07/2026
+// v2.12 (25/07/2026): aparência nos widgets de FILTRO (filtro/filtro_campo) —
+//   canStyle os inclui (menu ⋮ ▸ Aparência + sheet) e o cromo lê
+//   appearance.filter (bg/border/accent, espelhando o grupo kpi); título/
+//   fontes genéricos (title.*, fonts.title) já valiam para todo cromo.
 // v2.11 (23/07/2026): FieldFilterControls ganha shared (settings.valueScope
 //   'all' — valor do filtro compartilhado entre usuários via célula __ff__).
 // v2.10 (21/07/2026): prop deferredScopeKey (fingerprint de escopo da page)
@@ -364,6 +368,9 @@ export const WidgetCard = memo(function WidgetCard({
   const isShape = widget.visual_type === "forma";
   const isImage = widget.visual_type === "imagem";
   const kpi = isKpi ? appearance?.kpi : undefined;
+  // Aparência dos filtros (appearance.filter): fundo/borda/abinha do card,
+  // espelho do grupo kpi.
+  const filterAp = isFilter || isFieldFilter ? appearance?.filter : undefined;
   const noteAp = isNote ? appearance?.note : undefined;
   // Sem cromo de card: forma e imagem sempre (fundo transparente — PNG com
   // alpha aparece limpo); nota quando "Sem moldura" (Aparência).
@@ -455,10 +462,11 @@ export const WidgetCard = memo(function WidgetCard({
       onPageChange: handleServerPage,
     };
   }, [serverPaged, srvPage, srvLoading, recordListTotal, handleServerPage]);
-  // Aparência: charts/tabela/pizza/kpi e KANBAN (quadro/colunas/cards/abas —
-  // settings.kanban.appearance); segue fora em filtro/calc/agenda/imagem.
-  const canStyle =
-    !isFilter && !isFieldFilter && !isCalc && !isAgenda && !isImage;
+  // Aparência: charts/tabela/pizza/kpi, KANBAN (quadro/colunas/cards/abas —
+  // settings.kanban.appearance) e FILTROS (25/07/2026 — fundo/borda/abinha em
+  // appearance.filter + título/fontes genéricos); segue fora em calc/agenda/
+  // imagem.
+  const canStyle = !isCalc && !isAgenda && !isImage;
 
   // Catálogo de operandos do editor in-place da nota — builder ÚNICO
   // (lib/widgets/agg-catalog.ts), mesma montagem do calcRefs do builder e da
@@ -905,16 +913,19 @@ export const WidgetCard = memo(function WidgetCard({
       style={{
         background:
           kpi?.bg ??
+          filterAp?.bg ??
           (isNote
             ? (noteAp?.bg ?? "#fef9c3")
             : isCalculator
               ? appearance?.calculator?.bg
               : undefined),
-        borderColor: title?.border ?? kpi?.border,
+        borderColor: title?.border ?? kpi?.border ?? filterAp?.border,
       }}
     >
-      {kpi?.accent ? (
-        <div style={{ height: 3, background: kpi.accent }} />
+      {kpi?.accent || filterAp?.accent ? (
+        <div
+          style={{ height: 3, background: kpi?.accent ?? filterAp?.accent }}
+        />
       ) : null}
       <div
         className="flex items-center gap-2 border-b px-3 py-2"
