@@ -1,4 +1,8 @@
-// Versão: 1.20 | Data: 23/07/2026
+// Versão: 1.21 | Data: 25/07/2026
+// v1.21 (25/07/2026): novo tipo 'linha_divisoria' — compartilha o bloco de
+//   config da forma (texto/atalho; kind fixo "linha", sem combobox) e o save
+//   branch (spread do shape preserva o traçado); o combobox de Forma não
+//   oferece mais "linha" para formas novas (exceto valor atual legado).
 // v1.20 (23/07/2026): toggle "Aplicar filtro para todos os usuários" no
 //   Filtro por campo (settings.valueScope 'all' — valor compartilhado via
 //   célula __ff__; ausente = por usuário, comportamento atual).
@@ -742,13 +746,14 @@ export function WidgetBuilder({
     widget?.settings?.defaultPreset ?? ""
   );
   // Widgets que este filtro pode controlar (exclui a si mesmo, os controles e
-  // forma/imagem, que não têm dados/período).
+  // forma/linha divisória/imagem, que não têm dados/período).
   const targetable = siblings.filter(
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
       s.visual_type !== "filtro_campo" &&
       s.visual_type !== "forma" &&
+      s.visual_type !== "linha_divisoria" &&
       s.visual_type !== "imagem"
   );
 
@@ -780,6 +785,7 @@ export function WidgetBuilder({
       s.visual_type !== "filtro" &&
       s.visual_type !== "filtro_campo" &&
       s.visual_type !== "forma" &&
+      s.visual_type !== "linha_divisoria" &&
       s.visual_type !== "imagem"
   );
   const affectedSiblings = dataSiblings.filter((s) => {
@@ -1577,11 +1583,12 @@ export function WidgetBuilder({
       return;
     }
 
-    // Forma (figura geométrica): tipo, texto e atalho em settings.shape. O
-    // spread do shape anterior preserva chaves que o builder não edita — o
-    // traçado da Linha (shape.line, gravado pelo line-layer) sumia num
-    // re-save sem ele.
-    if (visualType === "forma") {
+    // Forma (figura geométrica) e Linha divisória: tipo, texto e atalho em
+    // settings.shape. O spread do shape anterior preserva chaves que o builder
+    // não edita — o traçado da linha (shape.line, gravado pelo line-layer)
+    // sumia num re-save sem ele. Na linha divisória o kind é SEMPRE "linha"
+    // (formato interno; o combobox de forma nem aparece).
+    if (visualType === "forma" || visualType === "linha_divisoria") {
       const input = {
         title: title.trim() || null,
         visual_type: visualType,
@@ -1594,7 +1601,7 @@ export function WidgetBuilder({
           ...(widget?.settings ?? {}),
           shape: {
             ...(widget?.settings?.shape ?? {}),
-            kind: shapeKind,
+            kind: visualType === "linha_divisoria" ? "linha" : shapeKind,
             text: shapeText.trim() || undefined,
             link: shapeLink,
           },
@@ -2795,29 +2802,36 @@ export function WidgetBuilder({
             })()
           ) : null}
 
-          {/* Config da Forma: tipo, texto interno e atalho para widget. */}
-          {visualType === "forma" ? (
+          {/* Config da Forma e da Linha divisória: tipo (só forma), texto
+              interno e atalho para widget. A linha divisória não tem combobox
+              de tipo (kind fixo "linha"); a forma não oferece mais "linha"
+              para formas novas (o tipo próprio assumiu) — exceto quando o
+              valor ATUAL é "linha" (forma legada não backfillada, ex.:
+              re-import de JSON antigo), p/ o combobox não exibir valor órfão. */}
+          {visualType === "forma" || visualType === "linha_divisoria" ? (
             <>
-              <div className="flex flex-col gap-1.5">
-                <Label>Forma</Label>
-                <Combobox
-                  searchable={false}
-                  options={(
-                    Object.keys(SHAPE_KIND_LABELS) as ShapeKind[]
-                  ).map((k) => ({ value: k, label: SHAPE_KIND_LABELS[k] }))}
-                  value={shapeKind}
-                  onValueChange={(v) => setShapeKind(v as ShapeKind)}
-                  aria-label="Tipo de forma"
-                />
-                {shapeKind === "linha" ? (
-                  <p className="text-muted-foreground text-xs">
-                    A linha é livre: no modo edição, arraste o corpo ou as
-                    pontas direto no painel — ela não se prende às colunas do
-                    grid e fica sempre na horizontal ou na vertical (a ponta
-                    decide pelo gesto dominante).
-                  </p>
-                ) : null}
-              </div>
+              {visualType === "forma" ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Forma</Label>
+                  <Combobox
+                    searchable={false}
+                    options={(Object.keys(SHAPE_KIND_LABELS) as ShapeKind[])
+                      .filter((k) => k !== "linha" || shapeKind === "linha")
+                      .map((k) => ({ value: k, label: SHAPE_KIND_LABELS[k] }))}
+                    value={shapeKind}
+                    onValueChange={(v) => setShapeKind(v as ShapeKind)}
+                    aria-label="Tipo de forma"
+                  />
+                </div>
+              ) : null}
+              {visualType === "linha_divisoria" || shapeKind === "linha" ? (
+                <p className="text-muted-foreground text-xs">
+                  A linha é livre: no modo edição, arraste o corpo ou as
+                  pontas direto no painel — ela não se prende às colunas do
+                  grid e fica sempre na horizontal ou na vertical (a ponta
+                  decide pelo gesto dominante).
+                </p>
+              ) : null}
               <div className="flex flex-col gap-1.5">
                 <Label>Texto na forma</Label>
                 <Input
@@ -2974,6 +2988,7 @@ export function WidgetBuilder({
           visualType !== "calculadora" &&
           visualType !== "nota" &&
           visualType !== "forma" &&
+          visualType !== "linha_divisoria" &&
           visualType !== "imagem" &&
           visualType !== "tabela_editavel" &&
           visualType !== "kanban" &&

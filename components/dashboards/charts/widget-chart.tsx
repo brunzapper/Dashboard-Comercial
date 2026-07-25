@@ -1,4 +1,13 @@
-// Versão: 3.4 | Data: 24/07/2026
+// Versão: 3.5 | Data: 25/07/2026
+// v3.5 (25/07/2026): rótulos de barra horizontal — a margem direita passa a
+//   RESERVAR a largura real (medida) do rótulo externo mais largo (dados,
+//   total do stack e variação; antes: 12px fixos = rótulo cortado na barra
+//   máxima) e o rótulo "Dentro" que não cabe na barra VIRA para fora sozinho
+//   (renderInsideBarLabel; em pilha, segmento intermediário sem espaço fica
+//   sem rótulo). O offset do rótulo de variação usa a medição real (fim do
+//   chute fixo de 44px). Barra vertical reserva topo p/ rótulo "Acima"/
+//   variação. Novos controles de aparência: barFillPct (espessura das barras
+//   → barCategoryGap) e chartInset (margem interna do plot, barras + linha).
 // v3.4 (24/07/2026): pernas de sub-base como SÉRIES — quando o engine carimba
 //   WidgetData.subSeries (modos "stacked"/"grouped"), buildSubSeriesPivot
 //   (lib/widgets/sub-series.ts) pivota a dim líder "Base" em uma série por
@@ -130,6 +139,7 @@ import {
 } from "@/lib/widgets/conditional";
 import { useFontScale } from "../font-scale-context";
 import { FONT_DEFAULTS, fontStyle, resolveFontNum } from "@/lib/widgets/fonts";
+import { measureTextWidth } from "@/lib/widgets/measure-text";
 import { VariationBadge } from "./variation-badge";
 
 // Glyphs dos ícones de regra condicional (células/valores).
@@ -585,6 +595,9 @@ export const WidgetChart = memo(function WidgetChart({
   };
   const grid = gridFlags(ap.gridLines);
   const bg = ap.chartBackground;
+  // Margem interna do plot (aparência, 25/07/2026): px somados aos 4 lados das
+  // margens base — barra/barra_horizontal/linha; pizza/funil não usam margem.
+  const chartInset = ap.chartInset ?? 0;
 
   // Eixo duplo: só se ≥2 métricas e alguma marcada como "direita".
   const hasRightAxis =
@@ -1089,46 +1102,6 @@ export const WidgetChart = memo(function WidgetChart({
       return n == null ? s : s + n;
     }, 0);
 
-  // Rótulo de variação nos pontos/barras (comparison.chartLabels): renderizado
-  // como <text> SVG posicionado pelo LabelList (content custom) e colorido pelo
-  // tom da variação. Com dataLabels ligado, desloca p/ dentro p/ não sobrepor.
-  const renderVarLabel = (props: unknown, key: string): React.ReactElement => {
-    if (!cmp) return <g />;
-    const { x, y, width, height, index } = props as {
-      x?: number;
-      y?: number;
-      width?: number;
-      height?: number;
-      index?: number;
-    };
-    if (index == null || !chartRows[index]) return <g />;
-    const r = chartRows[index] as WidgetRow;
-    const vr = computeVariation(
-      numOrNull(r[key]),
-      r.__cmp?.[key] == null ? null : Number(r.__cmp[key])
-    );
-    if (!vr) return <g />;
-    const fill = variationFill(variationTone(vr, cmp.settings.invertColors));
-    const text = `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`;
-    const hasDataLabels = Boolean(ap.dataLabels?.show);
-    if (visualType === "barra_horizontal") {
-      const tx = (x ?? 0) + (width ?? 0) + (hasDataLabels ? 44 : 4);
-      const ty = (y ?? 0) + (height ?? 0) / 2 + 3;
-      return (
-        <text x={tx} y={ty} fontSize={Math.max(9, chartPx - 1)} fill={fill}>
-          {text}
-        </text>
-      );
-    }
-    const tx = (x ?? 0) + (width ?? 0) / 2;
-    const ty = (y ?? 0) - (hasDataLabels ? 16 : 4);
-    return (
-      <text x={tx} y={ty} textAnchor="middle" fontSize={Math.max(9, chartPx - 1)} fill={fill}>
-        {text}
-      </text>
-    );
-  };
-
   function wrapCat(chartEl: React.ReactNode) {
     if (!editable) return withBg(chartEl);
     return (
@@ -1146,7 +1119,15 @@ export const WidgetChart = memo(function WidgetChart({
 
   if (visualType === "linha") {
     return wrapCat(
-      <LineChart data={chartRows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+      <LineChart
+        data={chartRows}
+        margin={{
+          top: 8 + chartInset,
+          right: 12 + chartInset,
+          bottom: 4 + chartInset,
+          left: chartInset,
+        }}
+      >
         <CartesianGrid
           strokeDasharray="3 3"
           stroke="var(--border)"
@@ -1373,6 +1354,121 @@ export const WidgetChart = memo(function WidgetChart({
       </text>
     );
   };
+  // Rótulo "Dentro" da barra HORIZONTAL (25/07/2026): mede o texto real e, se
+  // não couber na barra (com folga de 8px), VIRA para fora — à direita do fim
+  // da barra (a margem direita já reservou o espaço). Em pilha, só o segmento
+  // do topo pode virar (fora de um segmento intermediário colidiria com o
+  // próximo); intermediário sem espaço fica SEM rótulo — a tooltip detalha.
+  // Vertical e horizontal+Fora seguem na LabelList declarativa, intocados.
+  const renderInsideBarLabel = (
+    props: unknown,
+    key: string,
+    lastInStack: boolean
+  ): React.ReactElement => {
+    const { x, y, width, height, index } = props as {
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      index?: number;
+    };
+    if (index == null || x == null || y == null || !chartRows[index])
+      return <g />;
+    const v = (chartRows[index] as WidgetRow)[key];
+    if (v == null) return <g />;
+    const text = dataLabelText(v, key, seriesTotal(key));
+    if (!text) return <g />;
+    const fits = measureTextWidth(text, chartPx) + 8 <= (width ?? 0);
+    if (!fits && stackedBars && !lastInStack) return <g />;
+    const fill = ap.dataLabels?.color ?? "var(--foreground)";
+    const ty = y + (height ?? 0) / 2 + 3;
+    if (fits) {
+      return (
+        <text
+          x={x + (width ?? 0) / 2}
+          y={ty}
+          textAnchor="middle"
+          fontSize={chartPx}
+          fill={fill}
+        >
+          {text}
+        </text>
+      );
+    }
+    return (
+      <text x={x + (width ?? 0) + 4} y={ty} fontSize={chartPx} fill={fill}>
+        {text}
+      </text>
+    );
+  };
+
+  // Rótulo de variação nas barras (comparison.chartLabels): <text> SVG via
+  // LabelList content, colorido pelo tom da variação. Na horizontal, o offset
+  // após o fim da barra usa a largura REAL medida do rótulo de dados quando
+  // ele rendeu FORA (posição Fora, total do stack ou Dentro que virou) — fim
+  // do chute fixo de 44px, que cortava rótulos largos e afastava os curtos.
+  const renderVarLabel = (
+    props: unknown,
+    key: string,
+    lastInStack: boolean
+  ): React.ReactElement => {
+    if (!cmp) return <g />;
+    const { x, y, width, height, index } = props as {
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      index?: number;
+    };
+    if (index == null || !chartRows[index]) return <g />;
+    const r = chartRows[index] as WidgetRow;
+    const vr = computeVariation(
+      numOrNull(r[key]),
+      r.__cmp?.[key] == null ? null : Number(r.__cmp[key])
+    );
+    if (!vr) return <g />;
+    const fill = variationFill(variationTone(vr, cmp.settings.invertColors));
+    const text = `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`;
+    const hasDataLabels = Boolean(ap.dataLabels?.show);
+    if (visualType === "barra_horizontal") {
+      // Texto do rótulo de dados que ocupa o espaço após a barra (se houver).
+      let outsideText: string | null = null;
+      if (hasDataLabels) {
+        if (totalLabelMode) {
+          if (lastInStack) {
+            const t = rowStackTotal(r, resolveKey(key));
+            outsideText = t == null ? null : totalLabelText(t, resolveKey(key));
+          }
+        } else if (ap.dataLabels?.position === "inside") {
+          const dl = dataLabelText(r[key], key, seriesTotal(key));
+          const flipped =
+            dl !== "" && measureTextWidth(dl, chartPx) + 8 > (width ?? 0);
+          // Intermediário de pilha não vira (fica sem rótulo) — offset base.
+          if (flipped && (!stackedBars || lastInStack)) outsideText = dl;
+        } else {
+          outsideText = dataLabelText(r[key], key, seriesTotal(key));
+        }
+      }
+      const off = outsideText
+        ? 4 + measureTextWidth(outsideText, chartPx) + 6
+        : 4;
+      const tx = (x ?? 0) + (width ?? 0) + off;
+      const ty = (y ?? 0) + (height ?? 0) / 2 + 3;
+      return (
+        <text x={tx} y={ty} fontSize={Math.max(9, chartPx - 1)} fill={fill}>
+          {text}
+        </text>
+      );
+    }
+    const tx = (x ?? 0) + (width ?? 0) / 2;
+    const ty = (y ?? 0) - (hasDataLabels ? 16 : 4);
+    return (
+      <text x={tx} y={ty} textAnchor="middle" fontSize={Math.max(9, chartPx - 1)} fill={fill}>
+        {text}
+      </text>
+    );
+  };
+
   // Tooltip das barras EMPILHADAS: mesmas linhas por segmento do formatter
   // clássico (chartTooltipText preserva moeda/percentual e a variação) + linha
   // final "Total" com a soma da barra — o hover mostra o detalhado E a soma.
@@ -1469,6 +1565,85 @@ export const WidgetChart = memo(function WidgetChart({
     );
   };
 
+  // Reserva de margem p/ rótulos EXTERNOS (25/07/2026): na barra horizontal o
+  // rótulo de dados "Fora" (e o "Dentro" que vira p/ fora, o total do stack e
+  // o rótulo de variação) renderiza à DIREITA do fim da barra — sem reserva,
+  // barra no máximo do eixo = texto cortado pela borda (o right era 12 fixo).
+  // Mede o texto REAL mais largo (canvas; fallback determinístico) e soma à
+  // margem. Na vertical, "Acima"/total/variação saem pelo TOPO — reserva por
+  // altura da fonte, sem medição. `chartInset` soma aos 4 lados por cima.
+  const showDataLabels = Boolean(ap.dataLabels?.show);
+  const outsideLabelW = (() => {
+    if (!horizontal || !showDataLabels) return 0;
+    let max = 0;
+    if (totalLabelMode) {
+      for (const m of metrics) {
+        for (const r of chartRows) {
+          const t = rowStackTotal(r as WidgetRow, m.key);
+          if (t == null) continue;
+          const w = measureTextWidth(totalLabelText(t, m.key), chartPx);
+          if (w > max) max = w;
+        }
+      }
+      return max;
+    }
+    for (const s of plotSeries) {
+      const total = seriesTotal(s.dataKey);
+      for (const r of chartRows) {
+        const v = r[s.dataKey];
+        if (v == null) continue;
+        const w = measureTextWidth(dataLabelText(v, s.dataKey, total), chartPx);
+        if (w > max) max = w;
+      }
+    }
+    return max;
+  })();
+  const varLabelW = (() => {
+    if (!horizontal || !cmp?.settings.chartLabels) return 0;
+    let max = 0;
+    for (const s of plotSeries) {
+      for (const r of chartRows) {
+        const rw = r as WidgetRow;
+        const vr = computeVariation(
+          numOrNull(r[s.dataKey]),
+          rw.__cmp?.[s.dataKey] == null ? null : Number(rw.__cmp[s.dataKey])
+        );
+        if (!vr) continue;
+        const text = `${variationGlyph(vr.dir)} ${formatVariation(vr, cmp.settings.format ?? "pct")}`;
+        const w = measureTextWidth(text, Math.max(9, chartPx - 1));
+        if (w > max) max = w;
+      }
+    }
+    return max;
+  })();
+  // Rótulo externo no topo da barra VERTICAL: "Acima" explícito, default (top)
+  // ou modo total — todos desenham acima do fim da barra.
+  const vertTopLabels =
+    !horizontal &&
+    showDataLabels &&
+    (totalLabelMode || ap.dataLabels?.position !== "inside")
+      ? chartPx + 4
+      : 0;
+  const vertTopVar =
+    !horizontal && cmp?.settings.chartLabels ? chartPx + 6 : 0;
+  const barMargin = {
+    top: 8 + chartInset + vertTopLabels + vertTopVar,
+    right:
+      12 +
+      chartInset +
+      (outsideLabelW > 0 ? outsideLabelW + 4 : 0) +
+      (varLabelW > 0 ? varLabelW + 8 : 0),
+    bottom: 4 + chartInset,
+    left: chartInset,
+  };
+  // Espessura das barras (aparência, 25/07/2026): barFillPct = % do slot da
+  // categoria que a barra ocupa → barCategoryGap complementar. undefined =
+  // default do Recharts ("10%"), render idêntico ao anterior.
+  const barCategoryGap =
+    ap.barFillPct != null
+      ? `${100 - Math.min(100, Math.max(10, Math.round(ap.barFillPct)))}%`
+      : undefined;
+
   // Com linha de meta ativa, o container vira ComposedChart (o BarChart do
   // Recharts não desenha <Line>); sem meta, BarChart original — troca
   // condicional p/ zero risco de regressão nos widgets existentes.
@@ -1477,7 +1652,8 @@ export const WidgetChart = memo(function WidgetChart({
     <BarContainer
       data={chartRows}
       layout={horizontal ? "vertical" : "horizontal"}
-      margin={{ top: 8, right: 12, bottom: 4, left: 0 }}
+      margin={barMargin}
+      barCategoryGap={barCategoryGap}
     >
       <CartesianGrid
         strokeDasharray="3 3"
@@ -1603,21 +1779,32 @@ export const WidgetChart = memo(function WidgetChart({
                 ))
               : null}
             {ap.dataLabels?.show && !totalLabelMode ? (
-              <LabelList
-                dataKey={s.dataKey}
-                position={
-                  ap.dataLabels.position === "inside"
-                    ? "inside"
-                    : horizontal
-                      ? "right"
-                      : "top"
-                }
-                fill={ap.dataLabels.color ?? "var(--foreground)"}
-                fontSize={chartPx}
-                formatter={(v: unknown) =>
-                  dataLabelText(v, s.dataKey, seriesTotal(s.dataKey))
-                }
-              />
+              horizontal && ap.dataLabels.position === "inside" ? (
+                // Dentro (horizontal): content custom com auto-flip p/ fora
+                // quando o texto não cabe na barra (renderInsideBarLabel).
+                <LabelList
+                  dataKey={s.dataKey}
+                  content={(p) =>
+                    renderInsideBarLabel(p, s.dataKey, s.lastInStack)
+                  }
+                />
+              ) : (
+                <LabelList
+                  dataKey={s.dataKey}
+                  position={
+                    ap.dataLabels.position === "inside"
+                      ? "inside"
+                      : horizontal
+                        ? "right"
+                        : "top"
+                  }
+                  fill={ap.dataLabels.color ?? "var(--foreground)"}
+                  fontSize={chartPx}
+                  formatter={(v: unknown) =>
+                    dataLabelText(v, s.dataKey, seriesTotal(s.dataKey))
+                  }
+                />
+              )
             ) : null}
             {totalLabelMode && s.lastInStack ? (
               <LabelList
@@ -1628,7 +1815,7 @@ export const WidgetChart = memo(function WidgetChart({
             {cmp?.settings.chartLabels ? (
               <LabelList
                 dataKey={s.dataKey}
-                content={(p) => renderVarLabel(p, s.dataKey)}
+                content={(p) => renderVarLabel(p, s.dataKey, s.lastInStack)}
               />
             ) : null}
           </Bar>

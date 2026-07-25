@@ -1,5 +1,5 @@
-// Versão: 1.4 | Data: 25/07/2026
-// v1.4 (25/07/2026): SPEC DERIVADO do código — enums interpolados das
+// Versão: 1.5 | Data: 25/07/2026
+// v1.5 (25/07/2026): SPEC DERIVADO do código — enums interpolados das
 //   constantes de runtime (VISUAL_TYPE_LABELS, AGG_LABELS, DATE_TRANSFORMS,
 //   FILTER_OPS, PERIOD_PRESETS, PALETTES, DATA_TYPE_LABELS, DATE_TOKENS,
 //   FormulaFuncName) e settings/appearance renderizados dos dicionários
@@ -11,7 +11,15 @@
 //   coexistSubSources é ARRAY de keys (não booleano), "table.groupBy" vive em
 //   appearance.table (a chave raiz "table" não existe e era inerte) e as
 //   chaves antes ausentes (gridLines, categoryOrder/Sort, seriesAxis,
-//   table.*, fonts, background, fontScale…) agora são geráveis.
+//   table.*, fonts, background, fontScale…) agora são geráveis. As novidades
+//   da v1.4 (linha_divisoria, barFillPct/chartInset/filter, dataLabels da
+//   barra horizontal) entram DERIVADAS: enum via interpolação e chaves novas
+//   nos dicionários.
+// v1.4 (25/07/2026): novo tipo linha_divisoria (a Forma "linha" virou widget
+//   próprio); appearance ganha barFillPct/chartInset (gráficos) e filter
+//   (fundo/borda/abinha dos widgets de filtro); comentário de dataLabels
+//   documenta a semântica da barra horizontal ("top" = Fora + auto-flip do
+//   "inside").
 // v1.3 (24/07/2026): bloco "appearance" corrigido/alinhado a AppearanceSettings
 //   (removido o sub-objeto "chart"; enabled→show; chaves de COR documentadas —
 //   a IA não sabia editar cores porque as chaves nunca eram mencionadas).
@@ -249,6 +257,8 @@ Ligam colunas equivalentes de Bases diferentes numa coluna só ("unified:<key>")
 Tipos de DADOS (usam dimensions/metrics/filters): ${DATA_VISUAL_TYPES.join(
   ", "
 )}.
+"linha_divisoria" é uma linha livre de separação (a antiga Forma "linha",
+promovida a tipo próprio).
 
 ### Dimensões
 - "transform" (só campo de data): ${transformList}.

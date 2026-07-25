@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 25/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): merge da 0100 — entradas p/ as chaves novas de
+//   AppearanceSettings (barFillPct, chartInset, filter) e comentário de
+//   dataLabels com a semântica da barra horizontal (portados do SPEC v1.4,
+//   que os documentava à mão antes da derivação).
 // Documentação DERIVADA dos settings para o prompt de importação por IA
 // (instructions.ts). Cada dicionário é EXAUSTIVO por construção
 // (`satisfies Record<keyof T, string | null>`): chave NOVA no tipo sem entrada
@@ -149,13 +153,17 @@ export const APPEARANCE_DOC = {
   chartBackground: `"chartBackground": "#0b1220",            // fundo do gráfico`,
   gridLines: `"gridLines": "horizontal",               // linhas de grade do gráfico: none | horizontal | vertical | both`,
   fillMode: `"fillMode": "solid",                     // "solid" | "gradient"`,
+  barFillPct: `"barFillPct": 80,                        // espessura das barras: % do slot da categoria (10-100; omitir = Auto)`,
+  chartInset: `"chartInset": 8,                         // margem interna do plot em px (barra/barra_horizontal/linha; omitir = Auto)`,
   seriesAxis: `"seriesAxis": { "metric_2": "right" },    // eixo por métrica (combo de 2 eixos): "left" | "right"`,
   categoryOrder: `"categoryOrder": ["Instagram", "Google"],  // ordem MANUAL das categorias (eixo X / fatias)`,
   categorySort: `"categorySort": { "dir": "desc", "by": "value" },  // ordenação dinâmica: dir "asc"|"desc"; by "label"|"value" (+ "metric": "metric_<n>" opcional)`,
   categoryLimit: `"categoryLimit": { "n": 8, "others": true },  // Top-N de categorias + "Outros"`,
   dataLabels: `"dataLabels": { "show": true, "position": "top", "format": "value",
                 "color": "#0f172a", "mode": "detailed" },
-                                         // position: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|"inside"
+                                         // position: barra "top"(=acima)|"inside"; barra_horizontal "top"(=FORA, à direita
+                                         //   da barra; rótulo "inside" que não cabe na barra aparece fora sozinho e a área
+                                         //   do gráfico reserva o espaço automaticamente); linha "top"|"bottom"; pizza "top"(=fora)|"inside"
                                          // format: "value" | "percent" | "both"
                                          // mode (SÓ barras empilhadas): "detailed" (um rótulo por segmento, default)
                                          //   | "total" (um único rótulo com a SOMA da barra; detalhe fica na tooltip)`,
@@ -175,6 +183,8 @@ export const APPEARANCE_DOC = {
 ${renderDocBlock(APPEARANCE_TABLE_DOC, "  ")}
 },`,
   kpi: `"kpi": { "bg": "#ffffff", "border": "#e2e8f0", "accent": "#2563eb" },  // Card: fundo, borda e abinha superior`,
+  filter: `// widgets de filtro (filtro / filtro_campo):
+"filter": { "bg": "#f8fafc", "border": "#e2e8f0", "accent": "#2563eb" },  // fundo/borda do card + abinha superior`,
   title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0" },  // barra de título / contorno do card (todos os tipos)`,
   note: `"note": { "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota (post-it); "frameless": true = sem cromo do card`,
   shape: `"shape": { "fill": "#eef2ff", "stroke": "#6366f1", "strokeWidth": 2, "textColor": "#312e81" },  // aparência da forma`,

@@ -1,4 +1,11 @@
-// Versão: 1.12 | Data: 24/07/2026
+// Versão: 1.13 | Data: 25/07/2026
+// v1.13 (25/07/2026): visual_type 'linha_divisoria' (a Forma "linha" vira
+//   widget próprio; ShapeKind "linha" segue existindo p/ linhas legadas e
+//   como formato interno do novo tipo — ver isLineShapeWidget em lines.ts);
+//   rótulo de 'barra' vira "Barra vertical"; AppearanceSettings.barFillPct
+//   (espessura das barras, % do slot de categoria), .chartInset (margem
+//   interna do plot em px) e .filter (aparência dos widgets de filtro,
+//   espelhando o grupo kpi).
 // v1.12 (24/07/2026): WidgetSettings.subSeriesMode (exibição das pernas de
 // sub-base: stacked default | total | grouped) e WidgetData.subSeries
 // (marcador p/ o chart pivotar as pernas em séries). Ver §4.8 da arquitetura.
@@ -70,6 +77,7 @@ export type VisualType =
   | "calculadora"
   | "nota"
   | "forma"
+  | "linha_divisoria"
   | "kanban"
   | "agenda"
   | "imagem";
@@ -80,12 +88,15 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   calculadora: "Calculadora",
   nota: "Nota (post-it)",
   forma: "Forma",
+  // Linha livre (divisor) — era a Forma "linha" até a 0100; settings.shape
+  // continua sendo o formato interno (kind "linha" + line).
+  linha_divisoria: "Linha divisória",
   imagem: "Imagem",
   tabela: "Tabela",
   // O valor 'tabela_editavel' no banco é herdado da Fase 2 (o CHECK já o
   // aceita); o produto atual chama o widget de "Tabela Livre".
   tabela_editavel: "Tabela Livre",
-  barra: "Barra",
+  barra: "Barra vertical",
   barra_horizontal: "Barra horizontal",
   linha: "Linha",
   pizza: "Pizza",
@@ -635,6 +646,11 @@ export interface QuickTableSettings {
 }
 
 // --- Forma (figura geométrica) ---
+// O kind "linha" segue no union como FORMATO INTERNO: desde a 0100 o divisor
+// tem visual_type próprio ('linha_divisoria'), mas seus settings continuam
+// { shape: { kind: "linha", line } } e linhas legadas (forma + kind linha —
+// snapshots congelados, clipboard antigo) permanecem válidas. O picker de
+// Forma NÃO oferece mais "linha" para formas novas (widget-builder filtra).
 export type ShapeKind =
   | "retangulo"
   | "retangulo_arredondado"
@@ -817,6 +833,15 @@ export interface AppearanceSettings {
   // --- gráficos (barra / barra_horizontal / linha) ---
   chartBackground?: string; // fundo do gráfico
   gridLines?: GridLines; // linhas de grade
+  // Espessura das barras (25/07/2026): quanto do slot de cada categoria a
+  // barra ocupa, em % (10–100). undefined = Auto (default do Recharts, ~90%).
+  // Vira barCategoryGap = `${100 - pct}%` no container — barra/barra_horizontal.
+  barFillPct?: number;
+  // Margem interna do plot (25/07/2026), em px, somada aos 4 lados das margens
+  // base do gráfico — barra/barra_horizontal/linha. undefined = Auto (margens
+  // atuais). Não confundir com a reserva AUTOMÁTICA de margem p/ rótulos
+  // externos em barra horizontal, que é sempre aplicada (ver widget-chart).
+  chartInset?: number;
   fillMode?: "solid" | "gradient"; // sólido ou gradiente sutil entre colunas
   seriesColors?: Record<string, string>; // metricKey -> cor (toda a série)
   // Cor por categoria (barra, série única), chaveada pelo NOME da categoria
@@ -852,9 +877,14 @@ export interface AppearanceSettings {
   stacked?: boolean;
   seriesAxis?: Record<string, AxisSide>; // metricKey -> eixo esq/dir (combo)
   // Legenda de dados (rótulos de valores) — barra/linha/pizza/funil. `position`
-  // por tipo: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|
-  // "inside"; funil ignora. `format` ausente = "value"; percentual =
-  // participação no total da série exibida.
+  // por tipo: barra "top"|"inside"; barra_horizontal "top"(=Fora, à direita da
+  // barra)|"inside" (rótulo que não cabe na barra VIRA para fora sozinho — em
+  // pilha, segmento intermediário sem espaço fica sem rótulo); linha
+  // "top"|"bottom"; pizza "top"(=fora)|"inside"; funil ignora. Em barra
+  // horizontal a área do gráfico reserva margem à direita para o rótulo
+  // externo automaticamente (medição real do texto — widget-chart).
+  // `format` ausente = "value"; percentual = participação no total da série
+  // exibida.
   dataLabels?: {
     show?: boolean;
     position?: "inside" | "top" | "bottom";
@@ -940,6 +970,11 @@ export interface AppearanceSettings {
   };
   // --- kpi ---
   kpi?: { bg?: string; border?: string; accent?: string }; // accent = abinha superior
+  // --- filtros (filtro / filtro_campo, 25/07/2026) ---
+  // Espelha o grupo kpi: fundo/borda do card e abinha superior. Título/fontes
+  // vêm das chaves genéricas (title.*, fonts.title), como em todo widget com
+  // cromo.
+  filter?: { bg?: string; border?: string; accent?: string };
   // --- calculadora ---
   calculator?: {
     bg?: string; // fundo do card

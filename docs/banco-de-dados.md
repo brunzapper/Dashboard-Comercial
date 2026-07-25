@@ -1,4 +1,6 @@
-<!-- Versão: 2.3 | Data: 25/07/2026 -->
+<!-- Versão: 2.4 | Data: 25/07/2026 -->
+<!-- v2.4 (25/07/2026): 0100 — visual_type 'linha_divisoria' no CHECK de
+     widgets + backfill (forma + shape.kind 'linha' → linha_divisoria). -->
 <!-- v2.3 (25/07/2026): 0099 — campo core "Base" (source_system) vira selecao
      (options = origens de ingestão por org; whitelist CORE_SELECT_CAPABLE);
      seed_org_defaults re-emitida. -->
@@ -271,9 +273,13 @@ o hub esconde vencidos mesmo sem o cron). Sem RLS nova: transições via
 **`widgets`** (0008) — config declarativa: `dashboard_id`, `title`, `visual_type`,
 `source`, `dimensions`/`metrics`/`filters` jsonb, `grid_position` jsonb,
 `sort_order`, `settings` jsonb (0016), `sources` jsonb + `split_by_source` (0021).
-O CHECK de `visual_type` foi recriado várias vezes; conjunto atual (0073):
+O CHECK de `visual_type` foi recriado várias vezes; conjunto atual (0100):
 `tabela, barra, barra_horizontal, linha, pizza, kpi, funil, tabela_editavel,
-calculado, filtro, filtro_campo, calculadora, nota, forma, kanban, agenda, imagem`.
+calculado, filtro, filtro_campo, calculadora, nota, forma, kanban, agenda,
+imagem, linha_divisoria`. A 0100 também backfillou `forma` + `settings.shape.
+kind = 'linha'` → `linha_divisoria` (a forma "Linha" virou widget próprio);
+configs congeladas de snapshot não são reescritas — o front mantém o predicado
+de compat (`isLineShapeWidget`, `lib/widgets/lines.ts`).
 
 **`dashboard_table_cells`** (0026) — células da "Tabela editável":
 `(widget_id, row_key, col_key)` unique, `value` jsonb. Escrita liberada a qualquer

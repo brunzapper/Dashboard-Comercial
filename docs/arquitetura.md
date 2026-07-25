@@ -1,4 +1,12 @@
-<!-- Versão: 1.28 | Data: 24/07/2026 -->
+<!-- Versão: 1.29 | Data: 25/07/2026 -->
+<!-- v1.29 (25/07/2026): §4.7 — "Linha divisória" vira visual_type próprio
+     (linha_divisoria, 0100 — CHECK + backfill; settings.shape inalterado);
+     identidade SÓ por isLineShapeWidget (braço legado forma+kind linha é
+     permanente: snapshots congelados/clipboard antigos). Rótulos de barra
+     horizontal: reserva de margem medida p/ rótulo externo + auto-flip do
+     "Dentro" que não cabe; appearance barFillPct/chartInset/filter (aparência
+     dos widgets de filtro) — tudo client-side, RPCs intocados. -->
+<!-- v1.28 (24/07/2026): §4.8 — pernas de sub-base EXIBÍVEIS: (a) operando
 <!-- v1.28 (24/07/2026): §4.8 — pernas de sub-base EXIBÍVEIS: (a) operando
      escopado em fonte-IRMÃ é ZERADO por perna no branch multi-perna
      (zeroSiblingScopedOperands; cada perna mostra a própria contribuição —
@@ -876,6 +884,15 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `router.refresh()` síncrono no `onSaved`) no caminho de célula: Server Actions
   serializam por cliente e o re-render RSC da rota inteira a cada blur é o que
   travava a navegação.
+- **Linha divisória** (25/07/2026): a antiga Forma "linha" virou o
+  `visual_type 'linha_divisoria'` (0100 — CHECK + backfill dos widgets vivos);
+  os settings seguem `{ shape: { kind: "linha", line } }` e a renderização
+  segue na camada livre (`line-layer.tsx` + geometria em `lib/widgets/lines.ts`).
+  A identidade é decidida SÓ por `isLineShapeWidget` (chokepoint único —
+  partição do grid, estado otimista, paste, aparência, `saveShapeLine`), cujo
+  braço legado (forma + `shape.kind 'linha'`) é PERMANENTE: configs congeladas
+  de snapshot (`snapshots.config.widgets`) e payloads antigos de clipboard não
+  passam pelo backfill. Não teste `visual_type === 'linha_divisoria'` na mão.
 
 ### 4.8 Sub-fontes (fonte derivada, filtrada)
 
