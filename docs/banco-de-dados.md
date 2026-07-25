@@ -1,4 +1,7 @@
-<!-- Versão: 2.2 | Data: 24/07/2026 -->
+<!-- Versão: 2.3 | Data: 25/07/2026 -->
+<!-- v2.3 (25/07/2026): 0099 — campo core "Base" (source_system) vira selecao
+     (options = origens de ingestão por org; whitelist CORE_SELECT_CAPABLE);
+     seed_org_defaults re-emitida. -->
 <!-- v2.2 (24/07/2026): 0098 — dashboard_ai_sessions (sessão persistida do
      painel "Editar com IA" no dashboard: turnos/chat/prévia/snapshot do
      Desfazer por usuário×board; RLS linha própria + org; trigger de stamp
@@ -163,6 +166,9 @@ split em `lib/records/core-defs.ts`). `pipeline` nasce `selecao` com os funis
 como `options`, reescritas a cada sync (`syncFieldCatalog` →
 `lookups.categoryNames()`). O seed é idempotente (`on conflict do nothing`) e
 a migração deve rodar DEPOIS do deploy do código que a acompanha.
+`source_system` ("Base") é `selecao` desde a 0099 — options = origens de
+ingestão (distintos da org ∪ `bitrix/sheet_site/manual/csv`), geridas só pelo
+/campos (nada as reescreve automaticamente).
 
 **`field_correspondences`** + **`field_correspondence_members`** (0019) — campos
 unificados globais: uma correspondência (`key` unique, `label`, `data_type`) liga no
@@ -483,7 +489,7 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 Queries de verificação pós-migração (políticas `anon`, EXECUTE das funções de
 snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 
-## 7. Histórico de migrações (0001–0098)
+## 7. Histórico de migrações (0001–0099)
 
 | Nº | Arquivo | O que faz |
 |---|---|---|
@@ -587,6 +593,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0096 | ai_provider_config | Config de IA por ORG (provider/model/chave cifrada AES-GCM) p/ a geração DIRETA de dashboards via API (`lib/ai`). RLS SELECT só admin da org; escrita só service role. Não recria as RPCs |
 | 0097 | snapshot_expires_at | TTL opcional do link público: `snapshots.expires_at` (NULL = sem expiração); enforcement fail-closed no viewer (`app/s/[token]`), sem tocar RPCs/policies |
 | 0098 | dashboard_ai_sessions | Sessão persistida do painel "Editar com IA" no dashboard (turnos/chat/prévia/snapshot do Desfazer por usuário×board; RLS linha própria + org; trigger de stamp derivando a org do board) |
+| 0099 | source_system_selecao | Só dados + provisioning: campo core "Base" (`source_system`) vira `selecao` por org (options = distintos ∪ bitrix/sheet_site/manual/csv; entra na whitelist `CORE_SELECT_CAPABLE`); `seed_org_defaults` re-emitida com a Base nascendo selecao. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

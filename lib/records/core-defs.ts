@@ -29,10 +29,13 @@ export function splitCoreDefs<
 }
 
 // Colunas núcleo de TEXTO que podem alternar texto↔selecao no /campos (as
-// demais têm o tipo travado ao da coluna física).
+// demais têm o tipo travado ao da coluna física). `source_system` ("Base")
+// nasce selecao desde a 0099 — os valores são as origens de ingestão
+// (bitrix/sheet_site/manual/csv), conjunto pequeno controlado pelo app.
 export const CORE_SELECT_CAPABLE = new Set<string>([
   "pipeline",
   "stage",
   "sale_type",
   "channel",
+  "source_system",
 ]);
