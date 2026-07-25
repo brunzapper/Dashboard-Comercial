@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 25/07/2026
+// Versão: 1.2 | Data: 25/07/2026
+// v1.2 (25/07/2026): grade fina/páginas — `pages` (mescla de widgets) entra
+//   como null (referencia ids do banco; export remove, validador rejeita) e a
+//   linha de `canvas` aponta as DUAS escalas (gridVersion — regra 8 do SPEC).
 // v1.1 (25/07/2026): merge da 0100 — entradas p/ as chaves novas de
 //   AppearanceSettings (barFillPct, chartInset, filter) e comentário de
 //   dataLabels com a semântica da barra horizontal (portados do SPEC v1.4,
@@ -259,6 +262,7 @@ export const WIDGET_SETTINGS_DOC = {
   calculator: null, // variáveis da calculadora usam Formula tokenizada (editor); o widget funciona sem settings
   quickTable: null, // estrutura da Tabela Livre (colunas/linhas editáveis) — montada na UI, fora do escopo da IA
   presetKey: null, // identidade de preset/import — o SERVIDOR carimba; a IA nunca envia
+  pages: null, // mescla de widgets (páginas) — referencia widget ids do banco; o export a remove e o validador a rejeita; a IA nunca envia
   kanban: null, // config do widget kanban — fora do escopo da IA
   agenda: null, // config do widget agenda — fora do escopo da IA
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
@@ -277,7 +281,7 @@ export const DASHBOARD_SETTINGS_DOC = {
   "fieldBySource": { "<baseKey>": "<campo de data daquela Base>" },
   "scope": "global"                  // "global" | "tab"
 },`,
-  canvas: `"canvas": { "cols": 12, "rowHeight": 30 },`,
+  canvas: `"canvas": { "cols": 12, "rowHeight": 30 },   // escala CLÁSSICA (sem gridVersion); com "gridVersion": 2 = grade FINA (base 120) — ver regra 8 do SPEC`,
   dateFormat: `"dateFormat": "dd/mm/aaaa",          // dd/mm/aaaa | dd/mm/aa | mm/aa`,
   background: `"background": { "mode": "solid", "color": "#f8fafc" },  // fundo do dashboard; gradiente: { "mode": "gradient", "from": "#eef2ff", "to": "#fdf2f8", "angle": 135 }`,
   fontScale: `"fontScale": 1,                      // escala global de fonte (1 = 100%)`,

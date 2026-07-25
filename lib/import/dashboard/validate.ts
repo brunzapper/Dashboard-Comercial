@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 23/07/2026
+// Versão: 1.3 | Data: 25/07/2026
+// v1.3 (25/07/2026): espaço de grid v2 — JSON com canvas.gridVersion 2 valida
+//   em unidades FINAS (default 120 colunas); JSON sem o carimbo segue validado
+//   nas unidades LEGADAS (12 colunas, defaults 6×8) e o preset sai CONVERTIDO
+//   no final (normalizePresetGridSpace) — JSONs antigos continuam válidos.
 // v1.2 (23/07/2026): guardas de qualidade contra os erros observados na IA —
 //   (a) Sub-base declarada com o MESMO recorte de uma existente é descartada
 //   e as referências REMAPEADAS p/ a key existente (fim das variantes _v2);
@@ -47,6 +51,13 @@ import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
+import {
+  BASE_COLS,
+  GRID_VERSION,
+  X_SCALE,
+  Y_SCALE,
+  normalizePresetGridSpace,
+} from "@/lib/widgets/grid-space";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
 import { slugify } from "@/lib/records/slug";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -699,8 +710,29 @@ export function validateDashboardImport(
       }
     }
   }
+  // Espaço de grid do JSON: canvas.gridVersion 2 = unidades FINAS (export de
+  // board pós-grade-fina; deltas da IA herdam o carimbo via currentCanvas do
+  // rewrite). SEM o carimbo = JSON LEGADO (base 12) — validado nas unidades
+  // dele e CONVERTIDO no final (normalizePresetGridSpace), então JSONs antigos
+  // salvos continuam válidos byte a byte.
+  const fineJson = settings.canvas?.gridVersion === GRID_VERSION;
   const canvasCols =
-    typeof settings.canvas?.cols === "number" ? settings.canvas.cols : 12;
+    typeof settings.canvas?.cols === "number"
+      ? settings.canvas.cols
+      : fineJson
+        ? (settings.canvas?.baseCols ?? BASE_COLS)
+        : 12;
+  // Tamanho default por tipo NAS UNIDADES DO JSON: DEFAULT_WIDGET_SIZE é fino;
+  // a inversa (ceil((v+1)/escala)) devolve exatamente os antigos 6×8/4×4/….
+  const defaultSize = (t: VisualType): { w: number; h: number } => {
+    const fine = DEFAULT_WIDGET_SIZE[t] ?? { w: 59, h: 31 };
+    return fineJson
+      ? fine
+      : {
+          w: Math.ceil((fine.w + 1) / X_SCALE),
+          h: Math.ceil((fine.h + 1) / Y_SCALE),
+        };
+  };
 
   // --- widgets ---
   const widgetSpecs = asArray(parsed.widgets);
@@ -929,6 +961,15 @@ export function validateDashboardImport(
       ? ({ ...(w.settings as WidgetSettings) } as WidgetSettings)
       : {};
     delete (wSettings as Record<string, unknown>).presetKey;
+    // Páginas de widget: `pages` referencia widget ids do BANCO — nunca entra
+    // por JSON (o export a remove; o apply de edição a preserva do settings
+    // existente). Um id vindo da IA seria lixo (ou pior, um id de outro board).
+    if ((wSettings as Record<string, unknown>).pages !== undefined) {
+      delete (wSettings as Record<string, unknown>).pages;
+      warnings.push(
+        `${where}: "settings.pages" é gerida pelo sistema (mescla de widgets) e foi removida do JSON.`
+      );
+    }
     if (tabIds.size > 0) {
       const tab = asString(wSettings.tab);
       if (!tab || !tabIds.has(tab)) {
@@ -979,7 +1020,7 @@ export function validateDashboardImport(
         );
       }
     } else {
-      const size = DEFAULT_WIDGET_SIZE[visualType] ?? { w: 6, h: 8 };
+      const size = defaultSize(visualType);
       const y = autoY.get(tabKey) ?? 0;
       grid = { x: 0, y, w: size.w, h: size.h };
       if (gp !== undefined) {
@@ -1026,5 +1067,13 @@ export function validateDashboardImport(
     correspondences: presetCorrs.length > 0 ? presetCorrs : undefined,
     widgets: presetWidgets,
   };
-  return { ok: true, errors, warnings, preset, declares };
+  // JSON legado sai convertido para o espaço fino (posições + canvas
+  // carimbado) — o aplicador nunca vê unidades antigas. No-op quando fineJson.
+  return {
+    ok: true,
+    errors,
+    warnings,
+    preset: normalizePresetGridSpace(preset),
+    declares,
+  };
 }

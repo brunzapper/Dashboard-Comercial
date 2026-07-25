@@ -1,6 +1,10 @@
-// Versão: 3.0 | Data: 23/07/2026
+// Versão: 3.1 | Data: 25/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.1 (25/07/2026): espaço de grid v2 — settings/widgets passam por
+//   normalizeGridSpace (lib/widgets/grid-space) logo após o load: board legado
+//   é convertido em memória e o cliente inteiro opera no espaço fino (a
+//   persistência converte no write-path, ensureFineGrid das actions).
 // v3.0 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
 //   fallback do ?ff_ (e o seed do controle) vem da célula compartilhada
 //   __ff__/sel de dashboard_table_cells em vez de lastFieldFilters; __ff__
@@ -143,6 +147,7 @@ import {
   viewStateToFilters,
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
+import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
@@ -300,7 +305,15 @@ export default async function DashboardPage({
     lastFieldFilters?: Record<string, string>;
   };
 
-  const widgets = (widgetsData ?? []) as Widget[];
+  // Espaço de grid v2: board legado (sem canvas.gridVersion) é convertido AQUI
+  // para unidades finas — o cliente inteiro (grid/builder/menu) opera SEMPRE no
+  // espaço fino e as actions de escrita convertem o banco (ensureFineGrid).
+  const rawWidgets = (widgetsData ?? []) as Widget[];
+  const gridNorm = normalizeGridSpace(
+    (dash.settings ?? {}) as DashboardSettings,
+    rawWidgets
+  );
+  const widgets = gridNorm.widgets;
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   // Linhas core (0086) são overrides das colunas núcleo: entram em
   // buildAvailableFields (que particiona internamente) e nos guards do /campos,
@@ -309,7 +322,7 @@ export default async function DashboardPage({
   // Mapa chave→def p/ resolver operandos com escopo de fonte em fórmulas de
   // 'calculado_agg' salvas (widgetQuerySources / metricScopedSources).
   const fieldByKeyAll = new Map(customFields.map((f) => [f.field_key, f]));
-  const dashSettings = (dash.settings ?? {}) as DashboardSettings;
+  const dashSettings = gridNorm.settings;
   // Escopo de BASES do board (⋮ → "Bases"): catálogo EFETIVO deste dashboard —
   // recorta ofertas dos pickers E o universo dos widgets em "todas as bases".
   // Fontes já referenciadas por widgets existentes nunca saem do catálogo

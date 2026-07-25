@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 25/07/2026
+// v1.1 (25/07/2026): unidades FINAS do grid (base 120 — lib/widgets/grid-space):
+//   clique simples cria 59×31 (o antigo 6×8) e o retângulo mínimo vira 8×8
+//   células finas (~80px, o equivalente visual do antigo 2×2).
 // Overlay de "desenhar para criar" (Tabela Livre): cobre o canvas do grid com
 // cursor de mira; arrastar desenha um retângulo tracejado com um badge ao vivo
 // "N linhas × M colunas" (derivadas do tamanho em px) e, ao soltar, entrega a
@@ -82,11 +85,11 @@ export function DrawToCreateOverlay({
     const pxW = Math.abs(d.x1 - d.x0);
     const pxH = Math.abs(d.y1 - d.y0);
     if (pxW < 8 && pxH < 8) {
-      // Clique simples: tabela padrão 3×3 num widget 6×8 na célula clicada.
+      // Clique simples: tabela padrão 3×3 num widget 59×31 na célula clicada.
       const gx = gridX(Math.min(d.x0, d.x1));
       const gy = gridY(Math.min(d.y0, d.y1));
       onDone(
-        { x: Math.min(gx, Math.max(0, cols - 6)), y: gy, w: 6, h: 8 },
+        { x: Math.min(gx, Math.max(0, cols - 59)), y: gy, w: 59, h: 31 },
         { rows: 3, cols: 3 }
       );
       return;
@@ -99,8 +102,8 @@ export function DrawToCreateOverlay({
       {
         x: gx0,
         y: gy0,
-        w: Math.max(2, gx1 - gx0 + 1),
-        h: Math.max(2, gy1 - gy0 + 1),
+        w: Math.max(8, gx1 - gx0 + 1),
+        h: Math.max(8, gy1 - gy0 + 1),
       },
       tableSizeFromPx(pxW, pxH)
     );

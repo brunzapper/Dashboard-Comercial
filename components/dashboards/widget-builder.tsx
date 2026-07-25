@@ -223,6 +223,7 @@ import {
   type WidgetInput,
 } from "@/app/(app)/dashboards/actions";
 import { findFreePosition, posOf } from "@/lib/widgets/grid-placement";
+import { BASE_COLS } from "@/lib/widgets/grid-space";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
 import { defaultQuickTable } from "@/lib/widgets/quick-table/model";
 
@@ -1283,7 +1284,7 @@ export function WidgetBuilder({
   // destino = seletor do builder (tabId) ou a primeira. Posições correntes vêm
   // do layout otimista do shell (fallback: grid_position persistido). Sem isso,
   // createWidget usava um y fixo lá no fundo da página.
-  function newWidgetPosition(w = 6, h = 8): GridPosition {
+  function newWidgetPosition(w = 59, h = 31): GridPosition {
     const firstTab = tabs[0]?.id ?? "";
     const targetTab = tabId || firstTab;
     const knownTabs = new Set(tabs.map((t) => t.id));
@@ -1296,7 +1297,7 @@ export function WidgetBuilder({
       }
       occupied.push(layoutById?.[s.id] ?? posOf(s, i));
     });
-    return findFreePosition(occupied, canvasCols ?? 12, w, h);
+    return findFreePosition(occupied, canvasCols ?? BASE_COLS, w, h);
   }
 
   // Desfecho comum de todos os branches do save(). Na CRIAÇÃO com o modo

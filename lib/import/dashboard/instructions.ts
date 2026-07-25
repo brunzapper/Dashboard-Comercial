@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 25/07/2026
+// Versão: 1.6 | Data: 25/07/2026
+// v1.6 (25/07/2026): grade fina (espaço de grid v2) — regra 8 documenta as
+//   DUAS escalas: JSON sem canvas.gridVersion segue na clássica de 12 colunas
+//   (convertida ao aplicar); ESTADO ATUAL carimbado (gridVersion 2) usa a
+//   grade fina de 120 colunas e o delta deve manter a MESMA escala.
 // v1.5 (25/07/2026): SPEC DERIVADO do código — enums interpolados das
 //   constantes de runtime (VISUAL_TYPE_LABELS, AGG_LABELS, DATE_TRANSFORMS,
 //   FILTER_OPS, PERIOD_PRESETS, PALETTES, DATA_TYPE_LABELS, DATE_TOKENS,
@@ -304,8 +308,12 @@ Paletas: ${paletteList}.
    escolhe) em vez de filtro fixo com UUID.
 7. Condições de SOMASE/CONT.SE sobre responsible_id/operation_id comparam por
    NOME exato do cadastro (ex.: [responsible_id] = "Maria Silva").
-8. Grid: 12 colunas (padrão); w×h típicos — cards 4×4, gráficos/tabelas 6×8;
-   organize por linhas (y crescente), sem sobreposição.
+8. Grid: SEM "settings.canvas.gridVersion" o JSON usa a escala CLÁSSICA de 12
+   colunas — w×h típicos: cards 4×4, gráficos/tabelas 6×8; organize por linhas
+   (y crescente), sem sobreposição (o sistema converte para a grade fina ao
+   aplicar). Se o ESTADO ATUAL trouxer "settings.canvas.gridVersion": 2, as
+   posições dele estão na grade FINA (120 colunas; cards ~39×15, gráficos/
+   tabelas ~59×31) — use a MESMA escala do estado e não misture as duas.
 9. Se a análise precisa de um recorte fixo reutilizável com data própria
    (ex.: reuniões), crie uma Sub-base em "subSources" e use a key dela em
    "sources" — não replique o filtro em cada widget.
