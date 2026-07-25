@@ -147,6 +147,7 @@ import {
   applyPeriodToFilters,
   CORE_DATE_COLS,
   patchAuxPeriodByType,
+  resolveDateToken,
   scopedAuxPeriod,
   type DashboardPeriod,
 } from "./period";
@@ -181,27 +182,11 @@ import {
 } from "@/lib/sources";
 
 // Resolve tokens de período (@month_start, @year_start, ...) para datas ISO,
-// deixando os presets "do mês/ano" relativos ao momento da consulta.
+// deixando os presets "do mês/ano" relativos ao momento da consulta. A lista e
+// a matemática vivem em period.ts (DATE_TOKENS/resolveDateToken).
 function resolveToken(v: unknown): unknown {
   if (typeof v !== "string" || !v.startsWith("@")) return v;
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  switch (v) {
-    case "@today":
-      return iso(now);
-    case "@month_start":
-      return iso(new Date(y, m, 1));
-    case "@month_end":
-      return iso(new Date(y, m + 1, 0));
-    case "@year_start":
-      return iso(new Date(y, 0, 1));
-    case "@year_end":
-      return iso(new Date(y, 11, 31));
-    default:
-      return v;
-  }
+  return resolveDateToken(v) ?? v;
 }
 
 export function resolveFilters(filters: WidgetFilter[]): WidgetFilter[] {

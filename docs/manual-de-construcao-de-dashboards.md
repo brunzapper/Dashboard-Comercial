@@ -1,4 +1,9 @@
-<!-- Versão: 1.9 | Data: 24/07/2026 -->
+<!-- Versão: 1.10 | Data: 25/07/2026 -->
+<!-- v1.10 (25/07/2026): §3.8 — nota de que a especificação do prompt é GERADA
+     do código (enums e chaves de settings derivados das mesmas constantes da
+     UI; lib/import/dashboard/instructions.ts + settings-docs.ts), e as
+     contagens das enumerações do §16.2 passam a ser conferidas em CI
+     (lib/import/dashboard/instructions.test.ts). -->
 <!-- v1.9 (24/07/2026): §6.1 — seletor "Exibição das sub-bases" (empilhado/
      total somado/lado a lado) p/ widget com 2+ Sub-bases da mesma mãe ou
      Sub-base "conviver"; cada série mostra a contagem PRÓPRIA (operando da
@@ -430,7 +435,11 @@ etc.). O fluxo, guiado no próprio painel:
    **Conexões** entre as Bases, nomes de responsáveis/operações e uma
    **amostra de ~20 registros reais por Base** escolhida para que TODA coluna
    com dado no banco apareça preenchida em pelo menos uma linha (colunas
-   totalmente vazias são listadas como tal).
+   totalmente vazias são listadas como tal). A especificação dentro do prompt
+   é **gerada do próprio código do sistema** (tipos de widget, agregações,
+   operadores, períodos, paletas e as chaves de settings/aparência saem das
+   mesmas constantes que a UI usa), então recursos novos do construtor entram
+   nela automaticamente.
 4. Cole o prompt na IA, **descreva o dashboard desejado** e receba o JSON.
 5. Cole o JSON no painel e clique em **"Importar dashboard"**. O sistema
    valida tudo (tipos de widget, campos referenciados, fórmulas, operadores…)

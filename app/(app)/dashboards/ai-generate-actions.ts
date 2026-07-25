@@ -1,4 +1,8 @@
-// Versão: 2.1 | Data: 24/07/2026
+// Versão: 2.2 | Data: 25/07/2026
+// v2.2 (25/07/2026): EDIT_RULES deixa de listar à mão as chaves editáveis de
+//   dashboard.settings — a lista sai de documentedKeys(DASHBOARD_SETTINGS_DOC)
+//   (lib/import/dashboard/settings-docs.ts), o MESMO dicionário que o SPEC
+//   renderiza (fim da contradição background/fontScale citados sem definição).
 // v2.1 (24/07/2026): a IA passa a LER melhor o estado — `baseWidgets` (merge
 //   por widget) também no modo "from"; `copy_of` nas regras dos modos from/edit
 //   (cópia por delta, resolvida no servidor em normalizeImportRaw); e a prévia
@@ -35,6 +39,10 @@ import { loadOrgAiConfig } from "@/lib/ai/config";
 import { getAiClient, AiTruncatedError, type AiMessage } from "@/lib/ai";
 import { buildImportPrompt } from "@/app/(app)/dashboards/import-prompt-actions";
 import { loadImportContext } from "@/lib/import/dashboard/context";
+import {
+  DASHBOARD_SETTINGS_DOC,
+  documentedKeys,
+} from "@/lib/import/dashboard/settings-docs";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
 import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
 import {
@@ -131,8 +139,8 @@ Regras deste modo (além da especificação acima):
 - Você NÃO exclui widgets (omitir não exclui). Se o usuário pedir remoção,
   responda que a exclusão é manual (⋮ do widget) e siga com o resto.
 - Não mude "name", "visible_to_roles" nem "settings.tabs" sem pedido
-  explícito. Inclua "dashboard.settings" só se alterar periodBar/canvas/
-  background/dateFormat/fontScale/tabs.
+  explícito. Inclua "dashboard.settings" só se alterar
+  ${documentedKeys(DASHBOARD_SETTINGS_DOC).join("/")}.
 - A "chave" é fixa (o sistema a impõe) — repita a do estado atual.`;
 
 const FROM_RULES = `

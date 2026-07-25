@@ -1,26 +1,49 @@
-// Versão: 1.3 | Data: 24/07/2026
+// Versão: 1.4 | Data: 25/07/2026
+// v1.4 (25/07/2026): SPEC DERIVADO do código — enums interpolados das
+//   constantes de runtime (VISUAL_TYPE_LABELS, AGG_LABELS, DATE_TRANSFORMS,
+//   FILTER_OPS, PERIOD_PRESETS, PALETTES, DATA_TYPE_LABELS, DATE_TOKENS,
+//   FormulaFuncName) e settings/appearance renderizados dos dicionários
+//   EXAUSTIVOS de settings-docs.ts (chave nova no tipo sem entrada lá quebra o
+//   typecheck). Fim da sincronia manual: feature nova do construtor se
+//   documenta no DICIONÁRIO, nunca em prosa duplicada aqui. Guarda:
+//   instructions.test.ts (enums presentes + dicionários renderizados + exemplo
+//   validado pelo validador real). Corrige de quebra as mentiras acumuladas:
+//   coexistSubSources é ARRAY de keys (não booleano), "table.groupBy" vive em
+//   appearance.table (a chave raiz "table" não existe e era inerte) e as
+//   chaves antes ausentes (gridLines, categoryOrder/Sort, seriesAxis,
+//   table.*, fonts, background, fontScale…) agora são geráveis.
 // v1.3 (24/07/2026): bloco "appearance" corrigido/alinhado a AppearanceSettings
-//   (lib/widgets/types.ts): removido o sub-objeto "chart" (inexistente — tudo é
-//   plano em appearance), enabled→show em dataLabels/legend, forma real de
-//   conditional.rules (id + style{text,fill,bold,icon}), e documentadas as
-//   chaves de COR (seriesColors, categoryColors, colorByCategory, palette,
-//   sliceColors) + dataLabels.mode ("detailed"|"total") — a IA não sabia editar
-//   cores porque as chaves nunca eram mencionadas (o passthrough gravava chaves
-//   inventadas, inertes no render).
+//   (removido o sub-objeto "chart"; enabled→show; chaves de COR documentadas —
+//   a IA não sabia editar cores porque as chaves nunca eram mencionadas).
 // v1.2 (23/07/2026): regras 12-14 (eixo de tempo sem dateAgg; resultCurrency
-//   só p/ converter; reuso de Sub-bases existentes + escopo @sub ↔ sources) —
-//   respostas aos erros observados nos primeiros dashboards gerados por IA.
+//   só p/ converter; reuso de Sub-bases existentes + escopo @sub ↔ sources).
 // v1.1 (23/07/2026): multi-Base — envelope com `bases: []`, seções "MODELO
 //   DAS BASES"/"AMOSTRAS (por Base)" e regra semântica de dashboards
-//   multi-Base (fieldBySource sempre; unified: nas dimensões compartilhadas;
-//   match: só onde há Conexão cadastrada).
+//   multi-Base.
 // Manual de instruções COPIADO para o clipboard no modo "Importar dashboard
 // via JSON (IA)": especificação completa do formato + regras semânticas
 // condensadas + exemplo. O chamador (import-prompt-actions) injeta o MODELO DA
 // BASE selecionada e a AMOSTRA de registros; a variante "completo" anexa o
 // manual de construção de dashboards inteiro (docs/) para IAs menos capazes.
-// Mantenha os enums daqui em dia com lib/widgets/types.ts (fonte da verdade) —
-// mudanças de UI/semântica do construtor incluem este arquivo (AGENTS.md).
+import { DATA_TYPE_LABELS } from "@/lib/records/types";
+import { DATE_TRANSFORMS } from "@/lib/widgets/fields";
+import { FILTER_OPS } from "@/lib/widgets/filter-ops";
+import { PALETTES } from "@/lib/widgets/palettes";
+import { DATE_TOKENS } from "@/lib/widgets/period";
+import {
+  AGG_LABELS,
+  TRANSFORM_LABELS,
+  VISUAL_TYPE_LABELS,
+  type VisualType,
+} from "@/lib/widgets/types";
+import {
+  DASHBOARD_SETTINGS_DOC,
+  WIDGET_SETTINGS_DOC,
+  enumKeys,
+  enumKeysLabeled,
+  formulaFuncsIn,
+  renderDocBlock,
+} from "./settings-docs";
 
 export interface ImportPromptParts {
   basesLabel: string; // ex.: 'Leads do Bitrix ("leads"), Deals do Bitrix ("deals")'
@@ -29,6 +52,73 @@ export interface ImportPromptParts {
   sampleNote: string; // observações das amostras (colunas sem dado etc.)
   manual?: string; // variante "completo": manual de construção inteiro
 }
+
+// Tipos de widget que consultam DADOS (dimensions/metrics/filters). O
+// `satisfies` garante que só contém tipos existentes (remoção no union quebra
+// aqui); tipo NOVO de dados precisa ser acrescentado à mão.
+const DATA_VISUAL_TYPES = [
+  "tabela",
+  "barra",
+  "barra_horizontal",
+  "linha",
+  "pizza",
+  "funil",
+  "kpi",
+  "calculado",
+] as const satisfies readonly VisualType[];
+
+const transformList = DATE_TRANSFORMS.filter((t) => t !== "none")
+  .map((t) => `${t} (${TRANSFORM_LABELS[t].toLowerCase()})`)
+  .join(", ");
+
+const filterOpList = FILTER_OPS.map((o) => `${o.op} (${o.label})`).join(" | ");
+
+const paletteList = Object.entries(PALETTES)
+  .map(([k, v]) => `${k} (${v.label})`)
+  .join(" | ");
+
+// Exemplo mínimo do SPEC — exportado para o teste de paridade VALIDÁ-LO com o
+// validador real (instructions.test.ts): se o validador evoluir e o exemplo
+// ficar inválido, o CI acusa.
+export const SPEC_EXAMPLE = String.raw`{
+  "formato": "dashboard-import", "versao": 1,
+  "chave": "comercial_mes", "bases": ["deals", "leads"],
+  "dashboard": {
+    "name": "Comercial — Mês",
+    "visible_to_roles": ["admin", "gestor"],
+    "settings": {
+      "tabs": [{ "id": "geral", "name": "Visão geral" }],
+      "periodBar": { "enabled": true, "defaultPreset": "este_mes", "field": "closed_at",
+                     "fieldBySource": { "deals": "closed_at", "leads": "source_created_at" } },
+      "canvas": { "cols": 12, "rowHeight": 30 }
+    }
+  },
+  "widgets": [
+    { "key": "kpi_mrr", "title": "MRR do mês", "visual_type": "kpi",
+      "sources": ["deals"], "dimensions": [],
+      "metrics": [{ "field": "mrr", "agg": "sum", "label": "MRR" }],
+      "filters": [{ "field": "closed", "op": "eq", "value": true }],
+      "grid_position": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "settings": { "tab": "geral",
+        "comparison": { "enabled": true, "base": "previous_period", "format": "pct" } } },
+    { "key": "conv", "title": "Conversão lead → negócio", "visual_type": "calculado",
+      "dimensions": [], "metrics": [
+        { "formula_text": "[agg:count:*@deals] / [agg:count:*@leads]",
+          "resultPercent": true, "label": "Conversão" } ],
+      "filters": [], "grid_position": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "settings": { "tab": "geral" } },
+    { "key": "mrr_mensal", "title": "MRR por mês", "visual_type": "barra",
+      "sources": ["deals"],
+      "dimensions": [{ "field": "closed_at", "transform": "month_year" }],
+      "metrics": [{ "field": "mrr", "agg": "sum" }], "filters": [],
+      "grid_position": { "x": 0, "y": 4, "w": 8, "h": 8 },
+      "settings": { "tab": "geral",
+        "periodWindow": { "options": ["3m","6m","12m"], "default": "6m" },
+        "goalLine": { "enabled": true, "metric": "mrr", "mode": "pace" },
+        "appearance": { "seriesColors": { "metric_1": "#16a34a" },
+                        "dataLabels": { "show": true, "format": "value" } } } }
+  ]
+}`;
 
 const SPEC = String.raw`
 # Tarefa
@@ -74,22 +164,14 @@ quer; você responde com O JSON e nada mais.
   declarado em "fields").
 - Campo unificado: "unified:<key>" (existente ou declarado em "correspondences").
 - Campo do registro casado de outra Base: "match:<base>:<ref>".
-- Datas em FILTROS aceitam tokens dinâmicos: "@today", "@month_start",
-  "@month_end", "@year_start", "@year_end".
+- Datas em FILTROS aceitam tokens dinâmicos: ${DATE_TOKENS.map(
+  (t) => `"${t}"`
+).join(", ")}.
 
 ## Settings do dashboard
 
 "settings": {
-  "tabs": [ { "id": "geral", "name": "Visão geral", "color": "#eef2ff" } ],
-  "periodBar": {
-    "enabled": true,
-    "defaultPreset": "este_mes",       // hoje|ultimos_7|ultimos_30|ultimos_90|esta_semana|semana_passada|este_mes|mes_passado|este_trimestre|este_ano|ano_passado|all
-    "field": "closed_at",              // campo de data primário
-    "fieldBySource": { "<baseKey>": "<campo de data daquela Base>" },
-    "scope": "global"                  // "global" | "tab"
-  },
-  "canvas": { "cols": 12, "rowHeight": 30 },
-  "dateFormat": "dd/mm/aaaa"           // dd/mm/aaaa | dd/mm/aa | mm/aa
+${renderDocBlock(DASHBOARD_SETTINGS_DOC)}
 }
 
 REGRA IMPORTANTE: em dashboard multi-Base, configure "fieldBySource" para cada
@@ -101,7 +183,7 @@ Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
 {
   "field_key": "ticket_medio",         // slug único (minúsculas/underscore)
   "label": "Ticket médio",
-  "data_type": "texto|numero|data|selecao|moeda|booleano|calculado|calculado_agg",
+  "data_type": "${Object.keys(DATA_TYPE_LABELS).join("|")}",
   "options": ["A","B"],                // só p/ selecao
   "applies_to": ["<record_type>"],     // ausente = todas as Bases
   "is_local": true,
@@ -115,9 +197,11 @@ Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
   widget): operandos são agregados — [Contagem de registros], [Σ Valor],
   [Média Valor], [Contagem de <Campo>] (= registros com o campo preenchido) —
   cada um aceitando escopo de Base com "@": [agg:count:*@leads]. Aceita
-  SOMASE/SOMASES/CONT.SE/CONT.SES/MÉDIASE, SE/E/OU, SOMA/MÉDIA/MÍN/MÁX/ARRED/
-  ABS, ANTERIOR/VARPCT/VARABS (comparação com período anterior; VARPCT já sai
-  ×100). Campo cru SÓ dentro de SOMASE/CONT.SE/MÉDIASE.
+  ${formulaFuncsIn("cond_agg").join("/")},
+  ${formulaFuncsIn("logica").join("/")},
+  ${formulaFuncsIn("pura").join("/")},
+  ${formulaFuncsIn("comparacao").join("/")} (comparação com período anterior;
+  VARPCT já sai ×100). Campo cru SÓ dentro de SOMASE/CONT.SE/MÉDIASE.
 - Sintaxe: operandos entre colchetes [Rótulo] ou [ref] (ex.: [custom:forecast],
   [agg:sum:value], [agg:count:*@leads]); argumentos separados por ";" (vírgula
   é decimal: 1,5); texto "entre aspas"; comparadores = <> < > <= >=.
@@ -161,22 +245,20 @@ Ligam colunas equivalentes de Bases diferentes numa coluna só ("unified:<key>")
   "settings": { ... }                  // ver "Settings do widget"
 }
 
-### visual_type (todos): tabela, tabela_editavel (Tabela Livre), barra,
-barra_horizontal, linha, pizza, funil, kpi (Card), calculado (Métrica
-calculada), calculadora, nota, forma, imagem, filtro (Filtro de período),
-filtro_campo (Filtro por campo), kanban, agenda.
-Tipos de DADOS (usam dimensions/metrics/filters): tabela, barra,
-barra_horizontal, linha, pizza, funil, kpi, calculado.
+### visual_type (todos): ${enumKeysLabeled(VISUAL_TYPE_LABELS)}.
+Tipos de DADOS (usam dimensions/metrics/filters): ${DATA_VISUAL_TYPES.join(
+  ", "
+)}.
 
 ### Dimensões
-- "transform" (só campo de data): weekday (dia da semana), week_year (semana do
-  ano), week_month (semana do mês; "weekMode": "restricted"|"full"), month_name
-  (nome do mês), month_year (mês/ano), quarter (trimestre), year (ano).
+- "transform" (só campo de data): ${transformList}.
+  Só p/ week_month: "weekMode": "restricted" (recorta na virada do mês) |
+  "full" (semana cheia seg→dom).
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 
 ### Métricas
-- "agg": sum | count | avg | min | max. "field": "*" = contagem de registros
+- "agg": ${enumKeys(AGG_LABELS)}. "field": "*" = contagem de registros
   (agg count). count de um campo = registros com o campo PREENCHIDO.
 - Métrica de FÓRMULA própria: use "formula_text" (contexto de totais — mesmas
   regras do calculado_agg) + opcionais "resultPercent": true (exibe ×100 + "%")
@@ -187,75 +269,17 @@ barra_horizontal, linha, pizza, funil, kpi, calculado.
 - "percent": true só ANEXA "%" (não multiplica ×100).
 
 ### Filtros
-- "op": eq | neq | ilike (contém) | gt | gte | lt | lte | in (lista CSV) |
-  is_null (é vazio, sem value) | not_null (não vazio, sem value).
+- "op": ${filterOpList}.
+  Para "in", "value" é uma lista (["A","B"]); is_null/not_null vão sem "value".
 - Vários filtros = E (AND). "sources" no filtro = restringe SÓ essas Bases
   (as outras passam livres).
 
 ### Settings do widget (todos opcionais; omitir = padrão)
 
 "settings": {
-  "tab": "geral",                            // id da aba
-  "quickFilters": [                          // dropdowns no card (seleção compartilhada)
-    { "id": "qf1", "field": "responsible_id" },
-    { "id": "qf2", "field": "operation_id" },
-    { "id": "qf3", "field": "closed_at" },                          // dropdown de período
-    { "id": "qf4", "field": "closed_at", "transform": "month_name" } // multi-seleção de meses
-  ],
-  "comparison": {                            // variação vs outro período
-    "enabled": true,
-    "base": "previous_period",               // previous_period | previous_period_bd | previous_year | window_avg | window_median
-    "window": "last_12m",                    // só window_*: quarter|semester|ytd|last_12m
-    "format": "pct",                         // pct | abs | both
-    "style": "both",                         // color | arrow | both
-    "showBaseValue": false, "invertColors": false,
-    "ghostSeries": false, "chartLabels": false,
-    "tablePlacement": "inline"               // tabela: inline | column
-  },
-  "businessDayAlign": { "enabled": true, "reference": "today" },  // "today"|"period_end"
-  "periodWindow": { "options": ["3m","6m","12m"], "default": "6m", "showAlignToggle": true },
-  "goalLine": { "enabled": true, "metric": "mrr", "mode": "pace", "label": "Meta" },  // mode: monthly|pace; só barra/linha
-  "mode": "meta",                            // Card de META (kpi): compara com a meta cadastrada
-  "metric": "mrr", "scope": "global", "period": "month",          // config do Card de meta
-  "card": { "mode": "topn", "labelField": "responsible_id",       // Card: value|record|topn|list|formula
-            "metric": { "field": "mrr", "agg": "sum" }, "limit": 5 },
-  "rowMode": "records",                      // tabela: lista de registros individuais
-  "table": { "groupBy": "dim_1" },           // tabela agregada: agrupar pelo 1º nível
-  "coexistSubSources": false,
-  "subSeriesMode": "stacked",                // 2+ sub-bases no widget: stacked (empilhado, default) | total (somado, some a coluna Base) | grouped (lado a lado)
-  "autoSize": { "width": false, "height": false },
-  "appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
-    "decimals": 0,                           // casas decimais (tabelas, Card, rótulos, tooltip)
-    // gráficos (barra / barra_horizontal / linha):
-    "seriesColors": { "metric_1": "#2563eb" },   // cor POR MÉTRICA/série (chave = metric_<n>, na ordem das métricas)
-    "categoryColors": { "Instagram": { "fill": "#16a34a", "text": "#166534" } },
-                                             // cor POR BARRA (série única): chave = NOME exibido da categoria;
-                                             // "fill" = cor da barra, "text" = cor do rótulo de dados
-    "colorByCategory": true,                 // série única: cada barra pega uma cor da paleta (categoryColors vence)
-    "palette": "design",                     // paleta nomeada (pizza/funil e colorByCategory)
-    "stacked": true,                         // 2+ métricas no widget "barra": empilha num único stack
-    "chartBackground": "#0b1220",            // fundo do gráfico
-    "fillMode": "solid",                     // "solid" | "gradient"
-    "categoryLimit": { "n": 8, "others": true },  // Top-N de categorias + "Outros"
-    "dataLabels": { "show": true, "position": "top", "format": "value",
-                    "color": "#0f172a", "mode": "detailed" },
-                                             // position: barra "top"|"inside"; linha "top"|"bottom"; pizza "top"(=fora)|"inside"
-                                             // format: "value" | "percent" | "both"
-                                             // mode (SÓ barras empilhadas): "detailed" (um rótulo por segmento, default)
-                                             //   | "total" (um único rótulo com a SOMA da barra; detalhe fica na tooltip)
-    "legend": { "show": true, "color": "#334155" },  // legenda das séries
-    // pizza / funil:
-    "sliceColors": { "0": "#2563eb", "1": "#f59e0b" },  // cor por fatia (índice como string) — sobrepõe a paleta
-    // formatação condicional (tabelas, listas, Card, gráficos):
-    "conditional": { "rules": [ { "id": "cr_1", "target": "metric_1", "op": "lt", "value": 0.2,
-                                  "scope": "cell",
-                                  "style": { "text": "#dc2626", "fill": "#fee2e2", "bold": true } } ],
-                     "scales": [ { "id": "cs_1", "target": "metric_1", "min": "#fee2e2", "max": "#dcfce7" } ] }
-                                             // rule.op: gt|gte|lt|lte|eq|neq|between|contains|empty|not_empty|var_up|var_down
-                                             // rule.style: { "text", "fill", "bold", "icon": "up"|"down"|"dot"|"warn" }
-  }
+${renderDocBlock(WIDGET_SETTINGS_DOC)}
 }
-Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
+Paletas: ${paletteList}.
 
 ### REGRAS SEMÂNTICAS (não viole)
 
@@ -301,45 +325,7 @@ Paletas: design | vivid | ocean | sunset | forest | gray | inbound.
 
 ## Exemplo mínimo completo
 
-{
-  "formato": "dashboard-import", "versao": 1,
-  "chave": "comercial_mes", "bases": ["deals", "leads"],
-  "dashboard": {
-    "name": "Comercial — Mês",
-    "visible_to_roles": ["admin", "gestor"],
-    "settings": {
-      "tabs": [{ "id": "geral", "name": "Visão geral" }],
-      "periodBar": { "enabled": true, "defaultPreset": "este_mes", "field": "closed_at",
-                     "fieldBySource": { "deals": "closed_at", "leads": "source_created_at" } },
-      "canvas": { "cols": 12, "rowHeight": 30 }
-    }
-  },
-  "widgets": [
-    { "key": "kpi_mrr", "title": "MRR do mês", "visual_type": "kpi",
-      "sources": ["deals"], "dimensions": [],
-      "metrics": [{ "field": "mrr", "agg": "sum", "label": "MRR" }],
-      "filters": [{ "field": "closed", "op": "eq", "value": true }],
-      "grid_position": { "x": 0, "y": 0, "w": 4, "h": 4 },
-      "settings": { "tab": "geral",
-        "comparison": { "enabled": true, "base": "previous_period", "format": "pct" } } },
-    { "key": "conv", "title": "Conversão lead → negócio", "visual_type": "calculado",
-      "dimensions": [], "metrics": [
-        { "formula_text": "[agg:count:*@deals] / [agg:count:*@leads]",
-          "resultPercent": true, "label": "Conversão" } ],
-      "filters": [], "grid_position": { "x": 4, "y": 0, "w": 4, "h": 4 },
-      "settings": { "tab": "geral" } },
-    { "key": "mrr_mensal", "title": "MRR por mês", "visual_type": "barra",
-      "sources": ["deals"],
-      "dimensions": [{ "field": "closed_at", "transform": "month_year" }],
-      "metrics": [{ "field": "mrr", "agg": "sum" }], "filters": [],
-      "grid_position": { "x": 0, "y": 4, "w": 8, "h": 8 },
-      "settings": { "tab": "geral",
-        "periodWindow": { "options": ["3m","6m","12m"], "default": "6m" },
-        "goalLine": { "enabled": true, "metric": "mrr", "mode": "pace" },
-        "appearance": { "seriesColors": { "metric_1": "#16a34a" },
-                        "dataLabels": { "show": true, "format": "value" } } } }
-  ]
-}
+${SPEC_EXAMPLE}
 `;
 
 function section(title: string, body: string): string {
