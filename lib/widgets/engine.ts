@@ -1,4 +1,13 @@
-// Versão: 1.10 | Data: 24/07/2026
+// Versão: 1.11 | Data: 25/07/2026
+// v1.11 (25/07/2026): fold das pernas mensais do businessDayAlign/periodWindow
+// — quando a JANELA da barra e o BUCKET da dim mensal usam campos diferentes
+// (ex.: leads janelados por criação com dim unificada bucketizando por Data
+// Reunião), uma perna emite tuplas de OUTRO mês/bucket nulo e o concat cru
+// duplicava categorias no gráfico. foldAlignedLegRows descarta bucket mensal
+// nulo/fora da janela e funde tuplas repetidas (foldRowGroup + replot de
+// monetárias — mesma semântica do merge "total"); config consistente segue
+// byte-idêntica (concat intocado). Builder de specs de fusão unificado em
+// mergeMetricSpecs (3 usos). RPCs intocados.
 // v1.10 (24/07/2026): pernas de sub-base EXIBÍVEIS (§4.8) — no branch
 // multi-perna: (a) operando escopado em fonte-IRMÃ é zerado por perna
 // (zeroSiblingScopedOperands; cada perna mostra a própria contribuição) +
@@ -109,7 +118,11 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
+import {
+  foldRowGroup,
+  mergeRowsByBucket,
+  type MergeMetricSpec,
+} from "./bucket-merge";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
@@ -1614,6 +1627,30 @@ export async function runWidget(
       calcResolved.set(i, resolveCalcMetric(m, fieldByKey, catalog));
   });
 
+  // Specs de fusão por tupla/bucket (bucket-merge): semântica do Total geral —
+  // sum/count somam, min/max reduzem, calculadas reavaliam a fórmula sobre a
+  // basis fundida. Compartilhado pelo merge "total" das pernas de sub-base,
+  // pelo merge por bucket de dim custom (computeRows) e pelo fold das pernas
+  // mensais do align/janela (foldAlignedLegRows).
+  const mergeMetricSpecs = (): MergeMetricSpec[] =>
+    config.metrics.map((m, i) => {
+      const rc = calcResolved.get(i);
+      return {
+        key: `metric_${i + 1}`,
+        kind: rc
+          ? ("calc" as const)
+          : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
+        evalBasis: rc?.formula
+          ? (b: BasisValues) =>
+              evalCalcMoney(
+                rc.formula!,
+                b,
+                calcMoneyMeta(rc, rates, conversionPeriod)
+              ).value
+          : undefined,
+      };
+    });
+
   // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira
   // uma perna independente (filtro + data + membro próprios). Evita a
@@ -1720,23 +1757,7 @@ export async function runWidget(
       // monetárias fundem __money e replotam). __cmp soma os não-nulos
       // (aproximação, como o "Outros" do top-N); __goal é a MESMA meta global
       // repetida por perna — 1º não-nulo, nunca soma.
-      const specs = config.metrics.map((m, i) => {
-        const rc = calcResolved.get(i);
-        return {
-          key: `metric_${i + 1}`,
-          kind: rc
-            ? ("calc" as const)
-            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
-          evalBasis: rc?.formula
-            ? (b: BasisValues) =>
-                evalCalcMoney(
-                  rc.formula!,
-                  b,
-                  calcMoneyMeta(rc, rates, conversionPeriod)
-                ).value
-            : undefined,
-        };
-      });
+      const specs = mergeMetricSpecs();
       const groups = new Map<string, WidgetRow[]>();
       const order: string[] = [];
       for (const d of legData) {
@@ -2445,27 +2466,7 @@ export async function runWidget(
     // choke point único — principal, comparação, pernas do businessDayAlign,
     // card, quick-table e snapshot (mesmo engine) recebem linhas já fundidas.
     // Sem dim custom+transform, `merged === rows` (caminho atual intocado).
-    const merged = mergeRowsByBucket(
-      rows,
-      dims,
-      config.metrics.map((m, i) => {
-        const rc = calcResolved.get(i);
-        return {
-          key: `metric_${i + 1}`,
-          kind: rc
-            ? ("calc" as const)
-            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
-          evalBasis: rc?.formula
-            ? (b: BasisValues) =>
-                evalCalcMoney(
-                  rc.formula!,
-                  b,
-                  calcMoneyMeta(rc, rates, conversionPeriod)
-                ).value
-            : undefined,
-        };
-      })
-    );
+    const merged = mergeRowsByBucket(rows, dims, mergeMetricSpecs());
     if (merged !== rows) {
       // Replot das monetárias sobre o __money FUNDIDO (exato, incl. média).
       if (moneyEntries.length > 0 && hasBd) replotMoney(merged, moneyEntries);
@@ -2533,9 +2534,11 @@ export async function runWidget(
   // ---- Alinhamento "mesmo dia útil" (settings.businessDayAlign, 20/07/2026) --
   // Pernas POR MÊS: cada mês do período roda uma rodada COMPLETA (computeRows)
   // com o range recortado no N-ésimo dia útil do mês (N = dia útil corrente da
-  // referência). Como cada rodada só devolve linhas do próprio mês, o concat é
-  // o resultado final — todas as métricas (normais/calculadas/moeda/pernas)
-  // funcionam sem código novo e os RPCs ficam intocados. Meses ENCERRADOS no
+  // referência). O concat das rodadas passa por foldAlignedLegRows (fold por
+  // tupla + descarte de bucket mensal nulo/fora da janela — no-op quando cada
+  // rodada só devolve linhas do próprio mês, i.e. janela e bucket no MESMO
+  // campo) — todas as métricas (normais/calculadas/moeda/pernas)
+  // funcionam sem consulta nova e os RPCs ficam intocados. Meses ENCERRADOS no
   // alinhamento (N ≥ dias úteis do mês) usam o mês cheio (não perde registro
   // datado em fim de semana após o último dia útil — paridade com o KPI).
   // null = align inativo (fallback byte-idêntico). Precedências: KPI/card e
@@ -2664,13 +2667,72 @@ export async function runWidget(
     return { legs, n, holidays, refIso: ref, reference };
   })();
 
+  // Fold das pernas mensais do align/janela: a premissa "cada rodada só
+  // devolve linhas do próprio mês" vale quando a JANELA da barra e o BUCKET
+  // da dim mensal usam o MESMO campo. Config descasada (ex.: leads janelados
+  // por criação com dim unificada bucketizando por Data Reunião) faz uma perna
+  // emitir tuplas de OUTRO mês, bucket nulo (registro sem data no campo do
+  // bucket) ou mês fora da janela — o concat cru duplicaria categorias no
+  // gráfico. Pós-processo: descarta bucket mensal nulo/fora da janela e funde
+  // tuplas repetidas (foldRowGroup — mesma semântica do merge "total" das
+  // pernas de sub-base), replotando monetárias sobre o __money fundido.
+  // Config consistente não tem nulo nem tupla repetida → concat intocado.
+  const foldAlignedLegRows = (
+    flat: WidgetRow[],
+    legs: DashboardPeriod[]
+  ): WidgetRow[] => {
+    const monthIdx = dims.findIndex(
+      (d) =>
+        d.transform === "month" ||
+        d.transform === "month_name" ||
+        d.transform === "month_year"
+    );
+    if (monthIdx < 0) return flat;
+    const monthKey = `dim_${monthIdx + 1}`;
+    const windowMonths = new Set(legs.map((l) => (l.from ?? "").slice(0, 7)));
+    const kept = flat.filter((r) => {
+      const raw = r[monthKey];
+      if (raw == null) return false;
+      const m = String(raw).match(/^(\d{4}-\d{2})/);
+      // Bucket que não parseia como data não clampa — só participa do fold.
+      return !m || windowMonths.has(m[1]);
+    });
+    const groups = new Map<string, WidgetRow[]>();
+    const order: string[] = [];
+    for (const r of kept) {
+      const tuple: unknown[] = [];
+      for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+      const k = JSON.stringify(tuple);
+      const g = groups.get(k);
+      if (g) g.push(r);
+      else {
+        groups.set(k, [r]);
+        order.push(k);
+      }
+    }
+    if (groups.size === kept.length) return kept;
+    const specs = mergeMetricSpecs();
+    const folded = order.map((k) => foldRowGroup(groups.get(k)!, specs));
+    const moneyEntries = config.metrics
+      .map((m, i) => ({ m, i }))
+      .filter(
+        ({ m, i }) =>
+          !calcResolved.has(i) &&
+          isMoneyMetric(m, available) &&
+          m.agg !== "min" &&
+          m.agg !== "max"
+      );
+    if (moneyEntries.length > 0) replotMoney(folded, moneyEntries);
+    return folded;
+  };
+
   const [rows, cmpRun] = await Promise.all([
     bdAlignCtx
       ? Promise.all(
           bdAlignCtx.legs.map((leg) =>
             computeRows(dims, (srcs) => legFiltersFor(leg, srcs), leg)
           )
-        ).then((parts) => parts.flat())
+        ).then((parts) => foldAlignedLegRows(parts.flat(), bdAlignCtx.legs))
       : computeRows(dims, (srcs) => legFiltersFor(period, srcs), period),
     bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);

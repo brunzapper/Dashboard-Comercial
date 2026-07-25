@@ -1017,10 +1017,19 @@ invariantes 9/10).
   `computeRows` com o range recortado no N-ésimo dia útil do mês (N = dia útil
   corrente da referência — hoje limitado ao fim do período, ou o fim do
   período). Meses "encerrados" no alinhamento (N ≥ dias úteis do mês) usam o
-  mês CHEIO (não perde registro datado em fim de semana). Como cada rodada só
-  devolve linhas do próprio mês, o concat é o resultado — todas as métricas
-  (normais/calculadas/moeda/pernas por fonte) funcionam sem código novo. Teto
-  de 13 meses (acima disso o align é ignorado). Precedências: KPI/card e
+  mês CHEIO (não perde registro datado em fim de semana). O concat das rodadas
+  passa por um pós-processo no engine (`foldAlignedLegRows`, 25/07/2026):
+  linhas com bucket MENSAL nulo ou fora da janela são descartadas e tuplas de
+  dims repetidas entre pernas são FUNDIDAS (`foldRowGroup` — mesma semântica
+  do merge "total"; monetárias replotam do `__money` fundido). Isso cobre a
+  config VÁLIDA em que a janela da barra usa um campo e a dim mensal bucketiza
+  por outro (ex.: leads janelados por criação com dim `unified:` cuja
+  correspondência resolve para Data Reunião): cada perna pode emitir tuplas de
+  OUTRO mês (ou bucket nulo — registro sem data no campo do bucket) e o concat
+  cru duplicaria categorias no gráfico. Quando janela == bucket (cada rodada
+  só devolve linhas do próprio mês), o fold é no-op e o concat é o resultado —
+  todas as métricas (normais/calculadas/moeda/pernas por fonte) funcionam sem
+  consulta nova. Teto de 13 meses (acima disso o align é ignorado). Precedências: KPI/card e
   "Agrupar período" (`dateAgg`) não passam pelo align; pernas de sub-fonte
   "conviver" recursam `runWidget` e o align roda DENTRO de cada perna. Com o
   align ativo, `settings.comparison` é IGNORADA (exclusão mútua — o gráfico já

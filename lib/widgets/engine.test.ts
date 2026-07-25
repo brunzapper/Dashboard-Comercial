@@ -190,6 +190,49 @@ describe("alinhamento por dia útil (businessDayAlign)", () => {
     });
     expect(data.comparison).toBeUndefined();
   });
+
+  it("janela ≠ bucket: funde tupla repetida entre pernas e descarta bucket nulo/fora da janela", async () => {
+    // A perna de MAIO devolve linhas bucketizadas em JUNHO (campo do bucket ≠
+    // campo da janela da barra), com bucket NULO e fora da janela.
+    const perMonth = [
+      [
+        { dim_1: "2026-06-01", metric_1: 5 },
+        { dim_1: null, metric_1: 300 },
+        { dim_1: "2026-09-01", metric_1: 2 },
+      ],
+      [{ dim_1: "2026-06-01", metric_1: 2 }],
+      [{ dim_1: "2026-07-01", metric_1: 3 }],
+    ];
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: (_args, i) => ({
+          data: perMonth[Math.min(i, 2)],
+          error: null,
+        }),
+      },
+      tables: { non_working_days: [] },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [{ field: "closed_at", transform: "month_year" }],
+        metrics: [{ field: "*", agg: "count" }],
+        settings: {
+          businessDayAlign: { enabled: true, reference: "period_end" },
+        },
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-05-01", to: "2026-07-15" }
+    );
+
+    expect(rpcCalls).toHaveLength(3);
+    // Uma linha por mês: Junho fundido (5+2); nulo e Setembro descartados.
+    expect(data.rows.map((r) => [r.dim_1, r.metric_1])).toEqual([
+      ["Junho/26", 7],
+      ["Julho/26", 3],
+    ]);
+  });
 });
 
 describe("comparação com período anterior", () => {
