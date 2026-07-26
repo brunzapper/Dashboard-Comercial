@@ -123,7 +123,7 @@ function seedSettings(type: VisualType): WidgetSettings {
       return {
         kind: "period",
         field: DEFAULT_PERIOD_FIELD,
-        targets: [],
+        excludedTargets: [],
         defaultPreset: "",
       };
     case "filtro_campo":

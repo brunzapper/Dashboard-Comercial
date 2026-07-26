@@ -379,7 +379,9 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
   um widget sobre outro, o vizinho é **empurrado** na direção do movimento —
   EXCETO quando o drop cai quase exatamente sobre um widget de tamanho
   parecido: aí o sistema pergunta se você quer **mesclar** os dois (§3.4.1).
-- **Arrastar**: pela barra de título do widget (modo edição). **Pan**: clicar
+- **Arrastar**: pela barra de título do widget (modo edição). Widgets sem
+  barra (forma, imagem, nota "sem moldura", "Ocultar barra de título" do
+  §9.1) têm uma alça flutuante no canto superior esquerdo. **Pan**: clicar
   e arrastar uma área vazia move a viewport ("mãozinha").
 - **Redimensionar**: alças nas bordas do widget (modo edição).
 - **Tamanho dinâmico**: widgets com "Largura dinâmica"/"Altura dinâmica"
@@ -672,9 +674,13 @@ pode mirar widgets específicos:
 
 - **"Campo de data"** — qual coluna filtra (padrão: data de fechamento).
 - **"Período padrão"** — "Todo o período" ou qualquer preset da tabela acima.
-- **"Vincular a"** — checklist de widgets-alvo; sem seleção = o dashboard
-  inteiro. Quando um Filtro de período mira um widget, a seleção dele
-  **sobrepõe** a barra global para aquele widget.
+- **"Aplicar a"** — checklist dos widgets afetados. Por padrão TODOS marcados
+  e o alvo é dinâmico: widgets criados depois também reagem ao filtro;
+  desmarcar exclui um widget do efeito (mesma semântica do Filtro por campo).
+  Quando um Filtro de período mira um widget, a seleção dele **sobrepõe** a
+  barra global para aquele widget. (Filtros salvos antes dessa mudança
+  guardavam a lista fixa dos marcados — "congelada" no save; um re-save no
+  editor migra para o modo dinâmico.)
 
 ### 4.3 Widget "Filtro por campo"
 
@@ -1552,8 +1558,11 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
   widget"; "Valor (número grande)" (Card/Métrica calculada); "Rótulos"
   (Card); "Textos do gráfico"; "Corpo da tabela". Tamanhos fixados aqui não
   são afetados pela escala de fonte do dashboard (§3.6).
-- **"Título e borda"**: cor do texto do título, fundo da barra de título, cor
-  da borda/contorno do card.
+- **"Título e borda"**: "Ocultar barra de título" (some só a barra — borda,
+  corpo e abinha ficam; útil quando o conteúdo é auto-explicativo; em modo
+  edição o card ganha uma alça de arraste flutuante e o menu ⋮ aparece ao
+  passar o mouse), cor do texto do título, fundo da barra de título, cor da
+  borda/contorno do card.
 
 ### 9.2 Gráficos (Barra/Linha; Pizza/Funil onde indicado)
 

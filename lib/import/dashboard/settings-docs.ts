@@ -188,7 +188,7 @@ ${renderDocBlock(APPEARANCE_TABLE_DOC, "  ")}
   kpi: `"kpi": { "bg": "#ffffff", "border": "#e2e8f0", "accent": "#2563eb" },  // Card: fundo, borda e abinha superior`,
   filter: `// widgets de filtro (filtro / filtro_campo):
 "filter": { "bg": "#f8fafc", "border": "#e2e8f0", "accent": "#2563eb" },  // fundo/borda do card + abinha superior`,
-  title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0" },  // barra de título / contorno do card (todos os tipos)`,
+  title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0", "hidden": false },  // barra de título / contorno do card (todos os tipos); "hidden": true oculta a barra (borda e corpo ficam)`,
   note: `"note": { "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota (post-it); "frameless": true = sem cromo do card`,
   shape: `"shape": { "fill": "#eef2ff", "stroke": "#6366f1", "strokeWidth": 2, "textColor": "#312e81" },  // aparência da forma`,
   calculator: null, // cores da calculadora (visor/teclas) — estética de nicho, edite na UI
@@ -233,7 +233,7 @@ export const WIDGET_SETTINGS_DOC = {
   currencyMultiMode: null, // idem
   grandTotalMode: null, // idem
   kind: null, // FilterSettings.kind: sempre "period" (implícito no visual_type "filtro")
-  targets: `"targets": [],                             // widget "filtro": ids dos widgets controlados; vazio = dashboard inteiro`,
+  targets: null, // LEGADO do widget "filtro" (whitelist congelada de ids) — não gerar; ausente = dashboard inteiro
   field: `"field": "closed_at",                      // widget "filtro": campo de data primário do controle`,
   fieldBySource: `"fieldBySource": { "<baseKey>": "<campo de data daquela Base>" },  // widget "filtro": campo por Base (mesma semântica do periodBar)`,
   defaultPreset: `"defaultPreset": "este_mes",               // widget "filtro": preset inicial (mesmas chaves do periodBar)`,
@@ -241,7 +241,7 @@ export const WIDGET_SETTINGS_DOC = {
   defaultAte: null, // idem
   fields: `"fields": [ { "field": "stage" }, { "field": "custom:fonte" } ],  // widget "filtro_campo": campos expostos como controles`,
   searchFields: `"searchFields": ["title"],                 // widget "filtro_campo": colunas de texto da busca livre`,
-  excludedTargets: null, // widgets desmarcados na edição do filtro_campo — estado de UI
+  excludedTargets: null, // widgets desmarcados na edição do "filtro" e do "filtro_campo" — estado de UI; ausente = atinge todos
   valueScope: null, // escopo do valor do filtro_campo ("all" compartilhado | "user") — o default por usuário serve
   rowMode: `"rowMode": "records",                      // tabela: lista de registros individuais`,
   rowSource: `"rowSource": "records",                    // modo lista: "records" (default) | "responsibles" | "operations"`,

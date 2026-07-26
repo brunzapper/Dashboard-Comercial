@@ -295,7 +295,14 @@ export interface KpiSettings {
 // widgets.settings. `defaultPreset` guarda uma chave de PERIOD_PRESETS (ou "").
 export interface FilterSettings {
   kind?: "period";
-  targets?: string[]; // ids dos widgets controlados; vazio = dashboard inteiro
+  // LEGADO: whitelist congelada de ids (widgets criados depois ficavam de
+  // fora). Honrada só quando `excludedTargets` está AUSENTE — snapshots
+  // congelados e widgets nunca re-salvos dependem desse ramo; não remover.
+  targets?: string[];
+  // Ids de widgets desmarcados na edição; presente (mesmo []) = alvo dinâmico
+  // "todos os widgets de dados, inclusive futuros, menos estes" (mesma
+  // semântica do filtro_campo). Vence `targets`.
+  excludedTargets?: string[];
   field?: string; // campo de data PRIMÁRIO (visível/selecionável; default closed_at)
   // Override do campo de data por fonte (secundária/terciária/…): a mesma
   // seleção de calendário filtra cada fonte pela sua coluna de data. Ausente
@@ -1006,6 +1013,10 @@ export interface AppearanceSettings {
     color?: string; // cor do texto do título
     bg?: string; // fundo da barra de título
     border?: string; // cor da borda/contorno externo do card
+    // true = oculta a barra de título inteira (borda e corpo do card ficam);
+    // em modo edição o card ganha grip flutuante + ⋮ em hover (padrão do
+    // layout frameless do WidgetCard).
+    hidden?: boolean;
   };
   // --- formatação condicional (tabelas, listas, Card, gráficos) ---
   conditional?: ConditionalFormatting;
