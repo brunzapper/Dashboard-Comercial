@@ -1,4 +1,8 @@
-// Versão: 1.8 | Data: 21/07/2026
+// Versão: 1.9 | Data: 26/07/2026
+// v1.9 (26/07/2026): agrupamento de responsáveis (0101) — runRecordList e
+//   runRecordListPage expandem filtros responsible_id p/ o grupo (apelidos ∪
+//   principal) ANTES de montar a query PostgREST (a decisão dos mocks não
+//   muda: a expansão não toca refs de Data Reunião). Gate igual ao engine.
 // v1.8 (21/07/2026): dia de Brasília (0085) — o ramo @period ancora bounds de
 // coluna do núcleo (timestamptz) com -03:00 (anchorCoreDateBound); custom
 // (texto) segue naive. Os ops simples já chegam ancorados via resolveFilters.
@@ -47,6 +51,11 @@ import {
   type SourceDef,
 } from "@/lib/sources";
 import { resolveFilters, sourceFilters } from "./engine";
+import {
+  expandResponsibleFilters,
+  filtersReferenceResponsible,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import { CORE_FIELDS, type AvailableField } from "./fields";
@@ -402,6 +411,22 @@ async function fetchAll(
 }
 
 /**
+ * Agrupamento de responsáveis (0101): expande filtros responsible_id da config
+ * para o grupo ANTES de montar a query. Gate barato (sem referência → mesma
+ * config, nenhuma consulta extra); a regra dos mocks não muda — a expansão não
+ * toca refs de Data Reunião (recordListIncludesMocks segue com a config crua).
+ */
+async function expandConfigResponsibles(
+  supabase: SupabaseClient,
+  config: WidgetConfig
+): Promise<WidgetConfig> {
+  if (!filtersReferenceResponsible(config.filters)) return config;
+  const canon = await loadResponsibleCanon(supabase);
+  const expanded = expandResponsibleFilters(config.filters ?? [], canon);
+  return expanded === config.filters ? config : { ...config, filters: expanded };
+}
+
+/**
  * Lista os registros de um widget de Tabela em modo "registros individuais",
  * aplicando fontes/período/filtros do widget (mesma semântica de runWidget).
  */
@@ -413,6 +438,7 @@ export async function runRecordList(
   catalog: SourceDef[] = BUILTIN_SOURCES,
   opts?: { onlyMocks?: boolean }
 ): Promise<RecordRow[]> {
+  config = await expandConfigResponsibles(supabase, config);
   const { q, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,
@@ -568,6 +594,7 @@ export async function runRecordListPage(
   opts: { pageIndex: number; pageSize: number },
   catalog: SourceDef[] = BUILTIN_SOURCES
 ): Promise<{ rows: RecordRow[]; total: number }> {
+  config = await expandConfigResponsibles(supabase, config);
   const { q, hasBucketFilters, applyBucketFilters } = buildRecordListQuery(
     supabase,
     config,

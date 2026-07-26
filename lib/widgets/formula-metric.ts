@@ -1,4 +1,8 @@
-// Versão: 3.4 | Data: 20/07/2026
+// Versão: 3.5 | Data: 26/07/2026
+// v3.5 (26/07/2026): agrupamento de responsáveis (0101) — filtros
+//   responsible_id do dashboard e condições de SOMASE (pós
+//   resolveFkCondFilters) expandem p/ o grupo (apelidos ∪ principal), com o
+//   mesmo gate do engine (sem referência → byte-idêntico, sem consulta extra).
 // v3.4 (20/07/2026): unificados por PERNA — o input troca o mapa pronto
 //   (`correspondencesMap`) pelas correspondências CRUAS; o mapa passa a ser
 //   montado aqui via correspondenceMapForSources(fontes efetivas da consulta,
@@ -48,6 +52,12 @@ import {
   correspondenceMapForSources,
   type Correspondence,
 } from "@/lib/correspondences";
+import {
+  EMPTY_CANON,
+  expandResponsibleFilters,
+  filtersReferenceResponsible,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 import {
   BUILTIN_SOURCES,
   planSourceLegs,
@@ -169,9 +179,14 @@ export async function runCalculatedWidget(
     catalog
   );
 
+  // Agrupamento de responsáveis (0101): mesmo choke point do engine — filtros
+  // responsible_id expandem p/ o grupo antes de qualquer consulta.
+  const respCanon = filtersReferenceResponsible(input.filters)
+    ? await loadResponsibleCanon(supabase)
+    : EMPTY_CANON;
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   const baseFilters = applyFilterSourceTargets(
-    resolveFilters(input.filters ?? []),
+    expandResponsibleFilters(resolveFilters(input.filters ?? []), respCanon),
     querySources,
     catalog
   );
@@ -240,7 +255,7 @@ export async function runCalculatedWidget(
       runPeriod?.field ??
       "source_created_at";
     let f = applyFilterSourceTargets(
-      resolveFilters(input.filters ?? []),
+      expandResponsibleFilters(resolveFilters(input.filters ?? []), respCanon),
       [scope],
       catalog
     );
@@ -356,11 +371,17 @@ export async function runCalculatedWidget(
         // ausente → "—") em vez de derrubar a página do dashboard.
         jobs.push(
           (async () => {
-            // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
-            const extra = await resolveFkCondFilters(
+            // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
+            // com apelidos (0101), o UUID expande para o grupo do responsável.
+            let extra = await resolveFkCondFilters(
               supabase,
               condFilters(g.conds)
             );
+            if (filtersReferenceResponsible(extra))
+              extra = expandResponsibleFilters(
+                extra,
+                await loadResponsibleCanon(supabase)
+              );
             const scoped = g.scope
               ? scopedAuxInputs(g.scope, runPeriod)
               : null;

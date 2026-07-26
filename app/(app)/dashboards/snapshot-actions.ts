@@ -24,6 +24,12 @@ import {
 import { loadSources } from "@/lib/config/sources";
 import { applySourceScope } from "@/lib/config/source-scope";
 import {
+  buildResponsibleCanon,
+  collapseResponsibleOptions,
+  expandResponsibleIds,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
+import {
   PERIOD_ALL,
   PERIOD_PRESETS,
   type SavedPeriod,
@@ -263,6 +269,11 @@ export async function createSnapshot(
   const catalog = await loadSources(supabase);
   const resp = cleanIdList(input.allowedResponsibleIds, "responsáveis");
   if (!resp.ok) return { ok: false, message: resp.message };
+  // Agrupamento (0101): restrição gravada JÁ EXPANDIDA p/ o grupo (apelidos ∪
+  // principal) — o RPC do snapshot lê allowed_responsible_ids como está.
+  const respIds = resp.value
+    ? expandResponsibleIds(resp.value, await loadResponsibleCanon(supabase))
+    : resp.value;
   const ops = cleanIdList(input.allowedOperationIds, "operações");
   if (!ops.ok) return { ok: false, message: ops.message };
   const sources = cleanSources(
@@ -287,7 +298,7 @@ export async function createSnapshot(
       tab_id: tabId,
       name,
       token_hash: hashToken(token),
-      allowed_responsible_ids: resp.value,
+      allowed_responsible_ids: respIds,
       allowed_operation_ids: ops.value,
       allowed_sources: sources.value,
       allow_quick_filters: Boolean(input.allowQuickFilters),
@@ -335,6 +346,10 @@ export async function updateSnapshot(
   const catalog = await loadSources(supabase);
   const resp = cleanIdList(input.allowedResponsibleIds, "responsáveis");
   if (!resp.ok) return { ok: false, message: resp.message };
+  // Agrupamento (0101): grava a restrição expandida (mesma regra do create).
+  const respIds = resp.value
+    ? expandResponsibleIds(resp.value, await loadResponsibleCanon(supabase))
+    : resp.value;
   const ops = cleanIdList(input.allowedOperationIds, "operações");
   if (!ops.ok) return { ok: false, message: ops.message };
   const sources = cleanSources(
@@ -354,7 +369,7 @@ export async function updateSnapshot(
     .from("snapshots")
     .update({
       name,
-      allowed_responsible_ids: resp.value,
+      allowed_responsible_ids: respIds,
       allowed_operation_ids: ops.value,
       allowed_sources: sources.value,
       allow_quick_filters: Boolean(input.allowQuickFilters),
@@ -376,7 +391,7 @@ export async function updateSnapshot(
   // não pode esperar a agenda; o dataset antigo continuaria exposto).
   const restrictionsChanged =
     JSON.stringify(current.allowed_responsible_ids) !==
-      JSON.stringify(resp.value) ||
+      JSON.stringify(respIds) ||
     JSON.stringify(current.allowed_operation_ids) !==
       JSON.stringify(ops.value) ||
     JSON.stringify(current.allowed_sources) !== JSON.stringify(sources.value);
@@ -519,7 +534,7 @@ export async function getSnapshotFormOptions(
   const [{ data: resp }, { data: ops }, catalog] = await Promise.all([
     supabase
       .from("responsibles")
-      .select("id, display_name")
+      .select("id, display_name, canonical_id")
       .eq("active", true)
       .order("display_name"),
     supabase
@@ -529,12 +544,22 @@ export async function getSnapshotFormOptions(
       .order("name"),
     loadSources(supabase),
   ]);
+  // Agrupamento (0101): o form restringe pelo PRINCIPAL (apelidos colapsam);
+  // ao gravar, a restrição é expandida p/ o grupo (create/updateSnapshot).
+  const respRows = (resp ?? []) as {
+    id: string;
+    display_name: string;
+    canonical_id?: string | null;
+  }[];
   return {
     tabs: (access.settings.tabs ?? []).map((t) => ({ id: t.id, name: t.name })),
-    responsibles: (resp ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-    })),
+    responsibles: collapseResponsibleOptions(
+      respRows.map((r) => ({
+        value: r.id,
+        label: r.display_name ?? "—",
+      })),
+      buildResponsibleCanon(respRows)
+    ),
     operations: (ops ?? []).map((o) => ({
       value: o.id as string,
       label: (o.name as string) ?? "—",

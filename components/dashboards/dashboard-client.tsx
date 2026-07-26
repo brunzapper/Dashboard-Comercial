@@ -150,6 +150,7 @@ export function DashboardClient({
   tableCellsById = {},
   fields,
   fkLabels,
+  respCanon = {},
   responsibleOptions,
   userRoles,
   canEditValues,
@@ -202,6 +203,9 @@ export function DashboardClient({
   >;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  // Agrupamento de responsáveis (0101): apelido → principal (grupos das
+  // tabelas de registros fundem no principal).
+  respCanon?: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
@@ -995,6 +999,7 @@ export function DashboardClient({
             tableCellsById={tableCellsById}
             fields={fields}
             fkLabels={fkLabels}
+            respCanon={respCanon}
             responsibleOptions={responsibleOptions}
             userRoles={userRoles}
             canEditValues={canEditValues}

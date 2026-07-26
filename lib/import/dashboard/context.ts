@@ -38,6 +38,8 @@ export async function loadImportContext(
       source_system: (d.source_system as string | null) ?? null,
     })),
     correspondenceKeys: (corrRes.data ?? []).map((c) => String(c.key)),
+    // Agrupamento (0101): APELIDOS entram de propósito — o nome de um apelido
+    // segue válido em filtro/SOMASE (resolve p/ UUID e expande p/ o grupo).
     responsibleNames: (respRes.data ?? [])
       .map((r) => String((r as { display_name?: unknown }).display_name ?? ""))
       .filter(Boolean),

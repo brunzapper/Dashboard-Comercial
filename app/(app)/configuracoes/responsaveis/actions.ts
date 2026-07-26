@@ -1,6 +1,11 @@
-// Versão: 1.1 | Data: 13/07/2026
+// Versão: 1.2 | Data: 26/07/2026
 // Server Actions da tela de Responsáveis (admin): criar, ativar/desativar e
 // mapear operações com prioridade (responsible_operations). RLS exige admin.
+// v1.2 (26/07/2026): setResponsibleCanonical — agrupamento de exibição (0101):
+//   marca um responsável como apelido de outro ("nome usado"), mantendo o
+//   grupo PLANO (alvo apelido resolve pro principal dele; filhos do que vira
+//   apelido repontam ANTES — falha parcial deixa estado válido). Reversível
+//   (canonical_id = null); records.responsible_id nunca é repontado.
 // v1.1 (13/07/2026): createResponsible — responsáveis criados só no sistema
 //   (sem bitrix_user_id). Não aparecem em dropdowns write-back (não há usuário
 //   Bitrix p/ onde gravar); o guard em lib/records/actions.ts também os pula.
@@ -57,6 +62,49 @@ export async function setResponsibleActive(
   if (!(await ensureAdmin())) return;
   const supabase = await createClient();
   await supabase.from("responsibles").update({ active }).eq("id", id);
+  revalidatePath("/configuracoes/responsaveis");
+}
+
+export async function setResponsibleCanonical(
+  id: string,
+  canonicalId: string | null
+): Promise<void> {
+  if (!(await ensureAdmin())) return;
+  const supabase = await createClient();
+  if (!canonicalId) {
+    // Desfazer: só a própria linha volta a ser principal (filhos, se houver,
+    // permanecem apontando para ela).
+    await supabase
+      .from("responsibles")
+      .update({ canonical_id: null })
+      .eq("id", id);
+    revalidatePath("/configuracoes/responsaveis");
+    return;
+  }
+  if (canonicalId === id) return;
+  const { data: rows } = await supabase
+    .from("responsibles")
+    .select("id, canonical_id, organization_id")
+    .in("id", [id, canonicalId]);
+  const me = (rows ?? []).find((r) => r.id === id);
+  const target = (rows ?? []).find((r) => r.id === canonicalId);
+  if (!me || !target) return;
+  // Multi-org (0090): apelido e principal sempre da MESMA organização.
+  if ((me.organization_id ?? null) !== (target.organization_id ?? null)) return;
+  // Grupo plano: alvo que já é apelido resolve para o principal DELE; alvo
+  // cujo principal sou eu criaria ciclo — ignora.
+  const root = (target.canonical_id as string | null) ?? (target.id as string);
+  if (root === id) return;
+  // Filhos do que vira apelido repontam ANTES da própria linha: uma falha no
+  // 2º passo deixa o grafo plano e válido (nunca uma cadeia).
+  await supabase
+    .from("responsibles")
+    .update({ canonical_id: root })
+    .eq("canonical_id", id);
+  await supabase
+    .from("responsibles")
+    .update({ canonical_id: root })
+    .eq("id", id);
   revalidatePath("/configuracoes/responsaveis");
 }
 

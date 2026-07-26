@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 23/07/2026
+// Versão: 1.5 | Data: 26/07/2026
+// v1.5 (26/07/2026): agrupamento de responsáveis (0101) — a exceção do
+//   vendedor expande os responsáveis dele p/ o GRUPO (apelidos ∪ principal),
+//   paridade com a page e com a auth_responsible_ids do banco.
 // v1.4 (23/07/2026): "Filtro por campo" com settings.valueScope 'all' — o
 //   fallback do ?ff_ vem da célula compartilhada __ff__/sel de
 //   dashboard_table_cells em vez de lastFieldFilters (espelho da page).
@@ -71,6 +74,10 @@ import {
   loadOperationScopes,
   translateOperationFilters,
 } from "@/lib/config/operation-scope";
+import {
+  expandResponsibleIds,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 import type {
   DashboardSettings,
   Widget,
@@ -202,7 +209,8 @@ export async function resolveWidgetViewScope(
     }
 
     // Exceção do vendedor (mesma da page): seleção de responsáveis que exclui
-    // os dele vira os dele.
+    // os dele vira os dele. Agrupamento (0101): o conjunto cobre o GRUPO
+    // (apelidos ∪ principal) — paridade com a auth_responsible_ids do banco.
     const canViewAll = session.permissions.includes("view_all_records");
     let ownResponsibleIds: string[] = [];
     if (!canViewAll && qfEntries.some((e) => e.field === "responsible_id")) {
@@ -210,7 +218,11 @@ export async function resolveWidgetViewScope(
         .from("responsibles")
         .select("id")
         .eq("user_id", session.user.id);
-      ownResponsibleIds = (ownResp ?? []).map((r) => r.id as string);
+      const ownIds = (ownResp ?? []).map((r) => r.id as string);
+      ownResponsibleIds =
+        ownIds.length > 0
+          ? expandResponsibleIds(ownIds, await loadResponsibleCanon(supabase))
+          : [];
     }
 
     for (const entry of qfEntries) {

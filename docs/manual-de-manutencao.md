@@ -1,4 +1,8 @@
-<!-- Versão: 1.16 | Data: 24/07/2026 -->
+<!-- Versão: 1.17 | Data: 26/07/2026 -->
+<!-- v1.17 (26/07/2026): §4.10 — checklist do agrupamento de responsáveis
+     (canonical_id, 0101/invariante 20); §3 com o próximo número livre
+     corrigido (0102). -->
+
 <!-- v1.16 (24/07/2026): fase 2 dos testes — §2.1 ganha componentes (pragma
      jsdom + stubs em tests/setup/dom.ts), engine com cliente fake e o runbook
      "E2E e paridade viva" (stack Supabase local + seed + Playwright +
@@ -159,7 +163,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0077).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0102).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).
@@ -456,6 +460,30 @@ fonte no widget se precisar do mês.
   um admin negado não escreve nem chamando a action direto.
 - **Escopo de bases do board** (⋮ → Bases) é OFERTA (listas menores), não
   autorização — para PRIVAR use o deny de base por usuário.
+
+### 4.10 Mexeu no agrupamento de responsáveis (canonical_id, 0101)
+
+- [ ] A resolução é 100% engine/loaders (invariante 20 da arquitetura;
+      `lib/config/responsible-canon.ts`). Caminho NOVO que filtre ou agrupe
+      por `responsible_id` deve passar pelos choke points
+      (`expandResponsibleFilters` / merge de dims / `fetchFkLabels`) — senão o
+      grupo aparece RACHADO em silêncio. Nunca recrie as RPCs para isso.
+- [ ] `records.responsible_id` NUNCA é repontado — o desfazer
+      (`canonical_id = null`) deve restaurar tudo. Grupo sempre PLANO: só a
+      action `setResponsibleCanonical` escreve a coluna (repontea filhos ao
+      mesclar um principal).
+- [ ] `auth_responsible_ids()` devolve o GRUPO — mudou a semântica do grupo?
+      Confira a visibilidade do vendedor também em tasks/comments/registros
+      manuais (as policies reusam a função). Ampliar o grupo AMPLIA o que o
+      vendedor vê — comportamento desejado (apelido = mesma pessoa).
+- [ ] Snapshot grava `allowed_responsible_ids` JÁ EXPANDIDO. Mudou um grupo
+      DEPOIS de criar o snapshot? Re-salve a restrição (o conjunto gravado não
+      se atualiza sozinho).
+- [ ] Selects de write-back (atribuir responsável — tabela editável,
+      /registros) NÃO colapsam apelidos: gravam o responsável real.
+- [ ] Rede de segurança: `lib/config/responsible-canon.test.ts` +
+      os blocos "agrupamento de responsáveis" em `lib/widgets/engine.test.ts`
+      e `lib/widgets/record-list.test.ts` (`npm test`).
 
 ## 5. Troubleshooting
 
