@@ -18,6 +18,14 @@ export interface AiGenerateInput {
   messages: AiMessage[];
   /** Timeout/cancelamento (o chamador passa um AbortSignal.timeout). */
   signal?: AbortSignal;
+  /**
+   * Best-effort: recebe trechos do RACIOCÍNIO do modelo enquanto a resposta é
+   * gerada (painel "Editar com IA" exibe ao vivo). Adaptador sem suporte
+   * ignora. Regra de custo: só emitir onde o raciocínio já é padrão do modelo
+   * (ex.: resumos de pensamento do Gemini) — NUNCA habilitar thinking num
+   * modelo em que ele vem desligado, o que geraria tokens extras.
+   */
+  onThought?: (chunk: string) => void;
 }
 
 export interface AiClientConfig {

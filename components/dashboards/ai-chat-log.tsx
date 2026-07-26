@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Log de exibição da conversa com IA — bloco presentacional compartilhado entre
 // o sheet da Home (ImportDashboardSheet) e o painel "Editar com IA" do
 // dashboard (AiEditPanel). Puro: recebe as entradas prontas; quem persiste/
 // monta é o chamador (sheet: estado em memória; painel: dashboard_ai_sessions).
+// v1.1: `busyDetail` opcional — raciocínio AO VIVO do modelo exibido sob o
+// busyLabel enquanto gera (efêmero; o painel o alimenta pelo stream ai-turn).
 
 import { cn } from "@/lib/utils";
 
@@ -17,12 +19,15 @@ export function AiChatLog({
   entries,
   busy = false,
   busyLabel = "Gerando com IA…",
+  busyDetail,
   className,
   ref,
 }: {
   entries: AiChatEntry[];
   busy?: boolean;
   busyLabel?: string;
+  /** Raciocínio ao vivo do modelo (só exibido enquanto busy). */
+  busyDetail?: string;
   className?: string;
   /** Ref do contêiner rolável (auto-scroll do painel). React 19: ref é prop. */
   ref?: React.Ref<HTMLDivElement>;
@@ -67,7 +72,17 @@ export function AiChatLog({
           )}
         </div>
       ))}
-      {busy ? <p className="text-muted-foreground text-xs">{busyLabel}</p> : null}
+      {busy ? (
+        <div className="text-muted-foreground text-xs">
+          <p>{busyLabel}</p>
+          {busyDetail ? (
+            <p className="mt-1 border-l-2 pl-2 whitespace-pre-wrap italic opacity-80">
+              <span className="font-medium not-italic">Raciocínio:</span>{" "}
+              {busyDetail}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

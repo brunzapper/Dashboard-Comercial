@@ -61,9 +61,13 @@ import {
 import {
   applyGeneratedDashboard,
   generateDashboardWithAi,
-  type AiDashboardMode,
-  type GenerateDashboardState,
 } from "@/app/(app)/dashboards/ai-generate-actions";
+// Tipos direto do núcleo (server-only, mas `import type` é apagado no build) —
+// a action não re-exporta tipos (quebraria o chunk de actions; ver lá).
+import type {
+  AiDashboardMode,
+  GenerateDashboardState,
+} from "@/lib/ai/generate-dashboard";
 
 export interface AiBoardOption {
   id: string;
