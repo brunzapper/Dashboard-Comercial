@@ -31,13 +31,15 @@ import {
   runAiEditTurnCore,
   saveRow,
   stateFrom,
+  // NÃO re-exportar estes tipos daqui: o compilador de módulos "use server"
+  // (Turbopack) emite `export type {...}` como re-export de VALOR e TODAS as
+  // actions da página quebram em runtime. Consumidores importam de
+  // @/lib/ai/edit-session (import type é apagado no build).
   type AiEditSessionState,
   type SessionRow,
 } from "@/lib/ai/edit-session";
 import { restoreDashboardSnapshot } from "@/app/(app)/dashboards/actions";
 import { applyGeneratedDashboard } from "@/app/(app)/dashboards/ai-generate-actions";
-
-export type { AiEditSessionState };
 
 /** Estado persistido da sessão (abre o painel / F5). */
 export async function loadAiEditSession(

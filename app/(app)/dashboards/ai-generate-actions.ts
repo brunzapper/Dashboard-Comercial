@@ -42,13 +42,16 @@ import {
   applyGeneratedDashboardCore,
   generateDashboardCore,
 } from "@/lib/ai/generate-dashboard";
+// SÓ import de tipos — NÃO re-exportar tipos daqui: o compilador de módulos
+// "use server" (Turbopack) emite `export type {...}` como re-export de VALOR e
+// TODAS as actions da página quebram em runtime (ReferenceError na avaliação
+// do chunk). Consumidores importam os tipos direto de
+// @/lib/ai/generate-dashboard (import type é apagado no build).
 import type {
   AiDashboardMode,
   GenerateDashboardInput,
   GenerateDashboardState,
 } from "@/lib/ai/generate-dashboard";
-
-export type { AiDashboardMode, GenerateDashboardInput, GenerateDashboardState };
 
 export async function generateDashboardWithAi(
   input: GenerateDashboardInput

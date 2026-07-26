@@ -46,8 +46,10 @@ import {
   loadAiEditSession,
   resetAiEditSession,
   undoAiEditSession,
-  type AiEditSessionState,
 } from "@/app/(app)/dashboards/ai-session-actions";
+// Tipo direto do núcleo (server-only, mas `import type` é apagado no build) —
+// a action não re-exporta tipos (quebraria o chunk de actions; ver lá).
+import type { AiEditSessionState } from "@/lib/ai/edit-session";
 import { AI_PROVIDER_LABELS, isAiProvider } from "@/lib/ai/models";
 
 type PanelState = "closed" | "open" | "collapsed";
