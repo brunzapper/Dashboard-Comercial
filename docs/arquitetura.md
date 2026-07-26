@@ -1,4 +1,8 @@
-<!-- Versão: 1.32 | Data: 26/07/2026 -->
+<!-- Versão: 1.33 | Data: 26/07/2026 -->
+<!-- v1.33 (26/07/2026): §4.1 — cache TTL de run_widget_query ENTRE
+     requisições (lib/widgets/rpc-cache.ts, sob o withRpcMemo; chave por
+     escopo de autorização u:<userId>/s:<snapshotId>; env
+     WIDGET_RPC_CACHE_TTL_MS, default 45s, 0 desliga; erro nunca em cache). -->
 <!-- v1.32 (26/07/2026): §4.13 — agrupamento de responsáveis por exibição
      (responsibles.canonical_id, 0101): apelido → principal ("nome usado"),
      resolvido 100% no engine/loaders (lib/config/responsible-canon.ts) —
@@ -347,6 +351,20 @@ O subsistema mais crítico. A config do widget (JSONB: `p_source`, `p_dimensions
 O lado TypeScript é `lib/widgets/engine.ts` (chama o RPC, resolve rótulos de FK,
 pós-processa). A função foi **recriada 18 vezes** ao longo das migrações — a versão
 vigente é a da migração `0085_widget_rpc_brasilia_day.sql`.
+
+**Duas camadas de client em volta do RPC (26/07/2026):** toda page que computa
+widgets envolve o client em `withRpcMemo(withRpcTtlCache(...))`
+(`lib/widgets/rpc-memo.ts` + `lib/widgets/rpc-cache.ts`). O memo dedupa args
+idênticos dentro de UM render; o cache TTL (default 45s, env
+`WIDGET_RPC_CACHE_TTL_MS`, `0` desliga) reusa resultados ENTRE requisições da
+mesma instância serverless — F5/navegação/segundo viewer do mesmo dashboard
+custam ~0 ao banco dentro da janela. A chave é prefixada pelo ESCOPO DE
+AUTORIZAÇÃO (`u:<userId>` na page — o RPC é SECURITY INVOKER e a tradução de
+operação é por usuário; `s:<snapshotId>` no viewer público) — entradas nunca
+cruzam escopos. Erros não ficam em cache; `structuredClone` na leitura (o
+engine muta rows in place). É melhor esforço (instâncias não compartilham o
+store) e implica staleness de até o TTL após sync/edição — aceitável, o
+reconcile é horário.
 
 **Merge por bucket p/ dimensão `custom:` + transform (23/07/2026):** o ramo
 `custom:` da DIMENSÃO no RPC agrupa pelo VALOR CRU de `custom_fields->>key`

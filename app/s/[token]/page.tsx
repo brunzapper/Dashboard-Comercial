@@ -41,6 +41,7 @@ import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
+import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { hashToken, isTokenShaped } from "@/lib/snapshots/token";
 import {
@@ -269,7 +270,12 @@ export default async function SnapshotPage({
   // Memoização por argumentos (a mesma do dashboard autenticado): widgets/
   // notas/calculadoras duplicados geram RPCs idênticas — o memo intercepta
   // `run_widget_query` ANTES de o adapter renomear p/ o RPC do snapshot.
-  const db = withRpcMemo(snapshotClient(service, snap.id, orgId));
+  // Entre o memo e o adapter entra o cache TTL entre requisições (rpc-cache):
+  // link público popular repete os MESMOS args a cada hit — dataset congelado,
+  // escopo por snapshot (refresh do snapshot fica ≤TTL defasado, aceitável).
+  const db = withRpcMemo(
+    withRpcTtlCache(snapshotClient(service, snap.id, orgId), `s:${snap.id}`)
+  );
   const partnerIds = new Set((partnerRows ?? []).map((r) => r.id as string));
 
   // Período congelado na criação (0059): default_period vira o período de

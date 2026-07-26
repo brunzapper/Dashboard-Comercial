@@ -154,6 +154,7 @@ import {
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
+import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
@@ -209,9 +210,6 @@ export default async function DashboardPage({
   // Instrumentação: início do render (o resumo [dashboard:timing] sai no fim).
   const timing = startDashboardLoadTiming();
   const supabase = await createClient();
-  // Client com dedup de run_widget_query por render: widgets/notas/calculadoras
-  // com o mesmo escopo compartilham a mesma chamada (ver lib/widgets/rpc-memo).
-  const rpcClient = withRpcMemo(supabase);
 
   // Sessão (getUser é ida de rede) e dashboard em paralelo — a RLS do select de
   // dashboards não depende do objeto session daqui.
@@ -227,6 +225,13 @@ export default async function DashboardPage({
   ]);
   // Board na Lixeira (0087) não abre — mesmo 404 de board inexistente.
   if (!dash || dash.status === "trashed") notFound();
+  // Client de run_widget_query em duas camadas: dedup por render (rpc-memo)
+  // sobre o cache TTL entre requisições (rpc-cache). A chave POR USUÁRIO é
+  // obrigatória: o RPC é SECURITY INVOKER (RLS/bases negadas) e a tradução de
+  // operação é por usuário — nunca compartilhar entradas entre usuários.
+  const rpcClient = withRpcMemo(
+    withRpcTtlCache(supabase, `u:${session?.user.id ?? "anon"}`)
+  );
 
   const isOwner = dash.owner_user_id === session?.user.id;
   const isAdmin = session?.roles.includes("admin") ?? false;
