@@ -1,4 +1,8 @@
-<!-- Versão: 1.15 | Data: 26/07/2026 -->
+<!-- Versão: 1.16 | Data: 26/07/2026 -->
+<!-- v1.16 (26/07/2026): §3.8.2 — o título do painel "Editar com IA" passa a
+     ser o MODELO configurado (1ª letra maiúscula) e o RACIOCÍNIO da IA
+     aparece ao vivo durante a geração (Gemini; efêmero, sem custo extra de
+     tokens). -->
 <!-- v1.15 (26/07/2026): Parcerias — §2.1.3 Conexões valem para Bases criadas
      pelo usuário (sub-bases não casam; conexão automática na entrada) e §2.3
      operações só-por-perfil (sub-operações automáticas: multi-seleção e pai
@@ -618,7 +622,12 @@ anterior por inteiro.
 (dono ou admin, com permissão de criar dashboards) vê o botão **"Editar com
 IA"** na barra do próprio dashboard. Ele abre um painel lateral **não-modal** —
 o dashboard continua visível e clicável atrás — sempre no modo Editar deste
-dashboard. Diferenças em relação à janela da Home:
+dashboard. O **título do painel é o modelo de IA configurado** (com a primeira
+letra maiúscula, ex.: "Gemini-2.5-flash"; o subtítulo mostra o provedor), e
+durante a geração o painel exibe o **raciocínio da IA ao vivo** ("Raciocínio:"
+sob o "Gerando com IA…") — disponível com provedor Gemini, sem custo extra de
+tokens (o modelo já raciocina por padrão; o texto é efêmero e some quando a
+resposta chega). Diferenças em relação à janela da Home:
 
 - **A conversa fica SALVA** (por usuário, por dashboard): feche o painel,
   navegue, dê F5 — ao reabrir, o histórico volta e você continua de onde parou,
