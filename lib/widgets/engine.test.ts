@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Testes do ENGINE com cliente fake (tests/helpers/fake-supabase — mesmo shape
 // do snapshotClient de produção). Travam os comportamentos que os RPCs não
 // podem cobrir sozinhos: pernas por métrica (invariante 9), correspondências
@@ -6,6 +6,9 @@
 // dia útil (pernas mensais + businessDayRef), comparação (exclusão mútua com
 // o align), fold monetário com fallback do @rate_date e a tradução nome→UUID
 // das condições de relação.
+// v1.1 (26/07/2026): agrupamento de responsáveis (0101, invariante 20) —
+// fusão da dimensão apelido→principal, expansão de filtro p/ o grupo e o gate
+// (widget sem referência a responsável não consulta responsibles).
 import { describe, expect, it } from "vitest";
 
 import {
@@ -527,5 +530,78 @@ describe("pernas de sub-base (2+ subs da mesma pai) × operandos escopados", () 
     expect(rpcCalls).toHaveLength(2);
     expect(data.rows).toEqual([{ metric_1: 83 }]);
     expect(data.dimensions).toEqual([]);
+  });
+});
+
+describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
+  const RESPONSIBLES = [
+    { id: "r-main", display_name: "Ana Paula", canonical_id: null },
+    { id: "r-alias", display_name: "Ana P.", canonical_id: "r-main" },
+  ];
+
+  it("dimensão responsible_id: linhas do apelido fundem no principal com o nome usado", async () => {
+    const { db } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "r-main", metric_1: 2 },
+            { dim_1: "r-alias", metric_1: 3 },
+          ],
+          error: null,
+        }),
+      },
+      tables: { responsibles: RESPONSIBLES },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        dimensions: [{ field: "responsible_id" }],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE
+    );
+    // Uma linha só, somada, rotulada pelo display_name do PRINCIPAL.
+    expect(data.rows).toEqual([{ dim_1: "Ana Paula", metric_1: 5 }]);
+  });
+
+  it("filtro eq no apelido expande para `in` no grupo antes do RPC", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 5 }], error: null }) },
+      tables: { responsibles: RESPONSIBLES },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        filters: [{ field: "responsible_id", op: "eq", value: "r-alias" }],
+        metrics: [{ field: "*", agg: "count" }],
+        visual_type: "kpi",
+      }),
+      AVAILABLE
+    );
+    const sent = (rpcCalls[0].args.p_filters as WidgetFilter[]).find(
+      (f) => f.field === "responsible_id"
+    );
+    expect(sent).toEqual({
+      field: "responsible_id",
+      op: "in",
+      value: ["r-main", "r-alias"],
+    });
+  });
+
+  it("gate: widget sem referência a responsável não consulta responsibles", async () => {
+    // Fake SEM handler de tabela: qualquer consulta a responsibles LANÇARIA.
+    const { db, queries } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [{ metric_1: 1 }], error: null }) },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        metrics: [{ field: "*", agg: "count" }],
+        visual_type: "kpi",
+      }),
+      AVAILABLE
+    );
+    expect(data.rows).toEqual([{ metric_1: 1 }]);
+    expect(queries).toHaveLength(0);
   });
 });

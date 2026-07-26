@@ -92,6 +92,11 @@ import type {
 } from "@/lib/widgets/types";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  EMPTY_CANON,
+  canonicalOf,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import {
   applySourceScope,
@@ -647,6 +652,10 @@ export default async function SnapshotPage({
     return isListWidget(w) && (w.settings?.rowSource ?? "records") === "records";
   });
   const fkLabels: Record<string, string> = {};
+  // Agrupamento de responsáveis (0101): mapa apelido→principal AO VIVO
+  // (responsibles é passthrough no adapter) — rótulos e grupos das tabelas do
+  // viewer saem canônicos, e desfazer o agrupamento vale retroativamente.
+  const respCanonForTables: Record<string, string> = {};
   const fkLabelsPromise = Promise.all(listTasks).then(async () => {
     const listRows = Object.values(recordListById).flat();
     if (listRows.length === 0) return;
@@ -658,9 +667,22 @@ export default async function SnapshotPage({
       if (r.operation_id) opIds.add(r.operation_id);
       if (r.related_lead_id) leadIds.add(r.related_lead_id);
     }
+    const canon = respIds.size
+      ? await loadResponsibleCanon(db)
+      : EMPTY_CANON;
+    for (const [alias, main] of canon.canonicalById)
+      respCanonForTables[alias] = main;
+    const respLookup = new Set<string>();
+    for (const id of respIds) {
+      respLookup.add(id);
+      respLookup.add(canonicalOf(id, canon));
+    }
     const [resp, ops, leads] = await Promise.all([
-      respIds.size
-        ? db.from("responsibles").select("id, display_name").in("id", [...respIds])
+      respLookup.size
+        ? db
+            .from("responsibles")
+            .select("id, display_name")
+            .in("id", [...respLookup])
         : Promise.resolve({ data: [] }),
       opIds.size
         ? db.from("operations").select("id, name").in("id", [...opIds])
@@ -669,8 +691,13 @@ export default async function SnapshotPage({
         ? db.from("records").select("id, title").in("id", [...leadIds])
         : Promise.resolve({ data: [] }),
     ]);
+    const respName: Record<string, string> = {};
     for (const r of resp.data ?? [])
-      fkLabels[r.id as string] = (r.display_name as string) ?? "—";
+      respName[r.id as string] = (r.display_name as string) ?? "—";
+    for (const id of respIds) {
+      const name = respName[canonicalOf(id, canon)] ?? respName[id];
+      if (name != null) fkLabels[id] = name;
+    }
     for (const o of ops.data ?? [])
       fkLabels[o.id as string] = (o.name as string) ?? "—";
     for (const l of leads.data ?? [])
@@ -985,6 +1012,7 @@ export default async function SnapshotPage({
           kanbanResults={kanbanResults}
           fields={fields}
           fkLabels={fkLabels}
+          respCanon={respCanonForTables}
           available={available}
           settings={dashSettings}
           activeTabId={activeTabId}

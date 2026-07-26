@@ -1,4 +1,7 @@
-<!-- Versão: 2.4 | Data: 25/07/2026 -->
+<!-- Versão: 2.5 | Data: 26/07/2026 -->
+<!-- v2.5 (26/07/2026): 0101 — responsibles.canonical_id (agrupamento de
+     exibição: apelido → principal, "nome usado"; reversível, grupo plano) +
+     auth_responsible_ids redefinida devolvendo o GRUPO do vendedor. -->
 <!-- v2.4 (25/07/2026): 0100 — visual_type 'linha_divisoria' no CHECK de
      widgets + backfill (forma + shape.kind 'linha' → linha_divisoria). -->
 <!-- v2.3 (25/07/2026): 0099 — campo core "Base" (source_system) vira selecao
@@ -239,7 +242,12 @@ org_admin (`auth_can_grant_admin`). org_admin/Owner NÃO são linhas de
 
 **`responsibles`** (0012) — lista curada de responsáveis. `display_name`,
 `bitrix_user_id` unique (ASSIGNED_BY_ID, para o matching do sync), `user_id` →
-`auth.users` (**o vínculo que dá visibilidade RLS ao vendedor**), `active`.
+`auth.users` (**o vínculo que dá visibilidade RLS ao vendedor**), `active`,
+`canonical_id` (0101) — **agrupamento de exibição**: aponta o principal cujo
+`display_name` é o "nome usado" deste apelido (NULL = principal; grupo sempre
+plano — só a action `setResponsibleCanonical` escreve). Reversível:
+`records.responsible_id` nunca é repontado; a resolução é no engine/loaders
+(`lib/config/responsible-canon.ts`, invariante 20 da arquitetura).
 
 **`operations`** (0012) — operações comerciais; `parent_operation_id` (0016) permite
 aninhamento (subárvore via função `operation_subtree`); `filter` jsonb (0083) —
@@ -430,7 +438,7 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 |---|---|---|
 | `set_updated_at` | 0001 | Trigger genérico de `updated_at` (usado por ~28 tabelas) |
 | `auth_roles`, `auth_has_role`, `auth_has_permission` | 0003 | Helpers de RLS (SECURITY DEFINER); desde 0068, sempre chamados como `(select ...)` nas policies |
-| `auth_responsible_ids` | 0037 | IDs de `responsibles` vinculados ao usuário logado — base da visibilidade do vendedor |
+| `auth_responsible_ids` | 0037 (redefinida 0101) | IDs de `responsibles` vinculados ao usuário logado — base da visibilidade do vendedor. Desde a 0101 devolve o GRUPO (ids próprios + principais + apelidos desses principais): registros no id do apelido continuam visíveis |
 | `operation_subtree` | 0016 | Subárvore de operações (aninhamento) |
 | `snapshot_refresh_copy` | 0056 (recriada 0057) | Cópia atômica de `records` → `snapshot_records` (mock-aware); EXECUTE só service role |
 | `enforce_reuniao_freeze` | 0051 | Trigger: descarta escrita de Data Reunião < 01/06/2026 e protege mocks |
@@ -600,6 +608,8 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0097 | snapshot_expires_at | TTL opcional do link público: `snapshots.expires_at` (NULL = sem expiração); enforcement fail-closed no viewer (`app/s/[token]`), sem tocar RPCs/policies |
 | 0098 | dashboard_ai_sessions | Sessão persistida do painel "Editar com IA" no dashboard (turnos/chat/prévia/snapshot do Desfazer por usuário×board; RLS linha própria + org; trigger de stamp derivando a org do board) |
 | 0099 | source_system_selecao | Só dados + provisioning: campo core "Base" (`source_system`) vira `selecao` por org (options = distintos ∪ bitrix/sheet_site/manual/csv; entra na whitelist `CORE_SELECT_CAPABLE`); `seed_org_defaults` re-emitida com a Base nascendo selecao. Não recria as RPCs |
+| 0100 | linha_divisoria_type | `visual_type` 'linha_divisoria' no CHECK de `widgets` + backfill (forma + `settings.shape.kind` 'linha' → linha_divisoria). Não recria as RPCs |
+| 0101 | responsible_canonical | `responsibles.canonical_id` (agrupamento de exibição: apelido → principal, reversível, grupo plano) + índice parcial + `auth_responsible_ids` redefinida devolvendo o GRUPO do vendedor. Não recria as RPCs de widget |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

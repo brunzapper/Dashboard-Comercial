@@ -246,6 +246,7 @@ export const RecordListTable = memo(function RecordListTable({
   userRoles,
   canEditValues,
   fkLabels,
+  respCanon = {},
   responsibleOptions = [],
   appearance,
   dateFormat,
@@ -282,6 +283,10 @@ export const RecordListTable = memo(function RecordListTable({
   userRoles: string[];
   canEditValues: boolean;
   fkLabels: Record<string, string>;
+  // Agrupamento de responsáveis (0101): apelido → principal — o "Agrupar por"
+  // na coluna Responsável funde o grupo (o keyOf chaveia FK por id cru de
+  // propósito; sem o mapa, apelido e principal virariam grupos homônimos).
+  respCanon?: Record<string, string>;
   // Responsáveis ativos (id→nome) para o SELECT da coluna responsible_id editável.
   responsibleOptions?: ResponsibleOption[];
   appearance?: AppearanceSettings;
@@ -982,7 +987,11 @@ export const RecordListTable = memo(function RecordListTable({
     keyOf: (r, field) => {
       const gf = groupFmtOf(field);
       if (gf) return groupBucketOf(field, r, gf).key;
-      return isDateCol(field) ? groupCellDisplay(field, r) : String(rawValue(field, r) ?? "");
+      if (isDateCol(field)) return groupCellDisplay(field, r);
+      const raw = String(rawValue(field, r) ?? "");
+      // Agrupamento de responsáveis (0101): apelido cai no grupo do principal
+      // (SÓ responsible_id — as demais FKs mantêm a proteção contra homônimos).
+      return field === "responsible_id" ? (respCanon[raw] ?? raw) : raw;
     },
     labelOf: (r, field) => {
       const gf = groupFmtOf(field);

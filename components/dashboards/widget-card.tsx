@@ -211,6 +211,7 @@ export const WidgetCard = memo(function WidgetCard({
   tableCells,
   fields,
   fkLabels,
+  respCanon = {},
   responsibleOptions,
   userRoles,
   canEditValues,
@@ -268,6 +269,9 @@ export const WidgetCard = memo(function WidgetCard({
   currencyRates?: CurrencyRates;
   conversionPeriod?: { year: number; quarter: number };
   fkLabels: Record<string, string>;
+  // Agrupamento de responsáveis (0101): apelido → principal (grupos da
+  // RecordListTable fundem no principal).
+  respCanon?: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
@@ -1227,6 +1231,7 @@ export const WidgetCard = memo(function WidgetCard({
               userRoles={userRoles}
               canEditValues={canEditValues}
               fkLabels={listFkLabels}
+              respCanon={respCanon}
               responsibleOptions={responsibleOptions}
               appearance={appearance}
               dateFormat={dateFormat}

@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 25/07/2026
+// Versão: 1.2 | Data: 26/07/2026
+// v1.2 (26/07/2026): agrupamento de responsáveis (0101) — as opções de
+//   responsável congeladas colapsam apelidos no principal (mesma lista da
+//   page); a consulta congelada segue expandindo via engine (passthrough de
+//   responsibles no adapter).
 // v1.1 (25/07/2026): espaço de grid v2 — widgets/settings normalizados
 //   (normalizeGridSpace) antes de congelar: config novo sai em unidades finas.
 // Refresh de um snapshot: congela o DATASET (via RPC snapshot_refresh_copy,
@@ -36,6 +40,10 @@ import type {
 } from "@/lib/widgets/types";
 import { toRecordType, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  buildResponsibleCanon,
+  collapseResponsibleOptions,
+} from "@/lib/config/responsible-canon";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 
 import { snapshotClient } from "./db-adapter";
@@ -455,13 +463,33 @@ async function restrictedEntityOptions(
   const labelCol = table === "responsibles" ? "display_name" : "name";
   let q = service
     .from(table)
-    .select(`id, ${labelCol}`)
+    .select(
+      table === "responsibles"
+        ? `id, ${labelCol}, canonical_id`
+        : `id, ${labelCol}`
+    )
     .eq("active", true)
     .order(labelCol);
   if (allowed) q = q.in("id", allowed);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return ((data ?? []) as unknown as Record<string, string>[])
-    .slice(0, MAX_OPTIONS)
-    .map((r) => ({ value: r.id, label: r[labelCol] ?? "—" }));
+  const rows = (data ?? []) as unknown as Record<string, string | null>[];
+  const options = rows.map((r) => ({
+    value: String(r.id),
+    label: (r[labelCol] as string) ?? "—",
+  }));
+  if (table === "responsibles") {
+    // Agrupamento (0101): apelidos colapsam no principal quando ele está na
+    // lista (restrição gravada só com o apelido mantém o apelido visível).
+    return collapseResponsibleOptions(
+      options,
+      buildResponsibleCanon(
+        rows.map((r) => ({
+          id: String(r.id),
+          canonical_id: (r.canonical_id as string | null) ?? null,
+        }))
+      )
+    ).slice(0, MAX_OPTIONS);
+  }
+  return options.slice(0, MAX_OPTIONS);
 }

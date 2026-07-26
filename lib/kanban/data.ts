@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 26/07/2026
+// v1.2 (26/07/2026): agrupamento de responsáveis (0101) — quadro agrupado por
+//   responsible_id joga o card do APELIDO na coluna do PRINCIPAL
+//   (recordGroupKey canonicaliza; rótulo da coluna já sai canônico via
+//   labels/fk-labels). Filtros expandem dentro do runRecordList.
 // v1.1 (21/07/2026): opts { filters, available, catalog } — o widget kanban
 //   passa os filtros de VISUALIZAÇÃO do dashboard (__qf__/?ff_/operação, via
 //   resolveWidgetViewScope) e o catálogo p/ resolvê-los (unified:/@bucket).
@@ -19,6 +23,7 @@ import type { SourceDef } from "@/lib/sources";
 import { bucketRecordDate } from "@/lib/widgets/date-buckets";
 import type { AvailableField } from "@/lib/widgets/fields";
 import { runRecordList } from "@/lib/widgets/record-list";
+import { loadResponsibleCanon } from "@/lib/config/responsible-canon";
 import type { DashboardPeriod } from "@/lib/widgets/period";
 import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
 import { resolveFieldMoneyFromRecord } from "@/lib/widgets/currency";
@@ -85,7 +90,10 @@ export type KanbanLabels = RecordLabels;
 // Chave de grupo de um registro conforme a config (valor ou bucket de data).
 export function recordGroupKey(
   record: RecordRow,
-  settings: KanbanSettings
+  settings: KanbanSettings,
+  // Agrupamento de responsáveis (0101): apelido → principal — o card do
+  // apelido cai na coluna do principal. Ausente = sem canonicalização.
+  respCanonById?: Map<string, string>
 ): string {
   if (settings.dateBucket && settings.dateField) {
     const raw = resolveRecordRef(record, settings.dateField);
@@ -93,7 +101,9 @@ export function recordGroupKey(
     return bucket.key === "—" ? KANBAN_NO_VALUE_KEY : bucket.key;
   }
   const raw = resolveRecordRef(record, settings.groupField ?? "stage");
-  const s = raw == null ? "" : String(raw).trim();
+  let s = raw == null ? "" : String(raw).trim();
+  if (s && (settings.groupField ?? "stage") === "responsible_id")
+    s = respCanonById?.get(s) ?? s;
   return s === "" ? KANBAN_NO_VALUE_KEY : s;
 }
 
@@ -194,12 +204,21 @@ export async function runKanban(
   const extraRefs = (settings.card?.extraFields ?? []).slice(0, 4);
   const metricRef = settings.metric || null;
 
+  // Agrupamento de responsáveis (0101): só carrega o mapa quando o quadro
+  // agrupa por responsible_id (gate — sem consulta extra nos demais).
+  const respCanonById =
+    !isCustom &&
+    !(settings.dateBucket && settings.dateField) &&
+    (settings.groupField ?? "stage") === "responsible_id"
+      ? (await loadResponsibleCanon(supabase)).canonicalById
+      : undefined;
+
   const groupKeys: string[] = [];
   const cards: Omit<KanbanCard, "columnKey">[] = records.map((r) => {
     // Personalizar: a "chave de grupo" é a coluna posicionada ("" = 1ª coluna).
     const groupKey = isCustom
       ? (placements.get(r.id)?.columnKey ?? "")
-      : recordGroupKey(r, settings);
+      : recordGroupKey(r, settings, respCanonById);
     groupKeys.push(groupKey);
     const metricRaw = metricRef ? resolveRecordRef(r, metricRef) : null;
     const metricNum =

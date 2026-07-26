@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): agrupamento de responsáveis (0101) — o rótulo de um
+// apelido é o display_name do PRINCIPAL ("nome usado"): canonicaliza antes do
+// lookup, com fallback pro próprio nome (grupo intacto quando o principal não
+// resolve). Cobre listas, kanban, exports CSV e o SOMASE client-side.
 // Rótulos das colunas FK presentes em linhas do modo lista (id→nome):
 // responsáveis, operações e leads relacionados. Extraído da page do dashboard
 // para ser reusado pela action de paginação (fetchWidgetRecordsPage) — a
@@ -6,6 +10,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
+import {
+  EMPTY_CANON,
+  canonicalOf,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 
 export async function collectRecordFkLabels(
   supabase: SupabaseClient,
@@ -21,9 +30,20 @@ export async function collectRecordFkLabels(
     if (r.operation_id) opIds.add(r.operation_id);
     if (r.related_lead_id) leadIds.add(r.related_lead_id);
   }
+  const canon = respIds.size
+    ? await loadResponsibleCanon(supabase)
+    : EMPTY_CANON;
+  const respLookup = new Set<string>();
+  for (const id of respIds) {
+    respLookup.add(id);
+    respLookup.add(canonicalOf(id, canon));
+  }
   const [resp, ops, leads] = await Promise.all([
-    respIds.size
-      ? supabase.from("responsibles").select("id, display_name").in("id", [...respIds])
+    respLookup.size
+      ? supabase
+          .from("responsibles")
+          .select("id, display_name")
+          .in("id", [...respLookup])
       : Promise.resolve({ data: [] }),
     opIds.size
       ? supabase.from("operations").select("id, name").in("id", [...opIds])
@@ -32,8 +52,13 @@ export async function collectRecordFkLabels(
       ? supabase.from("records").select("id, title").in("id", [...leadIds])
       : Promise.resolve({ data: [] }),
   ]);
+  const respName: Record<string, string> = {};
   for (const r of resp.data ?? [])
-    fkLabels[r.id as string] = (r.display_name as string) ?? "—";
+    respName[r.id as string] = (r.display_name as string) ?? "—";
+  for (const id of respIds) {
+    const name = respName[canonicalOf(id, canon)] ?? respName[id];
+    if (name != null) fkLabels[id] = name;
+  }
   for (const o of ops.data ?? [])
     fkLabels[o.id as string] = (o.name as string) ?? "—";
   for (const l of leads.data ?? [])

@@ -341,3 +341,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
   exemplo do SPEC aceito pelo validador REAL e contagens `**Label (N)**` do
   §16.2 do manual — o conteúdo do manual segue humano (regra do topo), só as
   contagens são conferidas.
+- **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
+  repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
+  um responsável como APELIDO de outro ("nome usado") — exibição reversível:
+  `records.responsible_id` NUNCA é repontado e limpar a coluna desfaz tudo.
+  Resolução em `lib/config/responsible-canon.ts` (loader cacheado + helpers
+  puros, gate barato por referência a `responsible_id`): filtros expandem p/ o
+  GRUPO (`expandResponsibleFilters` nos choke points de
+  `runWidget`/`runCalculatedWidget`/`runRecordList*`, incl. o `responsible_id
+  in` da tradução de operação e condições de SOMASE pós
+  `resolveFkCondFilters`), a dimensão funde apelido→principal no
+  `mergeRowsByBucket`/`dimValue`, rótulos saem do principal
+  (`fetchFkLabels`/`collectRecordFkLabels`) e dropdowns colapsam
+  (`collapseResponsibleOptions`) — MENOS os selects de write-back, que gravam
+  o responsável real. Restrição de snapshot grava `allowed_responsible_ids`
+  JÁ EXPANDIDA (RPC intocado); `auth_responsible_ids()` devolve o grupo
+  (visibilidade do vendedor cobre o id do apelido). Grupo sempre PLANO — só a
+  action `setResponsibleCanonical` (Configurações → Responsáveis) escreve.
+  Fiscalizado por `lib/config/responsible-canon.test.ts` + blocos nos testes
+  de engine/record-list. Ver `docs/arquitetura.md` §4.13 e invariante 20.

@@ -68,6 +68,10 @@ import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { loadSources } from "@/lib/config/sources";
 import {
+  buildResponsibleCanon,
+  collapseResponsibleOptions,
+} from "@/lib/config/responsible-canon";
+import {
   collectBoardSourceKeys,
   type ScopeWidgetLike,
 } from "@/lib/config/source-scope";
@@ -1187,13 +1191,20 @@ export async function listFilterOptionCandidates(
   if (kind === "responsible") {
     const { data } = await supabase
       .from("responsibles")
-      .select("id, display_name")
+      .select("id, display_name, canonical_id")
       .eq("active", true)
       .order("display_name");
-    return (data ?? []).map((r) => ({
-      value: r.id as string,
-      label: (r.display_name as string) ?? "—",
-    }));
+    // Agrupamento (0101): apelidos colapsam no principal (mesma lista que os
+    // dropdowns exibem).
+    const rows = (data ?? []) as {
+      id: string;
+      display_name: string;
+      canonical_id?: string | null;
+    }[];
+    return collapseResponsibleOptions(
+      rows.map((r) => ({ value: r.id, label: r.display_name ?? "—" })),
+      buildResponsibleCanon(rows)
+    );
   }
   if (kind === "operation") {
     const { data } = await supabase
