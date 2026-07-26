@@ -210,4 +210,34 @@ describe("computeWidgetPeriods", () => {
     expect(out.periodByWidget.w1).toBeNull();
     expect(out.periodSourceByWidget.w1).toBe("filter");
   });
+
+  it("excludedTargets é dinâmico: atinge todos menos os excluídos (widget novo entra)", () => {
+    const r = resolver({ sp: { periodo: "este_mes", pf_f1: "hoje" } });
+    const fw = widget("f1", { field: "closed_at", excludedTargets: ["w2"] });
+    // w3 "nasceu" depois do save do filtro e mesmo assim é atingido.
+    const out = r.computeWidgetPeriods([...dataWidgets, widget("w3")], [fw]);
+    expect(out.periodSourceByWidget).toEqual({
+      w1: "filter",
+      w2: "bar",
+      w3: "filter",
+    });
+  });
+
+  it("excludedTargets presente vence a whitelist legada `targets`", () => {
+    const r = resolver({ sp: { periodo: "este_mes", pf_f1: "hoje" } });
+    const fw = widget("f1", {
+      field: "closed_at",
+      targets: ["w1"],
+      excludedTargets: [],
+    });
+    const out = r.computeWidgetPeriods(dataWidgets, [fw]);
+    expect(out.periodSourceByWidget).toEqual({ w1: "filter", w2: "filter" });
+  });
+
+  it("id excluído inexistente é inofensivo", () => {
+    const r = resolver({ sp: { pf_f1: "hoje" } });
+    const fw = widget("f1", { field: "closed_at", excludedTargets: ["morto"] });
+    const out = r.computeWidgetPeriods(dataWidgets, [fw]);
+    expect(out.periodSourceByWidget).toEqual({ w1: "filter", w2: "filter" });
+  });
 });

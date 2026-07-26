@@ -421,6 +421,15 @@ export function WidgetAppearanceSheet({
           {/* ---------- Título e borda (todos os tipos com cromo) ---------- */}
           {!isShape ? (
           <BuilderSection value="titulo" title="Título e borda">
+            {/* Some SÓ a barra (borda/corpo ficam); em edição o card ganha
+                grip flutuante + ⋮ em hover. Grava só quando true. */}
+            <CheckRow
+              label="Ocultar barra de título"
+              checked={ap.title?.hidden === true}
+              onChange={(c) =>
+                patch({ title: { ...ap.title, hidden: c ? true : undefined } })
+              }
+            />
             <ColorField
               label="Cor do texto do título"
               value={ap.title?.color}

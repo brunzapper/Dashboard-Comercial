@@ -1,4 +1,11 @@
-<!-- Versão: 1.30 | Data: 25/07/2026 -->
+<!-- Versão: 1.31 | Data: 26/07/2026 -->
+<!-- v1.31 (26/07/2026): §4.2 — alvos do "Filtro de período" DINÂMICOS
+     (settings.excludedTargets, espelho do filtro_campo; widget novo entra
+     sozinho; whitelist legada `targets` honrada sem excludedTargets — ramo
+     permanente; runbook backfill-filter-targets.sql) e Aparência ganha
+     "Ocultar barra de título" (appearance.title.hidden — só a barra some;
+     grip flutuante + ⋮ em hover no modo edição). RPCs intocados. -->
+
 <!-- v1.30 (25/07/2026): §4.12 — espaço de grid v2 (grade FINA: base 120 sem
      margens, linha quadrada default, controle "Largura da coluna"; conversão
      runtime normalizeGridSpace keyed em canvas.gridVersion + migração lazy
@@ -402,6 +409,15 @@ A mesma lógica roda na página do dashboard, na action da Tabela Rápida e no v
 snapshot — foi extraída para um módulo puro justamente para não divergir. O escopo
 do widget é **reconstruído no servidor** (`lib/widgets/widget-scope.ts`) — nunca se
 confia em config vinda do client.
+
+**Alvos do filtro de período (26/07/2026):** o vínculo é DINÂMICO, espelho do
+filtro_campo — `settings.excludedTargets` guarda os widgets DESMARCADOS na
+edição e o alvo efetivo é "todos os widgets de dados menos estes" (widget novo
+entra sozinho). A whitelist LEGADA `settings.targets` (ids congelados no save)
+segue honrada quando `excludedTargets` está ausente — snapshots congelados a
+guardam; ramo permanente em `computeWidgetPeriods`. Re-save no editor migra
+(grava `excludedTargets` e apaga `targets`); runbook p/ migrar em massa:
+`supabase/apply/backfill-filter-targets.sql` (rodar só APÓS o deploy).
 
 Fontes dinâmicas (`data_sources`, criáveis via UI sem migração) precisam estar
 cobertas no mapa `fieldBySource` do resolver — o `@period` do RPC **exclui**
