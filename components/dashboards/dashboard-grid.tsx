@@ -1,4 +1,6 @@
-// Versão: 2.16 | Data: 25/07/2026
+// Versão: 2.17 | Data: 26/07/2026
+// v2.17 (26/07/2026): repassa recordListWindowTotalById → WidgetCard
+//   (janela incremental do modo lista full-fetch; record-list v2.0).
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
 // v2.16 (25/07/2026): mescla com efeito IMEDIATO — pendingMerges/effWidgets
@@ -378,6 +380,7 @@ export function DashboardGrid({
   recordListById,
   recordListExtraById,
   recordListTotalById,
+  recordListWindowTotalById,
   entityListById,
   calcById,
   fields,
@@ -436,6 +439,9 @@ export function DashboardGrid({
   // Total dos widgets-lista paginados no servidor (chave ausente = full fetch;
   // opcional — o viewer de snapshots nunca pagina, dataset congelado).
   recordListTotalById?: Record<string, number>;
+  // Total do recorte quando a 1ª carga do full fetch foi TRUNCADA na janela
+  // incremental (record-list v2.0). Chave ausente = conjunto completo.
+  recordListWindowTotalById?: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   fields: FieldDefinition[];
@@ -1399,6 +1405,7 @@ export function DashboardGrid({
                         }
                         recordListExtra={recordListExtraById?.[shown.id]}
                         recordListTotal={recordListTotalById?.[shown.id]}
+                        recordListWindowTotal={recordListWindowTotalById?.[shown.id]}
                         entityList={
                           entityListById[shown.id] ?? EMPTY_ENTITY_LIST
                         }

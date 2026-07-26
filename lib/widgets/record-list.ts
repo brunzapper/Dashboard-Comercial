@@ -1,4 +1,11 @@
-// Versão: 1.9 | Data: 26/07/2026
+// Versão: 2.0 | Data: 26/07/2026
+// v2.0 (26/07/2026): janela incremental do full fetch — runRecordListWindow
+//   (offset + teto com count exato; desempate por id p/ janelas estáveis) e
+//   runRecordListWithExtras ganha windowOpts: widgets SEM pernas de
+//   Metric.sources e sem limit buscam só a 1ª janela (default 1000, env
+//   RECORD_LIST_WINDOW; 0 = sem teto) e o cliente carrega as próximas via
+//   action. Com pernas, o full fetch segue (basis dos subtotais precisa do
+//   conjunto completo). Filtro @bucket (pós-fetch) segue sem janela.
 // v1.9 (26/07/2026): agrupamento de responsáveis (0101) — runRecordList e
 //   runRecordListPage expandem filtros responsible_id p/ o grupo (apelidos ∪
 //   principal) ANTES de montar a query PostgREST (a decisão dos mocks não
@@ -465,6 +472,73 @@ export async function runRecordList(
   return applyBucketFilters(all);
 }
 
+// ===================== Janela incremental do full fetch =====================
+
+/** Teto default de linhas por carga do modo lista full-fetch. */
+export const RECORD_LIST_WINDOW_DEFAULT = 1000;
+
+/**
+ * Tamanho da janela do full fetch — env RECORD_LIST_WINDOW (0 = sem teto,
+ * comportamento antigo; ausente = 1000).
+ */
+export function recordListWindowSize(): number {
+  const raw = process.env.RECORD_LIST_WINDOW;
+  if (raw == null || raw === "") return RECORD_LIST_WINDOW_DEFAULT;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0
+    ? Math.floor(n)
+    : RECORD_LIST_WINDOW_DEFAULT;
+}
+
+/**
+ * Uma JANELA do conjunto do modo lista (offset + teto) com count exato do
+ * recorte — mesma consulta de runRecordList, paginada. Desempate estável por
+ * `id` (como runRecordListPage): janelas subsequentes continuam do offset sem
+ * repetir/perder linha. Filtros @bucket são pós-fetch: offset/count do
+ * servidor não valem — cai no conjunto completo e devolve windowed=false (o
+ * chamador não oferece "Carregar mais").
+ */
+export async function runRecordListWindow(
+  supabase: SupabaseClient,
+  config: WidgetConfig,
+  period: DashboardPeriod | null | undefined,
+  available: AvailableField[],
+  catalog: SourceDef[] = BUILTIN_SOURCES,
+  opts: { offset: number; maxRows: number } = {
+    offset: 0,
+    maxRows: RECORD_LIST_WINDOW_DEFAULT,
+  }
+): Promise<{ rows: RecordRow[]; total: number; windowed: boolean }> {
+  config = await expandConfigResponsibles(supabase, config);
+  const { q, hasBucketFilters, applyBucketFilters } = buildRecordListQuery(
+    supabase,
+    config,
+    period,
+    available,
+    { count: true },
+    catalog
+  );
+  const ordered = q
+    .order("source_created_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: true });
+
+  if (hasBucketFilters) {
+    const all = await fetchAll(ordered);
+    await attachMatches(supabase, all);
+    const filtered = applyBucketFilters(all);
+    return { rows: filtered, total: filtered.length, windowed: false };
+  }
+
+  const { data, error, count } = await ordered.range(
+    Math.max(0, opts.offset),
+    Math.max(0, opts.offset) + opts.maxRows - 1
+  );
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as unknown as RecordRow[];
+  await attachMatches(supabase, rows);
+  return { rows, total: count ?? opts.offset + rows.length, windowed: true };
+}
+
 /**
  * TOP-UP de mocks das pernas COBERTAS (fontes da métrica dentro das do widget,
  * inclusive widget em "todas as fontes"): pernas cobertas reusam os registros
@@ -527,8 +601,13 @@ export async function runRecordListWithExtras(
   catalog: SourceDef[] = BUILTIN_SOURCES,
   // Defs de campo p/ as pernas enxergarem operandos com escopo (`agg:…@<fonte>`)
   // em fórmulas de 'calculado_agg' salvas (metricScopedSources).
-  fields: FieldDefinition[] = []
-): Promise<{ records: RecordRow[]; extra: RecordRow[] }> {
+  fields: FieldDefinition[] = [],
+  // Janela incremental (v2.0): teto da 1ª carga do full fetch. Só se aplica
+  // sem pernas de Metric.sources (a basis dos subtotais precisa do conjunto
+  // completo) e sem settings.limit. `total` volta APENAS quando a janela foi
+  // aplicada (count exato do recorte; o chamador compara com records.length).
+  windowOpts?: { maxRows: number } | null
+): Promise<{ records: RecordRow[]; extra: RecordRow[]; total?: number }> {
   // Linhas core (0086) fora: refs custom:<key> nunca apontam p/ coluna núcleo.
   const fieldByKey = new Map(
     fields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
@@ -538,6 +617,19 @@ export async function runRecordListWithExtras(
     config.sources,
     fieldByKey
   );
+  const hasLimit =
+    typeof config.settings?.limit === "number" && config.settings.limit > 0;
+  if (windowOpts && windowOpts.maxRows > 0 && legs.length === 0 && !hasLimit) {
+    const { rows, total, windowed } = await runRecordListWindow(
+      supabase,
+      config,
+      period,
+      available,
+      catalog,
+      { offset: 0, maxRows: windowOpts.maxRows }
+    );
+    return { records: rows, extra: [], total: windowed ? total : undefined };
+  }
   const extraSources =
     config.sources && config.sources.length > 0
       ? [...new Set(legs.flatMap((l) => l.sources))].filter(

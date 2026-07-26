@@ -1,4 +1,6 @@
-// Versão: 2.5 | Data: 18/07/2026
+// Versão: 2.6 | Data: 26/07/2026
+// v2.6 (26/07/2026): repassa recordListWindowTotalById (janela incremental
+//   do modo lista full-fetch; record-list v2.0) page → grid.
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
 // barra de período global + o grid. Recebe tudo já serializável (widgets +
 // dados pré-computados).
@@ -142,6 +144,7 @@ export function DashboardClient({
   recordListById,
   recordListExtraById = {},
   recordListTotalById,
+  recordListWindowTotalById = {},
   entityListById,
   calcById,
   calcVarsById = {},
@@ -188,6 +191,9 @@ export function DashboardClient({
   recordListExtraById?: Record<string, RecordRow[]>;
   // Total dos widgets-lista paginados no servidor (chave ausente = full fetch).
   recordListTotalById: Record<string, number>;
+  // Janela incremental do full fetch (record-list v2.0): total do recorte
+  // quando a 1ª carga foi truncada (ausente = conjunto completo).
+  recordListWindowTotalById?: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   // Calculadora: valores das variáveis por widget ({ widgetId: { varId: r } }).
@@ -991,6 +997,7 @@ export function DashboardClient({
             recordListById={recordListById}
             recordListExtraById={recordListExtraById}
             recordListTotalById={recordListTotalById}
+            recordListWindowTotalById={recordListWindowTotalById}
             entityListById={entityListById}
             calcById={calcById}
             calcVarsById={calcVarsById}

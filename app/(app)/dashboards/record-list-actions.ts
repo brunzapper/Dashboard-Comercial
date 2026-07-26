@@ -1,16 +1,23 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Paginação server-side do widget de lista de registros: o WidgetCard chama
 // esta action ao trocar de página (a página 1 chega pelas props do RSC). O
 // escopo (período/filtros/busca da URL) é reconstruído no servidor pelo MESMO
 // loadWidgetScope do export — nunca confia em config vinda do client; RLS
 // vale (client do usuário). Só atende widgets elegíveis (serverPaginatedList).
+// v1.1 (26/07/2026): fetchWidgetRecordsWindow — próxima janela do modo
+// full-fetch (inelegível à paginação): mesmo recorte via loadWidgetScope,
+// offset por contagem de linhas já carregadas no cliente.
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { RecordRow } from "@/lib/records/types";
 import { collectRecordFkLabels } from "@/lib/widgets/fk-labels";
-import { runRecordListPage } from "@/lib/widgets/record-list";
+import {
+  recordListWindowSize,
+  runRecordListPage,
+  runRecordListWindow,
+} from "@/lib/widgets/record-list";
 import {
   RECORD_LIST_PAGE_SIZE,
   serverPaginatedList,
@@ -68,6 +75,58 @@ export async function fetchWidgetRecordsPage(
         pageSize: RECORD_LIST_PAGE_SIZE,
       },
       sources
+    );
+    const fkLabels = await collectRecordFkLabels(supabase, rows);
+    return { ok: true, rows, total, fkLabels };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Próxima JANELA do modo lista full-fetch (widget INELEGÍVEL à paginação —
+ * agrupado/ordem manual/sort exótico — cuja 1ª janela veio do RSC): mesma
+ * consulta com offset, count exato e desempate por id (runRecordListWindow).
+ * O cliente anexa as linhas às já carregadas até cobrir o total.
+ */
+export async function fetchWidgetRecordsWindow(
+  dashboardId: string,
+  widgetId: string,
+  // window.location.search do cliente — mesmo resolver único da page.
+  search: string,
+  // Nº de linhas já carregadas no cliente (offset da próxima janela).
+  offset: number
+): Promise<WidgetRecordsPageResult> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  const supabase = await createClient();
+
+  const scoped = await loadWidgetScope(
+    supabase,
+    session,
+    dashboardId,
+    widgetId,
+    search
+  );
+  if (!scoped.ok) return scoped;
+  const { widget, config, period, available, sources } = scoped.scope;
+
+  if (serverPaginatedList(widget.settings)) {
+    return { ok: false, message: "Widget é paginado no servidor." };
+  }
+  const windowSize = recordListWindowSize();
+  if (windowSize <= 0) {
+    return { ok: false, message: "Janela do modo lista desligada." };
+  }
+
+  try {
+    const { rows, total } = await runRecordListWindow(
+      supabase,
+      config,
+      period,
+      available,
+      sources,
+      { offset: Math.max(0, Math.floor(offset)), maxRows: windowSize }
     );
     const fkLabels = await collectRecordFkLabels(supabase, rows);
     return { ok: true, rows, total, fkLabels };

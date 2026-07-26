@@ -425,6 +425,21 @@ de snapshot podem excluir fontes de uma métrica — ela degrada para "—"
 (comportamento documentado, não é bug). KPI razão ignora
 `numerator/denominator.sources` no v1.
 
+**Janela incremental do modo lista full-fetch (26/07/2026):** listas
+inelegíveis à paginação server-side (`serverPaginatedList` false — agrupadas/
+ordem manual/sort exótico) e sem `settings.limit` não buscam mais o conjunto
+inteiro: a page carrega a 1ª janela (default 1000, env `RECORD_LIST_WINDOW`,
+`0` = teto desligado) via `runRecordListWindow` (`record-list.ts` v2.0 —
+offset + count exato, desempate estável por `id`) e o WidgetCard anexa as
+próximas com "Carregar mais" (`fetchWidgetRecordsWindow`, mesmo recorte via
+widget-scope — invariante 12). Grupos/subtotais/busca client-side valem sobre
+o CARREGADO (rodapé avisa "grupos e totais parciais"). Exceções que mantêm o
+full fetch: pernas de `Metric.sources` (basis dos subtotais precisa do
+conjunto completo), filtro `@bucket` (pós-fetch — offset/count do servidor
+não valem) e o viewer de snapshot (dataset congelado + pós-filtro de
+`partner_only` quebraria o total; payload já limitado na captura). Export CSV
+do widget = janelas carregadas; export server-side segue completo.
+
 ### 4.2 Filtros de período
 
 `lib/widgets/period.ts` + `lib/widgets/period-resolve.ts`. O período efetivo de cada

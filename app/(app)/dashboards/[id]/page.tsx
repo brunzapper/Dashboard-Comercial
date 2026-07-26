@@ -65,6 +65,7 @@ import {
 import { runWidget } from "@/lib/widgets/engine";
 import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
 import {
+  recordListWindowSize,
   runRecordListPage,
   runRecordListWithExtras,
 } from "@/lib/widgets/record-list";
@@ -1016,6 +1017,9 @@ export default async function DashboardPage({
   // Total de registros dos widgets-lista PAGINADOS no servidor (o cliente usa
   // p/ montar o pager; ausente = widget de full fetch, paginação client-side).
   const recordListTotalById: Record<string, number> = {};
+  // Janela incremental do full fetch (v2.0 do record-list): total do recorte
+  // quando a 1ª carga foi TRUNCADA na janela (ausente = conjunto completo).
+  const recordListWindowTotalById: Record<string, number> = {};
   const entityListById: Record<string, EntityListRow[]> = {};
   const calcById: Record<string, CalcWidgetResult> = {};
   const calcVarsById: Record<string, Record<string, CalcWidgetResult>> = {};
@@ -1204,16 +1208,25 @@ export default async function DashboardPage({
             recordListById[w.id] = rows;
             recordListTotalById[w.id] = total;
           } else {
-            const { records, extra } = await runRecordListWithExtras(
+            // Full fetch com JANELA (v2.0): a 1ª carga para no teto (default
+            // 1000) e o WidgetCard busca as próximas via
+            // fetchWidgetRecordsWindow. Widgets com pernas de Metric.sources
+            // seguem no conjunto completo (basis dos subtotais).
+            const windowSize = recordListWindowSize();
+            const { records, extra, total } = await runRecordListWithExtras(
               supabase,
               config,
               periodByWidget[w.id],
               available,
               sources,
-              customFields
+              customFields,
+              windowSize > 0 ? { maxRows: windowSize } : null
             );
             recordListById[w.id] = records;
             if (extra.length > 0) recordListExtraById[w.id] = extra;
+            if (typeof total === "number" && total > records.length) {
+              recordListWindowTotalById[w.id] = total;
+            }
           }
         } catch (e) {
           recordListById[w.id] = [];
@@ -1446,6 +1459,7 @@ export default async function DashboardPage({
         recordListById={recordListById}
         recordListExtraById={recordListExtraById}
         recordListTotalById={recordListTotalById}
+        recordListWindowTotalById={recordListWindowTotalById}
         entityListById={entityListById}
         calcById={calcById}
         calcVarsById={calcVarsById}
