@@ -1,4 +1,7 @@
-<!-- Versão: 2.5 | Data: 26/07/2026 -->
+<!-- Versão: 2.6 | Data: 26/07/2026 -->
+<!-- v2.6 (26/07/2026): 0102 — maintenance_analyze() (ANALYZE pós-sync em
+     massa, service role only; disparada pelo runner ao concluir job com
+     >= 2.000 linhas escritas). -->
 <!-- v2.5 (26/07/2026): 0101 — responsibles.canonical_id (agrupamento de
      exibição: apelido → principal, "nome usado"; reversível, grupo plano) +
      auth_responsible_ids redefinida devolvendo o GRUPO do vendedor. -->
@@ -452,6 +455,7 @@ America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 | `auth_can_grant_admin` | 0092 | Caller é org_admin de org que contém o alvo (gestão do papel `admin`) |
 | `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
 | `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
+| `maintenance_analyze` | 0102 | `ANALYZE` de `records`/`record_matches` (SECURITY DEFINER — service role não é dona das tabelas); EXECUTE só service role. Disparada pelo runner do sync ao concluir job com >= 2.000 linhas escritas |
 
 ## 5. Triggers
 
@@ -610,6 +614,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0099 | source_system_selecao | Só dados + provisioning: campo core "Base" (`source_system`) vira `selecao` por org (options = distintos ∪ bitrix/sheet_site/manual/csv; entra na whitelist `CORE_SELECT_CAPABLE`); `seed_org_defaults` re-emitida com a Base nascendo selecao. Não recria as RPCs |
 | 0100 | linha_divisoria_type | `visual_type` 'linha_divisoria' no CHECK de `widgets` + backfill (forma + `settings.shape.kind` 'linha' → linha_divisoria). Não recria as RPCs |
 | 0101 | responsible_canonical | `responsibles.canonical_id` (agrupamento de exibição: apelido → principal, reversível, grupo plano) + índice parcial + `auth_responsible_ids` redefinida devolvendo o GRUPO do vendedor. Não recria as RPCs de widget |
+| 0102 | maintenance_analyze | Performance: função `maintenance_analyze()` (ANALYZE de records/record_matches, service role only) — o runner do sync a dispara ao concluir job volumoso. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

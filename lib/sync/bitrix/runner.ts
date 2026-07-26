@@ -9,6 +9,9 @@
 // anterior parou — é isso que permite o navegador NÃO precisar dirigir o loop.
 // v1.1 (19/07/2026): fuso da fonte (0079) — JobContext.timezones (opcional)
 //   persiste o fuso por entidade e chega ao mapDeal/mapLead de cada página.
+// v1.2 (26/07/2026): ANALYZE automático pós-job (0102) — job concluído que
+//   escreveu >= ANALYZE_MIN_ROWS dispara maintenance_analyze (best-effort),
+//   eliminando o passo manual do runbook de dashboard lento pós-backfill.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
@@ -38,6 +41,22 @@ const STALE_JOB_MS = 10 * 60 * 1000;
 // Pausa curta entre passos ao dirigir server-side (o client já pausa entre
 // páginas internamente; isto só suaviza rajadas).
 const STEP_PAUSE_MS = 250;
+
+// Job que escreveu >= isto em `records` dispara ANALYZE ao concluir (0102):
+// estatísticas defasadas pós-reescrita em massa davam plano ruim nos RPCs de
+// widget até um ANALYZE manual. Best-effort — falha não derruba o job.
+const ANALYZE_MIN_ROWS = 2000;
+
+async function maybeAnalyzeAfterJob(
+  db: SupabaseClient,
+  totals: SyncResult
+): Promise<void> {
+  if (totals.inserted + totals.updated < ANALYZE_MIN_ROWS) return;
+  const { error } = await db.rpc("maintenance_analyze");
+  if (error) {
+    console.warn("[sync] maintenance_analyze falhou:", error.message);
+  }
+}
 
 // Uma fase = um método + filtro do Bitrix; percorrida página a página (`start`).
 interface PhasePlan {
@@ -345,6 +364,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         .from("sync_jobs")
         .update({ status: "done", finished_at: new Date().toISOString() })
         .eq("id", jobId);
+      await maybeAnalyzeAfterJob(db, totals);
       return { ...snapshot({ ...job, status: "done" }), done: true, status: "done" };
     }
 
@@ -415,6 +435,8 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         finished_at: done ? new Date().toISOString() : null,
       })
       .eq("id", jobId);
+
+    if (done) await maybeAnalyzeAfterJob(db, totals);
 
     return {
       jobId,
