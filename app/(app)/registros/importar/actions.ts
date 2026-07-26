@@ -27,6 +27,7 @@ import {
 import type { SyncResult } from "@/lib/sync/shared";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
+import { ensureAllAutoOperations } from "@/lib/operations/auto-operations";
 
 const MAX_CHUNK_ROWS = 500;
 const IMPORT_FIELD_TYPES = new Set(["texto", "numero", "data"]);
@@ -288,6 +289,13 @@ export async function finalizeCsvImport(): Promise<{ ok: boolean; message?: stri
     await recalcAllFormulaFields();
   } catch {
     /* ignora: auto-match/recalc podem ser rodados depois em Campos. */
+  }
+  // Sub-operações automáticas (0106): base com config gera/atualiza as
+  // sub-operações a partir dos registros recém-importados.
+  try {
+    await ensureAllAutoOperations(db);
+  } catch {
+    /* ignora: o botão "Gerar sub-operações agora" em Fontes cobre depois. */
   }
   // Dados de REGISTROS não afetam os providers do layout raiz (fontes/rótulos):
   // revalida só as superfícies que exibem registros, em vez de "/" + layout

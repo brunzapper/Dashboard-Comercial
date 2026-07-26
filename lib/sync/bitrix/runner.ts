@@ -12,10 +12,15 @@
 // v1.2 (26/07/2026): ANALYZE automático pós-job (0102) — job concluído que
 //   escreveu >= ANALYZE_MIN_ROWS dispara maintenance_analyze (best-effort),
 //   eliminando o passo manual do runbook de dashboard lento pós-backfill.
+// v1.3 (26/07/2026): auto-match INCREMENTAL pós-job (Parcerias) — job
+//   concluído que escreveu algo roda runAutoMatchIncremental (lado A restrito
+//   ao que o job tocou) + recalc direcionado dos recém-casados. Best-effort.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
 import type { FormulaFieldDef } from "@/lib/records/formulas";
+import { runAutoMatchIncremental } from "@/lib/records/matching-engine";
+import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import { BitrixClient } from "@/lib/sync/bitrix/client";
 import { BitrixLookups, type SerializedLookups } from "@/lib/sync/bitrix/lookups";
 import { mapDeal, mapLead, type MappedRecord } from "@/lib/sync/bitrix/mapper";
@@ -58,6 +63,28 @@ async function maybeAnalyzeAfterJob(
   }
 }
 
+// Conexões reativas (Parcerias): job concluído dispara o auto-match
+// INCREMENTAL das regras que tocam lead/negocio — lado A restrito ao que ESTE
+// job escreveu (last_synced_at >= started_at) — e o recalc direcionado dos
+// registros recém-casados (fórmulas com operandos match:). Antes disso, um
+// lead novo do Bitrix só casava quando alguém rodava o auto-match em lote.
+// Best-effort: falha não derruba o job (padrão maybeAnalyzeAfterJob).
+async function maybeAutoMatchAfterJob(
+  db: SupabaseClient,
+  job: JobRow
+): Promise<void> {
+  if (job.totals.inserted + job.totals.updated === 0) return;
+  try {
+    const res = await runAutoMatchIncremental(db, {
+      touchedRecordTypes: ["lead", "negocio"],
+      since: job.started_at ?? job.created_at ?? undefined,
+    });
+    if (res.inserted > 0) await recalcFormulaFieldsForRecords(res.recordIds);
+  } catch (e) {
+    console.warn("[sync] auto-match pós-job falhou:", (e as Error).message);
+  }
+}
+
 // Uma fase = um método + filtro do Bitrix; percorrida página a página (`start`).
 interface PhasePlan {
   label: string;
@@ -92,6 +119,8 @@ interface JobRow {
   context: JobContext | null;
   totals: SyncResult;
   error: string | null;
+  created_at: string;
+  started_at: string | null;
 }
 
 export interface StepProgress {
@@ -365,6 +394,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         .update({ status: "done", finished_at: new Date().toISOString() })
         .eq("id", jobId);
       await maybeAnalyzeAfterJob(db, totals);
+      await maybeAutoMatchAfterJob(db, job);
       return { ...snapshot({ ...job, status: "done" }), done: true, status: "done" };
     }
 
@@ -436,7 +466,10 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       })
       .eq("id", jobId);
 
-    if (done) await maybeAnalyzeAfterJob(db, totals);
+    if (done) {
+      await maybeAnalyzeAfterJob(db, totals);
+      await maybeAutoMatchAfterJob(db, { ...job, totals });
+    }
 
     return {
       jobId,

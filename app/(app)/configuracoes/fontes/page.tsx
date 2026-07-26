@@ -17,6 +17,10 @@ import type { ComboboxOption } from "@/components/ui/combobox";
 import { SourcesManager } from "@/components/configuracoes/sources-manager";
 import { SubSourcesManager } from "@/components/configuracoes/sub-sources-manager";
 import { SourceLabelsManager } from "@/components/configuracoes/source-labels-manager";
+import {
+  AutoOperationsManager,
+  type AutoOperationsConfigRow,
+} from "@/components/configuracoes/auto-operations-manager";
 
 export default async function FontesPage() {
   await requireSettingsArea("fontes");
@@ -54,6 +58,26 @@ export default async function FontesPage() {
         ])
     );
 
+  // Sub-operações automáticas (0106): configs + opções de operação-pai.
+  const [{ data: autoOpData }, { data: opsData }] = await Promise.all([
+    supabase
+      .from("source_auto_operations")
+      .select(
+        "source_key, parent_operation_id, name_field, value_field, target_field, target_sources, profile_op, enabled"
+      )
+      .order("source_key", { ascending: true }),
+    supabase
+      .from("operations")
+      .select("id, name")
+      .eq("active", true)
+      .order("name", { ascending: true }),
+  ]);
+  const autoOpConfigs = (autoOpData ?? []) as AutoOperationsConfigRow[];
+  const operationOptions: ComboboxOption[] = (opsData ?? []).map((o) => ({
+    value: o.id as string,
+    label: o.name as string,
+  }));
+
   // Campos personalizados de DATA por pai: opções extras do campo de período
   // da sub-fonte (0082 — 'custom:<key>'; ex.: Data Reunião).
   const dateFieldOptionsByParent: Record<string, ComboboxOption[]> =
@@ -90,6 +114,12 @@ export default async function FontesPage() {
         sources={sources}
         fieldOptionsByParent={fieldOptionsByParent}
         dateFieldOptionsByParent={dateFieldOptionsByParent}
+      />
+      <AutoOperationsManager
+        sources={sources}
+        configs={autoOpConfigs}
+        operationOptions={operationOptions}
+        fieldOptionsByParent={fieldOptionsByParent}
       />
       <div>
         <h2 className="text-lg font-semibold">Rótulos</h2>

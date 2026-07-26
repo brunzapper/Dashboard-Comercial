@@ -26,7 +26,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { sourceLabel, toSourceKey, type SourceKey } from "@/lib/sources";
+import {
+  rootSources,
+  sourceLabel,
+  toSourceKey,
+  type SourceKey,
+} from "@/lib/sources";
 import { useSources } from "@/components/sources-context";
 import type { MatchRule } from "@/lib/matching";
 import type { RefOption } from "@/components/campos/correspondences-manager";
@@ -66,7 +71,9 @@ function MatchRuleForm({
   const [state, formAction, pending] = useActionState(action, initial);
 
   const catalog = useSources();
-  const sourceOptions: ComboboxOption[] = catalog.map((s) => ({
+  // Só Bases raiz: sub-base compartilha o record_type da pai e a FK de
+  // match_rules (source_a/b -> data_sources.record_type) rejeitaria a key.
+  const sourceOptions: ComboboxOption[] = rootSources(catalog).map((s) => ({
     value: s.key,
     label: s.label,
   }));

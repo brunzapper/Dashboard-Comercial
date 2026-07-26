@@ -396,7 +396,12 @@ export function buildMatchFields(
   sources: SourceDef[] = BUILTIN_SOURCES
 ): AvailableField[] {
   const out: AvailableField[] = [];
-  for (const { key: src, label: srcLabel } of sources) {
+  // Só fontes RAIZ: sub-fonte compartilha o record_type da pai — o "casado"
+  // seria o MESMO registro da pai com rótulo enganoso (e sem o recorte da
+  // sub), e a key da sub não resolve no lookup dos helpers SQL (0104).
+  for (const { key: src, label: srcLabel } of sources.filter(
+    (s) => !s.parentKey
+  )) {
     for (const f of MATCH_CORE_FIELDS) {
       out.push({
         field: `match:${src}:${f.field}`,
