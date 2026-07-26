@@ -1,8 +1,13 @@
-// Versão: 1.3 | Data: 21/07/2026
+// Versão: 1.4 | Data: 26/07/2026
 // Shell client da página dedicada de kanban (/kanbans/[id]): cabeçalho (nome,
 // visões kanban|lista, barra de período simples, config de colunas, criação) +
 // o quadro/lista. Os dados chegam computados do RSC; navegação de período muda
 // a URL (?periodo/?de/?ate) e o servidor recomputa.
+// v1.4 (26/07/2026): prop opcional `widgetCtx` — a página cheia de um WIDGET
+//   kanban (/kanbans/w/[widgetId]) reusa este shell: persiste em
+//   widgets.settings.kanban (saveWidgetSettings), owner {kind:'widget'}
+//   (placements compartilhados com o widget), sem Agenda/Aparência (board-only)
+//   e defaults de tarefa espelhando o host do widget. Modo board inalterado.
 // v1.3 (21/07/2026): intervalo De/Até em RASCUNHO (PeriodRangeDraft, mesmo
 //   componente da barra de período dos dashboards) — digitar não navega mais a
 //   cada tecla com intervalo parcial; commit com o intervalo completo (auto)
@@ -14,6 +19,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarDays, Download, List, SquareKanban } from "lucide-react";
 
@@ -23,8 +29,11 @@ import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { PeriodRangeDraft } from "@/components/dashboards/period-range-inputs";
 import { PERIOD_PRESETS } from "@/lib/widgets/period";
-import { updateBoardSettings } from "@/app/(app)/dashboards/actions";
-import type { DashboardSettings } from "@/lib/widgets/types";
+import {
+  saveWidgetSettings,
+  updateBoardSettings,
+} from "@/app/(app)/dashboards/actions";
+import type { DashboardSettings, WidgetSettings } from "@/lib/widgets/types";
 import type { KanbanBoardData, KanbanColumnCards } from "@/lib/kanban/data";
 import { computeDateOnMove } from "@/lib/kanban/date-move";
 import { todayBrasiliaIso } from "@/lib/date/today";
@@ -82,6 +91,7 @@ export function KanbanPageClient({
   taskCtx,
   responsibleLabels = {},
   canConfig,
+  widgetCtx,
 }: {
   boardId: string;
   boardName: string;
@@ -93,6 +103,15 @@ export function KanbanPageClient({
   taskCtx?: TaskFormContext;
   responsibleLabels?: Record<string, string>;
   canConfig: boolean;
+  // Página cheia de um WIDGET kanban (/kanbans/w/[widgetId]): persistência em
+  // widgets.settings (o save sobrescreve o jsonb inteiro — widgetSettings é o
+  // settings COMPLETO do widget) e placements por widget_id. Ausente = board.
+  widgetCtx?: {
+    widgetId: string;
+    dashboardId: string;
+    dashboardName: string;
+    widgetSettings: WidgetSettings;
+  };
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -100,18 +119,28 @@ export function KanbanPageClient({
   const [view, setView] = useState<View>("kanban");
   const isTasks = kanban.mode === "tarefas";
   const isCustom = !isTasks && kanban.columnSource === "custom";
+  const isWidget = Boolean(widgetCtx);
+  // Widget de tarefas apontando p/ board dedicado usa as fases DO board — as
+  // colunas se editam lá (espelho do host do widget no dashboard).
+  const ownsColumns = !isWidget || !(isTasks && kanban.taskBoardId);
+  // Tarefa criada na página cheia de widget nasce no board apontado (ou em
+  // "minhas tarefas" quando não há board) — nunca no dashboard pai.
+  const taskDefaultsBoardId = widgetCtx ? (kanban.taskBoardId ?? null) : boardId;
 
   // Event bus: os dados do quadro vêm do RSC e revalidateTasks() não cobre
   // /kanbans/[id] — tarefa mudada em outra superfície força o re-render aqui.
   useDataChanged(() => router.refresh());
 
-  // Persistência das colunas (spread completo do settings — updateBoardSettings
-  // sobrescreve o jsonb inteiro).
+  // Persistência das colunas (spread completo do settings — os dois saves
+  // sobrescrevem o jsonb inteiro). Widget: grava em widgets.settings.kanban
+  // (mesma config do widget no dashboard — sync bidirecional).
   const persistKanban = async (next: KanbanSettings) => {
-    const res = await updateBoardSettings(boardId, {
-      ...settings,
-      kanban: next,
-    });
+    const res = widgetCtx
+      ? await saveWidgetSettings(widgetCtx.widgetId, widgetCtx.dashboardId, {
+          ...widgetCtx.widgetSettings,
+          kanban: next,
+        })
+      : await updateBoardSettings(boardId, { ...settings, kanban: next });
     if (res.ok) router.refresh();
     return res;
   };
@@ -185,7 +214,7 @@ export function KanbanPageClient({
         <TaskSheet
           ctx={taskCtx}
           defaults={{
-            boardId,
+            boardId: taskDefaultsBoardId,
             phase: col.key,
             locked: kanban.tasks?.lockByDefault,
           }}
@@ -234,7 +263,17 @@ export function KanbanPageClient({
     <div className="flex h-full min-h-0 flex-col gap-4">
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
-        <h1 className="text-2xl font-semibold">{boardName}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">{boardName}</h1>
+          {widgetCtx ? (
+            <Link
+              href={`/dashboards/${widgetCtx.dashboardId}`}
+              className="text-muted-foreground hover:text-foreground text-sm hover:underline"
+            >
+              No dashboard {widgetCtx.dashboardName}
+            </Link>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Visões */}
           <div className="flex rounded-md border p-0.5">
@@ -260,17 +299,21 @@ export function KanbanPageClient({
               <List className="size-4" />
               Lista
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn("h-7 gap-1 px-2", view === "agenda" && "bg-muted")}
-              style={swStyle(view === "agenda")}
-              onClick={() => setView("agenda")}
-              aria-pressed={view === "agenda"}
-            >
-              <CalendarDays className="size-4" />
-              Agenda
-            </Button>
+            {/* Agenda é board-only (fetchBoardAgenda resolve por
+                dashboards.kind='kanban' — não se aplica ao widget). */}
+            {!isWidget ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 gap-1 px-2", view === "agenda" && "bg-muted")}
+                style={swStyle(view === "agenda")}
+                onClick={() => setView("agenda")}
+                aria-pressed={view === "agenda"}
+              >
+                <CalendarDays className="size-4" />
+                Agenda
+              </Button>
+            ) : null}
           </div>
 
           {/* Período (modo registros; tarefas usam o vencimento nos destaques) */}
@@ -325,21 +368,27 @@ export function KanbanPageClient({
 
           {canConfig ? (
             <>
-              <ColumnConfigPopover
-                kanban={kanban}
-                data={data}
-                onSave={(next) =>
-                  updateBoardSettings(boardId, { ...settings, kanban: next })
-                }
-              />
-              <BoardAppearancePopover boardId={boardId} settings={settings} />
+              {ownsColumns ? (
+                <ColumnConfigPopover
+                  kanban={kanban}
+                  data={data}
+                  onSave={persistKanban}
+                />
+              ) : null}
+              {/* Aparência do WIDGET se edita no builder do dashboard. */}
+              {!isWidget ? (
+                <BoardAppearancePopover boardId={boardId} settings={settings} />
+              ) : null}
             </>
           ) : null}
 
           {isTasks && taskCtx ? (
             <TaskSheet
               ctx={taskCtx}
-              defaults={{ boardId, locked: kanban.tasks?.lockByDefault }}
+              defaults={{
+                boardId: taskDefaultsBoardId,
+                locked: kanban.tasks?.lockByDefault,
+              }}
             />
           ) : quickCreateSource ? (
             <RecordCreateSheet
@@ -362,10 +411,14 @@ export function KanbanPageClient({
           taskCtx={isTasks ? taskCtx : undefined}
           onMove={isTasks ? onMoveTask : undefined}
           columnExtra={columnExtra}
-          owner={{ kind: "board", id: boardId }}
-          canReorderColumns={canConfig}
+          owner={
+            widgetCtx
+              ? { kind: "widget", id: widgetCtx.widgetId }
+              : { kind: "board", id: boardId }
+          }
+          canReorderColumns={canConfig && ownsColumns}
           onReorderColumns={
-            canConfig
+            canConfig && ownsColumns
               ? (keys) =>
                   persistKanban({
                     ...kanban,
@@ -374,7 +427,7 @@ export function KanbanPageClient({
               : undefined
           }
           onAddColumn={
-            canConfig && (isTasks || isCustom)
+            canConfig && ownsColumns && (isTasks || isCustom)
               ? (label) => {
                   const cols = addColumnOverride(kanban, label);
                   if (!cols) {

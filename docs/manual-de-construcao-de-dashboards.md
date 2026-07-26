@@ -1821,7 +1821,11 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
 
 - **Quadro dedicado** (Home → Criar → Kanban): página própria, com nome e
   visibilidade por papel.
-- **Widget Kanban** dentro de um dashboard: mesmas capacidades, em card.
+- **Widget Kanban** dentro de um dashboard: mesmas capacidades, em card. Ele
+  também aparece na seção **Kanbans** do workspace (card "No dashboard X") e
+  abre em página cheia: é o MESMO kanban — mover cards e editar colunas
+  reflete no widget do dashboard e vice-versa. A página cheia tem barra de
+  período própria; os filtros do dashboard não se aplicam lá (por design).
 
 ### 12.2 Configuração do Kanban
 

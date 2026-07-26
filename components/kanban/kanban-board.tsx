@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.4 | Data: 26/07/2026
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -16,6 +16,9 @@
 //   settings.columns, ordem autoritativa p/ todas as fontes), coluna fantasma
 //   "+" (onAddColumn — modos tarefas/Personalizar) e `owner` p/ o move das
 //   colunas "Personalizar" (kanban_placements).
+// v1.4 (26/07/2026): campos extras do card aparecem também no modo `compact`
+//   (o gate escondia os extras no widget de dashboard — único lugar com picker;
+//   `compact` fica só para a largura de coluna).
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -285,7 +288,6 @@ function CardView({
   onDragStart,
   onDragEnd,
   taskCtx,
-  compact,
   readOnly,
   dueSoonDays,
   onOpenDetail,
@@ -296,7 +298,6 @@ function CardView({
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   taskCtx?: TaskFormContext;
-  compact?: boolean;
   readOnly?: boolean;
   dueSoonDays?: number;
   // Abre o CardDetailSheet (instância única no KanbanBoard).
@@ -387,7 +388,7 @@ function CardView({
               ) : null}
             </span>
           </div>
-          {!compact && card.fields.length > 0 ? (
+          {card.fields.length > 0 ? (
             <dl className="text-muted-foreground mt-1 flex flex-col gap-0.5 pl-1.5 text-xs">
               {card.fields.map((f) => (
                 <div key={f.label} className="flex justify-between gap-2">
@@ -473,7 +474,8 @@ export function KanbanBoard({
   ) => Promise<KanbanMoveResult>;
   // Nó extra no cabeçalho de cada coluna (quick-create do modo).
   columnExtra?: (col: KanbanColumnCards) => React.ReactNode;
-  // Widget dentro do dashboard: cards sem campos extras e colunas mais justas.
+  // Widget dentro do dashboard: colunas mais justas (w-56). Os campos extras
+  // do card aparecem em TODOS os contextos (o picker vive no widget-builder).
   compact?: boolean;
   // Snapshot público: sem drag, sem painéis de edição, sem concluir.
   readOnly?: boolean;
@@ -785,7 +787,6 @@ export function KanbanBoard({
                   <CardView
                     key={card.id}
                     card={card}
-                    compact={compact}
                     draggable={movable(card, col)}
                     onDragStart={(e) => {
                       setDragging(card.id);

@@ -180,7 +180,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   antigo em tela exibe "Atualizando…" (dim + spinner). Período personalizado
   é RASCUNHO + commit (`PeriodRangeDraft` — completo auto / aberto via
   "Aplicar"); não reintroduza navegação por tecla nos inputs de data. Agenda
-  ignora filtros do dashboard POR DESIGN. Ver `docs/arquitetura.md` §4.10 e
+  ignora filtros do dashboard POR DESIGN — e a página cheia do kanban de
+  widget (`/kanbans/w/[widgetId]`, seção Kanbans do hub) idem: barra própria,
+  RSC → `runKanban` direto (não é action de widget-no-dashboard; o widget NO
+  dashboard segue 100% no widget-scope). Ver `docs/arquitetura.md` §4.10 e
   invariante 12.
 - **Dia útil/meta se resolvem no ENGINE, nunca no RPC (20/07/2026):** feriados
   (`non_working_days`, 0081) + utilitários puros (`lib/date/business-days.ts`)

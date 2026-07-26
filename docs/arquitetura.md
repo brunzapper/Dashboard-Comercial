@@ -320,6 +320,8 @@ app/
     page.tsx             Home = lista de dashboards
     dashboards/[id]/     Página do dashboard (orquestra a leitura dos widgets)
     kanbans/[id]/        Kanbans dedicados (reusam dashboards com kind='kanban')
+    kanbans/w/[widgetId] Página cheia de um WIDGET kanban (mesma config/placements
+                         do widget; barra de período própria — ignora o pai)
     registros/           Grid de dados por fonte + importação CSV + painel de sync
     tarefas/             Tarefas standalone
     campos/              Colunas dinâmicas + correspondências (admin)
@@ -926,6 +928,19 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 - **Kanban/Tarefas/Agenda/Feed**: kanbans reusam `dashboards` (`kind='kanban'`);
   posições em `kanban_placements`; tarefas em `tasks` (RLS espelha registros; trava
   `locked` via trigger); comentários/subtarefas em `comments` + colunas de 0066.
+  **Widgets kanban na seção Kanbans do hub (26/07/2026):** a seção lista TAMBÉM
+  os widgets `visual_type='kanban'` de dashboards comuns ATIVOS (query
+  `widgets` + `dashboards!inner` na Home; mapeamento puro em
+  `lib/kanban/hub.ts`; a RLS de `widgets` — `auth_board_visible` do pai — já
+  recorta a visibilidade). O card ("No dashboard X", SEM menu ⋮ — o ciclo de
+  vida é do dashboard/widget) abre a página cheia `/kanbans/w/[widgetId]`, que
+  renderiza o MESMO kanban do widget: mesma config `widgets.settings.kanban`
+  (salvar lá reflete no dashboard e vice-versa, via `saveWidgetSettings`) e
+  mesmos `kanban_placements.widget_id` — SEM linha espelho em `dashboards`.
+  A página cheia reusa `kanban-page-client.tsx` (prop `widgetCtx`); Agenda e
+  Aparência ficam de fora (board-only — aparência do widget se edita no
+  builder). Pai arquivado sai do hub mas a URL direta segue abrindo (paridade
+  com boards); pai na Lixeira → 404.
 - **Ciclo de vida de boards no hub (22/07/2026, 0087):** o card do hub
   (`app/(app)/page.tsx` + `board-card-menu.tsx`) tem menu "⋮" com Duplicar/
   Arquivar/Excluir (dashboards E kanbans). **Excluir é SOFT** (`trashBoard` →
@@ -1271,7 +1286,14 @@ garantias:
   Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
   O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
   derivadas das opções do campo — filtro só reduz cards); a **Agenda ignora
-  os filtros do dashboard POR DESIGN** (range próprio mês/semana).
+  os filtros do dashboard POR DESIGN** (range próprio mês/semana). A **página
+  cheia do kanban de widget** (`/kanbans/w/[widgetId]`, 26/07/2026) é um
+  contexto de visualização PRÓPRIO na mesma categoria da Agenda: RSC que chama
+  `runKanban` direto (sem `runKanbanWidget`/widget-scope) e IGNORA por inteiro
+  os filtros/período do dashboard pai — barra de período própria
+  (`?periodo/?de/?ate`, como `/kanbans/[id]`). Não é uma remontagem parcial de
+  `__qf__`/`ff_` (o que a invariante 12 proíbe): o widget renderizado NO
+  dashboard segue 100% no widget-scope.
 - **Gatilho de re-fetch por FINGERPRINT:** a page computa
   `deferredScopeById[widgetId] = JSON.stringify({ p: período efetivo,
   f: filtros de visualização, pw: escolha __pw__ })` e o widget recebe como
@@ -1880,7 +1902,11 @@ principalmente — para mantenedores humanos.
     bug de widgets deferidos ignorando o filtro de operação até F5. No
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
-    persistido no banco não muda a URL). Ver §4.10.
+    persistido no banco não muda a URL). A página cheia do kanban de widget
+    (`/kanbans/w/[widgetId]`) NÃO é uma action de widget-no-dashboard: é um
+    contexto de visualização próprio (como a Agenda) que ignora os filtros do
+    pai POR INTEIRO e POR DESIGN — RSC → `runKanban` direto, barra de período
+    própria. Ver §4.10.
 
 13. **Linhas core de `field_definitions` são OVERRIDES, nunca campos custom.**
     A migração 0086 seeda as colunas do núcleo de `records` como linhas
