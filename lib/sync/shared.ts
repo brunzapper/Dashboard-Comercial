@@ -97,6 +97,22 @@ export function valuesDiffer(a: unknown, b: unknown): boolean {
   return String(a ?? "") !== String(b ?? "");
 }
 
+/**
+ * Comparação para colunas CORE timestamptz (closed_at/opened_at/
+ * source_created_at/source_modified_at): por INSTANTE, não por string. O
+ * PostgREST devolve "+00:00" e os mappers emitem "-03:00" — o byte-compare de
+ * `valuesDiffer` marcaria TODA linha como alterada a cada reconcile (churn de
+ * update + audit_log). Campos custom (texto) seguem em `valuesDiffer`: lá o
+ * formato É o dado (read prefix-based, invariante 0080).
+ */
+export function timestampValuesDiffer(a: unknown, b: unknown): boolean {
+  if (a == null || b == null) return valuesDiffer(a, b);
+  const ta = Date.parse(String(a));
+  const tb = Date.parse(String(b));
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return valuesDiffer(a, b);
+  return ta !== tb;
+}
+
 /** Operação de prioridade 1 (primária) de um responsável, se houver. */
 export async function primaryOperationId(
   db: SupabaseClient,

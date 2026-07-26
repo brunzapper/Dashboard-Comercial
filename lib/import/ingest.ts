@@ -16,6 +16,10 @@
 // (contador noMatch — proteção contra inserção por falha de match). Fontes
 // Bitrix com writeBack: updates enfileiram bitrix_writeback_queue e inclusões
 // criam a entidade via createBitrixEntity (source_id real).
+// v2.1 (26/07/2026): datas core ancoradas em Brasília (anchorNaiveToBrasilia)
+// — o naive do CSV entrava como UTC e o dia recuava no read side — e
+// comparadas por INSTANTE no update (timestampValuesDiffer; reimport não
+// churna contra o "+00:00" do PostgREST).
 // Requer service role (INSERT em records é admin-only na RLS) — o chamador
 // (server action) valida a sessão/papel ANTES de chegar aqui.
 import { createHash } from "node:crypto";
@@ -27,6 +31,7 @@ import {
   loadCustomDateKeys,
   loadFormulaDefs,
 } from "@/lib/records/formulas";
+import { anchorNaiveToBrasilia } from "@/lib/date/normalize";
 import {
   emptyResult,
   isProtected,
@@ -34,6 +39,7 @@ import {
   primaryOperationId,
   recordError,
   recordOutcome,
+  timestampValuesDiffer,
   valuesDiffer,
   type ExistingRecord,
   type SyncResult,
@@ -146,7 +152,14 @@ function buildRow(
     if (m.target.startsWith("core:")) {
       const col = m.target.slice("core:".length);
       if (!CORE_IMPORT_COLUMNS.has(col)) continue; // whitelist
-      const value = coerceValue(coreTargetKind(col), raw);
+      const kind = coreTargetKind(col);
+      let value = coerceValue(kind, raw);
+      // Colunas core de data são timestamptz: o naive do CSV é hora de parede
+      // de BRASÍLIA — sem âncora o Postgres assumiria UTC e o dia recuaria no
+      // read side. Custom fields (texto) seguem naive (read prefix-based).
+      if (kind === "data" && typeof value === "string") {
+        value = anchorNaiveToBrasilia(value);
+      }
       core[col] = value;
       if (value != null) hasValue = true;
       continue;
@@ -290,7 +303,13 @@ async function applyUpdateToExisting(
 
   for (const [col, value] of Object.entries(b.core)) {
     if (isProtected(col, existing)) continue;
-    if (valuesDiffer(existing[col], value)) {
+    // Datas core: compara instantes (o valor ancorado "-03:00" contra o
+    // "+00:00" do PostgREST) — byte-compare re-gravaria tudo a cada reimport.
+    const differ =
+      coreTargetKind(col) === "data"
+        ? timestampValuesDiffer(existing[col], value)
+        : valuesDiffer(existing[col], value);
+    if (differ) {
       audits.push({
         record_id: existing.id,
         field: col,

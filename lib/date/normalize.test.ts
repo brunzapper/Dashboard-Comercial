@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BRASILIA_TZ,
+  anchorNaiveToBrasilia,
   normalizeDateString,
   offsetSuffix,
   wallTimeToEpoch,
@@ -80,6 +81,34 @@ describe("normalizeDateString", () => {
     expect(normalizeDateString("2026-01-17 12:00:00", "Europe/London")).toBe(
       "2026-01-17T09:00:00-03:00"
     );
+  });
+});
+
+describe("anchorNaiveToBrasilia", () => {
+  it("date-only ancora à meia-noite de Brasília (senão o timestamptz assume UTC e o dia RECUA)", () => {
+    expect(anchorNaiveToBrasilia("2026-07-01")).toBe(
+      "2026-07-01T00:00:00-03:00"
+    );
+  });
+
+  it("naive datetime ganha o sufixo -03:00 (com e sem segundos; separador T ou espaço)", () => {
+    expect(anchorNaiveToBrasilia("2026-07-10T09:30:00")).toBe(
+      "2026-07-10T09:30:00-03:00"
+    );
+    expect(anchorNaiveToBrasilia("2026-07-10 09:30")).toBe(
+      "2026-07-10T09:30:00-03:00"
+    );
+  });
+
+  it("valor com offset/Z ou lixo → passthrough (nunca lança)", () => {
+    expect(anchorNaiveToBrasilia("2026-07-10T09:30:00-03:00")).toBe(
+      "2026-07-10T09:30:00-03:00"
+    );
+    expect(anchorNaiveToBrasilia("2026-07-10T12:30:00Z")).toBe(
+      "2026-07-10T12:30:00Z"
+    );
+    expect(anchorNaiveToBrasilia("abc")).toBe("abc");
+    expect(anchorNaiveToBrasilia("")).toBe("");
   });
 });
 

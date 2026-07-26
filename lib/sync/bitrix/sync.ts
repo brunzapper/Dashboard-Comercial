@@ -19,6 +19,9 @@
 //   e captura a mensagem do erro (recordOutcome/recordError) em vez de engolir.
 // v1.4 (19/07/2026): fuso da fonte — SyncContext.timezones (data_sources.timezone
 //   por record_type) chega ao mapper; datetimes normalizam p/ Brasília (0079).
+// v1.5 (26/07/2026): colunas core de DATA comparadas por instante
+//   (timestampValuesDiffer) — o byte-compare contra o "+00:00" do PostgREST
+//   marcava toda linha como alterada a cada reconcile (churn de audit_log).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { BitrixClient } from "./client";
@@ -41,6 +44,7 @@ import {
   primaryOperationId,
   recordError,
   recordOutcome,
+  timestampValuesDiffer,
   valuesDiffer,
   type ExistingRecord,
   type SyncResult,
@@ -64,6 +68,16 @@ const CORE_SYNC_FIELDS = [
   "source_created_at",
   "source_modified_at",
 ] as const;
+
+// Colunas timestamptz do núcleo: comparadas por INSTANTE (o mapper emite
+// "-03:00", o PostgREST devolve "+00:00" — byte-compare marcaria toda linha
+// como alterada a cada reconcile, churnando update + audit_log).
+const CORE_DATE_FIELDS = new Set([
+  "closed_at",
+  "opened_at",
+  "source_created_at",
+  "source_modified_at",
+]);
 
 async function resolveOwnerUserId(
   db: SupabaseClient,
@@ -253,7 +267,10 @@ export function computeRecordUpsert(
 
   // Núcleo
   for (const f of CORE_SYNC_FIELDS) {
-    if (!isProtected(f, existing) && valuesDiffer(existing[f], mapped[f])) {
+    const differ = CORE_DATE_FIELDS.has(f)
+      ? timestampValuesDiffer(existing[f], mapped[f])
+      : valuesDiffer(existing[f], mapped[f]);
+    if (!isProtected(f, existing) && differ) {
       audits.push({ record_id: existing.id, field: f, old_value: existing[f], new_value: mapped[f] });
       row[f] = mapped[f];
     } else {

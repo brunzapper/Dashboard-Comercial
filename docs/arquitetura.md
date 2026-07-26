@@ -1673,6 +1673,21 @@ principalmente — para mantenedores humanos.
     ancore bounds de campo custom (texto): a comparação é lexicográfica e o
     offset no lower bound excluiria valores date-only. NUNCA aplique
     `at time zone` a valor texto: um naive (CSV) recuaria um dia.
+    **Write side das colunas core `timestamptz` (26/07/2026):** valor NAIVE de
+    fonte sem fuso (planilha do Estudo, CSV do wizard/API) é hora de parede de
+    BRASÍLIA e deve ser ANCORADO na gravação com `anchorNaiveToBrasilia`
+    (`lib/date/normalize.ts` — date-only → `T00:00:00-03:00`; naive → sufixo
+    `-03:00`; com offset/lixo → passthrough). Sem a âncora o Postgres assume
+    UTC e o registro recua 3h — os de 00:00–02:59 mudam de dia e os do dia 1
+    caem no mês anterior (bug das "15 vs 17 vendas do site", corrigido pelo
+    backfill `supabase/apply/backfill-naive-tz.sql`). Isso vale SÓ para coluna
+    core `timestamptz` — campo custom (texto) segue naive/passthrough, como
+    acima. E o reconcile compara as colunas core de data por INSTANTE
+    (`timestampValuesDiffer`, `lib/sync/shared.ts`): o PostgREST devolve
+    `+00:00` e os mappers emitem `-03:00` — byte-compare (`valuesDiffer`)
+    churnaria update+audit de toda linha a cada sync (aconteceu até
+    26/07/2026: ~126k entradas de audit por coluna). Campos custom (texto)
+    seguem no byte-compare: lá o formato É o dado.
 
 12. **Escopo de widget em server action sai SEMPRE do widget-scope.** Toda
     server action que consulta dados de um widget do dashboard (paginação,

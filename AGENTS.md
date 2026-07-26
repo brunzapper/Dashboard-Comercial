@@ -105,7 +105,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `_widget_local_ts` (timestamptz → wall time America/Sao_Paulo; text →
   prefixo de 10 chars, byte-igual ao `parseYmd`). NUNCA ancore bounds de campo
   custom (texto — o offset no lower bound excluiria date-only) e NUNCA aplique
-  `at time zone` a valor texto (naive de CSV recuaria um dia). Ver
+  `at time zone` a valor texto (naive de CSV recuaria um dia). **Write side
+  (26/07/2026):** valor NAIVE (planilha/CSV) indo para coluna CORE
+  `timestamptz` é hora de parede de Brasília — ancore com
+  `anchorNaiveToBrasilia` (`lib/date/normalize.ts`; adapter de Sheets +
+  `ingestRows`), senão o Postgres assume UTC e o dia recua (venda do dia 1 cai
+  no mês anterior; legado: `supabase/apply/backfill-naive-tz.sql`). Campo
+  custom segue naive (texto). Reconcile compara colunas core de data por
+  INSTANTE (`timestampValuesDiffer`, `lib/sync/shared.ts` — PostgREST `+00:00`
+  × mapper `-03:00`); byte-compare (`valuesDiffer`) fica para texto. Ver
   `docs/arquitetura.md` §4.1/§4.5 e invariante 11.
 - **Sub-fontes (0078) se resolvem no ENGINE, nunca no RPC:** uma **sub-fonte**
   (`sub_sources`) é uma fonte cujas linhas são as da PAI recortadas por um
