@@ -1,4 +1,9 @@
-<!-- Versão: 1.12 | Data: 25/07/2026 -->
+<!-- Versão: 1.13 | Data: 26/07/2026 -->
+<!-- v1.13 (26/07/2026): cromo dos cards — §3.6 ganha os checkboxes "Ocultar
+     o texto de comparação" e "Ocultar o selo Nº dia útil" (padrão do
+     dashboard); §6.8 o select tri-state do texto "vs. período…" no Card
+     (comparison.hideLabel) e §9.1 o select do selo "Nº dia útil" em
+     "Título e borda" (appearance.hideBusinessDayBadge). -->
 <!-- v1.12 (25/07/2026): grade FINA (§3.4) — 120 colunas na largura visível
      (10× a antiga), linhas quadradas por padrão e controle "Largura da
      coluna" em ⋮ → Área de trabalho; dashboards antigos são convertidos
@@ -458,6 +463,11 @@ colunas do grid. Colar preserva o desenho, transladado para a célula clicada.
   - **Escala da fonte**: 90% / 100% (padrão) / 115% / 130% / 150% —
     multiplica os textos de todos os widgets. Tamanhos fixados em px num
     widget específico (§9.1) NÃO são afetados.
+  - **Cromo dos cards**: **"Ocultar o texto de comparação ('vs.
+    período…')"** — some o texto longo de TODOS os Cards de uma vez (o badge
+    de variação ▲/▼ fica); e **"Ocultar o selo 'Nº dia útil'"**. Cada widget
+    pode sobrescrever o padrão: o texto na seção Comparação do editor (§6.8)
+    e o selo em Aparência ▸ "Título e borda" (§9.1).
 - **Área de trabalho**: largura da coluna, colunas do grid e altura da linha
   (§3.4).
 - **Compartilhamento**: papéis que veem o dashboard.
@@ -1186,6 +1196,10 @@ Card. Configura `settings.comparison`:
 - **"Exibir o valor do período de comparação"** (`showBaseValue`).
 - **"Inverter cores (queda é bom — ex.: churn)"** (`invertColors`).
 - **"Mostrar só a variação (no lugar do valor)"** (só Card).
+- **"Texto 'vs. período anterior…'"** (só Card, `hideLabel`): "Padrão do
+  dashboard" (herda o checkbox de §3.6) / "Ocultar (o badge de variação
+  fica)" / "Sempre mostrar" — controla só o TEXTO do rótulo; tooltips de
+  gráfico não mudam.
 - **"Posição na tabela"** (só Tabela): "Na mesma célula do valor" (padrão) /
   "Coluna exclusiva de variação".
 - **"Série do período de comparação no gráfico (fantasma)"** (gráficos).
@@ -1553,7 +1567,10 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
   (Card); "Textos do gráfico"; "Corpo da tabela". Tamanhos fixados aqui não
   são afetados pela escala de fonte do dashboard (§3.6).
 - **"Título e borda"**: cor do texto do título, fundo da barra de título, cor
-  da borda/contorno do card.
+  da borda/contorno do card; em Card e gráficos, o select **"Selo 'Nº dia
+  útil'"** (`hideBusinessDayBadge`): "Padrão do dashboard" (herda o checkbox
+  de §3.6) / "Ocultar" / "Sempre mostrar" — o dropdown da janela de períodos
+  e o seletor dia útil × dia cheio não são afetados.
 
 ### 9.2 Gráficos (Barra/Linha; Pizza/Funil onde indicado)
 

@@ -137,6 +137,7 @@ import { deleteWidget } from "@/app/(app)/dashboards/actions";
 import { copyWidget } from "@/lib/widgets/clipboard";
 import type { QTCellValue } from "@/lib/widgets/quick-table/model";
 import { useFontScale } from "./font-scale-context";
+import { useBoardChrome } from "./board-chrome-context";
 import { ImageWidget } from "./image-widget";
 import { NoteWidget } from "./note-widget";
 import { ShapeWidget } from "./shape-widget";
@@ -386,6 +387,16 @@ export const WidgetCard = memo(function WidgetCard({
   );
   const fontScale = useFontScale();
   const fonts = appearance?.fonts;
+  // Selo "Nº dia útil" (26/07/2026): override do widget
+  // (appearance.hideBusinessDayBadge, tri-state) sobre o padrão do dashboard
+  // (hideBusinessDayBadges). Oculto ⇒ bdRef vazio nos DOIS slots de render (o
+  // dropdown da janela e o toggle dia útil × dia cheio ficam intactos).
+  const chrome = useBoardChrome();
+  const bdBadgeRef = (
+    appearance?.hideBusinessDayBadge ?? chrome.hideBusinessDayBadges
+  )
+    ? undefined
+    : data.businessDayRef;
 
   // Refs p/ medir o tamanho natural do conteúdo (dimensões dinâmicas).
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -1081,14 +1092,14 @@ export const WidgetCard = memo(function WidgetCard({
             dashboardId={dashboardId}
             widgetId={widget.id}
             state={periodWindow}
-            bdRef={data.businessDayRef}
+            bdRef={bdBadgeRef}
           />
-        ) : data.businessDayRef ? (
+        ) : bdBadgeRef ? (
           // Sem o controle da janela (align direto nos settings, ou viewer de
           // snapshot — que congela settings e não monta o dropdown), o badge
           // "Nº dia útil" aparece sozinho no mesmo slot.
           <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5">
-            <BusinessDayBadge bdRef={data.businessDayRef} />
+            <BusinessDayBadge bdRef={bdBadgeRef} />
           </div>
         ) : null}
         <div ref={contentRef} className="min-h-0 flex-1">

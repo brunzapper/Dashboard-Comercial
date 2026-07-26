@@ -1,4 +1,7 @@
-// Versão: 2.5 | Data: 25/07/2026
+// Versão: 2.6 | Data: 26/07/2026
+// v2.6 (26/07/2026): select tri-state do selo "Nº dia útil"
+//   (appearance.hideBusinessDayBadge — herda o padrão do dashboard / oculta /
+//   mostra) na seção "Título e borda", p/ Card e gráficos.
 // v2.5 (25/07/2026): posição do rótulo em barra HORIZONTAL vira "Fora"/
 //   "Dentro" (valores salvos inalterados; "Acima" era wording de barra
 //   vertical) + hint do auto-flip; novos controles "Espessura das barras"
@@ -436,6 +439,35 @@ export function WidgetAppearanceSheet({
               onChange={(v) => patch({ title: { ...ap.title, border: v } })}
               onClear={() => patch({ title: { ...ap.title, border: undefined } })}
             />
+            {isKpi || isChart ? (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs">Selo &quot;Nº dia útil&quot;</Label>
+                <Select
+                  value={
+                    ap.hideBusinessDayBadge == null
+                      ? "inherit"
+                      : ap.hideBusinessDayBadge
+                        ? "hide"
+                        : "show"
+                  }
+                  onValueChange={(v) =>
+                    patch({
+                      hideBusinessDayBadge:
+                        v === "inherit" ? undefined : v === "hide",
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">Padrão do dashboard</SelectItem>
+                    <SelectItem value="hide">Ocultar</SelectItem>
+                    <SelectItem value="show">Sempre mostrar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </BuilderSection>
           ) : null}
 

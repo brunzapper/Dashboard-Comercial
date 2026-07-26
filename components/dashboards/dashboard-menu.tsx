@@ -1,7 +1,11 @@
-// Versão: 1.2 | Data: 25/07/2026
+// Versão: 1.3 | Data: 26/07/2026
 // Fase 10: menu "⋮" ao lado de "Adicionar widget". Hoje: modo tela cheia
 // (Fullscreen API + esconde o chrome, via AppChromeContext) e "Aparência do
 // dashboard" (cor de fundo sólida/gradiente). Estruturado p/ novas opções.
+// v1.3 (26/07/2026): cromo dos cards no sheet Aparência — checkboxes
+//   "Ocultar texto de comparação" (hideComparisonLabels) e "Ocultar selo
+//   Nº dia útil" (hideBusinessDayBadges); cada widget pode sobrescrever
+//   (Comparação ▸ texto / Aparência ▸ Título e borda).
 // v1.2 (25/07/2026): grade fina (espaço v2) — sheet Área de trabalho ganhou o
 //   controle "Largura da coluna" (canvas.baseCols, degraus percentuais do
 //   default 120) e "Altura da linha" aceita VAZIO = automática (quadrada =
@@ -47,6 +51,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAppChrome } from "@/components/layout/app-shell";
 import { ColorField } from "./appearance-controls";
 import { dashboardBackgroundCss } from "@/lib/widgets/appearance";
@@ -146,6 +151,14 @@ export function DashboardMenu({
   const [fontScale, setFontScale] = useState<string>(
     String(settings.fontScale ?? 1)
   );
+  // Cromo dos cards (26/07/2026): padrões do dashboard; widgets sobrescrevem
+  // (tri-state em comparison.hideLabel / appearance.hideBusinessDayBadge).
+  const [hideCmpLabels, setHideCmpLabels] = useState(
+    settings.hideComparisonLabels ?? false
+  );
+  const [hideBdBadges, setHideBdBadges] = useState(
+    settings.hideBusinessDayBadges ?? false
+  );
 
   function save() {
     const nextBg: DashboardSettings["background"] | undefined =
@@ -162,6 +175,8 @@ export function DashboardMenu({
         dateFormat: dateFmt,
         fontScale:
           Number.isFinite(nextScale) && nextScale !== 1 ? nextScale : undefined,
+        hideComparisonLabels: hideCmpLabels ? true : undefined,
+        hideBusinessDayBadges: hideBdBadges ? true : undefined,
       });
       setBgOpen(false);
     });
@@ -324,6 +339,29 @@ export function DashboardMenu({
               <p className="text-muted-foreground text-xs">
                 Multiplica o tamanho dos textos de todos os widgets. Ajustes em
                 px por widget (Aparência ▸ Texto) não são afetados.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label className="text-xs">Cromo dos cards</Label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={hideCmpLabels}
+                  onCheckedChange={(v) => setHideCmpLabels(v === true)}
+                />
+                Ocultar o texto de comparação (&quot;vs. período…&quot;)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={hideBdBadges}
+                  onCheckedChange={(v) => setHideBdBadges(v === true)}
+                />
+                Ocultar o selo &quot;Nº dia útil&quot;
+              </label>
+              <p className="text-muted-foreground text-xs">
+                O badge de variação (▲/▼) continua nos cards. Cada widget pode
+                sobrescrever: seção Comparação do editor (texto) e Aparência ▸
+                Título e borda (selo).
               </p>
             </div>
 

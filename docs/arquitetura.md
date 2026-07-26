@@ -1086,6 +1086,19 @@ invariantes 9/10).
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto
   (feriados + hoje) chega por parâmetro opcional; sem contexto (chamador
   antigo, ex.: widget calculado) degrada para `previous_period`.
+- **Cromo dos cards** (26/07/2026, 100% client): o texto do rótulo de
+  comparação ("vs. período anterior…") no Card/KPI e o selo "Nº dia útil"
+  podem ser ocultados — padrão do dashboard em
+  `DashboardSettings.hideComparisonLabels`/`hideBusinessDayBadges` (⋮ ▸
+  Aparência do dashboard), propagado por `BoardChromeProvider`
+  (`components/dashboards/board-chrome-context.tsx`, molde do
+  FontScaleProvider — vale automaticamente no viewer de snapshot); override
+  POR WIDGET tri-state (`ausente` herda / `true` oculta / `false` força
+  exibir) em `ComparisonSettings.hideLabel` (seção Comparação do builder) e
+  `AppearanceSettings.hideBusinessDayBadge` (Aparência ▸ Título e borda).
+  Só EXIBIÇÃO: o badge de variação, as tooltips de gráfico com o rótulo, o
+  cálculo da comparação e `WidgetData.comparison.label`/`businessDayRef`
+  seguem intactos (engine/RPCs não mudam).
 - **Comparação nos Cards de FÓRMULA** (21/07/2026, `lib/widgets/card.ts`):
   com `settings.comparison` ativa, o `runCardWidget` roda a MESMA
   `runCalculatedWidget` uma segunda vez com o período deslocado pelo

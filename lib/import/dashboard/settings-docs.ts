@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 25/07/2026
+// Versão: 1.3 | Data: 26/07/2026
+// v1.3 (26/07/2026): cromo dos cards — `hideComparisonLabels`/
+//   `hideBusinessDayBadges` (dashboard), `comparison.hideLabel` e
+//   `hideBusinessDayBadge` (appearance), todos tri-state (ausente herda o
+//   dashboard; true oculta; false força exibir).
 // v1.2 (25/07/2026): grade fina/páginas — `pages` (mescla de widgets) entra
 //   como null (referencia ids do banco; export remove, validador rejeita) e a
 //   linha de `canvas` aponta as DUAS escalas (gridVersion — regra 8 do SPEC).
@@ -189,6 +193,7 @@ ${renderDocBlock(APPEARANCE_TABLE_DOC, "  ")}
   filter: `// widgets de filtro (filtro / filtro_campo):
 "filter": { "bg": "#f8fafc", "border": "#e2e8f0", "accent": "#2563eb" },  // fundo/borda do card + abinha superior`,
   title: `"title": { "color": "#0f172a", "bg": "#f8fafc", "border": "#e2e8f0" },  // barra de título / contorno do card (todos os tipos)`,
+  hideBusinessDayBadge: `"hideBusinessDayBadge": true,            // selo "Nº dia útil": omitir = herda o padrão do dashboard; true oculta; false força exibir`,
   note: `"note": { "bg": "#fef9c3", "color": "#1f2937", "fontSize": 14 },  // aparência da nota (post-it); "frameless": true = sem cromo do card`,
   shape: `"shape": { "fill": "#eef2ff", "stroke": "#6366f1", "strokeWidth": 2, "textColor": "#312e81" },  // aparência da forma`,
   calculator: null, // cores da calculadora (visor/teclas) — estética de nicho, edite na UI
@@ -213,6 +218,7 @@ export const WIDGET_SETTINGS_DOC = {
   "style": "both",                         // color | arrow | both
   "showBaseValue": false, "invertColors": false,
   "ghostSeries": false, "chartLabels": false,
+  "hideLabel": false,                      // Card: texto "vs. período…" — omitir = herda o padrão do dashboard; true oculta SÓ o texto (badge fica); false força exibir
   "tablePlacement": "inline"               // tabela: inline | column
 },`,
   businessDayAlign: `"businessDayAlign": { "enabled": true, "reference": "today" },  // "today"|"period_end"`,
@@ -285,6 +291,8 @@ export const DASHBOARD_SETTINGS_DOC = {
   dateFormat: `"dateFormat": "dd/mm/aaaa",          // dd/mm/aaaa | dd/mm/aa | mm/aa`,
   background: `"background": { "mode": "solid", "color": "#f8fafc" },  // fundo do dashboard; gradiente: { "mode": "gradient", "from": "#eef2ff", "to": "#fdf2f8", "angle": 135 }`,
   fontScale: `"fontScale": 1,                      // escala global de fonte (1 = 100%)`,
+  hideComparisonLabels: `"hideComparisonLabels": true,        // oculta o texto "vs. período…" de TODOS os Cards (badge de variação fica; override por card em comparison.hideLabel)`,
+  hideBusinessDayBadges: `"hideBusinessDayBadges": true,       // oculta o selo "Nº dia útil" de todos os widgets (override por widget em appearance.hideBusinessDayBadge)`,
   kanban: null, // config de kanban dedicado — nunca no import (o export não a emite)
   connectors: null, // linhas entre widgets — o export não as emite; criadas na UI
   preset: null, // identidade de preset — o SERVIDOR gerencia; a IA nunca envia
