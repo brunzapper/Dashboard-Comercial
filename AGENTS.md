@@ -317,6 +317,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   create_dashboards + dono/admin em toda action). O snapshot pré-turno segue
   sendo o Desfazer, agora DB-backed; "Recomeçar" zera a conversa mas PRESERVA
   o undo. O fluxo da Home (`ImportDashboardSheet`) segue client-state.
+  **Raciocínio ao vivo (26/07/2026):** o TURNO do painel entra pela rota de
+  streaming `/api/dashboards/<id>/ai-turn`, que roda o MESMO núcleo
+  (`runAiEditTurnCore`/`generateDashboardCore` em `lib/ai/edit-session.ts`/
+  `lib/ai/generate-dashboard.ts`; as actions viraram wrappers — NÃO recrie
+  gate/persistência fora deles) e emite o raciocínio do modelo
+  (`AiGenerateInput.onThought`; Gemini via SSE + `includeThoughts`) como
+  NDJSON efêmero — nunca persistido na sessão. Regra de custo: NUNCA habilitar
+  thinking num modelo em que ele vem desligado (só exibir onde o raciocínio já
+  é padrão — por isso Claude/OpenAI seguem sem). Título do painel = MODELO
+  configurado (1ª letra maiúscula).
 - **Espaço de grid v2 (grade fina) e páginas de widget (25/07/2026):**
   unidades de `grid_position`/`ShapeLine`/`canvas` dependem de
   `settings.canvas.gridVersion` (2 = fino base-120 sem margens, linha quadrada

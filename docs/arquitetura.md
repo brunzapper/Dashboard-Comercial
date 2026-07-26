@@ -1,4 +1,11 @@
-<!-- Versão: 1.35 | Data: 26/07/2026 -->
+<!-- Versão: 1.36 | Data: 26/07/2026 -->
+<!-- v1.36 (26/07/2026): §4.11.3 — raciocínio AO VIVO no painel "Editar com
+     IA": turno via rota de streaming /api/dashboards/<id>/ai-turn (NDJSON;
+     runAiEditTurnCore em lib/ai/edit-session.ts — mesmo gate/persistência das
+     actions, que viraram wrappers) + onThought no contrato dos adaptadores
+     (Gemini streamGenerateContent + includeThoughts; sem custo extra — nunca
+     ligar thinking onde está desligado). Título do painel = MODELO
+     configurado (1ª letra maiúscula). -->
 <!-- v1.35 (26/07/2026): §4.14 Parcerias (0104–0106) — match de bases
      dinâmicas (helpers com lookup em data_sources), auto-match INCREMENTAL
      pós-sync do Bitrix + recalc direcionado, fusão de perfis de operação
@@ -1483,8 +1490,11 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
 
 - **UI** (`components/dashboards/ai-edit-panel.tsx`): botão "Editar com IA" na
   toolbar do board (page passa `canAiEdit` = dono/admin + `create_dashboards`,
-  e a config pública do provedor pela org do BOARD). O painel é uma div FIXA à
-  direita, **não-modal** (sem overlay/portal — o dashboard atrás segue
+  e a config pública do provedor pela org do BOARD). O TÍTULO do painel aberto
+  é o MODELO configurado com a 1ª letra maiúscula (ex.: "Gemini-2.5-flash";
+  subtítulo mostra o rótulo do provedor; fallback "Editar com IA" sem config —
+  botões de gatilho/chip seguem "Editar com IA"/"IA"). O painel é uma div FIXA
+  à direita, **não-modal** (sem overlay/portal — o dashboard atrás segue
   interativo; `z-40`, abaixo dos Sheets `z-50`) e **recolhível** para um chip
   flutuante (dá para testar o dashboard com um turno em voo e voltar). O log de
   chat é o `AiChatLog` (`ai-chat-log.tsx`), extraído do sheet da Home e usado
@@ -1492,16 +1502,35 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
   `router.refresh()`, e F5 recarrega o CONTEÚDO do banco (reabrir é 1 clique;
   sem auto-abrir por design).
 - **Actions** (`app/(app)/dashboards/ai-session-actions.ts`): o SERVIDOR é a
-  fonte de verdade dos turnos — `runAiEditTurn` carrega os turnos do banco,
-  chama o MESMO `generateDashboardWithAi` (mode "edit"; cap de 10 turnos ao
-  modelo inalterado) e persiste chat + prévia + snapshot num upsert único; o
+  fonte de verdade dos turnos — o turno carrega os turnos do banco, chama o
+  MESMO núcleo de geração da Home (mode "edit"; cap de 10 turnos ao modelo
+  inalterado) e persiste chat + prévia + snapshot num upsert único; o
   cliente envia só a mensagem nova e SUBSTITUI o estado pelo canônico devolvido
-  (chat/pendingSummary/hasUndo — sem merge local). A prévia pendente
+  (chat/pendingSummary/hasUndo — sem merge local). Desde 26/07/2026 o corpo
+  do gate/linha da sessão/turno vive em `lib/ai/edit-session.ts`
+  (`gateAiEdit`/`loadRow`/`saveRow`/`runAiEditTurnCore`) e o da geração em
+  `lib/ai/generate-dashboard.ts` (`generateDashboardCore`) — as actions
+  (`runAiEditTurn`, `generateDashboardWithAi`, …) são wrappers finos; NÃO
+  recrie gate/persistência fora desses módulos. A prévia pendente
   (auto-aplicar OFF) fica no banco: `applyAiEditPending` lê o JSON de lá (nada
   bruto viaja do cliente) e ela sobrevive a F5. Gate em TODA action (antes de
   qualquer leitura): `create_dashboards` + dono/admin do board (espelho da
   geração; RLS own-row + org como muralha — ver banco §3.3). Caps de
   armazenamento: 30 turnos / 100 entradas de chat.
+- **Raciocínio ao vivo (26/07/2026)**: o TURNO do painel entra pela rota de
+  streaming `POST /api/dashboards/<id>/ai-turn` (server action não faz
+  streaming), que roda o MESMO `runAiEditTurnCore` e devolve NDJSON — linhas
+  `{type:"thought"}` com o raciocínio do modelo e uma linha final
+  `{type:"state"}` com o `AiEditSessionState` canônico (inclusive erros de
+  gate; anti-CSRF: cookies SameSite=Lax + checagem de `origin`). O raciocínio
+  é EFÊMERO (só exibido durante a geração — `busyDetail` do `AiChatLog`; nunca
+  persistido na sessão). Contrato nos adaptadores: `AiGenerateInput.onThought`
+  (best-effort) — implementado no Gemini via `:streamGenerateContent` (SSE) +
+  `thinkingConfig.includeThoughts` (resumos de pensamento; os modelos atuais
+  já pensam por padrão, então NÃO há custo extra de tokens). Regra de custo:
+  NUNCA habilitar thinking num modelo em que ele vem desligado (Claude Opus
+  4.8/Haiku, gpt-4.1…) — Claude/OpenAI seguem sem raciocínio exibido. Demais
+  actions (aplicar/desfazer/recomeçar/carregar) seguem server actions.
 - **Desfazer/Recomeçar**: o snapshot pré-turno do último apply
   (`EditDashboardState.snapshot`) é persistido em `undo_snapshot` —
   `undoAiEditSession` restaura via `restoreDashboardSnapshot` e limpa (sempre a

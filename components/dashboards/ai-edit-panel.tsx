@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Painel "Editar com IA" DENTRO do dashboard — sessão persistida por
 // (usuário, board) em dashboard_ai_sessions (0098). Sempre modo EDITAR (alvo =
 // o próprio board); o cliente envia só a mensagem nova e SUBSTITUI o estado
@@ -8,6 +8,11 @@
 // RECOLHÍVEL para um chip flutuante — dá para testar o dashboard com o turno em
 // voo e voltar. "Recomeçar" zera a conversa mas preserva o Desfazer; "Desfazer
 // edição da IA" restaura o snapshot pré-turno persistido (sobrevive a F5).
+// v1.1 (26/07/2026): título do painel = MODELO configurado (1ª letra
+// maiúscula; fallback "Editar com IA" sem config) e o TURNO passa a entrar
+// pela rota de streaming /api/dashboards/<id>/ai-turn (NDJSON) — o raciocínio
+// do modelo aparece ao vivo no log (efêmero, some ao concluir; demais actions
+// seguem server actions). Botões de gatilho/chip mantêm "Editar com IA"/"IA".
 "use client";
 
 import {
@@ -40,13 +45,14 @@ import {
   discardAiEditPending,
   loadAiEditSession,
   resetAiEditSession,
-  runAiEditTurn,
   undoAiEditSession,
   type AiEditSessionState,
 } from "@/app/(app)/dashboards/ai-session-actions";
+import { AI_PROVIDER_LABELS, isAiProvider } from "@/lib/ai/models";
 
 type PanelState = "closed" | "open" | "collapsed";
-type Action = "load" | "turn" | "apply" | "undo" | "reset" | null;
+// "turn" não passa mais por aqui — o turno usa a rota de streaming (turnBusy).
+type Action = "load" | "apply" | "undo" | "reset" | null;
 
 // Handle imperativo p/ o trigger externo (dropdown "Editar" da toolbar).
 export interface AiEditPanelHandle {
@@ -81,16 +87,31 @@ export function AiEditPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [action, setAction] = useState<Action>(null);
   const [busy, startBusy] = useTransition();
+  // Turno em voo pela rota de streaming (fora do useTransition das actions) +
+  // raciocínio ao vivo acumulado do stream (efêmero — zera ao concluir).
+  const [turnBusy, setTurnBusy] = useState(false);
+  const [liveThought, setLiveThought] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const aiReady = Boolean(ai?.hasKey);
-  const generating = busy && (action === "turn" || action === "apply");
+  const anyBusy = busy || turnBusy;
+  const generating = turnBusy || (busy && action === "apply");
 
-  // Auto-scroll do log ao fim a cada entrada nova / início de geração.
+  // Título do painel: o MODELO configurado, com a 1ª letra maiúscula.
+  const panelTitle = ai?.model
+    ? ai.model.charAt(0).toUpperCase() + ai.model.slice(1)
+    : "Editar com IA";
+  const providerLabel =
+    ai && isAiProvider(ai.provider)
+      ? AI_PROVIDER_LABELS[ai.provider]
+      : ai?.provider;
+
+  // Auto-scroll do log ao fim a cada entrada nova / início de geração /
+  // trecho novo de raciocínio.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chat, generating]);
+  }, [chat, generating, liveThought]);
 
   // Estado canônico devolvido por toda action: substitui por inteiro quando ok;
   // ok:false (gate) só vira aviso — o chat local não é apagado.
@@ -105,7 +126,7 @@ export function AiEditPanel({
   }
 
   function run(a: Exclude<Action, null>, fn: () => Promise<AiEditSessionState>) {
-    if (busy) return;
+    if (anyBusy) return;
     setAction(a);
     setNotice(null);
     startBusy(async () => {
@@ -123,17 +144,66 @@ export function AiEditPanel({
 
   useImperativeHandle(ref, () => ({ open: openPanel }));
 
-  function sendTurn() {
+  // Turno via rota de STREAMING (NDJSON): linhas {type:"thought"} alimentam o
+  // raciocínio ao vivo e a linha final {type:"state"} é o MESMO estado
+  // canônico das actions (absorb substitui tudo).
+  async function sendTurn() {
     const text = message.trim();
-    if (!text || busy) return;
-    // Otimista: a action devolve o chat completo (inclui esta entrada).
+    if (!text || anyBusy) return;
+    // Otimista: o estado final devolve o chat completo (inclui esta entrada).
     setChat((c) => [...c, { kind: "user", text }]);
     setMessage("");
-    run("turn", () => runAiEditTurn(dashboardId, text, autoApply));
+    setNotice(null);
+    setLiveThought("");
+    setTurnBusy(true);
+    try {
+      const res = await fetch(`/api/dashboards/${dashboardId}/ai-turn`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: text, autoApply }),
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`o servidor respondeu ${res.status}.`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalState: AiEditSessionState | null = null;
+      const handleLine = (raw: string) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return;
+        const evt = JSON.parse(trimmed) as
+          | { type: "thought"; text: string }
+          | { type: "state"; state: AiEditSessionState };
+        if (evt.type === "thought") setLiveThought((t) => t + evt.text);
+        else if (evt.type === "state") finalState = evt.state;
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          handleLine(buffer.slice(0, nl));
+          buffer = buffer.slice(nl + 1);
+        }
+      }
+      if (buffer.trim()) handleLine(buffer);
+      if (!finalState) throw new Error("resposta incompleta do servidor.");
+      absorb(finalState);
+    } catch (err) {
+      // O turno pode ter concluído no servidor mesmo com o stream perdido —
+      // a sessão persiste no banco; um F5/reabrir recarrega o estado real.
+      const msg = err instanceof Error ? err.message : String(err);
+      setNotice(`Falha no turno: ${msg}`);
+    } finally {
+      setTurnBusy(false);
+      setLiveThought("");
+    }
   }
 
   function restartSession() {
-    if (busy) return;
+    if (anyBusy) return;
     if (
       !window.confirm(
         "Apagar a conversa e recomeçar do zero? O Desfazer da última edição continua disponível."
@@ -166,8 +236,8 @@ export function AiEditPanel({
           onClick={() => setPanel("open")}
           title="Voltar para a edição com IA"
         >
-          <Wand2 className={busy ? "size-4 animate-pulse" : "size-4"} />
-          IA{busy ? "…" : ""}
+          <Wand2 className={anyBusy ? "size-4 animate-pulse" : "size-4"} />
+          IA{anyBusy ? "…" : ""}
         </Button>
       </>
     );
@@ -188,11 +258,11 @@ export function AiEditPanel({
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="flex items-center gap-2 font-semibold">
-              <Wand2 className="size-4" /> Editar com IA
+              <Wand2 className="size-4" /> {panelTitle}
             </p>
             <p className="text-muted-foreground text-xs">
               {aiReady
-                ? `Edita este dashboard conversando (${ai?.provider} · ${ai?.model}). A conversa fica salva para você.`
+                ? `Edita este dashboard conversando (${providerLabel}). A conversa fica salva para você.`
                 : "Edita este dashboard conversando com a IA."}
             </p>
           </div>
@@ -236,8 +306,11 @@ export function AiEditPanel({
               entries={chat}
               busy={generating}
               busyLabel={
-                action === "apply" ? "Aplicando as mudanças…" : "Gerando com IA…"
+                busy && action === "apply"
+                  ? "Aplicando as mudanças…"
+                  : "Gerando com IA…"
               }
+              busyDetail={turnBusy ? liveThought || undefined : undefined}
               className="min-h-0 flex-1"
             />
 
@@ -261,7 +334,7 @@ export function AiEditPanel({
                   <Button
                     type="button"
                     size="sm"
-                    disabled={busy}
+                    disabled={anyBusy}
                     onClick={() =>
                       run("apply", () => applyAiEditPending(dashboardId))
                     }
@@ -272,7 +345,7 @@ export function AiEditPanel({
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={busy}
+                    disabled={anyBusy}
                     onClick={() =>
                       run("reset", () => discardAiEditPending(dashboardId))
                     }
@@ -297,7 +370,7 @@ export function AiEditPanel({
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || message.trim().length === 0}
+                disabled={anyBusy || message.trim().length === 0}
                 onClick={sendTurn}
               >
                 {generating ? (
@@ -321,7 +394,7 @@ export function AiEditPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={busy || !hasUndo}
+                disabled={anyBusy || !hasUndo}
                 onClick={() =>
                   run("undo", () => undoAiEditSession(dashboardId))
                 }
@@ -333,7 +406,7 @@ export function AiEditPanel({
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={busy || (chat.length === 0 && !pendingSummary)}
+                disabled={anyBusy || (chat.length === 0 && !pendingSummary)}
                 onClick={restartSession}
                 title="Apaga a conversa salva e recomeça do zero (não mexe no dashboard nem no Desfazer)."
               >
