@@ -1,4 +1,10 @@
-// Versão: 1.4 | Data: 23/07/2026
+// Versão: 1.5 | Data: 26/07/2026
+// v1.5 (26/07/2026): PASTAS (0107) — folder_id/sort_order em data_sources e
+//   sort_order em sub_sources entram no SourceDef (folderId/sortOrder) e a
+//   ordenação vira sort_order asc → builtin desc → created_at asc (defaults 0
+//   preservam a ordem histórica até o admin reordenar). Pastas em si carregam
+//   por lib/config/source-folders.ts. ATENÇÃO deploy: sem a 0107 aplicada, o
+//   select nomeado falha e cai no fallback BUILTIN_SOURCES.
 // v1.4 (23/07/2026): multi-org (0090) — parâmetro opcional orgId filtra o
 //   catálogo pela organização ATIVA. A RLS já escopa às orgs do usuário; o
 //   filtro explícito resolve a visão de quem pertence a 2+ orgs (Owner) e o
@@ -30,8 +36,9 @@ export const loadSources = cache(async function loadSources(
     let query = supabase
       .from("data_sources")
       .select(
-        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone"
+        "key, record_type, label, short_label, default_period_field, builtin, manual_entry, timezone, folder_id, sort_order"
       )
+      .order("sort_order", { ascending: true })
       .order("builtin", { ascending: false })
       .order("created_at", { ascending: true });
     if (orgId) query = query.eq("organization_id", orgId);
@@ -50,6 +57,8 @@ export const loadSources = cache(async function loadSources(
         builtin: Boolean(r.builtin),
         manualEntry: Boolean(r.manual_entry),
         timezone: (r.timezone as string | null) || null,
+        folderId: (r.folder_id as string | null) ?? null,
+        sortOrder: Number(r.sort_order ?? 0),
       };
     });
 
@@ -58,7 +67,10 @@ export const loadSources = cache(async function loadSources(
     const rtByKey = new Map(roots.map((s) => [s.key, s.recordType]));
     const { data: subData } = await supabase
       .from("sub_sources")
-      .select("key, parent_key, label, short_label, default_period_field, filter")
+      .select(
+        "key, parent_key, label, short_label, default_period_field, filter, sort_order"
+      )
+      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
     const subs: SourceDef[] = (subData ?? [])
       .map((r): SourceDef | null => {
@@ -79,6 +91,7 @@ export const loadSources = cache(async function loadSources(
           manualEntry: false,
           parentKey,
           filter,
+          sortOrder: Number(r.sort_order ?? 0),
         };
       })
       .filter((s): s is SourceDef => s != null);

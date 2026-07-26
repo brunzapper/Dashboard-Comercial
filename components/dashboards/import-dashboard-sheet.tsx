@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 23/07/2026
+// Versão: 2.1 | Data: 26/07/2026
+// v2.1 (26/07/2026): PASTAS (0107) — checkboxes de base do modo "Criar novo"
+//   agrupados por pasta (heading só quando há pasta criada).
 // v2.0 (23/07/2026): painel vira SESSÃO de IA com 3 modos — "Criar novo",
 //   "Criar a partir de" (dashboard existente como referência ⇒ cria cópia
 //   melhorada) e "Editar" (atualiza in-place; a IA nunca exclui widgets).
@@ -48,6 +50,11 @@ import {
   type AiChatEntry,
 } from "@/components/dashboards/ai-chat-log";
 import type { SourceDef } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
+import { useSourceFolders } from "@/components/source-folders-context";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
   buildImportPrompt,
@@ -123,7 +130,11 @@ export function ImportDashboardSheet({
   const [genPending, startGenerate] = useTransition();
 
   const aiReady = Boolean(ai?.hasKey);
-  const rootSources = sources.filter((s) => !s.parentKey);
+  // PASTAS (0107): checkboxes de base do modo "new" agrupados por pasta
+  // (heading só quando há pasta criada). Só raízes, como antes.
+  const folders = useSourceFolders();
+  const sourceGroups = groupSourcesByFolder(folders, sources);
+  const showFolderHeadings = sourceGroups.some((g) => g.folder != null);
   const selectedBoard = boards.find((b) => b.id === boardId) ?? null;
   const sessionActive = chat.length > 0;
 
@@ -347,17 +358,31 @@ export function ImportDashboardSheet({
               <div className="flex flex-col gap-2">
                 <Label>Bases do dashboard (uma ou várias)</Label>
                 <div className="flex flex-col gap-1.5 rounded-md border p-3">
-                  {rootSources.map((s) => (
-                    <label
-                      key={s.key}
-                      className="flex cursor-pointer items-center gap-2 text-sm"
+                  {sourceGroups.map((g) => (
+                    <div
+                      key={g.folder?.id ?? "__sem_pasta__"}
+                      className="flex flex-col gap-1.5"
                     >
-                      <Checkbox
-                        checked={bases.includes(s.key)}
-                        onCheckedChange={(v) => toggleBase(s.key, v === true)}
-                      />
-                      {s.label}
-                    </label>
+                      {showFolderHeadings ? (
+                        <p className="text-muted-foreground text-xs font-medium uppercase">
+                          {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+                        </p>
+                      ) : null}
+                      {g.roots.map((s) => (
+                        <label
+                          key={s.key}
+                          className="flex cursor-pointer items-center gap-2 text-sm"
+                        >
+                          <Checkbox
+                            checked={bases.includes(s.key)}
+                            onCheckedChange={(v) =>
+                              toggleBase(s.key, v === true)
+                            }
+                          />
+                          {s.label}
+                        </label>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </div>

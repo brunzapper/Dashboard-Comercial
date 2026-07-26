@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 23/07/2026
+// Versão: 1.6 | Data: 26/07/2026
+// v1.6 (26/07/2026): SourceFoldersProvider — pastas de bases (source_folders,
+//   0107) para navegação/abas/pickers agrupados por pasta em todo o app.
 // Layout autenticado: shell com navegação lateral filtrada por papel/permissão.
 // v1.5 (23/07/2026): multi-org (0089+) — branding do sidebar sai de
 //   organizations (app_name/name, editáveis em Configurações → Organização);
@@ -21,6 +23,7 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrg, getMemberships } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { loadSourceFolders } from "@/lib/config/source-folders";
 import {
   loadSourceLabelsValue,
   mergeSourceLabels,
@@ -34,6 +37,7 @@ import { TaskBell } from "@/components/layout/task-bell";
 import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
+import { SourceFoldersProvider } from "@/components/source-folders-context";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
@@ -97,12 +101,14 @@ export default async function AppLayout({
   // seriais. O merge dos rótulos depende de `sources`, mas o FETCH não.
   // Sino: erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
   const supabase = await createClient();
-  const [settings, sources, labelsValue, dueCount] = await Promise.all([
-    loadUserSettings(user.id),
-    loadSources(supabase, org?.id),
-    loadSourceLabelsValue(supabase, org?.id),
-    countTaskAlerts().catch(() => 0),
-  ]);
+  const [settings, sources, sourceFolders, labelsValue, dueCount] =
+    await Promise.all([
+      loadUserSettings(user.id),
+      loadSources(supabase, org?.id),
+      loadSourceFolders(supabase, org?.id),
+      loadSourceLabelsValue(supabase, org?.id),
+      countTaskAlerts().catch(() => 0),
+    ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
   const initialPinned =
     (settings as { sidebarPinned?: boolean }).sidebarPinned ?? false;
@@ -142,6 +148,7 @@ export default async function AppLayout({
 
   return (
     <SourcesProvider sources={sources}>
+      <SourceFoldersProvider folders={sourceFolders}>
       <SourceLabelsProvider labels={sourceLabels}>
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
             coalescido; só no app autenticado (o viewer /s/ fica fora). */}
@@ -154,6 +161,7 @@ export default async function AppLayout({
           {children}
         </AppShell>
       </SourceLabelsProvider>
+      </SourceFoldersProvider>
     </SourcesProvider>
   );
 }

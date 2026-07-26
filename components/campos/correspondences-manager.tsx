@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 09/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): PASTAS (0107) — "Colunas por base" agrupada por pasta,
+//   com as subs logo abaixo da própria pai (↳).
 // Fase 8: gestão das correspondências de colunas (campos unificados) na aba
 // Campos. Tabela + Sheet para criar/editar. Cada correspondência liga uma coluna
 // por fonte (Leads/Deals/Estudo); o construtor de widgets usa como `unified:<key>`.
@@ -27,8 +29,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
-import { sourceLabel, type SourceKey } from "@/lib/sources";
+import { sourceLabel, subSourcesOf, type SourceKey } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
 import { useSources } from "@/components/sources-context";
+import { useSourceFolders } from "@/components/source-folders-context";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   createCorrespondence,
@@ -61,6 +68,12 @@ function CorrespondenceForm({
   const action = isEdit ? updateCorrespondence : createCorrespondence;
   const [state, formAction, pending] = useActionState(action, initial);
   const catalog = useSources();
+  // PASTAS (0107): "Colunas por base" agrupada por pasta (heading só quando
+  // há pasta) e cada raiz seguida das PRÓPRIAS subs. Puro visual — refs
+  // seguem chaveados por key.
+  const folders = useSourceFolders();
+  const catalogGroups = groupSourcesByFolder(folders, catalog);
+  const showFolderHeadings = catalogGroups.some((g) => g.folder != null);
   const [dataType, setDataType] = useState<DataType>(
     correspondence?.data_type ?? "numero"
   );
@@ -121,25 +134,42 @@ function CorrespondenceForm({
           Escolha a coluna equivalente em cada base. Deixe em branco onde não se
           aplica (mínimo de duas bases).
         </p>
-        {catalog.map((s) => (
-          <div key={s.key} className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{s.label}</span>
-            <Combobox
-              name={`member_${s.key}`}
-              options={[
-                { value: "", label: "— nenhuma —" },
-                ...(candidatesBySource[s.key] ?? []).map((c) => ({
-                  value: c.ref,
-                  label: c.label,
-                })),
-              ]}
-              value={refs[s.key] ?? ""}
-              onValueChange={(ref) =>
-                setRefs((prev) => ({ ...prev, [s.key]: ref }))
-              }
-              placeholder="— nenhuma —"
-              aria-label={s.label}
-            />
+        {catalogGroups.map((g) => (
+          <div
+            key={g.folder?.id ?? "__sem_pasta__"}
+            className="flex flex-col gap-2"
+          >
+            {showFolderHeadings ? (
+              <p className="text-muted-foreground text-xs font-medium uppercase">
+                {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+              </p>
+            ) : null}
+            {g.roots
+              .flatMap((root) => [root, ...subSourcesOf(root.key, catalog)])
+              .map((s) => (
+                <div key={s.key} className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">
+                    {s.parentKey ? "↳ " : ""}
+                    {s.label}
+                  </span>
+                  <Combobox
+                    name={`member_${s.key}`}
+                    options={[
+                      { value: "", label: "— nenhuma —" },
+                      ...(candidatesBySource[s.key] ?? []).map((c) => ({
+                        value: c.ref,
+                        label: c.label,
+                      })),
+                    ]}
+                    value={refs[s.key] ?? ""}
+                    onValueChange={(ref) =>
+                      setRefs((prev) => ({ ...prev, [s.key]: ref }))
+                    }
+                    placeholder="— nenhuma —"
+                    aria-label={s.label}
+                  />
+                </div>
+              ))}
           </div>
         ))}
       </div>

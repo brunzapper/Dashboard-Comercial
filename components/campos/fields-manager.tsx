@@ -1,4 +1,9 @@
-// Versão: 2.3 | Data: 20/07/2026
+// Versão: 2.4 | Data: 26/07/2026
+// v2.4 (26/07/2026): PASTAS (0107) — com pasta criada, as abas viram 2 níveis:
+//   [Núcleo] [pastas…] [Gerais] em cima e as bases da pasta ativa embaixo
+//   (badge da pasta = soma das bases). Seções agora só de bases RAIZ via
+//   recordTypeOf (as abas de sub eram mortas: toRecordType de sub devolve a
+//   própria key, que nunca aparece em applies_to — contagem sempre 0).
 // v2.3 (20/07/2026): catálogo agregado via builder ÚNICO (lib/widgets/
 //   agg-catalog.defsAggCatalogInput) — montagem idêntica, sem cópia local.
 // Gerenciador de campos personalizados: busca + ABAS por fonte (Leads/Deals/
@@ -41,11 +46,16 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { DATA_TYPE_LABELS, type FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
-import { toRecordType } from "@/lib/sources";
+import { rootSources } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { decorateRefOptions, sourceChips } from "@/lib/widgets/filter-ops";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { useSources } from "@/components/sources-context";
+import { useSourceFolders } from "@/components/source-folders-context";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
 import {
   buildAggOperandCatalog,
@@ -252,6 +262,9 @@ export function FieldsManager({
   // Filtra por rótulo/chave e agrupa por fonte (applies_to). Um campo pode
   // aparecer em mais de uma seção quando applies_to inclui vários record_types
   // (ex.: utm_* valem para lead e negócio). applies_to vazio = "Gerais".
+  // Só bases RAIZ (0107): os campos de uma sub são os da PAI (mesmo
+  // record_type) — as antigas abas de sub contavam sempre 0.
+  const roots = useMemo(() => rootSources(catalog), [catalog]);
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
@@ -266,7 +279,7 @@ export function FieldsManager({
       [NUCLEO_SECTION]: [],
       [GERAIS_SECTION]: [],
     };
-    for (const s of catalog) bySection[s.key] = [];
+    for (const s of roots) bySection[s.key] = [];
     for (const f of filtered) {
       if (isCoreDef(f)) {
         bySection[NUCLEO_SECTION].push(f);
@@ -277,16 +290,16 @@ export function FieldsManager({
         bySection[GERAIS_SECTION].push(f);
         continue;
       }
-      for (const s of catalog) {
-        if (appliesTo.includes(toRecordType(s.key))) bySection[s.key].push(f);
+      for (const s of roots) {
+        if (appliesTo.includes(s.recordType)) bySection[s.key].push(f);
       }
     }
     return bySection;
-  }, [fields, query, catalog]);
+  }, [fields, query, roots]);
 
   const sectionOrder: { key: string; label: string }[] = [
     { key: NUCLEO_SECTION, label: NUCLEO_LABEL },
-    ...catalog.map((s) => ({ key: s.key, label: s.label })),
+    ...roots.map((s) => ({ key: s.key, label: s.label })),
     { key: GERAIS_SECTION, label: GERAIS_LABEL },
   ];
   // Aba efetiva: se a fonte da aba salva sumiu do catálogo, cai na primeira.
@@ -297,6 +310,21 @@ export function FieldsManager({
     (n, s) => n + (sections[s.key]?.length ?? 0),
     0
   );
+
+  // PASTAS (0107): com pasta criada, a fileira vira [Núcleo] [pastas…]
+  // [Gerais] + as bases da pasta ativa embaixo. Grupo ativo deriva da aba.
+  const folders = useSourceFolders();
+  const folderGroups = useMemo(
+    () => groupSourcesByFolder(folders, catalog),
+    [folders, catalog]
+  );
+  const showFolders = folderGroups.some((g) => g.folder != null);
+  const activeGroup = showFolders
+    ? (folderGroups.find((g) => g.roots.some((r) => r.key === activeTab)) ??
+      null)
+    : null;
+  const groupCount = (g: (typeof folderGroups)[number]): number =>
+    g.roots.reduce((n, s) => n + (sections[s.key]?.length ?? 0), 0);
 
   function openCreate() {
     setEditing(undefined);
@@ -335,30 +363,113 @@ export function FieldsManager({
       ) : (
         <>
           {/* Abas por fonte (mesma receita visual das abas de Registros),
-              dirigidas pelo CATÁLOGO dinâmico (data_sources) + "Gerais". */}
-          <div className="flex flex-wrap gap-1 border-b">
-            {sectionOrder.map((s) => {
-              const active = s.key === activeTab;
-              return (
+              dirigidas pelo CATÁLOGO dinâmico (data_sources) + "Gerais".
+              Com PASTAS (0107): [Núcleo] [pastas…] [Gerais] em cima e as
+              bases da pasta ativa embaixo. */}
+          {showFolders ? (
+            <>
+              <div className="flex flex-wrap gap-1 border-b">
                 <button
-                  key={s.key}
                   type="button"
-                  onClick={() => setTab(s.key)}
+                  onClick={() => setTab(NUCLEO_SECTION)}
                   className={cn(
                     "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-                    active
+                    activeTab === NUCLEO_SECTION
                       ? "border-primary text-foreground"
                       : "text-muted-foreground border-transparent hover:text-foreground"
                   )}
                 >
-                  {s.label}
+                  {NUCLEO_LABEL}
                   <Badge variant="secondary">
-                    {sections[s.key]?.length ?? 0}
+                    {sections[NUCLEO_SECTION]?.length ?? 0}
                   </Badge>
                 </button>
-              );
-            })}
-          </div>
+                {folderGroups.map((g) => {
+                  const active = g === activeGroup;
+                  return (
+                    <button
+                      key={g.folder?.id ?? "__sem_pasta__"}
+                      type="button"
+                      onClick={() => setTab(g.roots[0].key)}
+                      className={cn(
+                        "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                        active
+                          ? "border-primary text-foreground"
+                          : "text-muted-foreground border-transparent hover:text-foreground"
+                      )}
+                    >
+                      {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+                      <Badge variant="secondary">{groupCount(g)}</Badge>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setTab(GERAIS_SECTION)}
+                  className={cn(
+                    "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                    activeTab === GERAIS_SECTION
+                      ? "border-primary text-foreground"
+                      : "text-muted-foreground border-transparent hover:text-foreground"
+                  )}
+                >
+                  {GERAIS_LABEL}
+                  <Badge variant="secondary">
+                    {sections[GERAIS_SECTION]?.length ?? 0}
+                  </Badge>
+                </button>
+              </div>
+              {activeGroup ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {activeGroup.roots.map((s) => {
+                    const active = s.key === activeTab;
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => setTab(s.key)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {s.label}
+                        <Badge variant="secondary">
+                          {sections[s.key]?.length ?? 0}
+                        </Badge>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex flex-wrap gap-1 border-b">
+              {sectionOrder.map((s) => {
+                const active = s.key === activeTab;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => setTab(s.key)}
+                    className={cn(
+                      "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                      active
+                        ? "border-primary text-foreground"
+                        : "text-muted-foreground border-transparent hover:text-foreground"
+                    )}
+                  >
+                    {s.label}
+                    <Badge variant="secondary">
+                      {sections[s.key]?.length ?? 0}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <FieldsSection
             fields={sections[activeTab] ?? []}
             onEdit={openEdit}

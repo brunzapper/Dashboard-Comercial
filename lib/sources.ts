@@ -49,6 +49,13 @@ export interface SourceDef {
   // (lib/date/normalize.ts, aplicado no sync). null/ausente = sem conversão.
   // Subs não têm (herdam a ingestão da pai).
   timezone?: string | null;
+  // PASTA (0107): agrupamento de EXIBIÇÃO das bases raiz (source_folders).
+  // null/ausente = "sem pasta" (grupo implícito). Subs não têm (herdam a da
+  // pai). Nunca entra em consulta/engine — só navegação/listas/pickers
+  // (lib/source-folders.ts).
+  folderId?: string | null;
+  // Ordem manual (0107) dentro da pasta (raiz) ou da pai (sub). Ausente = 0.
+  sortOrder?: number;
 }
 
 // Fallback/default: as 3 fontes históricas do produto.

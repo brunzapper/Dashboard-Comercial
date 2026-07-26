@@ -1,5 +1,11 @@
-// Versão: 1.5 | Data: 18/07/2026
+// Versão: 1.6 | Data: 26/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v1.6 (26/07/2026): PASTAS (0107) — navegação hierárquica Pasta → Base →
+//   Sub-base: fileira de pastas (só quando há pasta criada), fileira com as
+//   bases da pasta ativa e seletor "Base completa | sub..." quando a base tem
+//   sub-bases. Tudo URL-driven pelo `?fonte=` de sempre (pasta ativa DERIVA da
+//   base ativa — links antigos seguem funcionando); sem pastas, degrada para
+//   as abas planas (agora só raízes — subs no 3º nível).
 // v1.5 (18/07/2026): badge de write-backs pendentes (WritebackPendingBadge) —
 //   mostra "N aguardando envio ao Bitrix" com link p/ Configurações → Log.
 // v1.2 (05/07/2026): Fase 4 — listagem/filtros/edição (antes só o SyncPanel).
@@ -19,11 +25,18 @@ import {
   fieldAppliesToSource,
   isKnownSource,
   isSubSource,
+  parentKeyOf,
   recordTypeOf,
   sourcePredicate,
+  subSourcesOf,
   type SourceKey,
 } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
 import { loadSources } from "@/lib/config/sources";
+import { loadSourceFolders } from "@/lib/config/source-folders";
 import {
   buildResponsibleCanon,
   collapseResponsibleOptions,
@@ -77,8 +90,10 @@ export default async function RegistrosPage({
 
   const supabase = await createClient();
 
-  // Catálogo de fontes (abas): builtins + fontes criadas (data_sources).
+  // Catálogo de fontes (abas): builtins + fontes criadas (data_sources) +
+  // pastas (0107 — agrupam a navegação; [] sem migração/pasta).
   const sources = await loadSources(supabase);
+  const folders = await loadSourceFolders(supabase);
   const fonteRaw = str(sp.fonte);
   const fonte: SourceKey = isKnownSource(fonteRaw, sources)
     ? fonteRaw
@@ -262,6 +277,18 @@ export default async function RegistrosPage({
     return `/registros?${params.toString()}`;
   }
 
+  // Navegação Pasta → Base → Sub-base (0107): TUDO deriva da fonte ativa
+  // (`?fonte=`, já validada/fallback acima) — links antigos seguem valendo e
+  // não há param novo. Sem pasta criada, só a fileira de bases aparece
+  // (agora apenas raízes — as subs moram no 3º nível).
+  const rootKey = parentKeyOf(fonte, sources) ?? fonte;
+  const folderGroups = groupSourcesByFolder(folders, sources);
+  const showFolders = folderGroups.some((g) => g.folder != null);
+  const activeGroup =
+    folderGroups.find((g) => g.roots.some((r) => r.key === rootKey)) ??
+    folderGroups[0];
+  const subTabs = subSourcesOf(rootKey, sources);
+
   return (
     <div className="flex flex-col gap-6">
       {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
@@ -301,25 +328,84 @@ export default async function RegistrosPage({
           Gestor/admin — mesmo público da página; a RLS da fila reforça. */}
       <WritebackPendingBadge />
 
-      {/* Abas por fonte (catálogo dinâmico) */}
-      <div className="flex flex-wrap gap-1 border-b">
-        {sources.map((s) => {
-          const active = s.key === fonte;
-          return (
+      {/* Navegação por base (catálogo dinâmico + pastas 0107):
+          pastas → bases da pasta ativa → sub-bases da base ativa. */}
+      <div className="flex flex-col gap-2">
+        {showFolders ? (
+          <div className="flex flex-wrap gap-1.5">
+            {folderGroups.map((g) => {
+              const active = g === activeGroup;
+              const first = g.roots[0];
+              return (
+                <Link
+                  key={g.folder?.id ?? "__sem_pasta__"}
+                  href={tabHref(first.key)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap gap-1 border-b">
+          {(activeGroup?.roots ?? []).map((s) => {
+            const active = s.key === rootKey;
+            return (
+              <Link
+                key={s.key}
+                href={tabHref(s.key)}
+                className={cn(
+                  "-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "border-primary text-foreground"
+                    : "text-muted-foreground border-transparent hover:text-foreground"
+                )}
+              >
+                {s.label}
+              </Link>
+            );
+          })}
+        </div>
+
+        {subTabs.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
             <Link
-              key={s.key}
-              href={tabHref(s.key)}
+              href={tabHref(rootKey)}
               className={cn(
-                "-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "border-primary text-foreground"
-                  : "text-muted-foreground border-transparent hover:text-foreground"
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                fonte === rootKey
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {s.label}
+              Base completa
             </Link>
-          );
-        })}
+            {subTabs.map((s) => {
+              const active = s.key === fonte;
+              return (
+                <Link
+                  key={s.key}
+                  href={tabHref(s.key)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {s.label}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       <FiltersBar responsibles={filterResponsibles} />

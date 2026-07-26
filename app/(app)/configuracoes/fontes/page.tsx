@@ -1,5 +1,8 @@
-// Versão: 2.1 | Data: 19/07/2026
+// Versão: 2.2 | Data: 26/07/2026
 // Configurações → Fontes (admin).
+// v2.2 (26/07/2026): PASTAS (0107) — seção de pastas de bases (agrupamento de
+//   exibição + ordem manual) acima do catálogo; o formulário da base ganha o
+//   campo "Pasta".
 // v2.1 (19/07/2026): SUB-FONTES (0078) — seção de sub-fontes (fonte derivada de
 //   uma pai, recortada por um filtro). Carrega field_definitions p/ montar as
 //   opções de campo do editor de filtro por fonte pai (applies_to).
@@ -9,11 +12,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
 import { loadSources } from "@/lib/config/sources";
+import { loadSourceFolders } from "@/lib/config/source-folders";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { ComboboxOption } from "@/components/ui/combobox";
+import { SourceFoldersManager } from "@/components/configuracoes/source-folders-manager";
 import { SourcesManager } from "@/components/configuracoes/sources-manager";
 import { SubSourcesManager } from "@/components/configuracoes/sub-sources-manager";
 import { SourceLabelsManager } from "@/components/configuracoes/source-labels-manager";
@@ -26,6 +31,7 @@ export default async function FontesPage() {
   await requireSettingsArea("fontes");
   const supabase = await createClient();
   const sources = await loadSources(supabase);
+  const folders = await loadSourceFolders(supabase);
   const labels = await loadSourceLabels(supabase, sources);
   const { data: fieldsData } = await supabase
     .from("field_definitions")
@@ -109,7 +115,8 @@ export default async function FontesPage() {
           de CSV em Registros.
         </p>
       </div>
-      <SourcesManager sources={sources} />
+      <SourceFoldersManager folders={folders} sources={sources} />
+      <SourcesManager sources={sources} folders={folders} />
       <SubSourcesManager
         sources={sources}
         fieldOptionsByParent={fieldOptionsByParent}

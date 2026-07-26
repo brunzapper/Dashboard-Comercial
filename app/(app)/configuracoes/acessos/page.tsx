@@ -1,15 +1,23 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Configurações → Acessos (0094): acessos customizados por usuário,
 // independentes do nível — o admin CONCEDE além do papel ou REVOGA o que o
 // papel daria (override vence). Três seções por usuário: áreas de
 // Configurações (allow/deny), bases (deny) e dashboards/kanbans
 // (Ver/Editar/Bloqueado — board_access, 0088).
+// v1.1 (26/07/2026): PASTAS (0107) — a seção Bases vai agrupada por pasta
+//   (heading só quando há pasta) e as subs entram logo abaixo da própria pai.
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrg } from "@/lib/auth/org";
 import { AREA_LABELS } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
+import { loadSourceFolders } from "@/lib/config/source-folders";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
+import { subSourcesOf } from "@/lib/sources";
 import { AccessMatrix } from "@/components/configuracoes/access-matrix";
 
 export default async function AcessosPage() {
@@ -18,7 +26,7 @@ export default async function AcessosPage() {
 
   const supabase = await createClient();
   const service = createServiceClient();
-  const [usersRes, { data: memberRows }, sources, { data: boardRows }] =
+  const [usersRes, { data: memberRows }, sources, folders, { data: boardRows }] =
     await Promise.all([
       service.auth.admin.listUsers({ perPage: 1000 }),
       org
@@ -28,12 +36,29 @@ export default async function AcessosPage() {
             .eq("organization_id", org.id)
         : Promise.resolve({ data: null }),
       loadSources(supabase, org?.id),
+      loadSourceFolders(supabase, org?.id),
       supabase
         .from("dashboards")
         .select("id, name, kind, owner_user_id")
         .neq("status", "trashed")
         .order("name"),
     ]);
+
+  // Bases agrupadas por pasta (0107), cada raiz seguida das PRÓPRIAS subs.
+  // Sem pasta criada: um único grupo sem heading (label null).
+  const folderGroups = groupSourcesByFolder(folders, sources);
+  const showFolders = folderGroups.some((g) => g.folder != null);
+  const sourceGroups = folderGroups.map((g) => ({
+    label: showFolders ? (g.folder?.label ?? IMPLICIT_FOLDER_LABEL) : null,
+    sources: g.roots.flatMap((root) => [
+      { key: root.key, label: root.label, sub: false },
+      ...subSourcesOf(root.key, sources).map((s) => ({
+        key: s.key,
+        label: s.label,
+        sub: true,
+      })),
+    ]),
+  }));
 
   const memberIds = memberRows
     ? new Set((memberRows ?? []).map((m) => m.user_id as string))
@@ -60,11 +85,7 @@ export default async function AcessosPage() {
           key,
           label,
         }))}
-        sources={sources.map((s) => ({
-          key: s.key,
-          label: s.label,
-          sub: Boolean(s.parentKey),
-        }))}
+        sourceGroups={sourceGroups}
         boards={(boardRows ?? []).map((b) => ({
           id: b.id as string,
           name: b.name as string,

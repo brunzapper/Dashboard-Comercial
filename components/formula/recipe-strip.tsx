@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): PASTAS (0107) — com pasta criada, o grupo das BASES no
+//   combobox do wizard de conversão vira o nome da pasta ("Geral" p/ soltas);
+//   as SUB-bases seguem no grupo único "Sub-bases" (o rótulo "Pai › Sub" já
+//   contextualiza — espalhá-las por pasta duplicaria seções).
 // RECEITAS guiadas do FormulaEditor: cards "Ciclo de vendas" e "Taxa de
 // conversão" que abrem um wizard INLINE de 2-3 perguntas e geram uma fórmula
 // normal, aberta no editor já preenchida e 100% editável — atalho POR CIMA do
@@ -25,6 +29,11 @@ import {
 import { TODAY_REF } from "@/lib/records/date-operands";
 import { parseAggRef } from "@/lib/widgets/calc-metrics";
 import { rootSources, type SourceDef } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
+import { useSourceFolders } from "@/components/source-folders-context";
 import { cn } from "@/lib/utils";
 
 export function RecipeStrip({
@@ -316,14 +325,22 @@ function ConversionWizard({
   // Cada lado escolhe uma Base OU Sub-base (o catálogo escopado cobre as duas;
   // o motor roda uma perna própria por fonte — sub ÷ pai e sub ÷ sub valem).
   // Sub-base exibe "Pai › Sub" para o trigger fechado ficar inequívoco.
+  // PASTAS (0107): com pasta criada, o grupo das raízes vira o nome da pasta.
+  const folders = useSourceFolders();
   const sourceOptions: ComboboxOption[] = useMemo(() => {
     const roots = rootSources(sources);
     const rootByKey = new Map(roots.map((s) => [s.key, s]));
-    const out: ComboboxOption[] = roots.map((s) => ({
-      value: s.key,
-      label: s.label,
-      group: "Bases",
-    }));
+    const groups = groupSourcesByFolder(folders, sources);
+    const showFolders = groups.some((g) => g.folder != null);
+    const out: ComboboxOption[] = groups.flatMap((g) =>
+      g.roots.map((s) => ({
+        value: s.key,
+        label: s.label,
+        group: showFolders
+          ? (g.folder?.label ?? IMPLICIT_FOLDER_LABEL)
+          : "Bases",
+      }))
+    );
     for (const sub of sources.filter((s) => s.parentKey)) {
       const parent = rootByKey.get(sub.parentKey!);
       out.push({
@@ -333,7 +350,7 @@ function ConversionWizard({
       });
     }
     return out;
-  }, [sources]);
+  }, [sources, folders]);
   // Contagens da fonte: `agg:count:*@src` (registros) e `agg:count:<campo>@src`
   // (registros com o campo preenchido) — direto do catálogo agregado vivo.
   const countOptions = (src: string): ComboboxOption[] =>

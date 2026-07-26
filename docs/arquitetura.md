@@ -1,4 +1,8 @@
-<!-- Versão: 1.35 | Data: 26/07/2026 -->
+<!-- Versão: 1.36 | Data: 26/07/2026 -->
+<!-- v1.36 (26/07/2026): §4.8 — Pastas de bases (0107): source_folders +
+     folder_id/sort_order (exibição pura; groupSourcesByFolder único;
+     navegação Pasta → Base → Sub-base em /registros e /campos; headings nos
+     pickers; ↑/↓ em Configurações → Bases). RPCs intocados. -->
 <!-- v1.35 (26/07/2026): §4.14 Parcerias (0104–0106) — match de bases
      dinâmicas (helpers com lookup em data_sources), auto-match INCREMENTAL
      pós-sync do Bitrix + recalc direcionado, fusão de perfis de operação
@@ -1082,6 +1086,24 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   (`@period.byType` aceita `custom:` e a regra dos mocks 0052 inspeciona o
   byType serializado); a validação semântica (campo existe e é `data`) fica na
   server action de fontes.
+- **Pastas de bases (0107, 26/07/2026):** `source_folders` agrupa as bases
+  RAIZ em **Pastas** — agrupamento de EXIBIÇÃO puro + ordem manual
+  (`data_sources.folder_id`/`sort_order`, `sub_sources.sort_order`; botões
+  ↑/↓ em Configurações → Bases). Navegação Pasta → Base → Sub-base em
+  /registros (100% URL-driven pelo `?fonte=` de sempre — a pasta ativa DERIVA
+  da base ativa; sem pasta criada, degrada para as abas planas) e /campos;
+  headings por pasta nos pickers (widget-builder, diálogo Bases do board — as
+  pastas viajam na PRÓPRIA action `getBoardSourcesState`, catálogo completo —,
+  matriz de Acessos, import por IA, period-filter, correspondências) e nas
+  tabelas de Configurações → Bases. TODO agrupamento sai de
+  `groupSourcesByFolder` (`lib/source-folders.ts` — implícita "Geral"
+  primeiro, pastas por `sortOrder`, **grupos vazios omitidos**: catálogo
+  recortado por `applySourceScope`/RLS esconde a pasta esvaziada sozinho);
+  pastas chegam ao client pelo `SourceFoldersProvider` (layout; o viewer
+  público não o monta). Pasta NUNCA entra em consulta/engine/RPC, no
+  `sourceScope` (segue por keys) nem em permissão — excluir pasta devolve as
+  bases para "sem pasta" (FK SET NULL). Sub não tem pasta própria (herda a da
+  pai na exibição).
 
 ### 4.9 Dias úteis, meta ideal e alinhamento por dia útil (20/07/2026)
 

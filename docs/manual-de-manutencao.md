@@ -242,6 +242,12 @@ npm run build      # o que a Vercel roda no deploy
   datas/horas de 18h+ locais caem no dia seguinte no dashboard (o read side lê
   o prefixo `YYYY-MM-DD` da string). Só afeta valores DATETIME ingeridos; campo
   de calendário puro (Bitrix `date`) e date-only nunca convertem.
+- [ ] Muitas bases? Organize em **Pastas** (Configurações → Bases → Pastas,
+  0107) e ordene com ↑/↓ — é agrupamento de EXIBIÇÃO puro (abas de
+  /registros e /campos, headings dos pickers): nunca muda consulta, permissão
+  nem o `sourceScope` de board. Excluir pasta devolve as bases para "sem
+  pasta". Agrupamento novo em UI usa SEMPRE `groupSourcesByFolder`
+  (`lib/source-folders.ts`), nunca lógica própria.
 
 ### 4.5 Mexeu em campos calculados / fórmulas
 
