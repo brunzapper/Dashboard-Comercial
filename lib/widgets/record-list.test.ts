@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Testes do modo lista com fake PostgREST encadeável: o alvo é o TOP-UP de
 // mocks das pernas cobertas (invariante 9) — só busca is_mock=true quando a
 // config das pernas referencia Data Reunião E a de exibição NÃO (senão
 // duplicaria) — e o merge dedupeById.
+// v1.1 (26/07/2026): agrupamento de responsáveis (0101) — filtro expande p/ o
+// grupo na query PostgREST, com gate (sem filtro → sem consulta extra).
 import { describe, expect, it } from "vitest";
 
 import { MOCK_REUNIAO_KEYS } from "@/lib/widgets/mock-reuniao";
@@ -10,6 +12,7 @@ import {
   dedupeById,
   recordListIncludesMocks,
   runCoveredLegMockTopUp,
+  runRecordList,
 } from "@/lib/widgets/record-list";
 import type { WidgetConfig } from "@/lib/widgets/types";
 import { fakeSupabase, hasStep } from "@/tests/helpers/fake-supabase";
@@ -117,5 +120,48 @@ describe("dedupeById", () => {
       "3",
     ]);
     expect(dedupeById(a, [])).toBe(a);
+  });
+});
+
+describe("agrupamento de responsáveis (0101) no modo lista", () => {
+  it("filtro eq no apelido vira `in` no grupo na query PostgREST", async () => {
+    const { db, queries } = fakeSupabase({
+      tables: {
+        responsibles: [
+          { id: "r-main", canonical_id: null },
+          { id: "r-alias", canonical_id: "r-main" },
+        ],
+        records: (q) => {
+          // fetchAll pagina até lote vazio.
+          const ranges = q.steps.filter((s) => s.method === "range").length;
+          return { data: ranges <= 1 ? [] : [], error: null };
+        },
+        record_matches: [],
+      },
+    });
+    await runRecordList(
+      db,
+      {
+        ...displayConfig,
+        filters: [{ field: "responsible_id", op: "eq", value: "r-alias" }],
+      },
+      null,
+      AVAILABLE
+    );
+    const recordsQuery = queries.find((q) => q.table === "records")!;
+    expect(
+      hasStep(recordsQuery, "in", "responsible_id", ["r-main", "r-alias"])
+    ).toBe(true);
+  });
+
+  it("gate: sem filtro de responsável, não consulta responsibles", async () => {
+    const { db, queries } = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+      },
+    });
+    await runRecordList(db, displayConfig, null, AVAILABLE);
+    expect(queries.some((q) => q.table === "responsibles")).toBe(false);
   });
 });

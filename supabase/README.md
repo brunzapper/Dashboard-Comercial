@@ -1,4 +1,6 @@
-<!-- Versão: 1.1 | Data: 19/07/2026 -->
+<!-- Versão: 1.2 | Data: 26/07/2026 -->
+<!-- v1.2 (26/07/2026): seção da 0101 (agrupamento de responsáveis —
+     canonical_id + auth_responsible_ids de grupo; aplicar ANTES do deploy). -->
 
 # Banco de dados (Supabase) — aplicação manual
 
@@ -463,3 +465,27 @@ select policyname, tablename from pg_policies
 O `on conflict (field_key)` da 0086 deixa de existir após a 0090 (a unicidade
 virou por-org) — não re-rode a 0086 depois da 0090; o seed por org é
 `seed_org_defaults`.
+
+## Agrupamento de responsáveis (migração 0101, 26/07/2026)
+
+`0101_responsible_canonical.sql` — arquivo único, idempotente. Aplique
+**ANTES** do deploy do código (o app passa a selecionar
+`responsibles.canonical_id` em vários loaders). A migração:
+
+1. adiciona `responsibles.canonical_id` (self-FK, `on delete set null`) +
+   índice parcial;
+2. redefine `auth_responsible_ids()` para devolver o GRUPO do vendedor
+   (ids próprios + principais + apelidos desses principais) — sem grant novo.
+
+Conferência pós-migração:
+
+```sql
+-- Coluna criada e sem cadeias (deve retornar 0):
+select count(*) from public.responsibles a
+  join public.responsibles b on a.canonical_id = b.id
+ where b.canonical_id is not null;
+```
+
+Desfazer um agrupamento é `update public.responsibles set canonical_id = null
+where id = '<apelido>'` (ou o combobox "Nome usado" em Configurações →
+Responsáveis) — nenhum dado de `records` é alterado em momento algum.

@@ -1,4 +1,11 @@
-<!-- Versão: 1.31 | Data: 26/07/2026 -->
+<!-- Versão: 1.32 | Data: 26/07/2026 -->
+<!-- v1.32 (26/07/2026): §4.13 — agrupamento de responsáveis por exibição
+     (responsibles.canonical_id, 0101): apelido → principal ("nome usado"),
+     resolvido 100% no engine/loaders (lib/config/responsible-canon.ts) —
+     dropdowns colapsam, filtros expandem p/ o grupo, dimensões fundem no
+     merge client-side, restrição de snapshot grava expandida e
+     auth_responsible_ids devolve o grupo. Invariante 20. RPCs intocados. -->
+
 <!-- v1.31 (26/07/2026): §4.2 — alvos do "Filtro de período" DINÂMICOS
      (settings.excludedTargets, espelho do filtro_campo; widget novo entra
      sozinho; whitelist legada `targets` honrada sem excludedTargets — ramo
@@ -1520,6 +1527,58 @@ alternados por setinhas acima do card (`WidgetPager`). Vínculo:
   `duplicateBoard` não precisa de nada (o `remapJsonIds` já troca os uuids).
   `validate.ts` remove `pages` vindo por JSON com warning.
 
+### 4.13 Agrupamento de responsáveis por exibição (canonical_id, 26/07/2026)
+
+O mesmo responsável pode existir DUPLICADO em `responsibles` porque as chaves
+de matching divergem por fonte: o Bitrix casa por `bitrix_user_id`, planilha e
+CSV casam por nome normalizado (`normalizeName` — grafia um pouco diferente
+cria uma segunda entidade). A unificação é por **exibição, reversível**:
+`responsibles.canonical_id` (0101) marca a linha como **apelido** de um
+principal ("nome usado") — `records.responsible_id` **nunca é repontado** e
+limpar a coluna desfaz tudo. O grupo é sempre **plano** (apelido aponta direto
+ao principal; a action `setResponsibleCanonical` de Configurações →
+Responsáveis repontea filhos ao mesclar um principal e resolve alvo-apelido
+para o principal dele).
+
+Resolução 100% engine/loaders (`lib/config/responsible-canon.ts` —
+`loadResponsibleCanon` cacheado + helpers puros), com gate barato: sem
+referência a `responsible_id` na config, nenhuma consulta extra e caminho
+byte-idêntico. Superfícies:
+
+- **Filtros** (`runWidget`/`runCalculatedWidget`/`runRecordList*`):
+  `expandResponsibleFilters` reescreve `eq`/`eq_ci`/`in` de `responsible_id`
+  para `in` no GRUPO — inclusive o `responsible_id in` produzido pela tradução
+  de operação (que roda antes, na page/widget-scope) e as condições de SOMASE
+  (pós `resolveFkCondFilters`). Expansão idempotente; uuid fora de grupo (ex.:
+  o filtro impossível) passa intacto.
+- **Dimensões**: `mergeRowsByBucket` (bucket-merge v1.2) funde as linhas do
+  RPC apelido→principal no choke point único de `computeRows`; o caminho por
+  registros canonicaliza em `dimValue`. Rótulo id→nome sai do PRINCIPAL
+  (`fetchFkLabels`/`collectRecordFkLabels` canonicalizam antes do lookup).
+- **Dropdowns**: `collapseResponsibleOptions` remove o apelido SÓ quando o
+  principal está presente na lista (quick filters, filtro_campo, picker do
+  construtor, /registros, form e refresh de snapshot). Selects de
+  **write-back** (atribuir responsável) NÃO colapsam — gravam o responsável
+  real.
+- **Snapshots**: `responsibles` é PASSTHROUGH no adapter — o viewer lê o
+  agrupamento AO VIVO (desfazer vale retroativamente); a restrição
+  `allowed_responsible_ids` é gravada JÁ EXPANDIDA (create/updateSnapshot) e o
+  RPC segue lendo a coluna como está.
+- **RLS do vendedor** (invariante 8): `auth_responsible_ids()` (redefinida na
+  0101) devolve o grupo inteiro — sem isso, registros no id do apelido
+  sumiriam do vendedor. A exceção do vendedor da page/widget-scope expande o
+  mesmo conjunto.
+- **Kanban/tabelas**: `recordGroupKey` canonicaliza o agrupamento por
+  responsável; o "Agrupar por" da tabela de registros recebe o mapa via prop
+  `respCanon` (o keyOf chaveia FK por id cru de propósito — proteção contra
+  homônimos preservada nas demais FKs).
+
+Limitações documentadas: `appearance.categoryColors`/`categoryOrder` chaveiam
+pelo nome exibido (cores salvas com o nome antigo deixam de casar — cosmético);
+metas (`goals`) por responsável não se fundem; snapshots com restrição gravada
+ANTES de mudar um grupo precisam ser re-salvos para incluir apelidos novos;
+entity-list (`rowSource: responsibles`) segue exibindo apelidos como linhas.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -1716,6 +1775,19 @@ principalmente — para mantenedores humanos.
     membros é SÓ de renderização (`collectPageMembers` no grid) — nunca
     filtre membros da computação de dados da page (a página oculta precisa do
     dado ao virar visível).
+
+20. **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC
+    nem repontando `records.responsible_id` (§4.13).** `canonical_id` (0101)
+    é exibição reversível: filtros por responsável DEVEM expandir para o
+    grupo (`expandResponsibleFilters` nos choke points de
+    `runWidget`/`runCalculatedWidget`/`runRecordList*`), a dimensão funde no
+    merge client-side e o rótulo sai do principal. Caminho novo que filtre ou
+    agrupe por `responsible_id` sem passar por esses choke points mostra o
+    grupo rachado em silêncio. Restrição de snapshot grava o conjunto JÁ
+    EXPANDIDO (o RPC lê a coluna como está — não o recrie);
+    `auth_responsible_ids()` devolve o grupo (visibilidade do vendedor cobre
+    registros no id do apelido). Grupo sempre PLANO — só a action
+    `setResponsibleCanonical` escreve a coluna.
 
 ## 6. Convenções do projeto
 

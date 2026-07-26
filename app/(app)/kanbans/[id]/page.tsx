@@ -17,6 +17,10 @@ import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
 import {
+  buildResponsibleCanon,
+  canonicalOf,
+} from "@/lib/config/responsible-canon";
+import {
   applySourceScope,
   collectBoardSourceKeys,
 } from "@/lib/config/source-scope";
@@ -127,7 +131,7 @@ export default async function KanbanPage({
   const [{ data: respData }, { data: opsData }] = await Promise.all([
     supabase
       .from("responsibles")
-      .select("id, display_name, bitrix_user_id")
+      .select("id, display_name, bitrix_user_id, canonical_id")
       .eq("active", true)
       .order("display_name"),
     supabase.from("operations").select("id, name").eq("active", true).order("name"),
@@ -142,8 +146,17 @@ export default async function KanbanPage({
     label: o.name as string,
   }));
 
+  // Agrupamento (0101): rótulo do apelido = nome do PRINCIPAL ("nome usado")
+  // — colunas/células do quadro saem canônicas.
+  const kanbanCanon = buildResponsibleCanon(
+    (respData ?? []) as { id: string; canonical_id?: string | null }[]
+  );
+  const nameById = Object.fromEntries(responsibles.map((r) => [r.id, r.label]));
   const responsibleLabels = Object.fromEntries(
-    responsibles.map((r) => [r.id, r.label])
+    responsibles.map((r) => [
+      r.id,
+      nameById[canonicalOf(r.id, kanbanCanon)] ?? r.label,
+    ])
   );
 
   // Período: bucket de data filtra pelo próprio campo do bucket; senão, pelo

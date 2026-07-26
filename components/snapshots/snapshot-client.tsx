@@ -68,6 +68,7 @@ export function SnapshotClient({
   kanbanResults,
   fields,
   fkLabels,
+  respCanon = {},
   available,
   settings,
   activeTabId,
@@ -105,6 +106,8 @@ export function SnapshotClient({
   kanbanResults?: Record<string, KanbanWidgetResult>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  // Agrupamento de responsáveis (0101): apelido → principal.
+  respCanon?: Record<string, string>;
   available: AvailableField[];
   settings: DashboardSettings;
   activeTabId: string;
@@ -201,6 +204,7 @@ export function SnapshotClient({
                   tableCellsById={tableCellsById}
                   fields={fields}
                   fkLabels={fkLabels}
+                  respCanon={respCanon}
                   responsibleOptions={[]}
                   userRoles={[]}
                   canEditValues={false}

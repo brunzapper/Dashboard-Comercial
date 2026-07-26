@@ -140,6 +140,12 @@ import {
   translateOperationFilters,
 } from "@/lib/config/operation-scope";
 import {
+  buildResponsibleCanon,
+  collapseResponsibleOptions,
+  expandResponsibleIds,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
+import {
   RECORD_LIST_PAGE_SIZE,
   parseViewFilter,
   searchHandledOnClient,
@@ -514,10 +520,16 @@ export default async function DashboardPage({
       needsQfResp
         ? supabase
             .from("responsibles")
-            .select("id, display_name")
+            .select("id, display_name, canonical_id")
             .eq("active", true)
             .order("display_name")
-        : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+        : Promise.resolve({
+            data: [] as {
+              id: string;
+              display_name: string;
+              canonical_id?: string | null;
+            }[],
+          }),
       needsQfOps
         ? supabase
             .from("operations")
@@ -584,9 +596,15 @@ export default async function DashboardPage({
       const v = parseQuickFilterValue(c.value);
       if (v) qfValues.set(`${c.widget_id}:${c.col_key}`, v);
     }
-    const ownResponsibleIds = (ownRespRes.data ?? []).map(
-      (r) => r.id as string
-    );
+    // Agrupamento de responsáveis (0101): a exceção do vendedor cobre o GRUPO
+    // (apelidos ∪ principal) — paridade com a auth_responsible_ids do banco.
+    const ownResponsibleIds =
+      ownRespRes.data && ownRespRes.data.length > 0
+        ? expandResponsibleIds(
+            (ownRespRes.data ?? []).map((r) => r.id as string),
+            await loadResponsibleCanon(supabase)
+          )
+        : [];
 
     // Seleção CRUA efetiva da barra de período de um bucket (URL > default),
     // p/ o filtro rápido de período sem valor espelhar o que a barra mostra.
@@ -691,10 +709,20 @@ export default async function DashboardPage({
     // antes de entregar quickFiltersById ao cliente.
     fillQuickFilterOptions = async () => {
       const [qfRespRes, qfOpsRes] = await qfOptionsPromise;
-      const qfRespOptions = (qfRespRes.data ?? []).map((r) => ({
-        value: r.id as string,
-        label: (r.display_name as string) ?? "—",
-      }));
+      // Agrupamento (0101): apelido some do dropdown quando o principal está
+      // presente — uma seleção no principal alcança o grupo (expansão no engine).
+      const qfRespRows = (qfRespRes.data ?? []) as {
+        id: string;
+        display_name: string;
+        canonical_id?: string | null;
+      }[];
+      const qfRespOptions = collapseResponsibleOptions(
+        qfRespRows.map((r) => ({
+          value: r.id,
+          label: r.display_name ?? "—",
+        })),
+        buildResponsibleCanon(qfRespRows)
+      );
       const qfOpsOptions = (qfOpsRes.data ?? []).map((o) => ({
         value: o.id as string,
         label: (o.name as string) ?? "—",
@@ -942,11 +970,15 @@ export default async function DashboardPage({
           exposedFilterFields.has("responsible_id")
             ? supabase
                 .from("responsibles")
-                .select("id, display_name")
+                .select("id, display_name, canonical_id")
                 .eq("active", true)
                 .order("display_name")
             : Promise.resolve({
-                data: [] as { id: string; display_name: string }[],
+                data: [] as {
+                  id: string;
+                  display_name: string;
+                  canonical_id?: string | null;
+                }[],
               }),
           exposedFilterFields.has("operation_id")
             ? supabase
@@ -1229,6 +1261,12 @@ export default async function DashboardPage({
   const [fkLabels] = await timing.measure("widgets", () =>
     Promise.all([fkLabelsPromise, ...widgetTasks])
   );
+  // Agrupamento de responsáveis (0101): mapa apelido→principal p/ o "Agrupar
+  // por" client-side das tabelas (que chaveia FK por id cru de propósito —
+  // sem o mapa, apelido e principal virariam dois grupos homônimos).
+  const respCanonForTables = Object.fromEntries(
+    (await loadResponsibleCanon(supabase)).canonicalById
+  );
 
   // Opções de dropdown dos filtros rápidos (promise disparada antes da
   // computação; ver fillQuickFilterOptions acima).
@@ -1264,10 +1302,20 @@ export default async function DashboardPage({
     if (filterOptionsFetchPromise) {
       // Promise disparada antes da computação dos widgets — aqui só consome.
       const [respRes, opsRes, stageRes] = await filterOptionsFetchPromise;
-      responsibleOptions = (respRes.data ?? []).map((r) => ({
-        value: r.id as string,
-        label: (r.display_name as string) ?? "—",
-      }));
+      // Agrupamento (0101): apelidos colapsam no principal — uma seleção
+      // alcança o grupo inteiro (expansão no engine/record-list).
+      const respRows = (respRes.data ?? []) as {
+        id: string;
+        display_name: string;
+        canonical_id?: string | null;
+      }[];
+      responsibleOptions = collapseResponsibleOptions(
+        respRows.map((r) => ({
+          value: r.id,
+          label: r.display_name ?? "—",
+        })),
+        buildResponsibleCanon(respRows)
+      );
       operationOptions = (opsRes.data ?? []).map((o) => ({
         value: o.id as string,
         label: (o.name as string) ?? "—",
@@ -1401,6 +1449,7 @@ export default async function DashboardPage({
         tableCellsById={tableCellsById}
         fields={(fieldsData ?? []) as FieldDefinition[]}
         fkLabels={fkLabels}
+        respCanon={respCanonForTables}
         responsibleOptions={responsibleOptions}
         userRoles={userRoles}
         canEditValues={canEditValues}

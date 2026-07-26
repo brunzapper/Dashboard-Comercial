@@ -1,4 +1,11 @@
-// Versão: 1.10 | Data: 24/07/2026
+// Versão: 1.11 | Data: 26/07/2026
+// v1.11 (26/07/2026): agrupamento de responsáveis (0101, invariante 20) —
+// filtros responsible_id expandem p/ o GRUPO (apelidos ∪ principal) no choke
+// point de resolveFilters (gate widgetReferencesResponsible → sem referência,
+// byte-idêntico e sem consulta extra), condições de SOMASE idem (pós
+// resolveFkCondFilters), a dimensão responsible_id funde apelido→principal no
+// mergeRowsByBucket e fetchFkLabels rotula pelo display_name do PRINCIPAL
+// ("nome usado"). RPCs INTOCADAS. Ver lib/config/responsible-canon.ts.
 // v1.10 (24/07/2026): pernas de sub-base EXIBÍVEIS (§4.8) — no branch
 // multi-perna: (a) operando escopado em fonte-IRMÃ é zerado por perna
 // (zeroSiblingScopedOperands; cada perna mostra a própria contribuição) +
@@ -110,6 +117,14 @@ import {
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
 import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
+import {
+  EMPTY_CANON,
+  canonicalOf,
+  expandResponsibleFilters,
+  filtersReferenceResponsible,
+  loadResponsibleCanon,
+  widgetReferencesResponsible,
+} from "@/lib/config/responsible-canon";
 import { coveredLegSources, partitionMetricLegs } from "./metric-sources";
 import {
   alignComparisonRows,
@@ -619,11 +634,24 @@ export async function fetchFkLabels(
   if (ids.length === 0) return map;
 
   if (fk === "responsible") {
+    // Agrupamento (0101): o rótulo de um apelido é o display_name do PRINCIPAL
+    // ("nome usado") — canonicaliza ANTES do lookup; id sem grupo mantém o
+    // próprio nome (fallback nameOf[id] cobre principal apagado/inacessível).
+    const canon = await loadResponsibleCanon(supabase);
+    const lookupIds = [
+      ...new Set([...ids, ...ids.map((i) => canonicalOf(i, canon))]),
+    ];
     const { data } = await supabase
       .from("responsibles")
       .select("id, display_name")
-      .in("id", ids);
-    for (const r of data ?? []) map[r.id as string] = (r.display_name as string) ?? "—";
+      .in("id", lookupIds);
+    const nameOf: Record<string, string> = {};
+    for (const r of data ?? [])
+      nameOf[r.id as string] = (r.display_name as string) ?? "—";
+    for (const id of ids) {
+      const name = nameOf[canonicalOf(id, canon)] ?? nameOf[id];
+      if (name != null) map[id] = name;
+    }
   } else if (fk === "operation") {
     const { data } = await supabase
       .from("operations")
@@ -1119,6 +1147,13 @@ async function runWidgetByPeriod(
     }
   };
 
+  // Agrupamento de responsáveis (0101): a dimensão responsible_id agrupa pelo
+  // id CANÔNICO (apelido → principal) — o rótulo id→nome sai já canônico via
+  // fetchFkLabels adiante. Gate igual ao do caminho RPC (sem dim de
+  // responsável, nenhuma consulta extra).
+  const respCanon = dims.some((d) => d.field === "responsible_id")
+    ? await loadResponsibleCanon(supabase)
+    : EMPTY_CANON;
   type DV = { key: string; label: string; sort: number };
   const dimValue = (d: Dimension, r: RecordRow): DV => {
     if (isDateBucket(d)) {
@@ -1126,6 +1161,10 @@ async function runWidgetByPeriod(
       return { key: b.key, label: b.label, sort: b.sort };
     }
     const v = rawValue(d.field, r);
+    if (d.field === "responsible_id" && v != null) {
+      const c = canonicalOf(String(v), respCanon);
+      return { key: c, label: c, sort: 0 };
+    }
     return { key: String(v ?? ""), label: v == null ? "—" : String(v), sort: 0 };
   };
 
@@ -1499,7 +1538,18 @@ export async function runWidget(
   // precisam do @period byType das SUAS fontes — o RPC exclui record_types
   // fora do mapa, então reaproveitar os filtros do widget derrubaria as
   // fontes extras da métrica.
-  const resolved = resolveFilters(config.filters ?? []);
+  // Agrupamento de responsáveis (0101): filtros responsible_id expandem para o
+  // GRUPO (apelidos ∪ principal) — os records seguem no id original. Load
+  // GATEADO: sem referência a responsável, nenhuma consulta extra e filtros
+  // byte-idênticos. A tradução de operação (page/widget-scope) roda ANTES e
+  // deposita `responsible_id in [...]` em config.filters — expande aqui junto.
+  const respCanon = widgetReferencesResponsible(config)
+    ? await loadResponsibleCanon(supabase)
+    : EMPTY_CANON;
+  const resolved = expandResponsibleFilters(
+    resolveFilters(config.filters ?? []),
+    respCanon
+  );
   const legFiltersFor = (
     p: DashboardPeriod | null | undefined,
     srcs?: SourceKey[]
@@ -1964,8 +2014,14 @@ export async function runWidget(
     const condPromise = Promise.all(
       [...condGroups.values()].map(async (g) => {
         try {
-          // Condição sobre relação por NOME → resolve p/ UUID antes do RPC.
-          const condExtra = await resolveFkCondFilters(supabase, g.filters);
+          // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
+          // com apelidos (0101), o UUID expande para o grupo do responsável.
+          let condExtra = await resolveFkCondFilters(supabase, g.filters);
+          if (filtersReferenceResponsible(condExtra))
+            condExtra = expandResponsibleFilters(
+              condExtra,
+              await loadResponsibleCanon(supabase)
+            );
           const scoped = g.scope ? scopedAuxInputs(g.scope, runPeriod) : null;
           const { data: condData, error: condError } = await supabase.rpc(
             "run_widget_query",
@@ -2178,8 +2234,14 @@ export async function runWidget(
         [...condGroups.values()].map(async (g) => {
           try {
             // Condição sobre relação por NOME → resolve p/ UUID antes do RPC
-            // (mesmo tratamento da auxiliar de condição da consulta principal).
-            const condExtra = await resolveFkCondFilters(supabase, g.filters);
+            // (mesmo tratamento da auxiliar de condição da consulta principal,
+            // inclusive a expansão do grupo de responsáveis 0101).
+            let condExtra = await resolveFkCondFilters(supabase, g.filters);
+            if (filtersReferenceResponsible(condExtra))
+              condExtra = expandResponsibleFilters(
+                condExtra,
+                await loadResponsibleCanon(supabase)
+              );
             const scoped = g.scope
               ? scopedAuxInputs(g.scope, runPeriod)
               : null;
@@ -2429,7 +2491,9 @@ export async function runWidget(
     // ramo custom — o transform é só rótulo). Funde aqui pelo bucket, no
     // choke point único — principal, comparação, pernas do businessDayAlign,
     // card, quick-table e snapshot (mesmo engine) recebem linhas já fundidas.
-    // Sem dim custom+transform, `merged === rows` (caminho atual intocado).
+    // Dimensão responsible_id com apelidos (0101) funde apelido→principal na
+    // MESMA passada. Sem dim custom+transform nem apelido, `merged === rows`
+    // (caminho atual intocado).
     const merged = mergeRowsByBucket(
       rows,
       dims,
@@ -2449,7 +2513,8 @@ export async function runWidget(
                 ).value
             : undefined,
         };
-      })
+      }),
+      respCanon.canonicalById
     );
     if (merged !== rows) {
       // Replot das monetárias sobre o __money FUNDIDO (exato, incl. média).

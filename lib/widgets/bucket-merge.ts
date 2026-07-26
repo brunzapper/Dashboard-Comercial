@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 24/07/2026
+// Versão: 1.2 | Data: 26/07/2026
+// v1.2 (26/07/2026): mergeRowsByBucket ganha canonicalização OPCIONAL da
+// dimensão responsible_id (agrupamento de responsáveis, 0101) — linhas de um
+// apelido fundem com as do principal pela MESMA mecânica dos buckets; sem o
+// mapa (ou sem apelidos), byte-idêntico ao v1.1.
 // v1.1 (24/07/2026): foldRowGroup extraído do laço de mergeRowsByBucket
 // (byte-compatível) — reusado pelo merge "total" das pernas de sub-base
 // (lib/widgets/engine.ts).
@@ -150,22 +154,34 @@ function foldMetric(rows: WidgetRow[], spec: MergeMetricSpec): number | null {
 }
 
 /**
- * Funde as linhas do RPC pelo bucket das dims `custom:`+transform. Sem dim
- * assim, devolve `rows` INALTERADO (mesma referência — caminho atual segue
- * byte-idêntico). A ORDEM dos grupos segue a primeira ocorrência (o engine
- * reordena cronologicamente depois, pelo valor canônico).
+ * Funde as linhas do RPC pelo bucket das dims `custom:`+transform e — quando
+ * `respCanon` (apelido → principal, agrupamento 0101) vem preenchido — pela
+ * dimensão `responsible_id` canonicalizada. Sem dim assim, devolve `rows`
+ * INALTERADO (mesma referência — caminho atual segue byte-idêntico). A ORDEM
+ * dos grupos segue a primeira ocorrência (o engine reordena cronologicamente
+ * depois, pelo valor canônico).
  */
 export function mergeRowsByBucket(
   rows: WidgetRow[],
   dims: Dimension[],
-  metrics: MergeMetricSpec[]
+  metrics: MergeMetricSpec[],
+  respCanon?: Map<string, string>
 ): WidgetRow[] {
   const bucketIdx: number[] = [];
+  const respIdx: number[] = [];
   dims.forEach((d, i) => {
     if (dimNeedsClientBucket(d)) bucketIdx.push(i);
+    else if (
+      d.field === "responsible_id" &&
+      respCanon != null &&
+      respCanon.size > 0
+    )
+      respIdx.push(i);
   });
-  if (bucketIdx.length === 0 || rows.length === 0) return rows;
+  if ((bucketIdx.length === 0 && respIdx.length === 0) || rows.length === 0)
+    return rows;
   const bucketSet = new Set(bucketIdx);
+  const respSet = new Set(respIdx);
 
   const groups = new Map<string, { rows: WidgetRow[]; canon: unknown[] }>();
   const order: string[] = [];
@@ -180,6 +196,12 @@ export function mergeRowsByBucket(
         // colide com um canônico) e mantém o valor original na exibição.
         tuple.push(c == null ? `raw:${String(raw)}` : c);
         canon.push(c == null ? raw : c);
+      } else if (respSet.has(i) && raw != null) {
+        // Apelido → principal: linhas do apelido caem no grupo do principal
+        // (o rótulo id→nome sai depois, já canônico, em fetchFkLabels).
+        const c = respCanon!.get(String(raw)) ?? raw;
+        tuple.push(c);
+        canon.push(c);
       } else {
         tuple.push(raw);
         canon.push(raw);

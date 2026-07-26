@@ -24,6 +24,12 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import {
+  buildResponsibleCanon,
+  collapseResponsibleOptions,
+  expandResponsibleIds,
+  loadResponsibleCanon,
+} from "@/lib/config/responsible-canon";
 import { cn } from "@/lib/utils";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { WritebackPendingBadge } from "@/components/sync/writeback-pending-badge";
@@ -98,7 +104,18 @@ export default async function RegistrosPage({
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .range(from, to);
   if (etapa) query = query.ilike("stage", `%${etapa}%`);
-  if (responsavel) query = query.eq("responsible_id", responsavel);
+  // Agrupamento (0101): filtrar por um responsável alcança o grupo inteiro
+  // (apelidos ∪ principal) — mesmo recorte dos widgets.
+  if (responsavel) {
+    const group = expandResponsibleIds(
+      [responsavel],
+      await loadResponsibleCanon(supabase)
+    );
+    query =
+      group.length > 1
+        ? query.in("responsible_id", group)
+        : query.eq("responsible_id", responsavel);
+  }
   if (de) query = query.gte("source_created_at", de);
   if (ate) query = query.lte("source_created_at", `${ate}T23:59:59`);
   if (busca) query = query.ilike("title", `%${busca}%`);
@@ -140,7 +157,7 @@ export default async function RegistrosPage({
         .order("sort_order", { ascending: true }),
       supabase
         .from("responsibles")
-        .select("id, display_name, bitrix_user_id")
+        .select("id, display_name, bitrix_user_id, canonical_id")
         .eq("active", true)
         .order("display_name"),
       supabase
@@ -172,6 +189,22 @@ export default async function RegistrosPage({
     // Só os com usuário Bitrix entram no dropdown write-back do formulário.
     bitrixLinked: Boolean(r.bitrix_user_id),
   }));
+  // Agrupamento (0101): o dropdown de FILTRO colapsa apelidos no principal
+  // (uma seleção alcança o grupo); form/tabela seguem com a lista completa —
+  // atribuição/write-back grava o responsável REAL.
+  const respRows = (respData ?? []) as unknown as {
+    id: string;
+    canonical_id?: string | null;
+  }[];
+  const keepInFilter = new Set(
+    collapseResponsibleOptions(
+      respRows.map((r) => ({ value: r.id })),
+      buildResponsibleCanon(respRows)
+    ).map((o) => o.value)
+  );
+  const filterResponsibles: OptionItem[] = responsibles.filter((r) =>
+    keepInFilter.has(r.id)
+  );
   const operations: OptionItem[] = (opsData ?? []).map((o) => ({
     id: o.id as string,
     label: o.name as string,
@@ -289,7 +322,7 @@ export default async function RegistrosPage({
         })}
       </div>
 
-      <FiltersBar responsibles={responsibles} />
+      <FiltersBar responsibles={filterResponsibles} />
 
       <RecordsTable
         source={fonte}

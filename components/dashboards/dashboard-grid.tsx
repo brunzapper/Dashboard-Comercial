@@ -382,6 +382,7 @@ export function DashboardGrid({
   calcById,
   fields,
   fkLabels,
+  respCanon = {},
   responsibleOptions,
   userRoles,
   canEditValues,
@@ -439,6 +440,8 @@ export function DashboardGrid({
   calcById: Record<string, CalcWidgetResult>;
   fields: FieldDefinition[];
   fkLabels: Record<string, string>;
+  // Agrupamento de responsáveis (0101): apelido → principal.
+  respCanon?: Record<string, string>;
   responsibleOptions?: ResponsibleOption[];
   userRoles: string[];
   canEditValues: boolean;
@@ -1409,6 +1412,7 @@ export function DashboardGrid({
                         currencyRates={currencyRates}
                         conversionPeriod={conversionPeriodById[shown.id]}
                         fkLabels={fkLabels}
+                        respCanon={respCanon}
                         responsibleOptions={responsibleOptions}
                         userRoles={userRoles}
                         canEditValues={canEditValues}

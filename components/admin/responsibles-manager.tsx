@@ -1,7 +1,10 @@
-// Versão: 1.1 | Data: 13/07/2026
+// Versão: 1.2 | Data: 26/07/2026
 // Gerência de Responsáveis (admin): criar, ativar/desativar e mapear operações
 // com prioridade. Responsáveis vêm do sync OU são criados aqui (só no sistema,
 // sem Bitrix). O admin cura a lista.
+// v1.2 (26/07/2026): coluna "Nome usado" (agrupamento de exibição, 0101) —
+// unifica um responsável duplicado sob o principal escolhido; reversível
+// ("— próprio nome —"); badge "N unificados" no principal.
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
@@ -32,6 +35,7 @@ import {
   createResponsible,
   removeResponsibleOperation,
   setResponsibleActive,
+  setResponsibleCanonical,
   type ResponsibleState,
 } from "@/app/(app)/configuracoes/responsaveis/actions";
 
@@ -45,6 +49,8 @@ export interface ResponsibleRow {
   display_name: string;
   bitrix_user_id: string | null;
   active: boolean;
+  // Agrupamento de exibição (0101): id do principal quando esta linha é apelido.
+  canonical_id: string | null;
   ops: ResponsibleOp[];
 }
 
@@ -63,6 +69,16 @@ export function ResponsiblesManager({
     ResponsibleState,
     FormData
   >(createResponsible, {});
+  // Quantos apelidos apontam para cada principal (badge "N unificados").
+  const aliasCountById = new Map<string, number>();
+  for (const r of responsibles) {
+    if (r.canonical_id) {
+      aliasCountById.set(
+        r.canonical_id,
+        (aliasCountById.get(r.canonical_id) ?? 0) + 1
+      );
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -103,6 +119,7 @@ export function ResponsiblesManager({
             <TableHead>Responsável</TableHead>
             <TableHead>Bitrix ID</TableHead>
             <TableHead>Ativo</TableHead>
+            <TableHead>Nome usado</TableHead>
             <TableHead>Operações</TableHead>
             <TableHead className="text-right">Ações</TableHead>
           </TableRow>
@@ -110,14 +127,24 @@ export function ResponsiblesManager({
         <TableBody>
           {responsibles.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-muted-foreground text-center">
+              <TableCell colSpan={6} className="text-muted-foreground text-center">
                 Nenhum responsável ainda (são criados pelo sync do Bitrix/planilha ou aqui em cima).
               </TableCell>
             </TableRow>
           ) : (
             responsibles.map((r) => (
               <TableRow key={r.id}>
-                <TableCell className="font-medium">{r.display_name}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1.5">
+                    {r.display_name}
+                    {aliasCountById.get(r.id) ? (
+                      <Badge variant="outline">
+                        {aliasCountById.get(r.id)} unificado
+                        {aliasCountById.get(r.id)! > 1 ? "s" : ""}
+                      </Badge>
+                    ) : null}
+                  </span>
+                </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
                   {r.bitrix_user_id ?? "—"}
                 </TableCell>
@@ -131,6 +158,28 @@ export function ResponsiblesManager({
                         await setResponsibleActive(r.id, e.target.checked);
                       })
                     }
+                  />
+                </TableCell>
+                <TableCell>
+                  {/* Unificar com…: esta linha vira apelido do escolhido (some
+                      dos dropdowns; widgets/filtros tratam o grupo como um).
+                      "— próprio nome —" desfaz. */}
+                  <Combobox
+                    options={[
+                      { value: "", label: "— próprio nome —" },
+                      ...responsibles
+                        .filter((o) => o.id !== r.id)
+                        .map((o) => ({ value: o.id, label: o.display_name })),
+                    ]}
+                    value={r.canonical_id ?? ""}
+                    onValueChange={(v) =>
+                      startTransition(async () => {
+                        await setResponsibleCanonical(r.id, v || null);
+                      })
+                    }
+                    placeholder="— próprio nome —"
+                    className="w-44"
+                    aria-label={`Nome usado para ${r.display_name}`}
                   />
                 </TableCell>
                 <TableCell>
