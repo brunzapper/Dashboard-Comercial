@@ -1,5 +1,9 @@
-// Versão: 2.4 | Data: 23/07/2026
+// Versão: 2.5 | Data: 26/07/2026
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
+// v2.5 (26/07/2026): a seção Kanbans lista TAMBÉM os widgets kanban dos
+//   dashboards ativos (RLS de widgets = visibilidade do pai; sem linha espelho
+//   em dashboards) — card "No dashboard X" abrindo a página cheia
+//   /kanbans/w/[widgetId], que compartilha config/placements com o widget.
 // v2.4 (23/07/2026): botão "Importar" ao lado do "Criar" — modo de criação de
 //   dashboard via JSON gerado por IA (ImportDashboardSheet).
 // v2.3 (22/07/2026): ciclo de vida (0087) — menu "⋮" nos cards (Duplicar/
@@ -28,6 +32,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
+import {
+  mapWidgetKanbanRows,
+  type WidgetKanbanHubItem,
+  type WidgetKanbanHubRow,
+} from "@/lib/kanban/hub";
 import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
@@ -56,16 +65,20 @@ interface DashboardRow {
   settings: { preset?: { key?: string } } | null;
 }
 
-// Valida o lastView gravado (user_settings): só /dashboards/<uuid> ou
-// /kanbans/<uuid> (+ ?tab= opcional), e o board precisa estar na lista visível
-// (RLS) com o kind da rota — board excluído/sem acesso não redireciona, e
-// nenhum outro valor vira alvo de router.replace (sem open redirect).
+// Valida o lastView gravado (user_settings): só /dashboards/<uuid>,
+// /kanbans/<uuid> (+ ?tab= opcional) ou /kanbans/w/<uuid> (página cheia de
+// widget kanban), e o alvo precisa estar na lista visível (RLS) com o kind da
+// rota — board/widget excluído/sem acesso não redireciona, e nenhum outro
+// valor vira alvo de router.replace (sem open redirect).
 // Receber só linhas ABRÍVEIS (ativas + arquivadas): board na Lixeira não abre.
 function validateLastView(
   view: string | null,
-  rows: DashboardRow[]
+  rows: DashboardRow[],
+  widgetKanbanIds: Set<string>
 ): string | null {
   if (!view) return null;
+  const w = /^\/kanbans\/w\/([0-9a-f-]{36})$/.exec(view);
+  if (w) return widgetKanbanIds.has(w[1]) ? view : null;
   const m = /^\/(dashboards|kanbans)\/([0-9a-f-]{36})(?:\?tab=[\w%-]+)?$/.exec(
     view
   );
@@ -138,6 +151,33 @@ function BoardCard({
   );
 }
 
+// Card de um kanban de WIDGET na seção Kanbans: sem menu "⋮" (ciclo de vida é
+// do dashboard pai; renomear é o título do widget no builder) — só o link da
+// página cheia + o link "No dashboard X".
+function WidgetKanbanCard({ item }: { item: WidgetKanbanHubItem }) {
+  return (
+    <Card className="relative">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <SquareKanban className="text-muted-foreground size-4 shrink-0" />
+          <Link href={item.href} className="hover:underline">
+            {item.label}
+          </Link>
+        </CardTitle>
+        <CardDescription>
+          No dashboard{" "}
+          <Link
+            href={`/dashboards/${item.dashboardId}`}
+            className="hover:text-foreground hover:underline"
+          >
+            {item.dashboardName}
+          </Link>
+        </CardDescription>
+      </CardHeader>
+    </Card>
+  );
+}
+
 export default async function HomePage() {
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
@@ -156,6 +196,29 @@ export default async function HomePage() {
   if (orgId) boardsQuery = boardsQuery.eq("organization_id", orgId);
   const { data } = await boardsQuery;
   const rows = (data ?? []) as DashboardRow[];
+
+  // Widgets kanban dos dashboards ativos: entram na seção Kanbans como acesso
+  // à página cheia (/kanbans/w/[widgetId]) do MESMO kanban do widget. A RLS de
+  // widgets (auth_board_visible do pai, 0088) já recorta a visibilidade; o .eq
+  // de org espelha a query de dashboards acima.
+  let widgetKanbanQuery = supabase
+    .from("widgets")
+    .select(
+      "id, title, dashboard_id, settings, dashboards!inner(id, name, kind, status, organization_id)"
+    )
+    .eq("visual_type", "kanban")
+    .eq("dashboards.kind", "dashboard")
+    .eq("dashboards.status", "active");
+  if (orgId) {
+    widgetKanbanQuery = widgetKanbanQuery.eq(
+      "dashboards.organization_id",
+      orgId
+    );
+  }
+  const { data: widgetKanbanRows } = await widgetKanbanQuery;
+  const widgetKanbans = mapWidgetKanbanRows(
+    (widgetKanbanRows ?? []) as unknown as WidgetKanbanHubRow[]
+  );
   const canManageRow = (r: DashboardRow) =>
     isAdmin || r.owner_user_id === session?.user.id;
 
@@ -176,7 +239,8 @@ export default async function HomePage() {
     typeof settings.lastView === "string" ? settings.lastView : null;
   const restoreTarget = validateLastView(
     storedView,
-    rows.filter((r) => r.status !== "trashed")
+    rows.filter((r) => r.status !== "trashed"),
+    new Set(widgetKanbans.map((w) => w.widgetId))
   );
 
   // Insumos do diálogo "Criar kanban" (fontes + campos p/ o agrupamento).
@@ -260,7 +324,7 @@ export default async function HomePage() {
         cardGrid(dashboards)
       )}
 
-      {kanbans.length > 0 ? (
+      {kanbans.length > 0 || widgetKanbans.length > 0 ? (
         <>
           <div>
             <h2 className="text-lg font-semibold">Kanbans</h2>
@@ -269,7 +333,14 @@ export default async function HomePage() {
               altera o valor do campo no registro.
             </p>
           </div>
-          {cardGrid(kanbans)}
+          {kanbans.length > 0 ? cardGrid(kanbans) : null}
+          {widgetKanbans.length > 0 ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {widgetKanbans.map((w) => (
+                <WidgetKanbanCard key={w.widgetId} item={w} />
+              ))}
+            </div>
+          ) : null}
         </>
       ) : null}
 
