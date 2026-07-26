@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 19/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): anchorNaiveToBrasilia — âncora "-03:00" para valor naive
+//   de fonte SEM fuso indo a coluna CORE timestamptz (Sheets/CSV; ver função).
 // Normalização de fuso para strings de data/hora vindas de fontes externas
 // (data_sources.timezone — ex.: portal Bitrix em Europe/Moscow). O read side
 // inteiro é prefix-based (lê o "YYYY-MM-DD" literal da string: format.ts,
@@ -102,6 +104,26 @@ function emit(epochMs: number, tz: string): string {
     `T${pad(p.hh)}:${pad(p.mi)}:${pad(p.ss)}` +
     offsetSuffix(epochMs, tz)
   );
+}
+
+/**
+ * Ancora um valor naive (CSV/planilha, sem fuso) como horário de PAREDE de
+ * Brasília, para gravação em coluna CORE timestamptz de `records`. Sem a
+ * âncora o Postgres assume UTC — meia-noite naive vira 21h do dia ANTERIOR no
+ * relógio de Brasília e o registro muda de dia/mês no read side inteiro
+ * (invariante 11). Offset fixo "-03:00" (Brasília não tem DST desde 2019;
+ * mesma convenção do backfill 0080). NUNCA usar em campo custom (texto): lá o
+ * valor naive é o dado (read prefix-based) e o sufixo quebraria o prefixo.
+ *   - "YYYY-MM-DD"            -> "YYYY-MM-DDT00:00:00-03:00"
+ *   - "YYYY-MM-DD[T ]HH:mm[:ss]" -> "YYYY-MM-DDTHH:mm:ss-03:00"
+ *   - com offset/Z ou lixo    -> inalterado (nunca lança; sync não pode cair)
+ */
+export function anchorNaiveToBrasilia(value: string): string {
+  if (DATE_ONLY_RE.test(value)) return `${value}T00:00:00-03:00`;
+  const m = NAIVE_RE.exec(value);
+  if (!m) return value;
+  const [, y, mo, d, hh, mi, ss] = m;
+  return `${y}-${mo}-${d}T${hh}:${mi}:${ss ?? "00"}-03:00`;
 }
 
 /**

@@ -12,6 +12,10 @@
 //   em custom_fields, igual ao sync do Bitrix.
 // v1.2 (09/07/2026): Fase 8 — resultado por entidade (venda_site) + amostras de
 //   erro (recordOutcome/recordError).
+// v1.3 (26/07/2026): source_created_at ancorado em Brasília
+//   (anchorNaiveToBrasilia) — o "yyyy-MM-dd" naive entrava como meia-noite UTC
+//   e o dia recuava no read side (invariante 11); legado corrigido por
+//   supabase/apply/backfill-naive-tz.sql.
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -22,6 +26,7 @@ import {
   loadFormulaDefs,
   type FormulaFieldDef,
 } from "@/lib/records/formulas";
+import { anchorNaiveToBrasilia } from "@/lib/date/normalize";
 import {
   emptyResult,
   isProtected,
@@ -207,7 +212,9 @@ async function upsertSheetRow(
       mrr: row.mrr,
       sale_type: row.plan,
       channel: row.canal,
-      source_created_at: row.created_at,
+      // Coluna timestamptz: o "yyyy-MM-dd" da planilha é dia de BRASÍLIA —
+      // sem âncora o Postgres assumiria UTC e o dia recuaria no read side.
+      source_created_at: anchorNaiveToBrasilia(row.created_at),
       custom_fields,
       field_modified_at: {},
       last_synced_at: now,
