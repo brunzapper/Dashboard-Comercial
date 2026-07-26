@@ -43,7 +43,7 @@ as $$
     where r.user_id = (select auth.uid())
   ),
   roots as (
-    select distinct coalesce(m.canonical_id, m.id) as id from mine
+    select distinct coalesce(m.canonical_id, m.id) as id from mine m
   )
   select id from mine
   union
