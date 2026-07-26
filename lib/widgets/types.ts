@@ -496,6 +496,11 @@ export interface ComparisonSettings {
   tablePlacement?: "inline" | "column"; // tabela agregada; default "inline"
   ghostSeries?: boolean; // gráficos: série do período de comparação
   chartLabels?: boolean; // gráficos: rótulo de variação nos pontos/barras
+  // Texto do rótulo ("vs. período anterior…") no Card/KPI (26/07/2026):
+  // ausente = herda DashboardSettings.hideComparisonLabels; true oculta SÓ o
+  // texto (o badge de variação fica); false força exibir mesmo com o padrão
+  // do dashboard ligado. Tooltips de gráfico não são afetadas.
+  hideLabel?: boolean;
 }
 export interface ComparisonWidgetSettings {
   comparison?: ComparisonSettings;
@@ -1018,6 +1023,11 @@ export interface AppearanceSettings {
     // layout frameless do WidgetCard).
     hidden?: boolean;
   };
+  // Selo "Nº dia útil" (26/07/2026) — cards e gráficos mensais com
+  // businessDayAlign/periodWindow: ausente = herda
+  // DashboardSettings.hideBusinessDayBadges; true oculta o selo (o dropdown
+  // da janela e o toggle dia útil × dia cheio ficam); false força exibir.
+  hideBusinessDayBadge?: boolean;
   // --- formatação condicional (tabelas, listas, Card, gráficos) ---
   conditional?: ConditionalFormatting;
   // Casas decimais do widget inteiro (18/07/2026): 0–4; undefined = "Auto"
@@ -1131,6 +1141,14 @@ export interface DashboardSettings {
   // tabelas, textos de gráfico); px explícito em AppearanceSettings.fonts NÃO
   // multiplica. Propagada via FontScaleProvider (dashboard-grid.tsx).
   fontScale?: number;
+  // Cromo dos cards (26/07/2026), propagado via BoardChromeProvider
+  // (dashboard-grid.tsx) — cada widget pode sobrescrever (tri-state):
+  // oculta o texto "vs. período anterior…" de TODOS os Cards/KPIs (o badge de
+  // variação fica; override por card em ComparisonSettings.hideLabel).
+  hideComparisonLabels?: boolean;
+  // Oculta o selo "Nº dia útil" de todos os widgets (override por widget em
+  // AppearanceSettings.hideBusinessDayBadge).
+  hideBusinessDayBadges?: boolean;
   // Fundo da área do dashboard (Fase 10): sólido ou gradiente sutil.
   background?: {
     mode: "solid" | "gradient";

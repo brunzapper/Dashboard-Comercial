@@ -170,6 +170,7 @@ import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
 import { FontScaleProvider } from "./font-scale-context";
+import { BoardChromeProvider } from "./board-chrome-context";
 import { WidgetCard } from "./widget-card";
 import type { ResponsibleOption } from "./charts/record-list-table";
 
@@ -1200,6 +1201,16 @@ export function DashboardGrid({
     />
   ) : null;
 
+  // Cromo dos cards (26/07/2026): padrões do dashboard p/ o texto de
+  // comparação e o selo "Nº dia útil" (ver board-chrome-context).
+  const boardChrome = useMemo(
+    () => ({
+      hideComparisonLabels: settings.hideComparisonLabels ?? false,
+      hideBusinessDayBadges: settings.hideBusinessDayBadges ?? false,
+    }),
+    [settings.hideComparisonLabels, settings.hideBusinessDayBadges]
+  );
+
   // Em drawMode/placing o canvas renderiza mesmo vazio (é onde se desenha a
   // tabela / se clica para posicionar o widget novo).
   if (widgets.length === 0 && !drawMode && !placing) {
@@ -1375,7 +1386,8 @@ export function DashboardGrid({
                     {/* Escala de fonte do dashboard: só o conteúdo dos widgets
                       escala (o cromo do canvas — chips, overlays — não). */}
                     <FontScaleProvider value={settings.fontScale ?? 1}>
-                      <WidgetCard
+                      <BoardChromeProvider value={boardChrome}>
+                        <WidgetCard
                         key={shown.id}
                         widget={shown}
                         data={dataById[shown.id] ?? EMPTY_WIDGET_DATA}
@@ -1425,9 +1437,10 @@ export function DashboardGrid({
                         pageCount={pagesOf?.length}
                         onMergePages={performMerge}
                         onWidgetDeleted={onWidgetDeleted}
-                        autoOpenEditor={shown.id === autoEditWidgetId}
-                        onAutoEditConsumed={onAutoEditConsumed}
-                      />
+                          autoOpenEditor={shown.id === autoEditWidgetId}
+                          onAutoEditConsumed={onAutoEditConsumed}
+                        />
+                      </BoardChromeProvider>
                     </FontScaleProvider>
                   </div>
                 );

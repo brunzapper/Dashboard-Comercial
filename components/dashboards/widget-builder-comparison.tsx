@@ -1,5 +1,7 @@
 "use client";
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): select tri-state do texto "vs. período…" no Card
+//   (comparison.hideLabel — herda o padrão do dashboard / oculta / mostra).
 // Seção "Comparação" do builder (settings.comparison): compara o resultado do
 // widget com um período de comparação — período anterior, mesmo período do ano
 // passado, ou média/mediana por bucket de uma janela maior. Config de DADOS
@@ -186,6 +188,39 @@ export function ComparisonSection({
               />
               Mostrar só a variação (no lugar do valor)
             </label>
+          ) : null}
+          {visualType === "kpi" ? (
+            <div className="flex flex-col gap-1.5">
+              <Label>Texto &quot;vs. período anterior…&quot;</Label>
+              <Select
+                value={
+                  value.hideLabel == null
+                    ? "inherit"
+                    : value.hideLabel
+                      ? "hide"
+                      : "show"
+                }
+                onValueChange={(v) =>
+                  patch({
+                    hideLabel: v === "inherit" ? undefined : v === "hide",
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">Padrão do dashboard</SelectItem>
+                  <SelectItem value="hide">
+                    Ocultar (o badge de variação fica)
+                  </SelectItem>
+                  <SelectItem value="show">Sempre mostrar</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                O padrão do dashboard fica em ⋮ ▸ Aparência do dashboard.
+              </p>
+            </div>
           ) : null}
           {isTable ? (
             <div className="flex flex-col gap-1.5">

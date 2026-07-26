@@ -138,6 +138,7 @@ import {
   type ResolvedCondStyle,
 } from "@/lib/widgets/conditional";
 import { useFontScale } from "../font-scale-context";
+import { useBoardChrome } from "../board-chrome-context";
 import { FONT_DEFAULTS, fontStyle, resolveFontNum } from "@/lib/widgets/fonts";
 import { measureTextWidth } from "@/lib/widgets/measure-text";
 import { VariationBadge } from "./variation-badge";
@@ -495,6 +496,13 @@ export const WidgetChart = memo(function WidgetChart({
 
   // --- Comparação com período anterior (WidgetData.comparison) ---
   const cmp = data.comparison;
+  // Texto do rótulo ("vs. período anterior…") no Card/KPI: override do widget
+  // (comparison.hideLabel, tri-state) sobre o padrão do dashboard. Só o TEXTO
+  // some — badge de variação e tooltips de gráfico não são afetados.
+  const chrome = useBoardChrome();
+  const hideCmpLabel = Boolean(
+    cmp && (cmp.settings.hideLabel ?? chrome.hideComparisonLabels)
+  );
   // --- Linha de meta (WidgetData.goalLine): valores por linha em __goal ---
   const goal = data.goalLine;
   // Série fantasma nos gráficos: config explícita; default acompanha "exibir
@@ -660,7 +668,7 @@ export const WidgetChart = memo(function WidgetChart({
                 {c.subText}
               </span>
             ) : null}
-            {cmp ? (
+            {cmp && !hideCmpLabel ? (
               <span className="text-muted-foreground/70 text-[10px]">
                 {cmp.label}
               </span>
@@ -723,7 +731,11 @@ export const WidgetChart = memo(function WidgetChart({
                   vs. {c.cmpValueText}
                 </span>
               ) : null}
-              <span className="text-muted-foreground/70">{cardCmp.label}</span>
+              {!hideCmpLabel ? (
+                <span className="text-muted-foreground/70">
+                  {cardCmp.label}
+                </span>
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -780,7 +792,9 @@ export const WidgetChart = memo(function WidgetChart({
                     vs. {fmt(k.cmpValue, apDecimals)}
                   </span>
                 ) : null}
-                <span className="text-muted-foreground/70">{cmp.label}</span>
+                {!hideCmpLabel ? (
+                  <span className="text-muted-foreground/70">{cmp.label}</span>
+                ) : null}
               </span>
             ) : null}
           </div>
@@ -879,7 +893,9 @@ export const WidgetChart = memo(function WidgetChart({
                       vs. {fmtAbs(prev)}
                     </span>
                   ) : null}
+                  {!hideCmpLabel ? (
                   <span className="text-muted-foreground/70">{cmp.label}</span>
+                ) : null}
                 </span>
               ) : null}
             </div>
