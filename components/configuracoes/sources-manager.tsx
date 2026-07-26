@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 19/07/2026
+// Versão: 1.3 | Data: 26/07/2026
 // Gestão do catálogo de fontes (data_sources, 0060): listar, criar, editar e
 // excluir fontes dinâmicas. Fontes novas mapeiam key === record_type; a chave
 // é gerada do nome (slugify) e imutável após a criação. Excluir exige fonte
@@ -7,11 +7,14 @@
 //   habilita o botão "Novo registro" (Registros/kanbans) para a fonte.
 // v1.2 (19/07/2026): fuso horário da origem (timezone, 0079) — datetimes
 //   ingeridos da fonte são convertidos desse fuso p/ Brasília na entrada.
+// v1.3 (26/07/2026): PASTAS (0107) — campo "Pasta" no formulário, tabela
+//   agrupada por pasta (groupSourcesByFolder; só bases RAIZ — subs vivem na
+//   seção Sub-bases) e botões ↑/↓ de ordem manual dentro da pasta.
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useActionState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -34,8 +37,15 @@ import {
 } from "@/components/ui/table";
 import type { SourceDef } from "@/lib/sources";
 import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+  type SourceFolder,
+  type SourceFolderGroup,
+} from "@/lib/source-folders";
+import {
   createSource,
   deleteSource,
+  reorderSource,
   updateSource,
   type SourceActionState,
 } from "@/app/(app)/configuracoes/fontes/actions";
@@ -66,9 +76,11 @@ const TZ_OPTIONS: ComboboxOption[] = [
 
 function SourceForm({
   source,
+  folders,
   onDone,
 }: {
   source?: SourceDef;
+  folders: SourceFolder[];
   onDone?: () => void;
 }) {
   const isEdit = Boolean(source);
@@ -80,6 +92,15 @@ function SourceForm({
   // Fontes novas nascem aceitando criação manual; builtins (Sync) desligados.
   const [manualEntry, setManualEntry] = useState(source?.manualEntry ?? true);
   const [timezone, setTimezone] = useState(source?.timezone ?? "");
+  // Pasta (0107): "" = sem pasta. O campo só aparece quando há pasta criada.
+  const [folderId, setFolderId] = useState(source?.folderId ?? "");
+  const folderOptions = useMemo<ComboboxOption[]>(
+    () => [
+      { value: "", label: "— (sem pasta)" },
+      ...folders.map((f) => ({ value: f.id, label: f.label })),
+    ],
+    [folders]
+  );
   // Valor salvo fora da lista do runtime (raro) segue selecionável.
   const tzOptions = useMemo(
     () =>
@@ -97,6 +118,7 @@ function SourceForm({
     <form action={formAction} className="flex flex-col gap-4">
       {isEdit ? <input type="hidden" name="key" value={source!.key} /> : null}
       <input type="hidden" name="default_period_field" value={periodField} />
+      <input type="hidden" name="folder_id" value={folderId} />
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="source-label">Nome da base</Label>
@@ -130,6 +152,23 @@ function SourceForm({
           maxLength={40}
         />
       </div>
+
+      {folders.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <Label>Pasta</Label>
+          <Combobox
+            options={folderOptions}
+            value={folderId}
+            onValueChange={setFolderId}
+            searchable={false}
+            aria-label="Pasta"
+          />
+          <p className="text-muted-foreground text-xs">
+            Agrupa a base nas abas de Registros/Campos e nos seletores. Só
+            organização visual — não muda consultas nem permissões.
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <Label>Campo de data do filtro de período</Label>
@@ -199,6 +238,39 @@ function SourceForm({
   );
 }
 
+// ↑/↓ dentro da pasta (0107): cada clique re-sequencia o grupo no servidor
+// (reorderSource). Bordas viram no-op na action (resequenceAfterMove).
+function MoveSourceButtons({ sourceKey }: { sourceKey: string }) {
+  const [, formAction, pending] = useActionState(reorderSource, initial);
+  return (
+    <form action={formAction} className="flex items-center">
+      <input type="hidden" name="key" value={sourceKey} />
+      <Button
+        type="submit"
+        name="dir"
+        value="up"
+        variant="ghost"
+        size="icon"
+        disabled={pending}
+        aria-label="Mover base para cima"
+      >
+        <ArrowUp className="size-4" />
+      </Button>
+      <Button
+        type="submit"
+        name="dir"
+        value="down"
+        variant="ghost"
+        size="icon"
+        disabled={pending}
+        aria-label="Mover base para baixo"
+      >
+        <ArrowDown className="size-4" />
+      </Button>
+    </form>
+  );
+}
+
 function DeleteSourceButton({ sourceKey }: { sourceKey: string }) {
   const [state, formAction, pending] = useActionState(deleteSource, initial);
   return (
@@ -222,9 +294,22 @@ function DeleteSourceButton({ sourceKey }: { sourceKey: string }) {
   );
 }
 
-export function SourcesManager({ sources }: { sources: SourceDef[] }) {
+export function SourcesManager({
+  sources,
+  folders,
+}: {
+  sources: SourceDef[];
+  folders: SourceFolder[];
+}) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
+
+  // Só bases RAIZ, agrupadas por pasta (subs vivem na seção Sub-bases).
+  const groups = useMemo(
+    () => groupSourcesByFolder(folders, sources),
+    [folders, sources]
+  );
+  const showFolders = groups.some((g) => g.folder != null);
 
   function openCreate() {
     setEditing(undefined);
@@ -241,14 +326,14 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
         <div>
           <h2 className="text-lg font-semibold">Catálogo de bases</h2>
           <p className="text-muted-foreground text-sm">
-            Cada fonte agrupa registros próprios e aparece nas abas de
-            Registros, no construtor de widgets e no import de CSV. Fontes
+            Cada base agrupa registros próprios e aparece nas abas de
+            Registros, no construtor de widgets e no import de CSV. Bases
             internas (Bitrix/planilha) não podem ser excluídas.
           </p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="size-4" />
-          Nova fonte
+          Nova base
         </Button>
       </div>
 
@@ -267,43 +352,13 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sources.map((s) => (
-              <TableRow key={s.key}>
-                <TableCell className="font-medium">{s.label}</TableCell>
-                <TableCell>
-                  <code className="text-xs">{s.key}</code>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {s.shortLabel}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {periodFieldLabel(s.defaultPeriodField)}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {s.timezone || "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {s.manualEntry ? "Sim" : "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {s.builtin ? "Interna" : "Personalizada"}
-                </TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openEdit(s)}
-                      aria-label="Editar base"
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    {!s.builtin ? (
-                      <DeleteSourceButton sourceKey={s.key} />
-                    ) : null}
-                  </div>
-                </TableCell>
-              </TableRow>
+            {groups.map((g) => (
+              <FragmentGroup
+                key={g.folder?.id ?? "__sem_pasta__"}
+                group={g}
+                showFolders={showFolders}
+                onEdit={openEdit}
+              />
             ))}
           </TableBody>
         </Table>
@@ -315,7 +370,7 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
             <SheetTitle>{editing ? "Editar base" : "Nova base"}</SheetTitle>
             <SheetDescription>
               {editing
-                ? "Nome, nome curto e campo de período. A chave não muda."
+                ? "Nome, nome curto, pasta e campo de período. A chave não muda."
                 : "A base nasce vazia — importe um CSV ou conecte uma integração para populá-la."}
             </SheetDescription>
           </SheetHeader>
@@ -323,11 +378,76 @@ export function SourcesManager({ sources }: { sources: SourceDef[] }) {
             <SourceForm
               key={editing?.key ?? "new"}
               source={editing}
+              folders={folders}
               onDone={() => setOpen(false)}
             />
           </div>
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+// Bloco de uma pasta na tabela: linha-cabeçalho (só quando há pastas) +
+// linhas das bases do grupo com ↑/↓ (ordem dentro da pasta).
+function FragmentGroup({
+  group,
+  showFolders,
+  onEdit,
+}: {
+  group: SourceFolderGroup<SourceDef>;
+  showFolders: boolean;
+  onEdit: (s: SourceDef) => void;
+}) {
+  return (
+    <>
+      {showFolders ? (
+        <TableRow className="bg-muted/50 hover:bg-muted/50">
+          <TableCell
+            colSpan={8}
+            className="text-muted-foreground text-xs font-medium uppercase"
+          >
+            {group.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+          </TableCell>
+        </TableRow>
+      ) : null}
+      {group.roots.map((s) => (
+        <TableRow key={s.key}>
+          <TableCell className="font-medium">{s.label}</TableCell>
+          <TableCell>
+            <code className="text-xs">{s.key}</code>
+          </TableCell>
+          <TableCell className="text-muted-foreground text-xs">
+            {s.shortLabel}
+          </TableCell>
+          <TableCell className="text-muted-foreground text-xs">
+            {periodFieldLabel(s.defaultPeriodField)}
+          </TableCell>
+          <TableCell className="text-muted-foreground text-xs">
+            {s.timezone || "—"}
+          </TableCell>
+          <TableCell className="text-muted-foreground text-xs">
+            {s.manualEntry ? "Sim" : "—"}
+          </TableCell>
+          <TableCell className="text-muted-foreground text-xs">
+            {s.builtin ? "Interna" : "Personalizada"}
+          </TableCell>
+          <TableCell>
+            <div className="flex items-center justify-end gap-1">
+              <MoveSourceButtons sourceKey={s.key} />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onEdit(s)}
+                aria-label="Editar base"
+              >
+                <Pencil className="size-4" />
+              </Button>
+              {!s.builtin ? <DeleteSourceButton sourceKey={s.key} /> : null}
+            </div>
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
   );
 }

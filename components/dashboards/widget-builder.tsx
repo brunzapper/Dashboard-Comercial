@@ -116,10 +116,16 @@ import {
   fieldAppliesToSource,
   isSubSource,
   planSourceLegs,
+  subSourcesOf,
   toSourceKey,
   type SourceKey,
 } from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
 import { useSources } from "@/components/sources-context";
+import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
   SheetContent,
@@ -869,6 +875,62 @@ export function WidgetBuilder({
   const catalog = useSources();
   const catalogLabel = (k: string) =>
     catalog.find((s) => s.key === k)?.label ?? k;
+  // PASTAS (0107): agrupamento de exibição da seção "Bases de dados". O
+  // catálogo aqui JÁ vem escopado pelo board (applySourceScope) — pasta
+  // esvaziada some (o helper omite grupos vazios). Sub sem a pai no catálogo
+  // não deve ocorrer (applySourceScope mantém a pai da sub), mas se ocorrer
+  // rende no fim, fora dos grupos (orphanSubSources).
+  const sourceFolders = useSourceFolders();
+  const builderSourceGroups = useMemo(
+    () => groupSourcesByFolder(sourceFolders, catalog),
+    [sourceFolders, catalog]
+  );
+  const showBuilderFolders = builderSourceGroups.some((g) => g.folder != null);
+  const orphanSubSources = useMemo(
+    () =>
+      catalog.filter(
+        (s) => s.parentKey && !catalog.some((r) => r.key === s.parentKey)
+      ),
+    [catalog]
+  );
+  // Linha de uma base na seção "Bases de dados". SUB-FONTES: quando a sub E a
+  // pai estão selecionadas, oferece o toggle "conviver" (perna independente)
+  // × absorver (padrão).
+  const renderBuilderSourceRow = (s: (typeof catalog)[number]) => {
+    const parentSelected =
+      s.parentKey != null && sources.includes(s.parentKey);
+    const coexisting = coexistSubSources.includes(s.key);
+    return (
+      <div key={s.key} className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={sources.includes(s.key)}
+            onCheckedChange={() => toggleSource(s.key)}
+          />
+          {s.parentKey ? (
+            <span className="text-muted-foreground">↳ </span>
+          ) : null}
+          {s.label}
+        </label>
+        {sources.includes(s.key) && parentSelected ? (
+          <label className="ml-6 flex items-center gap-2 text-xs text-muted-foreground">
+            <Checkbox
+              checked={coexisting}
+              onCheckedChange={(v) =>
+                setCoexistSubSources((prev) =>
+                  v === true
+                    ? [...new Set([...prev, s.key])]
+                    : prev.filter((k) => k !== s.key)
+                )
+              }
+            />
+            Conviver com a pai (série própria; você garante que não se
+            sobrepõem). Padrão: somar na pai, sem duplicar.
+          </label>
+        ) : null}
+      </div>
+    );
+  };
   const sourceLabels = useSourceLabels();
   const fieldSourceChips = sourceChips(sourceLabels);
 
@@ -3027,43 +3089,28 @@ export function WidgetBuilder({
               entre as bases escolhidas.
             </p>
             <div className="flex flex-col gap-2 rounded-md border p-3">
-              {catalog.map((s) => {
-                // SUB-FONTES: quando a sub E a pai estão selecionadas, oferece o
-                // toggle "conviver" (perna independente) × absorver (padrão).
-                const parentSelected =
-                  s.parentKey != null && sources.includes(s.parentKey);
-                const coexisting = coexistSubSources.includes(s.key);
-                return (
-                  <div key={s.key} className="flex flex-col gap-1">
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={sources.includes(s.key)}
-                        onCheckedChange={() => toggleSource(s.key)}
-                      />
-                      {s.parentKey ? (
-                        <span className="text-muted-foreground">↳ </span>
-                      ) : null}
-                      {s.label}
-                    </label>
-                    {sources.includes(s.key) && parentSelected ? (
-                      <label className="ml-6 flex items-center gap-2 text-xs text-muted-foreground">
-                        <Checkbox
-                          checked={coexisting}
-                          onCheckedChange={(v) =>
-                            setCoexistSubSources((prev) =>
-                              v === true
-                                ? [...new Set([...prev, s.key])]
-                                : prev.filter((k) => k !== s.key)
-                            )
-                          }
-                        />
-                        Conviver com a pai (série própria; você garante que não se
-                        sobrepõem). Padrão: somar na pai, sem duplicar.
-                      </label>
-                    ) : null}
-                  </div>
-                );
-              })}
+              {/* PASTAS (0107): heading por pasta (quando houver) e cada
+                  raiz seguida das PRÓPRIAS subs (antes as subs ficavam
+                  todas no fim do catálogo, longe da pai). */}
+              {builderSourceGroups.map((g) => (
+                <div
+                  key={g.folder?.id ?? "__sem_pasta__"}
+                  className="flex flex-col gap-2"
+                >
+                  {showBuilderFolders ? (
+                    <p className="text-muted-foreground text-xs font-medium uppercase">
+                      {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+                    </p>
+                  ) : null}
+                  {g.roots
+                    .flatMap((root) => [
+                      root,
+                      ...subSourcesOf(root.key, catalog),
+                    ])
+                    .map((s) => renderBuilderSourceRow(s))}
+                </div>
+              ))}
+              {orphanSubSources.map((s) => renderBuilderSourceRow(s))}
             </div>
             <label className="mt-1 flex items-center gap-2 text-sm">
               <Checkbox

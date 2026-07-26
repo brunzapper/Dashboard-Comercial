@@ -1,10 +1,13 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // Matriz de acessos customizados (Configurações → Acessos, 0094): escolhe um
 // usuário e ajusta, por recurso, o override individual — Áreas de
 // Configurações (Padrão/Permitir/Negar), Bases (Padrão/Negar) e boards
 // (Padrão/Ver/Editar/Bloqueado — board_access/0088). Cada mudança grava na
 // hora (setAccessOverride/setBoardAccessEntry); o estado do usuário carrega
 // lazy ao selecioná-lo (getUserAccessState).
+// v1.1 (26/07/2026): PASTAS (0107) — a seção Bases recebe GRUPOS prontos da
+//   page (sourceGroups; label null = sem heading) com as subs logo abaixo da
+//   própria pai (antes ficavam todas no fim).
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
@@ -41,6 +44,12 @@ interface SourceOpt {
   label: string;
   sub: boolean;
 }
+// Grupo de bases por pasta (0107): label null = grupo único/implícito sem
+// heading (nenhuma pasta criada).
+interface SourceGroupOpt {
+  label: string | null;
+  sources: SourceOpt[];
+}
 interface BoardOpt {
   id: string;
   name: string;
@@ -52,13 +61,13 @@ export function AccessMatrix({
   users,
   currentUserId,
   areas,
-  sources,
+  sourceGroups,
   boards,
 }: {
   users: UserOpt[];
   currentUserId: string;
   areas: AreaOpt[];
-  sources: SourceOpt[];
+  sourceGroups: SourceGroupOpt[];
   boards: BoardOpt[];
 }) {
   const [userId, setUserId] = useState("");
@@ -188,27 +197,42 @@ export function AccessMatrix({
               Negar esconde a base do usuário — some dos seletores E dos dados
               dos widgets. Negar uma base leva as sub-bases junto.
             </p>
-            {sources.map((s) => (
-              <div key={s.key} className={rowCls}>
-                <span className="text-sm">
-                  {s.sub ? "↳ " : ""}
-                  {s.label}
-                </span>
-                <Select
-                  value={state.sources[s.key] === "deny" ? "deny" : "default"}
-                  onValueChange={(v) =>
-                    applyOverride("source", s.key, v === "deny" ? "deny" : null)
-                  }
-                  disabled={pending}
-                >
-                  <SelectTrigger className={selectCls}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">Padrão</SelectItem>
-                    <SelectItem value="deny">Negar</SelectItem>
-                  </SelectContent>
-                </Select>
+            {sourceGroups.map((g, gi) => (
+              <div key={g.label ?? `__grupo_${gi}__`}>
+                {g.label ? (
+                  <h3 className="text-muted-foreground mt-2 mb-1 text-xs font-medium uppercase">
+                    {g.label}
+                  </h3>
+                ) : null}
+                {g.sources.map((s) => (
+                  <div key={s.key} className={rowCls}>
+                    <span className="text-sm">
+                      {s.sub ? "↳ " : ""}
+                      {s.label}
+                    </span>
+                    <Select
+                      value={
+                        state.sources[s.key] === "deny" ? "deny" : "default"
+                      }
+                      onValueChange={(v) =>
+                        applyOverride(
+                          "source",
+                          s.key,
+                          v === "deny" ? "deny" : null
+                        )
+                      }
+                      disabled={pending}
+                    >
+                      <SelectTrigger className={selectCls}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">Padrão</SelectItem>
+                        <SelectItem value="deny">Negar</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
               </div>
             ))}
           </section>

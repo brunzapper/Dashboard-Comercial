@@ -1,14 +1,15 @@
-// Versão: 1.0 | Data: 19/07/2026
+// Versão: 1.1 | Data: 26/07/2026
 // SUB-FONTES (0078): CRUD das sub-fontes (fonte derivada de uma pai, recortada
 // por um filtro). Tabela + Sheet com formulário: pai (imutável na edição), nome,
 // nome curto, campo de período e um editor de CONDIÇÕES (field/op/value) que
 // serializa o predicado como JSON (WidgetFilter[]) num input escondido. Os
 // campos do filtro dependem da PAI escolhida (fieldOptionsByParent, montado no
 // servidor a partir de applies_to). Escrita = manage_field_definitions (admin).
+// v1.1 (26/07/2026): ↑/↓ de ordem manual dentro da pai (sort_order, 0107).
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -34,6 +35,7 @@ import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   createSubSource,
   deleteSubSource,
+  reorderSubSource,
   updateSubSource,
   type SourceActionState,
 } from "@/app/(app)/configuracoes/fontes/actions";
@@ -277,6 +279,38 @@ function SubSourceForm({
   );
 }
 
+// ↑/↓ dentro da PAI (0107): re-sequencia as subs da mesma pai no servidor.
+function MoveSubButtons({ subKey }: { subKey: string }) {
+  const [, formAction, pending] = useActionState(reorderSubSource, initial);
+  return (
+    <form action={formAction} className="flex items-center">
+      <input type="hidden" name="key" value={subKey} />
+      <Button
+        type="submit"
+        name="dir"
+        value="up"
+        variant="ghost"
+        size="icon"
+        disabled={pending}
+        aria-label="Mover sub-base para cima"
+      >
+        <ArrowUp className="size-4" />
+      </Button>
+      <Button
+        type="submit"
+        name="dir"
+        value="down"
+        variant="ghost"
+        size="icon"
+        disabled={pending}
+        aria-label="Mover sub-base para baixo"
+      >
+        <ArrowDown className="size-4" />
+      </Button>
+    </form>
+  );
+}
+
 function DeleteSubButton({ subKey }: { subKey: string }) {
   const [state, formAction, pending] = useActionState(deleteSubSource, initial);
   return (
@@ -312,7 +346,11 @@ export function SubSourcesManager({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
   const roots = sources.filter((s) => !s.parentKey);
-  const subs = sources.filter((s) => s.parentKey);
+  // Agrupadas por PAI (na ordem das raízes do catálogo): o ↑/↓ move dentro da
+  // pai, então a tabela precisa mostrar as irmãs juntas.
+  const subs = roots.flatMap((r) =>
+    sources.filter((s) => s.parentKey === r.key)
+  );
 
   function openCreate() {
     setEditing(undefined);
@@ -374,7 +412,8 @@ export function SubSourcesManager({
                     {(s.filter ?? []).length}
                   </TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1">
+                      <MoveSubButtons subKey={s.key} />
                       <Button
                         variant="ghost"
                         size="icon"

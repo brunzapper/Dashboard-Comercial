@@ -1,4 +1,7 @@
-<!-- Versão: 2.8 | Data: 26/07/2026 -->
+<!-- Versão: 2.9 | Data: 26/07/2026 -->
+<!-- v2.9 (26/07/2026): 0107 — source_folders (PASTAS de bases: agrupamento de
+     EXIBIÇÃO + ordem manual) + data_sources.folder_id/sort_order +
+     sub_sources.sort_order. Não recria as RPCs. -->
 <!-- v2.8 (26/07/2026): Parcerias (0104–0106) — match helpers com fonte por
      lookup em data_sources (stable) + idx_records_type_synced; op interno
      in_ci no par de RPCs (fusão de perfis de operação);
@@ -151,8 +154,21 @@ key === record_type), `label`, `short_label`, `default_period_field` (CHECK entr
 colunas de data do núcleo), `builtin`, `manual_entry` (0061 — aceita criação manual;
 builtins nascem desligados), `timezone` (0079 — fuso IANA da ORIGEM; datetimes
 ingeridos normalizam p/ Brasília na entrada, `lib/date/normalize.ts`; NULL = sem
-conversão; seed `Europe/Moscow` em `leads`/`deals`). Seed dos 3 builtins:
+conversão; seed `Europe/Moscow` em `leads`/`deals`), `folder_id` (0107 — FK →
+`source_folders` on delete SET NULL; NULL = "sem pasta") e `sort_order` (0107 —
+ordem manual dentro da pasta; loader ordena `sort_order, builtin desc,
+created_at`). Seed dos 3 builtins:
 `leads/lead`, `deals/negocio` (período `closed_at`), `estudo/venda_site`.
+
+**`source_folders`** (0107) — PASTAS de bases: agrupamento de EXIBIÇÃO
+(navegação de /registros e /campos, tabelas de Configurações → Bases e
+headings dos pickers de base) + ordem manual. `id` uuid PK, `label`,
+`sort_order`, `organization_id` (default Zapper), timestamps + trigger
+`set_updated_at`. RLS espelha `data_sources`: select da org; escrita exige
+`manage_field_definitions`. Pasta NUNCA entra em consulta/engine/RPC —
+excluir uma pasta devolve as bases para "sem pasta" (FK SET NULL). Helpers
+puros em `lib/source-folders.ts` (`groupSourcesByFolder` — grupo implícito
+"Geral" primeiro, grupos vazios omitidos); loader `lib/config/source-folders.ts`.
 
 **`sub_sources`** (0078) — catálogo de **sub-fontes**: uma fonte derivada de uma
 pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
@@ -160,11 +176,12 @@ pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
 `short_label`, `default_period_field` (CHECK: colunas de data do núcleo OU, desde
 a 0082, um campo personalizado de data `custom:<field_key>` — ex.: sub "SQLs"
 datada pela Data Reunião; a action valida que o campo existe e é de data),
-`filter` jsonb (`WidgetFilter[]` — o recorte). A sub COMPARTILHA o `record_type` da
+`filter` jsonb (`WidgetFilter[]` — o recorte), `sort_order` (0107 — ordem manual
+dentro da PAI). A sub COMPARTILHA o `record_type` da
 pai (por isso mora em tabela separada, para não quebrar `data_sources.record_type
 unique`/FK de `records`). Resolvida no ENGINE (perna por source-key); NÃO toca nas
 RPCs de widget. O loader (`lib/config/sources.ts`) une `data_sources` + `sub_sources`
-num único `SourceDef[]`.
+num único `SourceDef[]`. Sub não tem pasta própria (herda a da pai na exibição).
 
 **`field_definitions`** (0005) — metadados das colunas dinâmicas.
 `field_key` unique, `label`, `data_type` (`texto|numero|data|selecao|moeda` +
@@ -647,6 +664,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0104 | widget_match_dynamic_sources | Parcerias: `_widget_match_expr`(`_snap`) resolvem a fonte de `match:` por lookup em `data_sources` (fallback builtins; `immutable`→`stable`) — bases dinâmicas casam em widget agregado. + índice `idx_records_type_synced` (auto-match incremental). Não recria o par principal |
 | 0105 | widget_rpc_in_ci | Parcerias: op interno `in_ci` (pertencimento com a normalização do `eq_ci`) no PAR de RPCs — fusão de perfis de operação (multi-seleção/roll-up de parcerias). Corpos 0085 verbatim + ramo novo, espelhados |
 | 0106 | source_auto_operations | Parcerias: tabela `source_auto_operations` (config de sub-operações automáticas por base; RLS espelha operations_write) + `operations.auto_source_record_id` (identidade da geração, unique parcial). Não recria as RPCs |
+| 0107 | source_folders | PASTAS de bases (agrupamento de EXIBIÇÃO + ordem manual): tabela `source_folders` (uuid PK; RLS espelha data_sources_write) + `data_sources.folder_id` (FK on delete SET NULL)/`sort_order` + `sub_sources.sort_order`. Pasta nunca entra em consulta/engine. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

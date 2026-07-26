@@ -67,6 +67,8 @@ import {
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { loadSources } from "@/lib/config/sources";
+import { loadSourceFolders } from "@/lib/config/source-folders";
+import type { SourceFolder } from "@/lib/source-folders";
 import {
   buildResponsibleCanon,
   collapseResponsibleOptions,
@@ -614,7 +616,15 @@ export interface BoardSourcesState {
   // Catálogo COMPLETO (o dialog oferece tudo, mesmo dentro de um board já
   // escopado — o provider da page é o catálogo EFETIVO, que esconderia as
   // bases removíveis/adicionáveis).
-  catalog: { key: string; label: string; parentKey?: string }[];
+  catalog: {
+    key: string;
+    label: string;
+    parentKey?: string;
+    folderId?: string | null;
+  }[];
+  // Pastas (0107) — pelo MESMO canal do catálogo completo (o provider de
+  // pastas do layout serve o catálogo efetivo, não este dialog).
+  folders: SourceFolder[];
   // Escopo atual (settings.sourceScope.keys; vazio = todas as bases).
   scopeKeys: string[];
   // Bases referenciadas pela config atual (widgets/kanban) — o dialog as marca
@@ -630,29 +640,36 @@ export async function getBoardSourcesState(
   const empty: BoardSourcesState = {
     ok: false,
     catalog: [],
+    folders: [],
     scopeKeys: [],
     referencedKeys: [],
   };
   const session = await getSessionInfo();
   if (!session) return { ...empty, message: "Sessão expirada." };
   const supabase = await createClient();
-  const [{ data: dash }, { data: widgetsData }, catalog, { data: fieldsData }] =
-    await Promise.all([
-      supabase
-        .from("dashboards")
-        .select("id, settings")
-        .eq("id", boardId)
-        .maybeSingle(),
-      supabase
-        .from("widgets")
-        .select("sources, metrics, filters, settings")
-        .eq("dashboard_id", boardId),
-      loadSources(supabase),
-      supabase
-        .from("field_definitions")
-        .select("field_key, data_type, formula, source_system")
-        .or("show_in_builder.eq.true,source_system.eq.core"),
-    ]);
+  const [
+    { data: dash },
+    { data: widgetsData },
+    catalog,
+    folders,
+    { data: fieldsData },
+  ] = await Promise.all([
+    supabase
+      .from("dashboards")
+      .select("id, settings")
+      .eq("id", boardId)
+      .maybeSingle(),
+    supabase
+      .from("widgets")
+      .select("sources, metrics, filters, settings")
+      .eq("dashboard_id", boardId),
+    loadSources(supabase),
+    loadSourceFolders(supabase),
+    supabase
+      .from("field_definitions")
+      .select("field_key, data_type, formula, source_system")
+      .or("show_in_builder.eq.true,source_system.eq.core"),
+  ]);
   if (!dash) return { ...empty, message: "Board não encontrado." };
   const settings = (dash.settings ?? {}) as DashboardSettings;
   const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
@@ -669,7 +686,9 @@ export async function getBoardSourcesState(
       key: s.key,
       label: s.label,
       parentKey: s.parentKey,
+      folderId: s.folderId ?? null,
     })),
+    folders,
     scopeKeys: settings.sourceScope?.keys ?? [],
     referencedKeys: [...referenced],
   };

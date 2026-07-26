@@ -1,4 +1,9 @@
-// Versão: 2.3 | Data: 19/07/2026
+// Versão: 2.4 | Data: 26/07/2026
+// v2.4 (26/07/2026): PASTAS (0107) — CRUD de source_folders (agrupamento de
+//   EXIBIÇÃO das bases) + ordenação manual ↑/↓ (sort_order) de pastas, bases
+//   (dentro da pasta) e sub-bases (dentro da pai). Excluir pasta devolve as
+//   bases para "sem pasta" (FK on delete set null). createSource/updateSource
+//   ganham o campo folder_id (vazio = sem pasta).
 // v2.3 (19/07/2026): timezone (0079) — fuso da ORIGEM da fonte (IANA), validado
 //   com Intl; vazio = sem conversão. Datetimes ingeridos normalizam p/ Brasília.
 // v2.2 (19/07/2026): SUB-FONTES (0078) — CRUD de `sub_sources` (fonte derivada
@@ -26,6 +31,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/records/slug";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
+import { resequenceAfterMove } from "@/lib/source-folders";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 // Guard de escrita da área Fontes: papel admin (como sempre) + o override
@@ -132,6 +138,8 @@ function readSourceForm(formData: FormData): {
   periodField: string;
   manualEntry: boolean;
   timezone: string | null;
+  // Pasta (0107): uuid de source_folders; null = "sem pasta".
+  folderId: string | null;
   error?: string;
 } {
   const label = cleanText(formData.get("label"), 60);
@@ -139,6 +147,7 @@ function readSourceForm(formData: FormData): {
   const periodField = cleanText(formData.get("default_period_field"), 40);
   const manualEntry = String(formData.get("manual_entry") ?? "") === "1";
   const timezone = cleanText(formData.get("timezone"), 64) || null;
+  const folderId = cleanText(formData.get("folder_id"), 40) || null;
   if (label.length < 2) {
     return {
       label,
@@ -146,6 +155,7 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      folderId,
       error: "Informe o nome da base.",
     };
   }
@@ -156,6 +166,7 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      folderId,
       error: "Campo de período inválido.",
     };
   }
@@ -166,10 +177,25 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      folderId,
       error: "Fuso horário inválido (use um nome IANA, ex.: Europe/Moscow).",
     };
   }
-  return { label, shortLabel, periodField, manualEntry, timezone };
+  return { label, shortLabel, periodField, manualEntry, timezone, folderId };
+}
+
+// Pasta escolhida no form precisa existir e ser visível (RLS escopa à org).
+async function validateFolderId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  folderId: string | null
+): Promise<string | null> {
+  if (!folderId) return null;
+  const { data } = await supabase
+    .from("source_folders")
+    .select("id")
+    .eq("id", folderId)
+    .maybeSingle();
+  return data ? null : "Pasta não encontrada.";
 }
 
 export async function createSource(
@@ -177,8 +203,15 @@ export async function createSource(
   formData: FormData
 ): Promise<SourceActionState> {
   await requireFontesWrite();
-  const { label, shortLabel, periodField, manualEntry, timezone, error } =
-    readSourceForm(formData);
+  const {
+    label,
+    shortLabel,
+    periodField,
+    manualEntry,
+    timezone,
+    folderId,
+    error,
+  } = readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
   const key = slugify(label).slice(0, 40);
@@ -191,6 +224,8 @@ export async function createSource(
   }
 
   const supabase = await createClient();
+  const folderError = await validateFolderId(supabase, folderId);
+  if (folderError) return { ok: false, message: folderError };
   // Colisão com key OU record_type existentes (ex.: fonte "Lead" colidiria
   // com o record_type 'lead' do builtin leads).
   const { data: existing } = await supabase
@@ -219,6 +254,7 @@ export async function createSource(
       builtin: false,
       manual_entry: manualEntry,
       timezone,
+      folder_id: folderId,
       ...(orgId ? { organization_id: orgId } : {}),
     });
     insertError = error;
@@ -241,11 +277,20 @@ export async function updateSource(
 ): Promise<SourceActionState> {
   await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
-  const { label, shortLabel, periodField, manualEntry, timezone, error } =
-    readSourceForm(formData);
+  const {
+    label,
+    shortLabel,
+    periodField,
+    manualEntry,
+    timezone,
+    folderId,
+    error,
+  } = readSourceForm(formData);
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
+  const folderError = await validateFolderId(supabase, folderId);
+  if (folderError) return { ok: false, message: folderError };
   const { error: updateError } = await supabase
     .from("data_sources")
     .update({
@@ -254,6 +299,7 @@ export async function updateSource(
       default_period_field: periodField,
       manual_entry: manualEntry,
       timezone,
+      folder_id: folderId,
     })
     .eq("key", key);
   if (updateError) {
@@ -490,6 +536,210 @@ export async function deleteSubSource(
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
   revalidatePath("/", "layout");
   return { ok: true, message: "Sub-base excluída." };
+}
+
+// ============ PASTAS DE BASES (0107) ============
+// Agrupamento de EXIBIÇÃO das bases (source_folders) + ordenação manual ↑/↓.
+// A ordem regravada é sempre a do LOADER (sort_order asc + desempates) →
+// resequenceAfterMove → sort_order = índice do grupo inteiro (normaliza os
+// empates herdados do default 0 na primeira reordenação).
+
+function readDir(formData: FormData): "up" | "down" | null {
+  const dir = String(formData.get("dir") ?? "");
+  return dir === "up" || dir === "down" ? dir : null;
+}
+
+export async function createSourceFolder(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const label = cleanText(formData.get("label"), 60);
+  if (label.length < 2) return { ok: false, message: "Informe o nome da pasta." };
+
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  // Nova pasta entra no fim da lista da org.
+  let maxQuery = supabase
+    .from("source_folders")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1);
+  if (orgId) maxQuery = maxQuery.eq("organization_id", orgId);
+  const { data: maxRow } = await maxQuery.maybeSingle();
+  const { error } = await supabase.from("source_folders").insert({
+    label,
+    sort_order: Number(maxRow?.sort_order ?? -1) + 1,
+    ...(orgId ? { organization_id: orgId } : {}),
+  });
+  if (error) return { ok: false, message: `Falha ao criar: ${error.message}` };
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Pasta "${label}" criada.` };
+}
+
+export async function updateSourceFolder(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const id = cleanText(formData.get("id"), 40);
+  const label = cleanText(formData.get("label"), 60);
+  if (!id) return { ok: false, message: "Pasta inválida." };
+  if (label.length < 2) return { ok: false, message: "Informe o nome da pasta." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("source_folders")
+    .update({ label })
+    .eq("id", id);
+  if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Pasta atualizada." };
+}
+
+export async function deleteSourceFolder(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const id = cleanText(formData.get("id"), 40);
+  if (!id) return { ok: false, message: "Pasta inválida." };
+  const supabase = await createClient();
+  // FK data_sources.folder_id on delete SET NULL: as bases voltam para "sem
+  // pasta" — nunca somem.
+  const { error } = await supabase.from("source_folders").delete().eq("id", id);
+  if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
+  revalidatePath("/", "layout");
+  return {
+    ok: true,
+    message: 'Pasta excluída. As bases voltaram para "sem pasta".',
+  };
+}
+
+export async function reorderSourceFolder(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const id = cleanText(formData.get("id"), 40);
+  const dir = readDir(formData);
+  if (!id || !dir) return { ok: false, message: "Movimento inválido." };
+
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  let query = supabase
+    .from("source_folders")
+    .select("id")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data, error } = await query;
+  if (error || !data) return { ok: false, message: "Falha ao carregar pastas." };
+
+  const ids = data.map((r) => r.id as string);
+  const next = resequenceAfterMove(ids, id, dir);
+  const results = await Promise.all(
+    next.map((fid, idx) =>
+      supabase.from("source_folders").update({ sort_order: idx }).eq("id", fid)
+    )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function reorderSource(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const key = cleanText(formData.get("key"), 40);
+  const dir = readDir(formData);
+  if (!key || !dir) return { ok: false, message: "Movimento inválido." };
+
+  const supabase = await createClient();
+  // Grupo = bases da MESMA pasta (ou sem pasta), na ordem do loader.
+  const { data: row } = await supabase
+    .from("data_sources")
+    .select("folder_id")
+    .eq("key", key)
+    .maybeSingle();
+  if (!row) return { ok: false, message: "Base não encontrada." };
+
+  const orgId = await getActiveOrgId();
+  let query = supabase
+    .from("data_sources")
+    .select("key")
+    .order("sort_order", { ascending: true })
+    .order("builtin", { ascending: false })
+    .order("created_at", { ascending: true });
+  query =
+    row.folder_id == null
+      ? query.is("folder_id", null)
+      : query.eq("folder_id", row.folder_id as string);
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data, error } = await query;
+  if (error || !data) return { ok: false, message: "Falha ao carregar bases." };
+
+  const keys = data.map((r) => r.key as string);
+  const next = resequenceAfterMove(keys, key, dir);
+  const results = await Promise.all(
+    next.map((k, idx) =>
+      supabase.from("data_sources").update({ sort_order: idx }).eq("key", k)
+    )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function reorderSubSource(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const key = cleanText(formData.get("key"), 40);
+  const dir = readDir(formData);
+  if (!key || !dir) return { ok: false, message: "Movimento inválido." };
+
+  const supabase = await createClient();
+  // Grupo = sub-bases da MESMA pai, na ordem do loader.
+  const { data: row } = await supabase
+    .from("sub_sources")
+    .select("parent_key")
+    .eq("key", key)
+    .maybeSingle();
+  if (!row) return { ok: false, message: "Sub-base não encontrada." };
+
+  const { data, error } = await supabase
+    .from("sub_sources")
+    .select("key")
+    .eq("parent_key", row.parent_key as string)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error || !data) {
+    return { ok: false, message: "Falha ao carregar sub-bases." };
+  }
+
+  const keys = data.map((r) => r.key as string);
+  const next = resequenceAfterMove(keys, key, dir);
+  const results = await Promise.all(
+    next.map((k, idx) =>
+      supabase.from("sub_sources").update({ sort_order: idx }).eq("key", k)
+    )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 // ============ Sub-operações automáticas (0106, Parcerias) ============

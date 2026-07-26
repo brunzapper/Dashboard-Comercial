@@ -1,4 +1,6 @@
-// Versão: 3.0 | Data: 12/07/2026
+// Versão: 3.1 | Data: 26/07/2026
+// v3.1 (26/07/2026): PASTAS (0107) — "Campo de data por base" agrupado por
+//   pasta, com as subs logo abaixo da própria pai (↳).
 // Barra de período do dashboard: filtra todos os widgets não cobertos por um
 // widget de filtro. Editores configuram (engrenagem) o período/campo padrão, o
 // escopo (global x por aba) e podem ocultá-la (persistido em dashboards.settings).
@@ -19,7 +21,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { AvailableField } from "@/lib/widgets/fields";
-import { defaultPeriodFieldBySource, type SourceKey } from "@/lib/sources";
+import {
+  defaultPeriodFieldBySource,
+  subSourcesOf,
+  type SourceKey,
+} from "@/lib/sources";
+import {
+  groupSourcesByFolder,
+  IMPLICIT_FOLDER_LABEL,
+} from "@/lib/source-folders";
+import { useSourceFolders } from "@/components/source-folders-context";
 import {
   DEFAULT_PERIOD_FIELD,
   PERIOD_PRESETS,
@@ -168,6 +179,12 @@ function PeriodBarConfig({
     ...defaultPeriodFieldBySource(catalog),
     ...(periodBar?.fieldBySource ?? {}),
   }));
+  // PASTAS (0107): lista "Campo de data por base" agrupada por pasta (heading
+  // só quando há pasta) e cada raiz seguida das PRÓPRIAS subs. Puro visual —
+  // fieldBySource segue chaveado por key.
+  const folders = useSourceFolders();
+  const catalogGroups = groupSourcesByFolder(folders, catalog);
+  const showFolderHeadings = catalogGroups.some((g) => g.folder != null);
 
   const presetOptions: ComboboxOption[] = [
     { value: "", label: "Todo o período" },
@@ -247,20 +264,35 @@ function PeriodBarConfig({
             A mesma seleção do calendário filtra cada base pela sua coluna de
             data (ex.: negócios por assinatura e Estudo por Created At).
           </p>
-          {catalog.map((s) => (
-            <div key={s.key} className="flex items-center gap-2">
-              <span className="text-muted-foreground w-32 shrink-0 text-xs">
-                {s.label}
-              </span>
-              <Combobox
-                options={fieldOptions}
-                chips={fieldSourceChips}
-                value={fieldBySource[s.key] ?? s.defaultPeriodField}
-                onValueChange={(v) =>
-                  setFieldBySource((prev) => ({ ...prev, [s.key]: v }))
-                }
-                aria-label={`Campo de data — ${s.label}`}
-              />
+          {catalogGroups.map((g) => (
+            <div
+              key={g.folder?.id ?? "__sem_pasta__"}
+              className="flex flex-col gap-2"
+            >
+              {showFolderHeadings ? (
+                <p className="text-muted-foreground text-xs font-medium uppercase">
+                  {g.folder?.label ?? IMPLICIT_FOLDER_LABEL}
+                </p>
+              ) : null}
+              {g.roots
+                .flatMap((root) => [root, ...subSourcesOf(root.key, catalog)])
+                .map((s) => (
+                  <div key={s.key} className="flex items-center gap-2">
+                    <span className="text-muted-foreground w-32 shrink-0 text-xs">
+                      {s.parentKey ? "↳ " : ""}
+                      {s.label}
+                    </span>
+                    <Combobox
+                      options={fieldOptions}
+                      chips={fieldSourceChips}
+                      value={fieldBySource[s.key] ?? s.defaultPeriodField}
+                      onValueChange={(v) =>
+                        setFieldBySource((prev) => ({ ...prev, [s.key]: v }))
+                      }
+                      aria-label={`Campo de data — ${s.label}`}
+                    />
+                  </div>
+                ))}
             </div>
           ))}
         </div>
