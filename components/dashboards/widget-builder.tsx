@@ -740,9 +740,6 @@ export function WidgetBuilder({
   const [filterField, setFilterField] = useState(
     widget?.settings?.field ?? DEFAULT_PERIOD_FIELD
   );
-  const [filterTargets, setFilterTargets] = useState<string[]>(
-    widget?.settings?.targets ?? []
-  );
   const [filterPreset, setFilterPreset] = useState(
     widget?.settings?.defaultPreset ?? ""
   );
@@ -757,9 +754,22 @@ export function WidgetBuilder({
       s.visual_type !== "linha_divisoria" &&
       s.visual_type !== "imagem"
   );
+  // Alvos do filtro de período: guarda os DESMARCADOS (excludedTargets) — o
+  // default é dinâmico ("todos, inclusive widgets criados depois"). Widget
+  // legado com `targets` (whitelist congelada) abre com esses alvos marcados
+  // e o re-save migra para excludedTargets.
+  const [filterExcluded, setFilterExcluded] = useState<string[]>(() => {
+    const s = widget?.settings;
+    if (s?.excludedTargets) return s.excludedTargets;
+    if (s?.targets && s.targets.length > 0) {
+      const legacy = s.targets;
+      return targetable.filter((t) => !legacy.includes(t.id)).map((t) => t.id);
+    }
+    return [];
+  });
 
-  function toggleTarget(id: string) {
-    setFilterTargets((prev) =>
+  function toggleFilterExcluded(id: string) {
+    setFilterExcluded((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
   }
@@ -1345,11 +1355,13 @@ export function WidgetBuilder({
     const tabPatch = tabId ? { tab: tabId } : {};
 
     // Widget de filtro: sem dimensões/métricas/filtros; config vai em settings.
+    // Grava excludedTargets (alvo dinâmico) e NUNCA re-grava o legado
+    // `targets` — o update é wholesale, então o re-save migra e o apaga.
     if (visualType === "filtro") {
       const settings: FilterSettings = {
         kind: "period",
         field: filterField,
-        targets: filterTargets,
+        excludedTargets: filterExcluded,
         defaultPreset: filterPreset,
       };
       const input = {
@@ -1358,7 +1370,14 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings: { ...settings, ...tabPatch },
+        settings: {
+          ...settings,
+          ...tabPatch,
+          // Preserva a aparência: este branch reconstrói settings do zero.
+          ...(widget?.settings?.appearance
+            ? { appearance: widget.settings.appearance }
+            : {}),
+        },
       };
       commit(input);
       return;
@@ -2026,10 +2045,10 @@ export function WidgetBuilder({
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label>Vincular a</Label>
+                <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
-                  Escolha quais widgets este filtro controla. Sem seleção, ele
-                  controla o dashboard inteiro.
+                  Por padrão o filtro controla o dashboard inteiro — inclusive
+                  widgets criados depois. Desmarque os que não devem reagir.
                 </p>
                 {targetable.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
@@ -2043,8 +2062,8 @@ export function WidgetBuilder({
                         className="flex items-center gap-2 text-sm"
                       >
                         <Checkbox
-                          checked={filterTargets.includes(s.id)}
-                          onCheckedChange={() => toggleTarget(s.id)}
+                          checked={!filterExcluded.includes(s.id)}
+                          onCheckedChange={() => toggleFilterExcluded(s.id)}
                         />
                         {s.title ?? "Sem título"}
                       </label>

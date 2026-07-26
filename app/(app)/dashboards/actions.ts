@@ -380,7 +380,7 @@ export async function deleteBoardPermanently(id: string): Promise<ActionState> {
 // literal de substrings: uuids são colisão-seguros, e é o que cobre TODAS as
 // referências a widget conhecidas de uma vez — connectors[].from/to.widgetId,
 // shape.link.widgetId/dashboardId, links de nota "[rótulo](@<uuid>)"
-// (note-template.ts) e excludedTargets do filtro_campo.
+// (note-template.ts) e targets/excludedTargets dos widgets de filtro.
 function remapJsonIds(json: string, map: Map<string, string>): string {
   let out = json;
   for (const [oldId, newId] of map) out = out.split(oldId).join(newId);

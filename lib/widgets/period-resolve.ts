@@ -196,8 +196,13 @@ export function createPeriodResolver(input: {
       const pWithMap: DashboardPeriod | null = p
         ? { ...p, fieldBySource: resolveFieldBySource(field, s.fieldBySource) }
         : p;
-      const targets =
-        s.targets && s.targets.length > 0
+      // `excludedTargets` presente (mesmo []) = alvo dinâmico "todos menos
+      // estes" (widgets novos entram sozinhos). `targets` não-vazio é a
+      // whitelist LEGADA — snapshots congelados a guardam; ramo permanente.
+      const excluded = s.excludedTargets;
+      const targets = excluded
+        ? dataWidgets.map((w) => w.id).filter((id) => !excluded.includes(id))
+        : s.targets && s.targets.length > 0
           ? s.targets
           : dataWidgets.map((w) => w.id);
       for (const t of targets) {

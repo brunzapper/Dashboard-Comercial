@@ -416,6 +416,9 @@ export const WidgetCard = memo(function WidgetCard({
   // alpha aparece limpo); nota quando "Sem moldura" (Aparência).
   const frameless = isShape || isImage || (isNote && noteAp?.frameless === true);
   const title = appearance?.title;
+  // "Ocultar barra de título" (Aparência → Título e borda): some SÓ a barra;
+  // borda/corpo/abinha ficam. No frameless não se aplica (já não há barra).
+  const titleHidden = !frameless && title?.hidden === true;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
   // Busca textual client-side (lista de registros sem limit, barra visível):
@@ -993,7 +996,12 @@ export const WidgetCard = memo(function WidgetCard({
   return (
     <div
       ref={cardRef}
-      className="bg-card relative flex h-full flex-col overflow-hidden rounded-lg border"
+      // `group` SÓ com a barra oculta: o ⋮ flutuante aparece em hover do card
+      // (padrão do frameless); sempre presente dispararia group-hover: de
+      // descendentes em todos os widgets.
+      className={`bg-card relative flex h-full flex-col overflow-hidden rounded-lg border${
+        titleHidden ? " group" : ""
+      }`}
       style={{
         background:
           kpi?.bg ??
@@ -1011,46 +1019,64 @@ export const WidgetCard = memo(function WidgetCard({
           style={{ height: 3, background: kpi?.accent ?? filterAp?.accent }}
         />
       ) : null}
-      <div
-        className="flex items-center gap-2 border-b px-3 py-2"
-        style={{ background: title?.bg }}
-      >
-        {editMode ? (
-          <span className="widget-drag text-muted-foreground cursor-move">
-            <GripVertical className="size-4" />
-          </span>
-        ) : null}
-        <span
-          className="flex-1 truncate text-sm font-medium"
-          style={{
-            color: title?.color,
-            ...fontStyle(fonts?.title, FONT_DEFAULTS.title, fontScale),
-          }}
+      {titleHidden ? (
+        // Barra oculta: grip .widget-drag flutuante é OBRIGATÓRIO em edição
+        // (draggableHandle do grid) e o ⋮ aparece em hover — mesmo padrão do
+        // layout frameless acima.
+        <>
+          {editMode ? (
+            <span className="widget-drag bg-background/80 text-muted-foreground absolute top-1 left-1 z-10 cursor-move rounded border p-0.5">
+              <GripVertical className="size-4" />
+            </span>
+          ) : null}
+          {menu ? (
+            <div className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              {menu}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <div
+          className="flex items-center gap-2 border-b px-3 py-2"
+          style={{ background: title?.bg }}
         >
-          {widget.title ?? "Sem título"}
-        </span>
-        {menu}
-        {isCalculator && canEdit ? (
-          // Fechar fácil (sem confirmação): a exclusão entra no histórico do
-          // dashboard, então Desfazer restaura a calculadora.
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-foreground size-6"
-            title="Fechar calculadora"
-            aria-label="Fechar calculadora"
-            onClick={() => {
-              setClosing(true);
-              startTransition(async () => {
-                await deleteWidget(widget.id, dashboardId);
-                onWidgetDeleted?.(widget.id);
-              });
+          {editMode ? (
+            <span className="widget-drag text-muted-foreground cursor-move">
+              <GripVertical className="size-4" />
+            </span>
+          ) : null}
+          <span
+            className="flex-1 truncate text-sm font-medium"
+            style={{
+              color: title?.color,
+              ...fontStyle(fonts?.title, FONT_DEFAULTS.title, fontScale),
             }}
           >
-            <X className="size-4" />
-          </Button>
-        ) : null}
-      </div>
+            {widget.title ?? "Sem título"}
+          </span>
+          {menu}
+          {isCalculator && canEdit ? (
+            // Fechar fácil (sem confirmação): a exclusão entra no histórico do
+            // dashboard, então Desfazer restaura a calculadora.
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-foreground size-6"
+              title="Fechar calculadora"
+              aria-label="Fechar calculadora"
+              onClick={() => {
+                setClosing(true);
+                startTransition(async () => {
+                  await deleteWidget(widget.id, dashboardId);
+                  onWidgetDeleted?.(widget.id);
+                });
+              }}
+            >
+              <X className="size-4" />
+            </Button>
+          ) : null}
+        </div>
+      )}
       {exportError ? (
         <p className="text-destructive border-b px-3 py-1 text-xs">
           {exportError}
