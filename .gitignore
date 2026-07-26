@@ -12,6 +12,12 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+
+# supabase CLI local (stack de dev/e2e)
+/supabase/.branches/
+/supabase/.temp/
 
 # next.js
 /.next/
