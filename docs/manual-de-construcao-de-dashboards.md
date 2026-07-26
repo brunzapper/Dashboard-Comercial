@@ -357,6 +357,14 @@ No topo da página do dashboard:
 - **"Adicionar widget"** — abre o editor de widget (capítulo 6).
 - **Menu "⋮"** do dashboard (§3.6).
 
+**Como o dashboard carrega:** a página abre imediatamente com a estrutura
+(grid, filtros, tabelas de registros) e os widgets de dados — gráficos, KPIs,
+cards, tabelas agregadas, calculado, calculadora e nota — chegam logo em
+seguida, num único lote em segundo plano, cada um sob um pequeno indicador
+"Atualizando…" até o dado aterrissar (o mesmo comportamento que a Tabela
+Livre, o Kanban e a Agenda já tinham). Ao trocar período ou filtros, os dados
+antigos ficam em tela sob o indicador até o recorte novo chegar.
+
 ### 3.3 Abas
 
 Um dashboard pode ter **abas** (chips no topo). No modo edição: **"+"**

@@ -1,4 +1,9 @@
-<!-- Versão: 1.33 | Data: 26/07/2026 -->
+<!-- Versão: 1.34 | Data: 26/07/2026 -->
+<!-- v1.34 (26/07/2026): §4.10 — deferimento AUTOMÁTICO dos widgets de engine
+     (runDeferredWidgets em lote via widget-scope em bundle; page entrega só
+     fingerprints; env de escape DEFER_ENGINE_WIDGETS=0) e §4.1 — janela
+     incremental do modo lista full-fetch (runRecordListWindow +
+     fetchWidgetRecordsWindow; env RECORD_LIST_WINDOW, default 1000). -->
 <!-- v1.33 (26/07/2026): §4.1 — cache TTL de run_widget_query ENTRE
      requisições (lib/widgets/rpc-cache.ts, sob o withRpcMemo; chave por
      escopo de autorização u:<userId>/s:<snapshotId>; env
@@ -1214,10 +1219,11 @@ diferentes:
   campo" com `valueScope: "all"`, em `dashboard_table_cells`): server action +
   `revalidatePath` → re-render RSC **sem** mudança de URL.
 
-Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
+Os widgets computados no RSC (hoje: listas de registros/entity lists) cobrem
 os dois transportes por construção (props novas a cada render). Os widgets
-**DEFERIDOS** (Tabela Livre e kanban, fetch client-side via server action)
-precisam de duas garantias, ambas desta entrega:
+**DEFERIDOS** (Tabela Livre e kanban, fetch client-side via server action —
+e, desde 26/07/2026, TODOS os widgets de engine; ver abaixo) precisam de duas
+garantias:
 
 - **Escopo ÚNICO:** as actions deferidas (`runQuickTable`,
   `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
@@ -1242,6 +1248,24 @@ precisam de duas garantias, ambas desta entrega:
   não muda a URL e o widget ficava obsoleto até F5. Mudança de DADO (sem
   mudança de filtro) chega pelo event bus (`useDataChanged` → tick), nos dois
   widgets.
+
+**Deferimento automático dos widgets de ENGINE (26/07/2026):** a page NÃO
+computa mais gráfico/KPI/card/pizza/funil/tabela agregada/calculado/
+calculadora/nota — ela entrega o fingerprint (`deferredScopeById`, o mesmo
+acima) + `deferredEngineIds`, e o `DashboardClient` busca TODOS em UMA action
+(`runDeferredWidgets`, `app/(app)/dashboards/deferred-widget-actions.ts`) após
+o mount, com stale-while-refetch (overlay "Atualizando…" por card via
+`deferredPendingIds`). A action reproduz o dispatch do `computeWidget` da page
+sobre os MESMOS choke points (`runWidget`/`runCardWidget`/
+`runCalculatedWidget`) com escopo do widget-scope em BUNDLE
+(`loadDashboardScopeBundle` + `scopeForWidget` — as consultas compartilhadas
+de catálogo/prefs/períodos rodam 1× por lote; invariante 12 intacta), o
+cliente RPC em duas camadas (memo por lote + cache TTL §4.1) e o limitador
+compartilhado (`lib/widgets/task-limiter.ts`). Listas de registros/entity
+lists seguem inline no RSC (alimentam FK labels e a janela incremental);
+snapshot viewer segue computando tudo inline (link público de leitura). Env
+de escape `DEFER_ENGINE_WIDGETS=0` restaura o cômputo inline na page sem
+deploy. RPCs de widget INTOCADOS.
 
 **Período personalizado é rascunho + commit** (`PeriodRangeDraft`,
 `components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls`,

@@ -1,4 +1,8 @@
-// Versão: 2.6 | Data: 26/07/2026
+// Versão: 2.7 | Data: 26/07/2026
+// v2.7 (26/07/2026): engine deferido — busca em LOTE dos widgets de engine
+//   (runDeferredWidgets; deferredEngineIds + fingerprint deferredScopeById +
+//   event bus como gatilhos; stale-while-refetch) e mescla nos mapas
+//   dataById/calcById/calcVarsById/noteById antes do grid.
 // v2.6 (26/07/2026): repassa recordListWindowTotalById (janela incremental
 //   do modo lista full-fetch; record-list v2.0) page → grid.
 // Shell do dashboard: cabeçalho + alternar modo de edição + adicionar widget +
@@ -56,6 +60,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import {
+  runDeferredWidgets,
+  type DeferredWidgetsPayload,
+} from "@/app/(app)/dashboards/deferred-widget-actions";
+import { useDataChanged } from "@/lib/tasks/events";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
 import type {
@@ -177,6 +186,7 @@ export function DashboardClient({
   quickFiltersById,
   periodWindowById,
   deferredScopeById,
+  deferredEngineIds,
   initialTabId,
   focusWidgetId,
 }: {
@@ -243,10 +253,13 @@ export function DashboardClient({
   // Janela de períodos (settings.periodWindow) resolvida no servidor: estado
   // efetivo do dropdown do card (seleção compartilhada __pw__ ?? default).
   periodWindowById?: Record<string, WidgetPeriodWindowState>;
-  // Fingerprint do escopo efetivo dos widgets DEFERIDOS (Tabela Livre/kanban),
-  // computado na page: muda → o widget re-busca (cobre filtros persistidos no
-  // banco, que não passam pela URL). Ausente no viewer de snapshot.
+  // Fingerprint do escopo efetivo dos widgets DEFERIDOS (Tabela Livre/kanban/
+  // engine), computado na page: muda → o widget re-busca (cobre filtros
+  // persistidos no banco, que não passam pela URL). Ausente no snapshot.
   deferredScopeById?: Record<string, string>;
+  // Widgets de ENGINE deferidos (26/07/2026): a page NÃO os computou — este
+  // client os busca em LOTE via runDeferredWidgets e mescla nos mapas.
+  deferredEngineIds?: string[];
   // Aba vinda da URL (?tab=), para restaurar a aba ativa ao recarregar. Chega
   // crua da page (sem validação) — validada aqui contra as abas efetivas.
   initialTabId?: string;
@@ -257,6 +270,81 @@ export function DashboardClient({
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+
+  // ---- widgets de ENGINE deferidos (26/07/2026) ----
+  // A page não computa gráficos/KPIs/cards/…: este client busca TODOS em uma
+  // única action (runDeferredWidgets) após o mount, com stale-while-refetch
+  // (dados antigos ficam em tela sob o overlay "Atualizando…"). Re-busca
+  // quando o fingerprint dos escopos muda (período/filtros/__pw__ efetivos —
+  // inclusive persistidos no banco: a revalidação re-renderiza o RSC e a prop
+  // nova re-dispara) ou quando um registro muda (event bus, paridade com
+  // Tabela Livre/kanban).
+  const engineIds = useMemo(
+    () => deferredEngineIds ?? [],
+    [deferredEngineIds]
+  );
+  const engineScopeKey = useMemo(
+    () =>
+      JSON.stringify(
+        engineIds.map((id) => [id, deferredScopeById?.[id] ?? ""])
+      ),
+    [engineIds, deferredScopeById]
+  );
+  const [engineData, setEngineData] = useState<DeferredWidgetsPayload | null>(
+    null
+  );
+  const [engineLoading, setEngineLoading] = useState(engineIds.length > 0);
+  const [engineTick, setEngineTick] = useState(0);
+  useDataChanged((d) => {
+    if (d.kind === "record") setEngineTick((t) => t + 1);
+  });
+  useEffect(() => {
+    if (engineIds.length === 0) return;
+    let cancelled = false;
+    // Pequeno atraso coalesce rajadas (navegação rápida de período/filtros).
+    const timer = setTimeout(() => {
+      setEngineLoading(true);
+      // A URL é lida NA CHAMADA (não é dep): quem re-dispara é o
+      // engineScopeKey (fingerprint do escopo efetivo computado pela page).
+      void runDeferredWidgets(
+        dashboardId,
+        engineIds,
+        window.location.search
+      ).then((res) => {
+        if (cancelled) return;
+        if (res.ok) setEngineData(res);
+        setEngineLoading(false);
+      });
+    }, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // engineIds está resumido no engineScopeKey (id + fingerprint por id).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardId, engineScopeKey, engineTick]);
+  const effDataById = useMemo(
+    () => (engineData ? { ...dataById, ...engineData.dataById } : dataById),
+    [dataById, engineData]
+  );
+  const effCalcById = useMemo(
+    () => (engineData ? { ...calcById, ...engineData.calcById } : calcById),
+    [calcById, engineData]
+  );
+  const effCalcVarsById = useMemo(
+    () =>
+      engineData ? { ...calcVarsById, ...engineData.calcVarsById } : calcVarsById,
+    [calcVarsById, engineData]
+  );
+  const effNoteById = useMemo(
+    () => (engineData ? { ...noteById, ...engineData.noteById } : noteById),
+    [noteById, engineData]
+  );
+  // Ids sob overlay "Atualizando…": todos os deferidos enquanto o lote roda.
+  const enginePendingIds = useMemo(
+    () => (engineLoading ? new Set(engineIds) : undefined),
+    [engineLoading, engineIds]
+  );
   // Handle do painel "Editar com IA": aberto pelo item do dropdown "Editar"
   // (o painel fica montado com o trigger próprio escondido).
   const aiPanelRef = useRef<AiEditPanelHandle | null>(null);
@@ -993,15 +1081,16 @@ export function DashboardClient({
           <WidgetFocusProvider focus={focusWidget}>
           <DashboardGrid
             widgets={visibleWidgets}
-            dataById={dataById}
+            dataById={effDataById}
+            deferredPendingIds={enginePendingIds}
             recordListById={recordListById}
             recordListExtraById={recordListExtraById}
             recordListTotalById={recordListTotalById}
             recordListWindowTotalById={recordListWindowTotalById}
             entityListById={entityListById}
-            calcById={calcById}
-            calcVarsById={calcVarsById}
-            noteById={noteById}
+            calcById={effCalcById}
+            calcVarsById={effCalcVarsById}
+            noteById={effNoteById}
             calcExprById={calcExprById}
             tableCellsById={tableCellsById}
             fields={fields}

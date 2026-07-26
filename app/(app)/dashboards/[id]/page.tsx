@@ -1,6 +1,11 @@
-// Versão: 3.1 | Data: 25/07/2026
+// Versão: 3.2 | Data: 26/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.2 (26/07/2026): deferimento automático dos widgets de ENGINE — a page
+//   NÃO computa gráfico/KPI/card/…: entrega deferredEngineIds + fingerprint e
+//   o DashboardClient busca em lote (runDeferredWidgets). Listas seguem
+//   inline, agora com janela incremental (recordListWindowTotalById). Escape:
+//   DEFER_ENGINE_WIDGETS=0. Limitador extraído p/ lib/widgets/task-limiter.
 // v3.1 (25/07/2026): espaço de grid v2 — settings/widgets passam por
 //   normalizeGridSpace (lib/widgets/grid-space) logo após o load: board legado
 //   é convertido em memória e o cliente inteiro opera no espaço fino (a
@@ -158,6 +163,10 @@ import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { startDashboardLoadTiming } from "@/lib/widgets/load-timing";
+import {
+  createTaskLimiter,
+  WIDGET_TASK_CONCURRENCY,
+} from "@/lib/widgets/task-limiter";
 import { DashboardClient } from "@/components/dashboards/dashboard-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 import type { ResponsibleOption } from "@/components/dashboards/charts/record-list-table";
@@ -173,31 +182,8 @@ function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
-// Máximo de widget tasks em voo por render. Todos os widgets disparavam ao
-// mesmo tempo; num dashboard grande o pico de consultas simultâneas satura o
-// Postgres (statement timeouts em cascata) e TODOS pioram. O teto mantém o
-// paralelismo útil e suaviza o pico; os Promise.all internos de um task
-// (pernas de métrica, variáveis de calculadora, exprs de nota) não contam.
-const WIDGET_TASK_CONCURRENCY = 8;
-
-// Limitador simples (sem dependência): até `max` execuções simultâneas, demais
-// aguardam em fila (FIFO). O wrapper devolve a promise do próprio task.
-function createTaskLimiter(max: number) {
-  let active = 0;
-  const queue: (() => void)[] = [];
-  return async function run<T>(fn: () => Promise<T>): Promise<T> {
-    while (active >= max) {
-      await new Promise<void>((resolve) => queue.push(resolve));
-    }
-    active += 1;
-    try {
-      return await fn();
-    } finally {
-      active -= 1;
-      queue.shift()?.();
-    }
-  };
-}
+// Limitador de concorrência dos widget tasks — módulo compartilhado com a
+// action deferida (lib/widgets/task-limiter.ts).
 
 export default async function DashboardPage({
   params,
@@ -907,21 +893,43 @@ export default async function DashboardPage({
   // Kanban e Agenda: também DEFERIDOS (fetch no cliente, padrão Tabela Livre).
   const isKanbanWidget = (w: Widget) => w.visual_type === "kanban";
   const isAgendaWidget = (w: Widget) => w.visual_type === "agenda";
+  // Deferimento automático dos widgets de ENGINE (26/07/2026): gráfico/KPI/
+  // card/pizza/funil/tabela agregada/calculado/calculadora/nota saem do
+  // caminho crítico do RSC — o DashboardClient os busca em LOTE via
+  // runDeferredWidgets após o mount (padrão Tabela Livre/Kanban). Listas e
+  // entity lists seguem inline (alimentam FK labels e a janela incremental).
+  // Env de escape DEFER_ENGINE_WIDGETS=0 restaura o cômputo inline.
+  const deferEngineWidgets = process.env.DEFER_ENGINE_WIDGETS !== "0";
+  const isEngineDeferredWidget = (w: Widget) =>
+    deferEngineWidgets &&
+    !isListWidget(w) &&
+    !isQuickTableWidget(w) &&
+    !isKanbanWidget(w) &&
+    !isAgendaWidget(w);
 
-  // Fingerprint de ESCOPO dos widgets deferidos (Tabela Livre/kanban): o
-  // effect do cliente re-busca quando período/filtros EFETIVOS mudam —
+  // Fingerprint de ESCOPO dos widgets deferidos (Tabela Livre/kanban/engine):
+  // o effect do cliente re-busca quando período/filtros EFETIVOS mudam —
   // inclusive os persistidos no banco (__qf__/__pw__), que não passam pela
   // URL (a action revalida, o RSC re-renderiza e a prop nova re-dispara o
   // effect). Agenda fica FORA (ignora os filtros do dashboard por design).
   const deferredScopeById: Record<string, string> = {};
   for (const w of dataWidgets) {
-    if (!isQuickTableWidget(w) && !isKanbanWidget(w)) continue;
+    if (
+      !isQuickTableWidget(w) &&
+      !isKanbanWidget(w) &&
+      !isEngineDeferredWidget(w)
+    ) {
+      continue;
+    }
     deferredScopeById[w.id] = JSON.stringify({
       p: periodByWidget[w.id] ?? null,
       f: viewFiltersByWidget[w.id] ?? [],
       pw: pwChoiceById.get(w.id) ?? null,
     });
   }
+  const deferredEngineIds = dataWidgets
+    .filter(isEngineDeferredWidget)
+    .map((w) => w.id);
 
   // Buscas que NÃO dependem do resultado dos widgets: disparadas AGORA para
   // correrem em paralelo com a computação (antes eram ondas seriais depois
@@ -1026,6 +1034,9 @@ export default async function DashboardPage({
   const noteById: Record<string, CalcWidgetResult[]> = {};
   const runLimited = createTaskLimiter(WIDGET_TASK_CONCURRENCY);
   const computeWidget = async (w: Widget) => {
+      // Engine deferido (26/07/2026): computado pelo DashboardClient via
+      // runDeferredWidgets — a page só entrega o fingerprint de escopo.
+      if (isEngineDeferredWidget(w)) return;
       // Métricas calculadas: resolve a fórmula com o contexto do dashboard.
       // `settings.calcField` aponta p/ um campo "Calculado (totais)" salvo em
       // /campos (campo deletado → fórmula null → valor null → "—"). Moeda:
@@ -1492,6 +1503,7 @@ export default async function DashboardPage({
         quickFiltersById={quickFiltersById}
         periodWindowById={periodWindowById}
         deferredScopeById={deferredScopeById}
+        deferredEngineIds={deferredEngineIds}
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
       />

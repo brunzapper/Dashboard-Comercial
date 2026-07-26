@@ -1,4 +1,6 @@
-// Versão: 2.15 | Data: 26/07/2026
+// Versão: 2.16 | Data: 26/07/2026
+// v2.16 (26/07/2026): engine deferido — prop deferredPending liga o overlay
+//   "Atualizando…" enquanto o lote runDeferredWidgets do DashboardClient roda.
 // v2.15 (26/07/2026): janela incremental do full fetch — prop
 //   recordListWindowTotal + "Carregar mais" via fetchWidgetRecordsWindow
 //   (anexa janelas de 1000 até cobrir o total; reset quando o RSC recomputa).
@@ -240,6 +242,7 @@ export const WidgetCard = memo(function WidgetCard({
   quickFilters,
   periodWindow,
   deferredScopeKey,
+  deferredPending = false,
   autoSize,
   cellW = 0,
   rowH = 0,
@@ -316,6 +319,9 @@ export const WidgetCard = memo(function WidgetCard({
   // de fetch re-dispara quando muda — inclusive filtros persistidos no banco
   // (__qf__), que não passam pela URL. Ausente no snapshot (precomputado).
   deferredScopeKey?: string;
+  // Engine deferido (26/07/2026): lote runDeferredWidgets em voo p/ este
+  // widget → overlay "Atualizando…" (dados antigos ficam em tela).
+  deferredPending?: boolean;
   // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
   // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
   // métricas de célula do grid (p/ converter px → unidades).
@@ -1030,10 +1036,11 @@ export const WidgetCard = memo(function WidgetCard({
   ) : null;
 
   // Overlay de processamento: cobre o card enquanto o save do builder (painel
-  // já fechado) ou a exclusão correm — versão por card do overlay global do
-  // grid (dashboard-grid.tsx), pílula só com spinner (cards KPI são pequenos).
+  // já fechado), a exclusão ou o lote deferido de engine (deferredPending)
+  // correm — versão por card do overlay global do grid (dashboard-grid.tsx),
+  // pílula só com spinner (cards KPI são pequenos).
   const processingOverlay =
-    saving || pending ? (
+    saving || pending || deferredPending ? (
       <div className="bg-background/50 absolute inset-0 z-20 flex items-center justify-center rounded-lg backdrop-blur-[1px]">
         <div className="bg-background text-muted-foreground flex items-center rounded-full border p-1.5 shadow-sm">
           <Loader2 className="size-4 animate-spin" />
