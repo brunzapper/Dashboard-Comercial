@@ -1,4 +1,9 @@
-<!-- Versão: 2.7 | Data: 26/07/2026 -->
+<!-- Versão: 2.8 | Data: 26/07/2026 -->
+<!-- v2.8 (26/07/2026): Parcerias (0104–0106) — match helpers com fonte por
+     lookup em data_sources (stable) + idx_records_type_synced; op interno
+     in_ci no par de RPCs (fusão de perfis de operação);
+     source_auto_operations + operations.auto_source_record_id
+     (sub-operações automáticas por registro). -->
 <!-- v2.7 (26/07/2026): 0103 — índices de expressão parciais p/ Data Reunião
      (lead/negocio) + composto (organization_id, record_type,
      source_created_at); runbook apply/indices-periodo-custom.sql p/ campos
@@ -259,9 +264,22 @@ plano — só a action `setResponsibleCanonical` escreve). Reversível:
 **`operations`** (0012) — operações comerciais; `parent_operation_id` (0016) permite
 aninhamento (subárvore via função `operation_subtree`); `filter` jsonb (0083) —
 FILTROS DE PERFIL (WidgetFilter[], com fonte-alvo opcional por condição) que
-definem o recorte de dados da operação, editados em Configurações → Operações.
+definem o recorte de dados da operação, editados em Configurações → Operações;
+`auto_source_record_id` (0106) — FK `records(id) on delete set null` + unique
+parcial: identidade de uma sub-operação AUTOMÁTICA (gerada de um registro —
+ver `source_auto_operations`).
 
 **`responsible_operations`** (0012) — N:N com `priority` (1 = operação primária).
+
+**`source_auto_operations`** (0106) — config de SUB-OPERAÇÕES AUTOMÁTICAS,
+1 por base (PK `source_key` → `data_sources.key` cascade): `parent_operation_id`
+(→ operations cascade), `name_field`/`value_field` (refs no registro da base:
+nome da sub-operação e identificador gravado no lead), `target_field` +
+`target_sources` (ref/fontes-alvo do perfil gerado no lead), `profile_op`
+(`eq`|`eq_ci`), `enabled`, `organization_id`. RLS espelha `operations_write`
+(leitura da org; escrita admin). Rotina: `lib/operations/auto-operations.ts`
+(service role; ganchos no import CSV, na API de ingestão e na criação/edição
+manual; botão "Gerar agora" em Configurações → Fontes).
 
 > **`records.operation_id` é DERIVADA** (operação priority=1 do responsável no
 > momento do sync; updates só preenchem quando NULL). O filtro de Operação da
@@ -382,11 +400,16 @@ meta custom `[{key,label,money?}]`, mescladas aos builtins por
 `status` (`pending|done|error`), `attempts`.
 
 **`match_rules`** (0041) — regras de matching entre fontes: par de fontes + até 2
-pares de campos (par 2 = fallback), `enabled`, `priority`.
+pares de campos (par 2 = fallback), `enabled`, `priority`. Só fontes RAIZ
+(FK → `data_sources.record_type`; sub-fontes nunca casam).
 **`record_matches`** (0041) — matches efetivos: `(record_a_id, record_b_id)` unique,
 `mode` (`auto|manual`), `matched_on`. Índices compostos `(record_a_id, created_at desc)`
 / `(record_b_id, created_at desc)` (0077) assistem a subconsulta correlacionada de
-`match:` (`_widget_match_expr`, 0042), que resolve o registro casado por linha.
+`match:` (`_widget_match_expr`, 0042; desde a 0104 resolve a fonte por lookup
+em `data_sources` — bases dinâmicas casam sem migração), que resolve o registro
+casado por linha. O sync do Bitrix dispara auto-match INCREMENTAL ao concluir
+job (lado A restrito por `last_synced_at` — índice `idx_records_type_synced`,
+0104).
 
 **`currencies`** (0036) — moedas habilitáveis (seed: BRL/USD ligadas, EUR/GBP/ARS
 desligadas). **`currency_rates`** (0036) — taxa R$ por unidade, PK
@@ -423,8 +446,8 @@ service role (sem policy), carimbando `organization_id`.
 
 | Função | Versão vigente | Papel |
 |---|---|---|
-| `run_widget_query` | **0085** (recriada 18×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget |
-| `run_widget_query_snapshot` | **0085** (0056, 0057, 0072, 0085) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
+| `run_widget_query` | **0105** (recriada 19×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085, 0105) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget. 0105: op interno `in_ci` (pertencimento normalizado — fusão de perfis de operação) |
+| `run_widget_query_snapshot` | **0105** (0056, 0057, 0072, 0085, 0105) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
 
 **Invariante:** toda migração que recriar `run_widget_query` DEVE recriar
 `run_widget_query_snapshot` (e `_widget_match_expr` ↔ `_widget_match_expr_snap`) no
@@ -436,7 +459,8 @@ Helpers da família (todos `_widget_*`): `_widget_col_expr`, `_widget_unified_ex
 `_widget_local_ts` (0085, 2 overloads: timestamptz → wall time
 America/Sao_Paulo; text → prefixo de 10 chars, seguro), `_widget_safe_ts`
 (legado desde a 0085 — sem chamadores nos RPCs), `_widget_norm_text`,
-`_widget_safe_numeric`, `_widget_match_expr`(`_snap`),
+`_widget_safe_numeric`, `_widget_match_expr`(`_snap`) (0104 — fonte por lookup
+em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 `_widget_wrap_record_types`.
 
 ### 4.2 Demais funções
@@ -620,6 +644,9 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0101 | responsible_canonical | `responsibles.canonical_id` (agrupamento de exibição: apelido → principal, reversível, grupo plano) + índice parcial + `auth_responsible_ids` redefinida devolvendo o GRUPO do vendedor. Não recria as RPCs de widget |
 | 0102 | maintenance_analyze | Performance: função `maintenance_analyze()` (ANALYZE de records/record_matches, service role only) — o runner do sync a dispara ao concluir job volumoso. Não recria as RPCs |
 | 0103 | custom_period_indexes | Performance: índices de expressão parciais p/ "Data Reunião" de lead/negócio (`custom_fields->>k`, prefix lexicográfico) + composto `(organization_id, record_type, source_created_at)`. Campos custom de período de outras fontes: runbook `apply/indices-periodo-custom.sql`. Não recria as RPCs |
+| 0104 | widget_match_dynamic_sources | Parcerias: `_widget_match_expr`(`_snap`) resolvem a fonte de `match:` por lookup em `data_sources` (fallback builtins; `immutable`→`stable`) — bases dinâmicas casam em widget agregado. + índice `idx_records_type_synced` (auto-match incremental). Não recria o par principal |
+| 0105 | widget_rpc_in_ci | Parcerias: op interno `in_ci` (pertencimento com a normalização do `eq_ci`) no PAR de RPCs — fusão de perfis de operação (multi-seleção/roll-up de parcerias). Corpos 0085 verbatim + ramo novo, espelhados |
+| 0106 | source_auto_operations | Parcerias: tabela `source_auto_operations` (config de sub-operações automáticas por base; RLS espelha operations_write) + `operations.auto_source_record_id` (identidade da geração, unique parcial). Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

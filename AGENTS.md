@@ -23,13 +23,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
 > mudanças de UI/semântica do construtor incluem o manual de construção.
 
 - **RPC de widgets duplicado (Snapshots):** `run_widget_query_snapshot`
-  (versão vigente na 0085; introduzido na 0056) é uma cópia de
-  `run_widget_query` (vigente na 0085; base 0054) apontada para
+  (versão vigente na 0105; introduzido na 0056) é uma cópia de
+  `run_widget_query` (vigente na 0105; base 0054) apontada para
   `snapshot_records`, acrescida das
   restrições do snapshot aplicadas internamente (mock-aware). Toda mudança em
   `run_widget_query` (nova migração que o recrie) DEVE ser espelhada em
   `run_widget_query_snapshot` na mesma migração — inclusive o helper
-  `_widget_match_expr` ↔ `_widget_match_expr_snap`. O espelhamento é
+  `_widget_match_expr` ↔ `_widget_match_expr_snap` (vigentes na 0104: resolvem
+  a fonte do ref `match:<fonte>:` por lookup em `data_sources.key` →
+  `record_type`, com fallback nos 3 builtins — por isso são `stable`, não
+  `immutable`; sub-fontes nunca casam e ficam fora de `buildMatchFields`).
+  O espelhamento é
   FISCALIZADO em CI por `tests/rpc-parity.test.ts` (`npm test` — compara o SQL
   das últimas definições, sem banco); divergência snapshot-only INTENCIONAL
   nova entra na allowlist do teste com comentário justificando. Além do texto,
@@ -368,3 +372,28 @@ This version has breaking changes — APIs, conventions, and file structure may 
   action `setResponsibleCanonical` (Configurações → Responsáveis) escreve.
   Fiscalizado por `lib/config/responsible-canon.test.ts` + blocos nos testes
   de engine/record-list. Ver `docs/arquitetura.md` §4.13 e invariante 20.
+- **Parcerias: match dinâmico, fusão de perfis de operação e sub-operações
+  automáticas (0104–0106, 26/07/2026):** (a) os helpers
+  `_widget_match_expr(_snap)` resolvem a fonte por `data_sources` (regra do
+  espelho acima) — base RAIZ nova casa sem migração; refs `match:` de
+  SUB-fontes não existem (filtradas em `buildMatchFields`, no matches-manager
+  e no validador de import da IA). (b) O sync do Bitrix dispara auto-match
+  INCREMENTAL pós-job (`runAutoMatchIncremental` — lado A restrito por
+  `last_synced_at`, lado B inteiro) + recalc DIRECIONADO
+  (`recalcFormulaFieldsForRecords`) — best-effort, nunca derruba o job.
+  (c) Multi-seleção/pai de operações "profile-only" FUNDE os perfis no ENGINE
+  (`fuseOperationProfiles`, `lib/config/operation-scope.ts`) num único
+  `in`/`in_ci` (op interno do RPC, 0105 — normalização do `eq_ci`; fora da UI
+  de filtros e do SPEC da IA; modo lista degrada como o `eq_ci`); caso
+  misto/não-fundível degrada como antes (perfis descartados). NÃO recrie os
+  RPCs para fusão nova — resolva no engine. (d) Sub-operações automáticas:
+  config em `source_auto_operations` (1 por base; RLS espelha
+  operations_write), rotina `lib/operations/auto-operations.ts` com service
+  role + carimbo EXPLÍCITO de org; identidade por
+  `operations.auto_source_record_id` (rename atualiza a MESMA operação;
+  registro sumido INATIVA, nunca exclui; homônima sem vínculo é adotada); o
+  perfil gerado é PROPRIEDADE do gerador (edição manual é sobrescrita).
+  `records.operation_id` derivado fica NULL nessas operações (sem
+  responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
+  NÃO enxergam parcerias — limitação documentada, não bug. Ver
+  `docs/arquitetura.md` §4.14 e invariantes 21/22.

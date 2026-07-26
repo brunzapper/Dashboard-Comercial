@@ -1,4 +1,8 @@
-<!-- Versão: 1.14 | Data: 26/07/2026 -->
+<!-- Versão: 1.15 | Data: 26/07/2026 -->
+<!-- v1.15 (26/07/2026): Parcerias — §2.1.3 Conexões valem para Bases criadas
+     pelo usuário (sub-bases não casam; conexão automática na entrada) e §2.3
+     operações só-por-perfil (sub-operações automáticas: multi-seleção e pai
+     mostram a união; limitações de dimensão/snapshot/lista). -->
 <!-- v1.14 (26/07/2026): §5.1 — carga incremental do modo lista sem limite
      (1.000 por vez, rodapé "Exibindo X de Y — Carregar mais"; grupos/totais
      parciais até cobrir; exceções documentadas). -->
@@ -260,7 +264,12 @@ esse campo). Sub-bases podem ter membro próprio, diferente do da Base-mãe.
 Define regras de **casamento** entre registros de duas Bases: até 2 pares de
 campos (com fallback — se o primeiro par não casar, tenta o segundo) e um
 botão de auto-match. Depois de casados, os campos do registro conectado ficam
-disponíveis em fórmulas e colunas com o prefixo `↪`.
+disponíveis em fórmulas e colunas com o prefixo `↪`. Vale para QUALQUER Base
+raiz — inclusive Bases criadas por você (ex.: uma Base "Parceiros" conectada
+aos Leads pelo e-mail do parceiro). Sub-bases não casam (compartilham os
+registros da Base-mãe) e por isso não aparecem nem como Base da regra nem com
+campos `↪` próprios. Registros que chegam pelo sync/import casam sozinhos —
+o botão de auto-match serve para a primeira carga ou para conferência.
 
 ### 2.2 Configurações → Bases (rota "fontes")
 
@@ -287,6 +296,13 @@ disponíveis em fórmulas e colunas com o prefixo `↪`.
   (ela pode estar vazia/defasada). Ele traduz para: *registros cujos
   responsáveis pertencem à operação (incluindo sub-operações da árvore)* +
   o filtro de perfil da operação. Detalhes no §7.5.
+- **Operações definidas SÓ por perfil** (sem responsáveis — ex.: sub-operações
+  de parceria geradas automaticamente em Configurações → Bases): selecionar
+  VÁRIAS no filtro rápido mostra a UNIÃO dos recortes, e selecionar a
+  operação-PAI aplica a união dos perfis das filhas (quando os perfis são do
+  mesmo campo). Atenção: agrupar "por Operação" e restringir snapshot por
+  operação não enxergam essas operações (usam a coluna gravada no registro), e
+  widget de LISTA não recorta pelo perfil delas.
 
 ### 2.4 Configurações → Metas (e dias não úteis)
 

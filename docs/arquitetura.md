@@ -1,4 +1,10 @@
-<!-- Versão: 1.34 | Data: 26/07/2026 -->
+<!-- Versão: 1.35 | Data: 26/07/2026 -->
+<!-- v1.35 (26/07/2026): §4.14 Parcerias (0104–0106) — match de bases
+     dinâmicas (helpers com lookup em data_sources), auto-match INCREMENTAL
+     pós-sync do Bitrix + recalc direcionado, fusão de perfis de operação
+     (in_ci; operation-scope batelado com roll-up do pai) e sub-operações
+     automáticas por registro (source_auto_operations +
+     operations.auto_source_record_id); invariantes 21/22. -->
 <!-- v1.34 (26/07/2026): §4.10 — deferimento AUTOMÁTICO dos widgets de engine
      (runDeferredWidgets em lote via widget-scope em bundle; page entrega só
      fingerprints; env de escape DEFER_ENGINE_WIDGETS=0) e §4.1 — janela
@@ -1636,6 +1642,74 @@ metas (`goals`) por responsável não se fundem; snapshots com restrição grava
 ANTES de mudar um grupo precisam ser re-salvos para incluir apelidos novos;
 entity-list (`rowSource: responsibles`) segue exibindo apelidos como linhas.
 
+### 4.14 Parcerias: match dinâmico, conexão reativa e sub-operações automáticas (26/07/2026)
+
+Caso de uso: uma base "Parceiros" (CSV/API) e leads do Bitrix que carregam o
+identificador do parceiro num campo (ex.: `custom:bitrix_uf_crm_1784828550`,
+"Email parceiro"). Três peças, todas reutilizando a infra existente:
+
+- **Match para bases dinâmicas (0104).** Os helpers `_widget_match_expr` /
+  `_widget_match_expr_snap` resolvem a fonte do ref `match:<fonte>:<ref>` por
+  lookup `data_sources.key → record_type` (fallback no mapeamento histórico
+  `leads/deals/estudo`; `immutable` → `stable`). Antes, o `case` hardcoded
+  erguia exceção para qualquer base nova — o construtor oferecia
+  `↪ Parceiros: …` e o widget agregado explodia. Sub-fontes NUNCA casam
+  (compartilham o `record_type` da pai): `buildMatchFields` itera só raízes,
+  o matches-manager só oferece raízes como Base A/B e o validador de import
+  da IA rejeita `match:<sub>:*`. A regra de conexão em si é a de sempre
+  (`match_rules` + `record_matches`, aba Conexões em `/campos` — ex.: campo
+  "Email parceiro" do lead ↔ `custom:email` da base Parceiros).
+- **Conexão reativa pós-sync (A2).** O sync do Bitrix agora dispara, ao
+  CONCLUIR um job que escreveu algo, `maybeAutoMatchAfterJob` (runner):
+  `runAutoMatchIncremental` roda só as regras cujos `record_types` foram
+  tocados — lado A restrito a `last_synced_at >= started_at` do job (índice
+  `idx_records_type_synced`), lado B indexado inteiro (base de referência
+  pequena); regra com só o lado B tocado roda cheia. Pares inseridos
+  alimentam `recalcFormulaFieldsForRecords` (recalc DIRECIONADO — mesmo
+  pipeline do geral com `.in("id", …)`). Tudo best-effort, padrão
+  `maybeAnalyzeAfterJob`. Declare a regra de parcerias com `source_a = lead`
+  para o custo ficar O(tocados no tick).
+- **Fusão de perfis de operação (0105 + operation-scope v2).**
+  `loadOperationScopes` ficou BATELADO (1 query de `operations` + 1 de
+  `responsible_operations`; subárvore em JS ciclo-safe) e devolve também
+  `subtreeProfiles` (filhas ATIVAS com perfil + flag de vínculo). Quando a
+  seleção é 100% "profile-only" (nenhum responsável nas subárvores),
+  `fuseOperationProfiles` funde perfis de condição ÚNICA sobre o MESMO campo
+  (`eq`/`eq_ci`/`in`, mesmas `sources`) num único filtro: `in` quando todos
+  exatos, `in_ci` (op interno novo do par de RPCs, 0105 — pertencimento com a
+  normalização do `eq_ci`) quando qualquer `_ci` está presente. Cobre a
+  multi-seleção de parcerias no filtro rápido (antes: perfis descartados →
+  IMPOSSIBLE → dashboard zerado) e a seleção do PAI "Parceiro" (roll-up das
+  filhas). Caso misto (vínculo + perfil) ou não-fundível degrada EXATAMENTE
+  como antes. `updateOperation` ganhou detecção de ciclo indireto de pai.
+- **Sub-operações automáticas (0106).** Config 1-por-base em
+  `source_auto_operations` (`parent_operation_id`, `name_field`/`value_field`
+  — refs no registro da base, `target_field`/`target_sources` — ref/alvo no
+  lead, `profile_op` `eq_ci`|`eq`; RLS espelha `operations_write`; UI em
+  Configurações → Fontes, seção "Sub-operações automáticas" + botão "Gerar
+  agora"). A rotina (`lib/operations/auto-operations.ts`, service role com
+  carimbo EXPLÍCITO de `organization_id` da config) materializa uma
+  sub-operação por registro válido: identidade por
+  `operations.auto_source_record_id` (unique parcial) — rename do parceiro
+  renomeia a MESMA operação; homônima sem vínculo é ADOTADA (normalizeName,
+  como o seed 0053); registro sumido/sem identificador INATIVA (nunca
+  exclui); perfil gerado é PROPRIEDADE do gerador (edição manual do perfil é
+  sobrescrita). Ganchos: `finalizeCsvImport`, `POST /api/ingest/<source>`,
+  criação/edição manual de registros (`ensureAutoOperationsForRecordType`,
+  gate barato) — todos best-effort.
+
+Limitações documentadas: `records.operation_id` (derivada de
+`responsible_operations.priority=1`) fica NULL para registros recortados só
+por parcerias — a DIMENSÃO "por Operação" e a restrição
+`snapshots.allowed_operation_ids` não enxergam parcerias (um lead pode
+pertencer à operação do responsável E a uma parceria; a coluna é
+single-valued — use filtro fixo de dashboard para snapshot restrito a
+parceria). `in_ci`, como o `eq_ci`, não tem tradução no modo LISTA (widget de
+lista com filtro de parceria não recorta pelo perfil). Dropdowns de operação
+seguem planos (centenas de parcerias = dropdown grande). O e2e não tem
+fixture de base dinâmica com match (cobertura live do caminho novo é
+follow-up conhecido).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -1860,6 +1934,26 @@ principalmente — para mantenedores humanos.
     `auth_responsible_ids()` devolve o grupo (visibilidade do vendedor cobre
     registros no id do apelido). Grupo sempre PLANO — só a action
     `setResponsibleCanonical` escreve a coluna.
+21. **Match de bases dinâmicas resolve no helper, fusão de operações resolve
+    no ENGINE (§4.14).** `_widget_match_expr(_snap)` resolvem a fonte por
+    `data_sources` (são `stable`; recriação segue a invariante 1 — os dois na
+    mesma migração, linha do lookup idêntica). Refs `match:` de SUB-fontes não
+    existem em nenhum catálogo (buildMatchFields/matches-manager/validador de
+    import) — não os reintroduza. A fusão de perfis de operação
+    (`fuseOperationProfiles` + op interno `in_ci`) vive em
+    `lib/config/operation-scope.ts`: NÃO recrie os RPCs para variações novas
+    de fusão, e mantenha o degrade byte-idêntico dos casos não-fundíveis
+    (fiscalizado por `lib/config/operation-scope.test.ts`).
+22. **Sub-operações automáticas: identidade por `auto_source_record_id`,
+    perfil do gerador, nunca delete (§4.14).** A rotina
+    (`lib/operations/auto-operations.ts`) roda com service role e carimbo
+    EXPLÍCITO de org; rename atualiza a MESMA operação, registro sumido
+    INATIVA (goals/vínculos/snapshots podem referenciar a operação) e o
+    perfil gerado é reescrito a cada rodada (customize a CONFIG em
+    `source_auto_operations`, não o perfil). `records.operation_id` derivado
+    fica NULL nessas operações — dimensão "por Operação" e
+    `allowed_operation_ids` de snapshot não as enxergam (limitação
+    documentada; não "conserte" repontando a coluna).
 
 ## 6. Convenções do projeto
 

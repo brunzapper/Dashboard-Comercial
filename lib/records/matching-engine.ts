@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 12/07/2026
+// Versão: 1.1 | Data: 26/07/2026
+// v1.1 (26/07/2026): runAutoMatchIncremental — variante pós-sync do Bitrix
+//   (lado A restrito por last_synced_at; regras filtradas pelos record_types
+//   tocados) + retorno dos ids casados p/ recalc direcionado.
 // Fase 2: motor de auto-match. Para cada regra habilitada, casa registros da
 // fonte A com os da fonte B por 2 pares de campos com FALLBACK (par 1 → par 2) e
 // grava os matches (mode='auto') em record_matches. NUNCA sobrescreve um match
@@ -22,20 +25,31 @@ export interface AutoMatchResult {
   inserted: number;
 }
 
+export interface IncrementalAutoMatchResult extends AutoMatchResult {
+  /** Ids (lado A ∪ lado B) dos pares candidatos inseridos — superset inócuo
+   * (ignoreDuplicates pode ter descartado alguns), insumo idempotente do
+   * recalc direcionado. */
+  recordIds: string[];
+}
+
 // Carrega TODOS os registros de um record_type (paginado, para driblar o teto do
-// PostgREST), com as colunas usadas na comparação.
+// PostgREST), com as colunas usadas na comparação. `sinceLastSynced` restringe
+// aos tocados pelo sync desde o instante dado (last_synced_at; nulos ficam
+// fora — CSV/manual não passam por aqui).
 async function loadRecordsOfType(
   db: SupabaseClient,
-  recordType: string
+  recordType: string,
+  sinceLastSynced?: string
 ): Promise<MatchableRecord[]> {
   const BATCH = 1000;
   const all: MatchableRecord[] = [];
   for (let from = 0; ; ) {
-    const { data, error } = await db
+    let q = db
       .from("records")
       .select(MATCHABLE_COLS)
-      .eq("record_type", recordType)
-      .range(from, from + BATCH - 1);
+      .eq("record_type", recordType);
+    if (sinceLastSynced) q = q.gte("last_synced_at", sinceLastSynced);
+    const { data, error } = await q.range(from, from + BATCH - 1);
     if (error) throw new Error(error.message);
     const chunk = (data ?? []) as unknown as MatchableRecord[];
     if (chunk.length === 0) break;
@@ -60,15 +74,25 @@ function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+interface RunRuleResult {
+  inserted: number;
+  recordIds: string[];
+}
+
+// `sideASince`: variante INCREMENTAL — lado A restrito aos registros tocados
+// pelo sync desde o instante dado; lado B segue indexado inteiro (base de
+// referência tipicamente pequena, ex.: Parceiros).
 async function runRule(
   db: SupabaseClient,
-  rule: MatchRule
-): Promise<number> {
+  rule: MatchRule,
+  opts?: { sideASince?: string }
+): Promise<RunRuleResult> {
   const [aRecs, bRecs] = await Promise.all([
-    loadRecordsOfType(db, rule.source_a),
+    loadRecordsOfType(db, rule.source_a, opts?.sideASince),
     loadRecordsOfType(db, rule.source_b),
   ]);
-  if (aRecs.length === 0 || bRecs.length === 0) return 0;
+  if (aRecs.length === 0 || bRecs.length === 0)
+    return { inserted: 0, recordIds: [] };
 
   const idx1 = indexBy(bRecs, rule.field_b_1);
   const idx2 = rule.field_a_2 && rule.field_b_2 ? indexBy(bRecs, rule.field_b_2) : null;
@@ -133,7 +157,10 @@ async function runRule(
     if (error) throw new Error(error.message);
     inserted += count ?? 0;
   }
-  return inserted;
+  return {
+    inserted,
+    recordIds: rows.flatMap((r) => [r.record_a_id, r.record_b_id]),
+  };
 }
 
 // Registro casado por fonte (SourceKey → registro). Usado para materializar os
@@ -232,6 +259,37 @@ export async function runAutoMatch(
     (r) => r.enabled && (!ruleId || r.id === ruleId)
   );
   let inserted = 0;
-  for (const rule of rules) inserted += await runRule(db, rule);
+  for (const rule of rules) inserted += (await runRule(db, rule)).inserted;
   return { rulesRun: rules.length, inserted };
+}
+
+/**
+ * Auto-match INCREMENTAL pós-sync: roda só as regras cujos record_types foram
+ * tocados. Regra com `source_a` tocado → lado A restrito por `last_synced_at
+ * >= since` (lado B indexado inteiro); regra com SÓ `source_b` tocado → runRule
+ * cheio (o índice é do lado B — não dá para restringi-lo sem perder matches de
+ * A antigos). Preserva ignoreDuplicates (nunca sobrescreve manual). Devolve os
+ * ids dos pares inseridos para o recalc direcionado.
+ */
+export async function runAutoMatchIncremental(
+  db: SupabaseClient,
+  opts: { touchedRecordTypes: string[]; since?: string }
+): Promise<IncrementalAutoMatchResult> {
+  const touched = new Set(opts.touchedRecordTypes);
+  const rules = (await loadMatchRules(db)).filter(
+    (r) => r.enabled && (touched.has(r.source_a) || touched.has(r.source_b))
+  );
+  let inserted = 0;
+  const recordIds: string[] = [];
+  for (const rule of rules) {
+    const incremental = opts.since && touched.has(rule.source_a);
+    const res = await runRule(
+      db,
+      rule,
+      incremental ? { sideASince: opts.since } : undefined
+    );
+    inserted += res.inserted;
+    if (res.inserted > 0) recordIds.push(...res.recordIds);
+  }
+  return { rulesRun: rules.length, inserted, recordIds };
 }

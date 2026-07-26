@@ -1,4 +1,8 @@
-<!-- Versão: 1.17 | Data: 26/07/2026 -->
+<!-- Versão: 1.18 | Data: 26/07/2026 -->
+<!-- v1.18 (26/07/2026): §4.11 — runbook de Parcerias (base de parceiros,
+     conexão lead↔parceiro reativa, sub-operações automáticas, 0104–0106);
+     §4.1 aponta o par vigente (0105) e os helpers 0104; §3 próximo número
+     livre 0107. -->
 <!-- v1.17 (26/07/2026): §4.10 — checklist do agrupamento de responsáveis
      (canonical_id, 0101/invariante 20); §3 com o próximo número livre
      corrigido (0102). -->
@@ -163,7 +167,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0102).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0107).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).
@@ -183,7 +187,8 @@ npm run build      # o que a Vercel roda no deploy
 
 - [ ] A migração recria **também** `run_widget_query_snapshot` (e
   `_widget_match_expr` ↔ `_widget_match_expr_snap`) **no mesmo arquivo** — parta da
-  0085, que contém o par completo.
+  0105, que contém o par completo (helpers de match: parta da 0104 — a linha
+  do lookup em `data_sources` deve ficar byte-idêntica nos dois).
 - [ ] A regra dos mocks (substring das chaves `bitrix_uf_crm_1743441331` /
   `bitrix_uf_crm_67eacefcccd98`) permanece idêntica nos dois lados **e** em
   `lib/widgets/mock-reuniao.ts`.
@@ -484,6 +489,53 @@ fonte no widget se precisar do mês.
 - [ ] Rede de segurança: `lib/config/responsible-canon.test.ts` +
       os blocos "agrupamento de responsáveis" em `lib/widgets/engine.test.ts`
       e `lib/widgets/record-list.test.ts` (`npm test`).
+
+### 4.11 Parcerias: base de parceiros ligada aos leads (0104–0106, 26/07/2026)
+
+Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
+
+1. **Base Parceiros**: crie via wizard de CSV (`/registros/importar` — o passo
+   de Base cria a fonte e os campos custom) ou Configurações → Fontes. Key
+   sugerida `parceiros`; ligue "criação manual" se quiserem cadastrar à mão.
+   Colunas mínimas: nome (`title`) e o identificador que o lead carrega —
+   ex.: `custom:email`.
+2. **Campo do lead**: crie o campo no Bitrix (ex.: `UF_CRM_1784828550`,
+   "Email parceiro"). O próximo sync o cataloga como
+   `custom:bitrix_uf_crm_1784828550` (nasce OCULTO) — em `/campos`, renomeie e
+   ligue o olho. Rode um sync **backfill** para popular o histórico (o
+   reconcile incremental só toca registros modificados). Opcional (1 linha de
+   código): entrada em `FIELD_LABELS` (`lib/config/bitrix-field-map.ts`) para
+   rótulo/visibilidade default.
+3. **Conexão lead↔parceiro**: `/campos` → aba Conexões → nova regra com
+   Base A = Leads, campo `custom:bitrix_uf_crm_1784828550` ↔ Base B =
+   Parceiros, campo `custom:email` (par 2 opcional como fallback). A
+   comparação normaliza caixa/acentos/espaços (`matchKey`). Salvar a regra já
+   roda o auto-match; dali em diante o SYNC conecta sozinho (auto-match
+   incremental pós-job — procure `[sync] auto-match pós-job falhou` nos logs
+   se suspeitar). Declare a regra com Leads no lado A (custo O(tocados)).
+4. **Atualização recorrente da base**: re-upload de CSV com "casar com
+   existentes" (por e-mail/código, `updateExisting`) ou `POST
+   /api/ingest/parceiros` com chave `dck_...` (Configurações → Integrações).
+5. **Análises**: dimensão `custom:bitrix_uf_crm_1784828550` (leads por
+   parceiro, funciona até sem conexão) ou `match:parceiros:title` (nome
+   canônico da base); campos do parceiro em fórmulas/métricas via
+   `match:parceiros:custom:*` (tier, comissão…). A IA de dashboards enxerga
+   tudo isso pelo catálogo vivo.
+6. **Caminho por OPERAÇÕES (opcional)**: crie a operação-pai "Parceiro" em
+   Configurações → Operações; em Configurações → Fontes → "Sub-operações
+   automáticas", configure a base Parceiros (pai, campo do nome, campo do
+   identificador, campo comparado no lead) e clique "Gerar agora". Cada
+   parceiro vira uma sub-operação com perfil gerado; multi-seleção no filtro
+   rápido de Operação e a seleção do PAI funcionam (fusão de perfis). O
+   perfil gerado é reescrito a cada rodada — personalize a CONFIG, não o
+   perfil da operação.
+7. **Limitações** (documentadas em `docs/arquitetura.md` §4.14): dimensão
+   "por Operação" e restrição de snapshot por operação NÃO enxergam
+   parcerias (`operation_id` derivado fica NULL — para snapshot restrito a
+   parceria use filtro fixo do dashboard); filtro de parceria em widget de
+   LISTA não recorta pelo perfil (`in_ci` sem tradução no modo lista, como o
+   `eq_ci`); `match:` não é campo de período e filtro `match:` no modo lista
+   é ignorado.
 
 ## 5. Troubleshooting
 

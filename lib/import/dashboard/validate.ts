@@ -227,6 +227,10 @@ export function validateDashboardImport(
   const workingCorrKeys = new Set(ctx.correspondenceKeys);
   const workingSources: SourceDef[] = [...ctx.sources];
   const sourceKeySet = () => new Set(workingSources.map((s) => s.key));
+  // Refs `match:` só aceitam Bases RAIZ: sub-base compartilha o record_type da
+  // pai e nunca casa (buildMatchFields/helpers 0104 seguem a mesma regra).
+  const rootSourceKeySet = () =>
+    new Set(workingSources.filter((s) => !s.parentKey).map((s) => s.key));
   const respNames = new Set(
     ctx.responsibleNames.map((n) => n.trim().toLocaleLowerCase("pt-BR"))
   );
@@ -310,9 +314,9 @@ export function validateDashboardImport(
       const i = rest.indexOf(":");
       const src = i > 0 ? rest.slice(0, i) : "";
       const inner = i > 0 ? rest.slice(i + 1) : "";
-      if (!src || !sourceKeySet().has(src)) {
+      if (!src || !rootSourceKeySet().has(src)) {
         errors.push(
-          `${where}: "${ref}" referencia uma Base desconhecida ("${src}").`
+          `${where}: "${ref}" referencia uma Base desconhecida ou uma Sub-base ("${src}") — "match:" aceita só Bases raiz.`
         );
         return false;
       }

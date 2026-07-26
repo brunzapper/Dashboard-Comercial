@@ -1,6 +1,8 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 26/07/2026
 // Server Actions da tela de Operações (admin). Suporta aninhamento
 // (parent_operation_id). RLS de operations exige papel admin para escrever.
+// v1.2 (26/07/2026): updateOperation detecta ciclo INDIRETO de pai (A→B→A)
+// subindo os ancestrais do novo pai — antes só bloqueava pai = ele mesmo.
 // v1.1 (20/07/2026): updateOperationFilter — FILTROS DE PERFIL da operação
 // (operations.filter, 0083; WidgetFilter[] com `sources` opcional por
 // condição), consumidos pelo filtro de Operação da visualização
@@ -61,6 +63,28 @@ export async function updateOperation(
   if (err) return;
   if (patch.parent_operation_id === id) return; // evita pai = ele mesmo
   const supabase = await createClient();
+  // Ciclo indireto (A→B→…→A): subir os ancestrais do novo pai; alcançar `id`
+  // deixaria a árvore inconsistente (operation_subtree sobrevive por usar
+  // UNION, mas o roll-up/metas ficariam errados). Recusa silenciosa, como o
+  // guard de auto-pai acima.
+  if (patch.parent_operation_id) {
+    const { data } = await supabase
+      .from("operations")
+      .select("id, parent_operation_id");
+    const parentById = new Map(
+      (data ?? []).map((o) => [
+        o.id as string,
+        (o.parent_operation_id as string | null) ?? null,
+      ])
+    );
+    const seen = new Set<string>();
+    let cur: string | null = patch.parent_operation_id;
+    while (cur && !seen.has(cur)) {
+      if (cur === id) return; // criaria ciclo
+      seen.add(cur);
+      cur = parentById.get(cur) ?? null;
+    }
+  }
   await supabase.from("operations").update(patch).eq("id", id);
   revalidatePath("/configuracoes/operacoes");
 }

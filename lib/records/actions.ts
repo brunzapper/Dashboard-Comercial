@@ -60,6 +60,7 @@ import {
 } from "@/lib/config/core-writeback";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { ensureAutoOperationsForRecordType } from "@/lib/operations/auto-operations";
 
 function numOrNull(v: unknown): number | null {
   if (v == null || v === "") return null;
@@ -585,6 +586,18 @@ export async function updateRecord(
 
   await Promise.all(effects);
 
+  // Sub-operações automáticas (0106): edição manual numa base configurada
+  // re-materializa (rename do parceiro/novo identificador mudam nome e perfil
+  // gerados). Best-effort, com service role.
+  try {
+    await ensureAutoOperationsForRecordType(
+      createServiceClient(),
+      existing.record_type
+    );
+  } catch {
+    /* ignora: botão "Gerar sub-operações agora" em Fontes cobre depois. */
+  }
+
   // Edição inline (updateRecordField) manda no_revalidate=1: a célula já é
   // otimista e a página reconcilia no cliente (RealtimeRefresher + refresh
   // debounced do chamador). Sem o revalidate, a resposta da action volta sem o
@@ -922,6 +935,19 @@ export async function createRecord(
     { recordId: id, source: sourceKey },
     await getActiveOrgId()
   );
+
+  // Sub-operações automáticas (0106): registro novo numa base configurada
+  // (ex.: Parceiros) materializa a sub-operação. O usuário não escolhe nada da
+  // config (pré-definida por admin); roda com service role (RLS de operations
+  // é admin-only). Best-effort.
+  try {
+    await ensureAutoOperationsForRecordType(
+      createServiceClient(),
+      sourceDef.recordType
+    );
+  } catch {
+    /* ignora: botão "Gerar sub-operações agora" em Fontes cobre depois. */
+  }
 
   revalidatePath("/registros");
   const bitrixNote = row.source_id ? ` (criado no Bitrix, ID ${row.source_id}).` : ".";

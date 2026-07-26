@@ -491,3 +491,112 @@ export async function deleteSubSource(
   revalidatePath("/", "layout");
   return { ok: true, message: "Sub-base excluída." };
 }
+
+// ============ Sub-operações automáticas (0106, Parcerias) ============
+// Config por base: cada registro da base materializa uma sub-operação sob a
+// operação-pai com perfil gerado (lib/operations/auto-operations.ts). A
+// gravação usa o client do USUÁRIO (RLS espelha operations_write: admin da
+// org); só o "Gerar agora" usa service role — depois do guard de admin.
+
+const AUTO_OP_PROFILE_OPS = new Set(["eq", "eq_ci"]);
+
+export async function saveAutoOperations(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const sourceKey = cleanText(formData.get("source_key"), 40);
+  const parentId = String(formData.get("parent_operation_id") ?? "").trim();
+  const nameField = String(formData.get("name_field") ?? "").trim() || "title";
+  const valueField = String(formData.get("value_field") ?? "").trim();
+  const targetField = String(formData.get("target_field") ?? "").trim();
+  const targetSource = String(formData.get("target_source") ?? "").trim();
+  const profileOp = String(formData.get("profile_op") ?? "eq_ci").trim();
+  const enabled = String(formData.get("enabled") ?? "on") !== "off";
+
+  if (!sourceKey) return { ok: false, message: "Base inválida." };
+  if (!parentId) return { ok: false, message: "Escolha a operação-pai." };
+  if (!valueField) {
+    return { ok: false, message: "Escolha o campo do identificador na base." };
+  }
+  if (!targetField) {
+    return { ok: false, message: "Escolha o campo comparado no lead." };
+  }
+  if (!AUTO_OP_PROFILE_OPS.has(profileOp)) {
+    return { ok: false, message: "Operador inválido." };
+  }
+
+  const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  const { error } = await supabase.from("source_auto_operations").upsert(
+    {
+      source_key: sourceKey,
+      parent_operation_id: parentId,
+      name_field: nameField,
+      value_field: valueField,
+      target_field: targetField,
+      target_sources: targetSource ? [targetSource] : [],
+      profile_op: profileOp,
+      enabled,
+      // Carimbo de org (multi-org): sem ele, usuário de outra org falharia no
+      // WITH CHECK (default é a org legada).
+      ...(orgId ? { organization_id: orgId } : {}),
+    },
+    { onConflict: "source_key" }
+  );
+  if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
+  revalidatePath("/configuracoes/fontes");
+  return { ok: true, message: "Sub-operações automáticas configuradas." };
+}
+
+export async function deleteAutoOperations(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const sourceKey = cleanText(formData.get("source_key"), 40);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("source_auto_operations")
+    .delete()
+    .eq("source_key", sourceKey);
+  if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
+  revalidatePath("/configuracoes/fontes");
+  return {
+    ok: true,
+    message:
+      "Config removida. As sub-operações já geradas foram mantidas em Operações.",
+  };
+}
+
+export async function runAutoOperationsNow(
+  _prev: SourceActionState,
+  formData: FormData
+): Promise<SourceActionState> {
+  await requireFontesWrite();
+  const sourceKey = cleanText(formData.get("source_key"), 40);
+  if (!sourceKey) return { ok: false, message: "Base inválida." };
+  // Service role SÓ depois do guard de admin acima: a RLS de operations é
+  // admin-only e a rotina precisa escrever nelas.
+  const { ensureAutoOperationsForSource } = await import(
+    "@/lib/operations/auto-operations"
+  );
+  const { createServiceClient } = await import("@/lib/supabase/service");
+  try {
+    const res = await ensureAutoOperationsForSource(
+      createServiceClient(),
+      sourceKey
+    );
+    if (!res.configured) {
+      return { ok: false, message: "Base sem config habilitada." };
+    }
+    revalidatePath("/configuracoes/fontes");
+    revalidatePath("/configuracoes/operacoes");
+    return {
+      ok: true,
+      message: `Sub-operações geradas: ${res.created} nova(s), ${res.renamed} renomeada(s), ${res.adopted} adotada(s), ${res.reactivated} reativada(s), ${res.deactivated} inativada(s), ${res.skipped} registro(s) sem identificador.`,
+    };
+  } catch (e) {
+    return { ok: false, message: `Falha ao gerar: ${(e as Error).message}` };
+  }
+}

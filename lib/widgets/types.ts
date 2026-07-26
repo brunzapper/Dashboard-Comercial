@@ -189,6 +189,10 @@ export type FilterOp =
   // e null ≡ ''. *_num: comparação numérica com cast seguro.
   | "eq_ci"
   | "neq_ci"
+  // Pertencimento com a normalização do eq_ci (0105) — interno da FUSÃO de
+  // perfis de operação (lib/config/operation-scope.ts); fora da UI de filtros
+  // e do SPEC da IA. Modo lista não o traduz (mesma degradação do eq_ci).
+  | "in_ci"
   | "eq_num"
   | "neq_num"
   | "gt_num"

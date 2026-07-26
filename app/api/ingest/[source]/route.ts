@@ -19,6 +19,7 @@ import type { ColumnMapping } from "@/lib/import/csv";
 import { loadSources } from "@/lib/config/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
+import { ensureAutoOperationsForSource } from "@/lib/operations/auto-operations";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -218,6 +219,12 @@ export async function POST(
         await recalcAllFormulaFields();
       } catch {
         /* ignora: as linhas já foram persistidas. */
+      }
+      // Sub-operações automáticas (0106) da base recém-ingerida.
+      try {
+        await ensureAutoOperationsForSource(db, source);
+      } catch {
+        /* ignora: idem — botão em Fontes cobre depois. */
       }
       return NextResponse.json({ ok: true, result });
     } catch (e) {
