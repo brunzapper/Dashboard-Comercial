@@ -1,4 +1,8 @@
-<!-- Versão: 2.6 | Data: 26/07/2026 -->
+<!-- Versão: 2.7 | Data: 26/07/2026 -->
+<!-- v2.7 (26/07/2026): 0103 — índices de expressão parciais p/ Data Reunião
+     (lead/negocio) + composto (organization_id, record_type,
+     source_created_at); runbook apply/indices-periodo-custom.sql p/ campos
+     custom de período de outras fontes/sub-fontes. -->
 <!-- v2.6 (26/07/2026): 0102 — maintenance_analyze() (ANALYZE pós-sync em
      massa, service role only; disparada pelo runner ao concluir job com
      >= 2.000 linhas escritas). -->
@@ -129,7 +133,7 @@ do site ou linha de fonte dinâmica.
 | `value`, `mrr` numeric, `currency` text | |
 | `sale_type`, `channel` text | |
 | `closed` bool, `closed_at`, `opened_at` | |
-| `source_created_at`, `source_modified_at` | DATE_CREATE/DATE_MODIFY na origem; `source_created_at` é o sort/período padrão (índices na 0069) |
+| `source_created_at`, `source_modified_at` | DATE_CREATE/DATE_MODIFY na origem; `source_created_at` é o sort/período padrão (índices na 0069; composto multi-org `(organization_id, record_type, source_created_at)` e índices de expressão parciais p/ os campos custom "Data Reunião" na 0103 — outros campos custom de período: runbook `supabase/apply/indices-periodo-custom.sql`) |
 | `custom_fields` jsonb | Todos os campos dinâmicos, inclusive calculados materializados |
 | `field_modified_at` jsonb | `{campo: timestamp}` das edições manuais — protege do sync (conflito por campo) |
 | `created_at`, `updated_at`, `last_synced_at`, `locally_modified_at` | |
@@ -615,6 +619,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0100 | linha_divisoria_type | `visual_type` 'linha_divisoria' no CHECK de `widgets` + backfill (forma + `settings.shape.kind` 'linha' → linha_divisoria). Não recria as RPCs |
 | 0101 | responsible_canonical | `responsibles.canonical_id` (agrupamento de exibição: apelido → principal, reversível, grupo plano) + índice parcial + `auth_responsible_ids` redefinida devolvendo o GRUPO do vendedor. Não recria as RPCs de widget |
 | 0102 | maintenance_analyze | Performance: função `maintenance_analyze()` (ANALYZE de records/record_matches, service role only) — o runner do sync a dispara ao concluir job volumoso. Não recria as RPCs |
+| 0103 | custom_period_indexes | Performance: índices de expressão parciais p/ "Data Reunião" de lead/negócio (`custom_fields->>k`, prefix lexicográfico) + composto `(organization_id, record_type, source_created_at)`. Campos custom de período de outras fontes: runbook `apply/indices-periodo-custom.sql`. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
