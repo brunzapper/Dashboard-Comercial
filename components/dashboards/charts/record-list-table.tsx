@@ -1,4 +1,7 @@
-// Versão: 3.7 | Data: 19/07/2026
+// Versão: 3.8 | Data: 26/07/2026
+// v3.8 (26/07/2026): janela incremental do full fetch — prop windowState
+//   (rodapé "Exibindo X de Y — Carregar mais"; grupos/totais/busca local são
+//   PARCIAIS até cobrir o total; ver record-list v2.0).
 // v3.7 (19/07/2026): performance — resolução das colunas unificadas
 //   pré-computada por render (mapas membros/hierarquia); antes cada rawValue
 //   refazia available.find + cols.find POR CÉLULA (render, sort, grupos,
@@ -237,6 +240,7 @@ export const RecordListTable = memo(function RecordListTable({
   records,
   extraRecords = [],
   serverPage,
+  windowState,
   searchQ,
   searchFields,
   columns,
@@ -270,6 +274,17 @@ export const RecordListTable = memo(function RecordListTable({
     pageSize: number;
     loading?: boolean;
     onPageChange: (page: number) => void;
+  };
+  // Janela incremental do full fetch (record-list v2.0): `records` são as
+  // janelas JÁ carregadas de um recorte maior (total) — o rodapé mostra
+  // "Exibindo X de Y" + "Carregar mais" (delegado ao WidgetCard) e avisa que
+  // grupos/subtotais/busca local são PARCIAIS até cobrir o total. Presente só
+  // enquanto loaded < total; mutuamente exclusivo com serverPage.
+  windowState?: {
+    total: number;
+    loaded: number;
+    loading?: boolean;
+    onLoadMore: () => void;
   };
   // Busca textual client-side (WidgetCard, quando searchHandledOnClient):
   // termo digitado na TableFilterBar + campos de busca do widget. Ausentes =
@@ -2003,6 +2018,24 @@ export const RecordListTable = memo(function RecordListTable({
               Próxima
             </Button>
           </div>
+        </div>
+      ) : null}
+
+      {windowState ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t px-2 py-1 text-sm">
+          <span className="text-muted-foreground">
+            Exibindo {windowState.loaded.toLocaleString("pt-BR")} de{" "}
+            {windowState.total.toLocaleString("pt-BR")} registros — grupos e
+            totais parciais
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={windowState.loading}
+            onClick={windowState.onLoadMore}
+          >
+            {windowState.loading ? "Carregando…" : "Carregar mais"}
+          </Button>
         </div>
       ) : null}
 

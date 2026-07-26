@@ -1,4 +1,9 @@
-// Versão: 2.14 | Data: 25/07/2026
+// Versão: 2.16 | Data: 26/07/2026
+// v2.16 (26/07/2026): engine deferido — prop deferredPending liga o overlay
+//   "Atualizando…" enquanto o lote runDeferredWidgets do DashboardClient roda.
+// v2.15 (26/07/2026): janela incremental do full fetch — prop
+//   recordListWindowTotal + "Carregar mais" via fetchWidgetRecordsWindow
+//   (anexa janelas de 1000 até cobrir o total; reset quando o RSC recomputa).
 // v2.14 (25/07/2026): prop onMergePages (performMerge do grid) repassada ao
 //   AddPageDialog — ⋮ → "Adicionar página" com efeito otimista imediato.
 // v2.13 (25/07/2026): páginas de widget (mescla — lib/widgets/pages) — props
@@ -118,7 +123,10 @@ import {
   searchHandledOnClient,
   serverPaginatedList,
 } from "@/lib/widgets/view-filters";
-import { fetchWidgetRecordsPage } from "@/app/(app)/dashboards/record-list-actions";
+import {
+  fetchWidgetRecordsPage,
+  fetchWidgetRecordsWindow,
+} from "@/app/(app)/dashboards/record-list-actions";
 import { recordSearchMatcher } from "@/lib/widgets/record-search";
 import type { DateFormat } from "@/lib/widgets/format";
 import { formatMoney, type CurrencyRates } from "@/lib/widgets/currency";
@@ -203,6 +211,7 @@ export const WidgetCard = memo(function WidgetCard({
   recordList,
   recordListExtra,
   recordListTotal,
+  recordListWindowTotal,
   entityList,
   calcValue,
   calcVars,
@@ -233,6 +242,7 @@ export const WidgetCard = memo(function WidgetCard({
   quickFilters,
   periodWindow,
   deferredScopeKey,
+  deferredPending = false,
   autoSize,
   cellW = 0,
   rowH = 0,
@@ -255,6 +265,9 @@ export const WidgetCard = memo(function WidgetCard({
   // Total de registros quando a lista é PAGINADA no servidor (recordList é só
   // a página 1). Ausente = full fetch (paginação client-side, como antes).
   recordListTotal?: number;
+  // Total do recorte quando a 1ª carga do full fetch foi TRUNCADA na janela
+  // incremental (record-list v2.0): habilita o "Carregar +N" do rodapé.
+  recordListWindowTotal?: number;
   entityList: EntityListRow[];
   calcValue: CalcWidgetResult | null;
   // Calculadora: valores das variáveis (por id) e expressão compartilhada.
@@ -306,6 +319,9 @@ export const WidgetCard = memo(function WidgetCard({
   // de fetch re-dispara quando muda — inclusive filtros persistidos no banco
   // (__qf__), que não passam pela URL. Ausente no snapshot (precomputado).
   deferredScopeKey?: string;
+  // Engine deferido (26/07/2026): lote runDeferredWidgets em voo p/ este
+  // widget → overlay "Atualizando…" (dados antigos ficam em tela).
+  deferredPending?: boolean;
   // Dimensões dinâmicas (ligadas por eixo): mede o tamanho natural do conteúdo e
   // reporta ao grid, que usa max(mínimo, medido). `cellW`/`rowH`/`mx`/`my` são as
   // métricas de célula do grid (p/ converter px → unidades).
@@ -506,10 +522,82 @@ export const WidgetCard = memo(function WidgetCard({
     if (srvPageNumRef.current > 1) handleServerPage(srvPageNumRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordList]);
-  const listFkLabels = useMemo(
-    () => (srvPage ? { ...fkLabels, ...srvPage.fkLabels } : fkLabels),
-    [fkLabels, srvPage]
+  // Janela incremental do full fetch (record-list v2.0): a 1ª janela vem do
+  // RSC (recordListWindowTotal presente = carga truncada no teto); "Carregar
+  // mais" anexa as próximas via fetchWidgetRecordsWindow (mesmo recorte da
+  // page). Quando as props do RSC mudam (edição/filtro/período), as janelas
+  // anexadas caem — as props já são a 1ª janela do recorte novo (ajuste de
+  // estado em render, padrão do repo).
+  const windowedList =
+    isRecordList &&
+    !isEntityList &&
+    !serverPaged &&
+    typeof recordListWindowTotal === "number";
+  const [winExtra, setWinExtra] = useState<{
+    rows: RecordRow[];
+    fkLabels: Record<string, string>;
+    total: number;
+  } | null>(null);
+  const [winLoading, setWinLoading] = useState(false);
+  const winListRef = useRef(recordList);
+  if (winListRef.current !== recordList) {
+    winListRef.current = recordList;
+    if (winExtra) setWinExtra(null);
+  }
+  const winRows = useMemo(
+    () => (winExtra ? [...recordList, ...winExtra.rows] : recordList),
+    [recordList, winExtra]
   );
+  // Guarda de resposta obsoleta (como no pager acima).
+  const winReqRef = useRef(0);
+  const handleLoadMoreWindow = useCallback(() => {
+    const id = ++winReqRef.current;
+    setWinLoading(true);
+    void fetchWidgetRecordsWindow(
+      dashboardId,
+      widget.id,
+      window.location.search,
+      winRows.length
+    )
+      .then((res) => {
+        if (winReqRef.current !== id || !res.ok) return;
+        setWinExtra((prev) => ({
+          rows: [...(prev?.rows ?? []), ...res.rows],
+          fkLabels: { ...(prev?.fkLabels ?? {}), ...res.fkLabels },
+          total: res.total,
+        }));
+      })
+      .finally(() => {
+        if (winReqRef.current === id) setWinLoading(false);
+      });
+  }, [dashboardId, widget.id, winRows.length]);
+  const windowState = useMemo(() => {
+    if (!windowedList) return undefined;
+    const total = winExtra?.total ?? recordListWindowTotal!;
+    if (winRows.length >= total) return undefined; // recorte todo carregado
+    return {
+      total,
+      loaded: winRows.length,
+      loading: winLoading,
+      onLoadMore: handleLoadMoreWindow,
+    };
+  }, [
+    windowedList,
+    winExtra,
+    recordListWindowTotal,
+    winRows,
+    winLoading,
+    handleLoadMoreWindow,
+  ]);
+
+  const listFkLabels = useMemo(() => {
+    if (!srvPage && !winExtra) return fkLabels;
+    return {
+      ...fkLabels,
+      ...(winExtra?.fkLabels ?? {}),
+      ...(srvPage?.fkLabels ?? {}),
+    };
+  }, [fkLabels, srvPage, winExtra]);
   const serverPageState = useMemo(() => {
     if (!serverPaged) return undefined;
     return {
@@ -698,8 +786,10 @@ export const WidgetCard = memo(function WidgetCard({
       // Busca client-side ativa: exporta só o que a tabela exibe (mesmo
       // matcher em memória de record-search.ts). Widget paginado no servidor:
       // exporta a PÁGINA visível (o conjunto completo sai pelo "Exportar
-      // registros (CSV)", que refaz a consulta no servidor).
-      const baseRecords = srvPage?.rows ?? recordList;
+      // registros (CSV)", que refaz a consulta no servidor). Janela
+      // incremental: exporta as janelas JÁ carregadas (idem: completo via
+      // export server-side).
+      const baseRecords = srvPage?.rows ?? winRows;
       const matcher = clientSearch
         ? recordSearchMatcher(clientQ, widget.settings?.searchFields, available)
         : null;
@@ -946,10 +1036,11 @@ export const WidgetCard = memo(function WidgetCard({
   ) : null;
 
   // Overlay de processamento: cobre o card enquanto o save do builder (painel
-  // já fechado) ou a exclusão correm — versão por card do overlay global do
-  // grid (dashboard-grid.tsx), pílula só com spinner (cards KPI são pequenos).
+  // já fechado), a exclusão ou o lote deferido de engine (deferredPending)
+  // correm — versão por card do overlay global do grid (dashboard-grid.tsx),
+  // pílula só com spinner (cards KPI são pequenos).
   const processingOverlay =
-    saving || pending ? (
+    saving || pending || deferredPending ? (
       <div className="bg-background/50 absolute inset-0 z-20 flex items-center justify-center rounded-lg backdrop-blur-[1px]">
         <div className="bg-background text-muted-foreground flex items-center rounded-full border p-1.5 shadow-sm">
           <Loader2 className="size-4 animate-spin" />
@@ -1219,9 +1310,10 @@ export const WidgetCard = memo(function WidgetCard({
             />
           ) : isRecordList ? (
             <RecordListTable
-              records={srvPage?.rows ?? recordList}
+              records={srvPage?.rows ?? winRows}
               extraRecords={recordListExtra}
               serverPage={serverPageState}
+              windowState={windowState}
               searchQ={clientSearch ? clientQ : undefined}
               searchFields={widget.settings?.searchFields}
               columns={widget.settings?.columns ?? []}

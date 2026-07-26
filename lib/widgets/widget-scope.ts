@@ -1,4 +1,9 @@
-// Versão: 1.5 | Data: 26/07/2026
+// Versão: 1.6 | Data: 26/07/2026
+// v1.6 (26/07/2026): loadWidgetScope fatiado em loadDashboardScopeBundle
+//   (parte compartilhada: catálogo/prefs/períodos, 1× por dashboard) +
+//   scopeForWidget (parte por-widget) — a action deferida em LOTE
+//   (runDeferredWidgets) reusa o bundle p/ N widgets. Comportamento e
+//   consultas do loadWidgetScope inalterados.
 // v1.5 (26/07/2026): agrupamento de responsáveis (0101) — a exceção do
 //   vendedor expande os responsáveis dele p/ o GRUPO (apelidos ∪ principal),
 //   paridade com a page e com a auth_responsible_ids do banco.
@@ -375,6 +380,29 @@ export async function resolveWidgetViewScope(
   return { filters: resolvedViewFilters, period, effSettings };
 }
 
+// ============================================================================
+// Bundle de escopo do DASHBOARD (parte compartilhada do loadWidgetScope):
+// catálogo/correspondências/prefs/períodos resolvidos UMA vez — a action
+// deferida em lote (runDeferredWidgets) reusa o bundle p/ N widgets em vez de
+// repetir as consultas por widget. loadWidgetScope = bundle + scopeForWidget.
+// ============================================================================
+
+export interface DashboardScopeBundle {
+  sp: Record<string, string | string[] | undefined>;
+  widgets: Widget[];
+  allFields: FieldDefinition[];
+  sources: SourceDef[];
+  available: AvailableField[];
+  correspondences: Correspondence[];
+  prefSettings: PeriodPrefs;
+  resolver: ReturnType<typeof createPeriodResolver>;
+  periodByWidget: Record<string, DashboardPeriod | null>;
+}
+
+export type DashboardScopeBundleResult =
+  | { ok: true; bundle: DashboardScopeBundle }
+  | { ok: false; message: string };
+
 export async function loadWidgetScope(
   supabase: SupabaseClient,
   session: SessionInfo,
@@ -384,6 +412,22 @@ export async function loadWidgetScope(
   // URL, e o escopo os resolve exatamente como a page (resolver único).
   search: string
 ): Promise<WidgetScopeResult> {
+  const loaded = await loadDashboardScopeBundle(
+    supabase,
+    session,
+    dashboardId,
+    search
+  );
+  if (!loaded.ok) return loaded;
+  return scopeForWidget(supabase, session, loaded.bundle, widgetId);
+}
+
+export async function loadDashboardScopeBundle(
+  supabase: SupabaseClient,
+  session: SessionInfo,
+  dashboardId: string,
+  search: string
+): Promise<DashboardScopeBundleResult> {
   const sp: Record<string, string | string[] | undefined> = {};
   for (const [k, v] of new URLSearchParams(search ?? "")) {
     const cur = sp[k];
@@ -432,9 +476,6 @@ export async function loadWidgetScope(
   if (!dash) return { ok: false, message: "Dashboard não encontrado." };
 
   const widgets = (widgetsData ?? []) as Widget[];
-  const widget = widgets.find((w) => w.id === widgetId);
-  if (!widget) return { ok: false, message: "Widget não encontrado." };
-
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const dashSettings = (dash.settings ?? {}) as DashboardSettings;
   // Escopo de BASES do board (⋮ → "Bases") — MESMO catálogo efetivo da page
@@ -476,6 +517,46 @@ export async function loadWidgetScope(
     dataWidgets,
     filterWidgets
   );
+
+  return {
+    ok: true,
+    bundle: {
+      sp,
+      widgets,
+      allFields,
+      sources,
+      available,
+      correspondences,
+      prefSettings,
+      resolver,
+      periodByWidget,
+    },
+  };
+}
+
+/**
+ * Escopo de UM widget a partir do bundle (parte por-widget do loadWidgetScope
+ * — filtros de visualização + __pw__ + config final, mesma assembly da page).
+ */
+export async function scopeForWidget(
+  supabase: SupabaseClient,
+  session: SessionInfo,
+  bundle: DashboardScopeBundle,
+  widgetId: string
+): Promise<WidgetScopeResult> {
+  const {
+    sp,
+    widgets,
+    allFields,
+    sources,
+    available,
+    correspondences,
+    prefSettings,
+    resolver,
+    periodByWidget,
+  } = bundle;
+  const widget = widgets.find((w) => w.id === widgetId);
+  if (!widget) return { ok: false, message: "Widget não encontrado." };
 
   // ---- filtros de visualização + __pw__ (assembly única) ----
   const view = await resolveWidgetViewScope(supabase, session, {

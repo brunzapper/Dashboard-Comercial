@@ -1,4 +1,7 @@
-<!-- Versão: 1.13 | Data: 26/07/2026 -->
+<!-- Versão: 1.14 | Data: 26/07/2026 -->
+<!-- v1.14 (26/07/2026): §5.1 — carga incremental do modo lista sem limite
+     (1.000 por vez, rodapé "Exibindo X de Y — Carregar mais"; grupos/totais
+     parciais até cobrir; exceções documentadas). -->
 <!-- v1.13 (26/07/2026): cromo dos cards — §3.6 ganha os checkboxes "Ocultar
      o texto de comparação" e "Ocultar o selo Nº dia útil" (padrão do
      dashboard); §6.8 o select tri-state do texto "vs. período…" no Card
@@ -353,6 +356,14 @@ No topo da página do dashboard:
   widgets (§9.6).
 - **"Adicionar widget"** — abre o editor de widget (capítulo 6).
 - **Menu "⋮"** do dashboard (§3.6).
+
+**Como o dashboard carrega:** a página abre imediatamente com a estrutura
+(grid, filtros, tabelas de registros) e os widgets de dados — gráficos, KPIs,
+cards, tabelas agregadas, calculado, calculadora e nota — chegam logo em
+seguida, num único lote em segundo plano, cada um sob um pequeno indicador
+"Atualizando…" até o dado aterrissar (o mesmo comportamento que a Tabela
+Livre, o Kanban e a Agenda já tinham). Ao trocar período ou filtros, os dados
+antigos ficam em tela sob o indicador até o recorte novo chegar.
 
 ### 3.3 Abas
 
@@ -771,6 +782,17 @@ individuais. Recursos exclusivos (seção "Opções da tabela" do editor, §6.6)
   registro; as Dimensões viram as COLUNAS; colunas podem ser editáveis
   (inclusive com gravação de volta no Bitrix); a base das linhas pode ser
   Registros, Responsáveis ou Operações.
+- **Carga incremental em listas grandes**: uma lista sem "Limite de linhas"
+  carrega os primeiros 1.000 registros do recorte; o rodapé mostra
+  "Exibindo X de Y — Carregar mais" e cada clique anexa mais 1.000 até
+  cobrir o total. Enquanto não cobrir, grupos, subtotais e a busca da barra
+  valem só sobre o que já carregou (o rodapé avisa "grupos e totais
+  parciais"). Tabelas simples (sem agrupamento/ordem manual) não passam por
+  isso — são paginadas de 100 em 100 no servidor, com total exato. Exceções
+  que seguem carregando tudo: widget com métrica de fontes próprias (a basis
+  dos subtotais precisa do conjunto completo) e filtro rápido por bucket de
+  data. O export CSV do widget exporta o que está carregado; o "Exportar
+  registros (CSV)" do menu refaz a consulta completa no servidor.
 - **Orientação transposta** ("Cabeçalho à esquerda"), com escolha da dimensão
   que vira as colunas do topo.
 - **"Agrupar por"** hierárquico (multi-nível) com seções recolhíveis e

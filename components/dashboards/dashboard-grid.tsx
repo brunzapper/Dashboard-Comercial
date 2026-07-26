@@ -1,4 +1,8 @@
-// Versão: 2.16 | Data: 25/07/2026
+// Versão: 2.18 | Data: 26/07/2026
+// v2.18 (26/07/2026): engine deferido — repassa deferredPendingIds →
+//   WidgetCard.deferredPending (overlay "Atualizando…" por card).
+// v2.17 (26/07/2026): repassa recordListWindowTotalById → WidgetCard
+//   (janela incremental do modo lista full-fetch; record-list v2.0).
 // Grid drag-and-drop dos widgets (react-grid-layout v2 via wrapper /legacy,
 // API v1 familiar). No modo edição persiste o layout via saveLayout.
 // v2.16 (25/07/2026): mescla com efeito IMEDIATO — pendingMerges/effWidgets
@@ -378,6 +382,7 @@ export function DashboardGrid({
   recordListById,
   recordListExtraById,
   recordListTotalById,
+  recordListWindowTotalById,
   entityListById,
   calcById,
   fields,
@@ -405,6 +410,7 @@ export function DashboardGrid({
   quickFiltersById,
   periodWindowById,
   deferredScopeById,
+  deferredPendingIds,
   layoutById,
   applyLayoutPatch,
   lineById = {},
@@ -436,6 +442,9 @@ export function DashboardGrid({
   // Total dos widgets-lista paginados no servidor (chave ausente = full fetch;
   // opcional — o viewer de snapshots nunca pagina, dataset congelado).
   recordListTotalById?: Record<string, number>;
+  // Total do recorte quando a 1ª carga do full fetch foi TRUNCADA na janela
+  // incremental (record-list v2.0). Chave ausente = conjunto completo.
+  recordListWindowTotalById?: Record<string, number>;
   entityListById: Record<string, EntityListRow[]>;
   calcById: Record<string, CalcWidgetResult>;
   fields: FieldDefinition[];
@@ -474,6 +483,9 @@ export function DashboardGrid({
   // Fingerprint do escopo efetivo dos widgets DEFERIDOS (Tabela Livre/kanban):
   // muda → o widget re-busca. Ausente no viewer de snapshot (precomputado).
   deferredScopeById?: Record<string, string>;
+  // Widgets de ENGINE deferidos com lote em voo (DashboardClient): o card
+  // exibe o overlay "Atualizando…" enquanto o id estiver no conjunto.
+  deferredPendingIds?: Set<string>;
   // Estado otimista de layout (vive no shell — dashboard-client): posições BASE
   // por widget, fonte de verdade entre um saveLayout (que não revalida) e o
   // próximo refresh real. O grid lê via basePos() e escreve via applyLayoutPatch.
@@ -1399,6 +1411,7 @@ export function DashboardGrid({
                         }
                         recordListExtra={recordListExtraById?.[shown.id]}
                         recordListTotal={recordListTotalById?.[shown.id]}
+                        recordListWindowTotal={recordListWindowTotalById?.[shown.id]}
                         entityList={
                           entityListById[shown.id] ?? EMPTY_ENTITY_LIST
                         }
@@ -1431,6 +1444,7 @@ export function DashboardGrid({
                         quickFilters={quickFiltersById?.[shown.id]}
                         periodWindow={periodWindowById?.[shown.id]}
                         deferredScopeKey={deferredScopeById?.[shown.id]}
+                        deferredPending={deferredPendingIds?.has(shown.id)}
                         autoSize={shown.settings?.autoSize}
                         cellW={cellW}
                         rowH={ROW_H}

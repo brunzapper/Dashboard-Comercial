@@ -1,4 +1,13 @@
-<!-- Versão: 1.32 | Data: 26/07/2026 -->
+<!-- Versão: 1.34 | Data: 26/07/2026 -->
+<!-- v1.34 (26/07/2026): §4.10 — deferimento AUTOMÁTICO dos widgets de engine
+     (runDeferredWidgets em lote via widget-scope em bundle; page entrega só
+     fingerprints; env de escape DEFER_ENGINE_WIDGETS=0) e §4.1 — janela
+     incremental do modo lista full-fetch (runRecordListWindow +
+     fetchWidgetRecordsWindow; env RECORD_LIST_WINDOW, default 1000). -->
+<!-- v1.33 (26/07/2026): §4.1 — cache TTL de run_widget_query ENTRE
+     requisições (lib/widgets/rpc-cache.ts, sob o withRpcMemo; chave por
+     escopo de autorização u:<userId>/s:<snapshotId>; env
+     WIDGET_RPC_CACHE_TTL_MS, default 45s, 0 desliga; erro nunca em cache). -->
 <!-- v1.32 (26/07/2026): §4.13 — agrupamento de responsáveis por exibição
      (responsibles.canonical_id, 0101): apelido → principal ("nome usado"),
      resolvido 100% no engine/loaders (lib/config/responsible-canon.ts) —
@@ -348,6 +357,20 @@ O lado TypeScript é `lib/widgets/engine.ts` (chama o RPC, resolve rótulos de F
 pós-processa). A função foi **recriada 18 vezes** ao longo das migrações — a versão
 vigente é a da migração `0085_widget_rpc_brasilia_day.sql`.
 
+**Duas camadas de client em volta do RPC (26/07/2026):** toda page que computa
+widgets envolve o client em `withRpcMemo(withRpcTtlCache(...))`
+(`lib/widgets/rpc-memo.ts` + `lib/widgets/rpc-cache.ts`). O memo dedupa args
+idênticos dentro de UM render; o cache TTL (default 45s, env
+`WIDGET_RPC_CACHE_TTL_MS`, `0` desliga) reusa resultados ENTRE requisições da
+mesma instância serverless — F5/navegação/segundo viewer do mesmo dashboard
+custam ~0 ao banco dentro da janela. A chave é prefixada pelo ESCOPO DE
+AUTORIZAÇÃO (`u:<userId>` na page — o RPC é SECURITY INVOKER e a tradução de
+operação é por usuário; `s:<snapshotId>` no viewer público) — entradas nunca
+cruzam escopos. Erros não ficam em cache; `structuredClone` na leitura (o
+engine muta rows in place). É melhor esforço (instâncias não compartilham o
+store) e implica staleness de até o TTL após sync/edição — aceitável, o
+reconcile é horário.
+
 **Merge por bucket p/ dimensão `custom:` + transform (23/07/2026):** o ramo
 `custom:` da DIMENSÃO no RPC agrupa pelo VALOR CRU de `custom_fields->>key`
 (o transform é só rótulo) — valores com hora viravam um grupo POR REGISTRO
@@ -406,6 +429,21 @@ sem RPC — mocks na basis sem virar linha. Restrições `allowed_sources`
 de snapshot podem excluir fontes de uma métrica — ela degrada para "—"
 (comportamento documentado, não é bug). KPI razão ignora
 `numerator/denominator.sources` no v1.
+
+**Janela incremental do modo lista full-fetch (26/07/2026):** listas
+inelegíveis à paginação server-side (`serverPaginatedList` false — agrupadas/
+ordem manual/sort exótico) e sem `settings.limit` não buscam mais o conjunto
+inteiro: a page carrega a 1ª janela (default 1000, env `RECORD_LIST_WINDOW`,
+`0` = teto desligado) via `runRecordListWindow` (`record-list.ts` v2.0 —
+offset + count exato, desempate estável por `id`) e o WidgetCard anexa as
+próximas com "Carregar mais" (`fetchWidgetRecordsWindow`, mesmo recorte via
+widget-scope — invariante 12). Grupos/subtotais/busca client-side valem sobre
+o CARREGADO (rodapé avisa "grupos e totais parciais"). Exceções que mantêm o
+full fetch: pernas de `Metric.sources` (basis dos subtotais precisa do
+conjunto completo), filtro `@bucket` (pós-fetch — offset/count do servidor
+não valem) e o viewer de snapshot (dataset congelado + pós-filtro de
+`partner_only` quebraria o total; payload já limitado na captura). Export CSV
+do widget = janelas carregadas; export server-side segue completo.
 
 ### 4.2 Filtros de período
 
@@ -1181,10 +1219,11 @@ diferentes:
   campo" com `valueScope: "all"`, em `dashboard_table_cells`): server action +
   `revalidatePath` → re-render RSC **sem** mudança de URL.
 
-Os widgets computados no RSC (KPI/gráficos/tabelas/listas/calculados) cobrem
+Os widgets computados no RSC (hoje: listas de registros/entity lists) cobrem
 os dois transportes por construção (props novas a cada render). Os widgets
-**DEFERIDOS** (Tabela Livre e kanban, fetch client-side via server action)
-precisam de duas garantias, ambas desta entrega:
+**DEFERIDOS** (Tabela Livre e kanban, fetch client-side via server action —
+e, desde 26/07/2026, TODOS os widgets de engine; ver abaixo) precisam de duas
+garantias:
 
 - **Escopo ÚNICO:** as actions deferidas (`runQuickTable`,
   `runKanbanWidget`) montam os filtros de visualização pela MESMA assembly da
@@ -1209,6 +1248,24 @@ precisam de duas garantias, ambas desta entrega:
   não muda a URL e o widget ficava obsoleto até F5. Mudança de DADO (sem
   mudança de filtro) chega pelo event bus (`useDataChanged` → tick), nos dois
   widgets.
+
+**Deferimento automático dos widgets de ENGINE (26/07/2026):** a page NÃO
+computa mais gráfico/KPI/card/pizza/funil/tabela agregada/calculado/
+calculadora/nota — ela entrega o fingerprint (`deferredScopeById`, o mesmo
+acima) + `deferredEngineIds`, e o `DashboardClient` busca TODOS em UMA action
+(`runDeferredWidgets`, `app/(app)/dashboards/deferred-widget-actions.ts`) após
+o mount, com stale-while-refetch (overlay "Atualizando…" por card via
+`deferredPendingIds`). A action reproduz o dispatch do `computeWidget` da page
+sobre os MESMOS choke points (`runWidget`/`runCardWidget`/
+`runCalculatedWidget`) com escopo do widget-scope em BUNDLE
+(`loadDashboardScopeBundle` + `scopeForWidget` — as consultas compartilhadas
+de catálogo/prefs/períodos rodam 1× por lote; invariante 12 intacta), o
+cliente RPC em duas camadas (memo por lote + cache TTL §4.1) e o limitador
+compartilhado (`lib/widgets/task-limiter.ts`). Listas de registros/entity
+lists seguem inline no RSC (alimentam FK labels e a janela incremental);
+snapshot viewer segue computando tudo inline (link público de leitura). Env
+de escape `DEFER_ENGINE_WIDGETS=0` restaura o cômputo inline na page sem
+deploy. RPCs de widget INTOCADOS.
 
 **Período personalizado é rascunho + commit** (`PeriodRangeDraft`,
 `components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls`,
