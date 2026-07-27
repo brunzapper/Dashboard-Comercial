@@ -847,6 +847,11 @@ export interface UserAppSettings {
   // ?tab= se houver), para restaurar ao reabrir o app (RestoreLastView na
   // Home); null = limpou (fechou na Home). Período fica de fora (lastPeriod).
   lastView?: string | null;
+  // Tema visual (Configurações → Tema): null/ausente herda o padrão da org
+  // (organizations.theme) e, sem org, o padrão do app (claro + #7431B3).
+  // Resolução/sanitização em lib/theme.ts (resolveTheme).
+  theme?: "light" | "dark" | "system" | null;
+  accentColor?: string | null;
 }
 
 export async function updateUserSettings(

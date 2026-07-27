@@ -2,7 +2,7 @@
 <!-- v1.37 (26/07/2026): §4.8 — Pastas de bases (0107): source_folders +
      folder_id/sort_order (exibição pura; groupSourcesByFolder único;
      navegação Pasta → Base → Sub-base em /registros e /campos; headings nos
-     pickers; ↑/↓ em Configurações → Bases). RPCs intocados. -->
+     pickers; ↑/↓ em Registros → Bases). RPCs intocados. -->
 <!-- v1.36 (26/07/2026): §4.11.3 — raciocínio AO VIVO no painel "Editar com
      IA": turno via rota de streaming /api/dashboards/<id>/ai-turn (NDJSON;
      runAiEditTurnCore em lib/ai/edit-session.ts — mesmo gate/persistência das
@@ -323,10 +323,14 @@ app/
     kanbans/w/[widgetId] Página cheia de um WIDGET kanban (mesma config/placements
                          do widget; barra de período própria — ignora o pai)
     registros/           Grid de dados por fonte + importação CSV + painel de sync
+                         + bases/ (config das bases, ex-/configuracoes/fontes)
+                         + log/ (sincronizações/write-back, ex-/configuracoes/log)
     tarefas/             Tarefas standalone
-    campos/              Colunas dinâmicas + correspondências (admin)
-    configuracoes/       conta, fontes, integracoes, log, metas, moedas,
-                         operacoes, responsaveis, snapshots, usuarios
+    campos/              Colunas dinâmicas + correspondências (admin) + aba
+                         Moedas (ex-/configuracoes/moedas)
+    configuracoes/       acessos, conta, integracoes, metas, operacoes,
+                         organizacao, presets, responsaveis, snapshots, tema,
+                         usuarios
   s/[token]/             Viewer PÚBLICO de snapshots (única rota sem auth além do login)
   api/
     ingest/[source]/     Webhook de entrada (chaves de API)
@@ -564,7 +568,7 @@ exceção: sempre recomputados).
   `ENTITY_ID='SOURCE'`). "Implementação" (`implementacao`) é sincronizado de
   `UF_CRM_1778094396888` desde a 0075 (antes era campo local dos presets).
 - **Fuso da fonte (0079)**: `data_sources.timezone` (IANA, ex. `Europe/Moscow`;
-  editável em Configurações → Fontes) declara o fuso em que a ORIGEM expressa
+  editável em Registros → Bases) declara o fuso em que a ORIGEM expressa
   datas/horas. O mapper do Bitrix normaliza valores **datetime** para
   America/Sao_Paulo na entrada (`lib/date/normalize.ts`) — o read side inteiro é
   prefix-based (lê o `YYYY-MM-DD` literal), então sem a conversão uma reunião às
@@ -625,7 +629,16 @@ via `isSettingsAreaDenied`; allow concede só a VISUALIZAÇÃO além do papel, n
 a escrita, que segue o papel) e bases (deny some dos pickers via RLS de
 `data_sources` e dos DADOS via `records_select`). Fonte única dos gates por
 área: `AREA_GATES` (`lib/auth/access.ts`); guard `requireSettingsArea` nas
-sub-pages, `isSettingsAreaDenied` nos guards de escrita das actions.
+sub-pages, `isSettingsAreaDenied` nos guards de escrita das actions;
+`checkSettingsArea` é a variante sem redirect (condiciona LINKS, ex.:
+botões Bases/Log no header de Registros). **As chaves de área são HISTÓRICAS
+e desacopladas da rota** (27/07/2026): `fontes` vive em `/registros/bases`,
+`log` em `/registros/log` e `moedas` na aba Moedas de `/campos` — NUNCA
+renomear uma chave (os overrides gravados a referenciam); a matriz de Acessos
+mostra a nova casa no rótulo ("Bases (Registros)" etc.). Estreitamento aceito
+em Moedas: as taxas eram visíveis a qualquer autenticado; hoje só quem chega
+a `/campos` (`manage_field_definitions`) as vê — o deny de `moedas` esconde a
+aba e segue barrando a escrita.
 
 **Escopo de BASES por board (⋮ → Bases, Fase 1 desta entrega):**
 `DashboardSettings.sourceScope` define o catálogo EFETIVO do board —
@@ -651,6 +664,25 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
 
 ### 4.7 Outros subsistemas
 
+- **Tema visual (27/07/2026):** modo claro/escuro/sistema + cor de destaque
+  (`--brand*`, default `#7431B3`), configurados em Configurações → Tema.
+  Precedência: preferência do USUÁRIO (`user_settings.settings.theme/
+  accentColor`) ?? padrão da ORG (`organizations.theme`, 0108 — só org_admin
+  edita) ?? padrão do app — resolvida SÓ por `resolveTheme` (`lib/theme.ts`,
+  também dono das whitelists de sanitização; nada cru de cookie vai a
+  style/script). Os cookies `theme_mode`/`theme_accent` guardam os valores
+  EFETIVOS: o root layout (`app/layout.tsx`) os lê e aplica `--brand-base` no
+  style do `<html>` (portais Radix herdam) + a classe `.dark` via script
+  inline pré-paint (sem FOUC); `ThemeSync` (layout autenticado) reconcilia
+  cookie × banco (dispositivo novo/padrão da org alterado). O viewer público
+  `/s/*` NUNCA escurece (cores congeladas foram escolhidas no claro — o
+  script ignora o prefixo). Tokens em `app/globals.css`: `--brand` clareia no
+  `.dark` via `color-mix`; `--ring` aponta p/ `--brand`; `bg-brand`/
+  `text-brand`/`border-brand` via `@theme inline`. A cor entra SÓ em detalhes
+  sutis (abas ativas, chips, foco, seleção, checkbox, barras de progresso,
+  affordances de edição do grid) — `--primary` (botões/badges) segue quase
+  preto. Cores SALVAS pelo usuário em widgets (seriesColors, notas, paletas
+  fixas) ficam literais — limitação documentada, não bug.
 - **Metas** (`goals`): escopo global/operação/responsável; comunicam-se por
   **roll-up na leitura** (`lib/metas/`); operações aninham via
   `parent_operation_id` + `operation_subtree`. Métricas de meta são chaves do
@@ -1111,13 +1143,13 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
 - **Pastas de bases (0107, 26/07/2026):** `source_folders` agrupa as bases
   RAIZ em **Pastas** — agrupamento de EXIBIÇÃO puro + ordem manual
   (`data_sources.folder_id`/`sort_order`, `sub_sources.sort_order`; botões
-  ↑/↓ em Configurações → Bases). Navegação Pasta → Base → Sub-base em
+  ↑/↓ em Registros → Bases). Navegação Pasta → Base → Sub-base em
   /registros (100% URL-driven pelo `?fonte=` de sempre — a pasta ativa DERIVA
   da base ativa; sem pasta criada, degrada para as abas planas) e /campos;
   headings por pasta nos pickers (widget-builder, diálogo Bases do board — as
   pastas viajam na PRÓPRIA action `getBoardSourcesState`, catálogo completo —,
   matriz de Acessos, import por IA, period-filter, correspondências) e nas
-  tabelas de Configurações → Bases. TODO agrupamento sai de
+  tabelas de Registros → Bases. TODO agrupamento sai de
   `groupSourcesByFolder` (`lib/source-folders.ts` — implícita "Geral"
   primeiro, pastas por `sortOrder`, **grupos vazios omitidos**: catálogo
   recortado por `applySourceScope`/RLS esconde a pasta esvaziada sozinho);
@@ -1759,7 +1791,7 @@ identificador do parceiro num campo (ex.: `custom:bitrix_uf_crm_1784828550`,
   `source_auto_operations` (`parent_operation_id`, `name_field`/`value_field`
   — refs no registro da base, `target_field`/`target_sources` — ref/alvo no
   lead, `profile_op` `eq_ci`|`eq`; RLS espelha `operations_write`; UI em
-  Configurações → Fontes, seção "Sub-operações automáticas" + botão "Gerar
+  Registros → Bases, seção "Sub-operações automáticas" + botão "Gerar
   agora"). A rotina (`lib/operations/auto-operations.ts`, service role com
   carimbo EXPLÍCITO de `organization_id` da config) materializa uma
   sub-operação por registro válido: identidade por
@@ -1970,7 +2002,11 @@ principalmente — para mantenedores humanos.
     papel; view/edit concede; dono/admin imunes) — não reimplemente a regra
     em policy/page nova. Áreas de Configurações: `AREA_GATES` +
     `canAccessSettingsArea` (`lib/auth/access.ts`) — deny vence tudo, allow
-    vence o papel; sub-page nova usa `requireSettingsArea`. Bases negadas:
+    vence o papel; sub-page nova usa `requireSettingsArea` (link condicionado
+    usa `checkSettingsArea`, a variante sem redirect). A CHAVE de área é
+    HISTÓRICA e desacoplada da rota (27/07/2026: `fontes` →
+    `/registros/bases`, `log` → `/registros/log`, `moedas` → aba de
+    `/campos`) — NUNCA renomear (overrides gravados). Bases negadas:
     RLS de `data_sources`/`sub_sources` (pickers somem via loadSources) +
     `records_select` (dados) — não filtre "na mão" em componente. Escopo de
     bases do board (`sourceScope`) é OFERTA, nunca autorização — não os

@@ -32,7 +32,7 @@ function DueBadge({ task }: { task: TaskRow }) {
       className={cn(
         "rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap",
         status === "atrasada" && "bg-destructive/10 text-destructive font-medium",
-        status === "em_breve" && "bg-amber-500/15 text-amber-700 font-medium",
+        status === "em_breve" && "bg-amber-500/15 text-amber-700 dark:text-amber-400 font-medium",
         !status && "text-muted-foreground bg-muted"
       )}
       title={status ? DUE_STATUS_LABELS[status] : undefined}
@@ -111,7 +111,7 @@ export function TaskListItem({
         >
           {task.is_global ? (
             <Globe
-              className="text-primary size-3 shrink-0"
+              className="text-brand size-3 shrink-0"
               aria-label="Tarefa global (notifica todos)"
             />
           ) : null}

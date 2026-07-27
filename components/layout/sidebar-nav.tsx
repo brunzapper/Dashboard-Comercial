@@ -1,6 +1,8 @@
-// Versão: 1.1 | Data: 10/07/2026
+// Versão: 1.2 | Data: 27/07/2026
 // Navegação lateral (Client Component) com destaque do link ativo.
 // Recebe já filtrado por papel/permissão pelo layout (server).
+// v1.2 (27/07/2026): item ativo na cor da marca (bg-brand/10 + text-brand,
+//   configurável em Configurações → Tema); hover segue neutro.
 // v1.1 (10/07/2026): spinner por link (useLinkStatus) — feedback imediato ao
 //   clicar, enquanto a página de destino carrega (complementa o loading.tsx).
 "use client";
@@ -46,7 +48,7 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
             className={cn(
               "flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                ? "bg-brand/10 text-brand"
                 : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             )}
           >

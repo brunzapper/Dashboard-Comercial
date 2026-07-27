@@ -55,7 +55,7 @@ export interface ConnectorLayerApi {
   setLive: (l: readonly LayoutLike[] | null) => void;
 }
 
-const DEFAULT_COLOR = "var(--color-primary)";
+const DEFAULT_COLOR = "var(--color-brand)";
 const SIDES: Side[] = ["top", "right", "bottom", "left"];
 
 export function ConnectorLayer({
@@ -305,7 +305,7 @@ export function ConnectorLayer({
                     "absolute size-3 rounded-full border-2 transition-transform hover:scale-125 " +
                     (active
                       ? "border-background bg-foreground"
-                      : "border-background bg-primary")
+                      : "border-background bg-brand")
                   }
                   style={{
                     left: a.x - 6,

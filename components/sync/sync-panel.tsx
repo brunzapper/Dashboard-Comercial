@@ -94,7 +94,7 @@ function ProgressView({ progress }: { progress: StepProgress }) {
       <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
         <div
           className={
-            "bg-primary h-full rounded-full transition-all " +
+            "bg-brand h-full rounded-full transition-all " +
             (pct == null ? "w-1/3 animate-pulse" : "")
           }
           style={pct == null ? undefined : { width: `${pct}%` }}

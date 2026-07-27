@@ -375,7 +375,7 @@ export function FieldsManager({
                   className={cn(
                     "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                     activeTab === NUCLEO_SECTION
-                      ? "border-primary text-foreground"
+                      ? "border-brand text-foreground"
                       : "text-muted-foreground border-transparent hover:text-foreground"
                   )}
                 >
@@ -394,7 +394,7 @@ export function FieldsManager({
                       className={cn(
                         "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                         active
-                          ? "border-primary text-foreground"
+                          ? "border-brand text-foreground"
                           : "text-muted-foreground border-transparent hover:text-foreground"
                       )}
                     >
@@ -409,7 +409,7 @@ export function FieldsManager({
                   className={cn(
                     "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                     activeTab === GERAIS_SECTION
-                      ? "border-primary text-foreground"
+                      ? "border-brand text-foreground"
                       : "text-muted-foreground border-transparent hover:text-foreground"
                   )}
                 >
@@ -431,7 +431,7 @@ export function FieldsManager({
                         className={cn(
                           "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                           active
-                            ? "border-primary bg-primary text-primary-foreground"
+                            ? "border-brand bg-brand text-brand-foreground"
                             : "text-muted-foreground hover:text-foreground"
                         )}
                       >
@@ -457,7 +457,7 @@ export function FieldsManager({
                     className={cn(
                       "-mb-px flex items-center gap-2 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                       active
-                        ? "border-primary text-foreground"
+                        ? "border-brand text-foreground"
                         : "text-muted-foreground border-transparent hover:text-foreground"
                     )}
                   >

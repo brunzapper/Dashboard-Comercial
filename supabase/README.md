@@ -1,4 +1,6 @@
-<!-- Versão: 1.2 | Data: 26/07/2026 -->
+<!-- Versão: 1.3 | Data: 27/07/2026 -->
+<!-- v1.3 (27/07/2026): seção da 0108 (organizations.theme — padrão visual da
+     org; pode ser aplicada antes ou depois do deploy, código tolera). -->
 <!-- v1.2 (26/07/2026): seção da 0101 (agrupamento de responsáveis —
      canonical_id + auth_responsible_ids de grupo; aplicar ANTES do deploy). -->
 
@@ -135,7 +137,7 @@ meio, ao reabrir a página o job em andamento é detectado e pode ser retomado.
 
 Cole o [`migrations/0038_config_read_access.sql`](./migrations/0038_config_read_access.sql)
 no SQL Editor e execute. Idempotente. Ela libera a leitura de `sync_jobs` para
-qualquer autenticado (aba **Configurações → Log**, seção "Sincronizações": mostra
+qualquer autenticado (aba **Registros → Log**, seção "Sincronizações": mostra
 reconciliações e backfills a gestor/vendedor também) e troca a leitura de
 `bitrix_writeback_queue` de admin para quem tem `view_all_records` (admin + gestor).
 A escrita das duas tabelas continua só via service role. Depois disso, gestor e
@@ -489,3 +491,13 @@ select count(*) from public.responsibles a
 Desfazer um agrupamento é `update public.responsibles set canonical_id = null
 where id = '<apelido>'` (ou o combobox "Nome usado" em Configurações →
 Responsáveis) — nenhum dado de `records` é alterado em momento algum.
+
+## Tema padrão da organização (migração 0108, 27/07/2026)
+
+`0108_org_theme.sql` — arquivo único, idempotente: adiciona
+`organizations.theme jsonb not null default '{}'`. Sem policy nova (a
+`organizations_update` existente cobre a escrita do org_admin). Pode ser
+aplicada antes OU depois do deploy: o `getActiveOrg` tolera a coluna ausente
+(refaz o select sem ela) — até aplicar, o padrão da org simplesmente não é
+salvo/lido e todo mundo segue no padrão do app (claro + #7431B3) ou na
+preferência individual (`user_settings`, sem migração).

@@ -58,7 +58,7 @@ export default async function EscolherOrganizacaoPage() {
         {isOwner ? (
           <form action={enterOwnerModeAction}>
             <button type="submit" className="w-full text-left">
-              <Card className="hover:border-primary cursor-pointer transition-colors">
+              <Card className="hover:border-brand cursor-pointer transition-colors">
                 <CardHeader>
                   <CardTitle className="text-base">Owner</CardTitle>
                   <CardDescription>
@@ -76,7 +76,7 @@ export default async function EscolherOrganizacaoPage() {
             action={selectOrgAction.bind(null, org.id as string)}
           >
             <button type="submit" className="w-full text-left">
-              <Card className="hover:border-primary cursor-pointer transition-colors">
+              <Card className="hover:border-brand cursor-pointer transition-colors">
                 <CardHeader>
                   <CardTitle className="text-base">
                     {org.name as string}

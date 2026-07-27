@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 12/07/2026
-// Configurações → Log, seção "Sincronizações": histórico dos jobs de sync do
+// Registros → Log, seção "Sincronizações": histórico dos jobs de sync do
 // Bitrix (reconciliações e backfills), manuais ou automáticos. Só leitura — a
 // escrita da tabela sync_jobs é feita pelo runner via service role. Visível a
 // qualquer autenticado (não expõe dados de registros, só status/contagens).

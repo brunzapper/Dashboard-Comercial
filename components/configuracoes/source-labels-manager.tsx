@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   saveSourceLabels,
   type SourceLabelsActionState,
-} from "@/app/(app)/configuracoes/fontes/actions";
+} from "@/app/(app)/registros/bases/actions";
 
 const initial: SourceLabelsActionState = {};
 
@@ -46,7 +46,7 @@ export function SourceLabelsManager({ geral }: { geral: string }) {
         {state.message ? (
           <p
             className={
-              state.ok ? "text-sm text-emerald-600" : "text-destructive text-sm"
+              state.ok ? "text-sm text-emerald-600 dark:text-emerald-400" : "text-destructive text-sm"
             }
           >
             {state.message}

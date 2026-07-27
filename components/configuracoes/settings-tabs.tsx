@@ -27,7 +27,7 @@ export function SettingsTabs({ tabs }: { tabs: SettingsTab[] }) {
             className={cn(
               "border-b-2 px-3 py-2 text-sm font-medium transition-colors -mb-px",
               active
-                ? "border-primary text-foreground"
+                ? "border-brand text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >

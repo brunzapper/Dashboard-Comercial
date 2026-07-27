@@ -173,7 +173,7 @@ export function AiProviderForm({ config }: AiProviderFormProps) {
 
         {message ? (
           <p
-            className={error ? "text-destructive text-sm" : "text-sm text-green-600"}
+            className={error ? "text-destructive text-sm" : "text-sm text-green-600 dark:text-green-400"}
             role="status"
           >
             {message}

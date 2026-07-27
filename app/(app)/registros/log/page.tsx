@@ -1,12 +1,18 @@
-// Versão: 2.0 | Data: 12/07/2026
-// Configurações → Log. Duas seções:
+// Versão: 2.1 | Data: 27/07/2026
+// Registros → Log. Duas seções:
 //   1) Sincronizações (sync_jobs): reconciliações (manuais/automáticas) e
 //      backfills — visível a qualquer autenticado (gestor/vendedor inclusos).
 //   2) Write-back (fila do Bitrix): o que foi/está sendo enviado de volta ao CRM
 //      e o que falhou — mostra título/valores de registros, então só aparece para
 //      quem tem view_all_records (admin + gestor).
-import { requireSession } from "@/lib/auth/session";
+// v2.1 (27/07/2026): página movida de /configuracoes/log para /registros/log.
+//   Guard vira requireSettingsArea("log") (gate {} = mesmo público de antes),
+//   para o deny de Acessos seguir barrando a page fora do hub de Configurações.
+import Link from "next/link";
+
+import { requireSettingsArea } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
+import { Button } from "@/components/ui/button";
 import {
   WritebackLog,
   type WritebackLogRow,
@@ -18,7 +24,7 @@ import {
 import type { SyncResult } from "@/lib/sync/shared";
 
 export default async function LogPage() {
-  const session = await requireSession();
+  const session = await requireSettingsArea("log");
   const canSeeWriteback = session.permissions.includes("view_all_records");
   const supabase = await createClient();
 
@@ -74,6 +80,18 @@ export default async function LogPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-start justify-between gap-4 pr-8">
+        <div>
+          <h1 className="text-2xl font-semibold">Log</h1>
+          <p className="text-muted-foreground text-sm">
+            Sincronizações com o Bitrix e fila de write-back.
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link href="/registros">Voltar a Registros</Link>
+        </Button>
+      </div>
       <div className="flex flex-col gap-3">
         <div>
           <h2 className="text-lg font-semibold">Sincronizações</h2>

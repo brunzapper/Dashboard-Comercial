@@ -385,7 +385,7 @@ export function ApiDocs({
               <p className="text-muted-foreground">
                 O alvo especial <code className="text-xs">ignore</code> descarta
                 a coluna. Campos personalizados novos são criados no import de
-                CSV ou em Configurações → Bases — a chave só referencia campos
+                CSV ou em Registros → Bases — a chave só referencia campos
                 existentes.
               </p>
               {example ? (

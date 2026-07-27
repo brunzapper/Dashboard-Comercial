@@ -111,7 +111,7 @@ export function PeriodWindowControl({
           className={
             "rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors " +
             (bd
-              ? "border-primary bg-primary/10 text-primary"
+              ? "border-brand bg-brand/10 text-brand"
               : "text-muted-foreground border-dashed")
           }
           title="Alternar corte: dia útil (mesmo estágio) × dia cheio"

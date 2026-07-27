@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 12/07/2026
-// Server Actions da tela Configurações → Moedas. Habilita/desabilita moedas do
+// Versão: 1.1 | Data: 27/07/2026
+// Server Actions da aba Campos → Moedas. Habilita/desabilita moedas do
 // sistema e mantém as taxas de conversão (R$ por 1 unidade) por ano/trimestre —
 // à mão OU via média PTAX do Banco Central. RLS de currencies/currency_rates
 // exige manage_field_definitions (admin). Regra = último a escrever vence.
+// v1.1 (27/07/2026): movida de /configuracoes/moedas para aba de /campos.
+//   A CHAVE de área segue "moedas" (histórica — overrides gravados).
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -29,7 +31,7 @@ async function ensureCanManage(): Promise<string | null> {
 }
 
 function revalidateAll() {
-  revalidatePath("/configuracoes/moedas");
+  revalidatePath("/campos");
   revalidatePath("/registros");
   revalidatePath("/dashboards/[id]", "page");
 }

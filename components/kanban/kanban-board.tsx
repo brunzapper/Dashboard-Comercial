@@ -264,7 +264,7 @@ function TaskCardBody({
               "rounded px-1 py-0.5",
               status === "atrasada" &&
                 "bg-destructive/10 text-destructive font-medium",
-              status === "em_breve" && "bg-amber-500/15 text-amber-700 font-medium"
+              status === "em_breve" && "bg-amber-500/15 text-amber-700 dark:text-amber-400 font-medium"
             )}
             title={status ? DUE_STATUS_LABELS[status] : undefined}
           >
@@ -401,7 +401,7 @@ function CardView({
             </div>
           ) : null}
           {card.openTasks > 0 ? (
-            <span className="bg-primary/10 text-primary mt-1 ml-1.5 inline-block rounded px-1.5 py-0.5 text-[11px]">
+            <span className="bg-brand/10 text-brand mt-1 ml-1.5 inline-block rounded px-1.5 py-0.5 text-[11px]">
               {card.openTasks} tarefa(s)
             </span>
           ) : null}
@@ -696,10 +696,10 @@ export function KanbanBoard({
               className={cn(
                 "bg-muted/40 flex max-h-full w-64 shrink-0 flex-col rounded-lg border",
                 compact && "w-56",
-                dropTarget === col.key && dragging && "ring-primary/60 ring-2",
+                dropTarget === col.key && dragging && "ring-brand/60 ring-2",
                 colDropKey === col.key &&
                   colDragging &&
-                  "ring-primary/60 ring-2 ring-dashed"
+                  "ring-brand/60 ring-2 ring-dashed"
               )}
               style={{
                 background: kap.column?.bg,

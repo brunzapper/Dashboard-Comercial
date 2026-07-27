@@ -159,10 +159,10 @@ export function DrawToCreateOverlay({
       ) : null}
       {rect ? (
         <div
-          className="border-primary bg-primary/10 pointer-events-none absolute rounded-md border-2 border-dashed"
+          className="border-brand bg-brand/10 pointer-events-none absolute rounded-md border-2 border-dashed"
           style={rect}
         >
-          <span className="bg-primary text-primary-foreground absolute -top-7 left-0 rounded px-2 py-0.5 text-xs whitespace-nowrap shadow">
+          <span className="bg-brand text-brand-foreground absolute -top-7 left-0 rounded px-2 py-0.5 text-xs whitespace-nowrap shadow">
             {size!.rows} linha{size!.rows === 1 ? "" : "s"} × {size!.cols}{" "}
             coluna{size!.cols === 1 ? "" : "s"}
           </span>

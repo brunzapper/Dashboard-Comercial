@@ -32,7 +32,7 @@ import type {
 
 // Valores de `custom:fonte` (rótulos do Bitrix) que contam como INBOUND.
 // Se os rótulos do seu portal divergirem, ajuste as sub-fontes geradas em
-// Configurações → Fontes (o preset nunca sobrescreve subs existentes).
+// Registros → Bases (o preset nunca sobrescreve subs existentes).
 const FONTE_INBOUND = ["Formulário de CRM", "Site"];
 
 // Chaves de campo do Bitrix (ver docs/arquitetura.md §4.7 / bitrix-field-map).

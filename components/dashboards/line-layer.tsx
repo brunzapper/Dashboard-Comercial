@@ -46,7 +46,7 @@ import { useFocusWidget } from "./focus-context";
 import { WidgetAppearanceSheet } from "./widget-appearance-sheet";
 import { WidgetBuilder } from "./widget-builder";
 
-const DEFAULT_STROKE = "var(--color-primary)";
+const DEFAULT_STROKE = "var(--color-brand)";
 const DEFAULT_STROKE_WIDTH = 2;
 // Fallback estável para o Aparência (linha não tem dados de consulta).
 const EMPTY_WIDGET_DATA: WidgetData = { rows: [], dimensions: [], metrics: [] };

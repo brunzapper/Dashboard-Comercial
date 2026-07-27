@@ -3,7 +3,7 @@
 //   (sync_config tem PK (organization_id, key) desde a 0090; sem o filtro, um
 //   usuário multi-org receberia 2 linhas e o maybeSingle falharia).
 // Rótulos de exibição das fontes (nomes CURTOS dos prefixos/chips nos dropdowns
-// de campo + rótulo "Geral"), editados em Configurações → Fontes.
+// de campo + rótulo "Geral"), editados em Registros → Bases.
 // v1.1 (16/07/2026): fontes dinâmicas — o nome curto por fonte agora é
 //   canônico em data_sources.short_label (catálogo; migração 0060 copia o
 //   legado). sync_config 'source_labels' segue guardando o rótulo "geral" e os

@@ -2,7 +2,7 @@
 // Fonte automática das taxas cambiais: PTAX do Banco Central (API Olinda,
 // pública, sem chave). Busca a série de cotações de FECHAMENTO de uma moeda num
 // período e devolve a MÉDIA de `cotacaoVenda` (R$ por 1 unidade da moeda). Usada
-// pelo botão "Atualizar agora" da tela Configurações → Moedas para preencher a
+// pelo botão "Atualizar agora" da tela Campos → Moedas para preencher a
 // taxa anual e as 4 trimestrais de um ano.
 //   ⚠️ Em produção o host `olinda.bcb.gov.br` precisa estar liberado na política
 //   de rede do ambiente.

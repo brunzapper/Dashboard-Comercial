@@ -35,7 +35,7 @@ import {
   runAutoOperationsNow,
   saveAutoOperations,
   type SourceActionState,
-} from "@/app/(app)/configuracoes/fontes/actions";
+} from "@/app/(app)/registros/bases/actions";
 
 export interface AutoOperationsConfigRow {
   source_key: string;
