@@ -33,6 +33,10 @@ import {
   KANBAN_OVERFLOW_KEY,
   type KanbanDateBucket,
 } from "./types";
+// Tipos do contrato (BulkActionState/BulkItemResult) vivem em ./bulk-helpers —
+// importe-os de LÁ: num arquivo "use server" até um `export type {}` é
+// registrado pelo compilador de server actions como export de valor e quebra a
+// avaliação do módulo em runtime (só funções async podem sair daqui).
 import {
   BULK_MAX_ITEMS,
   chunk,
@@ -42,8 +46,6 @@ import {
   type BulkActionState,
   type BulkItemResult,
 } from "./bulk-helpers";
-
-export type { BulkActionState, BulkItemResult };
 
 const CHUNK = 200;
 const CONCURRENCY = 5;
