@@ -1,4 +1,15 @@
-// Versão: 1.5 | Data: 19/07/2026
+// Versão: 1.6 | Data: 27/07/2026
+// v1.6 (27/07/2026): o upsert em LOTE de field_definitions é tudo-ou-nada e
+//   morreu inteiro por 8 dias (19→27/07): a curadoria COMPANY_ID/COMPANY_TITLE
+//   → `empresa` entrou SEM a migração de reconciliação do runbook §4.6
+//   (precedente 0075) e colide no índice único (source_system,
+//   source_field_id) com a linha descoberta `bitrix_company_id` — e, desde
+//   26/07, disputa a key `empresa` com o campo LOCAL da base de parceiros.
+//   Nenhum campo novo entrava ("campo novo nunca aparece" de novo, 0076).
+//   Agora, se o lote falhar, cai para upserts POR LINHA — a linha envenenada
+//   é pulada COM LOG (field_key + erro) e as demais entram. label/options
+//   também são sanitizados (\u0000 fora — outro veneno de lote, preventivo).
+//   Ver manual §4.6.
 // v1.5 (19/07/2026): loga o erro do upsert final de field_definitions (antes
 //   engolido) — uma violação do índice único (source_system, source_field_id)
 //   derruba o upsert inteiro em silêncio e nenhum campo novo aparece (0076).
@@ -84,6 +95,12 @@ function toDataType(raw: string): string {
     case "char": return "booleano";
     default: return "texto";
   }
+}
+
+// Postgres rejeita \u0000 em text/jsonb — um único título/option do Bitrix com
+// o caractere derrubaria o upsert em lote inteiro do catálogo (v1.6).
+function cleanText(s: string): string {
+  return s.replace(/\u0000/g, "");
 }
 
 function coreIdsOf(entity: Entity): Set<string> {
@@ -249,9 +266,9 @@ export async function syncFieldCatalog(
       | undefined;
     return {
       field_key: r.field_key,
-      label: r.label,
+      label: cleanText(r.label),
       data_type: r.data_type,
-      options: r.options,
+      options: r.options.map(cleanText),
       source_system: r.source_system,
       source_field_id: r.source_field_id,
       applies_to: r.applies_to,
@@ -278,15 +295,34 @@ export async function syncFieldCatalog(
 
   // onConflict composto (0090): field_key é único POR ORG; o sync (service
   // role) escreve sem org e o default da coluna (Zapper) casa com o índice.
-  const { error } = await db
-    .from("field_definitions")
-    .upsert(payload, { onConflict: "organization_id,field_key" });
+  const conflict = { onConflict: "organization_id,field_key" };
+  const { error } = await db.from("field_definitions").upsert(payload, conflict);
   // Não aborta o sync: um catálogo desatualizado é preferível a um sync parado.
-  // Mas a falha precisa aparecer nos logs — um conflito com o índice único
-  // (source_system, source_field_id) da 0017 derruba o upsert INTEIRO e, calado,
-  // vira "campo novo nunca aparece" (ver manual §4.6).
+  // Mas o lote é tudo-ou-nada: UMA linha ruim (índice único da 0017, valor que
+  // o Postgres rejeita…) derrubaria TODAS e, calado, viraria "campo novo nunca
+  // aparece" (manual §4.6). Fallback: reaplica POR LINHA, pulando só a ofensora
+  // — com log de field_key + erro para o conserto dirigido.
   if (error) {
-    console.error(`syncFieldCatalog: upsert de field_definitions falhou: ${error.message}`);
+    console.error(
+      `syncFieldCatalog: upsert em lote de field_definitions falhou (${error.message}); reaplicando linha a linha`
+    );
+    let failed = 0;
+    for (const row of payload) {
+      const { error: rowErr } = await db
+        .from("field_definitions")
+        .upsert(row, conflict);
+      if (rowErr) {
+        failed += 1;
+        console.error(
+          `syncFieldCatalog: upsert de ${row.field_key} falhou: ${rowErr.message}`
+        );
+      }
+    }
+    if (failed > 0) {
+      console.error(
+        `syncFieldCatalog: ${failed} de ${payload.length} linha(s) do catálogo falharam`
+      );
+    }
   }
 
   // Coluna núcleo `pipeline` virada 'selecao' no /campos (linha core da 0086):

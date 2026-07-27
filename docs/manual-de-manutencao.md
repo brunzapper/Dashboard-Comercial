@@ -1,4 +1,8 @@
-<!-- Versão: 1.19 | Data: 27/07/2026 -->
+<!-- Versão: 1.20 | Data: 27/07/2026 -->
+<!-- v1.20 (27/07/2026): §4.6 — troubleshooting "campo novo do Bitrix não
+     aparece em /campos": lote do catálogo tudo-ou-nada morto pela curadoria
+     `empresa` sem reconciliação 0075 (represou 14 campos 19→27/07);
+     catalog.ts v1.6 reaplica por linha com log por field_key. -->
 <!-- v1.19 (27/07/2026): §4.12 — automações do kanban (0109) + ações em massa:
      job pg_cron nº 6 (kanban-automations-tick) no setup, runbook de
      configuração/diagnóstico (last_error, Executar agora) e comportamentos
@@ -312,6 +316,25 @@ npm run build      # o que a Vercel roda no deploy
   linha antiga de `field_definitions` numa migração ANTES do próximo catálogo — o
   índice único `(source_system, source_field_id)` (0017) rejeita a chave nova
   enquanto a descoberta existir (precedente: 0075, `fonte`/`implementacao`).
+- [ ] **"Campo novo do Bitrix não aparece em /campos"** (mas os VALORES chegam
+  em `records.custom_fields` — o mapper independe do catálogo): o upsert em
+  LOTE de `syncFieldCatalog` é tudo-ou-nada; UMA linha rejeitada pelo Postgres
+  derrubava TODAS, só com `console.error` na Vercel. Caso real (19→27/07/2026,
+  14 campos represados): a curadoria `COMPANY_ID`/`COMPANY_TITLE` → `empresa`
+  entrou sem a migração de reconciliação do item acima e colidiu no índice da
+  0017 com a linha descoberta `bitrix_company_id` — e, a partir de 26/07,
+  passou a disputar a key `empresa` com o campo LOCAL da base de parceiros
+  (`source_field_id parceiros:empresa`). Desde a v1.6 do `catalog.ts`, lote
+  que falha é reaplicado POR LINHA pulando só a ofensora (log
+  `syncFieldCatalog: upsert de <field_key> falhou: …`) e label/options são
+  sanitizados (`\u0000` fora, preventivo). Diagnóstico rápido:
+  `max(updated_at)` dos `field_definitions` bitrix parado no passado =
+  catálogo morto; em `pg_stat_statements`, o UPDATE das options do `pipeline`
+  presente e NENHUM `INSERT … ON CONFLICT` em `field_definitions` = lote
+  falhando antes de gravar (comando com erro não entra na view); o erro real
+  fica nos logs do Postgres na hora do prepare. O conserto dirigido é pelo
+  field_key logado; o upsert seguinte reescreve label/type/options de
+  qualquer linha inserida à mão como paliativo.
 - [ ] O sync **nunca** toca linhas mock (`source_system='manual'`,
   `source_id='mock_reuniao_*'`).
 - [ ] Fuso (0079): o mapper converte valores **datetime** do fuso da fonte
