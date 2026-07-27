@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 26/07/2026
+// Versão: 1.1 | Data: 27/07/2026
 // Guarda de regressão: os campos extras do card (card.fields) aparecem no
 // quadro TAMBÉM em modo `compact` (widget de dashboard) — o gate antigo os
 // escondia justamente no único contexto com picker de extras (widget-builder).
+// v1.1 (27/07/2026): o card exibe SÓ o valor do campo extra — o rótulo sai do
+//   corpo (vira title/hover) e o teste passa a exigir a ausência dele.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,7 +68,7 @@ const RECORD_CTX = {
 };
 
 describe("KanbanBoard — campos extras do card", () => {
-  it("exibe rótulo e valor SEM compact (página dedicada)", () => {
+  it("exibe SÓ o valor (rótulo no title) SEM compact (página dedicada)", () => {
     render(
       <KanbanBoard
         data={DATA}
@@ -75,11 +77,13 @@ describe("KanbanBoard — campos extras do card", () => {
         recordCtx={RECORD_CTX}
       />
     );
-    expect(screen.getByText("MRR")).toBeInTheDocument();
-    expect(screen.getByText("1.000")).toBeInTheDocument();
+    const value = screen.getByText("1.000");
+    expect(value).toBeInTheDocument();
+    expect(value).toHaveAttribute("title", "MRR");
+    expect(screen.queryByText("MRR")).toBeNull();
   });
 
-  it("exibe rótulo e valor COM compact (widget de dashboard)", () => {
+  it("exibe SÓ o valor (rótulo no title) COM compact (widget de dashboard)", () => {
     render(
       <KanbanBoard
         data={DATA}
@@ -89,7 +93,9 @@ describe("KanbanBoard — campos extras do card", () => {
         compact
       />
     );
-    expect(screen.getByText("MRR")).toBeInTheDocument();
-    expect(screen.getByText("1.000")).toBeInTheDocument();
+    const value = screen.getByText("1.000");
+    expect(value).toBeInTheDocument();
+    expect(value).toHaveAttribute("title", "MRR");
+    expect(screen.queryByText("MRR")).toBeNull();
   });
 });

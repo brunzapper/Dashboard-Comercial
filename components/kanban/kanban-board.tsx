@@ -1,4 +1,4 @@
-// Versão: 1.4 | Data: 26/07/2026
+// Versão: 1.5 | Data: 27/07/2026
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -16,6 +16,8 @@
 //   settings.columns, ordem autoritativa p/ todas as fontes), coluna fantasma
 //   "+" (onAddColumn — modos tarefas/Personalizar) e `owner` p/ o move das
 //   colunas "Personalizar" (kanban_placements).
+// v1.5 (27/07/2026): campos extras do card exibem SÓ o valor (nome do campo
+//   vira title/hover — pedido do usuário: o rótulo poluía o card).
 // v1.4 (26/07/2026): campos extras do card aparecem também no modo `compact`
 //   (o gate escondia os extras no widget de dashboard — único lugar com picker;
 //   `compact` fica só para a largura de coluna).
@@ -389,14 +391,14 @@ function CardView({
             </span>
           </div>
           {card.fields.length > 0 ? (
-            <dl className="text-muted-foreground mt-1 flex flex-col gap-0.5 pl-1.5 text-xs">
+            <div className="text-muted-foreground mt-1 flex flex-col gap-0.5 pl-1.5 text-xs">
+              {/* Só o VALOR no corpo do card; o nome do campo fica no hover. */}
               {card.fields.map((f) => (
-                <div key={f.label} className="flex justify-between gap-2">
-                  <dt className="truncate">{f.label}</dt>
-                  <dd className="shrink-0">{f.value}</dd>
+                <div key={f.label} title={f.label} className="break-words">
+                  {f.value}
                 </div>
               ))}
-            </dl>
+            </div>
           ) : null}
           {card.openTasks > 0 ? (
             <span className="bg-primary/10 text-primary mt-1 ml-1.5 inline-block rounded px-1.5 py-0.5 text-[11px]">
