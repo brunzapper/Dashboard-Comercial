@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 27/07/2026
+// v1.1 (27/07/2026): ActiveOrg.theme — padrão visual da org (0108), consumido
+//   por resolveTheme (lib/theme.ts); select tolera a coluna ausente
+//   (pré-migração ⇒ theme null).
 // Contexto de ORGANIZAÇÃO ativa (multi-org, 0089+): a org escolhida no
 // pós-login vive num cookie httpOnly, mas o cookie NUNCA é confiado — toda
 // leitura revalida a membership no banco (organization_members, via RLS).
@@ -13,6 +16,7 @@ import { cookies } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
 import { getSessionInfo } from "@/lib/auth/session";
+import { normalizeOrgTheme, type OrgThemeDefault } from "@/lib/theme";
 
 export const ORG_COOKIE = "active_org";
 
@@ -23,6 +27,8 @@ export interface ActiveOrg {
   isOrgAdmin: boolean;
   // O usuário pertence a 2+ orgs (mostra "Trocar organização" no sidebar).
   multiOrg: boolean;
+  // Padrão visual da org (0108) — null sem padrão/pré-migração.
+  theme: OrgThemeDefault | null;
 }
 
 interface Membership {
@@ -67,11 +73,21 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
   if (!chosen) return null;
 
   const supabase = await createClient();
-  const { data: org } = await supabase
+  // Pré-migração 0108 (coluna theme ausente): o select com theme falha —
+  // refaz sem a coluna para não derrubar o contexto de org inteiro.
+  let { data: org } = await supabase
     .from("organizations")
-    .select("id, name, app_name")
+    .select("id, name, app_name, theme")
     .eq("id", chosen.organization_id)
     .maybeSingle();
+  if (!org) {
+    const fallback = await supabase
+      .from("organizations")
+      .select("id, name, app_name")
+      .eq("id", chosen.organization_id)
+      .maybeSingle();
+    org = fallback.data ? { ...fallback.data, theme: null } : null;
+  }
   if (!org) return null;
   return {
     id: org.id as string,
@@ -79,6 +95,7 @@ export const getActiveOrg = cache(async function getActiveOrg(): Promise<
     appName: (org.app_name as string) || "Dashboard Comercial",
     isOrgAdmin: chosen.is_org_admin,
     multiOrg: memberships.length > 1,
+    theme: normalizeOrgTheme(org.theme),
   };
 });
 

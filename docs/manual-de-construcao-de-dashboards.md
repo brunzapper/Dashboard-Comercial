@@ -279,7 +279,7 @@ registros da Base-mãe) e por isso não aparecem nem como Base da regra nem com
 campos `↪` próprios. Registros que chegam pelo sync/import casam sozinhos —
 o botão de auto-match serve para a primeira carga ou para conferência.
 
-### 2.2 Configurações → Bases (rota "fontes")
+### 2.2 Registros → Bases (rota "fontes")
 
 - **Bases dinâmicas**: criação/edição de Bases além das três padrão (nome,
   rótulo curto, permissão de criação manual de registros, fuso horário da
@@ -305,7 +305,7 @@ o botão de auto-match serve para a primeira carga ou para conferência.
   responsáveis pertencem à operação (incluindo sub-operações da árvore)* +
   o filtro de perfil da operação. Detalhes no §7.5.
 - **Operações definidas SÓ por perfil** (sem responsáveis — ex.: sub-operações
-  de parceria geradas automaticamente em Configurações → Bases): selecionar
+  de parceria geradas automaticamente em Registros → Bases): selecionar
   VÁRIAS no filtro rápido mostra a UNIÃO dos recortes, e selecionar a
   operação-PAI aplica a união dos perfis das filhas (quando os perfis são do
   mesmo campo). Atenção: agrupar "por Operação" e restringir snapshot por
@@ -329,7 +329,7 @@ o botão de auto-match serve para a primeira carga ou para conferência.
   "mesmo dia útil", meta em modo "ritmo" (§6.7, §7.7). Sem cadastro, dia útil
   = segunda a sexta.
 
-### 2.5 Configurações → Moedas
+### 2.5 Campos → Moedas
 
 Tabela de taxas de conversão por moeda, **ano e trimestre** (trimestre 0 =
 taxa anual). Taxa = **reais por 1 unidade da moeda estrangeira**. Moedas

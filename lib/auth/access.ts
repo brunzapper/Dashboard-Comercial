@@ -1,8 +1,12 @@
-// Versão: 1.1 | Data: 24/07/2026
+// Versão: 1.2 | Data: 27/07/2026
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
 // sem override vale o gate atual. AREA_GATES é a fonte ÚNICA dos gates por
 // aba (o layout de Configurações e o guard requireSettingsArea leem daqui).
+// v1.2 (27/07/2026): chaves de área são HISTÓRICAS e desacopladas da rota —
+//   fontes/log vivem em /registros/*, moedas em /campos; NUNCA renomear uma
+//   chave (user_access_overrides gravados a referenciam). Novo helper
+//   checkSettingsArea (gate sem redirect, p/ esconder links) e área "tema".
 // v1.1 (24/07/2026): o override `deny` de uma área agora BARRA também a ESCRITA
 //   (isSettingsAreaDenied), não só a page/aba — antes um admin negado ainda
 //   escrevia chamando a server action direto. `allow` continua NÃO concedendo
@@ -17,8 +21,10 @@ import { createClient } from "@/lib/supabase/server";
 
 export type OverrideEffect = "allow" | "deny";
 
-// Gates por área (slug = último segmento da rota de Configurações). Espelha o
-// ALL_TABS do layout — mudou lá, muda aqui.
+// Gates por área. A chave é HISTÓRICA (foi o último segmento da rota original
+// de Configurações) e NUNCA muda — user_access_overrides gravados a
+// referenciam. Hoje fontes/log vivem em /registros/* e moedas em /campos;
+// as demais espelham o ALL_TABS do layout de Configurações.
 export const AREA_GATES: Record<
   string,
   { role?: string; permission?: string; orgAdmin?: boolean }
@@ -27,30 +33,31 @@ export const AREA_GATES: Record<
   operacoes: { role: "admin" },
   responsaveis: { role: "admin" },
   metas: { role: "admin" },
-  fontes: { role: "admin" },
+  fontes: { role: "admin" }, // chave histórica — página em /registros/bases
   presets: { role: "admin" },
   snapshots: { role: "admin" },
   integracoes: { role: "admin" },
   acessos: { role: "admin" },
-  moedas: {},
+  moedas: {}, // chave histórica — aba Moedas de /campos
   usuarios: { permission: "manage_users_roles" },
-  log: {},
+  log: {}, // chave histórica — página em /registros/log
+  tema: {}, // preferências visuais próprias — qualquer autenticado
   conta: {},
 };
 
 // Rótulos p/ a matriz da tela de Acessos (subset gerenciável — áreas sem gate
-// também entram: deny as esconde).
+// também entram: deny as esconde). "tema"/"conta" ficam de fora (pref pessoal).
 export const AREA_LABELS: Record<string, string> = {
   operacoes: "Operações",
   responsaveis: "Responsáveis",
   metas: "Metas",
-  fontes: "Bases",
+  fontes: "Bases (Registros)",
   presets: "Presets",
   snapshots: "Snapshots",
   integracoes: "Integrações",
-  moedas: "Moedas",
+  moedas: "Moedas (Campos)",
   usuarios: "Usuários",
-  log: "Log",
+  log: "Log (Registros)",
 };
 
 /** Overrides de settings_area do PRÓPRIO usuário (RLS: linhas próprias). */
@@ -127,11 +134,25 @@ export async function requireSettingsArea(
 ): Promise<SessionInfo> {
   const session = await getSessionInfo();
   if (!session) redirect("/login");
+  const allowed = await checkSettingsArea(areaKey);
+  if (!allowed) redirect("/");
+  return session;
+}
+
+/**
+ * Variante SEM redirect do gate de área: decide se o usuário atual pode ver
+ * uma página/link de área (mesma composição papel × overrides). Usada p/
+ * condicionar links de navegação (ex.: botões Bases/Log no header de
+ * Registros) — a page destino segue autoprotegida por requireSettingsArea.
+ */
+export async function checkSettingsArea(areaKey: string): Promise<boolean> {
+  const session = await getSessionInfo();
+  if (!session) return false;
   const [org, overrides] = await Promise.all([
     getActiveOrg(),
     loadOwnSettingsOverrides(),
   ]);
-  const allowed = canAccessSettingsArea(
+  return canAccessSettingsArea(
     areaRoleAllowed(
       areaKey,
       session.roles,
@@ -140,6 +161,4 @@ export async function requireSettingsArea(
     ),
     overrides.get(areaKey)
   );
-  if (!allowed) redirect("/");
-  return session;
 }

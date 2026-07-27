@@ -15,7 +15,7 @@
 // v1.3 (26/07/2026): auto-match INCREMENTAL pós-job (Parcerias) — job
 //   concluído que escreveu algo roda runAutoMatchIncremental (lado A restrito
 //   ao que o job tocou) + recalc direcionado dos recém-casados. Best-effort.
-// v1.4 (27/07/2026): automações do kanban pós-job (0108) — job concluído que
+// v1.4 (27/07/2026): automações do kanban pós-job (0109) — job concluído que
 //   escreveu algo reavalia as regras com deadline curto, DEPOIS do auto-match
 //   (contagens de conectados/refs match: veem vínculos frescos). Best-effort.
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -89,7 +89,7 @@ async function maybeAutoMatchAfterJob(
   }
 }
 
-// Automações do kanban (0108): job concluído que escreveu algo reavalia as
+// Automações do kanban (0109): job concluído que escreveu algo reavalia as
 // regras com um deadline CURTO (o grosso fica com o tick por minuto) — cards
 // se movem logo após o sync, sem esperar o próximo tick. Roda DEPOIS do
 // auto-match + recalc (refs match:/contagens de conectados veem os vínculos

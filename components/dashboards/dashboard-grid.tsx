@@ -1277,7 +1277,7 @@ export function DashboardGrid({
               "relative",
               panning ? "cursor-grabbing" : "cursor-grab",
               editMode &&
-                "rounded-md border border-dashed border-primary/40 bg-primary/[0.02]",
+                "rounded-md border border-dashed border-brand/40 bg-brand/[0.02]",
               // Só durante o arraste da alça: a borda desliza entre os degraus
               // de célula (fora dele, resize de janela/menu fica instantâneo).
               dragAxis && "transition-[width,height] duration-150 ease-out"
@@ -1504,8 +1504,8 @@ export function DashboardGrid({
                   onPointerCancel={onHandleUp}
                   className={cn(
                     "absolute bottom-0 left-0 z-20 flex h-3 w-full items-center justify-center",
-                    "cursor-ns-resize touch-none rounded-b-md bg-primary/15 hover:bg-primary/30",
-                    "before:h-0.5 before:w-8 before:rounded-full before:bg-primary/60 before:content-['']"
+                    "cursor-ns-resize touch-none rounded-b-md bg-brand/15 hover:bg-brand/30",
+                    "before:h-0.5 before:w-8 before:rounded-full before:bg-brand/60 before:content-['']"
                   )}
                 />
                 {/* Barra direita: arrasta a LARGURA. */}
@@ -1520,8 +1520,8 @@ export function DashboardGrid({
                   onPointerCancel={onHandleUp}
                   className={cn(
                     "absolute top-0 right-0 z-20 flex h-full w-3 items-center justify-center",
-                    "cursor-ew-resize touch-none rounded-r-md bg-primary/15 hover:bg-primary/30",
-                    "before:h-8 before:w-0.5 before:rounded-full before:bg-primary/60 before:content-['']"
+                    "cursor-ew-resize touch-none rounded-r-md bg-brand/15 hover:bg-brand/30",
+                    "before:h-8 before:w-0.5 before:rounded-full before:bg-brand/60 before:content-['']"
                   )}
                 />
                 {/* Chip com o tamanho ao vivo, junto da alça em arraste. */}
@@ -1529,8 +1529,8 @@ export function DashboardGrid({
                   <span
                     aria-hidden
                     className={cn(
-                      "pointer-events-none absolute z-30 rounded-md bg-primary px-2 py-0.5",
-                      "text-xs font-medium text-primary-foreground tabular-nums shadow-sm",
+                      "pointer-events-none absolute z-30 rounded-md bg-brand px-2 py-0.5",
+                      "text-xs font-medium text-brand-foreground tabular-nums shadow-sm",
                       dragAxis === "row"
                         ? "bottom-4 left-1/2 -translate-x-1/2"
                         : "top-1/2 right-4 -translate-y-1/2"

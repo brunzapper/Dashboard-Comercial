@@ -3,7 +3,7 @@
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
 // Registros (abas por fonte) e no construtor de widgets (seleção de fontes).
 // v1.1 (15/07/2026): rótulos CURTOS de exibição (prefixo/chips dos dropdowns de
-//   campo), personalizáveis em Configurações → Fontes (sync_config
+//   campo), personalizáveis em Registros → Bases (sync_config
 //   'source_labels' — ver lib/config/source-labels.ts).
 // v2.0 (16/07/2026): fontes DINÂMICAS. O catálogo vivo mora na tabela
 //   `data_sources` (migração 0060; loader em lib/config/sources.ts) e os 3

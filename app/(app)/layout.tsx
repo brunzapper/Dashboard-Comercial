@@ -1,4 +1,6 @@
-// Versão: 1.6 | Data: 26/07/2026
+// Versão: 1.7 | Data: 27/07/2026
+// v1.7 (27/07/2026): ThemeSync — reconcilia os cookies de tema (theme_mode/
+//   theme_accent) com a preferência do usuário × padrão da org (resolveTheme).
 // v1.6 (26/07/2026): SourceFoldersProvider — pastas de bases (source_folders,
 //   0107) para navegação/abas/pickers agrupados por pasta em todo o app.
 // Layout autenticado: shell com navegação lateral filtrada por papel/permissão.
@@ -10,7 +12,7 @@
 // v1.1 (05/07/2026): itens de admin da Fase 6B (Operações/Responsáveis/Metas)
 //   gated por papel; NavItem ganha `role`.
 // v1.2 (15/07/2026): SourceLabelsProvider — rótulos curtos das fontes
-//   (Configurações → Fontes) para os dropdowns de campo em todo o app.
+//   (Registros → Bases) para os dropdowns de campo em todo o app.
 // v1.3 (16/07/2026): SourcesProvider — catálogo de fontes dinâmicas
 //   (data_sources, 0060) para pickers/abas em todo o app.
 // v1.4 (16/07/2026): item "Tarefas" na navegação (todos os papéis — a RLS de
@@ -29,7 +31,9 @@ import {
   mergeSourceLabels,
 } from "@/lib/config/source-labels";
 import { loadUserSettings } from "@/lib/config/user-settings";
+import { resolveTheme } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
+import { ThemeSync } from "@/components/layout/theme-sync";
 import { LogoutButton } from "@/components/layout/logout-button";
 import { SidebarNav, type NavItem } from "@/components/layout/sidebar-nav";
 import { AppShell } from "@/components/layout/app-shell";
@@ -86,10 +90,11 @@ export default async function AppLayout({
       (!item.roles || item.roles.some((r) => roles.includes(r)))
   );
 
-  // "Configurações" agrupa as telas admin (Operações/Responsáveis/Metas/Usuários)
-  // + Moedas, Log e Conta. As abas admin seguem gated dentro da seção; Moedas
-  // (visualização), Log (sincronizações) e Conta (senha) valem para todo mundo,
-  // então a seção aparece para qualquer autenticado.
+  // "Configurações" agrupa as telas admin (Operações/Responsáveis/Metas/
+  // Usuários) + Tema e Conta. As abas admin seguem gated dentro da seção; Tema
+  // (preferências visuais) e Conta (senha) valem para todo mundo, então a
+  // seção aparece para qualquer autenticado. Bases/Log vivem em /registros/* e
+  // Moedas em /campos.
   items.push({ href: "/configuracoes", label: "Configurações" });
   const roleLabel = roles
     .map((r) => ROLE_LABELS[r as RoleKey] ?? r)
@@ -112,6 +117,12 @@ export default async function AppLayout({
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
   const initialPinned =
     (settings as { sidebarPinned?: boolean }).sidebarPinned ?? false;
+  // Tema efetivo (usuário ?? org ?? padrão) — o ThemeSync abaixo corrige
+  // cookie defasado (dispositivo novo / padrão da org alterado).
+  const resolvedTheme = resolveTheme(
+    settings as { theme?: string | null; accentColor?: string | null },
+    org?.theme ?? null
+  );
 
   // Conteúdo da barra montado no server (itens já filtrados por papel);
   // o AppShell (client) controla ocultar/fixar/tela cheia.
@@ -153,6 +164,7 @@ export default async function AppLayout({
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
             coalescido; só no app autenticado (o viewer /s/ fica fora). */}
         <RealtimeRefresher />
+        <ThemeSync resolved={resolvedTheme} />
         <AppShell
           initialPinned={initialPinned}
           sidebar={sidebarContent}

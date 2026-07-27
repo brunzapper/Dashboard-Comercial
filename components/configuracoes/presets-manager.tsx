@@ -143,7 +143,7 @@ export function PresetsManager({ rows }: { rows: PresetRow[] }) {
                           {r.dashboardId ? (
                             <Link
                               href={`/dashboards/${r.dashboardId}`}
-                              className="text-primary inline-flex items-center gap-1 text-xs underline-offset-2 hover:underline"
+                              className="text-brand inline-flex items-center gap-1 text-xs underline-offset-2 hover:underline"
                             >
                               Abrir <ExternalLink className="size-3" />
                             </Link>

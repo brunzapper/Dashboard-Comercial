@@ -267,10 +267,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (0088/0094):** boards → helpers `auth_board_visible/editable/manageable`
   (blocked vence papel; view/edit concede; dono/admin imunes; pages só
   refletem canEdit). Áreas de Configurações → `AREA_GATES` +
-  `requireSettingsArea` (page) / `isSettingsAreaDenied` (escrita)
+  `requireSettingsArea` (page) / `isSettingsAreaDenied` (escrita) /
+  `checkSettingsArea` (link condicionado, sem redirect)
   (`lib/auth/access.ts`; deny vence tudo — barra page E escrita das actions;
   allow vence o papel só p/ VER a page, nunca concede escrita, que segue o
-  papel). Bases negadas → RLS de
+  papel). As CHAVES de área são HISTÓRICAS e desacopladas da rota
+  (27/07/2026: `fontes` → `/registros/bases`, `log` → `/registros/log`,
+  `moedas` → aba de `/campos`) — NUNCA renomear (overrides gravados as
+  referenciam). Bases negadas → RLS de
   `data_sources`/`sub_sources`/`records` (pickers herdam via loadSources).
   Escopo de BASES por board (`settings.sourceScope`, ⋮ → Bases) é OFERTA,
   nunca autorização: catálogo efetivo via `applySourceScope`/
@@ -411,7 +415,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
 - **Automações do kanban e ações em massa se resolvem no ENGINE/actions, nunca
-  no RPC (0108, 27/07/2026):** regras em `kanban_automations` (tabela própria
+  no RPC (0109, 27/07/2026):** regras em `kanban_automations` (tabela própria
   — NUNCA em `settings.kanban`: o widget-builder reconstrói o objeto no save e
   derrubaria a chave; o tick perderia a enumeração indexada), jsonb versionado
   com parse FAIL-CLOSED (`lib/kanban/automations/types.ts`). Avaliação pura em

@@ -107,7 +107,7 @@ export function DashboardTabs({
             key={tab.id}
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition",
-              active ? "ring-primary ring-2" : "opacity-80 hover:opacity-100"
+              active ? "ring-brand ring-2" : "opacity-80 hover:opacity-100"
             )}
             style={{ background: tab.color, color: textColor }}
           >

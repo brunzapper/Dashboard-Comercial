@@ -183,7 +183,7 @@ ACRESCENTA quando chegar a hora:
 ## 7. Ordem sugerida quando for implementar
 
 1. Migração `api_keys` (+ origin `'api'` no `audit_log`) — 1 migração.
-2. UI de chaves em Configurações → Fontes (criar/listar/revogar; padrão
+2. UI de chaves em Registros → Bases (criar/listar/revogar; padrão
    SnapshotsPanel).
 3. Rota `POST /api/ingest/<source_key>` chamando `ingestRows` com o mapping
    salvo (o wizard de CSV já sabe construir/salvar mapeamentos).

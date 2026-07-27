@@ -1,6 +1,10 @@
-// Versão: 1.2 | Data: 24/07/2026
+// Versão: 1.3 | Data: 27/07/2026
 // Fase 10: helpers puros de render de aparência, compartilhados entre o fundo do
 // dashboard, os charts e as tabelas. Sem estado/UI — só transforma config em CSS.
+// v1.3 (27/07/2026): defaults do gradiente de fundo viram tokens do tema
+//   (var(--color-background/muted)) — um board sem cores explícitas acompanha
+//   o tema escuro; cores SALVAS pelo usuário seguem literais (limitação
+//   documentada — foram escolhidas sobre fundo claro).
 // v1.2 (24/07/2026): limitCategories ganha `rankKey` opcional (default = 1ª
 //   métrica, byte-compatível) — o pivot das sub-bases ranqueia pelo TOTAL da
 //   categoria (`__cat_total:<metric>`), não por uma série isolada.
@@ -118,8 +122,8 @@ export function dashboardBackgroundCss(
   if (!bg) return undefined;
   if (bg.mode === "solid") return bg.color || undefined;
   if (bg.mode === "gradient") {
-    const from = bg.from || "#ffffff";
-    const to = bg.to || "#e5e7eb";
+    const from = bg.from || "var(--color-background)";
+    const to = bg.to || "var(--color-muted)";
     const angle = bg.angle ?? 135;
     return `linear-gradient(${angle}deg, ${from}, ${to})`;
   }

@@ -166,7 +166,7 @@ export function FormulaPreviewPanel({
                 </span>
               ) : null}
               {r.note ? (
-                <span className="text-xs text-amber-600">{r.note}</span>
+                <span className="text-xs text-amber-600 dark:text-amber-400">{r.note}</span>
               ) : null}
             </div>
           ))}

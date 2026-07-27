@@ -2,7 +2,7 @@
 // Badge discreto em /registros: "N alteração(ões) aguardando envio ao Bitrix".
 // Observabilidade da fila de write-back (bitrix_writeback_queue) sem bloquear
 // nada — as edições entram na fila e o tick por minuto as drena; aqui só
-// mostramos que há itens a caminho, com link p/ Configurações → Log (detalhe +
+// mostramos que há itens a caminho, com link p/ Registros → Log (detalhe +
 // "Reenfileirar"). Polling leve (30s) pausado com a aba oculta (padrão do
 // SyncPanel); some quando a fila está vazia. A contagem vem de
 // getWritebackPendingCount (RLS: só gestor/admin enxergam a fila).
@@ -43,11 +43,11 @@ export function WritebackPendingBadge() {
   if (count === 0) return null;
   return (
     <Link
-      href="/configuracoes/log"
+      href="/registros/log"
       className="text-muted-foreground hover:text-foreground inline-flex w-fit items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors"
-      title="Ver o log de write-back (Configurações → Log)"
+      title="Ver o log de write-back (Registros → Log)"
     >
-      <span className="bg-primary inline-block size-1.5 animate-pulse rounded-full" />
+      <span className="bg-brand inline-block size-1.5 animate-pulse rounded-full" />
       {count === 1
         ? "1 alteração aguardando envio ao Bitrix"
         : `${count} alterações aguardando envio ao Bitrix`}

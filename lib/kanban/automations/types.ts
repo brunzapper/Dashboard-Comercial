@@ -3,7 +3,7 @@
 // condições em E (podem MESCLAR as 4 famílias — campo do registro, registros
 // conectados, tarefas e tempo) + uma ação. Várias regras em ordem (position)
 // dão o OU: a primeira que casar vence por card. Persistida como jsonb
-// versionado em kanban_automations.rule (0108); parse fail-closed — regra
+// versionado em kanban_automations.rule (0109); parse fail-closed — regra
 // malformada nunca roda (vira last_error), nunca "roda como der".
 // A avaliação é 100% no engine (evaluate.ts/engine.ts) — RPCs intocados.
 import type { WidgetFilter } from "@/lib/widgets/types";

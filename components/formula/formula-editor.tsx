@@ -522,13 +522,13 @@ export function FormulaEditor({
       {validation ? (
         validation.ok ? (
           <>
-            <p className="flex items-center gap-1 text-xs text-emerald-600">
+            <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
               <Check className="size-3.5" /> Fórmula válida
             </p>
             {validation.warnings.map((w, i) => (
               <p
                 key={i}
-                className="flex items-start gap-1 text-xs text-amber-600"
+                className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400"
               >
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> {w}
               </p>

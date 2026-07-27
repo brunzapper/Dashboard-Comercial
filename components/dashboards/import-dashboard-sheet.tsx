@@ -414,7 +414,7 @@ export function ImportDashboardSheet({
                   </p>
                 ) : null}
                 {mode === "edit" && selectedBoard?.factoryPreset ? (
-                  <p className="text-xs text-amber-600">
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
                     Este dashboard é um preset de fábrica: ao editá-lo por IA,
                     ele deixa de receber atualizações do preset (o preset pode
                     ser recriado à parte em Configurações → Presets).

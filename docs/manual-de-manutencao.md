@@ -1,5 +1,5 @@
 <!-- Versão: 1.19 | Data: 27/07/2026 -->
-<!-- v1.19 (27/07/2026): §4.12 — automações do kanban (0108) + ações em massa:
+<!-- v1.19 (27/07/2026): §4.12 — automações do kanban (0109) + ações em massa:
      job pg_cron nº 6 (kanban-automations-tick) no setup, runbook de
      configuração/diagnóstico (last_error, Executar agora) e comportamentos
      por design (drag × regra, wipLimit consultivo). -->
@@ -175,7 +175,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0107).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0110).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).
@@ -239,18 +239,18 @@ npm run build      # o que a Vercel roda no deploy
 
 ### 4.4 Criou/alterou fontes de dados
 
-- [ ] Fonte nova via UI (Configurações → Fontes) segue a convenção
+- [ ] Fonte nova via UI (Registros → Bases) segue a convenção
   `key === record_type`.
 - [ ] O resolver de período cobre a fonte (mapa `fieldBySource` —
   `lib/widgets/period-resolve.ts`); fontes fora do mapa são **excluídas** pelo
   `@period` do RPC.
 - [ ] `default_period_field` da fonte faz sentido (é o campo da barra de período).
 - [ ] Fonte com origem em OUTRO fuso horário? Configure o "Fuso horário da
-  origem" (Configurações → Fontes; `data_sources.timezone`, 0079) — sem isso,
+  origem" (Registros → Bases; `data_sources.timezone`, 0079) — sem isso,
   datas/horas de 18h+ locais caem no dia seguinte no dashboard (o read side lê
   o prefixo `YYYY-MM-DD` da string). Só afeta valores DATETIME ingeridos; campo
   de calendário puro (Bitrix `date`) e date-only nunca convertem.
-- [ ] Muitas bases? Organize em **Pastas** (Configurações → Bases → Pastas,
+- [ ] Muitas bases? Organize em **Pastas** (Registros → Bases → Pastas,
   0107) e ordene com ↑/↓ — é agrupamento de EXIBIÇÃO puro (abas de
   /registros e /campos, headings dos pickers): nunca muda consulta, permissão
   nem o `sourceScope` de board. Excluir pasta devolve as bases para "sem
@@ -365,7 +365,7 @@ DADO antes de gerar (o preset cria estrutura, não dados):
    "Desqualificado Marketing", "Novos Leads", "1º contato", "Em
    qualificação"), motivos ("Monitoramento pessoal", "Sem resposta",
    "Outros") e "DSQ" no Estudo. Se os rótulos do portal divergirem
-   (caixa/acento), ajuste as sub-fontes geradas em Configurações → Fontes
+   (caixa/acento), ajuste as sub-fontes geradas em Registros → Bases
    (o preset nunca sobrescreve subs existentes).
 2. **Metas**: métrica `sql` é registrada automaticamente; cadastre as metas
    MENSAIS em Configurações → Metas (a linha "Meta SQL" do Mês x Mês usa o
@@ -476,7 +476,13 @@ fonte no widget se precisar do mês.
   dentro dela segue o papel (RLS + gate da action). Deny de área esconde
   aba/page E barra a escrita das server actions (`isSettingsAreaDenied` nos
   guards de metas/operacoes/responsaveis/moedas/integracoes/fontes/usuarios) —
-  um admin negado não escreve nem chamando a action direto.
+  um admin negado não escreve nem chamando a action direto. Desde 27/07/2026
+  as áreas `fontes`/`log`/`moedas` vivem FORA do hub (Registros → Bases/Log;
+  Campos → aba Moedas) com as MESMAS chaves (rótulos da matriz indicam a nova
+  casa); o deny de `fontes`/`log` esconde os botões do header de Registros e
+  barra as pages, o de `moedas` esconde a aba de Campos e barra a escrita.
+  Moedas estreitou de propósito: só quem tem `manage_field_definitions`
+  chega a `/campos` para ver as taxas.
 - **Escopo de bases do board** (⋮ → Bases) é OFERTA (listas menores), não
   autorização — para PRIVAR use o deny de base por usuário.
 
@@ -509,7 +515,7 @@ fonte no widget se precisar do mês.
 Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
 
 1. **Base Parceiros**: crie via wizard de CSV (`/registros/importar` — o passo
-   de Base cria a fonte e os campos custom) ou Configurações → Fontes. Key
+   de Base cria a fonte e os campos custom) ou Registros → Bases. Key
    sugerida `parceiros`; ligue "criação manual" se quiserem cadastrar à mão.
    Colunas mínimas: nome (`title`) e o identificador que o lead carrega —
    ex.: `custom:email`.
@@ -536,7 +542,7 @@ Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
    `match:parceiros:custom:*` (tier, comissão…). A IA de dashboards enxerga
    tudo isso pelo catálogo vivo.
 6. **Caminho por OPERAÇÕES (opcional)**: crie a operação-pai "Parceiro" em
-   Configurações → Operações; em Configurações → Fontes → "Sub-operações
+   Configurações → Operações; em Registros → Bases → "Sub-operações
    automáticas", configure a base Parceiros (pai, campo do nome, campo do
    identificador, campo comparado no lead) e clique "Gerar agora". Cada
    parceiro vira uma sub-operação com perfil gerado; multi-seleção no filtro
@@ -551,7 +557,7 @@ Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
    `eq_ci`); `match:` não é campo de período e filtro `match:` no modo lista
    é ignorado.
 
-### 4.12 Automações do kanban (0108, 27/07/2026)
+### 4.12 Automações do kanban (0109, 27/07/2026)
 
 Regras que movem cards automaticamente (`docs/arquitetura.md` §4.15). Onde
 mexer e como operar:

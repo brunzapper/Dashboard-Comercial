@@ -56,7 +56,7 @@ import {
   type MatchConfig,
 } from "@/lib/import/csv";
 import type { SyncResult } from "@/lib/sync/shared";
-import { createSource } from "@/app/(app)/configuracoes/fontes/actions";
+import { createSource } from "@/app/(app)/registros/bases/actions";
 import {
   finalizeCsvImport,
   importCsvChunk,
@@ -839,7 +839,7 @@ export function ImportWizard({
                   <p className="text-muted-foreground text-xs">
                     Atualizações entram na fila de write-back (campos com
                     “Gravar no Bitrix” ligado em Campos + colunas do sistema
-                    mapeadas; acompanhe em Configurações → Log).{" "}
+                    mapeadas; acompanhe em Registros → Log).{" "}
                     {matchInsertNew
                       ? "Inclusões CRIAM a entidade no Bitrix na hora — o import fica mais lento (lotes menores)."
                       : ""}
@@ -906,12 +906,12 @@ export function ImportWizard({
             ) : null}
           </div>
           {!hasPeriodDate ? (
-            <p className="text-sm text-amber-600" role="status">
+            <p className="text-sm text-amber-600 dark:text-amber-400" role="status">
               Nenhuma coluna mapeia para “{periodField}”, o campo de data que o
               filtro de período desta base usa — com um período ativo no
               dashboard, estes registros ficariam de fora. Mapeie uma coluna de
               data para ele (ou ajuste o campo de período da base em
-              Configurações → Bases).
+              Registros → Bases).
             </p>
           ) : null}
           {busy || runError ? (
@@ -920,7 +920,7 @@ export function ImportWizard({
                 <>
                   <div className="bg-muted h-2 w-full overflow-hidden rounded">
                     <div
-                      className="bg-primary h-full transition-all"
+                      className="bg-brand h-full transition-all"
                       style={{
                         width: `${Math.round((progress.done / progress.total) * 100)}%`,
                       }}
@@ -966,9 +966,9 @@ export function ImportWizard({
           role="status"
           aria-live="polite"
         >
-          <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 bg-emerald-500/10 p-6">
+          <div className="flex flex-col gap-3 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-500/10 p-6">
             <div className="flex items-center gap-3">
-              <CircleCheck className="size-8 shrink-0 text-emerald-600" />
+              <CircleCheck className="size-8 shrink-0 text-emerald-600 dark:text-emerald-400" />
               <div>
                 <p className="text-lg font-semibold">
                   {report.result.errors > 0 || !report.finalized
@@ -991,7 +991,7 @@ export function ImportWizard({
               erro(s)
             </p>
             {report.result.noMatch ? (
-              <p className="text-sm font-medium text-amber-600">
+              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
                 {report.result.noMatch} linha(s) sem match rejeitada(s)
                 (“Incluir novos” desmarcado — nada foi inserido para elas).
               </p>
@@ -1016,7 +1016,7 @@ export function ImportWizard({
               </ul>
             ) : null}
             {!report.finalized ? (
-              <p className="text-xs text-amber-600">
+              <p className="text-xs text-amber-600 dark:text-amber-400">
                 Auto-match/recálculo não rodaram — rode “auto-match” em Campos
                 → Conexões se precisar.
               </p>

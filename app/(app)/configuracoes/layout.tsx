@@ -1,8 +1,12 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 27/07/2026
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
-// Usuários) + o Log de write-back como sub-abas. Cada sub-aba mantém o mesmo
+// Usuários) como sub-abas. Cada sub-aba mantém o mesmo
 // gating de papel/permissão de quando eram itens de topo. Sub-páginas ainda
 // aplicam requireRole/requirePermission — este layout só decide quais abas mostrar.
+// v1.2 (27/07/2026): Bases (fontes) e Log moveram para /registros/*, Moedas
+//   virou aba de /campos — saem do ALL_TABS, mas as CHAVES de área seguem em
+//   AREA_GATES (histórico — overrides gravados; nunca renomear). Nova aba
+//   "Tema" (preferências visuais — qualquer autenticado).
 // v1.1 (23/07/2026): aba "Organização" (multi-org, 0089) — gate orgAdmin
 //   (flag de organization_members, não é papel de user_roles) — e aba
 //   "Acessos" (0094). A filtragem passa a honrar os OVERRIDES individuais
@@ -24,22 +28,21 @@ import {
   type SettingsTab,
 } from "@/components/configuracoes/settings-tabs";
 
-// Moedas (só visualização p/ não-admin), Log (sincronizações) e Conta (senha
-// própria) não têm gating: valem para qualquer autenticado. As demais seguem
-// restritas por papel/permissão; "Organização" exige org_admin (0089).
+// Tema (preferências visuais) e Conta (senha própria) não têm gating: valem
+// para qualquer autenticado. As demais seguem restritas por papel/permissão;
+// "Organização" exige org_admin (0089). Bases/Log vivem em /registros/* e
+// Moedas em /campos (mesmas chaves de área — ver AREA_GATES).
 const ALL_TABS: SettingsTab[] = [
   { href: "/configuracoes/organizacao", label: "Organização" },
   { href: "/configuracoes/operacoes", label: "Operações" },
   { href: "/configuracoes/responsaveis", label: "Responsáveis" },
   { href: "/configuracoes/metas", label: "Metas" },
-  { href: "/configuracoes/fontes", label: "Bases" },
   { href: "/configuracoes/presets", label: "Presets" },
   { href: "/configuracoes/snapshots", label: "Snapshots" },
   { href: "/configuracoes/integracoes", label: "Integrações" },
   { href: "/configuracoes/acessos", label: "Acessos" },
-  { href: "/configuracoes/moedas", label: "Moedas" },
   { href: "/configuracoes/usuarios", label: "Usuários" },
-  { href: "/configuracoes/log", label: "Log" },
+  { href: "/configuracoes/tema", label: "Tema" },
   { href: "/configuracoes/conta", label: "Conta" },
 ];
 

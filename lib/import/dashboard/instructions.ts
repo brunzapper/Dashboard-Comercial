@@ -331,7 +331,7 @@ Paletas: ${paletteList}.
     tabela com "rowMode": "records", e nunca com métrica de fórmula) — o
     validador o remove com aviso.
 13. MOEDA DO RESULTADO: use "resultCurrency" SOMENTE quando precisar
-    CONVERTER moedas (exige taxas cadastradas em Configurações → Moedas; sem
+    CONVERTER moedas (exige taxas cadastradas em Campos → Moedas; sem
     taxa o widget exibe "—"). Para razões e valores já em R$, OMITA
     (resultado numérico é o seguro); percentual = "resultPercent": true.
 14. SUB-BASES: REUTILIZE as Sub-bases existentes do MODELO quando o recorte
