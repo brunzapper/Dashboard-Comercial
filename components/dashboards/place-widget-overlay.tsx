@@ -91,7 +91,7 @@ export function PlaceWidgetOverlay({
       </div>
       {ghost ? (
         <div
-          className="border-primary bg-primary/10 pointer-events-none absolute rounded-md border-2 border-dashed"
+          className="border-brand bg-brand/10 pointer-events-none absolute rounded-md border-2 border-dashed"
           style={ghost}
         />
       ) : null}

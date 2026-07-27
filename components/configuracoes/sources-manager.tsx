@@ -48,7 +48,7 @@ import {
   reorderSource,
   updateSource,
   type SourceActionState,
-} from "@/app/(app)/configuracoes/fontes/actions";
+} from "@/app/(app)/registros/bases/actions";
 
 const initial: SourceActionState = {};
 

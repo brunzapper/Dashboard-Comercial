@@ -1,5 +1,5 @@
 // Versão: 2.0 | Data: 12/07/2026
-// Configurações → Moedas: habilita as moedas do sistema e edita as taxas de
+// Campos → Moedas: habilita as moedas do sistema e edita as taxas de
 // conversão (R$ por 1 unidade) por ano/trimestre — manual ou pelo PTAX. BRL é a
 // base (taxa 1, não editável).
 // v2.0: as taxas viram rascunho local e só são gravadas ao clicar "Aplicar"
@@ -30,7 +30,7 @@ import {
   refreshRatesFromPtax,
   toggleCurrencyEnabled,
   upsertCurrencyRate,
-} from "@/app/(app)/configuracoes/moedas/actions";
+} from "@/app/(app)/campos/moedas-actions";
 
 export interface CurrencyRateRow {
   code: string;

@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 11/07/2026
-// Tabela do Log de write-back (Configurações → Log). Filtro por status no client
+// Tabela do Log de write-back (Registros → Log). Filtro por status no client
 // e botão "Reenfileirar" (server action) nos itens com erro.
 "use client";
 
@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { requeueWriteback } from "@/app/(app)/configuracoes/log/actions";
+import { requeueWriteback } from "@/app/(app)/registros/log/actions";
 
 export interface WritebackLogRow {
   id: string;

@@ -87,7 +87,7 @@ export async function loadEnabledCurrencies(
   return list.sort((a, b) => a.sort_order - b.sort_order);
 }
 
-/** Todas as moedas (para a tela de Configurações → Moedas). */
+/** Todas as moedas (para a tela de Campos → Moedas). */
 export async function loadAllCurrencies(db: Db): Promise<SystemCurrency[]> {
   const { data } = await db.from("currencies").select("code, label, enabled, sort_order");
   const rows = (data ?? []) as SystemCurrency[];

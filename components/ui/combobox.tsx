@@ -160,7 +160,7 @@ export function Combobox({
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-xs transition-colors",
                       activeChip === chip.key
-                        ? "border-primary bg-primary text-primary-foreground"
+                        ? "border-brand bg-brand text-brand-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                     )}
                   >

@@ -354,7 +354,7 @@ export function FieldForm({
             Moeda do registro: o valor segue a coluna Moeda de cada registro
             (registros sem moeda contam como Real). Moeda fixa: todos os valores
             deste campo são exibidos nessa moeda. Habilite outras moedas em
-            Configurações → Moedas.
+            Campos → Moedas.
           </p>
         </div>
       ) : null}

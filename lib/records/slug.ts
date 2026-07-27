@@ -1,6 +1,6 @@
 // Versão: 1.0 | Data: 16/07/2026
 // Slug compartilhado (extraído de app/(app)/campos/actions.ts): usado no
-// field_key dos campos e na key das fontes dinâmicas (Configurações → Fontes,
+// field_key dos campos e na key das fontes dinâmicas (Registros → Bases,
 // wizard de import). Minúsculas, sem acentos, [a-z0-9_], máx. 60.
 export function slugify(label: string): string {
   return label

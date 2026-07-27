@@ -1,5 +1,5 @@
 // Versão: 1.0 | Data: 11/07/2026
-// Ações da aba Configurações → Log (fila de write-back do Bitrix). Só admin.
+// Ações da aba Registros → Log (fila de write-back do Bitrix). Só admin.
 // Reenfileirar volta um item 'error' para 'pending' (zera tentativas) para o
 // próximo tick tentar de novo. Escrita via service role (a fila não tem policy
 // de update para o client autenticado).
@@ -20,5 +20,5 @@ export async function requeueWriteback(formData: FormData): Promise<void> {
     .update({ status: "pending", attempts: 0, last_error: null, processed_at: null })
     .eq("id", id)
     .eq("status", "error");
-  revalidatePath("/configuracoes/log");
+  revalidatePath("/registros/log");
 }

@@ -1,5 +1,8 @@
-// Versão: 2.2 | Data: 26/07/2026
-// Configurações → Fontes (admin).
+// Versão: 2.3 | Data: 27/07/2026
+// Registros → Bases (admin).
+// v2.3 (27/07/2026): página movida de /configuracoes/fontes para
+//   /registros/bases (config vive no ambiente dela). A CHAVE de área segue
+//   "fontes" (histórica — overrides gravados em user_access_overrides).
 // v2.2 (26/07/2026): PASTAS (0107) — seção de pastas de bases (agrupamento de
 //   exibição + ordem manual) acima do catálogo; o formulário da base ganha o
 //   campo "Pasta".
@@ -9,8 +12,11 @@
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo (data_sources):
 //   criar/editar/excluir fontes, nome curto por fonte e campo de período;
 //   mantém o rótulo dos campos "gerais" (sync_config).
+import Link from "next/link";
+
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
+import { Button } from "@/components/ui/button";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
 import { loadSourceLabels } from "@/lib/config/source-labels";
@@ -107,13 +113,19 @@ export default async function FontesPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Bases</h1>
-        <p className="text-muted-foreground text-sm">
-          Catálogo das bases de dados do produto: as internas (Bitrix e
-          planilha do Estudo) e as personalizadas, criadas aqui ou pelo import
-          de CSV em Registros.
-        </p>
+      {/* pr-8: afasta o botão do sino fixo (TaskBell, topo-direito) */}
+      <div className="flex items-start justify-between gap-4 pr-8">
+        <div>
+          <h1 className="text-2xl font-semibold">Bases</h1>
+          <p className="text-muted-foreground text-sm">
+            Catálogo das bases de dados do produto: as internas (Bitrix e
+            planilha do Estudo) e as personalizadas, criadas aqui ou pelo import
+            de CSV em Registros.
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link href="/registros">Voltar a Registros</Link>
+        </Button>
       </div>
       <SourceFoldersManager folders={folders} sources={sources} />
       <SourcesManager sources={sources} folders={folders} />

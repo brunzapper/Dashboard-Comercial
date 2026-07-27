@@ -63,7 +63,7 @@ function BellTaskRow({
         <p className="flex items-center gap-1 truncate text-sm">
           {task.is_global ? (
             <Globe
-              className="text-primary size-3 shrink-0"
+              className="text-brand size-3 shrink-0"
               aria-label="Tarefa global"
             />
           ) : null}
@@ -80,7 +80,7 @@ function BellTaskRow({
           className={cn(
             "shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium",
             status === "atrasada" && "bg-destructive/10 text-destructive",
-            status === "em_breve" && "bg-amber-500/15 text-amber-700"
+            status === "em_breve" && "bg-amber-500/15 text-amber-700 dark:text-amber-400"
           )}
           title={status ? DUE_STATUS_LABELS[status] : undefined}
         >

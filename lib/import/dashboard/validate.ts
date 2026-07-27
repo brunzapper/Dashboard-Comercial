@@ -115,7 +115,7 @@ const CORE_REFS = new Set<string>([
   "closed",
 ]);
 // Ops aceitos no recorte de sub-base (mesmo conjunto do parseSubFilter de
-// configuracoes/fontes/actions.ts — os 10 da UI; nunca sources/record_types).
+// registros/bases/actions.ts — os 10 da UI; nunca sources/record_types).
 const SUB_FILTER_OPS = UI_FILTER_OPS;
 const RESERVED_SOURCE_KEYS = new Set(["geral", "gerais", "records", "todas"]);
 const SOURCE_KEY_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -882,7 +882,7 @@ export function validateDashboardImport(
         }
         if (typeof m.resultCurrency === "string" && m.resultCurrency) {
           warnings.push(
-            `${mw}: "resultCurrency" converte o resultado para ${m.resultCurrency} e exige taxas cadastradas (Configurações → Moedas) — sem taxa o widget exibe "—". Para valores já em R$, prefira omitir.`
+            `${mw}: "resultCurrency" converte o resultado para ${m.resultCurrency} e exige taxas cadastradas (Campos → Moedas) — sem taxa o widget exibe "—". Para valores já em R$, prefira omitir.`
           );
         }
         metrics.push({

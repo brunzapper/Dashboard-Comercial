@@ -11,7 +11,7 @@
 //   deleteSubSource; o predicado chega como JSON (WidgetFilter[]) e é saneado.
 // v2.1 (16/07/2026): manual_entry (0061) — flag "Permite criação manual" por
 //   fonte (criar/editar).
-// Server Actions da tela Configurações → Fontes.
+// Server Actions da tela Registros → Bases.
 // v2.0 (16/07/2026): fontes DINÂMICAS — CRUD do catálogo data_sources (0060):
 //   criar fonte (key slugificada do nome; record_type = key), editar
 //   nome/nome curto/campo de período, excluir fonte sem registros (FK
@@ -795,7 +795,7 @@ export async function saveAutoOperations(
     { onConflict: "source_key" }
   );
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
-  revalidatePath("/configuracoes/fontes");
+  revalidatePath("/registros/bases");
   return { ok: true, message: "Sub-operações automáticas configuradas." };
 }
 
@@ -811,7 +811,7 @@ export async function deleteAutoOperations(
     .delete()
     .eq("source_key", sourceKey);
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
-  revalidatePath("/configuracoes/fontes");
+  revalidatePath("/registros/bases");
   return {
     ok: true,
     message:
@@ -840,7 +840,7 @@ export async function runAutoOperationsNow(
     if (!res.configured) {
       return { ok: false, message: "Base sem config habilitada." };
     }
-    revalidatePath("/configuracoes/fontes");
+    revalidatePath("/registros/bases");
     revalidatePath("/configuracoes/operacoes");
     return {
       ok: true,

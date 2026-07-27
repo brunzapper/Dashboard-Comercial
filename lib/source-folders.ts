@@ -1,7 +1,7 @@
 // Versão: 1.0 | Data: 26/07/2026
 // PASTAS DE BASES (0107): agrupamento de EXIBIÇÃO das bases raiz em "Pastas"
 // (source_folders) — navegação Pasta → Base → Sub-base em /registros e
-// /campos, tabelas de Configurações → Bases e headings dos pickers de base
+// /campos, tabelas de Registros → Bases e headings dos pickers de base
 // (widget-builder, diálogo Bases do board, matriz de Acessos...).
 // Pasta NUNCA entra em consulta/engine/RPC: este módulo é 100% exibição.
 // TODO agrupamento/ordenação passa por aqui — não recrie a lógica em cada

@@ -1,5 +1,8 @@
-// Versão: 1.6 | Data: 26/07/2026
+// Versão: 1.7 | Data: 27/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v1.7 (27/07/2026): botões "Bases" e "Log" no header — as páginas de config
+//   moveram de /configuracoes/* para /registros/{bases,log}; visibilidade via
+//   checkSettingsArea (papel × overrides — mesma audiência das abas antigas).
 // v1.6 (26/07/2026): PASTAS (0107) — navegação hierárquica Pasta → Base →
 //   Sub-base: fileira de pastas (só quando há pasta criada), fileira com as
 //   bases da pasta ativa e seletor "Base completa | sub..." quando a base tem
@@ -7,7 +10,7 @@
 //   base ativa — links antigos seguem funcionando); sem pastas, degrada para
 //   as abas planas (agora só raízes — subs no 3º nível).
 // v1.5 (18/07/2026): badge de write-backs pendentes (WritebackPendingBadge) —
-//   mostra "N aguardando envio ao Bitrix" com link p/ Configurações → Log.
+//   mostra "N aguardando envio ao Bitrix" com link p/ Registros → Log.
 // v1.2 (05/07/2026): Fase 4 — listagem/filtros/edição (antes só o SyncPanel).
 // v1.3 (09/07/2026): Fase 8 — abas por fonte (Leads/Deals/Estudo). Cada aba
 //   filtra por record_type e mostra só as colunas daquela fonte (applies_to).
@@ -17,6 +20,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { checkSettingsArea } from "@/lib/auth/access";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
@@ -87,6 +91,12 @@ export default async function RegistrosPage({
   // Só Gestores e Administradores visualizam a página Registros.
   const canViewRegistros = isAdmin || userRoles.includes("gestor");
   if (!canViewRegistros) redirect("/");
+
+  // Links p/ as páginas de config do ambiente (Bases/Log) — papel × overrides.
+  const [canSeeBases, canSeeLog] = await Promise.all([
+    checkSettingsArea("fontes"),
+    checkSettingsArea("log"),
+  ]);
 
   const supabase = await createClient();
 
@@ -319,6 +329,16 @@ export default async function RegistrosPage({
               <Link href="/registros/importar">Importar CSV</Link>
             </Button>
           ) : null}
+          {canSeeBases ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/bases">Bases</Link>
+            </Button>
+          ) : null}
+          {canSeeLog ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/log">Log</Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -343,7 +363,7 @@ export default async function RegistrosPage({
                   className={cn(
                     "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                     active
-                      ? "border-primary bg-primary text-primary-foreground"
+                      ? "border-brand bg-brand text-brand-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -364,7 +384,7 @@ export default async function RegistrosPage({
                 className={cn(
                   "-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors",
                   active
-                    ? "border-primary text-foreground"
+                    ? "border-brand text-foreground"
                     : "text-muted-foreground border-transparent hover:text-foreground"
                 )}
               >
@@ -381,7 +401,7 @@ export default async function RegistrosPage({
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                 fonte === rootKey
-                  ? "border-primary bg-primary text-primary-foreground"
+                  ? "border-brand bg-brand text-brand-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -396,7 +416,7 @@ export default async function RegistrosPage({
                   className={cn(
                     "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                     active
-                      ? "border-primary bg-primary text-primary-foreground"
+                      ? "border-brand bg-brand text-brand-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >

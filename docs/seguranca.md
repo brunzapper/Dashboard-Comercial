@@ -15,6 +15,23 @@ SSRF guard nos webhooks de saída, Owner guard triplo, nada sensível em
 isolamento entre organizações** (corrigidas) e itens de hardening (corrigidos ou
 documentados).
 
+## Follow-up 27/07/2026 — realocação de páginas de Configurações + Tema
+
+- **Páginas movidas mantêm chave e guards.** Bases (`/registros/bases`), Log
+  (`/registros/log`) e Moedas (aba de `/campos`) saíram do hub de
+  Configurações mas seguem nas MESMAS chaves de área (`fontes`/`log`/
+  `moedas`) em `requireSettingsArea`/`isSettingsAreaDenied` — overrides
+  gravados em `user_access_overrides` continuam valendo. Nunca renomear uma
+  chave de área.
+- **Log endurecido**: a page trocou `requireSession()` por
+  `requireSettingsArea("log")` (gate `{}` = mesmo público), fechando o acesso
+  por URL direta de um usuário com deny — antes o deny só escondia a aba.
+- **Tema**: cookies `theme_mode`/`theme_accent` NUNCA vão crus a style/script
+  — sanitização por whitelist em `lib/theme.ts` (`normalizeThemeMode`/
+  `normalizeHexColor`) no root layout e nas actions. Padrão da org
+  (`organizations.theme`, 0108) escrito só pelo org_admin (policy existente
+  `organizations_update` é a muralha).
+
 ## Follow-up 24/07/2026 — auditoria de comentários/docs
 
 Revisão focada em comentários e documentos que expunham fragilidades. Correções

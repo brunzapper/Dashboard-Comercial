@@ -89,7 +89,7 @@ export function FormulaChips({
   const caretEl = (
     <span
       aria-hidden
-      className="bg-primary inline-block h-5 w-0.5 shrink-0 animate-pulse rounded"
+      className="bg-brand inline-block h-5 w-0.5 shrink-0 animate-pulse rounded"
     />
   );
   return (
@@ -140,7 +140,7 @@ export function FormulaChips({
                     tabIndex={-1}
                     aria-label={`Inserir na posição ${i + 1}`}
                     onClick={() => onCaret(i)}
-                    className="hover:bg-primary/20 h-6 w-1.5 shrink-0 rounded"
+                    className="hover:bg-brand/20 h-6 w-1.5 shrink-0 rounded"
                   />
                 )}
                 <span
@@ -181,7 +181,7 @@ export function FormulaChips({
               tabIndex={-1}
               aria-label="Inserir no fim"
               onClick={() => onCaret(tokens.length)}
-              className="hover:bg-primary/20 h-6 w-2 shrink-0 rounded"
+              className="hover:bg-brand/20 h-6 w-2 shrink-0 rounded"
             />
           )}
         </>

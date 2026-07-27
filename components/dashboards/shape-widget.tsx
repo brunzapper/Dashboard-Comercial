@@ -16,8 +16,8 @@ import type {
 import { useFocusWidget } from "./focus-context";
 import { useFontScale } from "./font-scale-context";
 
-const DEFAULT_FILL = "color-mix(in oklch, var(--color-primary) 15%, transparent)";
-const DEFAULT_STROKE = "var(--color-primary)";
+const DEFAULT_FILL = "color-mix(in oklch, var(--color-brand) 15%, transparent)";
+const DEFAULT_STROKE = "var(--color-brand)";
 const DEFAULT_STROKE_WIDTH = 2;
 
 // Geometria de cada forma no retângulo W×H com inset i (metade do contorno,

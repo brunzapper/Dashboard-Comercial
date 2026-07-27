@@ -1,4 +1,10 @@
-/* Versão: 1.1 | Data: 15/07/2026 */
+/* Versão: 1.2 | Data: 27/07/2026 */
+/* v1.2 (27/07/2026): cor de destaque da marca (--brand*, default #7431B3) em
+   detalhes sutis — abas ativas, chips, foco, seleção, progresso. O runtime
+   sobrepõe SÓ --brand-base (style no <html>, lido do cookie theme_accent —
+   lib/theme.ts). Tema escuro ativa pela classe .dark no <html> (script
+   inline do root layout); no escuro, --brand clareia via color-mix p/
+   legibilidade. --primary (botões) segue quase preto — não é o accent. */
 /* v1.1 (15/07/2026): pulso .widget-focus (atalhos/links para widgets). */
 /* Estilos globais + design tokens shadcn/ui (Tailwind v4). */
 @import "tailwindcss";
@@ -25,7 +31,7 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.929 0.013 255.508);
   --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
+  --ring: var(--brand);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -38,7 +44,13 @@
   --sidebar-accent: oklch(0.968 0.007 247.896);
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.704 0.04 256.788);
+  --sidebar-ring: var(--brand);
+  /* Cor de destaque da marca: --brand-base é o ÚNICO ponto de override em
+     runtime (cor escolhida em Configurações → Tema). */
+  --brand-base: #7431b3;
+  --brand: var(--brand-base);
+  --brand-foreground: oklch(0.984 0.003 247.858);
+  color-scheme: light;
 }
 
 .dark {
@@ -59,7 +71,7 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
+  --ring: var(--brand);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -72,7 +84,12 @@
   --sidebar-accent: oklch(0.279 0.041 260.031);
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
+  --sidebar-ring: var(--brand);
+  /* #7431B3 (e qualquer cor escura do usuário) legibiliza sobre fundo escuro
+     clareando via color-mix; o texto sobre o brand clareado volta a escuro. */
+  --brand: color-mix(in oklch, var(--brand-base) 68%, white);
+  --brand-foreground: oklch(0.129 0.042 264.695);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -111,6 +128,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
 }
 
 @layer base {
@@ -120,10 +139,15 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Seleção de texto com lavagem sutil do brand (sem forçar cor de texto —
+     funciona sobre qualquer foreground). Inputs têm par próprio (ui/input). */
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 25%, transparent);
+  }
 }
 
 /* Pulso de destaque de um widget focado por atalho/link (lib/widgets/focus.ts):
-   anel na cor primária que some ao final. Aplicado no wrapper do item do grid. */
+   anel na cor da marca que some ao final. Aplicado no wrapper do item do grid. */
 .widget-focus {
   animation: widget-focus-pulse 2.2s ease-out;
 }
@@ -131,8 +155,8 @@
   0%,
   55% {
     box-shadow:
-      0 0 0 3px var(--color-primary),
-      0 0 0 10px color-mix(in oklch, var(--color-primary) 30%, transparent);
+      0 0 0 3px var(--color-brand),
+      0 0 0 10px color-mix(in oklch, var(--color-brand) 30%, transparent);
   }
   100% {
     box-shadow: 0 0 0 0 transparent;

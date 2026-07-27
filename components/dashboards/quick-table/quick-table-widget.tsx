@@ -1084,7 +1084,7 @@ export function QuickTableWidget({
                           cell.editable && "cursor-cell",
                           locked && "cursor-not-allowed opacity-80",
                           isSel &&
-                            "ring-primary/70 z-10 rounded-[2px] ring-2 ring-inset"
+                            "ring-brand/70 z-10 rounded-[2px] ring-2 ring-inset"
                         )}
                         style={{
                           background: pair.fill,
@@ -1175,7 +1175,7 @@ export function QuickTableWidget({
                         {selected ? (
                           <span
                             aria-hidden
-                            className="bg-primary/10 pointer-events-none absolute inset-0"
+                            className="bg-brand/10 pointer-events-none absolute inset-0"
                           />
                         ) : null}
                         {t.cellBorders?.[k] ? (

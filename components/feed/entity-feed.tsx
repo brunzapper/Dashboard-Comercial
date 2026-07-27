@@ -494,7 +494,7 @@ function TaskFeedRow({
               status === "atrasada" &&
                 "bg-destructive/10 text-destructive font-medium",
               status === "em_breve" &&
-                "bg-amber-500/15 font-medium text-amber-700"
+                "bg-amber-500/15 font-medium text-amber-700 dark:text-amber-400"
             )}
             title={status ? DUE_STATUS_LABELS[status] : undefined}
           >

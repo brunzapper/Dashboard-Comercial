@@ -1,4 +1,7 @@
-<!-- Versão: 2.9 | Data: 26/07/2026 -->
+<!-- Versão: 3.0 | Data: 27/07/2026 -->
+<!-- v3.0 (27/07/2026): 0108 — organizations.theme (padrão visual da org:
+     modo claro/escuro/sistema + cor de destaque; escolha individual em
+     user_settings prevalece). Não recria as RPCs. -->
 <!-- v2.9 (26/07/2026): 0107 — source_folders (PASTAS de bases: agrupamento de
      EXIBIÇÃO + ordem manual) + data_sources.folder_id/sort_order +
      sub_sources.sort_order. Não recria as RPCs. -->
@@ -161,7 +164,7 @@ created_at`). Seed dos 3 builtins:
 `leads/lead`, `deals/negocio` (período `closed_at`), `estudo/venda_site`.
 
 **`source_folders`** (0107) — PASTAS de bases: agrupamento de EXIBIÇÃO
-(navegação de /registros e /campos, tabelas de Configurações → Bases e
+(navegação de /registros e /campos, tabelas de Registros → Bases e
 headings dos pickers de base) + ordem manual. `id` uuid PK, `label`,
 `sort_order`, `organization_id` (default Zapper), timestamps + trigger
 `set_updated_at`. RLS espelha `data_sources`: select da org; escrita exige
@@ -228,6 +231,10 @@ Fase 12 (usado pelo `undo-mock-reuniao.sql`).
 **`organizations`** (0089) — MULTI-ORG: uma linha por empresa/tenant. `name`
 (empresa, ex. "Zapper") e `app_name` (nome do sistema, ex. "Dashboard
 Comercial") são o BRANDING editável do sidebar (Configurações → Organização).
+`theme` jsonb (0108) — padrão VISUAL da org (`{ mode, accentColor }`; `{}` =
+padrões do app: claro + `#7431B3`), editável só pelo org_admin em
+Configurações → Tema; a escolha individual (`user_settings.settings.theme/
+accentColor`) prevalece (`resolveTheme`, `lib/theme.ts`).
 A Zapper vive no uuid FIXO `00000000-0000-4000-a000-000000000001` (default
 das colunas `organization_id` da 0090). DELETE só via `delete_organization`
 (trigger `enforce_organizations_guard` + GUC).
@@ -296,7 +303,7 @@ nome da sub-operação e identificador gravado no lead), `target_field` +
 (`eq`|`eq_ci`), `enabled`, `organization_id`. RLS espelha `operations_write`
 (leitura da org; escrita admin). Rotina: `lib/operations/auto-operations.ts`
 (service role; ganchos no import CSV, na API de ingestão e na criação/edição
-manual; botão "Gerar agora" em Configurações → Fontes).
+manual; botão "Gerar agora" em Registros → Bases).
 
 > **`records.operation_id` é DERIVADA** (operação priority=1 do responsável no
 > momento do sync; updates só preenchem quando NULL). O filtro de Operação da
@@ -665,6 +672,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0105 | widget_rpc_in_ci | Parcerias: op interno `in_ci` (pertencimento com a normalização do `eq_ci`) no PAR de RPCs — fusão de perfis de operação (multi-seleção/roll-up de parcerias). Corpos 0085 verbatim + ramo novo, espelhados |
 | 0106 | source_auto_operations | Parcerias: tabela `source_auto_operations` (config de sub-operações automáticas por base; RLS espelha operations_write) + `operations.auto_source_record_id` (identidade da geração, unique parcial). Não recria as RPCs |
 | 0107 | source_folders | PASTAS de bases (agrupamento de EXIBIÇÃO + ordem manual): tabela `source_folders` (uuid PK; RLS espelha data_sources_write) + `data_sources.folder_id` (FK on delete SET NULL)/`sort_order` + `sub_sources.sort_order`. Pasta nunca entra em consulta/engine. Não recria as RPCs |
+| 0108 | org_theme | `organizations.theme` jsonb (`{ mode, accentColor }`; `{}` = padrões do app) — padrão visual da org (Configurações → Tema, org_admin); escolha individual em `user_settings` prevalece. Policies existentes cobrem a escrita. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

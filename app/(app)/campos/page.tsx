@@ -1,17 +1,28 @@
-// Versão: 1.3 | Data: 16/07/2026
+// Versão: 1.4 | Data: 27/07/2026
 // Campos personalizados (field_definitions). Só admin (manage_field_definitions).
+// v1.4 (27/07/2026): aba Moedas (movida de /configuracoes/moedas) — moedas e
+//   taxas de conversão do sistema. Estreitamento aceito: antes qualquer
+//   autenticado via as taxas read-only; agora só quem chega a /campos
+//   (manage_field_definitions). O deny do override de área "moedas" esconde a
+//   aba (slot null) e segue barrando a escrita nas actions.
 // v1.3 (16/07/2026): blocos empilhados viraram abas de página (CamposTabs:
 //   Campos | Correspondências | Conexões); o parágrafo descritivo (fala só de
 //   campos) desceu para dentro da aba Campos. Dados/queries inalterados.
 // v1.2 (09/07/2026): Fase 8 — seção de Correspondências de colunas (globais).
 // v1.1 (05/07/2026): implementado o CRUD (Fase 4) — antes era placeholder.
 import { requirePermission } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef, splitCoreDefs } from "@/lib/records/core-defs";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { loadMatchRules } from "@/lib/matching";
-import { currencyOptionsFrom, loadEnabledCurrencies } from "@/lib/widgets/currency";
+import {
+  currencyOptionsFrom,
+  loadAllCurrencies,
+  loadEnabledCurrencies,
+  type SystemCurrency,
+} from "@/lib/widgets/currency";
 import { fieldAppliesToSource, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
@@ -22,27 +33,46 @@ import {
   type RefOption,
 } from "@/components/campos/correspondences-manager";
 import { MatchesManager } from "@/components/campos/matches-manager";
+import {
+  CurrenciesManager,
+  type CurrencyRateRow,
+} from "@/components/configuracoes/currencies-manager";
 
 export default async function CamposPage() {
   await requirePermission("manage_field_definitions");
 
   const supabase = await createClient();
   const sources = await loadSources(supabase);
-  const [{ data }, correspondences, matchRules, currencies] = await Promise.all([
-    supabase
-      .from("field_definitions")
-      .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, write_back"
-      )
-      .order("sort_order", { ascending: true })
-      .order("label", { ascending: true }),
-    loadCorrespondences(supabase),
-    loadMatchRules(supabase),
-    loadEnabledCurrencies(supabase),
-  ]);
+  const [{ data }, correspondences, matchRules, currencies, moedasDenied, allCurrencies, { data: ratesData }] =
+    await Promise.all([
+      supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, source_system, source_field_id, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, write_back"
+        )
+        .order("sort_order", { ascending: true })
+        .order("label", { ascending: true }),
+      loadCorrespondences(supabase),
+      loadMatchRules(supabase),
+      loadEnabledCurrencies(supabase),
+      isSettingsAreaDenied("moedas"),
+      loadAllCurrencies(supabase),
+      supabase
+        .from("currency_rates")
+        .select("code, year, quarter, rate, source")
+        .order("year", { ascending: false }),
+    ]);
 
   const fields = (data ?? []) as FieldDefinition[];
   const currencyOptions = currencyOptionsFrom(currencies);
+
+  const rates = (ratesData ?? []).map((r) => ({
+    code: r.code as string,
+    year: r.year as number,
+    quarter: r.quarter as number,
+    rate: Number(r.rate),
+    source: (r.source as string | null) ?? null,
+  })) as CurrencyRateRow[];
 
   // Candidatos por fonte p/ correspondências: colunas do núcleo + campos
   // personalizados que se aplicam àquela fonte (applies_to). Linhas core (0086)
@@ -94,6 +124,24 @@ export default async function CamposPage() {
             rules={matchRules}
             candidatesBySource={candidatesBySource}
           />
+        }
+        moedas={
+          moedasDenied ? null : (
+            <div className="flex flex-col gap-6">
+              <p className="text-muted-foreground text-sm">
+                Habilite as moedas do sistema e informe a taxa média (R$ por 1
+                unidade) por ano e por trimestre. Use &quot;Atualizar
+                agora&quot; para preencher pela média do PTAX (Banco Central) —
+                a taxa do trimestre tem prioridade sobre a anual; o Real é a
+                base (taxa 1).
+              </p>
+              <CurrenciesManager
+                currencies={allCurrencies as SystemCurrency[]}
+                rates={rates}
+                readOnly={false}
+              />
+            </div>
+          )
         }
       />
     </div>

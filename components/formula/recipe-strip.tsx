@@ -245,13 +245,13 @@ function SalesCycleWizard({
           className="w-full"
         />
         {coverage?.configured ? (
-          <p className="flex items-center gap-1 text-xs text-emerald-600">
+          <p className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
             <CircleCheck className="size-3.5 shrink-0" /> Conexão configurada
             {coverage.label ? ` (${coverage.label})` : ""} — {coverage.pairs}{" "}
             registros casados.
           </p>
         ) : coverage && !coverage.configured ? (
-          <p className="flex items-start gap-1 text-xs text-amber-600">
+          <p className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> Nenhuma
             conexão com esta base ainda. O campo será criado, mas ficará vazio
             até você configurar o casamento em <strong>Campos → Conexões</strong>
