@@ -1783,6 +1783,73 @@ seguem planos (centenas de parcerias = dropdown grande). O e2e não tem
 fixture de base dinâmica com match (cobertura live do caminho novo é
 follow-up conhecido).
 
+### 4.15 Automações do kanban e ações em massa (27/07/2026)
+
+**Automações** (`kanban_automations`, 0108): regras condicionais por quadro
+(widget kanban OU kanban dedicado — XOR de dono, padrão 0067) que MOVEM cards
+automaticamente. Uma regra = `{ v:1, conditions[], action }` (jsonb versionado,
+parse fail-closed em `lib/kanban/automations/types.ts`): as condições valem em
+E e MESCLAM 4 famílias — campo do registro (`WidgetFilter` inteiro, incl. refs
+`match:`), contagem de registros CONECTADOS (`record_matches`, qualquer
+direção, com filtros sobre o conectado — "parceiro com ≥ N leads ganhos"),
+tarefas do card (abertas/atrasadas) e tempo em dias de calendário (desde
+criação / última alteração de campo via `field_modified_at` / entrada na
+coluna Personalizar via `kanban_placements.updated_at`). Regras em ordem
+(`position`): a PRIMEIRA que casa vence por card; ação v1 =
+`move_to_column` (união extensível).
+
+Execução 100% no ENGINE (RPCs de widget intocados), com SERVICE ROLE e escopo
+EXPLÍCITO de org em toda consulta (`opts.orgId` do `runRecordList` — v2.1 do
+record-list): `runBoardAutomations` (`lib/kanban/automations/engine.ts`) reusa
+`runKanban` (period null — a barra de período é filtro de VISÃO; resolução de
+colunas/placements/`__match` de graça), monta os fatos que as regras pedem
+(gates — tasks/fmod/placements/`countRelatedBySource` só quando usados),
+decide no avaliador PURO (`evaluate.ts` — decisões sobre o snapshot original:
+sem ping-pong intra-rodada; mock nunca move; alvo overflow/coluna sumida =
+erro da regra, nunca silêncio) e executa em `move.ts`: Personalizar = upsert
+de `kanban_placements` (dado da visão); coluna por VALOR = escrita do campo
+com carimbo `field_modified_at` + `locally_modified_at` (protege da Sync),
+efeitos em LOTE (um `recalcFormulaFieldsForRecords`, um insert de `audit_log`
+origin `'automation'`/user null, write-back opcional espelhando o gating do
+`updateRecord`, webhook `record.updated` por registro). Teto
+`MAX_MOVES_PER_RUN` (200)/quadro/rodada. Fora do escopo v1 (falham ALTO no
+`last_error`): modo tarefas e colunas por BUCKET DE DATA (mover reescreveria
+uma data real relativa a "hoje" a cada tick — não idempotente).
+
+Gatilhos: tick por minuto (`/api/kanban-automations/tick`, pg_cron via
+`supabase/apply/pg-cron-kanban-automations.sql`, SYNC_SECRET + orçamento de
+45s; round-robin pelos donos mais antigos — `min(last_run_at)`), hook
+pós-sync (`maybeRunKanbanAutomationsAfterJob`, deadline curto, DEPOIS do
+auto-match p/ contagens verem vínculos frescos) e "Executar agora" na UI.
+Autoria = gate de EDITOR do board (RLS de `kanban_automations` via
+`auth_board_editable` nos dois braços + org); execução tem autoridade de
+sistema (como o sync) — documentado, não bug. Bookkeeping por regra
+(`last_run_at`/`last_error`/`last_moved_count`) em vez de tabela de runs. UI:
+`components/kanban/automations-sheet.tsx` (página dedicada, página cheia do
+widget e widget no dashboard; campos via `buildAvailableFields` +
+`toFieldOptions` — nunca listas paralelas). Regras NÃO viajam no
+export/IA/duplicação de board (tabela própria, fora de `settings.kanban` — o
+widget-builder reconstrói o objeto `kanban` no save e derrubaria chaves
+novas).
+
+**Ações em massa** (`lib/kanban/bulk-actions.ts` + seleção no
+`kanban-board.tsx`): seleção por checkbox (hover/Ctrl+clique; select-all por
+coluna; Esc limpa; mock nunca selecionável) + barra flutuante — Mover para,
+Gerar tarefa (uma por card), Concluir tarefas (abertas dos cards; no modo
+tarefas, as selecionadas) e Excluir (registros: EXCLUSÃO REAL, gate de ADMIN
+na action espelhando a RLS `records_delete` + confirmação na UI + webhook
+`record.deleted`; tarefas: RLS/cadeado decidem por item). Contrato: resultado
+POR ITEM (`{ id, ok, message }[]`, teto 200/chamada, cliente fatia) — é o que
+permite o revert parcial. TODO movimento (card único incluso, e multi-drag
+via `KanbanDragPayload.items` — retrocompatível) passa pela fila otimista
+`use-kanban-bulk-queue.ts`: aplica local NA HORA, despacha em background
+(chunks de 50, sequencial), reverte SÓ os itens que falharam e os acumula num
+painel persistente com "Tentar novamente"; ao drenar, emite `emitDataChanged`
++ um refresh debounced. O resync `data` → estado local do board é GUARDADO
+enquanto a fila está em voo (dado que chegou durante a fila é descartado como
+stale — o refresh do settle traz o fresco); sem a guarda, um
+`router.refresh()` no meio da fila clobraria o estado otimista.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -2031,6 +2098,20 @@ principalmente — para mantenedores humanos.
     fica NULL nessas operações — dimensão "por Operação" e
     `allowed_operation_ids` de snapshot não as enxergam (limitação
     documentada; não "conserte" repontando a coluna).
+23. **Automações do kanban e ações em massa se resolvem no ENGINE/actions,
+    nunca no RPC (§4.15).** O caminho service-role das automações carrega
+    escopo EXPLÍCITO de org em TODA consulta (`opts.orgId` do
+    `runRecordList`, `.eq("organization_id")` nos fetches auxiliares) — um
+    fetch novo sem o escopo vaza registro entre orgs em silêncio. Colunas por
+    bucket de DATA nunca são alvo de automação (não idempotente); mocks nunca
+    movem/selecionam; `KANBAN_OVERFLOW_KEY` nunca recebe card. Exclusão de
+    registro é admin-only (action espelha a RLS `records_delete`) e SEMPRE
+    emite `record.deleted`. As ações em massa devolvem resultado POR ITEM e o
+    board só reconcilia `data` → estado local com a fila DRENADA (guarda de
+    resync) — remover a guarda faz o refresh clobrar o movimento otimista.
+    Regras vivem em `kanban_automations` (tabela própria): NÃO as mova para
+    `settings.kanban` (o widget-builder reconstrói o objeto no save e as
+    derrubaria; o tick perderia a enumeração indexada).
 
 ## 6. Convenções do projeto
 

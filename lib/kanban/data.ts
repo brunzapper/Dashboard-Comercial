@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 26/07/2026
+// Versão: 1.3 | Data: 27/07/2026
+// v1.3 (27/07/2026): opts.orgId — escopo explícito de org repassado ao
+//   runRecordList (chamadores SERVICE ROLE: engine de automações do kanban).
 // v1.2 (26/07/2026): agrupamento de responsáveis (0101) — quadro agrupado por
 //   responsible_id joga o card do APELIDO na coluna do PRINCIPAL
 //   (recordGroupKey canonicaliza; rótulo da coluna já sai canônico via
@@ -129,6 +131,8 @@ export async function runKanban(
     filters?: WidgetFilter[];
     available?: AvailableField[];
     catalog?: SourceDef[];
+    // Escopo explícito de org (chamadores service-role — automações).
+    orgId?: string;
   }
 ): Promise<KanbanBoardData> {
   const config: WidgetConfig = {
@@ -144,7 +148,8 @@ export async function runKanban(
     config,
     period ?? undefined,
     opts?.available,
-    opts?.catalog
+    opts?.catalog,
+    opts?.orgId ? { orgId: opts.orgId } : undefined
   );
 
   // Colunas "Personalizar": posição do card é dado da visão

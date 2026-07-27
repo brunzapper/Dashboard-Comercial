@@ -15,12 +15,16 @@
 // v1.3 (26/07/2026): auto-match INCREMENTAL pós-job (Parcerias) — job
 //   concluído que escreveu algo roda runAutoMatchIncremental (lado A restrito
 //   ao que o job tocou) + recalc direcionado dos recém-casados. Best-effort.
+// v1.4 (27/07/2026): automações do kanban pós-job (0108) — job concluído que
+//   escreveu algo reavalia as regras com deadline curto, DEPOIS do auto-match
+//   (contagens de conectados/refs match: veem vínculos frescos). Best-effort.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
 import type { FormulaFieldDef } from "@/lib/records/formulas";
 import { runAutoMatchIncremental } from "@/lib/records/matching-engine";
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
+import { runAllKanbanAutomations } from "@/lib/kanban/automations/engine";
 import { BitrixClient } from "@/lib/sync/bitrix/client";
 import { BitrixLookups, type SerializedLookups } from "@/lib/sync/bitrix/lookups";
 import { mapDeal, mapLead, type MappedRecord } from "@/lib/sync/bitrix/mapper";
@@ -82,6 +86,31 @@ async function maybeAutoMatchAfterJob(
     if (res.inserted > 0) await recalcFormulaFieldsForRecords(res.recordIds);
   } catch (e) {
     console.warn("[sync] auto-match pós-job falhou:", (e as Error).message);
+  }
+}
+
+// Automações do kanban (0108): job concluído que escreveu algo reavalia as
+// regras com um deadline CURTO (o grosso fica com o tick por minuto) — cards
+// se movem logo após o sync, sem esperar o próximo tick. Roda DEPOIS do
+// auto-match + recalc (refs match:/contagens de conectados veem os vínculos
+// frescos). Best-effort: falha não derruba o job (padrão maybeAnalyzeAfterJob).
+const AUTOMATIONS_AFTER_JOB_BUDGET_MS = 10_000;
+
+async function maybeRunKanbanAutomationsAfterJob(
+  db: SupabaseClient,
+  job: JobRow
+): Promise<void> {
+  if (job.totals.inserted + job.totals.updated === 0) return;
+  try {
+    await runAllKanbanAutomations(
+      db,
+      Date.now() + AUTOMATIONS_AFTER_JOB_BUDGET_MS
+    );
+  } catch (e) {
+    console.warn(
+      "[sync] automações do kanban pós-job falharam:",
+      (e as Error).message
+    );
   }
 }
 
@@ -395,6 +424,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
         .eq("id", jobId);
       await maybeAnalyzeAfterJob(db, totals);
       await maybeAutoMatchAfterJob(db, job);
+      await maybeRunKanbanAutomationsAfterJob(db, job);
       return { ...snapshot({ ...job, status: "done" }), done: true, status: "done" };
     }
 
@@ -469,6 +499,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
     if (done) {
       await maybeAnalyzeAfterJob(db, totals);
       await maybeAutoMatchAfterJob(db, { ...job, totals });
+      await maybeRunKanbanAutomationsAfterJob(db, { ...job, totals });
     }
 
     return {

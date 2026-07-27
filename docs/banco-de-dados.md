@@ -217,8 +217,9 @@ retro-preenchido com a fonte cujo `record_type` casa (a própria pai).
 responsável/operação (não a um registro): `(entity_type, entity_id, field_key)` unique.
 
 **`audit_log`** (0006) — toda edição de valor: `record_id`, `user_id` (null quando
-via sync), `field`, `old_value`/`new_value` jsonb, `origin`
-(`app|sync_bitrix|sync_sheet` + `api` desde 0074).
+via sync/automação), `field`, `old_value`/`new_value` jsonb, `origin`
+(`app|sync_bitrix|sync_sheet` + `api` desde 0074 + `automation` desde 0108 —
+movimentos executados pelas automações do kanban, via service role).
 
 **`reuniao_freeze_backup`** (0051) — valores originais de Data Reunião zerados pela
 Fase 12 (usado pelo `undo-mock-reuniao.sql`).
@@ -368,6 +369,20 @@ Adicionadas na 0066: `parent_task_id` (subtarefas), `pinned`, `feed_position`,
 **`kanban_placements`** (0067) — posição de registros em kanbans com colunas
 "Personalizar": exatamente um dono (`widget_id` XOR `board_id`) + `record_id`,
 `column_key`, `position`.
+
+**`kanban_automations`** (0108) — regras de automação do kanban (modo
+registros): exatamente um dono (`widget_id` XOR `board_id`, padrão 0067),
+`name`, `enabled`, `position` (ordem de avaliação — primeira que casa vence),
+`rule` jsonb versionado (`{ v:1, conditions[], action }` —
+`lib/kanban/automations/types.ts`; parse fail-closed) e bookkeeping por regra
+(`last_run_at`, `last_error`, `last_moved_count` — sem tabela de runs, o tick
+roda por minuto). `organization_id` com default Zapper + trigger de stamp que
+deriva a org do dashboard dono (`kanban_automations_set_org`, padrão 0098).
+Índices: por dono e `(enabled, last_run_at)` (enumeração do tick, round-robin
+pelos mais antigos). RLS: ler E escrever exigem `auth_board_editable` (nos
+dois braços de dono) + gate de org; a EXECUÇÃO das regras é service role
+(tick/pós-sync/"Executar agora") com escopo explícito de org. Sem acesso
+anon.
 
 **`dashboard_ai_sessions`** (0098) — sessão PERSISTIDA do painel "Editar com
 IA" dentro do dashboard: PK `(user_id, dashboard_id)` (uma linha por
@@ -665,6 +680,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0105 | widget_rpc_in_ci | Parcerias: op interno `in_ci` (pertencimento com a normalização do `eq_ci`) no PAR de RPCs — fusão de perfis de operação (multi-seleção/roll-up de parcerias). Corpos 0085 verbatim + ramo novo, espelhados |
 | 0106 | source_auto_operations | Parcerias: tabela `source_auto_operations` (config de sub-operações automáticas por base; RLS espelha operations_write) + `operations.auto_source_record_id` (identidade da geração, unique parcial). Não recria as RPCs |
 | 0107 | source_folders | PASTAS de bases (agrupamento de EXIBIÇÃO + ordem manual): tabela `source_folders` (uuid PK; RLS espelha data_sources_write) + `data_sources.folder_id` (FK on delete SET NULL)/`sort_order` + `sub_sources.sort_order`. Pasta nunca entra em consulta/engine. Não recria as RPCs |
+| 0108 | kanban_automations | Automações do kanban: tabela `kanban_automations` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

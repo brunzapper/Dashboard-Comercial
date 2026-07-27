@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 27/07/2026
+// v1.1 (27/07/2026): record.deleted — a exclusão em massa do kanban (admin)
+//   remove registros de verdade; sem o evento, integrações ficariam cegas.
 // Catálogo dos tipos de evento de webhook de SAÍDA. Adicionar um tipo novo é
 // só estender o array (sem migração — webhook_events.event_type é text e
 // webhook_endpoints.event_types é text[]). Quem emite: as server actions de
@@ -9,6 +11,7 @@
 export const WEBHOOK_EVENT_TYPES = [
   "record.created",
   "record.updated",
+  "record.deleted",
   "task.created",
   "task.updated",
   "task.completed",

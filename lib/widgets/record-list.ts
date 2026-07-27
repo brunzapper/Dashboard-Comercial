@@ -1,4 +1,8 @@
-// Versão: 2.0 | Data: 26/07/2026
+// Versão: 2.1 | Data: 27/07/2026
+// v2.1 (27/07/2026): opts.orgId — escopo EXPLÍCITO de organização na consulta
+//   (eq organization_id). Para chamadores com SERVICE ROLE (engine de
+//   automações do kanban), onde a RLS não escopa; caminhos de sessão seguem
+//   sem o opt (RLS manda), comportamento idêntico.
 // v2.0 (26/07/2026): janela incremental do full fetch — runRecordListWindow
 //   (offset + teto com count exato; desempate por id p/ janelas estáveis) e
 //   runRecordListWithExtras ganha windowOpts: widgets SEM pernas de
@@ -85,7 +89,9 @@ import { SEARCH_FIELD_SEP } from "./view-filters";
 import type { WidgetConfig, WidgetFilter } from "./types";
 
 // Mesmas colunas carregadas na página de Registros — satisfaz RecordRow.
-const RECORD_COLS =
+// Exportada p/ consultas irmãs que precisam de linhas RecordRow completas
+// (ex.: contagem de conectados das automações do kanban).
+export const RECORD_COLS =
   "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
@@ -207,7 +213,8 @@ function buildRecordListQuery(
   available: AvailableField[],
   // onlyMocks: SÓ is_mock=true (top-up das pernas cobertas) — o chamador
   // (runCoveredLegMockTopUp) garante que a config referencia Data Reunião.
-  opts?: { count?: boolean; onlyMocks?: boolean },
+  // orgId: escopo explícito de org (chamadores service-role — v2.1).
+  opts?: { count?: boolean; onlyMocks?: boolean; orgId?: string },
   // Catálogo de FONTES (0078): resolve a fonte efetiva por record_type (subs
   // absorvidas somem; sub avulsa recorta as linhas da pai). Ausente = builtins
   // (sem sub-fontes → comportamento legado idêntico).
@@ -241,6 +248,7 @@ function buildRecordListQuery(
   let q = supabase
     .from("records")
     .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
+  if (opts?.orgId) q = q.eq("organization_id", opts.orgId);
   if (opts?.onlyMocks) q = q.eq("is_mock", true);
   else if (!includeMocks) q = q.eq("is_mock", false);
   for (const f of filters as WidgetFilter[]) {
@@ -443,7 +451,7 @@ export async function runRecordList(
   period?: DashboardPeriod | null,
   available: AvailableField[] = [],
   catalog: SourceDef[] = BUILTIN_SOURCES,
-  opts?: { onlyMocks?: boolean }
+  opts?: { onlyMocks?: boolean; orgId?: string }
 ): Promise<RecordRow[]> {
   config = await expandConfigResponsibles(supabase, config);
   const { q, applyBucketFilters } = buildRecordListQuery(

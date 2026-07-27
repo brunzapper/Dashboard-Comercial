@@ -13,8 +13,12 @@ vi.mock("next/navigation", () => ({
 }));
 // Actions "use server" (puxam next/headers) e painéis pesados ficam fora do
 // escopo do teste de renderização.
-vi.mock("@/lib/kanban/actions", () => ({
-  moveRecordCard: vi.fn(),
+vi.mock("@/lib/kanban/bulk-actions", () => ({
+  moveRecordCardsBulk: vi.fn(),
+  createTasksBulk: vi.fn(),
+  completeTasksBulk: vi.fn(),
+  deleteRecordsBulk: vi.fn(),
+  deleteTasksBulk: vi.fn(),
 }));
 vi.mock("@/lib/tasks/actions", () => ({
   completeTask: vi.fn(),
