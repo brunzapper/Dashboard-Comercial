@@ -72,6 +72,7 @@ import {
 import { KanbanList } from "./kanban-list";
 import { ColumnConfigPopover } from "./column-config-popover";
 import { BoardAppearancePopover } from "./board-appearance-popover";
+import { AutomationsSheet } from "./automations-sheet";
 
 const PERIOD_OPTIONS: ComboboxOption[] = [
   { value: "", label: "Todo o período" },
@@ -373,6 +374,20 @@ export function KanbanPageClient({
                   kanban={kanban}
                   data={data}
                   onSave={persistKanban}
+                />
+              ) : null}
+              {/* Automações: modo registros, sem colunas por data (mover
+                  reescreveria a data do registro a cada execução). */}
+              {!isTasks && !(kanban.dateBucket && kanban.dateField) ? (
+                <AutomationsSheet
+                  owner={
+                    widgetCtx
+                      ? { kind: "widget", id: widgetCtx.widgetId }
+                      : { kind: "board", id: boardId }
+                  }
+                  source={kanban.source}
+                  columns={data.columns}
+                  isCustomColumns={isCustom}
                 />
               ) : null}
               {/* Aparência do WIDGET se edita no builder do dashboard. */}

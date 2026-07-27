@@ -414,3 +414,28 @@ This version has breaking changes — APIs, conventions, and file structure may 
   responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
+- **Automações do kanban e ações em massa se resolvem no ENGINE/actions, nunca
+  no RPC (0109, 27/07/2026):** regras em `kanban_automations` (tabela própria
+  — NUNCA em `settings.kanban`: o widget-builder reconstrói o objeto no save e
+  derrubaria a chave; o tick perderia a enumeração indexada), jsonb versionado
+  com parse FAIL-CLOSED (`lib/kanban/automations/types.ts`). Avaliação pura em
+  `evaluate.ts` (primeira regra que casa vence; decisões sobre o snapshot da
+  rodada; mock nunca move; alvo overflow/coluna sumida = `last_error`, nunca
+  silêncio), I/O em `engine.ts` reusando `runKanban` com period null e escopo
+  EXPLÍCITO de org em TODA consulta service-role (`opts.orgId` do
+  `runRecordList` — consulta nova sem o escopo vaza registro entre orgs);
+  execução em `move.ts` (Personalizar = upsert de placements; valor = escrita
+  com carimbo `field_modified_at`+`locally_modified_at`, recalc/audit
+  (`origin='automation'`)/write-back/webhook em lote). Bucket de DATA nunca é
+  alvo (não idempotente); modo tarefas fora do v1; teto 200 moves/quadro/
+  rodada. Gatilhos: tick por minuto (`pg-cron-kanban-automations.sql`) + hook
+  pós-sync (DEPOIS do auto-match) + "Executar agora"; autoria = editor do
+  board (RLS `auth_board_editable`), execução = autoridade de sistema. Ações
+  em massa (`lib/kanban/bulk-actions.ts`): resultado POR ITEM (revert parcial
+  no cliente), teto 200/chamada, sem revalidatePath; excluir REGISTRO é
+  admin-only (espelha a RLS `records_delete`) e SEMPRE emite `record.deleted`.
+  No board, TODO movimento passa pela fila otimista
+  (`use-kanban-bulk-queue.ts`) e o resync `data`→estado local é GUARDADO com a
+  fila em voo (dado mid-flight é stale e descartado) — não remova a guarda
+  nem re-introduza `await` no drop. Ver `docs/arquitetura.md` §4.15 e
+  invariante 23.

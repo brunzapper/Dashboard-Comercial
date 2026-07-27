@@ -1,4 +1,8 @@
-<!-- Versão: 1.16 | Data: 26/07/2026 -->
+<!-- Versão: 1.17 | Data: 27/07/2026 -->
+<!-- v1.17 (27/07/2026): §12.2.1 — seleção em massa no kanban (barra Mover
+     para/Gerar tarefa/Concluir tarefas/Excluir, otimista com revert parcial)
+     e Automações do quadro (regras "se … mover para …" com condições de
+     campo/conectados/tarefas/tempo; execução por minuto + pós-sync). -->
 <!-- v1.16 (26/07/2026): §3.8.2 — o título do painel "Editar com IA" passa a
      ser o MODELO configurado (1ª letra maiúscula) e o RACIOCÍNIO da IA
      aparece ao vivo durante a geração (Gemini; efêmero, sem custo extra de
@@ -1850,6 +1854,30 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
   limite WIP, ocultar (colunas de campo), adicionar/remover (colunas livres/
   tarefas).
 - Aparência completa no §9.3.
+
+### 12.2.1 Seleção em massa e Automações (27/07/2026)
+
+- **Seleção em massa**: passe o mouse num card e marque o checkbox (ou
+  Ctrl/Cmd+clique; checkbox no cabeçalho da coluna seleciona a coluna
+  inteira; Esc limpa). Com cards selecionados aparece a barra de ações:
+  **"Mover para"** (outra coluna), **"Gerar tarefa"** (cria uma tarefa por
+  card, com título/prazo/responsável), **"Concluir tarefas"** (as abertas dos
+  cards; no quadro de tarefas, as selecionadas) e **"Excluir"** (registros:
+  só administradores, com confirmação — exclusão definitiva; tarefas:
+  travadas/de outros não saem). Os movimentos aparecem NA HORA e gravam em
+  segundo plano — se algo falhar, os cards falhos voltam sozinhos e um aviso
+  no topo do quadro oferece "Tentar novamente". Arrastar um card selecionado
+  arrasta a seleção inteira.
+- **Automações** (botão ⚡ "Automações", p/ quem configura o quadro; modo
+  registros, sem colunas por data): regras "se … então mover para a coluna
+  …". As condições podem MISTURAR na mesma regra: campos do registro
+  (inclusive do registro casado ↪), quantidade de **registros conectados**
+  (ex.: parceiro com 5+ leads conectados, com filtros sobre os conectados),
+  tarefas do card (abertas/atrasadas) e tempo (desde a criação, desde a
+  última alteração de um campo, tempo na coluna atual — colunas livres). As
+  regras rodam em ordem (a primeira que casar vence), automaticamente a cada
+  minuto e após cada Sync; "Executar agora" roda na hora e cada regra mostra
+  a última execução/erro. Cards de demonstração nunca movem.
 
 ### 12.3 Agenda
 

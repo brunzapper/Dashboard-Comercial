@@ -38,6 +38,7 @@ import {
 } from "./kanban-board";
 import { KanbanList } from "./kanban-list";
 import { ColumnConfigPopover } from "./column-config-popover";
+import { AutomationsSheet } from "./automations-sheet";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import {
   TaskSheet,
@@ -307,6 +308,15 @@ export function KanbanWidget({
             kanban={kanban}
             data={result.data}
             onSave={persistKanban}
+          />
+        ) : null}
+        {/* Automações: modo registros, sem colunas por data. */}
+        {canManageColumns && !isTasks && !(kanban.dateBucket && kanban.dateField) ? (
+          <AutomationsSheet
+            owner={{ kind: "widget", id: widget.id }}
+            source={kanban.source}
+            columns={result.data.columns}
+            isCustomColumns={isCustom}
           />
         ) : null}
         <div className="flex rounded-md border p-0.5">

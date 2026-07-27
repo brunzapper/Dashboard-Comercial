@@ -1,4 +1,4 @@
-// Versão: 1.5 | Data: 27/07/2026
+// Versão: 1.6 | Data: 27/07/2026
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -7,6 +7,16 @@
 // página dedicada (/kanbans/[id]), pelo widget kanban (compact) e pelos
 // quadros de TAREFAS (v1.1: cards de tarefa com prazo/concluir, `onMove`
 // injetável e `columnExtra` p/ o quick-create de cada modo).
+// v1.6 (27/07/2026): SELEÇÃO EM MASSA + fila otimista — checkbox no card
+//   (hover/Ctrl+clique; select-all no cabeçalho da coluna; Esc limpa), barra
+//   flutuante de ações (Mover para / Gerar tarefa / Concluir tarefas /
+//   Excluir — registros só admin, com confirmação) e TODO movimento (inclusive
+//   card único e multi-drag via payload.items) passa pela fila
+//   use-kanban-bulk-queue: aplica local na hora, grava em background e
+//   reverte SÓ os itens que falharam (painel persistente + Tentar novamente).
+//   O resync com `data` é GUARDADO enquanto a fila está em voo (e o dado que
+//   chegou durante a fila é descartado como stale — o settle dispara um
+//   refresh que traz o fresco).
 // v1.2 (17/07/2026): FEED nos cards — clique no corpo abre o CardDetailSheet
 //   (abas Feed|Dados; instância única içada aqui) e o rodapé ganha os chips
 //   "+tarefa"/"+comentário"; o lápis de hover passou a abrir a aba Dados do
@@ -23,18 +33,26 @@
 //   `compact` fica só para a largura de coluna).
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Link2, Lock, Pencil, Plus } from "lucide-react";
+import { Link2, Loader2, Lock, Pencil, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { formatMoney } from "@/lib/widgets/currency";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
-import { moveRecordCard } from "@/lib/kanban/actions";
+import {
+  completeTasksBulk,
+  createTasksBulk,
+  deleteRecordsBulk,
+  deleteTasksBulk,
+  moveRecordCardsBulk,
+} from "@/lib/kanban/bulk-actions";
 import { completeTask, reopenTask } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
+import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { useFontScale } from "@/components/dashboards/font-scale-context";
 import {
@@ -59,6 +77,11 @@ import {
   TaskSheet,
   type TaskFormContext,
 } from "@/components/tarefas/task-sheet";
+import { BulkActionBar, type BulkTaskInput } from "./bulk-action-bar";
+import {
+  useKanbanBulkQueue,
+  type QueueItem,
+} from "./use-kanban-bulk-queue";
 
 // Contexto de registros p/ os painéis de edição abertos pelos cards.
 export interface KanbanRecordContext {
@@ -79,6 +102,9 @@ export interface KanbanDragPayload {
   cardId: string;
   fromKey: string;
   dateValue: string | null;
+  // v1.6 (seleção em massa): presentes quando o card arrastado faz parte da
+  // seleção — o drop move TODOS. Payload antigo (sem items) segue válido.
+  items?: { cardId: string; fromKey: string; dateValue: string | null }[];
 }
 
 // Canal próprio do drag de COLUNA (cards continuam em text/plain; no dragover
@@ -294,6 +320,10 @@ function CardView({
   dueSoonDays,
   onOpenDetail,
   cardAp,
+  selectable,
+  selected,
+  selectionActive,
+  onToggleSelect,
 }: {
   card: KanbanCard;
   draggable: boolean;
@@ -310,6 +340,12 @@ function CardView({
   ) => void;
   // Aparência dos cards (settings.kanban.appearance.card).
   cardAp?: KanbanAppearance["card"];
+  // Seleção em massa (v1.6): checkbox no hover (sempre visível com seleção
+  // ativa); Ctrl/Cmd+clique também alterna.
+  selectable?: boolean;
+  selected?: boolean;
+  selectionActive?: boolean;
+  onToggleSelect?: () => void;
 }) {
   // Detalhe só para cards com entidade carregada (registro ou tarefa).
   const canOpen = !readOnly && Boolean(card.record ?? card.task);
@@ -326,7 +362,13 @@ function CardView({
         onDragStart(e);
       }}
       onDragEnd={onDragEnd}
-      onClick={() => {
+      onClick={(e) => {
+        // Ctrl/Cmd+clique alterna a seleção (atalho de poder).
+        if (selectable && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          onToggleSelect?.();
+          return;
+        }
         // Clique no corpo abre o feed; seleção de texto não conta como clique.
         if (window.getSelection()?.toString()) return;
         open("feed");
@@ -334,7 +376,9 @@ function CardView({
       className={cn(
         "bg-card group relative rounded-md border p-2 text-sm shadow-sm",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-default",
-        canOpen && !draggable && "cursor-pointer"
+        canOpen && !draggable && "cursor-pointer",
+        selected && "ring-primary ring-2",
+        selectionActive && "pl-7"
       )}
       style={{
         background: cardAp?.bg,
@@ -354,6 +398,26 @@ function CardView({
           className="absolute inset-y-1 left-0 w-1 rounded-full"
           style={{ background: colorFromValue(card.colorValue) }}
         />
+      ) : null}
+      {selectable ? (
+        <span
+          className={cn(
+            "absolute top-1.5 left-1.5 z-10 transition-opacity",
+            selectionActive || selected
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100"
+          )}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          draggable={false}
+        >
+          <Checkbox
+            checked={Boolean(selected)}
+            onCheckedChange={() => onToggleSelect?.()}
+            aria-label={`Selecionar ${card.title}`}
+            className="bg-card size-4"
+          />
+        </span>
       ) : null}
       {card.task && taskCtx ? (
         <TaskCardBody
@@ -490,7 +554,6 @@ export function KanbanBoard({
   // "+" ao lado das colunas (modos tarefas/Personalizar; chamador persiste).
   onAddColumn?: (label: string) => Promise<KanbanMoveResult>;
 }) {
-  const router = useRouter();
   const [columns, setColumns] = useState<KanbanColumnCards[]>(data.columns);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -498,14 +561,24 @@ export function KanbanBoard({
   // Drag de COLUNA (cabeçalho): coluna arrastada + alvo do indicador.
   const [colDragging, setColDragging] = useState<string | null>(null);
   const [colDropKey, setColDropKey] = useState<string | null>(null);
-  // Snapshot pré-move p/ reverter em falha.
-  const beforeMove = useRef<KanbanColumnCards[] | null>(null);
+  // Seleção em massa (v1.6): ids dos cards selecionados.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   // Painel de detalhe (Feed|Dados) — UMA instância para o quadro inteiro.
   const [detail, setDetail] = useState<{
     target: CardDetailTarget;
     tab: CardDetailTab;
     focusComposer: boolean;
   } | null>(null);
+
+  const isTasksMode = settings.mode === "tarefas";
+  const debouncedRefresh = useDebouncedRefresh();
+  // Reconcile ao drenar a fila: anuncia a mutação (hosts re-buscam) + 1
+  // refresh debounced (cinto & suspensório na página dedicada).
+  const onQueueSettled = useCallback(() => {
+    emitDataChanged(isTasksMode ? { kind: "task" } : { kind: "record" });
+    debouncedRefresh();
+  }, [isTasksMode, debouncedRefresh]);
+  const queue = useKanbanBulkQueue({ setColumns, onSettled: onQueueSettled });
 
   // Contexto de tarefa p/ chips e feed: quadros de registros não recebem
   // taskCtx — deriva dos papéis do contexto de registros.
@@ -532,36 +605,220 @@ export function KanbanBoard({
     if (target) setDetail({ target, tab, focusComposer });
   }
 
-  // Re-sincroniza com o servidor após router.refresh() (novas props).
+  // Re-sincroniza com o servidor após router.refresh() (novas props) — com a
+  // GUARDA da fila: dado que chega com a fila em voo é stale (clobraria o
+  // otimista) e é descartado; o settle da fila dispara um refresh que traz o
+  // fresco (props novas com pending 0 → aplica).
+  const skipNextData = useRef(false);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (queue.pending > 0) {
+      skipNextData.current = true;
+      return;
+    }
+    if (skipNextData.current) {
+      skipNextData.current = false;
+      return;
+    }
+     
     setColumns(data.columns);
-  }, [data]);
+    // Poda a seleção: card que sumiu do quadro sai da seleção.
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(
+        data.columns.flatMap((c) => c.cards.map((card) => card.id))
+      );
+      const next = new Set([...prev].filter((id) => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [data, queue.pending]);
+
+  // Esc limpa a seleção.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected.size]);
 
   const movable = (card: KanbanCard, col: KanbanColumnCards) =>
     !readOnly && canMove && !card.isMock && col.key !== KANBAN_OVERFLOW_KEY;
+  // Selecionável p/ ações em massa (mock é congelado no produto inteiro).
+  const selectable = (card: KanbanCard) => !readOnly && !card.isMock;
 
-  function applyLocalMove(cardId: string, fromKey: string, toKey: string) {
-    setColumns((cols) => {
-      const card = cols
-        .find((c) => c.key === fromKey)
-        ?.cards.find((c) => c.id === cardId);
-      if (!card) return cols;
-      return cols.map((c) => {
-        if (c.key === fromKey) {
-          const cards = c.cards.filter((x) => x.id !== cardId);
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // ---- helpers imutáveis da fila (apply/revert por item) ----
+
+  const applyMoveMany = (
+    cols: KanbanColumnCards[],
+    ids: Set<string>,
+    toKey: string
+  ): KanbanColumnCards[] => {
+    const moved: KanbanCard[] = [];
+    const stripped = cols.map((c) => {
+      if (c.key === toKey) return c;
+      const keep = c.cards.filter((x) => {
+        if (ids.has(x.id)) {
+          moved.push({ ...x, columnKey: toKey });
+          return false;
+        }
+        return true;
+      });
+      return keep.length === c.cards.length
+        ? c
+        : { ...c, cards: keep, count: keep.length };
+    });
+    if (moved.length === 0) return cols;
+    return stripped.map((c) =>
+      c.key === toKey
+        ? { ...c, cards: [...moved, ...c.cards], count: c.cards.length + moved.length }
+        : c
+    );
+  };
+
+  const revertMoveMany = (
+    cols: KanbanColumnCards[],
+    failed: QueueItem[],
+    toKey: string
+  ): KanbanColumnCards[] => {
+    let next = cols;
+    for (const it of failed) {
+      const card = next
+        .find((c) => c.key === toKey)
+        ?.cards.find((x) => x.id === it.id);
+      if (!card) continue;
+      next = next.map((c) => {
+        if (c.key === toKey) {
+          const cards = c.cards.filter((x) => x.id !== it.id);
           return { ...c, cards, count: cards.length };
         }
-        if (c.key === toKey) {
-          const cards = [{ ...card, columnKey: toKey }, ...c.cards];
+        if (c.key === it.fromKey) {
+          const cards = [{ ...card, columnKey: it.fromKey }, ...c.cards];
           return { ...c, cards, count: cards.length };
         }
         return c;
       });
+    }
+    return next;
+  };
+
+  const removeMany = (
+    cols: KanbanColumnCards[],
+    ids: Set<string>
+  ): KanbanColumnCards[] =>
+    cols.map((c) => {
+      const keep = c.cards.filter((x) => !ids.has(x.id));
+      return keep.length === c.cards.length
+        ? c
+        : { ...c, cards: keep, count: keep.length };
+    });
+
+  const patchOpenTasks = (
+    cols: KanbanColumnCards[],
+    patch: Map<string, number>
+  ): KanbanColumnCards[] =>
+    cols.map((c) => ({
+      ...c,
+      cards: c.cards.map((x) =>
+        patch.has(x.id) ? { ...x, openTasks: patch.get(x.id)! } : x
+      ),
+    }));
+
+  // Itens da fila a partir de ids (fromKey/título/data pelo estado atual).
+  const queueItemsOf = (ids: string[]): QueueItem[] => {
+    const out: QueueItem[] = [];
+    for (const id of ids) {
+      for (const col of columns) {
+        const card = col.cards.find((x) => x.id === id);
+        if (card) {
+          out.push({
+            id,
+            fromKey: col.key,
+            title: card.title,
+            dateValue: card.dateValue,
+          });
+          break;
+        }
+      }
+    }
+    return out;
+  };
+
+  // ---- MOVER (drag de 1 ou N, e "Mover para" da barra) ----
+  function enqueueMove(items: QueueItem[], toKey: string) {
+    const target = columns.find((c) => c.key === toKey);
+    if (!target || target.noDrop) return;
+    const filtered = items.filter((it) => it.fromKey !== toKey);
+    if (filtered.length === 0) return;
+    // Personalizar sem dono conhecido: não arrisca gravar campo do registro.
+    if (settings.columnSource === "custom" && !owner && !onMove) {
+      setError("Quadro personalizado sem contexto — recarregue a página.");
+      return;
+    }
+    setError(null);
+    const ids = new Set(filtered.map((it) => it.id));
+    queue.enqueue({
+      label: "mover",
+      items: filtered,
+      apply: (cols) => applyMoveMany(cols, ids, toKey),
+      revert: (cols, failedIds) =>
+        revertMoveMany(
+          cols,
+          filtered.filter((it) => failedIds.has(it.id)),
+          toKey
+        ),
+      exec: async (chunk) => {
+        if (onMove) {
+          // Modo tarefas: uma action por card (moveTaskPhase do host) —
+          // resultados por item p/ o revert parcial.
+          const results = await Promise.all(
+            chunk.map(async (it) => {
+              try {
+                const res = await onMove(
+                  { cardId: it.id, fromKey: it.fromKey, dateValue: it.dateValue },
+                  toKey,
+                  target
+                );
+                return {
+                  id: it.id,
+                  ok: Boolean(res.ok),
+                  ...(res.message ? { message: res.message } : {}),
+                };
+              } catch {
+                return { id: it.id, ok: false, message: "Falha de rede." };
+              }
+            })
+          );
+          return { ok: true, results };
+        }
+        return moveRecordCardsBulk({
+          items: chunk.map((it) => ({
+            recordId: it.id,
+            currentDateValue: it.dateValue,
+          })),
+          targetKey: toKey,
+          groupField: settings.groupField,
+          dateField: settings.dateField,
+          dateBucket: settings.dateBucket,
+          writeBack: settings.writeBack,
+          // Colunas "Personalizar": posiciona na visão (não edita o registro).
+          ...(settings.columnSource === "custom" && owner
+            ? { custom: { ownerKind: owner.kind, ownerId: owner.id } }
+            : {}),
+        });
+      },
     });
   }
 
-  async function handleDrop(toKey: string, e: React.DragEvent) {
+  function handleDrop(toKey: string, e: React.DragEvent) {
     e.preventDefault();
     setDropTarget(null);
     setDragging(null);
@@ -571,45 +828,125 @@ export function KanbanBoard({
     } catch {
       return;
     }
-    if (!payload?.cardId || payload.fromKey === toKey) return;
-    const target = columns.find((c) => c.key === toKey);
-    if (!target || target.noDrop) return;
-    // Personalizar sem dono conhecido: não arrisca gravar campo do registro.
-    if (settings.columnSource === "custom" && !owner && !onMove) {
-      setError("Quadro personalizado sem contexto — recarregue a página.");
-      return;
-    }
+    if (!payload?.cardId) return;
+    const raw = payload.items?.length ? payload.items : [payload];
+    // Título p/ o painel de falhas vem do estado atual.
+    const byId = new Map(queueItemsOf(raw.map((p) => p.cardId)).map((i) => [i.id, i]));
+    const items: QueueItem[] = raw.map((p) => ({
+      id: p.cardId,
+      fromKey: p.fromKey,
+      title: byId.get(p.cardId)?.title ?? p.cardId,
+      dateValue: p.dateValue,
+    }));
+    enqueueMove(items, toKey);
+    if (payload.items?.length) setSelected(new Set());
+  }
 
-    beforeMove.current = columns;
-    setError(null);
-    applyLocalMove(payload.cardId, payload.fromKey, toKey);
+  // ---- ações da barra flutuante ----
+  const selectedItems = () => queueItemsOf([...selected]);
 
-    const res = onMove
-      ? await onMove(payload, toKey, target)
-      : await moveRecordCard({
-          recordId: payload.cardId,
-          groupField: settings.groupField,
-          dateField: settings.dateField,
-          dateBucket: settings.dateBucket,
-          currentDateValue: payload.dateValue,
-          targetKey: toKey,
-          writeBack: settings.writeBack,
-          // Colunas "Personalizar": posiciona na visão (não edita o registro).
-          ...(settings.columnSource === "custom" && owner
-            ? { custom: { ownerKind: owner.kind, ownerId: owner.id } }
-            : {}),
-        });
-    if (!res.ok) {
-      if (beforeMove.current) setColumns(beforeMove.current);
-      setError(res.message ?? "Falha ao mover o card.");
-      return;
+  function bulkCreateTask(input: BulkTaskInput) {
+    const items = selectedItems();
+    const before = new Map<string, number>();
+    const after = new Map<string, number>();
+    for (const col of columns) {
+      for (const card of col.cards) {
+        if (selected.has(card.id)) {
+          before.set(card.id, card.openTasks);
+          after.set(card.id, card.openTasks + 1);
+        }
+      }
     }
-    emitDataChanged(
-      settings.mode === "tarefas"
-        ? { kind: "task", taskId: payload.cardId }
-        : { kind: "record", recordId: payload.cardId }
-    );
-    router.refresh();
+    setSelected(new Set());
+    queue.enqueue({
+      label: "gerar tarefa",
+      items,
+      apply: (cols) => patchOpenTasks(cols, after),
+      revert: (cols, failedIds) =>
+        patchOpenTasks(
+          cols,
+          new Map([...before].filter(([id]) => failedIds.has(id)))
+        ),
+      exec: (chunk) =>
+        createTasksBulk({
+          recordIds: chunk.map((i) => i.id),
+          title: input.title,
+          due_date: input.due_date,
+          responsible_id: input.responsible_id,
+          locked: settings.tasks?.lockByDefault,
+        }),
+    });
+  }
+
+  function bulkCompleteTasks() {
+    const items = selectedItems();
+    const before = new Map<string, number>();
+    const zero = new Map<string, number>();
+    for (const col of columns) {
+      for (const card of col.cards) {
+        if (selected.has(card.id)) {
+          before.set(card.id, card.openTasks);
+          zero.set(card.id, 0);
+        }
+      }
+    }
+    setSelected(new Set());
+    queue.enqueue({
+      label: "concluir tarefas",
+      items,
+      // Modo registros: zera o badge de abertas; tarefas: sem otimista
+      // estrutural (o settle re-busca — coluna "Concluída" é config do host).
+      apply: (cols) => (isTasksMode ? cols : patchOpenTasks(cols, zero)),
+      revert: (cols, failedIds) =>
+        isTasksMode
+          ? cols
+          : patchOpenTasks(
+              cols,
+              new Map([...before].filter(([id]) => failedIds.has(id)))
+            ),
+      exec: (chunk) =>
+        completeTasksBulk(
+          isTasksMode
+            ? { taskIds: chunk.map((i) => i.id) }
+            : { recordIds: chunk.map((i) => i.id) }
+        ),
+    });
+  }
+
+  function bulkDelete() {
+    const items = selectedItems();
+    // Snapshot dos cards p/ reinserir os que falharem.
+    const snapshot = new Map<string, KanbanCard>();
+    for (const col of columns) {
+      for (const card of col.cards) {
+        if (selected.has(card.id)) snapshot.set(card.id, card);
+      }
+    }
+    setSelected(new Set());
+    const ids = new Set(items.map((i) => i.id));
+    queue.enqueue({
+      label: "excluir",
+      items,
+      apply: (cols) => removeMany(cols, ids),
+      revert: (cols, failedIds) => {
+        let next = cols;
+        for (const it of items) {
+          if (!failedIds.has(it.id)) continue;
+          const card = snapshot.get(it.id);
+          if (!card) continue;
+          next = next.map((c) =>
+            c.key === it.fromKey
+              ? { ...c, cards: [card, ...c.cards], count: c.cards.length + 1 }
+              : c
+          );
+        }
+        return next;
+      },
+      exec: (chunk) =>
+        isTasksMode
+          ? deleteTasksBulk(chunk.map((i) => i.id))
+          : deleteRecordsBulk(chunk.map((i) => i.id)),
+    });
   }
 
   // Colunas especiais não são arrastáveis (ficam sempre no fim).
@@ -658,6 +995,55 @@ export function KanbanBoard({
           {error}
         </p>
       ) : null}
+      {/* Painel PERSISTENTE de falhas da fila: os cards falhos já foram
+          revertidos à origem — aqui o porquê + reprocessar/dispensar. */}
+      {queue.failures.length > 0 ? (
+        <div
+          role="alert"
+          className="border-destructive/50 bg-destructive/5 rounded-md border p-2 text-sm"
+        >
+          <p className="text-destructive font-medium">
+            {queue.failures.length} card(s) não foram processados:
+          </p>
+          <ul className="text-destructive/90 mt-1 flex flex-col gap-0.5 text-xs">
+            {queue.failures.slice(0, 8).map((f, i) => (
+              <li key={`${f.id}-${i}`}>
+                {f.title} — {f.message}
+              </li>
+            ))}
+            {queue.failures.length > 8 ? (
+              <li>… e mais {queue.failures.length - 8}.</li>
+            ) : null}
+          </ul>
+          <div className="mt-1.5 flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              onClick={queue.retry}
+            >
+              Tentar novamente
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={queue.dismissFailures}
+            >
+              Dispensar
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {queue.pending > 0 ? (
+        <p
+          className="text-muted-foreground flex items-center gap-1 text-xs"
+          role="status"
+        >
+          <Loader2 className="size-3 animate-spin" /> Sincronizando… (
+          {queue.pending})
+        </p>
+      ) : null}
       <div
         className={cn(
           "flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2",
@@ -694,7 +1080,7 @@ export function KanbanBoard({
                 void handleDrop(col.key, e);
               }}
               className={cn(
-                "bg-muted/40 flex max-h-full w-64 shrink-0 flex-col rounded-lg border",
+                "bg-muted/40 group/col flex max-h-full w-64 shrink-0 flex-col rounded-lg border",
                 compact && "w-56",
                 dropTarget === col.key && dragging && "ring-brand/60 ring-2",
                 colDropKey === col.key &&
@@ -749,6 +1135,40 @@ export function KanbanBoard({
                 }}
               >
                 <div className="flex min-w-0 items-center gap-1.5">
+                  {/* Select-all da coluna (só cards selecionáveis). */}
+                  {!readOnly && col.cards.some(selectable) ? (
+                    <span
+                      className={cn(
+                        "transition-opacity",
+                        selected.size > 0
+                          ? "opacity-100"
+                          : "opacity-0 group-hover/col:opacity-100 hover:opacity-100"
+                      )}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      draggable={false}
+                    >
+                      <Checkbox
+                        className="size-3.5"
+                        checked={col.cards
+                          .filter(selectable)
+                          .every((x) => selected.has(x.id))}
+                        onCheckedChange={() => {
+                          const ids = col.cards.filter(selectable).map((x) => x.id);
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            const all = ids.every((id) => next.has(id));
+                            for (const id of ids) {
+                              if (all) next.delete(id);
+                              else next.add(id);
+                            }
+                            return next;
+                          });
+                        }}
+                        aria-label={`Selecionar todos em ${col.label}`}
+                      />
+                    </span>
+                  ) : null}
                   <span className="truncate text-sm font-medium">{col.label}</span>
                   <span
                     className={cn(
@@ -793,13 +1213,27 @@ export function KanbanBoard({
                     onDragStart={(e) => {
                       setDragging(card.id);
                       e.dataTransfer.effectAllowed = "move";
+                      // Card selecionado arrasta a SELEÇÃO inteira (items);
+                      // payload antigo (1 card) segue idêntico.
+                      const base = {
+                        cardId: card.id,
+                        fromKey: col.key,
+                        dateValue: card.dateValue,
+                      };
+                      const payload: KanbanDragPayload =
+                        selected.has(card.id) && selected.size > 1
+                          ? {
+                              ...base,
+                              items: queueItemsOf([...selected]).map((it) => ({
+                                cardId: it.id,
+                                fromKey: it.fromKey,
+                                dateValue: it.dateValue,
+                              })),
+                            }
+                          : base;
                       e.dataTransfer.setData(
                         "text/plain",
-                        JSON.stringify({
-                          cardId: card.id,
-                          fromKey: col.key,
-                          dateValue: card.dateValue,
-                        } satisfies KanbanDragPayload)
+                        JSON.stringify(payload)
                       );
                     }}
                     onDragEnd={() => {
@@ -811,6 +1245,10 @@ export function KanbanBoard({
                     dueSoonDays={settings.tasks?.dueSoonDays}
                     onOpenDetail={openDetail}
                     cardAp={kap.card}
+                    selectable={selectable(card)}
+                    selected={selected.has(card.id)}
+                    selectionActive={selected.size > 0}
+                    onToggleSelect={() => toggleSelect(card.id)}
                   />
                 ))}
                 {col.cards.length === 0 ? (
@@ -831,6 +1269,28 @@ export function KanbanBoard({
           />
         ) : null}
       </div>
+
+      {/* Barra flutuante das ações em massa (seleção ativa). */}
+      {!readOnly && selected.size > 0 ? (
+        <BulkActionBar
+          count={selected.size}
+          mode={settings.mode}
+          canMove={canMove}
+          canDelete={
+            isTasksMode || recordCtx.userRoles.includes("admin")
+          }
+          columns={columns}
+          responsibles={recordCtx.responsibles}
+          onMoveTo={(toKey) => {
+            enqueueMove(selectedItems(), toKey);
+            setSelected(new Set());
+          }}
+          onCreateTask={bulkCreateTask}
+          onCompleteTasks={bulkCompleteTasks}
+          onDelete={bulkDelete}
+          onClear={() => setSelected(new Set())}
+        />
+      ) : null}
 
       {/* Detalhe do card (Feed|Dados) — instância única do quadro. */}
       <CardDetailSheet

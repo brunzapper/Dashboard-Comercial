@@ -311,3 +311,33 @@ describe("agrupamento de responsáveis (0101) no modo lista", () => {
     expect(queries.some((q) => q.table === "responsibles")).toBe(false);
   });
 });
+
+describe("escopo explícito de org (v2.1 — chamadores service-role)", () => {
+  it("opts.orgId vira eq organization_id; ausente = sem o step", async () => {
+    const { db, queries } = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+      },
+    });
+    await runRecordList(db, displayConfig, null, AVAILABLE, undefined, {
+      orgId: "org1",
+    });
+    const withOrg = queries.find((q) => q.table === "records")!;
+    expect(hasStep(withOrg, "eq", "organization_id", "org1")).toBe(true);
+
+    const plain = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+      },
+    });
+    await runRecordList(plain.db, displayConfig, null, AVAILABLE);
+    const without = plain.queries.find((q) => q.table === "records")!;
+    expect(
+      without.steps.some(
+        (s) => s.method === "eq" && s.args[0] === "organization_id"
+      )
+    ).toBe(false);
+  });
+});

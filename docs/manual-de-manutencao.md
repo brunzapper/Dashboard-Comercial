@@ -1,4 +1,8 @@
-<!-- Versão: 1.18 | Data: 26/07/2026 -->
+<!-- Versão: 1.19 | Data: 27/07/2026 -->
+<!-- v1.19 (27/07/2026): §4.12 — automações do kanban (0109) + ações em massa:
+     job pg_cron nº 6 (kanban-automations-tick) no setup, runbook de
+     configuração/diagnóstico (last_error, Executar agora) e comportamentos
+     por design (drag × regra, wipLimit consultivo). -->
 <!-- v1.18 (26/07/2026): §4.11 — runbook de Parcerias (base de parceiros,
      conexão lead↔parceiro reativa, sub-operações automáticas, 0104–0106);
      §4.1 aponta o par vigente (0105) e os helpers 0104; §3 próximo número
@@ -88,7 +92,11 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
       boards (`dashboards.status='trashed'` há mais de 14 dias; SQL puro, não
       usa os segredos). Sem o job o hub apenas ESCONDE os vencidos — a limpeza
       física depende dele.
-   Os ticks (2–4) **pressupõem os segredos criados pelo primeiro**.
+   6. `apply/pg-cron-kanban-automations.sql` — tick das automações do kanban a
+      cada minuto (`/api/kanban-automations/tick`; ocioso = 1 SELECT
+      indexado). Sem o job as regras só rodam no pós-sync e no "Executar
+      agora".
+   Os ticks (2–4 e 6) **pressupõem os segredos criados pelo primeiro**.
    Verificar/remover: `select * from cron.job;` /
    `select cron.unschedule('purge-dashboard-trash');`.
 6. **Sync Bitrix** — logado como admin, em Registros: **Backfill inicial** (importa o
@@ -167,7 +175,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0107).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0110).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).
@@ -549,6 +557,38 @@ Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
    `eq_ci`); `match:` não é campo de período e filtro `match:` no modo lista
    é ignorado.
 
+### 4.12 Automações do kanban (0109, 27/07/2026)
+
+Regras que movem cards automaticamente (`docs/arquitetura.md` §4.15). Onde
+mexer e como operar:
+
+- **Configurar**: botão "Automações" (⚡) no cabeçalho do kanban dedicado, na
+  página cheia do widget e na toolbar do widget no dashboard — só p/ quem
+  configura o quadro (dono/admin/acesso 'edit'), modo registros, sem colunas
+  por data. As condições mesclam campo do registro, registros conectados
+  (parcerias), tarefas e tempo na MESMA regra (E lógico); a primeira regra
+  que casar vence.
+- **Execução**: tick por minuto (`pg-cron-kanban-automations.sql`, job
+  `kanban-automations-tick`) + reavaliação pós-sync + "Executar agora". Roda
+  com service role e escopo explícito de org; teto de 200 movimentos por
+  quadro por rodada (o resto fica pro próximo tick).
+- **Diagnóstico**: cada regra guarda `last_run_at`/`last_error`/
+  `last_moved_count` (visíveis na própria lista de regras). Regra parada =
+  confira `last_error` (alvo removido/oculto, quadro fora do escopo, regra
+  malformada), o job no `cron.job` e os logs `[kanban-automations]`/
+  `[kanban-automations/tick]`. "Executar agora" é o teste manual.
+- **Comportamentos por design**: card arrastado de volta pelo usuário será
+  re-movido no próximo tick se a condição ainda valer (desative a regra ou
+  ajuste as condições); `wipLimit` segue consultivo (a automação não o
+  respeita); mocks nunca movem; automação não escreve em quadros de bucket
+  de data. Regras NÃO acompanham export/duplicação/IA de dashboards.
+- **Ações em massa** (mesma entrega): seleção por checkbox no quadro + barra
+  flutuante (Mover para / Gerar tarefa / Concluir tarefas / Excluir).
+  Excluir REGISTROS é só admin (RLS `records_delete`) e emite
+  `record.deleted`; falhas parciais aparecem num painel no topo do quadro
+  com "Tentar novamente" — os cards falhos voltam sozinhos à coluna de
+  origem.
+
 ## 5. Troubleshooting
 
 | Sintoma | Causa provável | Ação |
@@ -563,7 +603,7 @@ Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
 | Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
-| Tick não roda (sync/snapshot/webhook) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 5 jobs (ticks + purga da Lixeira); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Tick não roda (sync/snapshot/webhook/automações) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 6 jobs (ticks + purga da Lixeira); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
 | Board na Lixeira não some após 14 dias | Job `purge-dashboard-trash` não agendado (o hub esconde o card, mas a linha continua no banco) | Aplique `apply/pg-cron-purge-trash.sql`; para purgar já, rode o `DELETE` do arquivo à mão no SQL editor |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
 | Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |
