@@ -1,15 +1,22 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 28/07/2026
+// v1.1 (28/07/2026): movido de lib/kanban/automations/ (agora compartilhado
+//   com as métricas de card/coluna do quadro — "Leads vinculados") +
+//   opts.extraPairs: pares extras opt-in (gêmeo records.related_lead_id,
+//   espelhando o coalesce do _widget_match_expr p/ leads). O parceiro do par
+//   extra passa pela MESMA validação (record_type/org/predicado/filtros) e o
+//   dedupe de par cobre gêmeo × linha real de record_matches. As automações
+//   (related_count) seguem chamando SEM extraPairs — comportamento inalterado.
 // Contagem de registros CONECTADOS por card (condição related_count das
-// automações): quantos registros da base `source` estão conectados
-// (record_matches, qualquer direção) a cada um dos `recordIds` e passam nos
-// `filters` — o "parceiro com ≥ N leads". O attachMatches do modo lista guarda
-// só o MELHOR match por fonte (p/ resolver refs match:), então não serve p/
-// contar; aqui contamos TODOS os pares (deduplicados — dois vínculos por
-// regras de match diferentes contam uma conexão só). Consultas com escopo
-// EXPLÍCITO de org (chamador service-role) e chunks de 200 (padrão
-// attachMatches). Filtros avaliados em memória com a MESMA semântica das
-// condições de campo (fieldFilterMatches); refs match: são proibidos aqui
-// (1 nível só — barrado no parse).
+// automações e métricas "vinculados" do quadro): quantos registros da base
+// `source` estão conectados (record_matches, qualquer direção) a cada um dos
+// `recordIds` e passam nos `filters` — o "parceiro com ≥ N leads". O
+// attachMatches do modo lista guarda só o MELHOR match por fonte (p/ resolver
+// refs match:), então não serve p/ contar; aqui contamos TODOS os pares
+// (deduplicados — dois vínculos por regras de match diferentes contam uma
+// conexão só). Consultas com escopo EXPLÍCITO de org (chamador service-role)
+// e chunks de 200 (padrão attachMatches). Filtros avaliados em memória com a
+// MESMA semântica das condições de campo (fieldFilterMatches); refs match:
+// são proibidos aqui (1 nível só — barrado no parse).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
@@ -18,7 +25,7 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import { RECORD_COLS } from "@/lib/widgets/record-list";
 import { recordRawValue } from "@/lib/widgets/quick-filters";
 import type { WidgetFilter } from "@/lib/widgets/types";
-import { fieldFilterMatches } from "./evaluate";
+import { fieldFilterMatches } from "./automations/evaluate";
 
 const CHUNK = 200;
 
@@ -33,6 +40,8 @@ function chunksOf(list: string[]): string[][] {
  * `filters`. Registro sem conexões não aparece no mapa (contagem 0 no
  * avaliador). `available`/`catalog` resolvem refs custom:/unified: dos filtros
  * e o predicado de sub-base (sub conta só as linhas recortadas da pai).
+ * `opts.extraPairs` acrescenta pares fora de record_matches (gêmeo
+ * related_lead_id) — validados e deduplicados como os demais.
  */
 export async function countRelatedBySource(
   db: SupabaseClient,
@@ -41,13 +50,16 @@ export async function countRelatedBySource(
   source: string,
   filters: WidgetFilter[],
   available: AvailableField[],
-  catalog: SourceDef[]
+  catalog: SourceDef[],
+  opts?: { extraPairs?: { selfId: string; partnerId: string }[] }
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   if (recordIds.length === 0) return counts;
   const selfIds = new Set(recordIds);
 
-  // 1) Pares conectados envolvendo os cards (qualquer direção).
+  // 1) Pares conectados envolvendo os cards (qualquer direção). Os pares
+  // extras (gêmeo) entram como linhas sintéticas ANTES da carga dos parceiros
+  // — mesmo caminho de validação; o dedupe de par absorve a sobreposição.
   type MatchRow = { record_a_id: string; record_b_id: string };
   const matches: MatchRow[] = (
     await Promise.all(
@@ -62,6 +74,10 @@ export async function countRelatedBySource(
       })
     )
   ).flat();
+  for (const p of opts?.extraPairs ?? []) {
+    if (!selfIds.has(p.selfId) || !p.partnerId) continue;
+    matches.push({ record_a_id: p.selfId, record_b_id: p.partnerId });
+  }
   if (matches.length === 0) return counts;
 
   // 2) Parceiros da base pedida (record_type da pai; sub recorta em memória).

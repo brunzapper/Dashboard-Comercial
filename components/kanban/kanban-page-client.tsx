@@ -1,8 +1,12 @@
-// Versão: 1.4 | Data: 26/07/2026
+// Versão: 1.5 | Data: 28/07/2026
 // Shell client da página dedicada de kanban (/kanbans/[id]): cabeçalho (nome,
 // visões kanban|lista, barra de período simples, config de colunas, criação) +
 // o quadro/lista. Os dados chegam computados do RSC; navegação de período muda
 // a URL (?periodo/?de/?ate) e o servidor recomputa.
+// v1.5 (28/07/2026): popover "Métricas" (MetricsPopover) ao lado do de colunas
+//   (modo registros, canConfig) — métrica do cabeçalho com agregação + até 3
+//   indicadores do card, persistindo pelo MESMO persistKanban (a página cheia
+//   de widget grava em widgets.settings.kanban — sincroniza com o builder).
 // v1.4 (26/07/2026): prop opcional `widgetCtx` — a página cheia de um WIDGET
 //   kanban (/kanbans/w/[widgetId]) reusa este shell: persiste em
 //   widgets.settings.kanban (saveWidgetSettings), owner {kind:'widget'}
@@ -71,6 +75,7 @@ import {
 } from "./kanban-board";
 import { KanbanList } from "./kanban-list";
 import { ColumnConfigPopover } from "./column-config-popover";
+import { MetricsPopover } from "./metrics-popover";
 import { BoardAppearancePopover } from "./board-appearance-popover";
 import { AutomationsSheet } from "./automations-sheet";
 
@@ -379,6 +384,14 @@ export function KanbanPageClient({
                       ? { kind: "widget", id: widgetCtx.widgetId }
                       : { kind: "board", id: boardId }
                   }
+                />
+              ) : null}
+              {/* Métricas (cabeçalho + indicadores do card) — modo registros. */}
+              {!isTasks ? (
+                <MetricsPopover
+                  kanban={kanban}
+                  fields={recordCtx.fields}
+                  onSave={persistKanban}
                 />
               ) : null}
               {/* Automações: modo registros, sem colunas por data (mover

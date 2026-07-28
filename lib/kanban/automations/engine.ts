@@ -25,7 +25,7 @@ import {
   type EvalContext,
   type RuleError,
 } from "./evaluate";
-import { countRelatedBySource } from "./related-count";
+import { countRelatedBySource } from "../related-count";
 import { executeAutomationMoves } from "./move";
 import {
   parseAutomationRule,
@@ -281,6 +281,9 @@ export async function runBoardAutomations(
       available,
       catalog,
       orgId: orgId ?? undefined,
+      // O tick só consome cards/colunas/openTasks — pula badges/conectados
+      // (os fatos das regras são coletados abaixo, gateados pelas condições).
+      lean: true,
     });
   } catch (e) {
     return finish(e instanceof Error ? e.message : String(e));

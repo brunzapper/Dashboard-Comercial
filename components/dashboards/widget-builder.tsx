@@ -1,4 +1,11 @@
-// Versão: 1.21 | Data: 25/07/2026
+// Versão: 1.22 | Data: 28/07/2026
+// v1.22 (28/07/2026): métricas expandidas do kanban — métrica do cabeçalho
+//   com agregação escolhível (columnMetric; indicadores calculados no engine:
+//   "Leads vinculados"/tarefas/idade + campos numéricos), até 3 indicadores
+//   por card (card.badges; ausente = pill legado de tarefas) e campos extras
+//   3-4 expostos (runtime já aceitava 4). Save path grava columnMetric/badges
+//   explicitamente (o rebuild derrubaria chaves não copiadas); `metric` legado
+//   só persiste enquanto columnMetric não existir.
 // v1.21 (25/07/2026): novo tipo 'linha_divisoria' — compartilha o bloco de
 //   config da forma (texto/atalho; kind fixo "linha", sem combobox) e o save
 //   branch (spread do shape preserva o traçado); o combobox de Forma não
@@ -107,8 +114,17 @@ import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import {
   DEFAULT_CUSTOM_COLUMNS,
+  KANBAN_MAX_BADGES,
+  type KanbanAgg,
+  type KanbanMetricSpec,
   type KanbanSettings,
 } from "@/lib/kanban/types";
+import {
+  defaultAggFor,
+  encodeMetricSpec,
+  kanbanMetricOptions,
+  parseMetricSpec,
+} from "@/lib/kanban/metrics";
 import type { AgendaSettings } from "@/lib/agenda/types";
 import { listTaskBoards } from "@/app/(app)/dashboards/kanban-actions";
 import { validateFormula, type Formula } from "@/lib/records/formulas";
@@ -1489,13 +1505,24 @@ export function WidgetBuilder({
                 : k.dateBucket
                   ? { dateField: k.dateField, dateBucket: k.dateBucket }
                   : { groupField: k.groupField }),
-              ...(k.metric ? { metric: k.metric } : {}),
+              // Métrica do cabeçalho: columnMetric vence; `metric` legado só
+              // persiste enquanto o usuário não tocar no select novo.
+              ...(k.columnMetric
+                ? { columnMetric: k.columnMetric }
+                : k.metric
+                  ? { metric: k.metric }
+                  : {}),
               card: {
                 titleField: k.card?.titleField || "title",
                 ...(k.card?.extraFields && k.card.extraFields.filter(Boolean).length > 0
                   ? { extraFields: k.card.extraFields.filter(Boolean).slice(0, 4) }
                   : {}),
                 ...(k.card?.colorField ? { colorField: k.card.colorField } : {}),
+                // Badges explícitos (inclusive [] = sem badges); ausente =
+                // default legado (pill de tarefas abertas).
+                ...(k.card?.badges
+                  ? { badges: k.card.badges.slice(0, KANBAN_MAX_BADGES) }
+                  : {}),
               },
               ...(!isCustomCols && k.columns ? { columns: k.columns } : {}),
               ...(k.appearance ? { appearance: k.appearance } : {}),
@@ -2549,14 +2576,65 @@ export function WidgetBuilder({
                 { value: "source_created_at", label: "Data de criação (origem)" },
                 ...customsOf((f) => f.data_type === "data"),
               ];
-              const metricOptions: ComboboxOption[] = [
+              // Métricas expandidas (28/07/2026): opções compartilhadas com o
+              // popover da página dedicada, na forma serializada
+              // (encodeMetricSpec). O select cobre o legado `metric` (exibido
+              // como "field:<ref>"; ao tocar, grava columnMetric e limpa o
+              // legado).
+              const metricOpts = kanbanMetricOptions(
+                fields,
+                src || undefined,
+                catalog
+              );
+              const headerMetricOptions: ComboboxOption[] = [
                 { value: "", label: "— nenhuma —" },
-                { value: "value", label: "Valor" },
-                { value: "mrr", label: "MRR" },
-                ...customsOf(
-                  (f) => f.data_type === "numero" || f.data_type === "moeda"
-                ),
+                ...metricOpts.fields,
+                ...metricOpts.indicators,
               ];
+              const badgeOptions: ComboboxOption[] = [
+                { value: "", label: "—" },
+                ...metricOpts.indicators,
+                ...metricOpts.fields,
+              ];
+              const headerSpec =
+                k.columnMetric?.spec ??
+                (k.metric ? parseMetricSpec(`field:${k.metric}`) : null);
+              const headerValue = headerSpec ? encodeMetricSpec(headerSpec) : "";
+              const headerAgg: KanbanAgg =
+                k.columnMetric?.agg ??
+                (headerSpec ? defaultAggFor(headerSpec) : "sum");
+              const setHeaderMetric = (v: string) => {
+                const spec = v ? parseMetricSpec(v) : null;
+                patchKanban({
+                  columnMetric: spec ? { spec, agg: headerAgg } : undefined,
+                  metric: undefined,
+                });
+              };
+              // Slots de indicadores do card: `badges` ausente (legado) exibe
+              // o default real (tarefas abertas no slot 1); qualquer toque
+              // grava card.badges explícito.
+              const badgeList = (): KanbanMetricSpec[] =>
+                k.card?.badges ?? [{ kind: "tasks", metric: "open" }];
+              const badgeAt = (i: number): string => {
+                const s = badgeList()[i];
+                return s ? encodeMetricSpec(s) : "";
+              };
+              const setBadge = (i: number, v: string) => {
+                const list: (KanbanMetricSpec | null)[] = badgeList().slice(
+                  0,
+                  KANBAN_MAX_BADGES
+                );
+                while (list.length < KANBAN_MAX_BADGES) list.push(null);
+                list[i] = v ? parseMetricSpec(v) : null;
+                patchKanban({
+                  card: {
+                    ...k.card,
+                    badges: list.filter(
+                      (s): s is KanbanMetricSpec => s != null
+                    ),
+                  },
+                });
+              };
               const cardFieldOptions: ComboboxOption[] = [
                 { value: "", label: "—" },
                 { value: "stage", label: "Etapa" },
@@ -2758,16 +2836,62 @@ export function WidgetBuilder({
                         </div>
                       )}
                       <div className="flex flex-col gap-1.5">
-                        <Label>Métrica no cabeçalho (soma por coluna)</Label>
-                        <Combobox
-                          options={metricOptions}
-                          value={k.metric ?? ""}
-                          onValueChange={(v) =>
-                            patchKanban({ metric: v || undefined })
-                          }
-                          className="w-full"
-                          aria-label="Métrica no cabeçalho"
-                        />
+                        <Label>Métrica no cabeçalho da coluna</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Combobox
+                            options={headerMetricOptions}
+                            value={headerValue}
+                            onValueChange={setHeaderMetric}
+                            className="w-full"
+                            aria-label="Métrica no cabeçalho"
+                          />
+                          {headerSpec ? (
+                            <Combobox
+                              searchable={false}
+                              options={aggOptions}
+                              value={headerAgg}
+                              onValueChange={(v) =>
+                                patchKanban({
+                                  columnMetric: {
+                                    spec: headerSpec,
+                                    agg: v as KanbanAgg,
+                                  },
+                                  metric: undefined,
+                                })
+                              }
+                              className="w-full"
+                              aria-label="Agregação da métrica"
+                            />
+                          ) : null}
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Campos numéricos ou indicadores calculados (registros
+                          conectados por base, tarefas, idade), com a agregação
+                          escolhida por coluna.
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Indicadores do card (até {KANBAN_MAX_BADGES})</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {Array.from(
+                            { length: KANBAN_MAX_BADGES },
+                            (_, i) => (
+                              <Combobox
+                                key={i}
+                                options={badgeOptions}
+                                value={badgeAt(i)}
+                                onValueChange={(v) => setBadge(i, v)}
+                                className="w-full"
+                                aria-label={`Indicador do card ${i + 1}`}
+                              />
+                            )
+                          )}
+                        </div>
+                        <p className="text-muted-foreground text-xs">
+                          Badges no rodapé do card — ex.: “Leads vinculados”
+                          (registros conectados), tarefas abertas/atrasadas ou
+                          idade em dias.
+                        </p>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-1.5">
@@ -2788,6 +2912,26 @@ export function WidgetBuilder({
                             onValueChange={(v) => setExtra(1, v)}
                             className="w-full"
                             aria-label="Campo extra 2"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Campo extra 3 (card)</Label>
+                          <Combobox
+                            options={cardFieldOptions}
+                            value={extra(2)}
+                            onValueChange={(v) => setExtra(2, v)}
+                            className="w-full"
+                            aria-label="Campo extra 3"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Campo extra 4 (card)</Label>
+                          <Combobox
+                            options={cardFieldOptions}
+                            value={extra(3)}
+                            onValueChange={(v) => setExtra(3, v)}
+                            className="w-full"
+                            aria-label="Campo extra 4"
                           />
                         </div>
                       </div>

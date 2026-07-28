@@ -1856,12 +1856,31 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
 - **Tarefas**: escolher "Minhas tarefas (todas visíveis)" ou um quadro de
   tarefas existente. Opções: alerta "vence em breve" (dias, padrão 3) e
   "novas tarefas nascem travadas".
-- **Card**: "Métrica no cabeçalho (soma por coluna)" (nenhuma / Valor / MRR /
-  campo numérico ou moeda), até 4 "campos extras" exibidos no card, "Cor do
-  card por campo".
+- **Card**:
+  - **"Métrica no cabeçalho da coluna"** com **agregação escolhível** (Soma /
+    Contagem / Média / Mínimo / Máximo): um campo numérico (Valor, MRR, campo
+    número/moeda) OU um **indicador calculado** — "**<Base> vinculados**"
+    (ex.: "Leads vinculados": quantos registros daquela base estão conectados
+    ao card — conexões da tela Conexões, nas duas direções e sem duplicar o
+    par; para leads o vínculo direto lead↔negócio também conta), "Tarefas
+    abertas", "Tarefas atrasadas" (abertas com prazo antes de hoje) ou
+    "Idade (dias)" (desde a abertura; sem ela, desde a criação na origem —
+    agrega por média por padrão). O rótulo do cabeçalho ganha o sufixo da
+    agregação quando ela difere do padrão (ex.: "Valor — Média").
+  - **"Indicadores do card" (até 3)**: badges no rodapé de cada card com as
+    mesmas opções (vinculados por base, tarefas abertas/atrasadas, idade,
+    campo numérico). Sem configuração, vale o comportamento de sempre: o
+    badge de tarefas abertas quando houver. Indicador cujo dado não pôde ser
+    consultado fica OCULTO (nunca mostra 0 enganoso) — ex.: tarefas em
+    snapshot público.
+  - Até 4 **"campos extras"** exibidos no card e **"Cor do card por campo"**.
+  - Na página dedicada/cheia, o popover **"Métricas"** (modo registros)
+    configura o mesmo cabeçalho + indicadores sem passar pelo construtor.
 - **Por coluna** (popover de configuração no quadro): ordem, rótulo, cor,
   limite WIP, ocultar (colunas de campo), adicionar/remover (colunas livres/
   tarefas).
+- A visão **Lista** e o **Exportar CSV** ganham colunas dos indicadores
+  configurados (além da métrica do cabeçalho).
 - Aparência completa no §9.3.
 
 ### 12.2.1 Seleção em massa e Automações (27/07/2026)

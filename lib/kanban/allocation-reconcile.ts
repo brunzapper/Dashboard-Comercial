@@ -132,6 +132,9 @@ export async function reconcileKanbanAllocationField(
       available,
       catalog,
       orgId: orgId ?? undefined,
+      // Só colunas/cards importam aqui — pula os fatos de métricas
+      // (badges/conectados), como o tick de automações.
+      lean: true,
     });
 
     // Options do campo = rótulos visíveis em ordem (só a coluna options — os
