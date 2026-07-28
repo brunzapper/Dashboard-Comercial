@@ -439,3 +439,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
   fila em voo (dado mid-flight é stale e descartado) — não remova a guarda
   nem re-introduza `await` no drop. Ver `docs/arquitetura.md` §4.15 e
   invariante 23.
+- **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
+  "Expor a fase como campo do registro" (só Personalizar) cria um
+  `field_definitions` local ("Fase — <nome>", `selecao`) e guarda a chave em
+  `settings.kanban.allocationFieldKey`; o valor (RÓTULO da coluna atual; sem
+  posição = 1ª coluna) vira `custom:<key>` filtrável em todo lugar SEM tocar
+  nas RPCs. `kanban_placements` segue sendo a VERDADE — escrita só pelos choke
+  points (`lib/kanban/allocation-field.ts`/`allocation-reconcile.ts`:
+  dual-write nos 3 escritores de placement + reconcile no enable/saves/
+  pós-sync/tick), sempre service-role com org EXPLÍCITA, carimbos
+  `field_modified_at`+`locally_modified_at`, SEM audit/webhook; mock nunca
+  recebe escrita. A chave pode viver em `settings.kanban` (diferente das
+  automações) SÓ porque o widget-builder a RE-EMITE no branch `isCustomCols` —
+  mantenha isso ao mexer no builder — e `createWidget`/`duplicateBoard`/troca
+  de base fazem STRIP (`normalizeKanbanAllocationOnSave`): cópia com a chave
+  escreveria no campo do quadro ORIGINAL. Campo excluído em /campos
+  auto-desliga o vínculo; desligar/excluir mantém campo e valores. Fiscalizado
+  por `lib/kanban/allocation-field.test.ts`. Ver `docs/arquitetura.md` §4.16 e
+  invariante 24.

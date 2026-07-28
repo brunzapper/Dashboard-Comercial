@@ -108,16 +108,18 @@ export async function runAllKanbanAutomations(
   return { boards, moved, evaluated, errors };
 }
 
-interface OwnerContext {
+export interface KanbanOwnerContext {
   settings: KanbanSettings;
   orgId: string | null;
 }
 
 // Resolve settings.kanban + org do dono. String = erro fatal (PT-BR).
-async function loadOwnerContext(
+// Exportado: o reconcile da alocação-como-campo (allocation-reconcile.ts)
+// resolve o dono pelo MESMO caminho (service role, sem visibilidade por papel).
+export async function loadKanbanOwnerContext(
   db: SupabaseClient,
   owner: AutomationOwner
-): Promise<OwnerContext | string> {
+): Promise<KanbanOwnerContext | string> {
   if (owner.kind === "widget") {
     const { data: w } = await db
       .from("widgets")
@@ -144,6 +146,39 @@ async function loadOwnerContext(
   const kanban = (d.settings as DashboardSettings | null)?.kanban;
   if (!kanban) return "Quadro sem configuração de kanban.";
   return { settings: kanban, orgId: (d.organization_id as string) ?? null };
+}
+
+export interface KanbanServiceContext {
+  catalog: Awaited<ReturnType<typeof loadSources>>;
+  defs: FieldDefinition[];
+  available: ReturnType<typeof buildAvailableFields>;
+}
+
+/**
+ * Catálogo + defs + available da org, com service role (mesma montagem do
+ * runKanbanWidget, sem visibilidade por papel — execução de sistema).
+ * Compartilhado entre as automações e o reconcile da alocação-como-campo.
+ */
+export async function loadKanbanServiceContext(
+  db: SupabaseClient,
+  orgId: string | null
+): Promise<KanbanServiceContext> {
+  const [catalog, correspondences, { data: defRows }] = await Promise.all([
+    loadSources(db, orgId ?? undefined),
+    loadCorrespondences(db, orgId ?? undefined),
+    (() => {
+      let q = db
+        .from("field_definitions")
+        .select(FIELD_DEF_COLS)
+        .or("show_in_builder.eq.true,source_system.eq.core")
+        .order("sort_order", { ascending: true });
+      if (orgId) q = q.eq("organization_id", orgId);
+      return q;
+    })(),
+  ]);
+  const defs = (defRows ?? []) as FieldDefinition[];
+  const available = buildAvailableFields(defs, correspondences, catalog);
+  return { catalog, defs, available };
 }
 
 /**
@@ -224,7 +259,7 @@ export async function runBoardAutomations(
   };
 
   // 2) Config do dono (fora do escopo = fatal visível, nunca silêncio).
-  const ctxOrErr = await loadOwnerContext(db, owner);
+  const ctxOrErr = await loadKanbanOwnerContext(db, owner);
   if (typeof ctxOrErr === "string") return finish(ctxOrErr);
   const { settings, orgId } = ctxOrErr;
   if (settings.mode === "tarefas")
@@ -236,24 +271,9 @@ export async function runBoardAutomations(
   if (rules.length === 0) return finish();
   if (overBudget()) return { ...summary, fatal: "Orçamento de tempo esgotado." };
 
-  // 3) Catálogo + quadro (mesma montagem do runKanbanWidget, sem visibilidade
-  // por papel — a execução é de sistema). period null: regra vê o dataset
-  // inteiro (a barra de período é filtro de VISÃO).
-  const [catalog, correspondences, { data: defRows }] = await Promise.all([
-    loadSources(db, orgId ?? undefined),
-    loadCorrespondences(db, orgId ?? undefined),
-    (() => {
-      let q = db
-        .from("field_definitions")
-        .select(FIELD_DEF_COLS)
-        .or("show_in_builder.eq.true,source_system.eq.core")
-        .order("sort_order", { ascending: true });
-      if (orgId) q = q.eq("organization_id", orgId);
-      return q;
-    })(),
-  ]);
-  const defs = (defRows ?? []) as FieldDefinition[];
-  const available = buildAvailableFields(defs, correspondences, catalog);
+  // 3) Catálogo + quadro. period null: regra vê o dataset inteiro (a barra de
+  // período é filtro de VISÃO).
+  const { catalog, defs, available } = await loadKanbanServiceContext(db, orgId);
 
   let board;
   try {

@@ -379,6 +379,11 @@ export function KanbanPageClient({
                   kanban={kanban}
                   data={data}
                   onSave={persistKanban}
+                  owner={
+                    widgetCtx
+                      ? { kind: "widget", id: widgetCtx.widgetId }
+                      : { kind: "board", id: boardId }
+                  }
                 />
               ) : null}
               {/* Métricas (cabeçalho + indicadores do card) — modo registros. */}

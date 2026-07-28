@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 17/07/2026
+// Versão: 2.1 | Data: 28/07/2026
+// v2.1 (28/07/2026): toggle "Expor a fase como campo do registro" (colunas
+//   Personalizar, invariante 24) — aplica na hora via setKanbanAllocationField
+//   com o `owner` da visão; some sem owner (ex.: quadro sem dono resolvido).
 // Configuração das colunas do kanban: ordem, rótulo, cor, WIP; em quadros de
 // TAREFAS, também a antecedência do alerta de prazo (dueSoonDays) e a trava de
 // exclusão por padrão; em quadros de REGISTROS por campo, o write-back e o
@@ -11,7 +14,7 @@
 //   KANBAN_MAX_COLUMNS; remoção joga os cards na 1ª coluna).
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Plus, Settings2, X } from "lucide-react";
 
@@ -22,7 +25,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { KanbanBoardData } from "@/lib/kanban/data";
+import { setKanbanAllocationField } from "@/lib/kanban/allocation-actions";
+import type { KanbanBoardData, KanbanOwner } from "@/lib/kanban/data";
 import {
   KANBAN_MAX_COLUMNS,
   type KanbanColumnOverride,
@@ -37,17 +41,40 @@ export function ColumnConfigPopover({
   kanban,
   data,
   onSave,
+  owner,
 }: {
   kanban: KanbanSettings;
   data: KanbanBoardData;
   // Persiste settings.kanban inteiro (o chamador faz o spread do resto).
   onSave: (next: KanbanSettings) => Promise<{ ok?: boolean; message?: string }>;
+  // Dono da visão (Personalizar) — habilita o toggle "Expor a fase como campo"
+  // (a action resolve settings/permissões pelo dono). Ausente = sem toggle.
+  owner?: KanbanOwner | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Toggle da alocação-como-campo: aplica NA HORA (setKanbanAllocationField),
+  // separado do "Salvar colunas" (cujo spread já preserva a chave).
+  const [allocPending, startAlloc] = useTransition();
+  const [allocMessage, setAllocMessage] = useState<string | null>(null);
+  const allocationOn = Boolean(kanban.allocationFieldKey);
+
+  function toggleAllocation(checked: boolean) {
+    if (!owner) return;
+    setAllocMessage(null);
+    startAlloc(async () => {
+      const res = await setKanbanAllocationField(owner, checked);
+      setAllocMessage(
+        res.ok
+          ? (res.message ?? null)
+          : (res.message ?? "Falha ao alterar o campo de alocação.")
+      );
+      if (res.ok) router.refresh();
+    });
+  }
   const isTasks = kanban.mode === "tarefas";
   const isCustom = kanban.mode === "registros" && kanban.columnSource === "custom";
   // Conjunto de colunas é DO USUÁRIO (tarefas/Personalizar): adiciona/remove.
@@ -309,7 +336,47 @@ export function ColumnConfigPopover({
                 Novas tarefas nascem travadas (só admin/gestor excluem)
               </label>
             </div>
-          ) : isCustom ? null : (
+          ) : isCustom ? (
+            owner ? (
+              <div className="flex flex-col gap-1 border-t pt-2">
+                <label className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={allocationOn}
+                    disabled={allocPending}
+                    onChange={(e) => toggleAllocation(e.target.checked)}
+                    className="mt-0.5 size-3.5 accent-primary"
+                  />
+                  <span>
+                    Expor a fase como campo do registro
+                    <span className="text-muted-foreground block">
+                      Cria um campo de seleção (“Fase — nome do quadro”)
+                      preenchido com a coluna atual de cada card — registros
+                      sem posição contam na primeira coluna. Use-o em filtros e
+                      widgets como qualquer campo. Desligar (ou excluir o
+                      quadro) mantém o campo e os valores; eles apenas deixam
+                      de ser atualizados.
+                    </span>
+                    {allocationOn ? (
+                      <span className="text-muted-foreground block">
+                        Campo: {kanban.allocationFieldKey} — gerencie ou exclua
+                        em Configurações → Campos.
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+                {allocPending ? (
+                  <p className="text-muted-foreground text-xs" role="status">
+                    Aplicando…
+                  </p>
+                ) : allocMessage ? (
+                  <p className="text-muted-foreground text-xs" role="status">
+                    {allocMessage}
+                  </p>
+                ) : null}
+              </div>
+            ) : null
+          ) : (
             <div className="flex flex-col gap-1 border-t pt-2">
               <label className="flex items-start gap-2 text-xs">
                 <input

@@ -308,6 +308,7 @@ export function KanbanWidget({
             kanban={kanban}
             data={result.data}
             onSave={persistKanban}
+            owner={{ kind: "widget", id: widget.id }}
           />
         ) : null}
         {/* Automações: modo registros, sem colunas por data. */}

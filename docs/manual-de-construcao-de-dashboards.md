@@ -1843,7 +1843,16 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
     (desligada por padrão) propaga a mudança ao Bitrix.
   - **"Períodos de um campo de data"** — colunas por: "Dia da semana" /
     "Mês do ano" / "Mês/Ano".
-  - **"Personalizar (colunas livres)"** — colunas manuais (até 30).
+  - **"Personalizar (colunas livres)"** — colunas manuais (até 30). No
+    popover "Colunas" desses quadros existe o toggle **"Expor a fase como
+    campo do registro"**: cria um campo de seleção "Fase — \<nome do quadro\>"
+    preenchido automaticamente com a coluna atual de cada card (registros sem
+    posição contam na primeira coluna) — use-o em filtros e widgets como
+    qualquer campo. Desligar o toggle (ou excluir o quadro) mantém o campo e
+    os valores; eles apenas deixam de ser atualizados (gerencie/exclua em
+    Configurações → Campos). O campo é derivado: editar o valor à mão não
+    adianta (o quadro o reescreve), e renomear colunas atualiza valores e
+    opções sozinho.
 - **Tarefas**: escolher "Minhas tarefas (todas visíveis)" ou um quadro de
   tarefas existente. Opções: alerta "vence em breve" (dias, padrão 3) e
   "novas tarefas nascem travadas".

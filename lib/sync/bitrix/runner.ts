@@ -18,6 +18,9 @@
 // v1.4 (27/07/2026): automações do kanban pós-job (0109) — job concluído que
 //   escreveu algo reavalia as regras com deadline curto, DEPOIS do auto-match
 //   (contagens de conectados/refs match: veem vínculos frescos). Best-effort.
+// v1.5 (28/07/2026): alocação-como-campo pós-job (invariante 24) — DEPOIS das
+//   automações (que ainda movem cards): registros novos do sync entram na 1ª
+//   coluna e o campo derivado precisa refletir. Best-effort.
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DEAL_PIPELINES } from "@/lib/config/bitrix-field-map";
@@ -25,6 +28,7 @@ import type { FormulaFieldDef } from "@/lib/records/formulas";
 import { runAutoMatchIncremental } from "@/lib/records/matching-engine";
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import { runAllKanbanAutomations } from "@/lib/kanban/automations/engine";
+import { reconcileAllKanbanAllocationFields } from "@/lib/kanban/allocation-reconcile";
 import { BitrixClient } from "@/lib/sync/bitrix/client";
 import { BitrixLookups, type SerializedLookups } from "@/lib/sync/bitrix/lookups";
 import { mapDeal, mapLead, type MappedRecord } from "@/lib/sync/bitrix/mapper";
@@ -109,6 +113,30 @@ async function maybeRunKanbanAutomationsAfterJob(
   } catch (e) {
     console.warn(
       "[sync] automações do kanban pós-job falharam:",
+      (e as Error).message
+    );
+  }
+}
+
+// Alocação-como-campo (invariante 24): registros novos/alterados pelo sync
+// entram na 1ª coluna dos quadros Personalizar — o campo derivado espelha.
+// Roda DEPOIS das automações (que ainda movem cards nesta janela); sobras
+// curam no tick por minuto. Best-effort: falha não derruba o job.
+const ALLOCATION_AFTER_JOB_BUDGET_MS = 10_000;
+
+async function maybeSyncKanbanAllocationAfterJob(
+  db: SupabaseClient,
+  job: JobRow
+): Promise<void> {
+  if (job.totals.inserted + job.totals.updated === 0) return;
+  try {
+    await reconcileAllKanbanAllocationFields(
+      db,
+      Date.now() + ALLOCATION_AFTER_JOB_BUDGET_MS
+    );
+  } catch (e) {
+    console.warn(
+      "[sync] alocação-como-campo pós-job falhou:",
       (e as Error).message
     );
   }
@@ -425,6 +453,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       await maybeAnalyzeAfterJob(db, totals);
       await maybeAutoMatchAfterJob(db, job);
       await maybeRunKanbanAutomationsAfterJob(db, job);
+      await maybeSyncKanbanAllocationAfterJob(db, job);
       return { ...snapshot({ ...job, status: "done" }), done: true, status: "done" };
     }
 
@@ -500,6 +529,7 @@ export async function stepJob(db: SupabaseClient, jobId: string): Promise<StepPr
       await maybeAnalyzeAfterJob(db, totals);
       await maybeAutoMatchAfterJob(db, { ...job, totals });
       await maybeRunKanbanAutomationsAfterJob(db, { ...job, totals });
+      await maybeSyncKanbanAllocationAfterJob(db, { ...job, totals });
     }
 
     return {

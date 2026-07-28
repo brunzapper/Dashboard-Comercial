@@ -21,6 +21,7 @@ import {
   type WriteBackChange,
 } from "@/lib/sync/bitrix/writeback";
 import { emitWebhookEvent } from "@/lib/webhooks/emit";
+import { applyAllocationForSettings } from "../allocation-field";
 import {
   KANBAN_NO_VALUE_KEY,
   KANBAN_OVERFLOW_KEY,
@@ -120,6 +121,19 @@ export async function executeAutomationMoves(
         continue;
       }
       okMoves.push(...slice);
+    }
+    // Alocação como campo (invariante 24): espelha a coluna destino no campo
+    // do registro (settings/org já em mãos — sem recarregar o dono). Nunca
+    // lança; falha não desfaz os placements.
+    if (okMoves.length > 0) {
+      await applyAllocationForSettings(db, {
+        settings,
+        orgId,
+        moves: okMoves.map((m) => ({
+          recordId: m.recordId,
+          targetKey: m.targetKey,
+        })),
+      });
     }
     return finish();
   }

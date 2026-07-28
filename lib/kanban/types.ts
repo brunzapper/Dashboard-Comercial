@@ -1,4 +1,7 @@
-// Versão: 1.3 | Data: 28/07/2026
+// Versão: 1.4 | Data: 28/07/2026
+// v1.4 (28/07/2026): KanbanSettings.allocationFieldKey — alocação do quadro
+//   "Personalizar" exposta como CAMPO do registro (fase filtrável fora do
+//   kanban; ver lib/kanban/allocation-field.ts e invariante 24).
 // v1.3 (28/07/2026): métricas expandidas — KanbanMetricSpec (campo | conectados
 //   de uma base raiz "Leads vinculados" | tarefas abertas/atrasadas | idade),
 //   columnMetric (agregação escolhível no cabeçalho; vence `metric` legado) e
@@ -138,6 +141,15 @@ export interface KanbanSettings {
   // Métrica do cabeçalho da coluna com agregação escolhível (28/07/2026).
   columnMetric?: KanbanColumnMetricSettings;
   card?: KanbanCardSettings;
+  // Alocação como campo (colunas "Personalizar"): field_key do campo de
+  // seleção criado por setKanbanAllocationField (lib/kanban/allocation-actions)
+  // e mantido pelo reconcile (lib/kanban/allocation-*.ts) com o RÓTULO da
+  // coluna atual de cada card. Presença = ligado. Guarda a KEY (não o rótulo):
+  // renomear o quadro não orfana o vínculo. ATENÇÃO: o widget-builder
+  // RECONSTRÓI settings.kanban no save — esta chave é re-emitida explicitamente
+  // lá (branch isCustomCols); createWidget/duplicações fazem STRIP (uma cópia
+  // nunca herda o vínculo — escreveria no campo do quadro original).
+  allocationFieldKey?: string;
   // Write-back (modo registros, agrupamento por VALOR): quando true, mover um
   // card ENFILEIRA a mudança de volta ao Bitrix (só surte efeito em registros de
   // Sync — source_system 'bitrix' com source_id — e em campos mapeados/marcados

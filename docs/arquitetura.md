@@ -1918,6 +1918,57 @@ copiadas) e popover "Métricas" na página dedicada/cheia
 `persistKanban`). Formatação única em `components/kanban/format.ts`
 (dinheiro / "N d" / número pt-BR).
 
+### 4.16 Alocação do kanban como campo do registro (28/07/2026)
+
+Num quadro **Personalizar** a coluna de cada card é dado da VISÃO
+(`kanban_placements`) — invisível a filtros fora do kanban. O toggle **"Expor
+a fase como campo do registro"** (engrenagem "Colunas"; só modo Personalizar —
+nos modos por campo/data a coluna já É um campo) materializa essa alocação num
+campo comum do catálogo: `setKanbanAllocationField`
+(`lib/kanban/allocation-actions.ts`) cria (ou ADOTA, no re-enable — off/on não
+prolifera campos) um `field_definitions` "Fase — \<nome do quadro\>" (`selecao`,
+`options` = rótulos das colunas visíveis em ordem, `applies_to` =
+`record_type` da base, campo LOCAL: `source_system` null + `is_local`) e
+guarda a `field_key` em `settings.kanban.allocationFieldKey`. A partir daí o
+campo entra em `buildAvailableFields` → refs `custom:<key>` em widgets/
+filtros/quick-filters/snapshots **sem nenhuma mudança de RPC/engine**.
+
+Semântica: o campo é ESPELHO derivado — `kanban_placements` segue sendo a
+fonte de verdade. Registro sem posição conta na 1ª coluna (o campo grava o
+rótulo dela: o filtro bate com o que o quadro mostra); chave órfã (coluna
+excluída) idem, via fallback do `runKanban`. Valor gravado = RÓTULO da coluna
+(rótulos duplicados entre colunas = valor ambíguo; documentado, não
+bloqueado). Mock nunca recebe escrita (0051). Edição manual do campo é
+revertida pelo reconcile.
+
+Escrita em DOIS caminhos, ambos service-role com org EXPLÍCITA, carimbo
+`field_modified_at[key]` + `locally_modified_at` (protege da Sync), recalc
+direcionado, e **sem audit_log/webhook** (dado derivado — o reconcile pós-sync
+tocaria milhares de linhas e viraria tempestade de `record.updated`):
+
+- **Dual-write pós-move** (`applyAllocationOnMoves`/`applyAllocationForSettings`,
+  `lib/kanban/allocation-field.ts` + `allocation-reconcile.ts`): os 3
+  escritores de placement (`moveRecordCardsBulk`, executor de automações,
+  `moveRecordCard`) gravam o rótulo destino na mesma rodada — filtro fresco
+  logo após o drag. A autorização é o upsert do placement (RLS por quadro); o
+  campo é efeito derivado de sistema (o movedor pode não ter
+  `edit_record_values`).
+- **Reconcile** (`reconcileKanbanAllocationField`/`…All…`): reusa `runKanban`
+  (period null, como as automações), sincroniza `options` e grava só DIFFS.
+  Gatilhos: backfill do enable, saves de settings com colunas mudadas
+  (`normalizeKanbanAllocationOnSave` — que também faz STRIP da chave ao sair
+  do Personalizar ou trocar de base), hook pós-sync (DEPOIS das automações) e
+  o tick por minuto (catch-all p/ registros criados no app/CSV/Sheets). Campo
+  excluído em /campos → o reconcile LIMPA a chave (self-healing). Desligar o
+  toggle / excluir o quadro mantém campo e valores (param de atualizar).
+
+A chave vive em `settings.kanban` (diferente das automações, que exigiram
+tabela própria) porque o builder a RE-EMITE explicitamente no branch
+`isCustomCols` e a enumeração do tick é um filtro jsonb barato sobre
+`dashboards`/`widgets`. `createWidget` e `duplicateBoard` fazem STRIP da chave
+(cópia nunca herda o vínculo — escreveria no campo do quadro original).
+Fiscalizado por `lib/kanban/allocation-field.test.ts`. Ver invariante 24.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -2184,6 +2235,21 @@ principalmente — para mantenedores humanos.
     Regras vivem em `kanban_automations` (tabela própria): NÃO as mova para
     `settings.kanban` (o widget-builder reconstrói o objeto no save e as
     derrubaria; o tick perderia a enumeração indexada).
+
+24. **Alocação do kanban como campo é ESPELHO derivado, mantido só pelos
+    choke points (§4.16).** `kanban_placements` é a verdade; o campo
+    `settings.kanban.allocationFieldKey` grava o RÓTULO da coluna atual (sem
+    posição = 1ª coluna) via dual-write pós-move + reconcile — SEMPRE
+    service-role com org explícita, com carimbo `field_modified_at`/
+    `locally_modified_at`, SEM audit/webhook, e mock nunca recebe escrita.
+    NUNCA leia `kanban_placements` nos RPCs/engine de widgets para "resolver"
+    a fase — é o campo materializado que dá o filtro. A chave em
+    `settings.kanban` DEVE ser re-emitida pelo widget-builder no save (branch
+    `isCustomCols` — o builder reconstrói o objeto) e SEMPRE sofre STRIP em
+    `createWidget`/`duplicateBoard` e na troca de base/modo
+    (`normalizeKanbanAllocationOnSave`): uma cópia com a chave escreveria no
+    campo do quadro ORIGINAL. Desligar/excluir mantém campo e valores; campo
+    excluído em /campos auto-desliga o vínculo no próximo reconcile.
 
 ## 6. Convenções do projeto
 

@@ -99,6 +99,9 @@ import {
   DEFAULT_TASK_PHASES,
   type KanbanSettings,
 } from "@/lib/kanban/types";
+import { normalizeKanbanAllocationOnSave } from "@/lib/kanban/allocation-field";
+import { reconcileKanbanAllocationField } from "@/lib/kanban/allocation-reconcile";
+import { createServiceClient } from "@/lib/supabase/service";
 import { baseColId, canTypeInColumn } from "@/lib/widgets/quick-table/model";
 import type {
   DashboardSettings,
@@ -288,6 +291,24 @@ export async function createBoard(
   return { ok: true, message: `Kanban "${name}" criado.`, id: boardId };
 }
 
+// Alocação como campo (invariante 24): reconcile best-effort pós-save quando
+// as colunas visíveis mudaram (rename/reorder/hide/remoção reescrevem valores
+// e options do campo). Deadline curto — sobras curam no tick por minuto.
+const ALLOCATION_SAVE_BUDGET_MS = 8_000;
+
+async function reconcileAllocationBestEffort(owner: {
+  kind: "widget" | "board";
+  id: string;
+}): Promise<void> {
+  try {
+    await reconcileKanbanAllocationField(createServiceClient(), owner, {
+      deadline: Date.now() + ALLOCATION_SAVE_BUDGET_MS,
+    });
+  } catch (e) {
+    console.warn("[kanban] reconcile da alocação pós-save falhou:", e);
+  }
+}
+
 // Settings de um kanban dedicado. Mesma semântica de updateDashboardSettings
 // (sobrescreve `settings` INTEIRO — enviar { ...settings, kanban: novo }), mas
 // revalida a rota do kanban. RLS restringe a owner/admin.
@@ -298,12 +319,31 @@ export async function updateBoardSettings(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // Alocação como campo: normaliza a chave no save (gate barato — só roda
+  // quando o payload novo carrega o vínculo).
+  let next = settings;
+  let maintenance = false;
+  if (settings.kanban?.allocationFieldKey) {
+    const { data: prevRow } = await supabase
+      .from("dashboards")
+      .select("settings")
+      .eq("id", boardId)
+      .maybeSingle();
+    const prevKanban =
+      ((prevRow?.settings as DashboardSettings | null) ?? null)?.kanban ?? null;
+    const norm = normalizeKanbanAllocationOnSave(prevKanban, settings.kanban);
+    next = { ...settings, kanban: norm.kanban };
+    maintenance = norm.maintenance;
+  }
   const { error } = await supabase
     .from("dashboards")
-    .update({ settings })
+    .update({ settings: next })
     .eq("id", boardId)
     .eq("kind", "kanban");
   if (error) return { ok: false, message: error.message };
+  if (maintenance) {
+    await reconcileAllocationBestEffort({ kind: "board", id: boardId });
+  }
   revalidatePath(`/kanbans/${boardId}`);
   return { ok: true };
 }
@@ -443,6 +483,10 @@ export async function duplicateBoard(
     remapJsonIds(JSON.stringify(src.settings ?? {}), idMap)
   ) as DashboardSettings;
   delete dashSettings.preset;
+  // Alocação como campo (invariante 24): a cópia nunca herda o vínculo — os
+  // placements copiados são OUTRA visão; manter a chave faria dois quadros
+  // escreverem no mesmo campo.
+  if (dashSettings.kanban) delete dashSettings.kanban.allocationFieldKey;
 
   // Nome único entre os boards que o usuário enxerga: "X (cópia)", "X (cópia 2)"…
   const { data: nameRows } = await supabase.from("dashboards").select("name");
@@ -480,6 +524,8 @@ export async function duplicateBoard(
           remapJsonIds(JSON.stringify(w.settings ?? {}), idMap)
         ) as WidgetSettings;
         delete settings.presetKey;
+        // Alocação como campo: idem ao board — a cópia não herda o vínculo.
+        if (settings.kanban) delete settings.kanban.allocationFieldKey;
         return {
           id: idMap.get(w.id as string),
           dashboard_id: newDashId,
@@ -970,6 +1016,13 @@ export async function createWidget(
     }, 0);
     position = { x: 0, y: maxBottom, w: 59, h: 31 };
   }
+  // Alocação como campo (invariante 24): widget NOVO nunca herda o vínculo
+  // (duplicar/copiar um kanban escreveria no campo do quadro original).
+  let createSettings = input.settings;
+  if (createSettings?.kanban?.allocationFieldKey) {
+    const { allocationFieldKey: _drop, ...kanban } = createSettings.kanban;
+    createSettings = { ...createSettings, kanban };
+  }
   const { data, error } = await supabase
     .from("widgets")
     .insert({
@@ -984,7 +1037,7 @@ export async function createWidget(
       filters: input.filters,
       // Widget Imagem: URLs não-https nunca são persistidas (o settings
       // congelado chega ao viewer público de snapshots).
-      settings: sanitizeImageSettings(input.settings),
+      settings: sanitizeImageSettings(createSettings),
       grid_position: position,
     })
     .select("id")
@@ -1002,6 +1055,25 @@ export async function updateWidget(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // Alocação como campo (invariante 24): o builder pode trocar a base ou o
+  // modo de colunas — normaliza a chave contra o estado anterior.
+  let nextSettings = input.settings;
+  let maintenance = false;
+  if (input.settings?.kanban?.allocationFieldKey) {
+    const { data: prevRow } = await supabase
+      .from("widgets")
+      .select("settings")
+      .eq("id", widgetId)
+      .maybeSingle();
+    const prevKanban =
+      ((prevRow?.settings as WidgetSettings | null) ?? null)?.kanban ?? null;
+    const norm = normalizeKanbanAllocationOnSave(
+      prevKanban,
+      input.settings.kanban
+    );
+    nextSettings = { ...input.settings, kanban: norm.kanban };
+    maintenance = norm.maintenance;
+  }
   const { error } = await supabase
     .from("widgets")
     .update({
@@ -1012,10 +1084,13 @@ export async function updateWidget(
       dimensions: input.dimensions,
       metrics: input.metrics,
       filters: input.filters,
-      settings: sanitizeImageSettings(input.settings),
+      settings: sanitizeImageSettings(nextSettings),
     })
     .eq("id", widgetId);
   if (error) return { ok: false, message: error.message };
+  if (maintenance) {
+    await reconcileAllocationBestEffort({ kind: "widget", id: widgetId });
+  }
   revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
@@ -1615,12 +1690,31 @@ export async function saveWidgetSettings(
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
+  // Alocação como campo (invariante 24): normaliza a chave no save (gate
+  // barato — hot path de aparência segue sem custo quando não há vínculo).
+  let next = settings;
+  let maintenance = false;
+  if (settings.kanban?.allocationFieldKey) {
+    const { data: prevRow } = await supabase
+      .from("widgets")
+      .select("settings")
+      .eq("id", widgetId)
+      .maybeSingle();
+    const prevKanban =
+      ((prevRow?.settings as WidgetSettings | null) ?? null)?.kanban ?? null;
+    const norm = normalizeKanbanAllocationOnSave(prevKanban, settings.kanban);
+    next = { ...settings, kanban: norm.kanban };
+    maintenance = norm.maintenance;
+  }
   const { error } = await supabase
     .from("widgets")
-    .update({ settings: sanitizeImageSettings(settings) })
+    .update({ settings: sanitizeImageSettings(next) })
     .eq("id", widgetId)
     .eq("dashboard_id", dashboardId);
   if (error) return { ok: false, message: error.message };
+  if (maintenance) {
+    await reconcileAllocationBestEffort({ kind: "widget", id: widgetId });
+  }
   return { ok: true };
 }
 

@@ -18,6 +18,7 @@ import { loadSourceLabels } from "@/lib/config/source-labels";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { toFieldOptions, type FieldOption } from "@/lib/widgets/filter-ops";
+import { ensureKanbanConfigGate } from "../config-gate";
 import { KANBAN_OVERFLOW_KEY } from "../types";
 import { runBoardAutomations } from "./engine";
 import {
@@ -33,42 +34,9 @@ export interface AutomationActionState {
   message?: string;
 }
 
-// Resolve o dashboard do dono e confere o gate de configuração (mesmo
-// canConfig da page /kanbans/[id]: admin || dono || board_access 'edit').
-// Leituras com o client do USUÁRIO — RLS prova a visibilidade.
-async function ensureCanConfig(
-  owner: AutomationOwner
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  const session = await getSessionInfo();
-  if (!session) return { ok: false, message: "Sessão expirada." };
-  const supabase = await createClient();
-  let dashboardId = owner.id;
-  if (owner.kind === "widget") {
-    const { data: w } = await supabase
-      .from("widgets")
-      .select("dashboard_id")
-      .eq("id", owner.id)
-      .maybeSingle();
-    if (!w) return { ok: false, message: "Widget não encontrado." };
-    dashboardId = w.dashboard_id as string;
-  }
-  if (session.roles.includes("admin")) return { ok: true };
-  const { data: d } = await supabase
-    .from("dashboards")
-    .select("owner_user_id")
-    .eq("id", dashboardId)
-    .maybeSingle();
-  if (!d) return { ok: false, message: "Quadro não encontrado." };
-  if (d.owner_user_id === session.user.id) return { ok: true };
-  const { data: access } = await supabase
-    .from("board_access")
-    .select("level")
-    .eq("dashboard_id", dashboardId)
-    .eq("user_id", session.user.id)
-    .maybeSingle();
-  if (access?.level === "edit") return { ok: true };
-  return { ok: false, message: "Sem permissão para configurar este quadro." };
-}
+// Gate de configuração do quadro: extraído p/ lib/kanban/config-gate.ts
+// (compartilhado com a alocação-como-campo). Alias local mantém os call sites.
+const ensureCanConfig = ensureKanbanConfigGate;
 
 const ownerCol = (owner: AutomationOwner) =>
   owner.kind === "widget" ? "widget_id" : "board_id";
