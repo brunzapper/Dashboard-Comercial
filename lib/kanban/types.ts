@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 28/07/2026
+// v1.3 (28/07/2026): métricas expandidas — KanbanMetricSpec (campo | conectados
+//   de uma base raiz "Leads vinculados" | tarefas abertas/atrasadas | idade),
+//   columnMetric (agregação escolhível no cabeçalho; vence `metric` legado) e
+//   card.badges (até 3 indicadores por card). Normalização/compat em
+//   lib/kanban/metrics.ts — nada disso exige migração de dados.
 // v1.2 (17/07/2026): KanbanAppearance (aparência do quadro/colunas/cards/
 //   seletor de visão — compartilhada entre widget e página dedicada) e
 //   columnSource "custom" (fases "Personalizar" no modo registros: colunas
@@ -27,6 +32,34 @@ export type KanbanMode = "registros" | "tarefas";
 /** Buckets de data suportados como colunas (mover realoca a data — D9). */
 export type KanbanDateBucket = "weekday" | "month_name" | "month_year";
 
+// ---- Métricas do kanban (28/07/2026) ----
+// Espelho ESTRUTURAL de Aggregation (lib/widgets/types.ts) — sem import daqui
+// para não criar ciclo (o types.ts de widgets importa deste módulo).
+export type KanbanAgg = "sum" | "count" | "avg" | "min" | "max";
+
+/**
+ * Uma métrica de kanban: valor de campo numérico, contagem de registros
+ * CONECTADOS de uma base raiz ("Leads vinculados" — record_matches nas duas
+ * direções + gêmeo related_lead_id quando a base é de leads), tarefas abertas/
+ * atrasadas do registro ou idade em dias (abertura; fallback criação na
+ * origem). Resolvida 100% no engine (lib/kanban/data.ts) — RPCs intocados.
+ */
+export type KanbanMetricSpec =
+  | { kind: "field"; ref: string } // 'value' | 'mrr' | 'custom:<key>' …
+  | { kind: "linked"; source: string } // key de base RAIZ do catálogo
+  | { kind: "tasks"; metric: "open" | "overdue" }
+  | { kind: "age" };
+
+/** Métrica do cabeçalho da coluna, com agregação escolhível. */
+export interface KanbanColumnMetricSettings {
+  spec: KanbanMetricSpec;
+  // Ausente = default do kind (age → 'avg'; demais → 'sum').
+  agg?: KanbanAgg;
+}
+
+// Teto de indicadores (badges) por card.
+export const KANBAN_MAX_BADGES = 3;
+
 export interface KanbanCardSettings {
   // Ref do título (default 'title'). Core ou 'custom:<key>'.
   titleField?: string;
@@ -34,6 +67,10 @@ export interface KanbanCardSettings {
   extraFields?: string[];
   // Campo cujo valor pinta a faixa lateral do card (categórico).
   colorField?: string;
+  // Até KANBAN_MAX_BADGES indicadores no rodapé do card. AUSENTE = badge
+  // legado de tarefas abertas; [] explícito = sem badges (a distinção é da
+  // normalização — lib/kanban/metrics.ts).
+  badges?: KanbanMetricSpec[];
 }
 
 export interface KanbanTasksSettings {
@@ -94,8 +131,12 @@ export interface KanbanSettings {
   // OU agrupar por BUCKET de data de um campo: dateField + dateBucket.
   dateField?: string; // 'closed_at' | 'opened_at' | 'source_created_at' | 'custom:<key>'
   dateBucket?: KanbanDateBucket;
-  // Métrica somada no cabeçalho da coluna ('value' | 'mrr' | 'custom:<key>').
+  // LEGADO: métrica somada no cabeçalho ('value' | 'mrr' | 'custom:<key>').
+  // Linhas novas gravam `columnMetric`; leitura normalizada em
+  // lib/kanban/metrics.ts (columnMetric vence quando presente).
   metric?: string;
+  // Métrica do cabeçalho da coluna com agregação escolhível (28/07/2026).
+  columnMetric?: KanbanColumnMetricSettings;
   card?: KanbanCardSettings;
   // Write-back (modo registros, agrupamento por VALOR): quando true, mover um
   // card ENFILEIRA a mudança de volta ao Bitrix (só surte efeito em registros de
