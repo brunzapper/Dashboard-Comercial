@@ -733,6 +733,10 @@ pode mirar widgets específicos:
 - **"Aplicar a"** — checklist dos widgets afetados. Por padrão TODOS marcados
   e o alvo é dinâmico: widgets criados depois também reagem ao filtro;
   desmarcar exclui um widget do efeito (mesma semântica do Filtro por campo).
+  Em dashboard com 2+ abas a lista vem **agrupada por aba**, com um checkbox
+  por aba: desmarcar a aba poupa a aba inteira do filtro — inclusive widgets
+  criados nela depois — e esmaece os widgets dela (a seleção individual fica
+  guardada e volta a valer se a aba for remarcada).
   Quando um Filtro de período mira um widget, a seleção dele **sobrepõe** a
   barra global para aquele widget. (Filtros salvos antes dessa mudança
   guardavam a lista fixa dos marcados — "congelada" no save; um re-save no
@@ -751,7 +755,11 @@ Painel de busca + filtros estruturados que afeta outros widgets:
   campo com operador "em (lista)" vira multi-seleção por checkbox; um campo
   de seleção vira dropdown com "— todos —".
 - **"Aplicar a"** — checklist dos widgets afetados (desmarcar exclui um
-  widget do efeito do filtro).
+  widget do efeito do filtro). Em dashboard com 2+ abas a lista vem agrupada
+  por aba, com um checkbox por aba — desmarcar a aba poupa a aba INTEIRA do
+  filtro (inclusive widgets criados nela depois). Útil quando o filtro faz
+  sentido numa aba mas zeraria as outras (ex.: um filtro de Pipeline na aba
+  de forecast não deve esvaziar a aba de fechamentos).
 
 A seleção do usuário no Filtro por campo é **individual** (cada usuário tem a
 sua, lembrada entre visitas) e também vive na URL (URL vence). Contraste com

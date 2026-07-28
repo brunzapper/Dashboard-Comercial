@@ -1,4 +1,10 @@
-<!-- Versão: 1.38 | Data: 28/07/2026 -->
+<!-- Versão: 1.39 | Data: 28/07/2026 -->
+<!-- v1.39 (28/07/2026): §4.2/§4.7 — alvo por ABA dos widgets de filtro
+     (settings.excludedTabs em "filtro" e "filtro_campo"; semântica dinâmica:
+     guarda as abas DESMARCADAS, aba/widget novo entra afetado; aba efetiva =
+     effectiveWidgetTab, period-resolve.ts). "Aplicar a" do builder agrupado
+     por aba com checkbox de aba. Aplicado em page/widget-scope/viewer de
+     snapshot/computeWidgetPeriods. RPCs intocados. -->
 <!-- v1.38 (28/07/2026): Redesign da AGENDA (0111): célula com altura fixa por
      densidade + scroll por dia + ordem cronológica (lib/agenda/day-items.ts);
      tasks.due_time_end (hora final); agenda_notes (anotação do dia — post-it;
@@ -498,6 +504,18 @@ guardam; ramo permanente em `computeWidgetPeriods`. Re-save no editor migra
 (grava `excludedTargets` e apaga `targets`); runbook p/ migrar em massa:
 `supabase/apply/backfill-filter-targets.sql` (rodar só APÓS o deploy).
 
+**Alvo por ABA (28/07/2026):** `settings.excludedTabs` (nos DOIS tipos —
+"filtro" e "filtro_campo") guarda as abas DESMARCADAS na seção "Aplicar a"
+(agrupada por aba quando o dashboard tem 2+ abas): widget cuja aba EFETIVA
+(`settings.tab` válido, senão a 1ª — `effectiveWidgetTab`,
+`lib/widgets/period-resolve.ts`) está desmarcada fica fora do alvo, POR CIMA
+de `excludedTargets` e do legado `targets` — inclusive widgets criados na aba
+depois (mesma semântica dinâmica). Aplicado nos MESMOS quatro pontos do
+targeting: `computeWidgetPeriods` (filtro de período), page, `widget-scope`
+(actions deferidas) e viewer de snapshot (snapshot antigo sem a chave segue
+idêntico). Ausente/`[]` = todas as abas; excluir a 1ª aba exclui também os
+widgets sem `settings.tab` (que renderizam nela).
+
 Fontes dinâmicas (`data_sources`, criáveis via UI sem migração) precisam estar
 cobertas no mapa `fieldBySource` do resolver — o `@period` do RPC **exclui**
 `record_types` fora do mapa.
@@ -754,6 +772,11 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   apaga) a célula. `__ff__` fica fora do Desfazer/Refazer (como `__qf__`) e o
   viewer de snapshot segue URL-only por visitante. Ausente/`"user"` =
   comportamento per-user acima, byte-idêntico.
+- **Alvo por ABA do "Filtro por campo" (28/07/2026):** `settings.excludedTabs`
+  poupa abas inteiras do filtro (widget de aba desmarcada não reage, inclusive
+  criado depois) — mesma chave/semântica do filtro de período; ver §4.2
+  ("Alvo por ABA"). Aplicado na page, no `widget-scope` e no viewer de
+  snapshot, sempre pela aba EFETIVA do widget-alvo.
 - **Opções visíveis dos dropdowns de filtro (22/07/2026):** `hiddenOptions`
   (blacklist por entry em `FieldFilterEntry`/`QuickFilterEntry`,
   `widgets.settings` jsonb — sem migração) oculta opções dos dropdowns do

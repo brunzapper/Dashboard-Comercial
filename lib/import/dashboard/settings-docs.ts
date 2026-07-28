@@ -248,6 +248,7 @@ export const WIDGET_SETTINGS_DOC = {
   fields: `"fields": [ { "field": "stage" }, { "field": "custom:fonte" } ],  // widget "filtro_campo": campos expostos como controles`,
   searchFields: `"searchFields": ["title"],                 // widget "filtro_campo": colunas de texto da busca livre`,
   excludedTargets: null, // widgets desmarcados na edição do "filtro" e do "filtro_campo" — estado de UI; ausente = atinge todos
+  excludedTabs: null, // abas desmarcadas na edição do "filtro" e do "filtro_campo" — estado de UI; ausente = todas as abas
   valueScope: null, // escopo do valor do filtro_campo ("all" compartilhado | "user") — o default por usuário serve
   rowMode: `"rowMode": "records",                      // tabela: lista de registros individuais`,
   rowSource: `"rowSource": "records",                    // modo lista: "records" (default) | "responsibles" | "operations"`,

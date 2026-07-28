@@ -240,4 +240,67 @@ describe("computeWidgetPeriods", () => {
     const out = r.computeWidgetPeriods(dataWidgets, [fw]);
     expect(out.periodSourceByWidget).toEqual({ w1: "filter", w2: "filter" });
   });
+
+  describe("excludedTabs (alvo por aba)", () => {
+    const dashSettings = {
+      tabs: [
+        { id: "t1", name: "Aba 1" },
+        { id: "t2", name: "Aba 2" },
+      ],
+    } as DashboardSettings;
+    // w1 sem aba (cai na 1ª), w2 na t2, w3 nasceu depois na t2.
+    const tabbed = [
+      widget("w1"),
+      widget("w2", { tab: "t2" }),
+      widget("w3", { tab: "t2" }),
+    ];
+
+    it("aba desmarcada fica fora do alvo (inclusive widgets futuros dela)", () => {
+      const r = resolver({ sp: { pf_f1: "hoje" }, dashSettings });
+      const fw = widget("f1", { field: "closed_at", excludedTabs: ["t2"] });
+      const out = r.computeWidgetPeriods(tabbed, [fw]);
+      expect(out.periodSourceByWidget).toEqual({
+        w1: "filter",
+        w2: "bar",
+        w3: "bar",
+      });
+    });
+
+    it("1ª aba desmarcada exclui também widget sem settings.tab", () => {
+      const r = resolver({ sp: { pf_f1: "hoje" }, dashSettings });
+      const fw = widget("f1", { field: "closed_at", excludedTabs: ["t1"] });
+      const out = r.computeWidgetPeriods(tabbed, [fw]);
+      expect(out.periodSourceByWidget).toEqual({
+        w1: "bar",
+        w2: "filter",
+        w3: "filter",
+      });
+    });
+
+    it("aplica-se por cima da whitelist legada `targets`", () => {
+      const r = resolver({ sp: { pf_f1: "hoje" }, dashSettings });
+      const fw = widget("f1", {
+        field: "closed_at",
+        targets: ["w1", "w2"],
+        excludedTabs: ["t2"],
+      });
+      const out = r.computeWidgetPeriods(tabbed, [fw]);
+      expect(out.periodSourceByWidget).toEqual({
+        w1: "filter",
+        w2: "bar",
+        w3: "bar",
+      });
+    });
+
+    it("chave ausente/vazia = comportamento atual (todas as abas)", () => {
+      const r = resolver({ sp: { pf_f1: "hoje" }, dashSettings });
+      const fw = widget("f1", { field: "closed_at", excludedTabs: [] });
+      const out = r.computeWidgetPeriods(tabbed, [fw]);
+      expect(out.periodSourceByWidget).toEqual({
+        w1: "filter",
+        w2: "filter",
+        w3: "filter",
+      });
+    });
+  });
 });

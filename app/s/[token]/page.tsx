@@ -488,8 +488,12 @@ export default async function SnapshotPage({
         fwSourceKeys.length > 0
           ? fs.map((f) => (isUnifiedFilter(f) ? f : { ...f, sources: fwSourceKeys }))
           : fs;
+      // Alvo por ABA (settings.excludedTabs) — mesma regra da page; snapshot
+      // antigo sem a chave segue idêntico.
+      const excludedTabs = fw.settings?.excludedTabs ?? [];
       for (const w of dataWidgets) {
         if (excluded.has(w.id)) continue;
+        if (excludedTabs.includes(resolver.widgetTab(w))) continue;
         if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
           continue;
         addViewFilters(w.id, targeted);

@@ -33,6 +33,28 @@ function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
+// Aba EFETIVA de um widget (settings.tab válido, senão a 1ª aba) — a mesma
+// regra do dashboard-client. É por ela que os widgets de filtro decidem o
+// alvo por aba (settings.excludedTabs) na page, no widget-scope e no viewer
+// de snapshot; o resolver interno (widgetTab) usa esta função.
+export function effectiveWidgetTab(
+  w: Widget,
+  tabs: { id: string }[]
+): string {
+  const t = w.settings?.tab;
+  return t && tabs.some((tab) => tab.id === t) ? t : (tabs[0]?.id ?? "");
+}
+
+/** O widget-alvo está numa aba desmarcada do filtro (excludedTabs)? */
+export function isTabExcluded(
+  w: Widget,
+  excludedTabs: string[] | undefined,
+  tabs: { id: string }[]
+): boolean {
+  if (!excludedTabs || excludedTabs.length === 0) return false;
+  return excludedTabs.includes(effectiveWidgetTab(w, tabs));
+}
+
 export interface PeriodPrefs {
   lastPeriod?: SavedPeriod;
   lastPeriodByTab?: Record<string, SavedPeriod>;
@@ -99,12 +121,8 @@ export function createPeriodResolver(input: {
   // Escopo e abas (a "aba efetiva" de um widget espelha o dashboard-client).
   const scope: PeriodScope = periodBar?.scope === "tab" ? "tab" : "global";
   const tabs = dashSettings.tabs ?? [];
-  const tabIds = new Set(tabs.map((t) => t.id));
   const firstTabId = tabs[0]?.id ?? "";
-  const widgetTab = (w: Widget) => {
-    const t = w.settings?.tab;
-    return t && tabIds.has(t) ? t : firstTabId;
-  };
+  const widgetTab = (w: Widget) => effectiveWidgetTab(w, tabs);
   const widgetBucket = (w: Widget) => (scope === "tab" ? widgetTab(w) : "");
 
   // Defaults (campo + período) de um bucket quando a URL está vazia:
@@ -199,12 +217,21 @@ export function createPeriodResolver(input: {
       // `excludedTargets` presente (mesmo []) = alvo dinâmico "todos menos
       // estes" (widgets novos entram sozinhos). `targets` não-vazio é a
       // whitelist LEGADA — snapshots congelados a guardam; ramo permanente.
+      // `excludedTabs` (abas desmarcadas) aplica-se POR CIMA dos dois ramos:
+      // widget cuja aba efetiva está desmarcada fica fora do alvo.
       const excluded = s.excludedTargets;
-      const targets = excluded
-        ? dataWidgets.map((w) => w.id).filter((id) => !excluded.includes(id))
-        : s.targets && s.targets.length > 0
-          ? s.targets
-          : dataWidgets.map((w) => w.id);
+      const inTab = new Set(
+        dataWidgets
+          .filter((w) => !isTabExcluded(w, s.excludedTabs, tabs))
+          .map((w) => w.id)
+      );
+      const targets = (
+        excluded
+          ? dataWidgets.map((w) => w.id).filter((id) => !excluded.includes(id))
+          : s.targets && s.targets.length > 0
+            ? s.targets
+            : dataWidgets.map((w) => w.id)
+      ).filter((id) => inTab.has(id));
       for (const t of targets) {
         if (t in periodByWidget) {
           periodByWidget[t] = pWithMap;

@@ -260,6 +260,78 @@ function newQuickId(): string {
   return `qf_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+// Lista de alvos dos widgets de filtro ("Aplicar a"). Dashboard sem abas (ou
+// com uma só): checkboxes planos, como sempre. Com 2+ abas, agrupa por aba
+// EFETIVA (settings.tab válido, senão a 1ª — regra de effectiveWidgetTab) e
+// expõe um checkbox de ABA (settings.excludedTabs): desmarcá-lo tira a aba
+// inteira do alvo — inclusive widgets criados nela depois — e esmaece os
+// widgets dela (a seleção individual é preservada, só deixa de valer).
+function FilterTargetsPicker({
+  tabs,
+  items,
+  excludedTargets,
+  excludedTabs,
+  onToggleTarget,
+  onToggleTab,
+}: {
+  tabs: { id: string; name: string }[];
+  items: Widget[];
+  excludedTargets: string[];
+  excludedTabs: string[];
+  onToggleTarget: (id: string) => void;
+  onToggleTab: (id: string) => void;
+}) {
+  const itemRow = (s: Widget, disabled = false) => (
+    <label
+      key={s.id}
+      className={`flex items-center gap-2 text-sm${disabled ? " opacity-50" : ""}`}
+    >
+      <Checkbox
+        checked={!disabled && !excludedTargets.includes(s.id)}
+        disabled={disabled}
+        onCheckedChange={() => onToggleTarget(s.id)}
+      />
+      {s.title ?? "Sem título"}
+    </label>
+  );
+  if (tabs.length < 2) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border p-3">
+        {items.map((s) => itemRow(s))}
+      </div>
+    );
+  }
+  const firstTabId = tabs[0]?.id ?? "";
+  const tabOf = (w: Widget) => {
+    const t = w.settings?.tab;
+    return t && tabs.some((x) => x.id === t) ? t : firstTabId;
+  };
+  return (
+    <div className="flex flex-col gap-3 rounded-md border p-3">
+      {tabs.map((tab) => {
+        const tabItems = items.filter((s) => tabOf(s) === tab.id);
+        const tabOff = excludedTabs.includes(tab.id);
+        return (
+          <div key={tab.id} className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <Checkbox
+                checked={!tabOff}
+                onCheckedChange={() => onToggleTab(tab.id)}
+              />
+              {tab.name || "Aba sem nome"}
+            </label>
+            {tabItems.length > 0 ? (
+              <div className="ml-6 flex flex-col gap-2">
+                {tabItems.map((s) => itemRow(s, tabOff))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function WidgetBuilder({
   dashboardId,
   available,
@@ -792,6 +864,18 @@ export function WidgetBuilder({
 
   function toggleFilterExcluded(id: string) {
     setFilterExcluded((prev) =>
+      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+    );
+  }
+
+  // Abas DESMARCADAS do alvo (settings.excludedTabs, semântica dinâmica: aba
+  // nova entra afetada) — compartilhado pelos widgets "filtro" e
+  // "filtro_campo" (só o branch do tipo ativo salva).
+  const [excludedTabs, setExcludedTabs] = useState<string[]>(
+    widget?.settings?.excludedTabs ?? []
+  );
+  function toggleExcludedTab(id: string) {
+    setExcludedTabs((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
   }
@@ -1440,6 +1524,8 @@ export function WidgetBuilder({
         kind: "period",
         field: filterField,
         excludedTargets: filterExcluded,
+        // Chave ausente = todas as abas afetadas (settings enxutos).
+        ...(excludedTabs.length ? { excludedTabs } : {}),
         defaultPreset: filterPreset,
       };
       const input = {
@@ -1590,6 +1676,8 @@ export function WidgetBuilder({
           }),
         searchFields: searchFieldRows.filter(Boolean),
         excludedTargets,
+        // Chave ausente = todas as abas afetadas (settings enxutos).
+        ...(excludedTabs.length ? { excludedTabs } : {}),
         // Chave ausente = por usuário, o default (settings enxutos).
         ...(ffSharedValue ? { valueScope: "all" as const } : {}),
       };
@@ -2150,27 +2238,24 @@ export function WidgetBuilder({
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
                   Por padrão o filtro controla o dashboard inteiro — inclusive
-                  widgets criados depois. Desmarque os que não devem reagir.
+                  widgets criados depois. Desmarque os que não devem reagir
+                  {tabs.length > 1
+                    ? "; desmarcar uma aba poupa a aba inteira (inclusive widgets futuros dela)."
+                    : "."}
                 </p>
                 {targetable.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
                     Nenhum outro widget para vincular ainda.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2 rounded-md border p-3">
-                    {targetable.map((s) => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={!filterExcluded.includes(s.id)}
-                          onCheckedChange={() => toggleFilterExcluded(s.id)}
-                        />
-                        {s.title ?? "Sem título"}
-                      </label>
-                    ))}
-                  </div>
+                  <FilterTargetsPicker
+                    tabs={tabs}
+                    items={targetable}
+                    excludedTargets={filterExcluded}
+                    excludedTabs={excludedTabs}
+                    onToggleTarget={toggleFilterExcluded}
+                    onToggleTab={toggleExcludedTab}
+                  />
                 )}
               </div>
             </>
@@ -2337,27 +2422,24 @@ export function WidgetBuilder({
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
                   Por padrão atinge todos os widgets com base sobreposta.
-                  Desmarque os que não devem reagir.
+                  Desmarque os que não devem reagir
+                  {tabs.length > 1
+                    ? "; desmarcar uma aba poupa a aba inteira (inclusive widgets futuros dela)."
+                    : "."}
                 </p>
                 {affectedSiblings.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
                     Nenhum widget de dados compatível ainda.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2 rounded-md border p-3">
-                    {affectedSiblings.map((s) => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={!excludedTargets.includes(s.id)}
-                          onCheckedChange={() => toggleExcluded(s.id)}
-                        />
-                        {s.title ?? "Sem título"}
-                      </label>
-                    ))}
-                  </div>
+                  <FilterTargetsPicker
+                    tabs={tabs}
+                    items={affectedSiblings}
+                    excludedTargets={excludedTargets}
+                    excludedTabs={excludedTabs}
+                    onToggleTarget={toggleExcluded}
+                    onToggleTab={toggleExcludedTab}
+                  />
                 )}
               </div>
 

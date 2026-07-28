@@ -307,6 +307,11 @@ export interface FilterSettings {
   // "todos os widgets de dados, inclusive futuros, menos estes" (mesma
   // semântica do filtro_campo). Vence `targets`.
   excludedTargets?: string[];
+  // Ids de ABAS desmarcadas na edição: widgets cuja aba efetiva (settings.tab
+  // válido, senão a 1ª aba) está aqui ficam fora do alvo — por cima de
+  // `excludedTargets` E do legado `targets`. Ausente/[] = todas as abas;
+  // aba nova entra afetada por padrão (mesma semântica dinâmica).
+  excludedTabs?: string[];
   field?: string; // campo de data PRIMÁRIO (visível/selecionável; default closed_at)
   // Override do campo de data por fonte (secundária/terciária/…): a mesma
   // seleção de calendário filtra cada fonte pela sua coluna de data. Ausente
@@ -335,6 +340,9 @@ export interface FieldFilterSettings {
   fields?: FieldFilterEntry[]; // campos que o widget expõe como controles
   searchFields?: string[]; // colunas de texto da busca livre (default ['title'])
   excludedTargets?: string[]; // ids de widgets desmarcados (padrão = todos p/ fonte)
+  // Ids de ABAS desmarcadas (mesma semântica do excludedTabs do widget
+  // "filtro": aba efetiva do alvo fora do filtro; ausente/[] = todas).
+  excludedTabs?: string[];
   // Escopo do VALOR aplicado: "all" = seleção compartilhada entre todos os
   // usuários do dashboard (célula __ff__/sel de dashboard_table_cells, como os
   // filtros rápidos __qf__); ausente/"user" = por usuário

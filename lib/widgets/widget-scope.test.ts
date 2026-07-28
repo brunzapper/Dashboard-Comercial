@@ -44,7 +44,11 @@ const baseArgs = (w: Widget) => ({
   sources: BUILTIN_SOURCES,
   prefSettings: {},
   sp: {},
-  resolver: { resolveFieldBySource: () => ({}) },
+  resolver: {
+    resolveFieldBySource: () => ({}),
+    // Mesma regra de effectiveWidgetTab: settings.tab válido, senão a 1ª.
+    widgetTab: (x: Widget) => (x.settings?.tab === "t2" ? "t2" : "t1"),
+  },
   period: null as never,
 });
 
@@ -130,5 +134,47 @@ describe("resolveWidgetViewScope", () => {
     expect(out.filters).toEqual([]);
     expect(out.period).toBe(period);
     expect(queries).toHaveLength(0);
+  });
+
+  it("filtro_campo com excludedTabs poupa widget de aba desmarcada (e atinge as demais)", async () => {
+    const { db } = fakeSupabase({});
+    const ffState = encodeURIComponent(
+      JSON.stringify({
+        q: "",
+        filters: [{ field: "pipeline", op: "eq", value: "Enterprise" }],
+      })
+    );
+    const fw = (excludedTabs?: string[]): Widget =>
+      ({
+        id: "ff1",
+        dashboard_id: "d1",
+        visual_type: "filtro_campo",
+        sources: [],
+        settings: { fields: [{ field: "pipeline" }], excludedTabs },
+      }) as unknown as Widget;
+    const run = (w: Widget, filter: Widget) =>
+      resolveWidgetViewScope(db, session([]), {
+        ...baseArgs(w),
+        widgets: [w, filter],
+        sp: { ff_ff1: ffState },
+      });
+
+    // Widget na aba desmarcada (t2) não reage ao filtro.
+    const out1 = await run(widget({ tab: "t2" }), fw(["t2"]));
+    expect(out1.filters).toEqual([]);
+    // Widget de outra aba segue atingido.
+    const out2 = await run(widget({ tab: "t1" }), fw(["t2"]));
+    expect(out2.filters).toContainEqual({
+      field: "pipeline",
+      op: "eq",
+      value: "Enterprise",
+    });
+    // Chave ausente = comportamento atual (todas as abas).
+    const out3 = await run(widget({ tab: "t2" }), fw(undefined));
+    expect(out3.filters).toContainEqual({
+      field: "pipeline",
+      op: "eq",
+      value: "Enterprise",
+    });
   });
 });

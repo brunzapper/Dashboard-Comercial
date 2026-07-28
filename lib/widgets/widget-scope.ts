@@ -129,10 +129,11 @@ export interface WidgetViewScopeArgs {
   // searchParams já no shape da page (valores string | string[]).
   sp: Record<string, string | string[] | undefined>;
   // Resolver de período da MESMA renderização (resolveFieldBySource p/ o mapa
-  // por fonte dos campos unificados).
+  // por fonte dos campos unificados; widgetTab p/ o alvo por aba dos
+  // filtro_campo — settings.excludedTabs).
   resolver: Pick<
     ReturnType<typeof createPeriodResolver>,
-    "resolveFieldBySource"
+    "resolveFieldBySource" | "widgetTab"
   >;
   // Período efetivo do widget JÁ resolvido (periodByWidget) — pode ser anulado
   // aqui quando um filtro rápido de período assume o mesmo campo.
@@ -328,6 +329,10 @@ export async function resolveWidgetViewScope(
     if (fs.length === 0) continue;
     const excluded = new Set(fw.settings?.excludedTargets ?? []);
     if (excluded.has(widget.id)) continue;
+    // Alvo por ABA (settings.excludedTabs): widget cuja aba efetiva foi
+    // desmarcada não reage a este filtro — espelho da page.
+    if (fw.settings?.excludedTabs?.includes(args.resolver.widgetTab(widget)))
+      continue;
     const fwSources = (fw.sources ?? []) as string[];
     const isUnifiedFilter = (f: WidgetFilter) =>
       f.field.split("|").some((p) => p.startsWith("unified:"));

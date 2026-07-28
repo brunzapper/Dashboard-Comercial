@@ -848,8 +848,12 @@ export default async function DashboardPage({
       fwSourceKeys.length > 0
         ? fs.map((f) => (isUnifiedFilter(f) ? f : { ...f, sources: fwSourceKeys }))
         : fs;
+    // Alvo por ABA (settings.excludedTabs): widget cuja aba efetiva foi
+    // desmarcada não reage a este filtro (mesma regra do widget-scope).
+    const excludedTabs = fw.settings?.excludedTabs ?? [];
     for (const w of dataWidgets) {
       if (excluded.has(w.id)) continue;
+      if (excludedTabs.includes(widgetTab(w))) continue;
       if (!unified && !sourcesOverlap(fwSources, (w.sources ?? []) as string[]))
         continue;
       addViewFilters(w.id, targeted);
