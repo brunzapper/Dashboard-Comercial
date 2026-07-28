@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 26/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // SUB-FONTES (0078): CRUD das sub-fontes (fonte derivada de uma pai, recortada
 // por um filtro). Tabela + Sheet com formulário: pai (imutável na edição), nome,
 // nome curto, campo de período e um editor de CONDIÇÕES (field/op/value) que
@@ -6,6 +6,11 @@
 // campos do filtro dependem da PAI escolhida (fieldOptionsByParent, montado no
 // servidor a partir de applies_to). Escrita = manage_field_definitions (admin).
 // v1.1 (26/07/2026): ↑/↓ de ordem manual dentro da pai (sort_order, 0107).
+// v1.2 (28/07/2026): o picker de campo de período usa a lista "só colunas com
+//   dados" da PAI (periodOptionsByParent, montada no servidor com probe
+//   não-mock — 0110); o valor salvo da SUB é injetado aqui (o mapa é por pai)
+//   com rótulo de dateFieldOptionsByParent. Opções/rótulos canônicos em
+//   lib/source-date-fields.ts.
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
@@ -30,6 +35,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  CORE_PERIOD_FIELD_OPTIONS,
+  ensurePeriodOption,
+} from "@/lib/source-date-fields";
 import { sourceLabel, type SourceDef } from "@/lib/sources";
 import type { WidgetFilter } from "@/lib/widgets/types";
 import {
@@ -41,15 +50,6 @@ import {
 } from "@/app/(app)/registros/bases/actions";
 
 const initial: SourceActionState = {};
-
-const PERIOD_FIELD_OPTIONS: ComboboxOption[] = [
-  { value: "source_created_at", label: "Data de criação (origem)" },
-  { value: "closed_at", label: "Data de fechamento" },
-  { value: "opened_at", label: "Data de abertura" },
-  { value: "source_modified_at", label: "Data de modificação (origem)" },
-  { value: "created_at", label: "Criado no app" },
-  { value: "updated_at", label: "Atualizado no app" },
-];
 
 // Operadores do editor (espelham SUB_FILTER_OPS na action).
 const OP_OPTIONS: ComboboxOption[] = [
@@ -107,13 +107,16 @@ function SubSourceForm({
   roots,
   fieldOptionsByParent,
   dateFieldOptionsByParent,
+  periodOptionsByParent,
   onDone,
 }: {
   sub?: SourceDef;
   roots: SourceDef[];
   fieldOptionsByParent: Record<string, ComboboxOption[]>;
-  // Campos personalizados de DATA da pai (0082): opções extras do período.
+  // Campos personalizados de DATA da pai (0082): fonte de RÓTULOS do período.
   dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
+  // Lista "só colunas com dados" da pai (0110, probe no servidor).
+  periodOptionsByParent?: Record<string, ComboboxOption[]>;
   onDone?: () => void;
 }) {
   const isEdit = Boolean(sub);
@@ -137,6 +140,17 @@ function SubSourceForm({
 
   const fieldOptions = fieldOptionsByParent[parentKey] ?? [];
   const filterJson = useMemo(() => JSON.stringify(toFilter(conds)), [conds]);
+  // O valor salvo DA SUB entra aqui (a lista probed é por PAI), com rótulo do
+  // catálogo de datas da pai; campo excluído degrada para o valor cru.
+  const periodOptions = useMemo(
+    () =>
+      ensurePeriodOption(
+        periodOptionsByParent?.[parentKey] ?? CORE_PERIOD_FIELD_OPTIONS,
+        periodField,
+        dateFieldOptionsByParent?.[parentKey]
+      ),
+    [periodOptionsByParent, dateFieldOptionsByParent, parentKey, periodField]
+  );
 
   const setCond = (i: number, patch: Partial<Cond>) =>
     setConds((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -199,15 +213,16 @@ function SubSourceForm({
       <div className="flex flex-col gap-1.5">
         <Label>Campo de data do filtro de período</Label>
         <Combobox
-          options={[
-            ...PERIOD_FIELD_OPTIONS,
-            ...(dateFieldOptionsByParent?.[parentKey] ?? []),
-          ]}
+          options={periodOptions}
           value={periodField}
           onValueChange={setPeriodField}
           searchable={false}
           aria-label="Campo de data do filtro de período"
         />
+        <p className="text-muted-foreground text-xs">
+          Só aparecem campos de data com ao menos um registro preenchido na
+          base pai (mocks não contam).
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -338,10 +353,12 @@ export function SubSourcesManager({
   sources,
   fieldOptionsByParent,
   dateFieldOptionsByParent,
+  periodOptionsByParent,
 }: {
   sources: SourceDef[];
   fieldOptionsByParent: Record<string, ComboboxOption[]>;
   dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
+  periodOptionsByParent?: Record<string, ComboboxOption[]>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
@@ -449,6 +466,7 @@ export function SubSourcesManager({
               roots={roots}
               fieldOptionsByParent={fieldOptionsByParent}
               dateFieldOptionsByParent={dateFieldOptionsByParent}
+              periodOptionsByParent={periodOptionsByParent}
               onDone={() => setOpen(false)}
             />
           </div>

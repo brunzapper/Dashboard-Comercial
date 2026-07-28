@@ -1,4 +1,9 @@
-// Versão: 2.4 | Data: 26/07/2026
+// Versão: 2.5 | Data: 28/07/2026
+// v2.5 (28/07/2026): campo de período CUSTOM nas BASES (0110, espelho da 0082
+//   das subs) — create/updateSource aceitam 'custom:<field_key>' e
+//   validateCustomPeriodField (agora usado por bases E subs) confere também
+//   que o campo NÃO é override core (0086) e que o applies_to cobre o
+//   record_type da base (fecha o gap: sub aceitava campo de outra base).
 // v2.4 (26/07/2026): PASTAS (0107) — CRUD de source_folders (agrupamento de
 //   EXIBIÇÃO das bases) + ordenação manual ↑/↓ (sort_order) de pastas, bases
 //   (dentro da pasta) e sub-bases (dentro da pai). Excluir pasta devolve as
@@ -29,6 +34,7 @@ import { requireRole } from "@/lib/auth/session";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { slugify } from "@/lib/records/slug";
 import { SOURCE_LABELS_CONFIG_KEY } from "@/lib/config/source-labels";
 import { resequenceAfterMove } from "@/lib/source-folders";
@@ -101,12 +107,13 @@ const PERIOD_FIELDS = new Set([
   "updated_at",
 ]);
 
-// Sub-fontes (0082) também aceitam campo personalizado de DATA como campo de
-// período ('custom:<field_key>' — ex.: Data Reunião). Formato validado aqui;
-// a existência/tipo do campo é conferida na action (validateCustomPeriodField).
+// Bases (0110) e sub-fontes (0082) também aceitam campo personalizado de DATA
+// como campo de período ('custom:<field_key>' — ex.: Data Reunião). Formato
+// validado aqui; existência/tipo/applies_to do campo são conferidos na action
+// (validateCustomPeriodField).
 const CUSTOM_PERIOD_RE = /^custom:[A-Za-z0-9_]{1,60}$/;
 
-function isSubPeriodField(v: string): boolean {
+function isPeriodFieldValue(v: string): boolean {
   return PERIOD_FIELDS.has(v) || CUSTOM_PERIOD_RE.test(v);
 }
 
@@ -159,7 +166,7 @@ function readSourceForm(formData: FormData): {
       error: "Informe o nome da base.",
     };
   }
-  if (!PERIOD_FIELDS.has(periodField)) {
+  if (!isPeriodFieldValue(periodField)) {
     return {
       label,
       shortLabel,
@@ -226,6 +233,11 @@ export async function createSource(
   const supabase = await createClient();
   const folderError = await validateFolderId(supabase, folderId);
   if (folderError) return { ok: false, message: folderError };
+  // Base nova: record_type = key identidade (na prática só campo global passa
+  // — applies_to restrito nunca referencia um record_type que ainda não
+  // existe; o form de criação oferece só as colunas core de todo modo).
+  const periodError = await validateCustomPeriodField(supabase, periodField, key);
+  if (periodError) return { ok: false, message: periodError };
   // Colisão com key OU record_type existentes (ex.: fonte "Lead" colidiria
   // com o record_type 'lead' do builtin leads).
   const { data: existing } = await supabase
@@ -291,6 +303,24 @@ export async function updateSource(
   const supabase = await createClient();
   const folderError = await validateFolderId(supabase, folderId);
   if (folderError) return { ok: false, message: folderError };
+  // Campo custom (0110): o applies_to é conferido contra o record_type da
+  // base (fetch só quando necessário — core não consulta nada).
+  let recordType: string | null = null;
+  if (periodField.startsWith("custom:")) {
+    const { data: row } = await supabase
+      .from("data_sources")
+      .select("record_type")
+      .eq("key", key)
+      .maybeSingle();
+    if (!row) return { ok: false, message: "Base não encontrada." };
+    recordType = (row.record_type as string) || key;
+  }
+  const periodError = await validateCustomPeriodField(
+    supabase,
+    periodField,
+    recordType
+  );
+  if (periodError) return { ok: false, message: periodError };
   const { error: updateError } = await supabase
     .from("data_sources")
     .update({
@@ -411,7 +441,7 @@ function readSubSourceForm(formData: FormData): {
   if (!parentKey) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a base pai." };
   }
-  if (!isSubPeriodField(periodField)) {
+  if (!isPeriodFieldValue(periodField)) {
     return { label, shortLabel, periodField, parentKey, filter, error: "Campo de período inválido." };
   }
   if (filter.length === 0) {
@@ -420,21 +450,35 @@ function readSubSourceForm(formData: FormData): {
   return { label, shortLabel, periodField, parentKey, filter };
 }
 
-// Campo 'custom:<key>' como período: o campo precisa existir e ser de DATA.
+// Campo 'custom:<key>' como período (bases 0110 e subs 0082): o campo precisa
+// existir, ser de DATA, não ser um override core (0086 — `custom:closed_at`
+// resolveria custom_fields->>'closed_at', sempre null) e, quando restrito por
+// applies_to, cobrir o record_type da base. recordType null pula esse último
+// check (degradação graciosa).
 async function validateCustomPeriodField(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  periodField: string
+  periodField: string,
+  recordType: string | null
 ): Promise<string | null> {
   if (!periodField.startsWith("custom:")) return null;
   const fieldKey = periodField.slice("custom:".length);
   const { data } = await supabase
     .from("field_definitions")
-    .select("data_type")
+    .select("field_key, data_type, applies_to, source_system")
     .eq("field_key", fieldKey)
     .maybeSingle();
   if (!data) return `Campo personalizado "${fieldKey}" não encontrado.`;
+  if (isCoreDef(data))
+    return `"${fieldKey}" é uma coluna do núcleo — selecione-a diretamente na lista.`;
   if (data.data_type !== "data")
     return `O campo "${fieldKey}" não é um campo de data.`;
+  if (
+    recordType &&
+    Array.isArray(data.applies_to) &&
+    data.applies_to.length > 0 &&
+    !data.applies_to.includes(recordType)
+  )
+    return `O campo "${fieldKey}" não se aplica a esta base.`;
   return null;
 }
 
@@ -457,15 +501,21 @@ export async function createSubSource(
   }
 
   const supabase = await createClient();
-  const periodError = await validateCustomPeriodField(supabase, periodField);
-  if (periodError) return { ok: false, message: periodError };
-  // A pai precisa existir como fonte RAIZ (data_sources).
+  // A pai precisa existir como fonte RAIZ (data_sources). O record_type dela
+  // valida o applies_to de um campo custom de período (a sub compartilha o
+  // record_type da pai).
   const { data: parent } = await supabase
     .from("data_sources")
-    .select("key")
+    .select("key, record_type")
     .eq("key", parentKey)
     .maybeSingle();
   if (!parent) return { ok: false, message: "Base pai não encontrada." };
+  const periodError = await validateCustomPeriodField(
+    supabase,
+    periodField,
+    (parent.record_type as string) || parentKey
+  );
+  if (periodError) return { ok: false, message: periodError };
 
   // Colisão de key com fonte raiz OU outra sub-fonte.
   const [{ data: rootHit }, { data: subHit }] = await Promise.all([
@@ -506,7 +556,30 @@ export async function updateSubSource(
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
-  const periodError = await validateCustomPeriodField(supabase, periodField);
+  // Campo custom (0082/0110): o applies_to é conferido contra o record_type
+  // da PAI da sub (fetch só quando necessário — core não consulta nada).
+  let parentRecordType: string | null = null;
+  if (periodField.startsWith("custom:")) {
+    const { data: subRow } = await supabase
+      .from("sub_sources")
+      .select("parent_key")
+      .eq("key", key)
+      .maybeSingle();
+    if (!subRow) return { ok: false, message: "Sub-base não encontrada." };
+    const { data: parentRow } = await supabase
+      .from("data_sources")
+      .select("record_type")
+      .eq("key", subRow.parent_key as string)
+      .maybeSingle();
+    parentRecordType =
+      (parentRow?.record_type as string | undefined) ??
+      (subRow.parent_key as string);
+  }
+  const periodError = await validateCustomPeriodField(
+    supabase,
+    periodField,
+    parentRecordType
+  );
   if (periodError) return { ok: false, message: periodError };
   // parent_key é imutável na edição (troca de pai = record_type diferente).
   const { error: updateError } = await supabase

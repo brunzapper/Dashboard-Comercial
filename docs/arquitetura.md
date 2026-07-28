@@ -1134,12 +1134,21 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   MESMA perna e o deal bucketizava pelo mês de criação. Limitação restante:
   dois membros de coluna de NÚCLEO distintos ainda se sombreiam (correção
   definitiva = CASE por record_type no RPC, migração espelhada futura).
-- **Campo de período `custom:` (0082):** `sub_sources.default_period_field`
-  aceita também um campo personalizado de DATA (`custom:<field_key>` — ex.: sub
-  "SQLs" da pai Leads datada pela *Data Reunião*). O read side já suportava
-  (`@period.byType` aceita `custom:` e a regra dos mocks 0052 inspeciona o
-  byType serializado); a validação semântica (campo existe e é `data`) fica na
-  server action de fontes.
+- **Campo de período `custom:` (0082/0110):** `sub_sources.default_period_field`
+  (0082) e `data_sources.default_period_field` (0110) aceitam também um campo
+  personalizado de DATA (`custom:<field_key>` — ex.: sub "SQLs" da pai Leads
+  datada pela *Data Reunião*; base de parceria datada por campo próprio). O
+  read side já suportava (`@period.byType` aceita `custom:` e a regra dos
+  mocks 0052 inspeciona o byType serializado); a validação semântica (campo
+  existe, é `data`, não é override core da 0086 e o `applies_to` cobre o
+  record_type da base) fica na server action de fontes. O picker de
+  Registros → Bases (bases E subs) oferece "só colunas com dados": probe
+  PostgREST na page (`lib/config/period-field-probe.ts` — `is_mock = false`
+  sempre; NUNCA via RPC, que não filtra `is_mock` e cuja regra 0052 incluiria
+  mocks) + montagem pura em `lib/source-date-fields.ts`; base sem linha
+  não-mock cai nas 6 colunas core, o valor salvo segue sempre listado e o
+  picker da sub usa a lista da PAI (o recorte da sub não é aplicado no probe —
+  simplificação documentada).
 - **Pastas de bases (0107, 26/07/2026):** `source_folders` agrupa as bases
   RAIZ em **Pastas** — agrupamento de EXIBIÇÃO puro + ordem manual
   (`data_sources.folder_id`/`sort_order`, `sub_sources.sort_order`; botões
