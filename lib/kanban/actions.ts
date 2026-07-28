@@ -18,11 +18,13 @@
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
   updateRecordField,
   type EditActionState,
 } from "@/lib/records/actions";
+import { applyAllocationOnMoves } from "./allocation-reconcile";
 import { computeDateOnMove } from "./date-move";
 import {
   KANBAN_NO_VALUE_KEY,
@@ -97,6 +99,18 @@ export async function moveRecordCard(
     if (error) return { ok: false, message: error.message };
     if (!data || data.length === 0) {
       return { ok: false, message: "Sem permissão para mover neste quadro." };
+    }
+    // Alocação como campo (invariante 24): mesmo dual-write best-effort do
+    // moveRecordCardsBulk (o caminho vivo do drag — este single fica
+    // consistente caso volte a ter callers).
+    try {
+      await applyAllocationOnMoves(
+        createServiceClient(),
+        { kind: input.custom.ownerKind, id: input.custom.ownerId },
+        [{ recordId: input.recordId, targetKey: input.targetKey }]
+      );
+    } catch (e) {
+      console.warn("[kanban] alocação-como-campo pós-move falhou:", e);
     }
     return { ok: true };
   }

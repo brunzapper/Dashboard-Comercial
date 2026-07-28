@@ -1479,6 +1479,12 @@ export function WidgetBuilder({
                     columns: k.columns?.length
                       ? k.columns
                       : DEFAULT_CUSTOM_COLUMNS,
+                    // Alocação como campo (invariante 24): o builder RECONSTRÓI
+                    // o objeto kanban — sem re-emitir a chave aqui o vínculo
+                    // some no save (a action ainda normaliza troca de base).
+                    ...(k.allocationFieldKey
+                      ? { allocationFieldKey: k.allocationFieldKey }
+                      : {}),
                   }
                 : k.dateBucket
                   ? { dateField: k.dateField, dateBucket: k.dateBucket }
@@ -2691,6 +2697,14 @@ export function WidgetBuilder({
                           card NÃO altera o registro — a posição vale só para
                           este quadro. Novos registros entram na primeira
                           coluna.
+                          {k.allocationFieldKey ? (
+                            <>
+                              {" "}
+                              Este quadro expõe a fase no campo “
+                              {k.allocationFieldKey}” (ligue/desligue na
+                              engrenagem “Colunas” do quadro).
+                            </>
+                          ) : null}
                         </p>
                       ) : k.dateBucket ? (
                         <>

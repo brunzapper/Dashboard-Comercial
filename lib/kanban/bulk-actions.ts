@@ -27,6 +27,7 @@ import { coreWriteBackFieldId } from "@/lib/config/core-writeback";
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import type { DataType } from "@/lib/records/types";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import { applyAllocationOnMoves } from "./allocation-reconcile";
 import { computeDateOnMove } from "./date-move";
 import {
   KANBAN_NO_VALUE_KEY,
@@ -138,6 +139,7 @@ export async function moveRecordCardsBulk(
   if (input.custom) {
     const ownerCol =
       input.custom.ownerKind === "widget" ? "widget_id" : "board_id";
+    const movedIds: string[] = [];
     for (const slice of chunk(movable, CHUNK)) {
       const { data, error } = await supabase
         .from("kanban_placements")
@@ -161,6 +163,22 @@ export async function moveRecordCardsBulk(
         );
       } else {
         results.push(...fanOut(sliceIds, true));
+        movedIds.push(...sliceIds);
+      }
+    }
+    // Alocação como campo (invariante 24): espelha a coluna destino no campo
+    // do registro. Service role — o movedor pode não ter edit_record_values
+    // (a autorização foi o upsert do placement; o campo é efeito derivado de
+    // sistema). Best-effort: falha nunca reverte o movimento.
+    if (movedIds.length > 0) {
+      try {
+        await applyAllocationOnMoves(
+          createServiceClient(),
+          { kind: input.custom.ownerKind, id: input.custom.ownerId },
+          movedIds.map((recordId) => ({ recordId, targetKey: input.targetKey }))
+        );
+      } catch (e) {
+        console.warn("[kanban] alocação-como-campo pós-move falhou:", e);
       }
     }
     return { ok: true, results };

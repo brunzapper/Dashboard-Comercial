@@ -374,6 +374,11 @@ export function KanbanPageClient({
                   kanban={kanban}
                   data={data}
                   onSave={persistKanban}
+                  owner={
+                    widgetCtx
+                      ? { kind: "widget", id: widgetCtx.widgetId }
+                      : { kind: "board", id: boardId }
+                  }
                 />
               ) : null}
               {/* Automações: modo registros, sem colunas por data (mover
