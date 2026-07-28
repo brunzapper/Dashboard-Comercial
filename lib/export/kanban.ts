@@ -1,8 +1,12 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 28/07/2026
+// v1.1 (28/07/2026): colunas dos badges do card (métricas expandidas) entre a
+//   métrica e as colunas core — só quando configurados (quadro legado segue
+//   byte-idêntico); valor null (fato indisponível) sai vazio.
 // Export CSV de um kanban (página dedicada e widget): achata as colunas do
 // KanbanBoardData JÁ computado (sem nova consulta) — Coluna, Título, campos
-// extras do card (como exibidos), métrica e, no modo registros, as colunas
-// core do registro na convenção reimportável (lib/export/record-cells.ts).
+// extras do card (como exibidos), métrica, badges e, no modo registros, as
+// colunas core do registro na convenção reimportável
+// (lib/export/record-cells.ts).
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { KanbanBoardData } from "@/lib/kanban/data";
 import { csvNumber } from "@/lib/export/csv";
@@ -43,12 +47,18 @@ export function kanbanBoardToCsv(
     flat
       .find((x) => x.card.fields.length > 0)
       ?.card.fields.map((f) => f.label) ?? [];
+  // Badges configurados (mesma ordem em todos os cards — config do board).
+  const badgeLabels =
+    flat
+      .find((x) => (x.card.badges ?? []).length > 0)
+      ?.card.badges?.map((b) => b.label) ?? [];
   const hasRecords = flat.some((x) => x.card.record);
   const headers = [
     "Coluna",
     "Título",
     ...fieldLabels,
     ...(data.metricLabel ? [data.metricLabel] : []),
+    ...badgeLabels,
     ...(hasRecords ? CORE_REFS.map((ref) => recordRefLabel(ref, defs)) : []),
   ];
   const rows = flat.map(({ card, column }) => [
@@ -56,6 +66,7 @@ export function kanbanBoardToCsv(
     card.title,
     ...fieldLabels.map((_, i) => card.fields[i]?.value ?? ""),
     ...(data.metricLabel ? [csvNumber(card.metricValue)] : []),
+    ...badgeLabels.map((_, i) => csvNumber(card.badges?.[i]?.value ?? null)),
     ...(hasRecords
       ? CORE_REFS.map((ref) =>
           card.record

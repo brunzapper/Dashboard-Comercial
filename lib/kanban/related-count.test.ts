@@ -1,8 +1,11 @@
-// Versão: 1.0 | Data: 27/07/2026
-// Contagem de conectados (condição related_count): consulta simétrica em
-// record_matches, dedupe de par (vínculos por regras diferentes contam uma
-// conexão), filtro dos parceiros em memória, predicado de sub-base e escopo
-// EXPLÍCITO de org nas consultas (chamador service-role).
+// Versão: 1.1 | Data: 28/07/2026
+// v1.1 (28/07/2026): movido junto com o módulo p/ lib/kanban/ + casos de
+//   opts.extraPairs (gêmeo related_lead_id): soma 1, dedupe gêmeo × match
+//   real, parceiro inexistente/record_type errado não conta.
+// Contagem de conectados (condição related_count + métricas "vinculados"):
+// consulta simétrica em record_matches, dedupe de par (vínculos por regras
+// diferentes contam uma conexão), filtro dos parceiros em memória, predicado
+// de sub-base e escopo EXPLÍCITO de org nas consultas (chamador service-role).
 import { describe, expect, it } from "vitest";
 
 import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
@@ -123,6 +126,86 @@ describe("countRelatedBySource", () => {
       [],
       [],
       BUILTIN_SOURCES
+    );
+    expect(counts.size).toBe(0);
+  });
+
+  it("extraPairs (gêmeo related_lead_id) soma 1 sem linha em record_matches", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        record_matches: [],
+        records: [leadRow("l1", "ganho")],
+      },
+    });
+    const counts = await countRelatedBySource(
+      db,
+      null,
+      ["p1"],
+      "leads",
+      [],
+      [],
+      BUILTIN_SOURCES,
+      { extraPairs: [{ selfId: "p1", partnerId: "l1" }] }
+    );
+    expect(counts.get("p1")).toBe(1);
+  });
+
+  it("extraPairs deduplica gêmeo × match real do MESMO par", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        record_matches: [{ record_a_id: "p1", record_b_id: "l1" }],
+        records: [leadRow("l1", "ganho")],
+      },
+    });
+    const counts = await countRelatedBySource(
+      db,
+      null,
+      ["p1"],
+      "leads",
+      [],
+      [],
+      BUILTIN_SOURCES,
+      { extraPairs: [{ selfId: "p1", partnerId: "l1" }] }
+    );
+    expect(counts.get("p1")).toBe(1);
+  });
+
+  it("extraPairs: parceiro inexistente ou de record_type errado não conta", async () => {
+    // d1 é negócio — não conta na base "leads". O handler-função aplica o
+    // .eq(record_type) como o banco faria (o array fixo devolveria tudo).
+    const rows = [{ ...leadRow("d1", "ganho"), record_type: "negocio" }];
+    const { db } = fakeSupabase({
+      tables: {
+        record_matches: [],
+        records: (q) => ({
+          data: rows.filter((r) =>
+            q.steps.some(
+              (s) =>
+                s.method === "eq" &&
+                s.args[0] === "record_type" &&
+                s.args[1] === r.record_type
+            )
+          ),
+          error: null,
+        }),
+      },
+    });
+    const counts = await countRelatedBySource(
+      db,
+      null,
+      ["p1"],
+      "leads",
+      [],
+      [],
+      BUILTIN_SOURCES,
+      {
+        extraPairs: [
+          { selfId: "p1", partnerId: "d1" },
+          { selfId: "p1", partnerId: "sumido" },
+          // selfId fora do quadro é ignorado.
+          { selfId: "outro", partnerId: "d1" },
+        ],
+      }
     );
     expect(counts.size).toBe(0);
   });

@@ -247,7 +247,9 @@ export default async function WidgetKanbanPage({
         operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
       },
       // Colunas "Personalizar": MESMOS posicionamentos do widget no dashboard.
-      { kind: "widget", id: widgetId }
+      { kind: "widget", id: widgetId },
+      // Catálogo p/ as métricas de conectados (rótulos + record_type da base).
+      { catalog: sources }
     );
   }
 

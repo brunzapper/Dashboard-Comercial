@@ -41,7 +41,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
-import { formatMoney } from "@/lib/widgets/currency";
 import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import {
   completeTasksBulk,
@@ -65,9 +64,11 @@ import {
 import type {
   KanbanBoardData,
   KanbanCard,
+  KanbanCardBadge,
   KanbanColumnCards,
   KanbanOwner,
 } from "@/lib/kanban/data";
+import { badgeFormat, boardMetricFormat, formatKanbanMetric } from "./format";
 import {
   CardDetailSheet,
   type CardDetailTab,
@@ -120,11 +121,61 @@ function colorFromValue(value: string): string {
   return `hsl(${h} 65% 45%)`;
 }
 
-function formatMetric(value: number | null, isMoney: boolean): string {
-  if (value == null) return "—";
-  if (isMoney) return formatMoney(value, null);
-  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(
-    value
+// Texto de um badge do card (métricas 28/07/2026). Tarefas mantêm os textos
+// dos pills ("N tarefa(s)"/"N atrasada(s)"); conectados levam o rótulo junto
+// ("2 Leads vinculados"); idade = "N d"; campo = só o valor (nome no hover,
+// como os campos extras).
+function badgeText(b: KanbanCardBadge): string {
+  const v = b.value ?? 0;
+  if (b.kind === "tasks") {
+    return b.key === "tasks:overdue" ? `${v} atrasada(s)` : `${v} tarefa(s)`;
+  }
+  if (b.kind === "linked") {
+    return `${formatKanbanMetric(v, "number")} ${b.label}`;
+  }
+  return formatKanbanMetric(v, badgeFormat(b));
+}
+
+// Badges do rodapé do card. `badges` ausente (quadro legado/modo tarefas/
+// lean) = pill de tarefas abertas de sempre. value null (fato indisponível)
+// fica OCULTO — nunca um 0 enganoso; tasks com 0 idem (paridade com o pill
+// legado, que só aparecia com openTasks > 0).
+function KanbanCardBadges({ card }: { card: KanbanCard }) {
+  const badges =
+    card.badges ??
+    (card.openTasks > 0
+      ? [
+          {
+            key: "tasks:open",
+            label: "Tarefas abertas",
+            kind: "tasks" as const,
+            value: card.openTasks,
+          },
+        ]
+      : []);
+  const visible = badges.filter(
+    (b) => b.value != null && (b.kind !== "tasks" || b.value > 0)
+  );
+  if (visible.length === 0) return null;
+  return (
+    <div className="mt-1 ml-1.5 flex flex-wrap gap-1">
+      {visible.map((b) => (
+        <span
+          key={b.key}
+          title={b.label}
+          className={cn(
+            "inline-block rounded px-1.5 py-0.5 text-[11px]",
+            b.kind === "tasks" && b.key === "tasks:overdue"
+              ? "bg-destructive/10 text-destructive"
+              : b.kind === "tasks"
+                ? "bg-brand/10 text-brand"
+                : "bg-muted text-muted-foreground"
+          )}
+        >
+          {badgeText(b)}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -464,11 +515,7 @@ function CardView({
               ))}
             </div>
           ) : null}
-          {card.openTasks > 0 ? (
-            <span className="bg-brand/10 text-brand mt-1 ml-1.5 inline-block rounded px-1.5 py-0.5 text-[11px]">
-              {card.openTasks} tarefa(s)
-            </span>
-          ) : null}
+          <KanbanCardBadges card={card} />
         </>
       )}
 
@@ -1198,7 +1245,7 @@ export function KanbanBoard({
                       title={data.metricLabel}
                       style={{ color: kap.metricColor }}
                     >
-                      {formatMetric(col.metricSum, data.metricIsMoney)}
+                      {formatKanbanMetric(col.metricSum, boardMetricFormat(data))}
                     </span>
                   ) : null}
                   {columnExtra ? columnExtra(col) : null}

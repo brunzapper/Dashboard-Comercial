@@ -196,7 +196,9 @@ export default async function KanbanPage({
         operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
       },
       // Colunas "Personalizar": posicionamentos escopados a ESTE board.
-      { kind: "board", id }
+      { kind: "board", id },
+      // Catálogo p/ as métricas de conectados (rótulos + record_type da base).
+      { catalog: sources }
     );
   }
 
