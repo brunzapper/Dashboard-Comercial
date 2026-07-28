@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 28/07/2026
+// v1.1 (28/07/2026): paridade com as métricas expandidas do modo registros —
+//   cards de tarefa seguem SEM `badges`/`metricAgg`/`metricFormat` (opcionais;
+//   o renderer cai no comportamento legado). Sem mudança funcional.
 // Kanban de TAREFAS: mapeia tasks (agrupadas por `phase`) no mesmo shape do
 // quadro de registros (KanbanBoardData) — o componente KanbanBoard renderiza
 // os dois; cards de tarefa carregam a TaskRow p/ o card exibir prazo/concluir.

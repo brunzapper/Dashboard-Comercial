@@ -1,14 +1,18 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // Visão LISTA do kanban: os mesmos cards do quadro numa tabela (coluna do
 // quadro, título, campos extras do card, métrica e edição). Compartilhada
 // entre a página dedicada e o widget.
+// v1.2 (28/07/2026): métricas expandidas — formatação pelo formatador único
+//   (components/kanban/format.ts; dias "N d") e colunas dos badges
+//   configurados (padrão das colunas extras; quadro legado sem badges segue
+//   idêntico).
 // v1.1 (17/07/2026): subconjunto da aparência do kanban (cabeçalho e linhas —
 //   settings.kanban.appearance).
 "use client";
 
-import { formatMoney } from "@/lib/widgets/currency";
 import type { KanbanBoardData } from "@/lib/kanban/data";
 import type { KanbanAppearance } from "@/lib/kanban/types";
+import { badgeFormat, boardMetricFormat, formatKanbanMetric } from "./format";
 import {
   Table,
   TableBody,
@@ -40,6 +44,13 @@ export function KanbanList({
     .find((c) => c.fields.length > 0)
     ?.fields.map((f) => f.label) ?? [];
 
+  // Badges configurados (métricas 28/07/2026) — mesma ordem em todos os cards
+  // (config do board); quadro legado (sem `badges`) não ganha colunas.
+  const badgeCols = data.columns
+    .flatMap((c) => c.cards)
+    .find((c) => (c.badges ?? []).length > 0)
+    ?.badges?.map((b) => ({ key: b.key, label: b.label })) ?? [];
+
   const rows = data.columns.flatMap((col) =>
     col.cards.map((card) => ({ col, card }))
   );
@@ -59,6 +70,11 @@ export function KanbanList({
             {extraLabels.map((l) => (
               <TableHead key={l}>{l}</TableHead>
             ))}
+            {badgeCols.map((b) => (
+              <TableHead key={b.key} className="text-right">
+                {b.label}
+              </TableHead>
+            ))}
             {data.metricLabel ? (
               <TableHead className="text-right">{data.metricLabel}</TableHead>
             ) : null}
@@ -69,7 +85,7 @@ export function KanbanList({
           {rows.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={3 + extraLabels.length}
+                colSpan={3 + extraLabels.length + badgeCols.length}
                 className="text-muted-foreground text-center text-sm"
               >
                 Nenhum registro.
@@ -93,15 +109,22 @@ export function KanbanList({
                     {card.fields[i]?.value ?? "—"}
                   </TableCell>
                 ))}
+                {badgeCols.map((bc, i) => {
+                  const b = card.badges?.[i];
+                  return (
+                    <TableCell key={bc.key} className="text-right text-sm">
+                      {b
+                        ? formatKanbanMetric(b.value, badgeFormat(b))
+                        : "—"}
+                    </TableCell>
+                  );
+                })}
                 {data.metricLabel ? (
                   <TableCell className="text-right text-sm">
-                    {card.metricValue == null
-                      ? "—"
-                      : data.metricIsMoney
-                        ? formatMoney(card.metricValue, null)
-                        : new Intl.NumberFormat("pt-BR", {
-                            maximumFractionDigits: 2,
-                          }).format(card.metricValue)}
+                    {formatKanbanMetric(
+                      card.metricValue,
+                      boardMetricFormat(data)
+                    )}
                   </TableCell>
                 ) : null}
                 <TableCell>

@@ -1882,6 +1882,42 @@ enquanto a fila está em voo (dado que chegou durante a fila é descartado como
 stale — o refresh do settle traz o fresco); sem a guarda, um
 `router.refresh()` no meio da fila clobraria o estado otimista.
 
+**Métricas de card/coluna do kanban (28/07/2026)** — 100% no ENGINE (RPCs
+intocados, sem migração). Config em `settings.kanban`:
+`columnMetric { spec, agg }` (cabeçalho da coluna, agregação escolhível) e
+`card.badges: KanbanMetricSpec[]` (até 3 indicadores por card). Um
+`KanbanMetricSpec` é `field:<ref>` | `linked:<base raiz>` ("Leads
+vinculados") | `tasks:open|overdue` | `age`. A leitura é normalizada em UM
+lugar (`normalizeKanbanMetrics`, `lib/kanban/metrics.ts`): `columnMetric`
+vence o `metric` legado (string = campo somado); `card.badges` AUSENTE =
+comportamento legado (pill de tarefas abertas — o pipeline nem emite
+`card.badges`, então lista/CSV/render de quadros antigos seguem
+byte-idênticos); `[]` explícito = sem badges. No `runKanban`
+(`lib/kanban/data.ts`) os fatos são GATEADOS pela config: sem métrica nova,
+zero consulta extra. **Conectados**: `countRelatedBySource` foi movido de
+`lib/kanban/automations/` para `lib/kanban/related-count.ts` (compartilhado
+entre automações e métricas) e ganhou `opts.extraPairs` — pares extras
+OPT-IN do gêmeo `records.related_lead_id` quando a base contada resolve p/
+`record_type='lead'` (espelha o coalesce do `_widget_match_expr`, 0104; o
+dedupe de par cobre gêmeo × match real). As automações (`related_count`)
+seguem chamando SEM `extraPairs` — a condição mantém a semântica antiga
+(divergência DOCUMENTADA: convergir é passar o opt-in lá). **Atrasadas**: a
+query de tarefas do quadro passou a selecionar `due_date` e conta
+abertas+atrasadas na mesma passada (régua canônica: aberta com prefixo de
+`due_date` < hoje de Brasília — a mesma do engine de automações). **Idade**:
+`opened_at ?? source_created_at` em dias de calendário (prefixo YYYY-MM-DD).
+Falha de consulta é FAIL-SOFT: o valor vira `null` e o renderer OCULTA
+(nunca 0 enganoso) — é o que acontece com `tasks` no viewer de snapshot
+(adapter fail-closed); `record_matches` funciona no snapshot via
+`snapshot_record_matches` (adapter de 0056). O tick de automações chama
+`runKanban` com `opts.lean` (pula badges/conectados — os fatos das regras
+têm gates próprios). UI: builder do widget (save path grava
+`columnMetric`/`badges` explicitamente — o rebuild derrubaria chaves não
+copiadas) e popover "Métricas" na página dedicada/cheia
+(`components/kanban/metrics-popover.tsx`, spread completo via
+`persistKanban`). Formatação única em `components/kanban/format.ts`
+(dinheiro / "N d" / número pt-BR).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão

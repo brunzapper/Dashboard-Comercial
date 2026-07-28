@@ -30,6 +30,7 @@ describe("normalizeKanbanMetrics", () => {
       agg: "sum",
     });
     expect(n.badges).toEqual([{ kind: "tasks", metric: "open" }]);
+    expect(n.badgesConfigured).toBe(false);
   });
 
   it("sem métrica nenhuma → columnMetric null", () => {
@@ -50,6 +51,7 @@ describe("normalizeKanbanMetrics", () => {
   it("badges [] explícito vence o default (sem badges)", () => {
     const n = normalizeKanbanMetrics({ ...base, card: { badges: [] } });
     expect(n.badges).toEqual([]);
+    expect(n.badgesConfigured).toBe(true);
   });
 
   it("badges: sanitiza shapes quebrados e corta no teto de 3", () => {

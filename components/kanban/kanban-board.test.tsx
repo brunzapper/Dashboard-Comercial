@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-// Versão: 1.1 | Data: 27/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // Guarda de regressão: os campos extras do card (card.fields) aparecem no
 // quadro TAMBÉM em modo `compact` (widget de dashboard) — o gate antigo os
 // escondia justamente no único contexto com picker de extras (widget-builder).
+// v1.2 (28/07/2026): métricas expandidas — badges data-driven (card.badges),
+//   fallback do pill legado de tarefas abertas em card SEM badges, value null
+//   oculto e formato "d" (dias) no cabeçalho da coluna.
 // v1.1 (27/07/2026): o card exibe SÓ o valor do campo extra — o rótulo sai do
 //   corpo (vira title/hover) e o teste passa a exigir a ausência dele.
 import { render, screen } from "@testing-library/react";
@@ -70,6 +73,94 @@ const RECORD_CTX = {
   canEditValues: false,
   canManageFields: false,
 };
+
+describe("KanbanBoard — badges de métricas do card", () => {
+  const withCard = (
+    card: Partial<KanbanBoardData["columns"][0]["cards"][0]>,
+    board: Partial<KanbanBoardData> = {},
+    column: Partial<KanbanBoardData["columns"][0]> = {}
+  ): KanbanBoardData => ({
+    ...DATA,
+    ...board,
+    columns: [
+      {
+        ...DATA.columns[0],
+        ...column,
+        cards: [{ ...DATA.columns[0].cards[0], ...card }],
+      },
+    ],
+  });
+
+  it("card SEM badges mantém o pill legado de tarefas abertas", () => {
+    render(
+      <KanbanBoard
+        data={withCard({ openTasks: 2 })}
+        settings={{ mode: "registros" }}
+        canMove={false}
+        recordCtx={RECORD_CTX}
+      />
+    );
+    expect(screen.getByText("2 tarefa(s)")).toBeInTheDocument();
+  });
+
+  it("badges configurados renderizam (atrasadas/vinculados/idade) e value null fica oculto", () => {
+    render(
+      <KanbanBoard
+        data={withCard({
+          badges: [
+            {
+              key: "tasks:overdue",
+              label: "Tarefas atrasadas",
+              kind: "tasks",
+              value: 3,
+            },
+            {
+              key: "linked:leads",
+              label: "Leads vinculados",
+              kind: "linked",
+              value: 2,
+            },
+            { key: "age", label: "Idade (dias)", kind: "age", value: 12 },
+            {
+              key: "tasks:open",
+              label: "Tarefas abertas",
+              kind: "tasks",
+              value: null, // fato indisponível → oculto
+            },
+          ],
+        })}
+        settings={{ mode: "registros" }}
+        canMove={false}
+        recordCtx={RECORD_CTX}
+      />
+    );
+    expect(screen.getByText("3 atrasada(s)")).toBeInTheDocument();
+    expect(screen.getByText("2 Leads vinculados")).toBeInTheDocument();
+    expect(screen.getByText("12 d")).toBeInTheDocument();
+    expect(screen.queryByText(/tarefa\(s\)/)).toBeNull();
+  });
+
+  it("cabeçalho da coluna formata a métrica em dias (metricFormat 'days')", () => {
+    render(
+      <KanbanBoard
+        data={withCard(
+          { badges: [] },
+          {
+            metricLabel: "Idade (dias)",
+            metricIsMoney: false,
+            metricAgg: "avg",
+            metricFormat: "days",
+          },
+          { metricSum: 7.5 }
+        )}
+        settings={{ mode: "registros" }}
+        canMove={false}
+        recordCtx={RECORD_CTX}
+      />
+    );
+    expect(screen.getByText("7,5 d")).toBeInTheDocument();
+  });
+});
 
 describe("KanbanBoard — campos extras do card", () => {
   it("exibe SÓ o valor (rótulo no title) SEM compact (página dedicada)", () => {

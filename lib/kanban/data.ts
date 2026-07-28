@@ -416,13 +416,20 @@ export async function runKanban(
       metricValue: metricNum,
       isMock: Boolean((r as unknown as { is_mock?: boolean }).is_mock),
       openTasks: taskCounts.get(r.id) ?? 0,
-      badges: badgeDefs.map((b) => ({
-        key: b.key,
-        label: b.label,
-        kind: b.spec.kind,
-        value: metricValueFor(b.spec, r),
-        ...(b.isMoney ? { isMoney: true } : {}),
-      })),
+      // Badges SÓ quando configurados explicitamente — quadro legado (default
+      // de tarefas abertas) fica sem `badges` e o renderer usa o pill de
+      // sempre via openTasks (lista/CSV não ganham colunas novas).
+      ...(normalized.badgesConfigured && !lean
+        ? {
+            badges: badgeDefs.map((b) => ({
+              key: b.key,
+              label: b.label,
+              kind: b.spec.kind,
+              value: metricValueFor(b.spec, r),
+              ...(b.isMoney ? { isMoney: true } : {}),
+            })),
+          }
+        : {}),
       record: r,
     };
   });

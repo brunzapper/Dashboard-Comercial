@@ -34,6 +34,11 @@ const AGGS: readonly KanbanAgg[] = ["sum", "count", "avg", "min", "max"];
 export interface NormalizedKanbanMetrics {
   columnMetric: { spec: KanbanMetricSpec; agg: KanbanAgg } | null;
   badges: KanbanMetricSpec[];
+  // O usuário configurou badges explicitamente? false = default legado
+  // (tarefas abertas) — o pipeline NÃO emite card.badges e o renderer cai no
+  // pill de sempre (quadros legados renderizam idênticos; lista/CSV sem
+  // colunas novas).
+  badgesConfigured: boolean;
 }
 
 /** Valida um spec vindo do jsonb (shape quebrado → null, nunca lança). */
@@ -97,7 +102,7 @@ export function normalizeKanbanMetrics(
           .filter((s): s is KanbanMetricSpec => s !== null)
           .slice(0, KANBAN_MAX_BADGES);
 
-  return { columnMetric, badges };
+  return { columnMetric, badges, badgesConfigured: raw !== undefined };
 }
 
 /**

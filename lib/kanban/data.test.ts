@@ -103,12 +103,11 @@ describe("runKanban — métricas", () => {
     expect(data.metricIsMoney).toBe(true);
     expect(data.metricAgg).toBe("sum");
     expect(data.metricFormat).toBe("money");
-    // Badge default (card.badges ausente) = tarefas abertas de sempre.
+    // card.badges ausente (default legado) → cards SEM `badges`: o renderer
+    // cai no pill de tarefas abertas de sempre via openTasks.
     const d1 = col.cards.find((c) => c.id === "d1")!;
     expect(d1.openTasks).toBe(1);
-    expect(d1.badges).toEqual([
-      { key: "tasks:open", label: "Tarefas abertas", kind: "tasks", value: 1 },
-    ]);
+    expect(d1.badges).toBeUndefined();
     // Sem métrica linked → record_matches só do attachMatches (1 consulta).
     expect(queries.filter((q) => q.table === "record_matches")).toHaveLength(1);
     // A query de tasks agora carrega o prazo (atrasadas na mesma passada).
@@ -326,7 +325,7 @@ describe("runKanban — métricas", () => {
     expect(queries.filter((q) => q.table === "record_matches")).toHaveLength(1);
     const col = data.columns.find((c) => c.key === "novo")!;
     expect(col.metricSum).toBeNull();
-    expect(col.cards[0]?.badges).toEqual([]);
+    expect(col.cards[0]?.badges).toBeUndefined();
     expect(col.cards[0]?.openTasks).toBe(1); // automações seguem lendo
   });
 });
