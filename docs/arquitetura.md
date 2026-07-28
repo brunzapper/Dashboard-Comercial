@@ -1008,7 +1008,8 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   hoje/fim de semana/densidade/chips; cores de STATUS e a cor da anotação
   vencem a estética), editada no sheet de Aparência (canStyle inclui agenda;
   o save branch do builder preserva `widget.settings` — paridade com kanban).
-  **Página `/agenda` do Workspace:** card fixo na Home + item no nav;
+  **Página `/agenda` do Workspace:** acesso pelo item "Agenda" do nav
+  lateral (o card fixo da Home foi removido em 28/07/2026 — redundante);
   `fetchWorkspaceAgenda` mistura os record-legs de TODOS os widgets agenda
   visíveis (dedupe por `(source, dateField)`, teto de 12 legs) ou de um
   específico, ou só entradas diretas (tarefas + anotações); recortes por

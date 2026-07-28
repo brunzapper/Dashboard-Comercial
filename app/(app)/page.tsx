@@ -1,5 +1,8 @@
-// Versão: 2.6 | Data: 28/07/2026
+// Versão: 2.7 | Data: 28/07/2026
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
+// v2.7 (28/07/2026): card "Agenda" removido da Home (redundante com o item
+//   do nav lateral, que segue sendo o acesso à página /agenda).
+//   validateLastView continua aceitando o literal "/agenda".
 // v2.6 (28/07/2026): seção "Agenda" — card fixo abrindo a página /agenda
 //   (calendário do workspace: mistura das agendas dos dashboards + tarefas +
 //   anotações). validateLastView aceita o literal "/agenda".
@@ -19,7 +22,7 @@
 // v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo;
 //   seções separadas p/ dashboards e kanbans (mesma tabela, kinds distintos).
 import Link from "next/link";
-import { CalendarDays, SquareKanban } from "lucide-react";
+import { SquareKanban } from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
@@ -328,29 +331,6 @@ export default async function HomePage() {
       ) : (
         cardGrid(dashboards)
       )}
-
-      <div>
-        <h2 className="text-lg font-semibold">Agenda</h2>
-        <p className="text-muted-foreground text-sm">
-          Calendário do workspace: as agendas dos dashboards, tarefas e
-          anotações num só lugar.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Card className="relative">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalendarDays className="text-muted-foreground size-4 shrink-0" />
-              <Link href="/agenda" className="hover:underline">
-                Agenda do workspace
-              </Link>
-            </CardTitle>
-            <CardDescription>
-              Todas as agendas ou uma específica; por responsável ou operação.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
 
       {kanbans.length > 0 || widgetKanbans.length > 0 ? (
         <>
