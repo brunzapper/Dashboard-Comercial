@@ -1,4 +1,10 @@
-<!-- Versão: 1.17 | Data: 27/07/2026 -->
+<!-- Versão: 1.18 | Data: 28/07/2026 -->
+<!-- v1.18 (28/07/2026): §12.3 — Agenda redesenhada (célula com altura fixa e
+     rolagem por dia, ordem cronológica com hora "14:00–15:30", "+" de
+     criação rápida de tarefa/anotação, post-its arrastáveis, painel
+     Feed/Dados no clique) + checkbox "Mostrar anotações do dia"; §12.4 —
+     Agenda do Workspace (/agenda: Conteúdo/Responsável/Operação); §9.3 —
+     aparência da Agenda. -->
 <!-- v1.17 (27/07/2026): §12.2.1 — seleção em massa no kanban (barra Mover
      para/Gerar tarefa/Concluir tarefas/Excluir, otimista com revert parcial)
      e Automações do quadro (regras "se … mover para …" com condições de
@@ -978,7 +984,8 @@ Já detalhados no §4.2 e §4.3.
 Detalhados no capítulo 12. Em resumo: Kanban = quadro de colunas com cards de
 registros (colunas por valores de um campo, por períodos de uma data, ou
 livres) ou de tarefas; Agenda = calendário mensal/semanal com registros
-alocados por um campo de data (+ tarefas com vencimento).
+alocados por um campo de data, tarefas com vencimento (e hora) e anotações
+do dia (post-its).
 
 ---
 
@@ -1675,7 +1682,7 @@ aparência. As seções variam por tipo. Além disso, tabelas e gráficos aceita
 "Oceano", "Pôr do sol", "Floresta", "Tons de cinza", "Inbound (roxo &
 verde)".
 
-### 9.3 Tabela, Card, Calculadora, Nota, Forma, Filtros, Kanban
+### 9.3 Tabela, Card, Calculadora, Nota, Forma, Filtros, Kanban, Agenda
 
 - **Tabela**: cores globais (fundo/texto do cabeçalho, fundo/texto do corpo,
   bordas); "Linhas de grade" (Ambas/Horizontais/Verticais/Nenhuma); "Texto
@@ -1695,6 +1702,11 @@ verde)".
 - **Kanban**: fundo do quadro; colunas (fundo, borda, cabeçalho, raio);
   cards (fundo, texto, borda, raio, fonte, "faixa lateral colorida");
   contadores e métrica; abas de visão.
+- **Agenda**: cabeçalho Seg–Dom (fundo, texto); células (densidade
+  compacta/normal/espaçosa, fundo, linhas da grade, fundo de hoje, fundo do
+  fim de semana, raio, "esmaecer dias fora do mês"); chips (fonte, raio,
+  cores por tipo — tarefa/registro). Cores de STATUS da tarefa (atrasada/em
+  breve) e a cor de cada anotação têm precedência sobre as cores estéticas.
 
 ### 9.4 Formatação condicional
 
@@ -1909,16 +1921,58 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
 
 ### 12.3 Agenda
 
-Widget de calendário:
+Widget de calendário (redesenhado em 28/07/2026):
 
 - **"Base dos registros"**: uma Base ou "— nenhuma (só tarefas) —".
 - **"Campo de data (aloca o registro no dia)"**: Data de fechamento / Data de
   abertura / Data de criação (origem) / campo personalizado de data.
 - **"Mostrar tarefas (vencimento)"** (padrão ligado).
+- **"Mostrar anotações do dia (post-its)"** (padrão ligado).
 - **"Visão inicial"**: "Mês" (padrão) / "Semana".
+
+Comportamento do calendário:
+
+- **Células com altura padronizada** (densidade configurável na Aparência):
+  um dia cheio rola DENTRO da própria célula (barra de rolagem por dia) — a
+  semana não estica. O número do dia e o "+" ficam fixos no topo da célula.
+- **Ordem cronológica no dia**: itens com hora primeiro (tarefas mostram
+  "14:00" ou "14:00–15:30" quando há hora final; registros herdam a hora do
+  campo de data quando houver), depois os sem hora (anotações → tarefas →
+  registros).
+- **"+" do dia (criação rápida)**: aparece ao passar o mouse (sempre visível
+  em telas de toque) — cria uma **tarefa** já datada naquele dia (com hora e
+  "até" opcionais) ou uma **anotação do dia** (texto livre + cor de post-it).
+- **Clique num chip** de tarefa/registro abre o painel de detalhe com
+  **Feed** (comentários/subtarefas) e **Dados** (edição). Clique numa
+  **anotação** abre o POST-IT (papel colorido): editar texto, trocar cor,
+  excluir. Anotações são visíveis a toda a organização; edição/exclusão pelo
+  autor ou admin/gestor.
+- **Arrastar entre dias**: tarefas e anotações podem ser arrastadas para
+  outro dia (a hora da tarefa acompanha); **registros não arrastam** — a data
+  deles vem do campo do registro (edite o registro para mudar).
 - **A Agenda ignora os filtros do dashboard por design** (período, filtros
   rápidos etc. não a afetam) — ela é um calendário operacional, não um
   gráfico filtrável.
+
+### 12.4 Agenda do Workspace (página `/agenda`)
+
+Além do widget, o Workspace (Home) tem a seção **"Agenda"** com o card
+**"Agenda do workspace"** (e o item "Agenda" no menu): um calendário cheio
+com barra própria de controles — as escolhas ficam salvas por usuário:
+
+- **"Conteúdo"**: "Todas as agendas" (mistura os registros de TODOS os
+  widgets Agenda visíveis a você — o mesmo registro em duas agendas aparece
+  uma vez) / "Só desta agenda (tarefas + anotações)" (sem registros de
+  dashboards) / uma agenda específica de um dashboard.
+- **"Responsável"**: todos ou um específico (recorta registros e tarefas).
+- **"Operação"**: todas ou uma específica — o recorte usa o vínculo vivo da
+  operação (subárvore de responsáveis + filtros de perfil); operações só de
+  perfil (parcerias) recortam apenas os registros — tarefas seguem os
+  responsáveis do vínculo.
+
+Tarefas e anotações criadas aqui são as mesmas de todo o app (aparecem em
+Tarefas, nos kanbans e nos widgets Agenda). Criação rápida, arrastar entre
+dias e post-its funcionam como no widget (§12.3).
 
 ---
 

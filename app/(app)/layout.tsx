@@ -50,6 +50,7 @@ import { RealtimeRefresher } from "@/components/realtime-refresher";
 // Registros só é visível a Gestores/Administradores.
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
   { href: "/", label: "Workspace" },
+  { href: "/agenda", label: "Agenda" },
   { href: "/tarefas", label: "Tarefas" },
   { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },

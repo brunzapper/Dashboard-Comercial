@@ -1,24 +1,46 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 2.0 | Data: 28/07/2026
 // Montagem dos dados da AGENDA: registros da fonte alocados no dia pelo campo
 // de data escolhido (runRecordList com período = range visível — RLS/mocks
-// como nos widgets) + tarefas por vencimento (RLS escopa o vendedor). Falha
-// silenciosa em `tasks` (pré-migração/snapshot) não derruba o calendário.
+// como nos widgets) + tarefas por vencimento (RLS escopa o vendedor) +
+// anotações do dia (agenda_notes, 0111 — RLS org-wide). Falha silenciosa em
+// `tasks`/`agenda_notes` (pré-migração/snapshot) não derruba o calendário.
+// v2.0 (28/07/2026): itens carregam `time` (HH:MM — prefixo naive do valor
+//   bruto nos registros; due_time nas tarefas) p/ ordenação cronológica no
+//   client; leg de anotações (gate showNotes/includeNotes); extraFilters
+//   (recorte extra dos registros — Workspace) e taskResponsibleIds (recorte
+//   de responsável do leg de tarefas, ids JÁ expandidos pelo chamador).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RecordRow } from "@/lib/records/types";
 import { runRecordList } from "@/lib/widgets/record-list";
-import type { WidgetConfig } from "@/lib/widgets/types";
+import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import { resolveRecordRef } from "@/lib/kanban/data";
-import type { AgendaData, AgendaItem, AgendaSettings } from "./types";
+import { extractTimeHHMM } from "./day-items";
+import {
+  AGENDA_NOTE_COLS,
+  type AgendaData,
+  type AgendaItem,
+  type AgendaNoteRow,
+  type AgendaSettings,
+} from "./types";
 
 export async function runAgenda(
   supabase: SupabaseClient,
   settings: AgendaSettings,
   range: { from: string; to: string },
   responsibleLabels: Record<string, string> = {},
-  // Snapshot público: nunca consulta `tasks` (dados privados).
-  opts: { includeTasks?: boolean } = {}
+  opts: {
+    // Snapshot público: nunca consulta `tasks` (dados privados).
+    includeTasks?: boolean;
+    // Idem para anotações (agenda_notes fora de PASSTHROUGH_TABLES).
+    includeNotes?: boolean;
+    // Recorte extra dos REGISTROS (Workspace: responsável/operação traduzida
+    // via operation-scope — nunca operation_id literal).
+    extraFilters?: WidgetFilter[];
+    // Recorte de responsável do leg de TAREFAS (ids já expandidos).
+    taskResponsibleIds?: string[];
+  } = {}
 ): Promise<AgendaData> {
   const items: AgendaItem[] = [];
 
@@ -28,7 +50,7 @@ export async function runAgenda(
       sources: [settings.source],
       dimensions: [],
       metrics: [],
-      filters: [],
+      filters: opts.extraFilters ?? [],
       settings: {},
     } as unknown as WidgetConfig;
     const records = await runRecordList(supabase, config, {
@@ -44,6 +66,7 @@ export async function runAgenda(
         id: r.id,
         kind: "record",
         date,
+        time: extractTimeHHMM(raw),
         title: r.title ?? "(sem nome)",
         record: r,
       });
@@ -53,12 +76,16 @@ export async function runAgenda(
   // ---- tarefas por vencimento ----
   if (opts.includeTasks !== false && settings.showTasks !== false) {
     try {
-      const { data } = await supabase
+      let query = supabase
         .from("tasks")
         .select(TASK_COLS_WITH_RECORD)
         .not("due_date", "is", null)
         .gte("due_date", range.from)
-        .lte("due_date", range.to)
+        .lte("due_date", range.to);
+      if (opts.taskResponsibleIds && opts.taskResponsibleIds.length > 0) {
+        query = query.in("responsible_id", opts.taskResponsibleIds);
+      }
+      const { data } = await query
         .order("due_time", { ascending: true, nullsFirst: false })
         .limit(500);
       for (const t of (data ?? []) as unknown as TaskRow[]) {
@@ -66,6 +93,7 @@ export async function runAgenda(
           id: t.id,
           kind: "task",
           date: (t.due_date as string).slice(0, 10),
+          time: t.due_time ? t.due_time.slice(0, 5) : null,
           title: t.title,
           task: {
             ...t,
@@ -77,6 +105,31 @@ export async function runAgenda(
       }
     } catch {
       // sem tarefas — calendário segue só com registros
+    }
+  }
+
+  // ---- anotações do dia (post-its) ----
+  if (opts.includeNotes !== false && settings.showNotes !== false) {
+    try {
+      const { data } = await supabase
+        .from("agenda_notes")
+        .select(AGENDA_NOTE_COLS)
+        .gte("note_date", range.from)
+        .lte("note_date", range.to)
+        .order("created_at", { ascending: true })
+        .limit(500);
+      for (const n of (data ?? []) as unknown as AgendaNoteRow[]) {
+        items.push({
+          id: n.id,
+          kind: "note",
+          date: n.note_date.slice(0, 10),
+          time: null,
+          title: n.body,
+          note: n,
+        });
+      }
+    } catch {
+      // sem anotações (pré-0111) — calendário segue
     }
   }
 

@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // Tipos de TAREFAS (tabela tasks, 0063). Uma tarefa pode ser standalone,
 // vinculada a um registro (record_id) e/ou a um kanban de tarefas (board_id;
 // `phase` é a key da coluna). Visibilidade via RLS: view_all_records OU
@@ -7,6 +7,8 @@
 //   não vira card), pinned/feed_position (feed dos cards; `position` segue
 //   sendo a ordenação no quadro), is_global (visível/notifica a todos; só
 //   admin/gestor define) e assigned_at (reatribuição → seção "Novas" do sino).
+// v1.2 (28/07/2026, 0111): due_time_end — hora FINAL opcional do agendamento
+//   ("14:00–15:30"); exige due_time (CHECK no banco + regra na action).
 
 export interface TaskRow {
   id: string;
@@ -17,6 +19,7 @@ export interface TaskRow {
   phase: string;
   due_date: string | null; // YYYY-MM-DD (dia civil)
   due_time: string | null; // HH:MM[:SS] (opcional, exibicional)
+  due_time_end: string | null; // HH:MM[:SS] (opcional; exige due_time)
   completed_at: string | null;
   completed_by: string | null;
   responsible_id: string | null;
@@ -35,7 +38,7 @@ export interface TaskRow {
 }
 
 export const TASK_COLS =
-  "id, title, description, record_id, board_id, phase, due_date, due_time, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, created_at, updated_at";
+  "id, title, description, record_id, board_id, phase, due_date, due_time, due_time_end, completed_at, completed_by, responsible_id, created_by, position, locked, parent_task_id, pinned, feed_position, is_global, assigned_at, created_at, updated_at";
 
 // Mesmo select com o título do registro vinculado (join FK record_id).
 export const TASK_COLS_WITH_RECORD = `${TASK_COLS}, record:records(title)`;

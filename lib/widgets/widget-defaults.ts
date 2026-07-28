@@ -133,7 +133,9 @@ function seedSettings(type: VisualType): WidgetSettings {
     case "kanban":
       return { kanban: { mode: "tarefas" } };
     case "agenda":
-      return { agenda: { showTasks: true, defaultView: "month" } };
+      return {
+        agenda: { showTasks: true, showNotes: true, defaultView: "month" },
+      };
     case "imagem":
       return { image: {} };
     default:

@@ -1552,7 +1552,11 @@ export function WidgetBuilder({
       const clean: AgendaSettings = {
         ...(a.source ? { source: a.source, dateField: a.dateField } : {}),
         showTasks: a.showTasks !== false,
+        showNotes: a.showNotes !== false,
         defaultView: a.defaultView === "week" ? "week" : "month",
+        // Aparência vive junto da config (settings.agenda.appearance) — o
+        // estado é seeded do settings salvo, então re-salvar dados preserva.
+        ...(a.appearance ? { appearance: a.appearance } : {}),
       };
       const input = {
         title: title.trim() || null,
@@ -1561,7 +1565,10 @@ export function WidgetBuilder({
         dimensions: [],
         metrics: [],
         filters: [],
-        settings: { agenda: clean, ...tabPatch },
+        // Preserva chaves fora do escopo do builder (ex.: appearance do card)
+        // — paridade com o branch do kanban; sem o spread, salvar "Editar
+        // dados" apagaria a aparência.
+        settings: { ...widget?.settings, agenda: clean, ...tabPatch },
       };
       commit(input);
       return;
@@ -3018,6 +3025,15 @@ export function WidgetBuilder({
                       }
                     />
                     Mostrar tarefas (vencimento)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={a.showNotes !== false}
+                      onCheckedChange={(v) =>
+                        patchAgenda({ showNotes: v === true })
+                      }
+                    />
+                    Mostrar anotações do dia (post-its)
                   </label>
                   <div className="flex flex-col gap-1.5">
                     <Label>Visão inicial</Label>

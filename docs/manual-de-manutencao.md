@@ -179,7 +179,7 @@ npm run build      # o que a Vercel roda no deploy
 
 ## 3. Como fazer uma mudança de banco
 
-1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0110).
+1. Crie `supabase/migrations/NNNN_nome.sql` com o próximo número livre (hoje: 0112).
    Cabeçalho `-- Versão / -- Data` + comentário explicando o quê/porquê.
 2. Escreva SQL **idempotente** (`if not exists`, `create or replace`,
    `drop ... if exists` antes de `create trigger/policy`).
