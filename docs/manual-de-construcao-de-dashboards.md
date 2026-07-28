@@ -1956,8 +1956,8 @@ Comportamento do calendário:
 
 ### 12.4 Agenda do Workspace (página `/agenda`)
 
-Além do widget, o Workspace (Home) tem a seção **"Agenda"** com o card
-**"Agenda do workspace"** (e o item "Agenda" no menu): um calendário cheio
+Além do widget, o item **"Agenda"** do menu lateral abre a página
+**"Agenda do workspace"**: um calendário cheio
 com barra própria de controles — as escolhas ficam salvas por usuário:
 
 - **"Conteúdo"**: "Todas as agendas" (mistura os registros de TODOS os
