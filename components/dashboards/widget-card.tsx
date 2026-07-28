@@ -609,10 +609,11 @@ export const WidgetCard = memo(function WidgetCard({
     };
   }, [serverPaged, srvPage, srvLoading, recordListTotal, handleServerPage]);
   // Aparência: charts/tabela/pizza/kpi, KANBAN (quadro/colunas/cards/abas —
-  // settings.kanban.appearance) e FILTROS (25/07/2026 — fundo/borda/abinha em
-  // appearance.filter + título/fontes genéricos); segue fora em calc/agenda/
-  // imagem.
-  const canStyle = !isCalc && !isAgenda && !isImage;
+  // settings.kanban.appearance), FILTROS (25/07/2026 — fundo/borda/abinha em
+  // appearance.filter + título/fontes genéricos) e AGENDA (28/07/2026 —
+  // cabeçalho/células/chips em settings.agenda.appearance); segue fora em
+  // calc/imagem.
+  const canStyle = !isCalc && !isImage;
 
   // Catálogo de operandos do editor in-place da nota — builder ÚNICO
   // (lib/widgets/agg-catalog.ts), mesma montagem do calcRefs do builder e da

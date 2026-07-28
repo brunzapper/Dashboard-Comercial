@@ -1,4 +1,9 @@
-<!-- Versão: 3.1 | Data: 27/07/2026 -->
+<!-- Versão: 3.2 | Data: 28/07/2026 -->
+<!-- v3.2 (28/07/2026): 0111 — tasks.due_time_end (hora final opcional; CHECK
+     exige due_time) + idx_tasks_due (due_date, due_time); agenda_notes
+     (anotação do dia/post-it — org-scoped raiz, carimbo na action; SELECT
+     org-wide, escrita autor/admin/gestor; sem anon; realtime).
+     Não recria as RPCs. -->
 <!-- v3.1 (27/07/2026): 0109 — kanban_automations (automações do kanban:
      regra jsonb versionada, XOR widget/board, RLS auth_board_editable + org)
      + audit_log.origin aceita 'automation'. Não recria as RPCs. -->
@@ -374,10 +379,26 @@ vivo via service role — `PASSTHROUGH_TABLES`). UI: Configurações → Metas
 `due_date`/`due_time`, `completed_at/by`, `responsible_id` (mesma entidade dos
 registros), `position` (ordenação fracionária), `locked` (trava: só admin/gestor).
 Adicionadas na 0066: `parent_task_id` (subtarefas), `pinned`, `feed_position`,
-`is_global`, `assigned_at`.
+`is_global`, `assigned_at`. Adicionada na 0111: `due_time_end` (hora FINAL
+opcional do agendamento — "14:00–15:30"; CHECK `tasks_due_time_end_pair` exige
+`due_time`; "fim > início" é regra da action) + índice parcial `idx_tasks_due`
+`(due_date, due_time) where due_date is not null` (range da agenda + ordem
+cronológica intra-dia). O par `date`+`time` é deliberado (0063): dia civil +
+hora de parede de Brasília, fora do regime de ancoragem `-03:00` dos `records`.
 
 **`comments`** (0066) — feed dos cards: exatamente um pai (`record_id` XOR
 `task_id`), `body`, `pinned`, `position`.
+
+**`agenda_notes`** (0111) — "anotação do dia" (post-it do calendário): texto
+livre ancorado a um dia civil (`note_date date`), sem vínculo com
+registro/tarefa; `body`, `color` (token da paleta de post-it — validado na
+action), `created_by`. Tabela RAIZ org-scoped (`organization_id` default
+Zapper; carimbo na ACTION via `getActiveOrgId()` — sem pai derivável, sem
+trigger de stamp). RLS: SELECT org-wide (anotação é contexto compartilhado do
+calendário); INSERT autor; UPDATE/DELETE autor OU admin/gestor. Sem acesso
+`anon`; fora de `PASSTHROUGH_TABLES` (snapshot público nunca lê — adapter
+falha fechado). Índice `(organization_id, note_date)`; entra na publication
+`supabase_realtime` (padrão 0071).
 
 **`kanban_placements`** (0067) — posição de registros em kanbans com colunas
 "Personalizar": exatamente um dono (`widget_id` XOR `board_id`) + `record_id`,
@@ -696,6 +717,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0108 | org_theme | `organizations.theme` jsonb (`{ mode, accentColor }`; `{}` = padrões do app) — padrão visual da org (Configurações → Tema, org_admin); escolha individual em `user_settings` prevalece. Policies existentes cobrem a escrita. Não recria as RPCs |
 | 0109 | kanban_automations | Automações do kanban: tabela `kanban_automations` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
 | 0110 | data_sources_custom_period_field | CHECK de `data_sources.default_period_field` aceita também `custom:<field_key>` (espelho da 0082 das subs). Validação semântica na action; picker "só colunas com dados" em Registros → Bases. Não recria as RPCs de widget |
+| 0111 | agenda_notes_task_time_end | Redesign da agenda: `tasks.due_time_end` (hora final opcional; CHECK exige `due_time`) + índice `idx_tasks_due (due_date, due_time)`; tabela `agenda_notes` (anotação do dia — org-scoped raiz, carimbo na action; SELECT org-wide, escrita autor/admin/gestor; sem anon) + publication realtime. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

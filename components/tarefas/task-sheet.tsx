@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // Painel de criação/edição de TAREFA: título, descrição, vencimento (data +
 // hora opcional), responsável (vendedor fica travado nos próprios), vínculo a
 // registro e trava de exclusão (só admin/gestor). `defaults` pré-preenche
@@ -8,6 +8,8 @@
 //   cria SUBTAREFA (feed da tarefa pai); gatilho `chipTrigger` ("+tarefa" no
 //   rodapé dos cards); checkbox "Global" (notifica todos — só admin/gestor,
 //   trigger 0066 reforça). Sucesso emite emitDataChanged (event bus W1).
+// v1.2 (28/07/2026, 0111): hora FINAL opcional ("até" — agendamento
+//   14:00–15:30) e defaults.dueDate/dueTime (quick-create por dia da agenda).
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
@@ -59,6 +61,9 @@ export interface TaskDefaults {
   recordTitle?: string | null;
   locked?: boolean;
   parentTaskId?: string | null;
+  // Quick-create por dia da agenda: pré-data (YYYY-MM-DD) e pré-hora (HH:MM).
+  dueDate?: string | null;
+  dueTime?: string | null;
 }
 
 /**
@@ -154,14 +159,14 @@ export function TaskForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="task-due">Vencimento</Label>
           <Input
             id="task-due"
             type="date"
             name="due_date"
-            defaultValue={task?.due_date ?? ""}
+            defaultValue={task?.due_date ?? defaults?.dueDate ?? ""}
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -170,7 +175,18 @@ export function TaskForm({
             id="task-time"
             type="time"
             name="due_time"
-            defaultValue={task?.due_time?.slice(0, 5) ?? ""}
+            defaultValue={
+              task?.due_time?.slice(0, 5) ?? defaults?.dueTime ?? ""
+            }
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="task-time-end">até</Label>
+          <Input
+            id="task-time-end"
+            type="time"
+            name="due_time_end"
+            defaultValue={task?.due_time_end?.slice(0, 5) ?? ""}
           />
         </div>
       </div>

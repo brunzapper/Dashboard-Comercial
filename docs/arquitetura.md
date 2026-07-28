@@ -1,4 +1,15 @@
-<!-- Versão: 1.37 | Data: 26/07/2026 -->
+<!-- Versão: 1.38 | Data: 28/07/2026 -->
+<!-- v1.38 (28/07/2026): Redesign da AGENDA (0111): célula com altura fixa por
+     densidade + scroll por dia + ordem cronológica (lib/agenda/day-items.ts);
+     tasks.due_time_end (hora final); agenda_notes (anotação do dia — post-it;
+     org-scoped raiz, SELECT org-wide, escrita autor/admin/gestor; realtime);
+     drag & drop de tarefas/anotações entre dias (rescheduleTask/moveAgendaNote
+     — otimista, mime application/x-agenda-item); quick-create por dia;
+     CardDetailSheet no clique do chip; aparência em
+     settings.agenda.appearance (canStyle inclui agenda); página /agenda do
+     Workspace (fetchWorkspaceAgenda — mistura de agendas com Operação
+     traduzida via operation-scope; prefs em user_settings.agendaHub).
+     RPCs intocados. -->
 <!-- v1.37 (26/07/2026): §4.8 — Pastas de bases (0107): source_folders +
      folder_id/sort_order (exibição pura; groupSourcesByFolder único;
      navegação Pasta → Base → Sub-base em /registros e /campos; headings nos
@@ -973,6 +984,42 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   Aparência ficam de fora (board-only — aparência do widget se edita no
   builder). Pai arquivado sai do hub mas a URL direta segue abrindo (paridade
   com boards); pai na Lixeira → 404.
+- **Agenda redesenhada (28/07/2026, 0111):** o calendário (`AgendaView`,
+  compartilhado por widget, 3ª visão do kanban dedicado e `/agenda`) tem
+  célula de ALTURA FIXA por densidade (`gridTemplateRows`; presets
+  compacta/normal/espaçosa — dia cheio rola NA célula, a semana não estica),
+  cabeçalho fixo por célula ("+" de criação rápida + nº do dia; faixa Seg–Dom
+  sticky) e ordem CRONOLÓGICA intra-dia via helpers puros de
+  `lib/agenda/day-items.ts` (`extractTimeHHMM` — prefixo naive, 00:00 = sem
+  hora; `sortDayItems` — com hora primeiro, desempate nota→tarefa→registro;
+  `mergeAgendaItems` — dedupe de registro por id|dia nas pernas do Workspace).
+  Itens: tarefas (hora `due_time` + FINAL opcional `due_time_end`, 0111 —
+  chip "14:00–15:30"), registros (hora extraída do valor bruto) e **anotações
+  do dia** (`agenda_notes`, 0111 — post-it: chip tintado; clique abre o
+  `NotePostIt` via BodyPortal com edição inline/cor/exclusão; org-wide na
+  leitura, escrita autor/admin/gestor — attempt-and-fail). Clique no corpo do
+  chip de tarefa/registro abre UMA instância içada de `CardDetailSheet`
+  (Feed default — comentários a um gesto; aba Dados edita). **Drag & drop**
+  nativo de tarefas/anotações entre dias (mime `application/x-agenda-item`;
+  otimista via `pendingMoves` com limpeza só quando o reload REFLETE o
+  movimento; falha reverte + mensagem; `rescheduleTask` muda só `due_date` —
+  horas preservadas; registros NÃO arrastam — a data vem do campo). Aparência
+  em `settings.agenda.appearance` (`AgendaAppearance` — cabeçalho/células/
+  hoje/fim de semana/densidade/chips; cores de STATUS e a cor da anotação
+  vencem a estética), editada no sheet de Aparência (canStyle inclui agenda;
+  o save branch do builder preserva `widget.settings` — paridade com kanban).
+  **Página `/agenda` do Workspace:** card fixo na Home + item no nav;
+  `fetchWorkspaceAgenda` mistura os record-legs de TODOS os widgets agenda
+  visíveis (dedupe por `(source, dateField)`, teto de 12 legs) ou de um
+  específico, ou só entradas diretas (tarefas + anotações); recortes por
+  Responsável e por Operação TRADUZIDA no server (`loadOperationScopes` +
+  `operationFilterSet` — nunca `operation_id` literal; perfil profile-only
+  recorta só registros; anotações nunca filtram). Prefs por usuário em
+  `user_settings.agendaHub`; `validateLastView` aceita o literal `/agenda`.
+  A agenda segue FORA dos filtros de dashboard (invariante 12) e FORA de
+  snapshots (`agenda_notes`/`tasks` fora de `PASSTHROUGH_TABLES`). `classifyDue`
+  segue por DIA CIVIL (hora é exibicional — decisão registrada). RPCs
+  intocados.
 - **Ciclo de vida de boards no hub (22/07/2026, 0087):** o card do hub
   (`app/(app)/page.tsx` + `board-card-menu.tsx`) tem menu "⋮" com Duplicar/
   Arquivar/Excluir (dashboards E kanbans). **Excluir é SOFT** (`trashBoard` →

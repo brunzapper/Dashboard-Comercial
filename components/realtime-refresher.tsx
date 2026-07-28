@@ -1,6 +1,7 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 28/07/2026
 // Assinante Supabase Realtime do app autenticado (montado uma vez no layout
-// (app)): postgres_changes de records/tasks/comments (publication 0071) usados
+// (app)): postgres_changes de records/tasks/comments (publication 0071; +
+// agenda_notes, 0111) usados
 // apenas como SINAL — nenhum dado do payload é aplicado. Ao receber eventos:
 //   1. emitDataChanged por kind presente no buffer (kanban/agenda/sino já
 //      reagem ao bus — lib/tasks/events.ts);
@@ -25,6 +26,7 @@ const TABLE_KIND: Record<string, DataChangedDetail["kind"]> = {
   records: "record",
   tasks: "task",
   comments: "comment",
+  agenda_notes: "agenda_note",
 };
 
 const DEBOUNCE_MS = 2000;

@@ -898,6 +898,14 @@ export interface UserAppSettings {
   // Resolução/sanitização em lib/theme.ts (resolveTheme).
   theme?: "light" | "dark" | "system" | null;
   accentColor?: string | null;
+  // Controles da Agenda do Workspace (/agenda): conteúdo ("todas" | "propria"
+  // | "widget:<id>"), recortes e visão — a página reabre como ficou.
+  agendaHub?: {
+    content?: string;
+    responsibleId?: string | null;
+    operationId?: string | null;
+    view?: "month" | "week";
+  };
 }
 
 export async function updateUserSettings(

@@ -1,4 +1,8 @@
-// Versão: 2.6 | Data: 26/07/2026
+// Versão: 2.7 | Data: 28/07/2026
+// v2.7 (28/07/2026): seção "Agenda" (AgendaAppearanceSection) — aparência do
+//   calendário vive DENTRO de settings.agenda.appearance (merge no save
+//   preservando a config; espelho do arranjo do kanban). Agenda entrou no
+//   canStyle do widget-card.
 // v2.6 (26/07/2026): select tri-state do selo "Nº dia útil"
 //   (appearance.hideBusinessDayBadge — herda o padrão do dashboard / oculta /
 //   mostra) na seção "Título e borda", p/ Card e gráficos.
@@ -52,6 +56,8 @@ import {
 } from "@/components/ui/sheet";
 import { ColorField } from "./appearance-controls";
 import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
+import { AgendaAppearanceSection } from "@/components/agenda/agenda-appearance-section";
+import type { AgendaAppearance } from "@/lib/agenda/types";
 import { fieldLabel, type AvailableField } from "@/lib/widgets/fields";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { ConditionalFormatSection } from "@/components/dashboards/conditional-format-section";
@@ -114,6 +120,10 @@ export function WidgetAppearanceSheet({
   const [kap, setKap] = useState<KanbanAppearance>(
     widget.settings?.kanban?.appearance ?? {}
   );
+  // Aparência da agenda: mesmo arranjo, dentro de settings.agenda.
+  const [aap, setAap] = useState<AgendaAppearance>(
+    widget.settings?.agenda?.appearance ?? {}
+  );
 
   const vt = widget.visual_type;
   const isBar = vt === "barra" || vt === "barra_horizontal";
@@ -132,6 +142,7 @@ export function WidgetAppearanceSheet({
     vt === "linha_divisoria" ||
     (isShape && widget.settings?.shape?.kind === "linha");
   const isKanban = vt === "kanban";
+  const isAgenda = vt === "agenda";
   const isFilter = vt === "filtro" || vt === "filtro_campo";
 
   const metrics = data.metrics;
@@ -295,6 +306,11 @@ export function WidgetAppearanceSheet({
         ...(isKanban && widget.settings?.kanban
           ? { kanban: { ...widget.settings.kanban, appearance: kap } }
           : {}),
+        // Agenda: idem, dentro de settings.agenda (guard p/ widget antigo sem
+        // o objeto — a aparência não pode se perder nem apagar a config).
+        ...(isAgenda
+          ? { agenda: { ...widget.settings?.agenda, appearance: aap } }
+          : {}),
       },
     };
     startTransition(async () => {
@@ -324,6 +340,12 @@ export function WidgetAppearanceSheet({
           {isKanban ? (
             <BuilderSection value="kanban" title="Kanban">
               <KanbanAppearanceSection value={kap} onChange={setKap} />
+            </BuilderSection>
+          ) : null}
+          {/* ---------- Agenda (cabeçalho/células/chips) ---------- */}
+          {isAgenda ? (
+            <BuilderSection value="agenda" title="Agenda">
+              <AgendaAppearanceSection value={aap} onChange={setAap} />
             </BuilderSection>
           ) : null}
           {/* ---------- Formatação condicional (valor→estilo + heatmap) ---------- */}

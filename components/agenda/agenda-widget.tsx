@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 28/07/2026
+// v1.2 (28/07/2026): repassa appearance/showNotes de settings.agenda ao
+// calendário redesenhado (aparência + anotações do dia).
 // v1.1 (21/07/2026): guarda de resposta obsoleta (contador de geração) — em
 // navegação rápida de mês/semana, só a ÚLTIMA resposta aterrissa (antes uma
 // resposta antiga podia sobrescrever a mais nova).
@@ -115,6 +117,8 @@ export function AgendaWidget({
         onViewChange={setView}
         onChanged={reload}
         compact
+        appearance={widget.settings?.agenda?.appearance}
+        showNotes={widget.settings?.agenda?.showNotes !== false}
       />
     </div>
   );

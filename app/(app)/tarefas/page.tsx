@@ -25,6 +25,7 @@ export default async function TarefasPage() {
       .is("parent_task_id", null)
       .order("completed_at", { ascending: true, nullsFirst: true })
       .order("due_date", { ascending: true, nullsFirst: false })
+      .order("due_time", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(500),
     supabase

@@ -1,9 +1,13 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 28/07/2026
 // Server Actions de TAREFAS (tabela tasks, 0063). Gravação com o client do
 // usuário — a RLS decide visibilidade/edição/exclusão (vendedor só as suas;
 // `locked` bloqueia exclusão de não-admin/gestor e a flag é protegida pelo
 // trigger enforce_task_lock). Sem view_all_records, o responsável é coagido a
 // um vinculado ao próprio usuário (espelha a policy de INSERT).
+// v1.1 (28/07/2026, 0111): due_time_end (hora final do agendamento — exige
+//   due_time; fim > início) + rescheduleTask (drag da agenda: só a DATA muda,
+//   horas preservadas por omissão) + ordem secundária por due_time nas listas
+//   (intra-dia cronológico em /tarefas, sino e painéis).
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -74,6 +78,7 @@ function readTaskForm(formData: FormData): {
   description: string | null;
   due_date: string | null;
   due_time: string | null;
+  due_time_end: string | null;
   responsible_id: string | null;
   record_id: string | null;
   error?: string;
@@ -82,24 +87,43 @@ function readTaskForm(formData: FormData): {
   const description = cleanStr(formData.get("description")) || null;
   const dueDateRaw = cleanStr(formData.get("due_date"), 10);
   const dueTimeRaw = cleanStr(formData.get("due_time"), 8);
+  const dueTimeEndRaw = cleanStr(formData.get("due_time_end"), 8);
   const responsible = cleanStr(formData.get("responsible_id"), 40) || null;
   const record = cleanStr(formData.get("record_id"), 40) || null;
+  const due_time = TIME_RE.test(dueTimeRaw) ? dueTimeRaw : null;
+  // Hora final: exige hora inicial (CHECK 0111) e precisa ser depois dela.
+  const due_time_end =
+    due_time && TIME_RE.test(dueTimeEndRaw) ? dueTimeEndRaw : null;
   if (!title) {
     return {
       title,
       description,
       due_date: null,
       due_time: null,
+      due_time_end: null,
       responsible_id: responsible,
       record_id: record,
       error: "Informe o título da tarefa.",
+    };
+  }
+  if (due_time_end && due_time_end.slice(0, 5) <= due_time!.slice(0, 5)) {
+    return {
+      title,
+      description,
+      due_date: null,
+      due_time: null,
+      due_time_end: null,
+      responsible_id: responsible,
+      record_id: record,
+      error: "A hora final deve ser depois da inicial.",
     };
   }
   return {
     title,
     description,
     due_date: DATE_RE.test(dueDateRaw) ? dueDateRaw : null,
-    due_time: TIME_RE.test(dueTimeRaw) ? dueTimeRaw : null,
+    due_time,
+    due_time_end,
     responsible_id: responsible,
     record_id: record,
   };
@@ -155,6 +179,7 @@ export async function createTask(
       phase,
       due_date: parsed.due_date,
       due_time: parsed.due_time,
+      due_time_end: parsed.due_time_end,
       responsible_id: responsibleId,
       created_by: session.user.id,
       // Ordenação fracionária: novas tarefas no topo da coluna (posição
@@ -209,6 +234,7 @@ export async function updateTask(
     description: parsed.description,
     due_date: parsed.due_date,
     due_time: parsed.due_time,
+    due_time_end: parsed.due_time_end,
     responsible_id: responsibleId,
     record_id: parsed.record_id,
   };
@@ -330,6 +356,39 @@ export async function moveTaskPhase(
   return { ok: true };
 }
 
+/**
+ * Remarca a DATA da tarefa (drag entre dias na agenda). Só `due_date` muda —
+ * `due_time`/`due_time_end` ficam intactos por omissão (a hora acompanha a
+ * tarefa, mesmo racional do withOriginalTime do kanban).
+ */
+export async function rescheduleTask(
+  id: string,
+  dueDateIso: string
+): Promise<TaskActionState> {
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!DATE_RE.test(dueDateIso)) {
+    return { ok: false, message: "Data inválida." };
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ due_date: dueDateIso })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, message: "Sem permissão para mover esta tarefa." };
+  }
+  await emitWebhookEvent(
+    "task.updated",
+    { taskId: id, dueDate: dueDateIso },
+    await getActiveOrgId()
+  );
+  revalidateTasks();
+  return { ok: true };
+}
+
 /** Exclui uma tarefa (RLS: admin/gestor sempre; envolvidos se não travada). */
 export async function deleteTask(id: string): Promise<TaskActionState> {
   const session = await getSessionInfo();
@@ -415,6 +474,7 @@ export async function listRecordTasks(recordId: string): Promise<TaskRow[]> {
     .eq("record_id", recordId)
     .order("completed_at", { ascending: true, nullsFirst: true })
     .order("due_date", { ascending: true, nullsFirst: false })
+    .order("due_time", { ascending: true, nullsFirst: false })
     .limit(100);
   return (data ?? []) as unknown as TaskRow[];
 }
@@ -463,6 +523,7 @@ export async function listTaskAlerts(
       .lte("due_date", limitIso)
       .or(notify)
       .order("due_date", { ascending: true })
+      .order("due_time", { ascending: true, nullsFirst: false })
       .limit(50),
     supabase
       .from("tasks")
@@ -529,6 +590,7 @@ export async function listDueTasks(
     .lte("due_date", limitIso)
     .or(notifyMeFilter(session.user.id, respIds))
     .order("due_date", { ascending: true })
+    .order("due_time", { ascending: true, nullsFirst: false })
     .limit(50);
   return (data ?? []) as unknown as TaskRow[];
 }

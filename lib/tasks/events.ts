@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 28/07/2026
 // Event bus CLIENT-SIDE de mudanças de tarefas/comentários/registros: mutação
 // concluída em qualquer superfície → emitDataChanged → assinantes (widget
 // kanban, agenda, sino, listas) recarregam na hora.
@@ -7,6 +7,7 @@
 // usuários/syncs chegam pelo mesmo caminho; o alcance deixou de ser só a
 // própria aba. Emita SEMPRE no client, após a Server Action resolver ok —
 // nunca de dentro da action (não há window no server).
+// v1.2 (28/07/2026, 0111): kind "agenda_note" (anotações do dia da agenda).
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -14,7 +15,7 @@ import { useEffect, useRef } from "react";
 export const DATA_CHANGED_EVENT = "app:tasks-changed";
 
 export interface DataChangedDetail {
-  kind: "task" | "comment" | "record";
+  kind: "task" | "comment" | "record" | "agenda_note";
   recordId?: string | null;
   taskId?: string | null;
   boardId?: string | null;
