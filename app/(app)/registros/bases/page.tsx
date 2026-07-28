@@ -1,5 +1,11 @@
-// Versão: 2.3 | Data: 27/07/2026
+// Versão: 2.4 | Data: 28/07/2026
 // Registros → Bases (admin).
+// v2.4 (28/07/2026): campo de período por BASE aceita campo custom de DATA
+//   (0110) e o picker (bases E subs) oferece "só colunas com dados": probe
+//   PostgREST não-mock (lib/config/period-field-probe.ts) + montagem pura
+//   (lib/source-date-fields.ts); fallback core p/ base sem linhas; valor salvo
+//   sempre presente. Fix: select de field_definitions ganha source_system e os
+//   overrides core (0086) saem dos pickers (isCoreDef — filtro em JS).
 // v2.3 (27/07/2026): página movida de /configuracoes/fontes para
 //   /registros/bases (config vive no ambiente dela). A CHAVE de área segue
 //   "fontes" (histórica — overrides gravados em user_access_overrides).
@@ -20,6 +26,13 @@ import { Button } from "@/components/ui/button";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
 import { loadSourceLabels } from "@/lib/config/source-labels";
+import { probeFilledPeriodFields } from "@/lib/config/period-field-probe";
+import { isCoreDef } from "@/lib/records/core-defs";
+import {
+  buildCustomDateFieldOptions,
+  buildPeriodFieldOptions,
+  ensurePeriodOption,
+} from "@/lib/source-date-fields";
 import { fieldAppliesToSource } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { FieldDefinition } from "@/lib/records/types";
@@ -41,33 +54,38 @@ export default async function FontesPage() {
   const labels = await loadSourceLabels(supabase, sources);
   const { data: fieldsData } = await supabase
     .from("field_definitions")
-    .select("field_key, label, data_type, applies_to")
+    .select("field_key, label, data_type, applies_to, source_system")
     .order("sort_order", { ascending: true })
     .order("label", { ascending: true });
   const fields = (fieldsData ?? []) as FieldDefinition[];
 
   // Opções de campo do editor de filtro por fonte PAI (raiz): colunas do núcleo
-  // + campos personalizados que se aplicam ao record_type da pai.
+  // + campos personalizados que se aplicam ao record_type da pai. Overrides
+  // core (0086) ficam de fora — a coluna já entra por coreOptions e
+  // `custom:<coluna core>` resolveria custom_fields->>'...', sempre null.
+  const roots = sources.filter((s) => !s.parentKey);
   const coreOptions: ComboboxOption[] = CORE_FIELDS.map((f) => ({
     value: f.field,
     label: f.label,
   }));
   const fieldOptionsByParent: Record<string, ComboboxOption[]> =
     Object.fromEntries(
-      sources
-        .filter((s) => !s.parentKey)
-        .map((s) => [
-          s.key,
-          [
-            ...coreOptions,
-            ...fields
-              .filter((f) => fieldAppliesToSource(f.applies_to, s.key, sources))
-              .map((f) => ({
-                value: `custom:${f.field_key}`,
-                label: f.label,
-              })),
-          ],
-        ])
+      roots.map((s) => [
+        s.key,
+        [
+          ...coreOptions,
+          ...fields
+            .filter(
+              (f) =>
+                !isCoreDef(f) &&
+                fieldAppliesToSource(f.applies_to, s.key, sources)
+            )
+            .map((f) => ({
+              value: `custom:${f.field_key}`,
+              label: f.label,
+            })),
+        ],
+      ])
     );
 
   // Sub-operações automáticas (0106): configs + opções de operação-pai.
@@ -90,25 +108,54 @@ export default async function FontesPage() {
     label: o.name as string,
   }));
 
-  // Campos personalizados de DATA por pai: opções extras do campo de período
-  // da sub-fonte (0082 — 'custom:<key>'; ex.: Data Reunião).
-  const dateFieldOptionsByParent: Record<string, ComboboxOption[]> =
+  // Campo de período por base (0082/0110): candidatos custom de DATA por pai
+  // (rótulos + probe) → lista "só colunas com dados" do picker (bases e subs).
+  const customDateOptionsByParent: Record<string, ComboboxOption[]> =
     Object.fromEntries(
-      sources
-        .filter((s) => !s.parentKey)
-        .map((s) => [
-          s.key,
-          fields
-            .filter(
-              (f) =>
-                f.data_type === "data" &&
-                fieldAppliesToSource(f.applies_to, s.key, sources)
-            )
-            .map((f) => ({
-              value: `custom:${f.field_key}`,
-              label: f.label,
-            })),
-        ])
+      roots.map((s) => [s.key, buildCustomDateFieldOptions(fields, s.key, sources)])
+    );
+  // Probe não-mock por base (Promise.all entre bases; página admin, custo ok).
+  const probes = Object.fromEntries(
+    await Promise.all(
+      roots.map(
+        async (s) =>
+          [
+            s.key,
+            await probeFilledPeriodFields(
+              supabase,
+              s.recordType,
+              customDateOptionsByParent[s.key].map((o) =>
+                o.value.slice("custom:".length)
+              )
+            ),
+          ] as const
+      )
+    )
+  );
+  // Lista filtrada por pai (picker das subs — o valor salvo DA SUB é injetado
+  // client-side no componente, pois o mapa é por pai).
+  const periodOptionsByParent: Record<string, ComboboxOption[]> =
+    Object.fromEntries(
+      roots.map((s) => [
+        s.key,
+        buildPeriodFieldOptions({
+          customOptions: customDateOptionsByParent[s.key],
+          hasRows: probes[s.key].hasRows,
+          filled: probes[s.key].filled,
+        }),
+      ])
+    );
+  // Por base: mesma lista + o valor salvo DA base sempre presente.
+  const periodOptionsBySource: Record<string, ComboboxOption[]> =
+    Object.fromEntries(
+      roots.map((s) => [
+        s.key,
+        ensurePeriodOption(
+          periodOptionsByParent[s.key],
+          s.defaultPeriodField,
+          customDateOptionsByParent[s.key]
+        ),
+      ])
     );
 
   return (
@@ -128,11 +175,16 @@ export default async function FontesPage() {
         </Button>
       </div>
       <SourceFoldersManager folders={folders} sources={sources} />
-      <SourcesManager sources={sources} folders={folders} />
+      <SourcesManager
+        sources={sources}
+        folders={folders}
+        periodOptionsBySource={periodOptionsBySource}
+      />
       <SubSourcesManager
         sources={sources}
         fieldOptionsByParent={fieldOptionsByParent}
-        dateFieldOptionsByParent={dateFieldOptionsByParent}
+        dateFieldOptionsByParent={customDateOptionsByParent}
+        periodOptionsByParent={periodOptionsByParent}
       />
       <AutoOperationsManager
         sources={sources}

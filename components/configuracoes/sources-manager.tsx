@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 26/07/2026
+// Versão: 1.4 | Data: 28/07/2026
 // Gestão do catálogo de fontes (data_sources, 0060): listar, criar, editar e
 // excluir fontes dinâmicas. Fontes novas mapeiam key === record_type; a chave
 // é gerada do nome (slugify) e imutável após a criação. Excluir exige fonte
@@ -10,6 +10,12 @@
 // v1.3 (26/07/2026): PASTAS (0107) — campo "Pasta" no formulário, tabela
 //   agrupada por pasta (groupSourcesByFolder; só bases RAIZ — subs vivem na
 //   seção Sub-bases) e botões ↑/↓ de ordem manual dentro da pasta.
+// v1.4 (28/07/2026): campo de período por base (0110) — o picker deixa a lista
+//   fixa de colunas core e recebe por prop a lista "só colunas com dados" da
+//   base (montada no servidor: core + campos custom de DATA com ≥1 linha
+//   preenchida não-mock; valor salvo sempre presente). Criação segue nas core
+//   (base nova não tem linhas). Opções/rótulos canônicos em
+//   lib/source-date-fields.ts.
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -37,6 +43,11 @@ import {
 } from "@/components/ui/table";
 import type { SourceDef } from "@/lib/sources";
 import {
+  CORE_PERIOD_FIELD_OPTIONS,
+  ensurePeriodOption,
+  periodFieldLabel,
+} from "@/lib/source-date-fields";
+import {
   groupSourcesByFolder,
   IMPLICIT_FOLDER_LABEL,
   type SourceFolder,
@@ -52,19 +63,6 @@ import {
 
 const initial: SourceActionState = {};
 
-const PERIOD_FIELD_OPTIONS: ComboboxOption[] = [
-  { value: "source_created_at", label: "Data de criação (origem)" },
-  { value: "closed_at", label: "Data de fechamento" },
-  { value: "opened_at", label: "Data de abertura" },
-  { value: "source_modified_at", label: "Data de modificação (origem)" },
-  { value: "created_at", label: "Criado no app" },
-  { value: "updated_at", label: "Atualizado no app" },
-];
-
-function periodFieldLabel(value: string): string {
-  return PERIOD_FIELD_OPTIONS.find((o) => o.value === value)?.label ?? value;
-}
-
 // Fusos IANA do runtime (guard: supportedValuesOf existe em todo alvo moderno;
 // sem ele a lista fica só com "sem conversão").
 const TZ_OPTIONS: ComboboxOption[] = [
@@ -77,10 +75,14 @@ const TZ_OPTIONS: ComboboxOption[] = [
 function SourceForm({
   source,
   folders,
+  periodOptions,
   onDone,
 }: {
   source?: SourceDef;
   folders: SourceFolder[];
+  // Lista "só colunas com dados" da base (servidor). Ausente (criação — base
+  // nova não tem linhas) = colunas core.
+  periodOptions?: ComboboxOption[];
   onDone?: () => void;
 }) {
   const isEdit = Boolean(source);
@@ -88,6 +90,13 @@ function SourceForm({
   const [state, formAction, pending] = useActionState(action, initial);
   const [periodField, setPeriodField] = useState(
     source?.defaultPeriodField ?? "source_created_at"
+  );
+  // Valor selecionado fora da lista filtrada segue selecionável (padrão do
+  // tzOptions abaixo).
+  const periodFieldOptions = useMemo(
+    () =>
+      ensurePeriodOption(periodOptions ?? CORE_PERIOD_FIELD_OPTIONS, periodField),
+    [periodOptions, periodField]
   );
   // Fontes novas nascem aceitando criação manual; builtins (Sync) desligados.
   const [manualEntry, setManualEntry] = useState(source?.manualEntry ?? true);
@@ -173,15 +182,17 @@ function SourceForm({
       <div className="flex flex-col gap-1.5">
         <Label>Campo de data do filtro de período</Label>
         <Combobox
-          options={PERIOD_FIELD_OPTIONS}
+          options={periodFieldOptions}
           value={periodField}
           onValueChange={setPeriodField}
           searchable={false}
           aria-label="Campo de data do filtro de período"
         />
         <p className="text-muted-foreground text-xs">
-          Onde a barra de período do dashboard busca a data desta fonte quando
-          não há override configurado.
+          Onde a barra de período do dashboard busca a data desta base quando
+          não há override configurado. Só aparecem campos de data com ao menos
+          um registro preenchido nesta base (mocks não contam); base sem
+          registros mostra as colunas padrão.
         </p>
       </div>
 
@@ -297,9 +308,13 @@ function DeleteSourceButton({ sourceKey }: { sourceKey: string }) {
 export function SourcesManager({
   sources,
   folders,
+  periodOptionsBySource,
 }: {
   sources: SourceDef[];
   folders: SourceFolder[];
+  // Por base RAIZ: lista "só colunas com dados" do campo de período (0110),
+  // com o valor salvo da base já injetado no servidor.
+  periodOptionsBySource?: Record<string, ComboboxOption[]>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
@@ -358,6 +373,7 @@ export function SourcesManager({
                 group={g}
                 showFolders={showFolders}
                 onEdit={openEdit}
+                periodOptionsBySource={periodOptionsBySource}
               />
             ))}
           </TableBody>
@@ -379,6 +395,9 @@ export function SourcesManager({
               key={editing?.key ?? "new"}
               source={editing}
               folders={folders}
+              periodOptions={
+                editing ? periodOptionsBySource?.[editing.key] : undefined
+              }
               onDone={() => setOpen(false)}
             />
           </div>
@@ -394,10 +413,12 @@ function FragmentGroup({
   group,
   showFolders,
   onEdit,
+  periodOptionsBySource,
 }: {
   group: SourceFolderGroup<SourceDef>;
   showFolders: boolean;
   onEdit: (s: SourceDef) => void;
+  periodOptionsBySource?: Record<string, ComboboxOption[]>;
 }) {
   return (
     <>
@@ -421,7 +442,10 @@ function FragmentGroup({
             {s.shortLabel}
           </TableCell>
           <TableCell className="text-muted-foreground text-xs">
-            {periodFieldLabel(s.defaultPeriodField)}
+            {periodFieldLabel(
+              s.defaultPeriodField,
+              periodOptionsBySource?.[s.key]
+            )}
           </TableCell>
           <TableCell className="text-muted-foreground text-xs">
             {s.timezone || "—"}

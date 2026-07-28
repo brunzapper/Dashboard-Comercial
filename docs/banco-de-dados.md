@@ -156,8 +156,11 @@ do site ou linha de fonte dinâmica.
 
 **`data_sources`** (0060) — catálogo de fontes (dinâmicas, criáveis via UI).
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
-key === record_type), `label`, `short_label`, `default_period_field` (CHECK entre as
-colunas de data do núcleo), `builtin`, `manual_entry` (0061 — aceita criação manual;
+key === record_type), `label`, `short_label`, `default_period_field` (CHECK:
+colunas de data do núcleo OU, desde a 0110, `custom:<field_key>` — espelho da
+0082 das subs; a action valida existência/tipo/`applies_to` e recusa override
+core da 0086; o picker de Registros → Bases só oferece campos com ≥1 linha
+preenchida não-mock), `builtin`, `manual_entry` (0061 — aceita criação manual;
 builtins nascem desligados), `timezone` (0079 — fuso IANA da ORIGEM; datetimes
 ingeridos normalizam p/ Brasília na entrada, `lib/date/normalize.ts`; NULL = sem
 conversão; seed `Europe/Moscow` em `leads`/`deals`), `folder_id` (0107 — FK →
@@ -692,6 +695,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0107 | source_folders | PASTAS de bases (agrupamento de EXIBIÇÃO + ordem manual): tabela `source_folders` (uuid PK; RLS espelha data_sources_write) + `data_sources.folder_id` (FK on delete SET NULL)/`sort_order` + `sub_sources.sort_order`. Pasta nunca entra em consulta/engine. Não recria as RPCs |
 | 0108 | org_theme | `organizations.theme` jsonb (`{ mode, accentColor }`; `{}` = padrões do app) — padrão visual da org (Configurações → Tema, org_admin); escolha individual em `user_settings` prevalece. Policies existentes cobrem a escrita. Não recria as RPCs |
 | 0109 | kanban_automations | Automações do kanban: tabela `kanban_automations` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
+| 0110 | data_sources_custom_period_field | CHECK de `data_sources.default_period_field` aceita também `custom:<field_key>` (espelho da 0082 das subs). Validação semântica na action; picker "só colunas com dados" em Registros → Bases. Não recria as RPCs de widget |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
