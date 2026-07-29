@@ -1,4 +1,12 @@
-<!-- Versão: 1.38 | Data: 28/07/2026 -->
+<!-- Versão: 1.39 | Data: 29/07/2026 -->
+<!-- v1.39 (29/07/2026): §4.10 — camada de feedback de FALHA fora de form:
+     Toaster global (sonner) no layout autenticado + notifyOnError
+     (lib/feedback/notify.ts) nos escritores que descartavam resultado;
+     actions void→ActionState (operações/responsáveis/metas/moedas/
+     deleteWidget); ConfirmDialog padronizado nas exclusões desprotegidas;
+     boundaries error/not-found (app + /s/[token]) e loading.tsx nas rotas
+     lentas; títulos de aba por página (template no layout (app)); botão de
+     menu acessível na sidebar desafixada. RPCs intocados. -->
 <!-- v1.38 (28/07/2026): Redesign da AGENDA (0111): célula com altura fixa por
      densidade + scroll por dia + ordem cronológica (lib/agenda/day-items.ts);
      tasks.due_time_end (hora final); agenda_notes (anotação do dia — post-it;
@@ -1444,6 +1452,21 @@ não apaga mais o `lastPeriod` salvo do usuário.
 - Respostas obsoletas: fetches concorrentes usam flag `cancelled` no cleanup
   (quick-table/kanban) ou contador de geração (agenda, pager server-side do
   modo lista) — só a ÚLTIMA resposta aterrissa.
+- **Falha de gravação fora de formulário → toast de ERRO (29/07/2026):**
+  ações sem form por perto (drag/resize do grid, aparência, colunas da Tabela
+  Livre, expressão da calculadora, excluir widget, Desfazer, toggles dos
+  managers de Operações/Responsáveis/Metas/Moedas, pin da sidebar) passam por
+  `notifyOnError(promise, contexto)` (`lib/feedback/notify.ts`), que toasta
+  `ok:false` (com a `message` da action) e rejeição de rede — **sucesso segue
+  silencioso** (esta política). O `<Toaster />` (sonner,
+  `components/ui/sonner.tsx`, tema via classe `.dark` do `<html>`) monta SÓ no
+  layout autenticado — o viewer `/s/` e o login ficam sem toasts. Feedback
+  INLINE (`useActionState` + `state.message`) segue sendo o padrão DENTRO de
+  formulários — não o troque por toast. Exceção única de toast de SUCESSO:
+  enviar board à Lixeira (reversível por design, sem confirmação) toasta com
+  ação "Desfazer" (`board-card-menu.tsx`). Ações destrutivas irreversíveis
+  confirmam com `ConfirmDialog` (`components/ui/confirm-dialog.tsx`, casca do
+  AlertDialog) — nunca `window.confirm`.
 
 Snapshot (`app/s/[token]`): nada disso se aplica — quick filters do visitante
 vão à URL (`qf_*`), kanban/Tabela Livre chegam PRECOMPUTADOS pelo RSC público
