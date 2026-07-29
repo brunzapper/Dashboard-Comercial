@@ -22,6 +22,9 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { AiProviderForm } from "@/components/configuracoes/ai-provider-form";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Integrações" };
+
 export default async function IntegracoesPage() {
   await requireSettingsArea("integracoes");
   const supabase = await createClient();

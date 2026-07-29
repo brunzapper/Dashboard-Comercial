@@ -19,6 +19,9 @@ import {
 // gratuito o teto real é ~60s) — mesmo padrão da página de Registros.
 export const maxDuration = 60;
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Importar CSV" };
+
 export default async function ImportarPage() {
   await requireRole("admin");
   const supabase = await createClient();

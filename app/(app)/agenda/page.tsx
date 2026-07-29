@@ -30,6 +30,9 @@ interface AgendaHubPrefs {
   view?: string;
 }
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Agenda" };
+
 export default async function AgendaHubPage() {
   const session = await getSessionInfo();
   if (!session) return null; // proxy já redireciona sem sessão

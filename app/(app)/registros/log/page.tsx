@@ -23,6 +23,9 @@ import {
 } from "@/components/configuracoes/sync-jobs-log";
 import type { SyncResult } from "@/lib/sync/shared";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Log de sincronização" };
+
 export default async function LogPage() {
   const session = await requireSettingsArea("log");
   const canSeeWriteback = session.permissions.includes("view_all_records");

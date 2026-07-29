@@ -15,6 +15,9 @@ import {
   type PresetRow,
 } from "@/components/configuracoes/presets-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Presets" };
+
 export default async function PresetsPage() {
   await requireSettingsArea("presets");
   const session = await getSessionInfo();

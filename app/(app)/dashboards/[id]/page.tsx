@@ -185,6 +185,25 @@ function str(v: string | string[] | undefined): string {
 // Limitador de concorrência dos widget tasks — módulo compartilhado com a
 // action deferida (lib/widgets/task-limiter.ts).
 
+// Título da aba = nome do board (template do layout completa "— {appName}").
+// Consulta BARATA só de nome (PK sob RLS) — não reusa a carga pesada da page.
+// Board inacessível/na lixeira → sem título (a page dá o 404).
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("dashboards")
+    .select("name, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!data || data.status === "trashed") return {};
+  return { title: data.name as string };
+}
+
 export default async function DashboardPage({
   params,
   searchParams,

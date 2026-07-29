@@ -41,6 +41,24 @@ function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
+// Título da aba = nome do board (consulta barata só de nome, sob RLS).
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("dashboards")
+    .select("name, status")
+    .eq("id", id)
+    .eq("kind", "kanban")
+    .maybeSingle();
+  if (!data || data.status === "trashed") return {};
+  return { title: data.name as string };
+}
+
 export default async function KanbanPage({
   params,
   searchParams,

@@ -10,6 +10,9 @@ import {
   type ResponsibleRow,
 } from "@/components/admin/responsibles-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Responsáveis" };
+
 export default async function ResponsaveisPage() {
   await requireSettingsArea("responsaveis");
   const supabase = await createClient();

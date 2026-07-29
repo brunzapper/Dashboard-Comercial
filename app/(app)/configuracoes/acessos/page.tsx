@@ -20,6 +20,9 @@ import {
 import { subSourcesOf } from "@/lib/sources";
 import { AccessMatrix } from "@/components/configuracoes/access-matrix";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Acessos" };
+
 export default async function AcessosPage() {
   const session = await requireSettingsArea("acessos");
   const org = await getActiveOrg();

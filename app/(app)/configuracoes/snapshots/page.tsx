@@ -7,6 +7,9 @@ import { listAllSnapshots } from "@/app/(app)/dashboards/snapshot-actions";
 import { requireSettingsArea } from "@/lib/auth/access";
 import { SnapshotsManager } from "@/components/admin/snapshots-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Snapshots" };
+
 export default async function SnapshotsPage() {
   await requireSettingsArea("snapshots");
   const snapshots = await listAllSnapshots();

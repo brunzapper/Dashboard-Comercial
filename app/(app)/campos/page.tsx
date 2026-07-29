@@ -38,6 +38,9 @@ import {
   type CurrencyRateRow,
 } from "@/components/configuracoes/currencies-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Campos" };
+
 export default async function CamposPage() {
   await requirePermission("manage_field_definitions");
 

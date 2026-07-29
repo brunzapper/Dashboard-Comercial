@@ -68,6 +68,9 @@ function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Registros" };
+
 export default async function RegistrosPage({
   searchParams,
 }: {
