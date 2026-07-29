@@ -10,6 +10,7 @@ import { useState } from "react";
 import { CheckCheck, ChevronDown, ListPlus, MoveRight, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Combobox } from "@/components/ui/combobox";
@@ -74,6 +75,7 @@ export function BulkActionBar({
   const [taskDue, setTaskDue] = useState("");
   const [taskResp, setTaskResp] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmComplete, setConfirmComplete] = useState(false);
   const isTasks = mode === "tarefas";
   const targets = columns.filter((c) => !c.noDrop);
 
@@ -175,7 +177,7 @@ export function BulkActionBar({
         variant="outline"
         size="sm"
         className="h-7 gap-1"
-        onClick={onCompleteTasks}
+        onClick={() => setConfirmComplete(true)}
         title={
           isTasks
             ? "Concluir as tarefas selecionadas"
@@ -185,6 +187,24 @@ export function BulkActionBar({
         <CheckCheck className="size-3.5" />
         Concluir tarefas
       </Button>
+      {/* Concluir em massa é irreversível na prática (não há "reabrir em
+          massa") — confirma com o escopo explícito, como o Excluir ao lado. */}
+      <ConfirmDialog
+        open={confirmComplete}
+        onOpenChange={setConfirmComplete}
+        title="Concluir tarefas?"
+        description={
+          isTasks
+            ? `As ${count} tarefa(s) selecionada(s) serão marcadas como concluídas.`
+            : `Todas as tarefas abertas dos ${count} card(s) selecionado(s) serão marcadas como concluídas.`
+        }
+        actionLabel="Concluir"
+        destructive={false}
+        onConfirm={() => {
+          setConfirmComplete(false);
+          onCompleteTasks();
+        }}
+      />
 
       {canDelete ? (
         <>

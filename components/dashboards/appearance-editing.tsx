@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { Button } from "@/components/ui/button";
 import { ColorField } from "./appearance-controls";
 import type {
@@ -73,10 +74,15 @@ export function useWidgetAppearance(widget: Widget, dashboardId: string) {
       latest.current = next;
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
-        void saveWidgetSettings(widget.id, dashboardId, {
-          ...widget.settings,
-          appearance: latest.current,
-        }).then(() => router.refresh());
+        void notifyOnError(
+          saveWidgetSettings(widget.id, dashboardId, {
+            ...widget.settings,
+            appearance: latest.current,
+          }),
+          "Não foi possível salvar a aparência"
+        ).then((res) => {
+          if (res?.ok) router.refresh();
+        });
       }, 500);
     },
     [widget.id, widget.settings, dashboardId, router]

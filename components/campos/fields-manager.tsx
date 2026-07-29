@@ -21,11 +21,12 @@
 //   toggle de exibir/ocultar (ícone do olho) já era inline e foi preservado.
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useRef, useState } from "react";
 import { Eye, EyeOff, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -95,6 +96,8 @@ function FieldRow({
   onEdit: (f: FieldDefinition) => void;
 }) {
   const [delState, deleteAction] = useActionState(deleteField, {});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteFormRef = useRef<HTMLFormElement>(null);
   const shown = field.show_in_builder ?? true;
   return (
     <TableRow>
@@ -140,16 +143,34 @@ function FieldRow({
           </Button>
           {/* Colunas do núcleo não podem ser excluídas (o server também barra). */}
           {!isCoreDef(field) && (
-            <form action={deleteAction}>
+            <form ref={deleteFormRef} action={deleteAction}>
               <input type="hidden" name="id" value={field.id} />
               <Button
-                type="submit"
+                type="button"
                 variant="ghost"
                 size="icon"
                 aria-label="Excluir"
+                onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="size-4" />
               </Button>
+              <ConfirmDialog
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                title="Excluir campo?"
+                description={
+                  <>
+                    O campo <strong>{field.label}</strong> (
+                    <code>{field.field_key}</code>) e os valores gravados nele
+                    serão removidos; widgets e filtros que o usam deixam de
+                    funcionar. Esta ação não pode ser desfeita.
+                  </>
+                }
+                onConfirm={() => {
+                  setConfirmDelete(false);
+                  deleteFormRef.current?.requestSubmit();
+                }}
+              />
             </form>
           )}
         </div>

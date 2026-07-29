@@ -35,6 +35,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AiChatLog,
@@ -87,6 +88,7 @@ export function AiEditPanel({
   const [message, setMessage] = useState("");
   // Aviso fora do chat: erro de gate/salvamento (ok:false não substitui o chat).
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [action, setAction] = useState<Action>(null);
   const [busy, startBusy] = useTransition();
   // Turno em voo pela rota de streaming (fora do useTransition das actions) +
@@ -206,14 +208,7 @@ export function AiEditPanel({
 
   function restartSession() {
     if (anyBusy) return;
-    if (
-      !window.confirm(
-        "Apagar a conversa e recomeçar do zero? O Desfazer da última edição continua disponível."
-      )
-    ) {
-      return;
-    }
-    run("reset", () => resetAiEditSession(dashboardId));
+    setConfirmRestart(true);
   }
 
   if (panel === "closed") {
@@ -427,6 +422,19 @@ export function AiEditPanel({
           </p>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmRestart}
+        onOpenChange={setConfirmRestart}
+        title="Recomeçar a conversa?"
+        description="A conversa salva será apagada e você recomeça do zero. O dashboard não é alterado e o Desfazer da última edição continua disponível."
+        actionLabel="Recomeçar"
+        destructive={false}
+        onConfirm={() => {
+          setConfirmRestart(false);
+          run("reset", () => resetAiEditSession(dashboardId));
+        }}
+      />
     </>
   );
 }

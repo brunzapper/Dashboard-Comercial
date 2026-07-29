@@ -27,6 +27,7 @@ import { Pin, PinOff } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { updateUserSettings } from "@/app/(app)/dashboards/actions";
 
 interface AppChrome {
@@ -71,7 +72,12 @@ export function AppShell({
   const togglePin = useCallback(() => {
     setPinned((prev) => {
       const next = !prev;
-      startTransition(() => void updateUserSettings({ sidebarPinned: next }));
+      startTransition(() =>
+        void notifyOnError(
+          updateUserSettings({ sidebarPinned: next }),
+          "Não foi possível salvar a preferência da barra"
+        )
+      );
       return next;
     });
   }, []);

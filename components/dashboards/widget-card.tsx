@@ -100,6 +100,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
@@ -1022,8 +1023,13 @@ export const WidgetCard = memo(function WidgetCard({
               onClick={(e) => {
                 e.preventDefault();
                 startTransition(async () => {
-                  await deleteWidget(widget.id, dashboardId);
-                  onWidgetDeleted?.(widget.id);
+                  const res = await notifyOnError(
+                    deleteWidget(widget.id, dashboardId),
+                    "Não foi possível excluir o widget"
+                  );
+                  // Só remove da tela quando o banco confirmou (antes, falha
+                  // silenciosa sumia com o card até o F5 e ele "voltava").
+                  if (res?.ok) onWidgetDeleted?.(widget.id);
                   setDeleteOpen(false);
                 });
               }}
@@ -1174,8 +1180,12 @@ export const WidgetCard = memo(function WidgetCard({
               onClick={() => {
                 setClosing(true);
                 startTransition(async () => {
-                  await deleteWidget(widget.id, dashboardId);
-                  onWidgetDeleted?.(widget.id);
+                  const res = await notifyOnError(
+                    deleteWidget(widget.id, dashboardId),
+                    "Não foi possível fechar a calculadora"
+                  );
+                  if (res?.ok) onWidgetDeleted?.(widget.id);
+                  else setClosing(false);
                 });
               }}
             >

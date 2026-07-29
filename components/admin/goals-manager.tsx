@@ -20,6 +20,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { OptionItem } from "@/lib/records/types";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import { goalMetricKeyFromLabel, goalMetricLabel } from "@/lib/metas/metrics";
@@ -86,6 +88,7 @@ export function GoalsManager({
   const [metric, setMetric] = useState("mrr");
   const [newMetricLabel, setNewMetricLabel] = useState("");
   const [metricMsg, setMetricMsg] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<GoalRow | null>(null);
   const [, startTransition] = useTransition();
   const year = new Date().getFullYear();
 
@@ -256,11 +259,7 @@ export function GoalsManager({
                       variant="ghost"
                       size="icon"
                       aria-label="Excluir"
-                      onClick={() =>
-                        startTransition(async () => {
-                          await deleteGoal(g.id);
-                        })
-                      }
+                      onClick={() => setConfirmDelete(g)}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -271,6 +270,36 @@ export function GoalsManager({
           </TableBody>
         </Table>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => !o && setConfirmDelete(null)}
+        title="Excluir meta?"
+        description={
+          confirmDelete ? (
+            <>
+              A meta de{" "}
+              <strong>{goalMetricLabel(confirmDelete.metric, metrics)}</strong>{" "}
+              ({confirmDelete.period_month
+                ? `${MONTHS[confirmDelete.period_month - 1]}/`
+                : ""}
+              {confirmDelete.period_year}) será removida. Esta ação não pode
+              ser desfeita.
+            </>
+          ) : undefined
+        }
+        onConfirm={() => {
+          const target = confirmDelete;
+          setConfirmDelete(null);
+          if (!target) return;
+          startTransition(async () => {
+            await notifyOnError(
+              deleteGoal(target.id),
+              "Não foi possível excluir a meta"
+            );
+          });
+        }}
+      />
     </div>
   );
 }

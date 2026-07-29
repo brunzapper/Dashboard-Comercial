@@ -29,6 +29,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { OptionItem } from "@/lib/records/types";
 import {
   addResponsibleOperation,
@@ -155,7 +156,10 @@ export function ResponsiblesManager({
                     className="size-4 accent-primary"
                     onChange={(e) =>
                       startTransition(async () => {
-                        await setResponsibleActive(r.id, e.target.checked);
+                        await notifyOnError(
+                          setResponsibleActive(r.id, e.target.checked),
+                          "Não foi possível alterar o responsável"
+                        );
                       })
                     }
                   />
@@ -174,7 +178,10 @@ export function ResponsiblesManager({
                     value={r.canonical_id ?? ""}
                     onValueChange={(v) =>
                       startTransition(async () => {
-                        await setResponsibleCanonical(r.id, v || null);
+                        await notifyOnError(
+                          setResponsibleCanonical(r.id, v || null),
+                          "Não foi possível unificar o responsável"
+                        );
                       })
                     }
                     placeholder="— próprio nome —"
@@ -235,7 +242,10 @@ export function ResponsiblesManager({
                       aria-label="Remover"
                       onClick={() =>
                         startTransition(async () => {
-                          await removeResponsibleOperation(editing.id, o.operation_id);
+                          await notifyOnError(
+                            removeResponsibleOperation(editing.id, o.operation_id),
+                            "Não foi possível remover a operação"
+                          );
                           setEditing(null);
                         })
                       }
@@ -274,7 +284,10 @@ export function ResponsiblesManager({
                 onClick={() => {
                   if (!editing || !opId) return;
                   startTransition(async () => {
-                    await addResponsibleOperation(editing.id, opId, priority);
+                    await notifyOnError(
+                      addResponsibleOperation(editing.id, opId, priority),
+                      "Não foi possível vincular a operação"
+                    );
                     setEditing(null);
                   });
                 }}

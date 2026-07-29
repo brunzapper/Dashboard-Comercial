@@ -29,6 +29,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { deleteWidget } from "@/app/(app)/dashboards/actions";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import { itemRect, type GridMetrics } from "@/lib/widgets/connectors";
@@ -450,8 +451,11 @@ export function LineLayer({
                   onClick={(e) => {
                     e.preventDefault();
                     startTransition(async () => {
-                      await deleteWidget(active.id, dashboardId);
-                      onWidgetDeleted?.(active.id);
+                      const res = await notifyOnError(
+                        deleteWidget(active.id, dashboardId),
+                        "Não foi possível excluir a linha"
+                      );
+                      if (res?.ok) onWidgetDeleted?.(active.id);
                       setDeleteOpen(false);
                     });
                   }}

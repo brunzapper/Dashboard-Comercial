@@ -130,21 +130,29 @@ export function SnapshotsPanel({
   );
   const [pending, startTransition] = useTransition();
 
-  // Carga inicial (o painel monta quando o Sheet abre).
+  // Carga inicial (o painel monta quando o Sheet abre). `loadNonce` permite
+  // "Tentar novamente" — antes, uma rejeição deixava o "Carregando…" eterno.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadNonce, setLoadNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void Promise.all([
       listSnapshots(dashboardId),
       getSnapshotFormOptions(dashboardId),
-    ]).then(([list, opts]) => {
-      if (cancelled) return;
-      setItems(list);
-      setOptions(opts);
-    });
+    ])
+      .then(([list, opts]) => {
+        if (cancelled) return;
+        setLoadFailed(false);
+        setItems(list);
+        setOptions(opts);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [dashboardId]);
+  }, [dashboardId, loadNonce]);
 
   const reload = async () => {
     setItems(await listSnapshots(dashboardId));
@@ -191,9 +199,35 @@ export function SnapshotsPanel({
   }
 
   async function copyLink(url: string) {
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard pode ser negado (permissão/contexto): mostra o link para
+      // cópia manual em vez de falhar em silêncio.
+      setMessage(`Não foi possível copiar automaticamente. Link: ${url}`);
+    }
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="flex flex-col items-start gap-2 px-4 py-6">
+        <p className="text-destructive text-sm" role="alert">
+          Não foi possível carregar os snapshots.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setLoadFailed(false);
+            setLoadNonce((n) => n + 1);
+          }}
+        >
+          Tentar novamente
+        </Button>
+      </div>
+    );
   }
 
   if (items === null || options === null) {

@@ -219,7 +219,12 @@ export function FieldFilterControls({
       // Persistência por usuário (fire-and-forget): encoded vazio LIMPA a
       // preferência (o usuário removeu o filtro — não pode ressuscitar).
       if (!snapshot && dashboardId && widgetId) {
-        void saveLastFieldFilter(dashboardId, widgetId, encoded || null);
+        void saveLastFieldFilter(dashboardId, widgetId, encoded || null).catch(
+          () => {
+            // Preferência é best-effort: a falha não pode virar unhandled
+            // rejection, e o filtro em tela já foi aplicado pela URL.
+          }
+        );
       }
     }, 350);
     return () => clearTimeout(timer);

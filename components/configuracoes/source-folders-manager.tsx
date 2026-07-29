@@ -7,11 +7,12 @@
 // SourcesManager.
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useActionState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -124,25 +125,49 @@ function MoveFolderButtons({ folderId }: { folderId: string }) {
   );
 }
 
-function DeleteFolderButton({ folderId }: { folderId: string }) {
+function DeleteFolderButton({
+  folderId,
+  label,
+}: {
+  folderId: string;
+  label: string;
+}) {
   const [state, formAction, pending] = useActionState(deleteSourceFolder, initial);
+  const [confirm, setConfirm] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   return (
-    <form action={formAction} className="flex items-center gap-1">
+    <form ref={formRef} action={formAction} className="flex items-center gap-1">
       <input type="hidden" name="id" value={folderId} />
       <Button
-        type="submit"
+        type="button"
         variant="ghost"
         size="icon"
         disabled={pending}
         aria-label="Excluir pasta"
+        onClick={() => setConfirm(true)}
       >
         <Trash2 className="size-4" />
       </Button>
       {state.message && !state.ok ? (
-        <span className="text-destructive text-xs" role="status">
+        <span className="text-destructive text-xs" role="alert">
           {state.message}
         </span>
       ) : null}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Excluir pasta?"
+        description={
+          <>
+            A pasta <strong>{label}</strong> será removida; as bases dela
+            voltam para &quot;sem pasta&quot; (nenhuma base é excluída).
+          </>
+        }
+        onConfirm={() => {
+          setConfirm(false);
+          formRef.current?.requestSubmit();
+        }}
+      />
     </form>
   );
 }
@@ -226,7 +251,7 @@ export function SourceFoldersManager({
                       >
                         <Pencil className="size-4" />
                       </Button>
-                      <DeleteFolderButton folderId={f.id} />
+                      <DeleteFolderButton folderId={f.id} label={f.label} />
                     </div>
                   </TableCell>
                 </TableRow>

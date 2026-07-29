@@ -52,6 +52,9 @@ import {
   restoreBoard,
   trashBoard,
 } from "@/app/(app)/dashboards/actions";
+import { toast } from "sonner";
+
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { ActionState } from "@/app/(app)/dashboards/actions";
 import { exportDashboardStructure } from "@/app/(app)/dashboards/export-structure-actions";
 import { BoardSourcesDialog } from "./board-sources-dialog";
@@ -86,6 +89,30 @@ export function BoardCardMenu({
     startTransition(async () => {
       const res = await action(id);
       if (!res.ok) setError(res.message ?? "Falha na operação.");
+    });
+  }
+
+  // Enviar à lixeira segue SEM confirmação (é reversível por design); o toast
+  // com "Desfazer" dá o caminho de volta imediato — antes a recuperação exigia
+  // achar a seção Lixeira no fim da Home.
+  function runTrash() {
+    setError(null);
+    startTransition(async () => {
+      const res = await trashBoard(id);
+      if (!res.ok) {
+        setError(res.message ?? "Falha na operação.");
+        return;
+      }
+      toast(`${kanban ? "Kanban enviado" : "Dashboard enviado"} para a Lixeira.`, {
+        action: {
+          label: "Desfazer",
+          onClick: () =>
+            void notifyOnError(
+              restoreBoard(id),
+              "Não foi possível restaurar"
+            ),
+        },
+      });
     });
   }
 
@@ -193,7 +220,7 @@ export function BoardCardMenu({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
-                    onSelect={() => run(trashBoard)}
+                    onSelect={() => runTrash()}
                   >
                     <Trash2 className="size-4" /> Excluir
                   </DropdownMenuItem>

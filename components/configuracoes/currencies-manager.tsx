@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { SystemCurrency } from "@/lib/widgets/currency";
 import {
   refreshRatesFromPtax,
@@ -135,7 +136,16 @@ export function CurrenciesManager({
     setMessage(null);
     startTransition(async () => {
       for (const op of ops) {
-        await upsertCurrencyRate(code, year, op.quarter, op.rate);
+        const res = await notifyOnError(
+          upsertCurrencyRate(code, year, op.quarter, op.rate),
+          "Não foi possível salvar a taxa"
+        );
+        if (!res?.ok) {
+          // Preserva o rascunho para nova tentativa; refresh mostra o que
+          // chegou a ser gravado antes da falha.
+          router.refresh();
+          return;
+        }
       }
       // Limpa o rascunho da linha (os valores recarregados viram a fonte).
       setDrafts((d) => {
@@ -187,7 +197,10 @@ export function CurrenciesManager({
                   disabled={locked || pending || readOnly}
                   onChange={(e) =>
                     startTransition(async () => {
-                      await toggleCurrencyEnabled(c.code, e.target.checked);
+                      await notifyOnError(
+                        toggleCurrencyEnabled(c.code, e.target.checked),
+                        "Não foi possível alterar a moeda"
+                      );
                       router.refresh();
                     })
                   }

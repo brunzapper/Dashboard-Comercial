@@ -8,7 +8,7 @@
 // com MutationObserver em vez de depender de next-themes (não usado aqui).
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
 function readTheme(): "light" | "dark" {
@@ -17,18 +17,23 @@ function readTheme(): "light" | "dark" {
     : "light";
 }
 
-function Toaster(props: ToasterProps) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+function subscribeToThemeClass(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    setTheme(readTheme());
-    const observer = new MutationObserver(() => setTheme(readTheme()));
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
+function Toaster(props: ToasterProps) {
+  // A classe `.dark` do <html> é o "external store" do tema (script inline +
+  // ThemeSync); useSyncExternalStore acompanha trocas em runtime sem efeito.
+  const theme = useSyncExternalStore(
+    subscribeToThemeClass,
+    readTheme,
+    () => "light" as const
+  );
 
   return (
     <Sonner

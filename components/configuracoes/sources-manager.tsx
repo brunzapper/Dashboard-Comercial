@@ -18,12 +18,13 @@
 //   lib/source-date-fields.ts.
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useActionState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -282,25 +283,50 @@ function MoveSourceButtons({ sourceKey }: { sourceKey: string }) {
   );
 }
 
-function DeleteSourceButton({ sourceKey }: { sourceKey: string }) {
+function DeleteSourceButton({
+  sourceKey,
+  label,
+}: {
+  sourceKey: string;
+  label: string;
+}) {
   const [state, formAction, pending] = useActionState(deleteSource, initial);
+  const [confirm, setConfirm] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   return (
-    <form action={formAction} className="flex items-center gap-1">
+    <form ref={formRef} action={formAction} className="flex items-center gap-1">
       <input type="hidden" name="key" value={sourceKey} />
       <Button
-        type="submit"
+        type="button"
         variant="ghost"
         size="icon"
         disabled={pending}
         aria-label="Excluir base"
+        onClick={() => setConfirm(true)}
       >
         <Trash2 className="size-4" />
       </Button>
       {state.message && !state.ok ? (
-        <span className="text-destructive text-xs" role="status">
+        <span className="text-destructive text-xs" role="alert">
           {state.message}
         </span>
       ) : null}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Excluir base?"
+        description={
+          <>
+            A base <strong>{label}</strong> será removida do catálogo — widgets
+            e filtros que a referenciam deixam de funcionar. Bases com
+            registros não podem ser excluídas. Esta ação não pode ser desfeita.
+          </>
+        }
+        onConfirm={() => {
+          setConfirm(false);
+          formRef.current?.requestSubmit();
+        }}
+      />
     </form>
   );
 }
@@ -467,7 +493,9 @@ function FragmentGroup({
               >
                 <Pencil className="size-4" />
               </Button>
-              {!s.builtin ? <DeleteSourceButton sourceKey={s.key} /> : null}
+              {!s.builtin ? (
+                <DeleteSourceButton sourceKey={s.key} label={s.label} />
+              ) : null}
             </div>
           </TableCell>
         </TableRow>

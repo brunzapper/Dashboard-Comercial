@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { DATE_TRANSFORMS, type AvailableField } from "@/lib/widgets/fields";
 import {
@@ -63,10 +64,15 @@ export function useQuickTableConfig(widget: Widget, dashboardId: string) {
       latest.current = next;
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
-        void saveWidgetSettings(widget.id, dashboardId, {
-          ...widget.settings,
-          quickTable: latest.current,
-        }).then(() => router.refresh());
+        void notifyOnError(
+          saveWidgetSettings(widget.id, dashboardId, {
+            ...widget.settings,
+            quickTable: latest.current,
+          }),
+          "Não foi possível salvar as colunas"
+        ).then((res) => {
+          if (res?.ok) router.refresh();
+        });
       }, 500);
     },
     [widget.id, widget.settings, dashboardId, router]
