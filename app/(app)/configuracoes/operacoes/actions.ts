@@ -58,15 +58,16 @@ export async function createOperation(
 export async function updateOperation(
   id: string,
   patch: { name?: string; active?: boolean; parent_operation_id?: string | null }
-): Promise<void> {
+): Promise<OpState> {
   const err = await ensureAdmin();
-  if (err) return;
-  if (patch.parent_operation_id === id) return; // evita pai = ele mesmo
+  if (err) return { ok: false, message: err };
+  if (patch.parent_operation_id === id) {
+    return { ok: false, message: "Uma operação não pode ser pai dela mesma." };
+  }
   const supabase = await createClient();
   // Ciclo indireto (A→B→…→A): subir os ancestrais do novo pai; alcançar `id`
   // deixaria a árvore inconsistente (operation_subtree sobrevive por usar
-  // UNION, mas o roll-up/metas ficariam errados). Recusa silenciosa, como o
-  // guard de auto-pai acima.
+  // UNION, mas o roll-up/metas ficariam errados).
   if (patch.parent_operation_id) {
     const { data } = await supabase
       .from("operations")
@@ -80,21 +81,33 @@ export async function updateOperation(
     const seen = new Set<string>();
     let cur: string | null = patch.parent_operation_id;
     while (cur && !seen.has(cur)) {
-      if (cur === id) return; // criaria ciclo
+      if (cur === id) {
+        return {
+          ok: false,
+          message: "Esse pai criaria um ciclo na árvore de operações.",
+        };
+      }
       seen.add(cur);
       cur = parentById.get(cur) ?? null;
     }
   }
-  await supabase.from("operations").update(patch).eq("id", id);
+  const { error } = await supabase
+    .from("operations")
+    .update(patch)
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/operacoes");
+  return { ok: true };
 }
 
-export async function deleteOperation(id: string): Promise<void> {
+export async function deleteOperation(id: string): Promise<OpState> {
   const err = await ensureAdmin();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const supabase = await createClient();
-  await supabase.from("operations").delete().eq("id", id);
+  const { error } = await supabase.from("operations").delete().eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/operacoes");
+  return { ok: true };
 }
 
 // Ops aceitos no perfil (mesmo vocabulário do editor de sub-fontes + os
