@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 25/07/2026
+// Versão: 1.4 | Data: 30/07/2026
+// v1.4 (30/07/2026): mescla multi-referência (modo Criar a partir de) —
+//   `refWidgets` (widgets das referências ADICIONAIS, keys prefixadas rN_ pelo
+//   helper de fusão, lib/import/dashboard/multi-ref.ts) entram SÓ como origem
+//   de `copy_of`: fora do merge por key e fora do bottomByTab (posições/abas
+//   deles pertencem a OUTRO board). Cópia de origem ref sem aba própria empilha
+//   no fundo da PRIMEIRA aba do JSON (é onde o validador vai colocá-la).
 // v1.3 (25/07/2026): injeção do canvas do estado (currentCanvas) — carrega o
 //   carimbo do espaço de grid v2 para o JSON da IA; sem ele o validador
 //   trataria o delta como legado (base 12) e re-escalaria as posições finas.
@@ -52,6 +58,15 @@ export interface NormalizeImportRawOpts {
    * NÃO é adicionado ao JSON (o apply sem-GC já preserva a linha do banco).
    */
   baseWidgets?: ImportWidgetSpec[];
+  /**
+   * Modo Criar a partir de com MESCLA: widgets das referências ADICIONAIS
+   * (keys já prefixadas `rN_` por fuseExtraReferences). Usados SÓ como origem
+   * de `copy_of` — nunca entram no merge por key nem no cálculo do fundo de
+   * aba (bottomByTab): posições/abas deles pertencem a OUTRO board. Em
+   * colisão de key com baseWidgets, a base vence (determinístico; o helper de
+   * fusão já evita a colisão via dedup).
+   */
+  refWidgets?: ImportWidgetSpec[];
   /**
    * Modos Editar/Criar a partir de: canvas do ESTADO EXPORTADO (carrega o
    * carimbo do espaço de grid v2 — gridVersion). Injetado SOB o canvas da IA
@@ -186,6 +201,30 @@ export function normalizeImportRaw(
         baseByKey.set(bk, b as unknown as Record<string, unknown>);
       }
     }
+    // Referências ADICIONAIS (mescla): só origem de copy_of — fora do merge
+    // por key e do bottomByTab (posições/abas de OUTRO board).
+    const refByKey = new Map<string, Record<string, unknown>>();
+    for (const r of opts.refWidgets ?? []) {
+      const rk = r.key;
+      if (typeof rk === "string" && rk) {
+        refByKey.set(rk, r as unknown as Record<string, unknown>);
+      }
+    }
+    // Aba-alvo de cópia vinda de ref SEM aba própria: a PRIMEIRA aba do JSON
+    // (pós-injeção de currentTabs) — é onde o validador vai colocá-la, então o
+    // empilhamento consulta o fundo da aba certa (o helper de fusão removeu o
+    // settings.tab dos refWidgets — aba de outro board).
+    let firstTabId: string | null = null;
+    const dashTabs =
+      dash && isPlainObject(dash.settings)
+        ? (dash.settings as Record<string, unknown>).tabs
+        : undefined;
+    if (Array.isArray(dashTabs) && dashTabs.length > 0) {
+      const t0 = dashTabs[0];
+      if (isPlainObject(t0) && typeof t0.id === "string" && t0.id) {
+        firstTabId = t0.id;
+      }
+    }
     // Fundo de cada aba no estado atual: cópias sem grid próprio empilham daí
     // para baixo (nunca sobre a origem nem sobre y=0 de uma aba ocupada).
     const bottomByTab = new Map<string, number>();
@@ -202,10 +241,15 @@ export function normalizeImportRaw(
       const k = w.key;
       const base = typeof k === "string" && k ? baseByKey.get(k) : undefined;
       if (base) return deepMergeValue(base, w);
-      const src =
-        typeof copyOf === "string" && copyOf
-          ? baseByKey.get(copyOf)
-          : undefined;
+      let src: Record<string, unknown> | undefined;
+      let srcIsRef = false;
+      if (typeof copyOf === "string" && copyOf) {
+        src = baseByKey.get(copyOf);
+        if (!src) {
+          src = refByKey.get(copyOf);
+          srcIsRef = src !== undefined;
+        }
+      }
       if (!src) return w;
       const copyBase = { ...src };
       delete copyBase.key; // a key NOVA do delta é a identidade da cópia
@@ -214,7 +258,8 @@ export function normalizeImportRaw(
       if (!("grid_position" in merged)) {
         const srcGrid = gridOf(src);
         if (srcGrid) {
-          const tab = tabOf(merged);
+          let tab = tabOf(merged);
+          if (srcIsRef && tab === "__single__" && firstTabId) tab = firstTabId;
           const y = bottomByTab.get(tab) ?? 0;
           merged.grid_position = { x: srcGrid.x, y, w: srcGrid.w, h: srcGrid.h };
           bottomByTab.set(tab, y + srcGrid.h);

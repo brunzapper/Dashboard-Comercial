@@ -1,4 +1,7 @@
-<!-- Versão: 1.19 | Data: 30/07/2026 -->
+<!-- Versão: 1.20 | Data: 30/07/2026 -->
+<!-- v1.20 (30/07/2026): §3.8.2 — mescla no "Criar a partir de": até 4
+     referências adicionais marcáveis; a IA traz widgets delas para a cópia
+     (os dashboards marcados ficam intactos). -->
 <!-- v1.19 (30/07/2026): §8.2 — editor de fórmulas UNIFICADO (texto assistido:
      autocomplete de colunas com `[` sem acentos, autocomplete de funções por
      nome/apelido, assinatura viva com argumento destacado, paleta ƒ; os modos
@@ -608,6 +611,11 @@ IA"**, com três modos:
   cópia. O original fica intacto; a cópia nasce como "… (cópia)" (ou o nome que
   você pedir) e a conversa passa a EDITAR a cópia. Para mudar ou remover algo que
   veio na cópia, faça no modo Editar (ou manual, no ⋮ do widget).
+  **Mesclar dashboards** (30/07/2026): abaixo do seletor da referência dá para
+  marcar até 4 **referências adicionais** — elas NÃO são copiadas, mas a IA
+  enxerga os widgets delas e pode trazê-los para a cópia ("traga o funil do
+  dashboard Y"), completos (métricas, filtros, aparência) e posicionados abaixo
+  do conteúdo existente da aba. Os dashboards marcados ficam intactos.
 - **Editar** — escolha um dashboard seu e converse para melhorá-lo IN-PLACE.
   Regras importantes: a IA **altera e adiciona** widgets, mas **NUNCA
   exclui** (widget que ela não mencionar permanece; remoção é manual, no ⋮ do

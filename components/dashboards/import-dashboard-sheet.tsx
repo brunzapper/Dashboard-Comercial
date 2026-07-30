@@ -1,4 +1,9 @@
-// Versão: 2.1 | Data: 26/07/2026
+// Versão: 2.2 | Data: 30/07/2026
+// v2.2 (30/07/2026): MESCLA no "Criar a partir de" — além da referência
+//   principal (copiada fielmente), checkboxes de referências ADICIONAIS (cap
+//   MAX_EXTRA_REFS): a IA pode trazer widgets delas para a cópia (copy_of com
+//   keys prefixadas rN_ no servidor). Só afeta a geração — o apply segue
+//   duplicando apenas a base.
 // v2.1 (26/07/2026): PASTAS (0107) — checkboxes de base do modo "Criar novo"
 //   agrupados por pasta (heading só quando há pasta criada).
 // v2.0 (23/07/2026): painel vira SESSÃO de IA com 3 modos — "Criar novo",
@@ -75,6 +80,7 @@ import type {
   AiDashboardMode,
   GenerateDashboardState,
 } from "@/lib/ai/generate-dashboard";
+import { MAX_EXTRA_REFS } from "@/lib/import/dashboard/multi-ref";
 
 export interface AiBoardOption {
   id: string;
@@ -101,6 +107,8 @@ export function ImportDashboardSheet({
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AiDashboardMode>("new");
   const [boardId, setBoardId] = useState<string>("");
+  // Modo from: referências ADICIONAIS para mescla (além da base `boardId`).
+  const [extraIds, setExtraIds] = useState<string[]>([]);
   const [bases, setBases] = useState<string[]>([]);
   const [autoApply, setAutoApply] = useState(true);
 
@@ -155,16 +163,24 @@ export function ImportDashboardSheet({
     if (next === mode) return;
     setMode(next);
     setBoardId("");
+    setExtraIds([]);
     resetSession();
   }
 
   function changeBoard(id: string) {
     setBoardId(id);
+    setExtraIds((prev) => prev.filter((x) => x !== id));
     resetSession();
   }
 
   function toggleBase(key: string, on: boolean) {
     setBases((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
+  }
+
+  // Trocar as extras entre turnos é seguro: a sessão é stateless e a prévia
+  // pendente já sai com o copy_of resolvido no servidor — não reseta a sessão.
+  function toggleExtra(id: string, on: boolean) {
+    setExtraIds((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
   }
 
   function copyPrompt(variant: ImportPromptVariant) {
@@ -248,6 +264,8 @@ export function ImportDashboardSheet({
         mode: effMode,
         bases: effMode === "new" ? bases : undefined,
         targetDashboardId: effTarget,
+        extraReferenceIds:
+          effMode === "from" && extraIds.length > 0 ? extraIds : undefined,
         description: text,
         priorTurns: turns,
         autoApply,
@@ -356,7 +374,7 @@ export function ImportDashboardSheet({
                 {mode === "new"
                   ? "Gera um dashboard novo a partir da sua descrição."
                   : mode === "from"
-                    ? "Usa um dashboard existente como referência e cria um NOVO com as mudanças pedidas (o original fica intacto)."
+                    ? "Usa um dashboard existente como referência e cria um NOVO com as mudanças pedidas (o original fica intacto). Marque referências adicionais para MESCLAR widgets delas na cópia."
                     : "Atualiza o próprio dashboard: a IA altera/adiciona widgets, mas NUNCA exclui (remoção é manual)."}
               </p>
             </div>
@@ -424,6 +442,39 @@ export function ImportDashboardSheet({
                     ser recriado à parte em Configurações → Presets).
                   </p>
                 ) : null}
+                {mode === "from" && boardId && boards.length > 1 ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Referências adicionais para mesclar (opcional)</Label>
+                    <div className="flex flex-col gap-1.5 rounded-md border p-3">
+                      {boards
+                        .filter((b) => b.id !== boardId)
+                        .map((b) => (
+                          <label
+                            key={b.id}
+                            className="flex cursor-pointer items-center gap-2 text-sm"
+                          >
+                            <Checkbox
+                              checked={extraIds.includes(b.id)}
+                              disabled={
+                                !extraIds.includes(b.id) &&
+                                extraIds.length >= MAX_EXTRA_REFS
+                              }
+                              onCheckedChange={(v) =>
+                                toggleExtra(b.id, v === true)
+                              }
+                            />
+                            {b.name}
+                            {b.factoryPreset ? " · preset de fábrica" : ""}
+                          </label>
+                        ))}
+                    </div>
+                    <p className="text-muted-foreground text-xs">
+                      A IA copia fielmente a referência principal e pode trazer
+                      widgets destes dashboards para a cópia (até{" "}
+                      {MAX_EXTRA_REFS}).
+                    </p>
+                  </div>
+                ) : null}
               </div>
             )}
 
@@ -478,7 +529,7 @@ export function ImportDashboardSheet({
                         : mode === "edit"
                           ? "O que melhorar neste dashboard? Ex.: adicione comparação com o mês anterior nos cards."
                           : mode === "from"
-                            ? "O que mudar em relação à referência? Ex.: mesma estrutura, mas focado em Leads."
+                            ? "O que mudar em relação à referência? Ex.: mesma estrutura, mas focado em Leads — ou traga o funil do dashboard mesclado."
                             : "Descreva o dashboard que você quer — ex.: conversão de leads por mês, com meta e comparação."
                     }
                     className="h-20"

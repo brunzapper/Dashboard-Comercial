@@ -1,4 +1,10 @@
-<!-- Versão: 1.40 | Data: 30/07/2026 -->
+<!-- Versão: 1.41 | Data: 30/07/2026 -->
+<!-- v1.41 (30/07/2026): §4.11.2 — MESCLA no modo "Criar a partir de"
+     (multi-referência): além da base (copiada fielmente), até 4 referências
+     ADICIONAIS entram SÓ na geração — fuseExtraReferences (multi-ref.ts)
+     prefixa as keys (rN_), une as bases e emite uma section de prompt por
+     extra; o rewrite ganha refWidgets (origem de copy_of fora do merge por
+     key e do bottomByTab). Apply/duplicateBoard/RPCs intocados. -->
 <!-- v1.40 (30/07/2026): §4.17 Assistentes de IA de registros e campos —
      inserir até 10 registros em bases manuais (prévia interativa só com
      colunas preenchidas, edição inline + troca de coluna, duplicados por
@@ -1642,6 +1648,25 @@ lê/edita em conversa multi-turno. Sem migração de banco. Peças:
   Substitui o antigo `importDashboardJson` do modo from (que recriava tudo do
   zero e dependia de a IA reproduzir a referência verbatim). O modo `new` segue
   em `importDashboardJson`.
+  **Mescla multi-referência (30/07/2026):** além da base, o usuário pode marcar
+  até `MAX_EXTRA_REFS` (4) referências ADICIONAIS
+  (`GenerateDashboardInput.extraReferenceIds`). Elas existem SÓ na GERAÇÃO:
+  cada extra é exportada e fundida por `fuseExtraReferences`
+  (`lib/import/dashboard/multi-ref.ts`) — keys de widget prefixadas `rN_`
+  (N = índice da referência; dedup contra as keys da base, convenção `_2` do
+  `assignWidgetKeys`), `settings.tab` REMOVIDA (aba de outro board), união das
+  bases (o `buildImportPrompt` cobre o catálogo de todas) e uma section de
+  prompt `REFERÊNCIA ADICIONAL N — "<nome>" (JSON)` por extra (só `widgets`,
+  sem envelope). O rewrite recebe os specs prefixados em
+  `NormalizeImportRawOpts.refWidgets` — origem de `copy_of` APENAS: fora do
+  merge por key e fora do `bottomByTab` (posições/abas de outro board
+  poluiriam o empilhamento); em colisão de key, a base vence. Cópia de origem
+  ref sem aba própria empilha no fundo da PRIMEIRA aba do JSON (com extras o
+  from passa a injetar `currentTabs` — é onde o validador coloca widget sem
+  aba). Como o `copy_of` é resolvido ANTES do apply (o `pendingJson` já sai
+  resolvido), `applyFromReference`/`duplicateBoard` seguem single-id e
+  INTOCADOS — keys `rN_` nunca chegam ao validador em operação normal.
+  Fiscalizado por `multi-ref.test.ts` + bloco refWidgets em `rewrite.test.ts`.
 - **Conversa** (`ai-generate-actions.ts` v2): STATELESS por turno — o servidor
   re-exporta o estado FRESCO para o system a cada turno e recebe só os textos
   de usuário anteriores (cap 10); nada de JSON de assistant acumulado. A ÚNICA

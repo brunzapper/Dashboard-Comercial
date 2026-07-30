@@ -1,4 +1,7 @@
-<!-- Versão: 1.20 | Data: 27/07/2026 -->
+<!-- Versão: 1.21 | Data: 30/07/2026 -->
+<!-- v1.21 (30/07/2026): runbook de truncamento da conversa de IA — a mescla
+     do "Criar a partir de" soma um JSON por referência adicional ao prompt;
+     remédio: desmarcar referências desnecessárias. -->
 <!-- v1.20 (27/07/2026): §4.6 — troubleshooting "campo novo do Bitrix não
      aparece em /campos": lote do catálogo tudo-ou-nada morto pela curadoria
      `empresa` sem reconciliação 0075 (represou 14 campos 19→27/07);
@@ -639,7 +642,7 @@ mexer e como operar:
 | Erro de env em runtime | Variável ausente na Vercel | `lib/env.ts` diz qual; confira `.env.example` |
 | Remover os mocks de vez | — | `supabase/apply/undo-mock-reuniao.sql` (única forma prevista) |
 | Salvar chave de IA falha ("Não foi possível cifrar a chave") | `KEY_ENCRYPTION_KEY` ausente/inválida no ambiente (32 bytes base64) | Configure na Vercel (Production+Preview+Development, MESMO valor) e refaça o deploy; NUNCA troque o valor depois (invalida os ciphertexts já gravados) |
-| Conversa de IA aborta com "resposta cortada pelo limite de tokens" | Dashboard grande demais para um turno (o modo Editar aceita resposta parcial, mas "Criar a partir de" ecoa o estado inteiro) | Peça mudanças menores/mais específicas por turno; em último caso edite por partes (widget a widget) |
+| Conversa de IA aborta com "resposta cortada pelo limite de tokens" | Dashboard grande demais para um turno (o modo Editar aceita resposta parcial, mas "Criar a partir de" ecoa o estado inteiro); na MESCLA do "Criar a partir de", cada referência adicional soma um JSON inteiro ao prompt | Peça mudanças menores/mais específicas por turno; na mescla, desmarque referências adicionais que não são necessárias; em último caso edite por partes (widget a widget) |
 | Turno da IA demorou e estourou o tempo | Provedor lento + laço de correção (timeout 120s/chamada, orçamento ~240s; Home E a página do dashboard têm `maxDuration=300`) | Reenvie o pedido (turnos são idempotentes — a identidade canônica converge); se recorrente, troque o modelo em Configurações → Integrações |
 | Edição da IA saiu errada | — | Botão "Desfazer edição da IA" (janela da Home ou painel do dashboard) restaura o snapshot pré-turno: widgets, settings e células; vale para o ÚLTIMO turno aplicado. No painel do dashboard o snapshot é PERSISTIDO (`dashboard_ai_sessions.undo_snapshot`) — sobrevive a F5; na Home continua só em memória |
 | Conversa do painel "Editar com IA" sumiu/não carrega | A sessão é por USUÁRIO×dashboard (`dashboard_ai_sessions`, 0098) — outro usuário/board não vê a mesma conversa; RLS own-row + org | Confirme usuário e board; a linha é sobrescrita in place e some com o board (cascade) — não há job de limpeza para criar/monitorar |

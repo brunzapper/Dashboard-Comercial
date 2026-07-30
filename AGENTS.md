@@ -314,6 +314,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `duplicateBoard` + o delta ADITIVO da IA aplicado como Edição na cópia
   (reusa o merge); NÃO usa mais `importDashboardJson` (que recriava tudo). Só o
   `new` segue no `importDashboardJson`. Duplica só no APPLY (sem cópias órfãs).
+  **Mescla multi-referência (30/07/2026):** referências ADICIONAIS do from
+  (`extraReferenceIds`, cap 4) entram SÓ na geração — `fuseExtraReferences`
+  (`lib/import/dashboard/multi-ref.ts`) prefixa as keys (`rN_`), une as bases
+  e alimenta `refWidgets` do rewrite (origem de `copy_of` FORA do merge por
+  key e do `bottomByTab`); o `copy_of` resolve ANTES do apply, então keys
+  `rN_` nunca chegam ao validador e o apply segue `duplicateBoard` só da base
+  — NÃO crie variante multi de `duplicateBoard` nem passe extras ao apply.
   Snapshot pré-turno (`captureDashboardSnapshot`) é o Desfazer.
   Export/serialização nunca emite `preset`/`presetKey`/`connectors`/`kanban`.
   RPCs de widget INTOCADOS. **Painel in-dashboard (24/07/2026):** o painel
