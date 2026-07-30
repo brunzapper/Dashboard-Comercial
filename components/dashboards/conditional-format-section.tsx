@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   Select,
   SelectContent,
@@ -107,10 +108,15 @@ export function ConditionalFormatSection({
       title="Formatação condicional"
       badge={count > 0 ? String(count) : null}
     >
-      <p className="text-muted-foreground text-xs">
-        Regras pintam o valor quando a condição casa (a primeira que casar
-        vence; cor manual de célula tem precedência). A escala de cor pinta o
-        fundo do menor ao maior valor da coluna.
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <span>Regras pintam o valor; a escala de cor pinta o fundo.</span>
+        <HelpHint ariaLabel="Como as regras de formato funcionam">
+          <p>
+            Regras pintam o valor quando a condição casa (a primeira que casar
+            vence; cor manual de célula tem precedência). A escala de cor
+            pinta o fundo do menor ao maior valor da coluna.
+          </p>
+        </HelpHint>
       </p>
 
       <div className="flex items-center justify-between">

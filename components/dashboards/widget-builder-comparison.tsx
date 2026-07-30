@@ -10,6 +10,7 @@
 // não inflar o widget-builder.
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   Select,
   SelectContent,
@@ -121,10 +122,15 @@ export function ComparisonSection({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-muted-foreground text-xs">
-                A janela é bucketizada na granularidade equivalente ao período
-                atual (ex.: vendo um mês, compara com a média/mediana MENSAL da
-                janela).
+              <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <span>A janela segue a granularidade do período atual.</span>
+                <HelpHint ariaLabel="Como a janela de comparação funciona">
+                  <p>
+                    A janela é bucketizada na granularidade equivalente ao
+                    período atual (ex.: vendo um mês, compara com a
+                    média/mediana MENSAL da janela).
+                  </p>
+                </HelpHint>
               </p>
             </div>
           ) : null}

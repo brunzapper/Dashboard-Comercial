@@ -21,11 +21,11 @@ import {
 } from "@/components/ui/table";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   rootSources,
   sourceLabel,
@@ -348,7 +348,11 @@ export function MatchesManager({
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:field-matches"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>{editing ? "Editar regra" : "Nova regra"}</SheetTitle>
             <SheetDescription>
@@ -364,7 +368,7 @@ export function MatchesManager({
               onDone={() => setOpen(false)}
             />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </div>
   );

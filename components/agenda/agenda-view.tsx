@@ -38,11 +38,11 @@ import {
 } from "@/components/ui/popover";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { cn } from "@/lib/utils";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import {
@@ -786,7 +786,11 @@ export function AgendaView({
           if (!v) setNewTaskDay(null);
         }}
       >
-        <SheetContent className="overflow-y-auto sm:max-w-md">
+        <ResizableSheetContent
+          storageKey="panel-w:agenda-task"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Nova tarefa</SheetTitle>
             <SheetDescription>
@@ -808,7 +812,7 @@ export function AgendaView({
               }}
             />
           ) : null}
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       {/* Post-it da anotação clicada — re-sincronizado com os dados

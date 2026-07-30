@@ -35,6 +35,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { usePanelWidth } from "@/components/ui/use-panel-width";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -78,6 +79,10 @@ export function AiEditPanel({
 }) {
   const router = useRouter();
   const [panel, setPanel] = useState<PanelState>("closed");
+  const { width: panelWidth, handleProps: panelHandleProps } = usePanelWidth(
+    "ai-edit-panel-width",
+    400
+  );
   const [loaded, setLoaded] = useState(false);
   const [chat, setChat] = useState<AiChatEntry[]>([]);
   const [pendingSummary, setPendingSummary] = useState<string[] | undefined>(
@@ -251,7 +256,19 @@ export function AiEditPanel({
           <Wand2 className="size-4" /> Editar com IA
         </Button>
       )}
-      <div className="bg-background fixed inset-y-0 right-0 z-40 flex w-[400px] max-w-[90vw] flex-col gap-3 border-l p-4 shadow-lg">
+      <div
+        className="bg-background fixed inset-y-0 right-0 z-40 flex max-w-[90vw] flex-col gap-3 border-l p-4 shadow-lg"
+        style={{ width: panelWidth }}
+      >
+        {/* Alça de redimensionamento (borda esquerda do painel). */}
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Redimensionar painel"
+          title="Arraste para redimensionar o painel"
+          {...panelHandleProps}
+          className="hover:bg-primary/40 absolute top-0 left-0 z-20 h-full w-1.5 cursor-col-resize"
+        />
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="flex items-center gap-2 font-semibold">

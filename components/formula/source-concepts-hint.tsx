@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 30/07/2026
+// v1.1 (30/07/2026): reimplementado sobre o HelpHint genérico (components/ui) —
+//   mesmo visual, menos um molde duplicado de popover "?".
 // Popover "?" que explica os três escopos de fonte que convivem numa métrica
 // calculada — fonte do WIDGET (linhas), fontes da MÉTRICA (universo do
 // cálculo) e @fonte no OPERANDO (recorte de um operando só). É o jargão mais
@@ -6,51 +8,31 @@
 // widgets (MetricRow/widget calculado) e nos editores de campos calculados.
 "use client";
 
-import { CircleHelp } from "lucide-react";
-
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { HelpHint } from "@/components/ui/help-hint";
 
 export function SourceConceptsHint({ className }: { className?: string }) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center",
-            className
-          )}
-          aria-label="Como as bases afetam o cálculo"
-        >
-          <CircleHelp className="size-3.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80" align="start">
-        <div className="flex flex-col gap-2 text-xs">
-          <p className="font-medium">Três escopos de base convivem aqui:</p>
-          <p>
-            <strong>Bases do widget</strong> — de onde vêm as linhas e os
-            registros exibidos (e as dimensões).
-          </p>
-          <p>
-            <strong>Bases da métrica</strong> — sobre quais bases ESTA
-            métrica é calculada. Pode ampliar ou restringir em relação ao
-            widget (ex.: linhas só de Deals, métrica contando Leads e Deals).
-            Nenhuma marcada = as bases do widget.
-          </p>
-          <p>
-            <strong>Base no operando</strong> — dentro da fórmula, um operando
-            &quot;Contagem · Leads&quot; recorta SÓ aquele operando para a
-            fonte, permitindo razões entre fontes (ex.: Contagem de Deals ÷
-            Contagem de Leads = conversão).
-          </p>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <HelpHint
+      ariaLabel="Como as bases afetam o cálculo"
+      title="Três escopos de base convivem aqui:"
+      className={className}
+    >
+      <p>
+        <strong>Bases do widget</strong> — de onde vêm as linhas e os
+        registros exibidos (e as dimensões).
+      </p>
+      <p>
+        <strong>Bases da métrica</strong> — sobre quais bases ESTA
+        métrica é calculada. Pode ampliar ou restringir em relação ao
+        widget (ex.: linhas só de Deals, métrica contando Leads e Deals).
+        Nenhuma marcada = as bases do widget.
+      </p>
+      <p>
+        <strong>Base no operando</strong> — dentro da fórmula, um operando
+        &quot;Contagem · Leads&quot; recorta SÓ aquele operando para a
+        fonte, permitindo razões entre fontes (ex.: Contagem de Deals ÷
+        Contagem de Leads = conversão).
+      </p>
+    </HelpHint>
   );
 }

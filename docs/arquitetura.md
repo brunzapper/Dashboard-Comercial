@@ -330,7 +330,7 @@ Pontos não-óbvios (conhecimento tribal — não descubra do jeito difícil):
   período, fórmulas, calc-metrics, sub-fontes, regra 0052, import de IA), a
   **guarda estática de paridade das RPCs** (`tests/rpc-parity.test.ts`,
   espelho executável da invariante 1), **componentes** em jsdom (opt-in por
-  arquivo — FormulaEditor/chips/preview, badges, Combobox) e o **engine com
+  arquivo — FormulaEditor/preview, badges, Combobox) e o **engine com
   cliente Supabase FAKE** (`tests/helpers/fake-supabase.ts`, mesmo shape do
   snapshotClient — pernas por métrica, correspondências por perna,
   businessDayAlign, comparação, top-up de mocks, aux de operando @fonte). O CI
@@ -954,20 +954,32 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
     editores rodam O MESMO módulo — validação AO VIVO com as mensagens do save.
     `warnings` (não bloqueiam) apontam operandos que degradariam para "—"
     (escopo `@fonte` não abaixável).
-  - **FormulaEditor unificado** (`components/formula/`): substitui o par
-    FormulaBuilder/FormulaTextEditor (removidos) e o toggle Construtor/Texto
-    copiado em 6 superfícies (FieldForm calculado/calculado_agg, widget
-    "calculado", métrica ad-hoc, variáveis da calculadora, Card-fórmula).
-    Views Visual|Texto sobre UM estado (trocar de aba nunca perde conteúdo;
-    texto inválido segura a aba); visual com CURSOR de inserção; paleta de
-    funções (SE/SOMASE/…/ANTERIOR montáveis por clique — antes só digitando);
-    ref não resolvida vira chip "⚠" (ref bruta só em tooltip); operandos
-    proibidos (ciclo, "Data atual" no agregado) aparecem DESABILITADOS com o
-    motivo (`disabledReason` em OperandRef/ComboboxOption) — política:
-    explicar, nunca esconder. O tipo `RefOption` agora é alias de `OperandRef`
-    em `lib/records/date-operands.ts` (a lib não importa mais de componente).
-    Contrato de form do FieldForm preservado (`formula`/`formula_text`/
-    `formula_mode`).
+  - **FormulaEditor unificado** (`components/formula/`; 30/07/2026: as views
+    Visual|Texto foram FUNDIDAS numa única superfície de TEXTO assistido —
+    chips/botões removidos): usado nas 6 superfícies (FieldForm
+    calculado/calculado_agg, widget "calculado", métrica ad-hoc, variáveis da
+    calculadora, Card-fórmula). Assistência em `lib/records/formula-assist.ts`
+    (helpers PUROS sobre texto+caret: `activeCall` → assinatura VIVA com o
+    argumento ativo destacado (`SignatureHelp`), `bracketRangeAt` → o
+    autocomplete do `[` substitui a ref INTEIRA sob o caret (sem `]` órfão),
+    `funcWordAt`/`matchFunctions` → autocomplete de FUNÇÕES por nome/alias,
+    `normalizeSearch` → busca sem acentos). Metadados das funções no catálogo
+    ÚNICO `lib/records/formula-funcs.ts` (`FORMULA_FUNCS satisfies
+    Record<FormulaFuncName, …>` — paleta ƒ, assinatura viva e o
+    `FORMULA_FUNC_GROUPS` do SPEC da IA derivam DELE; exemplos fiscalizados
+    por formula-funcs.test.ts contra o parser real). Dropdown de sugestões em
+    portal `fixed` (não é cortado pelo overflow do Sheet); Enter/Tab só são
+    interceptados com a lista aberta; Escape fecha até a próxima digitação.
+    Operandos proibidos (ciclo, "Data atual" no agregado) aparecem
+    DESABILITADOS com o motivo (`disabledReason` em OperandRef/
+    ComboboxOption) — política: explicar, nunca esconder. O tipo `RefOption` é
+    alias de `OperandRef` em `lib/records/date-operands.ts` (a lib não importa
+    de componente). Contrato de form do FieldForm preservado
+    (`formula`/`formula_text`/`formula_mode` — mode agora SEMPRE "text"; o
+    servidor já re-tokenizava `formula_text`, "builder" ficou como valor
+    legado aceito). Serialização token-only → texto emite ref CRUA para rótulo
+    duplicado (senão o texto não re-tokenizaria); fórmula legada sem `source`
+    ganha `source` no primeiro save sem mudança de tokens.
   - **Prévia ao vivo pelos choke points** (nunca caminho paralelo):
     por-registro via `app/(app)/campos/preview-actions.previewRecordFormula`
     — usa `lib/records/record-eval-context.ts` (montagem de contexto EXTRAÍDA

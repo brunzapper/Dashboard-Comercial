@@ -1,85 +1,19 @@
-// Versão: 1.0 | Data: 20/07/2026
-// Paleta de FUNÇÕES do FormulaEditor (view visual): antes, SE/E/OU e
-// SOMASE/CONT.SE/MÉDIASE só existiam DIGITANDO no modo texto — a paleta as
-// torna montáveis por clique (inserção como tokens FUNC ( ), com o cursor
-// dentro dos parênteses). Funções de agregação/comparação de período só
+// Versão: 1.1 | Data: 30/07/2026
+// v1.1 (30/07/2026): metadados (assinatura/grupo/descrição) saem do catálogo
+//   único FORMULA_FUNCS (lib/records/formula-funcs.ts) — a lista local sumiu.
+// Paleta de FUNÇÕES do FormulaEditor: inserção por clique como `NOME()` com o
+// cursor dentro dos parênteses. Funções de agregação/comparação de período só
 // aparecem no contexto agregado (no por-registro são impossíveis por
 // construção — o servidor as rejeita com mensagem dedicada).
 "use client";
 
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import {
+  FORMULA_FUNC_LIST,
+  FUNC_GROUP_LABELS,
+  funcSignature,
+} from "@/lib/records/formula-funcs";
 import type { FormulaFuncName } from "@/lib/records/formulas";
-
-interface FuncSpec {
-  name: FormulaFuncName;
-  sig: string;
-  group: string;
-  aggOnly?: boolean;
-}
-
-// Assinaturas curtas exibidas no seletor (o nome insere; a assinatura ensina).
-const FUNCS: FuncSpec[] = [
-  { name: "SE", sig: "SE(condição; então; senão)", group: "Condicionais" },
-  { name: "E", sig: "E(cond1; cond2; …)", group: "Condicionais" },
-  { name: "OU", sig: "OU(cond1; cond2; …)", group: "Condicionais" },
-  {
-    name: "SOMASE",
-    sig: "SOMASE([Campo]; condição)",
-    group: "Agregações condicionais",
-    aggOnly: true,
-  },
-  {
-    name: "SOMASES",
-    sig: "SOMASES([Campo]; cond1; cond2; …)",
-    group: "Agregações condicionais",
-    aggOnly: true,
-  },
-  {
-    name: "CONT.SE",
-    sig: "CONT.SE(condição)",
-    group: "Agregações condicionais",
-    aggOnly: true,
-  },
-  {
-    name: "CONT.SES",
-    sig: "CONT.SES(cond1; cond2; …)",
-    group: "Agregações condicionais",
-    aggOnly: true,
-  },
-  {
-    name: "MÉDIASE",
-    sig: "MÉDIASE([Campo]; condição)",
-    group: "Agregações condicionais",
-    aggOnly: true,
-  },
-  { name: "SOMA", sig: "SOMA(a; b; …)", group: "Matemáticas" },
-  { name: "MÉDIA", sig: "MÉDIA(a; b; …)", group: "Matemáticas" },
-  { name: "MÍN", sig: "MÍN(a; b; …)", group: "Matemáticas" },
-  { name: "MÁX", sig: "MÁX(a; b; …)", group: "Matemáticas" },
-  { name: "CONT.NÚM", sig: "CONT.NÚM(a; b; …)", group: "Matemáticas" },
-  { name: "CONT.VALORES", sig: "CONT.VALORES(a; b; …)", group: "Matemáticas" },
-  { name: "ARRED", sig: "ARRED(valor; casas)", group: "Matemáticas" },
-  { name: "ABS", sig: "ABS(valor)", group: "Matemáticas" },
-  { name: "CONCATENAR", sig: "CONCATENAR(a; b; …)", group: "Matemáticas" },
-  {
-    name: "ANTERIOR",
-    sig: 'ANTERIOR(expr; "anterior"|"ano")',
-    group: "Comparação de período",
-    aggOnly: true,
-  },
-  {
-    name: "VARPCT",
-    sig: "VARPCT(expr) — variação % vs período anterior",
-    group: "Comparação de período",
-    aggOnly: true,
-  },
-  {
-    name: "VARABS",
-    sig: "VARABS(expr) — variação absoluta vs período anterior",
-    group: "Comparação de período",
-    aggOnly: true,
-  },
-];
 
 export function FunctionPalette({
   context,
@@ -91,9 +25,16 @@ export function FunctionPalette({
   onInsert: (name: FormulaFuncName) => void;
   className?: string;
 }) {
-  const options: ComboboxOption[] = FUNCS.filter(
+  // O nome insere; a assinatura ensina; a descrição fica no tooltip da opção.
+  const options: ComboboxOption[] = FORMULA_FUNC_LIST.filter(
     (f) => context === "aggregate" || !f.aggOnly
-  ).map((f) => ({ value: f.name, label: f.sig, cleanLabel: f.name, group: f.group }));
+  ).map((f) => ({
+    value: f.name,
+    label: funcSignature(f),
+    cleanLabel: f.name,
+    group: FUNC_GROUP_LABELS[f.group],
+    title: f.description,
+  }));
   return (
     <Combobox
       options={options}

@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   Popover,
   PopoverContent,
@@ -547,11 +548,15 @@ export function MetricRow({
               aria-label="Formato do resultado"
             />
           </div>
-          <p className="text-muted-foreground text-xs">
-            Fórmula sobre os totais do recorte, recalculada por grupo,
-            subtotal e Total geral. Percentual exibe ×100 (0,35 → 35%); moeda
-            CONVERTE o resultado para a moeda escolhida (taxa do período do
-            dashboard).
+          <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+            <span>Fórmula sobre os totais do recorte.</span>
+            <HelpHint ariaLabel="Como a métrica de fórmula funciona">
+              <p>
+                Recalculada por grupo, subtotal e Total geral. Percentual exibe
+                ×100 (0,35 → 35%); moeda CONVERTE o resultado para a moeda
+                escolhida (taxa do período do dashboard).
+              </p>
+            </HelpHint>
           </p>
           {onSaveAsField ? (
             <Button

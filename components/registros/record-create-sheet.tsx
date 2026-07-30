@@ -19,11 +19,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { createRecord, type CreateRecordState } from "@/lib/records/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
@@ -172,7 +172,11 @@ export function RecordCreateSheet({
           {triggerLabel}
         </Button>
       )}
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
+      <ResizableSheetContent
+        storageKey="panel-w:record-create"
+        defaultWidth={512}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>Novo registro</SheetTitle>
           <SheetDescription>
@@ -342,7 +346,7 @@ export function RecordCreateSheet({
             {pending ? "Criando..." : "Criar registro"}
           </Button>
         </form>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 26/07/2026
+// Versão: 1.4 | Data: 30/07/2026
+// v1.4 (30/07/2026): FORMULA_FUNC_GROUPS/FormulaFuncGroup passam a DERIVAR do
+//   catálogo único FORMULA_FUNCS (lib/records/formula-funcs.ts — exaustivo por
+//   `satisfies Record<FormulaFuncName, …>`, mesma ordem histórica de chaves);
+//   render do SPEC byte-idêntico, `formulaFuncsIn` inalterado.
 // v1.3 (26/07/2026): cromo dos cards — `hideComparisonLabels`/
 //   `hideBusinessDayBadges` (dashboard), `comparison.hideLabel` e
 //   `hideBusinessDayBadge` (appearance), todos tri-state (ausente herda o
@@ -35,6 +39,10 @@ import {
   SHAPE_KIND_LABELS,
 } from "@/lib/widgets/types";
 import type { FormulaFuncName } from "@/lib/records/formulas";
+import {
+  FORMULA_FUNC_LIST,
+  type FormulaFuncGroup,
+} from "@/lib/records/formula-funcs";
 import { PERIOD_ALL, PERIOD_PRESETS } from "@/lib/widgets/period";
 
 // ---------- Helpers de render ----------
@@ -75,33 +83,18 @@ export function renderDocBlock(
 }
 
 // ---------- Funções de fórmula por grupo ----------
-// Fonte da verdade dos NOMES é o union FormulaFuncName (lib/records/formulas.ts);
-// os grupos daqui alimentam as listas do SPEC. Função nova no union sem entrada
-// aqui = erro de typecheck.
+// Fonte da verdade dos NOMES é o union FormulaFuncName (lib/records/formulas.ts)
+// e a dos METADADOS (grupo/assinatura/descrição) é o catálogo FORMULA_FUNCS
+// (lib/records/formula-funcs.ts — exaustivo por `satisfies`; função nova sem
+// entrada lá = erro de typecheck). Aqui só DERIVAMOS o mapa nome→grupo que o
+// SPEC renderiza, na MESMA ordem de chaves do catálogo.
 
-export type FormulaFuncGroup = "logica" | "cond_agg" | "pura" | "comparacao";
-export const FORMULA_FUNC_GROUPS = {
-  SE: "logica",
-  E: "logica",
-  OU: "logica",
-  SOMASE: "cond_agg",
-  SOMASES: "cond_agg",
-  "CONT.SE": "cond_agg",
-  "CONT.SES": "cond_agg",
-  MÉDIASE: "cond_agg",
-  SOMA: "pura",
-  MÉDIA: "pura",
-  MÍN: "pura",
-  MÁX: "pura",
-  "CONT.NÚM": "pura",
-  "CONT.VALORES": "pura",
-  ARRED: "pura",
-  ABS: "pura",
-  CONCATENAR: "pura",
-  ANTERIOR: "comparacao",
-  VARPCT: "comparacao",
-  VARABS: "comparacao",
-} satisfies Record<FormulaFuncName, FormulaFuncGroup>;
+export type { FormulaFuncGroup } from "@/lib/records/formula-funcs";
+
+export const FORMULA_FUNC_GROUPS: Record<FormulaFuncName, FormulaFuncGroup> =
+  Object.fromEntries(
+    FORMULA_FUNC_LIST.map((f) => [f.name, f.group])
+  ) as Record<FormulaFuncName, FormulaFuncGroup>;
 
 export function formulaFuncsIn(group: FormulaFuncGroup): string[] {
   return Object.entries(FORMULA_FUNC_GROUPS)

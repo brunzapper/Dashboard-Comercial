@@ -16,11 +16,11 @@ import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   Table,
   TableBody,
@@ -376,7 +376,11 @@ export function AutoOperationsManager({
       )}
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-md">
+        <ResizableSheetContent
+          storageKey="panel-w:auto-operations"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>
               {editing ? "Editar sub-operações automáticas" : "Nova config"}
@@ -396,7 +400,7 @@ export function AutoOperationsManager({
               onDone={() => setOpen(false)}
             />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </div>
   );

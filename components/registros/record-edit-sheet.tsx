@@ -20,11 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   RECORD_TYPE_LABELS,
   isPercentField,
@@ -389,7 +389,11 @@ export function RecordEditSheet(props: RecordEditFormProps) {
       >
         <Pencil className="size-4" />
       </Button>
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
+      <ResizableSheetContent
+        storageKey="panel-w:record-edit"
+        defaultWidth={512}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>{record.title ?? "(sem título)"}</SheetTitle>
           <SheetDescription>
@@ -409,7 +413,7 @@ export function RecordEditSheet(props: RecordEditFormProps) {
             userRoles={userRoles}
           />
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

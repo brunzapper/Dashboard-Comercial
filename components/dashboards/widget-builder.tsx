@@ -144,12 +144,13 @@ import { useSources } from "@/components/sources-context";
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   DATE_TRANSFORMS,
   fieldLabel,
@@ -365,46 +366,6 @@ export function WidgetBuilder({
       </DropdownMenu>
     );
   };
-
-  // Largura do painel de config, redimensionável arrastando a borda esquerda
-  // (como as colunas/linhas das tabelas). Persistida no localStorage (chrome do
-  // painel, não dado do widget). Default ~ sm:max-w-lg (512px).
-  const PANEL_KEY = "widget-builder-width";
-  const [panelWidth, setPanelWidth] = useState(512);
-  useEffect(() => {
-    const saved = Number(
-      typeof window !== "undefined" ? window.localStorage.getItem(PANEL_KEY) : ""
-    );
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (Number.isFinite(saved) && saved >= 360) setPanelWidth(saved);
-  }, []);
-  const resizeRef = useRef<{ x: number; w: number } | null>(null);
-  function onPanelResizeDown(e: React.PointerEvent) {
-    e.preventDefault();
-    resizeRef.current = { x: e.clientX, w: panelWidth };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPanelResizeMove(e: React.PointerEvent) {
-    const d = resizeRef.current;
-    if (!d) return;
-    // Painel abre à direita: arrastar para a ESQUERDA (delta negativo) aumenta.
-    const next = Math.min(
-      typeof window !== "undefined" ? window.innerWidth * 0.95 : 1200,
-      Math.max(360, Math.round(d.w - (e.clientX - d.x)))
-    );
-    setPanelWidth(next);
-  }
-  function onPanelResizeUp(e: React.PointerEvent) {
-    if (!resizeRef.current) return;
-    resizeRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* noop */
-    }
-    if (typeof window !== "undefined")
-      window.localStorage.setItem(PANEL_KEY, String(panelWidth));
-  }
 
   const [title, setTitle] = useState(widget?.title ?? "");
   const [visualType, setVisualType] = useState<VisualType>(
@@ -1166,12 +1127,20 @@ export function WidgetBuilder({
           <Plus className="size-4" /> Adicionar
         </Button>
       </div>
-      <p className="text-muted-foreground text-xs">
-        Dropdowns exibidos no próprio widget. A seleção é compartilhada entre
-        todos os usuários (persiste ao recarregar). Datas no formato padrão
-        abrem um dropdown de período; nos demais formatos, multi-seleção
-        (ex.: vários meses). O filtro de período com o MESMO campo do período
-        geral acompanha a barra (sem alterá-la de volta).
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <span>Dropdowns exibidos no próprio widget.</span>
+        <HelpHint ariaLabel="Como os filtros rápidos funcionam">
+          <p>
+            A seleção é compartilhada entre todos os usuários (persiste ao
+            recarregar).
+          </p>
+          <p>
+            Datas no formato padrão abrem um dropdown de período; nos demais
+            formatos, multi-seleção (ex.: vários meses). O filtro de período
+            com o MESMO campo do período geral acompanha a barra (sem alterá-la
+            de volta).
+          </p>
+        </HelpHint>
       </p>
       {quickFilters.map((e, i) => {
         const eIsDate = isDate(e.field);
@@ -2070,22 +2039,12 @@ export function WidgetBuilder({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       {trigger ? <SheetTrigger asChild>{trigger}</SheetTrigger> : null}
-      <SheetContent
-        className="bg-muted overflow-y-auto sm:max-w-none"
-        style={{ width: panelWidth, maxWidth: "95vw" }}
+      <ResizableSheetContent
+        storageKey="widget-builder-width"
+        defaultWidth={512}
+        minWidth={360}
+        className="bg-muted overflow-y-auto"
       >
-        {/* Alça de redimensionamento (borda esquerda do painel). */}
-        <span
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Redimensionar painel"
-          title="Arraste para redimensionar o painel"
-          onPointerDown={onPanelResizeDown}
-          onPointerMove={onPanelResizeMove}
-          onPointerUp={onPanelResizeUp}
-          onPointerCancel={onPanelResizeUp}
-          className="hover:bg-primary/40 absolute top-0 left-0 z-20 h-full w-1.5 cursor-col-resize"
-        />
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>
           <SheetDescription>
@@ -2180,12 +2139,19 @@ export function WidgetBuilder({
           {visualType === "filtro_campo" ? (
             <>
               <div className="flex flex-col gap-2">
-                <Label>Bases</Label>
+                <Label className="gap-1.5">
+                  Bases
+                  <HelpHint ariaLabel="Como as bases do filtro funcionam">
+                    <p>
+                      Este filtro atinge os widgets cujas bases se sobrepõem às
+                      escolhidas aqui — e neles só restringe os registros das
+                      bases escolhidas; registros de outras bases dos
+                      widgets-alvo não são afetados.
+                    </p>
+                  </HelpHint>
+                </Label>
                 <p className="text-muted-foreground text-xs">
-                  Sem seleção = todas as bases. Este filtro atinge os widgets
-                  cujas bases se sobrepõem às escolhidas aqui — e neles só
-                  restringe os registros das bases escolhidas; registros de
-                  outras bases dos widgets-alvo não são afetados.
+                  Sem seleção = todas as bases.
                 </p>
                 <div className="flex flex-col gap-2 rounded-md border p-3">
                   {catalog.map((s) => (
@@ -2368,12 +2334,14 @@ export function WidgetBuilder({
                     onCheckedChange={(v) => setFfSharedValue(v === true)}
                   />
                   Aplicar filtro para todos os usuários (compartilhado)
+                  <HelpHint ariaLabel="Como o filtro compartilhado funciona">
+                    <p>
+                      Desmarcado (padrão), cada usuário mantém a própria
+                      seleção. Marcado, quem mudar o filtro muda para todos que
+                      veem este dashboard — como os filtros rápidos do card.
+                    </p>
+                  </HelpHint>
                 </label>
-                <p className="text-muted-foreground text-xs">
-                  Desmarcado (padrão), cada usuário mantém a própria seleção.
-                  Marcado, quem mudar o filtro muda para todos que veem este
-                  dashboard — como os filtros rápidos do card.
-                </p>
               </div>
             </>
           ) : null}
@@ -2395,10 +2363,16 @@ export function WidgetBuilder({
                     className="w-full"
                     aria-label="Usar campo salvo"
                   />
-                  <p className="text-muted-foreground text-xs">
-                    Campo salvo (&quot;Calculado — totais do recorte&quot;, de
-                    Campos) = reutilizável em vários widgets; a fórmula/moeda
-                    vêm do campo. Fórmula escrita aqui vale só neste widget.
+                  <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                    <span>Fórmula escrita aqui vale só neste widget.</span>
+                    <HelpHint ariaLabel="Campo salvo × fórmula do widget">
+                      <p>
+                        Campo salvo (&quot;Calculado — totais do recorte&quot;,
+                        de Campos) = reutilizável em vários widgets; a
+                        fórmula/moeda vêm do campo. Fórmula escrita aqui vale
+                        só neste widget.
+                      </p>
+                    </HelpHint>
                   </p>
                 </>
               ) : null}
@@ -2455,10 +2429,18 @@ export function WidgetBuilder({
                   <Plus className="size-4" /> Adicionar variável
                 </Button>
               </div>
-              <p className="text-muted-foreground text-xs">
-                Cada variável é um total dos dados (respeita filtros e período)
-                e entra na expressão da calculadora como <code>[Nome]</code> —
-                digite <code>[</code> no card para buscar.
+              <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <span>
+                  Cada variável entra na expressão como <code>[Nome]</code> —
+                  digite <code>[</code> no card para buscar.
+                </span>
+                <HelpHint ariaLabel="Como as variáveis da calculadora funcionam">
+                  <p>
+                    Cada variável é um total dos dados (respeita filtros e
+                    período do dashboard). A expressão é editada direto no
+                    card da calculadora.
+                  </p>
+                </HelpHint>
               </p>
               {calcVariables.map((v, i) => (
                 <div key={v.id} className="flex flex-col gap-2 rounded-md border p-3">
@@ -2506,12 +2488,19 @@ export function WidgetBuilder({
 
           {/* Config da Nota: o texto é editado direto no card. */}
           {visualType === "nota" ? (
-            <p className="text-muted-foreground rounded-md border p-3 text-sm">
-              O texto da nota é editado direto no card (modo{" "}
-              <strong>Editar layout</strong> → clique no post-it). Use{" "}
-              <code>{"{= … }"}</code> para cálculos com campos e condicionais, e
-              o botão <strong>Link…</strong> para transformar palavras em
-              atalhos para outros widgets. Cores em <strong>Aparência</strong>.
+            <p className="text-muted-foreground flex items-center gap-1.5 rounded-md border p-3 text-sm">
+              <span>
+                O texto da nota é editado direto no card (modo{" "}
+                <strong>Editar layout</strong> → clique no post-it).
+              </span>
+              <HelpHint ariaLabel="Recursos da nota">
+                <p>
+                  Use <code>{"{= … }"}</code> para cálculos com campos e
+                  condicionais, e o botão <strong>Link…</strong> para
+                  transformar palavras em atalhos para outros widgets. Cores em{" "}
+                  <strong>Aparência</strong>.
+                </p>
+              </HelpHint>
             </p>
           ) : null}
 
@@ -2540,10 +2529,8 @@ export function WidgetBuilder({
                     painel
                   </Button>
                   <p className="text-muted-foreground text-xs">
-                    Arraste um retângulo no dashboard: o tamanho desenhado
-                    define a posição do widget e a quantidade inicial de
-                    linhas e colunas. Ou salve abaixo para criar uma grade
-                    padrão 3×3.
+                    Arraste um retângulo no dashboard para posicionar e definir
+                    a grade inicial — ou salve abaixo para uma grade 3×3.
                   </p>
                 </div>
               ) : null}
@@ -2872,13 +2859,22 @@ export function WidgetBuilder({
                           ) : null}
                         </div>
                         <p className="text-muted-foreground text-xs">
-                          Campos numéricos ou indicadores calculados (registros
-                          conectados por base, tarefas, idade), com a agregação
-                          escolhida por coluna.
+                          Campos numéricos ou indicadores calculados, com a
+                          agregação escolhida por coluna.
                         </p>
                       </div>
                       <div className="flex flex-col gap-1.5">
-                        <Label>Indicadores do card (até {KANBAN_MAX_BADGES})</Label>
+                        <Label className="gap-1.5">
+                          Indicadores do card (até {KANBAN_MAX_BADGES})
+                          <HelpHint ariaLabel="O que são os indicadores do card">
+                            <p>
+                              Badges no rodapé do card — ex.: &ldquo;Leads
+                              vinculados&rdquo; (registros conectados por
+                              base), tarefas abertas/atrasadas ou idade em
+                              dias.
+                            </p>
+                          </HelpHint>
+                        </Label>
                         <div className="grid grid-cols-2 gap-3">
                           {Array.from(
                             { length: KANBAN_MAX_BADGES },
@@ -2894,11 +2890,6 @@ export function WidgetBuilder({
                             )
                           )}
                         </div>
-                        <p className="text-muted-foreground text-xs">
-                          Badges no rodapé do card — ex.: “Leads vinculados”
-                          (registros conectados), tarefas abertas/atrasadas ou
-                          idade em dias.
-                        </p>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-1.5">
@@ -3081,11 +3072,18 @@ export function WidgetBuilder({
                 </div>
               ) : null}
               {visualType === "linha_divisoria" || shapeKind === "linha" ? (
-                <p className="text-muted-foreground text-xs">
-                  A linha é livre: no modo edição, arraste o corpo ou as
-                  pontas direto no painel — ela não se prende às colunas do
-                  grid e fica sempre na horizontal ou na vertical (a ponta
-                  decide pelo gesto dominante).
+                <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <span>
+                    No modo edição, arraste o corpo ou as pontas direto no
+                    painel.
+                  </span>
+                  <HelpHint ariaLabel="Como a linha se comporta">
+                    <p>
+                      A linha é livre: não se prende às colunas do grid e fica
+                      sempre na horizontal ou na vertical (a ponta decide pelo
+                      gesto dominante).
+                    </p>
+                  </HelpHint>
                 </p>
               ) : null}
               <div className="flex flex-col gap-1.5">
@@ -3098,10 +3096,17 @@ export function WidgetBuilder({
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Atalho para widget</Label>
-                <p className="text-muted-foreground text-xs">
-                  Clicar na forma (fora do modo edição) vai até o widget-alvo —
-                  em qualquer aba deste dashboard ou de outro — centralizando-o
-                  na tela.
+                <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <span>
+                    Clicar na forma (fora do modo edição) vai até o
+                    widget-alvo.
+                  </span>
+                  <HelpHint ariaLabel="Como o atalho da forma funciona">
+                    <p>
+                      O alvo pode estar em qualquer aba deste dashboard ou de
+                      outro — o clique navega e centraliza o widget na tela.
+                    </p>
+                  </HelpHint>
                 </p>
                 <WidgetLinkPicker
                   currentDashboardId={dashboardId}
@@ -3318,10 +3323,16 @@ export function WidgetBuilder({
                   }
                   aria-label="Exibição das sub-bases"
                 />
-                <p className="text-muted-foreground text-xs">
-                  Com 2+ sub-bases da mesma base, cada uma vira uma série com a
-                  contagem PRÓPRIA. &quot;Total&quot; soma as sub-bases por
-                  categoria — a coluna &quot;Base&quot; some da tabela e do CSV.
+                <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <span>Com 2+ sub-bases, cada uma vira uma série própria.</span>
+                  <HelpHint ariaLabel="Como sub-bases viram séries">
+                    <p>
+                      Com 2+ sub-bases da mesma base, cada uma vira uma série
+                      com a contagem PRÓPRIA. &quot;Total&quot; soma as
+                      sub-bases por categoria — a coluna &quot;Base&quot; some
+                      da tabela e do CSV.
+                    </p>
+                  </HelpHint>
                 </p>
               </div>
             ) : null}
@@ -3640,10 +3651,14 @@ export function WidgetBuilder({
                     onValueChange={(v) => setRowSource(v as RowSource)}
                     aria-label="Base das linhas"
                   />
-                  <p className="text-muted-foreground text-xs">
-                    As colunas são as Dimensões acima (na ordem). Campos
-                    personalizados não calculados ficam editáveis (se o papel
-                    permitir) e gravam na entidade listada.
+                  <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                    <span>As colunas são as Dimensões acima (na ordem).</span>
+                    <HelpHint ariaLabel="Edição inline das colunas">
+                      <p>
+                        Campos personalizados não calculados ficam editáveis
+                        (se o papel permitir) e gravam na entidade listada.
+                      </p>
+                    </HelpHint>
                   </p>
                 </div>
               ) : null}
@@ -3680,10 +3695,14 @@ export function WidgetBuilder({
                       }}
                       aria-label="Dimensão das colunas do topo"
                     />
-                    <p className="text-muted-foreground text-xs">
-                      Os valores desta dimensão viram as colunas do topo; as
-                      demais dimensões ficam disponíveis no &quot;Agrupar
-                      por&quot; para agrupar o eixo esquerdo.
+                    <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                      <span>Os valores desta dimensão viram as colunas do topo.</span>
+                      <HelpHint ariaLabel="Como o pivot funciona">
+                        <p>
+                          As demais dimensões ficam disponíveis no
+                          &quot;Agrupar por&quot; para agrupar o eixo esquerdo.
+                        </p>
+                      </HelpHint>
                     </p>
                   </div>
                 ) : null}
@@ -3835,8 +3854,7 @@ export function WidgetBuilder({
             >
               <Label>Tamanho dinâmico</Label>
               <p className="text-muted-foreground text-xs">
-                O widget cresce para caber o conteúdo e nunca encolhe abaixo do
-                tamanho atual (o mínimo). Redimensione pela alça para definir esse
+                O widget cresce para caber o conteúdo; a alça define o tamanho
                 mínimo.
               </p>
               <label className="flex items-center gap-2 text-sm">
@@ -3868,7 +3886,7 @@ export function WidgetBuilder({
                 : "Salvar widget"}
           </Button>
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
 
       {/* Criar/CONFIGURAR campo sem sair do editor: reusa o FieldForm de /campos;
           ao salvar, router.refresh() recomputa `available`/`fields`. Em modo edição
@@ -3884,7 +3902,11 @@ export function WidgetBuilder({
             }
           }}
         >
-          <SheetContent className="overflow-y-auto">
+          <ResizableSheetContent
+            storageKey="panel-w:field-form"
+            defaultWidth={448}
+            className="overflow-y-auto"
+          >
             <SheetHeader>
               <SheetTitle>
                 {editingField ? "Configurar campo" : "Novo campo"}
@@ -3956,7 +3978,7 @@ export function WidgetBuilder({
                 }}
               />
             </div>
-          </SheetContent>
+          </ResizableSheetContent>
         </Sheet>
       ) : null}
     </Sheet>

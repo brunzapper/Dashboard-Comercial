@@ -23,11 +23,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   Table,
   TableBody,
@@ -470,7 +470,11 @@ export function SubSourcesManager({
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:sub-sources"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>
               {editing ? "Editar sub-base" : "Nova sub-base"}
@@ -490,7 +494,7 @@ export function SubSourcesManager({
               onDone={() => setOpen(false)}
             />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </div>
   );

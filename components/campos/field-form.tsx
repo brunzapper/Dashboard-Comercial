@@ -58,6 +58,30 @@ import type { RefOption } from "@/lib/records/date-operands";
 import type { Formula } from "@/lib/records/formulas";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 import { RecipeStrip } from "@/components/formula/recipe-strip";
+import { HelpHint } from "@/components/ui/help-hint";
+
+// Regras de formato (percentual/moeda) dos DOIS campos calculados — o mesmo
+// conteúdo, com a frase da moeda ajustada ao contexto (totais × por registro).
+function ResultFormatHint({ context }: { context: "aggregate" | "record" }) {
+  return (
+    <HelpHint ariaLabel="Como o formato do resultado funciona">
+      <p>
+        <strong>Percentual</strong>: o resultado exibe multiplicado por 100
+        (0,35 → 35%){context === "record" ? " — o valor armazenado continua cru" : " em widgets e registros"}.
+      </p>
+      <p>
+        <strong>Automática</strong>:{" "}
+        {context === "aggregate"
+          ? "os totais mantêm a moeda dos operandos quando é uma só; ao misturar moedas, os operandos são somados convertidos para Real (taxa do período)."
+          : "o resultado mantém a moeda dos operandos (ex.: campo em US$ × 2 continua US$); ao misturar moedas diferentes, os valores são convertidos para Real pela taxa do período do registro."}
+      </p>
+      <p>
+        <strong>Moeda fixa</strong> converte o resultado para a moeda
+        escolhida.
+      </p>
+    </HelpHint>
+  );
+}
 
 const ROLE_KEYS = Object.keys(ROLE_LABELS) as RoleKey[];
 const DATA_TYPE_OPTIONS: ComboboxOption[] = (
@@ -310,10 +334,15 @@ export function FieldForm({
           ) : null}
           {isCore && field?.field_key === "source_system" ? (
             <p className="text-muted-foreground text-xs">
-              Os valores são as origens de ingestão dos registros (bitrix,
-              sheet_site, manual, csv). A lista não é reescrita
-              automaticamente — uma origem nova precisa ser adicionada aqui
-              para aparecer nos filtros.
+              Origens de ingestão dos registros — uma origem nova precisa ser
+              adicionada aqui para aparecer nos filtros.{" "}
+              <HelpHint ariaLabel="Sobre as origens de ingestão">
+                <p>
+                  Os valores são as origens de ingestão dos registros (bitrix,
+                  sheet_site, manual, csv). A lista não é reescrita
+                  automaticamente.
+                </p>
+              </HelpHint>
             </p>
           ) : null}
         </div>
@@ -329,17 +358,33 @@ export function FieldForm({
               className="size-4 accent-primary"
             />
             Exibir como percentual (0,35 → 35%)
+            <HelpHint ariaLabel="Como o percentual funciona">
+              <p>
+                Só a exibição muda: o valor armazenado continua cru e a edição
+                usa o valor cru. Agregações (soma/média) em widgets também
+                exibem em %.
+              </p>
+            </HelpHint>
           </label>
-          <p className="text-muted-foreground text-xs">
-            Só a exibição muda: o valor armazenado continua cru e a edição usa o
-            valor cru. Agregações (soma/média) em widgets também exibem em %.
-          </p>
         </div>
       ) : null}
 
       {!isCore && dataType === "moeda" ? (
         <div className="flex flex-col gap-1.5">
-          <Label>Moeda</Label>
+          <Label className="gap-1.5">
+            Moeda
+            <HelpHint ariaLabel="Como a moeda do campo funciona">
+              <p>
+                <strong>Moeda do registro</strong>: o valor segue a coluna
+                Moeda de cada registro (registros sem moeda contam como Real).
+              </p>
+              <p>
+                <strong>Moeda fixa</strong>: todos os valores deste campo são
+                exibidos nessa moeda. Habilite outras moedas em Campos →
+                Moedas.
+              </p>
+            </HelpHint>
+          </Label>
           <Combobox
             options={moedaOptions}
             value={moedaCurrency}
@@ -350,18 +395,23 @@ export function FieldForm({
           />
           <input type="hidden" name="currency_mode" value={moedaMode} />
           <input type="hidden" name="currency_code" value={moedaCode} />
-          <p className="text-muted-foreground text-xs">
-            Moeda do registro: o valor segue a coluna Moeda de cada registro
-            (registros sem moeda contam como Real). Moeda fixa: todos os valores
-            deste campo são exibidos nessa moeda. Habilite outras moedas em
-            Campos → Moedas.
-          </p>
         </div>
       ) : null}
 
       {dataType === "calculado_agg" ? (
         <div className="flex flex-col gap-1.5">
-          <Label>Fórmula (sobre os totais)</Label>
+          <Label className="gap-1.5">
+            Fórmula (sobre os totais)
+            <HelpHint ariaLabel="Como o campo calculado sobre totais funciona">
+              <p>
+                O resultado é calculado sobre os{" "}
+                <strong>totais do recorte</strong> (filtros/período do widget)
+                e recalculado em cada grupo, subtotal e Total geral — não por
+                registro. Ex.: ticket médio ={" "}
+                <code>Σ MRR ÷ Contagem de registros</code>.
+              </p>
+            </HelpHint>
+          </Label>
           <FormulaEditor
             key={`agg-${recipeNonce}`}
             context="aggregate"
@@ -389,13 +439,10 @@ export function FieldForm({
                 }),
             }}
           />
-          <p className="text-muted-foreground text-xs">
-            O resultado é calculado sobre os <strong>totais do recorte</strong>{" "}
-            (filtros/período do widget) e recalculado em cada grupo, subtotal e
-            Total geral — não por registro. Ex.: ticket médio ={" "}
-            <code>Σ MRR ÷ Contagem de registros</code>.
-          </p>
-          <Label className="mt-1">Formato do resultado</Label>
+          <Label className="mt-1 gap-1.5">
+            Formato do resultado
+            <ResultFormatHint context="aggregate" />
+          </Label>
           <Combobox
             options={aggResultOptions}
             value={calcCurrency}
@@ -411,13 +458,6 @@ export function FieldForm({
             name="show_as_percent"
             value={calcCurrency === "percent" ? "on" : ""}
           />
-          <p className="text-muted-foreground text-xs">
-            Percentual: o resultado exibe multiplicado por 100 (0,35 → 35%) em
-            widgets e registros. Automática: os totais mantêm a moeda dos
-            operandos quando é uma só; ao misturar moedas, os operandos são
-            somados convertidos para Real (taxa do período). Moeda fixa converte
-            o resultado para a moeda escolhida.
-          </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -432,7 +472,16 @@ export function FieldForm({
 
       {dataType === "calculado" ? (
         <div className="flex flex-col gap-1.5">
-          <Label>Fórmula</Label>
+          <Label className="gap-1.5">
+            Fórmula
+            <HelpHint ariaLabel="Como o campo calculado por registro funciona">
+              <p>
+                O resultado é calculado por registro a cada
+                sincronização/edição (fórmulas com ↪ registro casado são
+                atualizadas no auto-match/recálculo).
+              </p>
+            </HelpHint>
+          </Label>
           <FormulaEditor
             key={`rec-${recipeNonce}`}
             context="record"
@@ -455,12 +504,10 @@ export function FieldForm({
                 }),
             }}
           />
-          <p className="text-muted-foreground text-xs">
-            O resultado é calculado por registro a cada sincronização/edição
-            (fórmulas com ↪ registro casado são atualizadas no
-            auto-match/recálculo).
-          </p>
-          <Label className="mt-1">Formato do resultado</Label>
+          <Label className="mt-1 gap-1.5">
+            Formato do resultado
+            <ResultFormatHint context="record" />
+          </Label>
           <Combobox
             options={calcResultOptions}
             value={calcCurrency}
@@ -476,14 +523,6 @@ export function FieldForm({
             name="show_as_percent"
             value={calcCurrency === "percent" ? "on" : ""}
           />
-          <p className="text-muted-foreground text-xs">
-            Percentual: o valor calculado exibe multiplicado por 100 (0,35 →
-            35%) — o valor armazenado continua cru. Automática: o resultado
-            mantém a moeda dos operandos (ex.: campo em US$ × 2 continua US$);
-            ao misturar moedas diferentes, os valores são convertidos para Real
-            pela taxa do período do registro. Moeda fixa converte tudo para a
-            moeda escolhida.
-          </p>
           <label className="mt-1 flex items-center gap-2 text-sm">
             <input
               type="checkbox"

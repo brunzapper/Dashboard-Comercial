@@ -34,10 +34,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet,
-  SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   Table,
   TableBody,
@@ -347,7 +347,10 @@ export function UsersManager({
           if (o) setCreateError(null);
         }}
       >
-        <SheetContent>
+        <ResizableSheetContent
+          storageKey="panel-w:user-create"
+          defaultWidth={448}
+        >
           <SheetHeader>
             <SheetTitle>Criar usuário</SheetTitle>
           </SheetHeader>
@@ -404,7 +407,7 @@ export function UsersManager({
               {creating ? "Criando..." : "Criar usuário"}
             </Button>
           </form>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       {/* ============ Sheet: resetar senha ============ */}
@@ -412,7 +415,10 @@ export function UsersManager({
         open={!!resetTarget}
         onOpenChange={(o) => !o && setResetTarget(null)}
       >
-        <SheetContent>
+        <ResizableSheetContent
+          storageKey="panel-w:user-password"
+          defaultWidth={448}
+        >
           <SheetHeader>
             <SheetTitle>Resetar senha</SheetTitle>
           </SheetHeader>
@@ -448,7 +454,7 @@ export function UsersManager({
               {resetPending ? "Salvando..." : "Salvar nova senha"}
             </Button>
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       {/* ============ Confirmação de exclusão ============ */}

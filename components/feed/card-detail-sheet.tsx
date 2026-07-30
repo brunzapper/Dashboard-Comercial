@@ -12,11 +12,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { RECORD_TYPE_LABELS, type RecordRow } from "@/lib/records/types";
 import type { TaskRow } from "@/lib/tasks/types";
 import type { KanbanRecordContext } from "@/components/kanban/kanban-board";
@@ -85,7 +85,11 @@ export function CardDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
+      <ResizableSheetContent
+        storageKey="panel-w:card-detail"
+        defaultWidth={512}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>{subtitle}</SheetDescription>
@@ -147,7 +151,7 @@ export function CardDetailSheet({
             onDone={() => onOpenChange(false)}
           />
         )}
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

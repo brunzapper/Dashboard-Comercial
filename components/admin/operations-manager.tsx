@@ -17,11 +17,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   Table,
   TableBody,
@@ -413,7 +413,11 @@ export function OperationsManager({
       </div>
 
       <Sheet open={editing != null} onOpenChange={(v) => !v && setEditing(null)}>
-        <SheetContent className="overflow-y-auto sm:max-w-2xl">
+        <ResizableSheetContent
+          storageKey="panel-w:operation-profile"
+          defaultWidth={672}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Perfil de dados — {editing?.name}</SheetTitle>
             <SheetDescription>
@@ -433,7 +437,7 @@ export function OperationsManager({
               />
             ) : null}
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       <ConfirmDialog

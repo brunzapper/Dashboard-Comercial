@@ -20,11 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   getBoardSourcesState,
   saveBoardSourceScope,
@@ -143,7 +143,11 @@ export function BoardSourcesDialog({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-sm">
+      <ResizableSheetContent
+        storageKey="panel-w:board-sources"
+        defaultWidth={384}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>Bases</SheetTitle>
           <SheetDescription>
@@ -216,7 +220,7 @@ export function BoardSourcesDialog({
             </>
           ) : null}
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

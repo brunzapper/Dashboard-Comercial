@@ -39,11 +39,11 @@ import {
 } from "@/components/ui/select";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AiChatLog,
@@ -321,7 +321,11 @@ export function ImportDashboardSheet({
       </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-lg">
+        <ResizableSheetContent
+          storageKey="panel-w:import-dashboard"
+          defaultWidth={512}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Dashboards com IA</SheetTitle>
             <SheetDescription>
@@ -660,7 +664,7 @@ export function ImportDashboardSheet({
               </>
             ) : null}
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </>
   );

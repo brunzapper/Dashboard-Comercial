@@ -15,6 +15,7 @@ import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   Select,
   SelectContent,
@@ -138,10 +139,15 @@ export function CardModeSection({
               />
             </div>
           </div>
-          <p className="text-muted-foreground text-xs">
-            Ex.: classificar por Valor (maior) e exibir o Cliente → o cliente
-            do maior negócio do período. Classificar por uma data (maior) →
-            registro mais recente.
+          <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+            <span>Classifica os registros e exibe o campo escolhido.</span>
+            <HelpHint ariaLabel="Exemplos de classificação">
+              <p>
+                Ex.: classificar por Valor (maior) e exibir o Cliente → o
+                cliente do maior negócio do período. Classificar por uma data
+                (maior) → registro mais recente.
+              </p>
+            </HelpHint>
           </p>
         </>
       ) : null}
@@ -287,10 +293,6 @@ export function CardModeSection({
               />
             }
           />
-          <p className="text-muted-foreground text-xs">
-            Aceita SE/E/OU, SOMASE/CONT.SE/MÉDIASE e as funções de variação
-            ANTERIOR/VARPCT/VARABS (VARPCT já sai ×100).
-          </p>
         </div>
       ) : null}
 

@@ -1,4 +1,9 @@
-<!-- Versão: 1.18 | Data: 28/07/2026 -->
+<!-- Versão: 1.19 | Data: 30/07/2026 -->
+<!-- v1.19 (30/07/2026): §8.2 — editor de fórmulas UNIFICADO (texto assistido:
+     autocomplete de colunas com `[` sem acentos, autocomplete de funções por
+     nome/apelido, assinatura viva com argumento destacado, paleta ƒ; os modos
+     visual de botões × texto deixaram de existir). Painéis laterais passam a
+     ser redimensionáveis pela borda esquerda em todo o app. -->
 <!-- v1.18 (28/07/2026): §12.3 — Agenda redesenhada (célula com altura fixa e
      rolagem por dia, ordem cronológica com hora "14:00–15:30", "+" de
      criação rápida de tarefa/anotação, post-its arrastáveis, painel
@@ -1459,17 +1464,26 @@ são os MESMOS em todos esses lugares — muda apenas o **contexto**.
 No contexto agregado, a fórmula é reavaliada para CADA célula/grupo/subtotal/
 total do widget, sempre sobre os agregados daquele recorte (§7.8).
 
-### 8.2 O editor (dois modos)
+### 8.2 O editor (unificado)
 
-- **Modo visual (builder)**: botões para inserir operandos, operadores e
-  funções — impossível errar sintaxe.
-- **Modo texto**: digitação estilo planilha. O editor valida em tempo real e
-  explica os erros. Os dois modos são intercambiáveis (uma fórmula criada por
-  texto reabre em texto).
+Um único editor de texto estilo planilha, com assistência durante a digitação
+(os antigos modos "visual de botões" e "texto" foram fundidos):
+
+- **Colunas por autocomplete**: digite `[` e busque pelo nome (a busca ignora
+  acentos e maiúsculas); o botão **"Adicionar coluna…"** insere a coluna na
+  posição do cursor. Rótulo duplicado é inserido como referência crua
+  (ex.: `[custom:forecast]`) para não ficar ambíguo.
+- **Funções assistidas**: digite as primeiras letras e a lista de funções
+  aparece (nomes e apelidos — `sum`, `count`…); Enter/Tab insere
+  `NOME()` com o cursor dentro. A paleta **ƒ** lista todas com a assinatura.
+- **Assinatura viva**: com o cursor dentro de uma chamada, um painel mostra a
+  assinatura com o **argumento atual destacado**, a descrição e um exemplo.
+- O restante é digitação livre: operadores, números e textos são teclas.
+  O editor valida em tempo real e explica os erros.
 - Operandos proibidos no contexto atual aparecem **desabilitados com o
   motivo** — nunca escondidos.
 
-### 8.3 Sintaxe do modo texto
+### 8.3 Sintaxe do texto
 
 - **Operandos entre colchetes**, pelo rótulo exibido: `[Valor]`,
   `[Σ Valor]`, `[Contagem de Data Reunião]`, `[↪ Leads: Data de criação]`.
@@ -1482,7 +1496,7 @@ total do widget, sempre sobre os agregados daquele recorte (§7.8).
 - **Separador de argumentos: ponto-e-vírgula** `;` (a vírgula é reservada
   para decimais — usar vírgula como separador é erro).
 - Nomes de função aceitam variantes sem acento e em inglês (`sum` → SOMA,
-  `count` → CONT.NÚM, `round` → ARRED, `if` → SE etc.).
+  `count` → CONT.NÚM, `round` → ARRED, `average` → MÉDIA etc.).
 
 ### 8.4 Todas as funções (lista completa)
 
@@ -1599,7 +1613,7 @@ Atalhos que GERAM uma fórmula normal (100% editável depois):
 
 ### 8.9 Exemplos prontos (copiáveis)
 
-| Objetivo | Fórmula (modo texto, contexto agregado) |
+| Objetivo | Fórmula (texto, contexto agregado) |
 |---|---|
 | Ticket médio | `[Σ Valor] / [Contagem de registros]` |
 | Conversão lead → negócio | `[Contagem de registros · Negócios] / [Contagem de registros · Leads]` (formato Percentual) |
