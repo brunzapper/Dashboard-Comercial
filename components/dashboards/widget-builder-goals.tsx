@@ -14,6 +14,7 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HelpHint } from "@/components/ui/help-hint";
 import {
   Select,
   SelectContent,
@@ -82,12 +83,18 @@ export function GoalsSection({
         />
         Janela de meses no card (períodos equivalentes)
       </label>
-      <p className="text-muted-foreground text-xs">
-        Dropdown no próprio card (&quot;3 meses&quot;, &quot;Este
-        trimestre&quot;…): cada mês da janela recebe o recorte EQUIVALENTE ao
-        período da barra — por dia útil (mesmo estágio) ou por dia cheio.
-        Requer dimensão de data mensal. A seleção do dropdown é compartilhada
-        entre os usuários do dashboard.
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <span>
+          Dropdown no próprio card (&quot;3 meses&quot;, &quot;Este
+          trimestre&quot;…). Requer dimensão de data mensal.
+        </span>
+        <HelpHint ariaLabel="Como a janela de meses funciona">
+          <p>
+            Cada mês da janela recebe o recorte EQUIVALENTE ao período da
+            barra — por dia útil (mesmo estágio) ou por dia cheio. A seleção do
+            dropdown é compartilhada entre os usuários do dashboard.
+          </p>
+        </HelpHint>
       </p>
       {pwEnabled ? (
         <>
@@ -162,11 +169,18 @@ export function GoalsSection({
         />
         Alinhar meses pelo mesmo dia útil
       </label>
-      <p className="text-muted-foreground text-xs">
-        Cada mês do período conta só até o N-ésimo dia útil (N = dia útil
-        corrente) — compara meses no mesmo estágio de progresso. Requer
-        dimensão de data mensal e período ativo; feriados vêm de Configurações
-        → Metas. Com o alinhamento ativo, a Comparação é ignorada.
+      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <span>
+          Compara meses no mesmo estágio (até o dia útil corrente). Requer
+          dimensão de data mensal e período ativo.
+        </span>
+        <HelpHint ariaLabel="Como o alinhamento por dia útil funciona">
+          <p>
+            Cada mês do período conta só até o N-ésimo dia útil (N = dia útil
+            corrente). Feriados vêm de Configurações → Metas. Com o
+            alinhamento ativo, a Comparação é ignorada.
+          </p>
+        </HelpHint>
       </p>
       {bdAlign.enabled ? (
         <>
@@ -213,12 +227,18 @@ export function GoalsSection({
           </label>
           {goalLine.enabled ? (
             <>
-              <p className="text-muted-foreground text-xs">
-                Meta mensal (Configurações → Metas) desenhada como linha
-                tracejada sobre os buckets mensais. Modo &quot;ritmo&quot; =
-                meta ideal acumulada até o dia útil corrente (meta ÷ dias
-                úteis × N); meses passados usam a meta cheia, futuros ficam
-                sem linha.
+              <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <span>
+                  Meta mensal (Configurações → Metas) como linha tracejada.
+                </span>
+                <HelpHint ariaLabel="Como a linha de meta funciona">
+                  <p>
+                    Desenhada sobre os buckets mensais. Modo &quot;ritmo&quot;
+                    = meta ideal acumulada até o dia útil corrente (meta ÷
+                    dias úteis × N); meses passados usam a meta cheia, futuros
+                    ficam sem linha.
+                  </p>
+                </HelpHint>
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1.5">
