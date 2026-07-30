@@ -1,10 +1,15 @@
-// Versão: 2.0 | Data: 30/07/2026
+// Versão: 2.1 | Data: 30/07/2026
+// v2.1 (30/07/2026): dropdown de sugestões sobre Radix Popover ancorado no
+//   textarea — registra na pilha de layers do Dialog modal (Sheet), que
+//   devolve pointer-events e isenta do scroll-lock; o portal `fixed` manual
+//   da v2.0 herdava o `pointer-events: none` do body e ficava inclicável e
+//   sem rolagem dentro do Sheet.
 // v2.0 (30/07/2026): superfície ÚNICA do FormulaEditor (o modo visual de
 //   chips/botões foi absorvido): campos por autocomplete no `[` (busca sem
 //   acentos, lista completa com scroll, Escape fecha, substituição da ref
 //   INTEIRA quando o caret está no meio dela — sem `]` órfão), autocomplete de
 //   FUNÇÕES ao digitar letras (nomes + aliases, insere `NOME()` com o caret
-//   dentro), dropdown em portal `fixed` (não é cortado pelo overflow do
+//   dentro), dropdown em portal (não é cortado pelo overflow do
 //   Sheet/Accordion) e `insertAtCaret` imperativo para a toolbar do editor.
 //   Enter/Tab só são interceptados com a lista ABERTA. O caret é reportado ao
 //   pai (onCaretChange) para a assinatura viva.
@@ -15,14 +20,17 @@
 import {
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 
 import { displaySourceHint } from "@/components/formula/operand-display";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { RefOption } from "@/lib/records/date-operands";
@@ -72,7 +80,7 @@ export function FormulaTextView({
   const frag = useMemo(() => bracketRangeAt(text, cursor), [text, cursor]);
   const funcWord = useMemo(
     () => (frag ? null : funcWordAt(text, cursor)),
-    [frag, text, cursor]
+    [frag, text, cursor],
   );
 
   const fieldSuggestions = useMemo(() => {
@@ -81,13 +89,13 @@ export function FormulaTextView({
     // Busca também pela fonte (sourceHint): digitar "[deals" lista os campos
     // dessa fonte. A inserção continua usando só o rótulo limpo.
     return refs.filter((r) =>
-      normalizeSearch(`${r.sourceHint ?? ""} ${r.label}`).includes(q)
+      normalizeSearch(`${r.sourceHint ?? ""} ${r.label}`).includes(q),
     );
   }, [frag, refs]);
 
   const funcSuggestions = useMemo(
     () => (funcWord ? matchFunctions(funcWord.word, context) : []),
-    [funcWord, context]
+    [funcWord, context],
   );
 
   const listKind: "field" | "func" | null =
@@ -123,7 +131,7 @@ export function FormulaTextView({
     start: number,
     end: number,
     snippet: string,
-    caretOffset?: number
+    caretOffset?: number,
   ) {
     const next = text.slice(0, start) + snippet + text.slice(end);
     onTextChange(next);
@@ -176,142 +184,142 @@ export function FormulaTextView({
     }
   }
 
-  // ---- Dropdown em portal fixed (não cortado pelo overflow do Sheet) --------
-  const [rect, setRect] = useState<{
-    left: number;
-    top: number;
-    width: number;
-  } | null>(null);
-  useLayoutEffect(() => {
-    if (!listKind) return;
-    const update = () => {
-      const r = taRef.current?.getBoundingClientRect();
-      if (r) setRect({ left: r.left, top: r.bottom + 4, width: r.width });
-    };
-    // Posiciona ANTES do paint (rect antigo de uma abertura anterior não pisca).
-    update();
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [listKind]);
-
   // Mantém a opção ativa visível ao circular com as setas.
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     activeItemRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [suggestIndex, listKind]);
 
-  const list =
-    listKind && rect ? (
-      <div
-        style={{
-          position: "fixed",
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-        }}
-        className="bg-popover text-popover-foreground z-50 max-h-64 overflow-auto rounded-md border p-1 shadow-md"
-        role="listbox"
-        aria-label={
-          listKind === "field" ? "Sugestões de coluna" : "Sugestões de função"
-        }
-      >
-        {listKind === "field"
-          ? fieldSuggestions.map((r, i) => (
-              <button
-                key={r.ref}
-                ref={i === suggestIndex ? activeItemRef : undefined}
-                type="button"
-                role="option"
-                aria-selected={i === suggestIndex}
-                title={r.disabledReason ?? r.title}
-                aria-disabled={Boolean(r.disabledReason)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  insertField(r);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-sm",
-                  r.disabledReason
-                    ? "text-muted-foreground cursor-not-allowed opacity-60"
-                    : i === suggestIndex
-                      ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent/50"
-                )}
-              >
-                <span className="truncate">
-                  {displaySourceHint(r) ? (
-                    <span className="text-muted-foreground">
-                      {displaySourceHint(r)} ·{" "}
-                    </span>
-                  ) : null}
-                  {r.label}
+  // Só é renderizado com a lista aberta (Radix desmonta o content fechado).
+  const items =
+    listKind === "field"
+      ? fieldSuggestions.map((r, i) => (
+          <button
+            key={r.ref}
+            ref={i === suggestIndex ? activeItemRef : undefined}
+            type="button"
+            role="option"
+            aria-selected={i === suggestIndex}
+            title={r.disabledReason ?? r.title}
+            aria-disabled={Boolean(r.disabledReason)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              insertField(r);
+            }}
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-sm",
+              r.disabledReason
+                ? "text-muted-foreground cursor-not-allowed opacity-60"
+                : i === suggestIndex
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/50",
+            )}
+          >
+            <span className="truncate">
+              {displaySourceHint(r) ? (
+                <span className="text-muted-foreground">
+                  {displaySourceHint(r)} ·{" "}
                 </span>
-                {r.group ? (
-                  <span className="text-muted-foreground shrink-0 text-xs">
-                    {r.group}
-                  </span>
-                ) : null}
-              </button>
-            ))
-          : funcSuggestions.map((f, i) => (
-              <button
-                key={f.name}
-                ref={i === suggestIndex ? activeItemRef : undefined}
-                type="button"
-                role="option"
-                aria-selected={i === suggestIndex}
-                title={f.description}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  insertFunc(f);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-sm",
-                  i === suggestIndex
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-accent/50"
-                )}
-              >
-                <span className="truncate font-mono">{funcSignature(f)}</span>
-                <span className="text-muted-foreground shrink-0 truncate text-xs">
-                  {f.description}
-                </span>
-              </button>
-            ))}
-      </div>
-    ) : null;
+              ) : null}
+              {r.label}
+            </span>
+            {r.group ? (
+              <span className="text-muted-foreground shrink-0 text-xs">
+                {r.group}
+              </span>
+            ) : null}
+          </button>
+        ))
+      : funcSuggestions.map((f, i) => (
+          <button
+            key={f.name}
+            ref={i === suggestIndex ? activeItemRef : undefined}
+            type="button"
+            role="option"
+            aria-selected={i === suggestIndex}
+            title={f.description}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              insertFunc(f);
+            }}
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-sm",
+              i === suggestIndex
+                ? "bg-accent text-accent-foreground"
+                : "hover:bg-accent/50",
+            )}
+          >
+            <span className="truncate font-mono">{funcSignature(f)}</span>
+            <span className="text-muted-foreground shrink-0 truncate text-xs">
+              {f.description}
+            </span>
+          </button>
+        ));
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Textarea
-        ref={taRef}
-        value={text}
-        rows={3}
-        spellCheck={false}
-        placeholder='SE(E([Valor] > 10; [Etapa] = "Ganho"); [Valor] * 2; 0)'
-        onChange={(e) => {
-          onTextChange(e.target.value);
-          setCursor(e.target.selectionStart ?? 0);
-          setSuggestIndex(0);
-          setDismissed(false);
+      <Popover
+        open={Boolean(listKind)}
+        onOpenChange={(open) => {
+          if (!open) setDismissed(true);
         }}
-        onClick={syncCursor}
-        onSelect={syncCursor}
-        onKeyUp={(e) => {
-          if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key))
-            syncCursor();
-        }}
-        onKeyDown={onKeyDown}
-        className="font-mono text-sm"
-        aria-label="Fórmula (texto)"
-      />
-      {list && typeof document !== "undefined"
-        ? createPortal(list, document.body)
-        : null}
+      >
+        <PopoverAnchor asChild>
+          <Textarea
+            ref={taRef}
+            value={text}
+            rows={3}
+            spellCheck={false}
+            placeholder='SE(E([Valor] > 10; [Etapa] = "Ganho"); [Valor] * 2; 0)'
+            onChange={(e) => {
+              onTextChange(e.target.value);
+              setCursor(e.target.selectionStart ?? 0);
+              setSuggestIndex(0);
+              setDismissed(false);
+            }}
+            onClick={syncCursor}
+            onSelect={syncCursor}
+            onKeyUp={(e) => {
+              if (
+                !["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(
+                  e.key,
+                )
+              )
+                syncCursor();
+            }}
+            onKeyDown={onKeyDown}
+            className="font-mono text-sm"
+            aria-label="Fórmula (texto)"
+          />
+        </PopoverAnchor>
+        <PopoverContent
+          role="listbox"
+          aria-label={
+            listKind === "field" ? "Sugestões de coluna" : "Sugestões de função"
+          }
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          // O foco fica no textarea — a lista é só apontada/rolada, nunca focada.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => {
+            // Clicar/mover o caret no textarea (que está FORA do content) não
+            // pode dispensar a lista — só interação fora do editor dispensa.
+            const t = e.target;
+            if (t instanceof Node && taRef.current?.contains(t))
+              e.preventDefault();
+          }}
+          // O RemoveScroll do Sheet modal cancela wheel/touchmove fora do
+          // conteúdo dele num listener bubble em document — parar a propagação
+          // aqui deixa o scroll nativo da lista acontecer.
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          className="max-h-64 w-[var(--radix-popover-trigger-width)] overflow-auto p-1"
+        >
+          {items}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

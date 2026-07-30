@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Versão: 2.0 | Data: 30/07/2026
+// Versão: 2.1 | Data: 30/07/2026
 // Testes do FormulaEditor — a superfície ÚNICA de edição de fórmulas
 // (AGENTS.md), agora UNIFICADA (só texto assistido; o modo visual de
 // chips/botões foi absorvido). Invariantes: fórmula com `source` abre
@@ -11,10 +11,22 @@
 // onChange deduplica por assinatura (regressão v1.1 do loop de re-emissão); a
 // assinatura viva destaca o argumento sob o caret; autocomplete ignora
 // acentos, fecha no Escape e substitui a ref INTEIRA no meio dela.
+// v2.1: o dropdown virou Radix Popover (regressão v2.0: portal manual em
+// `document.body` herdava `pointer-events: none` do Sheet modal) — testes de
+// composição: abrir a lista não rouba o foco e Escape não fecha o Sheet.
+// jsdom não faz hit-testing de pointer-events, então o bug original só é
+// reproduzível no Playwright (e2e/formula-editor.spec.ts) — aqui garantimos
+// a fiação de foco/camadas que o fix exige.
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FormulaEditor } from "@/components/formula/formula-editor";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import type { RefOption } from "@/lib/records/date-operands";
 import { COND_AGG_IN_RECORD_MSG } from "@/lib/records/formula-validate";
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
@@ -237,6 +249,38 @@ describe("autocomplete de colunas", () => {
     // Sem lista aberta, Enter NÃO é interceptado (preventDefault não chamado).
     const enter = fireEvent.keyDown(ta, { key: "Enter" });
     expect(enter).toBe(true); // não-cancelado = quebra de linha nativa
+  });
+});
+
+describe("composição com Sheet modal (dropdown em Radix Popover)", () => {
+  it("abrir a lista NÃO rouba o foco do textarea (onOpenAutoFocus prevenido)", () => {
+    render(<FormulaEditor context="record" catalog={CATALOG} />);
+    const ta = textbox();
+    act(() => ta.focus());
+    typeText("[val");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+    // Sem o preventDefault do onOpenAutoFocus, o FocusScope do Radix moveria
+    // o foco para o content do popover e a digitação pararia de funcionar.
+    expect(document.activeElement).toBe(ta);
+  });
+
+  it("Escape com a lista aberta fecha SÓ a lista, nunca o Sheet envolvente", () => {
+    const onOpenChange = vi.fn();
+    render(
+      <Sheet open onOpenChange={onOpenChange}>
+        <SheetContent>
+          <SheetTitle>Editar campo</SheetTitle>
+          <SheetDescription>Fórmula</SheetDescription>
+          <FormulaEditor context="record" catalog={CATALOG} />
+        </SheetContent>
+      </Sheet>
+    );
+    const ta = typeText("[Val");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+    // A camada do popover é a mais alta — o Dialog do Sheet ignora o Escape.
+    fireEvent.keyDown(ta, { key: "Escape" });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });
 
