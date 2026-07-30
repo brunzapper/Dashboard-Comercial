@@ -968,8 +968,13 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
     Record<FormulaFuncName, …>` — paleta ƒ, assinatura viva e o
     `FORMULA_FUNC_GROUPS` do SPEC da IA derivam DELE; exemplos fiscalizados
     por formula-funcs.test.ts contra o parser real). Dropdown de sugestões em
-    portal `fixed` (não é cortado pelo overflow do Sheet); Enter/Tab só são
-    interceptados com a lista aberta; Escape fecha até a próxima digitação.
+    Radix Popover ancorado no textarea (portal não cortado pelo overflow do
+    Sheet e registrado na pilha de layers do Dialog modal — clicável/rolável
+    com o Sheet aberto; portal manual em `document.body` herdaria o
+    `pointer-events: none` do body); Enter/Tab só são
+    interceptados com a lista aberta; Escape fecha até a próxima digitação
+    (fecha SÓ a lista — o Sheet fica; guard real em
+    `e2e/formula-editor.spec.ts`, que exige hit-testing de verdade).
     Operandos proibidos (ciclo, "Data atual" no agregado) aparecem
     DESABILITADOS com o motivo (`disabledReason` em OperandRef/
     ComboboxOption) — política: explicar, nunca esconder. O tipo `RefOption` é
