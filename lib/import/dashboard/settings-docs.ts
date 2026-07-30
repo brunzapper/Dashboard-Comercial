@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 26/07/2026
+// Versão: 1.4 | Data: 30/07/2026
+// v1.4 (30/07/2026): FORMULA_FUNC_GROUPS/FormulaFuncGroup passam a DERIVAR do
+//   catálogo único FORMULA_FUNCS (lib/records/formula-funcs.ts — exaustivo por
+//   `satisfies Record<FormulaFuncName, …>`, mesma ordem histórica de chaves);
+//   render do SPEC byte-idêntico, `formulaFuncsIn` inalterado.
 // v1.3 (26/07/2026): cromo dos cards — `hideComparisonLabels`/
 //   `hideBusinessDayBadges` (dashboard), `comparison.hideLabel` e
 //   `hideBusinessDayBadge` (appearance), todos tri-state (ausente herda o
