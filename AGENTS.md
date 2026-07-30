@@ -110,10 +110,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   prefixo de 10 chars, byte-igual ao `parseYmd`). NUNCA ancore bounds de campo
   custom (texto — o offset no lower bound excluiria date-only) e NUNCA aplique
   `at time zone` a valor texto (naive de CSV recuaria um dia). **Write side
-  (26/07/2026):** valor NAIVE (planilha/CSV) indo para coluna CORE
+  (26/07/2026):** valor NAIVE (planilha/CSV/form) indo para coluna CORE
   `timestamptz` é hora de parede de Brasília — ancore com
   `anchorNaiveToBrasilia` (`lib/date/normalize.ts`; adapter de Sheets +
-  `ingestRows`), senão o Postgres assume UTC e o dia recua (venda do dia 1 cai
+  `ingestRows` + `coerceCore` de `lib/records/coerce.ts`, usado por
+  `createRecord`/`updateRecord`/inserção por IA desde 30/07/2026), senão o
+  Postgres assume UTC e o dia recua (venda do dia 1 cai
   no mês anterior; legado: `supabase/apply/backfill-naive-tz.sql`). Campo
   custom segue naive (texto). Reconcile compara colunas core de data por
   INSTANTE (`timestampValuesDiffer`, `lib/sync/shared.ts` — PostgREST `+00:00`
@@ -439,6 +441,30 @@ This version has breaking changes — APIs, conventions, and file structure may 
   fila em voo (dado mid-flight é stale e descartado) — não remova a guarda
   nem re-introduza `await` no drop. Ver `docs/arquitetura.md` §4.15 e
   invariante 23.
+- **Assistentes de IA de registros/campos NUNCA escrevem direto (30/07/2026,
+  §4.17):** os cores (`lib/ai/insert-records.ts` — até 10 registros em base
+  `manual_entry`; `lib/ai/csv-mapping.ts` — sugestão de mapeamento no wizard;
+  `lib/ai/create-fields.ts` — até 10 campos, calculados inclusos) só VALIDAM
+  (`lib/import/{records,csv-mapping,fields}/validate.ts`) e devolvem prévia; o
+  apply RE-VALIDA o JSON (a prévia de registros é editável — célula + troca de
+  coluna, `lib/import/records/preview.ts`) e escreve SÓ pelos choke points
+  existentes: `createRecord` por registro (RLS `records_insert` é a muralha;
+  nada de service role p/ inserir; pós-loop um
+  `recalcFormulaFieldsForRecords`), `createField` por campo (ordem simples →
+  calculado → calculado_agg) e o estado `plans` do wizard (a revisão da tabela
+  É a confirmação — import intocado). Base/alvo vem SEMPRE do seletor da UI,
+  nunca do JSON. Prévia de registros mostra SÓ colunas preenchidas; duplicado
+  por título é AVISO. Laço de autocorreção único (`lib/ai/json-loop.ts`;
+  `generateDashboardCore` mantém o dele); amostras por base compartilhadas em
+  `lib/import/sample-db.ts`. SPECs DERIVADOS de constantes reais
+  (`EDITABLE_CORE_COLUMNS`/`CORE_IMPORT_TARGETS`/`IMPORT_NEW_FIELD_TYPES`/
+  `DATA_TYPE_LABELS`/`FORMULA_FUNC_GROUPS`/`CURRENCY_OPTIONS`) e FISCALIZADOS
+  pelos testes de paridade (`lib/import/records/instructions.test.ts` etc.) —
+  nunca duplique em prosa. Fórmula da IA valida pelos módulos ÚNICOS extraídos
+  p/ `lib/records/formula-server.ts` (campos/actions reimporta — não recrie
+  catálogos). Datas core do contrato são `YYYY-MM-DD` ancoradas na escrita por
+  `coerceCore`→`anchorNaiveToBrasilia` (invariante 11); custom segue texto
+  naive. Ver `docs/arquitetura.md` §4.17 e invariante 25.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um
   `field_definitions` local ("Fase — <nome>", `selecao`) e guarda a chave em

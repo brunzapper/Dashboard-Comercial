@@ -1,7 +1,11 @@
-// Versão: 1.5 | Data: 18/07/2026
+// Versão: 1.6 | Data: 30/07/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
+// v1.6 (30/07/2026): coerção extraída p/ lib/records/coerce.ts (puro, testável;
+//   compartilhada com a inserção por IA). coerceCore de data passa a ancorar em
+//   Brasília (anchorNaiveToBrasilia — invariante 11, write side): o dia digitado
+//   no form deixa de recuar um dia no read side.
 // v1.5 (18/07/2026): menos roundtrips por edição — leituras iniciais em
 //   Promise.all; applyCalcFields deriva defs de fórmula/datas/moedas das
 //   field_definitions JÁ lidas (builders *FromRows; só taxas de câmbio seguem
@@ -61,12 +65,10 @@ import {
 import { fieldAppliesToSource } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import { ensureAutoOperationsForRecordType } from "@/lib/operations/auto-operations";
-
-function numOrNull(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+// Coerção pura extraída p/ lib/records/coerce.ts (30/07/2026): reuso pelo fluxo
+// de inserção por IA + testes; coerceCore ancora datas core em Brasília
+// (invariante 11, write side).
+import { coerce, coerceCore, coreEquals, numOrNull } from "@/lib/records/coerce";
 
 export interface EditActionState {
   ok?: boolean;
@@ -74,19 +76,6 @@ export interface EditActionState {
 }
 
 const RELATIONS = ["responsible_id", "operation_id", "related_lead_id"] as const;
-
-function coerce(dataType: DataType, raw: FormDataEntryValue | null): unknown {
-  const s = raw == null ? "" : String(raw).trim();
-  if (s === "") return null;
-  if (dataType === "numero" || dataType === "moeda") {
-    const n = Number(s.replace(/\./g, "").replace(",", "."));
-    return Number.isNaN(Number(s)) ? (Number.isNaN(n) ? null : n) : Number(s);
-  }
-  if (dataType === "booleano") {
-    return s === "true" ? true : s === "false" ? false : null;
-  }
-  return s;
-}
 
 interface ExistingForEdit {
   id: string;
@@ -112,21 +101,6 @@ interface ExistingForEdit {
   closed: boolean | null;
   opened_at: string | null;
   pipeline: string | null;
-}
-
-// Coerção de um valor cru (string do form) p/ o tipo de uma coluna do núcleo.
-function coerceCore(dataType: DataType, raw: FormDataEntryValue | null): unknown {
-  const s = raw == null ? "" : String(raw).trim();
-  if (s === "") return null;
-  if (dataType === "numero" || dataType === "moeda") {
-    const n = Number(s);
-    return Number.isFinite(n) ? n : null;
-  }
-  if (dataType === "booleano") {
-    return s === "true" ? true : s === "false" ? false : null;
-  }
-  if (dataType === "data") return s.slice(0, 10);
-  return s;
 }
 
 // Valores EFETIVOS do núcleo p/ o recomputo de campos calculados (edição usa
@@ -250,21 +224,6 @@ async function applyCalcFields(
     }
   }
   return changed;
-}
-
-// Igualdade "normalizada" p/ decidir se uma coluna do núcleo mudou (datas comparam
-// só o dia; números por valor; resto por texto).
-function coreEquals(dataType: DataType, oldVal: unknown, newVal: unknown): boolean {
-  if (dataType === "data") {
-    return String(oldVal ?? "").slice(0, 10) === String(newVal ?? "").slice(0, 10);
-  }
-  if (dataType === "numero" || dataType === "moeda") {
-    const a = oldVal == null || oldVal === "" ? null : Number(oldVal);
-    const b = newVal == null || newVal === "" ? null : Number(newVal);
-    return a === b;
-  }
-  if (dataType === "booleano") return Boolean(oldVal) === Boolean(newVal);
-  return String(oldVal ?? "") === String(newVal ?? "");
 }
 
 export async function updateRecord(

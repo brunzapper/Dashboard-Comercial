@@ -49,6 +49,10 @@ export function coreTargetKind(col: string): "texto" | "numero" | "data" {
   );
 }
 
+// Tipos aceitos para CAMPO NOVO criado pelo import (fonte única — o wizard, a
+// action prepareImportFields e a sugestão de mapeamento por IA derivam daqui).
+export const IMPORT_NEW_FIELD_TYPES = ["texto", "numero", "data"] as const;
+
 // ============ Match por coluna (upsert em fonte existente) ============
 // Modo "match" do passo 4 do wizard: em vez do hash de dedup no namespace
 // 'csv', cada linha procura um registro EXISTENTE da fonte (qualquer

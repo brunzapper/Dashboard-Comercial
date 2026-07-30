@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 30/07/2026
+// v1.3 (30/07/2026): botão "Sugerir com IA" no passo 3 (org com IA configurada)
+//   — a IA propõe o destino de cada coluna (resolvendo nomes diferentes e
+//   propondo campo novo p/ colunas sem correspondência); o resultado só
+//   preenche a tabela, a revisão continua obrigatória e o fluxo de import é o
+//   mesmo. NEW_FIELD_TYPES agora deriva de IMPORT_NEW_FIELD_TYPES.
 // v1.2 (17/07/2026): passo terminal "6. Concluído" — banner de sucesso
 //   destacado (emerald, contagens, avisos) com "Ver registros" e "Nova
 //   importação" (resetWizard + router.refresh re-busca fields do server).
@@ -29,6 +34,7 @@ import {
   CircleCheck,
   FileUp,
   RotateCcw,
+  Sparkles,
   Upload,
 } from "lucide-react";
 
@@ -49,12 +55,14 @@ import { slugify } from "@/lib/records/slug";
 import { type SourceDef } from "@/lib/sources";
 import {
   CORE_IMPORT_TARGETS,
+  IMPORT_NEW_FIELD_TYPES,
   MATCH_CORE_TARGETS,
   inferDataType,
   suggestTarget,
   type ColumnMapping,
   type MatchConfig,
 } from "@/lib/import/csv";
+import { DATA_TYPE_LABELS } from "@/lib/records/types";
 import type { SyncResult } from "@/lib/sync/shared";
 import { createSource } from "@/app/(app)/registros/bases/actions";
 import {
@@ -63,6 +71,7 @@ import {
   prepareImportFields,
   type PrepareFieldSpec,
 } from "@/app/(app)/registros/importar/actions";
+import { suggestCsvMappingWithAi } from "@/app/(app)/registros/importar/ai-mapping-actions";
 
 const CHUNK_SIZE = 300;
 
@@ -104,11 +113,11 @@ const MODE_OPTIONS: ComboboxOption[] = [
   { value: "match", label: "Incluir/atualizar existentes (match por coluna)" },
 ];
 
-const NEW_FIELD_TYPES: ComboboxOption[] = [
-  { value: "texto", label: "Texto" },
-  { value: "numero", label: "Número" },
-  { value: "data", label: "Data" },
-];
+// Fonte única com prepareImportFields e a sugestão por IA (lib/import/csv.ts).
+const NEW_FIELD_TYPES: ComboboxOption[] = IMPORT_NEW_FIELD_TYPES.map((t) => ({
+  value: t,
+  label: DATA_TYPE_LABELS[t],
+}));
 
 const PERIOD_FIELD_OPTIONS: ComboboxOption[] = [
   { value: "source_created_at", label: "Data de criação (origem)" },
@@ -119,9 +128,12 @@ const PERIOD_FIELD_OPTIONS: ComboboxOption[] = [
 export function ImportWizard({
   sources: initialSources,
   fields,
+  ai,
 }: {
   sources: SourceDef[];
   fields: ImportFieldOption[];
+  /** Config pública de IA da org (0096) — habilita "Sugerir com IA" no passo 3. */
+  ai?: { provider: string; model: string; hasKey: boolean } | null;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
@@ -153,6 +165,13 @@ export function ImportWizard({
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [runError, setRunError] = useState("");
   const [report, setReport] = useState<Report | null>(null);
+
+  // Sugestão de mapeamento por IA (passo 3): a IA resolve colunas com nomes
+  // diferentes/faltantes; o resultado só PREENCHE a tabela — revisar é
+  // obrigatório (Continuar segue passando pelas travas de sempre).
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNotes, setAiNotes] = useState<string[]>([]);
+  const [aiError, setAiError] = useState("");
 
   const source = sources.find((s) => s.key === sourceKey) ?? null;
 
@@ -273,6 +292,47 @@ export function ImportWizard({
     setPlans((prev) =>
       prev.map((p) => (p.csvColumn === csvColumn ? { ...p, ...patch } : p))
     );
+  }
+
+  async function suggestMappingWithAi() {
+    if (!source || aiBusy) return;
+    setAiBusy(true);
+    setAiError("");
+    setAiNotes([]);
+    try {
+      const res = await suggestCsvMappingWithAi({
+        sourceKey: source.key,
+        columns: plans.map((p) => ({ name: p.csvColumn, samples: p.samples })),
+      });
+      if (res.ok && res.items) {
+        const byColumn = new Map(res.items.map((i) => [i.coluna, i]));
+        setPlans((prev) =>
+          prev.map((p) => {
+            const it = byColumn.get(p.csvColumn);
+            if (!it) return p;
+            return {
+              ...p,
+              target: it.alvo,
+              ...(it.alvo === "new"
+                ? {
+                    newLabel: it.novoRotulo ?? p.newLabel,
+                    newType: it.novoTipo ?? p.newType,
+                  }
+                : {}),
+            };
+          })
+        );
+        setAiNotes(res.warnings ?? []);
+      } else {
+        setAiError(
+          [res.message, ...(res.errors ?? [])].filter(Boolean).join(" ")
+        );
+      }
+    } catch {
+      setAiError("Falha de comunicação com a IA — tente de novo.");
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   const mappedPlans = plans.filter((p) => p.target !== "ignore");
@@ -628,11 +688,37 @@ export function ImportWizard({
 
       {step === "mapeamento" && source ? (
         <div className="flex flex-col gap-4">
-          <p className="text-muted-foreground text-sm">
-            Diga para onde vai cada coluna do CSV em{" "}
-            <span className="font-medium">{source.label}</span>. Campos novos
-            são criados na base; campos existentes têm a base adicionada.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-muted-foreground text-sm">
+              Diga para onde vai cada coluna do CSV em{" "}
+              <span className="font-medium">{source.label}</span>. Campos novos
+              são criados na base; campos existentes têm a base adicionada.
+            </p>
+            {ai?.hasKey ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={suggestMappingWithAi}
+                disabled={aiBusy}
+              >
+                <Sparkles className="size-4" />
+                {aiBusy ? "Sugerindo…" : "Sugerir com IA"}
+              </Button>
+            ) : null}
+          </div>
+          {aiError ? (
+            <p className="text-destructive text-sm" role="status">
+              {aiError}
+            </p>
+          ) : null}
+          {aiNotes.length > 0 ? (
+            <ul className="text-muted-foreground list-disc pl-5 text-xs">
+              {aiNotes.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+          ) : null}
           <div className="rounded-lg border">
             <Table>
               <TableHeader>

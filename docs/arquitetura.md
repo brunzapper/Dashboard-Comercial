@@ -1,4 +1,15 @@
-<!-- Versão: 1.39 | Data: 29/07/2026 -->
+<!-- Versão: 1.40 | Data: 30/07/2026 -->
+<!-- v1.40 (30/07/2026): §4.17 Assistentes de IA de registros e campos —
+     inserir até 10 registros em bases manuais (prévia interativa só com
+     colunas preenchidas, edição inline + troca de coluna, duplicados por
+     título como aviso, apply via createRecord), sugestão de mapeamento de CSV
+     no wizard (preenche `plans`; revisão obrigatória) e criação de campos
+     (inclusive calculados — fórmula validada pelos módulos únicos extraídos
+     p/ lib/records/formula-server.ts; apply via createField). Laço de
+     autocorreção compartilhado (lib/ai/json-loop.ts); sampleForBase movido p/
+     lib/import/sample-db.ts; coerceCore passa a ancorar data core em Brasília
+     (invariante 11, write side — fix do form manual). Invariante 25.
+     RPCs intocados. -->
 <!-- v1.39 (29/07/2026): §4.10 — camada de feedback de FALHA fora de form:
      Toaster global (sonner) no layout autenticado + notifyOnError
      (lib/feedback/notify.ts) nos escritores que descartavam resultado;
@@ -2052,6 +2063,75 @@ tabela própria) porque o builder a RE-EMITE explicitamente no branch
 (cópia nunca herda o vínculo — escreveria no campo do quadro original).
 Fiscalizado por `lib/kanban/allocation-field.test.ts`. Ver invariante 24.
 
+### 4.17 Assistentes de IA de registros e campos (30/07/2026)
+
+Três superfícies novas sobre a MESMA fundação de IA dos dashboards (config por
+org 0096 → `loadOrgAiConfig`; laço de autocorreção compartilhado em
+`lib/ai/json-loop.ts` — 3 tentativas, 120s/chamada, budget 240s,
+`AiTruncatedError` aborta; pages com `maxDuration = 300`). Princípio comum, o
+mesmo do §4.11: **a IA nunca escreve** — os cores só validam e devolvem prévia;
+o apply RE-VALIDA no servidor e escreve SÓ pelos choke points existentes; o
+ALVO (base) vem sempre da UI, nunca do JSON da IA; conversas são client-state
+(padrão da Home — turnos de usuário + prévia pendente reinjetada no system com
+semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
+
+- **Inserir registros com IA** (`/registros` → botão "Inserir com IA", bases
+  com `manual_entry` + org com IA): até **10 registros por leva**
+  (`MAX_AI_INSERT_RECORDS`). Contrato `registros-insert`
+  (`lib/import/records/types.ts`): chaves = colunas de
+  `EDITABLE_CORE_COLUMNS` cruas + `custom:<field_key>` do conjunto EDITÁVEL
+  (mesmo gating do `createRecord`: papel × `applies_to`, sem calculados) +
+  `responsible_id`/`operation_id` por NOME (validador resolve nome→UUID;
+  desconhecido/ambíguo = erro). O prompt
+  (`lib/import/records/instructions.ts`, derivado de constantes reais e
+  fiscalizado por `instructions.test.ts`) leva o catálogo da base e AMOSTRAS
+  reais (`sampleForBase`, extraído p/ `lib/import/sample-db.ts` e
+  compartilhado com o prompt de dashboards) — é assim que a IA "copia o
+  formato" dos dados existentes. A geração também consulta duplicados por
+  título (case-insensitive) — AVISO por linha, nunca bloqueia. A PRÉVIA
+  obrigatória mostra **só colunas preenchidas** (`filledColumns`) e é
+  INTERATIVA: edição inline por célula + TROCA de coluna no cabeçalho
+  (realoca o dado p/ outro campo aceito) + remoção — helpers puros de
+  `lib/import/records/preview.ts`; toda edição re-serializa o JSON canônico,
+  que alimenta o apply E o turno seguinte. O apply
+  (`applyGeneratedRecordsCore`, `lib/ai/insert-records.ts`) re-valida e
+  insere UM A UM via `createRecord` (FormData idêntico ao form manual —
+  herda gates, coerção com âncora de Brasília, RLS `records_insert` ramo
+  manual, calc inline, audit `origin:'app'`, webhook, auto-operações);
+  resultado POR ITEM (falha parcial não desfaz) + um
+  `recalcFormulaFieldsForRecords(ids)` p/ assentar operandos `match:`.
+- **Sugestão de mapeamento de CSV** (wizard `/registros/importar`, etapa 3,
+  admin): botão "Sugerir com IA" envia colunas+amostras do CSV JÁ parseado no
+  browser; o core (`lib/ai/csv-mapping.ts`) valida o contrato
+  `csv-mapeamento` (`lib/import/csv-mapping/validate.ts` — toda coluna
+  exatamente uma vez; alvo ∈ `CORE_IMPORT_TARGETS` ∪ customs da base ∪
+  `responsible`/`new`/`ignore`; `new` exige rótulo + tipo de
+  `IMPORT_NEW_FIELD_TYPES`, agora fonte única em `lib/import/csv.ts`; dois
+  alvos iguais = erro) e o resultado só PREENCHE o estado `plans` — a revisão
+  na tabela do wizard É a confirmação; `prepareImportFields`/`importCsvChunk`/
+  `ingestRows` seguem intocados.
+- **Criar campos com IA** (`/campos` → botão "Criar com IA",
+  `manage_field_definitions`): até 10 `field_definitions` por leva, inclusive
+  **calculados** — contrato `campos-create` (`lib/import/fields/*`): rótulo
+  (chave = `slugify` no servidor; colisão com campo/coluna core = erro), tipo
+  de `DATA_TYPE_LABELS`, `opcoes` (selecao), `formula_texto` (estilo Sheets),
+  moeda/percentual pelas mesmas regras do `createField`. A fórmula é validada
+  NA GERAÇÃO pelos MESMOS módulos do editor — catálogos/tokenização/
+  `validateFormulaForContext`/ciclo/nomes de FK extraídos de campos/actions p/
+  `lib/records/formula-server.ts` (invariante 8 preservada) — com os campos do
+  LOTE injetados como linhas sintéticas no catálogo (calculado pode
+  referenciar campo simples proposto junto). O apply re-valida e cria campo a
+  campo via `createField` na ordem simples → calculado → calculado_agg (o
+  createField revalida com os anteriores já criados); papéis/visibilidade
+  ficam nos defaults programáticos (mesmos do import de CSV). Prévia
+  read-only; ajustes pelo chat.
+
+Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
+`lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`
+(paridade dos SPECs com as constantes reais + exemplos aceitos pelos
+validadores REAIS) e `lib/records/coerce.test.ts` (âncora de Brasília + trava
+anti-divergência validador↔escrita). Ver invariante 25.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -2155,7 +2235,10 @@ principalmente — para mantenedores humanos.
     caem no mês anterior (bug das "15 vs 17 vendas do site", corrigido pelo
     backfill `supabase/apply/backfill-naive-tz.sql`). Isso vale SÓ para coluna
     core `timestamptz` — campo custom (texto) segue naive/passthrough, como
-    acima. E o reconcile compara as colunas core de data por INSTANTE
+    acima. Ancoram hoje: adapter de Sheets, `ingestRows` e — desde 30/07/2026 —
+    a coerção do form manual/inserção por IA (`coerceCore` em
+    `lib/records/coerce.ts`, usada por `createRecord`/`updateRecord`; antes o
+    form gravava naive e o dia recuava no read side). E o reconcile compara as colunas core de data por INSTANTE
     (`timestampValuesDiffer`, `lib/sync/shared.ts`): o PostgREST devolve
     `+00:00` e os mappers emitem `-03:00` — byte-compare (`valuesDiffer`)
     churnaria update+audit de toda linha a cada sync (aconteceu até
@@ -2333,6 +2416,24 @@ principalmente — para mantenedores humanos.
     (`normalizeKanbanAllocationOnSave`): uma cópia com a chave escreveria no
     campo do quadro ORIGINAL. Desligar/excluir mantém campo e valores; campo
     excluído em /campos auto-desliga o vínculo no próximo reconcile.
+
+25. **Assistentes de IA de registros/campos nunca escrevem direto (§4.17).**
+    Os cores (`lib/ai/insert-records.ts`, `lib/ai/csv-mapping.ts`,
+    `lib/ai/create-fields.ts`) só validam e devolvem prévia; a aplicação
+    RE-VALIDA o JSON (possivelmente editado na prévia) e escreve SÓ pelos
+    choke points existentes — `createRecord` por registro, `createField` por
+    campo, estado `plans` do wizard (a RLS segue sendo a muralha; nada de
+    service role para inserir). A base/alvo vem SEMPRE do seletor da UI,
+    nunca do JSON da IA. Teto de 10 por leva (registros e campos); prévia
+    obrigatória (registros: só colunas preenchidas + edição inline/remap).
+    Os SPECs são DERIVADOS de constantes reais (`EDITABLE_CORE_COLUMNS`,
+    `CORE_IMPORT_TARGETS`, `IMPORT_NEW_FIELD_TYPES`, `DATA_TYPE_LABELS`,
+    `FORMULA_FUNC_GROUPS`, `CURRENCY_OPTIONS`) e fiscalizados pelos testes de
+    paridade — nunca documente em prosa paralela. Fórmula proposta pela IA
+    valida pelos módulos ÚNICOS de `lib/records/formula-server.ts` (extraídos
+    de campos/actions — não recrie catálogos). Datas core do contrato são
+    `YYYY-MM-DD` e ancoram em Brasília na ESCRITA via `coerceCore`
+    (invariante 11); campo custom de data segue texto naive.
 
 ## 6. Convenções do projeto
 

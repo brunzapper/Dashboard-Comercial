@@ -20,6 +20,7 @@ import { isCoreDef } from "@/lib/records/core-defs";
 import { ingestRows } from "@/lib/import/ingest";
 import {
   CORE_IMPORT_COLUMNS,
+  IMPORT_NEW_FIELD_TYPES,
   isValidMatchTarget,
   type ColumnMapping,
   type MatchConfig,
@@ -30,7 +31,8 @@ import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { ensureAllAutoOperations } from "@/lib/operations/auto-operations";
 
 const MAX_CHUNK_ROWS = 500;
-const IMPORT_FIELD_TYPES = new Set(["texto", "numero", "data"]);
+// Fonte única com o wizard e a sugestão por IA (lib/import/csv.ts).
+const IMPORT_FIELD_TYPES = new Set<string>(IMPORT_NEW_FIELD_TYPES);
 
 async function ensureAdmin(): Promise<
   { ok: true; userId: string } | { ok: false; message: string }
