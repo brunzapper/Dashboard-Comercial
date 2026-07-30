@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 26/07/2026
+// Versão: 1.1 | Data: 30/07/2026
+// v1.1 (30/07/2026): MESCLA no modo "Criar a partir de" — `extraReferenceIds`
+//   (até MAX_EXTRA_REFS além da base): cada extra é exportada e fundida por
+//   fuseExtraReferences (multi-ref.ts) — keys prefixadas rN_, união de bases,
+//   uma section de prompt por extra, refWidgets no rewrite. As extras existem
+//   SÓ na geração: o copy_of é resolvido ANTES do apply, então
+//   applyFromReference/duplicateBoard seguem single-id e intocados.
 // NÚCLEO da geração de dashboards por IA — extraído de
 // app/(app)/dashboards/ai-generate-actions.ts (v2.2) SEM mudança de
 // comportamento, para que o route handler de streaming (ai-turn) possa passar
@@ -32,6 +38,11 @@ import {
   IMPORT_PRESET_PREFIX,
   type ImportWidgetSpec,
 } from "@/lib/import/dashboard/types";
+import {
+  fuseExtraReferences,
+  MAX_EXTRA_REFS,
+  type ExtraRefInput,
+} from "@/lib/import/dashboard/multi-ref";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
 import {
@@ -48,8 +59,11 @@ export interface GenerateDashboardInput {
   mode: AiDashboardMode;
   /** Modo new: Bases marcadas (obrigatório). */
   bases?: string[];
-  /** Modo from: board de REFERÊNCIA; modo edit: board ALVO. */
+  /** Modo from: board de REFERÊNCIA (a BASE da cópia); modo edit: board ALVO. */
   targetDashboardId?: string;
+  /** Modo from: referências ADICIONAIS para MESCLA (cap MAX_EXTRA_REFS, sem a
+   * base). Entram só na geração — o apply segue duplicando apenas a base. */
+  extraReferenceIds?: string[];
   /** Pedido deste turno. */
   description: string;
   /** Turnos de usuário anteriores da sessão (stateless; cap 10). */
@@ -141,6 +155,23 @@ reproduzir os widgets existentes.
 - Dê um "name" ao novo dashboard (obrigatório); repetir o da referência ganha o
   sufixo "(cópia)".
 - A "chave" é definida pelo sistema — pode manter a que vier no estado.`;
+
+// Anexado a FROM_RULES SÓ quando há referências adicionais selecionadas.
+const FROM_RULES_EXTRAS = `
+- MESCLA: além da referência acima (a que será COPIADA), você recebeu seções
+  "REFERÊNCIA ADICIONAL N — … (JSON)". Esses dashboards NÃO são copiados —
+  servem só como fonte de widgets para a mescla. As keys dos widgets deles
+  levam o prefixo "rN_" (ex.: "r2_w_funil").
+- Para trazer um widget de uma referência adicional, crie um widget NOVO (key
+  nova SUA, sem o prefixo) com "copy_of": "<key prefixada>" (ex.:
+  "copy_of": "r2_w_funil") + SÓ os campos que quiser mudar — o servidor copia a
+  definição inteira da origem e aplica o seu delta por cima. NUNCA re-emita a
+  key "rN_…" como key de widget.
+- Aponte o "tab" desses widgets para uma aba do dashboard de referência (as
+  abas das referências adicionais não existem na cópia); sem "tab", eles caem
+  na primeira aba, empilhados abaixo do conteúdo existente.
+- Em "bases" do envelope, liste todas as Bases usadas pelo resultado —
+  incluindo as dos widgets trazidos das referências adicionais.`;
 
 const NEW_RULES = `
 Se o usuário continuar a conversa depois deste dashboard ser criado, os
@@ -258,6 +289,10 @@ export async function generateDashboardCore(
   // Modos from/edit: base do merge por widget e do `copy_of` (a IA manda só o
   // delta).
   let baseWidgets: ImportWidgetSpec[] | undefined;
+  // Modo from com MESCLA: widgets das referências ADICIONAIS (keys rN_ — só
+  // origem de copy_of no rewrite) e as sections de prompt correspondentes.
+  let refWidgets: ImportWidgetSpec[] | undefined;
+  let refSections: { title: string; body: string }[] = [];
   // Modos from/edit: canvas do estado EXPORTADO (carimbo do espaço de grid v2)
   // — injetado no JSON da IA quando ela o omite (rewrite.currentCanvas).
   let currentCanvas: Record<string, unknown> | undefined;
@@ -310,6 +345,48 @@ export async function generateDashboardCore(
       chave = randomChave(); // "from": identidade NOVA — nunca a da referência
       modeRules = FROM_RULES;
       avoidName = board.dash.name;
+      // MESCLA: referências adicionais (dedup, sem a base, cap).
+      const extraIds = [
+        ...new Set((input.extraReferenceIds ?? []).filter(Boolean)),
+      ].filter((id) => id !== input.targetDashboardId);
+      if (extraIds.length > MAX_EXTRA_REFS) {
+        return {
+          ok: false,
+          message: `No máximo ${MAX_EXTRA_REFS} referências adicionais.`,
+        };
+      }
+      if (extraIds.length > 0) {
+        const extras: ExtraRefInput[] = [];
+        for (const id of extraIds) {
+          const extra = await loadBoardForExport(supabase, id);
+          if (!extra.ok) {
+            return {
+              ok: false,
+              message: `Referência adicional: ${extra.message}`,
+            };
+          }
+          extras.push({
+            name: extra.dash.name,
+            json: exportDashboardJson({
+              dash: extra.dash,
+              widgets: extra.widgets,
+              sources,
+            }).json,
+          });
+        }
+        const fusion = fuseExtraReferences(
+          { bases, widgetKeys: exported.widgetKeyById.values() },
+          extras
+        );
+        bases = fusion.bases; // união → o prompt cobre o catálogo de todas
+        refWidgets = fusion.refWidgets;
+        refSections = fusion.sections;
+        // Habilita o fallback de aba do rewrite (cópia de extra sem aba
+        // empilha na PRIMEIRA aba real). Sem extras, currentTabs segue
+        // undefined no from — paridade com o comportamento anterior.
+        currentTabs = exported.json.dashboard.settings?.tabs;
+        modeRules = FROM_RULES + FROM_RULES_EXTRAS;
+      }
     }
   }
 
@@ -323,6 +400,7 @@ export async function generateDashboardCore(
   if (stateJson) {
     system += section("ESTADO ATUAL DO DASHBOARD (JSON)", stateJson);
   }
+  for (const s of refSections) system += section(s.title, s.body);
   // Prévia pendente (auto-aplicar OFF): sem isso a IA não enxerga o que ela
   // mesma propôs no turno anterior — "ajusta o card que você criou" falharia.
   const pendingJson = (input.pendingJson ?? "").trim();
@@ -391,6 +469,7 @@ export async function generateDashboardCore(
       currentRoles,
       avoidName,
       baseWidgets,
+      refWidgets,
       currentCanvas,
     });
 
