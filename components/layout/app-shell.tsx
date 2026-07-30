@@ -1,9 +1,12 @@
-// Versão: 1.3 | Data: 29/07/2026
+// Versão: 1.4 | Data: 30/07/2026
 // Fase 10: shell do app (client). Envolve a barra lateral + conteúdo e controla:
 //  - barra OCULTA por padrão (revelada por hover numa faixa fina à esquerda),
 //    FIXÁVEL por um pin discreto no topo direito da barra (pref. por usuário,
 //    persistida em user_settings via updateUserSettings);
-// v1.3 (29/07/2026): botão de menu (hambúrguer) quando a barra está desafixada
+// v1.4 (30/07/2026): botão de menu compacto (⋮, padrão dos menus do app) e o
+//   conteúdo em modo overlay ganha recuo à esquerda — o botão fixo ficava em
+//   cima dos títulos das páginas.
+// v1.3 (29/07/2026): botão de menu quando a barra está desafixada
 //   — antes o ÚNICO gatilho era a faixa de hover (aria-hidden), inalcançável
 //   por toque e teclado. Escape fecha e devolve o foco; navegar fecha; falha
 //   ao salvar o pin agora avisa (notifyOnError).
@@ -27,7 +30,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { Menu, Pin, PinOff, X } from "lucide-react";
+import { MoreVertical, Pin, PinOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
@@ -201,11 +204,15 @@ export function AppShell({
             }
             aria-expanded={sidebarVisible}
             className={cn(
-              "bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/50 fixed top-3 z-50 rounded-md border p-1.5 shadow-sm backdrop-blur transition-[left] duration-200 focus-visible:ring-[3px] focus-visible:outline-none",
+              "bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/50 fixed top-3 z-50 rounded-md border p-1 shadow-sm backdrop-blur transition-[left] duration-200 focus-visible:ring-[3px] focus-visible:outline-none",
               sidebarVisible ? "left-[15.5rem]" : "left-3"
             )}
           >
-            {sidebarVisible ? <X className="size-4" /> : <Menu className="size-4" />}
+            {sidebarVisible ? (
+              <X className="size-4" />
+            ) : (
+              <MoreVertical className="size-4" />
+            )}
           </button>
         ) : null}
 
@@ -214,7 +221,10 @@ export function AppShell({
         <main
           className={cn(
             "flex-1 overflow-auto",
-            chromeHidden ? "p-0" : "p-6"
+            // Em overlay o botão de menu (fixed, left-3, ~32px) divide o canto
+            // superior-esquerdo com o título da página: o recuo extra abre
+            // espaço para os dois sem sobreposição.
+            chromeHidden ? "p-0" : overlay ? "p-6 pl-12" : "p-6"
           )}
         >
           {children}
