@@ -1956,9 +1956,9 @@ export async function unmergeWidgetPages(
 export async function deleteWidget(
   widgetId: string,
   dashboardId: string
-): Promise<void> {
+): Promise<ActionState> {
   const session = await getSessionInfo();
-  if (!session) return;
+  if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
   // Páginas de widget: as settings precisam ser lidas ANTES do delete — um
   // HOST excluído devolve os membros (ocultos) ao canvas; um MEMBRO excluído
@@ -1973,7 +1973,13 @@ export async function deleteWidget(
   const victimPages = pageMembersOf({
     settings: (victim?.settings ?? {}) as WidgetSettings,
   });
-  await supabase.from("widgets").delete().eq("id", widgetId);
+  // Só o delete principal decide sucesso/falha (RLS negada aparece aqui);
+  // as limpezas abaixo (pages/conectores) seguem best-effort.
+  const { error: deleteError } = await supabase
+    .from("widgets")
+    .delete()
+    .eq("id", widgetId);
+  if (deleteError) return { ok: false, message: deleteError.message };
   if (victimPages.length > 0) {
     await freePageMembers(supabase, dashboardId, victimPages);
   }
@@ -2021,6 +2027,7 @@ export async function deleteWidget(
       .eq("id", dashboardId);
   }
   revalidatePath(`/dashboards/${dashboardId}`);
+  return { ok: true };
 }
 
 // ============ Presets (motor v2, 20/07/2026) ============

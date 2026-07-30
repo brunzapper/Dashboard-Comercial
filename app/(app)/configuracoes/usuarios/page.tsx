@@ -24,6 +24,9 @@ function isDisabled(bannedUntil: string | null | undefined): boolean {
   return !Number.isNaN(until.getTime()) && until.getTime() > Date.now();
 }
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Usuários" };
+
 export default async function UsuariosPage() {
   const session = await requireSettingsArea("usuarios");
   const org = await getActiveOrg();

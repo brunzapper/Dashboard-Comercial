@@ -10,6 +10,9 @@ import { NonWorkingDaysManager } from "@/components/configuracoes/non-working-da
 import { loadNonWorkingDayRows } from "@/lib/config/non-working-days";
 import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Metas" };
+
 export default async function MetasPage() {
   await requireSettingsArea("metas");
   const supabase = await createClient();

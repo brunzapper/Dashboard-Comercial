@@ -7,6 +7,9 @@ import { redirect } from "next/navigation";
 import { getActiveOrg } from "@/lib/auth/org";
 import { OrgBrandingForm } from "@/components/configuracoes/org-branding-form";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Organização" };
+
 export default async function OrganizacaoPage() {
   const org = await getActiveOrg();
   if (!org?.isOrgAdmin) redirect("/configuracoes");

@@ -55,86 +55,109 @@ export async function createResponsible(
   return { ok: true, message: `Responsável "${name}" criado.` };
 }
 
+const DENIED = { ok: false as const, message: "Apenas administradores." };
+
 export async function setResponsibleActive(
   id: string,
   active: boolean
-): Promise<void> {
-  if (!(await ensureAdmin())) return;
+): Promise<ResponsibleState> {
+  if (!(await ensureAdmin())) return DENIED;
   const supabase = await createClient();
-  await supabase.from("responsibles").update({ active }).eq("id", id);
+  const { error } = await supabase
+    .from("responsibles")
+    .update({ active })
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/responsaveis");
+  return { ok: true };
 }
 
 export async function setResponsibleCanonical(
   id: string,
   canonicalId: string | null
-): Promise<void> {
-  if (!(await ensureAdmin())) return;
+): Promise<ResponsibleState> {
+  if (!(await ensureAdmin())) return DENIED;
   const supabase = await createClient();
   if (!canonicalId) {
     // Desfazer: só a própria linha volta a ser principal (filhos, se houver,
     // permanecem apontando para ela).
-    await supabase
+    const { error } = await supabase
       .from("responsibles")
       .update({ canonical_id: null })
       .eq("id", id);
+    if (error) return { ok: false, message: error.message };
     revalidatePath("/configuracoes/responsaveis");
-    return;
+    return { ok: true };
   }
-  if (canonicalId === id) return;
+  if (canonicalId === id) {
+    return { ok: false, message: "Um responsável não pode ser apelido dele mesmo." };
+  }
   const { data: rows } = await supabase
     .from("responsibles")
     .select("id, canonical_id, organization_id")
     .in("id", [id, canonicalId]);
   const me = (rows ?? []).find((r) => r.id === id);
   const target = (rows ?? []).find((r) => r.id === canonicalId);
-  if (!me || !target) return;
+  if (!me || !target) {
+    return { ok: false, message: "Responsável não encontrado." };
+  }
   // Multi-org (0090): apelido e principal sempre da MESMA organização.
-  if ((me.organization_id ?? null) !== (target.organization_id ?? null)) return;
+  if ((me.organization_id ?? null) !== (target.organization_id ?? null)) {
+    return { ok: false, message: "Responsáveis de organizações diferentes." };
+  }
   // Grupo plano: alvo que já é apelido resolve para o principal DELE; alvo
-  // cujo principal sou eu criaria ciclo — ignora.
+  // cujo principal sou eu criaria ciclo — recusa.
   const root = (target.canonical_id as string | null) ?? (target.id as string);
-  if (root === id) return;
+  if (root === id) {
+    return { ok: false, message: "Esse vínculo criaria um ciclo de apelidos." };
+  }
   // Filhos do que vira apelido repontam ANTES da própria linha: uma falha no
   // 2º passo deixa o grafo plano e válido (nunca uma cadeia).
-  await supabase
+  const { error: childrenError } = await supabase
     .from("responsibles")
     .update({ canonical_id: root })
     .eq("canonical_id", id);
-  await supabase
+  if (childrenError) return { ok: false, message: childrenError.message };
+  const { error } = await supabase
     .from("responsibles")
     .update({ canonical_id: root })
     .eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/responsaveis");
+  return { ok: true };
 }
 
 export async function addResponsibleOperation(
   responsibleId: string,
   operationId: string,
   priority: number
-): Promise<void> {
-  if (!(await ensureAdmin())) return;
-  if (!operationId) return;
+): Promise<ResponsibleState> {
+  if (!(await ensureAdmin())) return DENIED;
+  if (!operationId) return { ok: false, message: "Escolha a operação." };
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("responsible_operations")
     .upsert(
       { responsible_id: responsibleId, operation_id: operationId, priority },
       { onConflict: "responsible_id,operation_id" }
     );
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/responsaveis");
+  return { ok: true };
 }
 
 export async function removeResponsibleOperation(
   responsibleId: string,
   operationId: string
-): Promise<void> {
-  if (!(await ensureAdmin())) return;
+): Promise<ResponsibleState> {
+  if (!(await ensureAdmin())) return DENIED;
   const supabase = await createClient();
-  await supabase
+  const { error } = await supabase
     .from("responsible_operations")
     .delete()
     .eq("responsible_id", responsibleId)
     .eq("operation_id", operationId);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/responsaveis");
+  return { ok: true };
 }

@@ -109,6 +109,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { cn } from "@/lib/utils";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { useDragPan } from "@/lib/use-drag-pan";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -991,16 +992,23 @@ export function DashboardGrid({
     }
     if (Object.keys(patch).length === 0) return;
     applyLayoutPatch(patch);
-    void saveLayout(
-      dashboardId,
-      Object.entries(patch).map(([id, p]) => ({
-        id,
-        x: p.x,
-        y: p.y,
-        w: p.w,
-        h: p.h,
-      }))
-    ).then(() => history.captureNow());
+    // Falha (RLS/rede) vira toast — antes era silenciosa e o layout "voltava"
+    // no F5. Histórico só captura quando a gravação de fato aconteceu.
+    void notifyOnError(
+      saveLayout(
+        dashboardId,
+        Object.entries(patch).map(([id, p]) => ({
+          id,
+          x: p.x,
+          y: p.y,
+          w: p.w,
+          h: p.h,
+        }))
+      ),
+      "Não foi possível salvar o layout"
+    ).then((res) => {
+      if (res?.ok) void history.captureNow();
+    });
   }
 
   function persist(
@@ -1053,7 +1061,12 @@ export function DashboardGrid({
     const line = roundLine(clampLine(axisLock(next), cols, rows));
     applyLinePatch?.({ [id]: line });
     applyLayoutPatch({ [id]: lineGridBBox(line) });
-    void saveShapeLine(dashboardId, id, line).then(() => history.captureNow());
+    void notifyOnError(
+      saveShapeLine(dashboardId, id, line),
+      "Não foi possível salvar a linha"
+    ).then((res) => {
+      if (res?.ok) void history.captureNow();
+    });
   }
   // Pontas dos conectores acompanham o gesto AO VIVO: onDrag/onResize entregam
   // o layout transitório só à camada de conectores (via apiRef) — nunca ao
@@ -1139,10 +1152,13 @@ export function DashboardGrid({
     const last = lastRef.current;
     // Clique sem mudança de tamanho não persiste nada.
     if (!last || (last.cols === d.cols && last.rows === d.rows)) return;
-    void updateDashboardSettings(dashboardId, {
-      ...settings,
-      canvas: { ...settings.canvas, cols: last.cols, rows: last.rows },
-    });
+    void notifyOnError(
+      updateDashboardSettings(dashboardId, {
+        ...settings,
+        canvas: { ...settings.canvas, cols: last.cols, rows: last.rows },
+      }),
+      "Não foi possível redimensionar o canvas"
+    );
   }
 
   // Menu flutuante do clique-direito (compartilhado entre o estado vazio e o

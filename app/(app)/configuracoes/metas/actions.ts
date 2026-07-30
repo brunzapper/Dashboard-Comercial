@@ -90,12 +90,14 @@ export async function createGoal(
   return { ok: true, message: "Meta salva." };
 }
 
-export async function deleteGoal(id: string): Promise<void> {
+export async function deleteGoal(id: string): Promise<GoalState> {
   const err = await ensureAdmin();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const supabase = await createClient();
-  await supabase.from("goals").delete().eq("id", id);
+  const { error } = await supabase.from("goals").delete().eq("id", id);
+  if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/metas");
+  return { ok: true };
 }
 
 // ===================== Métricas de meta (registry) =====================

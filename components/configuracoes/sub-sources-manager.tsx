@@ -13,10 +13,11 @@
 //   lib/source-date-fields.ts.
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -326,25 +327,44 @@ function MoveSubButtons({ subKey }: { subKey: string }) {
   );
 }
 
-function DeleteSubButton({ subKey }: { subKey: string }) {
+function DeleteSubButton({ subKey, label }: { subKey: string; label: string }) {
   const [state, formAction, pending] = useActionState(deleteSubSource, initial);
+  const [confirm, setConfirm] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   return (
-    <form action={formAction} className="flex items-center gap-1">
+    <form ref={formRef} action={formAction} className="flex items-center gap-1">
       <input type="hidden" name="key" value={subKey} />
       <Button
-        type="submit"
+        type="button"
         variant="ghost"
         size="icon"
         disabled={pending}
         aria-label="Excluir sub-base"
+        onClick={() => setConfirm(true)}
       >
         <Trash2 className="size-4" />
       </Button>
       {state.message && !state.ok ? (
-        <span className="text-destructive text-xs" role="status">
+        <span className="text-destructive text-xs" role="alert">
           {state.message}
         </span>
       ) : null}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Excluir sub-base?"
+        description={
+          <>
+            A sub-base <strong>{label}</strong> será removida — widgets e
+            filtros que a referenciam deixam de funcionar. Esta ação não pode
+            ser desfeita.
+          </>
+        }
+        onConfirm={() => {
+          setConfirm(false);
+          formRef.current?.requestSubmit();
+        }}
+      />
     </form>
   );
 }
@@ -439,7 +459,7 @@ export function SubSourcesManager({
                       >
                         <Pencil className="size-4" />
                       </Button>
-                      <DeleteSubButton subKey={s.key} />
+                      <DeleteSubButton subKey={s.key} label={s.label} />
                     </div>
                   </TableCell>
                 </TableRow>

@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { OperandRef } from "@/lib/records/date-operands";
 import {
   evaluateFormula,
@@ -130,7 +131,10 @@ export function CalculatorWidget({
     saveTimer.current = window.setTimeout(() => {
       if (next === lastSaved.current) return;
       lastSaved.current = next;
-      void saveCalcExpression(dashboardId, widget.id, next);
+      void notifyOnError(
+        saveCalcExpression(dashboardId, widget.id, next),
+        "Não foi possível salvar a expressão"
+      );
     }, SAVE_DEBOUNCE_MS);
   };
   useEffect(
@@ -138,7 +142,10 @@ export function CalculatorWidget({
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       if (!snapshot && exprRef.current !== lastSaved.current) {
         lastSaved.current = exprRef.current;
-        void saveCalcExpression(dashboardId, widget.id, exprRef.current);
+        void notifyOnError(
+          saveCalcExpression(dashboardId, widget.id, exprRef.current),
+          "Não foi possível salvar a expressão"
+        );
       }
     },
     // Flush só no desmonte.

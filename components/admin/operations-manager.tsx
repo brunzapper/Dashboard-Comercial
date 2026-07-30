@@ -30,6 +30,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { notifyOnError } from "@/lib/feedback/notify";
 import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   createOperation,
@@ -263,6 +265,7 @@ export function OperationsManager({
   const [state, formAction, pending] = useActionState(createOperation, initial);
   const [parentId, setParentId] = useState("");
   const [editing, setEditing] = useState<OperationRow | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<OperationRow | null>(null);
   const [, startTransition] = useTransition();
 
   return (
@@ -333,7 +336,10 @@ export function OperationsManager({
                         const next = e.target.value.trim();
                         if (next && next !== o.name)
                           startTransition(async () => {
-                            await updateOperation(o.id, { name: next });
+                            await notifyOnError(
+                              updateOperation(o.id, { name: next }),
+                              "Não foi possível renomear a operação"
+                            );
                           });
                       }}
                     />
@@ -349,9 +355,12 @@ export function OperationsManager({
                       value={o.parent_operation_id ?? ""}
                       onValueChange={(v) =>
                         startTransition(async () => {
-                          await updateOperation(o.id, {
-                            parent_operation_id: v || null,
-                          });
+                          await notifyOnError(
+                            updateOperation(o.id, {
+                              parent_operation_id: v || null,
+                            }),
+                            "Não foi possível trocar o pai da operação"
+                          );
                         })
                       }
                       placeholder="— nenhuma —"
@@ -378,7 +387,10 @@ export function OperationsManager({
                       className="size-4 accent-primary"
                       onChange={(e) =>
                         startTransition(async () => {
-                          await updateOperation(o.id, { active: e.target.checked });
+                          await notifyOnError(
+                            updateOperation(o.id, { active: e.target.checked }),
+                            "Não foi possível alterar a operação"
+                          );
                         })
                       }
                     />
@@ -388,11 +400,7 @@ export function OperationsManager({
                       variant="ghost"
                       size="icon"
                       aria-label="Excluir"
-                      onClick={() =>
-                        startTransition(async () => {
-                          await deleteOperation(o.id);
-                        })
-                      }
+                      onClick={() => setConfirmDelete(o)}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -427,6 +435,30 @@ export function OperationsManager({
           </div>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => !o && setConfirmDelete(null)}
+        title="Excluir operação?"
+        description={
+          <>
+            A operação <strong>{confirmDelete?.name}</strong> será removida —
+            dashboards, metas e responsáveis que a referenciam deixarão de
+            filtrar por ela. Esta ação não pode ser desfeita.
+          </>
+        }
+        onConfirm={() => {
+          const target = confirmDelete;
+          setConfirmDelete(null);
+          if (!target) return;
+          startTransition(async () => {
+            await notifyOnError(
+              deleteOperation(target.id),
+              "Não foi possível excluir a operação"
+            );
+          });
+        }}
+      />
     </div>
   );
 }

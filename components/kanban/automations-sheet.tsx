@@ -25,6 +25,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import type { KanbanColumn } from "@/lib/kanban/types";
@@ -273,6 +275,9 @@ export function AutomationsSheet({
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(
     null
   );
+  const [confirmDelete, setConfirmDelete] = useState<AutomationRow | null>(
+    null
+  );
   const [pending, startTransition] = useTransition();
 
   const targetOptions: ComboboxOption[] = columns
@@ -361,12 +366,7 @@ export function AutomationsSheet({
   }
 
   function remove(row: AutomationRow) {
-    if (!window.confirm(`Excluir a regra "${row.name || "sem nome"}"?`)) return;
-    startTransition(async () => {
-      const res = await deleteAutomation(owner, row.id);
-      if (!res.ok && res.message) setMessage({ ok: false, text: res.message });
-      reload();
-    });
+    setConfirmDelete(row);
   }
 
   function moveRule(index: number, dir: -1 | 1) {
@@ -376,9 +376,14 @@ export function AutomationsSheet({
     [next[index], next[j]] = [next[j], next[index]];
     setRows(next);
     startTransition(async () => {
-      await reorderAutomations(
-        owner,
-        next.map((r) => r.id)
+      // reload() ressincroniza a ordem do banco; a falha precisa aparecer
+      // (antes o resultado era descartado e a lista "voltava" sem explicação).
+      await notifyOnError(
+        reorderAutomations(
+          owner,
+          next.map((r) => r.id)
+        ),
+        "Não foi possível reordenar as regras"
       );
       reload();
     });
@@ -902,6 +907,30 @@ export function AutomationsSheet({
             </div>
           </div>
         )}
+
+        <ConfirmDialog
+          open={!!confirmDelete}
+          onOpenChange={(o) => !o && setConfirmDelete(null)}
+          title="Excluir regra?"
+          description={
+            <>
+              A regra <strong>{confirmDelete?.name || "sem nome"}</strong> será
+              removida e deixará de mover cards. Esta ação não pode ser
+              desfeita.
+            </>
+          }
+          onConfirm={() => {
+            const target = confirmDelete;
+            setConfirmDelete(null);
+            if (!target) return;
+            startTransition(async () => {
+              const res = await deleteAutomation(owner, target.id);
+              if (!res.ok && res.message)
+                setMessage({ ok: false, text: res.message });
+              reload();
+            });
+          }}
+        />
       </SheetContent>
     </Sheet>
   );

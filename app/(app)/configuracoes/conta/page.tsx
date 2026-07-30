@@ -5,6 +5,9 @@ import { requireSession } from "@/lib/auth/session";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ChangePasswordForm } from "@/components/configuracoes/change-password-form";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Conta" };
+
 export default async function ContaPage() {
   const session = await requireSession();
   const roleLabel = session.roles

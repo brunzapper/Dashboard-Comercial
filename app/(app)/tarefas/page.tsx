@@ -9,6 +9,9 @@ import type { OptionItem } from "@/lib/records/types";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import { TarefasClient } from "@/components/tarefas/tarefas-client";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Tarefas" };
+
 export default async function TarefasPage() {
   const session = await getSessionInfo();
   if (!session) return null; // proxy já redireciona sem sessão

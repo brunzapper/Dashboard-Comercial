@@ -1,8 +1,12 @@
-// Versão: 1.2 | Data: 17/07/2026
+// Versão: 1.3 | Data: 29/07/2026
 // Fase 10: shell do app (client). Envolve a barra lateral + conteúdo e controla:
 //  - barra OCULTA por padrão (revelada por hover numa faixa fina à esquerda),
 //    FIXÁVEL por um pin discreto no topo direito da barra (pref. por usuário,
 //    persistida em user_settings via updateUserSettings);
+// v1.3 (29/07/2026): botão de menu (hambúrguer) quando a barra está desafixada
+//   — antes o ÚNICO gatilho era a faixa de hover (aria-hidden), inalcançável
+//   por toque e teclado. Escape fecha e devolve o foco; navegar fecha; falha
+//   ao salvar o pin agora avisa (notifyOnError).
 //  - "modo tela cheia" (AppChromeContext.toggleFullscreen): esconde o chrome E
 //    entra na Fullscreen API do navegador (Esc restaura).
 // O conteúdo da barra é montado no server (layout.tsx) e passado em `sidebar`.
@@ -23,10 +27,11 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { Pin, PinOff } from "lucide-react";
+import { Menu, Pin, PinOff, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { markAppSessionActive } from "@/lib/app-session";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { updateUserSettings } from "@/app/(app)/dashboards/actions";
 
 interface AppChrome {
@@ -57,6 +62,10 @@ export function AppShell({
 }) {
   const [pinned, setPinned] = useState(initialPinned);
   const [hovering, setHovering] = useState(false);
+  // Abertura EXPLÍCITA (botão de menu): torna a barra alcançável por toque e
+  // teclado — o hover da faixa lateral não existe nesses meios. Independente
+  // de `hovering` para o mouse-leave não fechar o que o clique abriu.
+  const [openedByButton, setOpenedByButton] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [, startTransition] = useTransition();
 
@@ -71,7 +80,12 @@ export function AppShell({
   const togglePin = useCallback(() => {
     setPinned((prev) => {
       const next = !prev;
-      startTransition(() => void updateUserSettings({ sidebarPinned: next }));
+      startTransition(() =>
+        void notifyOnError(
+          updateUserSettings({ sidebarPinned: next }),
+          "Não foi possível salvar a preferência da barra"
+        )
+      );
       return next;
     });
   }, []);
@@ -97,6 +111,19 @@ export function AppShell({
 
   // overlay = barra flutuante (não empurra o conteúdo) quando não fixada.
   const overlay = !pinned && !chromeHidden;
+  const sidebarVisible = !overlay || hovering || openedByButton;
+
+  // Escape fecha a barra aberta pelo botão e devolve o foco a ele.
+  useEffect(() => {
+    if (!openedByButton) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setOpenedByButton(false);
+      document.getElementById("sidebar-menu-button")?.focus();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [openedByButton]);
 
   // Referência estável do value: o shell re-renderiza a cada hover da sidebar
   // (setHovering) — objeto novo por render re-renderizava todos os
@@ -112,11 +139,19 @@ export function AppShell({
         {!chromeHidden ? (
           <aside
             onMouseLeave={() => overlay && setHovering(false)}
+            onClick={(e) => {
+              // Navegar por um link fecha a barra aberta pelo botão (toque);
+              // cliques em botões internos (pin, logout já navega) não fecham.
+              if (!openedByButton) return;
+              if ((e.target as HTMLElement).closest("a")) {
+                setOpenedByButton(false);
+              }
+            }}
             className={cn(
               "bg-sidebar text-sidebar-foreground relative flex w-60 shrink-0 flex-col border-r p-4 transition-transform duration-200",
               overlay &&
                 "fixed inset-y-0 left-0 z-40 shadow-lg " +
-                  (hovering ? "translate-x-0" : "-translate-x-full")
+                  (sidebarVisible ? "translate-x-0" : "-translate-x-full")
             )}
           >
             <button
@@ -143,6 +178,35 @@ export function AppShell({
             onMouseEnter={() => setHovering(true)}
             className="fixed inset-y-0 left-0 z-30 w-2"
           />
+        ) : null}
+
+        {/* Botão de menu: única forma de abrir a barra desafixada por toque ou
+            teclado (a faixa de hover é aria-hidden e só reage a mouse). */}
+        {overlay ? (
+          <button
+            type="button"
+            id="sidebar-menu-button"
+            onClick={() => {
+              // Alterna pela VISIBILIDADE efetiva: se a barra já está à vista
+              // (hover ou botão), fecha; senão abre e mantém aberta.
+              if (sidebarVisible) {
+                setOpenedByButton(false);
+                setHovering(false);
+              } else {
+                setOpenedByButton(true);
+              }
+            }}
+            aria-label={
+              sidebarVisible ? "Fechar menu de navegação" : "Abrir menu de navegação"
+            }
+            aria-expanded={sidebarVisible}
+            className={cn(
+              "bg-background/80 text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/50 fixed top-3 z-50 rounded-md border p-1.5 shadow-sm backdrop-blur transition-[left] duration-200 focus-visible:ring-[3px] focus-visible:outline-none",
+              sidebarVisible ? "left-[15.5rem]" : "left-3"
+            )}
+          >
+            {sidebarVisible ? <X className="size-4" /> : <Menu className="size-4" />}
+          </button>
         ) : null}
 
         {!chromeHidden ? topRight : null}

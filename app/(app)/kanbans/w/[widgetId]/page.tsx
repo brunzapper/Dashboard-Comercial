@@ -64,6 +64,27 @@ interface WidgetRow {
   } | null;
 }
 
+// Título da aba = título do widget (fallback: nome do dashboard pai).
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ widgetId: string }>;
+}) {
+  const { widgetId } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("widgets")
+    .select("title, dashboards!inner(name, status)")
+    .eq("id", widgetId)
+    .eq("visual_type", "kanban")
+    .maybeSingle();
+  const dash = (data as { dashboards?: { name?: string; status?: string } } | null)
+    ?.dashboards;
+  if (!data || !dash || dash.status === "trashed") return {};
+  const title = (data as { title?: string | null }).title || dash.name;
+  return title ? { title } : {};
+}
+
 export default async function WidgetKanbanPage({
   params,
   searchParams,

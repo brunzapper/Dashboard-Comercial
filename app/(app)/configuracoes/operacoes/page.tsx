@@ -14,6 +14,9 @@ import {
   type OperationRow,
 } from "@/components/admin/operations-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Operações" };
+
 export default async function OperacoesPage() {
   await requireSettingsArea("operacoes");
   const supabase = await createClient();

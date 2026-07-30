@@ -40,12 +40,17 @@ function revalidateAll() {
 export async function toggleCurrencyEnabled(
   code: string,
   enabled: boolean
-): Promise<void> {
+): Promise<CurrencyActionState> {
   const err = await ensureCanManage();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const supabase = await createClient();
-  await supabase.from("currencies").update({ enabled }).eq("code", code);
+  const { error } = await supabase
+    .from("currencies")
+    .update({ enabled })
+    .eq("code", code);
+  if (error) return { ok: false, message: error.message };
   revalidateAll();
+  return { ok: true };
 }
 
 /**
@@ -57,25 +62,28 @@ export async function upsertCurrencyRate(
   year: number,
   quarter: number,
   rate: number | null
-): Promise<void> {
+): Promise<CurrencyActionState> {
   const err = await ensureCanManage();
-  if (err) return;
+  if (err) return { ok: false, message: err };
   const supabase = await createClient();
   if (rate == null || !Number.isFinite(rate)) {
-    await supabase
+    const { error } = await supabase
       .from("currency_rates")
       .delete()
       .eq("code", code)
       .eq("year", year)
       .eq("quarter", quarter);
+    if (error) return { ok: false, message: error.message };
   } else {
-    await supabase.from("currency_rates").upsert(
+    const { error } = await supabase.from("currency_rates").upsert(
       { code, year, quarter, rate, source: "manual", updated_at: new Date().toISOString() },
       { onConflict: "code,year,quarter" }
     );
+    if (error) return { ok: false, message: error.message };
   }
   await recalcAllFormulaFields();
   revalidateAll();
+  return { ok: true };
 }
 
 /**

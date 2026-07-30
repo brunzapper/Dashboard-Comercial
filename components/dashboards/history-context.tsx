@@ -26,6 +26,7 @@ import {
   restoreDashboardSnapshot,
 } from "@/app/(app)/dashboards/actions";
 import type { DashboardSnapshot } from "@/lib/widgets/history";
+import { notifyOnError } from "@/lib/feedback/notify";
 
 const MAX_HISTORY = 10;
 
@@ -102,9 +103,14 @@ export function DashboardHistoryProvider({
   }, [seedJson]);
 
   function captureNow() {
-    void captureDashboardSnapshot(dashboardId).then((snap) => {
-      if (snap) recordSnapshot(snap);
-    });
+    void captureDashboardSnapshot(dashboardId)
+      .then((snap) => {
+        if (snap) recordSnapshot(snap);
+      })
+      .catch(() => {
+        // Captura de histórico é best-effort: sem toast (a gravação principal
+        // já reportou), só evita a unhandled rejection.
+      });
   }
 
   async function applyRestore(target: DashboardSnapshot) {
@@ -115,8 +121,11 @@ export function DashboardHistoryProvider({
     syncFlags();
     setIsRestoring(true);
     try {
-      await restoreDashboardSnapshot(dashboardId, target);
-      router.refresh();
+      const res = await notifyOnError(
+        restoreDashboardSnapshot(dashboardId, target),
+        "Não foi possível desfazer"
+      );
+      if (res?.ok) router.refresh();
     } finally {
       setIsRestoring(false);
     }

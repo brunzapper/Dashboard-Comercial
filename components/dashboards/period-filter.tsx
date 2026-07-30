@@ -114,8 +114,13 @@ export function PeriodFilter({
         defaults={periodDefaults}
         persist={(sel: SavedPeriod) => {
           // Salva o último período consultado deste usuário/dashboard (por aba
-          // no modo "tab"; global caso contrário).
-          void saveLastPeriod(dashboardId, sel, scope === "tab" && bucket ? bucket : undefined);
+          // no modo "tab"; global caso contrário). Best-effort: falha não pode
+          // virar unhandled rejection (a consulta em tela já navegou).
+          void saveLastPeriod(
+            dashboardId,
+            sel,
+            scope === "tab" && bucket ? bucket : undefined
+          ).catch(() => {});
           // Sync UNIDIRECIONAL barra → filtros rápidos de período dos widgets
           // com o MESMO campo (persistido p/ todos). O inverso não acontece:
           // mudar o filtro do widget nunca altera a barra.
@@ -126,7 +131,7 @@ export function PeriodFilter({
             scope === "tab" && bucket
               ? { tabId: bucket, isFirst: bucket === firstTabId }
               : undefined
-          );
+          ).catch(() => {});
         }}
         fieldControl={{
           paramKey: keys.campo,

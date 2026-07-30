@@ -12,6 +12,9 @@ import {
   TemaForm,
 } from "@/components/configuracoes/tema-form";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Tema" };
+
 export default async function TemaPage() {
   const session = await requireSettingsArea("tema");
   const [org, settings] = await Promise.all([

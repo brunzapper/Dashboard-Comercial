@@ -1,4 +1,9 @@
-// Versão: 1.6 | Data: 25/07/2026
+// Versão: 1.7 | Data: 29/07/2026
+// v1.7 (29/07/2026): skeleton via <Suspense> IN-PAGE (SnapshotContent) — a
+//   validação do token roda antes do streaming e o 404 uniforme responde com
+//   STATUS 404 real (um loading.tsx de segmento tornaria a rota streamed e o
+//   notFound() responderia 200; contrato do e2e snapshot.spec.ts). not-found/
+//   error do segmento apresentam páginas neutras pt-BR ao visitante externo.
 // v1.6 (25/07/2026): espaço de grid v2 — config congelado legado é convertido
 //   em memória (normalizeGridSpace); conversão runtime PERMANENTE aqui (o
 //   backfill de `widgets` não alcança snapshots.config congelado).
@@ -35,6 +40,7 @@
 //    parsers seguros do app e validados contra as opções CONGELADAS.
 // A computação espelha app/(app)/dashboards/[id]/page.tsx, trocando o client
 // RLS pelo adapter do snapshot e as opções vivas pelas congeladas no config.
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 import type { Metadata } from "next";
@@ -121,6 +127,7 @@ import {
   quickTableBI,
 } from "@/lib/widgets/quick-table/model";
 import type { QuickTableResult } from "@/app/(app)/dashboards/quick-table-actions";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SnapshotClient } from "@/components/snapshots/snapshot-client";
 import { frozenPeriodLabel } from "@/components/snapshots/labels";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
@@ -215,6 +222,61 @@ export default async function SnapshotPage({
     );
   }
 
+  // Daqui para baixo é só cômputo PESADO (engine de todos os widgets sobre o
+  // dataset congelado). Ele roda num filho <Suspense>: o visitante externo vê
+  // o skeleton imediatamente, e o 404 dos tokens inválidos (acima) continua
+  // respondendo com STATUS 404 real — um loading.tsx de segmento tornaria a
+  // rota streamed e o notFound() responderia 200 (contrato do e2e
+  // snapshot.spec.ts e decisão de segurança do 404 uniforme).
+  return (
+    <Suspense fallback={<SnapshotSkeleton />}>
+      <SnapshotContent service={service} snap={snap} cfg={cfg} sp={sp} orgId={orgId} />
+    </Suspense>
+  );
+}
+
+// Skeleton do viewer (sempre claro, como o viewer): header + grid de cards.
+function SnapshotSkeleton() {
+  return (
+    <div
+      className="min-h-screen bg-white p-4 text-neutral-900 md:p-6"
+      aria-busy="true"
+      aria-label="Carregando painel"
+    >
+      <div className="mb-4 flex flex-col gap-2">
+        <Skeleton className="h-7 w-64 bg-neutral-200" />
+        <div className="flex gap-2">
+          <Skeleton className="h-5 w-40 bg-neutral-200" />
+          <Skeleton className="h-5 w-48 bg-neutral-200" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            className="h-40 rounded-lg bg-neutral-200"
+            style={{ animationDelay: `${i * 80}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Corpo pesado do viewer — inalterado, apenas movido para dentro do Suspense.
+async function SnapshotContent({
+  service,
+  snap,
+  cfg,
+  sp,
+  orgId,
+}: {
+  service: ReturnType<typeof createServiceClient>;
+  snap: SnapshotRow;
+  cfg: SnapshotConfig;
+  sp: Record<string, string | string[] | undefined>;
+  orgId: string | null;
+}) {
   // Espaço de grid v2: config congelado ANTES da grade fina é convertido em
   // memória (o refresh já congela normalizado; backfill não alcança jsonb
   // congelado — por isso a conversão runtime aqui é permanente). Read-only.

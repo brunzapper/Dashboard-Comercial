@@ -43,6 +43,7 @@ import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
 import { SourceFoldersProvider } from "@/components/source-folders-context";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
+import { Toaster } from "@/components/ui/sonner";
 
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
 // sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
@@ -56,11 +57,18 @@ const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
 ];
 
-// Título da aba segue o branding da org ativa (multi-org, 0089+).
+// Título da aba segue o branding da org ativa (multi-org, 0089+). O template
+// permite que cada página filha exporte um título curto ("Registros",
+// "NomeDoBoard") e a aba do navegador vire "Registros — {appName}" — antes,
+// 25 das 29 páginas herdavam o mesmo título e as abas eram indistinguíveis.
 export async function generateMetadata() {
   const org = await getActiveOrg();
+  const appName = org?.appName ?? "Dashboard Comercial";
   return {
-    title: org ? `${org.appName} — ${org.name}` : "Dashboard Comercial",
+    title: {
+      default: org ? `${appName} — ${org.name}` : appName,
+      template: `%s — ${appName}`,
+    },
   };
 }
 
@@ -165,6 +173,9 @@ export default async function AppLayout({
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
             coalescido; só no app autenticado (o viewer /s/ fica fora). */}
         <RealtimeRefresher />
+        {/* Feedback global de falha para ações fora de form (lib/feedback/
+            notify.ts); só no app autenticado — o viewer /s/ fica sem toasts. */}
+        <Toaster />
         <ThemeSync resolved={resolvedTheme} />
         <AppShell
           initialPinned={initialPinned}

@@ -46,6 +46,9 @@ import {
   type AutoOperationsConfigRow,
 } from "@/components/configuracoes/auto-operations-manager";
 
+// Título da aba (template do layout completa "— {appName}").
+export const metadata = { title: "Bases" };
+
 export default async function FontesPage() {
   await requireSettingsArea("fontes");
   const supabase = await createClient();
