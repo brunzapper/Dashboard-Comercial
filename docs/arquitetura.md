@@ -1,4 +1,12 @@
-<!-- Versão: 1.41 | Data: 30/07/2026 -->
+<!-- Versão: 1.42 | Data: 30/07/2026 -->
+<!-- v1.42 (30/07/2026): §4.18 Remuneração variável (0112) — comp_plans/
+     comp_entries (config jsonb fail-closed; efetivo = manual ?? calculado
+     derivado por computeEntry na leitura; recompute nunca toca inputs),
+     realizado por fator SÓ via runCalculatedWidget, alvos como linhas de
+     goals (id canônico, lib/metas/upsert.ts), fórmula livre de total via
+     evaluateFormula sobre o mapa comp:*, espelho "Publicar" via
+     createRecord/updateRecord (dedup mirror_record_id) e visão do vendedor
+     por auth_responsible_ids(). Invariante 26. RPCs intocados. -->
 <!-- v1.41 (30/07/2026): §4.11.2 — MESCLA no modo "Criar a partir de"
      (multi-referência): além da base (copiada fielmente), até 4 referências
      ADICIONAIS entram SÓ na geração — fuseExtraReferences (multi-ref.ts)
@@ -2174,6 +2182,83 @@ Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
 validadores REAIS) e `lib/records/coerce.test.ts` (âncora de Brasília + trava
 anti-divergência validador↔escrita). Ver invariante 25.
 
+### 4.18 Remuneração variável (0112, 30/07/2026)
+
+Configurações → Remuneração calcula, edita e publica a remuneração variável do
+time. Duas tabelas (0112): `comp_plans` (plano por org: nome, base variável
+default e `config` jsonb VERSIONADO — parse FAIL-CLOSED em `lib/comp/model.ts`,
+padrão kanban_automations) e `comp_entries` (lançamento por plano×responsável×
+ano×mês: base individual, `inputs` com overrides/bônus, `computed` com o
+snapshot CRU do recompute e `total` efetivo). Modelo:
+`total = base (R$) × Σ(peso% × atingimento%) + bônus`, com fórmula LIVRE de
+total opcional por plano.
+
+- **Fatores e realizado.** Cada fator tem peso %, fontes (bases/sub-bases),
+  cap/floor de atingimento e uma fórmula AGREGADA validada pelo MESMO caminho
+  do servidor de fórmulas (`buildAggOperandCatalog` +
+  `validateFormulaForContext` kind "aggregate" + `validateFkCondNames`). O
+  REALIZADO por membro×fator sai SÓ de `runCalculatedWidget` (fórmula + filtro
+  `responsible_id eq` — o choke point expande o grupo canônico — + período do
+  mês via `monthPeriod`, com `fieldBySource` cobrindo todo o catálogo; moeda
+  `fixed BRL`). RPCs de widget INTOCADOS. O recompute
+  (`lib/comp/engine.ts::recomputePlanMonth`, action `recomputeMonth`) roda uma
+  consulta por célula (task-limiter + rpc-memo/TTL, teto 400 células) e grava
+  APENAS `computed` ({v, at, realized, errors?}) + `total` — falha de uma
+  célula isola em `errors[fid]`, nunca derruba o mês.
+- **Efetivo = manual ?? calculado, derivado NA LEITURA.** `computeEntry`
+  (puro) deriva atingimento/valor/total a partir de config + inputs +
+  `computed.realized` + alvos: override por variável (realizado, ating.%,
+  valor por fator; total da linha) vive em `inputs.overrides` e NUNCA é tocado
+  pelo recompute; limpar a chave restaura a derivação sem re-consulta.
+  Cap/floor clampam SÓ o calculado. Grade (admin) e "Minha remuneração"
+  (vendedor) usam o MESMO `computeEntry` no cliente.
+- **Alvos são LINHAS de `goals`.** Cada fator vincula uma chave do registry
+  `goal_metrics` (automática `comp_*` no save, ou existente escolhida pelo
+  admin). A grade digita o alvo mas persiste `goals` (scope 'responsible', id
+  CANÔNICO) via `lib/metas/upsert.ts` (`upsertGoalTarget`/`deleteGoalTarget` —
+  a dança find-then-update extraída de `createGoal`; célula limpa EXCLUI a
+  linha, nunca `target=0`). A área Metas gerencia os mesmos alvos. Leitura em
+  batch (`loadTargetsByMember`) expande o grupo canônico e dobra
+  apelido→canônico (linha do canônico vence). `resolveGoal`/goalLine seguem
+  canon-blind (limitação documentada). Tradeoff aceito: `goals_select` é
+  org-wide autenticado — alvos legíveis via API por qualquer logado (regime
+  que `mrr`/`clientes` sempre tiveram; a page de Metas segue admin).
+- **Fórmula livre de total.** `config.totalFormula` avalia por
+  `evaluateFormula` sobre o mapa `comp:*` montado em `computeEntry`
+  (`comp:f:<fid>:realizado|alvo|ating|valor`, `comp:base`, `comp:bonus`,
+  `comp:fatores`) — variáveis JÁ efetivas (overrides aplicados = sincronia
+  total). Catálogo/validação em `compOperandCatalog` + kind "record" (módulo
+  único; SOMASE proibido com mensagem própria). Resultado não-numérico ⇒ total
+  null ("—" + aviso; Publicar pula a linha). `overrides.total` vence os dois
+  modos.
+- **Publicar (espelho em Base).** `publishMonth` materializa 1 registro por
+  responsável×mês numa base manual "Remuneração" (`lib/comp/mirror.ts`:
+  `data_sources` key `remuneracao` com sufixo em colisão global, ponteiro em
+  `sync_config` 'remuneracao_mirror', field defs fixas `rem_base`/`rem_bonus`/
+  `rem_atingimento`/`rem_plano` com `editable_by_roles: ["admin"]`). A escrita
+  é SÓ por `createRecord`/`updateRecord` com o client RLS do admin (invariante
+  25) — `core__value` = total, `core__closed_at` = último dia do mês
+  (`YYYY-MM-DD`; o `coerceCore` ancora em Brasília — invariante 11),
+  `responsible_id` canônico. Dedup por `comp_entries.mirror_record_id` (FK
+  `on delete set null` ⇒ registro apagado à mão é recriado no próximo
+  Publicar); NUNCA por `source_id` (o ramo manual da RLS exige null). Todos os
+  widgets/dashboards funcionam sobre a base sem código novo; a visibilidade do
+  vendedor segue a RLS normal de `records` (sem `view_all_records` vê só as
+  próprias linhas — consequência deliberada de publicar).
+- **Acesso.** `AREA_GATES.remuneracao = {}` — a page ramifica: admin gere;
+  demais papéis veem "Minha remuneração" (read-only). RLS: `comp_plans` select
+  org-wide (o vendedor precisa do DESENHO do plano; org que considere a base
+  default sensível deixa-a nula e digita por pessoa); `comp_entries` select =
+  admin OU `responsible_id in (select auth_responsible_ids())` (grupo
+  canônico, 0101); escrita admin-only nas duas. Tabelas raiz org-scoped com
+  carimbo na action (padrão 0111); fora de `PASSTHROUGH_TABLES`.
+
+Testes: `lib/comp/model.test.ts` (parse fail-closed, precedência de overrides,
+cap/floor, fórmula livre, catálogo comp:*), `lib/comp/engine.test.ts` (1 RPC
+por célula com canon expandido, alvos de goals dobrados, update nunca toca
+inputs, erro isolado), `lib/comp/mirror.test.ts` (builders do form) e
+`lib/metas/upsert.test.ts` (find-then-update, registry). Ver invariante 26.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -2476,6 +2561,22 @@ principalmente — para mantenedores humanos.
     de campos/actions — não recrie catálogos). Datas core do contrato são
     `YYYY-MM-DD` e ancoram em Brasília na ESCRITA via `coerceCore`
     (invariante 11); campo custom de data segue texto naive.
+
+26. **Remuneração variável se resolve no ENGINE e nos choke points (§4.18).**
+    O realizado por fator sai SÓ de `runCalculatedWidget` (RPCs intocados);
+    o efetivo é `manual ?? calculado` derivado por `computeEntry` na LEITURA —
+    `comp_entries.computed` guarda só o snapshot CRU e o recompute NUNCA toca
+    `inputs`/`base_amount` (overrides sobrevivem sempre). Alvos são LINHAS de
+    `goals` (scope 'responsible', id CANÔNICO) escritas SÓ por
+    `lib/metas/upsert.ts` (célula limpa EXCLUI a meta, nunca `target=0`); a
+    fórmula livre de total avalia SÓ por `evaluateFormula` sobre o mapa
+    `comp:*` montado em `computeEntry` — nunca parser/avaliador/catálogo
+    paralelo (`compOperandCatalog` é o módulo único de editor e servidor). O
+    espelho publicado escreve SÓ por `createRecord`/`updateRecord` com o
+    client RLS do admin, dedup por `mirror_record_id` (nunca `source_id`).
+    Leitura do vendedor via `auth_responsible_ids()` na policy de
+    `comp_entries` — remuneração é dado sensível: NUNCA afrouxar o select
+    para org-wide; escrita segue admin-only.
 
 ## 6. Convenções do projeto
 

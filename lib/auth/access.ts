@@ -1,6 +1,8 @@
-// Versão: 1.2 | Data: 27/07/2026
+// Versão: 1.3 | Data: 30/07/2026
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
+// v1.3 (30/07/2026): área "remuneracao" (0112) — sem gate de papel (a page
+//   ramifica: admin gere, vendedor vê a própria; RLS protege os valores).
 // sem override vale o gate atual. AREA_GATES é a fonte ÚNICA dos gates por
 // aba (o layout de Configurações e o guard requireSettingsArea leem daqui).
 // v1.2 (27/07/2026): chaves de área são HISTÓRICAS e desacopladas da rota —
@@ -33,6 +35,11 @@ export const AREA_GATES: Record<
   operacoes: { role: "admin" },
   responsaveis: { role: "admin" },
   metas: { role: "admin" },
+  // Remuneração variável (0112): SEM gate de papel — a page ramifica por papel
+  // (admin = gestão completa; demais = "Minha remuneração", read-only, com a
+  // RLS de comp_entries entregando só o próprio grupo canônico). Deny esconde
+  // a área inteira; a escrita segue admin nas actions + RLS.
+  remuneracao: {},
   fontes: { role: "admin" }, // chave histórica — página em /registros/bases
   presets: { role: "admin" },
   snapshots: { role: "admin" },
@@ -51,6 +58,7 @@ export const AREA_LABELS: Record<string, string> = {
   operacoes: "Operações",
   responsaveis: "Responsáveis",
   metas: "Metas",
+  remuneracao: "Remuneração",
   fontes: "Bases (Registros)",
   presets: "Presets",
   snapshots: "Snapshots",

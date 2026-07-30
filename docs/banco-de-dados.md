@@ -1,4 +1,9 @@
-<!-- Versão: 3.2 | Data: 28/07/2026 -->
+<!-- Versão: 3.3 | Data: 30/07/2026 -->
+<!-- v3.3 (30/07/2026): 0112 — comp_plans/comp_entries (remuneração variável:
+     config jsonb versionado fail-closed; entries com inputs/overrides/
+     computed cru/total efetivo + mirror_record_id do espelho publicado;
+     SELECT de entries = admin OU auth_responsible_ids(); escrita admin;
+     raízes org-scoped com carimbo na action). Não recria as RPCs. -->
 <!-- v3.2 (28/07/2026): 0111 — tasks.due_time_end (hora final opcional; CHECK
      exige due_time) + idx_tasks_due (due_date, due_time); agenda_notes
      (anotação do dia/post-it — org-scoped raiz, carimbo na action; SELECT
@@ -366,6 +371,32 @@ Desde 20/07/2026 `metric` aceita chaves arbitrárias (ex.: `sql`) — o vocabul�
 vem do registry (builtins em `lib/metas/metrics.ts` + custom no `sync_config`
 chave `goal_metrics`); o REALIZADO de um KPI meta é a consulta do próprio widget.
 
+**`comp_plans`** (0112) — planos de remuneração variável: `name`, `active`,
+`base_amount_default` numeric (base variável default em R$; null = digitada por
+pessoa) e `config` jsonb VERSIONADO (`{v:1, factors:[{id, label, weightPct,
+metricKey, money?, formula, sources, filters?, capPct?, floorPct?}],
+memberIds?, totalFormula?}`) com parse FAIL-CLOSED em `lib/comp/model.ts` —
+config fora do contrato nunca "roda como der". `factor.metricKey` vincula o
+fator a uma chave do registry `goal_metrics`: os ALVOS por pessoa×mês são
+linhas de `goals` (scope 'responsible', id canônico), nunca colunas daqui.
+Tabela RAIZ org-scoped (carimbo na ACTION, padrão 0111). RLS: SELECT org-wide
+(o vendedor renderiza o próprio detalhamento com o desenho do plano); escrita
+admin. Sem `anon`; fora de `PASSTHROUGH_TABLES`.
+
+**`comp_entries`** (0112) — lançamentos de remuneração por
+plano×responsável×ano×mês (única por essa tupla + org): `base_amount` (null =
+default do plano), `inputs` jsonb (`{overrides:{factors:{fid:{realized?,
+attainmentPct?, payout?}}, total?}, bonuses:[{id,label,amount}], note?}` — SEM
+targets), `computed` jsonb (snapshot CRU do recompute: `{v:1, at,
+realized:{fid}, errors?}` — os efetivos são DERIVADOS na leitura por
+`computeEntry`; recompute nunca toca `inputs`), `total` numeric (efetivo, p/
+listagem), `mirror_record_id` FK → `records` `on delete set null` (dedup do
+registro publicado na base espelho "Remuneração") e `published_at`. RLS:
+SELECT admin OU `responsible_id in (select auth_responsible_ids())` (o
+vendedor vê só o próprio grupo canônico — dado sensível, NUNCA org-wide);
+escrita admin. Sem `anon`; fora de `PASSTHROUGH_TABLES`. Ver
+`docs/arquitetura.md` §4.18 e invariante 26.
+
 **`non_working_days`** (0081) — dias não úteis (feriados/paradas): `day` date PK,
 `label`. Calendário ÚNICO global dos utilitários de dia útil
 (`lib/date/business-days.ts` — dia útil = seg–sex fora desta tabela), usados por
@@ -718,6 +749,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0109 | kanban_automations | Automações do kanban: tabela `kanban_automations` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
 | 0110 | data_sources_custom_period_field | CHECK de `data_sources.default_period_field` aceita também `custom:<field_key>` (espelho da 0082 das subs). Validação semântica na action; picker "só colunas com dados" em Registros → Bases. Não recria as RPCs de widget |
 | 0111 | agenda_notes_task_time_end | Redesign da agenda: `tasks.due_time_end` (hora final opcional; CHECK exige `due_time`) + índice `idx_tasks_due (due_date, due_time)`; tabela `agenda_notes` (anotação do dia — org-scoped raiz, carimbo na action; SELECT org-wide, escrita autor/admin/gestor; sem anon) + publication realtime. Não recria as RPCs |
+| 0112 | comp_plans | Remuneração variável: `comp_plans` (config jsonb versionado fail-closed; SELECT org-wide, escrita admin) + `comp_entries` (lançamentos por responsável×mês — inputs/overrides/computed/total, `mirror_record_id` p/ o espelho publicado; SELECT admin OU próprio grupo via `auth_responsible_ids()`, escrita admin). Raízes org-scoped com carimbo na action; sem anon; não recria as RPCs de widget |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
