@@ -64,6 +64,7 @@ import {
 } from "@/lib/widgets/agg-catalog";
 import { deleteField, toggleShowInBuilder } from "@/app/(app)/campos/actions";
 import { FieldForm } from "./field-form";
+import { FieldsAiCreateSheet } from "./ai-fields-sheet";
 import type { RefOption } from "@/lib/records/date-operands";
 
 function roleLabels(keys: string[]): string {
@@ -231,9 +232,12 @@ function FieldsSection({
 export function FieldsManager({
   fields,
   currencyOptions,
+  ai,
 }: {
   fields: FieldDefinition[];
   currencyOptions?: { value: string; label: string }[];
+  /** Config pública de IA da org (0096) — habilita o botão "Criar com IA". */
+  ai?: { provider: string; model: string; hasKey: boolean } | null;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FieldDefinition | undefined>(undefined);
@@ -369,10 +373,13 @@ export function FieldsManager({
             aria-label="Buscar campo"
           />
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="size-4" />
-          Novo campo
-        </Button>
+        <div className="flex items-center gap-2">
+          {ai?.hasKey ? <FieldsAiCreateSheet ai={ai} /> : null}
+          <Button onClick={openCreate}>
+            <Plus className="size-4" />
+            Novo campo
+          </Button>
+        </div>
       </div>
 
       {total === 0 ? (

@@ -1,11 +1,15 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 30/07/2026
 // Registros → Importar CSV (admin): wizard de import em massa — cria fontes e
 // campos a partir do arquivo e insere/atualiza registros de forma idempotente
 // (source_system='csv'). Parsing no browser; dados sobem em chunks JSON para
 // as Server Actions de app/(app)/registros/importar/actions.ts.
+// v1.1 (30/07/2026): prop `ai` (config pública 0096) habilita o botão
+//   "Sugerir com IA" do passo de mapeamento; maxDuration 60→300 (turno da IA).
 import Link from "next/link";
 
 import { requireRole } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { createClient } from "@/lib/supabase/server";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
@@ -15,9 +19,10 @@ import {
   type ImportFieldOption,
 } from "@/components/importacao/import-wizard";
 
-// Rede de segurança p/ as Server Actions de import (chunks pequenos; no plano
-// gratuito o teto real é ~60s) — mesmo padrão da página de Registros.
-export const maxDuration = 60;
+// Rede de segurança p/ as Server Actions desta página. 300 cobre o turno da
+// sugestão de mapeamento por IA (laço com orçamento de 240s); no plano
+// gratuito o teto real segue ~60s.
+export const maxDuration = 300;
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Importar CSV" };
@@ -26,6 +31,8 @@ export default async function ImportarPage() {
   await requireRole("admin");
   const supabase = await createClient();
   const sources = await loadSources(supabase);
+  const orgId = await getActiveOrgId();
+  const ai = orgId ? await loadOrgAiConfigPublic(orgId) : null;
 
   // Campos que podem RECEBER valores (calculados são materializados, não
   // importados) — oferecidos como destino de reuso no mapeamento.
@@ -61,7 +68,7 @@ export default async function ImportarPage() {
           <Link href="/registros">Voltar a Registros</Link>
         </Button>
       </div>
-      <ImportWizard sources={sources} fields={fields} />
+      <ImportWizard sources={sources} fields={fields} ai={ai} />
     </div>
   );
 }

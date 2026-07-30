@@ -1,5 +1,9 @@
-// Versão: 1.7 | Data: 27/07/2026
+// Versão: 1.8 | Data: 30/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v1.8 (30/07/2026): botão "Inserir com IA" (RecordsAiInsertSheet) nas bases
+//   manuais quando a org tem IA configurada (loadOrgAiConfigPublic) — até 10
+//   registros por leva com prévia obrigatória; maxDuration 60→300 (turno da IA
+//   tem orçamento de 240s, como na Home).
 // v1.7 (27/07/2026): botões "Bases" e "Log" no header — as páginas de config
 //   moveram de /configuracoes/* para /registros/{bases,log}; visibilidade via
 //   checkSettingsArea (papel × overrides — mesma audiência das abas antigas).
@@ -48,17 +52,21 @@ import {
   loadResponsibleCanon,
 } from "@/lib/config/responsible-canon";
 import { cn } from "@/lib/utils";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { SyncPanel } from "@/components/sync/sync-panel";
 import { WritebackPendingBadge } from "@/components/sync/writeback-pending-badge";
 import { ExportCsvButton } from "@/components/registros/export-csv-button";
 import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
+import { RecordsAiInsertSheet } from "@/components/registros/ai-insert-sheet";
 import { RecordsTable } from "@/components/registros/records-table";
 import { Button } from "@/components/ui/button";
 
-// Rede de segurança p/ as Server Actions de sync desta página (o desenho já
-// mantém cada passo pequeno; no plano gratuito o teto real é ~60s).
-export const maxDuration = 60;
+// Rede de segurança p/ as Server Actions desta página. 300 cobre o turno da
+// inserção por IA (laço com orçamento de 240s, como na Home); no plano
+// gratuito o teto real segue ~60s.
+export const maxDuration = 300;
 
 const PAGE_SIZE = 50;
 const RECORD_COLS =
@@ -253,6 +261,11 @@ export default async function RegistrosPage({
     }
   }
 
+  // IA por org (0096): habilita o botão "Inserir com IA" nas bases manuais.
+  // Só a config PÚBLICA (provider/model/hasKey) — a chave nunca sai do server.
+  const orgId = await getActiveOrgId();
+  const ai = orgId ? await loadOrgAiConfigPublic(orgId) : null;
+
   // Último sync (painel admin).
   let lastSyncedAt: string | null = null;
   if (isAdmin) {
@@ -322,6 +335,12 @@ export default async function RegistrosPage({
               responsibles={responsibles}
               operations={operations}
               userRoles={userRoles}
+            />
+          ) : null}
+          {canEditValues && fonteDef?.manualEntry && ai?.hasKey ? (
+            <RecordsAiInsertSheet
+              source={{ key: fonte, label: fonteDef.label }}
+              ai={ai}
             />
           ) : null}
           <ExportCsvButton

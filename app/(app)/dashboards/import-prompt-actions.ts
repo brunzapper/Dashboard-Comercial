@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 30/07/2026
+// v1.2 (30/07/2026): sampleForBase/truncate extraídos p/ lib/import/sample-db.ts
+//   (compartilhados com o prompt de inserção de registros por IA) — sem mudança
+//   de comportamento.
 // v1.1 (23/07/2026): multi-Base — o usuário marca UMA OU VÁRIAS Bases; o
 //   prompt leva o modelo e a amostra (cobertura de colunas) de CADA Base
 //   marcada + as Conexões (match_rules habilitadas) que as ligam, para a IA
@@ -28,10 +31,10 @@ import type { DataType } from "@/lib/records/types";
 import {
   isSampleValueFilled,
   sampleRefValue,
-  selectCoverageSample,
-  SAMPLE_TARGET,
-  type SampleRecordLike,
 } from "@/lib/import/dashboard/sample";
+// Amostragem por Base extraída p/ lib/import/sample-db.ts (30/07/2026):
+// compartilhada com o prompt de inserção de registros por IA.
+import { sampleForBase, truncateSampleValue } from "@/lib/import/sample-db";
 import { buildImportPromptText } from "@/lib/import/dashboard/instructions";
 
 export type ImportPromptVariant = "compacto" | "completo";
@@ -41,10 +44,6 @@ export interface ImportPromptState {
   message?: string;
   prompt?: string;
 }
-
-// Mesmas colunas da tela de Registros (a amostra mostra o registro inteiro).
-const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, lead_time_days, custom_fields";
 
 // Colunas do núcleo expostas na amostra/modelo (subset com significado de
 // negócio; carimbos internos ficam de fora).
@@ -65,10 +64,6 @@ const SAMPLE_CORE_REFS = [
   "operation_id",
   "lead_time_days",
 ] as const;
-
-const WINDOW_ROWS = 400; // janela recente varrida pela seleção gulosa
-const MAX_COMPLEMENT_QUERIES = 40; // teto de buscas por coluna descoberta (por Base)
-const MAX_STR = 200; // trunca strings longas na amostra
 
 const MANUAL_PATH = path.join(
   process.cwd(),
@@ -91,60 +86,6 @@ function coreTypeOf(f: (typeof CORE_FIELDS)[number]): string {
   if (f.isMoney) return "moeda";
   if (f.isNumeric) return "numero";
   return "texto";
-}
-
-function truncate(v: unknown): unknown {
-  if (typeof v === "string" && v.length > MAX_STR) {
-    return `${v.slice(0, MAX_STR)}…`;
-  }
-  return v;
-}
-
-// Amostra de UMA Base: janela recente + gulosa; colunas descobertas ganham 1
-// busca complementar cada e a seleção roda de novo sobre a união.
-async function sampleForBase(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  recordType: string,
-  refs: string[]
-): Promise<{ rows: SampleRecordLike[]; uncoveredRefs: string[] }> {
-  const { data: windowData } = await supabase
-    .from("records")
-    .select(RECORD_COLS)
-    .eq("record_type", recordType)
-    .eq("is_mock", false)
-    .order("source_created_at", { ascending: false, nullsFirst: false })
-    .limit(WINDOW_ROWS);
-  let pool = (windowData ?? []) as unknown as SampleRecordLike[];
-  let picked = selectCoverageSample(pool, refs, SAMPLE_TARGET);
-
-  const toComplement = picked.uncoveredRefs.slice(0, MAX_COMPLEMENT_QUERIES);
-  if (toComplement.length > 0 && pool.length > 0) {
-    const extras: SampleRecordLike[] = [];
-    for (const ref of toComplement) {
-      const col = ref.startsWith("custom:")
-        ? `custom_fields->>${ref.slice("custom:".length)}`
-        : ref;
-      const { data } = await supabase
-        .from("records")
-        .select(RECORD_COLS)
-        .eq("record_type", recordType)
-        .eq("is_mock", false)
-        .not(col, "is", null)
-        .order("source_created_at", { ascending: false, nullsFirst: false })
-        .limit(3);
-      for (const row of (data ?? []) as unknown as SampleRecordLike[]) {
-        if (isSampleValueFilled(sampleRefValue(row, ref))) {
-          extras.push(row);
-          break;
-        }
-      }
-    }
-    if (extras.length > 0) {
-      pool = [...pool, ...extras];
-      picked = selectCoverageSample(pool, refs, SAMPLE_TARGET);
-    }
-  }
-  return { rows: picked.rows, uncoveredRefs: picked.uncoveredRefs };
 }
 
 export async function buildImportPrompt(
@@ -290,7 +231,7 @@ export async function buildImportPrompt(
         } else if (ref === "operation_id") {
           out[ref] = opLabels.get(String(raw)) ?? "(nome não cadastrado)";
         } else {
-          out[ref] = truncate(raw);
+          out[ref] = truncateSampleValue(raw);
         }
       }
       return out;
