@@ -5,8 +5,11 @@
      actions void→ActionState (operações/responsáveis/metas/moedas/
      deleteWidget); ConfirmDialog padronizado nas exclusões desprotegidas;
      boundaries error/not-found (app + /s/[token]) e loading.tsx nas rotas
-     lentas; títulos de aba por página (template no layout (app)); botão de
-     menu acessível na sidebar desafixada. RPCs intocados. -->
+     lentas — no viewer público o skeleton é <Suspense> IN-PAGE (validação do
+     token antes do streaming preserva o STATUS 404 real do 404 uniforme;
+     loading.tsx de segmento responderia 200); títulos de aba por página
+     (template no layout (app)); botão de menu acessível na sidebar
+     desafixada. RPCs intocados. -->
 <!-- v1.38 (28/07/2026): Redesign da AGENDA (0111): célula com altura fixa por
      densidade + scroll por dia + ordem cronológica (lib/agenda/day-items.ts);
      tasks.due_time_end (hora final); agenda_notes (anotação do dia — post-it;
