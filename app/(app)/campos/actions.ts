@@ -325,8 +325,9 @@ function readForm(formData: FormData) {
   const writeBack = formData.get("write_back") === "on";
   const sortOrder = Number(formData.get("sort_order") ?? 0) || 0;
   const formula = parseFormula(String(formData.get("formula") ?? ""));
-  // Editor de fórmula: "builder" (botões, hidden `formula`) ou "text" (estilo
-  // Sheets, hidden `formula_text` — tokenizado no servidor com o catálogo).
+  // Editor de fórmula unificado (30/07/2026): envia SEMPRE "text" (o texto é
+  // tokenizado no servidor com o catálogo). "builder" é valor LEGADO — só
+  // chega de forms antigos em voo; nesse caso vale o hidden `formula` (JSON).
   const formulaMode = String(formData.get("formula_mode") ?? "builder");
   const formulaText = String(formData.get("formula_text") ?? "");
   const currencyCodeRaw = String(formData.get("currency_code") ?? "").trim().toUpperCase();

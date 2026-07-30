@@ -24,7 +24,9 @@ export type TokenizeResult =
   | { ok: true; formula: Formula }
   | { ok: false; error: string };
 
-const FUNC_NAMES: Record<string, FormulaFuncName> = {
+// Exportado para o autocomplete de funções (formula-assist.ts): digitar um
+// alias (ex.: "somase", "count") sugere a função canônica.
+export const FUNC_NAMES: Record<string, FormulaFuncName> = {
   se: "SE",
   e: "E",
   ou: "OU",

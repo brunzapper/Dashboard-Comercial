@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 2.0 | Data: 30/07/2026
 // Testes do FormulaEditor — a superfície ÚNICA de edição de fórmulas
-// (AGENTS.md). Invariantes: a troca Visual↔Texto NUNCA é destrutiva (texto com
-// erro BLOQUEIA a aba Visual e preserva o digitado), a linha de status usa as
-// MESMAS mensagens do servidor (validateFormulaForContext), excludeKeys
-// desabilita operando de ciclo SEM escondê-lo do catálogo de exibição, o modo
-// formulário emite o contrato formula/formula_text/formula_mode do FieldForm e
-// o onChange deduplica por assinatura (regressão v1.1 do loop de re-emissão).
-import { fireEvent, render, screen } from "@testing-library/react";
+// (AGENTS.md), agora UNIFICADA (só texto assistido; o modo visual de
+// chips/botões foi absorvido). Invariantes: fórmula com `source` abre
+// byte-idêntica e salva sem edição não muda; fórmula token-only é SERIALIZADA
+// com rótulo (ref crua quando o rótulo é duplicado — senão não re-tokeniza); a
+// linha de status usa as MESMAS mensagens do servidor (tokenizador +
+// validateFormulaForContext); o modo formulário emite o contrato
+// formula/formula_text/formula_mode do FieldForm com mode SEMPRE "text"; o
+// onChange deduplica por assinatura (regressão v1.1 do loop de re-emissão); a
+// assinatura viva destaca o argumento sob o caret; autocomplete ignora
+// acentos, fecha no Escape e substitui a ref INTEIRA no meio dela.
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FormulaEditor } from "@/components/formula/formula-editor";
@@ -23,9 +27,27 @@ const CATALOG: RefOption[] = [
 const ref = (r: string): FormulaToken => ({ kind: "field", ref: r });
 const hidden = (container: HTMLElement, name: string) =>
   container.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+const textbox = () =>
+  screen.getByRole("textbox", { name: "Fórmula (texto)" }) as HTMLTextAreaElement;
 
-describe("troca de view (nunca destrutiva)", () => {
-  it("fórmula com source abre no Texto e faz round-trip sem perder conteúdo", () => {
+// O autocomplete reposiciona o caret num requestAnimationFrame.
+async function flushRaf() {
+  await act(async () => {
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+  });
+}
+
+function typeText(value: string, caret?: number) {
+  const ta = textbox();
+  fireEvent.change(ta, { target: { value } });
+  const pos = caret ?? value.length;
+  ta.setSelectionRange(pos, pos);
+  fireEvent.click(ta); // sincroniza o caret interno
+  return ta;
+}
+
+describe("contrato de form (FieldForm)", () => {
+  it("fórmula com source abre byte-idêntica; hidden mode é sempre 'text'", () => {
     const initial: Formula = {
       tokens: [ref("value"), { kind: "op", op: "+" }, { kind: "const", value: 1 }],
       source: "[Valor] + 1",
@@ -33,38 +55,46 @@ describe("troca de view (nunca destrutiva)", () => {
     const { container } = render(
       <FormulaEditor context="record" catalog={CATALOG} initial={initial} formInputs />
     );
-    // Abriu no texto (preserva o autorado) e o hidden reflete o modo.
-    expect(screen.getByRole("textbox")).toHaveValue("[Valor] + 1");
+    expect(textbox()).toHaveValue("[Valor] + 1");
     expect(hidden(container, "formula_mode")).toHaveValue("text");
-
-    fireEvent.click(screen.getByRole("button", { name: "Visual" }));
-    expect(hidden(container, "formula_mode")).toHaveValue("builder");
+    expect(hidden(container, "formula_text")).toHaveValue("[Valor] + 1");
     expect(JSON.parse(hidden(container, "formula")!.value).tokens).toEqual(
       initial.tokens
     );
-
-    // Volta ao texto SEM regenerar (nenhuma edição visual): byte-idêntico.
-    fireEvent.click(screen.getByRole("button", { name: "Texto" }));
-    expect(hidden(container, "formula_text")).toHaveValue("[Valor] + 1");
   });
 
-  it("texto com erro BLOQUEIA a aba Visual e mantém o digitado", () => {
-    render(
+  it("fórmula token-only (legado do builder) é serializada e re-tokeniza igual", () => {
+    const initial: Formula = {
+      tokens: [ref("value"), { kind: "op", op: "*" }, { kind: "const", value: 2 }],
+    };
+    const { container } = render(
+      <FormulaEditor context="record" catalog={CATALOG} initial={initial} formInputs />
+    );
+    expect(hidden(container, "formula_text")).toHaveValue("[Valor] * 2");
+    expect(JSON.parse(hidden(container, "formula")!.value).tokens).toEqual(
+      initial.tokens
+    );
+  });
+
+  it("rótulo DUPLICADO serializa a ref crua (senão não re-tokenizaria)", () => {
+    const dupCatalog: RefOption[] = [
+      { ref: "value", label: "Valor" },
+      { ref: "custom:valor2", label: "Valor" },
+    ];
+    const { container } = render(
       <FormulaEditor
         context="record"
-        catalog={CATALOG}
-        initial={{ tokens: [], source: "[Coluna Sumida] +" }}
+        catalog={dupCatalog}
+        initial={{ tokens: [ref("custom:valor2")] }}
+        formInputs
       />
     );
-    const visualTab = screen.getByRole("button", { name: "Visual" });
-    expect(visualTab).toBeDisabled();
-    fireEvent.click(visualTab);
-    // Continua no texto, com o conteúdo intacto.
-    expect(screen.getByDisplayValue("[Coluna Sumida] +")).toBeInTheDocument();
+    expect(hidden(container, "formula_text")).toHaveValue("[custom:valor2]");
+    expect(screen.getByText("Fórmula válida")).toBeInTheDocument();
   });
 });
 
-describe("linha de status (fiação com validateFormulaForContext)", () => {
+describe("linha de status (fiação com tokenizador + validateFormulaForContext)", () => {
   it("SOMASE em contexto por-registro exibe a mensagem dedicada do servidor", () => {
     const initial: Formula = {
       tokens: [
@@ -95,7 +125,7 @@ describe("linha de status (fiação com validateFormulaForContext)", () => {
     expect(screen.getByText("Fórmula válida")).toBeInTheDocument();
   });
 
-  it("excludeKeys tira a ref do conjunto de validação (ciclo → coluna inválida)", () => {
+  it("excludeKeys tira a ref do conjunto de validação (ciclo → coluna desconhecida)", () => {
     render(
       <FormulaEditor
         context="record"
@@ -104,8 +134,10 @@ describe("linha de status (fiação com validateFormulaForContext)", () => {
         excludeKeys={new Set(["licencas"])}
       />
     );
+    // A serialização usa o rótulo do catálogo de EXIBIÇÃO; a tokenização usa o
+    // de VALIDAÇÃO (sem a ref de ciclo) — mesma mensagem que o servidor daria.
     expect(
-      screen.getByText("Coluna inválida na fórmula: custom:licencas")
+      screen.getByText("Coluna desconhecida: [Licenças]")
     ).toBeInTheDocument();
   });
 });
@@ -128,10 +160,13 @@ describe("onChange controlado (dedupe por assinatura)", () => {
       />
     );
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith({ tokens: initial.tokens }, { ok: true });
+    expect(onChange).toHaveBeenCalledWith(
+      { tokens: initial.tokens, source: "[Valor]" },
+      { ok: true }
+    );
   });
 
-  it("edição real (inserir operador) reemite com o novo conteúdo", () => {
+  it("edição real (digitar) reemite com o novo conteúdo", () => {
     const onChange = vi.fn();
     render(
       <FormulaEditor
@@ -141,10 +176,86 @@ describe("onChange controlado (dedupe por assinatura)", () => {
         onChange={onChange}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    typeText("[Valor] + 1");
     expect(onChange).toHaveBeenCalledTimes(2);
     const [formula, status] = onChange.mock.calls[1];
-    expect(formula.tokens).toEqual([ref("value"), { kind: "op", op: "+" }]);
-    expect(status.ok).toBe(false); // "[Valor] +" é incompleta
+    expect(formula.tokens).toEqual([
+      ref("value"),
+      { kind: "op", op: "+" },
+      { kind: "const", value: 1 },
+    ]);
+    expect(status.ok).toBe(true);
+  });
+});
+
+describe("assinatura viva", () => {
+  it("destaca o argumento sob o caret", () => {
+    render(<FormulaEditor context="aggregate" catalog={CATALOG} />);
+    typeText("SOMASE([Valor]; ");
+    expect(screen.getByText("Ex.:", { exact: false })).toBeInTheDocument();
+    // Assinatura exibida com o 2º parâmetro (condição) ativo.
+    const active = screen.getByText("condição; …");
+    expect(active.className).toContain("font-semibold");
+    expect(
+      screen.getByText("Soma o campo apenas nos registros que atendem à condição.")
+    ).toBeInTheDocument();
+  });
+
+  it("fora de chamada não exibe painel de assinatura", () => {
+    render(<FormulaEditor context="aggregate" catalog={CATALOG} />);
+    typeText("[Valor] + 1");
+    expect(screen.queryByText("Ex.:", { exact: false })).not.toBeInTheDocument();
+  });
+});
+
+describe("autocomplete de colunas", () => {
+  it("busca ignora acentos e a inserção substitui o fragmento", async () => {
+    render(<FormulaEditor context="record" catalog={CATALOG} />);
+    typeText("[licencas");
+    const option = screen.getByRole("option", { name: /Licenças/ });
+    fireEvent.mouseDown(option);
+    await flushRaf();
+    expect(textbox()).toHaveValue("[Licenças]");
+  });
+
+  it("inserção no MEIO de uma ref substitui a ref inteira (sem `]` órfão)", async () => {
+    render(<FormulaEditor context="record" catalog={CATALOG} />);
+    typeText("[Valor] + 1", 1); // caret logo após o `[` de "[Valor]"
+    const option = screen.getByRole("option", { name: /Licenças/ });
+    fireEvent.mouseDown(option);
+    await flushRaf();
+    expect(textbox()).toHaveValue("[Licenças] + 1");
+  });
+
+  it("Escape fecha a lista e Enter volta a inserir quebra de linha", () => {
+    render(<FormulaEditor context="record" catalog={CATALOG} />);
+    const ta = typeText("[Val");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+    fireEvent.keyDown(ta, { key: "Escape" });
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    // Sem lista aberta, Enter NÃO é interceptado (preventDefault não chamado).
+    const enter = fireEvent.keyDown(ta, { key: "Enter" });
+    expect(enter).toBe(true); // não-cancelado = quebra de linha nativa
+  });
+});
+
+describe("autocomplete de funções e paleta", () => {
+  it("digitar letras sugere funções (alias inglês incluso)", async () => {
+    render(<FormulaEditor context="aggregate" catalog={CATALOG} />);
+    const ta = typeText("cont");
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    fireEvent.keyDown(ta, { key: "Enter" });
+    await flushRaf();
+    // Primeira sugestão: CONT.SE — inserida como chamada com caret dentro.
+    expect(textbox().value).toMatch(/^CONT\./);
+    expect(textbox().value).toContain("()");
+  });
+
+  it("contexto por-registro não sugere aggOnly", () => {
+    render(<FormulaEditor context="record" catalog={CATALOG} />);
+    typeText("somase");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 });

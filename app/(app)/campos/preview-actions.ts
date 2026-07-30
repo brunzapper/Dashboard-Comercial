@@ -41,8 +41,9 @@ const PREVIEW_ROWS = 5;
 const PREVIEW_CANDIDATES = 30;
 
 export interface RecordPreviewInput {
-  // Fórmula candidata: tokens (JSON, modo visual) OU texto (modo texto) —
-  // mesmo contrato do submit do FieldForm.
+  // Fórmula candidata: tokens (JSON, mode "builder" = usar os tokens — é o
+  // que a prévia do editor envia, já tokenizados) OU texto (mode "text",
+  // tokenizado aqui) — mesmo contrato do submit do FieldForm.
   formulaJson?: string;
   formulaText?: string;
   formulaMode: "builder" | "text";
