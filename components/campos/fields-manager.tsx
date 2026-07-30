@@ -38,11 +38,11 @@ import {
 } from "@/components/ui/table";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { DATA_TYPE_LABELS, type FieldDefinition } from "@/lib/records/types";
@@ -504,7 +504,11 @@ export function FieldsManager({
       )}
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:field-form"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>{editing ? "Editar campo" : "Novo campo"}</SheetTitle>
             <SheetDescription>
@@ -526,7 +530,7 @@ export function FieldsManager({
               onDone={() => setOpen(false)}
             />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </div>
   );

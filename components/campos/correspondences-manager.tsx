@@ -23,11 +23,11 @@ import {
 } from "@/components/ui/table";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { DATA_TYPE_LABELS, type DataType } from "@/lib/records/types";
 import { sourceLabel, subSourcesOf, type SourceKey } from "@/lib/sources";
 import {
@@ -302,7 +302,11 @@ export function CorrespondencesManager({
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:correspondences"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>
               {editing ? "Editar correspondência" : "Nova correspondência"}
@@ -320,7 +324,7 @@ export function CorrespondencesManager({
               onDone={() => setOpen(false)}
             />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </div>
   );

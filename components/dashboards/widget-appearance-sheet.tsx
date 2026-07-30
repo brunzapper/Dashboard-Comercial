@@ -49,11 +49,11 @@ import {
 } from "@/components/ui/select";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ColorField } from "./appearance-controls";
 import { KanbanAppearanceSection } from "@/components/kanban/kanban-appearance-section";
 import { AgendaAppearanceSection } from "@/components/agenda/agenda-appearance-section";
@@ -322,7 +322,11 @@ export function WidgetAppearanceSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="bg-muted overflow-y-auto sm:max-w-md">
+      <ResizableSheetContent
+        storageKey="panel-w:widget-appearance"
+        defaultWidth={448}
+        className="bg-muted overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>Aparência</SheetTitle>
           <SheetDescription>
@@ -1163,7 +1167,7 @@ export function WidgetAppearanceSheet({
             {pending ? "Salvando…" : "Aplicar"}
           </Button>
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

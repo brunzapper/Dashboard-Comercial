@@ -21,11 +21,11 @@ import {
 } from "@/components/ui/select";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import {
   getBoardAccessState,
@@ -116,7 +116,11 @@ export function BoardAccessDialog({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-sm">
+      <ResizableSheetContent
+        storageKey="panel-w:board-access"
+        defaultWidth={384}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>Acesso</SheetTitle>
           <SheetDescription>
@@ -241,7 +245,7 @@ export function BoardAccessDialog({
             </>
           ) : null}
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

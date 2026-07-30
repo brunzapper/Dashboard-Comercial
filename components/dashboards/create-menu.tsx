@@ -20,11 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { fieldAppliesToSource, type SourceDef } from "@/lib/sources";
 import type { FieldDefinition } from "@/lib/records/types";
@@ -283,7 +283,11 @@ export function CreateMenu({
         open={open === "dashboard"}
         onOpenChange={(v) => setOpen(v ? "dashboard" : null)}
       >
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:create-dashboard"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Novo dashboard</SheetTitle>
             <SheetDescription>
@@ -293,14 +297,18 @@ export function CreateMenu({
           <div className="px-4 pb-4">
             <NewDashboardForm />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       <Sheet
         open={open === "kanban"}
         onOpenChange={(v) => setOpen(v ? "kanban" : null)}
       >
-        <SheetContent className="overflow-y-auto">
+        <ResizableSheetContent
+          storageKey="panel-w:create-kanban"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Novo kanban</SheetTitle>
             <SheetDescription>
@@ -311,7 +319,7 @@ export function CreateMenu({
           <div className="px-4 pb-4">
             <NewBoardForm sources={sources} fields={fields} />
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </>
   );

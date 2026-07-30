@@ -144,12 +144,12 @@ import { useSources } from "@/components/sources-context";
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   DATE_TRANSFORMS,
   fieldLabel,
@@ -365,46 +365,6 @@ export function WidgetBuilder({
       </DropdownMenu>
     );
   };
-
-  // Largura do painel de config, redimensionável arrastando a borda esquerda
-  // (como as colunas/linhas das tabelas). Persistida no localStorage (chrome do
-  // painel, não dado do widget). Default ~ sm:max-w-lg (512px).
-  const PANEL_KEY = "widget-builder-width";
-  const [panelWidth, setPanelWidth] = useState(512);
-  useEffect(() => {
-    const saved = Number(
-      typeof window !== "undefined" ? window.localStorage.getItem(PANEL_KEY) : ""
-    );
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (Number.isFinite(saved) && saved >= 360) setPanelWidth(saved);
-  }, []);
-  const resizeRef = useRef<{ x: number; w: number } | null>(null);
-  function onPanelResizeDown(e: React.PointerEvent) {
-    e.preventDefault();
-    resizeRef.current = { x: e.clientX, w: panelWidth };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPanelResizeMove(e: React.PointerEvent) {
-    const d = resizeRef.current;
-    if (!d) return;
-    // Painel abre à direita: arrastar para a ESQUERDA (delta negativo) aumenta.
-    const next = Math.min(
-      typeof window !== "undefined" ? window.innerWidth * 0.95 : 1200,
-      Math.max(360, Math.round(d.w - (e.clientX - d.x)))
-    );
-    setPanelWidth(next);
-  }
-  function onPanelResizeUp(e: React.PointerEvent) {
-    if (!resizeRef.current) return;
-    resizeRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* noop */
-    }
-    if (typeof window !== "undefined")
-      window.localStorage.setItem(PANEL_KEY, String(panelWidth));
-  }
 
   const [title, setTitle] = useState(widget?.title ?? "");
   const [visualType, setVisualType] = useState<VisualType>(
@@ -2070,22 +2030,12 @@ export function WidgetBuilder({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       {trigger ? <SheetTrigger asChild>{trigger}</SheetTrigger> : null}
-      <SheetContent
-        className="bg-muted overflow-y-auto sm:max-w-none"
-        style={{ width: panelWidth, maxWidth: "95vw" }}
+      <ResizableSheetContent
+        storageKey="widget-builder-width"
+        defaultWidth={512}
+        minWidth={360}
+        className="bg-muted overflow-y-auto"
       >
-        {/* Alça de redimensionamento (borda esquerda do painel). */}
-        <span
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Redimensionar painel"
-          title="Arraste para redimensionar o painel"
-          onPointerDown={onPanelResizeDown}
-          onPointerMove={onPanelResizeMove}
-          onPointerUp={onPanelResizeUp}
-          onPointerCancel={onPanelResizeUp}
-          className="hover:bg-primary/40 absolute top-0 left-0 z-20 h-full w-1.5 cursor-col-resize"
-        />
         <SheetHeader>
           <SheetTitle>{widget ? "Editar widget" : "Novo widget"}</SheetTitle>
           <SheetDescription>
@@ -3868,7 +3818,7 @@ export function WidgetBuilder({
                 : "Salvar widget"}
           </Button>
         </div>
-      </SheetContent>
+      </ResizableSheetContent>
 
       {/* Criar/CONFIGURAR campo sem sair do editor: reusa o FieldForm de /campos;
           ao salvar, router.refresh() recomputa `available`/`fields`. Em modo edição
@@ -3884,7 +3834,11 @@ export function WidgetBuilder({
             }
           }}
         >
-          <SheetContent className="overflow-y-auto">
+          <ResizableSheetContent
+            storageKey="panel-w:field-form"
+            defaultWidth={448}
+            className="overflow-y-auto"
+          >
             <SheetHeader>
               <SheetTitle>
                 {editingField ? "Configurar campo" : "Novo campo"}
@@ -3956,7 +3910,7 @@ export function WidgetBuilder({
                 }}
               />
             </div>
-          </SheetContent>
+          </ResizableSheetContent>
         </Sheet>
       ) : null}
     </Sheet>

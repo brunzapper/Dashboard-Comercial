@@ -19,12 +19,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
@@ -415,7 +415,11 @@ export function AutomationsSheet({
           Automações
         </Button>
       </SheetTrigger>
-      <SheetContent className="flex flex-col gap-4 overflow-y-auto sm:max-w-xl">
+      <ResizableSheetContent
+        storageKey="panel-w:kanban-automations"
+        defaultWidth={576}
+        className="flex flex-col gap-4 overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>Automações do quadro</SheetTitle>
           <SheetDescription>
@@ -931,7 +935,7 @@ export function AutomationsSheet({
             });
           }}
         />
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

@@ -25,10 +25,10 @@ import {
 } from "@/components/ui/table";
 import {
   Sheet,
-  SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { notifyOnError } from "@/lib/feedback/notify";
 import type { OptionItem } from "@/lib/records/types";
 import {
@@ -224,7 +224,10 @@ export function ResponsiblesManager({
       </Table>
 
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <SheetContent>
+        <ResizableSheetContent
+          storageKey="panel-w:responsible-ops"
+          defaultWidth={448}
+        >
           <SheetHeader>
             <SheetTitle>Operações de {editing?.display_name}</SheetTitle>
           </SheetHeader>
@@ -296,7 +299,7 @@ export function ResponsiblesManager({
               </Button>
             </div>
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
       </div>
     </div>

@@ -22,11 +22,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import type { OptionItem } from "@/lib/records/types";
 import type { TaskRow } from "@/lib/tasks/types";
 import {
@@ -342,7 +342,11 @@ export function TaskSheet({
           {triggerLabel}
         </Button>
       )}
-      <SheetContent className="overflow-y-auto sm:max-w-md">
+      <ResizableSheetContent
+        storageKey="panel-w:task"
+        defaultWidth={448}
+        className="overflow-y-auto"
+      >
         <SheetHeader>
           <SheetTitle>
             {isEdit ? "Editar tarefa" : isSub ? "Nova subtarefa" : "Nova tarefa"}
@@ -365,7 +369,7 @@ export function TaskSheet({
             if (onDone) onDone();
           }}
         />
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 }

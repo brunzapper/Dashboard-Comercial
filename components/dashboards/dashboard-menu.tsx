@@ -38,11 +38,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet,
-  SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import {
   Select,
   SelectContent,
@@ -251,7 +251,11 @@ export function DashboardMenu({
       {/* Editor de fundo num Sheet (painel lateral) — robusto, não some ao
           mover o mouse como o Popover ancorado anterior. */}
       <Sheet open={bgOpen} onOpenChange={setBgOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-sm">
+        <ResizableSheetContent
+          storageKey="panel-w:dashboard-appearance"
+          defaultWidth={384}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Aparência do dashboard</SheetTitle>
             <SheetDescription>Fundo da área do dashboard.</SheetDescription>
@@ -369,7 +373,7 @@ export function DashboardMenu({
               Aplicar
             </Button>
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       {/* Bases: escopo de bases do board (settings.sourceScope). */}
@@ -391,7 +395,11 @@ export function DashboardMenu({
       {/* Snapshots: links públicos congelados de uma aba (sem login). O painel
           carrega a lista/opções ao abrir; o link aparece só na criação. */}
       <Sheet open={snapshotsOpen} onOpenChange={setSnapshotsOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-md">
+        <ResizableSheetContent
+          storageKey="panel-w:snapshots"
+          defaultWidth={448}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Snapshots</SheetTitle>
             <SheetDescription>
@@ -402,13 +410,17 @@ export function DashboardMenu({
           {snapshotsOpen ? (
             <SnapshotsPanel dashboardId={dashboardId} period={snapshotPeriod} />
           ) : null}
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
 
       {/* Área de trabalho: densidade do grid (colunas + altura da linha). A
           largura/altura da área é ajustada arrastando a alça no modo edição. */}
       <Sheet open={canvasOpen} onOpenChange={setCanvasOpen}>
-        <SheetContent className="overflow-y-auto sm:max-w-sm">
+        <ResizableSheetContent
+          storageKey="panel-w:dashboard-workspace"
+          defaultWidth={384}
+          className="overflow-y-auto"
+        >
           <SheetHeader>
             <SheetTitle>Área de trabalho</SheetTitle>
             <SheetDescription>
@@ -466,7 +478,7 @@ export function DashboardMenu({
               Aplicar
             </Button>
           </div>
-        </SheetContent>
+        </ResizableSheetContent>
       </Sheet>
     </>
   );
