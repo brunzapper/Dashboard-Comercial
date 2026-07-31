@@ -1,12 +1,16 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
 // Painel "Automações" do kanban (modo registros, sem bucket de data): lista de
 // regras (ordem = ordem de avaliação; primeira que casa vence), editor de
 // condições das 4 famílias — Campo do registro / Registros conectados /
-// Tarefas / Tempo — mescláveis em E na MESMA regra, ação "Mover para a
-// coluna" e "Executar agora" (fora do tick). Status por regra (última
-// execução / movidos / erro) vem do bookkeeping do engine. Campos via
-// getAutomationFieldOptions (buildAvailableFields + toFieldOptions — nunca
-// listas paralelas). Feedback inline (role="status"/"alert" — sem toasts).
+// Tarefas / Tempo — mescláveis em E na MESMA regra, ações "Mover para a
+// coluna" e "Definir campo" e "Executar agora" (fora do tick). Status por
+// regra (última execução / ações / erro) vem do bookkeeping do engine. Campos
+// via getAutomationFieldOptions (buildAvailableFields + toFieldOptions —
+// nunca listas paralelas; alvos do "Definir campo" em settableFields, mesma
+// régua de setFieldTargetError). Feedback inline (role="status"/"alert").
+// v1.2 (31/07/2026): ação set_field — seletor de ação, picker de campo
+//   gravável e editor de valor por tipo (seleção usa o picker de rótulos;
+//   booleano vira Sim/Não; número vira input numérico).
 // v1.1 (31/07/2026): valor de condição AMIGÁVEL — responsável/operação/etapa e
 //   campos seleção ganham picker de rótulos (FilterValuePicker). A avaliação
 //   compara a coluna CRUA (evaluate.ts, fora do pipeline do engine — sem
@@ -134,8 +138,21 @@ interface RuleDraft {
   name: string;
   enabled: boolean;
   conds: CondDraft[];
+  actionType: "move_to_column" | "set_field";
   targetKey: string;
+  setField: string;
+  setValue: string;
 }
+
+const ACTION_OPTIONS: ComboboxOption[] = [
+  { value: "move_to_column", label: "Mover para a coluna" },
+  { value: "set_field", label: "Definir campo" },
+];
+
+const BOOL_OPTIONS: ComboboxOption[] = [
+  { value: "true", label: "Sim" },
+  { value: "false", label: "Não" },
+];
 
 // Serializa rascunho → WidgetFilter. `in` em ARRAY (picker) passa intacto
 // (valor com vírgula sobrevive); string divide por vírgula (digitação manual).
@@ -201,7 +218,20 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
       });
     }
   }
-  if (conditions.length === 0 || !draft.targetKey) return null;
+  if (conditions.length === 0) return null;
+  if (draft.actionType === "set_field") {
+    if (!draft.setField || draft.setValue.trim() === "") return null;
+    return {
+      v: 1,
+      conditions,
+      action: {
+        type: "set_field",
+        field: draft.setField,
+        value: draft.setValue,
+      },
+    };
+  }
+  if (!draft.targetKey) return null;
   return {
     v: 1,
     conditions,
@@ -252,12 +282,16 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
     }
     return d;
   });
+  const action = row.rule.action;
   return {
     id: row.id,
     name: row.name,
     enabled: row.enabled,
     conds,
-    targetKey: row.rule.action.targetKey,
+    actionType: action.type,
+    targetKey: action.type === "move_to_column" ? action.targetKey : "",
+    setField: action.type === "set_field" ? action.field : "",
+    setValue: action.type === "set_field" ? action.value : "",
   };
 }
 
@@ -362,11 +396,13 @@ export function AutomationsSheet({
     if (!open) return;
     reload();
     if (!catalog) {
-      void getAutomationFieldOptions(source).then((res) => {
+      // `owner` resolve o allocationFieldKey (filtra o campo espelho do
+      // picker de "Definir campo").
+      void getAutomationFieldOptions(source, owner).then((res) => {
         if (res.ok && res.catalog) setCatalog(res.catalog);
       });
     }
-  }, [open, reload, catalog, source]);
+  }, [open, reload, catalog, source, owner]);
 
   const fieldOptions = (catalog?.fields ?? []) as ComboboxOption[];
   // "Desde a última alteração de…": só refs com carimbo em field_modified_at
@@ -392,7 +428,7 @@ export function AutomationsSheet({
     if (!rule) {
       setMessage({
         ok: false,
-        text: "Regra incompleta: confira as condições e a coluna de destino.",
+        text: "Regra incompleta: confira as condições e a ação (coluna de destino ou campo + valor).",
       });
       return;
     }
@@ -491,7 +527,7 @@ export function AutomationsSheet({
           <SheetDescription>
             Regras são avaliadas em ordem — a primeira que casar vence. Rodam
             automaticamente (a cada minuto e após cada Sync) e movem cards para
-            a coluna configurada.
+            a coluna configurada ou definem um campo do registro.
           </SheetDescription>
         </SheetHeader>
 
@@ -515,7 +551,10 @@ export function AutomationsSheet({
                 name: "",
                 enabled: true,
                 conds: [emptyCond()],
+                actionType: "move_to_column",
                 targetKey: "",
+                setField: "",
+                setValue: "",
               })
             }
             disabled={pending || draft != null}
@@ -599,15 +638,37 @@ export function AutomationsSheet({
                   </Button>
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">
-                  {row.rule.conditions.length} condição(ões) → mover para{" "}
-                  <span className="font-medium">
-                    {targetOptions.find(
-                      (o) => o.value === row.rule.action.targetKey
-                    )?.label ?? row.rule.action.targetKey}
-                  </span>
+                  {row.rule.conditions.length} condição(ões) →{" "}
+                  {row.rule.action.type === "move_to_column" ? (
+                    <>
+                      mover para{" "}
+                      <span className="font-medium">
+                        {targetOptions.find(
+                          (o) =>
+                            row.rule.action.type === "move_to_column" &&
+                            o.value === row.rule.action.targetKey
+                        )?.label ??
+                          (row.rule.action.type === "move_to_column"
+                            ? row.rule.action.targetKey
+                            : "")}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      definir{" "}
+                      <span className="font-medium">
+                        {catalog?.settableFields.find(
+                          (o) =>
+                            row.rule.action.type === "set_field" &&
+                            o.value === row.rule.action.field
+                        )?.cleanLabel ?? row.rule.action.field}
+                      </span>{" "}
+                      = {row.rule.action.value}
+                    </>
+                  )}
                   {" · "}Última execução: {fmtWhen(row.last_run_at)}
                   {row.last_run_at != null
-                    ? ` · moveu ${row.last_moved_count} card(s)`
+                    ? ` · ${row.last_moved_count} ação(ões)`
                     : ""}
                 </p>
                 {row.last_error ? (
@@ -991,17 +1052,115 @@ export function AutomationsSheet({
               + Adicionar condição
             </Button>
 
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Então: mover para a coluna</Label>
-              <Combobox
-                options={targetOptions}
-                value={draft.targetKey}
-                onValueChange={(v) =>
-                  setDraft((d) => (d ? { ...d, targetKey: v } : d))
-                }
-                placeholder="Coluna de destino"
-                aria-label="Coluna de destino"
-              />
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex min-w-44 flex-col gap-1">
+                <Label className="text-xs">Então</Label>
+                <Combobox
+                  options={ACTION_OPTIONS}
+                  value={draft.actionType}
+                  onValueChange={(v) =>
+                    setDraft((d) =>
+                      d ? { ...d, actionType: v as RuleDraft["actionType"] } : d
+                    )
+                  }
+                  searchable={false}
+                  aria-label="Ação da regra"
+                />
+              </div>
+              {draft.actionType === "move_to_column" ? (
+                <div className="flex min-w-48 flex-1 flex-col gap-1">
+                  <Label className="text-xs">Coluna de destino</Label>
+                  <Combobox
+                    options={targetOptions}
+                    value={draft.targetKey}
+                    onValueChange={(v) =>
+                      setDraft((d) => (d ? { ...d, targetKey: v } : d))
+                    }
+                    placeholder="Coluna de destino"
+                    aria-label="Coluna de destino"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="flex min-w-48 flex-1 flex-col gap-1">
+                    <Label className="text-xs">Campo</Label>
+                    <Combobox
+                      options={
+                        (catalog?.settableFields ?? []) as ComboboxOption[]
+                      }
+                      value={draft.setField}
+                      onValueChange={(v) =>
+                        setDraft((d) =>
+                          d ? { ...d, setField: v, setValue: "" } : d
+                        )
+                      }
+                      placeholder="Campo a gravar"
+                      aria-label="Campo a gravar"
+                    />
+                  </div>
+                  <div className="flex min-w-40 flex-1 flex-col gap-1">
+                    <Label className="text-xs">Valor</Label>
+                    {(() => {
+                      if (catalog?.booleanFields.includes(draft.setField)) {
+                        return (
+                          <Combobox
+                            options={BOOL_OPTIONS}
+                            value={draft.setValue}
+                            onValueChange={(v) =>
+                              setDraft((d) => (d ? { ...d, setValue: v } : d))
+                            }
+                            searchable={false}
+                            aria-label="Valor a gravar"
+                          />
+                        );
+                      }
+                      const vs = autoFilterValueSource(
+                        draft.setField,
+                        source,
+                        catalog?.selectOptionsByField
+                      );
+                      if (vs) {
+                        return (
+                          <FilterValuePicker
+                            source={vs}
+                            multi={false}
+                            value={draft.setValue}
+                            onChange={(value) =>
+                              setDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      setValue: Array.isArray(value)
+                                        ? (value[0] ?? "")
+                                        : value,
+                                    }
+                                  : d
+                              )
+                            }
+                            ariaLabel="Valor a gravar"
+                          />
+                        );
+                      }
+                      return (
+                        <Input
+                          type={
+                            catalog?.numericFields.includes(draft.setField)
+                              ? "number"
+                              : "text"
+                          }
+                          value={draft.setValue}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, setValue: e.target.value } : d
+                            )
+                          }
+                          placeholder="valor"
+                        />
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

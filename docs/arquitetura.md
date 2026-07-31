@@ -1,4 +1,15 @@
-<!-- Versão: 1.49 | Data: 31/07/2026 -->
+<!-- Versão: 1.50 | Data: 31/07/2026 -->
+<!-- v1.50 (31/07/2026): (a) §4.17 + invariante 25 — assistente "Atualizar com
+     IA" (contrato registros-update v1): atualização em MASSA por filtros +
+     alterações; prévia server-side OBRIGATÓRIA via runRecordListWindow
+     (contagem exata + amostra; IA nunca emite ids; sub-fontes aceitas), apply
+     re-resolve ids e escreve SÓ pelo novo choke point updateRecordValuesBulk
+     (client RLS; teto 200 = MAX_AI_UPDATE_RECORDS; mocks pulados; sync-field
+     local-only); ops de filtro = FILTER_OPS estrito. (b) §4.15 + invariante
+     23 — ação set_field nas automações do kanban: idempotente no snapshot
+     (decideActions), alvos proibidos por setFieldTargetError (avaliação +
+     save + picker), executor único executeFieldWrites (moves + sets), teto
+     único MAX_ACTIONS_PER_RUN. RPCs intocados; sem migração. -->
 <!-- v1.49 (31/07/2026): recursos SOB DEMANDA por org (0114) — org_features
      (linha por org; escrita service-role-only) + lib/config/org-features
      (parse fail-closed) + AREA_FEATURES em access.ts (feature-off vence até
@@ -2164,8 +2175,25 @@ direção, com filtros sobre o conectado — "parceiro com ≥ N leads ganhos"),
 tarefas do card (abertas/atrasadas) e tempo em dias de calendário (desde
 criação / última alteração de campo via `field_modified_at` / entrada na
 coluna Personalizar via `kanban_placements.updated_at`). Regras em ordem
-(`position`): a PRIMEIRA que casa vence por card; ação v1 =
-`move_to_column` (união extensível).
+(`position`): a PRIMEIRA que casa vence por card; ações =
+`move_to_column` e `set_field` (31/07/2026 — união extensível).
+
+**Ação `set_field` (31/07/2026):** grava um valor FIXO num campo do registro
+("toda reunião com fonte X recebe SDR Y" como regra contínua, valendo p/
+registros futuros). Parse fail-closed valida SÓ a estrutura (`field`/`value`
+não-vazios); o ALVO é validado na AVALIAÇÃO por `setFieldTargetError`
+(`evaluate.ts` — a régua ÚNICA: campo fora do catálogo, data, calculado,
+relação, `match:`/`unified:`, coluna core fora de `EDITABLE_CORE_COLUMNS` e o
+campo-espelho da alocação `allocationFieldKey` — invariante 24 — viram regra
+INERTE + `last_error`; o catálogo pode mudar DEPOIS da regra criada), com a
+MESMA validação no save (`saveAutomation`) p/ mensagem imediata e no picker
+da UI (`settableFields` do `getAutomationFieldOptions` — deriva de
+`buildAvailableFields`, nunca lista paralela). IDEMPOTENTE por desenho: o
+avaliador compara o valor ATUAL no snapshot da rodada (`recordRawValue`,
+régua string do `updateRecord` — null ≡ '') e valor igual consome o card SEM
+emitir escrita — zero churn de audit/webhook no tick por minuto. Valor
+booleano/numérico é coerido no executor; campo de DATA nunca é alvo (não
+idempotente — mesma razão do bucket de data).
 
 Execução 100% no ENGINE (RPCs de widget intocados), com SERVICE ROLE e escopo
 EXPLÍCITO de org em toda consulta (`opts.orgId` do `runRecordList` — v2.1 do
@@ -2173,15 +2201,19 @@ record-list): `runBoardAutomations` (`lib/kanban/automations/engine.ts`) reusa
 `runKanban` (period null — a barra de período é filtro de VISÃO; resolução de
 colunas/placements/`__match` de graça), monta os fatos que as regras pedem
 (gates — tasks/fmod/placements/`countRelatedBySource` só quando usados),
-decide no avaliador PURO (`evaluate.ts` — decisões sobre o snapshot original:
-sem ping-pong intra-rodada; mock nunca move; alvo overflow/coluna sumida =
-erro da regra, nunca silêncio) e executa em `move.ts`: Personalizar = upsert
-de `kanban_placements` (dado da visão); coluna por VALOR = escrita do campo
-com carimbo `field_modified_at` + `locally_modified_at` (protege da Sync),
+decide no avaliador PURO (`evaluate.ts`/`decideActions` — decisões sobre o
+snapshot original: sem ping-pong intra-rodada; mock nunca move nem recebe
+escrita; alvo overflow/coluna sumida/campo proibido = erro da regra, nunca
+silêncio) e executa em `move.ts`: Personalizar = upsert
+de `kanban_placements` (dado da visão); escrita de CAMPO (move por valor E
+`set_field`) SÓ pelo executor único `executeFieldWrites` — carimbo
+`field_modified_at` + `locally_modified_at` (protege da Sync),
 efeitos em LOTE (um `recalcFormulaFieldsForRecords`, um insert de `audit_log`
 origin `'automation'`/user null, write-back opcional espelhando o gating do
-`updateRecord`, webhook `record.updated` por registro). Teto
-`MAX_MOVES_PER_RUN` (200)/quadro/rodada. Fora do escopo v1 (falham ALTO no
+`updateRecord`, webhook `record.updated` por registro). Teto ÚNICO
+`MAX_ACTIONS_PER_RUN` (200 — moves + sets somam)/quadro/rodada;
+`last_moved_count` conta AÇÕES (a UI rotula "ações"). Fora do escopo v1
+(falham ALTO no
 `last_error`): modo tarefas e colunas por BUCKET DE DATA (mover reescreveria
 uma data real relativa a "hoje" a cada tick — não idempotente).
 
@@ -2308,7 +2340,7 @@ Fiscalizado por `lib/kanban/allocation-field.test.ts`. Ver invariante 24.
 
 ### 4.17 Assistentes de IA de registros, campos e operações (30/07/2026)
 
-Três superfícies novas sobre a MESMA fundação de IA dos dashboards (config por
+Superfícies sobre a MESMA fundação de IA dos dashboards (config por
 org 0096 → `loadOrgAiConfig`; laço de autocorreção compartilhado em
 `lib/ai/json-loop.ts` — 3 tentativas, 120s/chamada, budget 240s,
 `AiTruncatedError` aborta; pages com `maxDuration = 300`). Princípio comum, o
@@ -2343,7 +2375,37 @@ semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
   manual, calc inline, audit `origin:'app'`, webhook, auto-operações);
   resultado POR ITEM (falha parcial não desfaz) + um
   `recalcFormulaFieldsForRecords(ids)` p/ assentar operandos `match:`.
-- **Sugestão de mapeamento de CSV** (wizard `/registros/importar`, etapa 3,
+- **Atualizar registros com IA (31/07/2026)** (`/registros` → botão
+  "Atualizar com IA", QUALQUER base/sub visível p/ quem tem
+  `edit_record_values` — o botão não depende de `manual_entry` nem de IA
+  configurada, pois o fluxo copiar-prompt → colar-JSON funciona sem). Contrato
+  `registros-update` v1 (`lib/import/records/update-{types,validate,
+  instructions}.ts`; core `lib/ai/update-records.ts`; sheet
+  `components/registros/ai-update-sheet.tsx` + wrappers em
+  `app/(app)/registros/ai-update-actions.ts`): UMA operação por resposta —
+  `filtros` (WidgetFilter[], ≥1 obrigatório; "todos" é recusado) +
+  `alteracoes` ({chave: valor}; `null` LIMPA o campo, `title` nunca). A IA
+  NUNCA emite ids: a PRÉVIA server-side obrigatória resolve os registros que
+  casam via `runRecordListWindow` com config sintética (`rowMode: "records"`,
+  period null) — o caminho canônico do modo lista dá de graça o predicado de
+  SUB-fonte (a base "Reunião" é sub de leads), nome→id de FK
+  (`resolveFkFilterNames`), expansão canônica e a regra 0052 dos mocks — e
+  devolve contagem EXATA + amostra antes→depois + avisos (mocks pulados,
+  campo de Sync = escrita local). Operadores = `FILTER_OPS` ESTRITO (op
+  interno seria dropado em silêncio pelo modo lista ⇒ over-match); relação em
+  filtro só eq/neq/in/is_null/not_null, por NOME (§4.10). Alvos de alteração
+  = mesmo gating do entry context + campos de SYNC do Bitrix (flag `sync`;
+  paridade com /registros via forceSync) — escrita LOCAL no v1, sem enfileirar
+  write-back (carimbos protegem do reconcile). O apply re-valida com contexto
+  FRESCO, RE-RESOLVE os ids (recorte > `MAX_AI_UPDATE_RECORDS` = 200, o
+  precedente de `BULK_MAX_ITEMS`, aborta ALTO), pula mocks (reportados),
+  deriva `operation_id` via `primaryOperationId` quando só o responsável
+  muda, e escreve SÓ por `updateRecordValuesBulk` (`lib/records/bulk-update.ts`
+  — client RLS do usuário com `.select("id")` por item, coerção
+  `coerce`/`coerceCore` — âncora de Brasília nas datas core —, no-op
+  idempotente por item, UM recalc, audit `origin:'app'` com user real em
+  lote, webhook `record.updated` por registro). A UI exige confirmação
+  EXPLÍCITA da contagem (checkbox) e bloqueia o apply acima do teto.
   admin): botão "Sugerir com IA" envia colunas+amostras do CSV JÁ parseado no
   browser; o core (`lib/ai/csv-mapping.ts`) valida o contrato
   `csv-mapeamento` (`lib/import/csv-mapping/validate.ts` — toda coluna
@@ -2394,6 +2456,8 @@ semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
   funciona sem IA configurada (chat gated por `ai.hasKey`).
 
 Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
+`lib/import/records/{update-validate,update-instructions}.test.ts`,
+`lib/records/bulk-update.test.ts`,
 `lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`,
 `lib/import/operations/{validate,instructions}.test.ts` e
 `lib/config/operation-profile.test.ts`
@@ -2843,7 +2907,18 @@ principalmente — para mantenedores humanos.
     `runRecordList`, `.eq("organization_id")` nos fetches auxiliares) — um
     fetch novo sem o escopo vaza registro entre orgs em silêncio. Colunas por
     bucket de DATA nunca são alvo de automação (não idempotente); mocks nunca
-    movem/selecionam; `KANBAN_OVERFLOW_KEY` nunca recebe card. Exclusão de
+    movem/selecionam/recebem escrita; `KANBAN_OVERFLOW_KEY` nunca recebe
+    card. A ação `set_field` é IDEMPOTENTE por comparação no snapshot da
+    rodada (valor igual consome o card SEM escrever — decidido no
+    `decideActions`, nunca no executor) e seus alvos proibidos
+    (data/calculado/relação/`match:`/`unified:`/coluna core não-editável/
+    campo-espelho da alocação) são barrados por `setFieldTargetError` na
+    AVALIAÇÃO + no save + no picker (`settableFields`) — a MESMA régua nos
+    três, nunca listas paralelas. Toda escrita de campo das automações (move
+    por valor E set) passa pelo executor ÚNICO `executeFieldWrites`
+    (carimbos, UM recalc, audit 'automation', write-back gateado, webhook em
+    lote); o teto é ÚNICO — `MAX_ACTIONS_PER_RUN` (200) sobre moves + sets.
+    Exclusão de
     registro é admin-only (action espelha a RLS `records_delete`) e SEMPRE
     emite `record.deleted`. As ações em massa devolvem resultado POR ITEM e o
     board só reconcilia `data` → estado local com a fila DRENADA (guarda de
@@ -2868,22 +2943,32 @@ principalmente — para mantenedores humanos.
     excluído em /campos auto-desliga o vínculo no próximo reconcile.
 
 25. **Assistentes de IA de registros/campos/operações nunca escrevem direto
-    (§4.17).** Os cores (`lib/ai/insert-records.ts`, `lib/ai/csv-mapping.ts`,
+    (§4.17).** Os cores (`lib/ai/insert-records.ts`,
+    `lib/ai/update-records.ts`, `lib/ai/csv-mapping.ts`,
     `lib/ai/create-fields.ts`, `lib/ai/manage-operations.ts`) só validam e
     devolvem prévia; a aplicação RE-VALIDA o JSON (possivelmente editado na
     prévia) e escreve SÓ pelos choke points existentes — `createRecord` por
-    registro, `createField` por campo, estado `plans` do wizard,
+    registro, `updateRecordValuesBulk` (`lib/records/bulk-update.ts`) na
+    atualização em massa, `createField` por campo, estado `plans` do wizard,
     `createOperation`/`updateOperation`/`updateOperationFilter`/
     `addResponsibleOperation`/`removeResponsibleOperation` por ação de
     operação (a RLS segue sendo a muralha; nada de service role para
-    inserir). A base/alvo vem SEMPRE do seletor da UI, nunca do JSON da IA;
+    inserir/atualizar). A base/alvo vem SEMPRE do seletor da UI, nunca do
+    JSON da IA;
     no contrato de operações a identidade é resolvida por NOME no SERVIDOR
     (ids nunca viajam no JSON) e operações AUTOMÁTICAS de parceria são
-    intocáveis (invariante 22). Teto de 10 por leva (registros e campos) e 15
-    ações (operações); prévia obrigatória (registros: só colunas preenchidas
-    + edição inline/remap). Os SPECs são DERIVADOS de constantes reais
+    intocáveis (invariante 22). Teto de 10 por leva (registros e campos), 15
+    ações (operações) e 200 registros na atualização em massa
+    (`MAX_AI_UPDATE_RECORDS` = precedente de `BULK_MAX_ITEMS` — recorte maior
+    aborta ALTO, nunca fatia em silêncio); prévia obrigatória (registros: só
+    colunas preenchidas + edição inline/remap; update: contagem resolvida no
+    SERVIDOR via `runRecordListWindow` + amostra antes→depois + confirmação
+    explícita — a IA NUNCA emite ids de registro; operadores de filtro =
+    `FILTER_OPS` estrito, senão o modo lista dropava o op em silêncio e o
+    recorte over-matchava). Os SPECs são DERIVADOS de constantes reais
     (`EDITABLE_CORE_COLUMNS`, `CORE_IMPORT_TARGETS`, `IMPORT_NEW_FIELD_TYPES`,
     `DATA_TYPE_LABELS`, `FORMULA_FUNC_GROUPS`, `CURRENCY_OPTIONS`,
+    `FILTER_OPS`,
     `PROFILE_OPS`/`NO_VALUE_OPS` de `lib/config/operation-profile.ts` — o
     MESMO módulo do choke point) e fiscalizados pelos testes de paridade —
     nunca documente em prosa paralela. Fórmula proposta pela IA valida pelos

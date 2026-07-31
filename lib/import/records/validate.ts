@@ -66,7 +66,9 @@ function resolveName(
 
 // Valida UM valor contra o spec do campo. Devolve o valor CANÔNICO ou undefined
 // (com erro registrado). Valor vazio/null = campo ausente (undefined sem erro).
-function coerceEntryValue(
+// Exportada (31/07/2026): o validador do contrato registros-update reusa a
+// MESMA coerção (update-validate.ts) — não duplique estas regras.
+export function coerceEntryValue(
   spec: EntryFieldSpec,
   raw: unknown,
   where: string,

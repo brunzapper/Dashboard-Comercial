@@ -1,5 +1,9 @@
-// Versão: 1.8 | Data: 30/07/2026
+// Versão: 1.9 | Data: 31/07/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v1.9 (31/07/2026): botão "Atualizar com IA" (RecordsAiUpdateSheet) em
+//   QUALQUER base/sub p/ quem tem edit_record_values — atualização em massa
+//   (contrato registros-update) com prévia server-side obrigatória; funciona
+//   sem IA configurada (fluxo copiar-prompt → colar-JSON).
 // v1.8 (30/07/2026): botão "Inserir com IA" (RecordsAiInsertSheet) nas bases
 //   manuais quando a org tem IA configurada (loadOrgAiConfigPublic) — até 10
 //   registros por leva com prévia obrigatória; maxDuration 60→300 (turno da IA
@@ -60,6 +64,7 @@ import { ExportCsvButton } from "@/components/registros/export-csv-button";
 import { FiltersBar } from "@/components/registros/filters-bar";
 import { RecordCreateSheet } from "@/components/registros/record-create-sheet";
 import { RecordsAiInsertSheet } from "@/components/registros/ai-insert-sheet";
+import { RecordsAiUpdateSheet } from "@/components/registros/ai-update-sheet";
 import { RecordsTable } from "@/components/registros/records-table";
 import { Button } from "@/components/ui/button";
 
@@ -339,6 +344,15 @@ export default async function RegistrosPage({
           ) : null}
           {canEditValues && fonteDef?.manualEntry && ai?.hasKey ? (
             <RecordsAiInsertSheet
+              source={{ key: fonte, label: fonteDef.label }}
+              ai={ai}
+            />
+          ) : null}
+          {/* Atualização em massa (registros-update): qualquer base/sub — o
+              gate real é edit_record_values + RLS; funciona sem IA (fluxo
+              copiar-prompt → colar-JSON). */}
+          {canEditValues && fonteDef ? (
+            <RecordsAiUpdateSheet
               source={{ key: fonte, label: fonteDef.label }}
               ai={ai}
             />

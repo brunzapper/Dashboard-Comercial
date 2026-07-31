@@ -1,6 +1,6 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Avaliador PURO das automações do kanban: sem I/O — recebe fatos por card
-// (CardFacts, montados pelo engine) e decide os movimentos. Semântica:
+// (CardFacts, montados pelo engine) e decide as AÇÕES. Semântica:
 // regras em ordem (position), a PRIMEIRA que casar vence por card; decisões
 // sobre o snapshot ORIGINAL do quadro (uma regra não "vê" o efeito de outra na
 // mesma rodada — mata ping-pong intra-run); card já na coluna alvo = no-op
@@ -11,8 +11,15 @@
 // ilike é avaliado localmente (contém, case-insensitive) p/ não degradar.
 // Tempo é dia de CALENDÁRIO (prefixo YYYY-MM-DD — todayIso já vem ancorado em
 // Brasília pelo chamador; coerente com a regra de datas 0079/0085).
+// v1.1 (31/07/2026): ação set_field — decideMoves vira decideActions
+// ({moves, sets, ruleErrors}). Alvo do set validado POR REGRA aqui (campo
+// inexistente/data/calculado/relação/match:/unified:/espelho da alocação ⇒
+// regra INERTE + ruleError — o catálogo pode mudar depois da regra criada) e
+// IDEMPOTÊNCIA decidida no snapshot: valor atual igual ao alvo consome o card
+// SEM emitir escrita (zero churn de audit/webhook no tick por minuto).
 import type { RecordRow } from "@/lib/records/types";
 import type { AggCondition } from "@/lib/records/formulas";
+import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
 import { recordMatchesConds } from "@/lib/widgets/calc-metrics";
 import { recordRawValue } from "@/lib/widgets/quick-filters";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -50,12 +57,24 @@ export interface EvalContext {
   todayIso: string;
   // Colunas derivadas do quadro (visíveis) — validação do alvo.
   columns: KanbanColumn[];
+  // settings.kanban.allocationFieldKey do quadro DONO (invariante 24): o campo
+  // ESPELHO da alocação nunca é alvo de set_field (dessincronizaria
+  // kanban_placements, a verdade). null/ausente = sem vínculo.
+  allocationFieldKey?: string | null;
 }
 
 export interface PlannedMove {
   recordId: string;
   fromKey: string;
   targetKey: string;
+  ruleId: string;
+}
+
+/** Escrita de campo decidida por uma regra set_field. */
+export interface PlannedSet {
+  recordId: string;
+  field: string;
+  value: string;
   ruleId: string;
 }
 
@@ -196,35 +215,89 @@ export function evaluateCondition(
 }
 
 /**
- * Decide os movimentos da rodada: por card, primeira regra (ordem do array)
- * cujas condições TODAS casam vence; já na coluna alvo = consome a regra sem
- * mover. Regras com alvo inválido (overflow, coluna inexistente/oculta) são
- * INERTES na rodada e saem em ruleErrors — o quadro pode ter perdido a coluna
- * depois da regra criada.
+ * Alvo de set_field é válido neste quadro/catálogo? null = ok; senão a
+ * mensagem do ruleError. Mesma régua do save (actions.ts) e do picker da UI
+ * (settableFields) — a guarda daqui é a DEFINITIVA (o campo pode sumir ou o
+ * vínculo da alocação pode nascer DEPOIS da regra criada).
  */
-export function decideMoves(
+export function setFieldTargetError(
+  field: string,
+  ctx: Pick<EvalContext, "available" | "allocationFieldKey">
+): string | null {
+  if (field.startsWith("match:") || field.startsWith("unified:")) {
+    return `O campo "${field}" (casado/unificado) não pode ser alvo de "Definir campo".`;
+  }
+  if (
+    ctx.allocationFieldKey &&
+    field === `custom:${ctx.allocationFieldKey}`
+  ) {
+    return `O campo "${field}" espelha a fase deste quadro — use a ação "Mover para a coluna".`;
+  }
+  const af = ctx.available.find((f) => f.field === field);
+  if (!af) {
+    return `Campo alvo "${field}" não existe no catálogo (removido ou oculto).`;
+  }
+  if (af.fk) {
+    return `O campo "${af.label}" é uma relação — fora do alcance de "Definir campo".`;
+  }
+  if (af.isDate) {
+    return `O campo "${af.label}" é de data — datas nunca são alvo de automação (não idempotente).`;
+  }
+  if (af.calc || af.aggCalc) {
+    return `O campo "${af.label}" é calculado — o valor é derivado, não gravável.`;
+  }
+  if (af.displayOnly) {
+    return `O campo "${af.label}" é só de exibição — não existe coluna para gravar.`;
+  }
+  // Coluna do núcleo: só as EDITÁVEIS (barra record_type/source_system/
+  // stage_semantic/lead_time_days — derivadas do sync, nunca graváveis).
+  if (!field.startsWith("custom:") && !(field in EDITABLE_CORE_COLUMNS)) {
+    return `A coluna "${af.label}" não é editável — fora do alcance de "Definir campo".`;
+  }
+  return null;
+}
+
+/**
+ * Decide as AÇÕES da rodada: por card, primeira regra (ordem do array)
+ * cujas condições TODAS casam vence; já na coluna alvo (move) ou já com o
+ * valor alvo (set) = consome a regra sem escrever. Regras com alvo inválido
+ * (overflow, coluna inexistente/oculta, campo proibido) são INERTES na rodada
+ * e saem em ruleErrors — o quadro/catálogo pode ter mudado depois da regra
+ * criada.
+ */
+export function decideActions(
   rules: AutomationRow[],
   cards: CardFacts[],
   ctx: EvalContext
-): { moves: PlannedMove[]; ruleErrors: RuleError[] } {
+): { moves: PlannedMove[]; sets: PlannedSet[]; ruleErrors: RuleError[] } {
   const ruleErrors: RuleError[] = [];
   const validKeys = new Set(
     ctx.columns.filter((c) => !c.noDrop).map((c) => c.key)
   );
   const active: AutomationRow[] = [];
   for (const rule of rules) {
-    const target = rule.rule.action.targetKey;
-    if (target === KANBAN_OVERFLOW_KEY || !validKeys.has(target)) {
-      ruleErrors.push({
-        ruleId: rule.id,
-        message: `Coluna alvo "${target}" não existe no quadro (removida ou oculta).`,
-      });
-      continue;
+    const action = rule.rule.action;
+    if (action.type === "move_to_column") {
+      const target = action.targetKey;
+      if (target === KANBAN_OVERFLOW_KEY || !validKeys.has(target)) {
+        ruleErrors.push({
+          ruleId: rule.id,
+          message: `Coluna alvo "${target}" não existe no quadro (removida ou oculta).`,
+        });
+        continue;
+      }
+    } else {
+      const err = setFieldTargetError(action.field, ctx);
+      if (err) {
+        ruleErrors.push({ ruleId: rule.id, message: err });
+        continue;
+      }
     }
     active.push(rule);
   }
 
   const moves: PlannedMove[] = [];
+  const sets: PlannedSet[] = [];
   for (const card of cards) {
     if (card.isMock) continue;
     for (const rule of active) {
@@ -232,17 +305,31 @@ export function decideMoves(
         evaluateCondition(c, card, ctx)
       );
       if (!matched) continue;
-      const targetKey = rule.rule.action.targetKey;
-      if (card.columnKey !== targetKey) {
-        moves.push({
-          recordId: card.record.id,
-          fromKey: card.columnKey,
-          targetKey,
-          ruleId: rule.id,
-        });
+      const action = rule.rule.action;
+      if (action.type === "move_to_column") {
+        if (card.columnKey !== action.targetKey) {
+          moves.push({
+            recordId: card.record.id,
+            fromKey: card.columnKey,
+            targetKey: action.targetKey,
+            ruleId: rule.id,
+          });
+        }
+      } else {
+        // Idempotência no snapshot: valor atual igual ao alvo NÃO escreve
+        // (mesma régua string do updateRecord — null ≡ '').
+        const current = recordRawValue(action.field, card.record, ctx.available);
+        if (String(current ?? "") !== action.value) {
+          sets.push({
+            recordId: card.record.id,
+            field: action.field,
+            value: action.value,
+            ruleId: rule.id,
+          });
+        }
       }
-      break; // primeira regra que casou consome o card (mesmo sem mover)
+      break; // primeira regra que casou consome o card (mesmo sem escrever)
     }
   }
-  return { moves, ruleErrors };
+  return { moves, sets, ruleErrors };
 }
