@@ -1,4 +1,10 @@
-// Versão: 1.11 | Data: 26/07/2026
+// Versão: 1.12 | Data: 31/07/2026
+// v1.12 (31/07/2026): operando de META (`meta:<chave>`) — após montar
+// calcResolved (runWidget/runWidgetByPeriod), as chaves de meta das fórmulas
+// são resolvidas (resolveGoalOperandValues, escopo GLOBAL, período da rodada
+// via goalPeriodScope — a MESMA regra extraída do KPI modo meta) e ABAIXADAS
+// para const (lowerGoalOperands). Fast path sem meta: zero await extra. O KPI
+// modo meta passou a usar goalPeriodScope (byte-idêntico ao inline antigo).
 // v1.11 (26/07/2026): agrupamento de responsáveis (0101, invariante 20) —
 // filtros responsible_id expandem p/ o GRUPO (apelidos ∪ principal) no choke
 // point de resolveFilters (gate widgetReferencesResponsible → sem referência,
@@ -101,9 +107,11 @@ import {
   basisMetric,
   condFilters,
   evalCalcMoney,
+  goalOperandKeys,
   isCalcMetric,
   isCondBasisKey,
   isMoneyOperandField,
+  lowerGoalOperands,
   parseCondBasisKey,
   recordMatchesConds,
   resolveCalcMetric,
@@ -181,7 +189,11 @@ import {
   unifiedMemberRef,
   type Correspondence,
 } from "@/lib/correspondences";
-import { resolveGoal } from "@/lib/metas/resolve";
+import {
+  goalPeriodScope,
+  resolveGoal,
+  resolveGoalOperandValues,
+} from "@/lib/metas/resolve";
 import {
   BUILTIN_SOURCES,
   isSubSource,
@@ -230,6 +242,38 @@ export function resolveFilters(filters: WidgetFilter[]): WidgetFilter[] {
 function metricForMeta(metric: string): Metric {
   if (metric === "clientes") return { field: "*", agg: "count" };
   return { field: metric, agg: "sum" };
+}
+
+// Operandos `meta:<chave>` das métricas calculadas: resolve as chaves (escopo
+// GLOBAL, período da RODADA — mesma regra do KPI meta via goalPeriodScope) e
+// ABAIXA para const nas fórmulas do mapa, mutando-o in place. Fast path sem
+// meta: zero await extra, fórmulas intactas. Meta ausente/falha degrada POR
+// CHAVE (ref mantido → ctx null → "—", nunca 0 fabricado). Pernas do
+// businessDayAlign/comparação compartilham o valor da rodada principal
+// (calcResolved é único — limitação documentada, §4.9).
+async function lowerCalcGoalOperands(
+  supabase: SupabaseClient,
+  calcResolved: Map<number, ResolvedCalcMetric>,
+  period: DashboardPeriod | null | undefined
+): Promise<void> {
+  const keys = [
+    ...new Set(
+      [...calcResolved.values()].flatMap((rc) =>
+        rc.formula ? goalOperandKeys(rc.formula) : []
+      )
+    ),
+  ];
+  if (keys.length === 0) return;
+  const values = await resolveGoalOperandValues(
+    supabase,
+    keys,
+    goalPeriodScope(period, new Date())
+  );
+  for (const [i, rc] of calcResolved) {
+    if (!rc.formula) continue;
+    const lowered = lowerGoalOperands(rc.formula, values);
+    if (lowered !== rc.formula) calcResolved.set(i, { ...rc, formula: lowered });
+  }
 }
 
 // Filtro implícito das fontes selecionadas (record_type in ...). Vazio = todas.
@@ -902,21 +946,15 @@ async function runKpi(
   } else {
     [realizado] = await aggregate(supabase, [metaMetric], filters, correspondencesMap);
   }
-  const now = new Date();
-  let year = now.getFullYear();
-  let month: number | null = s.period === "year" ? null : now.getMonth() + 1;
   // Com período global ativo, a meta acompanha o período: meta do mês quando o
   // intervalo cabe num único mês; senão, meta anual do ano da data inicial.
-  if (period?.from) {
-    const from = new Date(`${period.from}T00:00:00`);
-    const to = period.to ? new Date(`${period.to}T00:00:00`) : null;
-    year = from.getFullYear();
-    const sameMonth =
-      to != null &&
-      to.getFullYear() === from.getFullYear() &&
-      to.getMonth() === from.getMonth();
-    month = sameMonth ? from.getMonth() + 1 : null;
-  }
+  // Regra EXTRAÍDA byte-idêntica p/ goalPeriodScope (compartilhada com o
+  // operando `meta:` das fórmulas — lib/metas/resolve.ts).
+  const { year, month } = goalPeriodScope(
+    period,
+    new Date(),
+    s.period === "year"
+  );
   const goal = await resolveGoal(supabase, {
     scope: s.scope ?? "global",
     operationId: s.operationId ?? null,
@@ -1249,6 +1287,7 @@ async function runWidgetByPeriod(
     if (isCalcMetric(m, fieldByKey))
       calcResolved.set(mi, resolveCalcMetric(m, fieldByKey, catalog));
   });
+  await lowerCalcGoalOperands(supabase, calcResolved, period);
   const calcBasisKeys = [
     ...new Set(
       [...calcResolved.values()].flatMap((rc) =>
@@ -1648,6 +1687,7 @@ export async function runWidget(
     if (isCalcMetric(m, fieldByKey))
       calcResolved.set(i, resolveCalcMetric(m, fieldByKey, catalog));
   });
+  await lowerCalcGoalOperands(supabase, calcResolved, period);
 
   // SUB-FONTES conviver (0078): pernas EXTRAS (sub convivendo com a pai, ou 2+
   // subs da mesma pai) não cabem na consulta única — cada FONTE de linha vira

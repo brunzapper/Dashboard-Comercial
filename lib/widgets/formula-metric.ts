@@ -1,4 +1,8 @@
-// Versão: 3.5 | Data: 26/07/2026
+// Versão: 3.6 | Data: 31/07/2026
+// v3.6 (31/07/2026): operando de META (`meta:<chave>`) — resolvido com o
+//   período DESTA invocação (goalPeriodScope + resolveGoalOperandValues,
+//   escopo global) e abaixado para const logo após o lowering de escopo;
+//   fórmula só de meta vira const puro (0 RPCs). Meta ausente ⇒ "—".
 // v3.5 (26/07/2026): agrupamento de responsáveis (0101) — filtros
 //   responsible_id do dashboard e condições de SOMASE (pós
 //   resolveFkCondFilters) expandem p/ o grupo (apelidos ∪ principal), com o
@@ -38,6 +42,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  goalPeriodScope,
+  resolveGoalOperandValues,
+} from "@/lib/metas/resolve";
+
+import {
   evaluateFormula,
   formulaComparisonBases,
   formulaUsesFunctions,
@@ -73,6 +82,8 @@ import {
   evalCalcMoney,
   isCondBasisKey,
   isMoneyOperandField,
+  goalOperandKeys,
+  lowerGoalOperands,
   lowerSourceScopedOperands,
   parseCondBasisKey,
   type BasisKey,
@@ -150,7 +161,24 @@ export async function runCalculatedWidget(
   // (fast path sem aninhamento devolve o mesmo objeto). Em seguida, abaixa os
   // operandos com escopo de fonte (`agg:…@<fonte>` → chave aggif:) — v2.3.
   const expanded = expandAggFormula(input.formula, (k) => fieldByKey.get(k));
-  const formula = lowerSourceScopedOperands(expanded, input.sourceDefs);
+  const lowered = lowerSourceScopedOperands(expanded, input.sourceDefs);
+  // Operandos de META (31/07/2026): resolvidos com o período DESTA invocação
+  // (o card fórmula com comparação e o comp engine chamam runCalculatedWidget
+  // uma vez por período — a meta re-resolve certa de graça) e abaixados para
+  // const. Meta ausente/falha ⇒ ref mantido → "—" (nunca 0). Fast path sem
+  // meta: zero await extra.
+  const goalKeys = goalOperandKeys(lowered);
+  const formula =
+    goalKeys.length === 0
+      ? lowered
+      : lowerGoalOperands(
+          lowered,
+          await resolveGoalOperandValues(
+            supabase,
+            goalKeys,
+            goalPeriodScope(input.period, new Date())
+          )
+        );
   const rates = input.rates ?? {};
   const conversionPeriod = input.conversionPeriod ?? yearQuarterOf(null);
 

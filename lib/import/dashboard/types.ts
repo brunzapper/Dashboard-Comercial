@@ -132,6 +132,9 @@ export interface DashboardImportContext {
   // runtime compara por NOME — nome inexistente viraria contagem 0 silenciosa).
   responsibleNames: string[];
   operationNames: string[];
+  // Registry de métricas de meta — operandos `meta:<chave>` das fórmulas
+  // (31/07/2026); obrigatório para o validador aceitar o que o editor aceita.
+  goalMetrics: import("@/lib/metas/metrics").GoalMetricDef[];
 }
 
 export interface DashboardImportValidation {

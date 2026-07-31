@@ -605,3 +605,63 @@ describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
     expect(queries).toHaveLength(0);
   });
 });
+
+describe("operando de META em métrica calculada", () => {
+  it("abaixa meta: para const (fórmula exportada) e avalia por linha", async () => {
+    const { db, rpcCalls, queries } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "A", metric_1: 40000 },
+            { dim_1: "B", metric_1: 10000 },
+          ],
+          error: null,
+        }),
+      },
+      tables: {
+        goals: (q) => {
+          const single = q.steps.some((s) => s.method === "maybeSingle");
+          const eqs = Object.fromEntries(
+            q.steps
+              .filter((s) => s.method === "eq")
+              .map((s) => [s.args[0], s.args[1]])
+          );
+          if (single && eqs.scope === "global" && eqs.metric === "mrr")
+            return { data: { target: "50000" }, error: null };
+          return { data: single ? null : [], error: null };
+        },
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [{ field: "pipeline" }],
+        metrics: [
+          {
+            field: "calc:formula",
+            agg: "sum",
+            calc: true,
+            formula: {
+              tokens: [
+                { kind: "field", ref: "agg:sum:value" },
+                { kind: "op", op: "/" },
+                { kind: "field", ref: "meta:mrr" },
+              ],
+            },
+          },
+        ],
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-03-01", to: "2026-03-31" }
+    );
+    expect(queries.some((q) => q.table === "goals")).toBe(true);
+    expect(rpcCalls.length).toBeGreaterThan(0);
+    // Cada linha divide pela MESMA meta (constante por rodada — nunca somada).
+    expect(data.rows.map((r) => r.metric_1)).toEqual([0.8, 0.2]);
+    // A fórmula RESOLVIDA exportada ao cliente carrega o const embutido — o
+    // re-eval de subtotais usa a mesma meta, sem fold aditivo.
+    const calcFormula = data.metrics[0]?.calc?.formula;
+    expect(calcFormula?.tokens).toContainEqual({ kind: "const", value: 50000 });
+  });
+});

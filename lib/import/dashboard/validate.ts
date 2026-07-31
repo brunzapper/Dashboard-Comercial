@@ -342,6 +342,7 @@ export function validateDashboardImport(
       defsAggCatalogInput(
         workingDefs,
         workingSources,
+        ctx.goalMetrics,
         excludeKey ? new Set([excludeKey]) : new Set()
       )
     );

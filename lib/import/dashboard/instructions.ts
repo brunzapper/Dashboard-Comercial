@@ -214,12 +214,18 @@ Base filtrar pela SUA coluna de data (ex.: negócios por "closed_at", leads por
   ${formulaFuncsIn("pura").join("/")},
   ${formulaFuncsIn("comparacao").join("/")} (comparação com período anterior;
   VARPCT já sai ×100). Campo cru SÓ dentro de SOMASE/CONT.SE/MÉDIASE.
+  Aceita também o VALOR DA META cadastrada: [Meta: <rótulo>] ou
+  [meta:<chave>] (chaves em goal_metrics do modelo) — meta GLOBAL do período
+  da consulta (mensal quando o período cabe num mês; senão anual do ano
+  inicial; "todo período" = mês corrente); meta não cadastrada exibe "—".
+  Ex.: [agg:sum:value] / [meta:mrr] = fração da meta atingida.
 - Sintaxe: operandos entre colchetes [Rótulo] ou [ref] (ex.: [custom:forecast],
   [agg:sum:value], [agg:count:*@leads]); argumentos separados por ";" (vírgula
   é decimal: 1,5); texto "entre aspas"; comparadores = <> < > <= >=.
 - Se em dúvida entre rótulo e ref, USE A REF CRUA entre colchetes — sempre
   resolve. Refs agregadas: agg:sum:<campo>, agg:avg:<campo>, agg:count:<campo>,
-  agg:count:* (contagem de registros), com sufixo @<baseKey> opcional.
+  agg:count:* (contagem de registros), com sufixo @<baseKey> opcional; meta:
+  meta:<chave>.
 
 ## "subSources" — Sub-bases a criar
 
@@ -302,7 +308,8 @@ Paletas: ${paletteList}.
    ("month_name" ou "month_year") e período ativo (defaultPreset ≠ "all").
 3. Comparação não funciona com período "all" (não há base de comparação).
 4. Fórmula de totais NUNCA usa [Data atual]; fórmula por registro NUNCA usa
-   agregados/SOMASE.
+   agregados/SOMASE nem [Meta: …]; [Meta: …] nunca dentro de SOMASE/CONT.SE/
+   MÉDIASE (é um valor por consulta, não uma coluna).
 5. Widget kpi/calculado: use UMA métrica (a primeira é a exibida).
 6. Filtro por operação/responsável em widget: prefira quickFilters (o leitor
    escolhe) em vez de filtro fixo com UUID.

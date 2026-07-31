@@ -1,4 +1,9 @@
-<!-- Versão: 1.45 | Data: 31/07/2026 -->
+<!-- Versão: 1.46 | Data: 31/07/2026 -->
+<!-- v1.46 (31/07/2026): §4.9 — operando de META (`meta:<chave>`) nas fórmulas
+     agregadas: valor de goals.target ABAIXADO p/ const nos choke points
+     (lowerGoalOperands; nunca basis/RPC), período pela regra do card
+     (goalPeriodScope extraída byte-idêntica), registry obrigatório no
+     AggCatalogInput (10 sítios), meta ausente ⇒ "—". RPCs intocados. -->
 <!-- v1.45 (31/07/2026): fix §4.10/invariante 12 — o fingerprint dos widgets
      DEFERIDOS (deferredScopeById) ganha a CONFIG do widget
      (lib/widgets/deferred-fingerprint.ts; posição/ordem fora do hash):
@@ -1412,6 +1417,29 @@ invariantes 9/10).
   `ComposedChart` SÓ com a meta ativa. Falha em qualquer ponto degrada sem a
   linha. Snapshots: meta e feriados AO VIVO pelo adapter (paridade com KPI
   meta).
+- **Operando de META em fórmula (`meta:<chave>`, 31/07/2026):** o valor de
+  `goals.target` entra nas fórmulas AGREGADAS como operando (grupo "Metas" do
+  catálogo único; rótulo `Meta: <label>` do registry `goal_metrics`, que
+  virou campo OBRIGATÓRIO de `AggCatalogInput` — sítio sem o registry é erro
+  de compilação). Resolução 100% engine: as chaves são coletadas da fórmula
+  EXPANDIDA (`goalOperandKeys`) e ABAIXADAS para token `const` pré-resolvido
+  (`lowerGoalOperands` — molde do zeroing de irmãs) nos DOIS choke points —
+  `lowerCalcGoalOperands` após montar `calcResolved` no engine e o bloco
+  equivalente em `runCalculatedWidget` com o período DA INVOCAÇÃO. NUNCA via
+  basis (o `foldBasis` aditivo somaria a meta nos subtotais — o const
+  embutido viaja na fórmula resolvida e o re-eval client-side sai certo de
+  graça) e NUNCA via RPC. Escopo v1: GLOBAL, período pela regra do card modo
+  meta EXTRAÍDA byte-idêntica para `goalPeriodScope` (lib/metas/resolve.ts —
+  card refatorado para usá-la; cabe num mês ⇒ mensal, senão anual do ano
+  inicial, "todo período" ⇒ mês corrente). Meta ausente/falha ⇒ ref mantido
+  → "—" POR CHAVE (nunca 0, nunca derruba o widget). Limitações
+  documentadas: pernas de comparação/businessDayAlign usam a meta da rodada
+  principal (const é const); modo lista de registros re-resolve no cliente
+  sem os valores ⇒ "—"; proibido em SOMASE (allowlist de
+  `validateCondAggRefs`) e no contexto por-registro (`GOAL_IN_RECORD_MSG`).
+  Snapshots: valor AO VIVO (goals é passthrough org-scoped); o registry do
+  catálogo do viewer sai de leitura service org-scoped de `sync_config`
+  (NUNCA adicionar sync_config ao PASSTHROUGH).
 - **Coorte por registro casado:** "vendas por mês de criação do lead" é uma
   dimensão `match:<fonte>:<campo>` com transform de data — suportada pelo RPC
   desde a 0042 (`_widget_match_expr`, espelhada no `_snap`) e ofertada pelo

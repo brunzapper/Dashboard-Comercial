@@ -204,9 +204,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   no resultado como `WidgetData.businessDayRef` (badge "Nº dia útil" —
   `BusinessDayBadge`, rótulo único em `businessDayOrdinalLabel`; compartilhado
   entre os meses, mesmo N da goalLine "pace") — exiba-o a partir do RESULTADO,
-  não recompute na UI. NÃO recrie as RPCs para
+  não recompute na UI. **Operando de META em fórmula (`meta:<chave>`,
+  31/07/2026):** o valor de `goals.target` entra nas fórmulas AGREGADAS
+  ABAIXADO para const pré-resolvido (`goalOperandKeys`/`lowerGoalOperands` de
+  calc-metrics; `lowerCalcGoalOperands` no engine pós-`calcResolved` e o
+  bloco de `runCalculatedWidget` com o período DA INVOCAÇÃO) — NUNCA via
+  basis (fold aditivo somaria a meta em subtotal) e NUNCA via RPC; período
+  pela regra do card modo meta EXTRAÍDA p/ `goalPeriodScope`
+  (lib/metas/resolve.ts — o card a reusa byte-idêntico); escopo v1 GLOBAL;
+  meta ausente/falha ⇒ ref mantido → "—" por chave (nunca 0). Proibido em
+  SOMASE e no por-registro (`GOAL_IN_RECORD_MSG`). NÃO recrie as RPCs para
   nada disso; snapshots leem metas/feriados AO VIVO pelo adapter
-  (`PASSTHROUGH_TABLES`). Presets são DADOS aplicados idempotentemente por
+  (`PASSTHROUGH_TABLES`; o registry do catálogo do viewer sai de leitura
+  service org-scoped de `sync_config` — nunca o adicione ao passthrough). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca
   duplicar nem tocar widgets sem presetKey). Ver `docs/arquitetura.md` §4.9.
 - **Linhas core de `field_definitions` são OVERRIDES, nunca campos custom
@@ -229,7 +239,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   AGREGADO sai SEMPRE de `buildAggOperandCatalog`
   (`lib/widgets/agg-catalog.ts`, inputs `availableAggCatalogInput`/
   `defsAggCatalogInput`) — não recrie as montagens chamando
-  `aggOperandRefs`/`sourceScopedAggOperandRefs`/… na mão. Os DOIS inputs
+  `aggOperandRefs`/`sourceScopedAggOperandRefs`/… na mão. O input carrega o
+  registry de metas (`goalMetrics`, OBRIGATÓRIO — operandos `meta:<chave>`;
+  client via `useGoalMetrics()`/`GoalMetricsProvider`, server via
+  `loadGoalMetrics`): sítio novo sem o registry é erro de compilação, nunca
+  um save rejeitando fórmula que o editor aceitou. Os DOIS inputs
   incluem os campos do registro CASADO (`match:<fonte>:<ref>`; no defs desde
   20/07/2026) — refs/rótulos `↪` são construídos SÓ por `buildMatchFields`
   (`lib/widgets/fields.ts`), nunca remontados à mão. A validação de

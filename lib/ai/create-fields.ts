@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
 import { loadSources } from "@/lib/config/sources";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { DATA_TYPE_LABELS } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import {
@@ -115,7 +116,10 @@ async function validateBatchFormulas(
 ): Promise<string[]> {
   const errors: string[] = [];
   const withBatch = [...rows, ...syntheticRows(fields)];
-  const sources = await loadSources(supabase);
+  const [sources, goalMetrics] = await Promise.all([
+    loadSources(supabase),
+    loadGoalMetrics(supabase),
+  ]);
   for (let i = 0; i < fields.length; i++) {
     const f = fields[i];
     if (!f.formulaTexto) continue;
@@ -123,7 +127,7 @@ async function validateBatchFormulas(
     const isAgg = f.tipo === "calculado_agg";
     const forbidden = forbiddenOperandKeys(withBatch, f.fieldKey);
     const catalog = isAgg
-      ? aggOperandCatalog(withBatch, forbidden, sources)
+      ? aggOperandCatalog(withBatch, forbidden, sources, goalMetrics)
       : serverOperandCatalog(withBatch, forbidden, sources);
     const tok = tokenizeFormulaText(f.formulaTexto, catalog);
     if (!tok.ok) {
@@ -188,9 +192,10 @@ export async function generateFieldsCore(
   }
 
   const supabase = await createClient();
-  const [rows, sources] = await Promise.all([
+  const [rows, sources, goalMetrics] = await Promise.all([
     loadDefRows(supabase),
     loadSources(supabase),
+    loadGoalMetrics(supabase),
   ]);
   const ctx = fieldsCreateContext(rows);
 
@@ -216,7 +221,9 @@ export async function generateFieldsCore(
   const operandsJson = JSON.stringify(
     {
       por_registro: serverOperandCatalog(rows, none, sources).map((o) => o.label),
-      agregacao: aggOperandCatalog(rows, none, sources).map((o) => o.label),
+      agregacao: aggOperandCatalog(rows, none, sources, goalMetrics).map(
+        (o) => o.label
+      ),
     },
     null,
     2

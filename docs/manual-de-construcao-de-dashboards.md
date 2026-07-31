@@ -1,4 +1,8 @@
-<!-- Versão: 1.20 | Data: 30/07/2026 -->
+<!-- Versão: 1.21 | Data: 31/07/2026 -->
+<!-- v1.21 (31/07/2026): §8.5b — operandos de META ([Meta: <métrica>] /
+     meta:<chave>) no contexto agregado: valor da meta global do período da
+     consulta (regra do Card modo Meta), constante por consulta (nunca somada
+     em subtotais), "—" sem cadastro; §8.1/§8.6/§8.9/§16.2 atualizados. -->
 <!-- v1.20 (30/07/2026): §3.8.2 — mescla no "Criar a partir de": até 4
      referências adicionais marcáveis; a IA traz widgets delas para a cópia
      (os dashboards marcados ficam intactos). -->
@@ -1467,7 +1471,7 @@ são os MESMOS em todos esses lugares — muda apenas o **contexto**.
 | Contexto | Onde | O que os operandos são | O que é proibido |
 |---|---|---|---|
 | **Por registro** | campo "Calculado (por registro)" | campos DO PRÓPRIO registro (e do registro casado `↪`), "Data atual" | agregações (Σ/Média/Contagem) e SOMASE/CONT.SE/MÉDIASE — a fórmula enxerga UM registro; para condição use `SE(...)`. ANTERIOR/VARPCT/VARABS avaliam para vazio |
-| **Agregado** | todos os demais | AGREGADOS do recorte atual: "Contagem de registros", "Contagem de <Campo>", "Σ <Campo>", "Média <Campo>" — com escopo de Base opcional | "Data atual" (o agregado roda no banco, que não conhece "hoje") — a opção aparece desabilitada com o motivo |
+| **Agregado** | todos os demais | AGREGADOS do recorte atual: "Contagem de registros", "Contagem de <Campo>", "Σ <Campo>", "Média <Campo>" — com escopo de Base opcional — e o VALOR DA META cadastrada (`[Meta: <métrica>]`, grupo "Metas") | "Data atual" (o agregado roda no banco, que não conhece "hoje") — a opção aparece desabilitada com o motivo; `[Meta: …]` dentro de SOMASE/CONT.SE/MÉDIASE |
 
 No contexto agregado, a fórmula é reavaliada para CADA célula/grupo/subtotal/
 total do widget, sempre sobre os agregados daquele recorte (§7.8).
@@ -1581,9 +1585,34 @@ Leads"; referência interna `agg:count:*@leads`). Semântica:
   indisponível e a célula mostra **"—"** (o sistema nunca responde com o
   número sem escopo no lugar). O editor avisa esses casos ao salvar.
 
+### 8.5b Operandos de meta (contexto agregado)
+
+O valor da META cadastrada (§2.4) entra na fórmula como operando: no catálogo,
+grupo **"Metas"**, rótulo `Meta: <métrica>` (referência interna
+`meta:<chave>` — as métricas embutidas `mrr`/`clientes` + as criadas em
+Configurações → Metas). Semântica:
+
+- É a meta de escopo **GLOBAL** do período da consulta, com o roll-up normal
+  (sem meta global explícita, soma das metas de operação/responsável).
+- **Período**: mesma regra do Card modo Meta — período que cabe num mês ⇒
+  meta MENSAL daquele mês (mesmo parcial); vários meses/trimestre/ano ⇒ meta
+  ANUAL do ano da data inicial (metas de meses nunca são somadas); "todo o
+  período" ⇒ meta do mês corrente.
+- Numa tabela/gráfico com grupos, TODAS as linhas usam a MESMA meta (é um
+  valor por consulta, não por grupo) — e os subtotais também (a meta nunca é
+  somada entre linhas).
+- Ex.: `[Σ Valor] / [Meta: MRR]` com formato Percentual = % da meta atingida.
+- Meta não cadastrada para o período ⇒ resultado **"—"** (nunca 0).
+- Limitações: não entra em SOMASE/CONT.SE/MÉDIASE (erro no salvamento), não
+  existe no contexto por-registro, e as pernas de comparação
+  (ANTERIOR/VARPCT) e do alinhamento por dia útil usam a meta do período
+  PRINCIPAL da consulta. No modo "lista de registros" o operando exibe "—"
+  (limitação documentada).
+
 ### 8.6 Erros e degradações que o editor explica
 
 - Agregação/SOMASE em campo por-registro → bloqueado com mensagem dedicada.
+- `[Meta: …]` em campo por-registro → bloqueado com mensagem dedicada.
 - "Data atual" em fórmula agregada → operando desabilitado com o motivo.
 - Campo cru fora de SOMASE/CONT.SE/MÉDIASE em contexto agregado → erro.
 - Condição sobre coluna inválida (ex.: campo calculado agregado) → erro.
@@ -1629,7 +1658,9 @@ Atalhos que GERAM uma fórmula normal (100% editável depois):
 | Só vendas "Ganhou" | `SOMASE([Valor]; [Etapa] = "Ganhou")` |
 | Crescimento vs mês anterior | `VARPCT([Σ MRR])` |
 | MRR anualizado | `[Σ MRR] * 12` |
-| Meta batida? (texto no card) | `SE([Σ MRR] >= 100000; "Meta batida"; "Em andamento")` |
+| % da meta atingida | `[Σ MRR] / [Meta: MRR]` (formato Percentual) |
+| Quanto falta p/ a meta | `[Meta: MRR] - [Σ MRR]` |
+| Meta batida? (texto no card) | `SE([Σ MRR] >= [Meta: MRR]; "Meta batida"; "Em andamento")` |
 
 | Objetivo | Fórmula (por registro) |
 |---|---|
@@ -2237,7 +2268,8 @@ referência.
 - **Tokens de data em filtros (5)**: `@today`, `@month_start`, `@month_end`,
   `@year_start`, `@year_end`.
 - **Métricas de meta embutidas (2)**: `mrr`, `clientes` (+ personalizadas do
-  admin).
+  admin); cada uma vira o operando de fórmula `[Meta: …]`/`meta:<chave>`
+  (§8.5b).
 - **Presets de fábrica (4)**: Performance comercial do mês, Forecast do mês,
   MRR por vendedor, MRR por canal.
 - **Escalas de fonte do dashboard (5)**: 90%, 100%, 115%, 130%, 150%.

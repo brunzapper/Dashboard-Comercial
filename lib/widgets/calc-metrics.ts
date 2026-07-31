@@ -1,4 +1,12 @@
-// Versão: 2.4 | Data: 24/07/2026
+// Versão: 2.5 | Data: 31/07/2026
+// v2.5 (31/07/2026): operandos de META — ref `meta:<chave>` (registry
+//   goal_metrics) vira o VALOR da meta global do período da consulta. É
+//   ABAIXADO para token const pré-resolvido (lowerGoalOperands, molde do
+//   zeroing v2.4) nos choke points do engine/runCalculatedWidget — NUNCA via
+//   basis (foldBasis é aditivo: meta em basis somaria nos subtotais) e nunca
+//   RPC. Meta ausente ⇒ ref mantido (ctx null ⇒ "—", nunca 0 fabricado).
+//   GOAL_GROUP entra no allowlist de topo de validateCondAggRefs (fora de
+//   SOMASE ok; dentro segue rejeitado pelas mensagens existentes).
 // v2.4 (24/07/2026): zeroing de operandos de fonte-IRMÃ p/ o branch multi-perna
 //   do engine (zeroSiblingScopedOperands/zeroSiblingScopesInFields/
 //   siblingScopedBasisKeys) — cada perna de sub-base exibe só a PRÓPRIA
@@ -334,6 +342,78 @@ export function siblingScopedBasisKeys(
     const scope = parseCondBasisKey(k)?.scope;
     return scope != null && siblings.has(scope);
   });
+}
+
+// ===== Operandos de META (`meta:<chave>`, 31/07/2026) =====
+// O valor da meta GLOBAL do período da consulta (goals.target via resolveGoal)
+// entra na fórmula como CONSTANTE pré-resolvida: o caller (engine /
+// runCalculatedWidget) resolve as chaves e chama lowerGoalOperands ANTES da
+// avaliação — o const embutido viaja na fórmula resolvida (WidgetData) e o
+// re-eval de subtotais no cliente funciona de graça, sem somar a meta (fold
+// aditivo fica intocado porque meta: nunca entra na basis).
+
+export const GOAL_OPERAND_PREFIX = "meta:";
+// Papel igual aos COND_AGG_*_GROUP: validateCondAggRefs deriva o conjunto do
+// catálogo — nunca lista paralela.
+export const GOAL_GROUP = "Metas";
+// Mesma regra de chave do registry (lib/metas/metrics.ts).
+const GOAL_KEY_RE = /^[a-z0-9_]{1,40}$/;
+
+/** Chave da métrica de meta de um ref `meta:<chave>` válido, ou null. */
+export function parseGoalRef(ref: string): string | null {
+  if (!ref.startsWith(GOAL_OPERAND_PREFIX)) return null;
+  const key = ref.slice(GOAL_OPERAND_PREFIX.length);
+  return GOAL_KEY_RE.test(key) ? key : null;
+}
+
+/** Chaves `meta:` da fórmula (dedup) — rodar sobre a fórmula EXPANDIDA
+ *  (calculado_agg aninhado pode embutir operandos de meta). */
+export function goalOperandKeys(formula: Formula): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const ref of formulaRefs(formula)) {
+    const key = parseGoalRef(ref);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+/**
+ * Abaixa os operandos `meta:` para token const com o valor pré-resolvido.
+ * Valor null/ausente MANTÉM o ref (buildCtx → null → "—" — meta não cadastrada
+ * nunca vira 0). Fast path: nenhum token de meta ⇒ o MESMO objeto.
+ */
+export function lowerGoalOperands(
+  formula: Formula,
+  values: Record<string, number | null | undefined>
+): Formula {
+  const loweredValue = (t: FormulaToken): number | null => {
+    if (t.kind !== "field") return null;
+    const key = parseGoalRef(t.ref);
+    if (!key) return null;
+    const v = values[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  if (!formula.tokens.some((t) => loweredValue(t) != null)) return formula;
+  const tokens: FormulaToken[] = formula.tokens.map((t) => {
+    const v = loweredValue(t);
+    return v == null ? t : { kind: "const", value: v };
+  });
+  return { tokens };
+}
+
+/** Operandos de meta do catálogo agregado — um por métrica do registry. */
+export function goalOperandRefs(
+  goalMetrics: { key: string; label: string }[]
+): RefOption[] {
+  return goalMetrics.map((m) => ({
+    ref: `${GOAL_OPERAND_PREFIX}${m.key}`,
+    label: `Meta: ${m.label}`,
+    group: GOAL_GROUP,
+  }));
 }
 
 // Chave de basis: 'sum:<field>' | 'count:<field>' | 'count:*'. Operando
@@ -958,6 +1038,7 @@ export function validateCondAggRefs(
   const targets = new Set<string>();
   const conds = new Set<string>();
   const nested = new Set<string>();
+  const goals = new Set<string>();
   for (const o of catalog) {
     // Campos numéricos (grupo alvo) também valem como coluna de CONDIÇÃO
     // (ex.: CONT.SE([Valor] > 1000)) — o SE() permite comparação numérica e a
@@ -967,6 +1048,7 @@ export function validateCondAggRefs(
       conds.add(o.ref);
     } else if (o.group === COND_AGG_COND_GROUP) conds.add(o.ref);
     else if (o.group === AGG_NESTED_GROUP) nested.add(o.ref);
+    else if (o.group === GOAL_GROUP) goals.add(o.ref);
   }
   const labelOf = (ref: string) =>
     catalog.find((o) => o.ref === ref)?.label ?? ref;
@@ -976,8 +1058,15 @@ export function validateCondAggRefs(
     // condicionais (expandido em runtime); os demais planos, não. Chave
     // `aggif:` avulsa (operando com escopo JÁ abaixado) também é agregada —
     // a validação normal roda sobre a fórmula persistida (`agg:…@fonte`), mas
-    // a forma abaixada deve permanecer válida por simetria.
-    if (!ref.startsWith("agg:") && !ref.startsWith("aggif:") && !nested.has(ref)) {
+    // a forma abaixada deve permanecer válida por simetria. Operando de META
+    // (grupo GOAL_GROUP) é um VALOR por consulta — válido fora de SOMASE;
+    // dentro cai nas rejeições de alvo/condição abaixo.
+    if (
+      !ref.startsWith("agg:") &&
+      !ref.startsWith("aggif:") &&
+      !nested.has(ref) &&
+      !goals.has(ref)
+    ) {
       return {
         ok: false,
         error: `[${labelOf(ref)}] só pode aparecer dentro de SOMASE/CONT.SE/MÉDIASE — fora deles, use os operandos agregados (Σ, Média, Contagem).`,
