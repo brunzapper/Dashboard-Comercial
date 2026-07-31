@@ -1,5 +1,5 @@
-<!-- Versão: 1.49 | Data: 31/07/2026 -->
-<!-- v1.49 (31/07/2026): (a) §4.17 + invariante 25 — assistente "Atualizar com
+<!-- Versão: 1.50 | Data: 31/07/2026 -->
+<!-- v1.50 (31/07/2026): (a) §4.17 + invariante 25 — assistente "Atualizar com
      IA" (contrato registros-update v1): atualização em MASSA por filtros +
      alterações; prévia server-side OBRIGATÓRIA via runRecordListWindow
      (contagem exata + amostra; IA nunca emite ids; sub-fontes aceitas), apply
@@ -10,6 +10,14 @@
      (decideActions), alvos proibidos por setFieldTargetError (avaliação +
      save + picker), executor único executeFieldWrites (moves + sets), teto
      único MAX_ACTIONS_PER_RUN. RPCs intocados; sem migração. -->
+<!-- v1.49 (31/07/2026): recursos SOB DEMANDA por org (0114) — org_features
+     (linha por org; escrita service-role-only) + lib/config/org-features
+     (parse fail-closed) + AREA_FEATURES em access.ts (feature-off vence até
+     override allow; barra page/aba/escrita/matriz) + requiresFeature no
+     PresetDashboard (lista/applyPreset/generatePresets) + toggle no console
+     /owner. Remuneração vira config custom da Zapper; §4.18 atualizado.
+     UI: seletor de plano da Remuneração vira pills visíveis (nome + nº de
+     membros) — o combobox escondia os demais planos. -->
 <!-- v1.48 (31/07/2026): §4.7 preset Remuneração Variável v3 — dashboard de
      CONFERÊNCIA em 5 abas: Visão geral vira resumo da remuneração sobre o
      espelho (KPIs + tabela records-mode de conferência + total por
@@ -2608,6 +2616,24 @@ total opcional por plano.
   admin OU `responsible_id in (select auth_responsible_ids())` (grupo
   canônico, 0101); escrita admin-only nas duas. Tabelas raiz org-scoped com
   carimbo na action (padrão 0111); fora de `PASSTHROUGH_TABLES`.
+- **Recurso SOB DEMANDA por org (0114, 31/07/2026).** A Remuneração é config
+  CUSTOM feita sob demanda (Zapper): `org_features` (uma linha por org, jsonb
+  `{"remuneracao": true}`; select p/ membros, ESCRITA service-role-only) +
+  catálogo/parse fail-closed em `lib/config/org-features.ts` (sem linha/chave
+  = OFF; só `true` literal liga). O gate vive em `lib/auth/access.ts`
+  (`AREA_FEATURES`): feature-off vence TUDO — inclusive override allow —
+  na page (`requireSettingsArea`/`checkSettingsArea`), na ESCRITA
+  (`isSettingsAreaDenied`), na aba do settings layout (`disabledAreas`) e na
+  matriz de Acessos (linha some). O preset "Remuneração Variável" carrega
+  `requiresFeature: "remuneracao"` (`PresetDashboard`): some da lista de
+  Presets, `applyPreset` barra com erro amigável e `generatePresets` PULA —
+  os dois caminhos são alcançáveis por action direta, o filtro da lista não
+  basta. Habilitação SÓ pelo console `/owner` (toggle por org →
+  `setOrgFeatureAction`, requireOwner + service role; org_admin NUNCA se
+  auto-habilita). Desligar o feature esconde área/preset e barra escrita —
+  NUNCA apaga nem esconde dados (planos/entradas/espelho seguem com a RLS da
+  0112; a Zapper é semeada ON na própria migração). Precedência completa
+  documentada: feature-off > deny > allow > gate de papel.
 
 Testes: `lib/comp/model.test.ts` (parse fail-closed, precedência de overrides,
 cap/floor, fórmula livre, catálogo comp:*, faixas de comissão — seleção `>=`,

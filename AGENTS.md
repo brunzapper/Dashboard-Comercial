@@ -649,8 +649,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   select = admin OU `auth_responsible_ids()` (vendedor vê só o próprio grupo)
   — NUNCA afrouxar para org-wide; escrita admin-only; `comp_plans` select
   org-wide (só o desenho). Área `remuneracao` SEM gate de papel (a page
-  ramifica admin/vendedor). Fiscalizado por `lib/comp/*.test.ts` +
-  `lib/metas/upsert.test.ts`. Ver `docs/arquitetura.md` §4.18 e invariante 26.
+  ramifica admin/vendedor) — mas é RECURSO SOB DEMANDA por org
+  (`org_features` 0114, feature "remuneracao"; parse fail-closed em
+  `lib/config/org-features.ts`): feature-off vence TUDO — inclusive override
+  allow — em `requireSettingsArea`/`checkSettingsArea`/`isSettingsAreaDenied`
+  (`AREA_FEATURES`, lib/auth/access.ts), esconde a aba/matriz de Acessos e
+  barra/pula o preset (`PresetDashboard.requiresFeature` na lista, no
+  `applyPreset` e no `generatePresets`). Habilitação SÓ pelo console `/owner`
+  (escrita de org_features é service-role-only — org_admin NUNCA se
+  auto-habilita); desligar nunca apaga/esconde DADOS (RLS da 0112 intocada).
+  Fiscalizado por `lib/comp/*.test.ts` +
+  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
+  `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um
   `field_definitions` local ("Fase — <nome>", `selecao`) e guarda a chave em

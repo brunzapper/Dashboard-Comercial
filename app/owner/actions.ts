@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 23/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Server Actions do console do OWNER (multi-org, 0089/0093): criar e excluir
 // organizações. TODA action abre com requireOwner() (guard fail-closed —
 // lib/auth/owner.ts); as escritas usam service role (organization_members não
@@ -6,16 +6,55 @@
 // service role). Ao criar, o Owner define o Administrador de Organização: ele
 // mesmo ou uma conta NOVA (email/senha) — a org nasce VAZIA (só as core defs
 // de seed_org_defaults; nada da Zapper).
+// v1.1 (31/07/2026): setOrgFeatureAction — recursos SOB DEMANDA por org
+// (org_features, 0114; escrita service-role-only: SÓ o Owner habilita).
 "use server";
 
 import { revalidatePath } from "next/cache";
 
 import { requireOwner } from "@/lib/auth/owner";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  normalizeOrgFeatures,
+  ORG_FEATURES,
+  type OrgFeatureKey,
+} from "@/lib/config/org-features";
 
 export interface OwnerActionState {
   ok?: boolean;
   message?: string;
+}
+
+/** Liga/desliga um recurso sob demanda para uma org (merge sobre o jsonb —
+ * outros toggles da linha sobrevivem). Chave validada contra o catálogo. */
+export async function setOrgFeatureAction(
+  orgId: string,
+  featureKey: string,
+  enabled: boolean
+): Promise<OwnerActionState> {
+  await requireOwner();
+  if (!orgId) return { ok: false, message: "Organização inválida." };
+  if (!ORG_FEATURES.some((f) => f.key === featureKey)) {
+    return { ok: false, message: `Recurso desconhecido ("${featureKey}").` };
+  }
+  const service = createServiceClient();
+  const { data: row, error: readError } = await service
+    .from("org_features")
+    .select("features")
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  if (readError) return { ok: false, message: readError.message };
+  const features = normalizeOrgFeatures(row?.features ?? null);
+  features[featureKey as OrgFeatureKey] = enabled;
+  const { error } = await service
+    .from("org_features")
+    .upsert(
+      { organization_id: orgId, features },
+      { onConflict: "organization_id" }
+    );
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/owner");
+  return { ok: true };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

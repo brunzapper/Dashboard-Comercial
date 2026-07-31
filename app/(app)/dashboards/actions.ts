@@ -55,6 +55,7 @@ import { revalidatePath } from "next/cache";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgFeatures } from "@/lib/config/org-features";
 import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
@@ -2817,6 +2818,19 @@ export async function applyPreset(
   const preset = PRESETS.find((p) => p.presetKey === presetKey);
   if (!preset) return { ok: false, message: `Preset "${presetKey}" não existe.` };
   const supabase = await createClient();
+  // Recurso sob demanda (0114): a lista filtrada não basta — a action é
+  // alcançável direto; feature off barra o apply.
+  if (preset.requiresFeature) {
+    const features = await loadOrgFeatures(supabase, await getActiveOrgId());
+    if (!features[preset.requiresFeature]) {
+      return {
+        ok: false,
+        message:
+          `O preset "${preset.name}" é uma configuração sob demanda e não ` +
+          "está habilitado para esta organização.",
+      };
+    }
+  }
   const result = await applyPresetDefinition(supabase, session.user.id, preset, {
     // Caminho de FÁBRICA: único autorizado a aplicar operations/compPlans.
     allowOrgSections: true,
@@ -3119,9 +3133,13 @@ export async function generatePresets(): Promise<ActionState> {
     return { ok: false, message: "Apenas administradores podem gerar presets." };
   }
   const supabase = await createClient();
+  // Recurso sob demanda (0114): preset de feature desligado é PULADO — um
+  // "gerar todos" nunca cria a config custom de outra org.
+  const features = await loadOrgFeatures(supabase, await getActiveOrgId());
   let created = 0;
   let updated = 0;
   for (const preset of PRESETS) {
+    if (preset.requiresFeature && !features[preset.requiresFeature]) continue;
     const result = await applyPresetDefinition(supabase, session.user.id, preset, {
       // Caminho de fábrica — mesmas seções de org do applyPreset unitário.
       allowOrgSections: true,
