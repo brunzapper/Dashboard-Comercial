@@ -1,4 +1,9 @@
-<!-- Versão: 1.44 | Data: 31/07/2026 -->
+<!-- Versão: 1.45 | Data: 31/07/2026 -->
+<!-- v1.45 (31/07/2026): fix §4.10/invariante 12 — o fingerprint dos widgets
+     DEFERIDOS (deferredScopeById) ganha a CONFIG do widget
+     (lib/widgets/deferred-fingerprint.ts; posição/ordem fora do hash):
+     editar widget deferido re-busca sem F5 (antes o payload velho do lote
+     ficava na tela — regressão do deferimento automático de engine). -->
 <!-- v1.44 (31/07/2026): (a) §4.18 — membros do plano por OPERAÇÃO
      (config.memberOperationIds: subárvore viva via loadOperationScopes +
      canonicalização nos callers; helpers puros resolveOperationMembers/
@@ -1454,12 +1459,17 @@ garantias:
   dashboard segue 100% no widget-scope.
 - **Gatilho de re-fetch por FINGERPRINT:** a page computa
   `deferredScopeById[widgetId] = JSON.stringify({ p: período efetivo,
-  f: filtros de visualização, pw: escolha __pw__ })` e o widget recebe como
-  prop `scopeKey`, que é a dep REAL do effect de fetch (a URL é lida em
+  f: filtros de visualização, pw: escolha __pw__, c: CONFIG do widget
+  (widgetConfigFingerprint, 31/07/2026 — hash das colunas de config;
+  posição/ordem FORA para mover não re-buscar o lote) })` e o widget recebe
+  como prop `scopeKey`, que é a dep REAL do effect de fetch (a URL é lida em
   call-time, `window.location.search`). Como o RSC re-renderiza em TODOS os
   caminhos (navegação, `revalidatePath`, `router.refresh` do realtime), o
-  fingerprint cobre também mudanças feitas por OUTRO usuário. Não volte a
-  keyar o fetch deferido em `useSearchParams` — filtro persistido no banco
+  fingerprint cobre também mudanças feitas por OUTRO usuário — e o `c` cobre
+  a EDIÇÃO do próprio widget (sem ele, o payload deferido velho ficava na
+  tela até F5: updateWidget revalidava, mas período/filtros não mudavam e o
+  effect não re-buscava). Não remova o `c` ao mexer no deferimento. Não volte
+  a keyar o fetch deferido em `useSearchParams` — filtro persistido no banco
   não muda a URL e o widget ficava obsoleto até F5. Mudança de DADO (sem
   mudança de filtro) chega pelo event bus (`useDataChanged` → tick), nos dois
   widgets.
@@ -2469,7 +2479,10 @@ principalmente — para mantenedores humanos.
     bug de widgets deferidos ignorando o filtro de operação até F5. No
     cliente, o fetch deferido re-dispara pelo fingerprint `scopeKey`
     (`deferredScopeById` da page), nunca por `useSearchParams` (filtro
-    persistido no banco não muda a URL). A página cheia do kanban de widget
+    persistido no banco não muda a URL) — e o fingerprint INCLUI a config do
+    widget (`widgetConfigFingerprint`, posição fora): sem isso, EDITAR um
+    widget deferido deixava o payload velho na tela até F5 (regressão
+    31/07/2026). A página cheia do kanban de widget
     (`/kanbans/w/[widgetId]`) NÃO é uma action de widget-no-dashboard: é um
     contexto de visualização próprio (como a Agenda) que ignora os filtros do
     pai POR INTEIRO e POR DESIGN — RSC → `runKanban` direto, barra de período
