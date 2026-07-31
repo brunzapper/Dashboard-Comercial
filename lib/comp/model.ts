@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Modelo PURO da remuneração variável (0112). Um plano (comp_plans.config,
 // jsonb versionado — parse FAIL-CLOSED, padrão kanban_automations) define
 // fatores com peso %, fórmula AGREGADA (realizado computado pelo engine via
@@ -6,6 +6,12 @@
 // metas (alvos são LINHAS de `goals`, scope 'responsible', id canônico) e,
 // opcionalmente, uma fórmula LIVRE de total que compõe as MESMAS variáveis
 // efetivas (sincronia total com a estrutura padrão).
+// v1.1: comissão por FAIXAS de atingimento (config.commission) — % sobre uma
+// base (base variável ou realizado de um fator) escolhida pelo atingimento
+// EFETIVO do fator gatilho; tabela por membro (memberTiers) vence a do plano.
+// O cálculo é NATIVO em computeEntry (nunca fórmula gerada — override por
+// membro não caberia numa fórmula por plano) e a fórmula livre compõe via
+// ref `comp:comissao` (sem soma automática, semântica do comp:bonus).
 // computeEntry deriva o detalhamento NA LEITURA: efetivo = manual ?? calculado
 // em cada variável — recompute regrava só o snapshot CRU (computed.realized) e
 // nunca toca os overrides; editar peso/base/override atualiza tudo sem
@@ -25,6 +31,8 @@ import type { SourceDef } from "@/lib/sources";
 export const MAX_FACTORS = 12;
 export const MAX_BONUSES = 20;
 export const MAX_TOTAL_FORMULA_TOKENS = 200;
+export const MAX_COMMISSION_TIERS = 12; // por tabela (plano ou membro)
+export const MAX_COMMISSION_MEMBER_OVERRIDES = 400;
 
 /** Fator do plano: componente ponderado da remuneração. */
 export interface CompFactor {
@@ -42,6 +50,28 @@ export interface CompFactor {
   floorPct?: number; // piso idem
 }
 
+/** Faixa: atingimento >= fromPct ⇒ comissão de ratePct% da base. */
+export interface CompCommissionTier {
+  fromPct: number; // >= 0; estritamente crescente dentro da tabela
+  ratePct: number; // >= 0 (0 = faixa que zera)
+}
+
+/**
+ * Comissão por faixas: o atingimento EFETIVO do fator gatilho (pós override e
+ * cap/floor) escolhe a faixa (maior `fromPct` satisfeito vence, `>=`); a % da
+ * faixa incide sobre a base variável da linha ou sobre o realizado EFETIVO de
+ * um fator. `memberTiers` (id CANÔNICO) substitui a tabela inteira do plano
+ * para aquele membro; entrada órfã (membro fora do plano) nunca é selecionada
+ * e nunca é podada no save (memberIds vazio = "todos os ativos", que muda).
+ */
+export interface CompCommissionConfig {
+  triggerFactorId: string;
+  basisKind: "base" | "factor";
+  basisFactorId?: string; // obrigatório sse basisKind === "factor"
+  tiers: CompCommissionTier[]; // >= 1
+  memberTiers?: Record<string, CompCommissionTier[]>;
+}
+
 export interface CompPlanConfig {
   v: 1;
   factors: CompFactor[];
@@ -50,6 +80,8 @@ export interface CompPlanConfig {
   // Fórmula LIVRE do total (operandos comp:*). Ausente/null = composição
   // estruturada: base × Σ(peso% × ating%) + bônus.
   totalFormula?: Formula | null;
+  // Comissão por faixas de atingimento (opcional; ausente = sem comissão).
+  commission?: CompCommissionConfig;
 }
 
 /** Override manual das variáveis derivadas de um fator (efetivo = manual ?? calculado). */
@@ -69,6 +101,7 @@ export interface CompBonus {
 export interface CompEntryInputs {
   overrides: {
     factors: Record<string, CompFactorOverride>;
+    commission?: number;
     total?: number;
   };
   bonuses: CompBonus[];
@@ -92,11 +125,21 @@ export interface CompFactorBreakdown {
   overridden: { realized: boolean; attainmentPct: boolean; payout: boolean };
 }
 
+/** Detalhamento efetivo da comissão por faixas (derivado na leitura). */
+export interface CompCommissionBreakdown {
+  value: number; // efetivo = manual ?? calculado
+  tier: CompCommissionTier | null; // faixa satisfeita (null = nenhuma)
+  triggerAttainmentPct: number | null; // ating. EFETIVO usado na seleção
+  overridden: boolean;
+}
+
 /** Detalhamento efetivo da linha (responsável×mês). */
 export interface CompBreakdown {
   base: number;
   byFactor: Record<string, CompFactorBreakdown>;
   factorsTotal: number;
+  // null = plano sem comissão (a coluna/linha não existe na UI).
+  commission: CompCommissionBreakdown | null;
   bonusTotal: number;
   // null = fórmula livre presente com resultado inválido (div/0, ref ausente).
   total: number | null;
@@ -186,11 +229,72 @@ function parseFactor(raw: unknown): CompFactor | null {
   return out;
 }
 
+// Tabela de faixas: >= 1, todas finitas e >= 0, fromPct estritamente
+// crescente (cobre ordenação E duplicata num só check).
+function parseTiers(raw: unknown): CompCommissionTier[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  if (raw.length > MAX_COMMISSION_TIERS) return null;
+  const out: CompCommissionTier[] = [];
+  let prev = -Infinity;
+  for (const t of raw) {
+    if (!isRecord(t)) return null;
+    const fromPct = finiteOrNull(t.fromPct);
+    const ratePct = finiteOrNull(t.ratePct);
+    if (fromPct == null || fromPct < 0 || fromPct <= prev) return null;
+    if (ratePct == null || ratePct < 0) return null;
+    prev = fromPct;
+    out.push({ fromPct, ratePct });
+  }
+  return out;
+}
+
+// Bloco de comissão: FAIL-CLOSED (referência a fator fantasma computaria
+// silenciosamente errado — espírito da invariante 26; o editor valida antes
+// com mensagem própria, aqui é a muralha contra jsonb adulterado).
+function parseCommission(
+  raw: unknown,
+  factorIds: Set<string>
+): CompCommissionConfig | null {
+  if (!isRecord(raw)) return null;
+  const { triggerFactorId, basisKind } = raw;
+  if (typeof triggerFactorId !== "string" || !factorIds.has(triggerFactorId))
+    return null;
+  if (basisKind !== "base" && basisKind !== "factor") return null;
+  const out: CompCommissionConfig = {
+    triggerFactorId,
+    basisKind,
+    tiers: [],
+  };
+  if (basisKind === "factor") {
+    const b = raw.basisFactorId;
+    if (typeof b !== "string" || !factorIds.has(b)) return null;
+    out.basisFactorId = b;
+  }
+  const tiers = parseTiers(raw.tiers);
+  if (!tiers) return null;
+  out.tiers = tiers;
+  if (raw.memberTiers != null) {
+    if (!isRecord(raw.memberTiers)) return null;
+    const entries = Object.entries(raw.memberTiers);
+    if (entries.length > MAX_COMMISSION_MEMBER_OVERRIDES) return null;
+    const memberTiers: Record<string, CompCommissionTier[]> = {};
+    for (const [id, t] of entries) {
+      if (id === "") return null;
+      const parsed = parseTiers(t);
+      if (!parsed) return null;
+      memberTiers[id] = parsed;
+    }
+    if (entries.length > 0) out.memberTiers = memberTiers;
+  }
+  return out;
+}
+
 /**
  * Parse FAIL-CLOSED de comp_plans.config: qualquer estrutura fora do contrato
  * (v errado, fator sem id/fórmula, peso não-numérico, floor>cap, ids
- * duplicados, totalFormula acima do teto…) retorna null — o chamador exibe
- * "Configuração do plano inválida", nunca "roda como der".
+ * duplicados, totalFormula acima do teto, comissão apontando fator
+ * inexistente…) retorna null — o chamador exibe "Configuração do plano
+ * inválida", nunca "roda como der".
  */
 export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
   if (!isRecord(raw) || raw.v !== 1) return null;
@@ -218,6 +322,11 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
     if (!tf) return null;
     out.totalFormula = tf;
   }
+  if (raw.commission != null) {
+    const c = parseCommission(raw.commission, seen);
+    if (!c) return null;
+    out.commission = c;
+  }
   return out;
 }
 
@@ -242,6 +351,8 @@ export function parseCompEntryInputs(raw: unknown): CompEntryInputs {
       if (Object.keys(entry).length > 0) out.overrides.factors[fid] = entry;
     }
   }
+  const commission = finiteOrNull(ov.commission);
+  if (commission != null) out.overrides.commission = commission;
   const total = finiteOrNull(ov.total);
   if (total != null) out.overrides.total = total;
   if (Array.isArray(raw.bonuses)) {
@@ -280,6 +391,39 @@ export function compFactorRef(
 export const COMP_BASE_REF = "comp:base";
 export const COMP_BONUS_REF = "comp:bonus";
 export const COMP_FACTORS_REF = "comp:fatores";
+export const COMP_COMMISSION_REF = "comp:comissao";
+
+/**
+ * Tabela de faixas efetiva de um membro: a própria (memberTiers) substitui a
+ * do plano INTEIRA; sem memberId (ou sem override) vale a do plano; null =
+ * plano sem comissão.
+ */
+export function resolveCommissionTiers(
+  config: CompPlanConfig,
+  memberId?: string | null
+): CompCommissionTier[] | null {
+  const c = config.commission;
+  if (!c) return null;
+  if (memberId && c.memberTiers?.[memberId]) return c.memberTiers[memberId];
+  return c.tiers;
+}
+
+/**
+ * Faixa satisfeita: maior `fromPct` com atingimento >= fromPct (limiar exato
+ * entra). Abaixo da menor faixa, ou atingimento null, nenhuma (⇒ comissão 0).
+ */
+export function selectCommissionTier(
+  tiers: CompCommissionTier[],
+  attainmentPct: number | null
+): CompCommissionTier | null {
+  if (attainmentPct == null) return null;
+  let best: CompCommissionTier | null = null;
+  for (const t of tiers) {
+    if (attainmentPct >= t.fromPct && (best == null || t.fromPct > best.fromPct))
+      best = t;
+  }
+  return best;
+}
 
 /**
  * Catálogo de operandos da fórmula livre de total — derivado do config (os
@@ -302,6 +446,15 @@ export function compOperandCatalog(config: CompPlanConfig): OperandRef[] {
     { ref: COMP_BONUS_REF, label: "Total de bônus", group: "Totais" },
     { ref: COMP_FACTORS_REF, label: "Total dos fatores", group: "Totais" }
   );
+  // Só com comissão configurada — o operando some/aparece em sincronia, e
+  // desligar a comissão com a ref em uso reprova a fórmula no save de graça.
+  if (config.commission) {
+    out.push({
+      ref: COMP_COMMISSION_REF,
+      label: "Comissão (R$)",
+      group: "Totais",
+    });
+  }
   return out;
 }
 
@@ -310,14 +463,17 @@ export function compOperandCatalog(config: CompPlanConfig): OperandRef[] {
  * variável, cap/floor só no calculado, fórmula livre (se houver) sobre as
  * variáveis já efetivas, e `overrides.total` vencendo tudo nos dois modos.
  * `realized` vem de computed.realized (snapshot cru); `targets` vem de `goals`
- * (chaveado por factorId, já dobrado p/ o responsável canônico).
+ * (chaveado por factorId, já dobrado p/ o responsável canônico). `memberId`
+ * (id CANÔNICO da linha) seleciona a tabela de faixas do membro — ausente,
+ * vale a do plano.
  */
 export function computeEntry(
   config: CompPlanConfig,
   baseAmount: number | null | undefined,
   inputs: CompEntryInputs,
   realized: Record<string, number | null>,
-  targets: Record<string, number | null>
+  targets: Record<string, number | null>,
+  memberId?: string | null
 ): CompBreakdown {
   const base =
     typeof baseAmount === "number" && Number.isFinite(baseAmount)
@@ -359,6 +515,34 @@ export function computeEntry(
     inputs.bonuses.reduce((acc, b) => acc + b.amount, 0)
   );
 
+  // Comissão por faixas: o atingimento EFETIVO do gatilho (pós override e
+  // cap/floor — byFactor já é efetivo) escolhe a faixa; a % incide sobre a
+  // base variável ou o realizado EFETIVO do fator-base. Sem faixa satisfeita
+  // ou base ausente ⇒ 0 (nunca fabricar), override manual sempre possível.
+  let commission: CompCommissionBreakdown | null = null;
+  if (config.commission) {
+    const c = config.commission;
+    const tiers = resolveCommissionTiers(config, memberId) ?? c.tiers;
+    const att = byFactor[c.triggerFactorId]?.attainmentPct ?? null;
+    const tier = selectCommissionTier(tiers, att);
+    const basis =
+      c.basisKind === "base"
+        ? base
+        : (byFactor[c.basisFactorId ?? ""]?.realized ?? null);
+    const calc =
+      tier != null && basis != null
+        ? roundMoney(basis * (tier.ratePct / 100))
+        : 0;
+    const ovCommission = inputs.overrides.commission;
+    commission = {
+      value: ovCommission ?? calc,
+      tier,
+      triggerAttainmentPct: att,
+      overridden: ovCommission != null,
+    };
+  }
+  const commissionValue = commission?.value ?? 0;
+
   let totalComputed: number | null;
   let totalFromFormula = false;
   let totalFormulaError = false;
@@ -369,6 +553,9 @@ export function computeEntry(
       [COMP_BONUS_REF]: bonusTotal,
       [COMP_FACTORS_REF]: factorsTotal,
     };
+    // Sem soma automática no modo fórmula — a fórmula compõe explicitamente
+    // (mesma semântica do comp:bonus); ref presente só com comissão ativa.
+    if (commission != null) ctx[COMP_COMMISSION_REF] = commission.value;
     for (const f of config.factors) {
       const b = byFactor[f.id];
       ctx[compFactorRef(f.id, "realizado")] = b.realized;
@@ -384,7 +571,7 @@ export function computeEntry(
       totalFormulaError = true;
     }
   } else {
-    totalComputed = roundMoney(factorsTotal + bonusTotal);
+    totalComputed = roundMoney(factorsTotal + commissionValue + bonusTotal);
   }
 
   const totalOverridden = inputs.overrides.total != null;
@@ -393,6 +580,7 @@ export function computeEntry(
     base,
     byFactor,
     factorsTotal,
+    commission,
     bonusTotal,
     total,
     totalOverridden,

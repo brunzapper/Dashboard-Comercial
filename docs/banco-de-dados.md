@@ -1,4 +1,8 @@
-<!-- Versão: 3.3 | Data: 30/07/2026 -->
+<!-- Versão: 3.4 | Data: 31/07/2026 -->
+<!-- v3.4 (31/07/2026): comp_plans.config ganha bloco opcional `commission`
+     (faixas de comissão por atingimento; memberTiers por membro) e
+     comp_entries.inputs.overrides ganha `commission` — só shape de jsonb,
+     SEM migração nova. -->
 <!-- v3.3 (30/07/2026): 0112 — comp_plans/comp_entries (remuneração variável:
      config jsonb versionado fail-closed; entries com inputs/overrides/
      computed cru/total efetivo + mirror_record_id do espelho publicado;
@@ -375,7 +379,11 @@ chave `goal_metrics`); o REALIZADO de um KPI meta é a consulta do próprio widg
 `base_amount_default` numeric (base variável default em R$; null = digitada por
 pessoa) e `config` jsonb VERSIONADO (`{v:1, factors:[{id, label, weightPct,
 metricKey, money?, formula, sources, filters?, capPct?, floorPct?}],
-memberIds?, totalFormula?}`) com parse FAIL-CLOSED em `lib/comp/model.ts` —
+memberIds?, totalFormula?, commission?}`; `commission` (31/07/2026, sem
+migração) = `{triggerFactorId, basisKind:"base"|"factor", basisFactorId?,
+tiers:[{fromPct, ratePct}], memberTiers?:{respId: tiers}}` — faixas de
+comissão por atingimento, tabela do membro substitui a do plano) com parse
+FAIL-CLOSED em `lib/comp/model.ts` —
 config fora do contrato nunca "roda como der". `factor.metricKey` vincula o
 fator a uma chave do registry `goal_metrics`: os ALVOS por pessoa×mês são
 linhas de `goals` (scope 'responsible', id canônico), nunca colunas daqui.
@@ -386,8 +394,8 @@ admin. Sem `anon`; fora de `PASSTHROUGH_TABLES`.
 **`comp_entries`** (0112) — lançamentos de remuneração por
 plano×responsável×ano×mês (única por essa tupla + org): `base_amount` (null =
 default do plano), `inputs` jsonb (`{overrides:{factors:{fid:{realized?,
-attainmentPct?, payout?}}, total?}, bonuses:[{id,label,amount}], note?}` — SEM
-targets), `computed` jsonb (snapshot CRU do recompute: `{v:1, at,
+attainmentPct?, payout?}}, commission?, total?}, bonuses:[{id,label,amount}],
+note?}` — SEM targets), `computed` jsonb (snapshot CRU do recompute: `{v:1, at,
 realized:{fid}, errors?}` — os efetivos são DERIVADOS na leitura por
 `computeEntry`; recompute nunca toca `inputs`), `total` numeric (efetivo, p/
 listagem), `mirror_record_id` FK → `records` `on delete set null` (dedup do

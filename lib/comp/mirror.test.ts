@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: rem_comissao — vazio sem comissão)
 // Testes dos builders PUROS do espelho de remuneração: serialização exata do
 // FormData de createRecord/updateRecord (número com ponto; closed_at
 // `YYYY-MM-DD` SEM hora — o coerceCore ancora em Brasília, invariante 11) e o
@@ -71,7 +71,41 @@ describe("mirror builders", () => {
     expect(values.custom__rem_plano).toBe("Comercial");
     // Ponderado: (60×80 + 40×100)/100 = 88.
     expect(values.custom__rem_atingimento).toBe("88");
+    // Plano SEM comissão ⇒ campo vazio (nunca 0 fabricado).
+    expect(values.custom__rem_comissao).toBe("");
     expect(mirrorTitle("Ana", 2026, 12)).toBe("Ana — 12/2026");
+  });
+
+  it("comissão por faixas entra em rem_comissao e no total espelhado", () => {
+    const cfg: CompPlanConfig = {
+      ...CONFIG,
+      commission: {
+        triggerFactorId: "f_b",
+        basisKind: "factor",
+        basisFactorId: "f_a",
+        tiers: [{ fromPct: 100, ratePct: 3 }],
+      },
+    };
+    const breakdown = computeEntry(
+      cfg,
+      1000,
+      parseCompEntryInputs({}),
+      { f_a: 50000, f_b: 10 },
+      { f_a: 100000, f_b: 10 }
+    );
+    const values = mirrorFormValues({
+      config: cfg,
+      breakdown,
+      planName: "P",
+      memberName: "M",
+      responsibleId: "r",
+      year: 2026,
+      month: 7,
+      lastDay: 31,
+    });
+    // 3% de 50000 = 1500; total = 300 + 400 + 1500 = 2200.
+    expect(values.custom__rem_comissao).toBe("1500");
+    expect(values.core__value).toBe("2200");
   });
 
   it("atingimento médio ignora fatores sem atingimento; nenhum ⇒ null", () => {
@@ -110,6 +144,7 @@ describe("mirror builders", () => {
     expect(MIRROR_FIELDS.map((f) => f.key)).toEqual([
       "rem_base",
       "rem_bonus",
+      "rem_comissao",
       "rem_atingimento",
       "rem_plano",
     ]);

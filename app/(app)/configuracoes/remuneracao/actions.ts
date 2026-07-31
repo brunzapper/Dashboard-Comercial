@@ -1,6 +1,9 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Server Actions da tela de Remuneração (0112). Escrita SEMPRE admin (guard +
 // RLS); leitura do vendedor é da page (RLS entrega só o próprio grupo).
+// v1.1: comissão por faixas — bounds das faixas no savePlan, override
+// overrides.commission no patch de célula e responsible_id como memberId nos
+// computeEntry (tabela do membro vence a do plano).
 // - savePlan valida cada fator pelo MESMO caminho do servidor de fórmulas
 //   (buildAggOperandCatalog + validateFormulaForContext kind "aggregate" +
 //   validateFkCondNames) e a fórmula LIVRE de total com kind "record" sobre o
@@ -139,6 +142,24 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
     labels.add(k);
     if (f.weightPct < 0 || f.weightPct > 1000)
       return { ok: false, message: `Peso inválido no fator "${f.label}".` };
+  }
+
+  // Faixas de comissão: bounds amigáveis pós-parse (estrutura/ordenação/refs
+  // já são muralha do parse fail-closed — espelho do check de peso acima).
+  if (config.commission) {
+    const tables = [
+      config.commission.tiers,
+      ...Object.values(config.commission.memberTiers ?? {}),
+    ];
+    for (const table of tables) {
+      for (const t of table) {
+        if (t.ratePct > 1000 || t.fromPct > 100000)
+          return {
+            ok: false,
+            message: "Faixa de comissão inválida (percentual acima do limite).",
+          };
+      }
+    }
   }
 
   const supabase = await createClient();
@@ -353,6 +374,7 @@ export interface EntryPatch {
         payout?: number | null;
       }
     >;
+    commission?: number | null;
     total?: number | null;
   };
   bonuses?: { id: string; label: string; amount: number }[];
@@ -445,6 +467,11 @@ function applyEntryPatch(
     }
     if (Object.keys(target).length === 0) delete inputs.overrides.factors[fid];
     else inputs.overrides.factors[fid] = target;
+  }
+  if (ovPatch && "commission" in ovPatch) {
+    const v = cleanNumber(ovPatch.commission);
+    if (v == null) delete inputs.overrides.commission;
+    else inputs.overrides.commission = v;
   }
   if (ovPatch && "total" in ovPatch) {
     const v = cleanNumber(ovPatch.total);
@@ -557,7 +584,8 @@ export async function publishMonth(
       entry.base_amount ?? plan.base_amount_default,
       inputs,
       computed.realized ?? {},
-      targetsByMember.get(entry.responsible_id) ?? {}
+      targetsByMember.get(entry.responsible_id) ?? {},
+      entry.responsible_id
     );
     if (breakdown.total == null) {
       skipped += 1; // fórmula livre inválida — corrija antes de publicar
@@ -679,7 +707,8 @@ async function deriveTotal(
     opts.baseAmount ?? opts.plan.base_amount_default,
     opts.inputs,
     computed?.realized ?? {},
-    targets.get(opts.responsibleId) ?? {}
+    targets.get(opts.responsibleId) ?? {},
+    opts.responsibleId
   );
   return breakdown.total;
 }

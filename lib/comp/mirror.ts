@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: campo rem_comissao — comissão por faixas)
 // Espelho da remuneração numa Base de registros (0112): "Publicar" materializa
 // 1 registro por responsável×mês numa base manual "Remuneração" para TODOS os
 // widgets/dashboards existentes funcionarem de graça (período por closed_at =
@@ -23,6 +23,7 @@ export const MIRROR_SOURCE_LABEL = "Remuneração";
 export const MIRROR_FIELDS = [
   { key: "rem_base", label: "Base variável", dataType: "moeda" },
   { key: "rem_bonus", label: "Bônus", dataType: "moeda" },
+  { key: "rem_comissao", label: "Comissão", dataType: "moeda" },
   { key: "rem_atingimento", label: "Atingimento (%)", dataType: "numero" },
   { key: "rem_plano", label: "Plano", dataType: "texto" },
 ] as const;
@@ -85,6 +86,11 @@ export function mirrorFormValues(opts: {
     responsible_id: opts.responsibleId,
     custom__rem_base: String(roundMoney(breakdown.base)),
     custom__rem_bonus: String(roundMoney(breakdown.bonusTotal)),
+    // Vazio quando o plano não tem comissão — nunca 0 fabricado.
+    custom__rem_comissao:
+      breakdown.commission == null
+        ? ""
+        : String(roundMoney(breakdown.commission.value)),
     custom__rem_plano: opts.planName,
   };
   const att = mirrorAttainmentPct(opts.config, breakdown);

@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Engine I/O da remuneração variável (0112): recomputa o mês de um plano
 // consultando o REALIZADO de cada membro×fator SÓ pelo choke point
 // runCalculatedWidget (fórmula agregada + filtro `responsible_id eq`, que o
@@ -6,6 +6,7 @@
 // INTOCADOS) e regravando em comp_entries APENAS o snapshot CRU
 // (computed.realized) + o total efetivo derivado por computeEntry.
 // Recompute NUNCA toca inputs/base_amount — overrides sobrevivem sempre.
+// v1.1: member.id vai ao computeEntry (tabela de faixas de comissão do membro).
 // Alvos vêm de `goals` (scope 'responsible'): batch único por mês/métricas,
 // dobrado apelido→canônico (linha do canônico vence; apelido preenche
 // ausência — meta digitada no apelido pela área Metas não some).
@@ -279,7 +280,8 @@ export async function recomputePlanMonth(
       entry?.base_amount ?? opts.plan.base_amount_default,
       inputs,
       computed.realized,
-      targetsByMember.get(member.id) ?? {}
+      targetsByMember.get(member.id) ?? {},
+      member.id
     );
     // Update NUNCA toca inputs/base_amount (overrides sobrevivem ao recompute);
     // insert novo carimba org (WITH CHECK falha alto em org errada).

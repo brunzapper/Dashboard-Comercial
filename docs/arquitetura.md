@@ -1,4 +1,11 @@
-<!-- Versão: 1.42 | Data: 30/07/2026 -->
+<!-- Versão: 1.43 | Data: 31/07/2026 -->
+<!-- v1.43 (31/07/2026): §4.18 — comissão por FAIXAS de atingimento
+     (config.commission, sem migração): gatilho + base + tabela de faixas
+     (maior limiar >= vence sobre o atingimento EFETIVO), tabela por membro
+     (memberTiers) substitui a do plano inteira, cálculo NATIVO em
+     computeEntry (nunca fórmula gerada), ref comp:comissao na fórmula livre
+     (sem soma automática), override overrides.commission por célula e campo
+     rem_comissao no espelho. Invariante 26 estendida. RPCs intocados. -->
 <!-- v1.42 (30/07/2026): §4.18 Remuneração variável (0112) — comp_plans/
      comp_entries (config jsonb fail-closed; efetivo = manual ?? calculado
      derivado por computeEntry na leitura; recompute nunca toca inputs),
@@ -2223,19 +2230,41 @@ total opcional por plano.
   canon-blind (limitação documentada). Tradeoff aceito: `goals_select` é
   org-wide autenticado — alvos legíveis via API por qualquer logado (regime
   que `mrr`/`clientes` sempre tiveram; a page de Metas segue admin).
+- **Comissão por faixas de atingimento (31/07/2026).** Bloco OPCIONAL
+  `config.commission` (sem migração; parse fail-closed estendido — bloco
+  inválido ou apontando fator inexistente derruba o config inteiro):
+  `{triggerFactorId, basisKind: "base"|"factor", basisFactorId?, tiers:
+  [{fromPct, ratePct}], memberTiers?}`. O atingimento EFETIVO do fator gatilho
+  (pós override e cap/floor) escolhe a faixa — maior `fromPct` satisfeito
+  vence (`>=`); abaixo da menor faixa ou atingimento null ⇒ comissão 0
+  (`tier: null`, nunca fabricar). A % incide sobre a base variável da linha ou
+  o realizado EFETIVO de um fator. `memberTiers[respId CANÔNICO]` substitui a
+  tabela do plano INTEIRA para o membro (config durável, não input mensal;
+  entrada órfã é preservada e nunca selecionada — o editor a exibe com
+  remover). Cálculo NATIVO em `computeEntry`
+  (`resolveCommissionTiers`/`selectCommissionTier`, com o `memberId` no 6º
+  argumento — engine/grade/vendedor/publish passam o `responsible_id`) —
+  NUNCA gerar fórmula a partir das faixas (override por membro não caberia
+  numa fórmula por plano). No modo estruturado a comissão SOMA ao total; com
+  `totalFormula` ela só entra via ref `comp:comissao` (semântica do
+  `comp:bonus` — sem soma automática; o operando existe no catálogo SÓ com o
+  bloco presente, então desligar a comissão com a ref em uso reprova o save).
+  Override por célula em `inputs.overrides.commission`.
 - **Fórmula livre de total.** `config.totalFormula` avalia por
   `evaluateFormula` sobre o mapa `comp:*` montado em `computeEntry`
   (`comp:f:<fid>:realizado|alvo|ating|valor`, `comp:base`, `comp:bonus`,
-  `comp:fatores`) — variáveis JÁ efetivas (overrides aplicados = sincronia
-  total). Catálogo/validação em `compOperandCatalog` + kind "record" (módulo
-  único; SOMASE proibido com mensagem própria). Resultado não-numérico ⇒ total
-  null ("—" + aviso; Publicar pula a linha). `overrides.total` vence os dois
-  modos.
+  `comp:fatores`, `comp:comissao` quando há comissão) — variáveis JÁ efetivas
+  (overrides aplicados = sincronia total). Catálogo/validação em
+  `compOperandCatalog` + kind "record" (módulo único; SOMASE proibido com
+  mensagem própria). Resultado não-numérico ⇒ total null ("—" + aviso;
+  Publicar pula a linha). `overrides.total` vence os dois modos.
 - **Publicar (espelho em Base).** `publishMonth` materializa 1 registro por
   responsável×mês numa base manual "Remuneração" (`lib/comp/mirror.ts`:
   `data_sources` key `remuneracao` com sufixo em colisão global, ponteiro em
   `sync_config` 'remuneracao_mirror', field defs fixas `rem_base`/`rem_bonus`/
-  `rem_atingimento`/`rem_plano` com `editable_by_roles: ["admin"]`). A escrita
+  `rem_comissao`/`rem_atingimento`/`rem_plano` com
+  `editable_by_roles: ["admin"]`; `rem_comissao` fica vazio em plano sem
+  comissão — nunca 0 fabricado). A escrita
   é SÓ por `createRecord`/`updateRecord` com o client RLS do admin (invariante
   25) — `core__value` = total, `core__closed_at` = último dia do mês
   (`YYYY-MM-DD`; o `coerceCore` ancora em Brasília — invariante 11),
@@ -2254,9 +2283,11 @@ total opcional por plano.
   carimbo na action (padrão 0111); fora de `PASSTHROUGH_TABLES`.
 
 Testes: `lib/comp/model.test.ts` (parse fail-closed, precedência de overrides,
-cap/floor, fórmula livre, catálogo comp:*), `lib/comp/engine.test.ts` (1 RPC
-por célula com canon expandido, alvos de goals dobrados, update nunca toca
-inputs, erro isolado), `lib/comp/mirror.test.ts` (builders do form) e
+cap/floor, fórmula livre, catálogo comp:*, faixas de comissão — seleção `>=`,
+membro > plano, comp:comissao sem soma automática), `lib/comp/engine.test.ts`
+(1 RPC por célula com canon expandido, alvos de goals dobrados, update nunca
+toca inputs, erro isolado, total por membro com tabela própria),
+`lib/comp/mirror.test.ts` (builders do form, rem_comissao) e
 `lib/metas/upsert.test.ts` (find-then-update, registry). Ver invariante 26.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
@@ -2576,7 +2607,15 @@ principalmente — para mantenedores humanos.
     client RLS do admin, dedup por `mirror_record_id` (nunca `source_id`).
     Leitura do vendedor via `auth_responsible_ids()` na policy de
     `comp_entries` — remuneração é dado sensível: NUNCA afrouxar o select
-    para org-wide; escrita segue admin-only.
+    para org-wide; escrita segue admin-only. Comissão por faixas
+    (`config.commission`) calcula SÓ em `computeEntry` via
+    `resolveCommissionTiers`/`selectCommissionTier` (tabela do MEMBRO
+    substitui a do plano inteira; a seleção lê o atingimento EFETIVO do
+    gatilho) — NUNCA gerar fórmula a partir das faixas nem somar
+    `comp:comissao` automaticamente no modo `totalFormula`; todo call site de
+    `computeEntry` passa o `responsible_id` como `memberId` (omitir cai na
+    tabela do plano — degradação segura, mas silenciosa: consulta nova sem o
+    argumento erra o valor de membro personalizado).
 
 ## 6. Convenções do projeto
 
