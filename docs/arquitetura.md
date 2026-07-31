@@ -1,4 +1,13 @@
-<!-- Versão: 1.50 | Data: 31/07/2026 -->
+<!-- Versão: 1.51 | Data: 31/07/2026 -->
+<!-- v1.51 (31/07/2026): §4.18 + invariante 26 — APURAÇÃO SOBRE O MÊS ANTERIOR
+     (comp_plans.config.apuracao: "mes_anterior"; padrão da Zapper/preset):
+     lançamento M apura realizado/metas/taxas de M-1 via apuracaoRef, com o
+     deslocamento DENTRO dos loaders (contrato anti-dupla-conversão);
+     entry/espelho ficam no mês de pagamento; computed.ref carimba a janela.
+     UI da Remuneração: navegação de mês leve (rascunho + commit debounced,
+     picker mês/ano + "Hoje", replace + useNavPending, grade travada durante a
+     troca), aba via ?aba=plano com catálogo do editor condicional
+     (editorCatalog), piso de ano 2020 na page (URLs presas em 2000). -->
 <!-- v1.50 (31/07/2026): (a) §4.17 + invariante 25 — assistente "Atualizar com
      IA" (contrato registros-update v1): atualização em MASSA por filtros +
      alterações; prévia server-side OBRIGATÓRIA via runRecordListWindow
@@ -2583,6 +2592,27 @@ total opcional por plano.
   o convertido no tooltip ("mostrar os dois"). `config.presetKey` (identidade
   de plano criado por preset — §4.7) é parseado explicitamente e RE-EMITIDO
   pelo save do plan-editor.
+- **Apuração sobre o mês anterior (31/07/2026).** `config.apuracao:
+  "mes_anterior"` faz o lançamento do mês M (pagamento) apurar
+  realizado/metas/taxas sobre M-1 — caso Zapper: a variável paga em Julho
+  refere-se a Junho; os 5 planos do preset nascem com a chave e plano NOVO no
+  editor default a ela (o parse NORMALIZA `"mes_corrente"` para ausência —
+  ausente = mês do lançamento, compat). Contrato ANTI-DUPLA-CONVERSÃO:
+  `year`/`month` em toda assinatura pública é SEMPRE o mês do LANÇAMENTO; o
+  deslocamento acontece via `apuracaoRef` (helper puro do model, rollover de
+  janeiro) DENTRO de `loadTargetsByMember`/`loadTargetRatesForConfig` e nos
+  pontos únicos `monthPeriod` do `recomputePlanMonth` e key de goals do
+  `saveTarget` (a célula de alvo do lançamento M edita a meta de M-1 — mesma
+  linha que a área Metas mostra em M-1) — call site NUNCA passa mês já
+  deslocado (`rederiveEntryTotal`/`deriveTotal`/`publishMonth` seguem falando
+  M; o loader desloca de novo lá dentro — deslocar no caller leria M-2).
+  Identidade da entry (`period_year/month`), leitura/insert de entries e o
+  espelho (`closed_at`/título = mês de PAGAMENTO) ficam em M. O recompute
+  carimba a janela apurada em `computed.ref` ({year, month} — snapshot legado
+  sem a chave: a UI deriva do config); grade/vendedor exibem o badge
+  "Apurado sobre <mês>" e o save do editor RE-EMITE a chave (regra do
+  presetKey). Planos já criados NÃO são alcançados pelo ensure do preset —
+  backfill via SQL (PR da entrega).
 - **Fórmula livre de total.** `config.totalFormula` avalia por
   `evaluateFormula` sobre o mapa `comp:*` montado em `computeEntry`
   (`comp:f:<fid>:realizado|alvo|ating|valor`, `comp:base`, `comp:bonus`,
@@ -3022,7 +3052,13 @@ principalmente — para mantenedores humanos.
     ausente ⇒ atingimento null + `targetRateMissing`, NUNCA 1:1 — caller novo
     sem o 7º argumento falha FECHADO). `config.presetKey` (plano criado por
     preset) sobrevive ao round-trip do save do editor — removê-lo quebraria o
-    ensure-only do re-apply (§4.7).
+    ensure-only do re-apply (§4.7). Apuração sobre o mês anterior
+    (`config.apuracao: "mes_anterior"`): `year/month` público é SEMPRE o mês
+    do LANÇAMENTO e o deslocamento vive via `apuracaoRef` DENTRO de
+    `loadTargetsByMember`/`loadTargetRatesForConfig` + `monthPeriod` do
+    recompute + key de goals do `saveTarget` — NUNCA desloque no call site
+    (dupla conversão lê M-2) e NUNCA desloque entry/espelho (ficam no mês de
+    pagamento); o save do editor RE-EMITE a chave como o presetKey.
 
 27. **Filtros de relação por NOME se resolvem no ENGINE, antes do canon
     (§4.10).** Valor não-UUID em filtro de `responsible_id`/`operation_id`

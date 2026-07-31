@@ -109,6 +109,8 @@ describe("preset remuneracao_variavel — planos", () => {
       });
       expect(parsed, `plano ${decl.presetKey} não parseia`).not.toBeNull();
       expect(parsed!.presetKey).toBe(decl.presetKey);
+      // Padrão da casa: todo plano de fábrica apura sobre o mês anterior.
+      expect(parsed!.apuracao).toBe("mes_anterior");
       // Presença de operações ⇒ lista explícita SEMPRE (fail-closed do model).
       expect(parsed!.memberOperationIds?.length).toBe(
         decl.memberOperationNames?.length ?? 0

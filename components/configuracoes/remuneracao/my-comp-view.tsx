@@ -1,19 +1,22 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3: navegação de mês LEVE (useMonthDraft/MonthNav — rascunho + commit
+// debounced, picker de mês/ano + "Hoje", replace/useNavPending; cards
+// esmaecidos durante a troca) e badge "Apurado sobre <mês>" em plano com
+// config.apuracao = "mes_anterior".
+// v1.2: comissão multi-bloco (uma linha por bloco + soma quando há override)
+// e alvo em moeda própria (exibe na moeda digitada + convertido; cotação
+// ausente = aviso, atingimento vazio) via targetRatesByPlan do server.
 // "Minha remuneração" (0112) — visão READ-ONLY do vendedor: a RLS de
 // comp_entries entrega só as linhas do PRÓPRIO grupo canônico; o detalhamento
 // é derivado pelo MESMO computeEntry do gestor (transparência: célula com
 // override manual mostra o ponto âmbar; v1.1: linha de Comissão com a faixa
 // aplicada — o responsible_id da entry seleciona a tabela do membro). Nada é
 // editável; sem Recalcular/Publicar. Navegação de mês via searchParams.
-// v1.2: comissão multi-bloco (uma linha por bloco + soma quando há override)
-// e alvo em moeda própria (exibe na moeda digitada + convertido; cotação
-// ausente = aviso, atingimento vazio) via targetRatesByPlan do server.
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { useNavPending } from "@/components/dashboards/pending-context";
 import {
   Table,
   TableBody,
@@ -37,7 +40,8 @@ import type {
   CompEntryClientRow,
   CompPlanClientRow,
 } from "./remuneracao-manager";
-import { MONTH_LABELS } from "./remuneracao-manager";
+import { ApuracaoBadge } from "./remuneracao-manager";
+import { MonthNav, useMonthDraft } from "./month-nav";
 
 const fmtMoney = (v: number): string =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -78,12 +82,13 @@ export interface MyCompViewProps {
 export function MyCompView(props: MyCompViewProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const shiftMonth = (delta: number) => {
-    const d = new Date(Date.UTC(props.year, props.month - 1 + delta, 1));
-    router.push(
-      `${pathname}?ano=${d.getUTCFullYear()}&mes=${d.getUTCMonth() + 1}`
-    );
-  };
+  const { pending, run } = useNavPending();
+  const draft = useMonthDraft(props.year, props.month, (y, m) =>
+    run(() =>
+      router.replace(`${pathname}?ano=${y}&mes=${m}`, { scroll: false })
+    )
+  );
+  const busy = draft.dirty || pending;
 
   if (!props.linked) {
     return (
@@ -102,45 +107,32 @@ export function MyCompView(props: MyCompViewProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Mês anterior"
-          onClick={() => shiftMonth(-1)}
-        >
-          <ChevronLeft className="size-4" />
-        </Button>
-        <span className="min-w-36 text-center text-sm font-medium">
-          {MONTH_LABELS[props.month - 1]}/{props.year}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Próximo mês"
-          onClick={() => shiftMonth(1)}
-        >
-          <ChevronRight className="size-4" />
-        </Button>
-      </div>
+      <MonthNav draft={draft} pending={pending} />
 
-      {cards.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          Nenhum lançamento de remuneração para você neste mês.
-        </p>
-      ) : (
-        cards.map(({ plan, entry }) => (
-          <PlanCard
-            key={plan.id}
-            plan={plan}
-            entry={entry!}
-            targets={props.targetsByPlan[plan.id] ?? {}}
-            targetRates={props.targetRatesByPlan[plan.id] ?? {}}
-          />
-        ))
-      )}
+      <div
+        className={busy ? "pointer-events-none opacity-60" : undefined}
+        aria-busy={busy}
+      >
+        {cards.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            Nenhum lançamento de remuneração para você neste mês.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {cards.map(({ plan, entry }) => (
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                entry={entry!}
+                year={props.year}
+                month={props.month}
+                targets={props.targetsByPlan[plan.id] ?? {}}
+                targetRates={props.targetRatesByPlan[plan.id] ?? {}}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -148,6 +140,8 @@ export function MyCompView(props: MyCompViewProps) {
 function PlanCard(props: {
   plan: CompPlanClientRow;
   entry: CompEntryClientRow;
+  year: number;
+  month: number;
   targets: Record<string, number | null>;
   targetRates: Record<string, number | null>;
 }) {
@@ -167,8 +161,13 @@ function PlanCard(props: {
 
   return (
     <div className="bg-card rounded-md border p-4">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-lg font-medium">{props.plan.name}</h2>
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h2 className="flex items-baseline gap-2 text-lg font-medium">
+          {props.plan.name}
+          {config.apuracao === "mes_anterior" ? (
+            <ApuracaoBadge year={props.year} month={props.month} />
+          ) : null}
+        </h2>
         <span className="text-xl font-semibold">
           {breakdown.total != null ? fmtMoney(breakdown.total) : "—"}
           {breakdown.totalOverridden ? <OverrideDot /> : null}

@@ -1,3 +1,6 @@
+// Versão: 1.4 | Data: 31/07/2026 (v1.4: apuração sobre o mês anterior —
+// @period/goals deslocam p/ M-1 com rollover de janeiro, entry segue no mês
+// de pagamento e computed.ref carimba a janela apurada)
 // Versão: 1.3 | Data: 31/07/2026 (v1.3: memberField — filtro `in` com o
 // CONJUNTO DE NOMES do grupo canônico no lugar do responsible_id, membro sem
 // nome isola como erro de célula; targetCurrency — alvo convertido pela taxa
@@ -599,5 +602,95 @@ describe("recomputePlanMonth", () => {
     expect(payload.computed.realized.f_r).toBeNull();
     expect(payload.computed.realized.f_v).toBe(50);
     expect(payload.computed.errors?.f_r).toContain("boom");
+  });
+
+  // Fábrica do cenário de apuração M-1: um membro (m2), asserta @period das
+  // consultas, mês da query de goals e entry/computed.ref gravados.
+  async function runApuracao(year: number, month: number) {
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 100 }], error: null }),
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [{ responsible_id: M2, metric: "comp_vendas", target: 100 }],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: {
+        ...PLAN,
+        config: { ...CONFIG, memberIds: [M2], apuracao: "mes_anterior" },
+      },
+      year,
+      month,
+      orgId: "org-1",
+    });
+    expect(out.ok).toBe(true);
+    const goalsQuery = fake.queries.find((q) => q.table === "goals")!;
+    const goalsEq = (field: string) =>
+      goalsQuery.steps.find((s) => s.method === "eq" && s.args[0] === field)!
+        .args[1];
+    const mains = fake.rpcCalls.filter(
+      (c) => ((c.args.p_dimensions as unknown[]) ?? []).length === 0
+    );
+    expect(mains.length).toBeGreaterThan(0);
+    const periods = mains.map(
+      (c) =>
+        ((c.args.p_filters ?? []) as { field: string; value?: unknown }[]).find(
+          (x) => x.field === "@period"
+        )!.value as { from: string; to: string }
+    );
+    return { writes, goalsEq, periods };
+  }
+
+  it("apuracao mes_anterior: realizado/metas de M-1; entry no mês de pagamento com computed.ref apurado", async () => {
+    const { writes, goalsEq, periods } = await runApuracao(2026, 7);
+    // Metas do mês APURADO (Junho), não do lançamento.
+    expect(goalsEq("period_year")).toBe(2026);
+    expect(goalsEq("period_month")).toBe(6);
+    // @period de TODAS as consultas principais cobre Junho inteiro.
+    for (const p of periods) {
+      expect(p.from.startsWith("2026-06-01")).toBe(true);
+      expect(p.to.startsWith("2026-06-30")).toBe(true);
+    }
+    // Entry segue chaveada no mês de PAGAMENTO; ref carimba a janela apurada.
+    const entry = writes.find((w) => w.responsible_id === M2)!;
+    expect(entry.period_year).toBe(2026);
+    expect(entry.period_month).toBe(7);
+    expect((entry.computed as { ref?: unknown }).ref).toEqual({
+      year: 2026,
+      month: 6,
+    });
+    // Alvo de Junho encontrado ⇒ 100/100 = 100% ⇒ 1000×60% = 600 (f_r sem alvo).
+    expect(entry.total).toBe(600);
+  });
+
+  it("apuracao mes_anterior: lançamento de janeiro apura dezembro do ano anterior", async () => {
+    const { writes, goalsEq, periods } = await runApuracao(2026, 1);
+    expect(goalsEq("period_year")).toBe(2025);
+    expect(goalsEq("period_month")).toBe(12);
+    for (const p of periods) {
+      expect(p.from.startsWith("2025-12-01")).toBe(true);
+      expect(p.to.startsWith("2025-12-31")).toBe(true);
+    }
+    const entry = writes.find((w) => w.responsible_id === M2)!;
+    expect(entry.period_year).toBe(2026);
+    expect(entry.period_month).toBe(1);
+    expect((entry.computed as { ref?: unknown }).ref).toEqual({
+      year: 2025,
+      month: 12,
+    });
   });
 });

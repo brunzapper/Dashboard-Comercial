@@ -581,7 +581,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`lib/comp/model.ts`); o realizado por membro×fator sai SÓ de
   `runCalculatedWidget` (filtro `responsible_id eq` — canon no choke point;
   período de mês por `monthPeriod` com `fieldBySource` do catálogo inteiro;
-  RPCs de widget INTOCADOS — engine em `lib/comp/engine.ts`). O efetivo é
+  RPCs de widget INTOCADOS — engine em `lib/comp/engine.ts`). **Apuração
+  sobre o mês anterior (31/07/2026):** `config.apuracao: "mes_anterior"`
+  (padrão dos planos do preset e de plano novo no editor; parse normaliza
+  `mes_corrente` p/ AUSÊNCIA) faz o lançamento M apurar realizado/metas/taxas
+  de M-1 via `apuracaoRef` — o deslocamento vive DENTRO de
+  `loadTargetsByMember`/`loadTargetRatesForConfig` + `monthPeriod` do
+  recompute + key de goals do `saveTarget`; call site fala SEMPRE o mês do
+  LANÇAMENTO (deslocar no caller = dupla conversão lendo M-2) e
+  entry/espelho/navegação ficam no mês de PAGAMENTO; `computed.ref` carimba a
+  janela apurada e o save do plan-editor RE-EMITE a chave (regra do
+  presetKey). O efetivo é
   `manual ?? calculado` derivado por `computeEntry` NA LEITURA:
   `comp_entries.computed` guarda só o snapshot cru e o recompute NUNCA regrava
   `inputs`/`base_amount` (overrides sobrevivem; limpar a chave restaura a

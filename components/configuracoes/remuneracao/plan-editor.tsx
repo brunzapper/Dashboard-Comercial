@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4: seletor "Apuração" na identidade do plano (mes_anterior = realizado/
+// metas do mês anterior ao lançamento; plano NOVO nasce mes_anterior). O
+// save RE-EMITE config.apuracao quando mes_anterior (regra do presetKey —
+// o parse normaliza mes_corrente p/ ausência da chave).
 // v1.3: comissão MULTI-BLOCO — lista de blocos (cap MAX_COMMISSION_BLOCKS),
 // cada um com rótulo/gatilho/tierBy (atingimento × realizado)/kind (% × R$
 // fixo × R$ por unidade)/base/faixas + tabela por membro; TierTable com
@@ -260,6 +264,11 @@ export function PlanEditor(props: PlanEditorProps) {
   const [memberIds, setMemberIds] = useState<string[]>(
     props.config?.memberIds ?? []
   );
+  // Plano NOVO nasce apurando o mês anterior (padrão da casa); plano
+  // existente sem a chave segue no mês do lançamento (compat).
+  const [apuracao, setApuracao] = useState<"mes_corrente" | "mes_anterior">(
+    props.config?.apuracao ?? (props.plan ? "mes_corrente" : "mes_anterior")
+  );
   const [memberOperationIds, setMemberOperationIds] = useState<string[]>(
     props.config?.memberOperationIds ?? []
   );
@@ -480,6 +489,12 @@ export function PlanEditor(props: PlanEditorProps) {
           ? { totalFormula }
           : {}),
         ...(commissions.length > 0 ? { commissions } : {}),
+        // Apuração sobre o mês anterior: RE-EMITIR no save (o parse normaliza
+        // mes_corrente p/ ausência; sem re-emissão o round-trip derrubaria a
+        // chave em silêncio — mesma regra do presetKey).
+        ...(apuracao === "mes_anterior"
+          ? { apuracao: "mes_anterior" as const }
+          : {}),
         // Identidade de plano criado por preset SOBREVIVE ao round-trip do
         // save — sem isso o re-apply do preset duplicaria o plano.
         ...(props.config?.presetKey ? { presetKey: props.config.presetKey } : {}),
@@ -536,6 +551,24 @@ export function PlanEditor(props: PlanEditorProps) {
             value={memberOperationIds}
             onChange={setMemberOperationIds}
           />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Apuração</Label>
+          <Combobox
+            options={[
+              { value: "mes_anterior", label: "Mês anterior ao lançamento" },
+              { value: "mes_corrente", label: "Mês do lançamento" },
+            ]}
+            value={apuracao}
+            onValueChange={(v) =>
+              setApuracao(v === "mes_anterior" ? "mes_anterior" : "mes_corrente")
+            }
+            searchable={false}
+          />
+          <p className="text-muted-foreground text-xs">
+            Mês de referência do realizado e das metas. Alterar exige
+            Recalcular.
+          </p>
         </div>
         <label className="flex items-center gap-2 pt-6 text-sm">
           <Checkbox

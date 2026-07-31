@@ -1,4 +1,12 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4: APURAÇÃO SOBRE O MÊS ANTERIOR (config.apuracao: "mes_anterior") — o
+// lançamento do mês M (pagamento) apura realizado/metas/taxas sobre M-1.
+// Contrato anti-dupla-conversão: year/month nas assinaturas públicas é SEMPRE
+// o mês do LANÇAMENTO; o deslocamento acontece via apuracaoRef DENTRO dos
+// loaders do engine (loadTargetsByMember/loadTargetRatesForConfig) e nos
+// pontos únicos do recompute/saveTarget — call sites nunca passam mês já
+// deslocado. Entry (period_year/month), espelho e navegação ficam em M.
+// `mes_corrente` no raw é NORMALIZADO para ausência da chave (compat).
 // v1.3: comissão MULTI-BLOCO (config.commissions[]; legado `commission` é
 // NORMALIZADO no parse p/ um bloco id "comissao" — o tipo parseado expõe SÓ
 // `commissions`), kinds de faixa pct/flat/per_unit, seleção por atingimento OU
@@ -138,6 +146,12 @@ export interface CompPlanConfig {
   // preserva explicitamente para que o round-trip do save do editor não a
   // derrube (senão o re-apply do preset duplicaria o plano).
   presetKey?: string;
+  // Janela de apuração: "mes_anterior" = o lançamento do mês M calcula
+  // realizado/metas/taxas sobre M-1 (paga em Julho o realizado de Junho).
+  // Ausente = mês do próprio lançamento (compat; "mes_corrente" no raw é
+  // normalizado para ausência). Desloca APENAS a leitura de dados — entry,
+  // espelho e navegação seguem no mês de pagamento M.
+  apuracao?: "mes_anterior";
 }
 
 /** Override manual das variáveis derivadas de um fator (efetivo = manual ?? calculado). */
@@ -170,6 +184,9 @@ export interface CompComputedRaw {
   at: string; // ISO do recompute
   realized: Record<string, number | null>; // por fator (null = sem valor)
   errors?: Record<string, string>; // falha de consulta por fator
+  // Janela APURADA no recompute (mês de referência do realizado). Ausente em
+  // snapshots legados — a UI deriva via apuracaoRef(config) como fallback.
+  ref?: { year: number; month: number };
 }
 
 /** Detalhamento efetivo de um fator (derivado na leitura). */
@@ -477,6 +494,13 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
   if (raw.presetKey != null) {
     if (typeof raw.presetKey !== "string" || raw.presetKey === "") return null;
     out.presetKey = raw.presetKey;
+  }
+  if (raw.apuracao != null) {
+    // "mes_corrente" é aceito no raw mas normalizado para AUSÊNCIA da chave
+    // (config canônico — o save do editor e o backfill ficam idempotentes).
+    if (raw.apuracao !== "mes_anterior" && raw.apuracao !== "mes_corrente")
+      return null;
+    if (raw.apuracao === "mes_anterior") out.apuracao = "mes_anterior";
   }
   return out;
 }
@@ -856,6 +880,23 @@ function pad2(n: number): string {
 export function lastDayOfMonth(year: number, month: number): number {
   // Dia 0 do mês seguinte em UTC — imune a fuso/DST do runtime.
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * Mês APURADO de um lançamento: recebe o mês do LANÇAMENTO (pagamento) e
+ * devolve o mês de referência dos dados — M-1 quando o plano apura sobre o
+ * mês anterior (rollover de ano incluso), o próprio M caso contrário.
+ * Este helper é o ÚNICO ponto de deslocamento (aplicado dentro dos loaders
+ * do engine e nos pontos únicos de recompute/saveTarget — nunca em call
+ * sites, que sempre falam o mês do lançamento; ver contrato no topo).
+ */
+export function apuracaoRef(
+  year: number,
+  month: number,
+  config: Pick<CompPlanConfig, "apuracao">
+): { year: number; month: number } {
+  if (config.apuracao !== "mes_anterior") return { year, month };
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 }
 
 /**
