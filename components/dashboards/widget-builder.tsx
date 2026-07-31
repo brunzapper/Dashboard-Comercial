@@ -234,6 +234,7 @@ import {
   MetricRow,
   VisibleOptionsPicker,
 } from "@/components/dashboards/widget-builder-rows";
+import type { FilterValueSource } from "@/components/filters/filter-value-picker";
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
@@ -845,6 +846,21 @@ export function WidgetBuilder({
       optionCandidatesCache.current.set(key, p);
       return p;
     };
+
+  // Picker de VALOR dos filtros (31/07/2026): relação/etapa/seleção ganham
+  // dropdown de rótulos no lugar do texto cru. Relações GRAVAM O NOME (o
+  // engine resolve nome→id→grupo em runtime — resolveFkFilterNames); etapa e
+  // seleção gravam o próprio rótulo (semântica atual).
+  const filterValueSource = (field: string): FilterValueSource | null => {
+    const src = optionSourceFor(field);
+    if (!src) return null;
+    const fk = field === "responsible_id" || field === "operation_id";
+    return {
+      kind: src.kind,
+      load: loadOptionCandidates(src),
+      storeAs: fk ? "label" : "value",
+    };
+  };
 
   const numericFields = available.filter((f) => f.isNumeric);
 
@@ -3580,6 +3596,7 @@ export function WidgetBuilder({
                 fieldChips={fieldSourceChips}
                 opOptions={FILTER_OP_OPTIONS}
                 sourceOptions={filterSourceOptions(f)}
+                valueSource={filterValueSource(f.field)}
                 onChange={(patch) =>
                   setFilters((prev) => {
                     const next = [...prev];

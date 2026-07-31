@@ -42,6 +42,7 @@ import {
 } from "@/lib/config/source-scope";
 import { isKnownSource, type SourceKey } from "@/lib/sources";
 import type { SourceDef } from "@/lib/sources";
+import { resolveFkFilterNames } from "@/lib/widgets/engine";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
 import { widgetQuerySources } from "@/lib/widgets/metric-sources";
 import { quickTableBI } from "@/lib/widgets/quick-table/model";
@@ -347,17 +348,19 @@ export async function resolveWidgetViewScope(
     viewFilters.push(...targeted);
   }
 
-  // Filtro de OPERAÇÃO (20/07/2026): mesmo tratamento da page — nunca a
-  // coluna derivada records.operation_id; resolve vínculo + perfil
-  // (lib/config/operation-scope.ts).
-  const opIds = collectOperationFilterIds(viewFilters);
+  // Filtro por NOME em relação (31/07/2026): resolve nome→id ANTES do
+  // collect (espelho da page). Depois, filtro de OPERAÇÃO (20/07/2026):
+  // mesmo tratamento da page — nunca a coluna derivada records.operation_id;
+  // resolve vínculo + perfil (lib/config/operation-scope.ts).
+  const namedViewFilters = await resolveFkFilterNames(supabase, viewFilters);
+  const opIds = collectOperationFilterIds(namedViewFilters);
   const resolvedViewFilters =
     opIds.length > 0
       ? translateOperationFilters(
-          viewFilters,
+          namedViewFilters,
           await loadOperationScopes(supabase, opIds)
         )
-      : viewFilters;
+      : namedViewFilters;
 
   // Janela de períodos (settings.periodWindow): a seleção compartilhada do
   // card (célula __pw__) entra nos settings EFETIVOS antes do engine — mesmo

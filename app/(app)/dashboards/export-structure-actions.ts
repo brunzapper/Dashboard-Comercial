@@ -16,6 +16,7 @@ import {
   type ExportDashRow,
   type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
+import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
 import { loadImportContext } from "@/lib/import/dashboard/context";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
 
@@ -61,10 +62,13 @@ export async function exportDashboardStructure(
     loadSources(supabase),
   ]);
 
+  const widgets = (widgetsData ?? []) as unknown as ExportWidgetRow[];
   const result = exportDashboardJson({
     dash: dash as unknown as ExportDashRow,
-    widgets: (widgetsData ?? []) as unknown as ExportWidgetRow[],
+    widgets,
     sources,
+    // Filtros de relação saem por NOME (31/07/2026) — legível e round-trip ok.
+    fkNames: await loadExportFkNames(supabase, widgets),
   });
 
   // Round-trip check (aviso): o que o validador rejeitaria neste JSON hoje —

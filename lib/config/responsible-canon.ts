@@ -137,7 +137,7 @@ export function widgetReferencesResponsible(config: {
 /**
  * Reescreve filtros `responsible_id` para alcançar o grupo: `in` expande a
  * lista; `eq`/`eq_ci` com id de um grupo viram `in` no grupo (valor já é UUID
- * nesses caminhos — condições por NOME passam antes por resolveFkCondFilters).
+ * nesses caminhos — valores por NOME passam antes por resolveFkFilterNames).
  * Demais operadores (neq, is_null…) passam intactos. Sem apelidos ou sem
  * mudança real, retorna a MESMA lista (fast path).
  */

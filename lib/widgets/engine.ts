@@ -9,7 +9,7 @@
 // filtros responsible_id expandem p/ o GRUPO (apelidos ∪ principal) no choke
 // point de resolveFilters (gate widgetReferencesResponsible → sem referência,
 // byte-idêntico e sem consulta extra), condições de SOMASE idem (pós
-// resolveFkCondFilters), a dimensão responsible_id funde apelido→principal no
+// resolveFkFilterNames), a dimensão responsible_id funde apelido→principal no
 // mergeRowsByBucket e fetchFkLabels rotula pelo display_name do PRINCIPAL
 // ("nome usado"). RPCs INTOCADAS. Ver lib/config/responsible-canon.ts.
 // v1.10 (24/07/2026): pernas de sub-base EXIBÍVEIS (§4.8) — no branch
@@ -73,6 +73,7 @@
 // → RLS) e resolve os rótulos das dimensões FK (responsible/operation/lead:
 // id→nome). Razões/derivados (TM, valor/conta) e comparação com meta ficam na
 // Fase 6B (widget KPI estendido).
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -712,59 +713,109 @@ export async function fetchFkLabels(
   return map;
 }
 
-// Relações aceitas como condição de SOMASE/CONT.SE por NOME (19/07/2026):
-// [Responsável] = "Paulo" — o literal digitado é o nome, mas a coluna guarda o
-// UUID; resolveFkCondFilters troca o literal pelo id ANTES do RPC.
-const FK_COND_TABLES: Record<string, { table: string; col: string }> = {
-  responsible_id: { table: "responsibles", col: "display_name" },
-  operation_id: { table: "operations", col: "name" },
-};
-
+// Relações aceitas por NOME em filtro (19/07/2026 nas condições de SOMASE;
+// 31/07/2026 GENERALIZADO p/ os filtros de widget/visualização): o usuário
+// escreve "Paulo", a coluna guarda o UUID — resolveFkFilterNames troca o
+// literal pelo id ANTES do RPC/PostgREST, nos MESMOS choke points onde o
+// expandResponsibleFilters roda (ordem SEMPRE nome→id→grupo canônico).
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Valor já em forma de UUID (passthrough do resolver de nomes). */
+export function isFkUuid(v: unknown): v is string {
+  return typeof v === "string" && UUID_RE.test(v);
+}
+
 // UUID sintático impossível: nome não encontrado → recorte vazio (contagem 0,
-// mesma semântica de "= nome que não existe"); o erro amigável é do SAVE.
-const FK_NO_MATCH = "00000000-0000-0000-0000-000000000000";
+// mesma semântica de "= nome que não existe"); o erro amigável é do SAVE e do
+// validador de import. Em listas (`in`) a troca é POR ELEMENTO — um nome
+// errado não zera o resto da lista.
+export const FK_NO_MATCH = "00000000-0000-0000-0000-000000000000";
+
+const normFkName = (s: string) => s.trim().toLocaleLowerCase("pt-BR");
+
+// nome normalizado → id. Duplicatas: a linha CANÔNICA vence o apelido e o id
+// emitido é o PRINCIPAL (canonical_id ?? id) — apelido e principal dão o MESMO
+// recorte após o expandResponsibleFilters; a preferência só desambigua
+// homônimos reais (entre duas canônicas homônimas, a primeira vence —
+// irresolvível sem UI). cache() por request: N widgets do lote deferido = 1
+// consulta.
+const loadResponsibleNameMap = cache(async function loadResponsibleNameMap(
+  supabase: SupabaseClient
+): Promise<Map<string, string>> {
+  const { data } = await supabase
+    .from("responsibles")
+    .select("id, display_name, canonical_id");
+  const byName = new Map<string, { id: string; canonical: boolean }>();
+  for (const r of (data ?? []) as {
+    id: string;
+    display_name: string | null;
+    canonical_id: string | null;
+  }[]) {
+    const name = normFkName(r.display_name ?? "");
+    if (!name) continue;
+    const entry = { id: r.canonical_id ?? r.id, canonical: r.canonical_id == null };
+    const cur = byName.get(name);
+    if (!cur || (!cur.canonical && entry.canonical)) byName.set(name, entry);
+  }
+  return new Map([...byName].map(([n, e]) => [n, e.id]));
+});
+
+// Operações homônimas: a ATIVA vence a inativa; entre iguais, primeira vence.
+const loadOperationNameMap = cache(async function loadOperationNameMap(
+  supabase: SupabaseClient
+): Promise<Map<string, string>> {
+  const { data } = await supabase.from("operations").select("id, name, active");
+  const byName = new Map<string, { id: string; active: boolean }>();
+  for (const r of (data ?? []) as {
+    id: string;
+    name: string | null;
+    active: boolean;
+  }[]) {
+    const name = normFkName(r.name ?? "");
+    if (!name) continue;
+    const entry = { id: r.id, active: r.active !== false };
+    const cur = byName.get(name);
+    if (!cur || (!cur.active && entry.active)) byName.set(name, entry);
+  }
+  return new Map([...byName].map(([n, e]) => [n, e.id]));
+});
 
 /**
- * Resolve literais de NOME nos filtros de condição sobre relações
+ * Resolve literais de NOME nos filtros sobre relações
  * (responsible_id/operation_id) para o UUID correspondente (case-insensitive +
- * trim — mesma normalização do eq_ci). Valor já em forma de UUID passa intacto;
- * sem filtro de relação, retorna a MESMA lista (fast path). Uma consulta por
- * tabela referenciada.
+ * trim — mesma normalização do eq_ci). Cobre valor string E lista (`in`, por
+ * elemento). Valor já em forma de UUID passa intacto; sem nome a resolver,
+ * retorna a MESMA lista (fast path, zero consultas). Roda ANTES do
+ * expandResponsibleFilters em todos os call sites (o id emitido é o principal
+ * do grupo — a expansão canônica vem depois).
  */
-export async function resolveFkCondFilters(
+export async function resolveFkFilterNames(
   supabase: SupabaseClient,
   filters: WidgetFilter[]
 ): Promise<WidgetFilter[]> {
+  const needsValue = (v: unknown): boolean =>
+    (typeof v === "string" && !UUID_RE.test(v)) ||
+    (Array.isArray(v) && v.some((x) => typeof x === "string" && !UUID_RE.test(x)));
   const needsFor = (field: string) =>
-    filters.some(
-      (f) =>
-        f.field === field && typeof f.value === "string" && !UUID_RE.test(f.value)
-    );
-  if (!Object.keys(FK_COND_TABLES).some(needsFor)) return filters;
-  const norm = (s: string) => s.trim().toLocaleLowerCase("pt-BR");
+    filters.some((f) => f.field === field && needsValue(f.value));
+  const needResp = needsFor("responsible_id");
+  const needOp = needsFor("operation_id");
+  if (!needResp && !needOp) return filters;
   const maps = new Map<string, Map<string, string>>();
-  for (const [field, cfg] of Object.entries(FK_COND_TABLES)) {
-    if (!needsFor(field)) continue;
-    // Select literal por tabela (o parser de tipos do supabase-js não entende
-    // coluna interpolada).
-    const { data } =
-      field === "responsible_id"
-        ? await supabase.from("responsibles").select("id, display_name")
-        : await supabase.from("operations").select("id, name");
-    const m = new Map<string, string>();
-    for (const r of (data ?? []) as unknown as Record<string, unknown>[]) {
-      const name = norm(String(r[cfg.col] ?? ""));
-      if (name && !m.has(name)) m.set(name, String(r.id));
-    }
-    maps.set(field, m);
-  }
+  if (needResp) maps.set("responsible_id", await loadResponsibleNameMap(supabase));
+  if (needOp) maps.set("operation_id", await loadOperationNameMap(supabase));
+  const resolveOne = (m: Map<string, string>, v: unknown): unknown =>
+    typeof v !== "string" || UUID_RE.test(v)
+      ? v
+      : (m.get(normFkName(v)) ?? FK_NO_MATCH);
   return filters.map((f) => {
     const m = maps.get(f.field);
-    if (!m || typeof f.value !== "string" || UUID_RE.test(f.value)) return f;
-    return { ...f, value: m.get(norm(f.value)) ?? FK_NO_MATCH };
+    if (!m || !needsValue(f.value)) return f;
+    if (Array.isArray(f.value)) {
+      return { ...f, value: f.value.map((x) => resolveOne(m, x)) };
+    }
+    return { ...f, value: resolveOne(m, f.value) };
   });
 }
 
@@ -1585,8 +1636,10 @@ export async function runWidget(
   const respCanon = widgetReferencesResponsible(config)
     ? await loadResponsibleCanon(supabase)
     : EMPTY_CANON;
+  // Filtro por NOME em relação (31/07/2026): resolve ANTES da expansão
+  // canônica (nome → id principal → grupo). Fast path sem nome = mesma lista.
   const resolved = expandResponsibleFilters(
-    resolveFilters(config.filters ?? []),
+    await resolveFkFilterNames(supabase, resolveFilters(config.filters ?? [])),
     respCanon
   );
   const legFiltersFor = (
@@ -2056,7 +2109,7 @@ export async function runWidget(
         try {
           // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
           // com apelidos (0101), o UUID expande para o grupo do responsável.
-          let condExtra = await resolveFkCondFilters(supabase, g.filters);
+          let condExtra = await resolveFkFilterNames(supabase, g.filters);
           if (filtersReferenceResponsible(condExtra))
             condExtra = expandResponsibleFilters(
               condExtra,
@@ -2276,7 +2329,7 @@ export async function runWidget(
             // Condição sobre relação por NOME → resolve p/ UUID antes do RPC
             // (mesmo tratamento da auxiliar de condição da consulta principal,
             // inclusive a expansão do grupo de responsáveis 0101).
-            let condExtra = await resolveFkCondFilters(supabase, g.filters);
+            let condExtra = await resolveFkFilterNames(supabase, g.filters);
             if (filtersReferenceResponsible(condExtra))
               condExtra = expandResponsibleFilters(
                 condExtra,

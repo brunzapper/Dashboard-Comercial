@@ -171,6 +171,25 @@ This version has breaking changes — APIs, conventions, and file structure may 
   snapshot seguem na coluna derivada (runbook do backfill:
   `supabase/apply/backfill-operation-id.sql`). Unificados: o coalesce ordena
   refs `custom:` antes de colunas do núcleo (ver §4.8 da arquitetura).
+- **Filtros de relação aceitam NOME, resolvido no ENGINE antes do canon
+  (31/07/2026):** valor não-UUID em filtro de `responsible_id`/`operation_id`
+  (string OU elemento de array) é nome e vira id por `resolveFkFilterNames`
+  (`lib/widgets/engine.ts` — loaders `cache()`; homônimo: responsável canônico
+  vence apelido e emite o id PRINCIPAL, operação ativa vence; nome
+  desconhecido ⇒ uuid-zero `FK_NO_MATCH` por elemento = vazio silencioso em
+  runtime, erro amigável no validador de import). Ordem FIXA nos choke points:
+  nome→id→`expandResponsibleFilters` — `runWidget`, pernas por métrica
+  (`formula-metric.ts`), `expandConfigResponsibles` (record-list) e os
+  ESPELHOS de operação (page + widget-scope resolvem os view filters ANTES de
+  `collectOperationFilterIds`); UUID legado segue passthrough (fast path sem
+  consulta). Builder/barra da tabela GRAVAM nome (`FilterValuePicker`
+  storeAs "label"); sub-base/perfil de operação/automações do kanban GRAVAM ID
+  com rótulo exibido (storeAs "value" — os predicados comparam a coluna crua
+  fora do pipeline; avaliação local das automações não expande canon,
+  limitação documentada). Export da IA emite nome (`loadExportFkNames`);
+  `cleanFilters` preserva array de `in` (nome com vírgula). NÃO reintroduza
+  UUID em filtro de preset nem valide nome via RPC. Ver `docs/arquitetura.md`
+  §4.10.
 - **Escopo de widget em server action sai SEMPRE do widget-scope
   (21/07/2026):** toda action que consulta dados de um widget (paginação,
   export, `runQuickTable`, `runKanbanWidget` e futuras) monta o recorte por
@@ -229,10 +248,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   "todos") e `ensureCompMirror` (garante a base espelho `remuneracao` no
   apply; key com sufixo de colisão vira erro visível) aplicam SÓ com
   `opts.allowOrgSections`, que APENAS o caminho de fábrica (`applyPreset`)
-  passa — o import/IA fica estruturalmente incapaz de criá-las. A sentinela
-  `@responsible:<Nome>` em VALOR de filtro de widget é resolvida p/ o UUID
-  canônico no MESMO caminho (fora dele fica literal); nome não resolvido =
-  erro visível + card vazio, nunca silêncio. `PresetField.options_source: "responsibles"` (0113) marca campo
+  passa — o import/IA fica estruturalmente incapaz de criá-las. Filtro de
+  widget de preset por responsável usa o NOME puro como valor (resolvido no
+  ENGINE em runtime — bullet de filtros por nome abaixo; a antiga sentinela
+  `@responsible:<Nome>` foi removida em 31/07/2026).
+  `PresetField.options_source: "responsibles"` (0113) marca campo
   seleção de dropdown VIVO: options reescritas com os responsáveis ativos
   principais por `refreshResponsibleOptionFields` (`lib/config/
   responsible-options.ts` — chamado no apply, no `syncFieldCatalog` e nas

@@ -7,12 +7,12 @@
 // mensal + Publicar) — a aba Remuneração exibe o ESPELHO publicado.
 // v2 (31/07/2026): vínculos automáticos por responsibleNames (Gabriella/
 // Daniela/Paulo Vitor/Marcus/Marcos — grafias conferidas na base viva),
-// cards POR PESSOA via sentinela `@responsible:<Nome>` (o apply resolve o
-// UUID canônico; AEs filtram responsible_id — os campos ae_responsavel/
-// sdr_responsavel subcontariam, ~24 assinados de 2026 vazios), métrica
-// calculada de Valor gerado nos gráficos, abas novas "AEs" e "Remuneração"
-// (espelho — popula após o 1º Publicar) e comparação `previous_period_bd`
-// nos KPIs.
+// cards POR PESSOA com filtro `responsible_id eq <NOME>` (o ENGINE resolve
+// nome→id→grupo canônico em runtime — resolveFkFilterNames; AEs filtram
+// responsible_id porque os campos ae_responsavel/sdr_responsavel
+// subcontariam, ~24 assinados de 2026 vazios), métrica calculada de Valor
+// gerado nos gráficos, abas novas "AEs" e "Remuneração" (espelho — popula
+// após o 1º Publicar) e comparação `previous_period_bd` nos KPIs.
 //
 // Regras codificadas (pedido de 31/07/2026):
 // - AEs: % escalonada do VALOR GERADO por atingimento da meta — <75% ⇒ 30%,
@@ -452,8 +452,9 @@ const VISAO: PresetWidget[] = [
   },
 ];
 
-// Cards por PESSOA: filtro responsible_id com a sentinela resolvida no apply
-// (UUID canônico) — preciso mesmo com ae_responsavel vazio no negócio.
+// Cards por PESSOA: filtro responsible_id pelo NOME (o engine resolve
+// nome→id→grupo canônico em runtime) — preciso mesmo com ae_responsavel
+// vazio no negócio, e legível no builder/JSON.
 const AES: PresetWidget[] = [
   {
     presetKey: "remuneracao_variavel.aes.kpi_gabriella",
@@ -461,13 +462,7 @@ const AES: PresetWidget[] = [
     visual_type: "kpi",
     dimensions: [],
     metrics: [],
-    filters: [
-      {
-        field: "responsible_id",
-        op: "eq",
-        value: `@responsible:${AE_CLOSER}`,
-      },
-    ],
+    filters: [{ field: "responsible_id", op: "eq", value: AE_CLOSER }],
     settings: {
       tab: "aes",
       card: { mode: "formula", formula: VALOR_GERADO },
@@ -482,13 +477,7 @@ const AES: PresetWidget[] = [
     visual_type: "kpi",
     dimensions: [],
     metrics: [],
-    filters: [
-      {
-        field: "responsible_id",
-        op: "eq",
-        value: `@responsible:${AE_FULL_CYCLE}`,
-      },
-    ],
+    filters: [{ field: "responsible_id", op: "eq", value: AE_FULL_CYCLE }],
     settings: {
       tab: "aes",
       card: { mode: "formula", formula: VALOR_GERADO },

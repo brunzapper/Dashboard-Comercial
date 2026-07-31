@@ -21,6 +21,7 @@ import {
 } from "@/lib/records/formula-deps";
 import type { OperandRef } from "@/lib/records/date-operands";
 import { perRecordCalcOperands } from "@/lib/records/calc-operands";
+import { isFkUuid } from "@/lib/widgets/engine";
 import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { validateFormulaForContext } from "@/lib/records/formula-validate";
 import type { DataType } from "@/lib/records/types";
@@ -111,12 +112,9 @@ export function serverOperandCatalog(
   });
 }
 
-const FK_UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 // Valida os literais de NOME das condições sobre relações (responsible_id/
 // operation_id) de uma fórmula agregada contra as listas reais — espelho do
-// resolve de runtime (resolveFkCondFilters no engine). Nome desconhecido em
+// resolve de runtime (resolveFkFilterNames no engine). Nome desconhecido em
 // runtime vira recorte vazio (0) SILENCIOSO; no save vira erro claro.
 export async function validateFkCondNames(
   supabase: Supabase,
@@ -128,7 +126,7 @@ export async function validateFkCondNames(
       if (
         (c.ref === "responsible_id" || c.ref === "operation_id") &&
         typeof c.value === "string" &&
-        !FK_UUID_RE.test(c.value)
+        !isFkUuid(c.value)
       ) {
         wanted.push({ ref: c.ref, value: c.value });
       }

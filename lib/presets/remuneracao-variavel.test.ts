@@ -231,22 +231,22 @@ describe("preset remuneracao_variavel — estrutura", () => {
     // Raízes sem vínculo direto (as pessoas ficam nas sub-operações).
     expect(linksByOp.get("AEs")).toEqual([]);
     expect(linksByOp.get("SDR/BDR")).toEqual([]);
-    // Toda sentinela @responsible: referencia um nome DECLARADO nos vínculos
-    // (o apply resolve por nome — nome fora do conjunto seria typo).
+    // Cards por pessoa filtram responsible_id pelo NOME PURO (o engine
+    // resolve nome→id→grupo em runtime) — todo nome usado num filtro precisa
+    // estar DECLARADO nos vínculos (nome fora do conjunto seria typo).
     const declaredNames = new Set(
       P.operations!.flatMap((o) => o.responsibleNames ?? [])
     );
-    const sentinels = P.widgets.flatMap((w) =>
+    const respFilterValues = P.widgets.flatMap((w) =>
       w.filters
+        .filter((f) => f.field === "responsible_id")
         .map((f) => f.value)
-        .filter(
-          (v): v is string =>
-            typeof v === "string" && v.startsWith("@responsible:")
-        )
+        .filter((v): v is string => typeof v === "string")
     );
-    expect(sentinels.length).toBeGreaterThan(0);
-    for (const s of sentinels) {
-      expect(declaredNames.has(s.slice("@responsible:".length))).toBe(true);
+    expect(respFilterValues.length).toBeGreaterThan(0);
+    for (const v of respFilterValues) {
+      expect(v.startsWith("@")).toBe(false); // sentinela morreu — nome puro
+      expect(declaredNames.has(v)).toBe(true);
     }
     // Cards por SDR filtram o campo do dropdown vivo pelos MESMOS nomes.
     const sdrCardValues = P.widgets

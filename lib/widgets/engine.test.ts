@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateMoneyBreakdowns,
   fetchFkLabels,
-  resolveFkCondFilters,
+  resolveFkFilterNames,
   runWidget,
 } from "@/lib/widgets/engine";
 import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
@@ -280,7 +280,7 @@ describe("aggregateMoneyBreakdowns (fold por moeda + fallback @rate_date)", () =
 });
 
 describe("relações por nome (FK)", () => {
-  it("resolveFkCondFilters troca nome→UUID; desconhecido → sentinela", async () => {
+  it("resolveFkFilterNames troca nome→UUID; desconhecido → sentinela", async () => {
     const { db, queries } = fakeSupabase({
       tables: {
         responsibles: [
@@ -288,7 +288,7 @@ describe("relações por nome (FK)", () => {
         ],
       },
     });
-    const out = await resolveFkCondFilters(db, [
+    const out = await resolveFkFilterNames(db, [
       { field: "responsible_id", op: "eq_ci", value: "paulo" },
       { field: "responsible_id", op: "eq_ci", value: "ninguém" },
       { field: "pipeline", op: "eq_ci", value: "Vendas" },
@@ -299,6 +299,76 @@ describe("relações por nome (FK)", () => {
     expect(queries).toHaveLength(1); // uma consulta por tabela referenciada
   });
 
+  it("lista (`in`): resolve POR ELEMENTO — nome errado não zera o resto; UUID passa", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        responsibles: [
+          { id: "11111111-1111-1111-1111-111111111111", display_name: "Paulo" },
+          { id: "22222222-2222-2222-2222-222222222222", display_name: "Ana" },
+        ],
+      },
+    });
+    const out = await resolveFkFilterNames(db, [
+      {
+        field: "responsible_id",
+        op: "in",
+        value: ["Paulo", "ninguém", "33333333-3333-3333-3333-333333333333"],
+      },
+    ]);
+    expect(out[0].value).toEqual([
+      "11111111-1111-1111-1111-111111111111",
+      "00000000-0000-0000-0000-000000000000",
+      "33333333-3333-3333-3333-333333333333",
+    ]);
+  });
+
+  it("homônimos: linha CANÔNICA vence apelido e o id emitido é o PRINCIPAL", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        responsibles: [
+          // Apelido homônimo aparece ANTES; a canônica deve vencer.
+          {
+            id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            display_name: "Paulo Vitor",
+            canonical_id: "11111111-1111-1111-1111-111111111111",
+          },
+          {
+            id: "11111111-1111-1111-1111-111111111111",
+            display_name: "Paulo Vitor",
+            canonical_id: null,
+          },
+          // Apelido com nome PRÓPRIO resolve para o principal DELE.
+          {
+            id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+            display_name: "PV",
+            canonical_id: "11111111-1111-1111-1111-111111111111",
+          },
+        ],
+      },
+    });
+    const out = await resolveFkFilterNames(db, [
+      { field: "responsible_id", op: "eq", value: "Paulo Vitor" },
+      { field: "responsible_id", op: "eq", value: "PV" },
+    ]);
+    expect(out[0].value).toBe("11111111-1111-1111-1111-111111111111");
+    expect(out[1].value).toBe("11111111-1111-1111-1111-111111111111");
+  });
+
+  it("operações homônimas: a ATIVA vence a inativa", async () => {
+    const { db } = fakeSupabase({
+      tables: {
+        operations: [
+          { id: "cccccccc-cccc-4ccc-cccc-cccccccccccc", name: "Inbound", active: false },
+          { id: "dddddddd-dddd-4ddd-dddd-dddddddddddd", name: "Inbound", active: true },
+        ],
+      },
+    });
+    const out = await resolveFkFilterNames(db, [
+      { field: "operation_id", op: "eq", value: "inbound" },
+    ]);
+    expect(out[0].value).toBe("dddddddd-dddd-4ddd-dddd-dddddddddddd");
+  });
+
   it("fast path: sem literal de nome, retorna a MESMA lista sem consultar", async () => {
     const { db, queries } = fakeSupabase({});
     const filters: WidgetFilter[] = [
@@ -307,9 +377,44 @@ describe("relações por nome (FK)", () => {
         op: "eq_ci",
         value: "11111111-1111-1111-1111-111111111111",
       },
+      {
+        field: "responsible_id",
+        op: "in",
+        value: ["22222222-2222-2222-2222-222222222222"],
+      },
     ];
-    expect(await resolveFkCondFilters(db, filters)).toBe(filters);
+    expect(await resolveFkFilterNames(db, filters)).toBe(filters);
     expect(queries).toHaveLength(0);
+  });
+
+  it("wiring runWidget: filtro por NOME chega ao RPC como GRUPO canônico (nome→id→canon)", async () => {
+    const principal = "11111111-1111-1111-1111-111111111111";
+    const apelido = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 1 }], error: null }),
+      },
+      tables: {
+        responsibles: [
+          { id: principal, display_name: "Paulo Vitor", canonical_id: null },
+          { id: apelido, display_name: "Paulo", canonical_id: principal },
+        ],
+      },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        metrics: [{ field: "*", agg: "count" }],
+        filters: [{ field: "responsible_id", op: "eq", value: " paulo vitor " }],
+      }),
+      AVAILABLE
+    );
+    const sent = (rpcCalls[0].args.p_filters as WidgetFilter[]).find(
+      (f) => f.field === "responsible_id"
+    )!;
+    // Nome resolveu p/ o principal e a expansão canônica virou `in` no grupo.
+    expect(sent.op).toBe("in");
+    expect(new Set(sent.value as string[])).toEqual(new Set([principal, apelido]));
   });
 
   it("fetchFkLabels: ids vazios não consultam; responsável mapeia display_name", async () => {
@@ -535,8 +640,8 @@ describe("pernas de sub-base (2+ subs da mesma pai) × operandos escopados", () 
 
 describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
   const RESPONSIBLES = [
-    { id: "r-main", display_name: "Ana Paula", canonical_id: null },
-    { id: "r-alias", display_name: "Ana P.", canonical_id: "r-main" },
+    { id: "11111111-1111-4111-8111-111111111111", display_name: "Ana Paula", canonical_id: null },
+    { id: "22222222-2222-4222-8222-222222222222", display_name: "Ana P.", canonical_id: "11111111-1111-4111-8111-111111111111" },
   ];
 
   it("dimensão responsible_id: linhas do apelido fundem no principal com o nome usado", async () => {
@@ -544,8 +649,8 @@ describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
       rpc: {
         run_widget_query: () => ({
           data: [
-            { dim_1: "r-main", metric_1: 2 },
-            { dim_1: "r-alias", metric_1: 3 },
+            { dim_1: "11111111-1111-4111-8111-111111111111", metric_1: 2 },
+            { dim_1: "22222222-2222-4222-8222-222222222222", metric_1: 3 },
           ],
           error: null,
         }),
@@ -572,7 +677,7 @@ describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
     await runWidget(
       db,
       baseConfig({
-        filters: [{ field: "responsible_id", op: "eq", value: "r-alias" }],
+        filters: [{ field: "responsible_id", op: "eq", value: "22222222-2222-4222-8222-222222222222" }],
         metrics: [{ field: "*", agg: "count" }],
         visual_type: "kpi",
       }),
@@ -584,7 +689,7 @@ describe("agrupamento de responsáveis (0101 — canonical_id)", () => {
     expect(sent).toEqual({
       field: "responsible_id",
       op: "in",
-      value: ["r-main", "r-alias"],
+      value: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"],
     });
   });
 

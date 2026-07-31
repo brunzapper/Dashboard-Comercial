@@ -1,4 +1,8 @@
-<!-- Versão: 1.21 | Data: 31/07/2026 -->
+<!-- Versão: 1.22 | Data: 31/07/2026 -->
+<!-- v1.22 (31/07/2026): §4.5/§6.4 — filtros de Responsável/Operação passam a
+     ser POR NOME: seletor de rótulos no lugar do texto cru (o nome fica
+     gravado e é traduzido na consulta; apelidos agrupados contam junto);
+     barra da tabela idem (nome na URL; etapas em lista global). -->
 <!-- v1.21 (31/07/2026): §8.5b — operandos de META ([Meta: <métrica>] /
      meta:<chave>) no contexto agregado: valor da meta global do período da
      consulta (regra do Card modo Meta), constante por consulta (nunca somada
@@ -793,9 +797,11 @@ visitantes de snapshot público — a seleção deles fica só na URL do visitan
 
 Widgets de Tabela exibem (a menos que desligado no editor — "Mostrar barra de
 busca/filtro na tabela") uma barra com busca textual e filtros estruturados,
-visível a todos os visualizadores. Os mesmos 10 operadores do §6.4. Essas
-seleções vivem **na URL** (prefixo `tf_` + id do widget) — compartilháveis
-por link, não persistidas.
+visível a todos os visualizadores. Os mesmos 10 operadores do §6.4 — e, como
+lá, responsável/operação/etapa escolhem o valor num seletor de rótulos (o
+nome vai para a URL, legível; a lista de etapas aqui é global, não recortada
+pelas Bases do widget). Essas seleções vivem **na URL** (prefixo `tf_` + id
+do widget) — compartilháveis por link, não persistidas.
 
 ### 4.6 Como os filtros se combinam
 
@@ -1158,6 +1164,15 @@ Filtros fixos do widget (sempre aplicados, invisíveis ao leitor). Por linha:
 | "não vazio" | `not_null` | campo com valor (não pede valor) |
 
 - Vários filtros = **E** (todos precisam valer).
+- **Responsável e Operação filtram pelo NOME**: nesses campos o valor é
+  escolhido num seletor de rótulos (nada de id interno) e o que fica gravado
+  é o nome exato do cadastro — o sistema o traduz para a pessoa/operação na
+  hora da consulta (apelidos agrupados em Configurações → Responsáveis
+  contam junto).
+  Em "em (lista)", cada item é um nome. Nome que deixar de existir (ex.:
+  responsável renomeado sem apelido) zera o filtro silenciosamente — prefira
+  manter o cadastro estável ou usar apelidos. Valores antigos com id interno
+  continuam funcionando e aparecem traduzidos no seletor.
 - **"Bases"** do filtro (quando o widget toca 2+ Bases): o filtro pode mirar
   só algumas Bases — as linhas das Bases-alvo são restringidas e as das
   demais **passam livres**. (Diferente de "Bases da métrica": aqui é

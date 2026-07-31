@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 28/07/2026
+// Versão: 1.3 | Data: 31/07/2026
 // SUB-FONTES (0078): CRUD das sub-fontes (fonte derivada de uma pai, recortada
 // por um filtro). Tabela + Sheet com formulário: pai (imutável na edição), nome,
 // nome curto, campo de período e um editor de CONDIÇÕES (field/op/value) que
@@ -11,6 +11,11 @@
 //   não-mock — 0110); o valor salvo da SUB é injetado aqui (o mapa é por pai)
 //   com rótulo de dateFieldOptionsByParent. Opções/rótulos canônicos em
 //   lib/source-date-fields.ts.
+// v1.3 (31/07/2026): valor de filtro AMIGÁVEL — responsável/operação/etapa e
+//   campos seleção ganham picker de rótulos (FilterValuePicker). O predicado
+//   da sub compara a coluna CRUA (fora do pipeline do engine), então relações
+//   GRAVAM O ID (storeAs "value") e o picker só exibe o rótulo; `in` guarda
+//   array (valor com vírgula sobrevive).
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
@@ -40,8 +45,13 @@ import {
   CORE_PERIOD_FIELD_OPTIONS,
   ensurePeriodOption,
 } from "@/lib/source-date-fields";
-import { sourceLabel, type SourceDef } from "@/lib/sources";
+import { sourceLabel, type SourceDef, type SourceKey } from "@/lib/sources";
 import type { WidgetFilter } from "@/lib/widgets/types";
+import {
+  FilterValuePicker,
+  type FilterValueSource,
+} from "@/components/filters/filter-value-picker";
+import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import {
   createSubSource,
   deleteSubSource,
@@ -70,7 +80,8 @@ const NO_VALUE_OPS = new Set(["is_null", "not_null"]);
 interface Cond {
   field: string;
   op: string;
-  value: string;
+  // Array quando veio do picker de valor (`in`); string no texto livre.
+  value: string | string[];
 }
 
 function toConds(filter: WidgetFilter[] | undefined): Cond[] {
@@ -81,13 +92,14 @@ function toConds(filter: WidgetFilter[] | undefined): Cond[] {
       f.value == null
         ? ""
         : Array.isArray(f.value)
-          ? f.value.join(", ")
+          ? f.value.map((v) => String(v))
           : String(f.value),
   }));
 }
 
-// Serializa condições → WidgetFilter[]. `in` divide por vírgula; ops sem valor
-// não carregam value.
+// Serializa condições → WidgetFilter[]. `in` em ARRAY (picker) passa intacto
+// (nome/valor com vírgula sobrevive); string divide por vírgula (digitação
+// manual). Ops sem valor não carregam value.
 function toFilter(conds: Cond[]): WidgetFilter[] {
   return conds
     .filter((c) => c.field && c.op)
@@ -97,10 +109,61 @@ function toFilter(conds: Cond[]): WidgetFilter[] {
       }
       const value =
         c.op === "in"
-          ? c.value.split(",").map((v) => v.trim()).filter(Boolean)
-          : c.value;
+          ? Array.isArray(c.value)
+            ? c.value.map((v) => String(v).trim()).filter(Boolean)
+            : c.value.split(",").map((v) => v.trim()).filter(Boolean)
+          : Array.isArray(c.value)
+            ? (c.value[0] ?? "")
+            : c.value;
       return { field: c.field, op: c.op as WidgetFilter["op"], value };
     });
+}
+
+// Cache de MÓDULO das listas do picker de valor (responsável/operação por id;
+// etapa por base pai) — compartilhado entre os formulários da página.
+const subValueOptionCache = new Map<
+  string,
+  Promise<{ value: string; label: string }[]>
+>();
+
+// Picker de VALOR (31/07/2026): o predicado da sub compara a COLUNA CRUA
+// (fora do pipeline de filtros do engine) — relações GRAVAM O ID e o picker
+// exibe o rótulo; etapa/seleção gravam o próprio rótulo (valor = rótulo).
+function subFilterValueSource(
+  field: string,
+  parentKey: string,
+  selectOptionsByField?: Record<string, string[]>
+): FilterValueSource | null {
+  if (field === "responsible_id" || field === "operation_id" || field === "stage") {
+    const kind =
+      field === "responsible_id"
+        ? ("responsible" as const)
+        : field === "operation_id"
+          ? ("operation" as const)
+          : ("stage" as const);
+    const cacheKey = kind === "stage" ? `stage:${parentKey}` : kind;
+    return {
+      kind,
+      storeAs: "value",
+      load: () => {
+        const cached = subValueOptionCache.get(cacheKey);
+        if (cached) return cached;
+        const p = listFilterOptionCandidates(
+          kind,
+          kind === "stage" ? [parentKey as SourceKey] : undefined
+        );
+        subValueOptionCache.set(cacheKey, p);
+        return p;
+      },
+    };
+  }
+  const opts = selectOptionsByField?.[field];
+  if (!opts || opts.length === 0) return null;
+  return {
+    kind: "static",
+    storeAs: "value",
+    load: () => Promise.resolve(opts.map((o) => ({ value: o, label: o }))),
+  };
 }
 
 function SubSourceForm({
@@ -109,6 +172,7 @@ function SubSourceForm({
   fieldOptionsByParent,
   dateFieldOptionsByParent,
   periodOptionsByParent,
+  selectOptionsByField,
   onDone,
 }: {
   sub?: SourceDef;
@@ -118,6 +182,8 @@ function SubSourceForm({
   dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
   // Lista "só colunas com dados" da pai (0110, probe no servidor).
   periodOptionsByParent?: Record<string, ComboboxOption[]>;
+  // Options dos campos seleção (picker de valor do filtro).
+  selectOptionsByField?: Record<string, string[]>;
   onDone?: () => void;
 }) {
   const isEdit = Boolean(sub);
@@ -249,13 +315,30 @@ function SubSourceForm({
               />
             </div>
             {!NO_VALUE_OPS.has(c.op) ? (
-              <Input
-                value={c.value}
-                onChange={(e) => setCond(i, { value: e.target.value })}
-                placeholder="Valor"
-                className="flex-1"
-                aria-label="Valor"
-              />
+              (() => {
+                const vs = subFilterValueSource(
+                  c.field,
+                  parentKey,
+                  selectOptionsByField
+                );
+                return vs && ["eq", "neq", "in"].includes(c.op) ? (
+                  <FilterValuePicker
+                    source={vs}
+                    multi={c.op === "in"}
+                    value={c.value}
+                    onChange={(value) => setCond(i, { value })}
+                    ariaLabel="Valor"
+                  />
+                ) : (
+                  <Input
+                    value={Array.isArray(c.value) ? c.value.join(", ") : c.value}
+                    onChange={(e) => setCond(i, { value: e.target.value })}
+                    placeholder="Valor"
+                    className="flex-1"
+                    aria-label="Valor"
+                  />
+                );
+              })()
             ) : (
               <div className="flex-1" />
             )}
@@ -374,11 +457,13 @@ export function SubSourcesManager({
   fieldOptionsByParent,
   dateFieldOptionsByParent,
   periodOptionsByParent,
+  selectOptionsByField,
 }: {
   sources: SourceDef[];
   fieldOptionsByParent: Record<string, ComboboxOption[]>;
   dateFieldOptionsByParent?: Record<string, ComboboxOption[]>;
   periodOptionsByParent?: Record<string, ComboboxOption[]>;
+  selectOptionsByField?: Record<string, string[]>;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<SourceDef | undefined>(undefined);
@@ -491,6 +576,7 @@ export function SubSourcesManager({
               fieldOptionsByParent={fieldOptionsByParent}
               dateFieldOptionsByParent={dateFieldOptionsByParent}
               periodOptionsByParent={periodOptionsByParent}
+              selectOptionsByField={selectOptionsByField}
               onDone={() => setOpen(false)}
             />
           </div>

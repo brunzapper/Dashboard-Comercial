@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 17/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2 (31/07/2026): valor de filtro AMIGÁVEL — responsável/operação/etapa
+//   ganham picker de rótulos (FilterValuePicker; options lazy via a server
+//   action listFilterOptionCandidates, cache local). Relações GRAVAM O NOME
+//   na URL (legível/shareável) — o engine resolve nome→id em runtime
+//   (resolveFkFilterNames). Demais campos seguem no input de texto.
 // v1.1 (17/07/2026): busca client-side — nova prop `onSearchChange`; quando
 //   presente, digitar filtra no cliente na hora e o `q` vai pra URL com
 //   history.replaceState raso (shareável, SEM navegação RSC). Filtros
@@ -32,9 +37,21 @@ import {
   encodeViewFilter,
   parseViewFilter,
 } from "@/lib/widgets/view-filters";
+import {
+  FilterValuePicker,
+  type FilterValueSource,
+} from "@/components/filters/filter-value-picker";
+import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import { useNavPending } from "./pending-context";
 
 const FILTER_OP_OPTIONS = FILTER_OPS.map((o) => ({ value: o.op, label: o.label }));
+
+// Cache de MÓDULO das listas de opções (responsável/operação/etapa global):
+// compartilhado entre todas as barras da página — 1 chamada por tipo.
+const optionCache = new Map<
+  string,
+  Promise<{ value: string; label: string }[]>
+>();
 
 export function TableFilterBar({
   paramKey,
@@ -63,6 +80,33 @@ export function TableFilterBar({
   const sourceLabels = useSourceLabels();
   const fieldOptions = toFieldOptions(available, sourceLabels);
   const fieldSourceChips = sourceChips(sourceLabels);
+
+  // Picker de VALOR (31/07/2026): relação/etapa com rótulos no lugar do texto
+  // cru. A barra não conhece as fontes do widget — a lista de etapas é global
+  // (documentado); campos selecao custom seguem texto (o valor já é rótulo).
+  const filterValueSource = (field: string): FilterValueSource | null => {
+    const af = available.find((a) => a.field === field);
+    const kind =
+      af?.fk === "responsible"
+        ? ("responsible" as const)
+        : af?.fk === "operation"
+          ? ("operation" as const)
+          : field === "stage"
+            ? ("stage" as const)
+            : null;
+    if (!kind) return null;
+    return {
+      kind,
+      storeAs: "label",
+      load: () => {
+        const cached = optionCache.get(kind);
+        if (cached) return cached;
+        const p = listFilterOptionCandidates(kind);
+        optionCache.set(kind, p);
+        return p;
+      },
+    };
+  };
 
   // Estado efetivo (normalizado) → parâmetro de URL. Debounce p/ não navegar a
   // cada tecla. Só escreve quando o valor muda de fato. Com onSearchChange
@@ -193,13 +237,24 @@ export function TableFilterBar({
                 aria-label="Operador do filtro"
               />
               {!opHasNoValue(f.op) ? (
-                <Input
-                  className="h-8 w-28 shrink-0 text-sm"
-                  value={String(f.value ?? "")}
-                  onChange={(e) => updateFilter(i, { value: e.target.value })}
-                  placeholder="valor"
-                  aria-label="Valor do filtro"
-                />
+                filterValueSource(f.field) &&
+                ["eq", "neq", "in"].includes(f.op) ? (
+                  <FilterValuePicker
+                    source={filterValueSource(f.field)!}
+                    multi={f.op === "in"}
+                    value={f.value}
+                    onChange={(value) => updateFilter(i, { value })}
+                    ariaLabel="Valor do filtro"
+                  />
+                ) : (
+                  <Input
+                    className="h-8 w-28 shrink-0 text-sm"
+                    value={String(f.value ?? "")}
+                    onChange={(e) => updateFilter(i, { value: e.target.value })}
+                    placeholder="valor"
+                    aria-label="Valor do filtro"
+                  />
+                )
               ) : null}
               <Button
                 type="button"

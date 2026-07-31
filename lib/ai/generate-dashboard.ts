@@ -34,6 +34,7 @@ import {
   type ExportDashRow,
   type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
+import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
 import {
   IMPORT_PRESET_PREFIX,
   type ImportWidgetSpec,
@@ -320,10 +321,13 @@ export async function generateDashboardCore(
       }
     }
     const sources = await loadSources(supabase);
+    // Filtros de relação do ESTADO ATUAL por NOME (31/07/2026): a IA lê/edita
+    // nomes, nunca UUIDs.
     const exported = exportDashboardJson({
       dash: board.dash,
       widgets: board.widgets,
       sources,
+      fkNames: await loadExportFkNames(supabase, board.widgets),
     });
     bases = exported.json.bases ?? [];
     stateJson = JSON.stringify(exported.json, null, 2);
@@ -371,6 +375,7 @@ export async function generateDashboardCore(
               dash: extra.dash,
               widgets: extra.widgets,
               sources,
+              fkNames: await loadExportFkNames(supabase, extra.widgets),
             }).json,
           });
         }

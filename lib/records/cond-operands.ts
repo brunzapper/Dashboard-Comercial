@@ -23,7 +23,7 @@ export const COND_DATA_TYPES: DataType[] = ["texto", "selecao", "booleano"];
 // responsible_id/operation_id (19/07/2026) comparam por NOME: no contexto
 // por-registro o display_name é injetado no lugar do UUID (recalc/actions), e
 // no agregado o literal é resolvido nome→id antes do filtro do RPC
-// (resolveFkCondFilters no engine). Ex.: CONT.SE([Responsável] = "Paulo").
+// (resolveFkFilterNames no engine). Ex.: CONT.SE([Responsável] = "Paulo").
 export const CORE_COND_REFS = [
   "title",
   "record_type",

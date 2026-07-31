@@ -57,10 +57,22 @@ export default async function FontesPage() {
   const labels = await loadSourceLabels(supabase, sources);
   const { data: fieldsData } = await supabase
     .from("field_definitions")
-    .select("field_key, label, data_type, applies_to, source_system")
+    .select("field_key, label, data_type, applies_to, source_system, options")
     .order("sort_order", { ascending: true })
     .order("label", { ascending: true });
   const fields = (fieldsData ?? []) as FieldDefinition[];
+
+  // Options dos campos seleção (31/07/2026): alimentam o picker de VALOR do
+  // editor de filtro (rótulos em vez de texto cru). custom e overrides core
+  // (0086 — ref = nome cru da coluna, ex. pipeline) entram.
+  const selectOptionsByField: Record<string, string[]> = {};
+  for (const f of fields) {
+    if (f.data_type !== "selecao") continue;
+    const opts = (f.options ?? []).map((o) => String(o)).filter(Boolean);
+    if (opts.length === 0) continue;
+    selectOptionsByField[isCoreDef(f) ? f.field_key : `custom:${f.field_key}`] =
+      opts;
+  }
 
   // Opções de campo do editor de filtro por fonte PAI (raiz): colunas do núcleo
   // + campos personalizados que se aplicam ao record_type da pai. Overrides
@@ -188,6 +200,7 @@ export default async function FontesPage() {
         fieldOptionsByParent={fieldOptionsByParent}
         dateFieldOptionsByParent={customDateOptionsByParent}
         periodOptionsByParent={periodOptionsByParent}
+        selectOptionsByField={selectOptionsByField}
       />
       <AutoOperationsManager
         sources={sources}
