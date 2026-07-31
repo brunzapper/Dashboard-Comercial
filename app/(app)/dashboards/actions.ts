@@ -59,13 +59,18 @@ import { createClient } from "@/lib/supabase/server";
 import {
   PRESETS,
   PRESET_FIELDS,
+  type PresetCompPlan,
   type PresetCorrespondence,
+  type PresetOperation,
   type PresetDashboard,
   type PresetField,
   type PresetSubSource,
 } from "@/lib/presets/definitions";
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
+import { registerGoalMetrics } from "@/lib/metas/upsert";
+import { parseCompPlanConfig } from "@/lib/comp/model";
+import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
 import type { SourceFolder } from "@/lib/source-folders";
@@ -2051,6 +2056,14 @@ export interface PresetApplyResult {
   subSourcesSkipped: number;
   correspondencesCreated: number;
   correspondencesSkipped: number;
+  // Seções de ORG (31/07/2026) — só o caminho de fábrica as aplica.
+  operationsCreated: number;
+  operationsSkipped: number;
+  compPlansCreated: number;
+  compPlansSkipped: number;
+  // Erros NÃO fatais das seções de org (plano pulado por operação ausente…):
+  // o apply do dashboard segue, mas o admin precisa VER o motivo.
+  orgSectionErrors?: string[];
 }
 
 async function ensurePresetFields(
@@ -2079,15 +2092,172 @@ async function ensurePresetFields(
       // Campos calculados de preset (20/07/2026): fórmula + escopo de fonte.
       formula: f.formula ?? null,
       applies_to: f.applies_to ?? null,
+      // Dropdown vivo (0113): o refresh abaixo preenche as options.
+      options_source: f.options_source ?? null,
     }))
   );
   if (error) return { created: 0, createdCalc: false };
+  // Campo novo com options_source ganha as options frescas já no apply
+  // (best-effort — o próximo sync também as reescreve).
+  if (toCreate.some((f) => f.options_source)) {
+    await refreshResponsibleOptionFields(supabase, await getActiveOrgId());
+  }
   return {
     created: toCreate.length,
     // 'calculado' por-registro materializa em custom_fields → o chamador
     // dispara recalcAllFormulaFields (mesmo gatilho do createField em /campos).
     createdCalc: toCreate.some((f) => f.data_type === "calculado"),
   };
+}
+
+// ---------- Seções de ORG do preset (31/07/2026) ----------
+// Operações: ensure-BY-NAME (trim exato) — nunca renomeia/religa/reativa uma
+// existente; pais declarados antes dos filhos (resolve sequencial); filho com
+// pai não resolvido é PULADO (nunca criar raiz órfã em silêncio). Insert com
+// id do app + carimbo de org (padrão do createOperation/dashboards).
+async function ensurePresetOperations(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string | null,
+  ops: PresetOperation[]
+): Promise<{ created: number; skipped: number; errors: string[] }> {
+  if (ops.length === 0) return { created: 0, skipped: 0, errors: [] };
+  const { data } = await supabase.from("operations").select("id, name");
+  const idByName = new Map(
+    ((data ?? []) as { id: string; name: string }[]).map((o) => [
+      o.name.trim(),
+      o.id,
+    ])
+  );
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  for (const op of ops) {
+    const name = op.name.trim();
+    if (idByName.has(name)) {
+      skipped += 1; // já existe (possivelmente ajustada) — nunca sobrescrever
+      continue;
+    }
+    const parentId = op.parentName ? (idByName.get(op.parentName.trim()) ?? null) : null;
+    if (op.parentName && !parentId) {
+      skipped += 1;
+      errors.push(
+        `Operação "${name}": pai "${op.parentName}" não encontrado — declare o pai antes do filho.`
+      );
+      continue;
+    }
+    const newId = crypto.randomUUID();
+    const { error } = await supabase.from("operations").insert({
+      id: newId,
+      name,
+      active: true,
+      ...(parentId ? { parent_operation_id: parentId } : {}),
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
+    if (error) {
+      skipped += 1;
+      errors.push(`Operação "${name}": ${error.message}`);
+      continue;
+    }
+    idByName.set(name, newId);
+    created += 1;
+  }
+  return { created, skipped, errors };
+}
+
+// Planos de remuneração: identidade = config.presetKey (cru — sem full-parse
+// dos configs alheios); ensure-only (plano existente NUNCA é sobrescrito —
+// ajustes do admin sobrevivem ao re-apply). memberOperationNames resolve por
+// nome — ausente PULA com erro ALTO (nunca criar plano silenciosamente ligado
+// a "todos os ativos"). O config declarado passa pelo parseCompPlanConfig
+// como sanidade (falha = bug do preset, reportado) e é gravado PARSEADO
+// (canônico); as métricas de meta dos fatores entram no registry com rótulo
+// "Plano — Fator" (mesma regra do savePlan).
+async function ensurePresetCompPlans(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string | null,
+  plans: PresetCompPlan[]
+): Promise<{ created: number; skipped: number; errors: string[] }> {
+  if (plans.length === 0) return { created: 0, skipped: 0, errors: [] };
+  const [{ data: planRows }, { data: opRows }] = await Promise.all([
+    supabase.from("comp_plans").select("id, config"),
+    supabase.from("operations").select("id, name"),
+  ]);
+  const havePresetKeys = new Set<string>();
+  for (const row of (planRows ?? []) as { config: unknown }[]) {
+    const pk = (row.config as { presetKey?: unknown } | null)?.presetKey;
+    if (typeof pk === "string" && pk !== "") havePresetKeys.add(pk);
+  }
+  const opByName = new Map(
+    ((opRows ?? []) as { id: string; name: string }[]).map((o) => [
+      o.name.trim(),
+      o.id,
+    ])
+  );
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  for (const decl of plans) {
+    if (havePresetKeys.has(decl.presetKey)) {
+      skipped += 1;
+      continue;
+    }
+    const opIds: string[] = [];
+    let missingOp: string | null = null;
+    for (const name of decl.memberOperationNames ?? []) {
+      const id = opByName.get(name.trim());
+      if (!id) {
+        missingOp = name;
+        break;
+      }
+      opIds.push(id);
+    }
+    if (missingOp) {
+      skipped += 1;
+      errors.push(
+        `Plano "${decl.name}": operação "${missingOp}" não encontrada — plano não criado.`
+      );
+      continue;
+    }
+    const config = parseCompPlanConfig({
+      ...decl.config,
+      v: 1,
+      presetKey: decl.presetKey,
+      ...(opIds.length > 0 ? { memberOperationIds: opIds } : {}),
+    });
+    if (!config) {
+      skipped += 1;
+      errors.push(`Plano "${decl.name}": config inválida (bug do preset).`);
+      continue;
+    }
+    const { error: regError } = await registerGoalMetrics(
+      supabase,
+      orgId,
+      config.factors.map((f) => ({
+        key: f.metricKey,
+        label: `${decl.name} — ${f.label}`.slice(0, 60),
+        money: f.money,
+      }))
+    );
+    if (regError) {
+      skipped += 1;
+      errors.push(`Plano "${decl.name}": ${regError}`);
+      continue;
+    }
+    const { error } = await supabase.from("comp_plans").insert({
+      name: decl.name,
+      active: true,
+      base_amount_default: decl.baseAmountDefault ?? null,
+      config,
+      ...(orgId ? { organization_id: orgId } : {}),
+    });
+    if (error) {
+      skipped += 1;
+      errors.push(`Plano "${decl.name}": ${error.message}`);
+      continue;
+    }
+    created += 1;
+  }
+  return { created, skipped, errors };
 }
 
 // Correspondências (campos unificados) do preset: cria as ausentes por `key`;
@@ -2236,7 +2406,14 @@ async function applyPresetDefinition(
   // NUNCA cria um novo; e o GC de widgets é DESLIGADO (widget omitido do JSON
   // permanece — decisão de produto: a IA não exclui widgets; a resposta pode
   // ser PARCIAL, só com os widgets alterados/novos).
-  opts: { includeSupportFields?: boolean; targetDashboardId?: string } = {}
+  // allowOrgSections (31/07/2026): SÓ o caminho de fábrica (applyPreset) o
+  // passa — as seções operations/compPlans ficam ESTRUTURALMENTE fora do
+  // alcance do import/IA, mesmo que um validador futuro vaze as chaves.
+  opts: {
+    includeSupportFields?: boolean;
+    targetDashboardId?: string;
+    allowOrgSections?: boolean;
+  } = {}
   // Falha retorna { error } com a mensagem REAL do banco — o genérico "Falha
   // ao aplicar" escondia o diagnóstico (ex.: o 42501 do RETURNING, abaixo).
 ): Promise<PresetApplyResult | { error: string }> {
@@ -2272,6 +2449,23 @@ async function applyPresetDefinition(
       // registros ficam sem o valor materializado até o próximo recálculo
       // (diário/da tela de Campos) — não derruba a geração do preset.
     }
+  }
+  // Seções de ORG (operações + planos de remuneração): SÓ caminho de fábrica.
+  let opsResult = { created: 0, skipped: 0, errors: [] as string[] };
+  let compPlansResult = { created: 0, skipped: 0, errors: [] as string[] };
+  if (opts.allowOrgSections) {
+    const sectionOrgId = await getActiveOrgId();
+    opsResult = await ensurePresetOperations(
+      supabase,
+      sectionOrgId,
+      preset.operations ?? []
+    );
+    // Depois das operações — os planos as referenciam por nome.
+    compPlansResult = await ensurePresetCompPlans(
+      supabase,
+      sectionOrgId,
+      preset.compPlans ?? []
+    );
   }
 
   // 2) Dashboard: com targetDashboardId, o alvo é EXPLÍCITO (modo Editar da
@@ -2454,6 +2648,7 @@ async function applyPresetDefinition(
     }
   }
 
+  const orgSectionErrors = [...opsResult.errors, ...compPlansResult.errors];
   return {
     presetKey: preset.presetKey,
     dashboard: dashboardAction,
@@ -2464,6 +2659,11 @@ async function applyPresetDefinition(
     subSourcesSkipped: subResult.skipped,
     correspondencesCreated: corrResult.created,
     correspondencesSkipped: corrResult.skipped,
+    operationsCreated: opsResult.created,
+    operationsSkipped: opsResult.skipped,
+    compPlansCreated: compPlansResult.created,
+    compPlansSkipped: compPlansResult.skipped,
+    ...(orgSectionErrors.length > 0 ? { orgSectionErrors } : {}),
   };
 }
 
@@ -2479,18 +2679,35 @@ export async function applyPreset(
   const preset = PRESETS.find((p) => p.presetKey === presetKey);
   if (!preset) return { ok: false, message: `Preset "${presetKey}" não existe.` };
   const supabase = await createClient();
-  const result = await applyPresetDefinition(supabase, session.user.id, preset);
+  const result = await applyPresetDefinition(supabase, session.user.id, preset, {
+    // Caminho de FÁBRICA: único autorizado a aplicar operations/compPlans.
+    allowOrgSections: true,
+  });
   if ("error" in result) {
     return { ok: false, message: `Falha ao aplicar o preset: ${result.error}` };
   }
   revalidatePath("/");
   revalidatePath("/configuracoes/presets");
   revalidatePath(`/dashboards/${result.dashboardId}`);
+  if (result.operationsCreated > 0) revalidatePath("/configuracoes/operacoes");
+  if (result.compPlansCreated > 0) revalidatePath("/configuracoes/remuneracao");
   const w = result.widgets;
+  const extras = [
+    result.operationsCreated > 0 ? `${result.operationsCreated} operação(ões)` : null,
+    result.compPlansCreated > 0
+      ? `${result.compPlansCreated} plano(s) de remuneração`
+      : null,
+  ].filter(Boolean);
   return {
     ok: true,
     result,
-    message: `Preset "${preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"} (${w.created} widget(s) novo(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)).`,
+    message:
+      `Preset "${preset.name}" ${result.dashboard === "created" ? "criado" : "atualizado"} (${w.created} widget(s) novo(s), ${w.updated} atualizado(s), ${w.deleted} removido(s)` +
+      (extras.length > 0 ? `; ${extras.join(", ")}` : "") +
+      ")." +
+      (result.orgSectionErrors?.length
+        ? ` Atenção: ${result.orgSectionErrors.join(" ")}`
+        : ""),
   };
 }
 
@@ -2760,11 +2977,10 @@ export async function generatePresets(): Promise<ActionState> {
   let created = 0;
   let updated = 0;
   for (const preset of PRESETS) {
-    const result = await applyPresetDefinition(
-      supabase,
-      session.user.id,
-      preset
-    );
+    const result = await applyPresetDefinition(supabase, session.user.id, preset, {
+      // Caminho de fábrica — mesmas seções de org do applyPreset unitário.
+      allowOrgSections: true,
+    });
     if ("error" in result) continue; // relatado no contador final
     if (result.dashboard === "created") created += 1;
     else if (result.dashboard === "updated") updated += 1;

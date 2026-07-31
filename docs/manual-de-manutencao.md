@@ -455,6 +455,47 @@ antigo no MESMO período.
 > ajustes manuais de aparência feitos neles se perdem no re-apply (widgets
 > criados à mão não são tocados).
 
+**Gerar o preset "Remuneração Variável"**
+(`lib/presets/remuneracao-variavel.ts`, 31/07/2026) — monta o controle de
+remuneração do comercial: árvore de operações AEs/SDR-BDR, 5 planos de
+remuneração (Configurações → Remuneração), campos `adicional_ao_mrr` e
+`sdr_reuniao` (dropdown vivo de responsáveis), sub-base
+`reunioes_qualificadas` e um dashboard de INSUMOS. Ensure-only: nada já
+existente é sobrescrito (em produção, `adicional_ao_mrr` e
+`reunioes_qualificadas` já existem e são apenas reaproveitados). Runbook
+PÓS-geração:
+
+1. **Vincular pessoas às sub-operações** (Configurações → Responsáveis →
+   operações): AE Closer, AE Full Cycle, SDR Inbound Full Cycle, SDR
+   Outbound Full Cycle e SDR Outbound Simples. Sem vínculos, os planos
+   resolvem ZERO membros (fail-closed — o recompute avisa; nunca cai em
+   "todos os ativos").
+2. **Cotação USD do trimestre** (meta do AE Full Cycle é digitada em
+   dólares): Configurações → Campos → aba Moedas — PTAX ou manual. Sem a
+   cotação, o atingimento do fator fica em erro visível (nunca converte 1:1).
+3. **Preencher `SDR da Reunião` nos leads qualificados** (inclusive backfill
+   do mês corrente): o realizado de reuniões dos SDRs conta APENAS leads com
+   o campo preenchido. As options do dropdown se mantêm sozinhas
+   (responsáveis ativos; refresh no sync e nas actions de Responsáveis).
+4. **Preencher `Adicional ao MRR` nos negócios** (manual/import) — compõe o
+   "Valor gerado" junto de MRR do contrato, Implementação e Vendas do site.
+5. **20% dos SDRs**: os planos SDR Full Cycle nascem com 20% sobre o valor
+   para TODOS os membros; personalize exceções por membro (qualquer taxa,
+   inclusive zerar) na aba Plano → bloco "% sobre o valor" → "Faixas por
+   membro".
+6. **Metas**: AE Closer 35.000 (R$), AE Full Cycle 10.000 (US$), reuniões 10
+   (Outbound FC) e 20 (Outbound Simples) já entram como ALVO PADRÃO do plano
+   (itálico na grade); digitar na célula fixa a meta do mês (vira linha de
+   `goals`), limpar volta ao padrão. Inbound FC não tem meta de reuniões —
+   o prêmio é por VOLUME (R$/reunião por faixa).
+7. **Limitações documentadas**: a perna "Vendas do site" contribui 0 para os
+   fatores de valor dos SDRs (o Estudo não tem o campo `sdr_responsavel`);
+   o match de membro por campo é por NOME EXATO — divergência de grafia
+   entre o campo e `responsibles.display_name` zera o realizado (o
+   agrupamento de apelidos é honrado). Os campos `ganho_sdr_*` criados à mão
+   seguem intocados (viram material de widget; os planos calculam pelos
+   blocos de comissão, dirigidos por meta).
+
 **Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
 qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,
 ex.: "Mês/ano"):

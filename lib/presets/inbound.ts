@@ -88,23 +88,25 @@ const METRIC_SQL_CALC: Metric = {
 
 // ---- dependências -----------------------------------------------------------
 
-const FIELDS: PresetField[] = [
-  {
-    field_key: "mrr_contrato",
-    label: "MRR do contrato",
-    data_type: "calculado",
-    options: [],
-    visible_to_roles: ["admin", "gestor", "vendedor"],
-    editable_by_roles: [],
-    is_local: true,
-    currency_mode: "inherit", // moeda do registro (core `currency` do deal)
-    applies_to: ["negocio"],
-    formula: {
-      tokens: [fld(F_VALOR_LICENCA), op("*"), fld(F_NUM_LICENCAS)],
-      source: "[Valor por licença do contrato (R$)] * [Número de licenças contratadas]",
-    },
+// Compartilhado com o preset Remuneração Variável (31/07/2026): a MESMA
+// declaração nos dois presets — o ensure por field_key cria uma vez só.
+export const MRR_CONTRATO_FIELD: PresetField = {
+  field_key: "mrr_contrato",
+  label: "MRR do contrato",
+  data_type: "calculado",
+  options: [],
+  visible_to_roles: ["admin", "gestor", "vendedor"],
+  editable_by_roles: [],
+  is_local: true,
+  currency_mode: "inherit", // moeda do registro (core `currency` do deal)
+  applies_to: ["negocio"],
+  formula: {
+    tokens: [fld(F_VALOR_LICENCA), op("*"), fld(F_NUM_LICENCAS)],
+    source: "[Valor por licença do contrato (R$)] * [Número de licenças contratadas]",
   },
-];
+};
+
+const FIELDS: PresetField[] = [MRR_CONTRATO_FIELD];
 
 const MQL_FILTER: WidgetFilter[] = [
   { field: "custom:fonte", op: "in", value: FONTE_INBOUND },
@@ -112,6 +114,28 @@ const MQL_FILTER: WidgetFilter[] = [
   { field: "stage", op: "neq_ci", value: "Desqualificado Marketing" },
   { field: "stage", op: "neq_ci", value: "Novos Leads" },
 ];
+
+// Compartilhadas com o preset Remuneração Variável (ensure por key cria uma
+// vez; declaração ÚNICA evita drift entre presets).
+export const VENDAS_ASSINADAS_SUB: PresetSubSource = {
+  key: "vendas_assinadas",
+  parent_key: "deals",
+  label: "Vendas assinadas",
+  short_label: "Vendas AE",
+  default_period_field: F_DATA_ASSINATURA,
+  filter: [{ field: "stage", op: "eq", value: "Contrato assinado" }],
+};
+export const VENDAS_SITE_SUB: PresetSubSource = {
+  key: "vendas_site",
+  parent_key: "estudo",
+  label: "Vendas do site",
+  short_label: "Vendas Site",
+  default_period_field: "source_created_at",
+  filter: [
+    { field: "mrr", op: "gt", value: 0 },
+    { field: "stage", op: "neq_ci", value: "DSQ" },
+  ],
+};
 
 const SUB_SOURCES: PresetSubSource[] = [
   {
@@ -172,45 +196,42 @@ const SUB_SOURCES: PresetSubSource[] = [
       { field: F_MOTIVO_DESQ, op: "not_null" },
     ],
   },
-  {
-    key: "vendas_assinadas",
-    parent_key: "deals",
-    label: "Vendas assinadas",
-    short_label: "Vendas AE",
-    default_period_field: F_DATA_ASSINATURA,
-    filter: [{ field: "stage", op: "eq", value: "Contrato assinado" }],
-  },
-  {
-    key: "vendas_site",
-    parent_key: "estudo",
-    label: "Vendas do site",
-    short_label: "Vendas Site",
-    default_period_field: "source_created_at",
-    filter: [
-      { field: "mrr", op: "gt", value: 0 },
-      { field: "stage", op: "neq_ci", value: "DSQ" },
-    ],
-  },
+  VENDAS_ASSINADAS_SUB,
+  VENDAS_SITE_SUB,
 ];
 
+// Compartilhadas com o preset Remuneração Variável (ensure por key).
+export const DATA_REF_CORRESPONDENCE: PresetCorrespondence = {
+  key: "data_ref",
+  label: "Data de referência",
+  data_type: "data",
+  members: [
+    { source_key: "leads", field_ref: "source_created_at" },
+    { source_key: "mqls", field_ref: "source_created_at" },
+    { source_key: "sals", field_ref: "source_created_at" },
+    { source_key: "sqls", field_ref: F_DATA_REUNIAO },
+    { source_key: "clientes_lite", field_ref: F_MOVED_TIME },
+    { source_key: "desq_inbound", field_ref: F_MOVED_TIME },
+    { source_key: "deals", field_ref: "closed_at" },
+    { source_key: "vendas_assinadas", field_ref: F_DATA_ASSINATURA },
+    { source_key: "estudo", field_ref: "source_created_at" },
+    { source_key: "vendas_site", field_ref: "source_created_at" },
+  ],
+};
+export const MRR_VENDA_CORRESPONDENCE: PresetCorrespondence = {
+  key: "mrr_venda",
+  label: "MRR da venda",
+  data_type: "moeda",
+  members: [
+    { source_key: "deals", field_ref: "custom:mrr_contrato" },
+    { source_key: "vendas_assinadas", field_ref: "custom:mrr_contrato" },
+    { source_key: "estudo", field_ref: "mrr" },
+    { source_key: "vendas_site", field_ref: "mrr" },
+  ],
+};
+
 const CORRESPONDENCES: PresetCorrespondence[] = [
-  {
-    key: "data_ref",
-    label: "Data de referência",
-    data_type: "data",
-    members: [
-      { source_key: "leads", field_ref: "source_created_at" },
-      { source_key: "mqls", field_ref: "source_created_at" },
-      { source_key: "sals", field_ref: "source_created_at" },
-      { source_key: "sqls", field_ref: F_DATA_REUNIAO },
-      { source_key: "clientes_lite", field_ref: F_MOVED_TIME },
-      { source_key: "desq_inbound", field_ref: F_MOVED_TIME },
-      { source_key: "deals", field_ref: "closed_at" },
-      { source_key: "vendas_assinadas", field_ref: F_DATA_ASSINATURA },
-      { source_key: "estudo", field_ref: "source_created_at" },
-      { source_key: "vendas_site", field_ref: "source_created_at" },
-    ],
-  },
+  DATA_REF_CORRESPONDENCE,
   {
     key: "fonte_venda",
     label: "Fonte da venda",
@@ -222,17 +243,7 @@ const CORRESPONDENCES: PresetCorrespondence[] = [
       { source_key: "vendas_site", field_ref: "channel" },
     ],
   },
-  {
-    key: "mrr_venda",
-    label: "MRR da venda",
-    data_type: "moeda",
-    members: [
-      { source_key: "deals", field_ref: "custom:mrr_contrato" },
-      { source_key: "vendas_assinadas", field_ref: "custom:mrr_contrato" },
-      { source_key: "estudo", field_ref: "mrr" },
-      { source_key: "vendas_site", field_ref: "mrr" },
-    ],
-  },
+  MRR_VENDA_CORRESPONDENCE,
 ];
 
 // ---- widgets ----------------------------------------------------------------

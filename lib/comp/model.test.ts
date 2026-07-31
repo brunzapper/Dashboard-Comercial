@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
 // Testes do modelo PURO da remuneração variável. Invariantes duras: parse
 // FAIL-CLOSED do config (jsonb adulterado nunca "roda como der") e leniente
 // por chave dos inputs; efetivo = manual ?? calculado em CADA variável
@@ -8,6 +8,11 @@
 // v1.1: comissão por faixas — parse fail-closed do bloco, seleção >= com
 // maior limiar vencendo, tabela do membro > plano, efetivo alimenta a
 // seleção e comp:comissao só compõe a fórmula explicitamente.
+// v1.2 (multi-bloco): legado `commission` normalizado p/ UM bloco canônico
+// (objeto exato pinado), kinds flat/per_unit, seleção por realizado absoluto
+// (tierBy), soma dos blocos com override AGREGADO, defaultTarget como
+// fallback de alvo e targetCurrency convertido via targetRates (taxa ausente
+// ⇒ atingimento null, NUNCA 1:1).
 import { describe, expect, it } from "vitest";
 
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
@@ -17,12 +22,14 @@ import {
   COMP_BONUS_REF,
   COMP_COMMISSION_REF,
   COMP_FACTORS_REF,
+  MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
   MAX_TOTAL_FORMULA_TOKENS,
   compFactorRef,
   compOperandCatalog,
   computeEntry,
   explicitMemberIds,
+  factorTargetCurrencies,
   lastDayOfMonth,
   monthPeriod,
   parseCompEntryInputs,
@@ -31,7 +38,7 @@ import {
   resolveOperationMembers,
   roundMoney,
   selectCommissionTier,
-  type CompCommissionConfig,
+  type CompCommissionBlock,
   type CompPlanConfig,
 } from "@/lib/comp/model";
 
@@ -75,24 +82,28 @@ function makeConfig(over: Partial<CompPlanConfig> = {}): CompPlanConfig {
 const emptyInputs = () => parseCompEntryInputs({});
 
 // Gatilho = atingimento de Reuniões (f_b); base = realizado de Vendas (f_a).
+function commBlock(over: Partial<CompCommissionBlock> = {}): CompCommissionBlock {
+  return {
+    id: "comissao",
+    triggerFactorId: "f_b",
+    basisKind: "factor",
+    basisFactorId: "f_a",
+    tierBy: "attainment",
+    kind: "pct",
+    tiers: [
+      { fromPct: 50, ratePct: 1 },
+      { fromPct: 80, ratePct: 3 },
+      { fromPct: 100, ratePct: 5 },
+    ],
+    ...over,
+  };
+}
+
 function withCommission(
-  over: Partial<CompCommissionConfig> = {},
+  over: Partial<CompCommissionBlock> = {},
   cfgOver: Partial<CompPlanConfig> = {}
 ): CompPlanConfig {
-  return makeConfig({
-    commission: {
-      triggerFactorId: "f_b",
-      basisKind: "factor",
-      basisFactorId: "f_a",
-      tiers: [
-        { fromPct: 50, ratePct: 1 },
-        { fromPct: 80, ratePct: 3 },
-        { fromPct: 100, ratePct: 5 },
-      ],
-      ...over,
-    },
-    ...cfgOver,
-  });
+  return makeConfig({ commissions: [commBlock(over)], ...cfgOver });
 }
 
 const reparse = (cfg: CompPlanConfig) =>
@@ -146,13 +157,51 @@ describe("parseCompPlanConfig (fail-closed)", () => {
       withCommission({ memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] } })
     );
     expect(parsed).not.toBeNull();
-    expect(parsed!.commission!.triggerFactorId).toBe("f_b");
-    expect(parsed!.commission!.tiers).toHaveLength(3);
-    expect(parsed!.commission!.memberTiers).toEqual({
+    expect(parsed!.commissions![0].triggerFactorId).toBe("f_b");
+    expect(parsed!.commissions![0].tiers).toHaveLength(3);
+    expect(parsed!.commissions![0].memberTiers).toEqual({
       r1: [{ fromPct: 0, ratePct: 10 }],
     });
-    // Retrocompat: config sem o bloco parseia e fica sem commission.
-    expect(reparse(makeConfig())!.commission).toBeUndefined();
+    // Retrocompat: config sem o bloco parseia e fica sem commissions.
+    expect(reparse(makeConfig())!.commissions).toBeUndefined();
+  });
+
+  it("LEGADO `commission` (objeto) normaliza p/ UM bloco canônico id 'comissao'", () => {
+    const raw = JSON.parse(JSON.stringify(makeConfig())) as Record<string, unknown>;
+    raw.commission = {
+      triggerFactorId: "f_b",
+      basisKind: "factor",
+      basisFactorId: "f_a",
+      tiers: [
+        { fromPct: 50, ratePct: 1 },
+        { fromPct: 80, ratePct: 3 },
+      ],
+      memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] },
+    };
+    const parsed = parseCompPlanConfig(raw);
+    expect(parsed).not.toBeNull();
+    // Objeto EXATO pinado: kind/tierBy explícitos, id forçado, sem chave legado.
+    expect(parsed!.commissions).toEqual([
+      {
+        id: "comissao",
+        triggerFactorId: "f_b",
+        basisKind: "factor",
+        tierBy: "attainment",
+        kind: "pct",
+        basisFactorId: "f_a",
+        tiers: [
+          { fromPct: 50, ratePct: 1 },
+          { fromPct: 80, ratePct: 3 },
+        ],
+        memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] },
+      },
+    ]);
+    expect("commission" in parsed!).toBe(false);
+    // `commissions` presente tem precedência — o legado é ignorado.
+    raw.commissions = [
+      JSON.parse(JSON.stringify(commBlock({ id: "b1", tiers: [{ fromPct: 0, ratePct: 2 }] }))),
+    ];
+    expect(parseCompPlanConfig(raw)!.commissions![0].id).toBe("b1");
   });
 
   it("comissão: rejeita gatilho/base fantasmas, basisKind inválido e factor sem base", () => {
@@ -164,12 +213,98 @@ describe("parseCompPlanConfig (fail-closed)", () => {
       )
     ).toBeNull();
     const semBase = withCommission();
-    delete semBase.commission!.basisFactorId;
+    delete semBase.commissions![0].basisFactorId;
     expect(reparse(semBase)).toBeNull();
     // basisKind "base" dispensa basisFactorId.
     const base = withCommission({ basisKind: "base" });
-    delete base.commission!.basisFactorId;
+    delete base.commissions![0].basisFactorId;
     expect(reparse(base)).not.toBeNull();
+  });
+
+  it("comissão: rejeita kind/tierBy inválidos, id vazio/duplicado e >6 blocos", () => {
+    expect(reparse(withCommission({ kind: "x" as unknown as "pct" }))).toBeNull();
+    expect(
+      reparse(withCommission({ tierBy: "volume" as unknown as "realized" }))
+    ).toBeNull();
+    expect(reparse(withCommission({ id: "" }))).toBeNull();
+    expect(
+      reparse(
+        makeConfig({ commissions: [commBlock(), commBlock()] })
+      )
+    ).toBeNull();
+    const demais = Array.from({ length: MAX_COMMISSION_BLOCKS + 1 }, (_, i) =>
+      commBlock({ id: `b${i}` })
+    );
+    expect(reparse(makeConfig({ commissions: demais }))).toBeNull();
+  });
+
+  it("comissão: coluna de valor por kind — pct exige ratePct; flat/per_unit exigem amount; per_unit exige fator-base", () => {
+    // pct sem ratePct (faixa com amount) ⇒ null.
+    expect(
+      reparse(
+        withCommission({ tiers: [{ fromPct: 0, amount: 10 } as never] })
+      )
+    ).toBeNull();
+    // flat sem amount ⇒ null; com amount ⇒ ok (basisKind "base" permitido).
+    expect(
+      reparse(
+        withCommission({ kind: "flat", tiers: [{ fromPct: 50, ratePct: 1 } as never] })
+      )
+    ).toBeNull();
+    const flatOk = reparse(
+      withCommission({
+        kind: "flat",
+        basisKind: "base",
+        basisFactorId: undefined,
+        tiers: [{ fromPct: 50, amount: 500 }],
+      })
+    );
+    expect(flatOk!.commissions![0].tiers).toEqual([{ fromPct: 50, amount: 500 }]);
+    // per_unit com basisKind "base" ⇒ null (sem fator não há "unidade").
+    expect(
+      reparse(
+        withCommission({
+          kind: "per_unit",
+          basisKind: "base",
+          basisFactorId: undefined,
+          tiers: [{ fromPct: 0, amount: 10 }],
+        })
+      )
+    ).toBeNull();
+    // memberTiers segue o kind do bloco.
+    expect(
+      reparse(
+        withCommission({
+          kind: "flat",
+          tiers: [{ fromPct: 50, amount: 500 }],
+          memberTiers: { r1: [{ fromPct: 0, ratePct: 1 } as never] },
+        })
+      )
+    ).toBeNull();
+  });
+
+  it("fator: memberField/defaultTarget/targetCurrency validados e preservados; presetKey idem", () => {
+    const cfg = makeConfig({ presetKey: "rv_ae_closer" });
+    cfg.factors[0].memberField = "custom:sdr_reuniao";
+    cfg.factors[0].defaultTarget = 35000;
+    cfg.factors[0].targetCurrency = "USD";
+    const parsed = reparse(cfg);
+    expect(parsed!.factors[0].memberField).toBe("custom:sdr_reuniao");
+    expect(parsed!.factors[0].defaultTarget).toBe(35000);
+    expect(parsed!.factors[0].targetCurrency).toBe("USD");
+    expect(parsed!.presetKey).toBe("rv_ae_closer");
+    // Inválidos derrubam o config inteiro (fail-closed).
+    const mfVazio = makeConfig();
+    (mfVazio.factors[0] as { memberField?: unknown }).memberField = "";
+    expect(reparse(mfVazio)).toBeNull();
+    const alvoNeg = makeConfig();
+    alvoNeg.factors[0].defaultTarget = -1;
+    expect(reparse(alvoNeg)).toBeNull();
+    const moedaRuim = makeConfig();
+    (moedaRuim.factors[0] as { targetCurrency?: unknown }).targetCurrency = "usd";
+    expect(reparse(moedaRuim)).toBeNull();
+    const pkVazio = makeConfig({ presetKey: "" as unknown as string });
+    expect(reparse(pkVazio)).toBeNull();
   });
 
   it("comissão: rejeita faixas vazias/desordenadas/duplicadas/negativas e acima do teto", () => {
@@ -463,7 +598,7 @@ describe("comissão por faixas", () => {
   const targets = { f_a: 100000, f_b: 10 };
 
   it("selectCommissionTier: maior >= vence; limiar exato entra; abaixo/null ⇒ null", () => {
-    const tiers = withCommission().commission!.tiers;
+    const tiers = commBlock().tiers;
     expect(selectCommissionTier(tiers, 90)?.ratePct).toBe(3);
     expect(selectCommissionTier(tiers, 100)?.ratePct).toBe(5);
     expect(selectCommissionTier(tiers, 250)?.ratePct).toBe(5);
@@ -472,14 +607,13 @@ describe("comissão por faixas", () => {
     expect(selectCommissionTier(tiers, null)).toBeNull();
   });
 
-  it("resolveCommissionTiers: membro > plano; sem override ⇒ plano; sem comissão ⇒ null", () => {
-    const cfg = withCommission({
+  it("resolveCommissionTiers: membro > plano; sem override ⇒ tabela do bloco", () => {
+    const block = commBlock({
       memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] },
     });
-    expect(resolveCommissionTiers(cfg, "r1")![0].ratePct).toBe(10);
-    expect(resolveCommissionTiers(cfg, "r2")).toBe(cfg.commission!.tiers);
-    expect(resolveCommissionTiers(cfg)).toBe(cfg.commission!.tiers);
-    expect(resolveCommissionTiers(makeConfig(), "r1")).toBeNull();
+    expect(resolveCommissionTiers(block, "r1")[0].ratePct).toBe(10);
+    expect(resolveCommissionTiers(block, "r2")).toBe(block.tiers);
+    expect(resolveCommissionTiers(block)).toBe(block.tiers);
   });
 
   it("base 'factor': % da faixa sobre o realizado EFETIVO; total soma no modo estruturado", () => {
@@ -507,10 +641,137 @@ describe("comissão por faixas", () => {
 
   it("base 'base': % sobre a base variável; sem plano de comissão ⇒ breakdown null", () => {
     const cfg = withCommission({ basisKind: "base" });
-    delete cfg.commission!.basisFactorId;
+    delete cfg.commissions![0].basisFactorId;
     const bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets);
     expect(bd.commission!.value).toBe(30); // 3% de 1000
-    expect(computeEntry(makeConfig(), 1000, emptyInputs(), realized, targets).commission).toBeNull();
+    const sem = computeEntry(makeConfig(), 1000, emptyInputs(), realized, targets);
+    expect(sem.commission).toBeNull();
+    expect(sem.commissionBlocks).toEqual([]);
+  });
+
+  it("kind 'flat': R$ fixo da faixa de atingimento; nenhuma faixa ⇒ 0 (nunca fabricar)", () => {
+    // Meta de reuniões 10: faixas 50→500, 75→750, 100→1000, 120→1500.
+    const cfg = withCommission({
+      kind: "flat",
+      basisKind: "base",
+      basisFactorId: undefined,
+      tiers: [
+        { fromPct: 50, amount: 500 },
+        { fromPct: 75, amount: 750 },
+        { fromPct: 100, amount: 1000 },
+        { fromPct: 120, amount: 1500 },
+      ],
+    });
+    // 9/10 = 90% ⇒ faixa 75 ⇒ R$750, independente da base.
+    let bd = computeEntry(cfg, 0, emptyInputs(), realized, targets);
+    expect(bd.commission!.value).toBe(750);
+    // 12/10 = 120% ⇒ R$1500 (limiar exato entra).
+    bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: 12 }, targets);
+    expect(bd.commission!.value).toBe(1500);
+    // 4/10 = 40% < 50 ⇒ nenhuma faixa ⇒ 0.
+    bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: 4 }, targets);
+    expect(bd.commission!.value).toBe(0);
+    expect(bd.commissionBlocks[0].tier).toBeNull();
+  });
+
+  it("kind 'per_unit' + tierBy 'realized': R$/unidade escolhido pelo volume absoluto", () => {
+    // Prêmio por reunião do SDR Inbound: 0→10, 26→12,50, 50→15, 60→17,50.
+    const cfg = withCommission({
+      kind: "per_unit",
+      tierBy: "realized",
+      triggerFactorId: "f_b",
+      basisKind: "factor",
+      basisFactorId: "f_b",
+      tiers: [
+        { fromPct: 0, amount: 10 },
+        { fromPct: 26, amount: 12.5 },
+        { fromPct: 50, amount: 15 },
+        { fromPct: 60, amount: 17.5 },
+      ],
+    });
+    // 9 reuniões ⇒ faixa 0 ⇒ 9 × 10 = 90 (alvo NEM é usado na seleção).
+    let bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: 9 }, {});
+    expect(bd.commission!.value).toBe(90);
+    // 30 reuniões ⇒ faixa 26 ⇒ 30 × 12,50 = 375 (lookup, não marginal).
+    bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: 30 }, {});
+    expect(bd.commission!.value).toBe(375);
+    expect(bd.commissionBlocks[0].triggerValue).toBe(30);
+    expect(bd.commissionBlocks[0].tierBy).toBe("realized");
+    // Realizado null ⇒ nenhuma faixa ⇒ 0.
+    bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: null }, {});
+    expect(bd.commission!.value).toBe(0);
+    // tierBy 'realized' com override de realizado usa o EFETIVO.
+    bd = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({ overrides: { factors: { f_b: { realized: 61 } } } }),
+      { f_a: 0, f_b: 30 },
+      {}
+    );
+    expect(bd.commission!.value).toBe(roundMoney(61 * 17.5));
+  });
+
+  it("multi-bloco: soma no agregado; tier agregado só com bloco único; override é da SOMA", () => {
+    const cfg = makeConfig({
+      commissions: [
+        commBlock({
+          id: "perc",
+          label: "% valor",
+          tierBy: "realized",
+          triggerFactorId: "f_a",
+          tiers: [{ fromPct: 0, ratePct: 20 }],
+        }),
+        commBlock({
+          id: "premio",
+          kind: "flat",
+          basisKind: "base",
+          basisFactorId: undefined,
+          tiers: [{ fromPct: 50, amount: 500 }],
+        }),
+      ],
+    });
+    // Bloco 1: 20% de 50000 = 10000; bloco 2: 90% ⇒ 500.
+    let bd = computeEntry(cfg, 0, emptyInputs(), realized, targets);
+    expect(bd.commissionBlocks.map((b) => b.value)).toEqual([10000, 500]);
+    expect(bd.commission!.value).toBe(10500);
+    expect(bd.commission!.tier).toBeNull(); // multi-bloco: detalhe fica nos blocos
+    expect(bd.commission!.triggerAttainmentPct).toBeNull();
+    expect(bd.commissionBlocks[0].label).toBe("% valor");
+    // Override da SOMA vence; blocos seguem exibindo o calculado; limpar restaura.
+    bd = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({ overrides: { commission: 42 } }),
+      realized,
+      targets
+    );
+    expect(bd.commission!.value).toBe(42);
+    expect(bd.commission!.overridden).toBe(true);
+    expect(bd.commissionBlocks.map((b) => b.value)).toEqual([10000, 500]);
+    bd = computeEntry(cfg, 0, emptyInputs(), realized, targets);
+    expect(bd.commission!.value).toBe(10500);
+    // memberTiers por BLOCO: zera só o bloco do membro.
+    const cfg2 = makeConfig({
+      commissions: [
+        commBlock({
+          id: "perc",
+          tierBy: "realized",
+          triggerFactorId: "f_a",
+          tiers: [{ fromPct: 0, ratePct: 20 }],
+          memberTiers: { r9: [{ fromPct: 0, ratePct: 0 }] },
+        }),
+        commBlock({
+          id: "premio",
+          kind: "flat",
+          basisKind: "base",
+          basisFactorId: undefined,
+          tiers: [{ fromPct: 50, amount: 500 }],
+        }),
+      ],
+    });
+    bd = computeEntry(cfg2, 0, emptyInputs(), realized, targets, "r9");
+    expect(bd.commissionBlocks.map((b) => b.value)).toEqual([0, 500]);
+    expect(bd.commission!.value).toBe(500);
   });
 
   it("gatilho sem atingimento ou abaixo da menor faixa ⇒ 0 com tier null", () => {
@@ -604,6 +865,98 @@ describe("comissão por faixas", () => {
     // Só comissão + bônus — os 660 de fatores NÃO entram sozinhos.
     expect(bd.total).toBe(1550);
     expect(bd.totalFromFormula).toBe(true);
+  });
+});
+
+describe("alvo padrão e moeda do alvo", () => {
+  it("defaultTarget: fallback quando não há goal; linha de goals vence; targetSource marca a origem", () => {
+    const cfg = makeConfig();
+    cfg.factors[0].defaultTarget = 35000;
+    // Sem goal ⇒ usa o padrão do plano.
+    let bd = computeEntry(cfg, 1000, emptyInputs(), { f_a: 17500, f_b: 10 }, { f_b: 10 });
+    expect(bd.byFactor.f_a.target).toBe(35000);
+    expect(bd.byFactor.f_a.targetSource).toBe("default");
+    expect(bd.byFactor.f_a.attainmentPct).toBe(50);
+    // Goal presente vence o padrão (célula digitada = override durável).
+    bd = computeEntry(cfg, 1000, emptyInputs(), { f_a: 17500, f_b: 10 }, { f_a: 17500, f_b: 10 });
+    expect(bd.byFactor.f_a.target).toBe(17500);
+    expect(bd.byFactor.f_a.targetSource).toBe("goal");
+    expect(bd.byFactor.f_a.attainmentPct).toBe(100);
+    // Sem goal e sem padrão ⇒ sem alvo (null), atingimento null.
+    bd = computeEntry(cfg, 1000, emptyInputs(), { f_a: 17500, f_b: 10 }, { f_a: null, f_b: 10 });
+    expect(bd.byFactor.f_b.targetSource).toBe("goal");
+    expect(bd.byFactor.f_a.targetSource).toBe("default");
+    const semNada = computeEntry(makeConfig(), 1000, emptyInputs(), { f_a: 1, f_b: 1 }, {});
+    expect(semNada.byFactor.f_a.target).toBeNull();
+    expect(semNada.byFactor.f_a.targetSource).toBeNull();
+  });
+
+  it("targetCurrency: converte o alvo pela taxa do caller; taxa ausente ⇒ atingimento null (nunca 1:1)", () => {
+    const cfg = makeConfig();
+    cfg.factors[0].defaultTarget = 10000;
+    cfg.factors[0].targetCurrency = "USD";
+    // Taxa 5,00 ⇒ alvo efetivo R$ 50.000; realizado 25.000 ⇒ 50%.
+    let bd = computeEntry(
+      cfg,
+      1000,
+      emptyInputs(),
+      { f_a: 25000, f_b: 10 },
+      { f_b: 10 },
+      null,
+      { USD: 5 }
+    );
+    expect(bd.byFactor.f_a.target).toBe(10000); // unidade DIGITADA (US$)
+    expect(bd.byFactor.f_a.targetBRL).toBe(50000);
+    expect(bd.byFactor.f_a.attainmentPct).toBe(50);
+    expect(bd.byFactor.f_a.targetRateMissing).toBeUndefined();
+    // Goal digitado (em US$) vence o padrão e converte igual.
+    bd = computeEntry(
+      cfg,
+      1000,
+      emptyInputs(),
+      { f_a: 25000, f_b: 10 },
+      { f_a: 5000, f_b: 10 },
+      null,
+      { USD: 5 }
+    );
+    expect(bd.byFactor.f_a.targetBRL).toBe(25000);
+    expect(bd.byFactor.f_a.attainmentPct).toBe(100);
+    // Taxa ausente (null OU mapa omitido) ⇒ fail-closed.
+    for (const rates of [{ USD: null }, undefined] as const) {
+      bd = computeEntry(
+        cfg,
+        1000,
+        emptyInputs(),
+        { f_a: 25000, f_b: 10 },
+        { f_b: 10 },
+        null,
+        rates
+      );
+      expect(bd.byFactor.f_a.targetBRL).toBeNull();
+      expect(bd.byFactor.f_a.attainmentPct).toBeNull();
+      expect(bd.byFactor.f_a.targetRateMissing).toBe(true);
+      expect(bd.byFactor.f_a.payout).toBe(0);
+    }
+    // Fator SEM targetCurrency ignora o mapa (identidade).
+    const semMoeda = computeEntry(
+      makeConfig(),
+      1000,
+      emptyInputs(),
+      { f_a: 80, f_b: 10 },
+      { f_a: 100, f_b: 10 },
+      null,
+      { USD: 5 }
+    );
+    expect(semMoeda.byFactor.f_a.targetBRL).toBe(100);
+    expect(semMoeda.byFactor.f_a.attainmentPct).toBe(80);
+  });
+
+  it("factorTargetCurrencies: dedup na ordem dos fatores", () => {
+    const cfg = makeConfig();
+    cfg.factors[0].targetCurrency = "USD";
+    cfg.factors[1].targetCurrency = "USD";
+    expect(factorTargetCurrencies(cfg)).toEqual(["USD"]);
+    expect(factorTargetCurrencies(makeConfig())).toEqual([]);
   });
 });
 

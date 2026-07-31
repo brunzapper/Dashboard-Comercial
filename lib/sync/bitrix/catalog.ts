@@ -42,6 +42,7 @@ import {
   type BitrixFieldType,
   type CustomFieldMap,
 } from "@/lib/config/bitrix-field-map";
+import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
 import type { BitrixLookups } from "./lookups";
 
 export type Entity = "deal" | "lead";
@@ -343,4 +344,9 @@ export async function syncFieldCatalog(
       );
     }
   }
+
+  // Dropdown vivo de responsáveis (0113): campos options_source='responsibles'
+  // ganham as options frescas dos responsáveis ativos principais — mesmo
+  // contrato do pipeline acima (só options; best-effort, nunca derruba o sync).
+  await refreshResponsibleOptionFields(db);
 }

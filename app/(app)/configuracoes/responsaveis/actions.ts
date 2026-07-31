@@ -1,6 +1,9 @@
-// Versão: 1.2 | Data: 26/07/2026
+// Versão: 1.3 | Data: 31/07/2026
 // Server Actions da tela de Responsáveis (admin): criar, ativar/desativar e
 // mapear operações com prioridade (responsible_operations). RLS exige admin.
+// v1.3 (31/07/2026): mutações que mudam o conjunto de nomes vivos (criar,
+//   ativar/desativar, agrupar apelido) disparam o refresh best-effort dos
+//   campos com options_source='responsibles' (dropdown vivo, 0113).
 // v1.2 (26/07/2026): setResponsibleCanonical — agrupamento de exibição (0101):
 //   marca um responsável como apelido de outro ("nome usado"), mantendo o
 //   grupo PLANO (alvo apelido resolve pro principal dele; filhos do que vira
@@ -16,6 +19,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
+import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
 import { createClient } from "@/lib/supabase/server";
 
 export interface ResponsibleState {
@@ -51,6 +55,7 @@ export async function createResponsible(
       ...(orgId ? { organization_id: orgId } : {}),
     });
   if (error) return { ok: false, message: error.message };
+  await refreshResponsibleOptionFields(supabase, orgId);
   revalidatePath("/configuracoes/responsaveis");
   return { ok: true, message: `Responsável "${name}" criado.` };
 }
@@ -68,6 +73,7 @@ export async function setResponsibleActive(
     .update({ active })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
+  await refreshResponsibleOptionFields(supabase, await getActiveOrgId());
   revalidatePath("/configuracoes/responsaveis");
   return { ok: true };
 }
@@ -86,6 +92,7 @@ export async function setResponsibleCanonical(
       .update({ canonical_id: null })
       .eq("id", id);
     if (error) return { ok: false, message: error.message };
+    await refreshResponsibleOptionFields(supabase, await getActiveOrgId());
     revalidatePath("/configuracoes/responsaveis");
     return { ok: true };
   }
@@ -123,6 +130,8 @@ export async function setResponsibleCanonical(
     .update({ canonical_id: root })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
+  // Apelido some do dropdown vivo (grupo colapsa no principal).
+  await refreshResponsibleOptionFields(supabase, await getActiveOrgId());
   revalidatePath("/configuracoes/responsaveis");
   return { ok: true };
 }

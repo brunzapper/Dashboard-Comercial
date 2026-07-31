@@ -1,5 +1,7 @@
-// Versão: 1.1 | Data: 31/07/2026 (v1.1: repassa operations +
-// operationMembersById ao editor e à grade — membros por operação)
+// Versão: 1.2 | Data: 31/07/2026 (v1.2: repassa targetRates à grade e
+// currencies ao editor — alvos em moeda estrangeira)
+// v1.1: repassa operations + operationMembersById ao editor e à grade —
+// membros por operação.
 // Gerência de Remuneração variável (0112) — admin. Topo: seletor de plano +
 // navegação de mês (searchParams plano/ano/mes — a page recarrega os dados);
 // abas "Lançamentos" (grade mensal) e "Plano" (editor de fatores/fórmulas).
@@ -60,6 +62,10 @@ export interface RemuneracaoManagerProps {
   responsibles: { id: string; label: string }[];
   // Alvos do mês (goals) por responsável canônico → factorId → alvo.
   targets: Record<string, Record<string, number | null>>;
+  // Moeda do alvo → R$/unidade no trimestre (plano selecionado).
+  targetRates: Record<string, number | null>;
+  // Moedas habilitadas (editor: moeda do alvo do fator).
+  currencies: { value: string; label: string }[];
   metrics: GoalMetricDef[];
   // Insumos do catálogo de fórmulas agregadas (mesmos do widget-builder).
   available: AvailableField[];
@@ -194,6 +200,7 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
           sources={props.sources}
           operations={props.operations}
           operationMembersById={props.operationMembersById}
+          currencies={props.currencies}
           onSaved={(planId) => {
             setCreating(false);
             setTab("grade");
@@ -213,6 +220,7 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
           entries={props.entries}
           responsibles={props.responsibles}
           targets={props.targets}
+          targetRates={props.targetRates}
           operationMembersById={props.operationMembersById}
         />
       ) : (

@@ -1,4 +1,14 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3: comissão MULTI-BLOCO (config.commissions[]; legado `commission` é
+// NORMALIZADO no parse p/ um bloco id "comissao" — o tipo parseado expõe SÓ
+// `commissions`), kinds de faixa pct/flat/per_unit, seleção por atingimento OU
+// por realizado absoluto (tierBy), match de membro por campo do registro
+// (factor.memberField — injeção é do ENGINE), alvo padrão do plano
+// (factor.defaultTarget — fallback quando não há linha de goals; nunca
+// gravado) e alvo em moeda estrangeira (factor.targetCurrency — convertido a
+// BRL na LEITURA via targetRates resolvido pelos CALLERS; taxa ausente ⇒
+// atingimento null + targetRateMissing, NUNCA 1:1). config.presetKey é a
+// identidade de plano criado por preset e SOBREVIVE ao round-trip do save.
 // v1.2: membros por OPERAÇÃO (memberOperationIds) — helpers puros
 // resolveOperationMembers/explicitMemberIds combinam manual ∪ operações; a
 // resolução opId→ids canônicos é dos CALLERS (loadOperationScopes + canon).
@@ -36,6 +46,7 @@ export const MAX_BONUSES = 20;
 export const MAX_TOTAL_FORMULA_TOKENS = 200;
 export const MAX_COMMISSION_TIERS = 12; // por tabela (plano ou membro)
 export const MAX_COMMISSION_MEMBER_OVERRIDES = 400;
+export const MAX_COMMISSION_BLOCKS = 6;
 
 /** Fator do plano: componente ponderado da remuneração. */
 export interface CompFactor {
@@ -51,26 +62,54 @@ export interface CompFactor {
   filters?: WidgetFilter[]; // recorte extra (sem UI no v1; schema aceita)
   capPct?: number; // teto do atingimento CALCULADO (override manual ignora)
   floorPct?: number; // piso idem
+  // Ref de campo (ex. "custom:sdr_reuniao") que identifica o MEMBRO no
+  // registro por NOME em vez de responsible_id. A injeção do filtro (op `in`
+  // com os display_names do grupo canônico do membro) é do ENGINE — aqui só o
+  // contrato. Ausente = filtro responsible_id eq (comportamento clássico).
+  memberField?: string;
+  // Alvo padrão do mês quando NÃO há linha de goals p/ membro×mês (meta "por
+  // sub-operação"). Fallback de LEITURA — nunca vira linha de goals; digitar
+  // na célula grava um goal (override), limpar deleta e volta ao padrão.
+  defaultTarget?: number;
+  // Moeda em que alvo/defaultTarget são DIGITADOS (ex. "USD"). Conversão a
+  // BRL acontece na LEITURA (computeEntry) pela taxa do trimestre passada
+  // pelos callers (targetRates); ausente = BRL (sem conversão).
+  targetCurrency?: string;
 }
 
-/** Faixa: atingimento >= fromPct ⇒ comissão de ratePct% da base. */
+/** Tipo de payout de um bloco de comissão. */
+export type CompTierKind = "pct" | "flat" | "per_unit";
+
+/**
+ * Faixa de um bloco. `fromPct` (nome mantido p/ compat de JSON) é o limiar
+ * "a partir de" na UNIDADE do tierBy do bloco (atingimento % OU realizado
+ * absoluto). kind "pct" usa `ratePct` (% sobre a base); "flat" usa `amount`
+ * (R$ fixo); "per_unit" usa `amount` (R$ × realizado do fator-base).
+ */
 export interface CompCommissionTier {
   fromPct: number; // >= 0; estritamente crescente dentro da tabela
-  ratePct: number; // >= 0 (0 = faixa que zera)
+  ratePct?: number; // kind "pct": >= 0 (0 = faixa que zera)
+  amount?: number; // kind "flat"/"per_unit": >= 0
 }
 
 /**
- * Comissão por faixas: o atingimento EFETIVO do fator gatilho (pós override e
- * cap/floor) escolhe a faixa (maior `fromPct` satisfeito vence, `>=`); a % da
- * faixa incide sobre a base variável da linha ou sobre o realizado EFETIVO de
- * um fator. `memberTiers` (id CANÔNICO) substitui a tabela inteira do plano
- * para aquele membro; entrada órfã (membro fora do plano) nunca é selecionada
- * e nunca é podada no save (memberIds vazio = "todos os ativos", que muda).
+ * Bloco de comissão por faixas: o valor EFETIVO do gatilho (atingimento pós
+ * override/cap/floor, ou realizado efetivo quando tierBy "realized") escolhe
+ * a faixa (maior `fromPct` satisfeito vence, `>=`); o payout segue o kind —
+ * % sobre a base (variável ou realizado EFETIVO de um fator), R$ fixo, ou R$
+ * por unidade do realizado do fator-base (per_unit EXIGE basisKind "factor").
+ * `memberTiers` (id CANÔNICO) substitui a tabela inteira do plano para aquele
+ * membro; entrada órfã (membro fora do plano) nunca é selecionada e nunca é
+ * podada no save (memberIds vazio = "todos os ativos", que muda).
  */
-export interface CompCommissionConfig {
+export interface CompCommissionBlock {
+  id: string; // estável (chave de breakdown/labels) — NUNCA regenerar no save
+  label?: string;
   triggerFactorId: string;
   basisKind: "base" | "factor";
   basisFactorId?: string; // obrigatório sse basisKind === "factor"
+  tierBy?: "attainment" | "realized"; // default "attainment"
+  kind?: CompTierKind; // default "pct"
   tiers: CompCommissionTier[]; // >= 1
   memberTiers?: Record<string, CompCommissionTier[]>;
 }
@@ -90,8 +129,15 @@ export interface CompPlanConfig {
   // Fórmula LIVRE do total (operandos comp:*). Ausente/null = composição
   // estruturada: base × Σ(peso% × ating%) + bônus.
   totalFormula?: Formula | null;
-  // Comissão por faixas de atingimento (opcional; ausente = sem comissão).
-  commission?: CompCommissionConfig;
+  // Blocos de comissão por faixas (opcional; ausente/vazio = sem comissão).
+  // O jsonb legado `commission` (objeto único, v1.1) é NORMALIZADO no parse
+  // para um bloco `{id:"comissao", kind:"pct", tierBy:"attainment", ...}` —
+  // o tipo parseado expõe SÓ esta chave.
+  commissions?: CompCommissionBlock[];
+  // Identidade de plano criado por PRESET (ensure-only no apply). O parse a
+  // preserva explicitamente para que o round-trip do save do editor não a
+  // derrube (senão o re-apply do preset duplicaria o plano).
+  presetKey?: string;
 }
 
 /** Override manual das variáveis derivadas de um fator (efetivo = manual ?? calculado). */
@@ -128,18 +174,41 @@ export interface CompComputedRaw {
 
 /** Detalhamento efetivo de um fator (derivado na leitura). */
 export interface CompFactorBreakdown {
-  target: number | null;
+  target: number | null; // na unidade DIGITADA (targetCurrency do fator)
   realized: number | null;
   attainmentPct: number | null;
   payout: number;
   overridden: { realized: boolean; attainmentPct: boolean; payout: boolean };
+  // De onde saiu o alvo: linha de goals, defaultTarget do plano, ou nenhum.
+  targetSource: "goal" | "default" | null;
+  // Alvo convertido a BRL (== target sem targetCurrency); null quando não há
+  // alvo OU a taxa da moeda falta (targetRateMissing).
+  targetBRL: number | null;
+  // targetCurrency presente + alvo digitado + taxa ausente ⇒ true (atingimento
+  // fica null — fail-closed, nunca converter 1:1).
+  targetRateMissing?: boolean;
 }
 
-/** Detalhamento efetivo da comissão por faixas (derivado na leitura). */
+/** Detalhamento de UM bloco de comissão (sempre o CALCULADO — override é só na soma). */
+export interface CompCommissionBlockBreakdown {
+  blockId: string;
+  label: string; // label do bloco ?? "Comissão N"
+  value: number;
+  tier: CompCommissionTier | null; // faixa satisfeita (null = nenhuma)
+  triggerValue: number | null; // valor EFETIVO usado na seleção (na unidade do tierBy)
+  tierBy: "attainment" | "realized";
+  kind: CompTierKind;
+}
+
+/**
+ * Detalhamento AGREGADO da comissão (derivado na leitura). `value` = manual
+ * (override da SOMA) ?? Σ dos blocos; `tier`/`triggerAttainmentPct` só quando
+ * há exatamente UM bloco (senão null — o detalhe fica em commissionBlocks).
+ */
 export interface CompCommissionBreakdown {
   value: number; // efetivo = manual ?? calculado
-  tier: CompCommissionTier | null; // faixa satisfeita (null = nenhuma)
-  triggerAttainmentPct: number | null; // ating. EFETIVO usado na seleção
+  tier: CompCommissionTier | null; // faixa satisfeita (null = nenhuma/multi-bloco)
+  triggerAttainmentPct: number | null; // gatilho EFETIVO (null em multi-bloco)
   overridden: boolean;
 }
 
@@ -148,6 +217,8 @@ export interface CompBreakdown {
   base: number;
   byFactor: Record<string, CompFactorBreakdown>;
   factorsTotal: number;
+  // Um item por bloco de config.commissions (ordem do config); vazio = sem comissão.
+  commissionBlocks: CompCommissionBlockBreakdown[];
   // null = plano sem comissão (a coluna/linha não existe na UI).
   commission: CompCommissionBreakdown | null;
   bonusTotal: number;
@@ -216,6 +287,15 @@ function parseFactor(raw: unknown): CompFactor | null {
   const capPct = finiteOrNull(raw.capPct);
   const floorPct = finiteOrNull(raw.floorPct);
   if (capPct != null && floorPct != null && floorPct > capPct) return null;
+  if (raw.memberField != null && (typeof raw.memberField !== "string" || raw.memberField === ""))
+    return null;
+  const defaultTarget = raw.defaultTarget != null ? finiteOrNull(raw.defaultTarget) : undefined;
+  if (defaultTarget === null || (defaultTarget != null && defaultTarget < 0)) return null;
+  if (
+    raw.targetCurrency != null &&
+    (typeof raw.targetCurrency !== "string" || !/^[A-Z]{3}$/.test(raw.targetCurrency))
+  )
+    return null;
   const out: CompFactor = {
     id,
     label: label.trim(),
@@ -236,12 +316,18 @@ function parseFactor(raw: unknown): CompFactor | null {
   }
   if (capPct != null) out.capPct = capPct;
   if (floorPct != null) out.floorPct = floorPct;
+  if (typeof raw.memberField === "string" && raw.memberField !== "")
+    out.memberField = raw.memberField;
+  if (defaultTarget != null) out.defaultTarget = defaultTarget;
+  if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")
+    out.targetCurrency = raw.targetCurrency;
   return out;
 }
 
-// Tabela de faixas: >= 1, todas finitas e >= 0, fromPct estritamente
-// crescente (cobre ordenação E duplicata num só check).
-function parseTiers(raw: unknown): CompCommissionTier[] | null {
+// Tabela de faixas: >= 1, fromPct >= 0 estritamente crescente (cobre
+// ordenação E duplicata num só check); a coluna de valor depende do kind —
+// "pct" exige ratePct >= 0, "flat"/"per_unit" exigem amount >= 0.
+function parseTiers(raw: unknown, kind: CompTierKind): CompCommissionTier[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   if (raw.length > MAX_COMMISSION_TIERS) return null;
   const out: CompCommissionTier[] = [];
@@ -249,11 +335,17 @@ function parseTiers(raw: unknown): CompCommissionTier[] | null {
   for (const t of raw) {
     if (!isRecord(t)) return null;
     const fromPct = finiteOrNull(t.fromPct);
-    const ratePct = finiteOrNull(t.ratePct);
     if (fromPct == null || fromPct < 0 || fromPct <= prev) return null;
-    if (ratePct == null || ratePct < 0) return null;
     prev = fromPct;
-    out.push({ fromPct, ratePct });
+    if (kind === "pct") {
+      const ratePct = finiteOrNull(t.ratePct);
+      if (ratePct == null || ratePct < 0) return null;
+      out.push({ fromPct, ratePct });
+    } else {
+      const amount = finiteOrNull(t.amount);
+      if (amount == null || amount < 0) return null;
+      out.push({ fromPct, amount });
+    }
   }
   return out;
 }
@@ -261,26 +353,47 @@ function parseTiers(raw: unknown): CompCommissionTier[] | null {
 // Bloco de comissão: FAIL-CLOSED (referência a fator fantasma computaria
 // silenciosamente errado — espírito da invariante 26; o editor valida antes
 // com mensagem própria, aqui é a muralha contra jsonb adulterado).
-function parseCommission(
+// `forcedId` injeta a identidade do bloco LEGADO (`commission` sem `id`).
+function parseCommissionBlock(
   raw: unknown,
-  factorIds: Set<string>
-): CompCommissionConfig | null {
+  factorIds: Set<string>,
+  forcedId?: string
+): CompCommissionBlock | null {
   if (!isRecord(raw)) return null;
+  const id = forcedId ?? raw.id;
+  if (typeof id !== "string" || id === "") return null;
   const { triggerFactorId, basisKind } = raw;
   if (typeof triggerFactorId !== "string" || !factorIds.has(triggerFactorId))
     return null;
   if (basisKind !== "base" && basisKind !== "factor") return null;
-  const out: CompCommissionConfig = {
+  if (raw.kind != null && raw.kind !== "pct" && raw.kind !== "flat" && raw.kind !== "per_unit")
+    return null;
+  const kind: CompTierKind = (raw.kind as CompTierKind | undefined) ?? "pct";
+  if (raw.tierBy != null && raw.tierBy !== "attainment" && raw.tierBy !== "realized")
+    return null;
+  const tierBy = (raw.tierBy as "attainment" | "realized" | undefined) ?? "attainment";
+  // per_unit multiplica o realizado do fator-base — sem fator-base não há
+  // "unidade"; exigir basisKind "factor" aqui evita config que computaria 0
+  // em silêncio.
+  if (kind === "per_unit" && basisKind !== "factor") return null;
+  // O bloco parseado é CANÔNICO: kind/tierBy sempre explícitos (defaults
+  // resolvidos aqui, nunca nos consumidores).
+  const out: CompCommissionBlock = {
+    id,
     triggerFactorId,
     basisKind,
+    tierBy,
+    kind,
     tiers: [],
   };
+  if (typeof raw.label === "string" && raw.label.trim() !== "")
+    out.label = raw.label.trim();
   if (basisKind === "factor") {
     const b = raw.basisFactorId;
     if (typeof b !== "string" || !factorIds.has(b)) return null;
     out.basisFactorId = b;
   }
-  const tiers = parseTiers(raw.tiers);
+  const tiers = parseTiers(raw.tiers, kind);
   if (!tiers) return null;
   out.tiers = tiers;
   if (raw.memberTiers != null) {
@@ -288,11 +401,11 @@ function parseCommission(
     const entries = Object.entries(raw.memberTiers);
     if (entries.length > MAX_COMMISSION_MEMBER_OVERRIDES) return null;
     const memberTiers: Record<string, CompCommissionTier[]> = {};
-    for (const [id, t] of entries) {
-      if (id === "") return null;
-      const parsed = parseTiers(t);
+    for (const [mid, t] of entries) {
+      if (mid === "") return null;
+      const parsed = parseTiers(t, kind);
       if (!parsed) return null;
-      memberTiers[id] = parsed;
+      memberTiers[mid] = parsed;
     }
     if (entries.length > 0) out.memberTiers = memberTiers;
   }
@@ -340,10 +453,30 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
     if (!tf) return null;
     out.totalFormula = tf;
   }
-  if (raw.commission != null) {
-    const c = parseCommission(raw.commission, seen);
+  // `commissions` (v1.3) tem precedência; na ausência dela, o objeto legado
+  // `commission` (v1.1) é normalizado para UM bloco canônico id "comissao" —
+  // comportamento byte-idêntico (pct × atingimento) e migração preguiçosa no
+  // próximo save (que persiste o parseado).
+  if (raw.commissions != null) {
+    if (!Array.isArray(raw.commissions)) return null;
+    if (raw.commissions.length > MAX_COMMISSION_BLOCKS) return null;
+    const blocks: CompCommissionBlock[] = [];
+    const blockIds = new Set<string>();
+    for (const b of raw.commissions) {
+      const parsed = parseCommissionBlock(b, seen);
+      if (!parsed || blockIds.has(parsed.id)) return null;
+      blockIds.add(parsed.id);
+      blocks.push(parsed);
+    }
+    if (blocks.length > 0) out.commissions = blocks;
+  } else if (raw.commission != null) {
+    const c = parseCommissionBlock(raw.commission, seen, "comissao");
     if (!c) return null;
-    out.commission = c;
+    out.commissions = [c];
+  }
+  if (raw.presetKey != null) {
+    if (typeof raw.presetKey !== "string" || raw.presetKey === "") return null;
+    out.presetKey = raw.presetKey;
   }
   return out;
 }
@@ -458,35 +591,43 @@ export const COMP_FACTORS_REF = "comp:fatores";
 export const COMP_COMMISSION_REF = "comp:comissao";
 
 /**
- * Tabela de faixas efetiva de um membro: a própria (memberTiers) substitui a
- * do plano INTEIRA; sem memberId (ou sem override) vale a do plano; null =
- * plano sem comissão.
+ * Tabela de faixas efetiva de um membro num BLOCO: a própria (memberTiers)
+ * substitui a do plano INTEIRA; sem memberId (ou sem override) vale a do
+ * plano.
  */
 export function resolveCommissionTiers(
-  config: CompPlanConfig,
+  block: CompCommissionBlock,
   memberId?: string | null
-): CompCommissionTier[] | null {
-  const c = config.commission;
-  if (!c) return null;
-  if (memberId && c.memberTiers?.[memberId]) return c.memberTiers[memberId];
-  return c.tiers;
+): CompCommissionTier[] {
+  if (memberId && block.memberTiers?.[memberId]) return block.memberTiers[memberId];
+  return block.tiers;
 }
 
 /**
- * Faixa satisfeita: maior `fromPct` com atingimento >= fromPct (limiar exato
- * entra). Abaixo da menor faixa, ou atingimento null, nenhuma (⇒ comissão 0).
+ * Faixa satisfeita: maior `fromPct` com valor >= fromPct (limiar exato
+ * entra). `value` está na unidade do tierBy do bloco (atingimento % ou
+ * realizado absoluto). Abaixo da menor faixa, ou valor null, nenhuma (⇒ 0).
  */
 export function selectCommissionTier(
   tiers: CompCommissionTier[],
-  attainmentPct: number | null
+  value: number | null
 ): CompCommissionTier | null {
-  if (attainmentPct == null) return null;
+  if (value == null) return null;
   let best: CompCommissionTier | null = null;
   for (const t of tiers) {
-    if (attainmentPct >= t.fromPct && (best == null || t.fromPct > best.fromPct))
+    if (value >= t.fromPct && (best == null || t.fromPct > best.fromPct))
       best = t;
   }
   return best;
+}
+
+/** Moedas de alvo usadas pelo config (dedup) — insumo do resolveTargetRates dos callers. */
+export function factorTargetCurrencies(config: CompPlanConfig): string[] {
+  const out: string[] = [];
+  for (const f of config.factors) {
+    if (f.targetCurrency && !out.includes(f.targetCurrency)) out.push(f.targetCurrency);
+  }
+  return out;
 }
 
 /**
@@ -512,7 +653,7 @@ export function compOperandCatalog(config: CompPlanConfig): OperandRef[] {
   );
   // Só com comissão configurada — o operando some/aparece em sincronia, e
   // desligar a comissão com a ref em uso reprova a fórmula no save de graça.
-  if (config.commission) {
+  if ((config.commissions?.length ?? 0) > 0) {
     out.push({
       ref: COMP_COMMISSION_REF,
       label: "Comissão (R$)",
@@ -527,9 +668,12 @@ export function compOperandCatalog(config: CompPlanConfig): OperandRef[] {
  * variável, cap/floor só no calculado, fórmula livre (se houver) sobre as
  * variáveis já efetivas, e `overrides.total` vencendo tudo nos dois modos.
  * `realized` vem de computed.realized (snapshot cru); `targets` vem de `goals`
- * (chaveado por factorId, já dobrado p/ o responsável canônico). `memberId`
- * (id CANÔNICO da linha) seleciona a tabela de faixas do membro — ausente,
- * vale a do plano.
+ * (chaveado por factorId, já dobrado p/ o responsável canônico — ausência cai
+ * no defaultTarget do fator). `memberId` (id CANÔNICO da linha) seleciona a
+ * tabela de faixas do membro — ausente, vale a do plano. `targetRates` (moeda
+ * → R$/unidade no trimestre do mês) é resolvido pelos CALLERS (computeEntry é
+ * puro); fator com targetCurrency e taxa ausente fica com atingimento null +
+ * targetRateMissing — NUNCA converte 1:1.
  */
 export function computeEntry(
   config: CompPlanConfig,
@@ -537,7 +681,8 @@ export function computeEntry(
   inputs: CompEntryInputs,
   realized: Record<string, number | null>,
   targets: Record<string, number | null>,
-  memberId?: string | null
+  memberId?: string | null,
+  targetRates?: Record<string, number | null>
 ): CompBreakdown {
   const base =
     typeof baseAmount === "number" && Number.isFinite(baseAmount)
@@ -549,11 +694,28 @@ export function computeEntry(
   for (const f of config.factors) {
     weightSumPct += f.weightPct;
     const ov = inputs.overrides.factors[f.id] ?? {};
-    const target = targets[f.id] ?? null;
+    // Alvo efetivo: linha de goals ?? defaultTarget do plano (unidade DIGITADA).
+    const goalTarget = targets[f.id] ?? null;
+    const target = goalTarget ?? f.defaultTarget ?? null;
+    const targetSource: "goal" | "default" | null =
+      goalTarget != null ? "goal" : target != null ? "default" : null;
+    // Conversão a BRL: sem targetCurrency é identidade; com, exige taxa do
+    // caller — ausente/null ⇒ targetBRL null (atingimento null, fail-closed).
+    let targetBRL: number | null = target;
+    let targetRateMissing = false;
+    if (f.targetCurrency && target != null) {
+      const rate = targetRates?.[f.targetCurrency];
+      if (typeof rate === "number" && Number.isFinite(rate)) {
+        targetBRL = target * rate;
+      } else {
+        targetBRL = null;
+        targetRateMissing = true;
+      }
+    }
     const realizedEff = ov.realized ?? realized[f.id] ?? null;
     const attRaw =
-      target != null && target !== 0 && realizedEff != null
-        ? (realizedEff / target) * 100
+      targetBRL != null && targetBRL !== 0 && realizedEff != null
+        ? (realizedEff / targetBRL) * 100
         : null;
     const attEff = ov.attainmentPct ?? clampAtt(attRaw, f);
     const payout =
@@ -572,6 +734,9 @@ export function computeEntry(
         attainmentPct: ov.attainmentPct != null,
         payout: ov.payout != null,
       },
+      targetSource,
+      targetBRL,
+      ...(targetRateMissing ? { targetRateMissing: true } : {}),
     };
   }
   factorsTotal = roundMoney(factorsTotal);
@@ -579,29 +744,58 @@ export function computeEntry(
     inputs.bonuses.reduce((acc, b) => acc + b.amount, 0)
   );
 
-  // Comissão por faixas: o atingimento EFETIVO do gatilho (pós override e
-  // cap/floor — byFactor já é efetivo) escolhe a faixa; a % incide sobre a
-  // base variável ou o realizado EFETIVO do fator-base. Sem faixa satisfeita
-  // ou base ausente ⇒ 0 (nunca fabricar), override manual sempre possível.
-  let commission: CompCommissionBreakdown | null = null;
-  if (config.commission) {
-    const c = config.commission;
-    const tiers = resolveCommissionTiers(config, memberId) ?? c.tiers;
-    const att = byFactor[c.triggerFactorId]?.attainmentPct ?? null;
-    const tier = selectCommissionTier(tiers, att);
+  // Comissão por faixas, um BLOCO por vez: o gatilho EFETIVO (atingimento
+  // pós override/cap/floor, ou realizado efetivo quando tierBy "realized" —
+  // byFactor já é efetivo) escolhe a faixa; o payout segue o kind. Sem faixa
+  // satisfeita ou base ausente ⇒ 0 (nunca fabricar). O override manual é da
+  // SOMA (agregado) — os blocos exibem sempre o calculado.
+  const blocks = config.commissions ?? [];
+  const commissionBlocks: CompCommissionBlockBreakdown[] = [];
+  let blocksSum = 0;
+  blocks.forEach((b, i) => {
+    const kind = b.kind ?? "pct";
+    const tierBy = b.tierBy ?? "attainment";
+    const trigger = byFactor[b.triggerFactorId];
+    const triggerValue =
+      tierBy === "realized"
+        ? (trigger?.realized ?? null)
+        : (trigger?.attainmentPct ?? null);
+    const tiers = resolveCommissionTiers(b, memberId);
+    const tier = selectCommissionTier(tiers, triggerValue);
     const basis =
-      c.basisKind === "base"
+      b.basisKind === "base"
         ? base
-        : (byFactor[c.basisFactorId ?? ""]?.realized ?? null);
-    const calc =
-      tier != null && basis != null
-        ? roundMoney(basis * (tier.ratePct / 100))
-        : 0;
-    const ovCommission = inputs.overrides.commission;
-    commission = {
-      value: ovCommission ?? calc,
+        : (byFactor[b.basisFactorId ?? ""]?.realized ?? null);
+    let value = 0;
+    if (tier != null) {
+      if (kind === "flat") {
+        value = roundMoney(tier.amount ?? 0);
+      } else if (kind === "per_unit") {
+        value = basis != null ? roundMoney((tier.amount ?? 0) * basis) : 0;
+      } else {
+        value = basis != null ? roundMoney(basis * ((tier.ratePct ?? 0) / 100)) : 0;
+      }
+    }
+    blocksSum += value;
+    commissionBlocks.push({
+      blockId: b.id,
+      label: b.label ?? `Comissão ${i + 1}`,
+      value,
       tier,
-      triggerAttainmentPct: att,
+      triggerValue,
+      tierBy,
+      kind,
+    });
+  });
+  let commission: CompCommissionBreakdown | null = null;
+  if (blocks.length > 0) {
+    const ovCommission = inputs.overrides.commission;
+    const single = commissionBlocks.length === 1 ? commissionBlocks[0] : null;
+    commission = {
+      value: ovCommission ?? roundMoney(blocksSum),
+      tier: single?.tier ?? null,
+      triggerAttainmentPct:
+        single && single.tierBy === "attainment" ? single.triggerValue : null,
       overridden: ovCommission != null,
     };
   }
@@ -644,6 +838,7 @@ export function computeEntry(
     base,
     byFactor,
     factorsTotal,
+    commissionBlocks,
     commission,
     bonusTotal,
     total,
