@@ -456,20 +456,21 @@ antigo no MESMO período.
 > criados à mão não são tocados).
 
 **Gerar o preset "Remuneração Variável"**
-(`lib/presets/remuneracao-variavel.ts`, 31/07/2026) — monta o controle de
-remuneração do comercial: árvore de operações AEs/SDR-BDR, 5 planos de
+(`lib/presets/remuneracao-variavel.ts`, v2 31/07/2026) — monta o controle de
+remuneração do comercial: árvore de operações AEs/SDR-BDR JÁ COM os vínculos
+das pessoas (Gabriella Salles, Daniela Drielsma, Paulo Vitor Santos, Marcus
+Barcelos, Marcos Hernandes — re-garantidos a cada Atualizar; vínculo manual
+nunca é tocado; remover permanentemente = tirar do preset), 5 planos de
 remuneração (Configurações → Remuneração), campos `adicional_ao_mrr` e
 `sdr_reuniao` (dropdown vivo de responsáveis), sub-base
-`reunioes_qualificadas` e um dashboard de INSUMOS. Ensure-only: nada já
-existente é sobrescrito (em produção, `adicional_ao_mrr` e
-`reunioes_qualificadas` já existem e são apenas reaproveitados). Runbook
-PÓS-geração:
+`reunioes_qualificadas`, a base espelho "Remuneração" e um dashboard em 4
+abas (Visão geral, AEs com cards por pessoa, SDRs, Remuneração — espelho).
+Ensure-only: nada já existente é sobrescrito. Runbook PÓS-geração:
 
-1. **Vincular pessoas às sub-operações** (Configurações → Responsáveis →
-   operações): AE Closer, AE Full Cycle, SDR Inbound Full Cycle, SDR
-   Outbound Full Cycle e SDR Outbound Simples. Sem vínculos, os planos
-   resolvem ZERO membros (fail-closed — o recompute avisa; nunca cai em
-   "todos os ativos").
+1. **Conferir o resultado do apply** (mensagem da tela de Presets): vínculos
+   e cards por pessoa resolvem por NOME EXATO — typo vira erro visível na
+   mensagem (nunca silêncio) e se corrige ajustando a grafia em
+   Configurações → Responsáveis e reaplicando.
 2. **Cotação USD do trimestre** (meta do AE Full Cycle é digitada em
    dólares): Configurações → Campos → aba Moedas — PTAX ou manual. Sem a
    cotação, o atingimento do fator fica em erro visível (nunca converte 1:1).
@@ -488,13 +489,18 @@ PÓS-geração:
    (itálico na grade); digitar na célula fixa a meta do mês (vira linha de
    `goals`), limpar volta ao padrão. Inbound FC não tem meta de reuniões —
    o prêmio é por VOLUME (R$/reunião por faixa).
-7. **Limitações documentadas**: a perna "Vendas do site" contribui 0 para os
+7. **Publicar todo mês**: a aba "Remuneração" do dashboard exibe o ESPELHO —
+   só popula depois de Recalcular + Publicar na grade (Configurações →
+   Remuneração). Até lá fica vazia (esperado).
+8. **Limitações documentadas**: a perna "Vendas do site" contribui 0 para os
    fatores de valor dos SDRs (o Estudo não tem o campo `sdr_responsavel`);
    o match de membro por campo é por NOME EXATO — divergência de grafia
    entre o campo e `responsibles.display_name` zera o realizado (o
-   agrupamento de apelidos é honrado). Os campos `ganho_sdr_*` criados à mão
-   seguem intocados (viram material de widget; os planos calculam pelos
-   blocos de comissão, dirigidos por meta).
+   agrupamento de apelidos é honrado); pessoa NOVA no time = editar os
+   `responsibleNames`/cards do preset (o resto do dashboard acompanha
+   sozinho pelas dimensões). Os campos `ganho_sdr_*` criados à mão seguem
+   intocados (viram material de widget; os planos calculam pelos blocos de
+   comissão, dirigidos por meta).
 
 **Usar a janela de períodos em NOVOS acompanhamentos** (receita curta —
 qualquer widget de barra/linha/tabela agregada com dimensão de data mensal,

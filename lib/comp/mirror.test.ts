@@ -119,6 +119,33 @@ describe("mirror builders", () => {
     expect(values.core__value).toBe("2450");
   });
 
+  it("pesos TODOS zerados (payout só por comissão) ⇒ média SIMPLES dos atingimentos", () => {
+    // Planos do preset Remuneração Variável: fatores com weightPct 0 — a média
+    // ponderada daria 0/0; o fallback usa a média simples (nunca campo vazio
+    // com atingimento existente).
+    const cfg: CompPlanConfig = JSON.parse(JSON.stringify(CONFIG));
+    cfg.factors[0].weightPct = 0;
+    cfg.factors[1].weightPct = 0;
+    const bd = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({}),
+      { f_a: 80, f_b: 12 },
+      { f_a: 100, f_b: 10 }
+    );
+    // Atingimentos 80% e 120% ⇒ média simples 100.
+    expect(mirrorAttainmentPct(cfg, bd)).toBe(100);
+    // Só um fator com atingimento ⇒ o próprio valor.
+    const bd2 = computeEntry(
+      cfg,
+      0,
+      parseCompEntryInputs({}),
+      { f_a: 80, f_b: null },
+      { f_a: 100 }
+    );
+    expect(mirrorAttainmentPct(cfg, bd2)).toBe(80);
+  });
+
   it("atingimento médio ignora fatores sem atingimento; nenhum ⇒ null", () => {
     const semAlvo = computeEntry(
       CONFIG,

@@ -65,11 +65,13 @@ import {
   type PresetDashboard,
   type PresetField,
   type PresetSubSource,
+  type PresetWidget,
 } from "@/lib/presets/definitions";
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { registerGoalMetrics } from "@/lib/metas/upsert";
 import { parseCompPlanConfig } from "@/lib/comp/model";
+import { ensureMirrorSource, MIRROR_SOURCE_KEY } from "@/lib/comp/mirror";
 import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceFolders } from "@/lib/config/source-folders";
@@ -2059,6 +2061,8 @@ export interface PresetApplyResult {
   // Seções de ORG (31/07/2026) — só o caminho de fábrica as aplica.
   operationsCreated: number;
   operationsSkipped: number;
+  operationLinksCreated: number;
+  operationLinksSkipped: number;
   compPlansCreated: number;
   compPlansSkipped: number;
   // Erros NÃO fatais das seções de org (plano pulado por operação ausente…):
@@ -2119,8 +2123,13 @@ async function ensurePresetOperations(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string | null,
   ops: PresetOperation[]
-): Promise<{ created: number; skipped: number; errors: string[] }> {
-  if (ops.length === 0) return { created: 0, skipped: 0, errors: [] };
+): Promise<{
+  created: number;
+  skipped: number;
+  errors: string[];
+  // nome → id (existentes ∪ criadas) — insumo do ensure de vínculos.
+  idByName: Map<string, string>;
+}> {
   const { data } = await supabase.from("operations").select("id, name");
   const idByName = new Map(
     ((data ?? []) as { id: string; name: string }[]).map((o) => [
@@ -2128,6 +2137,7 @@ async function ensurePresetOperations(
       o.id,
     ])
   );
+  if (ops.length === 0) return { created: 0, skipped: 0, errors: [], idByName };
   let created = 0;
   let skipped = 0;
   const errors: string[] = [];
@@ -2161,7 +2171,145 @@ async function ensurePresetOperations(
     idByName.set(name, newId);
     created += 1;
   }
+  return { created, skipped, errors, idByName };
+}
+
+// Resolução de responsável por NOME (display_name exato, trim): linha
+// CANÔNICA preferida quando o mesmo nome existe em canônico e apelido; alvo
+// apelido resolve para o principal (canonical_id) — mesmo espírito do
+// agrupamento 0101. Insumo dos vínculos declarados e da sentinela
+// `@responsible:` dos filtros de widget.
+async function loadResponsibleIdByName(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<Map<string, string>> {
+  const { data } = await supabase
+    .from("responsibles")
+    .select("id, display_name, canonical_id");
+  const byName = new Map<string, { id: string; canonical: boolean }>();
+  for (const r of (data ?? []) as {
+    id: string;
+    display_name: string | null;
+    canonical_id: string | null;
+  }[]) {
+    const name = (r.display_name ?? "").trim();
+    if (!name) continue;
+    const entry = { id: r.canonical_id ?? r.id, canonical: r.canonical_id == null };
+    const cur = byName.get(name);
+    if (!cur || (!cur.canonical && entry.canonical)) byName.set(name, entry);
+  }
+  return new Map([...byName].map(([name, e]) => [name, e.id]));
+}
+
+// Vínculos responsável↔operação declarados no preset
+// (PresetOperation.responsibleNames): ensure-if-absent a CADA apply — nunca
+// remove nem repõe prioridade de vínculo existente (vínculos manuais
+// intocados; remover permanentemente = tirar do preset). priority é UNIQUE
+// por responsável — o vínculo novo entra com max(priority)+1 (nunca vira o
+// primário de quem já tem operação).
+async function ensurePresetOperationLinks(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ops: PresetOperation[],
+  opIdByName: Map<string, string>,
+  respIdByName: Map<string, string>
+): Promise<{ created: number; skipped: number; errors: string[] }> {
+  const wanted = ops.filter((o) => (o.responsibleNames?.length ?? 0) > 0);
+  if (wanted.length === 0) return { created: 0, skipped: 0, errors: [] };
+  const { data: linkRows } = await supabase
+    .from("responsible_operations")
+    .select("responsible_id, operation_id, priority");
+  const links = (linkRows ?? []) as {
+    responsible_id: string;
+    operation_id: string;
+    priority: number | null;
+  }[];
+  const linkSet = new Set(links.map((l) => `${l.responsible_id}:${l.operation_id}`));
+  const maxPriority = new Map<string, number>();
+  for (const l of links) {
+    maxPriority.set(
+      l.responsible_id,
+      Math.max(maxPriority.get(l.responsible_id) ?? 0, l.priority ?? 0)
+    );
+  }
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  for (const op of wanted) {
+    const opId = opIdByName.get(op.name.trim());
+    if (!opId) {
+      errors.push(`Vínculos de "${op.name}": operação não encontrada.`);
+      continue;
+    }
+    for (const rawName of op.responsibleNames ?? []) {
+      const name = rawName.trim();
+      const respId = respIdByName.get(name);
+      if (!respId) {
+        errors.push(
+          `Vínculo "${name}" → "${op.name}": responsável não encontrado (confira a grafia em Configurações → Responsáveis).`
+        );
+        continue;
+      }
+      const key = `${respId}:${opId}`;
+      if (linkSet.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      const priority = (maxPriority.get(respId) ?? 0) + 1;
+      const { error } = await supabase
+        .from("responsible_operations")
+        .insert({ responsible_id: respId, operation_id: opId, priority });
+      if (error) {
+        errors.push(`Vínculo "${name}" → "${op.name}": ${error.message}`);
+        continue;
+      }
+      linkSet.add(key);
+      maxPriority.set(respId, priority);
+      created += 1;
+    }
+  }
   return { created, skipped, errors };
+}
+
+// Sentinela `@responsible:<Nome>` em VALOR de filtro de widget: resolvida no
+// apply de fábrica para o UUID canônico (cards por pessoa em preset sem
+// hardcode de id). Nome não resolvido fica LITERAL (o widget mostra vazio —
+// degrada visível) + erro no resultado. Fora do caminho de fábrica o valor
+// nunca é tocado (import/IA inalterados).
+const RESPONSIBLE_FILTER_SENTINEL = "@responsible:";
+
+function resolveResponsibleFilterSentinels(
+  widgets: PresetWidget[],
+  respIdByName: Map<string, string>,
+  errors: string[]
+): PresetWidget[] {
+  return widgets.map((w) => {
+    if (
+      !w.filters.some(
+        (f) =>
+          typeof f.value === "string" &&
+          f.value.startsWith(RESPONSIBLE_FILTER_SENTINEL)
+      )
+    )
+      return w;
+    return {
+      ...w,
+      filters: w.filters.map((f) => {
+        if (
+          typeof f.value !== "string" ||
+          !f.value.startsWith(RESPONSIBLE_FILTER_SENTINEL)
+        )
+          return f;
+        const name = f.value.slice(RESPONSIBLE_FILTER_SENTINEL.length).trim();
+        const id = respIdByName.get(name);
+        if (!id) {
+          errors.push(
+            `Widget "${w.title}": responsável "${name}" não encontrado — o card ficará vazio até corrigir a grafia e reaplicar.`
+          );
+          return f;
+        }
+        return { ...f, value: id };
+      }),
+    };
+  });
 }
 
 // Planos de remuneração: identidade = config.presetKey (cru — sem full-parse
@@ -2450,21 +2598,52 @@ async function applyPresetDefinition(
       // (diário/da tela de Campos) — não derruba a geração do preset.
     }
   }
-  // Seções de ORG (operações + planos de remuneração): SÓ caminho de fábrica.
+  // Seções de ORG (operações/vínculos/planos/base espelho + sentinela
+  // @responsible: nos filtros): SÓ caminho de fábrica.
   let opsResult = { created: 0, skipped: 0, errors: [] as string[] };
+  let linksResult = { created: 0, skipped: 0, errors: [] as string[] };
   let compPlansResult = { created: 0, skipped: 0, errors: [] as string[] };
+  const extraSectionErrors: string[] = [];
+  let widgetsToApply = preset.widgets;
   if (opts.allowOrgSections) {
     const sectionOrgId = await getActiveOrgId();
-    opsResult = await ensurePresetOperations(
+    const opsOut = await ensurePresetOperations(
       supabase,
       sectionOrgId,
       preset.operations ?? []
     );
-    // Depois das operações — os planos as referenciam por nome.
+    opsResult = opsOut;
+    const respIdByName = await loadResponsibleIdByName(supabase);
+    // Depois das operações — vínculos e planos as referenciam por nome.
+    linksResult = await ensurePresetOperationLinks(
+      supabase,
+      preset.operations ?? [],
+      opsOut.idByName,
+      respIdByName
+    );
     compPlansResult = await ensurePresetCompPlans(
       supabase,
       sectionOrgId,
       preset.compPlans ?? []
+    );
+    if (preset.ensureCompMirror) {
+      const mirror = await ensureMirrorSource(supabase, sectionOrgId);
+      if (!mirror.ok) {
+        extraSectionErrors.push(
+          `Base espelho da remuneração: ${mirror.message ?? "falha ao garantir."}`
+        );
+      } else if (mirror.sourceKey !== MIRROR_SOURCE_KEY) {
+        // Widgets do preset referenciam a key literal — sufixo de colisão
+        // deixaria a aba Remuneração vazia em silêncio.
+        extraSectionErrors.push(
+          `Base espelho tem a chave "${mirror.sourceKey}" (colisão) — ajuste os widgets da aba Remuneração para essa Base.`
+        );
+      }
+    }
+    widgetsToApply = resolveResponsibleFilterSentinels(
+      preset.widgets,
+      respIdByName,
+      extraSectionErrors
     );
   }
 
@@ -2600,10 +2779,10 @@ async function applyPresetDefinition(
     const pages = pageMembersOf({ settings: s ?? undefined });
     if (pages.length > 0) existingPagesByKey.set(pk, pages);
   }
-  const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
+  const wantedKeys = new Set(widgetsToApply.map((w) => w.presetKey));
   const counts = { created: 0, updated: 0, deleted: 0 };
-  for (let i = 0; i < preset.widgets.length; i++) {
-    const w = preset.widgets[i];
+  for (let i = 0; i < widgetsToApply.length; i++) {
+    const w = widgetsToApply[i];
     const keptPages = existingPagesByKey.get(w.presetKey);
     const row = {
       title: w.title,
@@ -2648,7 +2827,12 @@ async function applyPresetDefinition(
     }
   }
 
-  const orgSectionErrors = [...opsResult.errors, ...compPlansResult.errors];
+  const orgSectionErrors = [
+    ...opsResult.errors,
+    ...linksResult.errors,
+    ...compPlansResult.errors,
+    ...extraSectionErrors,
+  ];
   return {
     presetKey: preset.presetKey,
     dashboard: dashboardAction,
@@ -2661,6 +2845,8 @@ async function applyPresetDefinition(
     correspondencesSkipped: corrResult.skipped,
     operationsCreated: opsResult.created,
     operationsSkipped: opsResult.skipped,
+    operationLinksCreated: linksResult.created,
+    operationLinksSkipped: linksResult.skipped,
     compPlansCreated: compPlansResult.created,
     compPlansSkipped: compPlansResult.skipped,
     ...(orgSectionErrors.length > 0 ? { orgSectionErrors } : {}),
@@ -2694,6 +2880,9 @@ export async function applyPreset(
   const w = result.widgets;
   const extras = [
     result.operationsCreated > 0 ? `${result.operationsCreated} operação(ões)` : null,
+    result.operationLinksCreated > 0
+      ? `${result.operationLinksCreated} vínculo(s) de responsável`
+      : null,
     result.compPlansCreated > 0
       ? `${result.compPlansCreated} plano(s) de remuneração`
       : null,

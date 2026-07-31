@@ -207,6 +207,61 @@ describe("preset remuneracao_variavel — estrutura", () => {
     }
   });
 
+  it("v2: 4 abas, vínculos pinados por nome, sentinela consistente e aba Remuneração no espelho", () => {
+    expect(P.settings!.tabs!.map((t) => t.id)).toEqual([
+      "visao",
+      "aes",
+      "sdr",
+      "remuneracao",
+    ]);
+    expect(P.ensureCompMirror).toBe(true);
+    // Vínculos declarados (grafias EXATAS da base viva) — 1 pessoa por sub-op.
+    const linksByOp = new Map(
+      P.operations!.map((o) => [o.name, o.responsibleNames ?? []])
+    );
+    expect(linksByOp.get("AE Closer")).toEqual(["Gabriella Salles"]);
+    expect(linksByOp.get("AE Full Cycle")).toEqual(["Daniela Drielsma"]);
+    expect(linksByOp.get("SDR Inbound Full Cycle")).toEqual([
+      "Paulo Vitor Santos",
+    ]);
+    expect(linksByOp.get("SDR Outbound Full Cycle")).toEqual([
+      "Marcus Barcelos",
+    ]);
+    expect(linksByOp.get("SDR Outbound Simples")).toEqual(["Marcos Hernandes"]);
+    // Raízes sem vínculo direto (as pessoas ficam nas sub-operações).
+    expect(linksByOp.get("AEs")).toEqual([]);
+    expect(linksByOp.get("SDR/BDR")).toEqual([]);
+    // Toda sentinela @responsible: referencia um nome DECLARADO nos vínculos
+    // (o apply resolve por nome — nome fora do conjunto seria typo).
+    const declaredNames = new Set(
+      P.operations!.flatMap((o) => o.responsibleNames ?? [])
+    );
+    const sentinels = P.widgets.flatMap((w) =>
+      w.filters
+        .map((f) => f.value)
+        .filter(
+          (v): v is string =>
+            typeof v === "string" && v.startsWith("@responsible:")
+        )
+    );
+    expect(sentinels.length).toBeGreaterThan(0);
+    for (const s of sentinels) {
+      expect(declaredNames.has(s.slice("@responsible:".length))).toBe(true);
+    }
+    // Cards por SDR filtram o campo do dropdown vivo pelos MESMOS nomes.
+    const sdrCardValues = P.widgets
+      .flatMap((w) => w.filters)
+      .filter((f) => f.field === "custom:sdr_reuniao" && f.op === "eq")
+      .map((f) => f.value as string);
+    for (const v of sdrCardValues) expect(declaredNames.has(v)).toBe(true);
+    // Aba Remuneração: todos os widgets sobre a base espelho (key literal).
+    const remWidgets = P.widgets.filter(
+      (w) => w.settings?.tab === "remuneracao"
+    );
+    expect(remWidgets.length).toBeGreaterThanOrEqual(4);
+    for (const w of remWidgets) expect(w.sources).toEqual(["remuneracao"]);
+  });
+
   it("campo do dropdown vivo declarado com options_source e sub de reuniões com a Data Reunião", () => {
     const sdr = P.fields!.find((f) => f.field_key === "sdr_reuniao")!;
     expect(sdr.options_source).toBe("responsibles");

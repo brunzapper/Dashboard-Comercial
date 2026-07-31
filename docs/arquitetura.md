@@ -9,6 +9,12 @@
      (lib/widgets/deferred-fingerprint.ts; posição/ordem fora do hash):
      editar widget deferido re-busca sem F5 (antes o payload velho do lote
      ficava na tela — regressão do deferimento automático de engine). -->
+<!-- v1.46 (31/07/2026): §4.7 preset v2 — vínculos automáticos
+     (PresetOperation.responsibleNames, ensure-if-absent), sentinela
+     @responsible:<Nome> em filtro de widget (resolvida no apply de fábrica),
+     ensureCompMirror (base espelho no apply) e preset Remuneração Variável
+     com 4 abas (cards por pessoa, métrica calculada de valor gerado, aba do
+     espelho). §4.18: rem_atingimento cai em média simples com pesos 0. -->
 <!-- v1.45 (31/07/2026): (a) §4.18 — comissão MULTI-BLOCO (commissions[];
      legado normalizado no parse; kinds pct/flat/per_unit; tierBy realized),
      memberField (match de membro por CONJUNTO DE NOMES via memberFilterFor),
@@ -881,37 +887,56 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   perdem no re-apply. Pré-requisitos de DADO no runbook (manual §4.7).
   **Seções de ORG (31/07/2026):** `PresetDashboard` aceita `operations`
   (árvore ensure-BY-NAME — pais declarados antes dos filhos; existente nunca
-  é renomeada/religada; filho com pai não resolvido é pulado com erro) e
+  é renomeada/religada; filho com pai não resolvido é pulado com erro),
   `compPlans` (`PresetCompPlan` — plano de remuneração com identidade
   `config.presetKey`, ensure-only: plano existente NUNCA sobrescrito; o
   `config` declarado passa pelo `parseCompPlanConfig` como sanidade e é
   gravado PARSEADO; `memberOperationNames` resolve por nome na org — nome
   ausente PULA o plano com erro em `orgSectionErrors`, nunca plano ligado a
   "todos os ativos"; métricas dos fatores entram no registry como no
-  savePlan). As duas seções aplicam SÓ com `opts.allowOrgSections`, que
-  APENAS o `applyPreset` de fábrica passa — os callers do import/IA nunca, o
-  que torna o caminho da IA estruturalmente incapaz de criar
-  operações/planos. `PresetField.options_source: "responsibles"` (0113)
+  savePlan) e `ensureCompMirror` (chama `ensureMirrorSource` no apply — a
+  aba de espelho do preset referencia a key literal `remuneracao`; key com
+  sufixo de colisão vira erro visível). `PresetOperation.responsibleNames`
+  (v2): vínculos responsável↔operação garantidos a CADA apply —
+  ensure-if-absent (`priority = max+1` do responsável; nunca remove nem
+  reordena; vínculos manuais intocados; remover permanentemente = tirar do
+  preset), nome resolvido por `display_name` exato com preferência à linha
+  CANÔNICA (alvo apelido canonicaliza — `loadResponsibleIdByName`). A MESMA
+  resolução alimenta a sentinela **`@responsible:<Nome>`** em valor de
+  filtro de widget (cards por pessoa sem hardcode de UUID): resolvida antes
+  do loop de widgets; nome não resolvido fica literal (card vazio) + erro.
+  As seções aplicam SÓ com `opts.allowOrgSections`, que APENAS o
+  `applyPreset`/`generatePresets` de fábrica passa — os callers do import/IA
+  nunca, o que torna o caminho da IA estruturalmente incapaz de criar
+  operações/planos (e a sentinela nunca é resolvida lá). `PresetField.options_source: "responsibles"` (0113)
   declara campo seleção de dropdown VIVO — options reescritas com os
   responsáveis ativos PRINCIPAIS por `refreshResponsibleOptionFields`
   (`lib/config/responsible-options.ts`; chamado no apply, no fim do
   `syncFieldCatalog` — padrão do refresh do `pipeline` — e nas actions de
   Responsáveis; por-org, best-effort, SÓ options; não editar à mão).
   **Preset "Remuneração Variável"** (`lib/presets/remuneracao-variavel.ts`,
-  v1 31/07/2026): monta o controle de remuneração do comercial — árvore
-  AEs/SDR-BDR (2 raízes + 5 sub-operações), 5 planos (`rv_ae_closer`,
+  v2 31/07/2026): monta o controle de remuneração do comercial — árvore
+  AEs/SDR-BDR (2 raízes + 5 sub-operações) COM os vínculos das pessoas
+  (responsibleNames: Gabriella Salles, Daniela Drielsma, Paulo Vitor Santos,
+  Marcus Barcelos, Marcos Hernandes), 5 planos (`rv_ae_closer`,
   `rv_ae_full_cycle` com meta em USD, `rv_sdr_inbound_fc` com R$/reunião
   per_unit por volume, `rv_sdr_outbound_fc` e `rv_sdr_outbound_simples` com
   prêmio flat por atingimento — ver §4.18), campos `adicional_ao_mrr` e
   `sdr_reuniao` (dropdown vivo), sub `reunioes_qualificadas` (Data Reunião ×
-  "Lead Qualificado") e dashboard de INSUMOS em 2 abas (valor gerado/
-  componentes/reuniões por SDR) — o payout autoritativo segue em
-  Configurações → Remuneração. Compartilha com o Inbound as declarações de
-  `mrr_contrato`, `vendas_assinadas`/`vendas_site` e `data_ref`/`mrr_venda`
-  (consts exportadas — declaração única, sem drift). Fiscalizado por
+  "Lead Qualificado"), a base espelho (`ensureCompMirror`) e dashboard em 4
+  abas: Visão geral (valor gerado + componentes, comparação por dia útil),
+  AEs (cards POR PESSOA via sentinela `@responsible:` + barra/linha com
+  MÉTRICA CALCULADA do valor gerado — padrão METRIC_SQL_CALC), SDRs (cards
+  por SDR filtrando `custom:sdr_reuniao` por nome + produção creditada por
+  `custom:sdr_responsavel`) e Remuneração (espelho publicado: folha/
+  comissões/atingimento por pessoa e evolução — popula após o 1º Publicar).
+  O payout autoritativo segue em Configurações → Remuneração. Compartilha
+  com o Inbound as declarações de `mrr_contrato`,
+  `vendas_assinadas`/`vendas_site` e `data_ref`/`mrr_venda` (consts
+  exportadas — declaração única, sem drift). Fiscalizado por
   `lib/presets/remuneracao-variavel.test.ts` (planos parseiam; fórmulas
   validam no catálogo agregado REAL; prefixo/unicidade de presetKeys; ordem
-  pais→filhos). Vincular PESSOAS às operações é runbook (manual §4.7).
+  pais→filhos; vínculos/sentinelas/abas pinados por nome).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -2441,7 +2466,9 @@ total opcional por plano.
   `sync_config` 'remuneracao_mirror', field defs fixas `rem_base`/`rem_bonus`/
   `rem_comissao`/`rem_atingimento`/`rem_plano` com
   `editable_by_roles: ["admin"]`; `rem_comissao` fica vazio em plano sem
-  comissão — nunca 0 fabricado). A escrita
+  comissão — nunca 0 fabricado; `rem_atingimento` é média ponderada pelos
+  pesos e cai em média SIMPLES quando TODOS os pesos são 0 — planos
+  só-comissão do preset Remuneração Variável). A escrita
   é SÓ por `createRecord`/`updateRecord` com o client RLS do admin (invariante
   25) — `core__value` = total, `core__closed_at` = último dia do mês
   (`YYYY-MM-DD`; o `coerceCore` ancora em Brasília — invariante 11),

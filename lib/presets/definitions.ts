@@ -106,11 +106,15 @@ export interface PresetWidget {
 // Operação declarada como dependência do preset (seção de ORG — só o caminho
 // de fábrica aplica): ensure-BY-NAME, nunca renomeia/religa/reativa uma
 // existente. Pais DEVEM vir antes dos filhos no array (o resolve de
-// parentName é sequencial). Vincular pessoas às operações é dado operacional
-// (runbook) — o preset só cria o esqueleto da árvore.
+// parentName é sequencial). `responsibleNames` (31/07/2026): vínculos de
+// responsáveis garantidos a CADA apply (ensure-if-absent — nunca remove;
+// remover permanentemente = tirar do preset); nome resolvido por
+// display_name exato (linha canônica preferida; alvo apelido canonicaliza),
+// não resolvido = erro visível. Vínculos criados à mão nunca são tocados.
 export interface PresetOperation {
   name: string;
   parentName?: string;
+  responsibleNames?: string[];
 }
 
 // Plano de remuneração declarado pelo preset (seção de ORG): identidade =
@@ -145,6 +149,10 @@ export interface PresetDashboard {
   // apply nunca as executa nesse caminho.
   operations?: PresetOperation[];
   compPlans?: PresetCompPlan[];
+  // Garante a base espelho da remuneração (ensureMirrorSource) no apply —
+  // widgets podem referenciar a source `remuneracao` (key literal; se a org
+  // resolveu com sufixo de colisão, o apply reporta erro visível).
+  ensureCompMirror?: boolean;
   widgets: PresetWidget[];
 }
 
