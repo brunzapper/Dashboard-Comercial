@@ -9,6 +9,16 @@
      (lib/widgets/deferred-fingerprint.ts; posição/ordem fora do hash):
      editar widget deferido re-busca sem F5 (antes o payload velho do lote
      ficava na tela — regressão do deferimento automático de engine). -->
+<!-- v1.45 (31/07/2026): (a) §4.18 — comissão MULTI-BLOCO (commissions[];
+     legado normalizado no parse; kinds pct/flat/per_unit; tierBy realized),
+     memberField (match de membro por CONJUNTO DE NOMES via memberFilterFor),
+     defaultTarget (alvo fallback de leitura) e targetCurrency (alvo em moeda
+     convertido na leitura via targetRates dos callers; taxa ausente =
+     fail-closed); (b) §4.7 — seções de ORG do preset (operations/compPlans,
+     ensure-only, SÓ caminho de fábrica via allowOrgSections) +
+     options_source 'responsibles' (dropdown vivo, 0113) + preset
+     "Remuneração Variável" (árvore AEs/SDR-BDR, 5 planos, dashboard de
+     insumos). Invariante 26 estendida. RPCs intocados. -->
 <!-- v1.44 (31/07/2026): (a) §4.18 — membros do plano por OPERAÇÃO
      (config.memberOperationIds: subárvore viva via loadOperationScopes +
      canonicalização nos callers; helpers puros resolveOperationMembers/
@@ -869,6 +879,39 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   pizza. ATENÇÃO: o update por `presetKey` sobrescreve o `settings` INTEIRO
   do widget gerido — ajustes manuais de aparência em widgets do preset se
   perdem no re-apply. Pré-requisitos de DADO no runbook (manual §4.7).
+  **Seções de ORG (31/07/2026):** `PresetDashboard` aceita `operations`
+  (árvore ensure-BY-NAME — pais declarados antes dos filhos; existente nunca
+  é renomeada/religada; filho com pai não resolvido é pulado com erro) e
+  `compPlans` (`PresetCompPlan` — plano de remuneração com identidade
+  `config.presetKey`, ensure-only: plano existente NUNCA sobrescrito; o
+  `config` declarado passa pelo `parseCompPlanConfig` como sanidade e é
+  gravado PARSEADO; `memberOperationNames` resolve por nome na org — nome
+  ausente PULA o plano com erro em `orgSectionErrors`, nunca plano ligado a
+  "todos os ativos"; métricas dos fatores entram no registry como no
+  savePlan). As duas seções aplicam SÓ com `opts.allowOrgSections`, que
+  APENAS o `applyPreset` de fábrica passa — os callers do import/IA nunca, o
+  que torna o caminho da IA estruturalmente incapaz de criar
+  operações/planos. `PresetField.options_source: "responsibles"` (0113)
+  declara campo seleção de dropdown VIVO — options reescritas com os
+  responsáveis ativos PRINCIPAIS por `refreshResponsibleOptionFields`
+  (`lib/config/responsible-options.ts`; chamado no apply, no fim do
+  `syncFieldCatalog` — padrão do refresh do `pipeline` — e nas actions de
+  Responsáveis; por-org, best-effort, SÓ options; não editar à mão).
+  **Preset "Remuneração Variável"** (`lib/presets/remuneracao-variavel.ts`,
+  v1 31/07/2026): monta o controle de remuneração do comercial — árvore
+  AEs/SDR-BDR (2 raízes + 5 sub-operações), 5 planos (`rv_ae_closer`,
+  `rv_ae_full_cycle` com meta em USD, `rv_sdr_inbound_fc` com R$/reunião
+  per_unit por volume, `rv_sdr_outbound_fc` e `rv_sdr_outbound_simples` com
+  prêmio flat por atingimento — ver §4.18), campos `adicional_ao_mrr` e
+  `sdr_reuniao` (dropdown vivo), sub `reunioes_qualificadas` (Data Reunião ×
+  "Lead Qualificado") e dashboard de INSUMOS em 2 abas (valor gerado/
+  componentes/reuniões por SDR) — o payout autoritativo segue em
+  Configurações → Remuneração. Compartilha com o Inbound as declarações de
+  `mrr_contrato`, `vendas_assinadas`/`vendas_site` e `data_ref`/`mrr_venda`
+  (consts exportadas — declaração única, sem drift). Fiscalizado por
+  `lib/presets/remuneracao-variavel.test.ts` (planos parseiam; fórmulas
+  validam no catálogo agregado REAL; prefixo/unicidade de presetKeys; ordem
+  pais→filhos). Vincular PESSOAS às operações é runbook (manual §4.7).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -2325,26 +2368,65 @@ total opcional por plano.
   canon-blind (limitação documentada). Tradeoff aceito: `goals_select` é
   org-wide autenticado — alvos legíveis via API por qualquer logado (regime
   que `mrr`/`clientes` sempre tiveram; a page de Metas segue admin).
-- **Comissão por faixas de atingimento (31/07/2026).** Bloco OPCIONAL
-  `config.commission` (sem migração; parse fail-closed estendido — bloco
-  inválido ou apontando fator inexistente derruba o config inteiro):
-  `{triggerFactorId, basisKind: "base"|"factor", basisFactorId?, tiers:
-  [{fromPct, ratePct}], memberTiers?}`. O atingimento EFETIVO do fator gatilho
-  (pós override e cap/floor) escolhe a faixa — maior `fromPct` satisfeito
-  vence (`>=`); abaixo da menor faixa ou atingimento null ⇒ comissão 0
-  (`tier: null`, nunca fabricar). A % incide sobre a base variável da linha ou
-  o realizado EFETIVO de um fator. `memberTiers[respId CANÔNICO]` substitui a
-  tabela do plano INTEIRA para o membro (config durável, não input mensal;
-  entrada órfã é preservada e nunca selecionada — o editor a exibe com
-  remover). Cálculo NATIVO em `computeEntry`
-  (`resolveCommissionTiers`/`selectCommissionTier`, com o `memberId` no 6º
-  argumento — engine/grade/vendedor/publish passam o `responsible_id`) —
-  NUNCA gerar fórmula a partir das faixas (override por membro não caberia
-  numa fórmula por plano). No modo estruturado a comissão SOMA ao total; com
-  `totalFormula` ela só entra via ref `comp:comissao` (semântica do
-  `comp:bonus` — sem soma automática; o operando existe no catálogo SÓ com o
-  bloco presente, então desligar a comissão com a ref em uso reprova o save).
-  Override por célula em `inputs.overrides.commission`.
+- **Comissão por faixas MULTI-BLOCO (31/07/2026).** `config.commissions[]`
+  (≤ `MAX_COMMISSION_BLOCKS` = 6; sem migração; parse fail-closed estendido —
+  bloco inválido, gatilho/base fantasmas, kind/tierBy desconhecidos ou id
+  duplicado derrubam o config inteiro): `{id, label?, triggerFactorId,
+  basisKind: "base"|"factor", basisFactorId?, tierBy?: "attainment"|
+  "realized", kind?: "pct"|"flat"|"per_unit", tiers, memberTiers?}`. O jsonb
+  LEGADO `commission` (objeto único, v1.1) é NORMALIZADO no parse para um
+  bloco canônico `{id:"comissao", kind:"pct", tierBy:"attainment"}` de
+  comportamento byte-idêntico — o tipo parseado expõe SÓ `commissions`
+  (migração preguiçosa no próximo save). Seleção da faixa: o gatilho EFETIVO
+  (atingimento % pós override/cap-floor; ou o REALIZADO efetivo absoluto com
+  `tierBy:"realized"` — faixas por VOLUME, ex. "26+ reuniões") escolhe pela
+  regra de sempre — maior `fromPct` satisfeito vence (`>=`); nenhuma faixa ou
+  gatilho null ⇒ 0 (`tier: null`, nunca fabricar). Payout por `kind`: `pct` =
+  `ratePct`% sobre a base (variável ou realizado EFETIVO de um fator);
+  `flat` = `amount` R$ fixo; `per_unit` = `amount` R$ × realizado do
+  fator-base (EXIGE `basisKind:"factor"` — parse recusa sem). Faixas são
+  tabela de LOOKUP (a vencedora aplica à base INTEIRA), nunca brackets
+  marginais. `memberTiers[respId CANÔNICO]` substitui a tabela do BLOCO
+  inteira para o membro (config durável, não input mensal; órfã preservada e
+  nunca selecionada — o editor a exibe com remover). Os blocos SOMAM no
+  agregado: `CompBreakdown.commissionBlocks` traz o detalhe por bloco (sempre
+  o CALCULADO) e `commission` mantém o shape antigo com `value = override ??
+  Σ` (`tier`/`triggerAttainmentPct` só com bloco único) — espelho/publish
+  intocados. `inputs.overrides.commission` segue override da SOMA. Cálculo
+  NATIVO em `computeEntry` (`resolveCommissionTiers(bloco, memberId)`/
+  `selectCommissionTier`) — NUNCA gerar fórmula a partir das faixas. Com
+  `totalFormula`, a comissão só entra via ref `comp:comissao` (sem soma
+  automática; operando existe SÓ com blocos presentes).
+- **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
+  Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
+  intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.
+  `custom:sdr_reuniao`) troca o filtro injetado do recompute por
+  `<campo> in (display_names do grupo canônico do membro)` — `memberFilterFor`
+  no engine monta o CONJUNTO DE NOMES (canônico + apelidos, inativos
+  inclusos, via `expandResponsibleIds` + nameById de TODOS os responsáveis);
+  match exato (`in`, sem `_ci` — os dois lados vêm dos nomes do
+  Bitrix/responsáveis); membro sem nome ⇒ `errors[fid]` (célula isola, NUNCA
+  consulta sem filtro); `expandResponsibleFilters` segue exclusivo do
+  `responsible_id`, intocado. O `savePlan` valida o ref contra
+  `buildAvailableFields` (numérico/data/sintético/agregado recusados). (b)
+  `factor.defaultTarget` = alvo FALLBACK quando não há linha de `goals` p/
+  membro×mês (meta "por sub-operação"): efetivo = `goals ?? defaultTarget`;
+  digitar na célula grava goal (override durável), limpar DELETA e volta ao
+  padrão; `CompFactorBreakdown.targetSource` ("goal"|"default"|null) alimenta
+  o itálico/tooltip da grade; nunca vira linha de goals. (c)
+  `factor.targetCurrency` (`^[A-Z]{3}$`, habilitada em `currencies`) = moeda
+  em que alvo/defaultTarget são DIGITADOS; a conversão a BRL acontece NA
+  LEITURA: os callers resolvem `targetRates` (moeda → R$/un. no trimestre do
+  fim do mês — `resolveTargetRates` no recompute;
+  `loadTargetRatesForConfig` com fast path sem consulta p/ plano só-BRL em
+  deriveTotal/publish/pages) e passam o 7º arg do `computeEntry` (que segue
+  PURO); taxa ausente ⇒ `targetBRL` null + atingimento null +
+  `targetRateMissing` (erro visível na grade/vendedor — NUNCA converter 1:1).
+  O realizado já era convertido a BRL pelo choke point (moeda `fixed BRL` +
+  rates) — nada muda nele. Grade/vendedor exibem o alvo na moeda digitada com
+  o convertido no tooltip ("mostrar os dois"). `config.presetKey` (identidade
+  de plano criado por preset — §4.7) é parseado explicitamente e RE-EMITIDO
+  pelo save do plan-editor.
 - **Fórmula livre de total.** `config.totalFormula` avalia por
   `evaluateFormula` sobre o mapa `comp:*` montado em `computeEntry`
   (`comp:f:<fid>:realizado|alvo|ating|valor`, `comp:base`, `comp:bonus`,
@@ -2720,15 +2802,30 @@ principalmente — para mantenedores humanos.
     `memberResponsibles` segue PURA (os ids resolvidos entram pelo 4º
     argumento). Leitura do vendedor via `auth_responsible_ids()` na policy de
     `comp_entries` — remuneração é dado sensível: NUNCA afrouxar o select
-    para org-wide; escrita segue admin-only. Comissão por faixas
-    (`config.commission`) calcula SÓ em `computeEntry` via
-    `resolveCommissionTiers`/`selectCommissionTier` (tabela do MEMBRO
-    substitui a do plano inteira; a seleção lê o atingimento EFETIVO do
-    gatilho) — NUNCA gerar fórmula a partir das faixas nem somar
-    `comp:comissao` automaticamente no modo `totalFormula`; todo call site de
-    `computeEntry` passa o `responsible_id` como `memberId` (omitir cai na
-    tabela do plano — degradação segura, mas silenciosa: consulta nova sem o
-    argumento erra o valor de membro personalizado).
+    para org-wide; escrita segue admin-only. Comissão por faixas MULTI-BLOCO
+    (`config.commissions[]`; legado `commission` NORMALIZADO no parse — o
+    tipo parseado expõe só `commissions`) calcula SÓ em `computeEntry` via
+    `resolveCommissionTiers(bloco)`/`selectCommissionTier` (tabela do MEMBRO
+    substitui a do bloco inteira; a seleção lê o gatilho EFETIVO —
+    atingimento %, ou realizado absoluto com `tierBy:"realized"`; payout por
+    kind pct/flat/per_unit; faixas são LOOKUP, nunca brackets; os blocos
+    SOMAM e `overrides.commission` é da SOMA) — NUNCA gerar fórmula a partir
+    das faixas nem somar `comp:comissao` automaticamente no modo
+    `totalFormula`; todo call site de `computeEntry` passa o `responsible_id`
+    como `memberId` (omitir cai na tabela do plano — degradação segura, mas
+    silenciosa: consulta nova sem o argumento erra o valor de membro
+    personalizado). `factor.memberField` troca o filtro de membro por
+    `<campo> in (nomes do grupo canônico)` SÓ via `memberFilterFor` (engine;
+    membro sem nome ⇒ erro de célula, nunca consulta sem filtro;
+    `expandResponsibleFilters` segue exclusivo do responsible_id).
+    `factor.defaultTarget` é fallback de LEITURA (goals vence; limpar a
+    célula segue deletando a linha) — nunca vira linha de goals.
+    `factor.targetCurrency` converte o alvo a BRL NA LEITURA pelos
+    `targetRates` resolvidos nos CALLERS (computeEntry segue puro; taxa
+    ausente ⇒ atingimento null + `targetRateMissing`, NUNCA 1:1 — caller novo
+    sem o 7º argumento falha FECHADO). `config.presetKey` (plano criado por
+    preset) sobrevive ao round-trip do save do editor — removê-lo quebraria o
+    ensure-only do re-apply (§4.7).
 
 ## 6. Convenções do projeto
 

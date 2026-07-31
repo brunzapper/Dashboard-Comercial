@@ -361,7 +361,7 @@ de um número errado. A semântica completa de conversão está no §7.6.
 
 ### 2.6 Configurações → Presets, Snapshots, Integrações, Usuários
 
-- **Presets**: geração/atualização dos 4 dashboards prontos (capítulo 13).
+- **Presets**: geração/atualização dos dashboards prontos (capítulo 13).
 - **Snapshots**: gestão global dos links públicos (capítulo 11).
 - **Integrações**: chaves de API de entrada e webhooks de saída (fora do
   escopo deste manual).
@@ -2040,6 +2040,13 @@ Lista completa:
    Potencial, Desconto (%)).
 3. **"MRR por vendedor"**.
 4. **"MRR por canal"**.
+5. **"Remuneração Variável"** — além do dashboard de acompanhamento (valor
+   gerado, componentes e reuniões qualificadas por SDR), este preset também
+   cria a árvore de operações AEs/SDR-BDR e os 5 planos de remuneração em
+   Configurações → Remuneração (onde vive o cálculo autoritativo do payout).
+   Nada já existente é sobrescrito; os passos pós-geração (vincular pessoas,
+   cotação USD, preencher "SDR da Reunião") estão no runbook do manual de
+   manutenção (§4.7).
 
 Comportamento:
 

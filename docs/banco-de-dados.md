@@ -216,7 +216,11 @@ num único `SourceDef[]`. Sub não tem pasta própria (herda a da pai na exibiç
 `editable_by_roles`, `is_local`, `sort_order`. Adicionadas:
 `source_system`/`source_field_id`/`show_in_builder`/`formula` (0017),
 `applies_to` text[] (0018), `write_back` (0031), `currency_code`/`currency_mode`
-(0036; `inherit` na 0046), `allow_negative` (0044), `show_as_percent` (0049).
+(0036; `inherit` na 0046), `allow_negative` (0044), `show_as_percent` (0049),
+`options_source` (0113 — check `in ('responsibles')`: campo `selecao` de
+dropdown VIVO cujas options são reescritas pelo app com os responsáveis
+ativos principais — `refreshResponsibleOptionFields`, padrão do refresh do
+`pipeline`; null = options manuais).
 Leitura liberada a autenticados desde 0043 (só metadados de schema).
 **Linhas core (0086):** as colunas do núcleo de `records` são seedadas como
 linhas `source_system='core'` (`field_key` = nome da coluna,
@@ -766,9 +770,16 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0110 | data_sources_custom_period_field | CHECK de `data_sources.default_period_field` aceita também `custom:<field_key>` (espelho da 0082 das subs). Validação semântica na action; picker "só colunas com dados" em Registros → Bases. Não recria as RPCs de widget |
 | 0111 | agenda_notes_task_time_end | Redesign da agenda: `tasks.due_time_end` (hora final opcional; CHECK exige `due_time`) + índice `idx_tasks_due (due_date, due_time)`; tabela `agenda_notes` (anotação do dia — org-scoped raiz, carimbo na action; SELECT org-wide, escrita autor/admin/gestor; sem anon) + publication realtime. Não recria as RPCs |
 | 0112 | comp_plans | Remuneração variável: `comp_plans` (config jsonb versionado fail-closed; SELECT org-wide, escrita admin) + `comp_entries` (lançamentos por responsável×mês — inputs/overrides/computed/total, `mirror_record_id` p/ o espelho publicado; SELECT admin OU próprio grupo via `auth_responsible_ids()`, escrita admin). Raízes org-scoped com carimbo na action; sem anon; não recria as RPCs de widget |
+| 0113 | field_options_source | `field_definitions.options_source` (check `in ('responsibles')`): campo `selecao` de dropdown VIVO — options reescritas pelo app com os responsáveis ativos principais (`refreshResponsibleOptionFields`; refresh no apply de preset, pós-sync e actions de Responsáveis). Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
 (7), `field_correspondences`(+membros) (3), `field_definitions`
 (`mrr_contrato`, calculado) e a chave `sql` no `sync_config.goal_metrics`.
 Nenhuma migração envolvida; itens já existentes nunca são sobrescritos.
+Idem (31/07/2026) para o preset "Remuneração Variável"
+(`lib/presets/remuneracao-variavel.ts`): semeia `operations` (árvore
+AEs/SDR-BDR), `comp_plans` (5 planos, identidade `config.presetKey`),
+`field_definitions` (`adicional_ao_mrr`, `sdr_reuniao` com
+`options_source='responsibles'`), `sub_sources` (`reunioes_qualificadas`) e
+chaves `comp_*` no registry — tudo ensure-only pelo caminho de fábrica.

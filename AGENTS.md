@@ -218,7 +218,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`PASSTHROUGH_TABLES`; o registry do catálogo do viewer sai de leitura
   service org-scoped de `sync_config` — nunca o adicione ao passthrough). Presets são DADOS aplicados idempotentemente por
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca
-  duplicar nem tocar widgets sem presetKey). Ver `docs/arquitetura.md` §4.9.
+  duplicar nem tocar widgets sem presetKey). **Seções de ORG do preset
+  (31/07/2026):** `operations` (árvore ensure-BY-NAME; pais antes dos filhos;
+  nunca renomeia/religa) e `compPlans` (planos de remuneração ensure por
+  `config.presetKey`; plano existente NUNCA sobrescrito; operação de
+  `memberOperationNames` ausente PULA com erro alto — nunca plano ligado a
+  "todos") aplicam SÓ com `opts.allowOrgSections`, que APENAS o caminho de
+  fábrica (`applyPreset`) passa — o import/IA fica estruturalmente incapaz de
+  criá-las. `PresetField.options_source: "responsibles"` (0113) marca campo
+  seleção de dropdown VIVO: options reescritas com os responsáveis ativos
+  principais por `refreshResponsibleOptionFields` (`lib/config/
+  responsible-options.ts` — chamado no apply, no `syncFieldCatalog` e nas
+  actions de Responsáveis; padrão do refresh do `pipeline`: SÓ options, não
+  editar à mão). Ver `docs/arquitetura.md` §4.9.
 - **Linhas core de `field_definitions` são OVERRIDES, nunca campos custom
   (0086, 22/07/2026):** as colunas do núcleo de `records` existem no catálogo
   como linhas `source_system='core'` (`field_key` = nome da coluna) só para a
@@ -531,20 +543,45 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`config.totalFormula`) avalia SÓ por `evaluateFormula` sobre o mapa
   `comp:*` de `computeEntry` (catálogo único `compOperandCatalog` — editor e
   servidor; kind "record", SOMASE proibido); resultado não-numérico ⇒ total
-  null, e `overrides.total` vence tudo. **Comissão por faixas (31/07/2026):**
-  bloco opcional `config.commission` (sem migração; parse fail-closed —
-  gatilho/base apontando fator inexistente derruba o config) calcula SÓ em
-  `computeEntry` via `resolveCommissionTiers`/`selectCommissionTier`: o
-  atingimento EFETIVO do gatilho escolhe a faixa (maior `fromPct` satisfeito
-  vence, `>=`; nenhuma ⇒ 0, nunca fabricar), a % incide sobre a base variável
-  ou o realizado EFETIVO de um fator, e `memberTiers[respId CANÔNICO]`
-  substitui a tabela do plano INTEIRA (config durável; órfão preservado e
-  nunca selecionado). NUNCA gerar fórmula a partir das faixas; com
-  `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
-  automática; operando existe SÓ com o bloco presente). Todo call site de
-  `computeEntry` passa `responsible_id` como `memberId`; override por célula
-  em `inputs.overrides.commission`; espelho ganha `rem_comissao` (vazio sem
-  comissão). O espelho "Publicar"
+  null, e `overrides.total` vence tudo. **Comissão por faixas MULTI-BLOCO
+  (31/07/2026):** `config.commissions[]` (≤6 blocos; sem migração; parse
+  fail-closed — gatilho/base apontando fator inexistente, kind/tierBy
+  inválidos ou id duplicado derrubam o config; o LEGADO `commission` objeto é
+  NORMALIZADO no parse p/ um bloco `{id:"comissao", kind:"pct",
+  tierBy:"attainment"}` byte-equivalente — o tipo parseado expõe SÓ
+  `commissions`) calcula SÓ em `computeEntry` via
+  `resolveCommissionTiers(bloco)`/`selectCommissionTier`: o gatilho EFETIVO
+  (atingimento %, ou realizado ABSOLUTO com `tierBy:"realized"`) escolhe a
+  faixa (maior `fromPct` satisfeito vence, `>=`; nenhuma ⇒ 0, nunca
+  fabricar) e o payout segue o `kind` — `pct` (% sobre base variável ou
+  realizado EFETIVO de um fator), `flat` (R$ fixo da faixa) ou `per_unit`
+  (R$ × realizado do fator-base; EXIGE basisKind "factor"); faixas são
+  LOOKUP (a vencedora aplica à base inteira), nunca brackets marginais.
+  `memberTiers[respId CANÔNICO]` substitui a tabela do bloco INTEIRA (config
+  durável; órfão preservado e nunca selecionado). Os blocos SOMAM;
+  `overrides.commission` segue override da SOMA (blocos exibem o calculado);
+  breakdown por bloco em `commissionBlocks` e o agregado `commission` mantém
+  o shape antigo (espelho intocado). NUNCA gerar fórmula a partir das faixas;
+  com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
+  automática; operando existe SÓ com blocos presentes). Todo call site de
+  `computeEntry` passa `responsible_id` como `memberId`; espelho ganha
+  `rem_comissao` (vazio sem comissão). **Match de membro por campo, alvo
+  padrão e alvo em moeda (31/07/2026):** `factor.memberField`
+  (ex. `custom:sdr_reuniao`) troca o filtro injetado por
+  `<campo> in (display_names do grupo canônico)` via `memberFilterFor`
+  (engine — expansão por CONJUNTO DE NOMES, apelidos/inativos inclusos;
+  `expandResponsibleFilters` segue SÓ p/ responsible_id, intocado; membro sem
+  nome ⇒ `errors[fid]`, nunca consulta sem filtro). `factor.defaultTarget` é
+  alvo FALLBACK de leitura (meta "por sub-operação"): linha de `goals` vence;
+  limpar a célula segue DELETANDO a linha (restaura o padrão); nunca vira
+  linha de goals. `factor.targetCurrency` = moeda em que o alvo é DIGITADO —
+  convertido a BRL NA LEITURA pelos `targetRates` resolvidos nos CALLERS
+  (`resolveTargetRates`/`loadTargetRatesForConfig`, trimestre do fim do mês;
+  computeEntry segue puro); taxa ausente ⇒ atingimento null +
+  `targetRateMissing`, NUNCA 1:1. `config.presetKey` (identidade de plano
+  criado por preset) é parseado explicitamente e o SAVE do plan-editor o
+  RE-EMITE — sem isso o re-apply do preset duplicaria o plano. O espelho
+  "Publicar"
   (`lib/comp/mirror.ts`) escreve SÓ por `createRecord`/`updateRecord` com o
   client RLS do admin (invariante 25), base manual `remuneracao` (ponteiro em
   `sync_config` 'remuneracao_mirror'), `closed_at` = último dia do mês
