@@ -28,6 +28,14 @@ const f = (...refs: string[]): Formula => ({
   tokens: refs.map((ref) => ({ kind: "field", ref })),
 });
 
+// Ids UUID-shaped (31/07/2026): o filtro `responsible_id` injetado pelo engine
+// passa por resolveFkFilterNames no runCalculatedWidget — valor não-UUID agora
+// é NOME. Em produção os ids são sempre UUID; "m1"/"m1a"/"m2" dos comentários
+// referem-se a estas constantes.
+const M1 = "11111111-1111-4111-8111-111111111111"; // m1 (canônico)
+const M1A = "1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a"; // m1a (apelido de m1)
+const M2 = "22222222-2222-4222-8222-222222222222"; // m2
+
 const CONFIG = {
   v: 1,
   factors: [
@@ -67,30 +75,30 @@ function responsiblesHandler(q: RecordedQuery) {
   if (sel && String(sel.args[0]).includes("canonical_id")) {
     return {
       data: [
-        { id: "m1", canonical_id: null },
-        { id: "m1a", canonical_id: "m1" },
-        { id: "m2", canonical_id: null },
+        { id: M1, canonical_id: null },
+        { id: M1A, canonical_id: M1 },
+        { id: M2, canonical_id: null },
       ],
     };
   }
   return {
     data: [
-      { id: "m1", display_name: "Um", active: true },
+      { id: M1, display_name: "Um", active: true },
       // Apelido INATIVO de propósito: o nome dele ainda entra no conjunto do
       // memberField (nameById cobre o grupo canônico inteiro).
-      { id: "m1a", display_name: "Um (apelido)", active: false },
-      { id: "m2", display_name: "Dois", active: true },
+      { id: M1A, display_name: "Um (apelido)", active: false },
+      { id: M2, display_name: "Dois", active: true },
     ],
   };
 }
 
 const GOALS_ROWS = [
   // Apelido preenche ausência (m1 não tem linha canônica de vendas)…
-  { responsible_id: "m1a", metric: "comp_vendas", target: 100 },
+  { responsible_id: M1A, metric: "comp_vendas", target: 100 },
   // …mas a linha do CANÔNICO vence a do apelido (999 é ignorado).
-  { responsible_id: "m1a", metric: "comp_reunioes", target: 999 },
-  { responsible_id: "m1", metric: "comp_reunioes", target: 10 },
-  { responsible_id: "m2", metric: "comp_vendas", target: 100 },
+  { responsible_id: M1A, metric: "comp_reunioes", target: 999 },
+  { responsible_id: M1, metric: "comp_reunioes", target: 10 },
+  { responsible_id: M2, metric: "comp_vendas", target: 100 },
 ];
 
 function respFilterOf(args: Record<string, unknown>): unknown {
@@ -102,46 +110,46 @@ describe("memberResponsibles", () => {
   it("sem memberIds = ativos canônicos; com memberIds = interseção ordenada", () => {
     const config = parseCompPlanConfig(JSON.parse(JSON.stringify(CONFIG)))!;
     const canon = {
-      canonicalById: new Map([["m1a", "m1"]]),
-      groupById: new Map([["m1", ["m1", "m1a"]]]),
+      canonicalById: new Map([[M1A, M1]]),
+      groupById: new Map([[M1, [M1, M1A]]]),
     };
     const all = [
-      { id: "m1", display_name: "Um" },
-      { id: "m1a", display_name: "Apelido" },
-      { id: "m2", display_name: "Dois" },
+      { id: M1, display_name: "Um" },
+      { id: M1A, display_name: "Apelido" },
+      { id: M2, display_name: "Dois" },
     ];
     expect(memberResponsibles(all, canon, config).map((r) => r.id)).toEqual([
-      "m1",
-      "m2",
+      M1,
+      M2,
     ]);
     expect(
       memberResponsibles(all, canon, {
         ...config,
-        memberIds: ["m2", "sumido"],
+        memberIds: [M2, "sumido"],
       }).map((r) => r.id)
-    ).toEqual(["m2"]);
+    ).toEqual([M2]);
   });
 
   it("4º arg soma membros de operação (dedup, manual primeiro); op-only vazio ⇒ []", () => {
     const config = parseCompPlanConfig(JSON.parse(JSON.stringify(CONFIG)))!;
     const canon = {
-      canonicalById: new Map([["m1a", "m1"]]),
-      groupById: new Map([["m1", ["m1", "m1a"]]]),
+      canonicalById: new Map([[M1A, M1]]),
+      groupById: new Map([[M1, [M1, M1A]]]),
     };
     const all = [
-      { id: "m1", display_name: "Um" },
-      { id: "m1a", display_name: "Apelido" },
-      { id: "m2", display_name: "Dois" },
+      { id: M1, display_name: "Um" },
+      { id: M1A, display_name: "Apelido" },
+      { id: M2, display_name: "Dois" },
     ];
     // Operação traz m1 além do manual m2 — manual primeiro, dedup.
     expect(
       memberResponsibles(
         all,
         canon,
-        { ...config, memberIds: ["m2"], memberOperationIds: ["opA"] },
-        ["m1", "m2"]
+        { ...config, memberIds: [M2], memberOperationIds: ["opA"] },
+        [M1, M2]
       ).map((r) => r.id)
-    ).toEqual(["m2", "m1"]);
+    ).toEqual([M2, M1]);
     // Só operações com resolução vazia ⇒ NENHUM membro (nunca "todos").
     expect(
       memberResponsibles(
@@ -157,27 +165,27 @@ describe("memberResponsibles", () => {
         all,
         canon,
         { ...config, memberOperationIds: ["opA"] },
-        ["m1a", "m2"]
+        [M1A, M2]
       ).map((r) => r.id)
-    ).toEqual(["m2"]);
+    ).toEqual([M2]);
   });
 });
 
 describe("operationMembersFromScopes", () => {
   it("canonicaliza apelidos e deduplica por operação", () => {
     const canon = {
-      canonicalById: new Map([["m1a", "m1"]]),
-      groupById: new Map([["m1", ["m1", "m1a"]]]),
+      canonicalById: new Map([[M1A, M1]]),
+      groupById: new Map([[M1, [M1, M1A]]]),
     };
     const scopes = new Map([
       [
         "opA",
-        { responsibleIds: ["m1a", "m1", "m2"], profile: [], subtreeProfiles: [] },
+        { responsibleIds: [M1A, M1, M2], profile: [], subtreeProfiles: [] },
       ],
       ["opB", { responsibleIds: [], profile: [], subtreeProfiles: [] }],
     ]);
     expect(operationMembersFromScopes(scopes, canon)).toEqual({
-      opA: ["m1", "m2"],
+      opA: [M1, M2],
       opB: [],
     });
   });
@@ -203,7 +211,7 @@ describe("recomputePlanMonth", () => {
         run_widget_query: (args) => {
           const metric = (args.p_metrics as { field: string }[])[0].field;
           const resp = JSON.stringify(respFilterOf(args) ?? "");
-          const m1 = resp.includes("m1");
+          const m1 = resp.includes(M1);
           if (metric === "value") {
             return { data: [{ metric_1: m1 ? 80 : 40 }], error: null };
           }
@@ -225,7 +233,7 @@ describe("recomputePlanMonth", () => {
             data: [
               {
                 id: "e1",
-                responsible_id: "m1",
+                responsible_id: M1,
                 base_amount: null,
                 // Override de payout de Vendas sobrevive ao recompute.
                 inputs: { overrides: { factors: { f_v: { payout: 111 } } } },
@@ -257,7 +265,7 @@ describe("recomputePlanMonth", () => {
     );
     expect(mains).toHaveLength(4);
     const m1Calls = mains.filter((c) =>
-      JSON.stringify(respFilterOf(c.args)).includes("m1a")
+      JSON.stringify(respFilterOf(c.args)).includes(M1A)
     );
     expect(m1Calls.length).toBe(2);
 
@@ -271,7 +279,7 @@ describe("recomputePlanMonth", () => {
       (s) => s.method === "in" && s.args[0] === "responsible_id"
     )!;
     expect(new Set(inResp.args[1] as string[])).toEqual(
-      new Set(["m1", "m1a", "m2"])
+      new Set([M1, M1A, M2])
     );
 
     // m1 (entry existente): UPDATE só {computed, total} — inputs/base intactos.
@@ -297,7 +305,7 @@ describe("recomputePlanMonth", () => {
     const insertPayload = insert.q.steps.find((s) => s.method === "insert")!
       .args[0] as Record<string, unknown>;
     expect(insertPayload.organization_id).toBe("org-1");
-    expect(insertPayload.responsible_id).toBe("m2");
+    expect(insertPayload.responsible_id).toBe(M2);
     expect(insertPayload.plan_id).toBe("plan-1");
     expect(insertPayload.period_year).toBe(2026);
     expect(insertPayload.period_month).toBe(7);
@@ -310,7 +318,7 @@ describe("recomputePlanMonth", () => {
       rpc: {
         run_widget_query: (args) => {
           const metric = (args.p_metrics as { field: string }[])[0].field;
-          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes("m1");
+          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes(M1);
           if (metric === "value")
             return { data: [{ metric_1: m1 ? 80 : 40 }], error: null };
           return { data: [{ metric_1: m1 ? 10 : 5 }], error: null };
@@ -329,8 +337,8 @@ describe("recomputePlanMonth", () => {
         ],
         // Vínculos: apelido m1a na raiz; m2 na FILHA (entra pela subárvore).
         responsible_operations: [
-          { responsible_id: "m1a", operation_id: "opA" },
-          { responsible_id: "m2", operation_id: "opB" },
+          { responsible_id: M1A, operation_id: "opA" },
+          { responsible_id: M2, operation_id: "opB" },
         ],
         comp_entries: (q) => {
           const ins = q.steps.find((s) => s.method === "insert");
@@ -354,7 +362,7 @@ describe("recomputePlanMonth", () => {
     expect(fake.queries.some((q) => q.table === "operations")).toBe(true);
     expect(fake.queries.some((q) => q.table === "responsible_operations")).toBe(true);
     // Apelido m1a canonicalizado ⇒ entry no m1; m2 veio da sub-operação.
-    expect(writes.map((w) => w.responsible_id).sort()).toEqual(["m1", "m2"]);
+    expect(writes.map((w) => w.responsible_id).sort()).toEqual([M1, M2]);
   });
 
   it("memberField: filtro `in` com os NOMES do grupo canônico; sem responsible_id; membro sem nome isola", async () => {
@@ -380,16 +388,16 @@ describe("recomputePlanMonth", () => {
           if (sel && String(sel.args[0]).includes("canonical_id")) {
             return {
               data: [
-                { id: "m1", canonical_id: null },
-                { id: "m1a", canonical_id: "m1" },
+                { id: M1, canonical_id: null },
+                { id: M1A, canonical_id: M1 },
                 { id: "m3", canonical_id: null },
               ],
             };
           }
           return {
             data: [
-              { id: "m1", display_name: "Um", active: true },
-              { id: "m1a", display_name: "Um (apelido)", active: false },
+              { id: M1, display_name: "Um", active: true },
+              { id: M1A, display_name: "Um (apelido)", active: false },
               // m3 SEM nome: fator com memberField vira erro de célula.
               { id: "m3", display_name: "  ", active: true },
             ],
@@ -463,8 +471,8 @@ describe("recomputePlanMonth", () => {
         currency_rates: [{ code: "USD", year: 2026, quarter: 3, rate: 5 }],
         // Alvo digitado em DÓLARES (10) — vale p/ os dois membros.
         goals: [
-          { responsible_id: "m1", metric: "comp_vendas", target: 10 },
-          { responsible_id: "m2", metric: "comp_vendas", target: 10 },
+          { responsible_id: M1, metric: "comp_vendas", target: 10 },
+          { responsible_id: M2, metric: "comp_vendas", target: 10 },
         ],
         comp_entries: (q) => {
           const ins = q.steps.find((s) => s.method === "insert");
@@ -493,7 +501,7 @@ describe("recomputePlanMonth", () => {
     expect(out.ok).toBe(true);
     // Vendas: realizado 100 / (10 US$ × 5) = 200% ⇒ 1000×60%×200% = 1200.
     // Reuniões: EUR sem taxa ⇒ atingimento null ⇒ 0. Total 1200.
-    const m1 = writes.find((w) => w.responsible_id === "m1")!;
+    const m1 = writes.find((w) => w.responsible_id === M1)!;
     expect(m1.total).toBe(1200);
   });
 
@@ -503,7 +511,7 @@ describe("recomputePlanMonth", () => {
       rpc: {
         run_widget_query: (args) => {
           const metric = (args.p_metrics as { field: string }[])[0].field;
-          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes("m1");
+          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes(M1);
           if (metric === "value")
             return { data: [{ metric_1: m1 ? 80 : 40 }], error: null };
           return { data: [{ metric_1: m1 ? 10 : 5 }], error: null };
@@ -535,7 +543,7 @@ describe("recomputePlanMonth", () => {
             basisKind: "factor",
             basisFactorId: "f_v",
             tiers: [{ fromPct: 100, ratePct: 10 }],
-            memberTiers: { m1: [{ fromPct: 0, ratePct: 50 }] },
+            memberTiers: { [M1]: [{ fromPct: 0, ratePct: 50 }] },
           },
         },
       },
@@ -546,9 +554,9 @@ describe("recomputePlanMonth", () => {
     expect(out.ok).toBe(true);
     // m1: fatores 880 + comissão pela tabela do MEMBRO (50% de 80 = 40) — a do
     // plano (10% ⇒ 8) daria 888. m2: gatilho sem alvo ⇒ comissão 0 ⇒ 240.
-    const m1 = writes.find((w) => w.responsible_id === "m1")!;
+    const m1 = writes.find((w) => w.responsible_id === M1)!;
     expect(m1.total).toBe(920);
-    const m2 = writes.find((w) => w.responsible_id === "m2")!;
+    const m2 = writes.find((w) => w.responsible_id === M2)!;
     expect(m2.total).toBe(240);
   });
 

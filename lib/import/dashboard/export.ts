@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 25/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2 (31/07/2026): filtros sobre relações saem por NOME — `fkNames`
+//   (opcional; carregado pelo chamador via loadExportFkNames, canon-aware)
+//   mapeia UUID→nome em responsible_id/operation_id (por elemento em arrays);
+//   id desconhecido fica como está (o validador aceita UUID legado). O JSON
+//   exportado fica legível e o round-trip com o validador/engine fecha
+//   (nome resolve em runtime — resolveFkFilterNames).
 // v1.1 (25/07/2026): espaço de grid v2 — board legado (sem canvas.gridVersion)
 //   é exportado JÁ convertido para unidades finas (posições ×10/×4−1 + canvas
 //   carimbado, lib/widgets/grid-space). Choke point único dos 3 chamadores
@@ -197,11 +203,30 @@ function exportMetric(m: Metric): ImportMetricSpec {
   });
 }
 
-function exportFilter(f: WidgetFilter): WidgetFilter {
+// Nomes p/ os filtros de relação (id → nome canônico); carregado pelo chamador
+// (loadExportFkNames — este módulo segue puro).
+export interface ExportFkNames {
+  responsible: Record<string, string>;
+  operation: Record<string, string>;
+}
+
+function exportFilter(f: WidgetFilter, fkNames?: ExportFkNames): WidgetFilter {
+  const names =
+    f.field === "responsible_id"
+      ? fkNames?.responsible
+      : f.field === "operation_id"
+        ? fkNames?.operation
+        : undefined;
+  let value = f.value;
+  if (names) {
+    const mapOne = (v: unknown): unknown =>
+      typeof v === "string" && names[v.trim()] != null ? names[v.trim()] : v;
+    value = Array.isArray(value) ? value.map(mapOne) : mapOne(value);
+  }
   return compact({
     field: f.field,
     op: f.op,
-    value: f.value,
+    value,
     sources: f.sources && f.sources.length > 0 ? f.sources : undefined,
   }) as WidgetFilter;
 }
@@ -233,8 +258,10 @@ export function exportDashboardJson(input: {
   dash: ExportDashRow;
   widgets: ExportWidgetRow[];
   sources: SourceDef[];
+  // id → nome p/ filtros de relação (loadExportFkNames); ausente = UUIDs crus.
+  fkNames?: ExportFkNames;
 }): ExportResult {
-  const { dash, sources } = input;
+  const { dash, sources, fkNames } = input;
   const chave = importChaveForDashboard(dash);
   const rootKeys = sources.filter((s) => !s.parentKey).map((s) => s.key);
 
@@ -334,7 +361,7 @@ export function exportDashboardJson(input: {
       split_by_source: w.split_by_source === true ? true : undefined,
       dimensions: (w.dimensions ?? []).map(exportDimension),
       metrics: (w.metrics ?? []).map(exportMetric),
-      filters: (w.filters ?? []).map(exportFilter),
+      filters: (w.filters ?? []).map((f) => exportFilter(f, fkNames)),
       settings: Object.keys(wSettings).length > 0 ? wSettings : undefined,
       grid_position: grid,
     }) as ImportWidgetSpec;

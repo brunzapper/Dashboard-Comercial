@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
+// v1.1 (31/07/2026): o catálogo do editor ganha selectOptionsByField (options
+//   dos campos seleção, ref = coluna crua p/ overrides core — 0086) p/ o
+//   picker de VALOR das condições (FilterValuePicker).
 // Server Actions das automações do kanban: CRUD das regras (client do USUÁRIO
 // — RLS de kanban_automations exige editor do board nos dois braços; a action
 // espelha o gate p/ mensagens amigáveis), "Executar agora" (mesma engine do
@@ -13,6 +16,7 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { FieldDefinition } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 import { loadCorrespondences } from "@/lib/correspondences";
@@ -206,6 +210,9 @@ export interface AutomationFieldCatalog {
   sources: { value: string; label: string }[];
   // Campos p/ os filtros dos conectados, por base (sem match: — 1 nível só).
   fieldsBySource: Record<string, FieldOption[]>;
+  // Options dos campos seleção (picker de VALOR das condições): ref → options.
+  // Overrides core (0086) entram pela coluna CRUA (ex. "pipeline").
+  selectOptionsByField: Record<string, string[]>;
 }
 
 /** Catálogo de campos/bases p/ o editor de condições (por base do quadro). */
@@ -254,12 +261,21 @@ export async function getAutomationFieldOptions(
       labels
     );
   }
+  const selectOptionsByField: Record<string, string[]> = {};
+  for (const f of (fieldsData ?? []) as FieldDefinition[]) {
+    if (f.data_type !== "selecao") continue;
+    const opts = (f.options ?? []).map((o) => String(o)).filter(Boolean);
+    if (opts.length === 0) continue;
+    selectOptionsByField[isCoreDef(f) ? f.field_key : `custom:${f.field_key}`] =
+      opts;
+  }
   return {
     ok: true,
     catalog: {
       fields: toFieldOptions(forBoard, labels),
       sources: sources.map((s) => ({ value: s.key, label: s.label })),
       fieldsBySource,
+      selectOptionsByField,
     },
   };
 }

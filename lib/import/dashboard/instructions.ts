@@ -1,4 +1,8 @@
-// Versão: 1.6 | Data: 25/07/2026
+// Versão: 1.7 | Data: 31/07/2026
+// v1.7 (31/07/2026): filtros sobre relações por NOME — a seção Filtros e a
+//   regra 6 documentam que responsible_id/operation_id aceitam o nome exato do
+//   cadastro como "value" (o engine resolve nome→id em runtime); nunca
+//   inventar UUID.
 // v1.6 (25/07/2026): grade fina (espaço de grid v2) — regra 8 documenta as
 //   DUAS escalas: JSON sem canvas.gridVersion segue na clássica de 12 colunas
 //   (convertida ao aplicar); ESTADO ATUAL carimbado (gridVersion 2) usa a
@@ -293,6 +297,8 @@ promovida a tipo próprio).
   Para "in", "value" é uma lista (["A","B"]); is_null/not_null vão sem "value".
 - Vários filtros = E (AND). "sources" no filtro = restringe SÓ essas Bases
   (as outras passam livres).
+- responsible_id/operation_id aceitam o NOME exato do cadastro como "value"
+  ("in" = lista de nomes) — NUNCA invente UUID; nome inexistente é erro.
 
 ### Settings do widget (todos opcionais; omitir = padrão)
 
@@ -311,8 +317,10 @@ Paletas: ${paletteList}.
    agregados/SOMASE nem [Meta: …]; [Meta: …] nunca dentro de SOMASE/CONT.SE/
    MÉDIASE (é um valor por consulta, não uma coluna).
 5. Widget kpi/calculado: use UMA métrica (a primeira é a exibida).
-6. Filtro por operação/responsável em widget: prefira quickFilters (o leitor
-   escolhe) em vez de filtro fixo com UUID.
+6. Filtro por operação/responsável em widget: filtro FIXO usa o NOME exato do
+   cadastro como "value" (ex.: { "field": "responsible_id", "op": "eq",
+   "value": "Maria Silva" }); quando o LEITOR deve escolher, prefira
+   quickFilters. Nunca invente UUID.
 7. Condições de SOMASE/CONT.SE sobre responsible_id/operation_id comparam por
    NOME exato do cadastro (ex.: [responsible_id] = "Maria Silva").
 8. Grid: SEM "settings.canvas.gridVersion" o JSON usa a escala CLÁSSICA de 12

@@ -5,7 +5,7 @@
 //   fórmula só de meta vira const puro (0 RPCs). Meta ausente ⇒ "—".
 // v3.5 (26/07/2026): agrupamento de responsáveis (0101) — filtros
 //   responsible_id do dashboard e condições de SOMASE (pós
-//   resolveFkCondFilters) expandem p/ o grupo (apelidos ∪ principal), com o
+//   resolveFkFilterNames) expandem p/ o grupo (apelidos ∪ principal), com o
 //   mesmo gate do engine (sem referência → byte-idêntico, sem consulta extra).
 // v3.4 (20/07/2026): unificados por PERNA — o input troca o mapa pronto
 //   (`correspondencesMap`) pelas correspondências CRUAS; o mapa passa a ser
@@ -94,7 +94,7 @@ import {
   aggregate,
   aggregateMoneyBreakdowns,
   resolveFilters,
-  resolveFkCondFilters,
+  resolveFkFilterNames,
   sourceFilters,
 } from "./engine";
 import { applyFilterSourceTargets } from "./filter-sources";
@@ -212,9 +212,16 @@ export async function runCalculatedWidget(
   const respCanon = filtersReferenceResponsible(input.filters)
     ? await loadResponsibleCanon(supabase)
     : EMPTY_CANON;
+  // Filtro por NOME em relação (31/07/2026): resolve UMA vez, ANTES do canon
+  // (nome → id principal → grupo); scopedAuxInputs é síncrona — o resolve
+  // fica aqui fora e o resultado serve às pernas auxiliares também.
+  const namedFilters = await resolveFkFilterNames(
+    supabase,
+    resolveFilters(input.filters ?? [])
+  );
   // Segmentação por fonte antes dos filtros sintéticos (mesma ordem do engine).
   const baseFilters = applyFilterSourceTargets(
-    expandResponsibleFilters(resolveFilters(input.filters ?? []), respCanon),
+    expandResponsibleFilters(namedFilters, respCanon),
     querySources,
     catalog
   );
@@ -283,7 +290,7 @@ export async function runCalculatedWidget(
       runPeriod?.field ??
       "source_created_at";
     let f = applyFilterSourceTargets(
-      expandResponsibleFilters(resolveFilters(input.filters ?? []), respCanon),
+      expandResponsibleFilters(namedFilters, respCanon),
       [scope],
       catalog
     );
@@ -401,7 +408,7 @@ export async function runCalculatedWidget(
           (async () => {
             // Condição sobre relação por NOME → resolve p/ UUID antes do RPC;
             // com apelidos (0101), o UUID expande para o grupo do responsável.
-            let extra = await resolveFkCondFilters(
+            let extra = await resolveFkFilterNames(
               supabase,
               condFilters(g.conds)
             );

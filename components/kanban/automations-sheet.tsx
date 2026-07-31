@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Painel "Automações" do kanban (modo registros, sem bucket de data): lista de
 // regras (ordem = ordem de avaliação; primeira que casa vence), editor de
 // condições das 4 famílias — Campo do registro / Registros conectados /
@@ -7,6 +7,11 @@
 // execução / movidos / erro) vem do bookkeeping do engine. Campos via
 // getAutomationFieldOptions (buildAvailableFields + toFieldOptions — nunca
 // listas paralelas). Feedback inline (role="status"/"alert" — sem toasts).
+// v1.1 (31/07/2026): valor de condição AMIGÁVEL — responsável/operação/etapa e
+//   campos seleção ganham picker de rótulos (FilterValuePicker). A avaliação
+//   compara a coluna CRUA (evaluate.ts, fora do pipeline do engine — sem
+//   expansão de grupo canônico, limitação documentada), então relações GRAVAM
+//   O ID (storeAs "value") e o picker exibe o rótulo; `in` guarda array.
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -28,9 +33,15 @@ import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
+import type { SourceKey } from "@/lib/sources";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import type { KanbanColumn } from "@/lib/kanban/types";
 import type { KanbanOwner } from "@/lib/kanban/data";
+import {
+  FilterValuePicker,
+  type FilterValueSource,
+} from "@/components/filters/filter-value-picker";
+import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import {
   deleteAutomation,
   getAutomationFieldOptions,
@@ -80,14 +91,15 @@ const TIME_OP_OPTIONS: ComboboxOption[] = [
 interface RelFilterDraft {
   field: string;
   op: string;
-  value: string;
+  // Array quando veio do picker de valor (`in`); string no texto livre.
+  value: string | string[];
 }
 
 interface CondDraft {
   kind: "field" | "related_count" | "tasks" | "time";
   field: string;
   op: string;
-  value: string;
+  value: string | string[];
   relSource: string;
   relFilters: RelFilterDraft[];
   numOp: "gte" | "lte" | "eq";
@@ -125,19 +137,21 @@ interface RuleDraft {
   targetKey: string;
 }
 
+// Serializa rascunho → WidgetFilter. `in` em ARRAY (picker) passa intacto
+// (valor com vírgula sobrevive); string divide por vírgula (digitação manual).
 function toWidgetFilter(d: RelFilterDraft): WidgetFilter | null {
   if (!d.field || !d.op) return null;
   const op = d.op as FilterOp;
   if (opHasNoValue(op)) return { field: d.field, op };
   if (op === "in") {
-    const list = d.value
-      .split(",")
-      .map((s) => s.trim())
+    const list = (Array.isArray(d.value) ? d.value : d.value.split(","))
+      .map((s) => String(s).trim())
       .filter(Boolean);
     return list.length > 0 ? { field: d.field, op, value: list } : null;
   }
-  if (d.value === "") return null;
-  return { field: d.field, op, value: d.value };
+  const value = Array.isArray(d.value) ? (d.value[0] ?? "") : d.value;
+  if (value === "") return null;
+  return { field: d.field, op, value };
 }
 
 const refToFmodKey = (ref: string) =>
@@ -155,7 +169,8 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
       if (!c.relSource || !Number.isFinite(n) || n < 0) return null;
       const filters: WidgetFilter[] = [];
       for (const f of c.relFilters) {
-        if (!f.field && !f.value) continue; // linha vazia
+        const empty = Array.isArray(f.value) ? f.value.length === 0 : !f.value;
+        if (!f.field && empty) continue; // linha vazia
         const parsed = toWidgetFilter(f);
         if (!parsed) return null;
         filters.push(parsed);
@@ -204,7 +219,7 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
       d.field = c.filter.field;
       d.op = c.filter.op;
       d.value = Array.isArray(c.filter.value)
-        ? c.filter.value.join(", ")
+        ? c.filter.value.map((v) => String(v))
         : c.filter.value == null
           ? ""
           : String(c.filter.value);
@@ -217,7 +232,7 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
         field: f.field,
         op: f.op,
         value: Array.isArray(f.value)
-          ? f.value.join(", ")
+          ? f.value.map((v) => String(v))
           : f.value == null
             ? ""
             : String(f.value),
@@ -243,6 +258,57 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
     enabled: row.enabled,
     conds,
     targetKey: row.rule.action.targetKey,
+  };
+}
+
+// Cache de MÓDULO das listas do picker de valor (responsável/operação por id;
+// etapa por base) — compartilhado entre quadros/aberturas do painel.
+const autoValueOptionCache = new Map<
+  string,
+  Promise<{ value: string; label: string }[]>
+>();
+
+// Picker de VALOR (31/07/2026): a avaliação das automações compara a COLUNA
+// CRUA (evaluate.ts) — relações GRAVAM O ID e o picker exibe o rótulo;
+// etapa/seleção gravam o próprio rótulo. `scopeSource` = base do quadro
+// (condição de campo) ou base conectada (filtro dos conectados); etapa sem
+// base = lista global.
+function autoFilterValueSource(
+  field: string,
+  scopeSource: string | undefined,
+  selectOptionsByField?: Record<string, string[]>
+): FilterValueSource | null {
+  if (field === "responsible_id" || field === "operation_id" || field === "stage") {
+    const kind =
+      field === "responsible_id"
+        ? ("responsible" as const)
+        : field === "operation_id"
+          ? ("operation" as const)
+          : ("stage" as const);
+    const cacheKey = kind === "stage" ? `stage:${scopeSource || "*"}` : kind;
+    return {
+      kind,
+      storeAs: "value",
+      load: () => {
+        const cached = autoValueOptionCache.get(cacheKey);
+        if (cached) return cached;
+        const p = listFilterOptionCandidates(
+          kind,
+          kind === "stage" && scopeSource
+            ? [scopeSource as SourceKey]
+            : undefined
+        );
+        autoValueOptionCache.set(cacheKey, p);
+        return p;
+      },
+    };
+  }
+  const opts = selectOptionsByField?.[field];
+  if (!opts || opts.length === 0) return null;
+  return {
+    kind: "static",
+    storeAs: "value",
+    load: () => Promise.resolve(opts.map((o) => ({ value: o, label: o }))),
   };
 }
 
@@ -631,15 +697,36 @@ export function AutomationsSheet({
                     {!opHasNoValue(c.op as FilterOp) ? (
                       <div className="flex min-w-36 flex-1 flex-col gap-1">
                         <Label className="text-xs">Valor</Label>
-                        <Input
-                          value={c.value}
-                          onChange={(e) =>
-                            patchCond(i, { value: e.target.value })
-                          }
-                          placeholder={
-                            c.op === "in" ? "valor1, valor2, ..." : "valor"
-                          }
-                        />
+                        {(() => {
+                          const vs = autoFilterValueSource(
+                            c.field,
+                            source,
+                            catalog?.selectOptionsByField
+                          );
+                          return vs && ["eq", "neq", "in"].includes(c.op) ? (
+                            <FilterValuePicker
+                              source={vs}
+                              multi={c.op === "in"}
+                              value={c.value}
+                              onChange={(value) => patchCond(i, { value })}
+                              ariaLabel="Valor"
+                            />
+                          ) : (
+                            <Input
+                              value={
+                                Array.isArray(c.value)
+                                  ? c.value.join(", ")
+                                  : c.value
+                              }
+                              onChange={(e) =>
+                                patchCond(i, { value: e.target.value })
+                              }
+                              placeholder={
+                                c.op === "in" ? "valor1, valor2, ..." : "valor"
+                              }
+                            />
+                          );
+                        })()}
                       </div>
                     ) : null}
                   </div>
@@ -722,18 +809,38 @@ export function AutomationsSheet({
                         {!opHasNoValue(f.op as FilterOp) ? (
                           <div className="flex min-w-32 flex-1 flex-col gap-1">
                             <Label className="text-xs">Valor</Label>
-                            <Input
-                              value={f.value}
-                              onChange={(e) =>
+                            {(() => {
+                              const vs = autoFilterValueSource(
+                                f.field,
+                                c.relSource || undefined,
+                                catalog?.selectOptionsByField
+                              );
+                              const setValue = (value: string | string[]) =>
                                 patchCond(i, {
                                   relFilters: c.relFilters.map((x, y) =>
-                                    y === k
-                                      ? { ...x, value: e.target.value }
-                                      : x
+                                    y === k ? { ...x, value } : x
                                   ),
-                                })
-                              }
-                            />
+                                });
+                              return vs &&
+                                ["eq", "neq", "in"].includes(f.op) ? (
+                                <FilterValuePicker
+                                  source={vs}
+                                  multi={f.op === "in"}
+                                  value={f.value}
+                                  onChange={setValue}
+                                  ariaLabel="Valor do conectado"
+                                />
+                              ) : (
+                                <Input
+                                  value={
+                                    Array.isArray(f.value)
+                                      ? f.value.join(", ")
+                                      : f.value
+                                  }
+                                  onChange={(e) => setValue(e.target.value)}
+                                />
+                              );
+                            })()}
                           </div>
                         ) : null}
                         <Button

@@ -71,7 +71,7 @@ import {
   resolveCurrencyCode,
   yearQuarterOf,
 } from "@/lib/widgets/currency";
-import { runWidget } from "@/lib/widgets/engine";
+import { resolveFkFilterNames, runWidget } from "@/lib/widgets/engine";
 import { isCardModeWidget, runCardWidget } from "@/lib/widgets/card";
 import {
   recordListWindowSize,
@@ -886,6 +886,12 @@ export default async function DashboardPage({
   // PERFIL da operação (operations.filter, 0083). Ver
   // lib/config/operation-scope.ts; espelho em widget-scope.
   {
+    // Filtro por NOME em relação (31/07/2026): resolve nome→id ANTES do
+    // collectOperationFilterIds (o nome de operação precisa virar UUID p/ a
+    // tradução enxergá-lo). Fast path + cache() = ≤1 consulta por tabela.
+    for (const [id, fs] of Object.entries(viewFiltersByWidget)) {
+      viewFiltersByWidget[id] = await resolveFkFilterNames(supabase, fs);
+    }
     const opIds = [
       ...new Set(
         Object.values(viewFiltersByWidget).flatMap(collectOperationFilterIds)

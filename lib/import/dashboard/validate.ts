@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 25/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4 (31/07/2026): filtros de widget sobre relações aceitam NOMES (o engine
+//   resolve nome→id→grupo canônico em runtime — resolveFkFilterNames): valor
+//   string ou elementos de array não-UUID em responsible_id/operation_id devem
+//   existir em responsibleNames/operationNames (erro amigável; UUID legado
+//   passa). Recorte de SUB-BASE segue comparando a coluna crua — nome em campo
+//   de relação lá é erro dedicado (use UUID ou filtre no widget).
 // v1.3 (25/07/2026): espaço de grid v2 — JSON com canvas.gridVersion 2 valida
 //   em unidades FINAS (default 120 colunas); JSON sem o carimbo segue validado
 //   nas unidades LEGADAS (12 colunas, defaults 6×8) e o preset sai CONVERTIDO
@@ -370,6 +376,27 @@ export function validateDashboardImport(
     }
   };
 
+  // Valida VALORES de filtro de widget sobre relações (31/07/2026): nomes são
+  // aceitos — o engine resolve nome→id→grupo canônico em runtime
+  // (resolveFkFilterNames) — mas nome inexistente viraria resultado vazio
+  // silencioso; UUIDs passam (valor legado). Arrays (`in`) validam por
+  // ELEMENTO.
+  const checkFkFilterValue = (field: string, value: unknown, where: string) => {
+    if (field !== "responsible_id" && field !== "operation_id") return;
+    const pool = field === "responsible_id" ? respNames : opNames;
+    const kind = field === "responsible_id" ? "o responsável" : "a operação";
+    for (const v of Array.isArray(value) ? value : [value]) {
+      if (typeof v !== "string") continue;
+      const s = v.trim();
+      if (!s || FK_UUID_RE.test(s)) continue;
+      if (!pool.has(s.toLocaleLowerCase("pt-BR"))) {
+        errors.push(
+          `${where}: não encontrei ${kind} "${s}" — use o nome exatamente como cadastrado.`
+        );
+      }
+    }
+  };
+
   // Resolve a fórmula de um campo/métrica: texto → tokens + validação de
   // contexto + (agregado) nomes de FK. Retorna null quando inválida.
   const resolveFormula = (
@@ -459,6 +486,21 @@ export function validateDashboardImport(
         continue;
       }
       if (!checkRef(field, `${where}.filter[${j}]`)) continue;
+      // Recorte de Sub-base compara a COLUNA CRUA no RPC (fora do resolver de
+      // nomes do engine — resolveFkFilterNames NÃO passa aqui): nome de
+      // responsável/operação não funciona neste predicado.
+      if (
+        (field === "responsible_id" || field === "operation_id") &&
+        (Array.isArray(c.value) ? c.value : [c.value]).some(
+          (v) =>
+            typeof v === "string" && v.trim() && !FK_UUID_RE.test(v.trim())
+        )
+      ) {
+        errors.push(
+          `${where}.filter[${j}]: o recorte de Sub-base compara o id interno (UUID) de "${field}" — nomes não são resolvidos aqui. Use o UUID ou filtre pelo nome no próprio widget.`
+        );
+        continue;
+      }
       filter.push({ field, op: op as WidgetFilter["op"], value: c.value });
     }
     if (filter.length === 0) {
@@ -944,6 +986,7 @@ export function validateDashboardImport(
         return;
       }
       if (!checkRef(field, fw)) return;
+      checkFkFilterValue(field, f.value, fw);
       const fSources = asArray(f.sources)
         .map(String)
         .filter(Boolean)

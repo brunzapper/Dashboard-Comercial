@@ -185,15 +185,16 @@ export function cleanFilters(filters: WidgetFilter[]): WidgetFilter[] {
       ];
       const src = sources.length > 0 ? { sources } : {};
       if (f.op === "in") {
-        return {
-          field: f.field,
-          op: f.op,
-          value: String(f.value ?? "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          ...src,
-        };
+        // Lista já em ARRAY (pickers de valor, 31/07/2026) passa intacta —
+        // `String(array)` re-junta por vírgula e quebraria nome com vírgula.
+        // String legada segue no split por vírgula (digitação manual).
+        const list = Array.isArray(f.value)
+          ? f.value.map((s) => String(s).trim()).filter(Boolean)
+          : String(f.value ?? "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+        return { field: f.field, op: f.op, value: list, ...src };
       }
       if (opHasNoValue(f.op)) {
         return { field: f.field, op: f.op, ...src };

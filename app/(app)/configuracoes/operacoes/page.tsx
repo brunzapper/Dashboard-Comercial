@@ -1,5 +1,8 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
 // Tela de Operações (admin) — Fase 6B.
+// v1.3 (31/07/2026): options dos campos seleção (custom e overrides core —
+// 0086, ref = coluna crua) alimentam o picker de VALOR do editor de perfil
+// (selectOptionsByField).
 // v1.2 (31/07/2026): assistente "Gerir com IA" (OperationsAiSheet — chat
 // interno + fluxo copiar-prompt/colar-JSON de IA externa; maxDuration 300
 // p/ os turnos de geração; contrato/apply em lib/ai/manage-operations.ts).
@@ -11,6 +14,7 @@ import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { loadSources } from "@/lib/config/sources";
+import { isCoreDef } from "@/lib/records/core-defs";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { WidgetFilter } from "@/lib/widgets/types";
 import type { ComboboxOption } from "@/components/ui/combobox";
@@ -38,7 +42,7 @@ export default async function OperacoesPage() {
       .order("name"),
     supabase
       .from("field_definitions")
-      .select("field_key, label")
+      .select("field_key, label, data_type, source_system, options")
       .order("sort_order", { ascending: true })
       .order("label", { ascending: true }),
     loadSources(supabase),
@@ -64,6 +68,20 @@ export default async function OperacoesPage() {
     label: s.label,
   }));
 
+  // Options dos campos seleção (31/07/2026): alimentam o picker de VALOR do
+  // editor de perfil. Overrides core (0086) entram pela coluna CRUA (o ref
+  // `custom:<coluna core>` resolveria custom_fields->>'…', sempre null).
+  const selectOptionsByField: Record<string, string[]> = {};
+  for (const f of fieldsData ?? []) {
+    if ((f.data_type as string) !== "selecao") continue;
+    const opts = ((f.options as unknown[]) ?? [])
+      .map((o) => String(o))
+      .filter(Boolean);
+    if (opts.length === 0) continue;
+    const key = f.field_key as string;
+    selectOptionsByField[isCoreDef(f) ? key : `custom:${key}`] = opts;
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -81,6 +99,7 @@ export default async function OperacoesPage() {
         operations={operations}
         fieldOptions={fieldOptions}
         sourceOptions={sourceOptions}
+        selectOptionsByField={selectOptionsByField}
       />
     </div>
   );

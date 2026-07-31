@@ -65,7 +65,6 @@ import {
   type PresetDashboard,
   type PresetField,
   type PresetSubSource,
-  type PresetWidget,
 } from "@/lib/presets/definitions";
 import { GOAL_METRICS_CONFIG_KEY } from "@/lib/config/goal-metrics";
 import { mergeGoalMetrics } from "@/lib/metas/metrics";
@@ -160,6 +159,7 @@ import {
   type ExportDashRow,
   type ExportWidgetRow,
 } from "@/lib/import/dashboard/export";
+import { loadExportFkNames } from "@/lib/import/dashboard/export-fk-names";
 import { normalizeImportRaw } from "@/lib/import/dashboard/rewrite";
 
 export interface ActionState {
@@ -2269,49 +2269,6 @@ async function ensurePresetOperationLinks(
   return { created, skipped, errors };
 }
 
-// Sentinela `@responsible:<Nome>` em VALOR de filtro de widget: resolvida no
-// apply de fábrica para o UUID canônico (cards por pessoa em preset sem
-// hardcode de id). Nome não resolvido fica LITERAL (o widget mostra vazio —
-// degrada visível) + erro no resultado. Fora do caminho de fábrica o valor
-// nunca é tocado (import/IA inalterados).
-const RESPONSIBLE_FILTER_SENTINEL = "@responsible:";
-
-function resolveResponsibleFilterSentinels(
-  widgets: PresetWidget[],
-  respIdByName: Map<string, string>,
-  errors: string[]
-): PresetWidget[] {
-  return widgets.map((w) => {
-    if (
-      !w.filters.some(
-        (f) =>
-          typeof f.value === "string" &&
-          f.value.startsWith(RESPONSIBLE_FILTER_SENTINEL)
-      )
-    )
-      return w;
-    return {
-      ...w,
-      filters: w.filters.map((f) => {
-        if (
-          typeof f.value !== "string" ||
-          !f.value.startsWith(RESPONSIBLE_FILTER_SENTINEL)
-        )
-          return f;
-        const name = f.value.slice(RESPONSIBLE_FILTER_SENTINEL.length).trim();
-        const id = respIdByName.get(name);
-        if (!id) {
-          errors.push(
-            `Widget "${w.title}": responsável "${name}" não encontrado — o card ficará vazio até corrigir a grafia e reaplicar.`
-          );
-          return f;
-        }
-        return { ...f, value: id };
-      }),
-    };
-  });
-}
-
 // Planos de remuneração: identidade = config.presetKey (cru — sem full-parse
 // dos configs alheios); ensure-only (plano existente NUNCA é sobrescrito —
 // ajustes do admin sobrevivem ao re-apply). memberOperationNames resolve por
@@ -2598,13 +2555,13 @@ async function applyPresetDefinition(
       // (diário/da tela de Campos) — não derruba a geração do preset.
     }
   }
-  // Seções de ORG (operações/vínculos/planos/base espelho + sentinela
-  // @responsible: nos filtros): SÓ caminho de fábrica.
+  // Seções de ORG (operações/vínculos/planos/base espelho): SÓ caminho de
+  // fábrica. Filtros por NOME em responsible_id/operation_id NÃO precisam de
+  // resolução aqui — o ENGINE resolve em runtime (resolveFkFilterNames).
   let opsResult = { created: 0, skipped: 0, errors: [] as string[] };
   let linksResult = { created: 0, skipped: 0, errors: [] as string[] };
   let compPlansResult = { created: 0, skipped: 0, errors: [] as string[] };
   const extraSectionErrors: string[] = [];
-  let widgetsToApply = preset.widgets;
   if (opts.allowOrgSections) {
     const sectionOrgId = await getActiveOrgId();
     const opsOut = await ensurePresetOperations(
@@ -2640,11 +2597,6 @@ async function applyPresetDefinition(
         );
       }
     }
-    widgetsToApply = resolveResponsibleFilterSentinels(
-      preset.widgets,
-      respIdByName,
-      extraSectionErrors
-    );
   }
 
   // 2) Dashboard: com targetDashboardId, o alvo é EXPLÍCITO (modo Editar da
@@ -2779,10 +2731,10 @@ async function applyPresetDefinition(
     const pages = pageMembersOf({ settings: s ?? undefined });
     if (pages.length > 0) existingPagesByKey.set(pk, pages);
   }
-  const wantedKeys = new Set(widgetsToApply.map((w) => w.presetKey));
+  const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
   const counts = { created: 0, updated: 0, deleted: 0 };
-  for (let i = 0; i < widgetsToApply.length; i++) {
-    const w = widgetsToApply[i];
+  for (let i = 0; i < preset.widgets.length; i++) {
+    const w = preset.widgets[i];
     const keptPages = existingPagesByKey.get(w.presetKey);
     const row = {
       title: w.title,
@@ -3057,10 +3009,14 @@ export async function applyDashboardEditJson(
     )
     .eq("dashboard_id", dashboardId)
     .order("sort_order", { ascending: true });
+  const baseWidgets = (baseWidgetData ?? []) as unknown as ExportWidgetRow[];
   const exported = exportDashboardJson({
     dash: dash as unknown as ExportDashRow,
-    widgets: (baseWidgetData ?? []) as unknown as ExportWidgetRow[],
+    widgets: baseWidgets,
     sources: await loadSources(supabase),
+    // Filtros de relação da BASE do merge por NOME (31/07/2026): o delta da IA
+    // referencia/preserva nomes, nunca UUIDs.
+    fkNames: await loadExportFkNames(supabase, baseWidgets),
   });
 
   // Identidade canônica + injeções protetivas (roles/tabs/canvas v2) + base do

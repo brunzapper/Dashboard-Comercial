@@ -67,6 +67,10 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import type { RefOption } from "@/lib/records/date-operands";
+import {
+  FilterValuePicker,
+  type FilterValueSource,
+} from "@/components/filters/filter-value-picker";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 import type { FormulaPreviewAdapter } from "@/components/formula/formula-preview";
 import { RecipeStrip } from "@/components/formula/recipe-strip";
@@ -752,6 +756,7 @@ export function FilterRow({
   fieldChips,
   opOptions,
   sourceOptions,
+  valueSource,
   onChange,
   onRemove,
 }: {
@@ -760,6 +765,9 @@ export function FilterRow({
   fieldChips?: ComboboxChip[];
   opOptions: ComboboxOption[];
   sourceOptions?: FilterSourceOption[];
+  // Picker de valor com rótulos (relação/etapa/seleção) — null/ausente =
+  // input de texto livre (campos não classificáveis e operadores de texto).
+  valueSource?: FilterValueSource | null;
   onChange: (patch: Partial<WidgetFilter>) => void;
   onRemove: () => void;
 }) {
@@ -794,11 +802,21 @@ export function FilterRow({
           aria-label="Operador do filtro"
         />
         {filter.op !== "is_null" && filter.op !== "not_null" ? (
-          <Input
-            value={String(filter.value ?? "")}
-            onChange={(e) => onChange({ value: e.target.value })}
-            placeholder="valor"
-          />
+          valueSource && ["eq", "neq", "in"].includes(filter.op) ? (
+            <FilterValuePicker
+              source={valueSource}
+              multi={filter.op === "in"}
+              value={filter.value}
+              onChange={(value) => onChange({ value })}
+              ariaLabel="Valor do filtro"
+            />
+          ) : (
+            <Input
+              value={String(filter.value ?? "")}
+              onChange={(e) => onChange({ value: e.target.value })}
+              placeholder="valor"
+            />
+          )
         ) : null}
       </div>
       {sourceOptions && sourceOptions.length > 1 ? (

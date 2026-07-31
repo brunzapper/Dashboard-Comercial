@@ -61,7 +61,7 @@ import {
   toSourceKey,
   type SourceDef,
 } from "@/lib/sources";
-import { resolveFilters, sourceFilters } from "./engine";
+import { resolveFilters, resolveFkFilterNames, sourceFilters } from "./engine";
 import {
   expandResponsibleFilters,
   filtersReferenceResponsible,
@@ -430,15 +430,20 @@ async function fetchAll(
  * para o grupo ANTES de montar a query. Gate barato (sem referência → mesma
  * config, nenhuma consulta extra); a regra dos mocks não muda — a expansão não
  * toca refs de Data Reunião (recordListIncludesMocks segue com a config crua).
+ * Filtro por NOME em relação (31/07/2026): resolvido ANTES da expansão
+ * (nome → id principal → grupo) — mesmo choke point p/ lista/kanban/export.
  */
 async function expandConfigResponsibles(
   supabase: SupabaseClient,
   config: WidgetConfig
 ): Promise<WidgetConfig> {
-  if (!filtersReferenceResponsible(config.filters)) return config;
-  const canon = await loadResponsibleCanon(supabase);
-  const expanded = expandResponsibleFilters(config.filters ?? [], canon);
-  return expanded === config.filters ? config : { ...config, filters: expanded };
+  const named = await resolveFkFilterNames(supabase, config.filters ?? []);
+  let filters = named;
+  if (filtersReferenceResponsible(named)) {
+    const canon = await loadResponsibleCanon(supabase);
+    filters = expandResponsibleFilters(named, canon);
+  }
+  return filters === config.filters ? config : { ...config, filters };
 }
 
 /**

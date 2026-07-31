@@ -1,4 +1,13 @@
-<!-- Versão: 1.46 | Data: 31/07/2026 -->
+<!-- Versão: 1.47 | Data: 31/07/2026 -->
+<!-- v1.47 (31/07/2026): §4.10 + invariante 27 — filtros de relação por NOME:
+     resolveFkFilterNames no ENGINE (nome→id→canon; strings e arrays; UUID
+     passthrough; FK_NO_MATCH p/ desconhecido) nos choke points runWidget/
+     pernas por métrica/record-list/espelhos de operação; FilterValuePicker
+     nos 6 editores (builder/tf_ gravam NOME; sub-base/perfil/automações
+     gravam ID com rótulo); validador de import checa nomes (erro amigável;
+     sub-base exige UUID), SPEC atualizado e export emite nome
+     (loadExportFkNames). §4.7: sentinela @responsible removida do preset
+     (nome puro). RPCs intocados. -->
 <!-- v1.46 (31/07/2026): §4.9 — operando de META (`meta:<chave>`) nas fórmulas
      agregadas: valor de goals.target ABAIXADO p/ const nos choke points
      (lowerGoalOperands; nunca basis/RPC), período pela regra do card
@@ -901,14 +910,16 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   ensure-if-absent (`priority = max+1` do responsável; nunca remove nem
   reordena; vínculos manuais intocados; remover permanentemente = tirar do
   preset), nome resolvido por `display_name` exato com preferência à linha
-  CANÔNICA (alvo apelido canonicaliza — `loadResponsibleIdByName`). A MESMA
-  resolução alimenta a sentinela **`@responsible:<Nome>`** em valor de
-  filtro de widget (cards por pessoa sem hardcode de UUID): resolvida antes
-  do loop de widgets; nome não resolvido fica literal (card vazio) + erro.
+  CANÔNICA (alvo apelido canonicaliza — `loadResponsibleIdByName`). Filtro
+  de widget de preset por responsável usa o NOME PURO como valor — resolvido
+  pelo ENGINE em runtime como qualquer filtro (§4.10, filtros de relação por
+  nome); a antiga sentinela `@responsible:<Nome>` (resolvida no apply) foi
+  REMOVIDA em 31/07/2026 — widgets de prod com UUID seguem funcionando
+  (passthrough) e o re-apply do preset reescreve para o nome.
   As seções aplicam SÓ com `opts.allowOrgSections`, que APENAS o
   `applyPreset`/`generatePresets` de fábrica passa — os callers do import/IA
   nunca, o que torna o caminho da IA estruturalmente incapaz de criar
-  operações/planos (e a sentinela nunca é resolvida lá). `PresetField.options_source: "responsibles"` (0113)
+  operações/planos. `PresetField.options_source: "responsibles"` (0113)
   declara campo seleção de dropdown VIVO — options reescritas com os
   responsáveis ativos PRINCIPAIS por `refreshResponsibleOptionFields`
   (`lib/config/responsible-options.ts`; chamado no apply, no fim do
@@ -925,8 +936,8 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `sdr_reuniao` (dropdown vivo), sub `reunioes_qualificadas` (Data Reunião ×
   "Lead Qualificado"), a base espelho (`ensureCompMirror`) e dashboard em 4
   abas: Visão geral (valor gerado + componentes, comparação por dia útil),
-  AEs (cards POR PESSOA via sentinela `@responsible:` + barra/linha com
-  MÉTRICA CALCULADA do valor gerado — padrão METRIC_SQL_CALC), SDRs (cards
+  AEs (cards POR PESSOA com filtro `responsible_id` pelo NOME + barra/linha
+  com MÉTRICA CALCULADA do valor gerado — padrão METRIC_SQL_CALC), SDRs (cards
   por SDR filtrando `custom:sdr_reuniao` por nome + produção creditada por
   `custom:sdr_responsavel`) e Remuneração (espelho publicado: folha/
   comissões/atingimento por pessoa e evolução — popula após o 1º Publicar).
@@ -936,7 +947,7 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   exportadas — declaração única, sem drift). Fiscalizado por
   `lib/presets/remuneracao-variavel.test.ts` (planos parseiam; fórmulas
   validam no catálogo agregado REAL; prefixo/unicidade de presetKeys; ordem
-  pais→filhos; vínculos/sentinelas/abas pinados por nome).
+  pais→filhos; vínculos/filtros-por-nome/abas pinados por nome).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.
@@ -1587,6 +1598,35 @@ lists seguem inline no RSC (alimentam FK labels e a janela incremental);
 snapshot viewer segue computando tudo inline (link público de leitura). Env
 de escape `DEFER_ENGINE_WIDGETS=0` restaura o cômputo inline na page sem
 deploy. RPCs de widget INTOCADOS.
+
+**Filtros de relação por NOME (31/07/2026):** filtros de
+`responsible_id`/`operation_id` (widget, `tf_`, JSON de import/export, preset)
+aceitam o NOME do cadastro como valor — o ENGINE resolve nome→id em runtime
+por `resolveFkFilterNames` (`lib/widgets/engine.ts`; generalização do antigo
+`resolveFkCondFilters` de SOMASE): strings E arrays (`in`, por elemento),
+loaders `cache()` por request (`loadResponsibleNameMap` — linha CANÔNICA vence
+apelido homônimo e o id emitido é o PRINCIPAL; `loadOperationNameMap` — ativa
+vence inativa), UUID legado passthrough e fast path sem NENHUMA consulta
+quando não há nome não-UUID. Nome desconhecido resolve para o uuid-zero
+`FK_NO_MATCH` (vazio silencioso em runtime; o validador de import barra antes
+com erro amigável). A ordem é FIXA e vale em TODOS os choke points:
+nome→id→grupo canônico (`expandResponsibleFilters` roda DEPOIS do resolver) —
+`runWidget`, pernas por métrica (`formula-metric.ts`, resolvido UMA vez),
+`expandConfigResponsibles` (record-list) e os espelhos de operação da page e
+do widget-scope (view filters resolvidos ANTES de
+`collectOperationFilterIds`). O snapshot viewer cobre de graça (adapter
+PASSTHROUGH de responsibles/operations). Na UI, o `FilterValuePicker`
+(`components/filters/filter-value-picker.tsx`) substitui o input cru:
+builder/barra da tabela gravam NOME (`storeAs: "label"` — URL legível);
+sub-bases, perfil de operação e automações do kanban gravam ID com rótulo
+exibido (`storeAs: "value"` — os predicados dessas famílias comparam a coluna
+CRUA fora do pipeline de filtros do engine; a avaliação local das automações
+não expande o grupo canônico — limitação documentada). O export da IA emite
+NOME (`loadExportFkNames` → `exportDashboardJson.fkNames`, canon-aware via
+`fetchFkLabels`) e `cleanFilters` preserva array de `in` (nome com vírgula
+sobrevive). Trade-off aceito: renomear responsável quebra filtro pelo nome
+antigo (mitigado pelo agrupamento de apelidos, §4.13); `__qf__`/`ff_` seguem
+por id (UI já era label-based). Ver invariante 27.
 
 **Período personalizado é rascunho + commit** (`PeriodRangeDraft`,
 `components/dashboards/period-range-inputs.tsx`, usado por `PeriodControls`,
@@ -2853,6 +2893,22 @@ principalmente — para mantenedores humanos.
     sem o 7º argumento falha FECHADO). `config.presetKey` (plano criado por
     preset) sobrevive ao round-trip do save do editor — removê-lo quebraria o
     ensure-only do re-apply (§4.7).
+
+27. **Filtros de relação por NOME se resolvem no ENGINE, antes do canon
+    (§4.10).** Valor não-UUID em filtro de `responsible_id`/`operation_id`
+    (string ou elemento de array) é NOME e resolve por
+    `resolveFkFilterNames` (engine; homônimo: responsável canônico vence e o
+    id emitido é o principal, operação ativa vence; desconhecido ⇒
+    `FK_NO_MATCH` = vazio silencioso — o validador de import barra antes). A
+    ordem nome→id→`expandResponsibleFilters` é FIXA em todos os choke points
+    (runWidget, pernas por métrica, record-list, espelhos de operação da
+    page/widget-scope — resolvidos ANTES de `collectOperationFilterIds`);
+    consulta nova que aceite filtro de visualização DEVE passar pelo
+    resolver. NUNCA valide nome via RPC nem reintroduza UUID em filtro de
+    preset/JSON da IA (o export emite nome — `loadExportFkNames`). Editores
+    cujos predicados comparam a coluna crua (sub-base, perfil de operação,
+    automações do kanban) seguem gravando ID (picker exibe rótulo; storeAs
+    "value") — nome lá NÃO resolve e no validador de import é erro dedicado.
 
 ## 6. Convenções do projeto
 

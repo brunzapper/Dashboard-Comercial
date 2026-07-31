@@ -129,6 +129,40 @@ describe("dedupeById", () => {
   });
 });
 
+describe("filtro por NOME em relação (resolveFkFilterNames no caminho lista)", () => {
+  it("nome em responsible_id vira o UUID do grupo canônico na query PostgREST", async () => {
+    const principal = "11111111-1111-4111-8111-111111111111";
+    const apelido = "22222222-2222-4222-8222-222222222222";
+    const { db, queries } = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+        responsibles: [
+          { id: principal, display_name: "Gabriella Salles", canonical_id: null },
+          { id: apelido, display_name: "Gabi", canonical_id: principal },
+        ],
+      },
+    });
+    const config: WidgetConfig = {
+      ...displayConfig,
+      filters: [
+        { field: "responsible_id", op: "eq", value: "gabriella salles" },
+      ],
+    };
+    await runRecordList(db, config, null, AVAILABLE);
+    const q = queries.find((x) => x.table === "records")!;
+    // Nome → id principal → expansão canônica (`in` no grupo inteiro).
+    expect(
+      q.steps.some(
+        (s) =>
+          s.method === "in" &&
+          s.args[0] === "responsible_id" &&
+          new Set(s.args[1] as string[]).size === 2
+      )
+    ).toBe(true);
+  });
+});
+
 describe("janela incremental do full fetch (v2.0)", () => {
   const rowsA = [
     { id: "a", record_type: "lead", related_lead_id: null },
@@ -274,8 +308,8 @@ describe("agrupamento de responsáveis (0101) no modo lista", () => {
     const { db, queries } = fakeSupabase({
       tables: {
         responsibles: [
-          { id: "r-main", canonical_id: null },
-          { id: "r-alias", canonical_id: "r-main" },
+          { id: "11111111-1111-4111-8111-111111111111", canonical_id: null },
+          { id: "22222222-2222-4222-8222-222222222222", canonical_id: "11111111-1111-4111-8111-111111111111" },
         ],
         records: (q) => {
           // fetchAll pagina até lote vazio.
@@ -289,14 +323,14 @@ describe("agrupamento de responsáveis (0101) no modo lista", () => {
       db,
       {
         ...displayConfig,
-        filters: [{ field: "responsible_id", op: "eq", value: "r-alias" }],
+        filters: [{ field: "responsible_id", op: "eq", value: "22222222-2222-4222-8222-222222222222" }],
       },
       null,
       AVAILABLE
     );
     const recordsQuery = queries.find((q) => q.table === "records")!;
     expect(
-      hasStep(recordsQuery, "in", "responsible_id", ["r-main", "r-alias"])
+      hasStep(recordsQuery, "in", "responsible_id", ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"])
     ).toBe(true);
   });
 

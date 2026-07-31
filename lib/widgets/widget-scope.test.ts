@@ -102,12 +102,16 @@ describe("resolveWidgetViewScope", () => {
   });
 
   it("exceção do vendedor: seleção que exclui os responsáveis dele vira os dele", async () => {
+    // Ids UUID-shaped (31/07/2026): valor não-UUID em responsible_id agora é
+    // NOME (resolveFkFilterNames) — em produção ids são sempre UUID.
+    const MEU = "11111111-1111-4111-8111-111111111111";
+    const OUTRO = "22222222-2222-4222-8222-222222222222";
     const { db } = fakeSupabase({
       tables: {
         ...qfCells([
-          { col_key: "c1", value: { kind: "options", values: ["outro-resp"] } },
+          { col_key: "c1", value: { kind: "options", values: [OUTRO] } },
         ]),
-        responsibles: [{ id: "meu-resp" }],
+        responsibles: [{ id: MEU }],
       },
     });
     const w = widget({ quickFilters: [{ id: "c1", field: "responsible_id" }] });
@@ -115,7 +119,7 @@ describe("resolveWidgetViewScope", () => {
     expect(out.filters).toContainEqual({
       field: "responsible_id",
       op: "in",
-      value: ["meu-resp"],
+      value: [MEU],
     });
   });
 

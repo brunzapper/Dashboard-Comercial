@@ -1,9 +1,14 @@
-// Versão: 2.0 | Data: 20/07/2026
+// Versão: 2.1 | Data: 31/07/2026
 // Gerência de Operações (admin): criar (com pai), RENOMEAR inline, trocar pai,
 // ativar/desativar, excluir e editar o FILTRO DE PERFIL (operations.filter,
 // 0083 — condições field/op/value com fonte-alvo opcional, no modelo do editor
 // de sub-fontes). O filtro de Operação dos dashboards aplica responsáveis
 // vinculados + este perfil (lib/config/operation-scope.ts).
+// v2.1 (31/07/2026): valor de filtro AMIGÁVEL — responsável/operação/etapa e
+//   campos seleção ganham picker de rótulos (FilterValuePicker). O perfil
+//   compara a coluna CRUA (operationFilterSet, fora do pipeline do engine),
+//   então relações GRAVAM O ID (storeAs "value") e o picker exibe o rótulo;
+//   `in` guarda array (valor com vírgula sobrevive).
 // v2.0 (20/07/2026): rename inline + editor de perfil (antes: nome fixo).
 "use client";
 
@@ -32,7 +37,13 @@ import {
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
+import type { SourceKey } from "@/lib/sources";
 import type { WidgetFilter } from "@/lib/widgets/types";
+import {
+  FilterValuePicker,
+  type FilterValueSource,
+} from "@/components/filters/filter-value-picker";
+import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import {
   createOperation,
   deleteOperation,
@@ -72,7 +83,8 @@ const NO_VALUE_OPS = new Set(["is_null", "not_null"]);
 interface Cond {
   field: string;
   op: string;
-  value: string;
+  // Array quando veio do picker de valor (`in`/`not_in`); string no texto livre.
+  value: string | string[];
   source: string; // fonte-alvo opcional ("" = todas)
 }
 
@@ -84,14 +96,15 @@ function toConds(filter: WidgetFilter[]): Cond[] {
       f.value == null
         ? ""
         : Array.isArray(f.value)
-          ? f.value.join(", ")
+          ? f.value.map((v) => String(v))
           : String(f.value),
     source: (f.sources?.[0] as string) ?? "",
   }));
 }
 
-// Serializa condições → WidgetFilter[]. `in`/`not_in` dividem por vírgula;
-// `not_in` expande num `neq_ci` por valor.
+// Serializa condições → WidgetFilter[]. `in`/`not_in` em ARRAY (picker) passam
+// intactos (valor com vírgula sobrevive); string divide por vírgula (digitação
+// manual). `not_in` expande num `neq_ci` por valor.
 function toFilter(conds: Cond[]): WidgetFilter[] {
   const out: WidgetFilter[] = [];
   for (const c of conds) {
@@ -103,9 +116,10 @@ function toFilter(conds: Cond[]): WidgetFilter[] {
       out.push({ field: c.field, op: c.op as WidgetFilter["op"], ...sources });
       continue;
     }
-    const lista = c.value
-      .split(",")
-      .map((v) => v.trim())
+    const lista = (
+      Array.isArray(c.value) ? c.value : c.value.split(",")
+    )
+      .map((v) => String(v).trim())
       .filter(Boolean);
     if (c.op === "not_in") {
       for (const v of lista) {
@@ -122,22 +136,73 @@ function toFilter(conds: Cond[]): WidgetFilter[] {
     out.push({
       field: c.field,
       op: c.op as WidgetFilter["op"],
-      value: c.value,
+      value: Array.isArray(c.value) ? (c.value[0] ?? "") : c.value,
       ...sources,
     });
   }
   return out;
 }
 
+// Cache de MÓDULO das listas do picker de valor (responsável/operação por id;
+// etapa por base-alvo) — compartilhado entre aberturas do editor.
+const profileValueOptionCache = new Map<
+  string,
+  Promise<{ value: string; label: string }[]>
+>();
+
+// Picker de VALOR (31/07/2026): o perfil compara a COLUNA CRUA (fora do
+// pipeline de filtros do engine) — relações GRAVAM O ID e o picker exibe o
+// rótulo; etapa/seleção gravam o próprio rótulo. Etapa usa a base-alvo da
+// condição como escopo (sem base-alvo = lista global).
+function profileFilterValueSource(
+  field: string,
+  source: string,
+  selectOptionsByField?: Record<string, string[]>
+): FilterValueSource | null {
+  if (field === "responsible_id" || field === "operation_id" || field === "stage") {
+    const kind =
+      field === "responsible_id"
+        ? ("responsible" as const)
+        : field === "operation_id"
+          ? ("operation" as const)
+          : ("stage" as const);
+    const cacheKey = kind === "stage" ? `stage:${source || "*"}` : kind;
+    return {
+      kind,
+      storeAs: "value",
+      load: () => {
+        const cached = profileValueOptionCache.get(cacheKey);
+        if (cached) return cached;
+        const p = listFilterOptionCandidates(
+          kind,
+          kind === "stage" && source ? [source as SourceKey] : undefined
+        );
+        profileValueOptionCache.set(cacheKey, p);
+        return p;
+      },
+    };
+  }
+  const opts = selectOptionsByField?.[field];
+  if (!opts || opts.length === 0) return null;
+  return {
+    kind: "static",
+    storeAs: "value",
+    load: () => Promise.resolve(opts.map((o) => ({ value: o, label: o }))),
+  };
+}
+
 function ProfileEditor({
   operation,
   fieldOptions,
   sourceOptions,
+  selectOptionsByField,
   onDone,
 }: {
   operation: OperationRow;
   fieldOptions: ComboboxOption[];
   sourceOptions: ComboboxOption[];
+  // Options dos campos seleção (picker de valor do filtro).
+  selectOptionsByField?: Record<string, string[]>;
   onDone: () => void;
 }) {
   const [conds, setConds] = useState<Cond[]>(
@@ -186,15 +251,35 @@ function ProfileEditor({
           {!NO_VALUE_OPS.has(c.op) ? (
             <div className="flex min-w-44 flex-1 flex-col gap-1">
               <Label className="text-xs">Valor</Label>
-              <Input
-                value={c.value}
-                onChange={(e) => patch(i, { value: e.target.value })}
-                placeholder={
-                  c.op === "in" || c.op === "not_in"
-                    ? "valor1, valor2, ..."
-                    : "valor"
-                }
-              />
+              {(() => {
+                const vs = profileFilterValueSource(
+                  c.field,
+                  c.source,
+                  selectOptionsByField
+                );
+                return vs &&
+                  ["eq", "neq_ci", "in", "not_in"].includes(c.op) ? (
+                  <FilterValuePicker
+                    source={vs}
+                    multi={c.op === "in" || c.op === "not_in"}
+                    value={c.value}
+                    onChange={(value) => patch(i, { value })}
+                    ariaLabel="Valor"
+                  />
+                ) : (
+                  <Input
+                    value={
+                      Array.isArray(c.value) ? c.value.join(", ") : c.value
+                    }
+                    onChange={(e) => patch(i, { value: e.target.value })}
+                    placeholder={
+                      c.op === "in" || c.op === "not_in"
+                        ? "valor1, valor2, ..."
+                        : "valor"
+                    }
+                  />
+                );
+              })()}
             </div>
           ) : null}
           <div className="flex min-w-40 flex-col gap-1">
@@ -257,10 +342,12 @@ export function OperationsManager({
   operations,
   fieldOptions,
   sourceOptions,
+  selectOptionsByField,
 }: {
   operations: OperationRow[];
   fieldOptions: ComboboxOption[];
   sourceOptions: ComboboxOption[];
+  selectOptionsByField?: Record<string, string[]>;
 }) {
   const [state, formAction, pending] = useActionState(createOperation, initial);
   const [parentId, setParentId] = useState("");
@@ -433,6 +520,7 @@ export function OperationsManager({
                 operation={editing}
                 fieldOptions={fieldOptions}
                 sourceOptions={sourceOptions}
+                selectOptionsByField={selectOptionsByField}
                 onDone={() => setEditing(null)}
               />
             ) : null}
