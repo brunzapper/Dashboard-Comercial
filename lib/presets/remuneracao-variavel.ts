@@ -1,17 +1,31 @@
-// Versão: 2.0 | Data: 31/07/2026
+// Versão: 3.0 | Data: 31/07/2026
 // Preset "Remuneração Variável": monta o CONTROLE de remuneração do comercial
 // — árvore de operações AEs/SDR-BDR COM os vínculos de responsáveis, 5 planos
 // de remuneração (comp_plans, ensure por config.presetKey), a base espelho
-// "Remuneração" (ensureCompMirror) e um dashboard de acompanhamento em 4
+// "Remuneração" (ensureCompMirror) e um dashboard de CONFERÊNCIA em 5
 // abas. O payout AUTORITATIVO vive em /configuracoes/remuneracao (grade
-// mensal + Publicar) — a aba Remuneração exibe o ESPELHO publicado.
+// mensal + Publicar) — o dashboard exibe o ESPELHO publicado.
+// v3 (31/07/2026): dashboard reorientado p/ CONFERÊNCIA de RH — a Visão
+// geral vira o resumo da REMUNERAÇÃO (KPIs de folha/comissões/prêmios/
+// atingimento + tabela de conferência por membro em modo registros + total
+// por plano — "por operação": rem_plano é determinístico, 1 plano ↔ 1
+// sub-operação; operation_id do espelho é a operação PRIMÁRIA do responsável
+// e pode divergir) e o valor gerado migra INTEIRO para a aba AEs. Nova aba
+// "Atribuição": tabela em modo registros sobre `reunioes_qualificadas` com a
+// coluna `custom:sdr_reuniao` EDITÁVEL (dropdown vivo de responsáveis —
+// options_source 0113) — é aqui que o gestor atribui a reunião ao SDR; sem
+// isso os cards da aba SDRs ficam zerados. 1º preset com records-table
+// (settings.rowMode/columns passam verbatim pelo applyPresetDefinition).
+// Mocks de Data Reunião aparecem na tabela de atribuição (includeMocks — a
+// sub referencia Data Reunião), mesmo universo dos KPIs. Editar exige
+// permission edit_record_values (+ view_all_records p/ leads de terceiros).
 // v2 (31/07/2026): vínculos automáticos por responsibleNames (Gabriella/
 // Daniela/Paulo Vitor/Marcus/Marcos — grafias conferidas na base viva),
 // cards POR PESSOA com filtro `responsible_id eq <NOME>` (o ENGINE resolve
 // nome→id→grupo canônico em runtime — resolveFkFilterNames; AEs filtram
 // responsible_id porque os campos ae_responsavel/sdr_responsavel
 // subcontariam, ~24 assinados de 2026 vazios), métrica calculada de Valor
-// gerado nos gráficos, abas novas "AEs" e "Remuneração" (espelho — popula
+// gerado nos gráficos, abas "AEs" e "Remuneração" (espelho — popula
 // após o 1º Publicar) e comparação `previous_period_bd` nos KPIs.
 //
 // Regras codificadas (pedido de 31/07/2026):
@@ -78,6 +92,17 @@ const CMP_BD = {
   comparison: {
     enabled: true,
     base: "previous_period_bd" as const,
+    format: "pct" as const,
+    style: "both" as const,
+  },
+};
+
+// KPIs do espelho (mensal — closed_at = último dia do mês): comparação por
+// período CHEIO anterior; dia útil não se aplica a uma folha mensal.
+const CMP_MES = {
+  comparison: {
+    enabled: true,
+    base: "previous_period" as const,
     format: "pct" as const,
     style: "both" as const,
   },
@@ -363,16 +388,145 @@ const COMP_PLANS: PresetCompPlan[] = [
 
 // ---- widgets ----------------------------------------------------------------
 
+// Visão geral = RESUMO DA REMUNERAÇÃO (local de conferência p/ RH): tudo
+// sobre a base espelho `remuneracao`. Popula após o 1º Publicar (a nota no
+// rodapé explica o fluxo). O valor gerado detalhado vive na aba AEs.
 const VISAO: PresetWidget[] = [
   {
-    presetKey: "remuneracao_variavel.visao.kpi_valor",
+    presetKey: "remuneracao_variavel.visao.kpi_folha",
+    title: "Folha variável do período",
+    visual_type: "kpi",
+    sources: ["remuneracao"],
+    dimensions: [],
+    metrics: [{ field: "value", agg: "sum" }],
+    filters: [],
+    settings: { tab: "visao", label: "Total a pagar (publicado)", ...CMP_MES },
+    grid_position: { x: 0, y: 0, w: 3, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.visao.kpi_comissoes",
+    title: "Comissões",
+    visual_type: "kpi",
+    sources: ["remuneracao"],
+    dimensions: [],
+    metrics: [{ field: "custom:rem_comissao", agg: "sum" }],
+    filters: [],
+    settings: { tab: "visao", ...CMP_MES },
+    grid_position: { x: 3, y: 0, w: 3, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.visao.kpi_bonus",
+    title: "Bônus e prêmios",
+    visual_type: "kpi",
+    sources: ["remuneracao"],
+    dimensions: [],
+    metrics: [{ field: "custom:rem_bonus", agg: "sum" }],
+    filters: [],
+    settings: { tab: "visao", ...CMP_MES },
+    grid_position: { x: 6, y: 0, w: 3, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.visao.kpi_atingimento",
+    title: "Atingimento médio",
+    visual_type: "kpi",
+    sources: ["remuneracao"],
+    dimensions: [],
+    metrics: [
+      { field: "custom:rem_atingimento", agg: "avg", label: "Ating. (%)" },
+    ],
+    filters: [],
+    settings: { tab: "visao" },
+    grid_position: { x: 9, y: 0, w: 3, h: 4 },
+  },
+  {
+    // Conferência LINHA A LINHA do espelho (1 linha por membro×mês publicado):
+    // modo registros p/ exibir o PLANO (texto) junto da composição — a tabela
+    // agregada por pessoa segue na aba Remuneração. `editable: false`
+    // EXPLÍCITO nas colunas custom: sem a flag, o legado do modo registros
+    // deixaria colunas custom editáveis inline (conferir ≠ editar; o espelho
+    // é reescrito pelo Publicar). Sort por Total desc em coluna CORE mantém a
+    // paginação server-side.
+    presetKey: "remuneracao_variavel.visao.folha_conferencia",
+    title: "Folha do mês — conferência por membro",
+    visual_type: "tabela",
+    sources: ["remuneracao"],
+    dimensions: [],
+    metrics: [],
+    filters: [],
+    settings: {
+      tab: "visao",
+      rowMode: "records",
+      rowSource: "records",
+      columns: [
+        { field: "responsible_id", label: "Membro" },
+        { field: "custom:rem_plano", label: "Plano", editable: false },
+        { field: "custom:rem_bonus", label: "Bônus", editable: false },
+        { field: "custom:rem_comissao", label: "Comissão", editable: false },
+        { field: "value", label: "Total" },
+        {
+          field: "custom:rem_atingimento",
+          label: "Ating. (%)",
+          editable: false,
+        },
+      ],
+      showFilterBar: true,
+      appearance: { table: { sort: { column: "value", dir: "desc" } } },
+    },
+    grid_position: { x: 0, y: 4, w: 7, h: 10 },
+  },
+  {
+    // "Por operação": o plano é 1:1 com a sub-operação neste preset e é
+    // gravado no espelho (rem_plano) — determinístico, ao contrário do
+    // operation_id derivado (operação primária do responsável).
+    presetKey: "remuneracao_variavel.visao.por_plano",
+    title: "Remuneração por plano (operação)",
+    visual_type: "barra_horizontal",
+    sources: ["remuneracao"],
+    dimensions: [{ field: "custom:rem_plano" }],
+    metrics: [{ field: "value", agg: "sum", label: "Total" }],
+    filters: [],
+    settings: { tab: "visao" },
+    grid_position: { x: 7, y: 4, w: 5, h: 10 },
+  },
+  {
+    presetKey: "remuneracao_variavel.visao.nota_fluxo",
+    title: "Como conferir",
+    visual_type: "nota",
+    dimensions: [],
+    metrics: [],
+    filters: [],
+    settings: {
+      tab: "visao",
+      note: {
+        text:
+          "Os valores desta aba vêm do ESPELHO PUBLICADO da remuneração. " +
+          "Fluxo de conferência: 1) calcule e confira o payout em " +
+          "Configurações → Remuneração (grade mensal); 2) clique em " +
+          "Publicar; 3) esta aba e a aba Remuneração refletem o publicado — " +
+          "é o que se repassa ao RH. Mês sem publicação aparece vazio. " +
+          "Reuniões sem SDR atribuído não contam para ninguém — atribua na " +
+          "aba Atribuição.",
+      },
+    },
+    grid_position: { x: 0, y: 14, w: 12, h: 3 },
+  },
+];
+
+// Aba AEs = VALOR GERADO completo (v3: absorveu os KPIs de componentes e a
+// produção por vendedor da antiga Visão geral). Cards por PESSOA: filtro
+// responsible_id pelo NOME (o engine resolve nome→id→grupo canônico em
+// runtime) — preciso mesmo com ae_responsavel vazio no negócio, e legível no
+// builder/JSON.
+const AES: PresetWidget[] = [
+  {
+    presetKey: "remuneracao_variavel.aes.kpi_valor",
     title: "Valor gerado (total)",
     visual_type: "kpi",
     dimensions: [],
     metrics: [],
     filters: [],
     settings: {
-      tab: "visao",
+      tab: "aes",
       card: { mode: "formula", formula: VALOR_GERADO },
       label: "Valor gerado",
       ...CMP_BD,
@@ -380,82 +534,49 @@ const VISAO: PresetWidget[] = [
     grid_position: { x: 0, y: 0, w: 4, h: 4 },
   },
   {
-    presetKey: "remuneracao_variavel.visao.kpi_mrr",
+    presetKey: "remuneracao_variavel.aes.kpi_mrr",
     title: "MRR do contrato",
     visual_type: "kpi",
     sources: ["vendas_assinadas"],
     dimensions: [],
     metrics: [{ field: "custom:mrr_contrato", agg: "sum" }],
     filters: [],
-    settings: { tab: "visao", ...CMP_BD },
+    settings: { tab: "aes", ...CMP_BD },
     grid_position: { x: 4, y: 0, w: 2, h: 4 },
   },
   {
-    presetKey: "remuneracao_variavel.visao.kpi_impl",
+    presetKey: "remuneracao_variavel.aes.kpi_impl",
     title: "Implementação",
     visual_type: "kpi",
     sources: ["vendas_assinadas"],
     dimensions: [],
     metrics: [{ field: "custom:implementacao", agg: "sum" }],
     filters: [],
-    settings: { tab: "visao", ...CMP_BD },
+    settings: { tab: "aes", ...CMP_BD },
     grid_position: { x: 6, y: 0, w: 2, h: 4 },
   },
   {
-    presetKey: "remuneracao_variavel.visao.kpi_adicional",
+    presetKey: "remuneracao_variavel.aes.kpi_adicional",
     title: "Adicional ao MRR",
     visual_type: "kpi",
     sources: ["vendas_assinadas"],
     dimensions: [],
     metrics: [{ field: "custom:adicional_ao_mrr", agg: "sum" }],
     filters: [],
-    settings: { tab: "visao", ...CMP_BD },
+    settings: { tab: "aes", ...CMP_BD },
     grid_position: { x: 8, y: 0, w: 2, h: 4 },
   },
   {
-    presetKey: "remuneracao_variavel.visao.kpi_site",
+    presetKey: "remuneracao_variavel.aes.kpi_site",
     title: "Vendas do site",
     visual_type: "kpi",
     sources: ["vendas_site"],
     dimensions: [],
     metrics: [{ field: "mrr", agg: "sum" }],
     filters: [],
-    settings: { tab: "visao", ...CMP_BD },
+    settings: { tab: "aes", ...CMP_BD },
     grid_position: { x: 10, y: 0, w: 2, h: 4 },
   },
-  {
-    presetKey: "remuneracao_variavel.visao.tabela_ae",
-    title: "Produção por vendedor",
-    visual_type: "tabela",
-    sources: ["vendas_assinadas"],
-    dimensions: [{ field: "responsible_id" }],
-    metrics: [
-      { field: "custom:mrr_contrato", agg: "sum", label: "MRR" },
-      { field: "custom:implementacao", agg: "sum", label: "Implementação" },
-      { field: "custom:adicional_ao_mrr", agg: "sum", label: "Adicional" },
-      { field: "*", agg: "count", label: "Vendas" },
-    ],
-    filters: [],
-    settings: { tab: "visao" },
-    grid_position: { x: 0, y: 4, w: 7, h: 9 },
-  },
-  {
-    presetKey: "remuneracao_variavel.visao.valor_mes",
-    title: "Valor de venda por mês",
-    visual_type: "barra",
-    sources: ["vendas_assinadas", "vendas_site"],
-    dimensions: [{ field: "unified:data_ref", transform: "month_year" }],
-    metrics: [{ field: "unified:mrr_venda", agg: "sum", label: "MRR" }],
-    filters: [],
-    settings: { tab: "visao" },
-    grid_position: { x: 7, y: 4, w: 5, h: 9 },
-  },
-];
-
-// Cards por PESSOA: filtro responsible_id pelo NOME (o engine resolve
-// nome→id→grupo canônico em runtime) — preciso mesmo com ae_responsavel
-// vazio no negócio, e legível no builder/JSON.
-const AES: PresetWidget[] = [
   {
     presetKey: "remuneracao_variavel.aes.kpi_gabriella",
     title: `Valor gerado — ${AE_CLOSER}`,
@@ -469,7 +590,7 @@ const AES: PresetWidget[] = [
       label: "AE Closer · meta R$ 35 mil",
       ...CMP_BD,
     },
-    grid_position: { x: 0, y: 0, w: 4, h: 4 },
+    grid_position: { x: 0, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "remuneracao_variavel.aes.kpi_daniela",
@@ -484,7 +605,7 @@ const AES: PresetWidget[] = [
       label: "AE Full Cycle · meta US$ 10 mil",
       ...CMP_BD,
     },
-    grid_position: { x: 4, y: 0, w: 4, h: 4 },
+    grid_position: { x: 4, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "remuneracao_variavel.aes.kpi_vendas",
@@ -495,7 +616,7 @@ const AES: PresetWidget[] = [
     metrics: [{ field: "*", agg: "count" }],
     filters: [],
     settings: { tab: "aes", ...CMP_BD },
-    grid_position: { x: 8, y: 0, w: 4, h: 4 },
+    grid_position: { x: 8, y: 4, w: 4, h: 4 },
   },
   {
     presetKey: "remuneracao_variavel.aes.valor_por_ae",
@@ -506,7 +627,7 @@ const AES: PresetWidget[] = [
     metrics: [METRIC_VALOR_CALC],
     filters: [],
     settings: { tab: "aes" },
-    grid_position: { x: 0, y: 4, w: 6, h: 9 },
+    grid_position: { x: 0, y: 8, w: 6, h: 9 },
   },
   {
     presetKey: "remuneracao_variavel.aes.evolucao_mensal",
@@ -517,7 +638,34 @@ const AES: PresetWidget[] = [
     metrics: [METRIC_VALOR_CALC],
     filters: [],
     settings: { tab: "aes" },
-    grid_position: { x: 6, y: 4, w: 6, h: 9 },
+    grid_position: { x: 6, y: 8, w: 6, h: 9 },
+  },
+  {
+    presetKey: "remuneracao_variavel.aes.tabela_ae",
+    title: "Produção por vendedor",
+    visual_type: "tabela",
+    sources: ["vendas_assinadas"],
+    dimensions: [{ field: "responsible_id" }],
+    metrics: [
+      { field: "custom:mrr_contrato", agg: "sum", label: "MRR" },
+      { field: "custom:implementacao", agg: "sum", label: "Implementação" },
+      { field: "custom:adicional_ao_mrr", agg: "sum", label: "Adicional" },
+      { field: "*", agg: "count", label: "Vendas" },
+    ],
+    filters: [],
+    settings: { tab: "aes" },
+    grid_position: { x: 0, y: 17, w: 7, h: 8 },
+  },
+  {
+    presetKey: "remuneracao_variavel.aes.valor_mes",
+    title: "Valor de venda por mês",
+    visual_type: "barra",
+    sources: ["vendas_assinadas", "vendas_site"],
+    dimensions: [{ field: "unified:data_ref", transform: "month_year" }],
+    metrics: [{ field: "unified:mrr_venda", agg: "sum", label: "MRR" }],
+    filters: [],
+    settings: { tab: "aes" },
+    grid_position: { x: 7, y: 17, w: 5, h: 8 },
   },
 ];
 
@@ -611,6 +759,98 @@ const SDR: PresetWidget[] = [
   },
 ];
 
+// Aba Atribuição (v3): É AQUI que o gestor liga a reunião ao SDR — tabela em
+// modo registros sobre `reunioes_qualificadas` com a coluna
+// `custom:sdr_reuniao` EDITÁVEL (Combobox das options vivas — o valor
+// gravado é o NOME, exatamente o que os cards da aba SDRs e o memberField
+// dos planos leem). A flag `editable: true` envia allowEdit ao
+// updateRecordField (a escrita ainda exige permission edit_record_values +
+// RLS). Sort por Data Reunião (coluna custom ⇒ sem paginação server; janela
+// de 1000 cobre folgado o volume mensal). Mocks de Data Reunião aparecem
+// (includeMocks) — mesmo universo dos KPIs.
+const ATRIBUICAO: PresetWidget[] = [
+  {
+    presetKey: "remuneracao_variavel.atrib.kpi_total",
+    title: "Reuniões no período",
+    visual_type: "kpi",
+    sources: ["reunioes_qualificadas"],
+    dimensions: [],
+    metrics: [{ field: "*", agg: "count" }],
+    filters: [],
+    settings: { tab: "atribuicao" },
+    grid_position: { x: 0, y: 0, w: 4, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.atrib.kpi_sem_sdr",
+    title: "Sem SDR atribuído",
+    visual_type: "kpi",
+    sources: ["reunioes_qualificadas"],
+    dimensions: [],
+    metrics: [{ field: "*", agg: "count" }],
+    filters: [{ field: "custom:sdr_reuniao", op: "is_null" }],
+    settings: { tab: "atribuicao", label: "Pendências — atribua abaixo" },
+    grid_position: { x: 4, y: 0, w: 4, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.atrib.kpi_atribuidas",
+    title: "Atribuídas",
+    visual_type: "kpi",
+    sources: ["reunioes_qualificadas"],
+    dimensions: [],
+    metrics: [{ field: "*", agg: "count" }],
+    filters: [{ field: "custom:sdr_reuniao", op: "not_null" }],
+    settings: { tab: "atribuicao" },
+    grid_position: { x: 8, y: 0, w: 4, h: 4 },
+  },
+  {
+    presetKey: "remuneracao_variavel.atrib.tabela",
+    title: "Atribuir SDR às reuniões",
+    visual_type: "tabela",
+    sources: ["reunioes_qualificadas"],
+    dimensions: [],
+    metrics: [],
+    filters: [],
+    settings: {
+      tab: "atribuicao",
+      rowMode: "records",
+      rowSource: "records",
+      // `editable` EXPLÍCITO em toda coluna custom (sem a flag, o legado do
+      // modo registros deixaria Data Reunião/Fonte editáveis inline) — só o
+      // SDR da Reunião é atribuível aqui.
+      columns: [
+        { field: "title", label: "Lead" },
+        { field: F_DATA_REUNIAO, label: "Data Reunião", editable: false },
+        { field: "responsible_id", label: "Dono do lead" },
+        { field: "custom:fonte", label: "Fonte", editable: false },
+        { field: "custom:sdr_reuniao", label: "SDR da Reunião", editable: true },
+      ],
+      showFilterBar: true,
+      appearance: { table: { sort: { column: F_DATA_REUNIAO, dir: "desc" } } },
+    },
+    grid_position: { x: 0, y: 4, w: 12, h: 12 },
+  },
+  {
+    presetKey: "remuneracao_variavel.atrib.nota",
+    title: "Como atribuir",
+    visual_type: "nota",
+    dimensions: [],
+    metrics: [],
+    filters: [],
+    settings: {
+      tab: "atribuicao",
+      note: {
+        text:
+          "Escolha o SDR no dropdown de cada linha — a atribuição vale na " +
+          "hora para os cards da aba SDRs e para o cálculo da remuneração " +
+          "(prêmios por reunião). Para ver só as pendências, use o filtro " +
+          'da tabela: campo "SDR da Reunião" + operador "é vazio". Reunião ' +
+          "sem SDR não conta para ninguém.",
+      },
+    },
+    grid_position: { x: 0, y: 16, w: 12, h: 3 },
+  },
+];
+
 // Espelho publicado (base `remuneracao` — ensureCompMirror garante a infra;
 // os dados aparecem após o 1º "Publicar" da grade). closed_at = último dia
 // do mês ⇒ a barra de período mensal recorta o mês certo.
@@ -690,7 +930,7 @@ const REMUNERACAO: PresetWidget[] = [
 
 export const REMUNERACAO_VARIAVEL_PRESET: PresetDashboard = {
   presetKey: "remuneracao_variavel",
-  version: 2,
+  version: 3,
   name: "Remuneração Variável",
   visible_to_roles: ["admin", "gestor"],
   settings: {
@@ -698,6 +938,7 @@ export const REMUNERACAO_VARIAVEL_PRESET: PresetDashboard = {
       { id: "visao", name: "Visão geral" },
       { id: "aes", name: "AEs" },
       { id: "sdr", name: "SDRs" },
+      { id: "atribuicao", name: "Atribuição" },
       { id: "remuneracao", name: "Remuneração" },
     ],
     periodBar: { enabled: true, defaultPreset: "este_mes", scope: "global" },
@@ -709,5 +950,5 @@ export const REMUNERACAO_VARIAVEL_PRESET: PresetDashboard = {
   operations: OPERATIONS,
   compPlans: COMP_PLANS,
   ensureCompMirror: true,
-  widgets: [...VISAO, ...AES, ...SDR, ...REMUNERACAO],
+  widgets: [...VISAO, ...AES, ...SDR, ...ATRIBUICAO, ...REMUNERACAO],
 };

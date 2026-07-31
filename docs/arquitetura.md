@@ -1,4 +1,11 @@
-<!-- Versão: 1.47 | Data: 31/07/2026 -->
+<!-- Versão: 1.48 | Data: 31/07/2026 -->
+<!-- v1.48 (31/07/2026): §4.7 preset Remuneração Variável v3 — dashboard de
+     CONFERÊNCIA em 5 abas: Visão geral vira resumo da remuneração sobre o
+     espelho (KPIs + tabela records-mode de conferência + total por
+     rem_plano), valor gerado migra p/ a aba AEs e nasce a aba Atribuição
+     (1ª records-table de preset: coluna custom:sdr_reuniao editable:true —
+     dropdown vivo; colunas custom read-only exigem editable:false explícito
+     pelo legado do modo registros). Zero mudança de engine/RPC. -->
 <!-- v1.47 (31/07/2026): §4.10 + invariante 27 — filtros de relação por NOME:
      resolveFkFilterNames no ENGINE (nome→id→canon; strings e arrays; UUID
      passthrough; FK_NO_MATCH p/ desconhecido) nos choke points runWidget/
@@ -926,7 +933,7 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `syncFieldCatalog` — padrão do refresh do `pipeline` — e nas actions de
   Responsáveis; por-org, best-effort, SÓ options; não editar à mão).
   **Preset "Remuneração Variável"** (`lib/presets/remuneracao-variavel.ts`,
-  v2 31/07/2026): monta o controle de remuneração do comercial — árvore
+  v3 31/07/2026): monta o controle de remuneração do comercial — árvore
   AEs/SDR-BDR (2 raízes + 5 sub-operações) COM os vínculos das pessoas
   (responsibleNames: Gabriella Salles, Daniela Drielsma, Paulo Vitor Santos,
   Marcus Barcelos, Marcos Hernandes), 5 planos (`rv_ae_closer`,
@@ -934,20 +941,32 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   per_unit por volume, `rv_sdr_outbound_fc` e `rv_sdr_outbound_simples` com
   prêmio flat por atingimento — ver §4.18), campos `adicional_ao_mrr` e
   `sdr_reuniao` (dropdown vivo), sub `reunioes_qualificadas` (Data Reunião ×
-  "Lead Qualificado"), a base espelho (`ensureCompMirror`) e dashboard em 4
-  abas: Visão geral (valor gerado + componentes, comparação por dia útil),
-  AEs (cards POR PESSOA com filtro `responsible_id` pelo NOME + barra/linha
-  com MÉTRICA CALCULADA do valor gerado — padrão METRIC_SQL_CALC), SDRs (cards
-  por SDR filtrando `custom:sdr_reuniao` por nome + produção creditada por
-  `custom:sdr_responsavel`) e Remuneração (espelho publicado: folha/
-  comissões/atingimento por pessoa e evolução — popula após o 1º Publicar).
-  O payout autoritativo segue em Configurações → Remuneração. Compartilha
-  com o Inbound as declarações de `mrr_contrato`,
+  "Lead Qualificado"), a base espelho (`ensureCompMirror`) e dashboard de
+  CONFERÊNCIA (repasse ao RH) em 5 abas: **Visão geral** = resumo da
+  REMUNERAÇÃO sobre o espelho publicado (KPIs folha/comissões/prêmios/
+  atingimento com comparação de mês cheio; tabela de conferência por membro
+  em MODO REGISTROS — exibe o plano/composição linha a linha, colunas custom
+  com `editable: false` EXPLÍCITO porque o legado do modo registros deixaria
+  custom editável; "por operação" agrupa por `custom:rem_plano`, 1 plano ↔ 1
+  sub-operação — determinístico, ao contrário do `operation_id` derivado);
+  **AEs** = valor gerado completo (KPIs de componentes + cards POR PESSOA com
+  filtro `responsible_id` pelo NOME + métrica calculada — padrão
+  METRIC_SQL_CALC + produção por vendedor); **SDRs** (cards por SDR filtrando
+  `custom:sdr_reuniao` por nome + produção creditada por
+  `custom:sdr_responsavel`); **Atribuição** (v3) = 1ª records-table de preset:
+  tabela sobre `reunioes_qualificadas` com a coluna `custom:sdr_reuniao`
+  `editable: true` (Combobox das options vivas — grava o NOME que cards e
+  memberField leem; exige `edit_record_values`; mocks de Data Reunião
+  aparecem, mesmo universo dos KPIs) + KPIs de pendência (`is_null`/
+  `not_null`); **Remuneração** = detalhe do espelho (por pessoa e evolução —
+  popula após o 1º Publicar). O payout autoritativo segue em Configurações →
+  Remuneração. Compartilha com o Inbound as declarações de `mrr_contrato`,
   `vendas_assinadas`/`vendas_site` e `data_ref`/`mrr_venda` (consts
   exportadas — declaração única, sem drift). Fiscalizado por
   `lib/presets/remuneracao-variavel.test.ts` (planos parseiam; fórmulas
   validam no catálogo agregado REAL; prefixo/unicidade de presetKeys; ordem
-  pais→filhos; vínculos/filtros-por-nome/abas pinados por nome).
+  pais→filhos; vínculos/filtros-por-nome/abas pinados; tabela de atribuição
+  editável e conferência read-only pinadas).
 - **Moedas** (`currencies`/`currency_rates`, `lib/widgets/currency.ts`): conversão
   BRL/USD por taxas **ano/trimestre** (PTAX), com breakdown por moeda; agregações
   não-lineares (min/max monetário) exibem o valor cru, sem breakdown.

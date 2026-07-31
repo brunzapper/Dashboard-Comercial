@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 31/07/2026
+// v1.1 (31/07/2026): v3 do preset — 5 abas (nova "atribuicao"); pina a tabela
+//   de ATRIBUIÇÃO (records-mode sobre reunioes_qualificadas com a coluna
+//   custom:sdr_reuniao editable) e a Visão geral de REMUNERAÇÃO (KPIs sobre a
+//   base espelho + tabela de conferência records-mode SEM coluna editável).
 // Fiscalização do preset "Remuneração Variável": os planos declarados passam
 // pelo MESMO parse fail-closed do runtime (parseCompPlanConfig — com
 // presetKey/memberOperationIds injetados exatamente como o
@@ -207,11 +211,12 @@ describe("preset remuneracao_variavel — estrutura", () => {
     }
   });
 
-  it("v2: 4 abas, vínculos pinados por nome, sentinela consistente e aba Remuneração no espelho", () => {
+  it("v3: 5 abas, vínculos pinados por nome, filtros por nome e aba Remuneração no espelho", () => {
     expect(P.settings!.tabs!.map((t) => t.id)).toEqual([
       "visao",
       "aes",
       "sdr",
+      "atribuicao",
       "remuneracao",
     ]);
     expect(P.ensureCompMirror).toBe(true);
@@ -260,6 +265,50 @@ describe("preset remuneracao_variavel — estrutura", () => {
     );
     expect(remWidgets.length).toBeGreaterThanOrEqual(4);
     for (const w of remWidgets) expect(w.sources).toEqual(["remuneracao"]);
+  });
+
+  it("v3: aba Atribuição com tabela records-mode e coluna sdr_reuniao EDITÁVEL", () => {
+    const tabela = P.widgets.find(
+      (w) => w.presetKey === "remuneracao_variavel.atrib.tabela"
+    )!;
+    expect(tabela.settings?.tab).toBe("atribuicao");
+    expect(tabela.sources).toEqual(["reunioes_qualificadas"]);
+    expect(tabela.settings?.rowMode).toBe("records");
+    const col = tabela.settings?.columns?.find(
+      (c) => c.field === "custom:sdr_reuniao"
+    );
+    expect(col?.editable).toBe(true);
+    // KPIs de pendência: sem SDR (is_null) e atribuídas (not_null) — o par
+    // que dá visibilidade à fila de atribuição.
+    const semSdr = P.widgets.find(
+      (w) => w.presetKey === "remuneracao_variavel.atrib.kpi_sem_sdr"
+    )!;
+    expect(semSdr.filters).toContainEqual({
+      field: "custom:sdr_reuniao",
+      op: "is_null",
+    });
+  });
+
+  it("v3: Visão geral = remuneração (KPIs no espelho; conferência records-mode SEM edição)", () => {
+    const visaoKpis = P.widgets.filter(
+      (w) => w.settings?.tab === "visao" && w.visual_type === "kpi"
+    );
+    expect(visaoKpis.length).toBeGreaterThanOrEqual(4);
+    for (const w of visaoKpis) expect(w.sources).toEqual(["remuneracao"]);
+    const conferencia = P.widgets.find(
+      (w) => w.presetKey === "remuneracao_variavel.visao.folha_conferencia"
+    )!;
+    expect(conferencia.sources).toEqual(["remuneracao"]);
+    expect(conferencia.settings?.rowMode).toBe("records");
+    // Conferência ≠ edição: nenhuma coluna do espelho é editável inline.
+    for (const c of conferencia.settings?.columns ?? []) {
+      expect(c.editable ?? false).toBe(false);
+    }
+    // "Por operação" determinístico: agrupa pelo PLANO gravado no espelho.
+    const porPlano = P.widgets.find(
+      (w) => w.presetKey === "remuneracao_variavel.visao.por_plano"
+    )!;
+    expect(porPlano.dimensions[0]?.field).toBe("custom:rem_plano");
   });
 
   it("campo do dropdown vivo declarado com options_source e sub de reuniões com a Data Reunião", () => {
