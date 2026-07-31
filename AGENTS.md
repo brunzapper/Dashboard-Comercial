@@ -178,8 +178,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   nunca remonte `__qf__`/`ff_`/`tf_`/operação/`__pw__` à mão (cópias parciais
   = widget deferido ignorando filtro até F5). No cliente, o fetch deferido
   re-dispara pelo fingerprint `scopeKey` (`deferredScopeById` da page), nunca
-  por `useSearchParams` (filtro persistido no banco não muda a URL); com dado
-  antigo em tela exibe "Atualizando…" (dim + spinner). Período personalizado
+  por `useSearchParams` (filtro persistido no banco não muda a URL); o
+  fingerprint INCLUI a CONFIG do widget (`widgetConfigFingerprint`,
+  `lib/widgets/deferred-fingerprint.ts` — posição/ordem fora do hash): sem o
+  `c`, editar widget deferido deixava o payload velho na tela até F5 — não o
+  remova. Com dado antigo em tela exibe "Atualizando…" (dim + spinner). Período personalizado
   é RASCUNHO + commit (`PeriodRangeDraft` — completo auto / aberto via
   "Aplicar"); não reintroduza navegação por tecla nos inputs de data. Agenda
   ignora filtros do dashboard POR DESIGN — e a página cheia do kanban de

@@ -1,6 +1,10 @@
-// Versão: 3.2 | Data: 26/07/2026
+// Versão: 3.3 | Data: 31/07/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.3 (31/07/2026): fingerprint deferido ganha a CONFIG do widget
+//   (widgetConfigFingerprint — hash das colunas de config, posição fora):
+//   editar um widget deferido re-busca sem F5 (antes o payload velho do lote
+//   ficava na tela porque período/filtros não mudavam).
 // v3.2 (26/07/2026): deferimento automático dos widgets de ENGINE — a page
 //   NÃO computa gráfico/KPI/card/…: entrega deferredEngineIds + fingerprint e
 //   o DashboardClient busca em lote (runDeferredWidgets). Listas seguem
@@ -159,6 +163,7 @@ import {
   viewStateToFilters,
 } from "@/lib/widgets/view-filters";
 import { buildDashboardSnapshot } from "@/lib/widgets/history";
+import { widgetConfigFingerprint } from "@/lib/widgets/deferred-fingerprint";
 import { normalizeGridSpace } from "@/lib/widgets/grid-space";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
@@ -930,7 +935,10 @@ export default async function DashboardPage({
   // o effect do cliente re-busca quando período/filtros EFETIVOS mudam —
   // inclusive os persistidos no banco (__qf__/__pw__), que não passam pela
   // URL (a action revalida, o RSC re-renderiza e a prop nova re-dispara o
-  // effect). Agenda fica FORA (ignora os filtros do dashboard por design).
+  // effect) — E quando a CONFIG do widget muda (widgetConfigFingerprint):
+  // sem o `c`, editar um widget deferido deixava o payload velho na tela até
+  // F5. Posição/ordem ficam fora do hash (mover não re-busca o lote). Agenda
+  // fica FORA (ignora os filtros do dashboard por design).
   const deferredScopeById: Record<string, string> = {};
   for (const w of dataWidgets) {
     if (
@@ -944,6 +952,7 @@ export default async function DashboardPage({
       p: periodByWidget[w.id] ?? null,
       f: viewFiltersByWidget[w.id] ?? [],
       pw: pwChoiceById.get(w.id) ?? null,
+      c: widgetConfigFingerprint(w),
     });
   }
   const deferredEngineIds = dataWidgets
