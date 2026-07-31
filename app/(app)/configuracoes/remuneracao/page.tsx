@@ -1,6 +1,10 @@
-// Versão: 1.2 | Data: 31/07/2026 (v1.2: alvos em moeda estrangeira — os dois
+// Versão: 1.3 | Data: 31/07/2026 (v1.3: fix do ano padrão — sem ?ano o clamp
+// Math.max(2000, Number("")) virava 2000 (truthy) e o fallback do ano ATUAL
+// nunca rodava: a página sempre abria em "Julho/2000". Ano agora valida como
+// o mês: range ok usa, senão cai no ano corrente.)
+// v1.2: alvos em moeda estrangeira — os dois
 // ramos resolvem targetRates no server via loadTargetRatesForConfig e o ramo
-// admin carrega as moedas habilitadas p/ o editor de planos)
+// admin carrega as moedas habilitadas p/ o editor de planos.
 // v1.1: membros por operação — ramo admin carrega operations +
 // loadOperationScopes do catálogo inteiro e passa operationMembersById ao
 // manager; editor mostra membros efetivos ao vivo.
@@ -55,8 +59,11 @@ export default async function RemuneracaoPage({
   const supabase = await createClient();
 
   const today = todayBrasiliaIso(); // YYYY-MM-DD (dia de Brasília)
+  const yearRaw = Number(str(sp.ano));
   const year =
-    Math.min(2100, Math.max(2000, Number(str(sp.ano)))) || Number(today.slice(0, 4));
+    Number.isInteger(yearRaw) && yearRaw >= 2000 && yearRaw <= 2100
+      ? yearRaw
+      : Number(today.slice(0, 4));
   const monthRaw = Number(str(sp.mes));
   const month =
     Number.isInteger(monthRaw) && monthRaw >= 1 && monthRaw <= 12
