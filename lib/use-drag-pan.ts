@@ -1,11 +1,19 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Hook de pan ("mãozinha"): segurar o botão esquerdo e arrastar rola o
 // container horizontal passado em `scrollRef` e o ancestral rolável vertical
 // (no app, o <main> do AppShell). Extraído do DashboardGrid para reuso na
 // tabela de Registros; comportamento idêntico ao original.
+// v1.1 (31/07/2026): opção `edgeAutoScroll` — com o pan ENGATADO e o ponteiro
+//   parado na zona de borda horizontal, um loop rAF continua rolando na
+//   direção do ARRASTO (na borda esquerda revela a direita — inverso do
+//   auto-scroll de DnD, que segue a borda). O loop acumula na BASE do gesto
+//   (p.scrollLeft), então um pointermove posterior parte do acumulado, sem
+//   snap-back. Opt-in por chamador (Registros liga; DashboardGrid não).
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
+import { edgeScrollVelocity } from "@/lib/use-edge-autoscroll";
 
 // Sobe do elemento até o ancestral que rola verticalmente (no app é o
 // <main className="flex-1 overflow-auto">). Fallback para o scroller do
@@ -32,6 +40,8 @@ export function useDragPan(
   opts?: {
     // Alvos que não devem armar o pan (widgets, controles interativos etc.).
     ignore?: (target: HTMLElement) => boolean;
+    // Auto-scroll de borda horizontal durante o pan (v1.1). true = defaults.
+    edgeAutoScroll?: boolean | { edge?: number; maxSpeed?: number };
   }
 ) {
   // Refs para não re-renderizar a cada movimento; `panning` só troca o
@@ -43,6 +53,9 @@ export function useDragPan(
     scrollTop: number;
     v: HTMLElement;
     engaged: boolean;
+    // Último movimento (auto-scroll de borda): dx aplicado e clientX cru.
+    lastDx: number;
+    lastX: number;
   } | null>(null);
   const [panning, setPanning] = useState(false);
   // Um AbortController por gesto: os listeners de window são registrados com o
@@ -83,6 +96,8 @@ export function useDragPan(
       scrollTop: v.scrollTop,
       v,
       engaged: false,
+      lastDx: 0,
+      lastX: e.clientX,
     };
     const ac = new AbortController();
     panAbortRef.current = ac;
@@ -92,6 +107,42 @@ export function useDragPan(
       setPanning(false);
       ac.abort();
     };
+
+    // Auto-scroll de borda (opt-in): loop rAF POR GESTO, morto pelo abort
+    // (pointerup/cancel/desmontar). Velocidade INVERTIDA em relação ao DnD:
+    // ponteiro na borda esquerda continua revelando a DIREITA (direção do
+    // arrasto), acumulando na base p.scrollLeft para o próximo pointermove
+    // partir do acumulado (sem snap-back).
+    const edgeOpt = opts?.edgeAutoScroll;
+    const edge = (typeof edgeOpt === "object" ? edgeOpt.edge : undefined) ?? 56;
+    const maxSpeed =
+      (typeof edgeOpt === "object" ? edgeOpt.maxSpeed : undefined) ?? 640;
+    let raf: number | null = null;
+    let prevTs: number | null = null;
+    const loop = (ts: number) => {
+      raf = null;
+      const p = panRef.current;
+      const cur = scrollRef.current;
+      if (!p || !cur) return;
+      const rect = cur.getBoundingClientRect();
+      const vel = -edgeScrollVelocity(p.lastX, rect.left, rect.right, edge, maxSpeed);
+      if (vel === 0) {
+        // Fora da zona: dorme; o próximo pointermove religa.
+        prevTs = null;
+        return;
+      }
+      if (prevTs != null) {
+        p.scrollLeft += (vel * (ts - prevTs)) / 1000;
+        cur.scrollLeft = p.scrollLeft - p.lastDx;
+      }
+      prevTs = ts;
+      raf = requestAnimationFrame(loop);
+    };
+    signal.addEventListener("abort", () => {
+      if (raf != null) cancelAnimationFrame(raf);
+      raf = null;
+    });
+
     window.addEventListener(
       "pointermove",
       (ev) => {
@@ -106,6 +157,10 @@ export function useDragPan(
         }
         if (scrollRef.current) scrollRef.current.scrollLeft = p.scrollLeft - dx;
         p.v.scrollTop = p.scrollTop - dy;
+        p.lastDx = dx;
+        p.lastX = ev.clientX;
+        if (edgeOpt && p.engaged && raf == null)
+          raf = requestAnimationFrame(loop);
       },
       { signal }
     );

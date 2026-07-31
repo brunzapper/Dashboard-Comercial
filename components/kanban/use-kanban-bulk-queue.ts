@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
+// v1.1: expõe `pendingIds` (ids dos cards com escrita em voo) p/ o indicador
+//   POR CARD do board — refcount, não Set: o mesmo card pode ser re-enfileirado
+//   antes do primeiro job drenar (A→X e depois A→Y; retry re-enfileira).
 // Fila OTIMISTA das ações em massa do kanban: aplica a mudança local
 // imediatamente (mover/excluir/badges), despacha as server actions em
 // BACKGROUND (chunks sequenciais — actions serializam por cliente) e, com os
@@ -10,7 +13,7 @@
 // ordem, pending, falhas e do momento de reconciliar (onSettled ao drenar).
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { KanbanColumnCards } from "@/lib/kanban/data";
 import type { BulkActionState } from "@/lib/kanban/bulk-helpers";
@@ -51,6 +54,8 @@ export function useKanbanBulkQueue(opts: {
   onSettled: () => void;
 }): {
   pending: number;
+  // Ids dos cards com escrita em voo (indicador por card no board).
+  pendingIds: Set<string>;
   failures: BulkFailure[];
   enqueue: (job: QueueJob) => void;
   retry: () => void;
@@ -58,6 +63,10 @@ export function useKanbanBulkQueue(opts: {
 } {
   const { setColumns, onSettled } = opts;
   const [pending, setPending] = useState(0);
+  // Refcount por card (id → nº de jobs em voo que o incluem).
+  const [pendingById, setPendingById] = useState<Map<string, number>>(
+    new Map()
+  );
   const [failures, setFailures] = useState<BulkFailure[]>([]);
   const jobsRef = useRef<QueueJob[]>([]);
   const runningRef = useRef(false);
@@ -87,6 +96,17 @@ export function useKanbanBulkQueue(opts: {
             }
           }
           setPending((p) => Math.max(0, p - slice.length));
+          // Decrementa mesmo em falha: o item falho é revertido e vai ao
+          // painel de falhas — não está mais "sincronizando".
+          setPendingById((prev) => {
+            const next = new Map(prev);
+            for (const item of slice) {
+              const n = (next.get(item.id) ?? 0) - 1;
+              if (n <= 0) next.delete(item.id);
+              else next.set(item.id, n);
+            }
+            return next;
+          });
         }
         if (failed.size > 0) {
           const failedIds = new Set(failed.keys());
@@ -117,6 +137,12 @@ export function useKanbanBulkQueue(opts: {
       if (job.items.length === 0) return;
       setColumns((cols) => job.apply(cols));
       setPending((p) => p + job.items.length);
+      setPendingById((prev) => {
+        const next = new Map(prev);
+        for (const item of job.items)
+          next.set(item.id, (next.get(item.id) ?? 0) + 1);
+        return next;
+      });
       jobsRef.current.push(job);
       void drain();
     },
@@ -144,5 +170,10 @@ export function useKanbanBulkQueue(opts: {
 
   const dismissFailures = useCallback(() => setFailures([]), []);
 
-  return { pending, failures, enqueue, retry, dismissFailures };
+  const pendingIds = useMemo(
+    () => new Set(pendingById.keys()),
+    [pendingById]
+  );
+
+  return { pending, pendingIds, failures, enqueue, retry, dismissFailures };
 }

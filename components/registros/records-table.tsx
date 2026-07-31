@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 18/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4 (31/07/2026): o pan da v1.2 estava MORTO na horizontal — o wrapper
+//   interno do primitivo Table (overflow-x-auto) absorvia todo o overflow e o
+//   div externo (dono do scrollRef) nunca tinha o que rolar. Agora o Table
+//   recebe containerClassName="overflow-x-visible" e o scroller real volta a
+//   ser o div externo; de quebra o pan ganha auto-scroll de borda
+//   (edgeAutoScroll do useDragPan): parar o ponteiro na borda continua rolando.
 // v1.3 (18/07/2026): a edição inline deixou de revalidar no servidor
 //   (no_revalidate) — onSaved passa um refresh debounced (fallback de reconcile
 //   quando o realtime está indisponível; o RealtimeRefresher segue sendo o
@@ -74,6 +80,7 @@ export function RecordsTable({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { panning, onPointerDown } = useDragPan(scrollRef, {
     ignore: (t) => !!t.closest("button, a, input, select, textarea, [contenteditable]"),
+    edgeAutoScroll: true,
   });
 
   if (records.length === 0) {
@@ -93,7 +100,9 @@ export function RecordsTable({
         panning ? "cursor-grabbing" : "cursor-grab"
       )}
     >
-      <Table>
+      {/* O wrapper interno do Table NÃO pode rolar (overflow-x-visible): o
+          scroller é o div acima — é nele que o pan escreve scrollLeft. */}
+      <Table containerClassName="overflow-x-visible">
         <TableHeader>
           <TableRow>
             <TableHead>Título</TableHead>
