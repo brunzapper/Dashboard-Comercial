@@ -1,6 +1,10 @@
-// Versão: 1.2 | Data: 26/07/2026
+// Versão: 1.3 | Data: 31/07/2026
 // Server Actions da tela de Operações (admin). Suporta aninhamento
 // (parent_operation_id). RLS de operations exige papel admin para escrever.
+// v1.3 (31/07/2026): sanitização do perfil extraída para o módulo puro
+// lib/config/operation-profile.ts (compartilhada com o assistente de IA de
+// operações); createOperation devolve o `id` criado (o apply do assistente
+// precisa dele p/ perfil/vínculos de operação recém-criada).
 // v1.2 (26/07/2026): updateOperation detecta ciclo INDIRETO de pai (A→B→A)
 // subindo os ancestrais do novo pai — antes só bloqueava pai = ele mesmo.
 // v1.1 (20/07/2026): updateOperationFilter — FILTROS DE PERFIL da operação
@@ -14,12 +18,16 @@ import { revalidatePath } from "next/cache";
 import { getSessionInfo } from "@/lib/auth/session";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
+import { sanitizeProfileFilters } from "@/lib/config/operation-profile";
 import { createClient } from "@/lib/supabase/server";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export interface OpState {
   ok?: boolean;
   message?: string;
+  // Preenchido pelo createOperation (o apply do assistente de IA usa o id da
+  // operação recém-criada para perfil/vínculos no mesmo lote).
+  id?: string;
 }
 
 async function ensureAdmin(): Promise<string | null> {
@@ -42,17 +50,23 @@ export async function createOperation(
 
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
-  const { error } = await supabase
+  const { data: created, error } = await supabase
     .from("operations")
     .insert({
       name,
       parent_operation_id: parent,
       // Carimbo de org (multi-org, 0090).
       ...(orgId ? { organization_id: orgId } : {}),
-    });
+    })
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/operacoes");
-  return { ok: true, message: `Operação "${name}" criada.` };
+  return {
+    ok: true,
+    message: `Operação "${name}" criada.`,
+    id: (created as { id?: string } | null)?.id,
+  };
 }
 
 export async function updateOperation(
@@ -110,76 +124,20 @@ export async function deleteOperation(id: string): Promise<OpState> {
   return { ok: true };
 }
 
-// Ops aceitos no perfil (mesmo vocabulário do editor de sub-fontes + os
-// normalizados *_ci — "diferente de" com null contando).
-const PROFILE_OPS = new Set([
-  "eq",
-  "neq",
-  "eq_ci",
-  "neq_ci",
-  "in",
-  "ilike",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "is_null",
-  "not_null",
-]);
-const NO_VALUE_OPS = new Set(["is_null", "not_null"]);
-
 export async function updateOperationFilter(
   id: string,
   filter: WidgetFilter[]
 ): Promise<OpState> {
   const err = await ensureAdmin();
   if (err) return { ok: false, message: err };
-  if (!Array.isArray(filter)) return { ok: false, message: "Filtro inválido." };
-  const clean: WidgetFilter[] = [];
-  for (const f of filter) {
-    const field = String(f?.field ?? "").trim();
-    const op = String(f?.op ?? "");
-    if (!field || !PROFILE_OPS.has(op)) {
-      return { ok: false, message: "Condição inválida no perfil." };
-    }
-    const sources = Array.isArray(f.sources)
-      ? f.sources.map(String).filter(Boolean)
-      : undefined;
-    if (NO_VALUE_OPS.has(op)) {
-      clean.push({
-        field,
-        op: op as WidgetFilter["op"],
-        ...(sources && sources.length > 0
-          ? { sources: sources as WidgetFilter["sources"] }
-          : {}),
-      });
-      continue;
-    }
-    const value = f.value;
-    const scalarOk =
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean";
-    const listOk =
-      Array.isArray(value) &&
-      value.length > 0 &&
-      value.every((v) => typeof v === "string" || typeof v === "number");
-    if (op === "in" ? !listOk : !scalarOk) {
-      return { ok: false, message: `Valor inválido na condição de "${field}".` };
-    }
-    clean.push({
-      field,
-      op: op as WidgetFilter["op"],
-      value,
-      ...(sources && sources.length > 0
-        ? { sources: sources as WidgetFilter["sources"] }
-        : {}),
-    });
-  }
+  // Vocabulário/sanitização vivem no módulo puro compartilhado com o
+  // assistente de IA de operações (lib/config/operation-profile.ts).
+  const sanitized = sanitizeProfileFilters(filter);
+  if (!sanitized.ok) return { ok: false, message: sanitized.message };
   const supabase = await createClient();
   const { error } = await supabase
     .from("operations")
-    .update({ filter: clean })
+    .update({ filter: sanitized.clean })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
   revalidatePath("/configuracoes/operacoes");

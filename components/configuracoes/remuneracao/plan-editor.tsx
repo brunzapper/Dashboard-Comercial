@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2: membros por OPERAÇÃO — OperationPicker + bloco "Membros efetivos"
+// (manual ∪ subárvore viva, helpers do model com os ids resolvidos no server
+// via props); operação órfã vira chip com remover; aviso quando a seleção
+// resolve zero membros (parceria profile-only não conta).
 // Editor do plano de remuneração (0112): nome/ativo/base default/membros e a
 // tabela de FATORES (rótulo, peso %, fontes, métrica de meta, cap/floor,
 // fórmula do realizado via FormulaEditor contexto "aggregate" — o MESMO
@@ -44,8 +48,10 @@ import { decorateRefOptions } from "@/lib/widgets/filter-ops";
 import {
   COMP_COMMISSION_REF,
   compOperandCatalog,
+  explicitMemberIds,
   MAX_COMMISSION_TIERS,
   MAX_FACTORS,
+  resolveOperationMembers,
   type CompCommissionConfig,
   type CompCommissionTier,
   type CompPlanConfig,
@@ -155,6 +161,9 @@ export interface PlanEditorProps {
   available: AvailableField[];
   allFields: FieldDefinition[];
   sources: SourceDef[];
+  // Operações da org + membros CANÔNICOS por operação (resolvidos no server).
+  operations: { id: string; name: string; active: boolean }[];
+  operationMembersById: Record<string, string[]>;
   onSaved: (planId: string) => void;
   onDeleted: () => void;
 }
@@ -172,6 +181,9 @@ export function PlanEditor(props: PlanEditorProps) {
   );
   const [memberIds, setMemberIds] = useState<string[]>(
     props.config?.memberIds ?? []
+  );
+  const [memberOperationIds, setMemberOperationIds] = useState<string[]>(
+    props.config?.memberOperationIds ?? []
   );
   const [factors, setFactors] = useState<FactorDraft[]>(
     draftsFromConfig(props.config)
@@ -257,6 +269,29 @@ export function PlanEditor(props: PlanEditorProps) {
     0
   );
 
+  // Membros EFETIVOS do rascunho (manual ∪ operações; null = todos os
+  // ativos) — mesmos helpers puros do servidor/grade, ids do server via props.
+  const effectiveIds = useMemo(
+    () =>
+      explicitMemberIds(
+        {
+          v: 1,
+          factors: [],
+          ...(memberIds.length > 0 ? { memberIds } : {}),
+          ...(memberOperationIds.length > 0 ? { memberOperationIds } : {}),
+        },
+        resolveOperationMembers(
+          memberOperationIds.length > 0 ? memberOperationIds : undefined,
+          props.operationMembersById
+        )
+      ),
+    [memberIds, memberOperationIds, props.operationMembersById]
+  );
+  // Operações órfãs (excluídas depois do save): chip com id cru + remover.
+  const orphanOperationIds = memberOperationIds.filter(
+    (id) => !props.operations.some((o) => o.id === id)
+  );
+
   const factorOptions: ComboboxOption[] = factors.map((f, i) => ({
     value: f.id,
     label: f.label.trim() || `Fator ${i + 1}`,
@@ -268,10 +303,13 @@ export function PlanEditor(props: PlanEditorProps) {
       label: `Realizado de: ${f.label.trim() || `Fator ${i + 1}`}`,
     })),
   ];
-  const commissionMembers =
-    memberIds.length > 0
-      ? props.responsibles.filter((r) => memberIds.includes(r.id))
-      : props.responsibles;
+  const commissionMembers = useMemo(() => {
+    if (effectiveIds === null) return props.responsibles;
+    const byId = new Map(props.responsibles.map((r) => [r.id, r]));
+    return effectiveIds
+      .map((id) => byId.get(id))
+      .filter((r): r is { id: string; label: string } => Boolean(r));
+  }, [effectiveIds, props.responsibles]);
   // Órfãos (membro saiu do plano/inativo): nunca usados no cálculo, nunca
   // podados em silêncio — visíveis com o id cru + remover.
   const orphanTierIds = Object.keys(commMemberTiers).filter(
@@ -350,6 +388,7 @@ export function PlanEditor(props: PlanEditorProps) {
             : {}),
         })),
         ...(memberIds.length > 0 ? { memberIds } : {}),
+        ...(memberOperationIds.length > 0 ? { memberOperationIds } : {}),
         ...(useTotalFormula && totalFormula && totalFormula.tokens.length > 0
           ? { totalFormula }
           : {}),
@@ -372,7 +411,7 @@ export function PlanEditor(props: PlanEditorProps) {
   return (
     <div className="flex flex-col gap-6">
       {/* Identidade do plano */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="comp-plan-name">Nome do plano</Label>
           <Input
@@ -400,6 +439,14 @@ export function PlanEditor(props: PlanEditorProps) {
             onChange={setMemberIds}
           />
         </div>
+        <div className="flex flex-col gap-1.5">
+          <Label>Operações (vínculo vivo)</Label>
+          <OperationPicker
+            operations={props.operations}
+            value={memberOperationIds}
+            onChange={setMemberOperationIds}
+          />
+        </div>
         <label className="flex items-center gap-2 pt-6 text-sm">
           <Checkbox
             checked={active}
@@ -407,6 +454,43 @@ export function PlanEditor(props: PlanEditorProps) {
           />
           Plano ativo
         </label>
+      </div>
+
+      {/* Membros efetivos (derivação viva do rascunho) */}
+      <div className="text-muted-foreground -mt-3 flex flex-col gap-1 text-xs">
+        {orphanOperationIds.map((id) => (
+          <span key={id} className="flex items-center gap-2">
+            <span className="rounded border border-dashed px-1.5 py-0.5">
+              Operação removida ({id}) — contribui zero membros.
+            </span>
+            <button
+              type="button"
+              className="text-destructive underline-offset-2 hover:underline"
+              onClick={() =>
+                setMemberOperationIds((cur) => cur.filter((x) => x !== id))
+              }
+            >
+              Remover
+            </button>
+          </span>
+        ))}
+        {effectiveIds === null ? (
+          <span>Membros efetivos: todos os responsáveis ativos.</span>
+        ) : effectiveIds.length === 0 ? (
+          <span className="text-destructive">
+            Nenhum membro efetivo — as operações escolhidas não têm responsáveis
+            vinculados (sub-operações de parceria não contam). O recálculo
+            falhará até ajustar membros/operações.
+          </span>
+        ) : (
+          <span>
+            Membros efetivos ({commissionMembers.length}):{" "}
+            {commissionMembers.map((r) => r.label).join(", ")}
+            {memberOperationIds.length > 0
+              ? " — atualiza sozinho quando os vínculos das operações mudarem."
+              : ""}
+          </span>
+        )}
       </div>
 
       {/* Fatores */}
@@ -793,6 +877,61 @@ function TierTable(props: {
         </Button>
       </div>
     </div>
+  );
+}
+
+// Multi-select de operações (popover + checkboxes). Membros = subárvore VIVA
+// de responsible_operations, resolvida no server; vazio = nenhuma operação.
+function OperationPicker(props: {
+  operations: { id: string; name: string; active: boolean }[];
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const label =
+    props.value.length === 0
+      ? "Nenhuma operação"
+      : props.value.length === 1
+        ? (props.operations.find((o) => o.id === props.value[0])?.name ??
+          "1 operação")
+        : `${props.value.length} operações`;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="justify-start font-normal">
+          {label}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="max-h-72 w-72 overflow-auto p-2">
+        <div className="flex flex-col gap-1">
+          {props.operations.length === 0 ? (
+            <p className="text-muted-foreground p-1 text-xs">
+              Nenhuma operação cadastrada (Configurações → Operações).
+            </p>
+          ) : null}
+          {props.operations.map((o) => {
+            const checked = props.value.includes(o.id);
+            return (
+              <label key={o.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted">
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(v) =>
+                    props.onChange(
+                      v === true
+                        ? [...props.value, o.id]
+                        : props.value.filter((x) => x !== o.id)
+                    )
+                  }
+                />
+                {o.name}
+                {!o.active ? (
+                  <span className="text-muted-foreground"> (inativa)</span>
+                ) : null}
+              </label>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

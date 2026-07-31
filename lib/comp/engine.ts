@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2: membros por OPERAÇÃO — recompute resolve config.memberOperationIds
+// via loadOperationScopes (subárvore viva) + operationMembersFromScopes
+// (canonicaliza) e memberResponsibles ganha o 4º arg com os ids resolvidos.
 // Engine I/O da remuneração variável (0112): recomputa o mês de um plano
 // consultando o REALIZADO de cada membro×fator SÓ pelo choke point
 // runCalculatedWidget (fórmula agregada + filtro `responsible_id eq`, que o
@@ -14,6 +17,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadSources } from "@/lib/config/sources";
 import { loadCorrespondences } from "@/lib/correspondences";
+import {
+  loadOperationScopes,
+  type OperationScope,
+} from "@/lib/config/operation-scope";
 import {
   canonicalOf,
   expandResponsibleIds,
@@ -31,9 +38,11 @@ import type { WidgetFilter } from "@/lib/widgets/types";
 
 import {
   computeEntry,
+  explicitMemberIds,
   monthPeriod,
   parseCompEntryInputs,
   parseCompPlanConfig,
+  resolveOperationMembers,
   type CompComputedRaw,
   type CompPlanConfig,
 } from "./model";
@@ -71,22 +80,52 @@ export interface RecomputeResult {
 }
 
 /**
- * Membros do plano: `config.memberIds` (∩ ativos) ou todos os responsáveis
- * ATIVOS canônicos (apelido nunca vira linha — mesma regra de
- * collapseResponsibleOptions).
+ * Membros do plano: lista explícita (memberIds ∪ operações resolvidas, ∩
+ * ativos) ou todos os responsáveis ATIVOS canônicos (apelido nunca vira linha
+ * — mesma regra de collapseResponsibleOptions). `operationMemberIds` = ids já
+ * CANÔNICOS resolvidos das operações do plano (operationMembersFromScopes);
+ * segue pura — a resolução com I/O é do caller.
  */
 export function memberResponsibles(
   responsibles: { id: string; display_name: string | null }[],
   canon: ResponsibleCanon,
-  config: CompPlanConfig
+  config: CompPlanConfig,
+  operationMemberIds: string[] = []
 ): { id: string; display_name: string | null }[] {
-  if (config.memberIds && config.memberIds.length > 0) {
+  const explicit = explicitMemberIds(config, operationMemberIds);
+  if (explicit !== null) {
     const byId = new Map(responsibles.map((r) => [r.id, r]));
-    return config.memberIds
+    return explicit
       .map((id) => byId.get(id))
-      .filter((r): r is { id: string; display_name: string | null } => !!r);
+      .filter((r): r is { id: string; display_name: string | null } => !!r)
+      // Defensivo: um apelido que escapou da canonicalização nunca vira linha.
+      .filter((r) => !canon.canonicalById.has(r.id));
   }
   return responsibles.filter((r) => !canon.canonicalById.has(r.id));
+}
+
+/**
+ * opId → ids CANÔNICOS dedup a partir dos escopos de operação. O vínculo
+ * (`responsible_operations`) pode apontar um APELIDO — canonicalizar aqui
+ * garante linha na grade e alvo em goals no principal.
+ */
+export function operationMembersFromScopes(
+  scopes: Map<string, OperationScope>,
+  canon: ResponsibleCanon
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [opId, scope] of scopes) {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of scope.responsibleIds) {
+      const id = canonicalOf(raw, canon);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    out[opId] = ids;
+  }
+  return out;
 }
 
 /**
@@ -168,7 +207,7 @@ export async function recomputePlanMonth(
     return { ok: false, message: "O plano não tem fatores." };
   }
 
-  const [sources, correspondences, fieldsRes, rates, canon, respRes, entriesRes] =
+  const [sources, correspondences, fieldsRes, rates, canon, respRes, entriesRes, opScopes] =
     await Promise.all([
       loadSources(supabase, opts.orgId),
       loadCorrespondences(supabase, opts.orgId),
@@ -191,6 +230,9 @@ export async function recomputePlanMonth(
         .eq("plan_id", opts.plan.id)
         .eq("period_year", opts.year)
         .eq("period_month", opts.month),
+      config.memberOperationIds?.length
+        ? loadOperationScopes(supabase, config.memberOperationIds)
+        : Promise.resolve(new Map<string, OperationScope>()),
     ]);
   const allFields = (fieldsRes.data ?? []) as FieldDefinition[];
   const responsibles = (respRes.data ?? []) as {
@@ -199,7 +241,11 @@ export async function recomputePlanMonth(
   }[];
   const entries = (entriesRes.data ?? []) as CompEntryRow[];
 
-  const members = memberResponsibles(responsibles, canon, config);
+  const operationMemberIds = resolveOperationMembers(
+    config.memberOperationIds,
+    operationMembersFromScopes(opScopes, canon)
+  );
+  const members = memberResponsibles(responsibles, canon, config, operationMemberIds);
   if (members.length === 0)
     return { ok: false, message: "O plano não tem membros ativos." };
   if (members.length * config.factors.length > MAX_RECOMPUTE_CELLS) {

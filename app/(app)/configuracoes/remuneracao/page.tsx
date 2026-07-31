@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: membros por operação — ramo admin
+// carrega operations + loadOperationScopes do catálogo inteiro e passa
+// operationMembersById ao manager; editor mostra membros efetivos ao vivo)
 // Tela de Remuneração variável (0112). A área NÃO tem gate de papel
 // (AREA_GATES.remuneracao = {}): a page ramifica — admin vê o gestor completo
 // (planos + grade mensal); demais papéis veem "Minha remuneração" (read-only;
@@ -18,7 +20,11 @@ import {
 import { todayBrasiliaIso } from "@/lib/date/today";
 import type { FieldDefinition } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
-import { loadTargetsByMember } from "@/lib/comp/engine";
+import { loadOperationScopes } from "@/lib/config/operation-scope";
+import {
+  loadTargetsByMember,
+  operationMembersFromScopes,
+} from "@/lib/comp/engine";
 import { parseCompPlanConfig } from "@/lib/comp/model";
 import {
   RemuneracaoManager,
@@ -135,6 +141,7 @@ export default async function RemuneracaoPage({
     correspondences,
     { data: fieldsData },
     metrics,
+    { data: opsData },
   ] = await Promise.all([
     supabase
       .from("comp_plans")
@@ -154,7 +161,21 @@ export default async function RemuneracaoPage({
         "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent"
       ),
     loadGoalMetrics(supabase),
+    supabase.from("operations").select("id, name, active").order("name"),
   ]);
+  const operations = ((opsData ?? []) as {
+    id: string;
+    name: string;
+    active: boolean;
+  }[]);
+  // Escopos do catálogo INTEIRO (loadOperationScopes já é batelado — 2
+  // queries): o editor mostra os membros efetivos AO VIVO ao marcar uma
+  // operação nova no picker, sem roundtrip.
+  const opScopes = await loadOperationScopes(
+    supabase,
+    operations.map((o) => o.id)
+  );
+  const operationMembersById = operationMembersFromScopes(opScopes, canon);
   const plans = (plansData ?? []) as CompPlanClientRow[];
   const selectedPlanId =
     plans.find((p) => p.id === str(sp.plano))?.id ?? plans[0]?.id ?? null;
@@ -212,6 +233,8 @@ export default async function RemuneracaoPage({
         available={available}
         allFields={allFields}
         sources={sources}
+        operations={operations}
+        operationMembersById={operationMembersById}
       />
     </div>
   );

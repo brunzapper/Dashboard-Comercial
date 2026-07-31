@@ -22,11 +22,13 @@ import {
   compFactorRef,
   compOperandCatalog,
   computeEntry,
+  explicitMemberIds,
   lastDayOfMonth,
   monthPeriod,
   parseCompEntryInputs,
   parseCompPlanConfig,
   resolveCommissionTiers,
+  resolveOperationMembers,
   roundMoney,
   selectCommissionTier,
   type CompCommissionConfig,
@@ -207,6 +209,44 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(
       reparse(withCommission({ memberTiers: { r1: [] } }))
     ).toBeNull();
+  });
+});
+
+describe("membros por operação (helpers puros)", () => {
+  it("parse: memberOperationIds válido preservado; [] vira chave omitida; item inválido derruba", () => {
+    const ok = reparse(makeConfig({ memberOperationIds: ["op1", "op2"] }));
+    expect(ok!.memberOperationIds).toEqual(["op1", "op2"]);
+    const vazio = reparse(makeConfig({ memberOperationIds: [] }));
+    expect(vazio!.memberOperationIds).toBeUndefined();
+    const invalido = makeConfig();
+    (invalido as { memberOperationIds?: unknown }).memberOperationIds = ["op1", ""];
+    expect(reparse(invalido)).toBeNull();
+  });
+
+  it("resolveOperationMembers: ordem do config, dedup, operação ausente contribui zero", () => {
+    const map = { op1: ["r2", "r1"], op2: ["r1", "r3"] };
+    expect(resolveOperationMembers(["op1", "op2"], map)).toEqual(["r2", "r1", "r3"]);
+    expect(resolveOperationMembers(["op9"], map)).toEqual([]);
+    expect(resolveOperationMembers(undefined, map)).toEqual([]);
+  });
+
+  it("explicitMemberIds: null só com AMBOS vazios; operações presentes nunca caem no 'todos'", () => {
+    expect(explicitMemberIds(makeConfig(), [])).toBeNull();
+    // Manual apenas.
+    expect(
+      explicitMemberIds(makeConfig({ memberIds: ["r1"] }), [])
+    ).toEqual(["r1"]);
+    // Manual ∪ operações, ordem manual primeiro, dedup.
+    expect(
+      explicitMemberIds(
+        makeConfig({ memberIds: ["r1"], memberOperationIds: ["op1"] }),
+        ["r2", "r1"]
+      )
+    ).toEqual(["r1", "r2"]);
+    // Só operações com resolução VAZIA ⇒ [] (fail-closed), nunca null.
+    expect(
+      explicitMemberIds(makeConfig({ memberOperationIds: ["op1"] }), [])
+    ).toEqual([]);
   });
 });
 

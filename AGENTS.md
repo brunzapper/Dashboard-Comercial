@@ -448,25 +448,41 @@ This version has breaking changes — APIs, conventions, and file structure may 
   fila em voo (dado mid-flight é stale e descartado) — não remova a guarda
   nem re-introduza `await` no drop. Ver `docs/arquitetura.md` §4.15 e
   invariante 23.
-- **Assistentes de IA de registros/campos NUNCA escrevem direto (30/07/2026,
-  §4.17):** os cores (`lib/ai/insert-records.ts` — até 10 registros em base
-  `manual_entry`; `lib/ai/csv-mapping.ts` — sugestão de mapeamento no wizard;
-  `lib/ai/create-fields.ts` — até 10 campos, calculados inclusos) só VALIDAM
-  (`lib/import/{records,csv-mapping,fields}/validate.ts`) e devolvem prévia; o
+- **Assistentes de IA de registros/campos/operações NUNCA escrevem direto
+  (30/07/2026, §4.17):** os cores (`lib/ai/insert-records.ts` — até 10
+  registros em base `manual_entry`; `lib/ai/csv-mapping.ts` — sugestão de
+  mapeamento no wizard; `lib/ai/create-fields.ts` — até 10 campos, calculados
+  inclusos; `lib/ai/manage-operations.ts` — até 15 ações de operações) só
+  VALIDAM (`lib/import/{records,csv-mapping,fields,operations}/validate.ts`) e
+  devolvem prévia; o
   apply RE-VALIDA o JSON (a prévia de registros é editável — célula + troca de
   coluna, `lib/import/records/preview.ts`) e escreve SÓ pelos choke points
   existentes: `createRecord` por registro (RLS `records_insert` é a muralha;
   nada de service role p/ inserir; pós-loop um
   `recalcFormulaFieldsForRecords`), `createField` por campo (ordem simples →
   calculado → calculado_agg) e o estado `plans` do wizard (a revisão da tabela
-  É a confirmação — import intocado). Base/alvo vem SEMPRE do seletor da UI,
+  É a confirmação — import intocado) e, p/ OPERAÇÕES (31/07/2026), as ações
+  do contrato `operacoes-edit` v1 (criar/editar/vincular/desvincular por
+  NOME — ids nunca no JSON; SEM delete; operação AUTOMÁTICA de parceria
+  intocável — invariante 22; catálogo de TRABALHO aceita referência a
+  operação criada no lote; `createOperation` devolve `id` p/ o encadeamento)
+  via `createOperation`/`updateOperation`/`updateOperationFilter`/
+  `addResponsibleOperation`/`removeResponsibleOperation`; a sanitização de
+  perfil vive no módulo ÚNICO `lib/config/operation-profile.ts`
+  (`PROFILE_OPS`/`NO_VALUE_OPS` — choke point e validador da IA usam o
+  mesmo). O fluxo copiar-prompt → colar-JSON de IA EXTERNA usa o MESMO
+  contrato/validador/prévia (`previewOperationsCore`/
+  `buildOperationsPromptCore`; manual funciona sem IA configurada). Base/alvo
+  vem SEMPRE do seletor da UI,
   nunca do JSON. Prévia de registros mostra SÓ colunas preenchidas; duplicado
   por título é AVISO. Laço de autocorreção único (`lib/ai/json-loop.ts`;
   `generateDashboardCore` mantém o dele); amostras por base compartilhadas em
   `lib/import/sample-db.ts`. SPECs DERIVADOS de constantes reais
   (`EDITABLE_CORE_COLUMNS`/`CORE_IMPORT_TARGETS`/`IMPORT_NEW_FIELD_TYPES`/
-  `DATA_TYPE_LABELS`/`FORMULA_FUNC_GROUPS`/`CURRENCY_OPTIONS`) e FISCALIZADOS
-  pelos testes de paridade (`lib/import/records/instructions.test.ts` etc.) —
+  `DATA_TYPE_LABELS`/`FORMULA_FUNC_GROUPS`/`CURRENCY_OPTIONS`/`PROFILE_OPS`) e
+  FISCALIZADOS pelos testes de paridade
+  (`lib/import/records/instructions.test.ts`,
+  `lib/import/operations/instructions.test.ts` etc.) —
   nunca duplique em prosa. Fórmula da IA valida pelos módulos ÚNICOS extraídos
   p/ `lib/records/formula-server.ts` (campos/actions reimporta — não recrie
   catálogos). Datas core do contrato são `YYYY-MM-DD` ancoradas na escrita por
@@ -485,7 +501,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   LINHAS de `goals` (scope 'responsible', id CANÔNICO, métrica do registry
   `goal_metrics` vinculada por `factor.metricKey`) escritas SÓ por
   `lib/metas/upsert.ts` — célula limpa EXCLUI a meta (nunca `target=0`); a
-  área Metas gerencia os mesmos alvos. A fórmula LIVRE de total
+  área Metas gerencia os mesmos alvos. **Membros por operação (31/07/2026):**
+  `config.memberOperationIds` = subárvore VIVA de `responsible_operations`
+  resolvida SÓ nos callers (`loadOperationScopes` +
+  `operationMembersFromScopes` — canonicaliza apelido→principal; NUNCA
+  `records.operation_id` literal), combinada aos manuais pelos helpers PUROS
+  `resolveOperationMembers`/`explicitMemberIds` de `lib/comp/model.ts`
+  (grade/editor usam os MESMOS via props — client nunca importa engine.ts).
+  Presença da chave ⇒ lista explícita SEMPRE (resolução vazia = plano sem
+  membros; parceria profile-only contribui zero — nunca fallback "todos");
+  ambos vazios = todos os ativos. A fórmula LIVRE de total
   (`config.totalFormula`) avalia SÓ por `evaluateFormula` sobre o mapa
   `comp:*` de `computeEntry` (catálogo único `compOperandCatalog` — editor e
   servidor; kind "record", SOMASE proibido); resultado não-numérico ⇒ total

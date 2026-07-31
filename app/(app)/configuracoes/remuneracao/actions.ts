@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2: membros por operação — savePlan valida a existência dos ids de
+// config.memberOperationIds (RLS recorta a org); a resolução de membros
+// segue nos callers (engine/page), nunca aqui.
 // Server Actions da tela de Remuneração (0112). Escrita SEMPRE admin (guard +
 // RLS); leitura do vendedor é da page (RLS entrega só o próprio grupo).
 // v1.1: comissão por faixas — bounds das faixas no savePlan, override
@@ -164,6 +167,24 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
 
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
+
+  // Operações vinculadas ao plano devem existir (RLS recorta a org — id de
+  // outra org conta como "não encontrada"); mensagem acionável em vez do
+  // silêncio de uma operação fantasma contribuindo zero membros.
+  if (config.memberOperationIds?.length) {
+    const { data: opRows } = await supabase
+      .from("operations")
+      .select("id")
+      .in("id", config.memberOperationIds);
+    const found = new Set(((opRows ?? []) as { id: string }[]).map((o) => o.id));
+    if (config.memberOperationIds.some((id) => !found.has(id)))
+      return {
+        ok: false,
+        message:
+          "Operação vinculada ao plano não encontrada (removida?) — reabra o seletor de operações e salve novamente.",
+      };
+  }
+
   const [sources, correspondences, { data: fieldsData }, registry] =
     await Promise.all([
       loadSources(supabase, orgId),

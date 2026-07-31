@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: repassa operations +
+// operationMembersById ao editor e à grade — membros por operação)
 // Gerência de Remuneração variável (0112) — admin. Topo: seletor de plano +
 // navegação de mês (searchParams plano/ano/mes — a page recarrega os dados);
 // abas "Lançamentos" (grade mensal) e "Plano" (editor de fatores/fórmulas).
@@ -64,6 +65,10 @@ export interface RemuneracaoManagerProps {
   available: AvailableField[];
   allFields: FieldDefinition[];
   sources: SourceDef[];
+  // Operações da org (opções do picker; inativas com sufixo) + membros por
+  // operação (id CANÔNICO, já resolvidos no server via loadOperationScopes).
+  operations: { id: string; name: string; active: boolean }[];
+  operationMembersById: Record<string, string[]>;
 }
 
 export function RemuneracaoManager(props: RemuneracaoManagerProps) {
@@ -187,6 +192,8 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
           available={props.available}
           allFields={props.allFields}
           sources={props.sources}
+          operations={props.operations}
+          operationMembersById={props.operationMembersById}
           onSaved={(planId) => {
             setCreating(false);
             setTab("grade");
@@ -206,6 +213,7 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
           entries={props.entries}
           responsibles={props.responsibles}
           targets={props.targets}
+          operationMembersById={props.operationMembersById}
         />
       ) : (
         <p className="text-destructive text-sm">
