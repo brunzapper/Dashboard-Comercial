@@ -1,10 +1,15 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 31/07/2026
 // Tela de Operações (admin) — Fase 6B.
+// v1.2 (31/07/2026): assistente "Gerir com IA" (OperationsAiSheet — chat
+// interno + fluxo copiar-prompt/colar-JSON de IA externa; maxDuration 300
+// p/ os turnos de geração; contrato/apply em lib/ai/manage-operations.ts).
 // v1.1 (20/07/2026): carrega o FILTRO DE PERFIL (operations.filter, 0083) e
 // monta as opções de campo (núcleo + custom com rótulo) e de fonte para o
 // editor de condições do perfil.
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import type { WidgetFilter } from "@/lib/widgets/types";
@@ -13,13 +18,19 @@ import {
   OperationsManager,
   type OperationRow,
 } from "@/components/admin/operations-manager";
+import { OperationsAiSheet } from "@/components/admin/operations-ai-sheet";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Operações" };
 
+// Turno de geração da IA pode passar do limite default de execução.
+export const maxDuration = 300;
+
 export default async function OperacoesPage() {
   await requireSettingsArea("operacoes");
   const supabase = await createClient();
+  const orgId = await getActiveOrgId();
+  const ai = orgId ? await loadOrgAiConfigPublic(orgId) : null;
   const [{ data }, { data: fieldsData }, sources] = await Promise.all([
     supabase
       .from("operations")
@@ -55,13 +66,16 @@ export default async function OperacoesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Operações</h1>
-        <p className="text-muted-foreground text-sm">
-          Crie operações, organize-as em árvore e defina o PERFIL de dados de
-          cada uma (filtros de inclusão/exclusão). O filtro de Operação dos
-          dashboards aplica os responsáveis vinculados + o perfil.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Operações</h1>
+          <p className="text-muted-foreground text-sm">
+            Crie operações, organize-as em árvore e defina o PERFIL de dados de
+            cada uma (filtros de inclusão/exclusão). O filtro de Operação dos
+            dashboards aplica os responsáveis vinculados + o perfil.
+          </p>
+        </div>
+        <OperationsAiSheet ai={ai} />
       </div>
       <OperationsManager
         operations={operations}

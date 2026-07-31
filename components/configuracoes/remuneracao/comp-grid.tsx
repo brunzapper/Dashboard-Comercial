@@ -1,4 +1,5 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026 (v1.2: linhas = lista efetiva manual ∪
+// operações via helpers do model — mesma resolução do servidor)
 // Grade mensal da remuneração (0112): linhas = membros canônicos; colunas =
 // Base | por fator (Alvo | Real. | Ating.% | Valor) | Comissão (se o plano
 // tiver faixas) | Bônus | Total. TODO o detalhamento é derivado no cliente
@@ -37,7 +38,9 @@ import {
 import { notifyActionError } from "@/lib/feedback/notify";
 import {
   computeEntry,
+  explicitMemberIds,
   parseCompEntryInputs,
+  resolveOperationMembers,
   type CompBonus,
   type CompComputedRaw,
   type CompEntryInputs,
@@ -77,6 +80,9 @@ export interface CompGridProps {
   entries: CompEntryClientRow[];
   responsibles: { id: string; label: string }[];
   targets: Record<string, Record<string, number | null>>;
+  // Membros por operação (ids CANÔNICOS, resolvidos no server) — mesma fonte
+  // da lista efetiva do engine; a grade nunca resolve operação sozinha.
+  operationMembersById: Record<string, string[]>;
 }
 
 // Estado local por linha (otimista — o servidor re-deriva e o refresh da page
@@ -92,16 +98,22 @@ export function CompGrid(props: CompGridProps) {
   const [busy, setBusy] = useState<"recompute" | "publish" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Mesma lista efetiva do servidor: manual ∪ operações (helpers do model —
+  // nunca importar engine.ts num client component).
   const members = useMemo(() => {
-    const ids = props.config.memberIds;
-    if (ids && ids.length > 0) {
-      const byId = new Map(props.responsibles.map((r) => [r.id, r]));
-      return ids
-        .map((id) => byId.get(id))
-        .filter((r): r is { id: string; label: string } => Boolean(r));
-    }
-    return props.responsibles;
-  }, [props.config.memberIds, props.responsibles]);
+    const explicit = explicitMemberIds(
+      props.config,
+      resolveOperationMembers(
+        props.config.memberOperationIds,
+        props.operationMembersById
+      )
+    );
+    if (explicit === null) return props.responsibles;
+    const byId = new Map(props.responsibles.map((r) => [r.id, r]));
+    return explicit
+      .map((id) => byId.get(id))
+      .filter((r): r is { id: string; label: string } => Boolean(r));
+  }, [props.config, props.responsibles, props.operationMembersById]);
 
   const entryByMember = useMemo(
     () => new Map(props.entries.map((e) => [e.responsible_id, e])),

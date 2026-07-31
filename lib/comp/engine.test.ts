@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 31/07/2026 (v1.1: total por membro com tabela de faixas própria)
+// Versão: 1.2 | Data: 31/07/2026 (v1.2: membros por operação — 4º arg de
+// memberResponsibles, operationMembersFromScopes canonicaliza e o recompute
+// resolve a subárvore viva; asserções de QUERY porque loadOperationScopes
+// degrada para vazio em erro)
 // Testes do engine I/O da remuneração (fake-supabase fail-closed): uma
 // consulta runCalculatedWidget por membro×fator com o filtro de responsável
 // chegando EXPANDIDO ao RPC (canon no choke point); alvos lidos de `goals`
@@ -10,7 +13,11 @@ import { describe, expect, it } from "vitest";
 import type { Formula } from "@/lib/records/formulas";
 import { fakeSupabase, type RecordedQuery } from "@/tests/helpers/fake-supabase";
 
-import { memberResponsibles, recomputePlanMonth } from "./engine";
+import {
+  memberResponsibles,
+  operationMembersFromScopes,
+  recomputePlanMonth,
+} from "./engine";
 import { parseCompPlanConfig } from "./model";
 
 const f = (...refs: string[]): Formula => ({
@@ -106,6 +113,66 @@ describe("memberResponsibles", () => {
         memberIds: ["m2", "sumido"],
       }).map((r) => r.id)
     ).toEqual(["m2"]);
+  });
+
+  it("4º arg soma membros de operação (dedup, manual primeiro); op-only vazio ⇒ []", () => {
+    const config = parseCompPlanConfig(JSON.parse(JSON.stringify(CONFIG)))!;
+    const canon = {
+      canonicalById: new Map([["m1a", "m1"]]),
+      groupById: new Map([["m1", ["m1", "m1a"]]]),
+    };
+    const all = [
+      { id: "m1", display_name: "Um" },
+      { id: "m1a", display_name: "Apelido" },
+      { id: "m2", display_name: "Dois" },
+    ];
+    // Operação traz m1 além do manual m2 — manual primeiro, dedup.
+    expect(
+      memberResponsibles(
+        all,
+        canon,
+        { ...config, memberIds: ["m2"], memberOperationIds: ["opA"] },
+        ["m1", "m2"]
+      ).map((r) => r.id)
+    ).toEqual(["m2", "m1"]);
+    // Só operações com resolução vazia ⇒ NENHUM membro (nunca "todos").
+    expect(
+      memberResponsibles(
+        all,
+        canon,
+        { ...config, memberOperationIds: ["opA"] },
+        []
+      )
+    ).toEqual([]);
+    // Apelido que escapasse da canonicalização nunca vira linha.
+    expect(
+      memberResponsibles(
+        all,
+        canon,
+        { ...config, memberOperationIds: ["opA"] },
+        ["m1a", "m2"]
+      ).map((r) => r.id)
+    ).toEqual(["m2"]);
+  });
+});
+
+describe("operationMembersFromScopes", () => {
+  it("canonicaliza apelidos e deduplica por operação", () => {
+    const canon = {
+      canonicalById: new Map([["m1a", "m1"]]),
+      groupById: new Map([["m1", ["m1", "m1a"]]]),
+    };
+    const scopes = new Map([
+      [
+        "opA",
+        { responsibleIds: ["m1a", "m1", "m2"], profile: [], subtreeProfiles: [] },
+      ],
+      ["opB", { responsibleIds: [], profile: [], subtreeProfiles: [] }],
+    ]);
+    expect(operationMembersFromScopes(scopes, canon)).toEqual({
+      opA: ["m1", "m2"],
+      opB: [],
+    });
   });
 });
 
@@ -228,6 +295,59 @@ describe("recomputePlanMonth", () => {
     expect(insertPayload.period_year).toBe(2026);
     expect(insertPayload.period_month).toBe(7);
     expect(insertPayload.total).toBe(240);
+  });
+
+  it("memberOperationIds: subárvore viva resolve membros (apelido → canônico) e o recompute os processa", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const metric = (args.p_metrics as { field: string }[])[0].field;
+          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes("m1");
+          if (metric === "value")
+            return { data: [{ metric_1: m1 ? 80 : 40 }], error: null };
+          return { data: [{ metric_1: m1 ? 10 : 5 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: GOALS_ROWS,
+        // Catálogo de operações: opA raiz com filha opB (subárvore conta).
+        operations: [
+          { id: "opA", parent_operation_id: null, filter: [], active: true },
+          { id: "opB", parent_operation_id: "opA", filter: [], active: true },
+        ],
+        // Vínculos: apelido m1a na raiz; m2 na FILHA (entra pela subárvore).
+        responsible_operations: [
+          { responsible_id: "m1a", operation_id: "opA" },
+          { responsible_id: "m2", operation_id: "opB" },
+        ],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config: { ...CONFIG, memberOperationIds: ["opA"] } },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out).toEqual({ ok: true, members: 2, factors: 2, queryErrors: 0 });
+    // Guarda contra o degrade silencioso do loadOperationScopes (catch ⇒
+    // vazio): as DUAS queries do resolver precisam ter acontecido.
+    expect(fake.queries.some((q) => q.table === "operations")).toBe(true);
+    expect(fake.queries.some((q) => q.table === "responsible_operations")).toBe(true);
+    // Apelido m1a canonicalizado ⇒ entry no m1; m2 veio da sub-operação.
+    expect(writes.map((w) => w.responsible_id).sort()).toEqual(["m1", "m2"]);
   });
 
   it("comissão por faixas: total gravado reflete a tabela do MEMBRO (member.id chega ao computeEntry)", async () => {

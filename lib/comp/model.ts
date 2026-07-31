@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2: membros por OPERAÇÃO (memberOperationIds) — helpers puros
+// resolveOperationMembers/explicitMemberIds combinam manual ∪ operações; a
+// resolução opId→ids canônicos é dos CALLERS (loadOperationScopes + canon).
 // Modelo PURO da remuneração variável (0112). Um plano (comp_plans.config,
 // jsonb versionado — parse FAIL-CLOSED, padrão kanban_automations) define
 // fatores com peso %, fórmula AGREGADA (realizado computado pelo engine via
@@ -77,6 +80,13 @@ export interface CompPlanConfig {
   factors: CompFactor[];
   // Responsáveis (ids CANÔNICOS) inscritos; ausente/vazio = todos os ativos.
   memberIds?: string[];
+  // Operações (ids de `operations`) cujos membros entram no plano: subárvore
+  // VIVA de responsible_operations, canonicalizada e intersectada com os
+  // ativos pelo CALLER (resolução é I/O — loadOperationScopes; o parse é
+  // puro). PRESENÇA da chave ⇒ lista explícita SEMPRE (mesmo resolvendo
+  // vazio — nunca cair no "todos os ativos": parceria profile-only não pode
+  // inflar o plano em silêncio).
+  memberOperationIds?: string[];
   // Fórmula LIVRE do total (operandos comp:*). Ausente/null = composição
   // estruturada: base × Σ(peso% × ating%) + bônus.
   totalFormula?: Formula | null;
@@ -317,6 +327,14 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
     }
     if (ids.length > 0) out.memberIds = ids;
   }
+  if (Array.isArray(raw.memberOperationIds)) {
+    const ids: string[] = [];
+    for (const m of raw.memberOperationIds) {
+      if (typeof m !== "string" || m === "") return null;
+      ids.push(m);
+    }
+    if (ids.length > 0) out.memberOperationIds = ids;
+  }
   if (raw.totalFormula != null) {
     const tf = parseFormula(raw.totalFormula, MAX_TOTAL_FORMULA_TOKENS);
     if (!tf) return null;
@@ -386,6 +404,52 @@ export function compFactorRef(
   kind: "realizado" | "alvo" | "ating" | "valor"
 ): string {
   return `comp:f:${factorId}:${kind}`;
+}
+
+/**
+ * Achata os membros resolvidos das operações do plano: ordem do config →
+ * ordem do array resolvido; dedup por id. `operationMembersById` já vem
+ * CANONICALIZADO do caller (operationMembersFromScopes no server); operação
+ * ausente do mapa (excluída/sem resolução) contribui zero.
+ */
+export function resolveOperationMembers(
+  memberOperationIds: string[] | undefined,
+  operationMembersById: Record<string, string[]>
+): string[] {
+  if (!memberOperationIds || memberOperationIds.length === 0) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const opId of memberOperationIds) {
+    for (const id of operationMembersById[opId] ?? []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Lista EXPLÍCITA de membros do plano (manuais ∪ operações, ordem manual
+ * primeiro, dedup) ou null = "todos os ativos". `memberOperationIds` presente
+ * ⇒ NUNCA null, mesmo resolvendo vazio (fail-closed — o plano fica sem
+ * membros em vez de virar "empresa inteira" em silêncio).
+ */
+export function explicitMemberIds(
+  config: CompPlanConfig,
+  operationMemberIds: string[]
+): string[] | null {
+  const manual = config.memberIds ?? [];
+  const hasOps = (config.memberOperationIds?.length ?? 0) > 0;
+  if (manual.length === 0 && !hasOps) return null;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...manual, ...operationMemberIds]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 export const COMP_BASE_REF = "comp:base";

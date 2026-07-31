@@ -1,4 +1,8 @@
-<!-- Versão: 3.4 | Data: 31/07/2026 -->
+<!-- Versão: 3.5 | Data: 31/07/2026 -->
+<!-- v3.5 (31/07/2026): comp_plans.config ganha `memberOperationIds?` (membros
+     do plano pela subárvore VIVA de responsible_operations, resolvida no
+     engine/page — nunca por records.operation_id) — só shape de jsonb, SEM
+     migração nova. -->
 <!-- v3.4 (31/07/2026): comp_plans.config ganha bloco opcional `commission`
      (faixas de comissão por atingimento; memberTiers por membro) e
      comp_entries.inputs.overrides ganha `commission` — só shape de jsonb,
@@ -379,7 +383,11 @@ chave `goal_metrics`); o REALIZADO de um KPI meta é a consulta do próprio widg
 `base_amount_default` numeric (base variável default em R$; null = digitada por
 pessoa) e `config` jsonb VERSIONADO (`{v:1, factors:[{id, label, weightPct,
 metricKey, money?, formula, sources, filters?, capPct?, floorPct?}],
-memberIds?, totalFormula?, commission?}`; `commission` (31/07/2026, sem
+memberIds?, memberOperationIds?, totalFormula?, commission?}`;
+`memberOperationIds` (31/07/2026, sem migração) = operações cujos membros
+entram no plano — subárvore VIVA de `responsible_operations` resolvida por
+`loadOperationScopes` + canonicalização nos callers (presença ⇒ lista
+explícita mesmo vazia, nunca fallback "todos"); `commission` (31/07/2026, sem
 migração) = `{triggerFactorId, basisKind:"base"|"factor", basisFactorId?,
 tiers:[{fromPct, ratePct}], memberTiers?:{respId: tiers}}` — faixas de
 comissão por atingimento, tabela do membro substitui a do plano) com parse

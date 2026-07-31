@@ -1,4 +1,13 @@
-<!-- Versão: 1.43 | Data: 31/07/2026 -->
+<!-- Versão: 1.44 | Data: 31/07/2026 -->
+<!-- v1.44 (31/07/2026): (a) §4.18 — membros do plano por OPERAÇÃO
+     (config.memberOperationIds: subárvore viva via loadOperationScopes +
+     canonicalização nos callers; helpers puros resolveOperationMembers/
+     explicitMemberIds no model; presença ⇒ nunca fallback "todos");
+     (b) §4.17 — 4ª superfície: assistente de IA de OPERAÇÕES (contrato
+     operacoes-edit v1 por NOME, sem delete, automáticas intocáveis,
+     PROFILE_OPS extraído p/ lib/config/operation-profile.ts, apply pelos
+     choke points; fluxo copiar-prompt/colar-JSON de IA externa no MESMO
+     contrato). Invariantes 25/26 estendidas. RPCs intocados. -->
 <!-- v1.43 (31/07/2026): §4.18 — comissão por FAIXAS de atingimento
      (config.commission, sem migração): gatilho + base + tabela de faixas
      (maior limiar >= vence sobre o atingimento EFETIVO), tabela por membro
@@ -1966,6 +1975,10 @@ seguem planos (centenas de parcerias = dropdown grande). O e2e não tem
 fixture de base dinâmica com match (cobertura live do caminho novo é
 follow-up conhecido).
 
+Nota (31/07/2026): o assistente de IA de operações (§4.17) NUNCA toca
+operações automáticas de parceria — o validador e o apply barram edição/
+vínculo/desvínculo/filha sob elas (a rotina é a dona; invariante 22).
+
 ### 4.15 Automações do kanban e ações em massa (27/07/2026)
 
 **Automações** (`kanban_automations`, 0109): regras condicionais por quadro
@@ -2120,7 +2133,7 @@ tabela própria) porque o builder a RE-EMITE explicitamente no branch
 (cópia nunca herda o vínculo — escreveria no campo do quadro original).
 Fiscalizado por `lib/kanban/allocation-field.test.ts`. Ver invariante 24.
 
-### 4.17 Assistentes de IA de registros e campos (30/07/2026)
+### 4.17 Assistentes de IA de registros, campos e operações (30/07/2026)
 
 Três superfícies novas sobre a MESMA fundação de IA dos dashboards (config por
 org 0096 → `loadOrgAiConfig`; laço de autocorreção compartilhado em
@@ -2182,9 +2195,35 @@ semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
   createField revalida com os anteriores já criados); papéis/visibilidade
   ficam nos defaults programáticos (mesmos do import de CSV). Prévia
   read-only; ajustes pelo chat.
+- **Gestão de operações (31/07/2026).** Configurações → Operações → "Gerir com
+  IA" (`components/admin/operations-ai-sheet.tsx` + wrappers em
+  `ai-operations-actions.ts`; core `lib/ai/manage-operations.ts`, gate admin +
+  área `operacoes`). Contrato `operacoes-edit` v1
+  (`lib/import/operations/{types,validate,instructions}.ts`): lote de até 15
+  ações `criar`/`editar`/`vincular`/`desvincular` identificadas por NOME (ids
+  NUNCA vêm do JSON; 0 hits lista os cadastrados, >1 = ambiguidade), SEM ação
+  de exclusão (fica na UI). O validador processa EM ORDEM com catálogo de
+  TRABALHO (referência a operação criada no lote e rename valendo para o resto
+  funcionam), pré-checa ciclo de pai, colisão de nome (exigência do
+  assistente — a UI manual segue permissiva) e o `unique(responsible_id,
+  priority)`, e barra operação AUTOMÁTICA de parceria nas 4 formas (invariante
+  22; o apply re-barra com contexto fresco). Perfil passa pela MESMA
+  sanitização do choke point (`lib/config/operation-profile.ts` — extração de
+  `updateOperationFilter`; `PROFILE_OPS`/`NO_VALUE_OPS` únicos) e ainda exige
+  `field` ∈ catálogo e `sources` ⊆ fontes (mais estrito de propósito). Apply
+  item a item SÓ pelos choke points (`createOperation` — que passou a devolver
+  o `id` criado —/`updateOperation`/`updateOperationFilter` +
+  `addResponsibleOperation`/`removeResponsibleOperation`; vincular/desvincular
+  re-passam pelo gate da área `responsaveis` — deny falha por item). **Fluxo de
+  IA EXTERNA no MESMO contrato**: "Copiar prompt" (`buildOperationsPromptCore`
+  — MESMO texto do system interno + catálogo atual) + colar-JSON
+  (`previewOperationsCore`, sem IA) caem na MESMA prévia/apply; o manual
+  funciona sem IA configurada (chat gated por `ai.hasKey`).
 
 Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
-`lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`
+`lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`,
+`lib/import/operations/{validate,instructions}.test.ts` e
+`lib/config/operation-profile.test.ts`
 (paridade dos SPECs com as constantes reais + exemplos aceitos pelos
 validadores REAIS) e `lib/records/coerce.test.ts` (âncora de Brasília + trava
 anti-divergência validador↔escrita). Ver invariante 25.
@@ -2219,6 +2258,24 @@ total opcional por plano.
   pelo recompute; limpar a chave restaura a derivação sem re-consulta.
   Cap/floor clampam SÓ o calculado. Grade (admin) e "Minha remuneração"
   (vendedor) usam o MESMO `computeEntry` no cliente.
+- **Membros por operação (31/07/2026).** `config.memberOperationIds` soma às
+  `memberIds` manuais os membros da subárvore VIVA de cada operação
+  (`responsible_operations`, qualquer priority, operação inativa inclusa —
+  paridade com o filtro de Operação dos dashboards): a page admin e o
+  `recomputePlanMonth` resolvem via `loadOperationScopes` +
+  `operationMembersFromScopes` (canonicaliza APELIDO → principal e deduplica;
+  vínculo em apelido vira linha canônica na grade e alvo em goals no
+  principal) e a combinação manual ∪ operações é dos helpers PUROS
+  `resolveOperationMembers`/`explicitMemberIds` de `lib/comp/model.ts` —
+  grade e editor usam os MESMOS helpers com os ids resolvidos via props
+  (client nunca importa engine.ts nem resolve operação sozinho). Presença de
+  `memberOperationIds` ⇒ lista explícita SEMPRE, mesmo resolvendo vazio
+  (fail-closed: sub-operação de parceria profile-only contribui zero e o
+  plano fica SEM membros — aviso no editor + "O plano não tem membros
+  ativos." no recompute — em vez de virar "empresa inteira" em silêncio).
+  Ambos vazios = todos os ativos (compat). `savePlan` valida a existência dos
+  ids (RLS recorta a org); `publishMonth`/`deriveTotal` seguem imunes
+  (derivam das entries materializadas).
 - **Alvos são LINHAS de `goals`.** Cada fator vincula uma chave do registry
   `goal_metrics` (automática `comp_*` no save, ou existente escolhida pelo
   admin). A grade digita o alvo mas persiste `goals` (scope 'responsible', id
@@ -2575,23 +2632,32 @@ principalmente — para mantenedores humanos.
     campo do quadro ORIGINAL. Desligar/excluir mantém campo e valores; campo
     excluído em /campos auto-desliga o vínculo no próximo reconcile.
 
-25. **Assistentes de IA de registros/campos nunca escrevem direto (§4.17).**
-    Os cores (`lib/ai/insert-records.ts`, `lib/ai/csv-mapping.ts`,
-    `lib/ai/create-fields.ts`) só validam e devolvem prévia; a aplicação
-    RE-VALIDA o JSON (possivelmente editado na prévia) e escreve SÓ pelos
-    choke points existentes — `createRecord` por registro, `createField` por
-    campo, estado `plans` do wizard (a RLS segue sendo a muralha; nada de
-    service role para inserir). A base/alvo vem SEMPRE do seletor da UI,
-    nunca do JSON da IA. Teto de 10 por leva (registros e campos); prévia
-    obrigatória (registros: só colunas preenchidas + edição inline/remap).
-    Os SPECs são DERIVADOS de constantes reais (`EDITABLE_CORE_COLUMNS`,
-    `CORE_IMPORT_TARGETS`, `IMPORT_NEW_FIELD_TYPES`, `DATA_TYPE_LABELS`,
-    `FORMULA_FUNC_GROUPS`, `CURRENCY_OPTIONS`) e fiscalizados pelos testes de
-    paridade — nunca documente em prosa paralela. Fórmula proposta pela IA
-    valida pelos módulos ÚNICOS de `lib/records/formula-server.ts` (extraídos
-    de campos/actions — não recrie catálogos). Datas core do contrato são
+25. **Assistentes de IA de registros/campos/operações nunca escrevem direto
+    (§4.17).** Os cores (`lib/ai/insert-records.ts`, `lib/ai/csv-mapping.ts`,
+    `lib/ai/create-fields.ts`, `lib/ai/manage-operations.ts`) só validam e
+    devolvem prévia; a aplicação RE-VALIDA o JSON (possivelmente editado na
+    prévia) e escreve SÓ pelos choke points existentes — `createRecord` por
+    registro, `createField` por campo, estado `plans` do wizard,
+    `createOperation`/`updateOperation`/`updateOperationFilter`/
+    `addResponsibleOperation`/`removeResponsibleOperation` por ação de
+    operação (a RLS segue sendo a muralha; nada de service role para
+    inserir). A base/alvo vem SEMPRE do seletor da UI, nunca do JSON da IA;
+    no contrato de operações a identidade é resolvida por NOME no SERVIDOR
+    (ids nunca viajam no JSON) e operações AUTOMÁTICAS de parceria são
+    intocáveis (invariante 22). Teto de 10 por leva (registros e campos) e 15
+    ações (operações); prévia obrigatória (registros: só colunas preenchidas
+    + edição inline/remap). Os SPECs são DERIVADOS de constantes reais
+    (`EDITABLE_CORE_COLUMNS`, `CORE_IMPORT_TARGETS`, `IMPORT_NEW_FIELD_TYPES`,
+    `DATA_TYPE_LABELS`, `FORMULA_FUNC_GROUPS`, `CURRENCY_OPTIONS`,
+    `PROFILE_OPS`/`NO_VALUE_OPS` de `lib/config/operation-profile.ts` — o
+    MESMO módulo do choke point) e fiscalizados pelos testes de paridade —
+    nunca documente em prosa paralela. Fórmula proposta pela IA valida pelos
+    módulos ÚNICOS de `lib/records/formula-server.ts` (extraídos de
+    campos/actions — não recrie catálogos). Datas core do contrato são
     `YYYY-MM-DD` e ancoram em Brasília na ESCRITA via `coerceCore`
-    (invariante 11); campo custom de data segue texto naive.
+    (invariante 11); campo custom de data segue texto naive. O `id` devolvido
+    por `createOperation` existe para o apply encadear perfil/vínculos de
+    operação criada no lote — segue sendo o choke point, não um caminho novo.
 
 26. **Remuneração variável se resolve no ENGINE e nos choke points (§4.18).**
     O realizado por fator sai SÓ de `runCalculatedWidget` (RPCs intocados);
@@ -2605,7 +2671,13 @@ principalmente — para mantenedores humanos.
     paralelo (`compOperandCatalog` é o módulo único de editor e servidor). O
     espelho publicado escreve SÓ por `createRecord`/`updateRecord` com o
     client RLS do admin, dedup por `mirror_record_id` (nunca `source_id`).
-    Leitura do vendedor via `auth_responsible_ids()` na policy de
+    Membros por operação (`config.memberOperationIds`) resolvem SÓ nos
+    callers via `loadOperationScopes` + canonicalização
+    (`operationMembersFromScopes`) — NUNCA por `records.operation_id` literal
+    nem em client component; presença da chave ⇒ lista explícita SEMPRE
+    (resolução vazia = plano sem membros, nunca fallback "todos");
+    `memberResponsibles` segue PURA (os ids resolvidos entram pelo 4º
+    argumento). Leitura do vendedor via `auth_responsible_ids()` na policy de
     `comp_entries` — remuneração é dado sensível: NUNCA afrouxar o select
     para org-wide; escrita segue admin-only. Comissão por faixas
     (`config.commission`) calcula SÓ em `computeEntry` via
