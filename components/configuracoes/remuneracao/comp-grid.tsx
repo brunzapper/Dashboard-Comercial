@@ -1,9 +1,10 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Grade mensal da remuneração (0112): linhas = membros canônicos; colunas =
-// Base | por fator (Alvo | Real. | Ating.% | Valor) | Bônus | Total. TODO o
-// detalhamento é derivado no cliente pelo MESMO computeEntry do servidor
-// (efetivo = manual ?? calculado): editar célula atualiza a linha na hora
-// (estado otimista) e persiste via saveTarget (alvo → linha de goals) ou
+// Base | por fator (Alvo | Real. | Ating.% | Valor) | Comissão (se o plano
+// tiver faixas) | Bônus | Total. TODO o detalhamento é derivado no cliente
+// pelo MESMO computeEntry do servidor (efetivo = manual ?? calculado; o id do
+// membro seleciona a tabela de faixas dele): editar célula atualiza a linha na
+// hora (estado otimista) e persiste via saveTarget (alvo → linha de goals) ou
 // saveEntryInputs (overrides/bônus/base). Célula derivada com override ganha
 // ponto âmbar + "voltar ao calculado" (limpa a chave). "Recalcular" re-consulta
 // o realizado (engine); "Publicar" materializa o espelho.
@@ -250,6 +251,14 @@ export function CompGrid(props: CompGridProps) {
                   </span>
                 </TableHead>
               ))}
+              {props.config.commission ? (
+                <TableHead
+                  className="border-l text-right"
+                  title={commissionHeaderTitle(props.config)}
+                >
+                  Comissão
+                </TableHead>
+              ) : null}
               <TableHead className="border-l text-right">Bônus</TableHead>
               <TableHead className="text-right">Total</TableHead>
             </TableRow>
@@ -259,6 +268,7 @@ export function CompGrid(props: CompGridProps) {
               {props.config.factors.map((f) => (
                 <FactorSubHeader key={f.id} />
               ))}
+              {props.config.commission ? <TableHead className="border-l" /> : null}
               <TableHead className="border-l" />
               <TableHead />
             </TableRow>
@@ -288,9 +298,9 @@ export function CompGrid(props: CompGridProps) {
         </Table>
       </div>
       <p className="text-muted-foreground text-xs">
-        Alvo, Base e Bônus são digitados. Real., Ating.% e valores são
-        calculados — duplo clique sobrescreve à mão (ponto âmbar; ✕ volta ao
-        calculado). Alvos são metas (Configurações → Metas).
+        Alvo, Base e Bônus são digitados. Real., Ating.%, valores e Comissão
+        são calculados — duplo clique sobrescreve à mão (ponto âmbar; ✕ volta
+        ao calculado). Alvos são metas (Configurações → Metas).
       </p>
     </div>
   );
@@ -305,6 +315,18 @@ function FactorSubHeader() {
       <TableHead className="text-right text-xs">Valor</TableHead>
     </>
   );
+}
+
+// Tooltip do header da coluna Comissão: gatilho, base e nº de faixas.
+function commissionHeaderTitle(config: CompPlanConfig): string {
+  const c = config.commission!;
+  const byId = new Map(config.factors.map((f) => [f.id, f.label]));
+  const trigger = byId.get(c.triggerFactorId) ?? c.triggerFactorId;
+  const basis =
+    c.basisKind === "base"
+      ? "base variável"
+      : `realizado de ${byId.get(c.basisFactorId ?? "") ?? "?"}`;
+  return `Gatilho: atingimento de ${trigger} · Incide sobre: ${basis} · ${c.tiers.length} faixa(s) — maior limiar ≥ vence`;
 }
 
 function GridRow(props: {
@@ -326,7 +348,8 @@ function GridRow(props: {
     baseAmount ?? props.plan.base_amount_default,
     inputs,
     computed?.realized ?? {},
-    row?.targets ?? {}
+    row?.targets ?? {},
+    props.member.id
   );
 
   const setOverride = (
@@ -394,6 +417,43 @@ function GridRow(props: {
           />
         );
       })}
+      {/* Comissão por faixas: derivada (tooltip mostra a faixa) com override. */}
+      {breakdown.commission != null ? (
+        <EditableCell
+          className="border-l"
+          display={
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>{fmtMoney(breakdown.commission.value)}</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {breakdown.commission.tier
+                  ? `Faixa ≥ ${fmtNum(breakdown.commission.tier.fromPct)}%: ${fmtNum(
+                      breakdown.commission.tier.ratePct
+                    )}%` +
+                    (breakdown.commission.triggerAttainmentPct != null
+                      ? ` — ating. do gatilho ${fmtNum(
+                          breakdown.commission.triggerAttainmentPct
+                        )}%`
+                      : "")
+                  : "Nenhuma faixa atingida"}
+                {config.commission?.memberTiers?.[props.member.id]
+                  ? " · faixas personalizadas do membro"
+                  : ""}
+              </TooltipContent>
+            </Tooltip>
+          }
+          overridden={breakdown.commission.overridden}
+          onSave={(v) => {
+            const overrides = { ...inputs.overrides };
+            if (v == null) delete overrides.commission;
+            else overrides.commission = v;
+            props.onRow({ inputs: { ...inputs, overrides } });
+            props.onPersist({ overrides: { commission: v } });
+          }}
+          current={inputs.overrides.commission ?? null}
+        />
+      ) : null}
       {/* Bônus: popover com a lista. */}
       <TableCell className="border-l text-right">
         <BonusCell
@@ -429,11 +489,11 @@ function GridRow(props: {
           breakdown.totalOverridden ? "Total manual — ✕ volta ao calculado" : null
         }
         onSave={(v) => {
-          const factors = inputs.overrides.factors;
-          const overrides =
-            v == null
-              ? { factors }
-              : { factors, total: v };
+          // Spread do objeto inteiro — reconstruir só {factors, total}
+          // descartaria overrides.commission do estado otimista.
+          const overrides = { ...inputs.overrides };
+          if (v == null) delete overrides.total;
+          else overrides.total = v;
           props.onRow({ inputs: { ...inputs, overrides } });
           props.onPersist({ overrides: { total: v } });
         }}

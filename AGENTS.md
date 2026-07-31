@@ -489,7 +489,20 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`config.totalFormula`) avalia SÓ por `evaluateFormula` sobre o mapa
   `comp:*` de `computeEntry` (catálogo único `compOperandCatalog` — editor e
   servidor; kind "record", SOMASE proibido); resultado não-numérico ⇒ total
-  null, e `overrides.total` vence tudo. O espelho "Publicar"
+  null, e `overrides.total` vence tudo. **Comissão por faixas (31/07/2026):**
+  bloco opcional `config.commission` (sem migração; parse fail-closed —
+  gatilho/base apontando fator inexistente derruba o config) calcula SÓ em
+  `computeEntry` via `resolveCommissionTiers`/`selectCommissionTier`: o
+  atingimento EFETIVO do gatilho escolhe a faixa (maior `fromPct` satisfeito
+  vence, `>=`; nenhuma ⇒ 0, nunca fabricar), a % incide sobre a base variável
+  ou o realizado EFETIVO de um fator, e `memberTiers[respId CANÔNICO]`
+  substitui a tabela do plano INTEIRA (config durável; órfão preservado e
+  nunca selecionado). NUNCA gerar fórmula a partir das faixas; com
+  `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
+  automática; operando existe SÓ com o bloco presente). Todo call site de
+  `computeEntry` passa `responsible_id` como `memberId`; override por célula
+  em `inputs.overrides.commission`; espelho ganha `rem_comissao` (vazio sem
+  comissão). O espelho "Publicar"
   (`lib/comp/mirror.ts`) escreve SÓ por `createRecord`/`updateRecord` com o
   client RLS do admin (invariante 25), base manual `remuneracao` (ponteiro em
   `sync_config` 'remuneracao_mirror'), `closed_at` = último dia do mês

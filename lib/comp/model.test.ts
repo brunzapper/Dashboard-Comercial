@@ -1,10 +1,13 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Testes do modelo PURO da remuneração variável. Invariantes duras: parse
 // FAIL-CLOSED do config (jsonb adulterado nunca "roda como der") e leniente
 // por chave dos inputs; efetivo = manual ?? calculado em CADA variável
 // (limpar override restaura a derivação); cap/floor só no calculado; fórmula
 // livre avalia sobre as variáveis EFETIVAS (sincronia) e resultado inválido
 // vira total null (nunca 0); overrides.total vence os dois modos.
+// v1.1: comissão por faixas — parse fail-closed do bloco, seleção >= com
+// maior limiar vencendo, tabela do membro > plano, efetivo alimenta a
+// seleção e comp:comissao só compõe a fórmula explicitamente.
 import { describe, expect, it } from "vitest";
 
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
@@ -12,7 +15,9 @@ import type { Formula, FormulaToken } from "@/lib/records/formulas";
 import {
   COMP_BASE_REF,
   COMP_BONUS_REF,
+  COMP_COMMISSION_REF,
   COMP_FACTORS_REF,
+  MAX_COMMISSION_TIERS,
   MAX_TOTAL_FORMULA_TOKENS,
   compFactorRef,
   compOperandCatalog,
@@ -21,7 +26,10 @@ import {
   monthPeriod,
   parseCompEntryInputs,
   parseCompPlanConfig,
+  resolveCommissionTiers,
   roundMoney,
+  selectCommissionTier,
+  type CompCommissionConfig,
   type CompPlanConfig,
 } from "@/lib/comp/model";
 
@@ -63,6 +71,30 @@ function makeConfig(over: Partial<CompPlanConfig> = {}): CompPlanConfig {
 }
 
 const emptyInputs = () => parseCompEntryInputs({});
+
+// Gatilho = atingimento de Reuniões (f_b); base = realizado de Vendas (f_a).
+function withCommission(
+  over: Partial<CompCommissionConfig> = {},
+  cfgOver: Partial<CompPlanConfig> = {}
+): CompPlanConfig {
+  return makeConfig({
+    commission: {
+      triggerFactorId: "f_b",
+      basisKind: "factor",
+      basisFactorId: "f_a",
+      tiers: [
+        { fromPct: 50, ratePct: 1 },
+        { fromPct: 80, ratePct: 3 },
+        { fromPct: 100, ratePct: 5 },
+      ],
+      ...over,
+    },
+    ...cfgOver,
+  });
+}
+
+const reparse = (cfg: CompPlanConfig) =>
+  parseCompPlanConfig(JSON.parse(JSON.stringify(cfg)));
 
 describe("parseCompPlanConfig (fail-closed)", () => {
   it("aceita config válido e aplica defaults (money=true)", () => {
@@ -106,6 +138,76 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     const cfg = { ...makeConfig(), totalFormula: { tokens } };
     expect(parseCompPlanConfig(JSON.parse(JSON.stringify(cfg)))).toBeNull();
   });
+
+  it("comissão: aceita bloco válido (memberTiers preservado) e segue sem ele", () => {
+    const parsed = reparse(
+      withCommission({ memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] } })
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.commission!.triggerFactorId).toBe("f_b");
+    expect(parsed!.commission!.tiers).toHaveLength(3);
+    expect(parsed!.commission!.memberTiers).toEqual({
+      r1: [{ fromPct: 0, ratePct: 10 }],
+    });
+    // Retrocompat: config sem o bloco parseia e fica sem commission.
+    expect(reparse(makeConfig())!.commission).toBeUndefined();
+  });
+
+  it("comissão: rejeita gatilho/base fantasmas, basisKind inválido e factor sem base", () => {
+    expect(reparse(withCommission({ triggerFactorId: "f_x" }))).toBeNull();
+    expect(reparse(withCommission({ basisFactorId: "f_x" }))).toBeNull();
+    expect(
+      reparse(
+        withCommission({ basisKind: "pct" as unknown as "base" })
+      )
+    ).toBeNull();
+    const semBase = withCommission();
+    delete semBase.commission!.basisFactorId;
+    expect(reparse(semBase)).toBeNull();
+    // basisKind "base" dispensa basisFactorId.
+    const base = withCommission({ basisKind: "base" });
+    delete base.commission!.basisFactorId;
+    expect(reparse(base)).not.toBeNull();
+  });
+
+  it("comissão: rejeita faixas vazias/desordenadas/duplicadas/negativas e acima do teto", () => {
+    expect(reparse(withCommission({ tiers: [] }))).toBeNull();
+    expect(
+      reparse(
+        withCommission({
+          tiers: [
+            { fromPct: 80, ratePct: 3 },
+            { fromPct: 50, ratePct: 1 },
+          ],
+        })
+      )
+    ).toBeNull();
+    expect(
+      reparse(
+        withCommission({
+          tiers: [
+            { fromPct: 80, ratePct: 3 },
+            { fromPct: 80, ratePct: 5 },
+          ],
+        })
+      )
+    ).toBeNull();
+    expect(
+      reparse(withCommission({ tiers: [{ fromPct: -1, ratePct: 3 }] }))
+    ).toBeNull();
+    expect(
+      reparse(withCommission({ tiers: [{ fromPct: 0, ratePct: -3 }] }))
+    ).toBeNull();
+    const demais = Array.from({ length: MAX_COMMISSION_TIERS + 1 }, (_, i) => ({
+      fromPct: i * 10,
+      ratePct: 1,
+    }));
+    expect(reparse(withCommission({ tiers: demais }))).toBeNull();
+    // memberTiers com tabela inválida derruba o config inteiro (fail-closed).
+    expect(
+      reparse(withCommission({ memberTiers: { r1: [] } }))
+    ).toBeNull();
+  });
 });
 
 describe("parseCompEntryInputs (leniente por chave)", () => {
@@ -125,6 +227,17 @@ describe("parseCompEntryInputs (leniente por chave)", () => {
     expect(parsed.overrides.total).toBeUndefined();
     expect(parsed.bonuses).toEqual([{ id: "b1", label: "Campanha", amount: 500 }]);
     expect(parsed.note).toBe("obs");
+  });
+
+  it("overrides.commission finito sobrevive; inválido cai", () => {
+    expect(
+      parseCompEntryInputs({ overrides: { commission: 250.5 } }).overrides
+        .commission
+    ).toBe(250.5);
+    expect(
+      parseCompEntryInputs({ overrides: { commission: "x" } }).overrides
+        .commission
+    ).toBeUndefined();
   });
 });
 
@@ -304,6 +417,156 @@ describe("computeEntry — fórmula livre de total", () => {
   });
 });
 
+describe("comissão por faixas", () => {
+  // Cenário base: alvo de f_b (qtd) = 10; alvo de f_a (valor) = 100000.
+  const realized = { f_a: 50000, f_b: 9 };
+  const targets = { f_a: 100000, f_b: 10 };
+
+  it("selectCommissionTier: maior >= vence; limiar exato entra; abaixo/null ⇒ null", () => {
+    const tiers = withCommission().commission!.tiers;
+    expect(selectCommissionTier(tiers, 90)?.ratePct).toBe(3);
+    expect(selectCommissionTier(tiers, 100)?.ratePct).toBe(5);
+    expect(selectCommissionTier(tiers, 250)?.ratePct).toBe(5);
+    expect(selectCommissionTier(tiers, 50)?.ratePct).toBe(1);
+    expect(selectCommissionTier(tiers, 49)).toBeNull();
+    expect(selectCommissionTier(tiers, null)).toBeNull();
+  });
+
+  it("resolveCommissionTiers: membro > plano; sem override ⇒ plano; sem comissão ⇒ null", () => {
+    const cfg = withCommission({
+      memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] },
+    });
+    expect(resolveCommissionTiers(cfg, "r1")![0].ratePct).toBe(10);
+    expect(resolveCommissionTiers(cfg, "r2")).toBe(cfg.commission!.tiers);
+    expect(resolveCommissionTiers(cfg)).toBe(cfg.commission!.tiers);
+    expect(resolveCommissionTiers(makeConfig(), "r1")).toBeNull();
+  });
+
+  it("base 'factor': % da faixa sobre o realizado EFETIVO; total soma no modo estruturado", () => {
+    const bd = computeEntry(withCommission(), 1000, emptyInputs(), realized, targets);
+    // f_b ating. 90% ⇒ faixa >= 80 ⇒ 3% de 50000 = 1500.
+    expect(bd.commission).not.toBeNull();
+    expect(bd.commission!.tier?.ratePct).toBe(3);
+    expect(bd.commission!.triggerAttainmentPct).toBe(90);
+    expect(bd.commission!.value).toBe(1500);
+    // f_a: 1000×60%×50% = 300; f_b: 1000×40%×90% = 360.
+    expect(bd.factorsTotal).toBe(660);
+    expect(bd.total).toBe(2160);
+    // Override do realizado da BASE muda a comissão em sincronia (efetivo).
+    const bd2 = computeEntry(
+      withCommission(),
+      1000,
+      parseCompEntryInputs({
+        overrides: { factors: { f_a: { realized: 80000 } } },
+      }),
+      realized,
+      targets
+    );
+    expect(bd2.commission!.value).toBe(2400);
+  });
+
+  it("base 'base': % sobre a base variável; sem plano de comissão ⇒ breakdown null", () => {
+    const cfg = withCommission({ basisKind: "base" });
+    delete cfg.commission!.basisFactorId;
+    const bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets);
+    expect(bd.commission!.value).toBe(30); // 3% de 1000
+    expect(computeEntry(makeConfig(), 1000, emptyInputs(), realized, targets).commission).toBeNull();
+  });
+
+  it("gatilho sem atingimento ou abaixo da menor faixa ⇒ 0 com tier null", () => {
+    // Alvo do gatilho ausente ⇒ ating. null.
+    let bd = computeEntry(withCommission(), 1000, emptyInputs(), realized, {
+      f_a: 100000,
+    });
+    expect(bd.commission!.tier).toBeNull();
+    expect(bd.commission!.value).toBe(0);
+    // Ating. 40% < menor faixa (50).
+    bd = computeEntry(
+      withCommission(),
+      1000,
+      emptyInputs(),
+      { f_a: 50000, f_b: 4 },
+      targets
+    );
+    expect(bd.commission!.tier).toBeNull();
+    expect(bd.commission!.value).toBe(0);
+    expect(bd.total).toBe(bd.factorsTotal);
+  });
+
+  it("override de ating. do gatilho muda a faixa; cap do gatilho limita a seleção", () => {
+    // Override manual de 100% no gatilho sobe para a faixa de 5%.
+    const bd = computeEntry(
+      withCommission(),
+      1000,
+      parseCompEntryInputs({
+        overrides: { factors: { f_b: { attainmentPct: 100 } } },
+      }),
+      realized,
+      targets
+    );
+    expect(bd.commission!.tier?.ratePct).toBe(5);
+    // Sem override, realizado 20/10 = 200% clampado no cap 120 ⇒ faixa 100.
+    const bd2 = computeEntry(
+      withCommission(),
+      1000,
+      emptyInputs(),
+      { f_a: 50000, f_b: 20 },
+      targets
+    );
+    expect(bd2.commission!.triggerAttainmentPct).toBe(120);
+    expect(bd2.commission!.tier?.ratePct).toBe(5);
+  });
+
+  it("overrides.commission vence o calculado; limpar restaura; memberTiers seleciona por membro", () => {
+    const cfg = withCommission({
+      memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] },
+    });
+    let bd = computeEntry(
+      cfg,
+      1000,
+      parseCompEntryInputs({ overrides: { commission: 42 } }),
+      realized,
+      targets,
+      "r1"
+    );
+    expect(bd.commission!.value).toBe(42);
+    expect(bd.commission!.overridden).toBe(true);
+    // Limpar (chave ausente) volta ao calculado — pela tabela do MEMBRO (10%).
+    bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets, "r1");
+    expect(bd.commission!.value).toBe(5000);
+    expect(bd.commission!.overridden).toBe(false);
+    // Membro sem override usa a tabela do plano (3%).
+    bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets, "r2");
+    expect(bd.commission!.value).toBe(1500);
+    // Sem memberId (call sites legados) idem.
+    bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets);
+    expect(bd.commission!.value).toBe(1500);
+  });
+
+  it("modo fórmula: comp:comissao compõe explicitamente (sem soma automática)", () => {
+    const cfg = withCommission(
+      {},
+      {
+        totalFormula: f(
+          ref(COMP_COMMISSION_REF),
+          op("+"),
+          ref(COMP_BONUS_REF)
+        ),
+      }
+    );
+    const bd = computeEntry(
+      cfg,
+      1000,
+      parseCompEntryInputs({ bonuses: [{ id: "b", label: "x", amount: 50 }] }),
+      realized,
+      targets
+    );
+    // Só comissão + bônus — os 660 de fatores NÃO entram sozinhos.
+    expect(bd.total).toBe(1550);
+    expect(bd.totalFromFormula).toBe(true);
+  });
+});
+
 describe("compOperandCatalog", () => {
   it("deriva 4 refs por fator + 3 totais, com rótulos por fator", () => {
     const cat = compOperandCatalog(makeConfig());
@@ -314,6 +577,15 @@ describe("compOperandCatalog", () => {
     expect(new Set(refs).size).toBe(refs.length);
     const valor = cat.find((o) => o.ref === "comp:f:f_a:valor");
     expect(valor?.label).toBe("Vendas — Valor (R$)");
+  });
+
+  it("comp:comissao entra SÓ com comissão configurada", () => {
+    expect(compOperandCatalog(makeConfig()).map((o) => o.ref)).not.toContain(
+      COMP_COMMISSION_REF
+    );
+    const cat = compOperandCatalog(withCommission());
+    expect(cat).toHaveLength(12);
+    expect(cat.map((o) => o.ref)).toContain(COMP_COMMISSION_REF);
   });
 });
 

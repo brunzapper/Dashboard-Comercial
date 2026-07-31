@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: total por membro com tabela de faixas própria)
 // Testes do engine I/O da remuneração (fake-supabase fail-closed): uma
 // consulta runCalculatedWidget por membro×fator com o filtro de responsável
 // chegando EXPANDIDO ao RPC (canon no choke point); alvos lidos de `goals`
@@ -228,6 +228,61 @@ describe("recomputePlanMonth", () => {
     expect(insertPayload.period_year).toBe(2026);
     expect(insertPayload.period_month).toBe(7);
     expect(insertPayload.total).toBe(240);
+  });
+
+  it("comissão por faixas: total gravado reflete a tabela do MEMBRO (member.id chega ao computeEntry)", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const metric = (args.p_metrics as { field: string }[])[0].field;
+          const m1 = JSON.stringify(respFilterOf(args) ?? "").includes("m1");
+          if (metric === "value")
+            return { data: [{ metric_1: m1 ? 80 : 40 }], error: null };
+          return { data: [{ metric_1: m1 ? 10 : 5 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: GOALS_ROWS,
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: {
+        ...PLAN,
+        config: {
+          ...CONFIG,
+          commission: {
+            triggerFactorId: "f_r",
+            basisKind: "factor",
+            basisFactorId: "f_v",
+            tiers: [{ fromPct: 100, ratePct: 10 }],
+            memberTiers: { m1: [{ fromPct: 0, ratePct: 50 }] },
+          },
+        },
+      },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out.ok).toBe(true);
+    // m1: fatores 880 + comissão pela tabela do MEMBRO (50% de 80 = 40) — a do
+    // plano (10% ⇒ 8) daria 888. m2: gatilho sem alvo ⇒ comissão 0 ⇒ 240.
+    const m1 = writes.find((w) => w.responsible_id === "m1")!;
+    expect(m1.total).toBe(920);
+    const m2 = writes.find((w) => w.responsible_id === "m2")!;
+    expect(m2.total).toBe(240);
   });
 
   it("falha de consulta de UM fator isola: realized null + errors[fid]", async () => {

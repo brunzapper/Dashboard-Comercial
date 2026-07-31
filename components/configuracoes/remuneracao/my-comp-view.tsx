@@ -1,9 +1,10 @@
-// Versão: 1.0 | Data: 30/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // "Minha remuneração" (0112) — visão READ-ONLY do vendedor: a RLS de
 // comp_entries entrega só as linhas do PRÓPRIO grupo canônico; o detalhamento
 // é derivado pelo MESMO computeEntry do gestor (transparência: célula com
-// override manual mostra o ponto âmbar). Nada é editável; sem Recalcular/
-// Publicar. Navegação de mês via searchParams (a page recarrega).
+// override manual mostra o ponto âmbar; v1.1: linha de Comissão com a faixa
+// aplicada — o responsible_id da entry seleciona a tabela do membro). Nada é
+// editável; sem Recalcular/Publicar. Navegação de mês via searchParams.
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
@@ -145,7 +146,8 @@ function PlanCard(props: {
     props.entry.base_amount ?? props.plan.base_amount_default,
     inputs,
     computed?.realized ?? {},
-    props.targets
+    props.targets,
+    props.entry.responsible_id
   );
 
   return (
@@ -197,6 +199,24 @@ function PlanCard(props: {
               </TableRow>
             );
           })}
+          {breakdown.commission != null ? (
+            <TableRow>
+              <TableCell className="text-muted-foreground">
+                Comissão
+                <span className="ml-1 text-xs">
+                  {breakdown.commission.tier
+                    ? `(faixa ≥ ${fmtNum(breakdown.commission.tier.fromPct)}% ⇒ ${fmtNum(
+                        breakdown.commission.tier.ratePct
+                      )}%)`
+                    : "(nenhuma faixa atingida)"}
+                </span>
+              </TableCell>
+              <TableCell colSpan={4} className="text-right tabular-nums">
+                {breakdown.commission.overridden ? <OverrideDot /> : null}
+                {fmtMoney(breakdown.commission.value)}
+              </TableCell>
+            </TableRow>
+          ) : null}
           <TableRow>
             <TableCell className="text-muted-foreground">Base variável</TableCell>
             <TableCell colSpan={4} className="text-right tabular-nums">
