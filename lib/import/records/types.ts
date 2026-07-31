@@ -46,6 +46,13 @@ export interface EntryFieldSpec {
   options?: string[];
   /** Só options DURAS bloqueiam a validação (custom selecao/relação/moeda). */
   strictOptions?: boolean;
+  /**
+   * Campo de SYNC (Bitrix) aceito como ALVO no contrato registros-update
+   * (paridade com /registros, que edita campos de Sync via forceSync). A
+   * escrita é LOCAL (carimbo protege do reconcile); a prévia avisa. Ausente
+   * no fluxo de inserção.
+   */
+  sync?: boolean;
 }
 
 /** Contexto de validação/prompt de UMA base (montado no servidor). */
