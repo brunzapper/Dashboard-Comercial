@@ -1,6 +1,8 @@
-// Versão: 1.2 | Data: 27/07/2026
+// Versão: 1.3 | Data: 30/07/2026
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) como sub-abas. Cada sub-aba mantém o mesmo
+// v1.3 (30/07/2026): aba "Remuneração" (0112) — sem gate de papel (a page
+//   ramifica admin/vendedor; ver AREA_GATES.remuneracao).
 // gating de papel/permissão de quando eram itens de topo. Sub-páginas ainda
 // aplicam requireRole/requirePermission — este layout só decide quais abas mostrar.
 // v1.2 (27/07/2026): Bases (fontes) e Log moveram para /registros/*, Moedas
@@ -37,6 +39,7 @@ const ALL_TABS: SettingsTab[] = [
   { href: "/configuracoes/operacoes", label: "Operações" },
   { href: "/configuracoes/responsaveis", label: "Responsáveis" },
   { href: "/configuracoes/metas", label: "Metas" },
+  { href: "/configuracoes/remuneracao", label: "Remuneração" },
   { href: "/configuracoes/presets", label: "Presets" },
   { href: "/configuracoes/snapshots", label: "Snapshots" },
   { href: "/configuracoes/integracoes", label: "Integrações" },

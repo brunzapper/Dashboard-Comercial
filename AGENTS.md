@@ -472,6 +472,34 @@ This version has breaking changes — APIs, conventions, and file structure may 
   catálogos). Datas core do contrato são `YYYY-MM-DD` ancoradas na escrita por
   `coerceCore`→`anchorNaiveToBrasilia` (invariante 11); custom segue texto
   naive. Ver `docs/arquitetura.md` §4.17 e invariante 25.
+- **Remuneração variável se resolve no ENGINE e nos choke points (0112,
+  30/07/2026):** `comp_plans.config` é jsonb VERSIONADO com parse FAIL-CLOSED
+  (`lib/comp/model.ts`); o realizado por membro×fator sai SÓ de
+  `runCalculatedWidget` (filtro `responsible_id eq` — canon no choke point;
+  período de mês por `monthPeriod` com `fieldBySource` do catálogo inteiro;
+  RPCs de widget INTOCADOS — engine em `lib/comp/engine.ts`). O efetivo é
+  `manual ?? calculado` derivado por `computeEntry` NA LEITURA:
+  `comp_entries.computed` guarda só o snapshot cru e o recompute NUNCA regrava
+  `inputs`/`base_amount` (overrides sobrevivem; limpar a chave restaura a
+  derivação sem re-consulta; cap/floor clampam só o calculado). Alvos são
+  LINHAS de `goals` (scope 'responsible', id CANÔNICO, métrica do registry
+  `goal_metrics` vinculada por `factor.metricKey`) escritas SÓ por
+  `lib/metas/upsert.ts` — célula limpa EXCLUI a meta (nunca `target=0`); a
+  área Metas gerencia os mesmos alvos. A fórmula LIVRE de total
+  (`config.totalFormula`) avalia SÓ por `evaluateFormula` sobre o mapa
+  `comp:*` de `computeEntry` (catálogo único `compOperandCatalog` — editor e
+  servidor; kind "record", SOMASE proibido); resultado não-numérico ⇒ total
+  null, e `overrides.total` vence tudo. O espelho "Publicar"
+  (`lib/comp/mirror.ts`) escreve SÓ por `createRecord`/`updateRecord` com o
+  client RLS do admin (invariante 25), base manual `remuneracao` (ponteiro em
+  `sync_config` 'remuneracao_mirror'), `closed_at` = último dia do mês
+  `YYYY-MM-DD` (coerceCore ancora — invariante 11), dedup por
+  `comp_entries.mirror_record_id` (NUNCA `source_id`). RLS: `comp_entries`
+  select = admin OU `auth_responsible_ids()` (vendedor vê só o próprio grupo)
+  — NUNCA afrouxar para org-wide; escrita admin-only; `comp_plans` select
+  org-wide (só o desenho). Área `remuneracao` SEM gate de papel (a page
+  ramifica admin/vendedor). Fiscalizado por `lib/comp/*.test.ts` +
+  `lib/metas/upsert.test.ts`. Ver `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um
   `field_definitions` local ("Fase — <nome>", `selecao`) e guarda a chave em

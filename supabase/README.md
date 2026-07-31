@@ -1,4 +1,7 @@
-<!-- Versão: 1.3 | Data: 27/07/2026 -->
+<!-- Versão: 1.4 | Data: 30/07/2026 -->
+<!-- v1.4 (30/07/2026): seção da 0112 (comp_plans/comp_entries — remuneração
+     variável; aplicar antes do deploy de preferência, só a aba nova depende).
+-->
 <!-- v1.3 (27/07/2026): seção da 0108 (organizations.theme — padrão visual da
      org; pode ser aplicada antes ou depois do deploy, código tolera). -->
 <!-- v1.2 (26/07/2026): seção da 0101 (agrupamento de responsáveis —
@@ -501,3 +504,17 @@ aplicada antes OU depois do deploy: o `getActiveOrg` tolera a coluna ausente
 (refaz o select sem ela) — até aplicar, o padrão da org simplesmente não é
 salvo/lido e todo mundo segue no padrão do app (claro + #7431B3) ou na
 preferência individual (`user_settings`, sem migração).
+
+## Remuneração variável (migração 0112, 30/07/2026)
+
+`0112_comp_plans.sql` — arquivo único, idempotente: cria `comp_plans` (planos:
+config jsonb versionado; SELECT org-wide, escrita admin) e `comp_entries`
+(lançamentos por responsável×mês; SELECT admin OU o próprio grupo canônico via
+`auth_responsible_ids()`, escrita admin), com triggers `updated_at`, índices e
+`revoke` de `anon`. Requer as migrações 0089–0091 (org/RLS) e 0101
+(`auth_responsible_ids`). Aplicar de preferência ANTES do deploy; pré-migração
+a aba Configurações → Remuneração falha só no load da page (tabela ausente) e
+as actions retornam erro legível — nenhum outro fluxo depende dela. A base
+espelho "Remuneração" NÃO é criada pela migração: nasce no primeiro "Publicar"
+(data_sources key `remuneracao` + campos `rem_*`, ponteiro em `sync_config`
+chave `remuneracao_mirror`).

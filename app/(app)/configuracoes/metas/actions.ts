@@ -1,5 +1,9 @@
-// Versão: 1.1 | Data: 23/07/2026
+// Versão: 1.2 | Data: 30/07/2026
 // Server Actions da tela de Metas (goals) — admin. RLS de goals exige admin.
+// v1.2 (30/07/2026): a dança find-then-update do upsert de goals e o append no
+//   registry de métricas foram EXTRAÍDOS para lib/metas/upsert.ts (módulo
+//   compartilhado com a Remuneração 0112 — a grade digita alvos que são linhas
+//   de goals); estas actions viraram wrappers finos. Comportamento idêntico.
 // v1.1 (23/07/2026): multi-org (0090) — carimbo de organization_id em goals/
 //   non_working_days/sync_config e onConflict das PKs compostas.
 "use server";
@@ -10,11 +14,8 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
-import {
-  GOAL_METRICS_CONFIG_KEY,
-  loadGoalMetrics,
-} from "@/lib/config/goal-metrics";
 import { goalMetricKeyFromLabel } from "@/lib/metas/metrics";
+import { registerGoalMetrics, upsertGoalTarget } from "@/lib/metas/upsert";
 
 export interface GoalState {
   ok?: boolean;
@@ -56,36 +57,14 @@ export async function createGoal(
     return { ok: false, message: "Selecione o responsável." };
 
   const supabase = await createClient();
-  // Upsert manual: o índice único usa coalesce() (expressão), então não dá para
-  // usar onConflict por colunas — procuramos a meta existente e atualizamos.
-  let find = supabase
-    .from("goals")
-    .select("id")
-    .eq("period_year", year)
-    .eq("scope", scope)
-    .eq("metric", metric);
-  find = month == null ? find.is("period_month", null) : find.eq("period_month", month);
-  find = operationId ? find.eq("operation_id", operationId) : find.is("operation_id", null);
-  find = responsibleId
-    ? find.eq("responsible_id", responsibleId)
-    : find.is("responsible_id", null);
-  const { data: existing } = await find.maybeSingle();
-
   const orgId = await getActiveOrgId();
-  const row = {
-    period_year: year,
-    period_month: month,
-    scope,
-    operation_id: operationId,
-    responsible_id: responsibleId,
-    metric,
-    target,
-    ...(orgId ? { organization_id: orgId } : {}),
-  };
-  const { error } = existing?.id
-    ? await supabase.from("goals").update({ target }).eq("id", existing.id)
-    : await supabase.from("goals").insert(row);
-  if (error) return { ok: false, message: error.message };
+  const error = await upsertGoalTarget(
+    supabase,
+    orgId,
+    { year, month, scope, operationId, responsibleId, metric },
+    target
+  );
+  if (error) return { ok: false, message: error };
   revalidatePath("/configuracoes/metas");
   return { ok: true, message: "Meta salva." };
 }
@@ -114,30 +93,15 @@ export async function createGoalMetric(label: string): Promise<GoalState> {
   if (!key) return { ok: false, message: "Nome inválido para gerar a chave." };
 
   const supabase = await createClient();
-  const registry = await loadGoalMetrics(supabase);
-  if (registry.some((m) => m.key === key))
-    return { ok: false, message: `Métrica "${key}" já existe.` };
-
-  // sync_config tem PK (organization_id, key) desde a 0090.
+  // sync_config tem PK (organization_id, key) desde a 0090; chave existente
+  // (builtin ou custom) não é re-registrada (registerGoalMetrics pula).
   const orgId = await getActiveOrgId();
-  let regQuery = supabase
-    .from("sync_config")
-    .select("value")
-    .eq("key", GOAL_METRICS_CONFIG_KEY);
-  if (orgId) regQuery = regQuery.eq("organization_id", orgId);
-  const { data } = await regQuery.maybeSingle();
-  const current = Array.isArray(data?.value) ? (data.value as unknown[]) : [];
-  const { error } = await supabase
-    .from("sync_config")
-    .upsert(
-      {
-        key: GOAL_METRICS_CONFIG_KEY,
-        value: [...current, { key, label: clean }],
-        ...(orgId ? { organization_id: orgId } : {}),
-      },
-      { onConflict: "organization_id,key" }
-    );
-  if (error) return { ok: false, message: error.message };
+  const { added, error } = await registerGoalMetrics(supabase, orgId, [
+    { key, label: clean },
+  ]);
+  if (error) return { ok: false, message: error };
+  if (added.length === 0)
+    return { ok: false, message: `Métrica "${key}" já existe.` };
   revalidatePath("/configuracoes/metas");
   return { ok: true, message: `Métrica "${clean}" criada (chave ${key}).` };
 }
