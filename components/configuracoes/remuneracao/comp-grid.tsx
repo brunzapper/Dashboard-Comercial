@@ -1,5 +1,9 @@
-// Versão: 1.2 | Data: 31/07/2026 (v1.2: linhas = lista efetiva manual ∪
-// operações via helpers do model — mesma resolução do servidor)
+// Versão: 1.3 | Data: 31/07/2026 (v1.3: comissão multi-bloco — tooltip lista
+// os blocos; alvo com moeda própria do fator: formato na moeda digitada,
+// convertido no tooltip via targetRates do server, itálico quando o alvo vem
+// do padrão do plano e erro destrutivo quando falta a cotação do trimestre)
+// v1.2: linhas = lista efetiva manual ∪ operações via helpers do model —
+// mesma resolução do servidor.
 // Grade mensal da remuneração (0112): linhas = membros canônicos; colunas =
 // Base | por fator (Alvo | Real. | Ating.% | Valor) | Comissão (se o plano
 // tiver faixas) | Bônus | Total. TODO o detalhamento é derivado no cliente
@@ -62,6 +66,15 @@ const fmtMoney = (v: number): string =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtNum = (v: number): string =>
   v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+// Moeda do ALVO do fator (targetCurrency) — códigos desconhecidos degradam
+// p/ prefixo cru (Intl lança em código inválido).
+function fmtMoneyIn(currency: string, v: number): string {
+  try {
+    return v.toLocaleString("pt-BR", { style: "currency", currency });
+  } catch {
+    return `${currency} ${fmtNum(v)}`;
+  }
+}
 
 function parseInput(s: string): number | null {
   const t = s.trim();
@@ -83,6 +96,9 @@ export interface CompGridProps {
   // Membros por operação (ids CANÔNICOS, resolvidos no server) — mesma fonte
   // da lista efetiva do engine; a grade nunca resolve operação sozinha.
   operationMembersById: Record<string, string[]>;
+  // Moeda do alvo → R$/unidade no trimestre do mês (resolveTargetRates no
+  // server) — computeEntry é puro e nunca consulta cotação sozinho.
+  targetRates: Record<string, number | null>;
 }
 
 // Estado local por linha (otimista — o servidor re-deriva e o refresh da page
@@ -263,7 +279,7 @@ export function CompGrid(props: CompGridProps) {
                   </span>
                 </TableHead>
               ))}
-              {props.config.commission ? (
+              {(props.config.commissions?.length ?? 0) > 0 ? (
                 <TableHead
                   className="border-l text-right"
                   title={commissionHeaderTitle(props.config)}
@@ -280,7 +296,9 @@ export function CompGrid(props: CompGridProps) {
               {props.config.factors.map((f) => (
                 <FactorSubHeader key={f.id} />
               ))}
-              {props.config.commission ? <TableHead className="border-l" /> : null}
+              {(props.config.commissions?.length ?? 0) > 0 ? (
+                <TableHead className="border-l" />
+              ) : null}
               <TableHead className="border-l" />
               <TableHead />
             </TableRow>
@@ -292,6 +310,7 @@ export function CompGrid(props: CompGridProps) {
                 member={member}
                 config={props.config}
                 plan={props.plan}
+                targetRates={props.targetRates}
                 entry={entryByMember.get(member.id) ?? null}
                 row={rows.get(member.id) ?? null}
                 onRow={(patch) => patchRow(member.id, patch)}
@@ -329,22 +348,35 @@ function FactorSubHeader() {
   );
 }
 
-// Tooltip do header da coluna Comissão: gatilho, base e nº de faixas.
+// Tooltip do header da coluna Comissão: um resumo por bloco (gatilho, tipo,
+// base e nº de faixas); blocos somam no total.
 function commissionHeaderTitle(config: CompPlanConfig): string {
-  const c = config.commission!;
   const byId = new Map(config.factors.map((f) => [f.id, f.label]));
-  const trigger = byId.get(c.triggerFactorId) ?? c.triggerFactorId;
-  const basis =
-    c.basisKind === "base"
-      ? "base variável"
-      : `realizado de ${byId.get(c.basisFactorId ?? "") ?? "?"}`;
-  return `Gatilho: atingimento de ${trigger} · Incide sobre: ${basis} · ${c.tiers.length} faixa(s) — maior limiar ≥ vence`;
+  const lines = (config.commissions ?? []).map((c, i) => {
+    const trigger = byId.get(c.triggerFactorId) ?? c.triggerFactorId;
+    const by =
+      (c.tierBy ?? "attainment") === "realized"
+        ? `realizado de ${trigger}`
+        : `atingimento de ${trigger}`;
+    const kind = c.kind ?? "pct";
+    const basis =
+      kind === "flat"
+        ? "prêmio fixo (R$)"
+        : c.basisKind === "base"
+          ? kind === "pct"
+            ? "% da base variável"
+            : "R$ × base variável"
+          : `${kind === "pct" ? "%" : "R$ × unidade"} de ${byId.get(c.basisFactorId ?? "") ?? "?"}`;
+    return `${c.label ?? `Comissão ${i + 1}`}: gatilho ${by} · ${basis} · ${c.tiers.length} faixa(s)`;
+  });
+  return `${lines.join(" | ")} — maior limiar ≥ vence; blocos somam`;
 }
 
 function GridRow(props: {
   member: { id: string; label: string };
   config: CompPlanConfig;
   plan: CompPlanClientRow;
+  targetRates: Record<string, number | null>;
   entry: CompEntryClientRow | null;
   row: { baseAmount: number | null; inputs: CompEntryInputs; targets: Record<string, number | null> } | null;
   onRow: (patch: Partial<{ baseAmount: number | null; inputs: CompEntryInputs }>) => void;
@@ -361,7 +393,8 @@ function GridRow(props: {
     inputs,
     computed?.realized ?? {},
     row?.targets ?? {},
-    props.member.id
+    props.member.id,
+    props.targetRates
   );
 
   const setOverride = (
@@ -417,7 +450,11 @@ function GridRow(props: {
           <FactorCells
             key={f.id}
             money={f.money}
+            targetCurrency={f.targetCurrency ?? null}
             target={b.target}
+            targetBRL={b.targetBRL}
+            targetSource={b.targetSource}
+            targetRateMissing={b.targetRateMissing === true}
             realized={b.realized}
             attainmentPct={b.attainmentPct}
             payout={b.payout}
@@ -429,7 +466,7 @@ function GridRow(props: {
           />
         );
       })}
-      {/* Comissão por faixas: derivada (tooltip mostra a faixa) com override. */}
+      {/* Comissão: soma dos blocos (tooltip detalha cada um) com override. */}
       {breakdown.commission != null ? (
         <EditableCell
           className="border-l"
@@ -439,19 +476,38 @@ function GridRow(props: {
                 <span>{fmtMoney(breakdown.commission.value)}</span>
               </TooltipTrigger>
               <TooltipContent>
-                {breakdown.commission.tier
-                  ? `Faixa ≥ ${fmtNum(breakdown.commission.tier.fromPct)}%: ${fmtNum(
-                      breakdown.commission.tier.ratePct
-                    )}%` +
-                    (breakdown.commission.triggerAttainmentPct != null
-                      ? ` — ating. do gatilho ${fmtNum(
-                          breakdown.commission.triggerAttainmentPct
-                        )}%`
-                      : "")
-                  : "Nenhuma faixa atingida"}
-                {config.commission?.memberTiers?.[props.member.id]
-                  ? " · faixas personalizadas do membro"
-                  : ""}
+                <div className="flex flex-col gap-0.5">
+                  {breakdown.commissionBlocks.map((cb) => {
+                    const unit = cb.tierBy === "attainment" ? "%" : "";
+                    const tierNote = cb.tier
+                      ? `faixa ≥ ${fmtNum(cb.tier.fromPct)}${unit}: ` +
+                        (cb.kind === "pct"
+                          ? `${fmtNum(cb.tier.ratePct ?? 0)}%`
+                          : cb.kind === "flat"
+                            ? fmtMoney(cb.tier.amount ?? 0)
+                            : `${fmtMoney(cb.tier.amount ?? 0)}/un.`)
+                      : "nenhuma faixa atingida";
+                    const memberCustom = config.commissions?.some(
+                      (c) => c.id === cb.blockId && c.memberTiers?.[props.member.id]
+                    );
+                    return (
+                      <span key={cb.blockId}>
+                        {cb.label}: {fmtMoney(cb.value)} — {tierNote}
+                        {cb.triggerValue != null
+                          ? ` (gatilho ${fmtNum(cb.triggerValue)}${unit})`
+                          : ""}
+                        {memberCustom ? " · faixas do membro" : ""}
+                      </span>
+                    );
+                  })}
+                  {breakdown.commissionBlocks.length > 1 ? (
+                    <span className="font-medium">
+                      Soma: {fmtMoney(
+                        breakdown.commissionBlocks.reduce((a, b) => a + b.value, 0)
+                      )}
+                    </span>
+                  ) : null}
+                </div>
               </TooltipContent>
             </Tooltip>
           }
@@ -518,7 +574,11 @@ function GridRow(props: {
 // Grupo de 4 células de um fator.
 function FactorCells(props: {
   money: boolean;
+  targetCurrency: string | null;
   target: number | null;
+  targetBRL: number | null;
+  targetSource: "goal" | "default" | null;
+  targetRateMissing: boolean;
   realized: number | null;
   attainmentPct: number | null;
   payout: number;
@@ -529,13 +589,62 @@ function FactorCells(props: {
   onOverride: (key: "realized" | "attainmentPct" | "payout", v: number | null) => void;
 }) {
   const fmt = props.money ? fmtMoney : fmtNum;
+  // Alvo: exibido na moeda DIGITADA; tooltip traz o convertido em R$ (decisão
+  // "mostrar os dois"), a origem (padrão do plano em itálico) e o erro de
+  // cotação ausente (fail-closed — nunca converte 1:1).
+  const targetText =
+    props.target == null
+      ? "—"
+      : props.targetCurrency
+        ? fmtMoneyIn(props.targetCurrency, props.target)
+        : fmt(props.target);
+  const targetTip: string[] = [];
+  if (props.targetRateMissing && props.targetCurrency)
+    targetTip.push(
+      `Sem cotação ${props.targetCurrency} para o trimestre — cadastre em Configurações → Campos → Moedas. Atingimento fica vazio (nunca converte 1:1).`
+    );
+  else if (props.targetCurrency && props.targetBRL != null)
+    targetTip.push(`≈ ${fmtMoney(props.targetBRL)} na cotação do trimestre`);
+  if (props.targetSource === "default")
+    targetTip.push(
+      "Alvo padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
+    );
   return (
     <>
       <EditableCell
         className="border-l"
-        display={props.target != null ? fmt(props.target) : "—"}
+        display={
+          targetTip.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={
+                    props.targetRateMissing
+                      ? "text-destructive inline-flex items-center gap-1"
+                      : undefined
+                  }
+                >
+                  {props.targetRateMissing ? (
+                    <CircleAlert className="size-3.5" />
+                  ) : null}
+                  {targetText}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className="flex max-w-64 flex-col gap-0.5">
+                  {targetTip.map((t, i) => (
+                    <span key={i}>{t}</span>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            targetText
+          )
+        }
+        muted={props.targetSource === "default"}
         onSave={props.onTarget}
-        current={props.target}
+        current={props.targetSource === "goal" ? props.target : null}
       />
       <EditableCell
         display={

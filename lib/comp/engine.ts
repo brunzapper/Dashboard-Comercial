@@ -1,4 +1,11 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3: match de membro por CAMPO do registro (factor.memberField) — o filtro
+// injetado vira `<campo> in (display_names do grupo canônico)` via
+// memberFilterFor (expansão por CONJUNTO DE NOMES; expandResponsibleFilters
+// segue só p/ responsible_id, intocado); membro sem nome ⇒ errors[fid], nunca
+// consulta sem filtro. Alvos em moeda estrangeira: resolveTargetRates (moeda →
+// R$/unidade no trimestre do mês) alimenta o computeEntry — taxa ausente ⇒
+// atingimento null (fail-closed no modelo).
 // v1.2: membros por OPERAÇÃO — recompute resolve config.memberOperationIds
 // via loadOperationScopes (subárvore viva) + operationMembersFromScopes
 // (canonicaliza) e memberResponsibles ganha o 4º arg com os ids resolvidos.
@@ -28,7 +35,12 @@ import {
   type ResponsibleCanon,
 } from "@/lib/config/responsible-canon";
 import type { FieldDefinition } from "@/lib/records/types";
-import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
+import {
+  loadCurrencyRates,
+  resolveRate,
+  yearQuarterOf,
+  type CurrencyRates,
+} from "@/lib/widgets/currency";
 import { runCalculatedWidget } from "@/lib/widgets/formula-metric";
 import {
   createTaskLimiter,
@@ -39,11 +51,14 @@ import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   computeEntry,
   explicitMemberIds,
+  factorTargetCurrencies,
+  lastDayOfMonth,
   monthPeriod,
   parseCompEntryInputs,
   parseCompPlanConfig,
   resolveOperationMembers,
   type CompComputedRaw,
+  type CompFactor,
   type CompPlanConfig,
 } from "./model";
 
@@ -102,6 +117,75 @@ export function memberResponsibles(
       .filter((r) => !canon.canonicalById.has(r.id));
   }
   return responsibles.filter((r) => !canon.canonicalById.has(r.id));
+}
+
+/**
+ * Filtro de MEMBRO de um fator: sem memberField é o clássico
+ * `responsible_id eq` (o choke point expande para o grupo canônico); com
+ * memberField o match é por NOME — `<campo> in (display_names do grupo
+ * canônico do membro, apelidos inclusos)`, valores exatamente como o sync
+ * grava (lookups.userName / responsibles.display_name). Membro sem nenhum
+ * nome ⇒ erro (a célula isola como falha de consulta; NUNCA consultar sem o
+ * filtro — vazaria o realizado global p/ todo membro).
+ */
+export function memberFilterFor(
+  factor: CompFactor,
+  memberId: string,
+  canon: ResponsibleCanon,
+  nameById: Map<string, string | null>
+): WidgetFilter | { error: string } {
+  if (!factor.memberField) {
+    return { field: "responsible_id", op: "eq", value: memberId };
+  }
+  const names: string[] = [];
+  for (const id of expandResponsibleIds([memberId], canon)) {
+    const name = nameById.get(id);
+    if (name && name.trim() !== "" && !names.includes(name)) names.push(name);
+  }
+  if (names.length === 0) {
+    return {
+      error:
+        "Membro sem nome de exibição para casar o campo do plano (memberField).",
+    };
+  }
+  return { field: factor.memberField, op: "in", value: names };
+}
+
+/**
+ * Taxas de conversão dos ALVOS (moeda → R$/unidade) no trimestre do mês —
+ * insumo do computeEntry p/ fatores com targetCurrency. Moeda sem taxa fica
+ * null (o modelo falha fechado: atingimento null + targetRateMissing).
+ */
+export function resolveTargetRates(
+  config: CompPlanConfig,
+  rates: CurrencyRates,
+  conv: { year: number; quarter: number }
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  for (const code of factorTargetCurrencies(config)) {
+    out[code] = resolveRate(rates, code, conv.year, conv.quarter);
+  }
+  return out;
+}
+
+/**
+ * Conveniência p/ os callers fora do recompute (deriveTotal/publish/pages):
+ * fast path SEM consulta quando o plano não usa moeda de alvo; senão carrega
+ * as taxas e resolve no trimestre do fim do mês (mesma regra do recompute —
+ * yearQuarterOf(period.to)).
+ */
+export async function loadTargetRatesForConfig(
+  supabase: SupabaseClient,
+  config: CompPlanConfig,
+  year: number,
+  month: number
+): Promise<Record<string, number | null>> {
+  if (factorTargetCurrencies(config).length === 0) return {};
+  const rates = await loadCurrencyRates(supabase);
+  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(
+    lastDayOfMonth(year, month)
+  ).padStart(2, "0")}`;
+  return resolveTargetRates(config, rates, yearQuarterOf(monthEnd));
 }
 
 /**
@@ -218,10 +302,10 @@ export async function recomputePlanMonth(
         ),
       loadCurrencyRates(supabase),
       loadResponsibleCanon(supabase),
-      supabase
-        .from("responsibles")
-        .select("id, display_name")
-        .eq("active", true),
+      // TODOS os responsáveis (apelidos/inativos inclusos): o nameById do
+      // memberFilterFor precisa dos nomes do grupo canônico inteiro; a lista
+      // de MEMBROS segue só o subset ativo (comportamento clássico).
+      supabase.from("responsibles").select("id, display_name, active"),
       supabase
         .from("comp_entries")
         .select(
@@ -235,10 +319,13 @@ export async function recomputePlanMonth(
         : Promise.resolve(new Map<string, OperationScope>()),
     ]);
   const allFields = (fieldsRes.data ?? []) as FieldDefinition[];
-  const responsibles = (respRes.data ?? []) as {
+  const allResponsibles = (respRes.data ?? []) as {
     id: string;
     display_name: string | null;
+    active: boolean;
   }[];
+  const responsibles = allResponsibles.filter((r) => r.active);
+  const nameById = new Map(allResponsibles.map((r) => [r.id, r.display_name]));
   const entries = (entriesRes.data ?? []) as CompEntryRow[];
 
   const operationMemberIds = resolveOperationMembers(
@@ -265,6 +352,7 @@ export async function recomputePlanMonth(
 
   const period = monthPeriod(opts.year, opts.month, sources);
   const conversionPeriod = yearQuarterOf(period.to);
+  const targetRates = resolveTargetRates(config, rates, conversionPeriod);
   const runLimited = createTaskLimiter(WIDGET_TASK_CONCURRENCY);
   const nowIso = new Date().toISOString();
   let queryErrors = 0;
@@ -278,9 +366,16 @@ export async function recomputePlanMonth(
       await Promise.all(
         config.factors.map((factor) =>
           runLimited(async () => {
+            const memberFilter = memberFilterFor(factor, member.id, canon, nameById);
+            if ("error" in memberFilter) {
+              realized[factor.id] = null;
+              errors[factor.id] = memberFilter.error;
+              queryErrors += 1;
+              return;
+            }
             const filters: WidgetFilter[] = [
               ...(factor.filters ?? []),
-              { field: "responsible_id", op: "eq", value: member.id },
+              memberFilter,
             ];
             try {
               const res = await runCalculatedWidget(rpcClient, {
@@ -327,7 +422,8 @@ export async function recomputePlanMonth(
       inputs,
       computed.realized,
       targetsByMember.get(member.id) ?? {},
-      member.id
+      member.id,
+      targetRates
     );
     // Update NUNCA toca inputs/base_amount (overrides sobrevivem ao recompute);
     // insert novo carimba org (WITH CHECK falha alto em org errada).

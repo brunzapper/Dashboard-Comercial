@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3: comissão multi-bloco (bounds por kind), memberField validado contra o
+// catálogo de campos (buildAvailableFields — nunca lista paralela),
+// defaultTarget/targetCurrency por fator (moeda precisa estar habilitada) e
+// alvos em moeda estrangeira nos deriveTotal/publishMonth via
+// loadTargetRatesForConfig (fast path sem consulta p/ plano só-BRL).
+// config.presetKey passa intacto pelo parse (identidade de plano de preset).
 // v1.2: membros por operação — savePlan valida a existência dos ids de
 // config.memberOperationIds (RLS recorta a org); a resolução de membros
 // segue nos callers (engine/page), nunca aqui.
@@ -57,6 +63,7 @@ import { buildAvailableFields } from "@/lib/widgets/fields";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import {
+  loadTargetRatesForConfig,
   loadTargetsByMember,
   recomputePlanMonth,
   type CompEntryRow,
@@ -66,6 +73,7 @@ import {
 import {
   compOperandCatalog,
   computeEntry,
+  factorTargetCurrencies,
   lastDayOfMonth,
   parseCompEntryInputs,
   parseCompPlanConfig,
@@ -147,19 +155,28 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
       return { ok: false, message: `Peso inválido no fator "${f.label}".` };
   }
 
-  // Faixas de comissão: bounds amigáveis pós-parse (estrutura/ordenação/refs
-  // já são muralha do parse fail-closed — espelho do check de peso acima).
-  if (config.commission) {
-    const tables = [
-      config.commission.tiers,
-      ...Object.values(config.commission.memberTiers ?? {}),
-    ];
+  // Faixas de comissão: bounds amigáveis pós-parse, por kind e por unidade do
+  // tierBy (estrutura/ordenação/refs já são muralha do parse fail-closed —
+  // espelho do check de peso acima). Vale p/ a tabela do plano E as por membro.
+  for (const block of config.commissions ?? []) {
+    const tables = [block.tiers, ...Object.values(block.memberTiers ?? {})];
+    const fromMax = (block.tierBy ?? "attainment") === "attainment" ? 100000 : MAX_ABS_VALUE;
     for (const table of tables) {
       for (const t of table) {
-        if (t.ratePct > 1000 || t.fromPct > 100000)
+        if (t.fromPct > fromMax)
+          return {
+            ok: false,
+            message: "Faixa de comissão inválida (limiar acima do limite).",
+          };
+        if ((block.kind ?? "pct") === "pct" && (t.ratePct ?? 0) > 1000)
           return {
             ok: false,
             message: "Faixa de comissão inválida (percentual acima do limite).",
+          };
+        if ((block.kind ?? "pct") !== "pct" && (t.amount ?? 0) >= MAX_ABS_VALUE)
+          return {
+            ok: false,
+            message: "Faixa de comissão inválida (valor acima do limite).",
           };
       }
     }
@@ -207,6 +224,24 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
       withNested: true,
     })
   );
+  // Moedas habilitadas p/ targetCurrency (uma consulta, fora do loop).
+  const usedCurrencies = factorTargetCurrencies(config);
+  if (usedCurrencies.length > 0) {
+    const { data: curData } = await supabase
+      .from("currencies")
+      .select("code")
+      .eq("enabled", true);
+    const enabled = new Set(((curData ?? []) as { code: string }[]).map((c) => c.code));
+    for (const code of usedCurrencies) {
+      if (!enabled.has(code))
+        return {
+          ok: false,
+          message: `Moeda de alvo "${code}" não está habilitada (Campos → Moedas).`,
+        };
+    }
+  }
+
+  const availableByRef = new Map(available.map((a) => [a.field, a]));
   for (const f of config.factors) {
     for (const s of f.sources) {
       if (!sourceKeys.has(s))
@@ -215,6 +250,21 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
           message: `Fonte desconhecida ("${s}") no fator "${f.label}".`,
         };
     }
+    // Campo de membro: precisa existir no catálogo e ser filtrável por texto
+    // (numérico/data/sintético/agregado não identificam pessoa).
+    if (f.memberField) {
+      const af = availableByRef.get(f.memberField);
+      if (!af || af.isNumeric || af.isDate || af.displayOnly || af.aggCalc)
+        return {
+          ok: false,
+          message: `Campo de membro inválido no fator "${f.label}" — escolha um campo de texto/seleção do registro.`,
+        };
+    }
+    if (f.defaultTarget != null && cleanNumber(f.defaultTarget) == null)
+      return {
+        ok: false,
+        message: `Alvo padrão inválido no fator "${f.label}".`,
+      };
     const v = validateFormulaForContext(f.formula, {
       kind: "aggregate",
       catalog: aggCatalog,
@@ -584,13 +634,16 @@ export async function publishMonth(
       (r) => [r.id, r.display_name ?? "—"]
     )
   );
-  const targetsByMember = await loadTargetsByMember(supabase, {
-    year,
-    month,
-    config,
-    memberIds: entries.map((e) => e.responsible_id),
-    canon,
-  });
+  const [targetsByMember, targetRates] = await Promise.all([
+    loadTargetsByMember(supabase, {
+      year,
+      month,
+      config,
+      memberIds: entries.map((e) => e.responsible_id),
+      canon,
+    }),
+    loadTargetRatesForConfig(supabase, config, year, month),
+  ]);
 
   let published = 0;
   let skipped = 0;
@@ -608,7 +661,8 @@ export async function publishMonth(
       inputs,
       computed.realized ?? {},
       targetsByMember.get(entry.responsible_id) ?? {},
-      entry.responsible_id
+      entry.responsible_id,
+      targetRates
     );
     if (breakdown.total == null) {
       skipped += 1; // fórmula livre inválida — corrija antes de publicar
@@ -717,13 +771,16 @@ async function deriveTotal(
   }
 ): Promise<number | null> {
   const canon = await loadResponsibleCanon(supabase);
-  const targets = await loadTargetsByMember(supabase, {
-    year: opts.year,
-    month: opts.month,
-    config: opts.config,
-    memberIds: [opts.responsibleId],
-    canon,
-  });
+  const [targets, targetRates] = await Promise.all([
+    loadTargetsByMember(supabase, {
+      year: opts.year,
+      month: opts.month,
+      config: opts.config,
+      memberIds: [opts.responsibleId],
+      canon,
+    }),
+    loadTargetRatesForConfig(supabase, opts.config, opts.year, opts.month),
+  ]);
   const computed = (opts.computed ?? null) as CompComputedRaw | null;
   const breakdown = computeEntry(
     opts.config,
@@ -731,7 +788,8 @@ async function deriveTotal(
     opts.inputs,
     computed?.realized ?? {},
     targets.get(opts.responsibleId) ?? {},
-    opts.responsibleId
+    opts.responsibleId,
+    targetRates
   );
   return breakdown.total;
 }

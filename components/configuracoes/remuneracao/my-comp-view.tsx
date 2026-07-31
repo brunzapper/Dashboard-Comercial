@@ -1,10 +1,13 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
 // "Minha remuneração" (0112) — visão READ-ONLY do vendedor: a RLS de
 // comp_entries entrega só as linhas do PRÓPRIO grupo canônico; o detalhamento
 // é derivado pelo MESMO computeEntry do gestor (transparência: célula com
 // override manual mostra o ponto âmbar; v1.1: linha de Comissão com a faixa
 // aplicada — o responsible_id da entry seleciona a tabela do membro). Nada é
 // editável; sem Recalcular/Publicar. Navegação de mês via searchParams.
+// v1.2: comissão multi-bloco (uma linha por bloco + soma quando há override)
+// e alvo em moeda própria (exibe na moeda digitada + convertido; cotação
+// ausente = aviso, atingimento vazio) via targetRatesByPlan do server.
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
@@ -40,6 +43,13 @@ const fmtMoney = (v: number): string =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtNum = (v: number): string =>
   v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+function fmtMoneyIn(currency: string, v: number): string {
+  try {
+    return v.toLocaleString("pt-BR", { style: "currency", currency });
+  } catch {
+    return `${currency} ${fmtNum(v)}`;
+  }
+}
 
 function OverrideDot() {
   return (
@@ -58,6 +68,8 @@ export interface MyCompViewProps {
   entries: (CompEntryClientRow & { plan_id: string })[];
   // Alvos do mês por plano → factorId (já dobrados p/ o canônico).
   targetsByPlan: Record<string, Record<string, number | null>>;
+  // Moeda do alvo → R$/unidade no trimestre, por plano (server).
+  targetRatesByPlan: Record<string, Record<string, number | null>>;
   year: number;
   month: number;
   linked: boolean; // usuário tem responsável vinculado?
@@ -125,6 +137,7 @@ export function MyCompView(props: MyCompViewProps) {
             plan={plan}
             entry={entry!}
             targets={props.targetsByPlan[plan.id] ?? {}}
+            targetRates={props.targetRatesByPlan[plan.id] ?? {}}
           />
         ))
       )}
@@ -136,6 +149,7 @@ function PlanCard(props: {
   plan: CompPlanClientRow;
   entry: CompEntryClientRow;
   targets: Record<string, number | null>;
+  targetRates: Record<string, number | null>;
 }) {
   const config = parseCompPlanConfig(props.plan.config);
   if (!config) return null;
@@ -147,7 +161,8 @@ function PlanCard(props: {
     inputs,
     computed?.realized ?? {},
     props.targets,
-    props.entry.responsible_id
+    props.entry.responsible_id,
+    props.targetRates
   );
 
   return (
@@ -182,7 +197,30 @@ function PlanCard(props: {
                   </span>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {b.target != null ? fmt(b.target) : "—"}
+                  {b.target == null ? (
+                    "—"
+                  ) : f.targetCurrency ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={
+                            b.targetRateMissing ? "text-destructive" : undefined
+                          }
+                        >
+                          {fmtMoneyIn(f.targetCurrency, b.target)}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {b.targetRateMissing
+                          ? `Sem cotação ${f.targetCurrency} para o trimestre — atingimento fica vazio.`
+                          : b.targetBRL != null
+                            ? `≈ ${fmtMoney(b.targetBRL)} na cotação do trimestre`
+                            : null}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    fmt(b.target)
+                  )}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {b.overridden.realized ? <OverrideDot /> : null}
@@ -199,17 +237,37 @@ function PlanCard(props: {
               </TableRow>
             );
           })}
-          {breakdown.commission != null ? (
+          {breakdown.commissionBlocks.map((cb) => {
+            const unit = cb.tierBy === "attainment" ? "%" : "";
+            return (
+              <TableRow key={cb.blockId}>
+                <TableCell className="text-muted-foreground">
+                  {cb.label}
+                  <span className="ml-1 text-xs">
+                    {cb.tier
+                      ? `(faixa ≥ ${fmtNum(cb.tier.fromPct)}${unit} ⇒ ${
+                          cb.kind === "pct"
+                            ? `${fmtNum(cb.tier.ratePct ?? 0)}%`
+                            : cb.kind === "flat"
+                              ? fmtMoney(cb.tier.amount ?? 0)
+                              : `${fmtMoney(cb.tier.amount ?? 0)}/un.`
+                        })`
+                      : "(nenhuma faixa atingida)"}
+                  </span>
+                </TableCell>
+                <TableCell colSpan={4} className="text-right tabular-nums">
+                  {fmtMoney(cb.value)}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+          {/* Soma/override da comissão: linha extra só quando há override ou
+              mais de um bloco (com um bloco sem override, a linha acima já diz). */}
+          {breakdown.commission != null &&
+          (breakdown.commission.overridden || breakdown.commissionBlocks.length > 1) ? (
             <TableRow>
               <TableCell className="text-muted-foreground">
-                Comissão
-                <span className="ml-1 text-xs">
-                  {breakdown.commission.tier
-                    ? `(faixa ≥ ${fmtNum(breakdown.commission.tier.fromPct)}% ⇒ ${fmtNum(
-                        breakdown.commission.tier.ratePct
-                      )}%)`
-                    : "(nenhuma faixa atingida)"}
-                </span>
+                Comissão (total)
               </TableCell>
               <TableCell colSpan={4} className="text-right tabular-nums">
                 {breakdown.commission.overridden ? <OverrideDot /> : null}

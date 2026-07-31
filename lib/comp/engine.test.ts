@@ -1,7 +1,11 @@
-// Versão: 1.2 | Data: 31/07/2026 (v1.2: membros por operação — 4º arg de
-// memberResponsibles, operationMembersFromScopes canonicaliza e o recompute
-// resolve a subárvore viva; asserções de QUERY porque loadOperationScopes
-// degrada para vazio em erro)
+// Versão: 1.3 | Data: 31/07/2026 (v1.3: memberField — filtro `in` com o
+// CONJUNTO DE NOMES do grupo canônico no lugar do responsible_id, membro sem
+// nome isola como erro de célula; targetCurrency — alvo convertido pela taxa
+// do trimestre chega ao total gravado; config LEGADO com `commission` objeto
+// segue recomputando idêntico via normalização do parse)
+// v1.2: membros por operação — 4º arg de memberResponsibles,
+// operationMembersFromScopes canonicaliza e o recompute resolve a subárvore
+// viva; asserções de QUERY porque loadOperationScopes degrada p/ vazio em erro.
 // Testes do engine I/O da remuneração (fake-supabase fail-closed): uma
 // consulta runCalculatedWidget por membro×fator com o filtro de responsável
 // chegando EXPANDIDO ao RPC (canon no choke point); alvos lidos de `goals`
@@ -56,7 +60,8 @@ const PLAN = {
 };
 
 // Handler de responsibles que serve o loader do canon (select id, canonical_id)
-// E a lista de membros ativos (select id, display_name).
+// E a lista completa (select id, display_name, active — o engine filtra os
+// ativos p/ membros e usa TODOS os nomes no nameById do memberField).
 function responsiblesHandler(q: RecordedQuery) {
   const sel = q.steps.find((s) => s.method === "select");
   if (sel && String(sel.args[0]).includes("canonical_id")) {
@@ -70,9 +75,11 @@ function responsiblesHandler(q: RecordedQuery) {
   }
   return {
     data: [
-      { id: "m1", display_name: "Um" },
-      { id: "m1a", display_name: "Um (apelido)" },
-      { id: "m2", display_name: "Dois" },
+      { id: "m1", display_name: "Um", active: true },
+      // Apelido INATIVO de propósito: o nome dele ainda entra no conjunto do
+      // memberField (nameById cobre o grupo canônico inteiro).
+      { id: "m1a", display_name: "Um (apelido)", active: false },
+      { id: "m2", display_name: "Dois", active: true },
     ],
   };
 }
@@ -348,6 +355,146 @@ describe("recomputePlanMonth", () => {
     expect(fake.queries.some((q) => q.table === "responsible_operations")).toBe(true);
     // Apelido m1a canonicalizado ⇒ entry no m1; m2 veio da sub-operação.
     expect(writes.map((w) => w.responsible_id).sort()).toEqual(["m1", "m2"]);
+  });
+
+  it("memberField: filtro `in` com os NOMES do grupo canônico; sem responsible_id; membro sem nome isola", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const seen: { metric: string; filters: { field: string; op: string; value?: unknown }[] }[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          seen.push({
+            metric: (args.p_metrics as { field: string }[])[0].field,
+            filters: (args.p_filters ?? []) as {
+              field: string;
+              op: string;
+              value?: unknown;
+            }[],
+          });
+          return { data: [{ metric_1: 7 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: (q: RecordedQuery) => {
+          const sel = q.steps.find((s) => s.method === "select");
+          if (sel && String(sel.args[0]).includes("canonical_id")) {
+            return {
+              data: [
+                { id: "m1", canonical_id: null },
+                { id: "m1a", canonical_id: "m1" },
+                { id: "m3", canonical_id: null },
+              ],
+            };
+          }
+          return {
+            data: [
+              { id: "m1", display_name: "Um", active: true },
+              { id: "m1a", display_name: "Um (apelido)", active: false },
+              // m3 SEM nome: fator com memberField vira erro de célula.
+              { id: "m3", display_name: "  ", active: true },
+            ],
+          };
+        },
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const config = {
+      ...CONFIG,
+      factors: [
+        CONFIG.factors[0], // f_v sem memberField (clássico responsible_id eq)
+        { ...CONFIG.factors[1], memberField: "custom:sdr_reuniao" },
+      ],
+    };
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    // m3 sem nome: SÓ o fator com memberField falha (1 erro por membro sem nome).
+    expect(out.ok).toBe(true);
+    expect(out.queryErrors).toBe(1);
+    // f_r de m1: filtro no CAMPO com os nomes canônico+apelido; NENHUM
+    // responsible_id nessa consulta.
+    const reunioes = seen.filter((c) => c.metric === "*");
+    const m1Call = reunioes.find((c) =>
+      JSON.stringify(c.filters).includes("sdr_reuniao")
+    )!;
+    const mf = m1Call.filters.find((x) => x.field === "custom:sdr_reuniao")!;
+    expect(mf.op).toBe("in");
+    expect(mf.value).toEqual(["Um", "Um (apelido)"]);
+    expect(m1Call.filters.some((x) => x.field === "responsible_id")).toBe(false);
+    // f_v segue com responsible_id (expandido pelo choke point).
+    const vendas = seen.filter((c) => c.metric === "value");
+    expect(
+      vendas.every((c) => c.filters.some((x) => x.field === "responsible_id"))
+    ).toBe(true);
+    // O erro do m3 ficou registrado no computed.
+    const m3 = writes.find((w) => w.responsible_id === "m3") as {
+      computed: { realized: Record<string, number | null>; errors?: Record<string, string> };
+    };
+    expect(m3.computed.realized.f_r).toBeNull();
+    expect(m3.computed.errors?.f_r).toContain("memberField");
+    expect(m3.computed.realized.f_v).toBe(7);
+  });
+
+  it("targetCurrency: alvo digitado em USD converte pela taxa do trimestre; sem taxa ⇒ atingimento null", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 100 }], error: null }),
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        // Q3/2026 = 5 R$/US$ (o mês 7 cai no trimestre 3).
+        currency_rates: [{ code: "USD", year: 2026, quarter: 3, rate: 5 }],
+        // Alvo digitado em DÓLARES (10) — vale p/ os dois membros.
+        goals: [
+          { responsible_id: "m1", metric: "comp_vendas", target: 10 },
+          { responsible_id: "m2", metric: "comp_vendas", target: 10 },
+        ],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const config = {
+      ...CONFIG,
+      factors: [
+        { ...CONFIG.factors[0], targetCurrency: "USD" },
+        // 2º fator em EUR SEM taxa cadastrada: atingimento null ⇒ payout 0.
+        { ...CONFIG.factors[1], targetCurrency: "EUR", defaultTarget: 4 },
+      ],
+    };
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out.ok).toBe(true);
+    // Vendas: realizado 100 / (10 US$ × 5) = 200% ⇒ 1000×60%×200% = 1200.
+    // Reuniões: EUR sem taxa ⇒ atingimento null ⇒ 0. Total 1200.
+    const m1 = writes.find((w) => w.responsible_id === "m1")!;
+    expect(m1.total).toBe(1200);
   });
 
   it("comissão por faixas: total gravado reflete a tabela do MEMBRO (member.id chega ao computeEntry)", async () => {

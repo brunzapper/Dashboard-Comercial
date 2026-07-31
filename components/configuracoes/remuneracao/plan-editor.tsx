@@ -1,4 +1,12 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3: comissão MULTI-BLOCO — lista de blocos (cap MAX_COMMISSION_BLOCKS),
+// cada um com rótulo/gatilho/tierBy (atingimento × realizado)/kind (% × R$
+// fixo × R$ por unidade)/base/faixas + tabela por membro; TierTable com
+// colunas cientes de kind/tierBy. Fator ganha linha "Avançado": campo de
+// membro (memberField — match por nome via engine), alvo padrão
+// (defaultTarget) e moeda do alvo (targetCurrency). O save RE-EMITE
+// config.presetKey (identidade de plano criado por preset — sem isso o 1º
+// save quebraria o ensure-only do re-apply).
 // v1.2: membros por OPERAÇÃO — OperationPicker + bloco "Membros efetivos"
 // (manual ∪ subárvore viva, helpers do model com os ids resolvidos no server
 // via props); operação órfã vira chip com remover; aviso quando a seleção
@@ -49,12 +57,14 @@ import {
   COMP_COMMISSION_REF,
   compOperandCatalog,
   explicitMemberIds,
+  MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
   MAX_FACTORS,
   resolveOperationMembers,
-  type CompCommissionConfig,
+  type CompCommissionBlock,
   type CompCommissionTier,
   type CompPlanConfig,
+  type CompTierKind,
 } from "@/lib/comp/model";
 import {
   deletePlan,
@@ -65,6 +75,9 @@ import type { CompPlanClientRow } from "./remuneracao-manager";
 
 // Sentinela do select de métrica: o savePlan gera a chave automática.
 const AUTO_METRIC = "__auto__";
+// Sentinelas dos selects avançados do fator (draft guarda "" nos defaults).
+const MEMBER_DEFAULT = "__resp__";
+const CURRENCY_DEFAULT = "__brl__";
 
 interface FactorDraft {
   id: string;
@@ -76,6 +89,9 @@ interface FactorDraft {
   sources: string[];
   capPct: string;
   floorPct: string;
+  memberField: string; // "" = Responsável (padrão)
+  defaultTarget: string;
+  targetCurrency: string; // "" = R$ (sem conversão)
 }
 
 function newFactorId(): string {
@@ -93,6 +109,9 @@ function emptyFactor(): FactorDraft {
     sources: [],
     capPct: "",
     floorPct: "",
+    memberField: "",
+    defaultTarget: "",
+    targetCurrency: "",
   };
 }
 
@@ -108,6 +127,9 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     sources: f.sources,
     capPct: f.capPct != null ? String(f.capPct) : "",
     floorPct: f.floorPct != null ? String(f.floorPct) : "",
+    memberField: f.memberField ?? "",
+    defaultTarget: f.defaultTarget != null ? String(f.defaultTarget) : "",
+    targetCurrency: f.targetCurrency ?? "",
   }));
 }
 
@@ -119,38 +141,92 @@ const numOrNull = (s: string): number | null => {
 // Sentinela da base da comissão: % incide sobre a base variável da linha.
 const BASIS_BASE = "__base__";
 
+// Rascunho de faixa: `value` é a 2ª coluna, cuja semântica segue o kind do
+// bloco (% p/ pct; R$ p/ flat/per_unit).
 interface TierDraft {
   fromPct: string; // texto do input; parse no save
-  ratePct: string;
+  value: string;
 }
 
 const tierDrafts = (tiers: CompCommissionTier[] | undefined): TierDraft[] =>
   tiers && tiers.length > 0
-    ? tiers.map((t) => ({ fromPct: String(t.fromPct), ratePct: String(t.ratePct) }))
-    : [{ fromPct: "", ratePct: "" }];
+    ? tiers.map((t) => ({
+        fromPct: String(t.fromPct),
+        value: String(t.ratePct ?? t.amount ?? ""),
+      }))
+    : [{ fromPct: "", value: "" }];
 
 // Linha toda vazia é ignorada; número inválido/negativo ou limiar duplicado
-// reprova (mensagem específica); ordena asc — o parse do servidor exige.
+// reprova (mensagem específica); ordena asc — o parse do servidor exige. A 2ª
+// coluna vira ratePct (kind pct) ou amount (flat/per_unit).
 function parseTierDrafts(
-  rows: TierDraft[]
+  rows: TierDraft[],
+  kind: CompTierKind
 ): { tiers: CompCommissionTier[] } | { error: string } {
   const out: CompCommissionTier[] = [];
   const seen = new Set<number>();
   for (const r of rows) {
-    if (r.fromPct.trim() === "" && r.ratePct.trim() === "") continue;
+    if (r.fromPct.trim() === "" && r.value.trim() === "") continue;
     const fromPct = numOrNull(r.fromPct);
-    const ratePct = numOrNull(r.ratePct);
-    if (fromPct == null || ratePct == null || fromPct < 0 || ratePct < 0)
+    const value = numOrNull(r.value);
+    if (fromPct == null || value == null || fromPct < 0 || value < 0)
       return { error: "Faixa de comissão com número inválido." };
     if (seen.has(fromPct))
-      return { error: "Duas faixas com o mesmo limiar de atingimento." };
+      return { error: "Duas faixas com o mesmo limiar." };
     seen.add(fromPct);
-    out.push({ fromPct, ratePct });
+    out.push(kind === "pct" ? { fromPct, ratePct: value } : { fromPct, amount: value });
   }
   if (out.length === 0)
     return { error: "Adicione ao menos uma faixa de comissão." };
   out.sort((a, b) => a.fromPct - b.fromPct);
   return { tiers: out };
+}
+
+// Rascunho de um BLOCO de comissão (id estável — chave do breakdown).
+interface CommissionBlockDraft {
+  id: string;
+  label: string;
+  trigger: string;
+  basis: string; // BASIS_BASE | id de fator | "" (erro inline)
+  tierBy: "attainment" | "realized";
+  kind: CompTierKind;
+  tiers: TierDraft[];
+  memberTiers: Record<string, TierDraft[]>;
+}
+
+function newBlockId(): string {
+  return `c_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyBlock(): CommissionBlockDraft {
+  return {
+    id: newBlockId(),
+    label: "",
+    trigger: "",
+    basis: BASIS_BASE,
+    tierBy: "attainment",
+    kind: "pct",
+    tiers: [{ fromPct: "", value: "" }],
+    memberTiers: {},
+  };
+}
+
+function blockDraftsFromConfig(config: CompPlanConfig | null): CommissionBlockDraft[] {
+  return (config?.commissions ?? []).map((b) => {
+    const memberTiers: Record<string, TierDraft[]> = {};
+    for (const [id, tiers] of Object.entries(b.memberTiers ?? {}))
+      memberTiers[id] = tierDrafts(tiers);
+    return {
+      id: b.id,
+      label: b.label ?? "",
+      trigger: b.triggerFactorId,
+      basis: b.basisKind === "base" ? BASIS_BASE : (b.basisFactorId ?? ""),
+      tierBy: b.tierBy ?? "attainment",
+      kind: b.kind ?? "pct",
+      tiers: tierDrafts(b.tiers),
+      memberTiers,
+    };
+  });
 }
 
 export interface PlanEditorProps {
@@ -164,6 +240,8 @@ export interface PlanEditorProps {
   // Operações da org + membros CANÔNICOS por operação (resolvidos no server).
   operations: { id: string; name: string; active: boolean }[];
   operationMembersById: Record<string, string[]>;
+  // Moedas HABILITADAS (Campos → Moedas) p/ a moeda do alvo do fator.
+  currencies: { value: string; label: string }[];
   onSaved: (planId: string) => void;
   onDeleted: () => void;
 }
@@ -194,30 +272,9 @@ export function PlanEditor(props: PlanEditorProps) {
   const [totalFormula, setTotalFormula] = useState<Formula | null>(
     props.config?.totalFormula ?? null
   );
-  const savedCommission = props.config?.commission ?? null;
-  const [commissionOn, setCommissionOn] = useState(Boolean(savedCommission));
-  const [commTrigger, setCommTrigger] = useState<string>(
-    savedCommission?.triggerFactorId ?? ""
+  const [commBlocks, setCommBlocks] = useState<CommissionBlockDraft[]>(() =>
+    blockDraftsFromConfig(props.config)
   );
-  // "" = sem escolha (erro inline); BASIS_BASE = base variável; senão id do fator.
-  const [commBasis, setCommBasis] = useState<string>(
-    savedCommission == null
-      ? BASIS_BASE
-      : savedCommission.basisKind === "base"
-        ? BASIS_BASE
-        : (savedCommission.basisFactorId ?? "")
-  );
-  const [commTiers, setCommTiers] = useState<TierDraft[]>(
-    tierDrafts(savedCommission?.tiers)
-  );
-  const [commMemberTiers, setCommMemberTiers] = useState<
-    Record<string, TierDraft[]>
-  >(() => {
-    const out: Record<string, TierDraft[]> = {};
-    for (const [id, tiers] of Object.entries(savedCommission?.memberTiers ?? {}))
-      out[id] = tierDrafts(tiers);
-    return out;
-  });
 
   // Catálogo agregado (realizado) — mesma montagem do widget-builder.
   const aggCatalog: RefOption[] = useMemo(
@@ -255,18 +312,21 @@ export function PlanEditor(props: PlanEditorProps) {
           formula: f.formula,
           sources: f.sources,
         })),
-      ...(commissionOn
+      ...(commBlocks.length > 0
         ? {
-            commission: {
-              triggerFactorId: "",
-              basisKind: "base",
-              tiers: [],
-            } satisfies CompCommissionConfig,
+            commissions: [
+              {
+                id: "dummy",
+                triggerFactorId: "",
+                basisKind: "base",
+                tiers: [],
+              } satisfies CompCommissionBlock,
+            ],
           }
         : {}),
     };
     return compOperandCatalog(draftConfig);
-  }, [factors, commissionOn]);
+  }, [factors, commBlocks.length]);
 
   const weightSum = factors.reduce(
     (acc, f) => acc + (numOrNull(f.weightPct) ?? 0),
@@ -314,13 +374,8 @@ export function PlanEditor(props: PlanEditorProps) {
       .map((id) => byId.get(id))
       .filter((r): r is { id: string; label: string } => Boolean(r));
   }, [effectiveIds, props.responsibles]);
-  // Órfãos (membro saiu do plano/inativo): nunca usados no cálculo, nunca
-  // podados em silêncio — visíveis com o id cru + remover.
-  const orphanTierIds = Object.keys(commMemberTiers).filter(
-    (id) => !commissionMembers.some((r) => r.id === id)
-  );
   const formulaLacksCommission =
-    commissionOn &&
+    commBlocks.length > 0 &&
     useTotalFormula &&
     totalFormula != null &&
     totalFormula.tokens.length > 0 &&
@@ -335,45 +390,68 @@ export function PlanEditor(props: PlanEditorProps) {
       label: `${m.label} (${m.key})`,
     })),
   ];
+  // Campo de membro: refs de texto/seleção do catálogo (numérico/data/
+  // sintético/agregado não identificam pessoa) — mesma regra do savePlan.
+  const memberFieldOptions: ComboboxOption[] = [
+    { value: MEMBER_DEFAULT, label: "Responsável (padrão)" },
+    ...props.available
+      .filter((a) => !a.isNumeric && !a.isDate && !a.displayOnly && !a.aggCalc)
+      .map((a) => ({ value: a.field, label: a.label })),
+  ];
+  const currencyOptions: ComboboxOption[] = [
+    { value: CURRENCY_DEFAULT, label: "R$ (sem conversão)" },
+    ...props.currencies.filter((c) => c.value !== "BRL"),
+  ];
 
   const patchFactor = (id: string, patch: Partial<FactorDraft>) =>
     setFactors((cur) => cur.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const patchBlock = (id: string, patch: Partial<CommissionBlockDraft>) =>
+    setCommBlocks((cur) => cur.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
-  // Monta e valida o bloco de comissão do rascunho (null = desligado; string =
-  // erro de validação com mensagem própria — o parse do servidor é o backstop).
-  const buildCommission = (): CompCommissionConfig | string | null => {
-    if (!commissionOn) return null;
+  // Monta e valida os blocos de comissão do rascunho (string = erro de
+  // validação com mensagem própria — o parse do servidor é o backstop).
+  const buildCommissions = (): CompCommissionBlock[] | string => {
     const factorIds = new Set(factors.map((f) => f.id));
-    if (!factorIds.has(commTrigger))
-      return "Escolha o fator gatilho da comissão.";
-    if (commBasis !== BASIS_BASE && !factorIds.has(commBasis))
-      return "Escolha a base da comissão.";
-    const parsed = parseTierDrafts(commTiers);
-    if ("error" in parsed) return parsed.error;
-    const memberTiers: Record<string, CompCommissionTier[]> = {};
-    for (const [id, rows] of Object.entries(commMemberTiers)) {
-      const p = parseTierDrafts(rows);
-      if ("error" in p) {
-        const who =
-          props.responsibles.find((r) => r.id === id)?.label ?? id;
-        return `${p.error} (faixas de ${who})`;
+    const out: CompCommissionBlock[] = [];
+    for (const [i, b] of commBlocks.entries()) {
+      const who = b.label.trim() || `Comissão ${i + 1}`;
+      if (!factorIds.has(b.trigger))
+        return `Escolha o fator gatilho (${who}).`;
+      if (b.kind === "per_unit" && (b.basis === BASIS_BASE || b.basis === ""))
+        return `"R$ por unidade" exige um fator como base (${who}).`;
+      if (b.basis !== BASIS_BASE && !factorIds.has(b.basis))
+        return `Escolha a base da comissão (${who}).`;
+      const parsed = parseTierDrafts(b.tiers, b.kind);
+      if ("error" in parsed) return `${parsed.error} (${who})`;
+      const memberTiers: Record<string, CompCommissionTier[]> = {};
+      for (const [id, rows] of Object.entries(b.memberTiers)) {
+        const p = parseTierDrafts(rows, b.kind);
+        if ("error" in p) {
+          const member = props.responsibles.find((r) => r.id === id)?.label ?? id;
+          return `${p.error} (faixas de ${member}, ${who})`;
+        }
+        memberTiers[id] = p.tiers;
       }
-      memberTiers[id] = p.tiers;
+      out.push({
+        id: b.id,
+        ...(b.label.trim() !== "" ? { label: b.label.trim() } : {}),
+        triggerFactorId: b.trigger,
+        basisKind: b.basis === BASIS_BASE ? "base" : "factor",
+        ...(b.basis === BASIS_BASE ? {} : { basisFactorId: b.basis }),
+        tierBy: b.tierBy,
+        kind: b.kind,
+        tiers: parsed.tiers,
+        ...(Object.keys(memberTiers).length > 0 ? { memberTiers } : {}),
+      });
     }
-    return {
-      triggerFactorId: commTrigger,
-      basisKind: commBasis === BASIS_BASE ? "base" : "factor",
-      ...(commBasis === BASIS_BASE ? {} : { basisFactorId: commBasis }),
-      tiers: parsed.tiers,
-      ...(Object.keys(memberTiers).length > 0 ? { memberTiers } : {}),
-    };
+    return out;
   };
 
   const save = () =>
     startTransition(async () => {
-      const commission = buildCommission();
-      if (typeof commission === "string") {
-        notifyActionError("Salvar plano", commission);
+      const commissions = buildCommissions();
+      if (typeof commissions === "string") {
+        notifyActionError("Salvar plano", commissions);
         return;
       }
       const config = {
@@ -390,13 +468,21 @@ export function PlanEditor(props: PlanEditorProps) {
           ...(numOrNull(f.floorPct) != null
             ? { floorPct: numOrNull(f.floorPct) }
             : {}),
+          ...(f.memberField !== "" ? { memberField: f.memberField } : {}),
+          ...(numOrNull(f.defaultTarget) != null
+            ? { defaultTarget: numOrNull(f.defaultTarget) }
+            : {}),
+          ...(f.targetCurrency !== "" ? { targetCurrency: f.targetCurrency } : {}),
         })),
         ...(memberIds.length > 0 ? { memberIds } : {}),
         ...(memberOperationIds.length > 0 ? { memberOperationIds } : {}),
         ...(useTotalFormula && totalFormula && totalFormula.tokens.length > 0
           ? { totalFormula }
           : {}),
-        ...(commission ? { commission } : {}),
+        ...(commissions.length > 0 ? { commissions } : {}),
+        // Identidade de plano criado por preset SOBREVIVE ao round-trip do
+        // save — sem isso o re-apply do preset duplicaria o plano.
+        ...(props.config?.presetKey ? { presetKey: props.config.presetKey } : {}),
       };
       const res = await savePlan({
         planId: props.plan?.id ?? null,
@@ -602,6 +688,58 @@ export function PlanEditor(props: PlanEditorProps) {
                 }}
               />
             </div>
+            {/* Avançado: campo de membro / alvo padrão / moeda do alvo */}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Crédito do membro (campo)</Label>
+                <Combobox
+                  options={memberFieldOptions}
+                  value={f.memberField || MEMBER_DEFAULT}
+                  onValueChange={(v) =>
+                    patchFactor(f.id, {
+                      memberField: v === MEMBER_DEFAULT ? "" : v,
+                    })
+                  }
+                />
+                <p className="text-muted-foreground text-xs">
+                  Padrão: Responsável do registro. Com um campo escolhido, o
+                  realizado do membro conta registros cujo campo tem o NOME
+                  dele (ex.: SDR da Reunião).
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Alvo padrão do plano</Label>
+                <Input
+                  inputMode="decimal"
+                  value={f.defaultTarget}
+                  onChange={(e) =>
+                    patchFactor(f.id, { defaultTarget: e.target.value })
+                  }
+                  placeholder="Ex.: 35000"
+                />
+                <p className="text-muted-foreground text-xs">
+                  Usado quando o mês não tem meta digitada; digitar na grade
+                  fixa a meta do mês, limpar volta ao padrão.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Moeda do alvo</Label>
+                <Combobox
+                  options={currencyOptions}
+                  value={f.targetCurrency || CURRENCY_DEFAULT}
+                  onValueChange={(v) =>
+                    patchFactor(f.id, {
+                      targetCurrency: v === CURRENCY_DEFAULT ? "" : v,
+                    })
+                  }
+                />
+                <p className="text-muted-foreground text-xs">
+                  Alvos digitados nesta moeda são convertidos a R$ pela
+                  cotação do trimestre (Campos → Moedas). Sem cotação, o
+                  atingimento fica em erro — nunca converte 1:1.
+                </p>
+              </div>
+            </div>
             <div className="flex justify-end">
               <Button
                 type="button"
@@ -611,10 +749,15 @@ export function PlanEditor(props: PlanEditorProps) {
                 disabled={factors.length <= 1}
                 onClick={() => {
                   setFactors((cur) => cur.filter((x) => x.id !== f.id));
-                  // Gatilho/base da comissão apontando o fator excluído zera o
+                  // Gatilho/base de bloco apontando o fator excluído zera o
                   // select — erro inline até escolher outro (nunca silencioso).
-                  if (commTrigger === f.id) setCommTrigger("");
-                  if (commBasis === f.id) setCommBasis("");
+                  setCommBlocks((cur) =>
+                    cur.map((b) => ({
+                      ...b,
+                      trigger: b.trigger === f.id ? "" : b.trigger,
+                      basis: b.basis === f.id ? "" : b.basis,
+                    }))
+                  );
                 }}
               >
                 <Trash2 className="size-4" /> Remover fator {idx + 1}
@@ -635,130 +778,232 @@ export function PlanEditor(props: PlanEditorProps) {
         </div>
       </div>
 
-      {/* Comissão por faixas de atingimento */}
+      {/* Comissões por faixa (multi-bloco) */}
       <div className="flex flex-col gap-2 rounded-md border p-3">
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <Checkbox
-            checked={commissionOn}
-            onCheckedChange={(v) => setCommissionOn(v === true)}
-          />
-          Comissão por faixa de atingimento
-        </label>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-medium">Comissões por faixa</h2>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={commBlocks.length >= MAX_COMMISSION_BLOCKS}
+            onClick={() => setCommBlocks((cur) => [...cur, emptyBlock()])}
+          >
+            <Plus className="size-4" /> Adicionar comissão
+          </Button>
+        </div>
         <p className="text-muted-foreground text-xs">
-          O atingimento do fator gatilho escolhe a faixa e a % dela incide
-          sobre a base escolhida, somando ao total. Maior limiar satisfeito
-          vence (≥). Abaixo da menor faixa (ou sem atingimento no gatilho) a
-          comissão é 0.
+          Cada comissão escolhe a faixa pelo gatilho (atingimento % ou
+          realizado absoluto — maior limiar satisfeito vence, ≥) e paga
+          conforme o tipo: % sobre a base, prêmio fixo em R$, ou R$ por
+          unidade do realizado. Abaixo da menor faixa (ou gatilho sem valor) o
+          valor é 0. Os blocos SOMAM no total.
         </p>
-        {commissionOn ? (
-          <div className="flex flex-col gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+        {commBlocks.map((b, bi) => {
+          const orphanTierIds = Object.keys(b.memberTiers).filter(
+            (id) => !commissionMembers.some((r) => r.id === id)
+          );
+          return (
+            <div key={b.id} className="bg-card flex flex-col gap-3 rounded-md border p-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label>Nome (opcional)</Label>
+                  <Input
+                    value={b.label}
+                    onChange={(e) => patchBlock(b.id, { label: e.target.value })}
+                    placeholder={`Comissão ${bi + 1}`}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Fator gatilho</Label>
+                  <Combobox
+                    options={factorOptions}
+                    value={b.trigger}
+                    onValueChange={(v) => patchBlock(b.id, { trigger: v })}
+                  />
+                  {b.trigger === "" ? (
+                    <p className="text-destructive text-xs">
+                      Escolha o fator que decide a faixa.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Faixa escolhida por</Label>
+                  <Combobox
+                    options={[
+                      { value: "attainment", label: "Atingimento do gatilho (%)" },
+                      { value: "realized", label: "Realizado do gatilho (absoluto)" },
+                    ]}
+                    value={b.tierBy}
+                    onValueChange={(v) =>
+                      patchBlock(b.id, {
+                        tierBy: v === "realized" ? "realized" : "attainment",
+                      })
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Tipo de pagamento</Label>
+                  <Combobox
+                    options={[
+                      { value: "pct", label: "% sobre a base" },
+                      { value: "flat", label: "Prêmio fixo (R$)" },
+                      { value: "per_unit", label: "R$ por unidade do realizado" },
+                    ]}
+                    value={b.kind}
+                    onValueChange={(v) =>
+                      patchBlock(b.id, {
+                        kind: v === "flat" || v === "per_unit" ? v : "pct",
+                        // per_unit exige fator-base; sai do sentinela "base".
+                        ...(v === "per_unit" && b.basis === BASIS_BASE
+                          ? { basis: "" }
+                          : {}),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              {b.kind !== "flat" ? (
+                <div className="flex max-w-md flex-col gap-1.5">
+                  <Label>
+                    {b.kind === "per_unit"
+                      ? "R$ por unidade do realizado de"
+                      : "Comissão incide sobre"}
+                  </Label>
+                  <Combobox
+                    options={
+                      b.kind === "per_unit"
+                        ? basisOptions.filter((o) => o.value !== BASIS_BASE)
+                        : basisOptions
+                    }
+                    value={b.basis}
+                    onValueChange={(v) => patchBlock(b.id, { basis: v })}
+                  />
+                  {b.basis === "" ? (
+                    <p className="text-destructive text-xs">
+                      {b.kind === "per_unit"
+                        ? "Escolha o fator cujo realizado multiplica o R$ da faixa."
+                        : "Escolha sobre o que a % incide."}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex flex-col gap-1.5">
-                <Label>Fator gatilho (atingimento)</Label>
-                <Combobox
-                  options={factorOptions}
-                  value={commTrigger}
-                  onValueChange={(v) => setCommTrigger(v)}
+                <Label>Faixas do plano</Label>
+                <TierTable
+                  tiers={b.tiers}
+                  kind={b.kind}
+                  tierBy={b.tierBy}
+                  onChange={(rows) => patchBlock(b.id, { tiers: rows })}
                 />
-                {commTrigger === "" ? (
-                  <p className="text-destructive text-xs">
-                    Escolha o fator cujo atingimento decide a faixa.
-                  </p>
-                ) : null}
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Comissão incide sobre</Label>
-                <Combobox
-                  options={basisOptions}
-                  value={commBasis}
-                  onValueChange={(v) => setCommBasis(v)}
-                />
-                {commBasis === "" ? (
-                  <p className="text-destructive text-xs">
-                    Escolha sobre o que a % incide.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Faixas do plano</Label>
-              <TierTable tiers={commTiers} onChange={setCommTiers} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Percentuais por membro</Label>
-              <p className="text-muted-foreground text-xs">
-                Personalizar substitui a tabela INTEIRA do plano para o membro
-                (começa como cópia). Sem personalização, vale a tabela acima.
-              </p>
-              <div className="flex flex-col gap-2">
-                {commissionMembers.map((r) => {
-                  const custom = commMemberTiers[r.id] != null;
-                  return (
-                    <div key={r.id} className="rounded border p-2">
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={custom}
-                          onCheckedChange={(v) =>
-                            setCommMemberTiers((cur) => {
-                              const next = { ...cur };
-                              if (v === true)
-                                next[r.id] = commTiers.map((t) => ({ ...t }));
-                              else delete next[r.id];
-                              return next;
-                            })
-                          }
-                        />
-                        {r.label}
-                        <span className="text-muted-foreground text-xs">
-                          {custom ? "faixas personalizadas" : "padrão do plano"}
-                        </span>
-                      </label>
-                      {custom ? (
-                        <div className="mt-2">
-                          <TierTable
-                            tiers={commMemberTiers[r.id]}
-                            onChange={(rows) =>
-                              setCommMemberTiers((cur) => ({
-                                ...cur,
-                                [r.id]: rows,
-                              }))
+                <Label>Faixas por membro</Label>
+                <p className="text-muted-foreground text-xs">
+                  Personalizar substitui a tabela INTEIRA do plano para o
+                  membro (começa como cópia — edite para qualquer valor,
+                  inclusive zerar). Sem personalização, vale a tabela acima.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {commissionMembers.map((r) => {
+                    const custom = b.memberTiers[r.id] != null;
+                    return (
+                      <div key={r.id} className="rounded border p-2">
+                        <label className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={custom}
+                            onCheckedChange={(v) =>
+                              setCommBlocks((cur) =>
+                                cur.map((x) => {
+                                  if (x.id !== b.id) return x;
+                                  const next = { ...x.memberTiers };
+                                  if (v === true)
+                                    next[r.id] = x.tiers.map((t) => ({ ...t }));
+                                  else delete next[r.id];
+                                  return { ...x, memberTiers: next };
+                                })
+                              )
                             }
                           />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                {orphanTierIds.map((id) => (
-                  <div
-                    key={id}
-                    className="flex items-center gap-2 rounded border border-dashed p-2 text-xs"
-                  >
-                    <span className="text-muted-foreground">
-                      Faixas de um membro fora do plano ({id}) — preservadas,
-                      nunca usadas no cálculo.
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() =>
-                        setCommMemberTiers((cur) => {
-                          const next = { ...cur };
-                          delete next[id];
-                          return next;
-                        })
-                      }
+                          {r.label}
+                          <span className="text-muted-foreground text-xs">
+                            {custom ? "faixas personalizadas" : "padrão do plano"}
+                          </span>
+                        </label>
+                        {custom ? (
+                          <div className="mt-2">
+                            <TierTable
+                              tiers={b.memberTiers[r.id]}
+                              kind={b.kind}
+                              tierBy={b.tierBy}
+                              onChange={(rows) =>
+                                setCommBlocks((cur) =>
+                                  cur.map((x) =>
+                                    x.id === b.id
+                                      ? {
+                                          ...x,
+                                          memberTiers: {
+                                            ...x.memberTiers,
+                                            [r.id]: rows,
+                                          },
+                                        }
+                                      : x
+                                  )
+                                )
+                              }
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {orphanTierIds.map((id) => (
+                    <div
+                      key={id}
+                      className="flex items-center gap-2 rounded border border-dashed p-2 text-xs"
                     >
-                      Remover
-                    </Button>
-                  </div>
-                ))}
+                      <span className="text-muted-foreground">
+                        Faixas de um membro fora do plano ({id}) — preservadas,
+                        nunca usadas no cálculo.
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() =>
+                          setCommBlocks((cur) =>
+                            cur.map((x) => {
+                              if (x.id !== b.id) return x;
+                              const next = { ...x.memberTiers };
+                              delete next[id];
+                              return { ...x, memberTiers: next };
+                            })
+                          )
+                        }
+                      >
+                        Remover
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() =>
+                    setCommBlocks((cur) => cur.filter((x) => x.id !== b.id))
+                  }
+                >
+                  <Trash2 className="size-4" /> Remover comissão {bi + 1}
+                </Button>
               </div>
             </div>
-          </div>
-        ) : null}
+          );
+        })}
       </div>
 
       {/* Fórmula livre do total (avançado) */}
@@ -826,19 +1071,32 @@ export function PlanEditor(props: PlanEditorProps) {
   );
 }
 
-// Tabela editável de faixas: "atingimento a partir de (%)" → "comissão (%)".
-// Linha toda vazia é ignorada no save; ordenação acontece no parse.
+// Tabela editável de faixas: colunas cientes do kind (% × R$) e do tierBy
+// (limiar em atingimento % ou realizado absoluto). Linha toda vazia é
+// ignorada no save; ordenação acontece no parse.
 function TierTable(props: {
   tiers: TierDraft[];
+  kind: CompTierKind;
+  tierBy: "attainment" | "realized";
   onChange: (rows: TierDraft[]) => void;
 }) {
   const patch = (i: number, p: Partial<TierDraft>) =>
     props.onChange(props.tiers.map((t, j) => (j === i ? { ...t, ...p } : t)));
+  const fromLabel =
+    props.tierBy === "attainment"
+      ? "Atingimento a partir de (%)"
+      : "Realizado a partir de";
+  const valueLabel =
+    props.kind === "pct"
+      ? "Comissão (%)"
+      : props.kind === "flat"
+        ? "Prêmio (R$)"
+        : "R$ por unidade";
   return (
     <div className="flex max-w-md flex-col gap-1.5">
       <div className="text-muted-foreground grid grid-cols-[1fr_1fr_2.5rem] gap-2 text-xs">
-        <span>Atingimento a partir de (%)</span>
-        <span>Comissão (%)</span>
+        <span>{fromLabel}</span>
+        <span>{valueLabel}</span>
         <span />
       </div>
       {props.tiers.map((t, i) => (
@@ -847,13 +1105,19 @@ function TierTable(props: {
             inputMode="decimal"
             value={t.fromPct}
             onChange={(e) => patch(i, { fromPct: e.target.value })}
-            placeholder="Ex.: 80"
+            placeholder={props.tierBy === "attainment" ? "Ex.: 80" : "Ex.: 26"}
           />
           <Input
             inputMode="decimal"
-            value={t.ratePct}
-            onChange={(e) => patch(i, { ratePct: e.target.value })}
-            placeholder="Ex.: 3"
+            value={t.value}
+            onChange={(e) => patch(i, { value: e.target.value })}
+            placeholder={
+              props.kind === "pct"
+                ? "Ex.: 3"
+                : props.kind === "flat"
+                  ? "Ex.: 500"
+                  : "Ex.: 12,50"
+            }
           />
           <Button
             type="button"
@@ -874,7 +1138,7 @@ function TierTable(props: {
           size="sm"
           disabled={props.tiers.length >= MAX_COMMISSION_TIERS}
           onClick={() =>
-            props.onChange([...props.tiers, { fromPct: "", ratePct: "" }])
+            props.onChange([...props.tiers, { fromPct: "", value: "" }])
           }
         >
           <Plus className="size-4" /> Adicionar faixa

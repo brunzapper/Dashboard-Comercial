@@ -1,6 +1,9 @@
-// Versão: 1.1 | Data: 31/07/2026 (v1.1: membros por operação — ramo admin
-// carrega operations + loadOperationScopes do catálogo inteiro e passa
-// operationMembersById ao manager; editor mostra membros efetivos ao vivo)
+// Versão: 1.2 | Data: 31/07/2026 (v1.2: alvos em moeda estrangeira — os dois
+// ramos resolvem targetRates no server via loadTargetRatesForConfig e o ramo
+// admin carrega as moedas habilitadas p/ o editor de planos)
+// v1.1: membros por operação — ramo admin carrega operations +
+// loadOperationScopes do catálogo inteiro e passa operationMembersById ao
+// manager; editor mostra membros efetivos ao vivo.
 // Tela de Remuneração variável (0112). A área NÃO tem gate de papel
 // (AREA_GATES.remuneracao = {}): a page ramifica — admin vê o gestor completo
 // (planos + grade mensal); demais papéis veem "Minha remuneração" (read-only;
@@ -22,6 +25,7 @@ import type { FieldDefinition } from "@/lib/records/types";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { loadOperationScopes } from "@/lib/config/operation-scope";
 import {
+  loadTargetRatesForConfig,
   loadTargetsByMember,
   operationMembersFromScopes,
 } from "@/lib/comp/engine";
@@ -97,20 +101,26 @@ export default async function RemuneracaoPage({
     const canonId = ownIds.length > 0 ? canonicalOf(ownIds[0], canon) : null;
     const plans = (plansData ?? []) as CompPlanClientRow[];
 
-    // Alvos do mês por plano (goals é org-wide legível; só o próprio canônico).
+    // Alvos do mês por plano (goals é org-wide legível; só o próprio canônico)
+    // + taxas de moeda de alvo por plano (fast path {} p/ plano só-BRL).
     const targetsByPlan: Record<string, Record<string, number | null>> = {};
+    const targetRatesByPlan: Record<string, Record<string, number | null>> = {};
     if (canonId) {
       for (const plan of plans) {
         const config = parseCompPlanConfig(plan.config);
         if (!config) continue;
-        const targets = await loadTargetsByMember(supabase, {
-          year,
-          month,
-          config,
-          memberIds: [canonId],
-          canon,
-        });
+        const [targets, rates] = await Promise.all([
+          loadTargetsByMember(supabase, {
+            year,
+            month,
+            config,
+            memberIds: [canonId],
+            canon,
+          }),
+          loadTargetRatesForConfig(supabase, config, year, month),
+        ]);
         targetsByPlan[plan.id] = targets.get(canonId) ?? {};
+        targetRatesByPlan[plan.id] = rates;
       }
     }
 
@@ -123,6 +133,7 @@ export default async function RemuneracaoPage({
             (entriesData ?? []) as (CompEntryClientRow & { plan_id: string })[]
           }
           targetsByPlan={targetsByPlan}
+          targetRatesByPlan={targetRatesByPlan}
           year={year}
           month={month}
           linked={canonId != null}
@@ -189,31 +200,45 @@ export default async function RemuneracaoPage({
     .filter((r) => !canon.canonicalById.has(r.id))
     .map((r) => ({ id: r.id, label: r.display_name ?? "—" }));
 
-  const [{ data: entriesData }, targets] = await Promise.all([
-    selectedPlanId
-      ? supabase
-          .from("comp_entries")
-          .select(
-            "id, responsible_id, base_amount, inputs, computed, total, mirror_record_id, published_at, updated_at"
-          )
-          .eq("plan_id", selectedPlanId)
-          .eq("period_year", year)
-          .eq("period_month", month)
-      : Promise.resolve({ data: [] as unknown[] }),
-    (async () => {
-      const plan = plans.find((p) => p.id === selectedPlanId);
-      const config = plan ? parseCompPlanConfig(plan.config) : null;
-      if (!config) return {};
-      const map = await loadTargetsByMember(supabase, {
-        year,
-        month,
-        config,
-        memberIds: responsibles.map((r) => r.id),
-        canon,
-      });
-      return Object.fromEntries(map);
-    })(),
-  ]);
+  const selectedConfig = (() => {
+    const plan = plans.find((p) => p.id === selectedPlanId);
+    return plan ? parseCompPlanConfig(plan.config) : null;
+  })();
+  const [{ data: entriesData }, targets, targetRates, { data: curData }] =
+    await Promise.all([
+      selectedPlanId
+        ? supabase
+            .from("comp_entries")
+            .select(
+              "id, responsible_id, base_amount, inputs, computed, total, mirror_record_id, published_at, updated_at"
+            )
+            .eq("plan_id", selectedPlanId)
+            .eq("period_year", year)
+            .eq("period_month", month)
+        : Promise.resolve({ data: [] as unknown[] }),
+      (async () => {
+        if (!selectedConfig) return {};
+        const map = await loadTargetsByMember(supabase, {
+          year,
+          month,
+          config: selectedConfig,
+          memberIds: responsibles.map((r) => r.id),
+          canon,
+        });
+        return Object.fromEntries(map);
+      })(),
+      selectedConfig
+        ? loadTargetRatesForConfig(supabase, selectedConfig, year, month)
+        : Promise.resolve({} as Record<string, number | null>),
+      supabase
+        .from("currencies")
+        .select("code, label")
+        .eq("enabled", true)
+        .order("sort_order"),
+    ]);
+  const currencies = ((curData ?? []) as { code: string; label: string }[]).map(
+    (c) => ({ value: c.code, label: `${c.label} (${c.code})` })
+  );
 
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
@@ -229,6 +254,8 @@ export default async function RemuneracaoPage({
         entries={(entriesData ?? []) as CompEntryClientRow[]}
         responsibles={responsibles}
         targets={targets}
+        targetRates={targetRates}
+        currencies={currencies}
         metrics={metrics}
         available={available}
         allFields={allFields}

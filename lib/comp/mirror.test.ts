@@ -76,15 +76,25 @@ describe("mirror builders", () => {
     expect(mirrorTitle("Ana", 2026, 12)).toBe("Ana — 12/2026");
   });
 
-  it("comissão por faixas entra em rem_comissao e no total espelhado", () => {
+  it("comissão por faixas entra em rem_comissao e no total espelhado (2 blocos = soma)", () => {
     const cfg: CompPlanConfig = {
       ...CONFIG,
-      commission: {
-        triggerFactorId: "f_b",
-        basisKind: "factor",
-        basisFactorId: "f_a",
-        tiers: [{ fromPct: 100, ratePct: 3 }],
-      },
+      commissions: [
+        {
+          id: "perc",
+          triggerFactorId: "f_b",
+          basisKind: "factor",
+          basisFactorId: "f_a",
+          tiers: [{ fromPct: 100, ratePct: 3 }],
+        },
+        {
+          id: "premio",
+          kind: "flat",
+          triggerFactorId: "f_b",
+          basisKind: "base",
+          tiers: [{ fromPct: 100, amount: 250 }],
+        },
+      ],
     };
     const breakdown = computeEntry(
       cfg,
@@ -103,9 +113,10 @@ describe("mirror builders", () => {
       month: 7,
       lastDay: 31,
     });
-    // 3% de 50000 = 1500; total = 300 + 400 + 1500 = 2200.
-    expect(values.custom__rem_comissao).toBe("1500");
-    expect(values.core__value).toBe("2200");
+    // 3% de 50000 = 1500 + prêmio fixo 250 = 1750 (rem_comissao = AGREGADO);
+    // total = 300 + 400 + 1750 = 2450.
+    expect(values.custom__rem_comissao).toBe("1750");
+    expect(values.core__value).toBe("2450");
   });
 
   it("atingimento médio ignora fatores sem atingimento; nenhum ⇒ null", () => {
