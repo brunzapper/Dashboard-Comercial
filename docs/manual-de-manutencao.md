@@ -1,4 +1,8 @@
-<!-- Versão: 1.21 | Data: 30/07/2026 -->
+<!-- Versão: 1.22 | Data: 31/07/2026 -->
+<!-- v1.22 (31/07/2026): recursos SOB DEMANDA por org (0114) — runbook de
+     habilitação pelo /owner (org_features; Zapper nasce ligada) + preset
+     Remuneração Variável v3 (5 abas; aba Atribuição no passo do
+     sdr_reuniao). -->
 <!-- v1.21 (30/07/2026): runbook de truncamento da conversa de IA — a mescla
      do "Criar a partir de" soma um JSON por referência adicional ao prompt;
      remédio: desmarcar referências desnecessárias. -->
@@ -455,16 +459,29 @@ antigo no MESMO período.
 > ajustes manuais de aparência feitos neles se perdem no re-apply (widgets
 > criados à mão não são tocados).
 
+**Habilitar um recurso SOB DEMANDA para uma organização** (org_features,
+0114 — hoje só "Remuneração variável", construído sob demanda para a
+Zapper): entrar como OWNER em `/owner` → card da organização → seção
+"Recursos sob demanda" → marcar o toggle. Só o owner habilita (a escrita de
+`org_features` é service-role-only; org_admin não se auto-habilita). Com o
+recurso DESLIGADO a org não vê a aba Configurações → Remuneração, a linha na
+matriz de Acessos nem o preset "Remuneração Variável" (aplicar/gerar também
+barram); os DADOS de quem já usou nunca são apagados/escondidos — religar
+restaura tudo. A Zapper já nasce ligada pela própria migração 0114.
+
 **Gerar o preset "Remuneração Variável"**
-(`lib/presets/remuneracao-variavel.ts`, v2 31/07/2026) — monta o controle de
-remuneração do comercial: árvore de operações AEs/SDR-BDR JÁ COM os vínculos
-das pessoas (Gabriella Salles, Daniela Drielsma, Paulo Vitor Santos, Marcus
-Barcelos, Marcos Hernandes — re-garantidos a cada Atualizar; vínculo manual
-nunca é tocado; remover permanentemente = tirar do preset), 5 planos de
-remuneração (Configurações → Remuneração), campos `adicional_ao_mrr` e
-`sdr_reuniao` (dropdown vivo de responsáveis), sub-base
-`reunioes_qualificadas`, a base espelho "Remuneração" e um dashboard em 4
-abas (Visão geral, AEs com cards por pessoa, SDRs, Remuneração — espelho).
+(`lib/presets/remuneracao-variavel.ts`, v3 31/07/2026; exige o recurso sob
+demanda "Remuneração variável" LIGADO para a org — bloco acima) — monta o
+controle de remuneração do comercial: árvore de operações AEs/SDR-BDR JÁ COM
+os vínculos das pessoas (Gabriella Salles, Daniela Drielsma, Paulo Vitor
+Santos, Marcus Barcelos, Marcos Hernandes — re-garantidos a cada Atualizar;
+vínculo manual nunca é tocado; remover permanentemente = tirar do preset), 5
+planos de remuneração (Configurações → Remuneração), campos
+`adicional_ao_mrr` e `sdr_reuniao` (dropdown vivo de responsáveis), sub-base
+`reunioes_qualificadas`, a base espelho "Remuneração" e um dashboard de
+CONFERÊNCIA em 5 abas (Visão geral — resumo da remuneração sobre o espelho;
+AEs — valor gerado + cards por pessoa; SDRs; Atribuição — tabela editável
+que liga a reunião ao SDR; Remuneração — detalhe do espelho).
 Ensure-only: nada já existente é sobrescrito. Runbook PÓS-geração:
 
 1. **Conferir o resultado do apply** (mensagem da tela de Presets): vínculos
@@ -476,8 +493,10 @@ Ensure-only: nada já existente é sobrescrito. Runbook PÓS-geração:
    cotação, o atingimento do fator fica em erro visível (nunca converte 1:1).
 3. **Preencher `SDR da Reunião` nos leads qualificados** (inclusive backfill
    do mês corrente): o realizado de reuniões dos SDRs conta APENAS leads com
-   o campo preenchido. As options do dropdown se mantêm sozinhas
-   (responsáveis ativos; refresh no sync e nas actions de Responsáveis).
+   o campo preenchido — a aba **Atribuição** do dashboard (v3) é o lugar:
+   dropdown por linha + KPI de pendências ("Sem SDR"). As options do dropdown
+   se mantêm sozinhas (responsáveis ativos; refresh no sync e nas actions de
+   Responsáveis).
 4. **Preencher `Adicional ao MRR` nos negócios** (manual/import) — compõe o
    "Valor gerado" junto de MRR do contrato, Implementação e Vendas do site.
 5. **20% dos SDRs**: os planos SDR Full Cycle nascem com 20% sobre o valor

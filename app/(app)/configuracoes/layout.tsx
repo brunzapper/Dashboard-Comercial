@@ -1,6 +1,10 @@
-// Versão: 1.3 | Data: 30/07/2026
+// Versão: 1.4 | Data: 31/07/2026
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) como sub-abas. Cada sub-aba mantém o mesmo
+// v1.4 (31/07/2026): recursos SOB DEMANDA por org (0114) — a aba de área com
+//   entrada em AREA_FEATURES some quando o feature da org está off
+//   (disabledAreas, computado aqui via loadOrgFeatures; a page/action seguem
+//   autoprotegidas pelo gate de access.ts).
 // v1.3 (30/07/2026): aba "Remuneração" (0112) — sem gate de papel (a page
 //   ramifica admin/vendedor; ver AREA_GATES.remuneracao).
 // gating de papel/permissão de quando eram itens de topo. Sub-páginas ainda
@@ -19,12 +23,15 @@ import { redirect } from "next/navigation";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrg } from "@/lib/auth/org";
+import { createClient } from "@/lib/supabase/server";
 import {
+  AREA_FEATURES,
   areaRoleAllowed,
   canAccessSettingsArea,
   loadOwnSettingsOverrides,
   type OverrideEffect,
 } from "@/lib/auth/access";
+import { loadOrgFeatures } from "@/lib/config/org-features";
 import {
   SettingsTabs,
   type SettingsTab,
@@ -55,10 +62,14 @@ export function allowedSettingsTabs(
   roles: string[],
   permissions: string[],
   isOrgAdmin = false,
-  overrides: Map<string, OverrideEffect> = new Map()
+  overrides: Map<string, OverrideEffect> = new Map(),
+  // Áreas de recurso sob demanda DESLIGADO na org (0114) — somem antes de
+  // qualquer override (feature-off vence allow).
+  disabledAreas: ReadonlySet<string> = new Set()
 ): SettingsTab[] {
   return ALL_TABS.filter((t) => {
     const key = areaKeyOf(t.href);
+    if (disabledAreas.has(key)) return false;
     // "conta" é sempre do próprio usuário — override não a esconde.
     if (key === "conta") return true;
     return canAccessSettingsArea(
@@ -66,6 +77,19 @@ export function allowedSettingsTabs(
       overrides.get(key)
     );
   }).map(({ href, label }) => ({ href, label }));
+}
+
+/** Áreas com recurso sob demanda DESLIGADO para a org ativa (0114). */
+export async function loadDisabledFeatureAreas(
+  org: { id: string } | null
+): Promise<Set<string>> {
+  const supabase = await createClient();
+  const features = await loadOrgFeatures(supabase, org?.id ?? null);
+  return new Set(
+    Object.entries(AREA_FEATURES)
+      .filter(([, feature]) => !feature || !features[feature])
+      .map(([area]) => area)
+  );
 }
 
 export default async function ConfiguracoesLayout({
@@ -80,11 +104,13 @@ export default async function ConfiguracoesLayout({
     getActiveOrg(),
     loadOwnSettingsOverrides(),
   ]);
+  const disabledAreas = await loadDisabledFeatureAreas(org);
   const tabs = allowedSettingsTabs(
     session.roles,
     session.permissions,
     org?.isOrgAdmin ?? false,
-    overrides
+    overrides,
+    disabledAreas
   );
   if (tabs.length === 0) redirect("/");
 

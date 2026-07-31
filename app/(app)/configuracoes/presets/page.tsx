@@ -1,13 +1,18 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Configurações → Presets (admin): gerar/atualizar os dashboards preset do
 // catálogo (lib/presets/definitions.ts) via applyPreset/generatePresets
 // (aplicação idempotente — ver docs/arquitetura.md §4.7). O estado por preset
 // sai do marcador dashboards.settings.preset dos dashboards DESTE usuário.
+// v1.1 (31/07/2026): preset com requiresFeature (recurso sob demanda, 0114)
+// sai da lista quando o feature da org está off — applyPreset/generatePresets
+// barram/pulam também (a lista não é a única porta).
 import { redirect } from "next/navigation";
 import { requireSettingsArea } from "@/lib/auth/access";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { loadOrgFeatures } from "@/lib/config/org-features";
 import { PRESETS } from "@/lib/presets/definitions";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import {
@@ -38,7 +43,13 @@ export default async function PresetsPage() {
     settings: DashboardSettings | null;
   }[];
 
-  const rows: PresetRow[] = PRESETS.map((p) => {
+  // Recursos sob demanda (0114): preset de feature desligado não é oferecido.
+  const features = await loadOrgFeatures(supabase, await getActiveOrgId());
+  const offered = PRESETS.filter(
+    (p) => !p.requiresFeature || features[p.requiresFeature]
+  );
+
+  const rows: PresetRow[] = offered.map((p) => {
     const applied = dashboards.find(
       (d) => d.settings?.preset?.key === p.presetKey
     );
