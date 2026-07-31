@@ -1,6 +1,11 @@
-// Versão: 1.3 | Data: 30/07/2026
+// Versão: 1.4 | Data: 31/07/2026
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
+// v1.4 (31/07/2026): recursos SOB DEMANDA por org (0114) — AREA_FEATURES liga
+//   área → feature de org_features; feature-off vence TUDO (até override
+//   allow: não dá para "allowar" recurso que a org não contratou). Precedência
+//   completa: feature-off > deny > allow > gate de papel. Vale na page
+//   (requireSettingsArea/checkSettingsArea) E na escrita (isSettingsAreaDenied).
 // v1.3 (30/07/2026): área "remuneracao" (0112) — sem gate de papel (a page
 //   ramifica: admin gere, vendedor vê a própria; RLS protege os valores).
 // sem override vale o gate atual. AREA_GATES é a fonte ÚNICA dos gates por
@@ -20,6 +25,10 @@ import { redirect } from "next/navigation";
 import { getSessionInfo, type SessionInfo } from "@/lib/auth/session";
 import { getActiveOrg } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import {
+  loadOrgFeatures,
+  type OrgFeatureKey,
+} from "@/lib/config/org-features";
 
 export type OverrideEffect = "allow" | "deny";
 
@@ -68,6 +77,28 @@ export const AREA_LABELS: Record<string, string> = {
   log: "Log (Registros)",
 };
 
+// Áreas que só existem com o recurso SOB DEMANDA da org ligado (org_features,
+// 0114). Feature-off vence TUDO — inclusive override allow — e barra page,
+// aba e escrita. A chave de área segue HISTÓRICA; a de feature vem do
+// catálogo ORG_FEATURES (lib/config/org-features.ts).
+export const AREA_FEATURES: Partial<Record<string, OrgFeatureKey>> = {
+  remuneracao: "remuneracao",
+};
+
+/** O recurso sob demanda da área está ligado para a org ativa? Áreas sem
+ * entrada em AREA_FEATURES passam direto. Fail-closed (sem org = off). */
+const areaFeatureEnabled = cache(async function areaFeatureEnabled(
+  areaKey: string
+): Promise<boolean> {
+  const feature = AREA_FEATURES[areaKey];
+  if (!feature) return true;
+  const org = await getActiveOrg();
+  if (!org) return false;
+  const supabase = await createClient();
+  const features = await loadOrgFeatures(supabase, org.id);
+  return features[feature];
+});
+
 /** Overrides de settings_area do PRÓPRIO usuário (RLS: linhas próprias). */
 export const loadOwnSettingsOverrides = cache(
   async function loadOwnSettingsOverrides(): Promise<
@@ -104,6 +135,9 @@ export const loadOwnSettingsOverrides = cache(
  * jamais concede escrita a quem não tem o papel.
  */
 export async function isSettingsAreaDenied(areaKey: string): Promise<boolean> {
+  // Recurso sob demanda desligado barra a escrita como um deny (precedência
+  // máxima — fecha o bypass da action direta numa org sem o recurso).
+  if (!(await areaFeatureEnabled(areaKey))) return true;
   const overrides = await loadOwnSettingsOverrides();
   return overrides.get(areaKey) === "deny";
 }
@@ -156,6 +190,9 @@ export async function requireSettingsArea(
 export async function checkSettingsArea(areaKey: string): Promise<boolean> {
   const session = await getSessionInfo();
   if (!session) return false;
+  // Feature-off vence tudo (antes de deny/allow): área de recurso sob demanda
+  // simplesmente não existe numa org sem o recurso.
+  if (!(await areaFeatureEnabled(areaKey))) return false;
   const [org, overrides] = await Promise.all([
     getActiveOrg(),
     loadOwnSettingsOverrides(),

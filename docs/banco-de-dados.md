@@ -1,4 +1,7 @@
-<!-- Versão: 3.5 | Data: 31/07/2026 -->
+<!-- Versão: 3.6 | Data: 31/07/2026 -->
+<!-- v3.6 (31/07/2026): 0114 — org_features (recursos sob demanda por org;
+     SELECT membros, escrita service-role-only via /owner; seed Zapper com
+     remuneracao ligado). Não recria as RPCs. -->
 <!-- v3.5 (31/07/2026): comp_plans.config ganha `memberOperationIds?` (membros
      do plano pela subárvore VIVA de responsible_operations, resolvida no
      engine/page — nunca por records.operation_id) — só shape de jsonb, SEM
@@ -557,6 +560,16 @@ browser — só o servidor decifra em `loadOrgAiConfig`), `updated_by`. RLS SELE
 só admin da própria org (`auth_org_ids` + `auth_has_role('admin')`); escrita só
 service role (sem policy), carimbando `organization_id`.
 
+**`org_features`** (0114) — recursos SOB DEMANDA por organização (config
+custom): `organization_id` (PK → `organizations`), `features` jsonb
+(`{"remuneracao": true}` — parse fail-closed em
+`lib/config/org-features.ts`: sem linha/chave = OFF). RLS SELECT p/ qualquer
+membro da org; escrita SÓ service role (sem policy) — habilitação exclusiva
+do console `/owner` (org_admin nunca se auto-habilita). Seed: a org Zapper
+nasce com `remuneracao` ligado (`on conflict do nothing` — reaplicar não
+sobrescreve toggles). O gate de app vive em `AREA_FEATURES`
+(lib/auth/access.ts) + `PresetDashboard.requiresFeature`.
+
 ## 4. Funções
 
 ### 4.1 O par crítico de RPCs de widget
@@ -771,6 +784,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0111 | agenda_notes_task_time_end | Redesign da agenda: `tasks.due_time_end` (hora final opcional; CHECK exige `due_time`) + índice `idx_tasks_due (due_date, due_time)`; tabela `agenda_notes` (anotação do dia — org-scoped raiz, carimbo na action; SELECT org-wide, escrita autor/admin/gestor; sem anon) + publication realtime. Não recria as RPCs |
 | 0112 | comp_plans | Remuneração variável: `comp_plans` (config jsonb versionado fail-closed; SELECT org-wide, escrita admin) + `comp_entries` (lançamentos por responsável×mês — inputs/overrides/computed/total, `mirror_record_id` p/ o espelho publicado; SELECT admin OU próprio grupo via `auth_responsible_ids()`, escrita admin). Raízes org-scoped com carimbo na action; sem anon; não recria as RPCs de widget |
 | 0113 | field_options_source | `field_definitions.options_source` (check `in ('responsibles')`): campo `selecao` de dropdown VIVO — options reescritas pelo app com os responsáveis ativos principais (`refreshResponsibleOptionFields`; refresh no apply de preset, pós-sync e actions de Responsáveis). Não recria as RPCs |
+| 0114 | org_features | Recursos SOB DEMANDA por org (config custom — hoje `remuneracao`): linha por org com jsonb de toggles; SELECT p/ membros, escrita SÓ service role (console /owner); seed liga `remuneracao` p/ a Zapper (`on conflict do nothing`). Gate de app em AREA_FEATURES + requiresFeature de preset. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

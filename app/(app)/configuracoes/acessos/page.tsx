@@ -6,9 +6,12 @@
 // (Ver/Editar/Bloqueado — board_access, 0088).
 // v1.1 (26/07/2026): PASTAS (0107) — a seção Bases vai agrupada por pasta
 //   (heading só quando há pasta) e as subs entram logo abaixo da própria pai.
+// v1.2 (31/07/2026): áreas de recurso SOB DEMANDA desligado (0114) saem da
+//   matriz — feature-off vence qualquer override, então a linha seria inerte.
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrg } from "@/lib/auth/org";
-import { AREA_LABELS } from "@/lib/auth/access";
+import { AREA_FEATURES, AREA_LABELS } from "@/lib/auth/access";
+import { loadOrgFeatures } from "@/lib/config/org-features";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { loadSources } from "@/lib/config/sources";
@@ -63,6 +66,15 @@ export default async function AcessosPage() {
     ]),
   }));
 
+  // Recursos sob demanda (0114): área com feature desligado sai da matriz.
+  const orgFeatures = await loadOrgFeatures(supabase, org?.id ?? null);
+  const areas = Object.entries(AREA_LABELS)
+    .filter(([key]) => {
+      const feature = AREA_FEATURES[key];
+      return !feature || orgFeatures[feature];
+    })
+    .map(([key, label]) => ({ key, label }));
+
   const memberIds = memberRows
     ? new Set((memberRows ?? []).map((m) => m.user_id as string))
     : null;
@@ -84,10 +96,7 @@ export default async function AcessosPage() {
       <AccessMatrix
         users={users}
         currentUserId={session.user.id}
-        areas={Object.entries(AREA_LABELS).map(([key, label]) => ({
-          key,
-          label,
-        }))}
+        areas={areas}
         sourceGroups={sourceGroups}
         boards={(boardRows ?? []).map((b) => ({
           id: b.id as string,

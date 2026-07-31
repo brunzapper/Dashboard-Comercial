@@ -932,6 +932,9 @@ export const REMUNERACAO_VARIAVEL_PRESET: PresetDashboard = {
   presetKey: "remuneracao_variavel",
   version: 3,
   name: "Remuneração Variável",
+  // Config CUSTOM sob demanda (0114): só orgs com o feature "remuneracao"
+  // ligado (Zapper) veem/aplicam este preset — habilitação pelo /owner.
+  requiresFeature: "remuneracao",
   visible_to_roles: ["admin", "gestor"],
   settings: {
     tabs: [

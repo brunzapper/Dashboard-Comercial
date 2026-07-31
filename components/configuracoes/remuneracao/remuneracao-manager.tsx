@@ -1,5 +1,12 @@
-// Versão: 1.2 | Data: 31/07/2026 (v1.2: repassa targetRates à grade e
-// currencies ao editor — alvos em moeda estrangeira)
+// Versão: 1.3 | Data: 31/07/2026
+// v1.3 (31/07/2026): o seletor de plano vira PILLS visíveis (nome + nº de
+//   membros + inativo) — o combobox discreto fazia parecer que só existia o
+//   1º plano (ordem alfabética); todos ficam à vista e o clique segue
+//   navegando ?plano= como antes. Contagem pelos MESMOS helpers puros do
+//   model (resolveOperationMembers/explicitMemberIds — client nunca importa
+//   engine.ts).
+// v1.2: repassa targetRates à grade e currencies ao editor — alvos em moeda
+// estrangeira.
 // v1.1: repassa operations + operationMembersById ao editor e à grade —
 // membros por operação.
 // Gerência de Remuneração variável (0112) — admin. Topo: seletor de plano +
@@ -15,12 +22,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceDef } from "@/lib/sources";
 import type { AvailableField } from "@/lib/widgets/fields";
-import { parseCompPlanConfig } from "@/lib/comp/model";
+import {
+  explicitMemberIds,
+  parseCompPlanConfig,
+  resolveOperationMembers,
+} from "@/lib/comp/model";
 
 import { CompGrid } from "./comp-grid";
 import { PlanEditor } from "./plan-editor";
@@ -107,25 +117,68 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
     navigate(plan?.id ?? null, d.getUTCFullYear(), d.getUTCMonth() + 1);
   };
 
-  const planOptions: ComboboxOption[] = props.plans.map((p) => ({
-    value: p.id,
-    label: p.active ? p.name : `${p.name} (inativo)`,
-  }));
+  // Pills de plano: nº de membros EFETIVOS (manuais ∪ operações; lista
+  // explícita ausente = todos os ativos) — mesmo cálculo da grade.
+  const planPills = useMemo(
+    () =>
+      props.plans.map((p) => {
+        const cfg = parseCompPlanConfig(p.config);
+        let members: number | null = null;
+        if (cfg) {
+          const opMembers = resolveOperationMembers(
+            cfg.memberOperationIds,
+            props.operationMembersById
+          );
+          const explicit = explicitMemberIds(cfg, opMembers);
+          members = explicit ? explicit.length : props.responsibles.length;
+        }
+        return { id: p.id, name: p.name, active: p.active, members };
+      }),
+    [props.plans, props.operationMembersById, props.responsibles.length]
+  );
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        {props.plans.length > 0 ? (
-          <div className="w-56">
-            <Combobox
-              options={planOptions}
-              value={plan?.id ?? ""}
-              onValueChange={(v) => {
-                setCreating(false);
-                navigate(v || null, props.year, props.month);
-              }}
-              placeholder="Plano…"
-            />
+        {planPills.length > 0 ? (
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="tablist"
+            aria-label="Planos de remuneração"
+          >
+            {planPills.map((p) => {
+              const selected = !creating && p.id === plan?.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors ${
+                    selected
+                      ? "border-primary bg-primary/10 font-medium"
+                      : "text-muted-foreground hover:bg-accent border-border"
+                  }`}
+                  onClick={() => {
+                    setCreating(false);
+                    navigate(p.id, props.year, props.month);
+                  }}
+                >
+                  <span>
+                    {p.name}
+                    {!p.active ? " (inativo)" : ""}
+                  </span>
+                  {p.members != null ? (
+                    <span
+                      className="bg-muted text-muted-foreground rounded-full px-1.5 text-xs tabular-nums"
+                      title={`${p.members} membro(s)`}
+                    >
+                      {p.members}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         ) : null}
         <Button

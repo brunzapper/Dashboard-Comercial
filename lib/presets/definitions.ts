@@ -153,6 +153,10 @@ export interface PresetDashboard {
   // widgets podem referenciar a source `remuneracao` (key literal; se a org
   // resolveu com sufixo de colisão, o apply reporta erro visível).
   ensureCompMirror?: boolean;
+  // Recurso SOB DEMANDA (org_features, 0114) exigido: preset some da lista e
+  // applyPreset/generatePresets o barram/pulam quando o feature da org está
+  // desligado (os dois caminhos são alcançáveis por action direta).
+  requiresFeature?: import("@/lib/config/org-features").OrgFeatureKey;
   widgets: PresetWidget[];
 }
 
