@@ -247,6 +247,171 @@ describe("runBoardAutomations — quadro por valor", () => {
   });
 });
 
+describe("runBoardAutomations — ação set_field", () => {
+  const kanban = {
+    mode: "registros",
+    source: "leads",
+    groupField: "stage",
+    columns: [{ key: "novo" }, { key: "quente" }],
+  };
+  const SET_RULE: AutomationRule = {
+    v: 1,
+    conditions: [
+      { kind: "field", filter: { field: "stage", op: "eq", value: "novo" } },
+    ],
+    action: {
+      type: "set_field",
+      field: "custom:obs",
+      value: "Paulo Vitor Santos",
+    },
+  };
+  const obsDef = {
+    id: "f1",
+    field_key: "obs",
+    label: "Obs",
+    data_type: "texto",
+    options: null,
+    visible_to_roles: null,
+    editable_by_roles: null,
+    is_local: true,
+    show_in_builder: true,
+    formula: null,
+    allow_negative: null,
+    currency_code: null,
+    currency_mode: null,
+    show_as_percent: null,
+    sort_order: 0,
+    applies_to: null,
+    source_system: null,
+    source_field_id: null,
+    write_back: false,
+  };
+
+  function makeFake(rows: ReturnType<typeof recordRow>[]) {
+    return fakeSupabase({
+      tables: {
+        kanban_automations: (q) =>
+          q.steps.some((s) => s.method === "update")
+            ? { data: null, error: null }
+            : { data: [ruleRow(SET_RULE)], error: null },
+        dashboards: () => ({ data: boardRow(kanban), error: null }),
+        data_sources: [],
+        field_definitions: [obsDef],
+        field_correspondences: [],
+        records: recordsHandler(rows),
+        record_matches: [],
+        tasks: [],
+        audit_log: () => ({ data: null, error: null }),
+      },
+    });
+  }
+
+  it("escreve o campo com carimbos + org explícita e audit 'automation'", async () => {
+    const { db, queries } = makeFake([recordRow("r1", "novo")]);
+    const summary = await runBoardAutomations(db, {
+      kind: "board",
+      id: "board-1",
+    });
+    expect(summary.fatal).toBeUndefined();
+    expect(summary.ruleErrors).toEqual([]);
+    expect(summary.moved).toBe(1); // "moved" agrega AÇÕES (moves + sets)
+
+    const upd = queries.find(
+      (q) =>
+        q.table === "records" && q.steps.some((s) => s.method === "update")
+    )!;
+    const updArgs = upd.steps.find((s) => s.method === "update")!
+      .args[0] as Record<string, unknown>;
+    expect(
+      (updArgs.custom_fields as Record<string, unknown>).obs
+    ).toBe("Paulo Vitor Santos");
+    expect(
+      (updArgs.field_modified_at as Record<string, string>).obs
+    ).toBeTruthy();
+    expect(updArgs.locally_modified_at).toBeTruthy();
+    expect(hasStep(upd, "eq", "id", "r1")).toBe(true);
+    expect(hasStep(upd, "eq", "organization_id", "org1")).toBe(true);
+
+    const audit = queries.find((q) => q.table === "audit_log")!;
+    const rows = audit.steps.find((s) => s.method === "insert")!
+      .args[0] as Record<string, unknown>[];
+    expect(rows[0]).toMatchObject({
+      record_id: "r1",
+      field: "obs",
+      new_value: "Paulo Vitor Santos",
+      origin: "automation",
+      user_id: null,
+    });
+    expect(recalcFormulaFieldsForRecords).toHaveBeenCalledWith(["r1"]);
+    expect(emitWebhookEvent).toHaveBeenCalledTimes(1);
+
+    const bk = queries.find(
+      (q) =>
+        q.table === "kanban_automations" &&
+        q.steps.some((s) => s.method === "update")
+    )!;
+    expect(
+      (bk.steps.find((s) => s.method === "update")!.args[0] as Record<string, unknown>)
+        .last_moved_count
+    ).toBe(1);
+  });
+
+  it("idempotência fim-a-fim: valor já igual não gera UPDATE nem efeitos", async () => {
+    const done = {
+      ...recordRow("r1", "novo"),
+      custom_fields: { obs: "Paulo Vitor Santos" },
+    };
+    const { db, queries } = makeFake([done]);
+    const summary = await runBoardAutomations(db, {
+      kind: "board",
+      id: "board-1",
+    });
+    expect(summary.fatal).toBeUndefined();
+    expect(summary.moved).toBe(0);
+    expect(
+      queries.some(
+        (q) => q.table === "records" && q.steps.some((s) => s.method === "update")
+      )
+    ).toBe(false);
+    expect(recalcFormulaFieldsForRecords).not.toHaveBeenCalled();
+    expect(emitWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it("alvo proibido (campo inexistente) vira ruleError, nunca escrita", async () => {
+    const badRule: AutomationRule = {
+      v: 1,
+      conditions: SET_RULE.conditions,
+      action: { type: "set_field", field: "custom:sumiu", value: "x" },
+    };
+    const { db, queries } = fakeSupabase({
+      tables: {
+        kanban_automations: (q) =>
+          q.steps.some((s) => s.method === "update")
+            ? { data: null, error: null }
+            : { data: [ruleRow(badRule)], error: null },
+        dashboards: () => ({ data: boardRow(kanban), error: null }),
+        data_sources: [],
+        field_definitions: [obsDef],
+        field_correspondences: [],
+        records: recordsHandler([recordRow("r1", "novo")]),
+        record_matches: [],
+        tasks: [],
+      },
+    });
+    const summary = await runBoardAutomations(db, {
+      kind: "board",
+      id: "board-1",
+    });
+    expect(summary.moved).toBe(0);
+    expect(summary.ruleErrors[0]?.message).toMatch(/não existe/);
+    expect(
+      queries.some(
+        (q) => q.table === "records" && q.steps.some((s) => s.method === "update")
+      )
+    ).toBe(false);
+  });
+});
+
 describe("runBoardAutomations — colunas Personalizar", () => {
   const kanban = {
     mode: "registros",

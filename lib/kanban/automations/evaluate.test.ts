@@ -1,16 +1,21 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Avaliador puro das automações do kanban: parse fail-closed, condições das 4
 // famílias (mescláveis em E na MESMA regra), first-match-wins, guardas de
 // mock/overflow/coluna sumida e dias de calendário com todayIso fixo.
+// v1.1 (31/07/2026): ação set_field — parse, guardas de alvo
+// (setFieldTargetError: data/calculado/relação/alocação/inexistente),
+// idempotência (valor igual consome sem escrever) e first-match entre famílias.
 import { describe, expect, it } from "vitest";
 
 import type { RecordRow } from "@/lib/records/types";
+import type { AvailableField } from "@/lib/widgets/fields";
 import type { KanbanColumn } from "../types";
 import {
   daysSince,
-  decideMoves,
+  decideActions,
   evaluateCondition,
   fieldFilterMatches,
+  setFieldTargetError,
   type CardFacts,
   type EvalContext,
 } from "./evaluate";
@@ -290,7 +295,7 @@ describe("evaluateCondition", () => {
   });
 });
 
-describe("decideMoves", () => {
+describe("decideActions", () => {
   it("primeira regra que casa vence; já na coluna alvo consome sem mover", () => {
     const rules = [
       rule("r-a", [{ kind: "tasks", metric: "open", op: "eq", value: 0 }], "novo", 0),
@@ -298,7 +303,7 @@ describe("decideMoves", () => {
     ];
     // Card em "novo": r-a casa primeiro (alvo = coluna atual) → nenhum
     // movimento, e r-b NÃO é avaliada (first-match-wins).
-    const { moves, ruleErrors } = decideMoves(rules, [facts()], CTX);
+    const { moves, ruleErrors } = decideActions(rules, [facts()], CTX);
     expect(moves).toEqual([]);
     expect(ruleErrors).toEqual([]);
   });
@@ -319,12 +324,12 @@ describe("decideMoves", () => {
       ]),
     ];
     const card = facts({ relatedCounts: { [relatedCountKey(cond)]: 2 } });
-    expect(decideMoves(rules, [card], CTX).moves).toEqual([
+    expect(decideActions(rules, [card], CTX).moves).toEqual([
       { recordId: "r1", fromKey: "novo", targetKey: "quente", ruleId: "r-mix" },
     ]);
     // Uma condição falhando derruba a regra inteira (E lógico).
     const cold = facts({ relatedCounts: { [relatedCountKey(cond)]: 1 } });
-    expect(decideMoves(rules, [cold], CTX).moves).toEqual([]);
+    expect(decideActions(rules, [cold], CTX).moves).toEqual([]);
   });
 
   it("mock nunca move; alvo overflow/inexistente vira erro e regra inerte", () => {
@@ -333,15 +338,205 @@ describe("decideMoves", () => {
       rule("r-gone", [{ kind: "tasks", metric: "open", op: "eq", value: 0 }], "sumiu"),
       rule("r-ok", [{ kind: "tasks", metric: "open", op: "eq", value: 0 }], "quente"),
     ];
-    const { moves, ruleErrors } = decideMoves(
+    const { moves, ruleErrors } = decideActions(
       rules,
       [facts({ isMock: true }), facts()],
       CTX
     );
-    expect(ruleErrors.map((e) => e.ruleId)).toEqual(["r-bad", "r-gone"]);
+    expect(ruleErrors.map((e: { ruleId: string }) => e.ruleId)).toEqual([
+      "r-bad",
+      "r-gone",
+    ]);
     // Só o card não-mock move, pela única regra válida.
     expect(moves).toEqual([
       { recordId: "r1", fromKey: "novo", targetKey: "quente", ruleId: "r-ok" },
     ]);
+  });
+});
+
+// ---------- ação set_field (v1.1) ----------
+
+const AVAILABLE: AvailableField[] = [
+  { field: "stage", label: "Etapa", isNumeric: false, isDate: false },
+  { field: "closed_at", label: "Fechamento", isNumeric: false, isDate: true },
+  {
+    field: "record_type",
+    label: "Tipo de registro",
+    isNumeric: false,
+    isDate: false,
+  },
+  {
+    field: "responsible_id",
+    label: "Responsável",
+    isNumeric: false,
+    isDate: false,
+    fk: "responsible",
+  },
+  {
+    field: "custom:sdr_reuniao",
+    label: "SDR da Reunião",
+    isNumeric: false,
+    isDate: false,
+  },
+  {
+    field: "custom:fase_espelho",
+    label: "Fase — Quadro",
+    isNumeric: false,
+    isDate: false,
+  },
+  {
+    field: "custom:score",
+    label: "Score",
+    isNumeric: true,
+    isDate: false,
+    calc: true,
+  },
+];
+
+const SET_CTX: EvalContext = {
+  available: AVAILABLE,
+  todayIso: TODAY,
+  columns: COLUMNS,
+  allocationFieldKey: "fase_espelho",
+};
+
+function setRule(
+  id: string,
+  conditions: AutomationCondition[],
+  field: string,
+  value: string,
+  position = 0
+): AutomationRow {
+  return {
+    id,
+    name: id,
+    enabled: true,
+    position,
+    rule: { v: 1, conditions, action: { type: "set_field", field, value } },
+    last_run_at: null,
+    last_error: null,
+    last_moved_count: 0,
+  };
+}
+
+describe("parseAutomationRule — set_field", () => {
+  const ok: AutomationRule = {
+    v: 1,
+    conditions: [{ kind: "tasks", metric: "open", op: "eq", value: 0 }],
+    action: {
+      type: "set_field",
+      field: "custom:sdr_reuniao",
+      value: "Paulo Vitor Santos",
+    },
+  };
+
+  it("aceita set_field válido (round-trip do jsonb)", () => {
+    expect(parseAutomationRule(JSON.parse(JSON.stringify(ok)))).toEqual(ok);
+  });
+
+  it("fail-closed estrutural: field/value vazios viram null", () => {
+    expect(
+      parseAutomationRule({ ...ok, action: { type: "set_field", field: "" , value: "x" } })
+    ).toBeNull();
+    expect(
+      parseAutomationRule({
+        ...ok,
+        action: { type: "set_field", field: "custom:x", value: "  " },
+      })
+    ).toBeNull();
+    expect(
+      parseAutomationRule({
+        ...ok,
+        action: { type: "set_field", field: "custom:x", value: 7 },
+      })
+    ).toBeNull();
+  });
+});
+
+describe("setFieldTargetError", () => {
+  const ctx = { available: AVAILABLE, allocationFieldKey: "fase_espelho" };
+
+  it("alvos válidos passam; proibidos explicam o motivo", () => {
+    expect(setFieldTargetError("custom:sdr_reuniao", ctx)).toBeNull();
+    expect(setFieldTargetError("stage", ctx)).toBeNull();
+    expect(setFieldTargetError("closed_at", ctx)).toMatch(/data/);
+    expect(setFieldTargetError("responsible_id", ctx)).toMatch(/relação/);
+    expect(setFieldTargetError("custom:score", ctx)).toMatch(/calculado/);
+    expect(setFieldTargetError("custom:sumiu", ctx)).toMatch(/não existe/);
+    expect(setFieldTargetError("match:leads:stage", ctx)).toMatch(/casado/);
+    expect(setFieldTargetError("unified:data", ctx)).toMatch(/unificado/);
+    // Espelho da alocação (invariante 24) orienta a usar o move.
+    expect(setFieldTargetError("custom:fase_espelho", ctx)).toMatch(
+      /Mover para a coluna/
+    );
+    // Coluna core derivada do sync (não editável) é barrada.
+    expect(setFieldTargetError("record_type", ctx)).toMatch(/não é editável/);
+  });
+});
+
+describe("decideActions — set_field", () => {
+  const conds: AutomationCondition[] = [
+    {
+      kind: "field",
+      filter: { field: "custom:fonte", op: "eq", value: "Formulário de CRM" },
+    },
+  ];
+  const card = () =>
+    facts({
+      record: record({ custom_fields: { fonte: "Formulário de CRM" } }),
+    });
+
+  it("emite o set quando o valor difere; consome sem escrever quando igual", () => {
+    const rules = [
+      setRule("r-set", conds, "custom:sdr_reuniao", "Paulo Vitor Santos"),
+    ];
+    const { sets, ruleErrors } = decideActions(rules, [card()], SET_CTX);
+    expect(ruleErrors).toEqual([]);
+    expect(sets).toEqual([
+      {
+        recordId: "r1",
+        field: "custom:sdr_reuniao",
+        value: "Paulo Vitor Santos",
+        ruleId: "r-set",
+      },
+    ]);
+
+    // Idempotência: já com o valor → regra casa, consome o card, zero sets —
+    // inclusive p/ a regra SEGUINTE (first-match-wins vale entre famílias).
+    const done = facts({
+      record: record({
+        custom_fields: {
+          fonte: "Formulário de CRM",
+          sdr_reuniao: "Paulo Vitor Santos",
+        },
+      }),
+    });
+    const two = decideActions(
+      [
+        setRule("r-set", conds, "custom:sdr_reuniao", "Paulo Vitor Santos", 0),
+        rule("r-move", conds.slice(), "quente", 1),
+      ],
+      [done],
+      SET_CTX
+    );
+    expect(two.sets).toEqual([]);
+    expect(two.moves).toEqual([]);
+  });
+
+  it("mock nunca recebe set; alvo proibido vira ruleError e regra inerte", () => {
+    const rules = [
+      setRule("r-aloc", conds, "custom:fase_espelho", "Quente"),
+      setRule("r-ok", conds, "custom:sdr_reuniao", "Paulo Vitor Santos"),
+    ];
+    const { sets, ruleErrors } = decideActions(
+      rules,
+      [facts({ isMock: true, record: record({ custom_fields: { fonte: "Formulário de CRM" } }) }), card()],
+      SET_CTX
+    );
+    expect(ruleErrors.map((e: { ruleId: string }) => e.ruleId)).toEqual([
+      "r-aloc",
+    ]);
+    expect(sets).toHaveLength(1);
+    expect(sets[0].ruleId).toBe("r-ok");
   });
 });

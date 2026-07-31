@@ -1,14 +1,18 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Engine I/O das automações do kanban: carrega o quadro do DONO (widget ou
 // board dedicado) com SERVICE ROLE e escopo EXPLÍCITO de org (invariante
 // 0089+), monta os CardFacts que as regras ativas pedem (gates — nada de
 // consulta desnecessária), decide via avaliador puro (evaluate.ts) e executa
-// via move.ts, com teto de movimentos por rodada e deadline cooperativo (tick
+// via move.ts, com teto de AÇÕES por rodada e deadline cooperativo (tick
 // com orçamento). Reusa runKanban inteiro (resolução de colunas, placements,
 // canonicalização de responsáveis, __match) — RPCs de widget INTOCADOS.
 // Quadros fora do escopo v1 (modo tarefas, bucket de data — mover reescreveria
 // uma DATA real relativa a "hoje" a cada tick, não idempotente) falham ALTO
 // (fatal na rodada, visível no last_error), nunca em silêncio.
+// v1.1 (31/07/2026): ação set_field — decideActions devolve {moves, sets};
+// teto ÚNICO (MAX_ACTIONS_PER_RUN, ex-MAX_MOVES_PER_RUN) sobre a soma;
+// last_moved_count passa a contar AÇÕES executadas (a UI rotula "ações");
+// EvalContext.allocationFieldKey vem do settings do dono (invariante 24).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FieldDefinition } from "@/lib/records/types";
@@ -20,13 +24,13 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { runKanban } from "../data";
 import type { KanbanSettings } from "../types";
 import {
-  decideMoves,
+  decideActions,
   type CardFacts,
   type EvalContext,
   type RuleError,
 } from "./evaluate";
 import { countRelatedBySource } from "../related-count";
-import { executeAutomationMoves } from "./move";
+import { executeAutomationMoves, executeAutomationSets } from "./move";
 import {
   parseAutomationRule,
   relatedCountKey,
@@ -42,9 +46,10 @@ export interface AutomationRunSummary {
   fatal?: string;
 }
 
-/** Teto de movimentos por quadro por rodada (o resto fica p/ o próximo tick —
- *  mantém webhooks/write-backs e o orçamento do tick limitados). */
-export const MAX_MOVES_PER_RUN = 200;
+/** Teto de AÇÕES (moves + sets de campo) por quadro por rodada — o resto fica
+ *  p/ o próximo tick; um teto ÚNICO mantém webhooks/write-backs e o orçamento
+ *  do tick limitados mesmo com regras das duas famílias. */
+export const MAX_ACTIONS_PER_RUN = 200;
 
 const CHUNK = 200;
 
@@ -407,43 +412,75 @@ export async function runBoardAutomations(
     };
   });
 
-  // 5) Decide e executa (teto por rodada; sobras ficam p/ o próximo tick).
+  // 5) Decide e executa (teto ÚNICO por rodada — moves + sets somam; sobras
+  // ficam p/ o próximo tick).
   const evalCtx: EvalContext = {
     available,
     todayIso,
     columns: board.columns,
+    // Campo espelho da alocação (invariante 24) — nunca alvo de set_field; o
+    // vínculo pode nascer DEPOIS da regra, por isso a guarda é de avaliação.
+    allocationFieldKey: settings.allocationFieldKey ?? null,
   };
-  const { moves, ruleErrors } = decideMoves(rules, facts, evalCtx);
+  const { moves, sets, ruleErrors } = decideActions(rules, facts, evalCtx);
   for (const e of ruleErrors) errorByRule.set(e.ruleId, e.message);
   summary.ruleErrors.push(...ruleErrors);
 
-  const capped = moves.slice(0, MAX_MOVES_PER_RUN);
-  if (capped.length > 0) {
+  // Orçamento compartilhado: moves primeiro (ordem estável), sets no que sobrar.
+  const cappedMoves = moves.slice(0, MAX_ACTIONS_PER_RUN);
+  const cappedSets = sets.slice(0, MAX_ACTIONS_PER_RUN - cappedMoves.length);
+
+  const noteFailures = (
+    failed: { recordId: string; message: string }[],
+    planned: { recordId: string; ruleId: string }[],
+    verb: string
+  ) => {
+    // Primeira falha de execução por regra vira last_error (diagnóstico).
+    for (const f of failed) {
+      const p = planned.find((m) => m.recordId === f.recordId);
+      if (p && !errorByRule.has(p.ruleId)) {
+        errorByRule.set(p.ruleId, `${verb}: ${f.message}`);
+        summary.ruleErrors.push({
+          ruleId: p.ruleId,
+          message: `${verb}: ${f.message}`,
+        });
+      }
+    }
+  };
+
+  if (cappedMoves.length > 0) {
     if (overBudget())
       return { ...summary, fatal: "Orçamento de tempo esgotado." };
     const result = await executeAutomationMoves(db, {
-      moves: capped,
+      moves: cappedMoves,
       recordById,
       settings,
       owner,
       orgId,
       defs,
     });
-    summary.moved = result.okIds.length;
+    summary.moved += result.okIds.length;
     for (const [ruleId, n] of result.movedByRule) {
-      summaryMovedByRule.set(ruleId, n);
+      summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
-    // Primeira falha de execução por regra vira last_error (diagnóstico).
-    for (const f of result.failed) {
-      const move = capped.find((m) => m.recordId === f.recordId);
-      if (move && !errorByRule.has(move.ruleId)) {
-        errorByRule.set(move.ruleId, `Falha ao mover: ${f.message}`);
-        summary.ruleErrors.push({
-          ruleId: move.ruleId,
-          message: `Falha ao mover: ${f.message}`,
-        });
-      }
+    noteFailures(result.failed, cappedMoves, "Falha ao mover");
+  }
+
+  if (cappedSets.length > 0) {
+    if (overBudget())
+      return { ...summary, fatal: "Orçamento de tempo esgotado." };
+    const result = await executeAutomationSets(db, {
+      sets: cappedSets,
+      recordById,
+      settings,
+      orgId,
+      defs,
+    });
+    summary.moved += result.okIds.length;
+    for (const [ruleId, n] of result.movedByRule) {
+      summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
+    noteFailures(result.failed, cappedSets, "Falha ao definir campo");
   }
 
   return finish();

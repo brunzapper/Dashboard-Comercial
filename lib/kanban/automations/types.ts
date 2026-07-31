@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Modelo das AUTOMAÇÕES do kanban (modo registros): uma regra é uma lista de
 // condições em E (podem MESCLAR as 4 famílias — campo do registro, registros
 // conectados, tarefas e tempo) + uma ação. Várias regras em ordem (position)
@@ -6,6 +6,13 @@
 // versionado em kanban_automations.rule (0109); parse fail-closed — regra
 // malformada nunca roda (vira last_error), nunca "roda como der".
 // A avaliação é 100% no engine (evaluate.ts/engine.ts) — RPCs intocados.
+// v1.1 (31/07/2026): ação `set_field` (grava um valor fixo num campo do
+// registro). O parse valida SÓ a estrutura (field/value não-vazios) —
+// existência/tipo do campo é checagem de AVALIAÇÃO (evaluate.ts: regra inerte
+// + last_error; o catálogo pode mudar depois da regra criada) com validação
+// adicional no save (actions.ts) p/ mensagem imediata. IDEMPOTENTE por
+// desenho: valor atual igual ao alvo consome o card SEM escrever (decidido no
+// avaliador — zero churn de audit/webhook no tick por minuto).
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 /** Comparador numérico das condições de contagem (conectados/tarefas). */
@@ -44,8 +51,13 @@ export type AutomationCondition =
   // coluna) → condição NÃO casa.
   | { kind: "time"; basis: AutomationTimeBasis; op: "gte" | "lte"; days: number };
 
-/** Ação da regra — união EXTENSÍVEL (v2: criar tarefa, definir campo, …). */
-export type AutomationAction = { type: "move_to_column"; targetKey: string };
+/** Ação da regra — união EXTENSÍVEL (v3: criar tarefa, …). `set_field`
+ *  grava valor FIXO (string; coerção por tipo no executor); alvo de data/
+ *  calculado/relação/`match:`/`unified:`/campo-espelho da alocação é barrado
+ *  na avaliação e no save, nunca aqui (fail-closed estrutural apenas). */
+export type AutomationAction =
+  | { type: "move_to_column"; targetKey: string }
+  | { type: "set_field"; field: string; value: string };
 
 export interface AutomationRule {
   v: 1;
@@ -164,13 +176,31 @@ function parseCondition(raw: unknown): AutomationCondition | null {
 export function parseAutomationRule(raw: unknown): AutomationRule | null {
   if (!isRecord(raw) || raw.v !== 1) return null;
   const actionRaw = raw.action;
-  if (
-    !isRecord(actionRaw) ||
-    actionRaw.type !== "move_to_column" ||
-    typeof actionRaw.targetKey !== "string" ||
-    actionRaw.targetKey === ""
-  )
-    return null;
+  let action: AutomationAction | null = null;
+  if (isRecord(actionRaw)) {
+    if (
+      actionRaw.type === "move_to_column" &&
+      typeof actionRaw.targetKey === "string" &&
+      actionRaw.targetKey !== ""
+    ) {
+      action = { type: "move_to_column", targetKey: actionRaw.targetKey };
+    } else if (
+      // set_field: só estrutura (v1 sem "limpar" — value não-vazio); o alvo é
+      // validado na avaliação/save (o catálogo pode mudar após a regra).
+      actionRaw.type === "set_field" &&
+      typeof actionRaw.field === "string" &&
+      actionRaw.field !== "" &&
+      typeof actionRaw.value === "string" &&
+      actionRaw.value.trim() !== ""
+    ) {
+      action = {
+        type: "set_field",
+        field: actionRaw.field,
+        value: actionRaw.value,
+      };
+    }
+  }
+  if (!action) return null;
   const condsRaw = raw.conditions;
   if (
     !Array.isArray(condsRaw) ||
@@ -184,11 +214,7 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
     if (!parsed) return null;
     conditions.push(parsed);
   }
-  return {
-    v: 1,
-    conditions,
-    action: { type: "move_to_column", targetKey: actionRaw.targetKey },
-  };
+  return { v: 1, conditions, action };
 }
 
 /**

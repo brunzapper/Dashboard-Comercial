@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2 (31/07/2026): ação set_field — saveAutomation valida o campo alvo no
+//   SAVE (setFieldTargetError, mesma régua da avaliação — mensagem imediata;
+//   a guarda definitiva segue no evaluate) e o catálogo ganha settableFields
+//   (alvos graváveis: deriva de buildAvailableFields — nunca lista paralela).
 // v1.1 (31/07/2026): o catálogo do editor ganha selectOptionsByField (options
 //   dos campos seleção, ref = coluna crua p/ overrides core — 0086) p/ o
 //   picker de VALOR das condições (FilterValuePicker).
@@ -17,6 +21,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { FieldDefinition } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
+import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
 import { loadSources } from "@/lib/config/sources";
 import { loadSourceLabels } from "@/lib/config/source-labels";
 import { loadCorrespondences } from "@/lib/correspondences";
@@ -24,7 +29,8 @@ import { buildAvailableFields } from "@/lib/widgets/fields";
 import { toFieldOptions, type FieldOption } from "@/lib/widgets/filter-ops";
 import { ensureKanbanConfigGate } from "../config-gate";
 import { KANBAN_OVERFLOW_KEY } from "../types";
-import { runBoardAutomations } from "./engine";
+import { loadKanbanOwnerContext, runBoardAutomations } from "./engine";
+import { setFieldTargetError } from "./evaluate";
 import {
   parseAutomationRule,
   type AutomationOwner,
@@ -96,14 +102,48 @@ export async function saveAutomation(
   if (!rule) {
     return {
       ok: false,
-      message: "Regra incompleta: confira as condições e a coluna de destino.",
+      message: "Regra incompleta: confira as condições e a ação.",
     };
   }
-  if (rule.action.targetKey === KANBAN_OVERFLOW_KEY) {
+  if (
+    rule.action.type === "move_to_column" &&
+    rule.action.targetKey === KANBAN_OVERFLOW_KEY
+  ) {
     return { ok: false, message: 'A coluna "Outros" não recebe cards.' };
   }
   const session = await getSessionInfo();
   const supabase = await createClient();
+  if (rule.action.type === "set_field") {
+    // Validação de SAVE (mensagem imediata) com a MESMA régua da avaliação —
+    // que segue sendo a guarda definitiva (campo pode sumir/alocação pode
+    // nascer depois). Client do usuário: RLS recorta o que ele enxerga.
+    const orgId = await getActiveOrgId();
+    const sources = await loadSources(supabase, orgId);
+    const [correspondences, { data: fieldsData }, ownerCtx] = await Promise.all([
+      loadCorrespondences(supabase, orgId),
+      supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
+        )
+        .or("show_in_builder.eq.true,source_system.eq.core")
+        .order("sort_order", { ascending: true }),
+      loadKanbanOwnerContext(supabase, owner),
+    ]);
+    const available = buildAvailableFields(
+      (fieldsData ?? []) as FieldDefinition[],
+      correspondences,
+      sources
+    );
+    const err = setFieldTargetError(rule.action.field, {
+      available,
+      allocationFieldKey:
+        typeof ownerCtx === "string"
+          ? null
+          : (ownerCtx.settings.allocationFieldKey ?? null),
+    });
+    if (err) return { ok: false, message: err };
+  }
   const row = {
     name: input.name.trim().slice(0, 120),
     enabled: Boolean(input.enabled),
@@ -194,8 +234,9 @@ export async function runAutomationsNow(
     return {
       ok: true,
       moved,
+      // "Ações" cobre as duas famílias (mover + definir campo).
       message:
-        (moved === 1 ? "1 card movido." : `${moved} cards movidos.`) +
+        (moved === 1 ? "1 ação executada." : `${moved} ações executadas.`) +
         (errs > 0 ? ` ${errs} regra(s) com erro — veja o detalhe na lista.` : ""),
     };
   } catch (e) {
@@ -213,28 +254,45 @@ export interface AutomationFieldCatalog {
   // Options dos campos seleção (picker de VALOR das condições): ref → options.
   // Overrides core (0086) entram pela coluna CRUA (ex. "pipeline").
   selectOptionsByField: Record<string, string[]>;
+  // Alvos da ação "Definir campo": campos GRAVÁVEIS da base do quadro + gerais
+  // (sem data/calculado/relação/match:/unified:/espelho da alocação — mesma
+  // régua de setFieldTargetError). Deriva de buildAvailableFields.
+  settableFields: FieldOption[];
+  // Tipo booleano do alvo (o editor de valor vira Sim/Não): refs booleanos.
+  booleanFields: string[];
+  numericFields: string[];
 }
 
-/** Catálogo de campos/bases p/ o editor de condições (por base do quadro). */
+/** Catálogo de campos/bases p/ o editor de condições (por base do quadro).
+ *  `owner` (opcional) resolve o allocationFieldKey do quadro — filtra o
+ *  espelho da alocação do picker de "Definir campo" (oferta; a guarda real é
+ *  save + avaliação). */
 export async function getAutomationFieldOptions(
-  source: string | undefined
+  source: string | undefined,
+  owner?: AutomationOwner
 ): Promise<AutomationActionState & { catalog?: AutomationFieldCatalog }> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
   const sources = await loadSources(supabase, orgId);
-  const [correspondences, { data: fieldsData }, labels] = await Promise.all([
-    loadCorrespondences(supabase, orgId),
-    supabase
-      .from("field_definitions")
-      .select(
-        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
-      )
-      .or("show_in_builder.eq.true,source_system.eq.core")
-      .order("sort_order", { ascending: true }),
-    loadSourceLabels(supabase, sources, orgId),
-  ]);
+  const [correspondences, { data: fieldsData }, labels, ownerCtx] =
+    await Promise.all([
+      loadCorrespondences(supabase, orgId),
+      supabase
+        .from("field_definitions")
+        .select(
+          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, allow_negative, currency_code, currency_mode, show_as_percent, sort_order, applies_to, source_system, source_field_id, write_back"
+        )
+        .or("show_in_builder.eq.true,source_system.eq.core")
+        .order("sort_order", { ascending: true }),
+      loadSourceLabels(supabase, sources, orgId),
+      owner ? loadKanbanOwnerContext(supabase, owner) : Promise.resolve(null),
+    ]);
+  const allocationFieldKey =
+    ownerCtx && typeof ownerCtx !== "string"
+      ? (ownerCtx.settings.allocationFieldKey ?? null)
+      : null;
   const available = buildAvailableFields(
     (fieldsData ?? []) as FieldDefinition[],
     correspondences,
@@ -269,6 +327,26 @@ export async function getAutomationFieldOptions(
     selectOptionsByField[isCoreDef(f) ? f.field_key : `custom:${f.field_key}`] =
       opts;
   }
+  // Alvos de "Definir campo": base do quadro + gerais, aprovados pela MESMA
+  // régua da avaliação (setFieldTargetError) — nunca uma lista paralela.
+  const settable = available.filter(
+    (f) =>
+      f.baseLabel == null &&
+      (!f.source || !source || f.source === source) &&
+      setFieldTargetError(f.field, { available, allocationFieldKey }) == null
+  );
+  const booleanFields: string[] = [];
+  const numericFields: string[] = [];
+  for (const [col, dt] of Object.entries(EDITABLE_CORE_COLUMNS)) {
+    if (dt === "booleano") booleanFields.push(col);
+    else if (dt === "numero" || dt === "moeda") numericFields.push(col);
+  }
+  for (const f of (fieldsData ?? []) as FieldDefinition[]) {
+    if (isCoreDef(f)) continue;
+    if (f.data_type === "booleano") booleanFields.push(`custom:${f.field_key}`);
+    else if (f.data_type === "numero" || f.data_type === "moeda")
+      numericFields.push(`custom:${f.field_key}`);
+  }
   return {
     ok: true,
     catalog: {
@@ -276,6 +354,9 @@ export async function getAutomationFieldOptions(
       sources: sources.map((s) => ({ value: s.key, label: s.label })),
       fieldsBySource,
       selectOptionsByField,
+      settableFields: toFieldOptions(settable, labels),
+      booleanFields,
+      numericFields,
     },
   };
 }
