@@ -1,4 +1,7 @@
-<!-- Versão: 1.22 | Data: 31/07/2026 -->
+<!-- Versão: 1.23 | Data: 31/07/2026 -->
+<!-- v1.23 (31/07/2026): §12.2.1 — Automações ganham a ação "Definir campo"
+     (grava valor fixo num campo gravável; idempotente; regra contínua;
+     seletor de ação Mover/Definir + picker de campo + valor por tipo). -->
 <!-- v1.22 (31/07/2026): §4.5/§6.4 — filtros de Responsável/Operação passam a
      ser POR NOME: seletor de rótulos no lugar do texto cru (o nome fica
      gravado e é traduzido na consulta; apelidos agrupados contam junto);
@@ -1977,15 +1980,25 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
   no topo do quadro oferece "Tentar novamente". Arrastar um card selecionado
   arrasta a seleção inteira.
 - **Automações** (botão ⚡ "Automações", p/ quem configura o quadro; modo
-  registros, sem colunas por data): regras "se … então mover para a coluna
-  …". As condições podem MISTURAR na mesma regra: campos do registro
+  registros, sem colunas por data): regras "se … então …" com DUAS ações
+  possíveis — **"Mover para a coluna"** ou **"Definir campo"** (31/07/2026:
+  grava um valor fixo num campo do registro, ex.: "toda reunião com Fonte =
+  Formulário de CRM fica com SDR da Reunião = Paulo Vitor Santos"; o seletor
+  só oferece campos graváveis — data, calculados, relações, campos
+  casados/unificados e o campo-espelho da fase ficam de fora; campo de
+  Seleção mostra as opções, booleano vira Sim/Não). As condições podem
+  MISTURAR na mesma regra: campos do registro
   (inclusive do registro casado ↪), quantidade de **registros conectados**
   (ex.: parceiro com 5+ leads conectados, com filtros sobre os conectados),
   tarefas do card (abertas/atrasadas) e tempo (desde a criação, desde a
   última alteração de um campo, tempo na coluna atual — colunas livres). As
   regras rodam em ordem (a primeira que casar vence), automaticamente a cada
   minuto e após cada Sync; "Executar agora" roda na hora e cada regra mostra
-  a última execução/erro. Cards de demonstração nunca movem.
+  a última execução/erro (contagem em "ações"). "Definir campo" só grava
+  quando o valor está diferente (registro já correto não gera histórico) e é
+  uma regra CONTÍNUA: enquanto a condição valer, edição manual do campo volta
+  ao valor da regra no próximo tick. Cards de demonstração nunca movem nem
+  recebem escrita.
 
 ### 12.3 Agenda
 

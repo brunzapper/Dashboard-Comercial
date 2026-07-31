@@ -489,11 +489,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
   silêncio), I/O em `engine.ts` reusando `runKanban` com period null e escopo
   EXPLÍCITO de org em TODA consulta service-role (`opts.orgId` do
   `runRecordList` — consulta nova sem o escopo vaza registro entre orgs);
-  execução em `move.ts` (Personalizar = upsert de placements; valor = escrita
-  com carimbo `field_modified_at`+`locally_modified_at`, recalc/audit
-  (`origin='automation'`)/write-back/webhook em lote). Bucket de DATA nunca é
-  alvo (não idempotente); modo tarefas fora do v1; teto 200 moves/quadro/
-  rodada. Gatilhos: tick por minuto (`pg-cron-kanban-automations.sql`) + hook
+  execução em `move.ts` (Personalizar = upsert de placements; escrita de CAMPO
+  — move por valor E `set_field` — SÓ pelo executor único `executeFieldWrites`:
+  carimbo `field_modified_at`+`locally_modified_at`, recalc/audit
+  (`origin='automation'`)/write-back/webhook em lote). **Ação `set_field`
+  (31/07/2026):** grava valor FIXO num campo; IDEMPOTENTE por comparação no
+  snapshot da rodada (valor igual consome o card SEM escrever — decidido no
+  `decideActions` de evaluate.ts, nunca no executor); alvo de data/calculado/
+  relação/`match:`/`unified:`/coluna core não-editável/campo-espelho da
+  alocação (`allocationFieldKey`, invariante 24) é barrado por
+  `setFieldTargetError` na AVALIAÇÃO (regra inerte + `last_error`) E no save;
+  o picker da UI (`settableFields`) deriva da MESMA régua — nunca lista
+  paralela. Bucket de DATA nunca é
+  alvo (não idempotente); modo tarefas fora do v1; teto ÚNICO de 200 AÇÕES
+  (moves + sets somam — `MAX_ACTIONS_PER_RUN`)/quadro/
+  rodada; `last_moved_count` conta ações. Gatilhos: tick por minuto (`pg-cron-kanban-automations.sql`) + hook
   pós-sync (DEPOIS do auto-match) + "Executar agora"; autoria = editor do
   board (RLS `auth_board_editable`), execução = autoridade de sistema. Ações
   em massa (`lib/kanban/bulk-actions.ts`): resultado POR ITEM (revert parcial
@@ -506,7 +516,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   invariante 23.
 - **Assistentes de IA de registros/campos/operações NUNCA escrevem direto
   (30/07/2026, §4.17):** os cores (`lib/ai/insert-records.ts` — até 10
-  registros em base `manual_entry`; `lib/ai/csv-mapping.ts` — sugestão de
+  registros em base `manual_entry`; `lib/ai/update-records.ts` — atualização
+  em MASSA, contrato `registros-update` v1, até 200 registros;
+  `lib/ai/csv-mapping.ts` — sugestão de
   mapeamento no wizard; `lib/ai/create-fields.ts` — até 10 campos, calculados
   inclusos; `lib/ai/manage-operations.ts` — até 15 ações de operações) só
   VALIDAM (`lib/import/{records,csv-mapping,fields,operations}/validate.ts`) e
@@ -543,7 +555,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   p/ `lib/records/formula-server.ts` (campos/actions reimporta — não recrie
   catálogos). Datas core do contrato são `YYYY-MM-DD` ancoradas na escrita por
   `coerceCore`→`anchorNaiveToBrasilia` (invariante 11); custom segue texto
-  naive. Ver `docs/arquitetura.md` §4.17 e invariante 25.
+  naive. **Contrato `registros-update` v1 (31/07/2026):** a IA emite UMA
+  operação `{filtros, alteracoes}` — NUNCA ids de registro; a base vem do
+  seletor da UI. Aceita QUALQUER base visível, SUB-fontes incluídas (o gate é
+  `edit_record_values` + `editable_by_roles` + RLS, não `manual_entry`).
+  Prévia server-side OBRIGATÓRIA: os registros que casam saem de
+  `runRecordListWindow` (caminho canônico do modo lista — predicado de sub,
+  nome→id de FK, canon, regra 0052; NUNCA consulta paralela nem RPC novo) com
+  contagem exata + amostra; o apply RE-RESOLVE os ids na hora (recorte > teto
+  de 200 = `MAX_AI_UPDATE_RECORDS` aborta ALTO — nunca fatia em silêncio),
+  pula mocks (reportados) e escreve SÓ por `updateRecordValuesBulk`
+  (`lib/records/bulk-update.ts` — client RLS do usuário, coerção
+  `coerce`/`coerceCore`, carimbos, UM recalc, audit `origin='app'` com user
+  real, webhook por registro; write-back Bitrix FORA do v1 — campo de Sync é
+  alvo válido com escrita LOCAL, flag `sync` no contexto e aviso na prévia).
+  Operadores de filtro = `FILTER_OPS` ESTRITO (op interno `eq_ci`/`*_num`
+  seria dropado em silêncio pelo modo lista ⇒ over-match); relação em filtro
+  só eq/neq/in/is_null/not_null com NOME (nunca UUID); ≥1 filtro obrigatório;
+  `null` em alteração LIMPA o campo (title nunca). SPEC derivado também de
+  `FILTER_OPS` e fiscalizado por
+  `lib/import/records/update-instructions.test.ts`.
+  Ver `docs/arquitetura.md` §4.17 e invariante 25.
 - **Remuneração variável se resolve no ENGINE e nos choke points (0112,
   30/07/2026):** `comp_plans.config` é jsonb VERSIONADO com parse FAIL-CLOSED
   (`lib/comp/model.ts`); o realizado por membro×fator sai SÓ de

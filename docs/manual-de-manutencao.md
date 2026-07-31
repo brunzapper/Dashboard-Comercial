@@ -1,4 +1,9 @@
-<!-- Versão: 1.21 | Data: 30/07/2026 -->
+<!-- Versão: 1.22 | Data: 31/07/2026 -->
+<!-- v1.22 (31/07/2026): §4.12 — ação "Definir campo" das automações do kanban
+     (idempotente; teto único de 200 ações; como estender via
+     executeFieldWrites/setFieldTargetError) e novo §4.13 — atualização em
+     massa por IA (contrato registros-update: prévia server-side, teto 200,
+     mocks/sync-fields, onde estender). -->
 <!-- v1.21 (30/07/2026): runbook de truncamento da conversa de IA — a mescla
      do "Criar a partir de" soma um JSON por referência adicional ao prompt;
      remédio: desmarcar referências desnecessárias. -->
@@ -632,35 +637,81 @@ Runbook de CONFIGURAÇÃO (o código já está pronto; nada disto exige deploy):
 
 ### 4.12 Automações do kanban (0109, 27/07/2026)
 
-Regras que movem cards automaticamente (`docs/arquitetura.md` §4.15). Onde
-mexer e como operar:
+Regras que movem cards ou DEFINEM CAMPOS automaticamente
+(`docs/arquitetura.md` §4.15). Onde mexer e como operar:
 
 - **Configurar**: botão "Automações" (⚡) no cabeçalho do kanban dedicado, na
   página cheia do widget e na toolbar do widget no dashboard — só p/ quem
   configura o quadro (dono/admin/acesso 'edit'), modo registros, sem colunas
   por data. As condições mesclam campo do registro, registros conectados
   (parcerias), tarefas e tempo na MESMA regra (E lógico); a primeira regra
-  que casar vence.
+  que casar vence. Ações: "Mover para a coluna" e "Definir campo"
+  (31/07/2026 — grava um valor fixo num campo gravável; o picker só oferece
+  alvos válidos e o save explica os proibidos: data, calculado, relação,
+  campo casado/unificado, coluna core não-editável e o campo-espelho da
+  alocação do quadro).
 - **Execução**: tick por minuto (`pg-cron-kanban-automations.sql`, job
   `kanban-automations-tick`) + reavaliação pós-sync + "Executar agora". Roda
-  com service role e escopo explícito de org; teto de 200 movimentos por
-  quadro por rodada (o resto fica pro próximo tick).
+  com service role e escopo explícito de org; teto ÚNICO de 200 AÇÕES
+  (movimentos + definições de campo) por quadro por rodada (o resto fica pro
+  próximo tick). "Definir campo" é idempotente: registro já com o valor não
+  gera escrita/audit/webhook nenhum tick.
+- **Estender**: ação nova entra na união `AutomationAction`
+  (`lib/kanban/automations/types.ts`, parse fail-closed estrutural) +
+  decisão em `evaluate.ts` (guardas de alvo na AVALIAÇÃO — o catálogo muda
+  depois da regra criada) + execução reaproveitando `executeFieldWrites`
+  (`move.ts` — carimbos/recalc/audit/write-back/webhook num lugar só) +
+  validação no save (`actions.ts`) e picker derivado do catálogo
+  (`settableFields`) — nunca listas paralelas. Testes:
+  `evaluate.test.ts`/`engine.test.ts`.
 - **Diagnóstico**: cada regra guarda `last_run_at`/`last_error`/
-  `last_moved_count` (visíveis na própria lista de regras). Regra parada =
-  confira `last_error` (alvo removido/oculto, quadro fora do escopo, regra
-  malformada), o job no `cron.job` e os logs `[kanban-automations]`/
+  `last_moved_count` (contagem de AÇÕES; visíveis na própria lista de
+  regras). Regra parada =
+  confira `last_error` (alvo removido/oculto, campo proibido, quadro fora do
+  escopo, regra malformada), o job no `cron.job` e os logs
+  `[kanban-automations]`/
   `[kanban-automations/tick]`. "Executar agora" é o teste manual.
 - **Comportamentos por design**: card arrastado de volta pelo usuário será
   re-movido no próximo tick se a condição ainda valer (desative a regra ou
-  ajuste as condições); `wipLimit` segue consultivo (a automação não o
-  respeita); mocks nunca movem; automação não escreve em quadros de bucket
-  de data. Regras NÃO acompanham export/duplicação/IA de dashboards.
+  ajuste as condições); campo editado à mão volta ao valor da regra no
+  próximo tick enquanto a condição valer (é uma regra CONTÍNUA — para
+  correção pontual use "Atualizar com IA" em /registros); `wipLimit` segue
+  consultivo (a automação não o
+  respeita); mocks nunca movem nem recebem escrita; automação não escreve em
+  quadros de bucket de data. Regras NÃO acompanham export/duplicação/IA de
+  dashboards.
 - **Ações em massa** (mesma entrega): seleção por checkbox no quadro + barra
   flutuante (Mover para / Gerar tarefa / Concluir tarefas / Excluir).
   Excluir REGISTROS é só admin (RLS `records_delete`) e emite
   `record.deleted`; falhas parciais aparecem num painel no topo do quadro
   com "Tentar novamente" — os cards falhos voltam sozinhos à coluna de
   origem.
+
+### 4.13 Atualização em massa por IA (registros-update, 31/07/2026)
+
+Botão "Atualizar com IA" em /registros (qualquer base/sub, p/ quem tem
+`edit_record_values`; funciona SEM IA configurada via copiar-prompt →
+colar-JSON). Pedidos como "todo SDR da reunião cuja fonte seja Formulário de
+CRM vira Paulo Vitor Santos" viram UMA operação filtros + alterações
+(`docs/arquitetura.md` §4.17). Operação:
+
+- **Prévia é a muralha de produto**: a contagem/amostra é resolvida no
+  SERVIDOR (`runRecordListWindow`) e o Aplicar exige o checkbox de
+  confirmação. Recorte acima de 200 (`MAX_AI_UPDATE_RECORDS`) bloqueia —
+  oriente o usuário a refinar os filtros (não há fatiamento automático, por
+  desenho).
+- **Mocks** são pulados e reportados; **campos de Sync** (Bitrix) são alvos
+  válidos com escrita LOCAL (carimbos protegem do reconcile; nada é enviado
+  ao Bitrix no v1). Auditoria: `audit_log` origin 'app' com o usuário real —
+  a trilha responde "quem mandou a IA fazer isso".
+- **Estender o contrato**: tipos/validador/SPEC em
+  `lib/import/records/update-{types,validate,instructions}.ts` (SPEC derivado
+  de constantes reais — op de filtro novo só existe se entrar em
+  `FILTER_OPS`, que o modo lista traduz; teste de paridade
+  `update-instructions.test.ts` quebra se faltar cobertura); core em
+  `lib/ai/update-records.ts`; escrita SÓ por `updateRecordValuesBulk`
+  (`lib/records/bulk-update.ts` — client RLS, nunca service role). Testes:
+  `update-validate.test.ts` + `bulk-update.test.ts`.
 
 ## 5. Troubleshooting
 
