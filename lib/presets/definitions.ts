@@ -1,5 +1,10 @@
-// Versão: 2.0 | Data: 20/07/2026
+// Versão: 2.1 | Data: 31/07/2026
 // Definições declarativas dos dashboards preset (Fase 6B) + campos de apoio.
+// v2.1 (31/07/2026): seções de ORG opcionais — operations (árvore ensure-by-
+//   name) e compPlans (planos de remuneração ensure por config.presetKey) —
+//   aplicadas SÓ pelo caminho de fábrica (applyPreset passa allowOrgSections;
+//   o import/IA nunca as alcança). PresetField ganha options_source
+//   ('responsibles' = dropdown vivo, 0113).
 // v2.0 (20/07/2026): preset engine v2 — shapes COMPLETOS e identidade estável:
 //   - PresetDashboard ganha presetKey/version, settings (DashboardSettings:
 //     abas, periodBar/fieldBySource, canvas, background) e dependências
@@ -34,6 +39,7 @@ import type {
 import type { SourceKey } from "@/lib/sources";
 import type { DataType } from "@/lib/records/types";
 import type { Formula } from "@/lib/records/formulas";
+import type { CompPlanConfig } from "@/lib/comp/model";
 
 export interface PresetField {
   field_key: string;
@@ -52,6 +58,9 @@ export interface PresetField {
   // record_types a que o campo se aplica (field_definitions.applies_to);
   // ausente = todas as fontes.
   applies_to?: string[];
+  // Dropdown VIVO (0113): options reescritas pelo app a partir dos
+  // responsáveis ativos principais (invariante 20) — declarar options: [].
+  options_source?: "responsibles";
 }
 
 // Correspondência (campo unificado) declarada como dependência do preset:
@@ -94,6 +103,30 @@ export interface PresetWidget {
   grid_position: GridPosition;
 }
 
+// Operação declarada como dependência do preset (seção de ORG — só o caminho
+// de fábrica aplica): ensure-BY-NAME, nunca renomeia/religa/reativa uma
+// existente. Pais DEVEM vir antes dos filhos no array (o resolve de
+// parentName é sequencial). Vincular pessoas às operações é dado operacional
+// (runbook) — o preset só cria o esqueleto da árvore.
+export interface PresetOperation {
+  name: string;
+  parentName?: string;
+}
+
+// Plano de remuneração declarado pelo preset (seção de ORG): identidade =
+// config.presetKey (o parse do model a preserva no round-trip do editor);
+// plano existente NUNCA é sobrescrito (ajustes do admin sobrevivem ao
+// re-apply). memberOperationNames resolve por NOME na org do apply — nome
+// ausente PULA o plano com erro visível (nunca criar plano silenciosamente
+// ligado a "todos os ativos").
+export interface PresetCompPlan {
+  presetKey: string;
+  name: string;
+  baseAmountDefault?: number | null;
+  memberOperationNames?: string[];
+  config: Omit<CompPlanConfig, "memberIds" | "memberOperationIds" | "presetKey">;
+}
+
 export interface PresetDashboard {
   presetKey: string; // identidade estável (dashboards.settings.preset.key)
   version: number; // bump a cada mudança relevante (auditoria/futuro diff)
@@ -107,6 +140,11 @@ export interface PresetDashboard {
   fields?: PresetField[]; // campos de apoio específicos deste preset
   subSources?: PresetSubSource[]; // sub-fontes de que os widgets dependem
   correspondences?: PresetCorrespondence[]; // campos unificados dependidos
+  // Seções de ORG (31/07/2026): aplicadas SÓ com opts.allowOrgSections (o
+  // caminho de fábrica); o import/IA materializa PresetDashboard sem elas e o
+  // apply nunca as executa nesse caminho.
+  operations?: PresetOperation[];
+  compPlans?: PresetCompPlan[];
   widgets: PresetWidget[];
 }
 
@@ -144,6 +182,7 @@ export const PRESET_FIELDS: PresetField[] = [
 ];
 
 import { INBOUND_PRESET } from "./inbound";
+import { REMUNERACAO_VARIAVEL_PRESET } from "./remuneracao-variavel";
 
 // Filtros reutilizáveis
 const closedThisMonth: WidgetFilter[] = [
@@ -158,6 +197,7 @@ const closedThisYear: WidgetFilter[] = [
 
 export const PRESETS: PresetDashboard[] = [
   INBOUND_PRESET,
+  REMUNERACAO_VARIAVEL_PRESET,
   {
     presetKey: "performance_mes",
     version: 1,
