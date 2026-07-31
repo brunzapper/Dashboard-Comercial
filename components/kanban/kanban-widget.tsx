@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 21/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2 (31/07/2026): o DIM (opacity-60) do quadro ficou restrito a refetch por
+//   MUDANÇA DE ESCOPO/CONFIG (scopeKey/cfgKey — período/filtros/colunas);
+//   refetch disparado pelo event bus (tick — ex.: settle da fila após mover
+//   card) mostra só o rótulo "Atualizando…": o feedback do movimento é POR
+//   CARD (queue.pendingIds no board), não no quadro inteiro.
 // v1.1 (21/07/2026): fetch re-dispara pelo FINGERPRINT de escopo da page
 //   (prop scopeKey — cobre filtros persistidos no banco, __qf__, que não
 //   mudam a URL); enquanto re-busca com o quadro antigo em tela, exibe
@@ -11,7 +16,7 @@
 // tarefas nunca entra no snapshot (dados privados) → placeholder.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, List, Loader2, SquareKanban } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -77,8 +82,11 @@ export function KanbanWidget({
   const snapshotMode = useSnapshotMode();
   const readOnly = snapshotMode.snapshot;
   const [fetched, setFetched] = useState<KanbanWidgetResult | null>(null);
-  // Re-busca com o quadro antigo em tela: dim + spinner até o novo aterrissar.
+  // Re-busca com o quadro antigo em tela: spinner até o novo aterrissar.
   const [refreshing, setRefreshing] = useState(false);
+  // Dim SÓ p/ refetch de escopo/config (o tick do bus não esmaece — feedback
+  // de movimento é por card).
+  const [dim, setDim] = useState(false);
   const [view, setView] = useState<"kanban" | "lista">("kanban");
 
   // Event bus: tarefa/registro/comentário mudou em qualquer superfície →
@@ -87,13 +95,21 @@ export function KanbanWidget({
   useDataChanged(() => setTick((t) => t + 1));
 
   const cfgKey = JSON.stringify(widget.settings?.kanban ?? {});
+  // Distingue o GATILHO do refetch comparando com a rodada anterior: escopo/
+  // config mudou → dim; só o tick do bus → sem dim (o init já vem com os
+  // valores do mount, então o 1º load nunca esmaece — tem placeholder).
+  const scopeRef = useRef({ scope: scopeKey, cfg: cfgKey });
   useEffect(() => {
     if (readOnly) return; // snapshot: precomputado pela page pública
+    const scopeChanged =
+      scopeRef.current.scope !== scopeKey || scopeRef.current.cfg !== cfgKey;
+    scopeRef.current = { scope: scopeKey, cfg: cfgKey };
     let cancelled = false;
     // 250ms: coalesce rajadas de eventos do bus (uma mutação pode emitir vários
     // e cada re-busca é uma server action inteira) sem atrasar perceptivelmente.
     const timer = setTimeout(() => {
       setRefreshing(true);
+      if (scopeChanged) setDim(true);
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
       // scopeKey — fingerprint do escopo efetivo computado pela page, que
       // muda tanto por navegação (período/ff_) quanto por revalidação
@@ -106,6 +122,7 @@ export function KanbanWidget({
         if (cancelled) return;
         setFetched(res);
         setRefreshing(false);
+        setDim(false);
       });
     }, 250);
     return () => {
@@ -282,6 +299,7 @@ export function KanbanWidget({
 
   // "Atualizando…" só quando há quadro antigo em tela (1º load tem placeholder).
   const staleRefreshing = refreshing && !readOnly;
+  const staleDim = dim && !readOnly;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5 p-1">
@@ -345,13 +363,14 @@ export function KanbanWidget({
           </Button>
         </div>
       </div>
-      {/* Dim durante a re-busca (sem bloquear interações — drag continua; um
-          resultado antigo que aterrisse após um move é reconciliado pelo
-          data-changed → tick → novo fetch). */}
+      {/* Dim SÓ na re-busca por escopo/config (sem bloquear interações — drag
+          continua; um resultado antigo que aterrisse após um move é
+          reconciliado pelo data-changed → tick → novo fetch). O tick do bus
+          (ex.: card movido) não esmaece o quadro — feedback por card. */}
       <div
         className={cn(
           "min-h-0 flex-1 transition-opacity",
-          staleRefreshing && "opacity-60"
+          staleDim && "opacity-60"
         )}
       >
       {view === "kanban" ? (

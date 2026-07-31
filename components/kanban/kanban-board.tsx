@@ -1,4 +1,4 @@
-// Versão: 1.6 | Data: 27/07/2026
+// Versão: 1.7 | Data: 31/07/2026
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -7,6 +7,10 @@
 // página dedicada (/kanbans/[id]), pelo widget kanban (compact) e pelos
 // quadros de TAREFAS (v1.1: cards de tarefa com prazo/concluir, `onMove`
 // injetável e `columnExtra` p/ o quick-create de cada modo).
+// v1.7 (31/07/2026): auto-scroll de borda no drag (use-edge-autoscroll no
+//   container das colunas — arrastar card/coluna até a borda rola o quadro
+//   sozinho) + indicador de sync POR CARD (spinner/opacity via
+//   queue.pendingIds) — o esmaecimento do quadro inteiro saiu do widget.
 // v1.6 (27/07/2026): SELEÇÃO EM MASSA + fila otimista — checkbox no card
 //   (hover/Ctrl+clique; select-all no cabeçalho da coluna; Esc limpa), barra
 //   flutuante de ações (Mover para / Gerar tarefa / Concluir tarefas /
@@ -52,6 +56,7 @@ import {
 import { completeTask, reopenTask } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
+import { useEdgeAutoScroll } from "@/lib/use-edge-autoscroll";
 import { classifyDue, DUE_STATUS_LABELS } from "@/lib/tasks/alerts";
 import { useFontScale } from "@/components/dashboards/font-scale-context";
 import {
@@ -375,6 +380,7 @@ function CardView({
   selected,
   selectionActive,
   onToggleSelect,
+  syncing,
 }: {
   card: KanbanCard;
   draggable: boolean;
@@ -397,6 +403,8 @@ function CardView({
   selected?: boolean;
   selectionActive?: boolean;
   onToggleSelect?: () => void;
+  // Escrita do card em voo na fila (v1.7): feedback SÓ no card movido.
+  syncing?: boolean;
 }) {
   // Detalhe só para cards com entidade carregada (registro ou tarefa).
   const canOpen = !readOnly && Boolean(card.record ?? card.task);
@@ -425,11 +433,12 @@ function CardView({
         open("feed");
       }}
       className={cn(
-        "bg-card group relative rounded-md border p-2 text-sm shadow-sm",
+        "bg-card group relative rounded-md border p-2 text-sm shadow-sm transition-opacity",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-default",
         canOpen && !draggable && "cursor-pointer",
         selected && "ring-primary ring-2",
-        selectionActive && "pl-7"
+        selectionActive && "pl-7",
+        syncing && "opacity-60"
       )}
       style={{
         background: cardAp?.bg,
@@ -449,6 +458,15 @@ function CardView({
           className="absolute inset-y-1 left-0 w-1 rounded-full"
           style={{ background: colorFromValue(card.colorValue) }}
         />
+      ) : null}
+      {syncing ? (
+        <span
+          role="status"
+          aria-label={`Sincronizando ${card.title}`}
+          className="pointer-events-none absolute top-1.5 right-1.5 z-10"
+        >
+          <Loader2 className="text-muted-foreground size-3 animate-spin" />
+        </span>
       ) : null}
       {selectable ? (
         <span
@@ -616,6 +634,11 @@ export function KanbanBoard({
     tab: CardDetailTab;
     focusComposer: boolean;
   } | null>(null);
+
+  // Auto-scroll de borda enquanto um drag (card ou coluna) paira perto das
+  // bordas do container horizontal; os dragend/drop param o loop na hora.
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const edgeScroll = useEdgeAutoScroll(boardRef);
 
   const isTasksMode = settings.mode === "tarefas";
   const debouncedRefresh = useDebouncedRefresh();
@@ -867,6 +890,7 @@ export function KanbanBoard({
 
   function handleDrop(toKey: string, e: React.DragEvent) {
     e.preventDefault();
+    edgeScroll.stop();
     setDropTarget(null);
     setDragging(null);
     let payload: KanbanDragPayload;
@@ -1003,6 +1027,7 @@ export function KanbanBoard({
   async function handleColumnDrop(targetKey: string, e: React.DragEvent) {
     e.preventDefault();
     e.stopPropagation();
+    edgeScroll.stop();
     setColDropKey(null);
     setColDragging(null);
     if (!onReorderColumns) return;
@@ -1092,6 +1117,10 @@ export function KanbanBoard({
         </p>
       ) : null}
       <div
+        ref={boardRef}
+        // Só alimenta o auto-scroll de borda — NUNCA preventDefault aqui: quem
+        // habilita o drop é o dragover POR COLUNA (os gaps não são alvo).
+        onDragOver={edgeScroll.onDragOver}
         className={cn(
           "flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2",
           kap.boardBg && "rounded-lg p-2"
@@ -1152,6 +1181,7 @@ export function KanbanBoard({
                   e.dataTransfer.setData(COLUMN_DND_TYPE, col.key);
                 }}
                 onDragEnd={() => {
+                  edgeScroll.stop();
                   setColDragging(null);
                   setColDropKey(null);
                 }}
@@ -1284,6 +1314,7 @@ export function KanbanBoard({
                       );
                     }}
                     onDragEnd={() => {
+                      edgeScroll.stop();
                       setDragging(null);
                       setDropTarget(null);
                     }}
@@ -1296,6 +1327,7 @@ export function KanbanBoard({
                     selected={selected.has(card.id)}
                     selectionActive={selected.size > 0}
                     onToggleSelect={() => toggleSelect(card.id)}
+                    syncing={queue.pendingIds.has(card.id)}
                   />
                 ))}
                 {col.cards.length === 0 ? (

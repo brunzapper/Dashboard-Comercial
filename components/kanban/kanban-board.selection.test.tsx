@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 31/07/2026
+// v1.1: indicador de sync POR CARD (queue.pendingIds → CardView syncing).
 // Seleção em massa + fila otimista do KanbanBoard: checkbox/segunda via
 // Ctrl+clique, barra de ações (gating de Excluir por admin), movimento
 // otimista via moveRecordCardsBulk, falha PARCIAL revertendo só o card falho
@@ -230,5 +231,68 @@ describe("seleção em massa", () => {
     });
     // Depois do settle, o quadro segue otimista até o refresh trazer o fresco.
     expect(colDiv("Quente").textContent).toContain("A1");
+  });
+
+  it("indicador de sync aparece SÓ no card movido e some no settle", async () => {
+    const user = userEvent.setup();
+    let resolveMove!: (v: BulkActionState) => void;
+    vi.mocked(moveRecordCardsBulk).mockImplementation(
+      () => new Promise<BulkActionState>((r) => (resolveMove = r))
+    );
+    renderBoard(
+      boardData({
+        novo: [card("a1", "A1", "novo"), card("a2", "A2", "novo")],
+        quente: [],
+      })
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: "Selecionar A1" }));
+    await user.click(screen.getByRole("button", { name: /Mover para/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "Quente" }));
+
+    // Em voo: spinner no card movido; o vizinho não movido fica limpo.
+    expect(
+      screen.getByRole("status", { name: "Sincronizando A1" })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("status", { name: "Sincronizando A2" })
+    ).toBeNull();
+
+    await act(async () => {
+      resolveMove({ ok: true, results: [{ id: "a1", ok: true }] });
+    });
+    expect(
+      screen.queryByRole("status", { name: "Sincronizando A1" })
+    ).toBeNull();
+  });
+
+  it("indicador de sync limpa também quando o item falha (revert)", async () => {
+    const user = userEvent.setup();
+    let resolveMove!: (v: BulkActionState) => void;
+    vi.mocked(moveRecordCardsBulk).mockImplementation(
+      () => new Promise<BulkActionState>((r) => (resolveMove = r))
+    );
+    renderBoard(
+      boardData({ novo: [card("a1", "A1", "novo")], quente: [] })
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: "Selecionar A1" }));
+    await user.click(screen.getByRole("button", { name: /Mover para/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "Quente" }));
+    expect(
+      screen.getByRole("status", { name: "Sincronizando A1" })
+    ).toBeTruthy();
+
+    await act(async () => {
+      resolveMove({
+        ok: true,
+        results: [{ id: "a1", ok: false, message: "Sem permissão." }],
+      });
+    });
+    // Falhou: reverteu pra Novo, painel de falha no lugar do spinner.
+    expect(
+      screen.queryByRole("status", { name: "Sincronizando A1" })
+    ).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("A1");
   });
 });

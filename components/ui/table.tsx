@@ -1,14 +1,22 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 31/07/2026
 // Componentes de Tabela (shadcn/ui, new-york).
+// v1.1: `containerClassName` opt-in no wrapper — permite a um chamador com
+//   scroller PRÓPRIO neutralizar o overflow-x-auto interno (ex.: RecordsTable
+//   passa overflow-x-visible p/ o pan de mão atuar no div externo dele).
+//   Omitida, a classe emitida é idêntica à de antes.
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & { containerClassName?: string }) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"
