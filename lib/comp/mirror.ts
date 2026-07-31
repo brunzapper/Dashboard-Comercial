@@ -39,8 +39,10 @@ export function mirrorTitle(
 
 /**
  * Atingimento médio da linha p/ o campo rem_atingimento: média PONDERADA pelos
- * pesos dos fatores com atingimento efetivo não-nulo. Sem nenhum ⇒ null (campo
- * fica vazio — nunca 0 fabricado).
+ * pesos dos fatores com atingimento efetivo não-nulo. Plano com TODOS os pesos
+ * zerados (payout só por comissão — planos do preset Remuneração Variável) cai
+ * na média SIMPLES desses fatores. Sem nenhum atingimento ⇒ null (campo fica
+ * vazio — nunca 0 fabricado).
  */
 export function mirrorAttainmentPct(
   config: CompPlanConfig,
@@ -48,14 +50,19 @@ export function mirrorAttainmentPct(
 ): number | null {
   let weighted = 0;
   let weights = 0;
+  let simpleSum = 0;
+  let count = 0;
   for (const f of config.factors) {
     const att = breakdown.byFactor[f.id]?.attainmentPct;
     if (att == null) continue;
     weighted += f.weightPct * att;
     weights += f.weightPct;
+    simpleSum += att;
+    count += 1;
   }
-  if (weights === 0) return null;
-  return Math.round((weighted / weights) * 100) / 100;
+  if (count === 0) return null;
+  const avg = weights === 0 ? simpleSum / count : weighted / weights;
+  return Math.round(avg * 100) / 100;
 }
 
 /**

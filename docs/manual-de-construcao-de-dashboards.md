@@ -2040,13 +2040,14 @@ Lista completa:
    Potencial, Desconto (%)).
 3. **"MRR por vendedor"**.
 4. **"MRR por canal"**.
-5. **"Remuneração Variável"** — além do dashboard de acompanhamento (valor
-   gerado, componentes e reuniões qualificadas por SDR), este preset também
-   cria a árvore de operações AEs/SDR-BDR e os 5 planos de remuneração em
-   Configurações → Remuneração (onde vive o cálculo autoritativo do payout).
-   Nada já existente é sobrescrito; os passos pós-geração (vincular pessoas,
-   cotação USD, preencher "SDR da Reunião") estão no runbook do manual de
-   manutenção (§4.7).
+5. **"Remuneração Variável"** — dashboard em 4 abas (Visão geral, AEs com
+   cards por pessoa, SDRs e Remuneração — esta última sobre o espelho
+   publicado, populada após o "Publicar" mensal). O preset também cria a
+   árvore de operações AEs/SDR-BDR já com os vínculos das pessoas e os 5
+   planos de remuneração em Configurações → Remuneração (onde vive o cálculo
+   autoritativo do payout). Nada já existente é sobrescrito; os passos
+   pós-geração (cotação USD, preencher "SDR da Reunião", publicar o mês)
+   estão no runbook do manual de manutenção (§4.7).
 
 Comportamento:
 

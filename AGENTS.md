@@ -220,12 +220,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `applyPreset` (identidade `settings.preset.key`/`settings.presetKey` — nunca
   duplicar nem tocar widgets sem presetKey). **Seções de ORG do preset
   (31/07/2026):** `operations` (árvore ensure-BY-NAME; pais antes dos filhos;
-  nunca renomeia/religa) e `compPlans` (planos de remuneração ensure por
+  nunca renomeia/religa; `responsibleNames` = vínculos de responsáveis
+  garantidos a CADA apply — ensure-if-absent com priority max+1, nunca
+  remove; nome resolvido por display_name exato com preferência à linha
+  canônica), `compPlans` (planos de remuneração ensure por
   `config.presetKey`; plano existente NUNCA sobrescrito; operação de
   `memberOperationNames` ausente PULA com erro alto — nunca plano ligado a
-  "todos") aplicam SÓ com `opts.allowOrgSections`, que APENAS o caminho de
-  fábrica (`applyPreset`) passa — o import/IA fica estruturalmente incapaz de
-  criá-las. `PresetField.options_source: "responsibles"` (0113) marca campo
+  "todos") e `ensureCompMirror` (garante a base espelho `remuneracao` no
+  apply; key com sufixo de colisão vira erro visível) aplicam SÓ com
+  `opts.allowOrgSections`, que APENAS o caminho de fábrica (`applyPreset`)
+  passa — o import/IA fica estruturalmente incapaz de criá-las. A sentinela
+  `@responsible:<Nome>` em VALOR de filtro de widget é resolvida p/ o UUID
+  canônico no MESMO caminho (fora dele fica literal); nome não resolvido =
+  erro visível + card vazio, nunca silêncio. `PresetField.options_source: "responsibles"` (0113) marca campo
   seleção de dropdown VIVO: options reescritas com os responsáveis ativos
   principais por `refreshResponsibleOptionFields` (`lib/config/
   responsible-options.ts` — chamado no apply, no `syncFieldCatalog` e nas
