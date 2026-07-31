@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: guard do operando de meta no record)
 // Testes da validação de fórmula POR CONTEXTO — fonte única das regras e
 // mensagens compartilhadas entre editores (ao vivo) e servidor (submit).
 // Warnings de escopo NÃO bloqueiam o save: apontam operandos @fonte que
@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGG_IN_RECORD_MSG,
   COND_AGG_IN_RECORD_MSG,
+  GOAL_IN_RECORD_MSG,
   validateFormulaForContext,
 } from "@/lib/records/formula-validate";
 import type { Formula, FormulaToken } from "@/lib/records/formulas";
@@ -56,6 +57,14 @@ describe("contexto 'record'", () => {
       catalog,
     });
     expect(out).toEqual({ ok: false, error: AGG_IN_RECORD_MSG, warnings: [] });
+  });
+
+  it("operando de meta (meta:) → mensagem dedicada exata", () => {
+    const out = validateFormulaForContext(f(ref("meta:mrr")), {
+      kind: "record",
+      catalog,
+    });
+    expect(out).toEqual({ ok: false, error: GOAL_IN_RECORD_MSG, warnings: [] });
   });
 
   it("ref fora do catálogo → erro; fórmula ok → { ok, warnings: [] }", () => {

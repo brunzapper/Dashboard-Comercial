@@ -31,6 +31,7 @@ import {
   mergeSourceLabels,
 } from "@/lib/config/source-labels";
 import { loadUserSettings } from "@/lib/config/user-settings";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { resolveTheme } from "@/lib/theme";
 import { ROLE_LABELS, type RoleKey } from "@/lib/auth/roles";
 import { ThemeSync } from "@/components/layout/theme-sync";
@@ -41,6 +42,7 @@ import { TaskBell } from "@/components/layout/task-bell";
 import { countTaskAlerts } from "@/lib/tasks/actions";
 import { SourceLabelsProvider } from "@/components/source-labels-context";
 import { SourcesProvider } from "@/components/sources-context";
+import { GoalMetricsProvider } from "@/components/goal-metrics-context";
 import { SourceFoldersProvider } from "@/components/source-folders-context";
 import { RealtimeRefresher } from "@/components/realtime-refresher";
 import { Toaster } from "@/components/ui/sonner";
@@ -115,13 +117,14 @@ export default async function AppLayout({
   // seriais. O merge dos rótulos depende de `sources`, mas o FETCH não.
   // Sino: erro (ex.: migrações 0063/0066 pendentes) cai em 0 sem quebrar.
   const supabase = await createClient();
-  const [settings, sources, sourceFolders, labelsValue, dueCount] =
+  const [settings, sources, sourceFolders, labelsValue, dueCount, goalMetrics] =
     await Promise.all([
       loadUserSettings(user.id),
       loadSources(supabase, org?.id),
       loadSourceFolders(supabase, org?.id),
       loadSourceLabelsValue(supabase, org?.id),
       countTaskAlerts().catch(() => 0),
+      loadGoalMetrics(supabase),
     ]);
   const sourceLabels = mergeSourceLabels(labelsValue, sources);
   const initialPinned =
@@ -168,6 +171,7 @@ export default async function AppLayout({
 
   return (
     <SourcesProvider sources={sources}>
+      <GoalMetricsProvider metrics={goalMetrics}>
       <SourceFoldersProvider folders={sourceFolders}>
       <SourceLabelsProvider labels={sourceLabels}>
         {/* Sinal realtime (records/tasks/comments) → event bus + refresh
@@ -186,6 +190,7 @@ export default async function AppLayout({
         </AppShell>
       </SourceLabelsProvider>
       </SourceFoldersProvider>
+      </GoalMetricsProvider>
     </SourcesProvider>
   );
 }

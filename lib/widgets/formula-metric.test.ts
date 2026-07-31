@@ -118,3 +118,112 @@ describe("runCalculatedWidget", () => {
     expect(out).toEqual({ value: null, currency: null });
   });
 });
+
+describe("operando de META (meta:<chave>)", () => {
+  const op = (o: "/"): { kind: "op"; op: "/" } => ({ kind: "op", op: o });
+
+  it("resolve a meta do período (year/month da regra do card) e divide", async () => {
+    const { db, rpcCalls, queries } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 40000 }], error: null }),
+      },
+      tables: {
+        goals: (q) => {
+          // Escopo GLOBAL mensal: period_year 2026 / period_month 3 (o período
+          // 01–31/03 cabe num mês — regra extraída do card).
+          const eqs = Object.fromEntries(
+            q.steps
+              .filter((s) => s.method === "eq")
+              .map((s) => [s.args[0], s.args[1]])
+          );
+          const single = q.steps.some((s) => s.method === "maybeSingle");
+          if (
+            single &&
+            eqs.period_year === 2026 &&
+            eqs.period_month === 3 &&
+            eqs.scope === "global" &&
+            eqs.metric === "mrr"
+          ) {
+            return { data: { target: "50000" }, error: null };
+          }
+          return { data: single ? null : [], error: null };
+        },
+      },
+    });
+    const out = await runCalculatedWidget(db, {
+      formula: {
+        tokens: [
+          { kind: "field", ref: "agg:sum:value" },
+          op("/"),
+          { kind: "field", ref: "meta:mrr" },
+        ],
+      },
+      sources: ["deals"],
+      period: { field: "closed_at", from: "2026-03-01", to: "2026-03-31" },
+    });
+    expect(out.value).toBeCloseTo(0.8);
+    expect(rpcCalls).toHaveLength(1);
+    expect(queries.some((q) => q.table === "goals")).toBe(true);
+  });
+
+  it("meta ausente ⇒ valor null (nunca 0); falha da tabela idem", async () => {
+    const semMeta = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 40000 }], error: null }),
+      },
+      tables: {
+        goals: (q) => ({
+          data: q.steps.some((s) => s.method === "maybeSingle") ? null : [],
+          error: null,
+        }),
+      },
+    });
+    const out = await runCalculatedWidget(semMeta.db, {
+      formula: {
+        tokens: [
+          { kind: "field", ref: "agg:sum:value" },
+          op("/"),
+          { kind: "field", ref: "meta:mrr" },
+        ],
+      },
+      sources: ["deals"],
+      period: { field: "closed_at", from: "2026-03-01", to: "2026-03-31" },
+    });
+    expect(out.value).toBeNull();
+    // Handler de goals que LANÇA: degrade por chave, widget não derruba.
+    const quebrado = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 1 }], error: null }),
+      },
+      tables: {
+        goals: () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    const out2 = await runCalculatedWidget(quebrado.db, {
+      formula: { tokens: [{ kind: "field", ref: "meta:mrr" }] },
+      sources: ["deals"],
+      period: null,
+    });
+    expect(out2.value).toBeNull();
+  });
+
+  it("fórmula SÓ de meta vira const puro — zero RPCs de widget", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      tables: {
+        goals: (q) => {
+          const single = q.steps.some((s) => s.method === "maybeSingle");
+          return { data: single ? { target: "1234" } : [], error: null };
+        },
+      },
+    });
+    const out = await runCalculatedWidget(db, {
+      formula: { tokens: [{ kind: "field", ref: "meta:mrr" }] },
+      sources: ["deals"],
+      period: { field: "closed_at", from: "2026-03-01", to: "2026-03-31" },
+    });
+    expect(out.value).toBe(1234);
+    expect(rpcCalls).toHaveLength(0);
+  });
+});

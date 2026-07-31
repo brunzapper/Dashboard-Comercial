@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: operandos de META — parse/coleta/
+// lowering p/ const e colocação na validação)
 // Testes das métricas calculadas de agregados. Invariantes: o operando com
 // escopo de fonte (`agg:…@<fonte>`) é ABAIXADO para a chave `aggif:` (com o 4º
 // elemento `scope`) — e, quando NÃO abaixável (min/max, sub inexpressável), o
@@ -14,9 +15,14 @@ import {
   condFilters,
   evalCalcMoney,
   foldBasis,
+  GOAL_GROUP,
+  goalOperandKeys,
+  goalOperandRefs,
+  lowerGoalOperands,
   lowerSourceScopedOperands,
   parseAggRef,
   parseCondBasisKey,
+  parseGoalRef,
   recordMatchesConds,
   resolveCalcMetric,
   siblingScopedBasisKeys,
@@ -522,5 +528,92 @@ describe("zeroing de operandos de fonte-irmã (pernas de sub-base)", () => {
     expect(keys).toHaveLength(1);
     expect(keys[0].startsWith("aggif:")).toBe(true);
     expect(keys[0]).toContain("leads_sql");
+  });
+});
+
+describe("operandos de META (meta:<chave>)", () => {
+  it("parseGoalRef: chave válida, inválida e prefixo alheio", () => {
+    expect(parseGoalRef("meta:mrr")).toBe("mrr");
+    expect(parseGoalRef("meta:vendas_sql")).toBe("vendas_sql");
+    expect(parseGoalRef("meta:MRR")).toBeNull(); // maiúscula fora da regra
+    expect(parseGoalRef("meta:")).toBeNull();
+    expect(parseGoalRef("agg:sum:value")).toBeNull();
+  });
+
+  it("goalOperandKeys deduplica e ignora refs de outros prefixos", () => {
+    const formula = f(
+      ref("agg:sum:value"),
+      { kind: "op", op: "/" },
+      ref("meta:mrr"),
+      { kind: "op", op: "+" },
+      ref("meta:mrr"),
+      { kind: "op", op: "+" },
+      ref("meta:sql")
+    );
+    expect(goalOperandKeys(formula)).toEqual(["mrr", "sql"]);
+    expect(goalOperandKeys(f(ref("agg:sum:value")))).toEqual([]);
+  });
+
+  it("lowerGoalOperands: const com valor; null/ausente MANTÉM o ref; fast-path identidade", () => {
+    const formula = f(ref("agg:sum:value"), { kind: "op", op: "/" }, ref("meta:mrr"));
+    const lowered = lowerGoalOperands(formula, { mrr: 50000 });
+    expect(lowered.tokens[2]).toEqual({ kind: "const", value: 50000 });
+    expect(lowered.tokens[0]).toEqual(ref("agg:sum:value"));
+    // null e chave ausente mantêm o ref (ctx null → "—", nunca 0).
+    expect(lowerGoalOperands(formula, { mrr: null }).tokens[2]).toEqual(
+      ref("meta:mrr")
+    );
+    expect(lowerGoalOperands(formula, {}).tokens[2]).toEqual(ref("meta:mrr"));
+    // Sem token ABAIXÁVEL (sem meta, ou só valores null) ⇒ MESMO objeto.
+    const noMeta = f(ref("agg:sum:value"));
+    expect(lowerGoalOperands(noMeta, { mrr: 1 })).toBe(noMeta);
+    expect(lowerGoalOperands(formula, { mrr: null })).toBe(formula);
+  });
+
+  it("basisKeysFor ignora meta: (nunca vira chave de basis/fold)", () => {
+    expect(
+      basisKeysFor(f(ref("agg:sum:value"), { kind: "op", op: "/" }, ref("meta:mrr")))
+    ).toEqual(["sum:value"]);
+  });
+
+  it("goalOperandRefs emite grupo Metas com rótulo 'Meta: <label>'", () => {
+    const refs = goalOperandRefs([
+      { key: "mrr", label: "MRR" },
+      { key: "sql", label: "SQLs" },
+    ]);
+    expect(refs).toEqual([
+      { ref: "meta:mrr", label: "Meta: MRR", group: GOAL_GROUP },
+      { ref: "meta:sql", label: "Meta: SQLs", group: GOAL_GROUP },
+    ]);
+  });
+
+  it("validateCondAggRefs: meta fora de SOMASE ok; alvo/condição de SOMASE rejeitados", () => {
+    const catalog = [
+      { ref: "agg:sum:value", label: "Σ Valor" },
+      { ref: "meta:mrr", label: "Meta: MRR", group: GOAL_GROUP },
+      { ref: "value", label: "Valor", group: "Campos (SOMASE/MÉDIASE)" },
+      { ref: "pipeline", label: "Etapa", group: "Condições (SOMASE/CONT.SE)" },
+    ];
+    const ok = validateCondAggRefs(
+      f(ref("agg:sum:value"), { kind: "op", op: "/" }, ref("meta:mrr")),
+      catalog
+    );
+    expect(ok.ok).toBe(true);
+    // Alvo de SOMASE: rejeitado pela mensagem existente de campo numérico.
+    const alvo = validateCondAggRefs(
+      f(
+        { kind: "func", name: "SOMASE" },
+        { kind: "lparen" },
+        ref("meta:mrr"),
+        { kind: "argsep" },
+        ref("pipeline"),
+        { kind: "cmp", op: "=" },
+        { kind: "const", value: 1 },
+        { kind: "rparen" }
+      ),
+      catalog
+    );
+    expect(alvo.ok).toBe(false);
+    expect(alvo.error).toContain("1º argumento");
   });
 });

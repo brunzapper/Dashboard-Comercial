@@ -13,6 +13,7 @@
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { validateFormulaForContext } from "@/lib/records/formula-validate";
 import type { Formula } from "@/lib/records/formulas";
@@ -64,7 +65,7 @@ export async function previewAggregateFormula(
     return { ok: false, message: "Defina a fórmula para ver a prévia." };
   }
 
-  const [{ data: fieldsData }, correspondences, sources, rates] =
+  const [{ data: fieldsData }, correspondences, sources, rates, goalMetrics] =
     await Promise.all([
       supabase
         .from("field_definitions")
@@ -74,6 +75,7 @@ export async function previewAggregateFormula(
       loadCorrespondences(supabase),
       loadSources(supabase),
       loadCurrencyRates(supabase),
+      loadGoalMetrics(supabase),
     ]);
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   const available = buildAvailableFields(allFields, correspondences, sources);
@@ -81,7 +83,7 @@ export async function previewAggregateFormula(
   // Mesmo catálogo dos editores (builder único) — a prévia rejeita exatamente
   // o que o save rejeitaria, com as mesmas mensagens.
   const catalog = buildAggOperandCatalog(
-    availableAggCatalogInput(available, allFields, sources, {
+    availableAggCatalogInput(available, allFields, sources, goalMetrics, {
       withNested: true,
     })
   );

@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 31/07/2026 (v1.1: guard dedicado do operando de META no
+// contexto por-registro — [Meta: …] só existe em fórmulas de totais)
 // Validação de fórmula POR CONTEXTO — fonte ÚNICA das regras e mensagens que
 // antes viviam espalhadas entre campos/actions.ts (servidor) e os saves dos
 // editores. Módulo puro (client+server): os editores rodam a MESMA validação
@@ -37,6 +38,8 @@ export const COND_AGG_IN_RECORD_MSG =
   'SOMASE/CONT.SE/MÉDIASE só funcionam em campos "Calculado (totais do recorte)" e métricas de widget — a fórmula por registro enxerga um registro só. Para condição por registro, use SE(...).';
 export const AGG_IN_RECORD_MSG =
   'Operandos agregados (Σ, Média, Contagem) só funcionam em campos "Calculado (totais do recorte)" — o campo calculado por registro enxerga um registro só. Use os valores do próprio registro, ou crie um campo "Calculado (totais do recorte)".';
+export const GOAL_IN_RECORD_MSG =
+  'Operandos de meta ([Meta: …]) só funcionam em fórmulas de totais (campos "Calculado (totais do recorte)" e métricas de widget) — a fórmula por registro enxerga um registro só.';
 
 export interface FormulaContext {
   kind: "record" | "aggregate";
@@ -68,6 +71,9 @@ export function validateFormulaForContext(
     }
     if (formulaRefs(formula).some((r) => r.startsWith("agg:"))) {
       return { ok: false, error: AGG_IN_RECORD_MSG, warnings: [] };
+    }
+    if (formulaRefs(formula).some((r) => r.startsWith("meta:"))) {
+      return { ok: false, error: GOAL_IN_RECORD_MSG, warnings: [] };
     }
     const v = validateFormula(formula, refs);
     return v.ok

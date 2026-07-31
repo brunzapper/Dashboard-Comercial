@@ -11,6 +11,8 @@ import "server-only";
 
 import type { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
+import type { GoalMetricDef } from "@/lib/metas/metrics";
 import { formulaCondAggInfo, type Formula } from "@/lib/records/formulas";
 import {
   findFormulaCycle,
@@ -79,12 +81,16 @@ export function forbiddenOperandKeys(
 // com os editores (lib/widgets/agg-catalog.ts) — servidor e UI montam o MESMO
 // catálogo por construção (rótulo é load-bearing no round-trip texto⇄tokens).
 // `forbidden` = self + dependentes transitivos (referenciá-los criaria ciclo).
+// `goalMetrics` = registry de metas (operandos `meta:<chave>`, 31/07/2026).
 export function aggOperandCatalog(
   rows: DefRow[],
   forbidden: Set<string>,
-  sources: Sources
+  sources: Sources,
+  goalMetrics: GoalMetricDef[]
 ): OperandRef[] {
-  return buildAggOperandCatalog(defsAggCatalogInput(rows, sources, forbidden));
+  return buildAggOperandCatalog(
+    defsAggCatalogInput(rows, sources, goalMetrics, forbidden)
+  );
 }
 
 // Catálogo completo de operandos por-registro (números + casados + datas +
@@ -199,15 +205,16 @@ export async function resolveAndValidateFormula(
   fieldKey?: string
 ): Promise<{ ok: true; formula: Formula } | { ok: false; message: string }> {
   const isAgg = f.dataType === "calculado_agg";
-  const [rows, sources] = await Promise.all([
+  const [rows, sources, goalMetrics] = await Promise.all([
     loadDefRows(supabase),
     loadSources(supabase),
+    loadGoalMetrics(supabase),
   ]);
   const forbidden = forbiddenOperandKeys(rows, fieldKey);
   // Catálogo do CONTEXTO (agregado ou por-registro) — builder único
   // compartilhado com os editores; tokenização e validação usam o mesmo.
   const catalog = isAgg
-    ? aggOperandCatalog(rows, forbidden, sources)
+    ? aggOperandCatalog(rows, forbidden, sources, goalMetrics)
     : serverOperandCatalog(rows, forbidden, sources);
   let formula = f.formula;
   if (f.formulaMode === "text") {

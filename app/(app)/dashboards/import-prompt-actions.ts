@@ -24,6 +24,7 @@ import path from "path";
 import { getSessionInfo } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { loadSources } from "@/lib/config/sources";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import { fieldAppliesToSource, recordTypeOf, type SourceDef } from "@/lib/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { isCoreDef } from "@/lib/records/core-defs";
@@ -116,6 +117,7 @@ export async function buildImportPrompt(
     { data: respData },
     { data: opData },
     { data: matchData },
+    goalMetrics,
   ] = await Promise.all([
     supabase
       .from("field_definitions")
@@ -132,6 +134,7 @@ export async function buildImportPrompt(
       .from("match_rules")
       .select("label, source_a, source_b, field_a_1, field_b_1, field_a_2, field_b_2")
       .eq("enabled", true),
+    loadGoalMetrics(supabase),
   ]);
   const defs = (defsData ?? []) as FieldDefRow[];
   const respLabels = new Map(
@@ -282,6 +285,8 @@ export async function buildImportPrompt(
     conexoes,
     responsaveis: [...respLabels.values()].sort(),
     operacoes: [...opLabels.values()].sort(),
+    // Chaves válidas do operando de fórmula [meta:<chave>] (31/07/2026).
+    goal_metrics: goalMetrics.map((m) => ({ chave: m.key, rotulo: m.label })),
   };
 
   const sampleNote = [

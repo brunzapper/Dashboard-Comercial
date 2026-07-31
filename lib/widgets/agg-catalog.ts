@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 31/07/2026
+// v1.2 (31/07/2026): operandos de META (`meta:<chave>`, grupo "Metas") — o
+//   registry goal_metrics entra como campo OBRIGATÓRIO do input (typecheck
+//   força TODOS os sítios a fornecê-lo: um sítio de validação sem o registry
+//   rejeitaria no save fórmula válida no editor). Valor resolvido no engine
+//   (lowerGoalOperands) — ver lib/widgets/calc-metrics.ts v2.5.
 // Builder ÚNICO do catálogo de operandos AGREGADOS (fórmulas 'calculado_agg' e
 // métricas/expressões de widget). Antes esta montagem estava copiada em SEIS
 // sítios (widget-builder, fields-manager, campos/actions, quick-table-actions,
@@ -28,11 +33,13 @@ import {
 } from "@/lib/records/date-operands";
 import { NUMERIC_DATA_TYPES, type DataType } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
+import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { SourceDef } from "@/lib/sources";
 import {
   aggNestedOperandRefs,
   aggOperandRefs,
   condAggOperandRefs,
+  goalOperandRefs,
   sourceScopedAggOperandRefs,
   type ScopedAggField,
 } from "./calc-metrics";
@@ -64,6 +71,10 @@ export interface AggCatalogInput {
   // Catálogo de fontes VIVO (loadSources/useSources) — escopo @fonte e casados
   // casam por rótulo de fonte; editores e servidor DEVEM usar o mesmo.
   sources: SourceDef[];
+  // Registry de métricas de meta (loadGoalMetrics/useGoalMetrics) — operandos
+  // `meta:<chave>`. OBRIGATÓRIO de propósito: sítio esquecido é erro de
+  // compilação, nunca um save rejeitando fórmula que o editor aceitou.
+  goalMetrics: GoalMetricDef[];
 }
 
 /** Catálogo agregado completo: agg:* + variantes @fonte + aninhados + operandos
@@ -80,6 +91,7 @@ export function buildAggOperandCatalog(input: AggCatalogInput): OperandRef[] {
       input.sources
     ),
     ...aggNestedOperandRefs(input.nested ?? []),
+    ...goalOperandRefs(input.goalMetrics),
     ...condAggOperandRefs(
       input.numeric,
       input.customCond,
@@ -113,6 +125,7 @@ export function availableAggCatalogInput(
   available: AvailableField[],
   allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
+  goalMetrics: GoalMetricDef[],
   opts?: { withNested?: boolean }
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -152,6 +165,7 @@ export function availableAggCatalogInput(
       .filter((f) => f.unified && !f.isNumeric)
       .map((f) => ({ field: f.field, label: f.label })),
     sources,
+    goalMetrics,
   };
 }
 
@@ -163,6 +177,7 @@ export function availableAggCatalogInput(
 export function defsAggCatalogInput(
   allDefs: AggCatalogDefRow[],
   sources: SourceDef[],
+  goalMetrics: GoalMetricDef[],
   forbidden: Set<string> = new Set()
 ): AggCatalogInput {
   const defs = allDefs.filter((d) => !isCoreDef(d));
@@ -224,5 +239,6 @@ export function defsAggCatalogInput(
       .filter((d) => d.data_type === "data")
       .map((d) => ({ field_key: d.field_key, label: d.label })),
     sources,
+    goalMetrics,
   };
 }

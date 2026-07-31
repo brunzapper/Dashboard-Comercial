@@ -141,6 +141,7 @@ import {
   IMPLICIT_FOLDER_LABEL,
 } from "@/lib/source-folders";
 import { useSources } from "@/components/sources-context";
+import { useGoalMetrics } from "@/components/goal-metrics-context";
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   Sheet,
@@ -909,6 +910,7 @@ export function WidgetBuilder({
     );
   };
   const sourceLabels = useSourceLabels();
+  const goalMetrics = useGoalMetrics();
   const fieldSourceChips = sourceChips(sourceLabels);
 
   // Pernas extras de sub-base na seleção atual (2+ subs da mesma base, ou sub
@@ -964,14 +966,14 @@ export function WidgetBuilder({
     () =>
       decorateRefOptions(
         buildAggOperandCatalog(
-          availableAggCatalogInput(available, fields, catalog, {
+          availableAggCatalogInput(available, fields, catalog, goalMetrics, {
             withNested: true,
           })
         ),
         available,
         sourceLabels
       ),
-    [available, fields, sourceLabels, catalog]
+    [available, fields, sourceLabels, catalog, goalMetrics]
   );
   // Campos "Calculado (totais)" salvos em /campos: entram SÓ como métrica.
   const aggCalcFields = available.filter((f) => f.aggCalc);

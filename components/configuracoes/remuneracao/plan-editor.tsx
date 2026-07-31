@@ -224,14 +224,18 @@ export function PlanEditor(props: PlanEditorProps) {
     () =>
       decorateRefOptions(
         buildAggOperandCatalog(
-          availableAggCatalogInput(props.available, props.allFields, props.sources, {
-            withNested: true,
-          })
+          availableAggCatalogInput(
+            props.available,
+            props.allFields,
+            props.sources,
+            props.metrics,
+            { withNested: true }
+          )
         ),
         props.available,
         sourceLabels
       ),
-    [props.available, props.allFields, props.sources, sourceLabels]
+    [props.available, props.allFields, props.sources, props.metrics, sourceLabels]
   );
 
   // Catálogo comp:* da fórmula do total — derivado do RASCUNHO (sincronia:

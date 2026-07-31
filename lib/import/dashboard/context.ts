@@ -6,6 +6,7 @@
 import "server-only";
 
 import { loadSources } from "@/lib/config/sources";
+import { loadGoalMetrics } from "@/lib/config/goal-metrics";
 import type { createClient } from "@/lib/supabase/server";
 import type {
   DashboardImportContext,
@@ -17,15 +18,17 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 export async function loadImportContext(
   supabase: ServerClient
 ): Promise<DashboardImportContext> {
-  const [sources, defsRes, corrRes, respRes, opRes] = await Promise.all([
-    loadSources(supabase),
-    supabase
-      .from("field_definitions")
-      .select("id, field_key, label, data_type, formula, applies_to, source_system"),
-    supabase.from("field_correspondences").select("key"),
-    supabase.from("responsibles").select("display_name"),
-    supabase.from("operations").select("name"),
-  ]);
+  const [sources, defsRes, corrRes, respRes, opRes, goalMetrics] =
+    await Promise.all([
+      loadSources(supabase),
+      supabase
+        .from("field_definitions")
+        .select("id, field_key, label, data_type, formula, applies_to, source_system"),
+      supabase.from("field_correspondences").select("key"),
+      supabase.from("responsibles").select("display_name"),
+      supabase.from("operations").select("name"),
+      loadGoalMetrics(supabase),
+    ]);
   return {
     sources,
     defs: ((defsRes.data ?? []) as Record<string, unknown>[]).map((d) => ({
@@ -46,5 +49,6 @@ export async function loadImportContext(
     operationNames: (opRes.data ?? [])
       .map((o) => String((o as { name?: unknown }).name ?? ""))
       .filter(Boolean),
+    goalMetrics,
   };
 }

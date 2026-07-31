@@ -25,6 +25,7 @@ import {
 } from "@/lib/import/dashboard/settings-docs";
 import type { DashboardImportContext } from "@/lib/import/dashboard/types";
 import { validateDashboardImport } from "@/lib/import/dashboard/validate";
+import { BUILTIN_GOAL_METRICS } from "@/lib/metas/metrics";
 import { DATA_TYPE_LABELS } from "@/lib/records/types";
 import { BUILTIN_SOURCES } from "@/lib/sources";
 import { DATE_TRANSFORMS } from "@/lib/widgets/fields";
@@ -130,6 +131,7 @@ describe("prompt de importação por IA — paridade com o código", () => {
       correspondenceKeys: [],
       responsibleNames: [],
       operationNames: [],
+      goalMetrics: BUILTIN_GOAL_METRICS,
     };
     const res = validateDashboardImport(SPEC_EXAMPLE, ctx);
     expect(res.errors).toEqual([]);

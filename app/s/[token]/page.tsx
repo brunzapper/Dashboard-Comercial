@@ -47,6 +47,7 @@ import type { Metadata } from "next";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { snapshotClient } from "@/lib/snapshots/db-adapter";
+import { mergeGoalMetrics } from "@/lib/metas/metrics";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import { hashToken, isTokenShaped } from "@/lib/snapshots/token";
@@ -878,10 +879,21 @@ async function SnapshotContent({
   const quickTableWidgets = dataWidgets.filter(isQuickTableWidget);
   let quickTablePromise: Promise<unknown> = Promise.resolve();
   if (quickTableWidgets.length > 0) {
+    // Registry de metas p/ o catálogo: `sync_config` NÃO passa no
+    // snapshotClient (fail-closed, de propósito) — leitura DIRETA org-scoped
+    // via service role + mergeGoalMetrics (fallback builtins). NUNCA
+    // adicionar sync_config ao PASSTHROUGH (abriria leitura sem escopo).
+    const { data: gmRow } = await service
+      .from("sync_config")
+      .select("value")
+      .eq("key", "goal_metrics")
+      .eq("organization_id", orgId)
+      .maybeSingle();
+    const goalMetrics = mergeGoalMetrics(gmRow?.value);
     // Catálogo de operandos das expressões {=…} — builder ÚNICO
     // (lib/widgets/agg-catalog.ts), mesma montagem da action do quick-table.
     const catalog: OperandRef[] = buildAggOperandCatalog(
-      availableAggCatalogInput(available, fields, sources)
+      availableAggCatalogInput(available, fields, sources, goalMetrics)
     );
 
     quickTablePromise = Promise.all(

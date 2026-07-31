@@ -203,7 +203,9 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
   // Fórmula do realizado: MESMO catálogo/validação do servidor de fórmulas
   // agregadas (nunca montar catálogo paralelo).
   const aggCatalog = buildAggOperandCatalog(
-    availableAggCatalogInput(available, allFields, sources, { withNested: true })
+    availableAggCatalogInput(available, allFields, sources, registry, {
+      withNested: true,
+    })
   );
   for (const f of config.factors) {
     for (const s of f.sources) {
