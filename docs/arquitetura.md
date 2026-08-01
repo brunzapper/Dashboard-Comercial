@@ -2578,7 +2578,23 @@ total opcional por plano.
   agregado: `CompBreakdown.commissionBlocks` traz o detalhe por bloco (sempre
   o CALCULADO) e `commission` mantém o shape antigo com `value = override ??
   Σ` (`tier`/`triggerAttainmentPct` só com bloco único) — espelho/publish
-  intocados. `inputs.overrides.commission` segue override da SOMA. Cálculo
+  intocados. **Memória de cálculo (01/08/2026):** cada bloco do breakdown
+  carrega também `basis` (multiplicando efetivo — realizado do fator-base ou
+  base variável; `null` em `flat`, que não multiplica), `basisLabel`,
+  `basisMoney`, `triggerLabel`, `triggerMoney` e `memberTiersApplied` —
+  campos DERIVADOS na leitura por `computeEntry` (nada persiste;
+  `comp_entries.computed` segue snapshot cru). Os rótulos pt-BR da memória
+  ("44 (Reuniões) × R$ 12,50 = R$ 550,00", "faixa a partir de 26…") são
+  gerados SÓ por `commissionMemory` (`lib/comp/commission-label.ts`) —
+  helper puro único consumido pela grade (popover clicável na célula
+  Comissão: ícone próprio dentro do display do `EditableCell`, override por
+  duplo-clique preservado; override da soma ganha nota calculado × manual) e
+  pela visão do vendedor (`my-comp-view`). Na grade e na visão do vendedor,
+  o Valor de fator com peso 0 sem override exibe "—" com title explicativo
+  (display-only — a coluna nunca some: Base/Valor seguem alimentando
+  `basisKind:"base"`, refs `comp:*` do `totalFormula` e overrides); Valor de
+  fator com peso > 0 ganha `title` com a conta base × peso × ating.
+  `inputs.overrides.commission` segue override da SOMA. Cálculo
   NATIVO em `computeEntry` (`resolveCommissionTiers(bloco, memberId)`/
   `selectCommissionTier`) — NUNCA gerar fórmula a partir das faixas. Com
   `totalFormula`, a comissão só entra via ref `comp:comissao` (sem soma

@@ -630,7 +630,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   durável; órfão preservado e nunca selecionado). Os blocos SOMAM;
   `overrides.commission` segue override da SOMA (blocos exibem o calculado);
   breakdown por bloco em `commissionBlocks` e o agregado `commission` mantém
-  o shape antigo (espelho intocado). NUNCA gerar fórmula a partir das faixas;
+  o shape antigo (espelho intocado). **Memória de cálculo (01/08/2026):**
+  `commissionBlocks` carrega também `basis`/`basisLabel`/`basisMoney`/
+  `triggerLabel`/`triggerMoney`/`memberTiersApplied` — DERIVADOS na leitura
+  (`computed` segue snapshot cru; nada persiste); os rótulos pt-BR saem SÓ de
+  `commissionMemory` (`lib/comp/commission-label.ts` — helper único da grade
+  E da my-comp-view, dono dos formatadores `fmtMoneyBRL`/`fmtNumBR`; nunca
+  duplique o texto em componente). Na grade, a célula Comissão tem POPOVER
+  clicável de memória (ícone próprio no display — o override por duplo-clique
+  segue no resto da célula; com override da soma o popover exibe nota
+  calculado × manual) e o Valor de fator com peso 0 sem override exibe "—"
+  (display-only — a coluna NUNCA some: base/valor seguem alimentando
+  `basisKind:"base"`, `totalFormula` e overrides). NUNCA gerar fórmula a
+  partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
   `computeEntry` passa `responsible_id` como `memberId`; espelho ganha

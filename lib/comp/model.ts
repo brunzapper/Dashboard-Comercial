@@ -1,4 +1,9 @@
-// Versão: 1.5 | Data: 01/08/2026
+// Versão: 1.6 | Data: 01/08/2026
+// v1.6: MEMÓRIA DE CÁLCULO no breakdown de comissão — CompCommissionBlockBreakdown
+// ganha campos DERIVADOS na leitura (basis/basisLabel/basisMoney/triggerLabel/
+// triggerMoney/memberTiersApplied); nada persiste (computed segue snapshot cru)
+// e o agregado `commission`/espelho ficam intocados. Rótulos pt-BR da memória
+// vivem SÓ em lib/comp/commission-label.ts (grade + my-comp-view).
 // v1.5: RECORTE DO FATOR com UI (factor.filters) — parse endurecido: op
 // restrito aos 10 operadores de UI de FILTER_OPS (internos eq_ci/*_num
 // rejeitados), `in` normalizado p/ array de strings (string legada com
@@ -228,6 +233,14 @@ export interface CompCommissionBlockBreakdown {
   triggerValue: number | null; // valor EFETIVO usado na seleção (na unidade do tierBy)
   tierBy: "attainment" | "realized";
   kind: CompTierKind;
+  // Memória de cálculo (derivada na leitura — nunca persistida). `basis` é o
+  // multiplicando efetivo do payout; null em kind "flat" (nada é multiplicado).
+  basis: number | null;
+  basisLabel: string | null; // "Base variável" | label do fator-base; null em flat
+  basisMoney: boolean; // formata basis como R$ (base variável ou fator money)
+  triggerLabel: string; // label do fator gatilho (fallback: id)
+  triggerMoney: boolean; // tierBy "realized" com fator gatilho money ⇒ limiar/gatilho em R$
+  memberTiersApplied: boolean; // a tabela de faixas do MEMBRO venceu a do plano
 }
 
 /**
@@ -816,6 +829,7 @@ export function computeEntry(
   const blocks = config.commissions ?? [];
   const commissionBlocks: CompCommissionBlockBreakdown[] = [];
   let blocksSum = 0;
+  const factorById = new Map(config.factors.map((f) => [f.id, f]));
   blocks.forEach((b, i) => {
     const kind = b.kind ?? "pct";
     const tierBy = b.tierBy ?? "attainment";
@@ -841,6 +855,8 @@ export function computeEntry(
       }
     }
     blocksSum += value;
+    const basisFactor = factorById.get(b.basisFactorId ?? "");
+    const triggerFactor = factorById.get(b.triggerFactorId);
     commissionBlocks.push({
       blockId: b.id,
       label: b.label ?? `Comissão ${i + 1}`,
@@ -849,6 +865,19 @@ export function computeEntry(
       triggerValue,
       tierBy,
       kind,
+      basis: kind === "flat" ? null : basis,
+      basisLabel:
+        kind === "flat"
+          ? null
+          : b.basisKind === "base"
+            ? "Base variável"
+            : (basisFactor?.label ?? b.basisFactorId ?? null),
+      basisMoney:
+        kind !== "flat" &&
+        (b.basisKind === "base" || (basisFactor?.money ?? false)),
+      triggerLabel: triggerFactor?.label ?? b.triggerFactorId,
+      triggerMoney: tierBy === "realized" && (triggerFactor?.money ?? false),
+      memberTiersApplied: Boolean(memberId && b.memberTiers?.[memberId]),
     });
   });
   let commission: CompCommissionBreakdown | null = null;
