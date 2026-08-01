@@ -1,3 +1,11 @@
+// Versão: 1.5 | Data: 01/08/2026 (v1.5: MEMÓRIA DE CÁLCULO da comissão —
+// popover clicável na célula (ícone dedicado; o valor segue EditableCell com
+// override por duplo-clique) com a multiplicação por bloco via
+// commissionMemory (lib/comp/commission-label — helper único, nunca texto
+// duplicado); Valor de fator com peso 0 sem override exibe "—" com title
+// (display-only — a coluna nunca some: segue alvo de override e de
+// comp:f:<id>:valor); title com a conta base × peso × ating. no Valor de
+// fator com peso > 0)
 // Versão: 1.4 | Data: 31/07/2026 (v1.4: plano com config.apuracao =
 // "mes_anterior" — tooltip do cabeçalho de fator e legenda do rodapé avisam
 // que Alvo/Real. referem-se ao mês APURADO; a célula de alvo grava a meta do
@@ -20,7 +28,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { CircleAlert, Play, UploadCloud, X } from "lucide-react";
+import { CircleAlert, ListTree, Play, UploadCloud, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,11 +53,18 @@ import {
 } from "@/components/ui/tooltip";
 import { notifyActionError } from "@/lib/feedback/notify";
 import {
+  commissionMemory,
+  fmtMoneyBRL as fmtMoney,
+  fmtNumBR as fmtNum,
+} from "@/lib/comp/commission-label";
+import {
   computeEntry,
   explicitMemberIds,
   parseCompEntryInputs,
   resolveOperationMembers,
   type CompBonus,
+  type CompCommissionBlockBreakdown,
+  type CompCommissionBreakdown,
   type CompComputedRaw,
   type CompEntryInputs,
   type CompPlanConfig,
@@ -66,10 +81,6 @@ import type {
   CompPlanClientRow,
 } from "./remuneracao-manager";
 
-const fmtMoney = (v: number): string =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const fmtNum = (v: number): string =>
-  v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 // Moeda do ALVO do fator (targetCurrency) — códigos desconhecidos degradam
 // p/ prefixo cru (Intl lança em código inválido).
 function fmtMoneyIn(currency: string, v: number): string {
@@ -457,10 +468,18 @@ function GridRow(props: {
       {config.factors.map((f) => {
         const b = breakdown.byFactor[f.id];
         const error = computed?.errors?.[f.id];
+        // Memória do Valor por atingimento (mesma conta do computeEntry:
+        // base × peso × ating.) — só quando o fator pontua e nada foi
+        // sobrescrito à mão (senão o title mentiria).
+        const payoutTitle =
+          f.weightPct > 0 && !b.overridden.payout && b.attainmentPct != null
+            ? `${fmtMoney(breakdown.base)} × ${fmtNum(f.weightPct)}% × ${fmtNum(b.attainmentPct)}% = ${fmtMoney(b.payout)}`
+            : null;
         return (
           <FactorCells
             key={f.id}
             money={f.money}
+            weightPct={f.weightPct}
             targetCurrency={f.targetCurrency ?? null}
             target={b.target}
             targetBRL={b.targetBRL}
@@ -469,6 +488,7 @@ function GridRow(props: {
             realized={b.realized}
             attainmentPct={b.attainmentPct}
             payout={b.payout}
+            payoutTitle={payoutTitle}
             overridden={b.overridden}
             queryError={error ?? null}
             hasComputed={computed != null}
@@ -477,50 +497,20 @@ function GridRow(props: {
           />
         );
       })}
-      {/* Comissão: soma dos blocos (tooltip detalha cada um) com override. */}
+      {/* Comissão: soma dos blocos com override; o ícone abre a memória de
+          cálculo (popover clicável — o dblclick de edição fica no resto da
+          célula). */}
       {breakdown.commission != null ? (
         <EditableCell
           className="border-l"
           display={
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>{fmtMoney(breakdown.commission.value)}</span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <div className="flex flex-col gap-0.5">
-                  {breakdown.commissionBlocks.map((cb) => {
-                    const unit = cb.tierBy === "attainment" ? "%" : "";
-                    const tierNote = cb.tier
-                      ? `faixa ≥ ${fmtNum(cb.tier.fromPct)}${unit}: ` +
-                        (cb.kind === "pct"
-                          ? `${fmtNum(cb.tier.ratePct ?? 0)}%`
-                          : cb.kind === "flat"
-                            ? fmtMoney(cb.tier.amount ?? 0)
-                            : `${fmtMoney(cb.tier.amount ?? 0)}/un.`)
-                      : "nenhuma faixa atingida";
-                    const memberCustom = config.commissions?.some(
-                      (c) => c.id === cb.blockId && c.memberTiers?.[props.member.id]
-                    );
-                    return (
-                      <span key={cb.blockId}>
-                        {cb.label}: {fmtMoney(cb.value)} — {tierNote}
-                        {cb.triggerValue != null
-                          ? ` (gatilho ${fmtNum(cb.triggerValue)}${unit})`
-                          : ""}
-                        {memberCustom ? " · faixas do membro" : ""}
-                      </span>
-                    );
-                  })}
-                  {breakdown.commissionBlocks.length > 1 ? (
-                    <span className="font-medium">
-                      Soma: {fmtMoney(
-                        breakdown.commissionBlocks.reduce((a, b) => a + b.value, 0)
-                      )}
-                    </span>
-                  ) : null}
-                </div>
-              </TooltipContent>
-            </Tooltip>
+            <span className="inline-flex items-center gap-1">
+              <CommissionMemoryPopover
+                blocks={breakdown.commissionBlocks}
+                commission={breakdown.commission}
+              />
+              {fmtMoney(breakdown.commission.value)}
+            </span>
           }
           overridden={breakdown.commission.overridden}
           onSave={(v) => {
@@ -585,6 +575,7 @@ function GridRow(props: {
 // Grupo de 4 células de um fator.
 function FactorCells(props: {
   money: boolean;
+  weightPct: number;
   targetCurrency: string | null;
   target: number | null;
   targetBRL: number | null;
@@ -593,6 +584,8 @@ function FactorCells(props: {
   realized: number | null;
   attainmentPct: number | null;
   payout: number;
+  // Conta base × peso × ating. (title do Valor) — null sem atingimento.
+  payoutTitle: string | null;
   overridden: { realized: boolean; attainmentPct: boolean; payout: boolean };
   queryError: string | null;
   hasComputed: boolean;
@@ -688,8 +681,23 @@ function FactorCells(props: {
         onSave={(v) => props.onOverride("attainmentPct", v)}
         current={props.attainmentPct}
       />
+      {/* Valor: com peso 0 sem override, "—" (o fator não compõe a parcela
+          por atingimento) — display-only, o override por dblclick segue. */}
       <EditableCell
-        display={fmtMoney(props.payout)}
+        display={
+          props.weightPct === 0 && !props.overridden.payout ? (
+            <span
+              className="text-muted-foreground"
+              title="Peso 0% — este fator não compõe a parcela por atingimento; serve de gatilho/base de comissão."
+            >
+              —
+            </span>
+          ) : (
+            <span title={props.payoutTitle ?? undefined}>
+              {fmtMoney(props.payout)}
+            </span>
+          )
+        }
         overridden={props.overridden.payout}
         onSave={(v) => props.onOverride("payout", v)}
         current={props.payout}
@@ -770,6 +778,70 @@ function EditableCell(props: {
         </span>
       )}
     </TableCell>
+  );
+}
+
+// Memória de cálculo da comissão: um bloco por linha (label + multiplicação +
+// faixa/gatilho via commissionMemory — helper único com a my-comp-view), soma
+// quando há mais de um bloco e nota explícita quando a soma foi sobrescrita
+// (sem ela, "soma dos blocos ≠ célula" pareceria bug). O trigger é um ícone
+// próprio DENTRO do display do EditableCell: dblclick nele não pode vazar
+// para a edição da célula (stopPropagation).
+function CommissionMemoryPopover(props: {
+  blocks: CompCommissionBlockBreakdown[];
+  commission: CompCommissionBreakdown;
+}) {
+  const blocksSum = props.blocks.reduce((a, b) => a + b.value, 0);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Memória de cálculo da comissão"
+          title="Memória de cálculo"
+          className="text-muted-foreground hover:text-foreground"
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <ListTree className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-3">
+        <div className="flex flex-col gap-2 text-left">
+          <p className="text-sm font-medium">Memória de cálculo</p>
+          {props.blocks.map((cb) => {
+            const mem = commissionMemory(cb);
+            return (
+              <div key={cb.blockId} className="flex flex-col gap-0.5 text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium">{cb.label}</span>
+                  <span className="tabular-nums">{fmtMoney(cb.value)}</span>
+                </div>
+                {mem.formula != null ? (
+                  <span className="tabular-nums text-xs">{mem.formula}</span>
+                ) : null}
+                <span className="text-muted-foreground text-xs">
+                  {mem.tierNote}
+                  {mem.memberTiers ? " · faixas do membro" : ""}
+                </span>
+              </div>
+            );
+          })}
+          {props.blocks.length > 1 ? (
+            <div className="flex items-baseline justify-between gap-2 border-t pt-1.5 text-sm font-medium">
+              <span>Soma</span>
+              <span className="tabular-nums">{fmtMoney(blocksSum)}</span>
+            </div>
+          ) : null}
+          {props.commission.overridden ? (
+            <p className="text-muted-foreground text-xs">
+              Soma sobrescrita à mão: {fmtMoney(props.commission.value)}{" "}
+              (calculado: {fmtMoney(blocksSum)}) — ✕ na célula volta ao
+              calculado.
+            </p>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

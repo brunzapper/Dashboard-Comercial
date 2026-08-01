@@ -1,3 +1,9 @@
+// Versão: 1.4 | Data: 01/08/2026
+// v1.4: memória de cálculo da comissão via commissionMemory
+// (lib/comp/commission-label — MESMO helper da grade do gestor, nunca texto
+// duplicado): linha do bloco mostra a multiplicação + faixa/gatilho e o
+// sufixo "faixas do membro"; Valor de fator com peso 0 sem override exibe
+// "—" (consistência com a grade).
 // Versão: 1.3 | Data: 31/07/2026
 // v1.3: navegação de mês LEVE (useMonthDraft/MonthNav — rascunho + commit
 // debounced, picker de mês/ano + "Hoje", replace/useNavPending; cards
@@ -31,6 +37,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  commissionMemory,
+  fmtMoneyBRL as fmtMoney,
+  fmtNumBR as fmtNum,
+} from "@/lib/comp/commission-label";
+import {
   computeEntry,
   parseCompEntryInputs,
   parseCompPlanConfig,
@@ -43,10 +54,6 @@ import type {
 import { ApuracaoBadge } from "./remuneracao-manager";
 import { MonthNav, useMonthDraft } from "./month-nav";
 
-const fmtMoney = (v: number): string =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const fmtNum = (v: number): string =>
-  v.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 function fmtMoneyIn(currency: string, v: number): string {
   try {
     return v.toLocaleString("pt-BR", { style: "currency", currency });
@@ -231,28 +238,34 @@ function PlanCard(props: {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {b.overridden.payout ? <OverrideDot /> : null}
-                  {fmtMoney(b.payout)}
+                  {f.weightPct === 0 && !b.overridden.payout ? (
+                    <span
+                      className="text-muted-foreground"
+                      title="Peso 0% — este fator não compõe a parcela por atingimento; serve de gatilho/base de comissão."
+                    >
+                      —
+                    </span>
+                  ) : (
+                    fmtMoney(b.payout)
+                  )}
                 </TableCell>
               </TableRow>
             );
           })}
+          {/* Comissão: memória de cálculo por bloco (helper único da grade). */}
           {breakdown.commissionBlocks.map((cb) => {
-            const unit = cb.tierBy === "attainment" ? "%" : "";
+            const mem = commissionMemory(cb);
             return (
               <TableRow key={cb.blockId}>
                 <TableCell className="text-muted-foreground">
                   {cb.label}
-                  <span className="ml-1 text-xs">
-                    {cb.tier
-                      ? `(faixa ≥ ${fmtNum(cb.tier.fromPct)}${unit} ⇒ ${
-                          cb.kind === "pct"
-                            ? `${fmtNum(cb.tier.ratePct ?? 0)}%`
-                            : cb.kind === "flat"
-                              ? fmtMoney(cb.tier.amount ?? 0)
-                              : `${fmtMoney(cb.tier.amount ?? 0)}/un.`
-                        })`
-                      : "(nenhuma faixa atingida)"}
+                  <span className="ml-1 block text-xs">
+                    {mem.formula ?? mem.tierNote}
+                    {mem.memberTiers ? " · faixas do membro" : ""}
                   </span>
+                  {mem.formula != null ? (
+                    <span className="block text-xs">{mem.tierNote}</span>
+                  ) : null}
                 </TableCell>
                 <TableCell colSpan={4} className="text-right tabular-nums">
                   {fmtMoney(cb.value)}

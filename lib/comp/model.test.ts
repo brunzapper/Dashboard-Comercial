@@ -727,6 +727,13 @@ describe("comissão por faixas", () => {
     expect(bd.commission!.tier?.ratePct).toBe(3);
     expect(bd.commission!.triggerAttainmentPct).toBe(90);
     expect(bd.commission!.value).toBe(1500);
+    // Memória de cálculo derivada no bloco (basis = realizado do fator-base).
+    expect(bd.commissionBlocks[0].basis).toBe(50000);
+    expect(bd.commissionBlocks[0].basisLabel).toBe("Vendas");
+    expect(bd.commissionBlocks[0].basisMoney).toBe(true);
+    expect(bd.commissionBlocks[0].triggerLabel).toBe("Reuniões");
+    expect(bd.commissionBlocks[0].triggerMoney).toBe(false); // tierBy attainment
+    expect(bd.commissionBlocks[0].memberTiersApplied).toBe(false);
     // f_a: 1000×60%×50% = 300; f_b: 1000×40%×90% = 360.
     expect(bd.factorsTotal).toBe(660);
     expect(bd.total).toBe(2160);
@@ -748,6 +755,9 @@ describe("comissão por faixas", () => {
     delete cfg.commissions![0].basisFactorId;
     const bd = computeEntry(cfg, 1000, emptyInputs(), realized, targets);
     expect(bd.commission!.value).toBe(30); // 3% de 1000
+    expect(bd.commissionBlocks[0].basis).toBe(1000);
+    expect(bd.commissionBlocks[0].basisLabel).toBe("Base variável");
+    expect(bd.commissionBlocks[0].basisMoney).toBe(true);
     const sem = computeEntry(makeConfig(), 1000, emptyInputs(), realized, targets);
     expect(sem.commission).toBeNull();
     expect(sem.commissionBlocks).toEqual([]);
@@ -769,6 +779,10 @@ describe("comissão por faixas", () => {
     // 9/10 = 90% ⇒ faixa 75 ⇒ R$750, independente da base.
     let bd = computeEntry(cfg, 0, emptyInputs(), realized, targets);
     expect(bd.commission!.value).toBe(750);
+    // flat não multiplica nada ⇒ memória sem basis (emitir seria memória falsa).
+    expect(bd.commissionBlocks[0].basis).toBeNull();
+    expect(bd.commissionBlocks[0].basisLabel).toBeNull();
+    expect(bd.commissionBlocks[0].basisMoney).toBe(false);
     // 12/10 = 120% ⇒ R$1500 (limiar exato entra).
     bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: 12 }, targets);
     expect(bd.commission!.value).toBe(1500);
@@ -801,6 +815,10 @@ describe("comissão por faixas", () => {
     expect(bd.commission!.value).toBe(375);
     expect(bd.commissionBlocks[0].triggerValue).toBe(30);
     expect(bd.commissionBlocks[0].tierBy).toBe("realized");
+    expect(bd.commissionBlocks[0].basis).toBe(30);
+    expect(bd.commissionBlocks[0].basisLabel).toBe("Reuniões");
+    expect(bd.commissionBlocks[0].basisMoney).toBe(false);
+    expect(bd.commissionBlocks[0].triggerMoney).toBe(false); // f_b não é money
     // Realizado null ⇒ nenhuma faixa ⇒ 0.
     bd = computeEntry(cfg, 0, emptyInputs(), { f_a: 0, f_b: null }, {});
     expect(bd.commission!.value).toBe(0);
@@ -876,6 +894,11 @@ describe("comissão por faixas", () => {
     bd = computeEntry(cfg2, 0, emptyInputs(), realized, targets, "r9");
     expect(bd.commissionBlocks.map((b) => b.value)).toEqual([0, 500]);
     expect(bd.commission!.value).toBe(500);
+    // memberTiersApplied só no bloco que tem tabela do membro.
+    expect(bd.commissionBlocks[0].memberTiersApplied).toBe(true);
+    expect(bd.commissionBlocks[1].memberTiersApplied).toBe(false);
+    // tierBy realized com fator gatilho money ⇒ triggerMoney (limiar em R$).
+    expect(bd.commissionBlocks[0].triggerMoney).toBe(true); // f_a é money
   });
 
   it("gatilho sem atingimento ou abaixo da menor faixa ⇒ 0 com tier null", () => {
