@@ -1,3 +1,11 @@
+// Versão: 1.6 | Data: 01/08/2026 (v1.6: aba "geral" (VISÃO GERAL) — landing
+// do admin SEM `?plano` (a ausência do plano decide; `?aba=plano` vence; 0
+// planos segue forçando o editor): memória de cálculo de todos os membros de
+// todos os planos ATIVOS do mês. Dados da visão geral (entries com plan_id de
+// todos os ativos numa query + targets/rates POR PLANO — 1+P+(0..P) queries
+// paralelas, ~5 planos; teto ~1000 do PostgREST folgado p/ planos×membros)
+// carregam SÓ nessa aba (padrão editorCatalog), e o gate é SIMÉTRICO: na
+// "geral" as queries do plano selecionado não rodam (a grade não renderiza).)
 // Versão: 1.5 | Data: 01/08/2026 (v1.5: select de field_definitions do
 // catálogo do editor inclui `options` — picker estático de valor dos campos
 // seleção nas condições do recorte do fator.)
@@ -190,11 +198,21 @@ export default async function RemuneracaoPage({
     active: boolean;
   }[];
   const plans = (plansData ?? []) as CompPlanClientRow[];
-  const selectedPlanId =
-    plans.find((p) => p.id === str(sp.plano))?.id ?? plans[0]?.id ?? null;
-  // Aba decidida no SERVER (sem planos força o editor — mesma regra da UI).
-  const aba: "grade" | "plano" =
-    str(sp.aba) === "plano" || plans.length === 0 ? "plano" : "grade";
+  // Aba decidida no SERVER: `?aba=plano` vence; sem planos força o editor;
+  // sem `?plano` VÁLIDO a página abre na VISÃO GERAL (a ausência do plano é o
+  // que expressa a aba geral — nenhum valor de query próprio); com `?plano`,
+  // grade (back-compat de links; plano apagado cai na geral).
+  const requestedPlanId =
+    plans.find((p) => p.id === str(sp.plano))?.id ?? null;
+  const aba: "geral" | "grade" | "plano" =
+    plans.length === 0 || str(sp.aba) === "plano"
+      ? "plano"
+      : requestedPlanId == null
+        ? "geral"
+        : "grade";
+  // Fallback plans[0] preservado: o editor ("Novo plano" com planos) e as
+  // pills dependem de um plano corrente mesmo sem `?plano`.
+  const selectedPlanId = requestedPlanId ?? plans[0]?.id ?? null;
 
   // Linhas da grade: ativos CANÔNICOS (apelido nunca vira linha — mesma regra
   // do engine; a consulta expande o grupo no choke point).
@@ -212,13 +230,19 @@ export default async function RemuneracaoPage({
 
   // Onda 2 — tudo em paralelo: escopos de operação (catálogo INTEIRO — o
   // editor mostra membros efetivos ao vivo; loadOperationScopes já é batelado,
-  // 2 queries), dados do mês e — SÓ na aba Plano — o catálogo do editor.
+  // 2 queries), dados do mês — gate SIMÉTRICO: na aba "geral" as queries do
+  // plano selecionado não rodam (a grade não renderiza) e vice-versa —, SÓ na
+  // aba Plano o catálogo do editor e SÓ na "geral" os dados da visão geral.
   const wantsEditor = aba === "plano";
+  const wantsOverview = aba === "geral";
+  const activePlans = plans.filter((p) => p.active);
   const [
     opScopes,
     { data: entriesData },
     targets,
     targetRates,
+    { data: overviewEntriesData },
+    overviewByPlan,
     sources,
     correspondences,
     fieldsRes,
@@ -229,7 +253,7 @@ export default async function RemuneracaoPage({
       supabase,
       operations.map((o) => o.id)
     ),
-    selectedPlanId
+    selectedPlanId && !wantsOverview
       ? supabase
           .from("comp_entries")
           .select(
@@ -240,7 +264,7 @@ export default async function RemuneracaoPage({
           .eq("period_month", month)
       : Promise.resolve({ data: [] as unknown[] }),
     (async () => {
-      if (!selectedConfig) return {};
+      if (!selectedConfig || wantsOverview) return {};
       const map = await loadTargetsByMember(supabase, {
         year,
         month,
@@ -250,9 +274,58 @@ export default async function RemuneracaoPage({
       });
       return Object.fromEntries(map);
     })(),
-    selectedConfig
+    selectedConfig && !wantsOverview
       ? loadTargetRatesForConfig(supabase, selectedConfig, year, month)
       : Promise.resolve({} as Record<string, number | null>),
+    // Visão geral: entries do mês de TODOS os planos ativos numa query, COM
+    // plan_id no select (espelho do ramo vendedor). Sem paginação — o teto
+    // default do PostgREST (~1000) é folgado p/ planos×membros.
+    wantsOverview && activePlans.length > 0
+      ? supabase
+          .from("comp_entries")
+          .select(
+            "id, plan_id, responsible_id, base_amount, inputs, computed, total, mirror_record_id, published_at, updated_at"
+          )
+          .in(
+            "plan_id",
+            activePlans.map((p) => p.id)
+          )
+          .eq("period_year", year)
+          .eq("period_month", month)
+      : Promise.resolve({ data: null }),
+    // Alvos/taxas POR PLANO ativo (mesmo laço paralelo do ramo vendedor;
+    // memberIds = todos os canônicos — superconjunto dos membros, mesma
+    // escolha da grade). Custo: P queries de goals + 0..P de currency_rates.
+    (async () => {
+      if (!wantsOverview) return null;
+      const targetsByPlan: Record<
+        string,
+        Record<string, Record<string, number | null>>
+      > = {};
+      const targetRatesByPlan: Record<
+        string,
+        Record<string, number | null>
+      > = {};
+      await Promise.all(
+        activePlans.map(async (plan) => {
+          const config = parseCompPlanConfig(plan.config);
+          if (!config) return;
+          const [map, rates] = await Promise.all([
+            loadTargetsByMember(supabase, {
+              year,
+              month,
+              config,
+              memberIds: responsibles.map((r) => r.id),
+              canon,
+            }),
+            loadTargetRatesForConfig(supabase, config, year, month),
+          ]);
+          targetsByPlan[plan.id] = Object.fromEntries(map);
+          targetRatesByPlan[plan.id] = rates;
+        })
+      );
+      return { targetsByPlan, targetRatesByPlan };
+    })(),
     wantsEditor ? loadSources(supabase, orgId) : Promise.resolve(null),
     wantsEditor ? loadCorrespondences(supabase, orgId) : Promise.resolve(null),
     wantsEditor
@@ -291,6 +364,17 @@ export default async function RemuneracaoPage({
     };
   })();
 
+  // Payload da Visão geral (prop única anulável — padrão editorCatalog).
+  const overview = wantsOverview
+    ? {
+        entries: ((overviewEntriesData ?? []) as (CompEntryClientRow & {
+          plan_id: string;
+        })[]),
+        targetsByPlan: overviewByPlan?.targetsByPlan ?? {},
+        targetRatesByPlan: overviewByPlan?.targetRatesByPlan ?? {},
+      }
+    : null;
+
   return (
     <div className="flex flex-col gap-6">
       {header}
@@ -305,6 +389,7 @@ export default async function RemuneracaoPage({
         targets={targets}
         targetRates={targetRates}
         editorCatalog={editorCatalog}
+        overview={overview}
         operations={operations}
         operationMembersById={operationMembersById}
       />

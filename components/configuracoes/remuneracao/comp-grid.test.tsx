@@ -107,14 +107,37 @@ function renderGrid() {
 const bodyText = () => (document.body.textContent ?? "").replace(/ /g, " ");
 
 describe("CompGrid — memória de cálculo", () => {
-  it("popover da Comissão mostra a multiplicação e a faixa do bloco", async () => {
+  it("linha de detalhe SEMPRE visível traz a conta sem abrir o popover", () => {
+    renderGrid();
+    // Sem nenhum clique: a memória está no corpo da tabela (linha de detalhe).
+    expect(bodyText()).toContain("44 (Reuniões) × R$ 12,50 = R$ 550,00");
+    expect(bodyText()).toContain("faixa a partir de 26 (Reuniões: 44)");
+    expect(bodyText()).toContain("realizado 44 (gatilho/base de comissão)");
+  });
+
+  it("colSpan da linha de detalhe == soma dos colSpans do thead (layout pinado)", () => {
+    renderGrid();
+    const table = document.querySelector("table");
+    expect(table).not.toBeNull();
+    const headCells = table!.querySelectorAll("thead tr:first-child th");
+    const sum = [...headCells].reduce(
+      (a, th) => a + ((th as HTMLTableCellElement).colSpan || 1),
+      0
+    );
+    const detail = table!.querySelector("tbody td[colspan]");
+    expect(detail).not.toBeNull();
+    expect(Number(detail!.getAttribute("colspan"))).toBe(sum);
+  });
+
+  it("popover da Comissão abre com a mesma memória", async () => {
     renderGrid();
     fireEvent.click(
       screen.getByRole("button", { name: "Memória de cálculo da comissão" })
     );
     await waitFor(() => {
+      // Título exclusivo do popover (a linha de detalhe não o tem).
+      expect(screen.getByText("Memória de cálculo")).toBeTruthy();
       expect(bodyText()).toContain("44 (Reuniões) × R$ 12,50 = R$ 550,00");
-      expect(bodyText()).toContain("faixa a partir de 26 (Reuniões: 44)");
     });
   });
 

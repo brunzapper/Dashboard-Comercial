@@ -641,7 +641,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
   segue no resto da célula; com override da soma o popover exibe nota
   calculado × manual) e o Valor de fator com peso 0 sem override exibe "—"
   (display-only — a coluna NUNCA some: base/valor seguem alimentando
-  `basisKind:"base"`, `totalFormula` e overrides). NUNCA gerar fórmula a
+  `basisKind:"base"`, `totalFormula` e overrides). **Memória inline + Visão
+  geral (01/08/2026):** a grade tem linha de DETALHE sempre visível sob cada
+  membro — textos SÓ de `entryMemoryLines`/`factorPayoutFormula` (mesmo
+  módulo commission-label; colSpan = contagem de colunas do header, PINADA em
+  `comp-grid.test`). Landing do ADMIN sem `?plano` = aba `geral` ("Visão
+  geral": pill PRIMEIRA do tablist) — a AUSÊNCIA do plano na URL decide, sem
+  valor de query próprio; `?aba=plano` vence; 0 planos força o editor; o
+  `navigate` do manager omite plano/aba nesse caso (invariante no único
+  construtor de URL). A Visão geral é SOMENTE leitura, 100% client-derived
+  pelo MESMO `computeEntry` (totais da derivação, nunca `entry.total`) sobre
+  todos os planos ATIVOS; os dados (entries com `plan_id` numa query +
+  targets/rates POR plano) carregam SÓ nessa aba (padrão editorCatalog; gate
+  SIMÉTRICO — na geral as queries do plano selecionado não rodam); card único
+  `comp-plan-card.tsx` (extraído da my-comp-view; `title` opcional;
+  ApuracaoBadge mora LÁ — importá-lo do manager criaria ciclo); agrupamento
+  por plano/por pessoa com preferência do usuário em localStorage
+  `comp-overview:group` (chrome de UI, nunca dado). NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de

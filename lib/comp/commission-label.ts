@@ -1,13 +1,22 @@
-// Versão: 1.0 | Data: 01/08/2026
+// Versão: 1.1 | Data: 01/08/2026
+// v1.1: memória da LINHA inteira — `entryMemoryLines` (linha de detalhe da
+// grade de Lançamentos) e `factorPayoutFormula` (conta base × peso × ating.,
+// também usada no title do Valor). Este módulo segue sendo o DONO ÚNICO dos
+// textos pt-BR da memória de cálculo.
 // Rótulos pt-BR da MEMÓRIA DE CÁLCULO da comissão por faixas — helper PURO e
-// ÚNICO consumido pela grade de Lançamentos (popover da célula Comissão) e
-// pela visão do vendedor (my-comp-view). Nunca duplique estes textos em
-// componente: o breakdown (CompCommissionBlockBreakdown, model.ts) já carrega
-// os campos derivados (basis/basisLabel/basisMoney/triggerLabel/triggerMoney)
-// e este módulo só formata. Também é o dono dos formatadores pt-BR antes
-// duplicados em comp-grid/my-comp-view (fmtMoneyBRL/fmtNumBR).
+// ÚNICO consumido pela grade de Lançamentos (linha de detalhe + popover da
+// célula Comissão), pela Visão geral e pela visão do vendedor (my-comp-view).
+// Nunca duplique estes textos em componente: o breakdown
+// (CompCommissionBlockBreakdown, model.ts) já carrega os campos derivados
+// (basis/basisLabel/basisMoney/triggerLabel/triggerMoney) e este módulo só
+// formata. Também é o dono dos formatadores pt-BR antes duplicados em
+// comp-grid/my-comp-view (fmtMoneyBRL/fmtNumBR).
 
-import type { CompCommissionBlockBreakdown } from "./model";
+import type {
+  CompBreakdown,
+  CompCommissionBlockBreakdown,
+  CompPlanConfig,
+} from "./model";
 
 export const fmtMoneyBRL = (v: number): string =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -79,4 +88,103 @@ export function commissionMemory(
       ? `${basisPart} × ${fmtMoneyBRL(cb.tier.amount ?? 0)} = ${fmtMoneyBRL(cb.value)}`
       : `${fmtNumBR(cb.tier.ratePct ?? 0)}% × ${basisPart} = ${fmtMoneyBRL(cb.value)}`;
   return { formula, tierNote, memberTiers };
+}
+
+/**
+ * Conta do Valor por atingimento de um fator com peso — byte-idêntica ao
+ * antigo title inline da grade: "R$ 3.000,00 × 40% × 90% = R$ 1.080,00"
+ * (mesma fórmula do computeEntry: base × peso/100 × ating./100).
+ */
+export function factorPayoutFormula(
+  base: number,
+  weightPct: number,
+  attainmentPct: number,
+  payout: number
+): string {
+  return `${fmtMoneyBRL(base)} × ${fmtNumBR(weightPct)}% × ${fmtNumBR(attainmentPct)}% = ${fmtMoneyBRL(payout)}`;
+}
+
+/**
+ * Memória da LINHA inteira (membro×mês) para a linha de detalhe da grade:
+ * um item por fator (conta do payout ou papel de gatilho), um por bloco de
+ * comissão (via commissionMemory — nunca reformatar), soma/override da
+ * comissão, bônus e a composição do total. A base variável NUNCA soma no
+ * total estruturado — ela multiplica DENTRO dos fatores (model.ts) e já
+ * aparece na conta de cada um.
+ */
+export function entryMemoryLines(
+  config: CompPlanConfig,
+  breakdown: CompBreakdown
+): string[] {
+  const lines: string[] = [];
+  for (const f of config.factors) {
+    const b = breakdown.byFactor[f.id];
+    if (!b) continue;
+    if (f.weightPct > 0) {
+      if (b.overridden.payout) {
+        // Fórmula aqui mentiria — o payout foi digitado à mão.
+        lines.push(`${f.label}: ${fmtMoneyBRL(b.payout)} (manual)`);
+      } else if (b.attainmentPct != null) {
+        lines.push(
+          `${f.label}: ${factorPayoutFormula(breakdown.base, f.weightPct, b.attainmentPct, b.payout)}`
+        );
+      } else {
+        lines.push(
+          `${f.label}: sem atingimento (alvo/realizado vazio) ⇒ ${fmtMoneyBRL(0)}`
+        );
+      }
+    } else {
+      const real =
+        b.realized != null
+          ? `realizado ${f.money ? fmtMoneyBRL(b.realized) : fmtNumBR(b.realized)}`
+          : "sem realizado";
+      lines.push(`${f.label}: ${real} (gatilho/base de comissão)`);
+    }
+  }
+  for (const cb of breakdown.commissionBlocks) {
+    const mem = commissionMemory(cb);
+    const suffix = mem.memberTiers ? " · faixas do membro" : "";
+    lines.push(
+      mem.formula != null
+        ? `${cb.label}: ${mem.formula} — ${mem.tierNote}${suffix}`
+        : `${cb.label}: ${mem.tierNote}${suffix}`
+    );
+  }
+  const comm = breakdown.commission;
+  if (comm != null && (comm.overridden || breakdown.commissionBlocks.length > 1)) {
+    const calc = breakdown.commissionBlocks.reduce((a, b) => a + b.value, 0);
+    lines.push(
+      comm.overridden
+        ? `Comissão manual ${fmtMoneyBRL(comm.value)} (calculado ${fmtMoneyBRL(calc)})`
+        : `Comissão (soma): ${fmtMoneyBRL(comm.value)}`
+    );
+  }
+  if (breakdown.bonusTotal !== 0) {
+    lines.push(`Bônus: ${fmtMoneyBRL(breakdown.bonusTotal)}`);
+  }
+  if (breakdown.totalOverridden) {
+    lines.push(
+      `Total manual: ${breakdown.total != null ? fmtMoneyBRL(breakdown.total) : "—"}`
+    );
+  } else if (breakdown.totalFormulaError) {
+    lines.push("Fórmula do total sem resultado");
+  } else if (breakdown.totalFromFormula) {
+    lines.push(
+      `Total pela fórmula do plano: ${breakdown.total != null ? fmtMoneyBRL(breakdown.total) : "—"}`
+    );
+  } else {
+    // Composição só quando há o que compor (≥ 2 termos não-zero) — com um
+    // termo só, a linha do próprio termo já conta a história.
+    const terms: string[] = [];
+    if (breakdown.factorsTotal !== 0)
+      terms.push(`fatores ${fmtMoneyBRL(breakdown.factorsTotal)}`);
+    const commValue = comm?.value ?? 0;
+    if (commValue !== 0) terms.push(`comissão ${fmtMoneyBRL(commValue)}`);
+    if (breakdown.bonusTotal !== 0)
+      terms.push(`bônus ${fmtMoneyBRL(breakdown.bonusTotal)}`);
+    if (terms.length >= 2 && breakdown.total != null) {
+      lines.push(`Total: ${terms.join(" + ")} = ${fmtMoneyBRL(breakdown.total)}`);
+    }
+  }
+  return lines;
 }

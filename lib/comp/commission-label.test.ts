@@ -6,10 +6,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   commissionMemory,
+  entryMemoryLines,
+  factorPayoutFormula,
   fmtMoneyBRL,
   fmtNumBR,
 } from "./commission-label";
-import type { CompCommissionBlockBreakdown } from "./model";
+import {
+  computeEntry,
+  parseCompEntryInputs,
+  type CompCommissionBlockBreakdown,
+  type CompPlanConfig,
+} from "./model";
 
 function block(
   over: Partial<CompCommissionBlockBreakdown> = {}
@@ -154,6 +161,194 @@ describe("commissionMemory", () => {
   it("memberTiersApplied atravessa (o caller decide o sufixo)", () => {
     expect(commissionMemory(block({ memberTiersApplied: true })).memberTiers).toBe(
       true
+    );
+  });
+});
+
+// ————— Memória da LINHA inteira (entryMemoryLines) — breakdowns montados
+// pelo PRÓPRIO computeEntry (nunca literais com espaço comum: NBSP do Intl).
+
+const aggCount = { tokens: [{ kind: "field" as const, ref: "agg:count:*" }] };
+
+// Plano 100% comissão (estilo SDR Inbound): fator peso 0 + bloco per_unit.
+const cfgSoComissao: CompPlanConfig = {
+  v: 1,
+  factors: [
+    {
+      id: "reunioes",
+      label: "Reuniões",
+      weightPct: 0,
+      metricKey: "m_r",
+      money: false,
+      formula: aggCount,
+      sources: [],
+    },
+  ],
+  commissions: [
+    {
+      id: "premio",
+      label: "Prêmio por reunião",
+      triggerFactorId: "reunioes",
+      basisKind: "factor",
+      basisFactorId: "reunioes",
+      tierBy: "realized",
+      kind: "per_unit",
+      tiers: [
+        { fromPct: 0, amount: 10 },
+        { fromPct: 26, amount: 12.5 },
+      ],
+    },
+  ],
+};
+
+// Plano clássico: dois fatores com peso, sem comissão.
+const cfgPesos: CompPlanConfig = {
+  v: 1,
+  factors: [
+    {
+      id: "f_a",
+      label: "Vendas",
+      weightPct: 60,
+      metricKey: "m_a",
+      money: true,
+      formula: aggCount,
+      sources: [],
+    },
+    {
+      id: "f_b",
+      label: "Reuniões",
+      weightPct: 40,
+      metricKey: "m_b",
+      money: false,
+      formula: aggCount,
+      sources: [],
+    },
+  ],
+};
+
+describe("factorPayoutFormula", () => {
+  it("é byte-idêntica ao antigo title inline da grade", () => {
+    expect(factorPayoutFormula(3000, 60, 90, 1620)).toBe(
+      `${fmtMoneyBRL(3000)} × ${fmtNumBR(60)}% × ${fmtNumBR(90)}% = ${fmtMoneyBRL(1620)}`
+    );
+  });
+});
+
+describe("entryMemoryLines", () => {
+  it("plano só-comissão: fator peso 0 + bloco; SEM linha de Total (um termo só)", () => {
+    const bd = computeEntry(
+      cfgSoComissao,
+      null,
+      parseCompEntryInputs({}),
+      { reunioes: 44 },
+      {}
+    );
+    const lines = entryMemoryLines(cfgSoComissao, bd);
+    expect(lines[0]).toBe(
+      `Reuniões: realizado ${fmtNumBR(44)} (gatilho/base de comissão)`
+    );
+    expect(lines[1]).toBe(
+      `Prêmio por reunião: ${fmtNumBR(44)} (Reuniões) × ${fmtMoneyBRL(12.5)} = ${fmtMoneyBRL(550)} — faixa a partir de ${fmtNumBR(26)} (Reuniões: ${fmtNumBR(44)})`
+    );
+    // 1 bloco sem override ⇒ sem linha de soma; comissão é o único termo ⇒
+    // sem linha de Total.
+    expect(lines).toHaveLength(2);
+  });
+
+  it("plano com pesos + bônus: conta por fator e Total composto", () => {
+    const inputs = parseCompEntryInputs({
+      bonuses: [{ id: "b1", label: "Campanha", amount: 100 }],
+    });
+    const bd = computeEntry(
+      cfgPesos,
+      1000,
+      inputs,
+      { f_a: 50000, f_b: 9 },
+      { f_a: 100000, f_b: 10 }
+    );
+    const lines = entryMemoryLines(cfgPesos, bd);
+    // f_a: 1000×60%×50% = 300; f_b: 1000×40%×90% = 360.
+    expect(lines[0]).toBe(`Vendas: ${factorPayoutFormula(1000, 60, 50, 300)}`);
+    expect(lines[1]).toBe(`Reuniões: ${factorPayoutFormula(1000, 40, 90, 360)}`);
+    expect(lines[2]).toBe(`Bônus: ${fmtMoneyBRL(100)}`);
+    expect(lines[3]).toBe(
+      `Total: fatores ${fmtMoneyBRL(660)} + bônus ${fmtMoneyBRL(100)} = ${fmtMoneyBRL(760)}`
+    );
+    expect(lines).toHaveLength(4);
+  });
+
+  it("override da soma da comissão vira nota calculado × manual", () => {
+    const bd = computeEntry(
+      cfgSoComissao,
+      null,
+      parseCompEntryInputs({ overrides: { commission: 42 } }),
+      { reunioes: 44 },
+      {}
+    );
+    const lines = entryMemoryLines(cfgSoComissao, bd);
+    expect(lines).toContain(
+      `Comissão manual ${fmtMoneyBRL(42)} (calculado ${fmtMoneyBRL(550)})`
+    );
+  });
+
+  it("payout manual e atingimento vazio têm linhas dedicadas (fórmula nunca mente)", () => {
+    const bd = computeEntry(
+      cfgPesos,
+      1000,
+      parseCompEntryInputs({
+        overrides: { factors: { f_a: { payout: 500 } } },
+      }),
+      { f_a: 50000, f_b: 9 },
+      { f_a: 100000 } // f_b sem alvo ⇒ atingimento null
+    );
+    const lines = entryMemoryLines(cfgPesos, bd);
+    expect(lines[0]).toBe(`Vendas: ${fmtMoneyBRL(500)} (manual)`);
+    expect(lines[1]).toBe(
+      `Reuniões: sem atingimento (alvo/realizado vazio) ⇒ ${fmtMoneyBRL(0)}`
+    );
+  });
+
+  it("totalFormula: linha própria; erro da fórmula vira aviso", () => {
+    const ok: CompPlanConfig = {
+      ...cfgPesos,
+      totalFormula: {
+        tokens: [
+          { kind: "const", value: 100 },
+          { kind: "op", op: "+" },
+          { kind: "const", value: 23 },
+        ],
+      },
+    };
+    const bdOk = computeEntry(ok, 1000, parseCompEntryInputs({}), {}, {});
+    expect(entryMemoryLines(ok, bdOk)).toContain(
+      `Total pela fórmula do plano: ${fmtMoneyBRL(123)}`
+    );
+    const err: CompPlanConfig = {
+      ...cfgPesos,
+      totalFormula: {
+        tokens: [
+          { kind: "const", value: 1 },
+          { kind: "op", op: "/" },
+          { kind: "const", value: 0 },
+        ],
+      },
+    };
+    const bdErr = computeEntry(err, 1000, parseCompEntryInputs({}), {}, {});
+    expect(entryMemoryLines(err, bdErr)).toContain(
+      "Fórmula do total sem resultado"
+    );
+  });
+
+  it("override do total vence tudo na linha final", () => {
+    const bd = computeEntry(
+      cfgPesos,
+      1000,
+      parseCompEntryInputs({ overrides: { total: 999 } }),
+      { f_a: 50000, f_b: 9 },
+      { f_a: 100000, f_b: 10 }
+    );
+    expect(entryMemoryLines(cfgPesos, bd)).toContain(
+      `Total manual: ${fmtMoneyBRL(999)}`
     );
   });
 });
