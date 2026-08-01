@@ -1,3 +1,6 @@
+// Versão: 1.5 | Data: 01/08/2026 (v1.5: regressão do realizado zerado — fator
+// money com perna escopada VAZIA soma as pernas preenchidas; a aux monetária
+// sem linhas não pode virar operando null)
 // Versão: 1.4 | Data: 31/07/2026 (v1.4: apuração sobre o mês anterior —
 // @period/goals deslocam p/ M-1 com rollover de janeiro, entry segue no mês
 // de pagamento e computed.ref carimba a janela apurada)
@@ -602,6 +605,97 @@ describe("recomputePlanMonth", () => {
     expect(payload.computed.realized.f_r).toBeNull();
     expect(payload.computed.realized.f_v).toBe(50);
     expect(payload.computed.errors?.f_r).toContain("boom");
+  });
+
+  it("fator money com perna escopada VAZIA: realized = soma das pernas preenchidas (nunca null)", async () => {
+    // Regressão (01/08/2026, shape de produção): fórmula de operandos com
+    // escopo de sub-base + modo moeda fixa BRL. A perna @vendas_site não tem
+    // linhas p/ o membro (venda do site sem responsável AE) — a aux monetária
+    // devolvia breakdown VAZIO ⇒ operando null ⇒ realized null ⇒ tudo zerado,
+    // SEM erro registrado (não é falha de consulta).
+    const writes: Record<string, unknown>[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const dims = (args.p_dimensions as unknown[]) ?? [];
+          const site = JSON.stringify(args.p_filters ?? []).includes(
+            "venda_site"
+          );
+          if (dims.length === 0) {
+            // Principal: vendas_site sem linhas (sum SQL de 0 linhas = null).
+            return { data: [{ metric_1: site ? null : 14510 }], error: null };
+          }
+          // Aux monetária: vendas_assinadas tudo BRL; vendas_site SEM linhas.
+          if (site) return { data: [], error: null };
+          return {
+            data: [{ dim_1: "BRL", metric_1: 14510, metric_2: 2 }],
+            error: null,
+          };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        data_sources: [
+          { key: "deals", record_type: "negocio", label: "Negócios", short_label: "Negócios", default_period_field: "closed_at", builtin: true, manual_entry: false, timezone: "Europe/Moscow", folder_id: null, sort_order: 0 },
+          { key: "estudo", record_type: "venda_site", label: "Estudo", short_label: "Estudo", default_period_field: "source_created_at", builtin: true, manual_entry: false, timezone: null, folder_id: null, sort_order: 0 },
+        ],
+        sub_sources: [
+          { key: "vendas_assinadas", parent_key: "deals", label: "Vendas Assinadas", short_label: "Vendas", default_period_field: "custom:data_assinatura", filter: [{ op: "eq", field: "stage", value: "Contrato assinado" }], sort_order: 0 },
+          { key: "vendas_site", parent_key: "estudo", label: "Vendas do Site", short_label: "Site", default_period_field: "source_created_at", filter: [{ op: "gt", field: "mrr", value: 0 }], sort_order: 0 },
+        ],
+        field_definitions: [
+          { field_key: "mrr_contrato", label: "MRR do contrato", data_type: "calculado", formula: { tokens: [] }, applies_to: ["negocio"], currency_code: null, currency_mode: "inherit", allow_negative: true, show_as_percent: false },
+        ],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: (q) => {
+          const ins = q.steps.find((s) => s.method === "insert");
+          if (ins) {
+            writes.push(ins.args[0] as Record<string, unknown>);
+            return { data: null };
+          }
+          return { data: [] };
+        },
+      },
+    });
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: {
+        ...PLAN,
+        config: {
+          v: 1,
+          memberIds: [M2],
+          factors: [
+            {
+              id: "valor",
+              label: "Valor gerado",
+              weightPct: 100,
+              metricKey: "comp_valor",
+              money: true,
+              formula: {
+                tokens: [
+                  { kind: "field", ref: "agg:sum:custom:mrr_contrato@vendas_assinadas" },
+                  { kind: "op", op: "+" },
+                  { kind: "field", ref: "agg:sum:mrr@vendas_site" },
+                ],
+              },
+              sources: [],
+            },
+          ],
+        },
+      },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out).toEqual({ ok: true, members: 1, factors: 1, queryErrors: 0 });
+    const entry = writes.find((w) => w.responsible_id === M2)!;
+    const computed = entry.computed as {
+      realized: Record<string, number | null>;
+      errors?: Record<string, string>;
+    };
+    expect(computed.errors).toBeUndefined();
+    expect(computed.realized.valor).toBe(14510);
   });
 
   // Fábrica do cenário de apuração M-1: um membro (m2), asserta @period das

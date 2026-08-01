@@ -1,3 +1,5 @@
+// Versão: 1.2 | Data: 01/08/2026 (v1.2: recorte monetário VAZIO vale 0 —
+// identidade aditiva; null fica só p/ chave AUSENTE)
 // Versão: 1.1 | Data: 31/07/2026 (v1.1: operandos de META — parse/coleta/
 // lowering p/ const e colocação na validação)
 // Testes das métricas calculadas de agregados. Invariantes: o operando com
@@ -352,6 +354,40 @@ describe("evalCalcMoney", () => {
     expect(
       evalCalcMoney(f(ref("agg:avg:value")), { "sum:value": 10, "count:value": 0 }, { mode: "none" })
     ).toEqual({ value: null, currency: null });
+  });
+
+  it("recorte VAZIO vale 0 (identidade aditiva), nunca null", () => {
+    const soma = f(
+      ref("agg:sum:value"),
+      { kind: "op", op: "+" },
+      ref("agg:sum:mrr")
+    );
+    // Perna sem registros (aux monetária sem linhas) ao lado de uma perna de
+    // UMA moeda (useRaw): a soma segue a perna preenchida — era o bug que
+    // zerava o realizado da Remuneração (perna @vendas_site vazia p/ AEs).
+    expect(
+      evalCalcMoney(
+        soma,
+        { "sum:value": bd({ BRL: 100 }, 100), "sum:mrr": bd({}, 0) },
+        { mode: "fixed", code: "BRL", fixedRate: 1 }
+      )
+    ).toEqual({ value: 100, currency: "BRL" });
+    // Basis toda vazia (membro sem registro nenhum no recorte): 0, não "—".
+    expect(
+      evalCalcMoney(
+        soma,
+        { "sum:value": bd({}, 0), "sum:mrr": bd({}, 0) },
+        { mode: "auto" }
+      ).value
+    ).toBe(0);
+    // Chave AUSENTE (consulta que falhou / não resolvida) segue null.
+    expect(
+      evalCalcMoney(
+        soma,
+        { "sum:value": bd({ BRL: 100 }, 100), "sum:mrr": null },
+        { mode: "auto" }
+      ).value
+    ).toBeNull();
   });
 
   it("allowNegative=false grampeia em 0; escopo não abaixado → null", () => {

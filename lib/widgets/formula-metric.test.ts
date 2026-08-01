@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 01/08/2026 (v1.1: perna escopada VAZIA no modo moeda
+// soma como 0 — a aux monetária sem linhas não pode derrubar a fórmula)
 // Versão: 1.0 | Data: 24/07/2026
 // Testes de runCalculatedWidget com fake só-rpc — o choke point das métricas
 // calculadas de dashboard. O caso duro é o operando com ESCOPO de fonte
@@ -100,6 +102,44 @@ describe("runCalculatedWidget", () => {
     expect(args.p_correspondences).toEqual({
       data_venda: ["custom:sub_data"],
     });
+  });
+
+  it("perna escopada VAZIA soma como 0 no modo moeda (nunca derruba a fórmula)", async () => {
+    // Regressão (01/08/2026): com currencyMode ciente de moeda, a aux
+    // monetária substitui o número cru pelo MoneyBreakdown — e a perna sem
+    // registros virava breakdown VAZIO ⇒ operando null ⇒ fórmula inteira null
+    // (zerava o realizado da Remuneração e os cards fórmula por pessoa).
+    const { db } = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const dims = (args.p_dimensions ?? []) as unknown[];
+          const sql = JSON.stringify(args.p_filters ?? []).includes("SQL");
+          if (dims.length === 0) {
+            // Consulta principal: leads_sql sem linhas (sum SQL de 0 linhas).
+            return { data: [{ metric_1: sql ? null : 70 }], error: null };
+          }
+          // Aux monetária: leads_lite tudo em BRL; leads_sql SEM linhas.
+          if (sql) return { data: [], error: null };
+          return {
+            data: [{ dim_1: "BRL", metric_1: 70, metric_2: 2 }],
+            error: null,
+          };
+        },
+      },
+    });
+    const out = await runCalculatedWidget(db, {
+      formula: {
+        tokens: [
+          { kind: "field", ref: "agg:sum:value@leads_lite" },
+          { kind: "op", op: "+" },
+          { kind: "field", ref: "agg:sum:value@leads_sql" },
+        ],
+      },
+      sourceDefs: CATALOG,
+      currencyMode: "fixed",
+      currencyCode: "BRL",
+    });
+    expect(out).toEqual({ value: 70, currency: "BRL" });
   });
 
   it("falha da aux condicional degrada para null (nunca derruba)", async () => {
