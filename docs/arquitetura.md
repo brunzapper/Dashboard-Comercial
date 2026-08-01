@@ -1,4 +1,10 @@
-<!-- Versão: 1.51 | Data: 31/07/2026 -->
+<!-- Versão: 1.52 | Data: 01/08/2026 -->
+<!-- v1.52 (01/08/2026): §4.18 + invariante 26 — CONDIÇÕES DO RECORTE POR FATOR
+     (factor.filters com UI no plan-editor): recorte configurável do realizado
+     aplicado ANTES do filtro de membro na mesma consulta; parse restrito aos
+     10 ops de FILTER_OPS, `in` → array, sources por-filtro descartado,
+     operation_id proibido no savePlan; o save RE-EMITE os filtros (antes o
+     round-trip do editor os destruía) e a prévia da fórmula os aplica. -->
 <!-- v1.51 (31/07/2026): §4.18 + invariante 26 — APURAÇÃO SOBRE O MÊS ANTERIOR
      (comp_plans.config.apuracao: "mes_anterior"; padrão da Zapper/preset):
      lançamento M apura realizado/metas/taxas de M-1 via apuracaoRef, com o
@@ -2607,6 +2613,28 @@ total opcional por plano.
   o convertido no tooltip ("mostrar os dois"). `config.presetKey` (identidade
   de plano criado por preset — §4.7) é parseado explicitamente e RE-EMITIDO
   pelo save do plan-editor.
+- **Condições do recorte por fator (01/08/2026).** `factor.filters`
+  (WidgetFilter[], "Condições do recorte" no plan-editor) é o recorte
+  configurável do realizado — ex.: gatilho de reuniões contando SÓ as de uma
+  origem, sem código novo; um fator de peso 0 com recorte próprio serve de
+  gatilho dedicado de comissão. O recompute o aplica ANTES do filtro de
+  membro, na MESMA chamada `runCalculatedWidget`
+  (`[...(factor.filters ?? []), memberFilter]` — pipeline completo: tokens de
+  data, nome→id de FK, canon, fontes-alvo e as pernas auxiliares de operando
+  escopado, que também recebem os filtros do widget). Parse do model
+  FAIL-CLOSED e restrito aos 10 operadores de UI de `FILTER_OPS` (nunca lista
+  paralela; internos `eq_ci`/`*_num` rejeitados), `in` normalizado p/ array
+  de strings (string legada com vírgulas aceita), op sem valor perde o valor,
+  `sources` POR-FILTRO é DESCARTADO (o universo da consulta é
+  `factor.sources`) e teto `MAX_FACTOR_FILTERS`. O `savePlan` valida campo
+  contra `buildAvailableFields` (sintético/agregado recusados) e exige valor
+  nos ops com valor; `operation_id` é PROIBIDO (coluna derivada possivelmente
+  NULL — a tradução viva de operação do §4.10 não passa pelo recompute;
+  filtre por responsável ou campo do registro). O save do editor RE-EMITE os
+  filtros (regra do presetKey — sem isso o round-trip os destruiria) e a
+  prévia da fórmula os aplica; valor de relação grava NOME
+  (`FilterValuePicker` storeAs "label", resolvido em runtime — §4.10),
+  etapa/seleção gravam o rótulo.
 - **Apuração sobre o mês anterior (31/07/2026).** `config.apuracao:
   "mes_anterior"` faz o lançamento do mês M (pagamento) apurar
   realizado/metas/taxas sobre M-1 — caso Zapper: a variável paga em Julho
@@ -3060,6 +3088,11 @@ principalmente — para mantenedores humanos.
     `<campo> in (nomes do grupo canônico)` SÓ via `memberFilterFor` (engine;
     membro sem nome ⇒ erro de célula, nunca consulta sem filtro;
     `expandResponsibleFilters` segue exclusivo do responsible_id).
+    `factor.filters` (condições do recorte, com UI no plan-editor) entra
+    ANTES do filtro de membro na MESMA consulta; parse restrito aos 10 ops de
+    `FILTER_OPS` (nunca lista paralela), `sources` por-filtro descartado,
+    `operation_id` proibido no savePlan e o save do editor RE-EMITE os
+    filtros (regra do presetKey).
     `factor.defaultTarget` é fallback de LEITURA (goals vence; limpar a
     célula segue deletando a linha) — nunca vira linha de goals.
     `factor.targetCurrency` converte o alvo a BRL NA LEITURA pelos

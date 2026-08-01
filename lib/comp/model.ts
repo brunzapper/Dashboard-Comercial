@@ -1,4 +1,11 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 01/08/2026
+// v1.5: RECORTE DO FATOR com UI (factor.filters) — parse endurecido: op
+// restrito aos 10 operadores de UI de FILTER_OPS (internos eq_ci/*_num
+// rejeitados), `in` normalizado p/ array de strings (string legada com
+// vírgulas aceita), ops sem valor perdem o valor, `sources` por-filtro é
+// DESCARTADO (factor.sources já define o universo da consulta) e teto
+// MAX_FACTOR_FILTERS. O engine aplica os filtros ANTES do filtro de membro,
+// na MESMA consulta (pipeline completo de runCalculatedWidget).
 // v1.4: APURAÇÃO SOBRE O MÊS ANTERIOR (config.apuracao: "mes_anterior") — o
 // lançamento do mês M (pagamento) apura realizado/metas/taxas sobre M-1.
 // Contrato anti-dupla-conversão: year/month nas assinaturas públicas é SEMPRE
@@ -44,7 +51,8 @@ import {
   type FormulaToken,
 } from "@/lib/records/formulas";
 import type { OperandRef } from "@/lib/records/date-operands";
-import type { WidgetFilter } from "@/lib/widgets/types";
+import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
+import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
 import { DEFAULT_PERIOD_FIELD, type DashboardPeriod } from "@/lib/widgets/period";
 import type { SourceDef } from "@/lib/sources";
 
@@ -55,6 +63,7 @@ export const MAX_TOTAL_FORMULA_TOKENS = 200;
 export const MAX_COMMISSION_TIERS = 12; // por tabela (plano ou membro)
 export const MAX_COMMISSION_MEMBER_OVERRIDES = 400;
 export const MAX_COMMISSION_BLOCKS = 6;
+export const MAX_FACTOR_FILTERS = 12;
 
 /** Fator do plano: componente ponderado da remuneração. */
 export interface CompFactor {
@@ -67,7 +76,11 @@ export interface CompFactor {
   money: boolean; // formata alvo/realizado como R$ (senão número puro)
   formula: Formula; // fórmula AGREGADA do realizado (contexto "aggregate")
   sources: string[]; // fontes do recorte ([] = todas as fontes)
-  filters?: WidgetFilter[]; // recorte extra (sem UI no v1; schema aceita)
+  // Recorte extra do fator (condições em E), editado no plan-editor. Só os 10
+  // operadores de UI (FILTER_OPS); `in` é array de strings; `sources`
+  // por-filtro não existe aqui (factor.sources define o universo). O ENGINE
+  // aplica ANTES do filtro de membro, na MESMA consulta.
+  filters?: WidgetFilter[];
   capPct?: number; // teto do atingimento CALCULADO (override manual ignora)
   floorPct?: number; // piso idem
   // Ref de campo (ex. "custom:sdr_reuniao") que identifica o MEMBRO no
@@ -260,14 +273,39 @@ export function roundMoney(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
 
+// Operadores aceitos no recorte do fator: SEMPRE derivado de FILTER_OPS
+// (nunca lista paralela) — os internos do RPC (eq_ci/*_num/in_ci) ficam fora.
+const UI_FILTER_OPS = new Set<string>(FILTER_OPS.map((o) => o.op));
+
+const isScalar = (v: unknown): v is string | number | boolean =>
+  typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
 function parseFilter(raw: unknown): WidgetFilter | null {
   if (!isRecord(raw)) return null;
   const { field, op } = raw;
   if (typeof field !== "string" || field === "") return null;
-  if (typeof op !== "string" || op === "") return null;
-  const out = { field, op } as WidgetFilter;
-  if ("value" in raw) out.value = raw.value;
-  return out;
+  if (typeof op !== "string" || !UI_FILTER_OPS.has(op)) return null;
+  const filterOp = op as FilterOp;
+  // `sources` por-filtro é descartado de propósito: o universo da consulta do
+  // fator é factor.sources — alvo por-filtro não acrescenta expressividade.
+  if (opHasNoValue(filterOp)) return { field, op: filterOp };
+  if (filterOp === "in") {
+    // Array de escalares (pickers) ou string legada com vírgulas (digitação).
+    const list = Array.isArray(raw.value)
+      ? raw.value.every(isScalar)
+        ? raw.value.map((v) => String(v).trim()).filter(Boolean)
+        : null
+      : typeof raw.value === "string"
+        ? raw.value
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : null;
+    if (!list || list.length === 0) return null;
+    return { field, op: filterOp, value: list };
+  }
+  if (!isScalar(raw.value)) return null;
+  return { field, op: filterOp, value: raw.value };
 }
 
 // Fórmula persistida: exige o shape {tokens:[...]} com tokens-objeto. A
@@ -322,7 +360,9 @@ function parseFactor(raw: unknown): CompFactor | null {
     formula,
     sources,
   };
-  if (Array.isArray(raw.filters)) {
+  if (raw.filters != null) {
+    if (!Array.isArray(raw.filters)) return null;
+    if (raw.filters.length > MAX_FACTOR_FILTERS) return null;
     const filters: WidgetFilter[] = [];
     for (const f of raw.filters) {
       const parsed = parseFilter(f);

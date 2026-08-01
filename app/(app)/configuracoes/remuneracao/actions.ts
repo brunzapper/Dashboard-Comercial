@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 01/08/2026
+// v1.5: condições do recorte do fator (factor.filters) validadas no savePlan —
+// campo do catálogo (mesma régua do memberField; operation_id proibido: coluna
+// derivada fora da tradução viva de operação) e valor obrigatório nos ops com
+// valor. O shape/op já chega garantido pelo parse fail-closed do model.
 // v1.4: apuração sobre o mês anterior — saveTarget grava a meta no mês
 // APURADO (apuracaoRef; a célula do lançamento M edita a goal de M-1 em plano
 // "mes_anterior"), mas rederive/deriveTotal/publish seguem falando o mês do
@@ -65,6 +69,7 @@ import {
   buildAggOperandCatalog,
 } from "@/lib/widgets/agg-catalog";
 import { buildAvailableFields } from "@/lib/widgets/fields";
+import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import {
@@ -265,6 +270,32 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
           ok: false,
           message: `Campo de membro inválido no fator "${f.label}" — escolha um campo de texto/seleção do registro.`,
         };
+    }
+    // Condições do recorte: campo do catálogo (numérico/data valem — comparam
+    // valor) e valor presente nos ops com valor. Operação fica FORA: a coluna
+    // derivada pode estar NULL e a tradução viva de operação não passa aqui.
+    for (const flt of f.filters ?? []) {
+      if (flt.field === "operation_id")
+        return {
+          ok: false,
+          message: `Condição do fator "${f.label}": Operação não é filtrável aqui — filtre por responsável ou por um campo do registro.`,
+        };
+      const af = availableByRef.get(flt.field);
+      if (!af || af.displayOnly || af.aggCalc)
+        return {
+          ok: false,
+          message: `Condição do fator "${f.label}": campo desconhecido ("${flt.field}").`,
+        };
+      if (!opHasNoValue(flt.op)) {
+        const empty = Array.isArray(flt.value)
+          ? flt.value.length === 0
+          : String(flt.value ?? "").trim() === "";
+        if (empty)
+          return {
+            ok: false,
+            message: `Condição do fator "${f.label}": informe o valor do filtro.`,
+          };
+      }
     }
     if (f.defaultTarget != null && cleanNumber(f.defaultTarget) == null)
       return {

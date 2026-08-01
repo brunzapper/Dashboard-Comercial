@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 31/07/2026 (v1.4: ano da URL < 2020 cai no mês/ano
+// Versão: 1.5 | Data: 01/08/2026 (v1.5: select de field_definitions do
+// catálogo do editor inclui `options` — picker estático de valor dos campos
+// seleção nas condições do recorte do fator.)
+// v1.4: ano da URL < 2020 cai no mês/ano
 // correntes — URLs velhas presas em 2000 (pré-v1.3) escapavam do fix e as
 // setas nunca saíam de lá (chegou a recriar entry órfã em produção); as
 // actions seguem aceitando 2000-2100. Aba vira query `?aba=plano` decidida no
@@ -256,7 +259,9 @@ export default async function RemuneracaoPage({
       ? supabase
           .from("field_definitions")
           .select(
-            "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent"
+            // `options` alimenta o picker estático de valor dos campos seleção
+            // nas condições do recorte do fator (plan-editor v1.5).
+            "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent, options"
           )
       : Promise.resolve({ data: null }),
     wantsEditor ? loadGoalMetrics(supabase) : Promise.resolve(null),

@@ -1,3 +1,6 @@
+// Versão: 1.6 | Data: 01/08/2026 (v1.6: recorte do fator — factor.filters
+// chega ao RPC em TODA consulta do fator, junto do filtro de membro clássico
+// E do memberField, sem vazar p/ os demais fatores)
 // Versão: 1.5 | Data: 01/08/2026 (v1.5: regressão do realizado zerado — fator
 // money com perna escopada VAZIA soma as pernas preenchidas; a aux monetária
 // sem linhas não pode virar operando null)
@@ -461,6 +464,92 @@ describe("recomputePlanMonth", () => {
     expect(m3.computed.realized.f_r).toBeNull();
     expect(m3.computed.errors?.f_r).toContain("memberField");
     expect(m3.computed.realized.f_v).toBe(7);
+  });
+
+  it("factor.filters chega ao RPC em toda consulta do fator — com responsible_id e com memberField", async () => {
+    const seen: {
+      metric: string;
+      filters: { field: string; op: string; value?: unknown }[];
+    }[] = [];
+    const fake = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          seen.push({
+            metric: (args.p_metrics as { field: string }[])[0].field,
+            filters: (args.p_filters ?? []) as {
+              field: string;
+              op: string;
+              value?: unknown;
+            }[],
+          });
+          return { data: [{ metric_1: 7 }], error: null };
+        },
+      },
+      tables: {
+        responsibles: responsiblesHandler,
+        field_definitions: [],
+        field_correspondences: [],
+        currency_rates: [],
+        goals: [],
+        comp_entries: () => ({ data: [] }),
+      },
+    });
+    const config = {
+      ...CONFIG,
+      factors: [
+        // f_v: recorte próprio + filtro clássico de responsável.
+        {
+          ...CONFIG.factors[0],
+          filters: [{ field: "custom:fonte", op: "eq", value: "Inbound" }],
+        },
+        // f_r: recorte próprio + memberField (os dois na MESMA consulta).
+        {
+          ...CONFIG.factors[1],
+          memberField: "custom:sdr_reuniao",
+          filters: [{ field: "stage", op: "eq", value: "Lead Qualificado" }],
+        },
+      ],
+    };
+    const out = await recomputePlanMonth(fake.db, fake.db, {
+      plan: { ...PLAN, config },
+      year: 2026,
+      month: 7,
+      orgId: "org-1",
+    });
+    expect(out.ok).toBe(true);
+    expect(out.queryErrors).toBe(0);
+    const vendas = seen.filter((c) => c.metric === "value");
+    expect(vendas.length).toBeGreaterThan(0);
+    for (const c of vendas) {
+      expect(c.filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "custom:fonte",
+            op: "eq",
+            value: "Inbound",
+          }),
+          expect.objectContaining({ field: "responsible_id" }),
+        ])
+      );
+      // O recorte do OUTRO fator nunca vaza p/ esta consulta.
+      expect(c.filters.some((x) => x.field === "stage")).toBe(false);
+    }
+    const reunioes = seen.filter((c) => c.metric === "*");
+    expect(reunioes.length).toBeGreaterThan(0);
+    for (const c of reunioes) {
+      expect(c.filters).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "stage",
+            op: "eq",
+            value: "Lead Qualificado",
+          }),
+          expect.objectContaining({ field: "custom:sdr_reuniao", op: "in" }),
+        ])
+      );
+      expect(c.filters.some((x) => x.field === "responsible_id")).toBe(false);
+      expect(c.filters.some((x) => x.field === "custom:fonte")).toBe(false);
+    }
   });
 
   it("targetCurrency: alvo digitado em USD converte pela taxa do trimestre; sem taxa ⇒ atingimento null", async () => {

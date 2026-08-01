@@ -1,4 +1,11 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 01/08/2026
+// v1.5: "Condições do recorte" por fator (factor.filters) — linhas FilterRow
+// (mesmo card do widget-builder, sem fontes-alvo por filtro) com picker de
+// valor (responsável grava NOME — o engine resolve nome→id→grupo; etapa/
+// seleção gravam o rótulo). O save RE-EMITE os filtros (regra do presetKey —
+// antes o round-trip os destruía em silêncio) e a prévia da fórmula passa a
+// aplicá-los. Operação não é filtrável aqui (coluna derivada — savePlan
+// rejeita e o dropdown nem oferece).
 // v1.4: seletor "Apuração" na identidade do plano (mes_anterior = realizado/
 // metas do mês anterior ao lançamento; plano NOVO nasce mes_anterior). O
 // save RE-EMITE config.apuracao quando mes_anterior (regra do presetKey —
@@ -43,6 +50,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { FilterRow } from "@/components/dashboards/widget-builder-rows";
+import type { FilterValueSource } from "@/components/filters/filter-value-picker";
 import { FormulaEditor } from "@/components/formula/formula-editor";
 import { useSourceLabels } from "@/components/source-labels-context";
 import { notifyActionError } from "@/lib/feedback/notify";
@@ -56,13 +65,23 @@ import {
   buildAggOperandCatalog,
 } from "@/lib/widgets/agg-catalog";
 import type { AvailableField } from "@/lib/widgets/fields";
-import { decorateRefOptions } from "@/lib/widgets/filter-ops";
+import {
+  cleanFilters,
+  decorateRefOptions,
+  FILTER_OPS,
+  opHasNoValue,
+  sourceChips,
+  toFieldOptions,
+} from "@/lib/widgets/filter-ops";
+import { splitCoreDefs } from "@/lib/records/core-defs";
+import type { WidgetFilter } from "@/lib/widgets/types";
 import {
   COMP_COMMISSION_REF,
   compOperandCatalog,
   explicitMemberIds,
   MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
+  MAX_FACTOR_FILTERS,
   MAX_FACTORS,
   resolveOperationMembers,
   type CompCommissionBlock,
@@ -74,8 +93,16 @@ import {
   deletePlan,
   savePlan,
 } from "@/app/(app)/configuracoes/remuneracao/actions";
+import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import type { CompPlanClientRow } from "./remuneracao-manager";
+
+// Operadores das condições do recorte — SEMPRE de FILTER_OPS (nunca lista
+// paralela; mesma régua do parse do model e da barra da tabela).
+const FILTER_OP_OPTIONS: ComboboxOption[] = FILTER_OPS.map((o) => ({
+  value: o.op,
+  label: o.label,
+}));
 
 // Sentinela do select de métrica: o savePlan gera a chave automática.
 const AUTO_METRIC = "__auto__";
@@ -96,6 +123,7 @@ interface FactorDraft {
   memberField: string; // "" = Responsável (padrão)
   defaultTarget: string;
   targetCurrency: string; // "" = R$ (sem conversão)
+  filters: WidgetFilter[]; // condições do recorte (linhas cruas da UI)
 }
 
 function newFactorId(): string {
@@ -116,6 +144,7 @@ function emptyFactor(): FactorDraft {
     memberField: "",
     defaultTarget: "",
     targetCurrency: "",
+    filters: [],
   };
 }
 
@@ -134,6 +163,9 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     memberField: f.memberField ?? "",
     defaultTarget: f.defaultTarget != null ? String(f.defaultTarget) : "",
     targetCurrency: f.targetCurrency ?? "",
+    // Clona (nunca mutar o config das props) — e RE-EMITIR no save é
+    // obrigatório: sem isso o round-trip destruiria os filtros em silêncio.
+    filters: (f.filters ?? []).map((x) => ({ ...x })),
   }));
 }
 
@@ -412,6 +444,87 @@ export function PlanEditor(props: PlanEditorProps) {
     ...props.currencies.filter((c) => c.value !== "BRL"),
   ];
 
+  // Condições do recorte: campos filtráveis (sintético/agregado ficam fora —
+  // não são consultáveis no RPC; operação idem, coluna derivada que o savePlan
+  // rejeita) com chips de fonte, mesma montagem do widget-builder.
+  const filterFieldOptions = useMemo(
+    () =>
+      toFieldOptions(
+        props.available.filter(
+          (a) => !a.displayOnly && !a.aggCalc && a.field !== "operation_id"
+        ),
+        sourceLabels
+      ),
+    [props.available, sourceLabels]
+  );
+  const filterFieldChips = useMemo(
+    () => sourceChips(sourceLabels),
+    [sourceLabels]
+  );
+  // Picker de VALOR (mesma régua do widget-builder): responsável GRAVA O NOME
+  // (o engine resolve nome→id→grupo em runtime — resolveFkFilterNames + canon);
+  // etapa/seleção gravam o próprio rótulo. Cache por render do editor: a
+  // action só dispara no primeiro open (etapas variam com as fontes do fator).
+  const fieldDefSplit = useMemo(
+    () => splitCoreDefs(props.allFields),
+    [props.allFields]
+  );
+  const customDefsByKey = useMemo(
+    () => new Map(fieldDefSplit.custom.map((d) => [d.field_key, d])),
+    [fieldDefSplit]
+  );
+  // Map ESTÁVEL via useState (não useRef: o lint do compiler barra ref lido
+  // em função chamada no render; a mutação do Map não precisa re-render).
+  const [optionCandidatesCache] = useState(
+    () => new Map<string, Promise<{ value: string; label: string }[]>>()
+  );
+  const filterValueSource = (
+    field: string,
+    factorSources: string[]
+  ): FilterValueSource | null => {
+    const cachedLoad =
+      (key: string, kind: "responsible" | "stage") =>
+      (): Promise<{ value: string; label: string }[]> => {
+        const cached = optionCandidatesCache.get(key);
+        if (cached) return cached;
+        const p = listFilterOptionCandidates(
+          kind,
+          kind === "stage" && factorSources.length > 0
+            ? factorSources
+            : undefined
+        );
+        optionCandidatesCache.set(key, p);
+        return p;
+      };
+    if (field === "responsible_id")
+      return {
+        kind: "responsible",
+        storeAs: "label",
+        load: cachedLoad("responsible", "responsible"),
+      };
+    if (field === "stage")
+      return {
+        kind: "stage",
+        storeAs: "value",
+        load: cachedLoad(
+          `stage:${[...factorSources].sort().join(",")}`,
+          "stage"
+        ),
+      };
+    const def = field.startsWith("custom:")
+      ? customDefsByKey.get(field.slice("custom:".length))
+      : fieldDefSplit.core.get(field);
+    if (def?.data_type !== "selecao") return null;
+    const opts = def.options ?? [];
+    if (opts.length === 0) return null;
+    return {
+      kind: "static",
+      storeAs: "value",
+      load: () =>
+        Promise.resolve(opts.map((o) => ({ value: o, label: o }))),
+    };
+  };
+
   const patchFactor = (id: string, patch: Partial<FactorDraft>) =>
     setFactors((cur) => cur.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   const patchBlock = (id: string, patch: Partial<CommissionBlockDraft>) =>
@@ -456,12 +569,44 @@ export function PlanEditor(props: PlanEditorProps) {
     return out;
   };
 
+  // Condições do recorte prontas p/ o config: cleanFilters (linha sem campo
+  // some; `in` vira array; op sem valor perde o valor) + fontes-alvo por
+  // filtro fora do contrato do fator + valor obrigatório (string = erro).
+  const buildFactorFilters = (
+    f: FactorDraft,
+    who: string
+  ): WidgetFilter[] | string => {
+    const cleaned = cleanFilters(f.filters).map(
+      ({ sources: _sources, ...rest }) => rest
+    );
+    for (const flt of cleaned) {
+      if (opHasNoValue(flt.op)) continue;
+      const empty = Array.isArray(flt.value)
+        ? flt.value.length === 0
+        : String(flt.value ?? "").trim() === "";
+      if (empty) return `Condição sem valor no fator "${who}".`;
+    }
+    return cleaned;
+  };
+
   const save = () =>
     startTransition(async () => {
       const commissions = buildCommissions();
       if (typeof commissions === "string") {
         notifyActionError("Salvar plano", commissions);
         return;
+      }
+      const factorFilters = new Map<string, WidgetFilter[]>();
+      for (const [i, f] of factors.entries()) {
+        const built = buildFactorFilters(
+          f,
+          f.label.trim() || `Fator ${i + 1}`
+        );
+        if (typeof built === "string") {
+          notifyActionError("Salvar plano", built);
+          return;
+        }
+        factorFilters.set(f.id, built);
       }
       const config = {
         v: 1,
@@ -482,6 +627,11 @@ export function PlanEditor(props: PlanEditorProps) {
             ? { defaultTarget: numOrNull(f.defaultTarget) }
             : {}),
           ...(f.targetCurrency !== "" ? { targetCurrency: f.targetCurrency } : {}),
+          // RE-EMITIR as condições do recorte (regra do presetKey/apuracao):
+          // sem isso o round-trip do save as destruiria em silêncio.
+          ...((factorFilters.get(f.id) ?? []).length > 0
+            ? { filters: factorFilters.get(f.id) }
+            : {}),
         })),
         ...(memberIds.length > 0 ? { memberIds } : {}),
         ...(memberOperationIds.length > 0 ? { memberOperationIds } : {}),
@@ -708,18 +858,73 @@ export function PlanEditor(props: PlanEditorProps) {
                 initial={f.formula}
                 onChange={(formula) => patchFactor(f.id, { formula })}
                 preview={{
-                  title: "Prévia do realizado (todo período, sem recorte de responsável)",
+                  title:
+                    "Prévia do realizado (todo período, com as condições do fator, sem recorte de membro)",
                   manualStart: true,
                   run: (formula) =>
                     previewAggregateFormula({
                       formulaJson: JSON.stringify(formula),
                       sources: f.sources,
-                      filters: [],
+                      filters: cleanFilters(f.filters),
                       resultPercent: false,
                       resultCurrency: f.money ? "BRL" : null,
                     }),
                 }}
               />
+            </div>
+            {/* Condições do recorte (factor.filters): em E, aplicadas ao
+                realizado ANTES do filtro de membro (mesma consulta). */}
+            <div className="flex flex-col gap-1.5">
+              <Label>Condições do recorte</Label>
+              {f.filters.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {f.filters.map((flt, fi) => (
+                    <FilterRow
+                      key={fi}
+                      filter={flt}
+                      fieldOptions={filterFieldOptions}
+                      fieldChips={filterFieldChips}
+                      opOptions={FILTER_OP_OPTIONS}
+                      valueSource={filterValueSource(flt.field, f.sources)}
+                      onChange={(patch) =>
+                        patchFactor(f.id, {
+                          filters: f.filters.map((x, xi) =>
+                            xi === fi ? { ...x, ...patch } : x
+                          ),
+                        })
+                      }
+                      onRemove={() =>
+                        patchFactor(f.id, {
+                          filters: f.filters.filter((_, xi) => xi !== fi),
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={f.filters.length >= MAX_FACTOR_FILTERS}
+                  onClick={() =>
+                    patchFactor(f.id, {
+                      filters: [
+                        ...f.filters,
+                        { field: "", op: "eq", value: "" },
+                      ],
+                    })
+                  }
+                >
+                  <Plus className="size-4" /> Adicionar condição
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Condições em E aplicadas ao realizado deste fator, antes do
+                recorte de membro. Um fator com peso 0 pode servir só de
+                gatilho de comissão.
+              </p>
             </div>
             {/* Avançado: campo de membro / alvo padrão / moeda do alvo */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

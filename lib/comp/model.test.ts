@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 01/08/2026
+// v1.3: recorte do fator (factor.filters) — parse endurecido: só os 10 ops de
+// UI (FILTER_OPS; internos eq_ci/*_num rejeitados), `in` normalizado p/ array
+// de strings, ops sem valor perdem o valor, `sources` por-filtro descartado,
+// teto MAX_FACTOR_FILTERS e [] ⇒ chave omitida.
 // Testes do modelo PURO da remuneração variável. Invariantes duras: parse
 // FAIL-CLOSED do config (jsonb adulterado nunca "roda como der") e leniente
 // por chave dos inputs; efetivo = manual ?? calculado em CADA variável
@@ -24,6 +28,7 @@ import {
   COMP_FACTORS_REF,
   MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
+  MAX_FACTOR_FILTERS,
   MAX_TOTAL_FORMULA_TOKENS,
   apuracaoRef,
   compFactorRef,
@@ -362,6 +367,87 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(
       reparse(withCommission({ memberTiers: { r1: [] } }))
     ).toBeNull();
+  });
+});
+
+describe("factor.filters (recorte do fator)", () => {
+  const withFilters = (filters: unknown) => {
+    const raw = JSON.parse(JSON.stringify(makeConfig())) as {
+      factors: Record<string, unknown>[];
+    };
+    raw.factors[0].filters = filters;
+    return parseCompPlanConfig(raw);
+  };
+
+  it("aceita os 10 operadores de UI e faz round-trip estável", () => {
+    const filters = [
+      { field: "stage", op: "eq", value: "Lead Qualificado" },
+      { field: "stage", op: "neq", value: "Perdido" },
+      { field: "title", op: "ilike", value: "demo" },
+      { field: "value", op: "gt", value: 10 },
+      { field: "value", op: "gte", value: 10 },
+      { field: "value", op: "lt", value: 10 },
+      { field: "value", op: "lte", value: 10 },
+      { field: "custom:fonte", op: "in", value: ["Inbound", "Outbound"] },
+      { field: "custom:sdr_reuniao", op: "not_null" },
+      { field: "custom:obs", op: "is_null" },
+    ];
+    const parsed = withFilters(filters);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.factors[0].filters).toEqual(filters);
+    expect(reparse(parsed!)!.factors[0].filters).toEqual(filters);
+  });
+
+  it("normaliza: op sem valor perde o valor; `in` string legada e escalares viram array de strings", () => {
+    const parsed = withFilters([
+      { field: "custom:x", op: "is_null", value: "lixo" },
+      { field: "custom:fonte", op: "in", value: "Inbound, Outro" },
+      { field: "custom:n", op: "in", value: [1, true, " a "] },
+    ]);
+    expect(parsed!.factors[0].filters).toEqual([
+      { field: "custom:x", op: "is_null" },
+      { field: "custom:fonte", op: "in", value: ["Inbound", "Outro"] },
+      { field: "custom:n", op: "in", value: ["1", "true", "a"] },
+    ]);
+  });
+
+  it("descarta `sources` por-filtro (o universo da consulta é factor.sources)", () => {
+    const parsed = withFilters([
+      { field: "stage", op: "eq", value: "X", sources: ["leads"] },
+    ]);
+    expect(parsed!.factors[0].filters).toEqual([
+      { field: "stage", op: "eq", value: "X" },
+    ]);
+  });
+
+  it("rejeita op desconhecido/interno, valor inválido e shapes quebrados (fail-closed)", () => {
+    expect(withFilters([{ field: "stage", op: "banana", value: "X" }])).toBeNull();
+    // Ops internos do RPC (eq_ci/*_num) ficam FORA do recorte do fator.
+    expect(withFilters([{ field: "stage", op: "eq_ci", value: "X" }])).toBeNull();
+    expect(withFilters([{ field: "value", op: "gt_num", value: 1 }])).toBeNull();
+    expect(withFilters([{ field: "stage", op: "eq" }])).toBeNull();
+    expect(
+      withFilters([{ field: "stage", op: "eq", value: { a: 1 } }])
+    ).toBeNull();
+    expect(withFilters([{ field: "custom:fonte", op: "in", value: [] }])).toBeNull();
+    expect(
+      withFilters([{ field: "custom:fonte", op: "in", value: [{}] }])
+    ).toBeNull();
+    expect(withFilters([{ field: "custom:fonte", op: "in", value: 7 }])).toBeNull();
+    expect(withFilters([{ field: "", op: "eq", value: "X" }])).toBeNull();
+    expect(withFilters(["x"])).toBeNull();
+    expect(withFilters("nao-array")).toBeNull();
+  });
+
+  it("teto MAX_FACTOR_FILTERS; [] ⇒ chave omitida", () => {
+    const demais = Array.from({ length: MAX_FACTOR_FILTERS + 1 }, (_, i) => ({
+      field: `custom:f${i}`,
+      op: "not_null",
+    }));
+    expect(withFilters(demais)).toBeNull();
+    const vazio = withFilters([]);
+    expect(vazio).not.toBeNull();
+    expect(vazio!.factors[0].filters).toBeUndefined();
   });
 });
 
