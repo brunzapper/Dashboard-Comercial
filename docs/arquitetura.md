@@ -2071,7 +2071,10 @@ principal ("nome usado") — `records.responsible_id` **nunca é repontado** e
 limpar a coluna desfaz tudo. O grupo é sempre **plano** (apelido aponta direto
 ao principal; a action `setResponsibleCanonical` de Configurações →
 Responsáveis repontea filhos ao mesclar um principal e resolve alvo-apelido
-para o principal dele).
+para o principal dele). Na tela (01/08/2026), apelidos ficam **recolhidos**
+sob o principal — o badge "N unificados" expande as linhas-filho (controles de
+Ativo/desfazer/Operações preservados) — e o alvo do "Nome usado" só oferece
+principais.
 
 Resolução 100% engine/loaders (`lib/config/responsible-canon.ts` —
 `loadResponsibleCanon` cacheado + helpers puros), com gate barato: sem

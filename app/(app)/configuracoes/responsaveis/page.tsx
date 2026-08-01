@@ -1,7 +1,8 @@
-// Versão: 1.1 | Data: 26/07/2026
+// Versão: 1.2 | Data: 01/08/2026
 // Tela de Responsáveis (admin) — Fase 6B.
 // v1.1 (26/07/2026): agrupamento de exibição (0101) — carrega canonical_id e a
 // coluna "Nome usado" (unificar responsáveis duplicados sob o principal).
+// v1.2 (01/08/2026): texto — unificados ficam recolhidos sob o principal.
 import { createClient } from "@/lib/supabase/server";
 import { requireSettingsArea } from "@/lib/auth/access";
 import type { OptionItem } from "@/lib/records/types";
@@ -67,7 +68,9 @@ export default async function ResponsaveisPage() {
           prioridade 1 é a padrão puxada nas vendas). Use &quot;Nome usado&quot;
           para unificar responsáveis duplicados entre bases: o apelido some dos
           dropdowns e widgets/filtros passam a tratar o grupo como um só —
-          reversível, sem alterar os registros.
+          reversível, sem alterar os registros. Unificados ficam recolhidos sob
+          o principal; clique no selo &quot;N unificados&quot; para vê-los ou
+          desfazer.
         </p>
       </div>
       <ResponsiblesManager responsibles={responsibles} operations={operations} />
