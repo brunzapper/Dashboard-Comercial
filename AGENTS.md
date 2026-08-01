@@ -634,7 +634,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
   `computeEntry` passa `responsible_id` como `memberId`; espelho ganha
-  `rem_comissao` (vazio sem comissão). **Match de membro por campo, alvo
+  `rem_comissao` (vazio sem comissão). **Condições do recorte por fator
+  (01/08/2026):** `factor.filters` (WidgetFilter[]) tem UI no plan-editor
+  ("Condições do recorte") e entra ANTES do filtro de membro na MESMA
+  consulta (pipeline completo — nome→id/canon/tokens de data); parse
+  restrito aos 10 ops de `FILTER_OPS` (nunca lista paralela; internos
+  `eq_ci`/`*_num` rejeitados), `in` vira array, `sources` por-filtro é
+  descartado (o universo é `factor.sources`), teto `MAX_FACTOR_FILTERS` e
+  `operation_id` proibido no savePlan (coluna derivada — fora da tradução
+  viva de operação); o save RE-EMITE os filtros (regra do presetKey — sem
+  isso o round-trip os destruiria) e fator de peso 0 com recorte próprio
+  serve de gatilho dedicado de comissão. **Match de membro por campo, alvo
   padrão e alvo em moeda (31/07/2026):** `factor.memberField`
   (ex. `custom:sdr_reuniao`) troca o filtro injetado por
   `<campo> in (display_names do grupo canônico)` via `memberFilterFor`
