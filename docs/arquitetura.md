@@ -2599,6 +2599,36 @@ total opcional por plano.
   `selectCommissionTier`) — NUNCA gerar fórmula a partir das faixas. Com
   `totalFormula`, a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes).
+  **Memória inline + Visão geral (01/08/2026).** A grade de Lançamentos ganha
+  uma linha de DETALHE sempre visível sob cada membro com a conta da linha
+  inteira — fatores com peso ("R$ 1.000,00 × 60% × 50% = R$ 300,00"), fatores
+  peso 0 ("realizado 44 (gatilho/base de comissão)"), um item por bloco de
+  comissão (via `commissionMemory`), soma/override da comissão, bônus e a
+  composição do total (só com ≥ 2 termos não-zero; a base variável nunca soma
+  no total — ela multiplica dentro dos fatores). Os textos nascem SÓ em
+  `entryMemoryLines`/`factorPayoutFormula` (`lib/comp/commission-label.ts`) e
+  o `colSpan` da célula de detalhe é a contagem de colunas do header, PINADA
+  em `comp-grid.test`. **Aba "Visão geral"** (pill primeira do tablist): o
+  landing do admin SEM `?plano` cai na aba `geral` — a AUSÊNCIA do plano na
+  URL decide (sem valor de query próprio; `?aba=plano` vence; 0 planos força
+  o editor; o `navigate` do manager omite plano/aba nesse caso — invariante
+  no único construtor de URL; link velho com `?plano` válido segue na grade).
+  A Visão geral (`comp-overview.tsx`) é SOMENTE leitura e 100% client-derived
+  pelo MESMO `computeEntry` (totais/subtotais saem da derivação, nunca de
+  `entry.total`, que pode estar stale) sobre todos os planos ATIVOS, com a
+  MESMA resolução de membros da grade (membro inativo com entry fica fora —
+  intencional) e cards do módulo único `comp-plan-card.tsx` (extraído da
+  my-comp-view com prop `title`; `ApuracaoBadge`/`OverrideDot`/`fmtMoneyIn`
+  moram lá — importar do manager criaria ciclo). Dados carregam SÓ na aba
+  geral (padrão editorCatalog, gate SIMÉTRICO com as queries do plano
+  selecionado): entries do mês de todos os ativos numa query COM `plan_id`
+  (sem paginação — teto ~1000 do PostgREST folgado p/ planos×membros) +
+  `loadTargetsByMember`/`loadTargetRatesForConfig` por plano (1+P+(0..P)
+  queries paralelas). Agrupamento por plano/por pessoa com preferência do
+  usuário em localStorage `comp-overview:group` (chrome de UI por usuário,
+  nunca dado; SSR determinístico + leitura pós-mount, padrão use-panel-width).
+  Membro esperado sem entry no mês aparece como nota "sem lançamento" (nunca
+  some em silêncio).
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

@@ -1,3 +1,9 @@
+// Versão: 1.6 | Data: 01/08/2026 (v1.6: linha de DETALHE sempre visível sob
+// cada membro — a memória da linha inteira (fatores base × peso × ating.,
+// blocos de comissão, soma/override, bônus, composição do total) em texto
+// compacto via entryMemoryLines/factorPayoutFormula do commission-label
+// (dono único dos textos); colSpan da célula = colCount computado junto do
+// header e pinado em teste)
 // Versão: 1.5 | Data: 01/08/2026 (v1.5: MEMÓRIA DE CÁLCULO da comissão —
 // popover clicável na célula (ícone dedicado; o valor segue EditableCell com
 // override por duplo-clique) com a multiplicação por bloco via
@@ -54,6 +60,8 @@ import {
 import { notifyActionError } from "@/lib/feedback/notify";
 import {
   commissionMemory,
+  entryMemoryLines,
+  factorPayoutFormula,
   fmtMoneyBRL as fmtMoney,
   fmtNumBR as fmtNum,
 } from "@/lib/comp/commission-label";
@@ -240,6 +248,13 @@ export function CompGrid(props: CompGridProps) {
     return !computed || String(computed.at ?? "") < props.plan.updated_at;
   });
 
+  // Nº de colunas físicas da tabela (fonte: header abaixo) — a linha de
+  // detalhe da memória usa este valor como colSpan.
+  const colCount =
+    4 +
+    4 * props.config.factors.length +
+    ((props.config.commissions?.length ?? 0) > 0 ? 1 : 0);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -274,6 +289,9 @@ export function CompGrid(props: CompGridProps) {
       </div>
 
       <div className="overflow-x-auto rounded-md border">
+        {/* Colunas físicas do header acima: Responsável + Base + 4 por fator
+            + Comissão (se houver) + Bônus + Total — a linha de detalhe usa a
+            MESMA contagem no colSpan (pinado em comp-grid.test). */}
         <Table>
           <TableHeader>
             <TableRow>
@@ -329,6 +347,7 @@ export function CompGrid(props: CompGridProps) {
                 member={member}
                 config={props.config}
                 plan={props.plan}
+                colCount={colCount}
                 targetRates={props.targetRates}
                 entry={entryByMember.get(member.id) ?? null}
                 row={rows.get(member.id) ?? null}
@@ -398,6 +417,7 @@ function GridRow(props: {
   member: { id: string; label: string };
   config: CompPlanConfig;
   plan: CompPlanClientRow;
+  colCount: number;
   targetRates: Record<string, number | null>;
   entry: CompEntryClientRow | null;
   row: { baseAmount: number | null; inputs: CompEntryInputs; targets: Record<string, number | null> } | null;
@@ -437,6 +457,7 @@ function GridRow(props: {
   };
 
   return (
+    <>
     <TableRow>
       <TableCell className="bg-background sticky left-0 z-10 font-medium">
         {props.member.label}
@@ -468,12 +489,11 @@ function GridRow(props: {
       {config.factors.map((f) => {
         const b = breakdown.byFactor[f.id];
         const error = computed?.errors?.[f.id];
-        // Memória do Valor por atingimento (mesma conta do computeEntry:
-        // base × peso × ating.) — só quando o fator pontua e nada foi
-        // sobrescrito à mão (senão o title mentiria).
+        // Memória do Valor por atingimento (helper único) — só quando o
+        // fator pontua e nada foi sobrescrito à mão (senão o title mentiria).
         const payoutTitle =
           f.weightPct > 0 && !b.overridden.payout && b.attainmentPct != null
-            ? `${fmtMoney(breakdown.base)} × ${fmtNum(f.weightPct)}% × ${fmtNum(b.attainmentPct)}% = ${fmtMoney(b.payout)}`
+            ? factorPayoutFormula(breakdown.base, f.weightPct, b.attainmentPct, b.payout)
             : null;
         return (
           <FactorCells
@@ -569,6 +589,22 @@ function GridRow(props: {
         current={inputs.overrides.total ?? null}
       />
     </TableRow>
+    {/* Memória de cálculo SEMPRE visível (pedido do RH): a conta da linha em
+        texto compacto — itens de entryMemoryLines (helper único). A célula
+        única não participa do sticky da 1ª coluna (rola com a tabela). */}
+    <TableRow className="hover:bg-muted/30">
+      <TableCell colSpan={props.colCount} className="bg-muted/30 py-1">
+        <div className="text-muted-foreground flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+          {entryMemoryLines(config, breakdown).map((line, i) => (
+            <span key={i} className="inline-flex items-baseline gap-x-2">
+              {i > 0 ? <span aria-hidden>·</span> : null}
+              <span>{line}</span>
+            </span>
+          ))}
+        </div>
+      </TableCell>
+    </TableRow>
+    </>
   );
 }
 
