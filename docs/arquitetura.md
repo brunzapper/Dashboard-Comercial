@@ -1064,6 +1064,18 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   NÃO rejanelam pela data da sub (limitação documentada); a aux do `@sqls`
   referencia a chave de Data Reunião no filtro → regra dos mocks 0052 segue
   valendo.
+  **Correção 01/08/2026 (realizado da Remuneração zerado):** em modo ciente de
+  moeda (`auto`/`fixed`), a aux monetária substitui o número cru do operando
+  pelo `MoneyBreakdown` — e um recorte legitimamente VAZIO (ex.: perna
+  `@vendas_site` de um AE sem venda no site) virava detalhamento sem moedas,
+  que `rawTotal` traduzia para null = "operando ausente" e a fórmula INTEIRA
+  caía para null (realizado/cards fórmula por pessoa zerados, sem erro
+  registrado — não é falha de consulta). Agora recorte vazio vale **0**
+  (identidade aditiva, igual ao `?? 0` do `aggregate` e ao caminho convertido
+  `.brl`, que já dava 0); null fica reservado a operando AUSENTE (chave não
+  resolvida / consulta que falhou). Efeito visível: card fórmula só de somas
+  sobre recorte todo vazio exibe R$ 0,00 em vez de "—" (razões seguem "—"
+  pela guarda de divisão por zero).
 - **Catálogo por-registro ÚNICO** (19/07/2026, `lib/records/calc-operands.ts`):
   `perRecordCalcOperands` monta os operandos do campo calculado POR-REGISTRO
   para os DOIS editores (página `/campos` e o FieldForm inline do

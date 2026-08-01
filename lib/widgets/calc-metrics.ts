@@ -1,4 +1,12 @@
-// Versão: 2.5 | Data: 31/07/2026
+// Versão: 2.6 | Data: 01/08/2026
+// v2.6 (01/08/2026): operando monetário de recorte VAZIO vale 0, não null —
+//   rawTotal de MoneyBreakdown sem moedas devolve a identidade aditiva, como
+//   o `?? 0` do aggregate e o caminho convertido (.brl, que já dava 0). Antes,
+//   uma perna escopada legitimamente vazia (ex.: @vendas_site de um AE sem
+//   venda no site) virava operando ausente e derrubava a fórmula INTEIRA para
+//   null — zerava o realizado da Remuneração Variável e os cards fórmula por
+//   pessoa, sem erro registrado. null segue reservado a operando AUSENTE
+//   (chave não resolvida / consulta que falhou).
 // v2.5 (31/07/2026): operandos de META — ref `meta:<chave>` (registry
 //   goal_metrics) vira o VALOR da meta global do período da consulta. É
 //   ABAIXADO para token const pré-resolvido (lowerGoalOperands, molde do
@@ -430,12 +438,13 @@ function isMoneyBreakdown(v: unknown): v is MoneyBreakdown {
   );
 }
 
-// Soma crua (misturando moedas) de um detalhamento; null quando o recorte não
-// tem nenhum valor (coerente com o SUM SQL de zero linhas).
-function rawTotal(bd: MoneyBreakdown): number | null {
-  const codes = Object.keys(bd.perCurrency);
-  if (codes.length === 0) return null;
-  return codes.reduce((s, c) => s + bd.perCurrency[c], 0);
+// Soma crua (misturando moedas) de um detalhamento. Recorte VAZIO (a aux
+// rodou e não achou linha) é identidade aditiva — 0, como o `?? 0` do
+// aggregate e o caminho convertido (.brl): null aqui viraria "operando
+// ausente" e derrubaria a fórmula inteira por causa de uma perna
+// legitimamente sem registros (v2.6).
+function rawTotal(bd: MoneyBreakdown): number {
+  return Object.keys(bd.perCurrency).reduce((s, c) => s + bd.perCurrency[c], 0);
 }
 
 /** O campo de um operando de basis é monetário? (value/mrr ou custom moeda/calc-moeda.) */
