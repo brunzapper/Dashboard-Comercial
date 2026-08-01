@@ -1,4 +1,15 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4 (31/07/2026): navegação de mês LEVE — rascunho + commit debounced
+//   (useMonthDraft/MonthNav: setas atualizam o rótulo na hora; UMA navegação
+//   RSC após a pausa; picker de mês/ano + "Hoje" com commit imediato). Toda
+//   navegação passa a router.replace dentro de useNavPending (histórico
+//   limpo; Voltar não desfaz mês a mês — intencional) e a grade fica
+//   esmaecida + pointer-events-none enquanto dirty/pending (edição de célula
+//   durante a troca gravaria no mês ANTIGO com rótulo novo — a trava é
+//   correção, não cosmética). A aba vem do SERVER (?aba=plano): o catálogo do
+//   editor chega na prop única `editorCatalog` (null na aba Lançamentos —
+//   placeholder até a navegação de aba responder). Badge "Apurado sobre
+//   <mês>" quando o plano tem config.apuracao = "mes_anterior".
 // v1.3 (31/07/2026): o seletor de plano vira PILLS visíveis (nome + nº de
 //   membros + inativo) — o combobox discreto fazia parecer que só existia o
 //   1º plano (ordem alfabética); todos ficam à vista e o clique segue
@@ -10,8 +21,8 @@
 // v1.1: repassa operations + operationMembersById ao editor e à grade —
 // membros por operação.
 // Gerência de Remuneração variável (0112) — admin. Topo: seletor de plano +
-// navegação de mês (searchParams plano/ano/mes — a page recarrega os dados);
-// abas "Lançamentos" (grade mensal) e "Plano" (editor de fatores/fórmulas).
+// navegação de mês (searchParams plano/ano/mes/aba — a page recarrega os
+// dados); abas "Lançamentos" (grade mensal) e "Plano" (editor de fatores).
 // O detalhamento é 100% derivado no cliente pelo MESMO computeEntry do
 // servidor (modelo puro importável) — editar peso/override atualiza a grade
 // sem re-consulta; só fórmula/fontes exigem "Recalcular".
@@ -19,20 +30,24 @@
 
 import { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useNavPending } from "@/components/dashboards/pending-context";
+import { MONTH_LABELS } from "@/lib/date/month-labels";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceDef } from "@/lib/sources";
 import type { AvailableField } from "@/lib/widgets/fields";
 import {
+  apuracaoRef,
   explicitMemberIds,
   parseCompPlanConfig,
   resolveOperationMembers,
 } from "@/lib/comp/model";
 
 import { CompGrid } from "./comp-grid";
+import { MonthNav, useMonthDraft } from "./month-nav";
 import { PlanEditor } from "./plan-editor";
 
 export interface CompPlanClientRow {
@@ -56,14 +71,23 @@ export interface CompEntryClientRow {
   updated_at: string;
 }
 
-export const MONTH_LABELS = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-];
+// Catálogo do editor de planos — SÓ chega na aba Plano (?aba=plano); a aba
+// Lançamentos navega o mês sem pagar estas queries/payload.
+export interface CompEditorCatalog {
+  // Moedas habilitadas (editor: moeda do alvo do fator).
+  currencies: { value: string; label: string }[];
+  metrics: GoalMetricDef[];
+  // Insumos do catálogo de fórmulas agregadas (mesmos do widget-builder).
+  available: AvailableField[];
+  allFields: FieldDefinition[];
+  sources: SourceDef[];
+}
 
 export interface RemuneracaoManagerProps {
   plans: CompPlanClientRow[];
   selectedPlanId: string | null;
+  // Aba decidida no SERVER (?aba=plano; sem planos força "plano").
+  aba: "grade" | "plano";
   year: number;
   month: number;
   entries: CompEntryClientRow[];
@@ -74,13 +98,7 @@ export interface RemuneracaoManagerProps {
   targets: Record<string, Record<string, number | null>>;
   // Moeda do alvo → R$/unidade no trimestre (plano selecionado).
   targetRates: Record<string, number | null>;
-  // Moedas habilitadas (editor: moeda do alvo do fator).
-  currencies: { value: string; label: string }[];
-  metrics: GoalMetricDef[];
-  // Insumos do catálogo de fórmulas agregadas (mesmos do widget-builder).
-  available: AvailableField[];
-  allFields: FieldDefinition[];
-  sources: SourceDef[];
+  editorCatalog: CompEditorCatalog | null;
   // Operações da org (opções do picker; inativas com sufixo) + membros por
   // operação (id CANÔNICO, já resolvidos no server via loadOperationScopes).
   operations: { id: string; name: string; active: boolean }[];
@@ -90,11 +108,12 @@ export interface RemuneracaoManagerProps {
 export function RemuneracaoManager(props: RemuneracaoManagerProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const [tab, setTab] = useState<"grade" | "plano">(
-    props.plans.length === 0 ? "plano" : "grade"
-  );
+  const { pending, run } = useNavPending();
   // "Novo plano" abre o editor vazio sem perder o plano selecionado na URL.
   const [creating, setCreating] = useState(props.plans.length === 0);
+  // Aba efetiva: server decide (?aba); "criando" força o editor localmente
+  // enquanto a navegação de aba não responde.
+  const tab: "grade" | "plano" = creating ? "plano" : props.aba;
 
   const plan =
     props.plans.find((p) => p.id === props.selectedPlanId) ??
@@ -105,17 +124,26 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
     [plan]
   );
 
-  const navigate = (planId: string | null, year: number, month: number) => {
+  // ÚNICO construtor de URL da tela (plano/ano/mes/aba sempre juntos).
+  // replace + transition compartilhada (padrão period-controls): histórico
+  // limpo e `pending` acende o dim da grade.
+  const navigate = (
+    planId: string | null,
+    year: number,
+    month: number,
+    aba: "grade" | "plano" = props.aba
+  ) => {
     const q = new URLSearchParams();
     if (planId) q.set("plano", planId);
     q.set("ano", String(year));
     q.set("mes", String(month));
-    router.push(`${pathname}?${q.toString()}`);
+    if (aba === "plano") q.set("aba", "plano");
+    run(() => router.replace(`${pathname}?${q.toString()}`, { scroll: false }));
   };
-  const shiftMonth = (delta: number) => {
-    const d = new Date(Date.UTC(props.year, props.month - 1 + delta, 1));
-    navigate(plan?.id ?? null, d.getUTCFullYear(), d.getUTCMonth() + 1);
-  };
+  const draft = useMonthDraft(props.year, props.month, (y, m) =>
+    navigate(plan?.id ?? null, y, m)
+  );
+  const busy = draft.dirty || pending;
 
   // Pills de plano: nº de membros EFETIVOS (manuais ∪ operações; lista
   // explícita ausente = todos os ativos) — mesmo cálculo da grade.
@@ -161,7 +189,10 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
                   }`}
                   onClick={() => {
                     setCreating(false);
-                    navigate(p.id, props.year, props.month);
+                    // Leva o mês EFETIVO (rascunho) e cancela o commit
+                    // agendado — senão o timer renavegaria p/ o plano antigo.
+                    draft.cancel();
+                    navigate(p.id, draft.year, draft.month);
                   }}
                 >
                   <span>
@@ -187,33 +218,18 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
           size="sm"
           onClick={() => {
             setCreating(true);
-            setTab("plano");
+            draft.cancel();
+            // Navega p/ ?aba=plano — o catálogo do editor vem nessa resposta.
+            navigate(plan?.id ?? null, draft.year, draft.month, "plano");
           }}
         >
           <Plus className="size-4" /> Novo plano
         </Button>
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Mês anterior"
-            onClick={() => shiftMonth(-1)}
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <span className="min-w-36 text-center text-sm font-medium">
-            {MONTH_LABELS[props.month - 1]}/{props.year}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Próximo mês"
-            onClick={() => shiftMonth(1)}
-          >
-            <ChevronRight className="size-4" />
-          </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {config?.apuracao === "mes_anterior" ? (
+            <ApuracaoBadge year={props.year} month={props.month} />
+          ) : null}
+          <MonthNav draft={draft} pending={pending} />
         </div>
       </div>
 
@@ -233,7 +249,11 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
                   ? "border-primary font-medium"
                   : "text-muted-foreground border-transparent"
               }`}
-              onClick={() => setTab(key)}
+              onClick={() => {
+                if (key === "grade") setCreating(false);
+                draft.cancel();
+                navigate(plan?.id ?? null, draft.year, draft.month, key);
+              }}
             >
               {label}
             </button>
@@ -242,45 +262,71 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
       ) : null}
 
       {tab === "plano" || !plan ? (
-        <PlanEditor
-          key={creating ? "novo" : (plan?.id ?? "novo")}
-          plan={creating ? null : plan}
-          config={creating ? null : config}
-          metrics={props.metrics}
-          responsibles={props.responsibles}
-          available={props.available}
-          allFields={props.allFields}
-          sources={props.sources}
-          operations={props.operations}
-          operationMembersById={props.operationMembersById}
-          currencies={props.currencies}
-          onSaved={(planId) => {
-            setCreating(false);
-            setTab("grade");
-            navigate(planId, props.year, props.month);
-          }}
-          onDeleted={() => {
-            setCreating(false);
-            navigate(null, props.year, props.month);
-          }}
-        />
+        props.editorCatalog ? (
+          <PlanEditor
+            key={creating ? "novo" : (plan?.id ?? "novo")}
+            plan={creating ? null : plan}
+            config={creating ? null : config}
+            metrics={props.editorCatalog.metrics}
+            responsibles={props.responsibles}
+            available={props.editorCatalog.available}
+            allFields={props.editorCatalog.allFields}
+            sources={props.editorCatalog.sources}
+            operations={props.operations}
+            operationMembersById={props.operationMembersById}
+            currencies={props.editorCatalog.currencies}
+            onSaved={(planId) => {
+              setCreating(false);
+              navigate(planId, draft.year, draft.month, "grade");
+            }}
+            onDeleted={() => {
+              setCreating(false);
+              navigate(null, draft.year, draft.month, "grade");
+            }}
+          />
+        ) : (
+          // Janela da soft navigation p/ ?aba=plano (catálogo ainda no server).
+          <p className="text-muted-foreground text-sm">Carregando editor…</p>
+        )
       ) : config ? (
-        <CompGrid
-          plan={plan}
-          config={config}
-          year={props.year}
-          month={props.month}
-          entries={props.entries}
-          responsibles={props.responsibles}
-          targets={props.targets}
-          targetRates={props.targetRates}
-          operationMembersById={props.operationMembersById}
-        />
+        // Trava OBRIGATÓRIA durante a troca de mês: com rótulo novo e dados
+        // antigos em tela, uma célula editada gravaria no mês ERRADO.
+        <div
+          className={busy ? "pointer-events-none opacity-60" : undefined}
+          aria-busy={busy}
+        >
+          <CompGrid
+            plan={plan}
+            config={config}
+            year={props.year}
+            month={props.month}
+            entries={props.entries}
+            responsibles={props.responsibles}
+            targets={props.targets}
+            targetRates={props.targetRates}
+            operationMembersById={props.operationMembersById}
+          />
+        </div>
       ) : (
         <p className="text-destructive text-sm">
           Configuração do plano inválida — reabra a aba Plano e salve novamente.
         </p>
       )}
     </div>
+  );
+}
+
+/** Badge "Apurado sobre <mês>" — plano com apuração no mês anterior. */
+export function ApuracaoBadge(props: { year: number; month: number }) {
+  const ref = apuracaoRef(props.year, props.month, {
+    apuracao: "mes_anterior",
+  });
+  return (
+    <span
+      className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs"
+      title="Este plano apura o realizado e as metas sobre o mês anterior ao do lançamento."
+    >
+      Apurado sobre {MONTH_LABELS[ref.month - 1]}/{ref.year}
+    </span>
   );
 }

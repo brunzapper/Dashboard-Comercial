@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4: APURAÇÃO SOBRE O MÊS ANTERIOR (config.apuracao) — o recompute do
+// lançamento M consulta realizado/metas/taxas de M-1 via apuracaoRef. O
+// deslocamento vive DENTRO de loadTargetsByMember/loadTargetRatesForConfig e
+// no monthPeriod do recompute; os call sites falam SEMPRE o mês do
+// lançamento (contrato anti-dupla-conversão). Entries (leitura/insert) e
+// espelho seguem no mês de pagamento; computed.ref carimba a janela apurada.
 // v1.3: match de membro por CAMPO do registro (factor.memberField) — o filtro
 // injetado vira `<campo> in (display_names do grupo canônico)` via
 // memberFilterFor (expansão por CONJUNTO DE NOMES; expandResponsibleFilters
@@ -49,6 +55,7 @@ import {
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 import {
+  apuracaoRef,
   computeEntry,
   explicitMemberIds,
   factorTargetCurrencies,
@@ -171,8 +178,9 @@ export function resolveTargetRates(
 /**
  * Conveniência p/ os callers fora do recompute (deriveTotal/publish/pages):
  * fast path SEM consulta quando o plano não usa moeda de alvo; senão carrega
- * as taxas e resolve no trimestre do fim do mês (mesma regra do recompute —
- * yearQuarterOf(period.to)).
+ * as taxas e resolve no trimestre do fim do mês APURADO (mesma regra do
+ * recompute — yearQuarterOf(period.to)). `year`/`month` = mês do LANÇAMENTO;
+ * o deslocamento de apuração acontece AQUI (apuracaoRef) — nunca no caller.
  */
 export async function loadTargetRatesForConfig(
   supabase: SupabaseClient,
@@ -182,8 +190,9 @@ export async function loadTargetRatesForConfig(
 ): Promise<Record<string, number | null>> {
   if (factorTargetCurrencies(config).length === 0) return {};
   const rates = await loadCurrencyRates(supabase);
-  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(
-    lastDayOfMonth(year, month)
+  const ref = apuracaoRef(year, month, config);
+  const monthEnd = `${ref.year}-${String(ref.month).padStart(2, "0")}-${String(
+    lastDayOfMonth(ref.year, ref.month)
   ).padStart(2, "0")}`;
   return resolveTargetRates(config, rates, yearQuarterOf(monthEnd));
 }
@@ -216,7 +225,9 @@ export function operationMembersFromScopes(
  * Alvos do mês por membro (chaveados por factorId), lidos de `goals` num batch
  * único: `responsible_id in (grupo canônico expandido)` + `metric in (chaves
  * dos fatores)`. Dobra apelido→canônico: linha do id CANÔNICO sempre vence;
- * apelido só preenche ausência.
+ * apelido só preenche ausência. `opts.year/month` = mês do LANÇAMENTO
+ * (pagamento); a janela apurada é derivada AQUI via apuracaoRef — call sites
+ * nunca passam mês deslocado (contrato anti-dupla-conversão do model v1.4).
  */
 export async function loadTargetsByMember(
   supabase: SupabaseClient,
@@ -235,11 +246,12 @@ export async function loadTargetsByMember(
     opts.config.factors.map((f) => [f.metricKey, f.id])
   );
   const expanded = expandResponsibleIds(opts.memberIds, opts.canon);
+  const ref = apuracaoRef(opts.year, opts.month, opts.config);
   const { data, error } = await supabase
     .from("goals")
     .select("responsible_id, metric, target")
-    .eq("period_year", opts.year)
-    .eq("period_month", opts.month)
+    .eq("period_year", ref.year)
+    .eq("period_month", ref.month)
     .eq("scope", "responsible")
     .in("metric", metricKeys)
     .in("responsible_id", expanded);
@@ -350,7 +362,12 @@ export async function recomputePlanMonth(
     canon,
   });
 
-  const period = monthPeriod(opts.year, opts.month, sources);
+  // Janela APURADA (M-1 quando config.apuracao = "mes_anterior"): desloca SÓ
+  // realizado/taxas — targets já deslocam DENTRO de loadTargetsByMember (não
+  // deslocar lá em cima: dupla conversão leria M-2); entries/insert seguem no
+  // mês de pagamento (opts.year/month).
+  const ref = apuracaoRef(opts.year, opts.month, config);
+  const period = monthPeriod(ref.year, ref.month, sources);
   const conversionPeriod = yearQuarterOf(period.to);
   const targetRates = resolveTargetRates(config, rates, conversionPeriod);
   const runLimited = createTaskLimiter(WIDGET_TASK_CONCURRENCY);
@@ -405,6 +422,7 @@ export async function recomputePlanMonth(
       const computed: CompComputedRaw = {
         v: 1,
         at: nowIso,
+        ref, // janela apurada (== opts.year/month sem apuração deslocada)
         realized,
         ...(Object.keys(errors).length > 0 ? { errors } : {}),
       };

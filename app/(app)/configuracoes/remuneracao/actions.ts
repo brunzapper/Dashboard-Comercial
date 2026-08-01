@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 31/07/2026
+// v1.4: apuração sobre o mês anterior — saveTarget grava a meta no mês
+// APURADO (apuracaoRef; a célula do lançamento M edita a goal de M-1 em plano
+// "mes_anterior"), mas rederive/deriveTotal/publish seguem falando o mês do
+// LANÇAMENTO: o deslocamento é interno aos loaders do engine (contrato
+// anti-dupla-conversão). Espelho intocado (mês de pagamento).
 // v1.3: comissão multi-bloco (bounds por kind), memberField validado contra o
 // catálogo de campos (buildAvailableFields — nunca lista paralela),
 // defaultTarget/targetCurrency por fator (moeda precisa estar habilitada) e
@@ -71,6 +76,7 @@ import {
   type RecomputeResult,
 } from "@/lib/comp/engine";
 import {
+  apuracaoRef,
   compOperandCatalog,
   computeEntry,
   factorTargetCurrencies,
@@ -405,9 +411,12 @@ export async function saveTarget(input: {
   // Sempre no id CANÔNICO (as linhas da grade já são canônicas — cinto extra).
   const canon = await loadResponsibleCanon(supabase);
   const responsibleId = canonicalOf(input.responsibleId, canon);
+  // A célula de alvo do lançamento M lê/grava a meta do mês APURADO (M-1 em
+  // plano "mes_anterior") — coerência com loadTargetsByMember e a área Metas.
+  const ref = apuracaoRef(input.year, input.month, config);
   const key = {
-    year: input.year,
-    month: input.month,
+    year: ref.year,
+    month: ref.month,
     scope: "responsible",
     responsibleId,
     metric: factor.metricKey,
@@ -420,6 +429,8 @@ export async function saveTarget(input: {
   if (gErr) return { ok: false, message: gErr };
 
   // Total efetivo da entry depende do alvo — re-deriva sem re-consultar RPC.
+  // Mês do LANÇAMENTO aqui (NÃO deslocar de novo: o loadTargetsByMember do
+  // deriveTotal já desloca internamente — passar o ref leria a meta de M-2).
   const totalErr = await rederiveEntryTotal(supabase, orgId, {
     plan,
     config,

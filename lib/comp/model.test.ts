@@ -25,6 +25,7 @@ import {
   MAX_COMMISSION_BLOCKS,
   MAX_COMMISSION_TIERS,
   MAX_TOTAL_FORMULA_TOKENS,
+  apuracaoRef,
   compFactorRef,
   compOperandCatalog,
   computeEntry,
@@ -305,6 +306,23 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(reparse(moedaRuim)).toBeNull();
     const pkVazio = makeConfig({ presetKey: "" as unknown as string });
     expect(reparse(pkVazio)).toBeNull();
+  });
+
+  it("apuracao: preserva mes_anterior, normaliza mes_corrente p/ ausência e rejeita inválido", () => {
+    const anterior = reparse(makeConfig({ apuracao: "mes_anterior" }));
+    expect(anterior!.apuracao).toBe("mes_anterior");
+    const corrente = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      apuracao: "mes_corrente",
+    });
+    expect(corrente).not.toBeNull();
+    expect("apuracao" in corrente!).toBe(false);
+    expect(
+      parseCompPlanConfig({
+        ...JSON.parse(JSON.stringify(makeConfig())),
+        apuracao: "trimestre",
+      })
+    ).toBeNull();
   });
 
   it("comissão: rejeita faixas vazias/desordenadas/duplicadas/negativas e acima do teto", () => {
@@ -1022,5 +1040,18 @@ describe("monthPeriod / lastDayOfMonth / roundMoney", () => {
   it("roundMoney arredonda a 2 casas", () => {
     expect(roundMoney(10.005)).toBe(10.01);
     expect(roundMoney(880.0000001)).toBe(880);
+  });
+});
+
+describe("apuracaoRef", () => {
+  it("sem a chave é identidade (mês do lançamento)", () => {
+    expect(apuracaoRef(2026, 7, {})).toEqual({ year: 2026, month: 7 });
+    expect(apuracaoRef(2026, 1, {})).toEqual({ year: 2026, month: 1 });
+  });
+
+  it("mes_anterior desloca -1 com rollover de ano em janeiro", () => {
+    const cfg = { apuracao: "mes_anterior" as const };
+    expect(apuracaoRef(2026, 7, cfg)).toEqual({ year: 2026, month: 6 });
+    expect(apuracaoRef(2026, 1, cfg)).toEqual({ year: 2025, month: 12 });
   });
 });

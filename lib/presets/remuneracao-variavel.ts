@@ -1,4 +1,7 @@
-// Versão: 3.0 | Data: 31/07/2026
+// Versão: 3.1 | Data: 31/07/2026
+// v3.1: os 5 planos nascem com apuracao: "mes_anterior" (padrão da casa — a
+// variável do mês M paga o realizado/metas de M-1; planos JÁ criados em
+// produção não são alcançados pelo ensure — backfill via SQL, ver PR).
 // Preset "Remuneração Variável": monta o CONTROLE de remuneração do comercial
 // — árvore de operações AEs/SDR-BDR COM os vínculos de responsáveis, 5 planos
 // de remuneração (comp_plans, ensure por config.presetKey), a base espelho
@@ -304,6 +307,7 @@ const COMP_PLANS: PresetCompPlan[] = [
     memberOperationNames: ["AE Closer"],
     config: {
       v: 1,
+      apuracao: "mes_anterior" as const,
       factors: [valorFactor("comp_valor_ae_closer", { defaultTarget: 35000 })],
       commissions: [AE_COMMISSION],
     },
@@ -315,6 +319,7 @@ const COMP_PLANS: PresetCompPlan[] = [
     memberOperationNames: ["AE Full Cycle"],
     config: {
       v: 1,
+      apuracao: "mes_anterior" as const,
       factors: [
         valorFactor("comp_valor_ae_fc", {
           defaultTarget: 10000,
@@ -331,6 +336,7 @@ const COMP_PLANS: PresetCompPlan[] = [
     memberOperationNames: ["SDR Inbound Full Cycle"],
     config: {
       v: 1,
+      apuracao: "mes_anterior" as const,
       factors: [
         valorFactor("comp_valor_sdr_in_fc", {
           memberField: "custom:sdr_responsavel",
@@ -364,6 +370,7 @@ const COMP_PLANS: PresetCompPlan[] = [
     memberOperationNames: ["SDR Outbound Full Cycle"],
     config: {
       v: 1,
+      apuracao: "mes_anterior" as const,
       factors: [
         valorFactor("comp_valor_sdr_out_fc", {
           memberField: "custom:sdr_responsavel",
@@ -380,6 +387,7 @@ const COMP_PLANS: PresetCompPlan[] = [
     memberOperationNames: ["SDR Outbound Simples"],
     config: {
       v: 1,
+      apuracao: "mes_anterior" as const,
       factors: [reunioesFactor("comp_reunioes_sdr_out_s", 20)],
       commissions: [PREMIO_META_REUNIOES],
     },

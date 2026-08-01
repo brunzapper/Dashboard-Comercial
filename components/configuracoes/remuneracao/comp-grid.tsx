@@ -1,7 +1,11 @@
-// Versão: 1.3 | Data: 31/07/2026 (v1.3: comissão multi-bloco — tooltip lista
+// Versão: 1.4 | Data: 31/07/2026 (v1.4: plano com config.apuracao =
+// "mes_anterior" — tooltip do cabeçalho de fator e legenda do rodapé avisam
+// que Alvo/Real. referem-se ao mês APURADO; a célula de alvo grava a meta do
+// mês apurado via saveTarget, que desloca no server)
+// v1.3: comissão multi-bloco — tooltip lista
 // os blocos; alvo com moeda própria do fator: formato na moeda digitada,
 // convertido no tooltip via targetRates do server, itálico quando o alvo vem
-// do padrão do plano e erro destrutivo quando falta a cotação do trimestre)
+// do padrão do plano e erro destrutivo quando falta a cotação do trimestre
 // v1.2: linhas = lista efetiva manual ∪ operações via helpers do model —
 // mesma resolução do servidor.
 // Grade mensal da remuneração (0112): linhas = membros canônicos; colunas =
@@ -271,7 +275,11 @@ export function CompGrid(props: CompGridProps) {
                   key={f.id}
                   colSpan={4}
                   className="border-l text-center"
-                  title="Alvos são metas — também editáveis em Configurações → Metas"
+                  title={
+                    props.config.apuracao === "mes_anterior"
+                      ? "Alvo e Realizado referem-se ao mês APURADO (anterior ao do lançamento). Alvos são metas — também editáveis em Configurações → Metas, no mês apurado."
+                      : "Alvos são metas — também editáveis em Configurações → Metas"
+                  }
                 >
                   {f.label}{" "}
                   <span className="text-muted-foreground font-normal">
@@ -332,6 +340,9 @@ export function CompGrid(props: CompGridProps) {
         Alvo, Base e Bônus são digitados. Real., Ating.%, valores e Comissão
         são calculados — duplo clique sobrescreve à mão (ponto âmbar; ✕ volta
         ao calculado). Alvos são metas (Configurações → Metas).
+        {props.config.apuracao === "mes_anterior"
+          ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Alvo/Real. referem-se ao mês apurado."
+          : ""}
       </p>
     </div>
   );
