@@ -1,4 +1,10 @@
-// Versão: 2.1 | Data: 20/07/2026
+// Versão: 2.2 | Data: 02/08/2026
+// v2.2 (02/08/2026): controle "Aplica-se a" — checkboxes das bases RAIZ
+//   (rootSources do catálogo `sources`) gravadas em applies_to; nenhuma
+//   marcada = campo geral. Editável só em campo local/app; campo Bitrix exibe
+//   desabilitado (o sync do catálogo é o dono da coluna) e linha core não
+//   mostra o controle. O hidden `applies_to_present` avisa a action de que o
+//   controle foi renderizado — form sem ele (legado/em voo) não mexe na coluna.
 // v2.1 (20/07/2026): receitas guiadas na criação (RecipeStrip — a receita
 //   escolhe tipo/fórmula/formato), prévias ao vivo (registros reais no
 //   'calculado'; runCalculatedWidget no 'calculado_agg') e preset
@@ -46,7 +52,7 @@ import {
 } from "@/lib/records/types";
 import { CORE_SELECT_CAPABLE, isCoreDef } from "@/lib/records/core-defs";
 import { CURRENCY_OPTIONS } from "@/lib/widgets/currency";
-import type { SourceDef } from "@/lib/sources";
+import { rootSources, type SourceDef } from "@/lib/sources";
 import {
   createField,
   updateField,
@@ -167,6 +173,11 @@ export function FieldForm({
   // (rótulo/olho/ordem; tipo travado, exceto texto↔seleção na whitelist).
   const isCore = Boolean(field && isCoreDef(field));
   const coreSelectable = isCore && CORE_SELECT_CAPABLE.has(field!.field_key);
+  // "Aplica-se a" (02/08/2026): opções = bases RAIZ do catálogo (sub-base
+  // herda os campos da pai — nunca é opção). Campo Bitrix exibe desabilitado:
+  // o sync do catálogo é o dono do applies_to dele.
+  const isBitrix = field?.source_system === "bitrix";
+  const appliesRoots = rootSources(sources ?? []);
   const action = isEdit ? updateField : createField;
   const [state, formAction, pending] = useActionState(action, initial);
   const [dataType, setDataType] = useState<DataType>(
@@ -552,6 +563,55 @@ export function FieldForm({
           </div>
         </>
       )}
+
+      {!isCore && appliesRoots.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <Label className="gap-1.5">
+            Aplica-se a
+            <HelpHint ariaLabel="Como o Aplica-se a funciona">
+              <p>
+                Bases em que o campo existe (coluna em Registros, formulários e
+                seletores). Sub-bases herdam os campos da base raiz.
+              </p>
+              <p>
+                <strong>Nenhuma marcada</strong> = campo geral, vale para todas
+                as bases.
+              </p>
+            </HelpHint>
+          </Label>
+          {/* O marcador só sai em form EDITÁVEL: sem ele a action não toca na
+              coluna (protege forms sem o controle e o campo Bitrix). */}
+          {!isBitrix ? (
+            <input type="hidden" name="applies_to_present" value="1" />
+          ) : null}
+          <div className="flex flex-wrap gap-3">
+            {appliesRoots.map((s) => (
+              <label
+                key={s.recordType}
+                className="flex items-center gap-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  name="applies_to"
+                  value={s.recordType}
+                  defaultChecked={(field?.applies_to ?? []).includes(
+                    s.recordType
+                  )}
+                  disabled={isBitrix}
+                  className="size-4 accent-primary"
+                />
+                {s.label}
+              </label>
+            ))}
+          </div>
+          {isBitrix ? (
+            <p className="text-muted-foreground text-xs">
+              Campo do Bitrix — as bases são definidas pela sincronização do
+              catálogo.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <label className="flex items-center gap-2 text-sm">
         <input
