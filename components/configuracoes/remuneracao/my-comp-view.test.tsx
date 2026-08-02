@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: botão "Google Planilhas" (0115) — some sem config (vendedor não é
+// admin); configurado, o clique chama a action com scope "minha". Actions de
+// sheets mockadas (importam server-only).
 // Versão: 1.0 | Data: 02/08/2026
 // Testes da visão do vendedor: botões Exportar CSV/PDF do próprio
 // demonstrativo — CSV dispara o download (blob) e PDF monta o portal
@@ -7,16 +11,25 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createSheetExportTicket } from "@/app/(app)/configuracoes/remuneracao/sheets-actions";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
 import { MyCompView, type MyCompViewProps } from "./my-comp-view";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/configuracoes/remuneracao",
 }));
 vi.mock("@/components/dashboards/pending-context", () => ({
   useNavPending: () => ({ pending: false, run: (fn: () => void) => fn() }),
+}));
+vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+  createSheetExportTicket: vi.fn(async () => ({
+    ok: true,
+    token: "tok-de-teste",
+    webappUrl: "https://script.google.com/macros/s/x/exec",
+  })),
+  saveCompSheetsWebappUrl: vi.fn(async () => ({ ok: true })),
 }));
 
 class ResizeObserverStub {
@@ -88,6 +101,7 @@ function renderView(over: Partial<MyCompViewProps> = {}) {
       year={2026}
       month={8}
       linked
+      sheetsConfigured={false}
       {...over}
     />
   );
@@ -120,5 +134,25 @@ describe("MyCompView export", () => {
     expect(
       screen.queryByRole("button", { name: /Exportar/ })
     ).toBeNull();
+  });
+
+  it("Sheets não configurado: vendedor não vê o botão", () => {
+    renderView({ sheetsConfigured: false });
+    expect(
+      screen.queryByRole("button", { name: /Google Planilhas/ })
+    ).toBeNull();
+  });
+
+  it("Sheets configurado: clique chama a action com scope 'minha'", async () => {
+    const fakeWin = { close: vi.fn(), location: { href: "" } };
+    window.open = vi.fn(() => fakeWin as unknown as Window);
+    renderView({ sheetsConfigured: true });
+    fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
+    await waitFor(() =>
+      expect(vi.mocked(createSheetExportTicket)).toHaveBeenCalled()
+    );
+    expect(vi.mocked(createSheetExportTicket).mock.calls[0][0].scope).toBe(
+      "minha"
+    );
   });
 });

@@ -30,6 +30,11 @@ vi.mock("@/app/(app)/configuracoes/remuneracao/actions", () => ({
   saveEntryInputs: vi.fn(),
   saveTarget: vi.fn(),
 }));
+// O botão de Sheets (via comp-overview) importa actions server-only.
+vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+  createSheetExportTicket: vi.fn(),
+  saveCompSheetsWebappUrl: vi.fn(),
+}));
 vi.mock("@/lib/feedback/notify", () => ({ notifyActionError: vi.fn() }));
 
 beforeEach(() => {
@@ -76,6 +81,7 @@ function renderManager(over: Partial<RemuneracaoManagerProps> = {}) {
       overview={{ entries: [], targetsByPlan: {}, targetRatesByPlan: {} }}
       operations={[]}
       operationMembersById={{}}
+      sheetsWebappUrl={null}
       {...over}
     />
   );

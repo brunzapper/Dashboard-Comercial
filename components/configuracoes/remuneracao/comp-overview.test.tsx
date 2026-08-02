@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: botão "Google Planilhas" (0115) — sem config, admin vê só o
+// "Configurar…"; configurado, o clique abre a aba SINCRONAMENTE
+// (popup-safe) e chama a action com scope/aba/números; falha fecha a aba.
+// Actions de sheets são mockadas (importam server-only).
 // Versão: 1.1 | Data: 02/08/2026
 // v1.1: exportação — botões Exportar CSV/PDF do toolbar (CSV dispara o
 // download; PDF monta o portal [data-print-root], chama window.print e
@@ -16,11 +21,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fmtMoneyBRL } from "@/lib/comp/commission-label";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
+import { createSheetExportTicket } from "@/app/(app)/configuracoes/remuneracao/sheets-actions";
 import { CompOverview } from "./comp-overview";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
 } from "./remuneracao-manager";
+
+// O botão de Sheets importa as actions (server-only) e o popover usa o router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+  createSheetExportTicket: vi.fn(async () => ({
+    ok: true,
+    token: "tok-de-teste",
+    webappUrl: "https://script.google.com/macros/s/x/exec",
+  })),
+  saveCompSheetsWebappUrl: vi.fn(async () => ({ ok: true })),
+}));
 
 // Radix (tooltips dos cards) exige ResizeObserver, ausente no jsdom.
 class ResizeObserverStub {
@@ -129,7 +148,7 @@ function entry(
   };
 }
 
-function renderOverview() {
+function renderOverview(sheetsWebappUrl: string | null = null) {
   return render(
     <CompOverview
       plans={plans}
@@ -148,6 +167,7 @@ function renderOverview() {
       operationMembersById={{}}
       year={2026}
       month={8}
+      sheetsWebappUrl={sheetsWebappUrl}
     />
   );
 }
@@ -225,6 +245,50 @@ describe("CompOverview", () => {
     expect(text).toContain("Ana");
     expect(text).toContain("Plano A");
     expect(text).not.toContain("Bruno");
+  });
+
+  it("Sheets sem config: admin vê só o 'Configurar…' (sem botão de export)", () => {
+    renderOverview(null);
+    expect(
+      screen.getByRole("button", { name: /Google Planilhas — Configurar…/ })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /^Google Planilhas$/ })
+    ).toBeNull();
+  });
+
+  it("Sheets configurado: clique abre aba SINCRONAMENTE e chama a action", async () => {
+    const fakeWin = { close: vi.fn(), location: { href: "" } };
+    window.open = vi.fn(() => fakeWin as unknown as Window);
+    renderOverview("https://script.google.com/macros/s/x/exec");
+    fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
+    // window.open antes de qualquer await (popup-safe).
+    expect(window.open).toHaveBeenCalledWith("", "_blank");
+    await waitFor(() =>
+      expect(vi.mocked(createSheetExportTicket)).toHaveBeenCalled()
+    );
+    const arg = vi.mocked(createSheetExportTicket).mock.calls[0][0];
+    expect(arg.scope).toBe("visao-geral");
+    expect(arg.tabName).toBe("Agosto 2026");
+    // Números CRUS no payload (compReportValues).
+    expect(arg.rows.flat().some((c) => typeof c === "number")).toBe(true);
+    await waitFor(() =>
+      expect(fakeWin.location.href).toContain(
+        "https://script.google.com/macros/s/x/exec?token="
+      )
+    );
+  });
+
+  it("Sheets: falha da action fecha a aba aberta", async () => {
+    vi.mocked(createSheetExportTicket).mockResolvedValueOnce({
+      ok: false,
+      message: "nope",
+    });
+    const fakeWin = { close: vi.fn(), location: { href: "" } };
+    window.open = vi.fn(() => fakeWin as unknown as Window);
+    renderOverview("https://script.google.com/macros/s/x/exec");
+    fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
+    await waitFor(() => expect(fakeWin.close).toHaveBeenCalled());
   });
 
   it("preferência salva abre por pessoa; 'Usar como padrão' grava a chave", async () => {

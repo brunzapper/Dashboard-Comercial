@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: compReportValues (export p/ Google Planilhas) — números CRUS, ""
+// onde a UI mostra "—", e paridade byte-a-byte com o CSV via csvNumber.
 // Testes do CSV de Remuneração (lib/export/comp.ts): headers pinados, linhas
 // por fator/comissão/base/bônus/total derivadas pelo MESMO computeEntry dos
 // cards (fixtures espelham comp-overview.test.tsx), memória da comissão via
@@ -8,9 +10,11 @@ import { describe, expect, it } from "vitest";
 
 import type { CompPlanConfig } from "@/lib/comp/model";
 
+import { csvNumber } from "./csv";
 import {
   COMP_CSV_HEADERS,
   compReportCsv,
+  compReportValues,
   compStatementRows,
   type CompStatementInput,
 } from "./comp";
@@ -203,6 +207,55 @@ describe("compStatementRows", () => {
     expect(rows).toEqual([
       ["Plano B", "Ana", "Total", "", "", "", "", "", "sem lançamento no mês"],
     ]);
+  });
+});
+
+describe("compReportValues", () => {
+  it("devolve números CRUS (Sheets) e '' onde a UI mostra '—'", () => {
+    const { headers, rows } = compReportValues([
+      statement({
+        config: configB,
+        planName: "Plano B",
+        memberLabel: "Bruno",
+        baseAmountDefault: 1000,
+        entry: {
+          ...entryB,
+          computed: {
+            v: 1,
+            at: "2026-08-01T10:00:00Z",
+            realized: { vendas: 50500 },
+          },
+        },
+        targets: { vendas: 100000 },
+      }),
+      statement({ config: configA, planName: "Plano A", entry: entryA }),
+    ]);
+    expect(headers).toBe(COMP_CSV_HEADERS);
+    for (const r of rows) expect(r).toHaveLength(COMP_CSV_HEADERS.length);
+    const fatorB = rows.find((r) => r[2] === "Fator" && r[3] === "Vendas")!;
+    expect(fatorB[4]).toBe(100000); // número, não "100000"
+    expect(fatorB[6]).toBe(50.5); // número, não "50,5"
+    const fatorA = rows.find((r) => r[2] === "Fator" && r[3] === "Reuniões")!;
+    expect(fatorA[7]).toBe(""); // peso 0 sem override ⇒ vazio
+  });
+
+  it("paridade com o CSV: rows === values mapeados por csvNumber", () => {
+    const inputs = [
+      statement({ config: configA, planName: "Plano A", entry: entryA }),
+      statement({
+        config: configB,
+        planName: "Plano B",
+        baseAmountDefault: 1000,
+        entry: entryB,
+        targets: { vendas: 100000 },
+      }),
+      statement({ config: configB, planName: "Plano B", memberLabel: "Ana" }),
+    ];
+    const csvRows = compReportCsv(inputs).rows;
+    const valueRows = compReportValues(inputs).rows.map((r) =>
+      r.map((c) => (typeof c === "number" ? csvNumber(c) : c))
+    );
+    expect(csvRows).toEqual(valueRows);
   });
 });
 

@@ -1,3 +1,12 @@
+<!-- Versão: 1.54 | Data: 02/08/2026 -->
+<!-- v1.54 (02/08/2026): §4.18 — export p/ GOOGLE PLANILHAS (0115): Apps
+     Script Web App "executar como usuário que acessa" cria/atualiza a
+     planilha no Drive do PRÓPRIO usuário (aba por mês; sem credencial Google
+     no app). Handshake por TICKET single-use (token sha256 at rest, TTL 15
+     min, GET consome/POST completa, 404 uniforme) em
+     /api/sheets-export/[token]; vínculo durável em comp_sheet_links; URL do
+     Web App por org em sync_config 'comp_sheets_webapp' (UI no toolbar da
+     Visão geral). -->
 <!-- Versão: 1.53 | Data: 02/08/2026 -->
 <!-- v1.53 (02/08/2026): §4.18 — EXPORTAÇÃO CSV/PDF da Remuneração (Visão
      geral do admin + my-comp-view do vendedor): 100% client-derived das
@@ -2658,6 +2667,36 @@ total opcional por plano.
   CSV próprio — a page não carrega o display_name; tradeoff documentado).
   Fiscalizado por `lib/export/comp.test.ts` + casos novos de
   `comp-overview.test.tsx`/`my-comp-view.test.tsx`.
+  **Export p/ Google Planilhas (0115, 02/08/2026).** Botão "Google
+  Planilhas" (Visão geral + my-comp-view) cria/atualiza uma planilha NA CONTA
+  GOOGLE do próprio usuário SEM credencial Google no app: Web App do Apps
+  Script (`integrations/apps-script/comp_sheets_webapp.gs`) publicado como
+  "executar como usuário que acessa". Handshake: a action
+  `createSheetExportTicket` (`sheets-actions.ts`; gates sessão +
+  `isSettingsAreaDenied` + admin no escopo `visao-geral`; caps de
+  `validateReportPayload`) grava um TICKET single-use em
+  `comp_sheet_export_tickets` (token de `lib/snapshots/token.ts`, só o sha256
+  persiste; payload congelado com números CRUS de `compReportValues` — o
+  builder tipado único de `lib/export/comp.ts`, CSV segue byte-idêntico) e o
+  cliente abre `<webappUrl>?token=…` numa aba nova (window.open SÍNCRONO no
+  gesto — popup-safe). O script busca o payload em
+  `/api/sheets-export/[token]` (GET CONSOME o ticket — corrida resolvida por
+  update condicional; TTL 15 min; compare constante; 404 UNIFORME), abre o
+  `knownSpreadsheetId` do vínculo ou cria a planilha, faz upsert da aba do
+  mês ("Agosto 2026"; `clear()` — re-export apaga edição manual da aba, por
+  design) e devolve id/url no POST, que grava `comp_sheet_links`
+  (usuário×escopo→planilha; RLS linha-própria; escrita da rota via service
+  role com org/user/escopo DA LINHA DO TICKET — nunca do corpo). Tickets SEM
+  policies (service-role only — a RLS não expressa os gates da action);
+  NUNCA policy anon (doutrina dos snapshots). Payload nasce no CLIENTE
+  (usuário só exporta o que a tela dele já renderiza; destino é o Drive
+  DELE — tradeoff aceito). URL do Web App por ORG em `sync_config`
+  'comp_sheets_webapp' (`lib/comp/sheets-export.ts` — validações puras +
+  loader fail-closed), editável no popover do botão (admin;
+  `saveCompSheetsWebappUrl` via client do usuário — a policy admin de
+  sync_config é a muralha). Fiscalizado por `lib/comp/sheets-export.test.ts`
+  + paridade CSV↔values em `lib/export/comp.test.ts` + casos de botão nos
+  testes das duas telas.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

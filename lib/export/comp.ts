@@ -1,6 +1,12 @@
-// Versão: 1.0 | Data: 02/08/2026
-// Núcleo PURO do CSV de Remuneração (client-safe, sem DOM) — consumido pela
-// Visão geral do admin (comp-overview) e pela visão do vendedor
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: builder interno TIPADO (compStatementCells) alimentando DOIS
+// renderizadores — o CSV (compStatementRows/compReportCsv, strings via
+// csvNumber, saída BYTE-IDÊNTICA à v1.0; os testes pinam) e o novo
+// compReportValues (números CRUS p/ o export ao Google Planilhas via Apps
+// Script — Sheets recebe number, nunca "50,5"). null = célula vazia ("—" da
+// UI) nos dois formatos.
+// Núcleo PURO de exportação da Remuneração (client-safe, sem DOM) — consumido
+// pela Visão geral do admin (comp-overview) e pela visão do vendedor
 // (my-comp-view). Formato LONGO (uma linha por item: fator/bloco de comissão/
 // base/bônus/total) pensado p/ abrir direto no Google Planilhas/Excel pelas
 // convenções de lib/export/csv.ts (";" + BOM; números via csvNumber). Deriva
@@ -52,17 +58,20 @@ export const COMP_CSV_HEADERS = [
   "Observação",
 ];
 
-/** Linhas do demonstrativo de UM plano×membro (mesma ordem do CompPlanCard). */
-export function compStatementRows(input: CompStatementInput): string[][] {
+// Célula tipada do builder interno: number cru (Sheets), null = vazio.
+type ReportCell = string | number | null;
+
+/** Células do demonstrativo de UM plano×membro (mesma ordem do CompPlanCard). */
+function compStatementCells(input: CompStatementInput): ReportCell[][] {
   const row = (
     tipo: string,
     item: string,
-    alvo: string,
-    realizado: string,
-    ating: string,
-    valor: string,
+    alvo: ReportCell,
+    realizado: ReportCell,
+    ating: ReportCell,
+    valor: ReportCell,
     obs: string
-  ): string[] => [
+  ): ReportCell[] => [
     input.planName,
     input.memberLabel,
     tipo,
@@ -75,7 +84,7 @@ export function compStatementRows(input: CompStatementInput): string[][] {
   ];
 
   if (!input.entry) {
-    return [row("Total", "", "", "", "", "", "sem lançamento no mês")];
+    return [row("Total", "", null, null, null, null, "sem lançamento no mês")];
   }
 
   const computed = (input.entry.computed ?? null) as CompComputedRaw | null;
@@ -90,7 +99,7 @@ export function compStatementRows(input: CompStatementInput): string[][] {
     input.targetRates
   );
 
-  const rows: string[][] = [];
+  const rows: ReportCell[][] = [];
   for (const f of input.config.factors) {
     const b = breakdown.byFactor[f.id];
     if (!b) continue;
@@ -112,11 +121,11 @@ export function compStatementRows(input: CompStatementInput): string[][] {
       row(
         "Fator",
         f.label,
-        b.target != null ? csvNumber(b.target) : "",
-        b.realized != null ? csvNumber(b.realized) : "",
-        b.attainmentPct != null ? csvNumber(roundMoney(b.attainmentPct)) : "",
+        b.target,
+        b.realized,
+        b.attainmentPct != null ? roundMoney(b.attainmentPct) : null,
         // Paridade com o card: peso 0 sem override exibe "—" (aqui vazio).
-        f.weightPct === 0 && !b.overridden.payout ? "" : csvNumber(b.payout),
+        f.weightPct === 0 && !b.overridden.payout ? null : b.payout,
         notes.join(" · ")
       )
     );
@@ -128,7 +137,7 @@ export function compStatementRows(input: CompStatementInput): string[][] {
       (mem.formula ? `${mem.formula} — ` : "") +
       mem.tierNote +
       (mem.memberTiers ? " · faixas do membro" : "");
-    rows.push(row("Comissão", cb.label, "", "", "", csvNumber(cb.value), obs));
+    rows.push(row("Comissão", cb.label, null, null, null, cb.value, obs));
   }
   // Linha da soma/override: só quando agrega algo além do bloco único (mesma
   // regra do CompPlanCard).
@@ -140,10 +149,10 @@ export function compStatementRows(input: CompStatementInput): string[][] {
       row(
         "Comissão (total)",
         "",
-        "",
-        "",
-        "",
-        csvNumber(breakdown.commission.value),
+        null,
+        null,
+        null,
+        breakdown.commission.value,
         breakdown.commission.overridden ? "ajuste manual" : ""
       )
     );
@@ -153,15 +162,15 @@ export function compStatementRows(input: CompStatementInput): string[][] {
     row(
       "Base variável",
       "",
-      "",
-      "",
-      "",
-      csvNumber(breakdown.base),
+      null,
+      null,
+      null,
+      breakdown.base,
       "não soma no total — multiplica os fatores"
     )
   );
   for (const b of inputs.bonuses) {
-    rows.push(row("Bônus", b.label, "", "", "", csvNumber(b.amount), ""));
+    rows.push(row("Bônus", b.label, null, null, null, b.amount, ""));
   }
 
   const totalObs = breakdown.totalOverridden
@@ -171,21 +180,18 @@ export function compStatementRows(input: CompStatementInput): string[][] {
       : breakdown.totalFromFormula
         ? "total pela fórmula do plano"
         : "";
-  rows.push(
-    row(
-      "Total",
-      "",
-      "",
-      "",
-      "",
-      breakdown.total != null ? csvNumber(breakdown.total) : "",
-      totalObs
-    )
-  );
+  rows.push(row("Total", "", null, null, null, breakdown.total, totalObs));
   return rows;
 }
 
-/** Relatório inteiro (concatena demonstrativos na ordem recebida). */
+/** Linhas do demonstrativo em STRINGS (CSV) — números via csvNumber. */
+export function compStatementRows(input: CompStatementInput): string[][] {
+  return compStatementCells(input).map((r) =>
+    r.map((c) => (typeof c === "number" ? csvNumber(c) : (c ?? "")))
+  );
+}
+
+/** Relatório inteiro em CSV (concatena demonstrativos na ordem recebida). */
 export function compReportCsv(inputs: CompStatementInput[]): {
   headers: string[];
   rows: string[][];
@@ -193,5 +199,21 @@ export function compReportCsv(inputs: CompStatementInput[]): {
   return {
     headers: COMP_CSV_HEADERS,
     rows: inputs.flatMap(compStatementRows),
+  };
+}
+
+/**
+ * Relatório inteiro em VALORES TIPADOS (export p/ Google Planilhas): números
+ * crus p/ o Sheets tratar como número; null vira célula vazia "".
+ */
+export function compReportValues(inputs: CompStatementInput[]): {
+  headers: string[];
+  rows: (string | number)[][];
+} {
+  return {
+    headers: COMP_CSV_HEADERS,
+    rows: inputs.flatMap((input) =>
+      compStatementCells(input).map((r) => r.map((c) => c ?? ""))
+    ),
   };
 }

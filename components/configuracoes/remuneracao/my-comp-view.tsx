@@ -1,3 +1,7 @@
+// Versão: 1.7 | Data: 02/08/2026
+// v1.7: botão "Google Planilhas" (SheetsExportButton, 0115) — planilha
+// "Minha remuneração" na conta Google do próprio vendedor; sem config aqui
+// (admin configura na Visão geral; vendedor sem config não vê o botão).
 // Versão: 1.6 | Data: 02/08/2026
 // v1.6: exportação CSV/PDF do próprio demonstrativo — mesma dupla da Visão
 // geral do admin (builder puro lib/export/comp.ts + CompReportPrint via
@@ -43,6 +47,7 @@ import { compReportCsv, type CompStatementInput } from "@/lib/export/comp";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { CompPlanCard } from "./comp-plan-card";
 import { CompReportPrint } from "./comp-report-print";
+import { SheetsExportButton } from "./sheets-export-button";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -60,6 +65,9 @@ export interface MyCompViewProps {
   year: number;
   month: number;
   linked: boolean; // usuário tem responsável vinculado?
+  // Export p/ Google Planilhas configurado na org? (vendedor recebe só o
+  // boolean — a URL fica na action, fonte única no clique.)
+  sheetsConfigured: boolean;
 }
 
 export function MyCompView(props: MyCompViewProps) {
@@ -89,10 +97,11 @@ export function MyCompView(props: MyCompViewProps) {
     .map((plan) => ({ plan, entry: entryByPlan.get(plan.id) ?? null }))
     .filter((c) => c.entry != null);
 
-  // Demonstrativo próprio → CSV (memberLabel vazio: a page não carrega o
-  // display_name; plano com config inválida sai — CompPlanCard renderiza null).
-  const exportCsv = () => {
-    const statements = cards.flatMap<CompStatementInput>(({ plan, entry }) => {
+  // Statements do próprio demonstrativo (memberLabel vazio: a page não
+  // carrega o display_name; plano com config inválida sai — CompPlanCard
+  // renderiza null). Reusado pelo CSV e pelo export ao Google Planilhas.
+  const buildStatements = () =>
+    cards.flatMap<CompStatementInput>(({ plan, entry }) => {
       const config = parseCompPlanConfig(plan.config);
       if (!config) return [];
       return [
@@ -107,7 +116,9 @@ export function MyCompView(props: MyCompViewProps) {
         },
       ];
     });
-    const { headers, rows } = compReportCsv(statements);
+
+  const exportCsv = () => {
+    const { headers, rows } = compReportCsv(buildStatements());
     downloadCsv(csvFilename("minha-remuneracao"), buildCsv(headers, rows));
   };
 
@@ -143,6 +154,14 @@ export function MyCompView(props: MyCompViewProps) {
               >
                 <Printer className="size-4" /> Exportar PDF
               </Button>
+              <SheetsExportButton
+                scope="minha"
+                year={props.year}
+                month={props.month}
+                configured={props.sheetsConfigured}
+                admin={false}
+                getStatements={buildStatements}
+              />
             </div>
             {cards.map(({ plan, entry }) => (
               <CompPlanCard

@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: botão "Google Planilhas" (SheetsExportButton, 0115) no toolbar —
+// mesmo caminho de statements do CSV, planilha criada na conta Google do
+// próprio admin via Apps Script Web App; popover de config (URL /exec) aqui.
 // Versão: 1.1 | Data: 02/08/2026
 // v1.1: exportação CSV/PDF — 100% client-derived dos MESMOS dados das props:
 // CSV pelo builder puro lib/export/comp.ts (compReportCsv, convenções de
@@ -43,6 +47,7 @@ import {
   type CompReportCard,
   type CompReportSection,
 } from "./comp-report-print";
+import { SheetsExportButton } from "./sheets-export-button";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -65,6 +70,9 @@ export interface CompOverviewProps {
   operationMembersById: Record<string, string[]>;
   year: number;
   month: number;
+  // URL /exec do Web App de export p/ Google Planilhas (null = não
+  // configurado — o botão vira o afford. de configuração do admin).
+  sheetsWebappUrl: string | null;
 }
 
 // Uma célula plano×membro esperado (entry pode faltar — "sem lançamento").
@@ -355,6 +363,15 @@ export function CompOverview(props: CompOverviewProps) {
         >
           <Printer className="size-4" /> Exportar PDF
         </Button>
+        <SheetsExportButton
+          scope="visao-geral"
+          year={props.year}
+          month={props.month}
+          configured={props.sheetsWebappUrl != null}
+          admin
+          webappUrl={props.sheetsWebappUrl}
+          getStatements={() => cells.map(toStatement)}
+        />
         <span className="text-muted-foreground ml-auto text-sm">
           Total do mês:{" "}
           <span className="text-foreground font-semibold">

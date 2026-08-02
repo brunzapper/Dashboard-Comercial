@@ -670,7 +670,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   convenções de `lib/export/csv.ts`) e "PDF" = impressão do navegador via
   portal `[data-print-root]` (`comp-report-print.tsx` + `@media print` de
   `globals.css`, flag `body[data-printing="comp"]`) — nenhuma action/RPC
-  nova. NUNCA gerar fórmula a
+  nova. **Export p/ Google Planilhas (0115):** Web App do Apps Script
+  "executar como usuário que acessa" grava a planilha no Drive do PRÓPRIO
+  usuário (sem credencial Google no app); handshake por TICKET single-use
+  (`comp_sheet_export_tickets` — token sha256 at rest, TTL 15 min, GET
+  consome/POST completa, 404 uniforme em `/api/sheets-export/[token]`;
+  tabela SEM policies — service role only, org carimbada na action) +
+  vínculo durável `comp_sheet_links` (RLS linha-própria; upsert da rota usa
+  org/user/escopo DA LINHA do ticket, nunca do corpo); payload
+  client-derived (`compReportValues` — números crus; CSV segue
+  byte-idêntico) → Drive do próprio usuário (tradeoff aceito); URL do Web
+  App por org em `sync_config` 'comp_sheets_webapp'
+  (`lib/comp/sheets-export.ts`); NUNCA policy anon. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
