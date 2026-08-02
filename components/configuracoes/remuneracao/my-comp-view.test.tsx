@@ -151,8 +151,11 @@ describe("MyCompView export", () => {
     await waitFor(() =>
       expect(vi.mocked(createSheetExportTicket)).toHaveBeenCalled()
     );
-    expect(vi.mocked(createSheetExportTicket).mock.calls[0][0].scope).toBe(
-      "minha"
-    );
+    const arg = vi.mocked(createSheetExportTicket).mock.calls[0][0];
+    expect(arg.scope).toBe("minha");
+    // Demonstrativo do vendedor: título próprio e nenhuma coluna "Pessoa"
+    // (a page não carrega display_name — o layout omite a coluna).
+    expect(arg.headers[0]).toContain("Minha remuneração");
+    expect(JSON.stringify(arg.rows)).not.toContain("Pessoa");
   });
 });

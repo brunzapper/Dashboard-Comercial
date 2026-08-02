@@ -6,8 +6,9 @@
 // blocker: window.open("", "_blank") SÍNCRONO no gesto; o redirect entra
 // depois que a action responde. Config (URL /exec do Web App, por org em
 // sync_config) em Popover — só admin vê o "Configurar…"; vendedor sem config
-// não vê nada. Payload derivado NO CLIQUE via compReportValues (números crus
-// p/ o Sheets) a partir dos MESMOS statements do CSV.
+// não vê nada. Payload derivado NO CLIQUE via compSheetReport (demonstrativo
+// v2 — resumo + detalhe + kinds por linha, números crus p/ o Sheets) a partir
+// dos MESMOS statements do CSV.
 "use client";
 
 import { Settings2, Sheet } from "lucide-react";
@@ -31,7 +32,8 @@ import {
   type CompSheetScope,
 } from "@/lib/comp/sheets-export";
 import { MONTH_LABELS } from "@/lib/date/month-labels";
-import { compReportValues, type CompStatementInput } from "@/lib/export/comp";
+import type { CompStatementInput } from "@/lib/export/comp";
+import { compSheetReport } from "@/lib/export/comp-sheet";
 import { notifyOnError } from "@/lib/feedback/notify";
 
 export interface SheetsExportButtonProps {
@@ -134,7 +136,10 @@ export function SheetsExportButton(props: SheetsExportButtonProps) {
     const w = window.open("", "_blank");
     setPending(true);
     try {
-      const { headers, rows } = compReportValues(props.getStatements());
+      const { headers, rows, kinds } = compSheetReport(props.getStatements(), {
+        scope: props.scope,
+        monthLabel: `${MONTH_LABELS[props.month - 1]} de ${props.year}`,
+      });
       const res = await notifyOnError(
         createSheetExportTicket({
           scope: props.scope,
@@ -144,6 +149,7 @@ export function SheetsExportButton(props: SheetsExportButtonProps) {
           tabName: `${MONTH_LABELS[props.month - 1]} ${props.year}`,
           headers,
           rows,
+          kinds,
         }),
         "Não foi possível exportar para o Google Planilhas"
       );

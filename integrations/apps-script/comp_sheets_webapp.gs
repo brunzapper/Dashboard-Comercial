@@ -1,5 +1,9 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 2.0 | Data: 02/08/2026
 // Apps Script — Export da Remuneração p/ Google Planilhas (Web App).
+// v2: o payload traz `kinds` (um por linha) e o script renderiza um
+// DEMONSTRATIVO formatado — título, quadro-resumo, seções por pessoa, moeda
+// R$, percentuais, larguras fixas e quebra de linha na memória de cálculo.
+// Payload antigo (sem kinds) cai no rendering simples de sempre.
 // Fluxo: o dashboard cria um TICKET single-use e abre <esta URL>?token=...
 // numa aba nova → este doGet (rodando como o USUÁRIO que acessa) busca o
 // payload em <APP_BASE_URL>/api/sheets-export/<token>, cria/atualiza a
@@ -20,6 +24,13 @@
 // 5) Primeiro uso de CADA usuário: o Google pede consentimento (app "não
 //    verificado": Avançado → Acessar <projeto> (não seguro) em conta pessoal;
 //    em Workspace o admin pode precisar liberar o app interno).
+//
+// ATUALIZAÇÃO deste script (nova versão do código):
+// 1) Cole o código novo por cima no editor e salve.
+// 2) Implantar → GERENCIAR implantações → ✏️ na implantação ativa →
+//    Versão: "Nova versão" → Implantar.
+//    A URL /exec NÃO muda — não é preciso reconfigurar o dashboard.
+//    ("Nova implantação" geraria uma URL nova e exigiria recolar no app.)
 
 var TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -55,8 +66,8 @@ function doGet(e) {
   // 2) Abre a planilha conhecida ou cria uma nova no Drive do usuário.
   var ss = abrirOuCriar_(data.knownSpreadsheetId, String(data.spreadsheetTitle || 'Remuneração'));
 
-  // 3) Upsert da aba do mês (clear + setValues; cabeçalho bold + congelado).
-  gravarAba_(ss, String(data.tabName), data.headers, data.rows);
+  // 3) Upsert da aba do mês (clear + rendering v2 por kind; sem kinds = simples).
+  gravarAba_(ss, String(data.tabName), data.headers, data.rows, data.kinds);
 
   // 4) Devolve id/url ao dashboard (grava o vínculo p/ os próximos exports).
   var postOk = true;
@@ -84,7 +95,7 @@ function abrirOuCriar_(knownId, title) {
   return SpreadsheetApp.create(title);
 }
 
-function gravarAba_(ss, tabName, headers, rows) {
+function gravarAba_(ss, tabName, headers, rows, kinds) {
   var sh = ss.getSheetByName(tabName);
   if (sh) {
     // clear() (conteúdo + formatos): a aba re-exportada nasce determinística —
@@ -95,6 +106,17 @@ function gravarAba_(ss, tabName, headers, rows) {
   } else {
     sh = ss.insertSheet(tabName);
   }
+  var v2 = kinds && Object.prototype.toString.call(kinds) === '[object Array]' &&
+    kinds.length === rows.length;
+  if (v2) {
+    gravarDemonstrativo_(ss, sh, headers, rows, kinds);
+  } else {
+    gravarSimples_(sh, headers, rows); // payload v1 (ticket antigo em trânsito)
+  }
+}
+
+// Rendering v1: grid cru com a 1ª linha em bold (compat com payload sem kinds).
+function gravarSimples_(sh, headers, rows) {
   var ncols = headers.length;
   var values = [headers];
   for (var i = 0; i < rows.length; i++) {
@@ -106,6 +128,85 @@ function gravarAba_(ss, tabName, headers, rows) {
   sh.getRange(1, 1, 1, ncols).setFontWeight('bold');
   sh.setFrozenRows(1);
   try { sh.autoResizeColumns(1, Math.min(ncols, 12)); } catch (err) { /* best-effort */ }
+}
+
+// ---- Rendering v2: demonstrativo por kind ----
+// headers = linha-TÍTULO do relatório; rows/kinds = grid (kinds[i] descreve
+// rows[i]). Estilos aplicados em LOTE via getRangeList (nunca célula a célula).
+var LARGURAS_ = [220, 110, 110, 100, 80, 130, 420];
+var FMT_MOEDA_ = 'R$ #,##0.00';
+// Aspas no % = literal (o valor já vem 0–100; "%" nu multiplicaria por 100).
+var FMT_PCT_ = '0.00"%"';
+// Segmentos CONTÍGUOS de colunas (1-based, [de, até]) formatados por kind.
+// Independe de escopo (visão geral × minha usam as mesmas colunas numéricas).
+var MOEDA_POR_KIND_ = {
+  summary: [[3, 7]],
+  summaryTotal: [[4, 7]],
+  factor: [[6, 6]],
+  factorMoney: [[2, 3], [6, 6]],
+  commission: [[6, 6]],
+  bonus: [[6, 6]],
+  info: [[6, 6]],
+  blockTotal: [[6, 6]]
+};
+var PCT_POR_KIND_ = { factor: [[4, 5]], factorMoney: [[4, 5]] };
+var BOLD_KINDS_ = { summaryHeader: 1, summaryTotal: 1, section: 1, detailHeader: 1, blockTotal: 1 };
+var HEADER_BG_KINDS_ = { summaryHeader: 1, detailHeader: 1 };
+var NOTA_KINDS_ = { info: 1, note: 1 };
+var COL_LETRAS_ = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+
+function gravarDemonstrativo_(ss, sh, titleRow, rows, kinds) {
+  var ncols = LARGURAS_.length;
+  var values = [];
+  var pad = function (src) {
+    var row = (src || []).slice(0, ncols);
+    while (row.length < ncols) row.push('');
+    return row;
+  };
+  values.push(pad(titleRow));
+  for (var i = 0; i < rows.length; i++) values.push(pad(rows[i]));
+  sh.getRange(1, 1, values.length, ncols).setValues(values);
+
+  // Locale pt-BR (best-effort): garante "R$ 1.234,56" no formato de número.
+  try {
+    if (String(ss.getSpreadsheetLocale()).indexOf('pt') !== 0) ss.setSpreadsheetLocale('pt_BR');
+  } catch (err) { /* best-effort */ }
+
+  // Acumula notações A1 por estilo e aplica em lote.
+  var bold = ['A1:G1'];
+  var headerBg = [];
+  var sectionBg = [];
+  var nota = [];
+  var moeda = [];
+  var pct = [];
+  var segsA1 = function (rowA1, segs, out) {
+    for (var s = 0; s < segs.length; s++) {
+      out.push(COL_LETRAS_[segs[s][0] - 1] + rowA1 + ':' + COL_LETRAS_[segs[s][1] - 1] + rowA1);
+    }
+  };
+  for (var r = 0; r < kinds.length; r++) {
+    var kind = String(kinds[r]);
+    var rowA1 = r + 2; // +1 do título, +1 do 1-based
+    var linha = 'A' + rowA1 + ':G' + rowA1;
+    if (BOLD_KINDS_[kind]) bold.push(linha);
+    if (HEADER_BG_KINDS_[kind]) headerBg.push(linha);
+    if (kind === 'section') sectionBg.push(linha);
+    if (NOTA_KINDS_[kind]) nota.push(linha);
+    if (MOEDA_POR_KIND_[kind]) segsA1(rowA1, MOEDA_POR_KIND_[kind], moeda);
+    if (PCT_POR_KIND_[kind]) segsA1(rowA1, PCT_POR_KIND_[kind], pct);
+  }
+  if (bold.length) sh.getRangeList(bold).setFontWeight('bold');
+  if (headerBg.length) sh.getRangeList(headerBg).setBackground('#eef1f5');
+  if (sectionBg.length) sh.getRangeList(sectionBg).setBackground('#dde3ea');
+  if (nota.length) sh.getRangeList(nota).setFontStyle('italic').setFontColor('#5f6368');
+  if (moeda.length) sh.getRangeList(moeda).setNumberFormat(FMT_MOEDA_);
+  if (pct.length) sh.getRangeList(pct).setNumberFormat(FMT_PCT_);
+
+  sh.getRange(1, 1).setFontSize(12);
+  for (var c = 0; c < ncols; c++) sh.setColumnWidth(c + 1, LARGURAS_[c]);
+  // Wrap SÓ na coluna de memória (números não são afetados).
+  sh.getRange(1, ncols, values.length, 1).setWrap(true);
+  sh.setFrozenRows(1);
 }
 
 // ---- Páginas HTML (pt-BR). Apps Script serve num iframe sandbox: a

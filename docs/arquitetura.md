@@ -1,3 +1,13 @@
+<!-- Versão: 1.55 | Data: 02/08/2026 -->
+<!-- v1.55 (02/08/2026): §4.18 — payload v2 do export p/ Google Planilhas:
+     DEMONSTRATIVO (resumo + detalhe na aba do mês) gerado por compSheetReport
+     (lib/export/comp-sheet.ts; 7 colunas fixas, título em headers, kinds por
+     linha — whitelist COMP_SHEET_KINDS em lib/comp/sheets-export.ts) e
+     renderizado POR KIND no Apps Script (moeda/%/bold/larguras fixas; sem
+     autoResize/merge; degradação bidirecional script v1 × payload v2). Frases
+     do demonstrativo SÓ em commission-label.ts (sem jargão interno — pinado);
+     compReportValues REMOVIDO (CSV segue byte-idêntico via
+     statementBreakdown). -->
 <!-- Versão: 1.54 | Data: 02/08/2026 -->
 <!-- v1.54 (02/08/2026): §4.18 — export p/ GOOGLE PLANILHAS (0115): Apps
      Script Web App "executar como usuário que acessa" cria/atualiza a
@@ -2676,8 +2686,7 @@ total opcional por plano.
   `isSettingsAreaDenied` + admin no escopo `visao-geral`; caps de
   `validateReportPayload`) grava um TICKET single-use em
   `comp_sheet_export_tickets` (token de `lib/snapshots/token.ts`, só o sha256
-  persiste; payload congelado com números CRUS de `compReportValues` — o
-  builder tipado único de `lib/export/comp.ts`, CSV segue byte-idêntico) e o
+  persiste; payload congelado v2 — abaixo) e o
   cliente abre `<webappUrl>?token=…` numa aba nova (window.open SÍNCRONO no
   gesto — popup-safe). O script busca o payload em
   `/api/sheets-export/[token]` (GET CONSOME o ticket — corrida resolvida por
@@ -2694,9 +2703,39 @@ total opcional por plano.
   'comp_sheets_webapp' (`lib/comp/sheets-export.ts` — validações puras +
   loader fail-closed), editável no popover do botão (admin;
   `saveCompSheetsWebappUrl` via client do usuário — a policy admin de
-  sync_config é a muralha). Fiscalizado por `lib/comp/sheets-export.test.ts`
-  + paridade CSV↔values em `lib/export/comp.test.ts` + casos de botão nos
-  testes das duas telas.
+  sync_config é a muralha). **Payload v2 = DEMONSTRATIVO (02/08/2026).** A
+  planilha NÃO é o grid do CSV: `compSheetReport`
+  (`lib/export/comp-sheet.ts`, builder puro) monta um demonstrativo p/
+  leitor externo (RH/gestor) — linha-TÍTULO (viaja em `headers`: o script v1
+  a degrada como header bold), quadro-RESUMO (uma linha por pessoa×plano:
+  base/fatores/comissão/bônus/total; total geral SEM somar a base — ela
+  multiplica os fatores) e blocos de DETALHE por pessoa (seção, sub-header,
+  fatores com alvo/realizado/atingimento/peso/valor, comissões com a fórmula
+  de `commissionMemory`, bônus, base variável quando participa e total do
+  bloco) — grid de 7 colunas FIXAS (padding ""), números CRUS, ordenado por
+  pessoa (pt-BR). Cada linha carrega um KIND (`kinds` paralelo às rows;
+  whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts` — dono do
+  contrato; `validateReportPayload` exige kinds↔rows) e o `.gs` formata POR
+  KIND em lote (getRangeList): moeda `R$ #,##0.00`, percentual `0.00"%"`
+  (aspas — valor já vem 0–100), bold/fundos em headers/seções, larguras
+  FIXAS (sem autoResize — a memória de cálculo tem coluna larga com wrap) e
+  SEM merge (`clear()` não desfaz merge — re-export deixaria merges órfãos).
+  Frases novas do demonstrativo nascem SÓ em `commission-label.ts`
+  (`sheetFactorNote`/`sheetCommissionSumNote`/`sheetTotalNote`/
+  `SHEET_BASE_NOTE`/`SHEET_NO_ENTRY_NOTE`) — sem jargão interno ("peso 0%",
+  "gatilho/base de comissão"), ausência PINADA em
+  `lib/export/comp-sheet.test.ts`. Escopo `minha` omite a coluna Pessoa
+  (colunas numéricas NÃO deslocam — o mapa kind→coluna do script independe
+  de escopo). Degradação bidirecional na transição: script v1 × payload v2 =
+  grid cru com título; script v2 × ticket v1 (rota devolve `kinds: null`) =
+  rendering simples antigo. `compReportValues` foi REMOVIDO (era o grid
+  espelho do CSV); o CSV segue byte-idêntico — CSV e demonstrativo derivam
+  do MESMO `statementBreakdown` (`lib/export/comp.ts`). Atualização do
+  script publicado: nova VERSÃO da MESMA implantação (URL /exec não muda —
+  runbook em `supabase/README.md`). Fiscalizado por
+  `lib/comp/sheets-export.test.ts` + `lib/export/comp-sheet.test.ts` + os
+  pinos do CSV em `lib/export/comp.test.ts` + casos de botão nos testes das
+  duas telas.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

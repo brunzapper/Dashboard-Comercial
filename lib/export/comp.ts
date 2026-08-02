@@ -1,10 +1,12 @@
-// Versão: 1.1 | Data: 02/08/2026
-// v1.1: builder interno TIPADO (compStatementCells) alimentando DOIS
-// renderizadores — o CSV (compStatementRows/compReportCsv, strings via
-// csvNumber, saída BYTE-IDÊNTICA à v1.0; os testes pinam) e o novo
-// compReportValues (números CRUS p/ o export ao Google Planilhas via Apps
-// Script — Sheets recebe number, nunca "50,5"). null = célula vazia ("—" da
-// UI) nos dois formatos.
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: o export ao Google Planilhas ganhou builder PRÓPRIO com layout de
+// demonstrativo (lib/export/comp-sheet.ts) — compReportValues (grid espelho
+// do CSV) foi REMOVIDO. Este módulo exporta `statementBreakdown` (derivação
+// única entry → computeEntry) p/ o builder do demonstrativo reusar; o CSV
+// segue BYTE-IDÊNTICO à v1.0 (os testes pinam).
+// v1.1: builder interno TIPADO (compStatementCells) alimentando o CSV
+// (compStatementRows/compReportCsv, strings via csvNumber). null = célula
+// vazia ("—" da UI).
 // Núcleo PURO de exportação da Remuneração (client-safe, sem DOM) — consumido
 // pela Visão geral do admin (comp-overview) e pela visão do vendedor
 // (my-comp-view). Formato LONGO (uma linha por item: fator/bloco de comissão/
@@ -22,7 +24,9 @@ import {
   computeEntry,
   parseCompEntryInputs,
   roundMoney,
+  type CompBreakdown,
   type CompComputedRaw,
+  type CompEntryInputs,
   type CompPlanConfig,
 } from "@/lib/comp/model";
 import { csvNumber } from "@/lib/export/csv";
@@ -58,7 +62,31 @@ export const COMP_CSV_HEADERS = [
   "Observação",
 ];
 
-// Célula tipada do builder interno: number cru (Sheets), null = vazio.
+/**
+ * Derivação ÚNICA de um demonstrativo: entry → computeEntry (nunca
+ * entry.total — pode estar stale). null = sem lançamento no mês.
+ * Compartilhada entre o CSV (compStatementCells) e o builder do
+ * demonstrativo do Google Planilhas (lib/export/comp-sheet.ts).
+ */
+export function statementBreakdown(
+  input: CompStatementInput
+): { breakdown: CompBreakdown; inputs: CompEntryInputs } | null {
+  if (!input.entry) return null;
+  const computed = (input.entry.computed ?? null) as CompComputedRaw | null;
+  const inputs = parseCompEntryInputs(input.entry.inputs);
+  const breakdown = computeEntry(
+    input.config,
+    input.entry.base_amount ?? input.baseAmountDefault,
+    inputs,
+    computed?.realized ?? {},
+    input.targets,
+    input.entry.responsible_id,
+    input.targetRates
+  );
+  return { breakdown, inputs };
+}
+
+// Célula tipada do builder interno: number cru, null = vazio.
 type ReportCell = string | number | null;
 
 /** Células do demonstrativo de UM plano×membro (mesma ordem do CompPlanCard). */
@@ -83,21 +111,11 @@ function compStatementCells(input: CompStatementInput): ReportCell[][] {
     obs,
   ];
 
-  if (!input.entry) {
+  const derived = statementBreakdown(input);
+  if (!derived) {
     return [row("Total", "", null, null, null, null, "sem lançamento no mês")];
   }
-
-  const computed = (input.entry.computed ?? null) as CompComputedRaw | null;
-  const inputs = parseCompEntryInputs(input.entry.inputs);
-  const breakdown = computeEntry(
-    input.config,
-    input.entry.base_amount ?? input.baseAmountDefault,
-    inputs,
-    computed?.realized ?? {},
-    input.targets,
-    input.entry.responsible_id,
-    input.targetRates
-  );
+  const { breakdown, inputs } = derived;
 
   const rows: ReportCell[][] = [];
   for (const f of input.config.factors) {
@@ -199,21 +217,5 @@ export function compReportCsv(inputs: CompStatementInput[]): {
   return {
     headers: COMP_CSV_HEADERS,
     rows: inputs.flatMap(compStatementRows),
-  };
-}
-
-/**
- * Relatório inteiro em VALORES TIPADOS (export p/ Google Planilhas): números
- * crus p/ o Sheets tratar como número; null vira célula vazia "".
- */
-export function compReportValues(inputs: CompStatementInput[]): {
-  headers: string[];
-  rows: (string | number)[][];
-} {
-  return {
-    headers: COMP_CSV_HEADERS,
-    rows: inputs.flatMap((input) =>
-      compStatementCells(input).map((r) => r.map((c) => c ?? ""))
-    ),
   };
 }

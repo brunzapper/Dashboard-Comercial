@@ -678,10 +678,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
   tabela SEM policies — service role only, org carimbada na action) +
   vínculo durável `comp_sheet_links` (RLS linha-própria; upsert da rota usa
   org/user/escopo DA LINHA do ticket, nunca do corpo); payload
-  client-derived (`compReportValues` — números crus; CSV segue
-  byte-idêntico) → Drive do próprio usuário (tradeoff aceito); URL do Web
+  client-derived → Drive do próprio usuário (tradeoff aceito); URL do Web
   App por org em `sync_config` 'comp_sheets_webapp'
-  (`lib/comp/sheets-export.ts`); NUNCA policy anon. NUNCA gerar fórmula a
+  (`lib/comp/sheets-export.ts`); NUNCA policy anon. **Payload v2 =
+  DEMONSTRATIVO (02/08/2026):** o grid nasce de `compSheetReport`
+  (`lib/export/comp-sheet.ts` — resumo + detalhe na aba do mês, 7 colunas
+  fixas, números crus, título em `headers`) com `kinds` paralelo às rows
+  (whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts`, validada no
+  `validateReportPayload`); o `.gs` formata POR KIND (moeda/%/bold/larguras
+  fixas, SEM autoResize e SEM merge — `clear()` não desfaz merge) com
+  degradação bidirecional (script v1 × payload v2 e vice-versa); frases
+  novas do demonstrativo SÓ em `commission-label.ts` (`sheetFactorNote`/
+  `sheetTotalNote`/`SHEET_*`), sem jargão interno (pinado em
+  `comp-sheet.test.ts`); o CSV NÃO passa por aí (builder `compReportCsv`
+  intocado, byte-idêntico; `compReportValues` foi removido — deriva via
+  `statementBreakdown` de `lib/export/comp.ts`). NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
