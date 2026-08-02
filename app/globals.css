@@ -1,4 +1,7 @@
-/* Versão: 1.2 | Data: 27/07/2026 */
+/* Versão: 1.3 | Data: 02/08/2026 */
+/* v1.3 (02/08/2026): impressão de relatórios (Remuneração) — regras @media
+   print no final: o portal [data-print-root] (comp-report-print.tsx) seta
+   body[data-printing="comp"] enquanto montado e só ele aparece no papel. */
 /* v1.2 (27/07/2026): cor de destaque da marca (--brand*, default #7431B3) em
    detalhes sutis — abas ativas, chips, foco, seleção, progresso. O runtime
    sobrepõe SÓ --brand-base (style no <html>, lido do cookie theme_accent —
@@ -161,4 +164,31 @@
   100% {
     box-shadow: 0 0 0 0 transparent;
   }
+}
+
+/* Impressão de relatórios (Remuneração): o portal [data-print-root]
+   (comp-report-print.tsx) seta body[data-printing="comp"] enquanto montado —
+   na impressão só ele aparece; Ctrl+P sem o portal segue intocado (a regra
+   exige o flag). Tokens forçados p/ papel: no tema escuro o texto claro
+   sumiria no fundo branco (browsers não imprimem background por padrão). */
+@media print {
+  body[data-printing="comp"] > *:not([data-print-root]) {
+    display: none !important;
+  }
+  [data-print-root] {
+    --background: #fff;
+    --foreground: #111;
+    --card: #fff;
+    --card-foreground: #111;
+    --muted: #f3f4f6;
+    --muted-foreground: #555;
+    --border: #d4d4d8;
+    --destructive: #b91c1c;
+    color: var(--foreground);
+    background: var(--background);
+    color-scheme: light;
+  }
+}
+@page {
+  margin: 14mm;
 }

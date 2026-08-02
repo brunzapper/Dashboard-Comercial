@@ -122,6 +122,9 @@ export interface RemuneracaoManagerProps {
   // operação (id CANÔNICO, já resolvidos no server via loadOperationScopes).
   operations: { id: string; name: string; active: boolean }[];
   operationMembersById: Record<string, string[]>;
+  // URL /exec do Web App de export p/ Google Planilhas (sync_config; null =
+  // não configurado) — repassada à Visão geral (botão + popover de config).
+  sheetsWebappUrl: string | null;
 }
 
 export function RemuneracaoManager(props: RemuneracaoManagerProps) {
@@ -329,6 +332,7 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
               operationMembersById={props.operationMembersById}
               year={props.year}
               month={props.month}
+              sheetsWebappUrl={props.sheetsWebappUrl}
             />
           </div>
         ) : (

@@ -1,3 +1,7 @@
+// Versão: 1.7 | Data: 02/08/2026 (v1.7: export p/ Google Planilhas (0115) —
+// os dois ramos carregam a URL do Web App configurada (sync_config
+// 'comp_sheets_webapp' via loadCompSheetsWebappUrl): admin recebe a URL
+// (default do popover de config); vendedor recebe só o boolean.)
 // Versão: 1.6 | Data: 01/08/2026 (v1.6: aba "geral" (VISÃO GERAL) — landing
 // do admin SEM `?plano` (a ausência do plano decide; `?aba=plano` vence; 0
 // planos segue forçando o editor): memória de cálculo de todos os membros de
@@ -55,6 +59,7 @@ import {
   operationMembersFromScopes,
 } from "@/lib/comp/engine";
 import { parseCompPlanConfig } from "@/lib/comp/model";
+import { loadCompSheetsWebappUrl } from "@/lib/comp/sheets-export";
 import {
   RemuneracaoManager,
   type CompEntryClientRow,
@@ -106,27 +111,34 @@ export default async function RemuneracaoPage({
 
   if (!isAdmin) {
     // ===== Vendedor: "Minha remuneração" (read-only, RLS filtra) =====
-    const [{ data: own }, canon, { data: plansData }, { data: entriesData }] =
-      await Promise.all([
-        supabase
-          .from("responsibles")
-          .select("id")
-          .eq("user_id", session?.user.id ?? "")
-          .eq("active", true),
-        loadResponsibleCanon(supabase),
-        supabase
-          .from("comp_plans")
-          .select("id, name, active, base_amount_default, config, updated_at")
-          .eq("active", true)
-          .order("name"),
-        supabase
-          .from("comp_entries")
-          .select(
-            "id, plan_id, responsible_id, base_amount, inputs, computed, total, mirror_record_id, published_at, updated_at"
-          )
-          .eq("period_year", year)
-          .eq("period_month", month),
-      ]);
+    const [
+      { data: own },
+      canon,
+      { data: plansData },
+      { data: entriesData },
+      sheetsUrl,
+    ] = await Promise.all([
+      supabase
+        .from("responsibles")
+        .select("id")
+        .eq("user_id", session?.user.id ?? "")
+        .eq("active", true),
+      loadResponsibleCanon(supabase),
+      supabase
+        .from("comp_plans")
+        .select("id, name, active, base_amount_default, config, updated_at")
+        .eq("active", true)
+        .order("name"),
+      supabase
+        .from("comp_entries")
+        .select(
+          "id, plan_id, responsible_id, base_amount, inputs, computed, total, mirror_record_id, published_at, updated_at"
+        )
+        .eq("period_year", year)
+        .eq("period_month", month),
+      (async () =>
+        loadCompSheetsWebappUrl(supabase, await getActiveOrgId()))(),
+    ]);
     const ownIds = ((own ?? []) as { id: string }[]).map((r) => r.id);
     const canonId = ownIds.length > 0 ? canonicalOf(ownIds[0], canon) : null;
     const plans = (plansData ?? []) as CompPlanClientRow[];
@@ -170,6 +182,7 @@ export default async function RemuneracaoPage({
           year={year}
           month={month}
           linked={canonId != null}
+          sheetsConfigured={sheetsUrl != null}
         />
       </div>
     );
@@ -178,20 +191,26 @@ export default async function RemuneracaoPage({
   // ===== Admin: gestor completo =====
   const orgId = await getActiveOrgId();
   // Onda 1 — básicos, invariantes à aba (pills/grade/membros precisam).
-  const [{ data: plansData }, { data: respData }, canon, { data: opsData }] =
-    await Promise.all([
-      supabase
-        .from("comp_plans")
-        .select("id, name, active, base_amount_default, config, updated_at")
-        .order("name"),
-      supabase
-        .from("responsibles")
-        .select("id, display_name")
-        .eq("active", true)
-        .order("display_name"),
-      loadResponsibleCanon(supabase),
-      supabase.from("operations").select("id, name, active").order("name"),
-    ]);
+  const [
+    { data: plansData },
+    { data: respData },
+    canon,
+    { data: opsData },
+    sheetsUrl,
+  ] = await Promise.all([
+    supabase
+      .from("comp_plans")
+      .select("id, name, active, base_amount_default, config, updated_at")
+      .order("name"),
+    supabase
+      .from("responsibles")
+      .select("id, display_name")
+      .eq("active", true)
+      .order("display_name"),
+    loadResponsibleCanon(supabase),
+    supabase.from("operations").select("id, name, active").order("name"),
+    loadCompSheetsWebappUrl(supabase, orgId),
+  ]);
   const operations = (opsData ?? []) as {
     id: string;
     name: string;
@@ -392,6 +411,7 @@ export default async function RemuneracaoPage({
         overview={overview}
         operations={operations}
         operationMembersById={operationMembersById}
+        sheetsWebappUrl={sheetsUrl}
       />
     </div>
   );

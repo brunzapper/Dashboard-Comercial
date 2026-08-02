@@ -1,3 +1,7 @@
+<!-- Versão: 1.5 | Data: 02/08/2026 -->
+<!-- v1.5 (02/08/2026): seção da 0115 (comp_sheet_links/tickets — export p/
+     Google Planilhas via Apps Script Web App; runbook do deploy do script).
+-->
 <!-- Versão: 1.4 | Data: 30/07/2026 -->
 <!-- v1.4 (30/07/2026): seção da 0112 (comp_plans/comp_entries — remuneração
      variável; aplicar antes do deploy de preferência, só a aba nova depende).
@@ -518,3 +522,30 @@ as actions retornam erro legível — nenhum outro fluxo depende dela. A base
 espelho "Remuneração" NÃO é criada pela migração: nasce no primeiro "Publicar"
 (data_sources key `remuneracao` + campos `rem_*`, ponteiro em `sync_config`
 chave `remuneracao_mirror`).
+
+## Export p/ Google Planilhas (migração 0115, 02/08/2026)
+
+`0115_comp_sheet_links.sql` — arquivo único, idempotente: cria
+`comp_sheet_links` (vínculo durável usuário×escopo→planilha; RLS linha
+própria, padrão `dashboard_ai_sessions`) e `comp_sheet_export_tickets`
+(ticket single-use do handshake com o Apps Script Web App; SEM policies —
+leitura/escrita só via service role, padrão `api_keys`/`org_features`), com
+trigger `updated_at`, índices e `revoke` de `anon`/`authenticated`. Requer as
+migrações 0089–0091 (org/RLS). Pode ser aplicada antes OU depois do deploy:
+pré-migração o botão "Google Planilhas" só falha na action com mensagem
+legível (tabela ausente); pré-deploy as tabelas ficam simplesmente sem uso.
+
+Runbook do Web App (uma vez por organização — instruções completas no
+cabeçalho de `integrations/apps-script/comp_sheets_webapp.gs`):
+
+1. script.google.com → novo projeto standalone → colar o arquivo.
+2. Propriedades do script: `APP_BASE_URL = https://<app>.vercel.app` (sem
+   barra final).
+3. Implantar → App da Web → Executar como **"Usuário que acessa"** + acesso
+   **"Qualquer pessoa com Conta do Google"** → copiar a URL `/exec`.
+4. No dashboard (admin): Configurações → Remuneração → Visão geral →
+   "Google Planilhas — Configurar…" → colar a URL.
+5. Primeiro uso de cada usuário: consentimento do Google (app "não
+   verificado": Avançado → continuar; em Workspace o admin pode precisar
+   liberar o app interno). A planilha nasce no Drive do PRÓPRIO usuário —
+   nenhuma credencial Google fica no app.

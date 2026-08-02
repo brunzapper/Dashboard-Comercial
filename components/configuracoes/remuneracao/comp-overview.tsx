@@ -1,3 +1,14 @@
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: botão "Google Planilhas" (SheetsExportButton, 0115) no toolbar —
+// mesmo caminho de statements do CSV, planilha criada na conta Google do
+// próprio admin via Apps Script Web App; popover de config (URL /exec) aqui.
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: exportação CSV/PDF — 100% client-derived dos MESMOS dados das props:
+// CSV pelo builder puro lib/export/comp.ts (compReportCsv, convenções de
+// lib/export/csv.ts) e "PDF" pela impressão do navegador (CompReportPrint,
+// portal [data-print-root] + @media print de globals.css). Botões no toolbar
+// (relatório inteiro no agrupamento corrente) e por pessoa no agrupamento
+// "Por pessoa" (demonstrativo individual). Nada de action/RPC — read-only.
 // Versão: 1.0 | Data: 01/08/2026
 // Visão geral da Remuneração (admin) — memória de cálculo de TODOS os membros
 // de TODOS os planos ATIVOS do mês, SOMENTE LEITURA (sem Recalcular/Publicar/
@@ -13,6 +24,7 @@
 // intencional, consistente com a grade). Card único: CompPlanCard.
 "use client";
 
+import { Download, Printer } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -26,7 +38,16 @@ import {
   type CompComputedRaw,
   type CompPlanConfig,
 } from "@/lib/comp/model";
+import { MONTH_LABELS } from "@/lib/date/month-labels";
+import { compReportCsv, type CompStatementInput } from "@/lib/export/comp";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { CompPlanCard } from "./comp-plan-card";
+import {
+  CompReportPrint,
+  type CompReportCard,
+  type CompReportSection,
+} from "./comp-report-print";
+import { SheetsExportButton } from "./sheets-export-button";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -34,6 +55,10 @@ import type {
 
 const GROUP_PREF_KEY = "comp-overview:group";
 type OverviewGroup = "por-plano" | "por-pessoa";
+
+// Alvo do "Exportar PDF": relatório inteiro (agrupamento corrente) ou o
+// demonstrativo de UMA pessoa (botão da seção no agrupamento por pessoa).
+type PrintTarget = { kind: "geral" } | { kind: "pessoa"; memberId: string };
 
 export interface CompOverviewProps {
   plans: CompPlanClientRow[]; // todas; o componente filtra as ativas
@@ -45,6 +70,9 @@ export interface CompOverviewProps {
   operationMembersById: Record<string, string[]>;
   year: number;
   month: number;
+  // URL /exec do Web App de export p/ Google Planilhas (null = não
+  // configurado — o botão vira o afford. de configuração do admin).
+  sheetsWebappUrl: string | null;
 }
 
 // Uma célula plano×membro esperado (entry pode faltar — "sem lançamento").
@@ -93,6 +121,7 @@ function useGroupPref() {
 
 export function CompOverview(props: CompOverviewProps) {
   const { group, setGroup, saved, saveDefault } = useGroupPref();
+  const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null);
 
   const { cells, invalidPlans } = useMemo(() => {
     const byId = new Map(props.responsibles.map((r) => [r.id, r]));
@@ -180,6 +209,75 @@ export function CompOverview(props: CompOverviewProps) {
       .sort((a, b) => a.member.label.localeCompare(b.member.label, "pt-BR"));
   }, [cells]);
 
+  // ---- Exportação (CSV/impressão) — 100% derivada da MESMA matriz. ----
+  const monthLabel = `${MONTH_LABELS[props.month - 1]} de ${props.year}`;
+
+  const toStatement = (c: OverviewCell): CompStatementInput => ({
+    planName: c.plan.name,
+    memberLabel: c.member.label,
+    config: c.config,
+    baseAmountDefault: c.plan.base_amount_default,
+    entry: c.entry,
+    targets: props.targetsByPlan[c.plan.id]?.[c.member.id] ?? {},
+    targetRates: props.targetRatesByPlan[c.plan.id] ?? {},
+  });
+
+  // Síncrono (padrão "export displayed" do widget-card): dados já em props.
+  const exportCsv = (member?: { id: string; label: string }) => {
+    const list = member
+      ? cells.filter((c) => c.member.id === member.id)
+      : cells;
+    const { headers, rows } = compReportCsv(list.map(toStatement));
+    downloadCsv(
+      csvFilename(
+        member ? `remuneracao-${member.label}` : "remuneracao-visao-geral"
+      ),
+      buildCsv(headers, rows)
+    );
+  };
+
+  const toCard = (c: OverviewCell, title: string): CompReportCard => ({
+    key: `${c.plan.id}:${c.member.id}`,
+    title,
+    plan: c.plan,
+    entry: c.entry,
+    targets: props.targetsByPlan[c.plan.id]?.[c.member.id] ?? {},
+    targetRates: props.targetRatesByPlan[c.plan.id] ?? {},
+  });
+
+  // Seções de impressão espelham o card() de cada agrupamento.
+  const printSections = (target: PrintTarget): CompReportSection[] => {
+    if (target.kind === "pessoa") {
+      return byPerson
+        .filter((p) => p.member.id === target.memberId)
+        .map((p) => ({
+          key: p.member.id,
+          heading: p.member.label,
+          cards: p.cells.map((c) => toCard(c, c.plan.name)),
+        }));
+    }
+    return group === "por-plano"
+      ? byPlan.map((s) => ({
+          key: s.plan.id,
+          heading: s.plan.name,
+          cards: s.cells.map((c) => toCard(c, c.member.label)),
+        }))
+      : byPerson.map((p) => ({
+          key: p.member.id,
+          heading: p.member.label,
+          cards: p.cells.map((c) => toCard(c, c.plan.name)),
+        }));
+  };
+
+  const printTitle = (target: PrintTarget): string => {
+    if (target.kind === "pessoa") {
+      const label = byPerson.find((p) => p.member.id === target.memberId)
+        ?.member.label;
+      return `Remuneração — ${label ?? ""} — ${monthLabel}`;
+    }
+    return `Remuneração — ${monthLabel}`;
+  };
+
   const card = (c: OverviewCell, title: string) =>
     c.entry ? (
       <CompPlanCard
@@ -248,6 +346,32 @@ export function CompOverview(props: CompOverviewProps) {
         >
           {saved === group ? "Padrão" : "Usar como padrão"}
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => exportCsv()}
+        >
+          <Download className="size-4" /> Exportar CSV
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          title="Abre a impressão do navegador — salve como PDF."
+          onClick={() => setPrintTarget({ kind: "geral" })}
+        >
+          <Printer className="size-4" /> Exportar PDF
+        </Button>
+        <SheetsExportButton
+          scope="visao-geral"
+          year={props.year}
+          month={props.month}
+          configured={props.sheetsWebappUrl != null}
+          admin
+          webappUrl={props.sheetsWebappUrl}
+          getStatements={() => cells.map(toStatement)}
+        />
         <span className="text-muted-foreground ml-auto text-sm">
           Total do mês:{" "}
           <span className="text-foreground font-semibold">
@@ -284,10 +408,34 @@ export function CompOverview(props: CompOverviewProps) {
             <section key={p.member.id} className="flex flex-col gap-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2 border-b pb-1">
                 <h2 className="text-lg font-medium">{p.member.label}</h2>
-                <span className="text-muted-foreground text-sm">
-                  Subtotal:{" "}
-                  <span className="text-foreground font-semibold">
-                    {fmtMoney(p.subtotal)}
+                <span className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Exportar CSV de ${p.member.label}`}
+                    title={`Exportar CSV de ${p.member.label}`}
+                    onClick={() => exportCsv(p.member)}
+                  >
+                    <Download className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Imprimir demonstrativo de ${p.member.label}`}
+                    title={`Imprimir demonstrativo de ${p.member.label} — salve como PDF.`}
+                    onClick={() =>
+                      setPrintTarget({ kind: "pessoa", memberId: p.member.id })
+                    }
+                  >
+                    <Printer className="size-3.5" />
+                  </Button>
+                  <span className="text-muted-foreground text-sm">
+                    Subtotal:{" "}
+                    <span className="text-foreground font-semibold">
+                      {fmtMoney(p.subtotal)}
+                    </span>
                   </span>
                 </span>
               </div>
@@ -296,6 +444,23 @@ export function CompOverview(props: CompOverviewProps) {
               </div>
             </section>
           ))}
+
+      {printTarget ? (
+        <CompReportPrint
+          title={printTitle(printTarget)}
+          groupingLabel={
+            printTarget.kind === "geral"
+              ? group === "por-plano"
+                ? "Agrupado por plano"
+                : "Agrupado por pessoa"
+              : undefined
+          }
+          sections={printSections(printTarget)}
+          year={props.year}
+          month={props.month}
+          onDone={() => setPrintTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,3 +1,8 @@
+<!-- Versão: 3.7 | Data: 02/08/2026 -->
+<!-- v3.7 (02/08/2026): 0115 — comp_sheet_links + comp_sheet_export_tickets
+     (export da Remuneração p/ Google Planilhas via Apps Script Web App:
+     vínculo durável por usuário×escopo com RLS linha-própria; ticket
+     single-use sem policies, service role only). Não recria as RPCs. -->
 <!-- Versão: 3.6 | Data: 31/07/2026 -->
 <!-- v3.6 (31/07/2026): 0114 — org_features (recursos sob demanda por org;
      SELECT membros, escrita service-role-only via /owner; seed Zapper com
@@ -88,7 +93,7 @@
 
 # Banco de dados — schema consolidado
 
-Referência do estado **atual** do banco (após a migração 0094), para que um
+Referência do estado **atual** do banco (após a migração 0115), para que um
 mantenedor não precise ler as migrações em ordem para reconstruir o modelo.
 Complementa o runbook de aplicação em [`../supabase/README.md`](../supabase/README.md)
 e a visão de fluxos em [`arquitetura.md`](./arquitetura.md).
@@ -570,6 +575,24 @@ nasce com `remuneracao` ligado (`on conflict do nothing` — reaplicar não
 sobrescreve toggles). O gate de app vive em `AREA_FEATURES`
 (lib/auth/access.ts) + `PresetDashboard.requiresFeature`.
 
+**`comp_sheet_links`** (0115) — vínculo DURÁVEL do export da Remuneração p/
+Google Planilhas: PK composta `(organization_id, user_id, scope_key)`
+(`scope_key` check `'visao-geral' | 'minha'` — uma planilha por usuário×
+relatório) + `spreadsheet_id`/`spreadsheet_url` da planilha criada no Drive
+do PRÓPRIO usuário pelo Apps Script Web App. RLS linha-própria (org +
+`auth.uid()`, padrão `dashboard_ai_sessions`): a action lê o id conhecido com
+o client do usuário; a escrita real vem da rota `/api/sheets-export/[token]`
+via service role com org/user/escopo tirados DA LINHA do ticket.
+
+**`comp_sheet_export_tickets`** (0115) — ticket EFÊMERO single-use do
+handshake com o Web App: `token_hash` unique (sha256; token em claro sai UMA
+vez da action), `payload` jsonb congelado (relatório derivado no cliente),
+`scope_key`/`period_year`/`period_month`, `consumed_at` (GET do script
+consome) e `completed_at` (POST devolve id/url). TTL de 15 min aplicado no
+app. SEM policies — leitura/escrita SÓ service role (padrão
+`api_keys`/`org_features`; a RLS não expressa os gates da action) + revokes
+de `anon`/`authenticated`.
+
 ## 4. Funções
 
 ### 4.1 O par crítico de RPCs de widget
@@ -785,6 +808,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0112 | comp_plans | Remuneração variável: `comp_plans` (config jsonb versionado fail-closed; SELECT org-wide, escrita admin) + `comp_entries` (lançamentos por responsável×mês — inputs/overrides/computed/total, `mirror_record_id` p/ o espelho publicado; SELECT admin OU próprio grupo via `auth_responsible_ids()`, escrita admin). Raízes org-scoped com carimbo na action; sem anon; não recria as RPCs de widget |
 | 0113 | field_options_source | `field_definitions.options_source` (check `in ('responsibles')`): campo `selecao` de dropdown VIVO — options reescritas pelo app com os responsáveis ativos principais (`refreshResponsibleOptionFields`; refresh no apply de preset, pós-sync e actions de Responsáveis). Não recria as RPCs |
 | 0114 | org_features | Recursos SOB DEMANDA por org (config custom — hoje `remuneracao`): linha por org com jsonb de toggles; SELECT p/ membros, escrita SÓ service role (console /owner); seed liga `remuneracao` p/ a Zapper (`on conflict do nothing`). Gate de app em AREA_FEATURES + requiresFeature de preset. Não recria as RPCs |
+| 0115 | comp_sheet_links | Export da Remuneração p/ Google Planilhas via Apps Script Web App (sem credencial Google no app): `comp_sheet_links` (vínculo durável usuário×escopo→planilha; RLS linha-própria) + `comp_sheet_export_tickets` (ticket single-use do handshake: token sha256, payload jsonb, consumed/completed; SEM policies — service role only). Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
