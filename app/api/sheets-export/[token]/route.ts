@@ -86,6 +86,7 @@ export async function GET(
     tabName?: unknown;
     headers?: unknown;
     rows?: unknown;
+    kinds?: unknown;
     knownSpreadsheetId?: unknown;
   };
   return NextResponse.json({
@@ -93,6 +94,9 @@ export async function GET(
     tabName: p.tabName,
     headers: p.headers,
     rows: p.rows,
+    // v2: kinds por linha (demonstrativo). Ticket v1 em trânsito → null e o
+    // script novo cai no rendering simples.
+    kinds: p.kinds ?? null,
     knownSpreadsheetId: p.knownSpreadsheetId ?? null,
   });
 }

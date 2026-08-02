@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 01/08/2026
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: frases do DEMONSTRATIVO do Google Planilhas (`sheetFactorNote`,
+// `sheetCommissionSumNote`, `sheetTotalNote`, SHEET_*_NOTE) — linguagem p/
+// RH/gestor, sem jargão interno; consumidas só pelo builder
+// `lib/export/comp-sheet.ts`. `entryMemoryLines`/`factorPayoutFormula`/
+// `commissionMemory` seguem intocados (grade e PDF pinados).
 // v1.1: memória da LINHA inteira — `entryMemoryLines` (linha de detalhe da
 // grade de Lançamentos) e `factorPayoutFormula` (conta base × peso × ating.,
 // também usada no title do Valor). Este módulo segue sendo o DONO ÚNICO dos
@@ -15,6 +20,8 @@
 import type {
   CompBreakdown,
   CompCommissionBlockBreakdown,
+  CompFactor,
+  CompFactorBreakdown,
   CompPlanConfig,
 } from "./model";
 
@@ -187,4 +194,76 @@ export function entryMemoryLines(
     }
   }
   return lines;
+}
+
+// ============ Frases do DEMONSTRATIVO (Google Planilhas) ============
+// Linguagem p/ leitor externo (RH/gestor): nada de "gatilho/base de
+// comissão", "peso N%" solto ou "não soma no total". O peso já tem coluna
+// própria no demonstrativo — a nota conta só a HISTÓRIA do valor.
+
+export const SHEET_BASE_NOTE =
+  "Base que multiplica o peso × atingimento de cada fator — já refletida no valor dos fatores acima.";
+
+export const SHEET_NO_ENTRY_NOTE = "Sem lançamento neste mês.";
+
+/**
+ * Nota do fator p/ o demonstrativo (sem prefixo de label — o label vai na
+ * coluna Item). Conta principal + anexos discretos com " · ".
+ */
+export function sheetFactorNote(
+  f: CompFactor,
+  b: CompFactorBreakdown,
+  base: number
+): string {
+  let main: string;
+  if (b.overridden.payout) {
+    main = "Valor definido manualmente";
+  } else if (f.weightPct === 0) {
+    main = "Usado no cálculo da comissão — não gera valor próprio";
+  } else if (b.attainmentPct != null) {
+    main = factorPayoutFormula(base, f.weightPct, b.attainmentPct, b.payout);
+  } else {
+    main = `Sem atingimento (alvo ou realizado vazio) ⇒ ${fmtMoneyBRL(0)}`;
+  }
+  const extras: string[] = [];
+  if (b.targetSource === "default") extras.push("Alvo padrão do plano");
+  if (f.targetCurrency && b.target != null) {
+    extras.push(
+      b.targetRateMissing
+        ? `Sem cotação ${f.targetCurrency} no mês — atingimento não calculado`
+        : `Alvo em ${f.targetCurrency}` +
+            (b.targetBRL != null ? ` ≈ ${fmtMoneyBRL(b.targetBRL)}` : "")
+    );
+  }
+  if (b.overridden.realized) extras.push("Realizado informado manualmente");
+  if (b.overridden.attainmentPct)
+    extras.push("Atingimento informado manualmente");
+  return [main, ...extras].join(" · ");
+}
+
+/** Nota da linha "Comissão (total)" do demonstrativo. */
+export function sheetCommissionSumNote(
+  overridden: boolean,
+  calculated: number
+): string {
+  return overridden
+    ? `Ajuste manual (calculado: ${fmtMoneyBRL(calculated)})`
+    : "Soma dos blocos de comissão";
+}
+
+/** Nota da linha "Total" do bloco no demonstrativo. */
+export function sheetTotalNote(breakdown: CompBreakdown): string {
+  if (breakdown.totalOverridden) return "Total definido manualmente";
+  if (breakdown.totalFormulaError)
+    return "Fórmula do total sem resultado — revise o plano";
+  if (breakdown.totalFromFormula)
+    return "Total calculado pela fórmula do plano";
+  const terms: string[] = [];
+  if (breakdown.factorsTotal !== 0)
+    terms.push(`Fatores ${fmtMoneyBRL(breakdown.factorsTotal)}`);
+  const commValue = breakdown.commission?.value ?? 0;
+  if (commValue !== 0) terms.push(`Comissão ${fmtMoneyBRL(commValue)}`);
+  if (breakdown.bonusTotal !== 0)
+    terms.push(`Bônus ${fmtMoneyBRL(breakdown.bonusTotal)}`);
+  return terms.length >= 2 ? terms.join(" + ") : "";
 }

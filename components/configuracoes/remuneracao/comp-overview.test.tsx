@@ -270,8 +270,11 @@ describe("CompOverview", () => {
     const arg = vi.mocked(createSheetExportTicket).mock.calls[0][0];
     expect(arg.scope).toBe("visao-geral");
     expect(arg.tabName).toBe("Agosto 2026");
-    // Números CRUS no payload (compReportValues).
+    // Payload v2 (compSheetReport): kinds paralelo às rows + números CRUS.
+    expect(arg.kinds).toHaveLength(arg.rows.length);
     expect(arg.rows.flat().some((c) => typeof c === "number")).toBe(true);
+    // Título do demonstrativo viaja em headers (linha 1 da aba).
+    expect(arg.headers[0]).toContain("Demonstrativo de remuneração");
     await waitFor(() =>
       expect(fakeWin.location.href).toContain(
         "https://script.google.com/macros/s/x/exec?token="

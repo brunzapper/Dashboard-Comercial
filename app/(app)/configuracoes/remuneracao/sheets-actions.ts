@@ -38,6 +38,9 @@ export interface SheetTicketInput {
   tabName: string;
   headers: string[];
   rows: (string | number)[][];
+  // Payload v2: kind por linha (paralelo a rows) — o Apps Script formata o
+  // demonstrativo por kind; whitelist validada em validateReportPayload.
+  kinds: string[];
 }
 
 export interface SheetTicketResult {
@@ -72,6 +75,7 @@ export async function createSheetExportTicket(
     tabName: input.tabName,
     headers: input.headers,
     rows: input.rows,
+    kinds: input.kinds,
   });
   if (!payloadCheck.ok) return { ok: false, message: payloadCheck.message };
 
@@ -108,11 +112,12 @@ export async function createSheetExportTicket(
     period_month: input.month,
     token_hash: hashToken(token),
     payload: {
-      v: 1,
+      v: 2,
       spreadsheetTitle: input.title,
       tabName: input.tabName,
       headers: input.headers,
       rows: input.rows,
+      kinds: input.kinds,
       knownSpreadsheetId,
     },
   });

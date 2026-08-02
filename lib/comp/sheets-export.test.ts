@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: payload v2 — kinds obrigatório (paralelo às rows, whitelist
+// COMP_SHEET_KINDS) no validateReportPayload.
 // Testes puros do export p/ Google Planilhas (lib/comp/sheets-export.ts):
 // validação da URL do Web App, id/url de planilha, TTL do ticket (nowMs
 // injetado) e caps/shape do payload do relatório.
@@ -96,10 +98,27 @@ describe("validateReportPayload", () => {
     tabName: "Agosto 2026",
     headers: ["A", "B"],
     rows: [["x", 1.5]] as (string | number)[][],
+    kinds: ["summary"],
   };
 
   it("payload válido passa", () => {
     expect(validateReportPayload(base)).toEqual({ ok: true });
+  });
+
+  it("kinds ausente, dessincronizado ou fora da whitelist falha", () => {
+    expect(
+      validateReportPayload({
+        ...base,
+        kinds: undefined,
+      } as unknown as Parameters<typeof validateReportPayload>[0]).ok
+    ).toBe(false);
+    expect(validateReportPayload({ ...base, kinds: [] }).ok).toBe(false);
+    expect(
+      validateReportPayload({ ...base, kinds: ["summary", "blank"] }).ok
+    ).toBe(false);
+    expect(
+      validateReportPayload({ ...base, kinds: ["linhaMagica"] }).ok
+    ).toBe(false);
   });
 
   it("largura divergente falha", () => {
@@ -155,7 +174,11 @@ describe("validateReportPayload", () => {
       1,
     ]);
     expect(
-      validateReportPayload({ ...base, rows: rows as (string | number)[][] }).ok
+      validateReportPayload({
+        ...base,
+        rows: rows as (string | number)[][],
+        kinds: rows.map(() => "summary"),
+      }).ok
     ).toBe(false);
   });
 });

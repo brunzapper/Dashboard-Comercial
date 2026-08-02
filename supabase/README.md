@@ -549,3 +549,11 @@ cabeçalho de `integrations/apps-script/comp_sheets_webapp.gs`):
    verificado": Avançado → continuar; em Workspace o admin pode precisar
    liberar o app interno). A planilha nasce no Drive do PRÓPRIO usuário —
    nenhuma credencial Google fica no app.
+6. ATUALIZAÇÃO do script (nova versão do `.gs`, ex. o rendering v2 do
+   demonstrativo): colar o código novo por cima no editor → Implantar →
+   **Gerenciar implantações** → ✏️ na implantação ativa → Versão: **"Nova
+   versão"** → Implantar. A URL `/exec` NÃO muda (não reconfigurar o
+   dashboard). Atenção: **"Nova implantação"** geraria uma URL nova e
+   exigiria recolar no app. Script desatualizado não quebra: payload v2 num
+   script v1 rende o grid cru com título (degradação documentada em
+   `docs/arquitetura.md` §4.18).

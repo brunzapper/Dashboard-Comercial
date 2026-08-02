@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: payload v2 — o relatório vira DEMONSTRATIVO (resumo + detalhe na aba
+// do mês) e cada linha carrega um KIND (`COMP_SHEET_KINDS`, whitelist deste
+// módulo — dono do contrato) que o Apps Script usa p/ formatar (moeda, %,
+// bold, fundos). O grid nasce em lib/export/comp-sheet.ts; o validador exige
+// kinds paralelo às rows. Script v1 ignora kinds (grid cru com título);
+// script v2 sem kinds (ticket v1) cai no rendering antigo.
 // Export da Remuneração p/ Google Planilhas (0115) — constantes, validações
 // PURAS e o loader da config. O fluxo: a action cria um TICKET single-use
 // (token de lib/snapshots/token.ts) com o payload do relatório; o Web App do
@@ -19,6 +25,29 @@ export const MAX_REPORT_ROWS = 5000;
 export const MAX_PAYLOAD_BYTES = 256_000;
 
 export type CompSheetScope = "visao-geral" | "minha";
+
+/**
+ * Kinds de linha do demonstrativo (payload v2) — o Apps Script formata por
+ * kind ("note" reservado p/ linhas discretas futuras). Whitelist do
+ * validador; o builder (lib/export/comp-sheet.ts) importa o tipo daqui.
+ */
+export const COMP_SHEET_KINDS = [
+  "summaryHeader",
+  "summary",
+  "summaryTotal",
+  "blank",
+  "section",
+  "detailHeader",
+  "factor",
+  "factorMoney",
+  "commission",
+  "bonus",
+  "info",
+  "blockTotal",
+  "note",
+] as const;
+
+export type CompSheetRowKind = (typeof COMP_SHEET_KINDS)[number];
 
 /** Título da planilha criada no Drive do usuário (uma por escopo). */
 export const SHEET_TITLES: Record<CompSheetScope, string> = {
@@ -55,12 +84,13 @@ export function isTicketExpired(createdAtIso: string, nowMs?: number): boolean {
   return (nowMs ?? Date.now()) - created > TICKET_TTL_MIN * 60_000;
 }
 
-/** Caps + shape do relatório (headers × largura das linhas × células). */
+/** Caps + shape do relatório (headers × largura das linhas × células × kinds). */
 export function validateReportPayload(input: {
   title: string;
   tabName: string;
   headers: string[];
   rows: (string | number)[][];
+  kinds: string[];
 }): { ok: true } | { ok: false; message: string } {
   const fail = (message: string) => ({ ok: false as const, message });
   if (typeof input.title !== "string" || input.title.length < 1 || input.title.length > 120)
@@ -84,6 +114,14 @@ export function validateReportPayload(input: {
       if (!okCell) return fail("Linhas do relatório inválidas.");
     }
   }
+  if (
+    !Array.isArray(input.kinds) ||
+    input.kinds.length !== input.rows.length ||
+    input.kinds.some(
+      (k) => !COMP_SHEET_KINDS.includes(k as CompSheetRowKind)
+    )
+  )
+    return fail("Linhas do relatório inválidas.");
   if (JSON.stringify(input).length > MAX_PAYLOAD_BYTES)
     return fail("Relatório grande demais para exportar de uma vez.");
   return { ok: true };
