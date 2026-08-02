@@ -127,3 +127,47 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("PlanEditor — validação amigável por fator no save", () => {
+  // Fator novo (Adicionar fator): nome/peso/fórmula vazios morriam no parse
+  // fail-closed do servidor com o genérico "Configuração do plano inválida.".
+  it("nome, peso e fórmula vazios têm mensagem própria; savePlan nem dispara", async () => {
+    renderEditor(makeConfig());
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar fator/ }));
+    const saveBtn = screen.getByRole("button", { name: "Salvar plano" });
+
+    // Sem nome.
+    fireEvent.click(saveBtn);
+    await waitFor(() =>
+      expect(notifyActionError).toHaveBeenCalledWith(
+        "Salvar plano",
+        "Dê um nome ao fator 2."
+      )
+    );
+
+    // Com nome, sem peso — a mensagem diz que 0 vale.
+    fireEvent.change(screen.getAllByPlaceholderText("Ex.: Vendas")[1], {
+      target: { value: "Valor gerado (SDR)" },
+    });
+    fireEvent.click(saveBtn);
+    await waitFor(() =>
+      expect(notifyActionError).toHaveBeenCalledWith(
+        "Salvar plano",
+        'Informe o peso do fator "Valor gerado (SDR)" — 0 vale (fator só de gatilho/base de comissão).'
+      )
+    );
+
+    // Com peso 0, sem fórmula (FormulaEditor mockado — tokens seguem []).
+    fireEvent.change(screen.getAllByPlaceholderText("Ex.: 60")[1], {
+      target: { value: "0" },
+    });
+    fireEvent.click(saveBtn);
+    await waitFor(() =>
+      expect(notifyActionError).toHaveBeenCalledWith(
+        "Salvar plano",
+        'Monte a fórmula do realizado do fator "Valor gerado (SDR)".'
+      )
+    );
+    expect(savePlan).not.toHaveBeenCalled();
+  });
+});

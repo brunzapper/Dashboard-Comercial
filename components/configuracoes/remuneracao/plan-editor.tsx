@@ -1,3 +1,8 @@
+// Versão: 1.6 | Data: 02/08/2026
+// v1.6: validação amigável POR FATOR no save (nome/peso/fórmula vazios têm
+// mensagem própria — antes morriam no parse fail-closed do servidor com o
+// genérico "Configuração do plano inválida."; peso 0 é válido e o texto diz
+// isso); o sentinel -1 do peso saiu (valor validado segue ao servidor).
 // Versão: 1.5 | Data: 01/08/2026
 // v1.5: "Condições do recorte" por fator (factor.filters) — linhas FilterRow
 // (mesmo card do widget-builder, sem fontes-alvo por filtro) com picker de
@@ -591,6 +596,31 @@ export function PlanEditor(props: PlanEditorProps) {
 
   const save = () =>
     startTransition(async () => {
+      // Identidade básica de cada fator ANTES do config: sem isto, peso
+      // vazio/label vazio/fórmula vazia morriam no parse fail-closed do
+      // servidor com o genérico "Configuração do plano inválida.".
+      for (const [i, f] of factors.entries()) {
+        const who = f.label.trim() || `Fator ${i + 1}`;
+        if (f.label.trim() === "") {
+          notifyActionError("Salvar plano", `Dê um nome ao fator ${i + 1}.`);
+          return;
+        }
+        const w = numOrNull(f.weightPct);
+        if (w == null || w < 0) {
+          notifyActionError(
+            "Salvar plano",
+            `Informe o peso do fator "${who}" — 0 vale (fator só de gatilho/base de comissão).`
+          );
+          return;
+        }
+        if (f.formula.tokens.length === 0) {
+          notifyActionError(
+            "Salvar plano",
+            `Monte a fórmula do realizado do fator "${who}".`
+          );
+          return;
+        }
+      }
       const commissions = buildCommissions();
       if (typeof commissions === "string") {
         notifyActionError("Salvar plano", commissions);
@@ -613,7 +643,9 @@ export function PlanEditor(props: PlanEditorProps) {
         factors: factors.map((f) => ({
           id: f.id,
           label: f.label.trim(),
-          weightPct: numOrNull(f.weightPct) ?? -1,
+          // Validado acima (não-nulo e >= 0) — o parse do servidor segue
+          // como muralha.
+          weightPct: numOrNull(f.weightPct) ?? 0,
           metricKey: f.metricKey || AUTO_METRIC,
           money: f.money,
           formula: f.formula,

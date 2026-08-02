@@ -1,3 +1,7 @@
+// Versão: 1.6 | Data: 02/08/2026 (v1.6: savePlan valida campo de membro ×
+// fontes EFETIVAS do fator via memberFieldSourceError (lib/comp/member-field
+// — helper puro sobre o coletor de fontes de fields.ts): campo de outra
+// fonte era aceito e computava 0 em silêncio.)
 // Versão: 1.5 | Data: 01/08/2026
 // v1.5: condições do recorte do fator (factor.filters) validadas no savePlan —
 // campo do catálogo (mesma régua do memberField; operation_id proibido: coluna
@@ -92,6 +96,7 @@ import {
   type CompEntryInputs,
   type CompPlanConfig,
 } from "@/lib/comp/model";
+import { memberFieldSourceError } from "@/lib/comp/member-field";
 import { ensureMirrorSource, mirrorFormValues } from "@/lib/comp/mirror";
 
 export interface CompActionState {
@@ -270,6 +275,10 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
           ok: false,
           message: `Campo de membro inválido no fator "${f.label}" — escolha um campo de texto/seleção do registro.`,
         };
+      // ... e existir nas fontes EFETIVAS do fator (campo de OUTRA fonte
+      // salvaria e computaria 0 em silêncio — o filtro injetado nunca casa).
+      const mfErr = memberFieldSourceError(f, allFields, sources);
+      if (mfErr) return { ok: false, message: mfErr };
     }
     // Condições do recorte: campo do catálogo (numérico/data valem — comparam
     // valor) e valor presente nos ops com valor. Operação fica FORA: a coluna

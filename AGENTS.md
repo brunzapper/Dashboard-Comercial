@@ -672,7 +672,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `operation_id` proibido no savePlan (coluna derivada — fora da tradução
   viva de operação); o save RE-EMITE os filtros (regra do presetKey — sem
   isso o round-trip os destruiria) e fator de peso 0 com recorte próprio
-  serve de gatilho dedicado de comissão. **Match de membro por campo, alvo
+  serve de gatilho dedicado de comissão. **Validação por fator no save
+  (02/08/2026):** o `save()` do plan-editor valida nome/peso/fórmula de CADA
+  fator com mensagem própria ANTES de montar o config (peso 0 é válido e o
+  texto diz isso; o sentinel -1 saiu) — o parse fail-closed do servidor segue
+  como muralha, nunca como UX; e o savePlan rejeita campo de membro que não
+  existe em NENHUMA fonte EFETIVA do fator (sources ∪ fontes dos operandos da
+  fórmula) via `memberFieldSourceError` (`lib/comp/member-field.ts` — helper
+  puro sobre `formulaSourceKeys` de `lib/widgets/fields.ts`, o MESMO coletor
+  do `source` efetivo; campo de OUTRA fonte salvava e computava 0 em
+  silêncio; presente em ALGUMA fonte passa — perna sem o campo não credita,
+  design aceito). **Match de membro por campo, alvo
   padrão e alvo em moeda (31/07/2026):** `factor.memberField`
   (ex. `custom:sdr_reuniao`) troca o filtro injetado por
   `<campo> in (display_names do grupo canônico)` via `memberFilterFor`
