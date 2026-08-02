@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: exportação — botões Exportar CSV/PDF do toolbar (CSV dispara o
+// download; PDF monta o portal [data-print-root], chama window.print e
+// desmonta no afterprint) e impressão do demonstrativo de UMA pessoa no
+// agrupamento por pessoa (conteúdo do portal recortado ao membro). jsdom não
+// tem print/createObjectURL — stubs no beforeEach.
 // Versão: 1.0 | Data: 01/08/2026
 // Testes da Visão geral da Remuneração: agrupamento por plano (default) e por
 // pessoa, memória de cálculo visível nos cards, membro sem lançamento com
 // nota, somente leitura (sem Recalcular/Publicar) e preferência de
 // agrupamento em localStorage (`comp-overview:group`).
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fmtMoneyBRL } from "@/lib/comp/commission-label";
 import type { CompPlanConfig } from "@/lib/comp/model";
@@ -27,6 +33,14 @@ beforeEach(() => {
     (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
   }
   window.localStorage.clear();
+  // jsdom não implementa print nem blob URLs (caminho do downloadCsv); o
+  // click do <a download> também navegaria (not implemented) — tudo stub.
+  window.print = vi.fn();
+  URL.createObjectURL = vi.fn(() => "blob:x");
+  URL.revokeObjectURL = vi.fn();
+  vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(() => undefined);
 });
 
 // Plano A: 100% comissão (fator peso 0 + per_unit) — memória "44 × R$ 12,50".
@@ -171,6 +185,46 @@ describe("CompOverview", () => {
     expect(
       screen.queryByRole("button", { name: /Recalcular|Publicar/ })
     ).toBeNull();
+  });
+
+  it("Exportar CSV baixa o relatório (blob) sem tocar em nada mais", () => {
+    renderOverview();
+    fireEvent.click(screen.getByRole("button", { name: "Exportar CSV" }));
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    // O conteúdo das linhas é contrato de lib/export/comp.test.ts.
+  });
+
+  it("Exportar PDF monta o portal de impressão, imprime e desmonta no afterprint", async () => {
+    renderOverview();
+    fireEvent.click(screen.getByRole("button", { name: "Exportar PDF" }));
+    const root = document.querySelector("[data-print-root]");
+    expect(root).not.toBeNull();
+    expect(document.body.dataset.printing).toBe("comp");
+    const text = norm(root!.textContent ?? "");
+    expect(text).toContain("Remuneração — Agosto de 2026");
+    expect(text).toContain("Plano A");
+    expect(text).toContain("Plano B");
+    // double-rAF antes do print.
+    await waitFor(() => expect(window.print).toHaveBeenCalled());
+    fireEvent(window, new Event("afterprint"));
+    await waitFor(() =>
+      expect(document.querySelector("[data-print-root]")).toBeNull()
+    );
+    expect(document.body.dataset.printing).toBeUndefined();
+  });
+
+  it("imprimir demonstrativo de uma pessoa recorta o portal ao membro", () => {
+    renderOverview();
+    fireEvent.click(screen.getByRole("button", { name: "Por pessoa" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Imprimir demonstrativo de Ana" })
+    );
+    const text = norm(
+      document.querySelector("[data-print-root]")?.textContent ?? ""
+    );
+    expect(text).toContain("Ana");
+    expect(text).toContain("Plano A");
+    expect(text).not.toContain("Bruno");
   });
 
   it("preferência salva abre por pessoa; 'Usar como padrão' grava a chave", async () => {

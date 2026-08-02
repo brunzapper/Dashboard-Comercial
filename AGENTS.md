@@ -663,7 +663,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `comp-plan-card.tsx` (extraído da my-comp-view; `title` opcional;
   ApuracaoBadge mora LÁ — importá-lo do manager criaria ciclo); agrupamento
   por plano/por pessoa com preferência do usuário em localStorage
-  `comp-overview:group` (chrome de UI, nunca dado). NUNCA gerar fórmula a
+  `comp-overview:group` (chrome de UI, nunca dado). **Export CSV/PDF
+  (02/08/2026):** Visão geral e my-comp-view exportam 100% client-derived —
+  CSV pelo builder puro `lib/export/comp.ts` via o MESMO `computeEntry`
+  (nunca `entry.total`; rótulos de memória SÓ de `commission-label.ts`;
+  convenções de `lib/export/csv.ts`) e "PDF" = impressão do navegador via
+  portal `[data-print-root]` (`comp-report-print.tsx` + `@media print` de
+  `globals.css`, flag `body[data-printing="comp"]`) — nenhuma action/RPC
+  nova. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de

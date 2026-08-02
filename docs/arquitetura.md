@@ -1,4 +1,11 @@
-<!-- Versão: 1.52 | Data: 01/08/2026 -->
+<!-- Versão: 1.53 | Data: 02/08/2026 -->
+<!-- v1.53 (02/08/2026): §4.18 — EXPORTAÇÃO CSV/PDF da Remuneração (Visão
+     geral do admin + my-comp-view do vendedor): 100% client-derived das
+     mesmas props (nenhuma action/RPC nova). CSV pelo builder puro
+     lib/export/comp.ts (mesmo computeEntry; memória via commissionMemory;
+     convenções de lib/export/csv.ts) e "PDF" = impressão do navegador
+     (comp-report-print.tsx: portal [data-print-root] + @media print de
+     globals.css; CompPlanCard reutilizado + entryMemoryLines por card). -->
 <!-- v1.52 (01/08/2026): §4.18 + invariante 26 — CONDIÇÕES DO RECORTE POR FATOR
      (factor.filters com UI no plan-editor): recorte configurável do realizado
      aplicado ANTES do filtro de membro na mesma consulta; parse restrito aos
@@ -2628,7 +2635,29 @@ total opcional por plano.
   usuário em localStorage `comp-overview:group` (chrome de UI por usuário,
   nunca dado; SSR determinístico + leitura pós-mount, padrão use-panel-width).
   Membro esperado sem entry no mês aparece como nota "sem lançamento" (nunca
-  some em silêncio).
+  some em silêncio). **Exportação CSV/PDF (02/08/2026).** Visão geral e
+  my-comp-view exportam 100% no CLIENTE dos MESMOS dados das props (nenhuma
+  action/RPC nova; tudo read-only — a RLS já recortou o que chegou): CSV pelo
+  builder puro `lib/export/comp.ts` (`compReportCsv`/`compStatementRows` —
+  deriva na hora pelo MESMO `computeEntry`, nunca `entry.total`; memória da
+  comissão via `commissionMemory`; convenções de `lib/export/csv.ts`: `;` +
+  BOM + `csvNumber` — abre direto no Google Planilhas/Excel), formato LONGO
+  `Plano;Pessoa;Tipo;Item;Alvo;Realizado;Atingimento %;Valor (R$);Observação`
+  (uma linha por fator/bloco de comissão/base/bônus/total; vazio onde a UI
+  mostra "—"). "PDF" é a impressão do navegador: `comp-report-print.tsx`
+  monta um portal `[data-print-root]` oculto em tela (CompPlanCard
+  reutilizado — card único — + `entryMemoryLines` por card; uma seção por
+  página via break-after), seta `body[data-printing="comp"]` enquanto montado
+  e chama `window.print()` após double-rAF (guarda fire-once p/ StrictMode;
+  desmonte no `afterprint` — Safari não bloqueia no print()); o `@media
+  print` de `globals.css` esconde o resto do shell (regra exige o flag —
+  Ctrl+P alheio intocado) e força tokens de papel (tema escuro imprimiria
+  texto claro). Botões: toolbar da Visão geral (relatório inteiro no
+  agrupamento corrente), por pessoa no agrupamento "Por pessoa"
+  (demonstrativo individual) e na visão do vendedor (memberLabel vazio no
+  CSV próprio — a page não carrega o display_name; tradeoff documentado).
+  Fiscalizado por `lib/export/comp.test.ts` + casos novos de
+  `comp-overview.test.tsx`/`my-comp-view.test.tsx`.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

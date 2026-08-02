@@ -1,3 +1,9 @@
+// Versão: 1.6 | Data: 02/08/2026
+// v1.6: exportação CSV/PDF do próprio demonstrativo — mesma dupla da Visão
+// geral do admin (builder puro lib/export/comp.ts + CompReportPrint via
+// impressão do navegador), 100% client-derived das props (RLS já recortou);
+// memberLabel vazio no CSV (a page não carrega o display_name — tradeoff
+// documentado). Plano com config inválida é pulado (paridade CompPlanCard).
 // Versão: 1.5 | Data: 01/08/2026
 // v1.5: o card do plano foi EXTRAÍDO para comp-plan-card.tsx (CompPlanCard —
 // agora compartilhado com a Visão geral do admin, junto de OverrideDot/
@@ -25,10 +31,18 @@
 // editável; sem Recalcular/Publicar. Navegação de mês via searchParams.
 "use client";
 
+import { Download, Printer } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 
 import { useNavPending } from "@/components/dashboards/pending-context";
+import { Button } from "@/components/ui/button";
+import { parseCompPlanConfig } from "@/lib/comp/model";
+import { MONTH_LABELS } from "@/lib/date/month-labels";
+import { compReportCsv, type CompStatementInput } from "@/lib/export/comp";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { CompPlanCard } from "./comp-plan-card";
+import { CompReportPrint } from "./comp-report-print";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -52,6 +66,7 @@ export function MyCompView(props: MyCompViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { pending, run } = useNavPending();
+  const [printing, setPrinting] = useState(false);
   const draft = useMonthDraft(props.year, props.month, (y, m) =>
     run(() =>
       router.replace(`${pathname}?ano=${y}&mes=${m}`, { scroll: false })
@@ -74,6 +89,28 @@ export function MyCompView(props: MyCompViewProps) {
     .map((plan) => ({ plan, entry: entryByPlan.get(plan.id) ?? null }))
     .filter((c) => c.entry != null);
 
+  // Demonstrativo próprio → CSV (memberLabel vazio: a page não carrega o
+  // display_name; plano com config inválida sai — CompPlanCard renderiza null).
+  const exportCsv = () => {
+    const statements = cards.flatMap<CompStatementInput>(({ plan, entry }) => {
+      const config = parseCompPlanConfig(plan.config);
+      if (!config) return [];
+      return [
+        {
+          planName: plan.name,
+          memberLabel: "",
+          config,
+          baseAmountDefault: plan.base_amount_default,
+          entry,
+          targets: props.targetsByPlan[plan.id] ?? {},
+          targetRates: props.targetRatesByPlan[plan.id] ?? {},
+        },
+      ];
+    });
+    const { headers, rows } = compReportCsv(statements);
+    downloadCsv(csvFilename("minha-remuneracao"), buildCsv(headers, rows));
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <MonthNav draft={draft} pending={pending} />
@@ -88,6 +125,25 @@ export function MyCompView(props: MyCompViewProps) {
           </p>
         ) : (
           <div className="flex flex-col gap-4">
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={exportCsv}
+              >
+                <Download className="size-4" /> Exportar CSV
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                title="Abre a impressão do navegador — salve como PDF."
+                onClick={() => setPrinting(true)}
+              >
+                <Printer className="size-4" /> Exportar PDF
+              </Button>
+            </div>
             {cards.map(({ plan, entry }) => (
               <CompPlanCard
                 key={plan.id}
@@ -102,6 +158,27 @@ export function MyCompView(props: MyCompViewProps) {
           </div>
         )}
       </div>
+
+      {printing ? (
+        <CompReportPrint
+          title={`Minha remuneração — ${MONTH_LABELS[props.month - 1]} de ${props.year}`}
+          sections={[
+            {
+              key: "me",
+              cards: cards.map(({ plan, entry }) => ({
+                key: plan.id,
+                plan,
+                entry,
+                targets: props.targetsByPlan[plan.id] ?? {},
+                targetRates: props.targetRatesByPlan[plan.id] ?? {},
+              })),
+            },
+          ]}
+          year={props.year}
+          month={props.month}
+          onDone={() => setPrinting(false)}
+        />
+      ) : null}
     </div>
   );
 }
