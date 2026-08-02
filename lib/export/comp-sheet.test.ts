@@ -1,15 +1,22 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 1.1 | Data: 02/08/2026
+// v1.1: layout por COLABORADOR — sem quadro-resumo no topo: seção única por
+// pessoa (nome 1× + total consolidado no cabeçalho), planHeader por plano,
+// memberTotal com 2+ planos, Total geral só no rodapé (2+ pessoas), Peso
+// omitido do header quando nenhum fator o usa e Base variável com a condição
+// corrigida (flat não usa a base; totalFormula com comp:base usa).
 // Testes do builder do DEMONSTRATIVO p/ Google Planilhas (comp-sheet.ts):
 // shape do grid (largura fixa 7 + kinds paralelo, whitelist do contrato),
-// quadro-resumo (números crus, total geral, ordenação por pessoa pt-BR),
-// blocos de detalhe (seções, fator peso-0, factorMoney, memória da comissão
+// blocos por pessoa (seções, fator peso-0, factorMoney, memória da comissão
 // via commissionMemory, sem lançamento), AUSÊNCIA do jargão interno do CSV
 // (regressão de linguagem — o demonstrativo é p/ RH/gestor), escopo "minha"
-// sem coluna Pessoa e aceitação pelo validateReportPayload do contrato.
+// sem menção a Pessoa e aceitação pelo validateReportPayload do contrato.
 // Fixtures espelham comp.test.ts (mesmos planos A/B).
 import { describe, expect, it } from "vitest";
 
-import { SHEET_NO_ENTRY_NOTE } from "@/lib/comp/commission-label";
+import {
+  SHEET_MEMBER_TOTAL_NOTE,
+  SHEET_NO_ENTRY_NOTE,
+} from "@/lib/comp/commission-label";
 import type { CompPlanConfig } from "@/lib/comp/model";
 import {
   COMP_SHEET_KINDS,
@@ -124,6 +131,9 @@ const rowOf = (
     (r, i) => report.kinds[i] === kind && (col0 == null || r[0] === col0)
   );
 
+const rowsOf = (report: ReturnType<typeof compSheetReport>, kind: string) =>
+  report.rows.filter((_, i) => report.kinds[i] === kind);
+
 describe("compSheetReport", () => {
   it("shape: largura fixa, kinds paralelo à whitelist, título com o mês", () => {
     const report = compSheetReport(inputs(), OPTS);
@@ -139,39 +149,69 @@ describe("compSheetReport", () => {
         if (typeof c === "string") expect(c.length).toBeLessThanOrEqual(500);
   });
 
-  it("resumo: uma linha por statement, números CRUS, ordenação por pessoa", () => {
+  it("seção por pessoa: nome 1×, total no cabeçalho, ordenação pt-BR", () => {
     const report = compSheetReport(inputs(), OPTS);
-    const summaries = report.rows.filter(
-      (_, i) => report.kinds[i] === "summary"
-    );
-    expect(summaries).toHaveLength(2);
-    // Ana (Plano A) vem antes de Bruno apesar da ordem de entrada.
-    expect(summaries[0][0]).toBe("Ana");
-    expect(summaries[1][0]).toBe("Bruno");
-    // Plano A: só comissão (base/fatores 0, comissão 550, total 550).
-    expect(summaries[0][4]).toBe(550);
-    expect(summaries[0][6]).toBe(550);
-    // Plano B: base 1000, fatores 500, sem comissão ("" — plano sem blocos).
-    expect(summaries[1][2]).toBe(1000);
-    expect(summaries[1][3]).toBe(500);
-    expect(summaries[1][4]).toBe("");
-    expect(summaries[1][6]).toBe(500);
+    // Sem quadro-resumo no topo: os kinds antigos ficam reservados.
+    expect(report.kinds).not.toContain("summaryHeader");
+    expect(report.kinds).not.toContain("summary");
+    // Ana antes de Bruno apesar da ordem de entrada; nome SÓ na seção.
+    const sections = rowsOf(report, "section");
+    expect(sections.map((r) => r[0])).toEqual(["Ana", "Bruno"]);
+    // Total consolidado (números CRUS) na coluna Valor do cabeçalho.
+    expect(sections[0][5]).toBe(550);
+    expect(sections[1][5]).toBe(500);
+    // Nome do plano vira sub-cabeçalho do bloco da pessoa.
+    expect(rowsOf(report, "planHeader").map((r) => r[0])).toEqual([
+      "Plano A",
+      "Plano B",
+    ]);
+    // Pessoa com UM plano não ganha memberTotal (o Total do bloco basta).
+    expect(report.kinds).not.toContain("memberTotal");
   });
 
-  it("total geral soma fatores/comissão/bônus/total e deixa a base vazia", () => {
+  it("total geral no rodapé com 2+ pessoas; ausente com uma só", () => {
     const report = compSheetReport(inputs(), OPTS);
     const total = rowOf(report, "summaryTotal")!;
     expect(total[0]).toBe("Total geral");
-    expect(total[2]).toBe(""); // base NÃO soma (multiplica os fatores)
-    expect(total[3]).toBe(500);
-    expect(total[4]).toBe(550);
-    expect(total[6]).toBe(1050);
+    expect(total[5]).toBe(1050);
+    // Rodapé é a última linha do grid.
+    expect(report.kinds[report.kinds.length - 1]).toBe("summaryTotal");
+    const single = compSheetReport([inputs()[0]], OPTS);
+    expect(single.kinds).not.toContain("summaryTotal");
   });
 
-  it("detalhe: seção por pessoa×plano, memória protagonista", () => {
+  it("pessoa com 2+ planos: seção única, composição no cabeçalho e memberTotal", () => {
+    const report = compSheetReport(
+      [
+        statement({ config: configA, planName: "Plano A", entry: entryA }),
+        statement({
+          config: configB,
+          planName: "Plano B",
+          baseAmountDefault: 1000,
+          entry: entryB,
+          targets: { vendas: 100000 },
+        }),
+      ],
+      OPTS
+    );
+    const sections = rowsOf(report, "section");
+    expect(sections).toHaveLength(1);
+    expect(sections[0][0]).toBe("Ana");
+    expect(sections[0][5]).toBe(1050);
+    expect(norm(String(sections[0][6]))).toBe(
+      "Fatores R$ 500,00 + Comissão R$ 550,00"
+    );
+    expect(rowsOf(report, "planHeader")).toHaveLength(2);
+    const memberTotal = rowOf(report, "memberTotal", "Total — Ana")!;
+    expect(memberTotal[5]).toBe(1050);
+    expect(memberTotal[6]).toBe(SHEET_MEMBER_TOTAL_NOTE);
+  });
+
+  it("detalhe: memória protagonista, Peso omitido quando nenhum fator o usa", () => {
     const report = compSheetReport(inputs(), OPTS);
-    expect(rowOf(report, "section", "Ana — Plano A")).toBeTruthy();
-    expect(rowOf(report, "section", "Bruno — Plano B")).toBeTruthy();
+    // Plano A (só comissão): header sem rótulo "Peso"; Plano B com.
+    const headers = rowsOf(report, "detailHeader");
+    expect(headers.map((r) => r[4])).toEqual(["", "Peso"]);
     // Fator com peso (money sem moeda estrangeira) = factorMoney com a conta.
     const vendas = rowOf(report, "factorMoney", "Vendas")!;
     expect(vendas[1]).toBe(100000);
@@ -195,21 +235,64 @@ describe("compSheetReport", () => {
     );
     // Plano A (sem fator com peso nem comissão sobre a base): sem linha de
     // base variável no bloco; o total do bloco fecha em 550.
-    const blocoTotais = report.rows.filter(
-      (_, i) => report.kinds[i] === "blockTotal"
-    );
+    const blocoTotais = rowsOf(report, "blockTotal");
     expect(blocoTotais.some((r) => r[5] === 550)).toBe(true);
     expect(rowOf(report, "info", "Base variável")).toBeTruthy(); // do Plano B
   });
 
-  it("sem lançamento: seção + nota, resumo vazio", () => {
+  it("base variável: flat sobre a base NÃO conta; totalFormula com comp:base conta", () => {
+    // Comissão flat "sobre a base": o valor da faixa é fixo — a base não
+    // participa e a linha é omitida.
+    const flatConfig: CompPlanConfig = {
+      ...configA,
+      commissions: [
+        {
+          id: "premio",
+          label: "Prêmio fixo",
+          triggerFactorId: "reunioes",
+          basisKind: "base",
+          tierBy: "realized",
+          kind: "flat",
+          tiers: [{ fromPct: 0, amount: 300 }],
+        },
+      ],
+    };
+    const flat = compSheetReport(
+      [statement({ config: flatConfig, planName: "Plano A", entry: entryA })],
+      OPTS
+    );
+    expect(rowOf(flat, "info", "Base variável")).toBeFalsy();
+    // Fórmula livre do total referenciando comp:base: a base participa.
+    const formulaConfig: CompPlanConfig = {
+      ...configA,
+      totalFormula: { tokens: [{ kind: "field", ref: "comp:base" }] },
+    };
+    const formula = compSheetReport(
+      [
+        statement({
+          config: formulaConfig,
+          planName: "Plano A",
+          baseAmountDefault: 2000,
+          entry: entryA,
+        }),
+      ],
+      OPTS
+    );
+    const baseRow = rowOf(formula, "info", "Base variável")!;
+    expect(baseRow[5]).toBe(2000);
+  });
+
+  it("sem lançamento: seção com total vazio + nota no bloco do plano", () => {
     const report = compSheetReport(
       [statement({ config: configB, planName: "Plano B", memberLabel: "Ana" })],
       OPTS
     );
-    const summary = rowOf(report, "summary")!;
-    expect(summary.slice(2)).toEqual(["", "", "", "", ""]);
+    const section = rowOf(report, "section", "Ana")!;
+    expect(section[5]).toBe("");
+    expect(section[6]).toBe("");
+    expect(rowOf(report, "planHeader", "Plano B")).toBeTruthy();
     expect(rowOf(report, "info", SHEET_NO_ENTRY_NOTE)).toBeTruthy();
+    expect(report.kinds).not.toContain("detailHeader");
   });
 
   it("jargão interno do CSV NÃO aparece no demonstrativo", () => {
@@ -228,25 +311,46 @@ describe("compSheetReport", () => {
     expect(all).not.toContain("sem lançamento no mês"); // virou SHEET_NO_ENTRY_NOTE
   });
 
-  it('escopo "minha": sem coluna/menção a Pessoa, seção só com o plano', () => {
-    const report = compSheetReport(
-      [
-        statement({
-          config: configB,
-          planName: "Plano B",
-          memberLabel: "",
-          baseAmountDefault: 1000,
-          entry: entryB,
-          targets: { vendas: 100000 },
-        }),
-      ],
-      { scope: "minha", monthLabel: "Agosto de 2026" }
-    );
-    expect(report.headers[0]).toBe("Minha remuneração — Agosto de 2026");
-    const header = rowOf(report, "summaryHeader")!;
-    expect(header[0]).toBe("Plano");
-    expect(JSON.stringify(report.rows)).not.toContain("Pessoa");
-    expect(rowOf(report, "section", "Plano B")).toBeTruthy();
+  it('escopo "minha": sem menção a Pessoa, seção por plano, Total do mês', () => {
+    const mine = (planos: CompStatementInput[]) =>
+      compSheetReport(planos, { scope: "minha", monthLabel: "Agosto de 2026" });
+    const one = mine([
+      statement({
+        config: configB,
+        planName: "Plano B",
+        memberLabel: "",
+        baseAmountDefault: 1000,
+        entry: entryB,
+        targets: { vendas: 100000 },
+      }),
+    ]);
+    expect(one.headers[0]).toBe("Minha remuneração — Agosto de 2026");
+    expect(JSON.stringify(one.rows)).not.toContain("Pessoa");
+    expect(rowOf(one, "section", "Plano B")).toBeTruthy();
+    // Sem cabeçalho de pessoa p/ subordinar: nada de planHeader/memberTotal.
+    expect(one.kinds).not.toContain("planHeader");
+    expect(one.kinds).not.toContain("memberTotal");
+    // Com 2+ planos o fecho é "Total do mês".
+    const two = mine([
+      statement({
+        config: configB,
+        planName: "Plano B",
+        memberLabel: "",
+        baseAmountDefault: 1000,
+        entry: entryB,
+        targets: { vendas: 100000 },
+      }),
+      statement({
+        config: configA,
+        planName: "Plano A",
+        memberLabel: "",
+        entry: entryA,
+      }),
+    ]);
+    const total = rowOf(two, "memberTotal", "Total do mês")!;
+    expect(total[5]).toBe(1050);
+    expect(total[6]).toBe(SHEET_MEMBER_TOTAL_NOTE);
+    expect(two.kinds).not.toContain("summaryTotal");
   });
 
   it("o payload do builder passa no validador do contrato", () => {

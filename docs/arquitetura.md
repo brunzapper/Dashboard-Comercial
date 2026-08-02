@@ -1,3 +1,13 @@
+<!-- Versão: 1.56 | Data: 02/08/2026 -->
+<!-- v1.56 (02/08/2026): §4.18 — demonstrativo do export p/ Google Planilhas
+     reorganizado por COLABORADOR: sem quadro-resumo no topo — seção única por
+     pessoa (nome 1×, total consolidado + composição sheetSummaryNote no
+     cabeçalho), planHeader por plano, memberTotal com 2+ planos e Total geral
+     só no rodapé (2+ pessoas). Omissões: rótulo "Peso" sai sem fator com peso;
+     linha "Base variável" segue baseParticipates corrigido (flat não usa a
+     base; totalFormula com comp:base usa). Kinds novos planHeader/memberTotal
+     na whitelist (summaryHeader/summary reservados); Apps Script v2.1 com os
+     estilos (script 2.0 degrada p/ texto puro até republicar). -->
 <!-- Versão: 1.55 | Data: 02/08/2026 -->
 <!-- v1.55 (02/08/2026): §4.18 — payload v2 do export p/ Google Planilhas:
      DEMONSTRATIVO (resumo + detalhe na aba do mês) gerado por compSheetReport
@@ -2703,39 +2713,54 @@ total opcional por plano.
   'comp_sheets_webapp' (`lib/comp/sheets-export.ts` — validações puras +
   loader fail-closed), editável no popover do botão (admin;
   `saveCompSheetsWebappUrl` via client do usuário — a policy admin de
-  sync_config é a muralha). **Payload v2 = DEMONSTRATIVO (02/08/2026).** A
-  planilha NÃO é o grid do CSV: `compSheetReport`
+  sync_config é a muralha). **Payload v2 = DEMONSTRATIVO por COLABORADOR
+  (02/08/2026).** A planilha NÃO é o grid do CSV: `compSheetReport`
   (`lib/export/comp-sheet.ts`, builder puro) monta um demonstrativo p/
   leitor externo (RH/gestor) — linha-TÍTULO (viaja em `headers`: o script v1
-  a degrada como header bold), quadro-RESUMO (uma linha por pessoa×plano:
-  base/fatores/comissão/bônus/total; total geral SEM somar a base — ela
-  multiplica os fatores) e blocos de DETALHE por pessoa (seção, sub-header,
-  fatores com alvo/realizado/atingimento/peso/valor, comissões com a fórmula
-  de `commissionMemory`, bônus, base variável quando participa e total do
-  bloco) — grid de 7 colunas FIXAS (padding ""), números CRUS, ordenado por
-  pessoa (pt-BR). Cada linha carrega um KIND (`kinds` paralelo às rows;
-  whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts` — dono do
-  contrato; `validateReportPayload` exige kinds↔rows) e o `.gs` formata POR
-  KIND em lote (getRangeList): moeda `R$ #,##0.00`, percentual `0.00"%"`
-  (aspas — valor já vem 0–100), bold/fundos em headers/seções, larguras
-  FIXAS (sem autoResize — a memória de cálculo tem coluna larga com wrap) e
-  SEM merge (`clear()` não desfaz merge — re-export deixaria merges órfãos).
-  Frases novas do demonstrativo nascem SÓ em `commission-label.ts`
-  (`sheetFactorNote`/`sheetCommissionSumNote`/`sheetTotalNote`/
-  `SHEET_BASE_NOTE`/`SHEET_NO_ENTRY_NOTE`) — sem jargão interno ("peso 0%",
-  "gatilho/base de comissão"), ausência PINADA em
-  `lib/export/comp-sheet.test.ts`. Escopo `minha` omite a coluna Pessoa
-  (colunas numéricas NÃO deslocam — o mapa kind→coluna do script independe
-  de escopo). Degradação bidirecional na transição: script v1 × payload v2 =
-  grid cru com título; script v2 × ticket v1 (rota devolve `kinds: null`) =
-  rendering simples antigo. `compReportValues` foi REMOVIDO (era o grid
-  espelho do CSV); o CSV segue byte-idêntico — CSV e demonstrativo derivam
-  do MESMO `statementBreakdown` (`lib/export/comp.ts`). Atualização do
-  script publicado: nova VERSÃO da MESMA implantação (URL /exec não muda —
-  runbook em `supabase/README.md`). Fiscalizado por
-  `lib/comp/sheets-export.test.ts` + `lib/export/comp-sheet.test.ts` + os
-  pinos do CSV em `lib/export/comp.test.ts` + casos de botão nos testes das
-  duas telas.
+  a degrada como header bold) e, SEM quadro-resumo no topo, uma SEÇÃO por
+  pessoa (ordenada pt-BR): `section` = nome 1× com o total consolidado na
+  col F e a composição (`sheetSummaryNote` — "Fatores + Comissão + Bônus",
+  termos zerados/ausentes fora, "" com <2 termos) na col G; dentro dela um
+  sub-cabeçalho `planHeader` por plano (detalhe: fatores com
+  alvo/realizado/atingimento/peso/valor, comissões com a fórmula de
+  `commissionMemory`, bônus, base variável quando participa e total do
+  bloco) e o fecho `memberTotal` ("Total — <nome>") SÓ com 2+ planos;
+  `summaryTotal` ("Total geral", col F) é RODAPÉ, SÓ com 2+ pessoas — a base
+  variável nunca soma em total nenhum (multiplica os fatores). O que não
+  participa é OMITIDO: rótulo "Peso" sai do `detailHeader` quando nenhum
+  fator do plano tem peso, e a linha "Base variável" segue o helper
+  `baseParticipates` do builder — fator com peso OU comissão sobre a base
+  (EXCETO `flat`, que ignora o basis e paga o valor fixo da faixa) OU
+  `totalFormula` referenciando `comp:base`; o CSV mantém a linha
+  incondicional. Grid de 7 colunas FIXAS (padding ""), números CRUS. Cada
+  linha carrega um KIND (`kinds` paralelo às rows; whitelist
+  `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts` — dono do contrato;
+  `validateReportPayload` exige kinds↔rows; `summaryHeader`/`summary`/
+  `note` reservados — não emitidos, mantidos p/ compat) e o `.gs` (v2.1)
+  formata POR KIND em lote (getRangeList): moeda `R$ #,##0.00`, percentual
+  `0.00"%"` (aspas — valor já vem 0–100), bold/fundos em headers/seções
+  (`planHeader` no fundo claro dos headers; `memberTotal` no fundo da seção,
+  fechando o bloco), larguras FIXAS (sem autoResize — a memória de cálculo
+  tem coluna larga com wrap) e SEM merge (`clear()` não desfaz merge —
+  re-export deixaria merges órfãos). Frases novas do demonstrativo nascem SÓ
+  em `commission-label.ts` (`sheetFactorNote`/`sheetCommissionSumNote`/
+  `sheetTotalNote`/`sheetSummaryNote`/`SHEET_BASE_NOTE`/
+  `SHEET_NO_ENTRY_NOTE`/`SHEET_MEMBER_TOTAL_NOTE`) — sem jargão interno
+  ("peso 0%", "gatilho/base de comissão"), ausência PINADA em
+  `lib/export/comp-sheet.test.ts`. Escopo `minha` não menciona pessoa:
+  `section` = nome do plano, sem `planHeader`, fecho "Total do mês" com 2+
+  planos (colunas numéricas NÃO deslocam — o mapa kind→coluna do script
+  independe de escopo). Degradação bidirecional na transição: script v1 ×
+  payload v2 = grid cru com título; script v2 × ticket v1 (rota devolve
+  `kinds: null`) = rendering simples antigo; script 2.0 × payload novo =
+  kinds novos como texto puro e total da seção sem R$ (republicar p/ os
+  estilos). `compReportValues` foi REMOVIDO (era o grid espelho do CSV); o
+  CSV segue byte-idêntico — CSV e demonstrativo derivam do MESMO
+  `statementBreakdown` (`lib/export/comp.ts`). Atualização do script
+  publicado: nova VERSÃO da MESMA implantação (URL /exec não muda — runbook
+  em `supabase/README.md`). Fiscalizado por `lib/comp/sheets-export.test.ts`
+  + `lib/export/comp-sheet.test.ts` + os pinos do CSV em
+  `lib/export/comp.test.ts` + casos de botão nos testes das duas telas.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

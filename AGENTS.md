@@ -681,15 +681,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   client-derived → Drive do próprio usuário (tradeoff aceito); URL do Web
   App por org em `sync_config` 'comp_sheets_webapp'
   (`lib/comp/sheets-export.ts`); NUNCA policy anon. **Payload v2 =
-  DEMONSTRATIVO (02/08/2026):** o grid nasce de `compSheetReport`
-  (`lib/export/comp-sheet.ts` — resumo + detalhe na aba do mês, 7 colunas
-  fixas, números crus, título em `headers`) com `kinds` paralelo às rows
+  DEMONSTRATIVO por COLABORADOR (02/08/2026):** o grid nasce de
+  `compSheetReport` (`lib/export/comp-sheet.ts` — 7 colunas fixas, números
+  crus, título em `headers`), SEM quadro-resumo no topo: uma seção por
+  pessoa (`section` = nome 1×, total consolidado na col F + composição
+  `sheetSummaryNote` na col G), sub-cabeçalho `planHeader` por plano e fecho
+  `memberTotal` ("Total — <nome>"/"Total do mês") SÓ com 2+ planos;
+  `summaryTotal` ("Total geral") virou rodapé, SÓ com 2+ pessoas; escopo
+  "minha" segue com `section` = nome do plano (sem `planHeader`). O que não
+  participa é OMITIDO: rótulo "Peso" some do `detailHeader` quando nenhum
+  fator tem peso, e a linha "Base variável" só entra quando a base participa
+  — comissão `flat` sobre a base NÃO conta (computeEntry ignora o basis) e
+  `totalFormula` com `comp:base` CONTA (helper `baseParticipates` do
+  builder; o CSV mantém a linha incondicional). `kinds` paralelo às rows
   (whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts`, validada no
-  `validateReportPayload`); o `.gs` formata POR KIND (moeda/%/bold/larguras
-  fixas, SEM autoResize e SEM merge — `clear()` não desfaz merge) com
-  degradação bidirecional (script v1 × payload v2 e vice-versa); frases
-  novas do demonstrativo SÓ em `commission-label.ts` (`sheetFactorNote`/
-  `sheetTotalNote`/`SHEET_*`), sem jargão interno (pinado em
+  `validateReportPayload`; `summaryHeader`/`summary`/`note` reservados — não
+  emitidos); o `.gs` (v2.1) formata POR KIND (moeda/%/bold/larguras fixas,
+  SEM autoResize e SEM merge — `clear()` não desfaz merge) com degradação
+  bidirecional (script v1 × payload v2 e vice-versa; script 2.0 rende os
+  kinds novos como texto puro até republicar); frases novas do demonstrativo
+  SÓ em `commission-label.ts` (`sheetFactorNote`/`sheetTotalNote`/
+  `sheetSummaryNote`/`SHEET_*`), sem jargão interno (pinado em
   `comp-sheet.test.ts`); o CSV NÃO passa por aí (builder `compReportCsv`
   intocado, byte-idêntico; `compReportValues` foi removido — deriva via
   `statementBreakdown` de `lib/export/comp.ts`). NUNCA gerar fórmula a
