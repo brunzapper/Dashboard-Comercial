@@ -1,3 +1,8 @@
+// Versão: 1.6 | Data: 02/08/2026
+// v1.6: formulaSourceKeys exportado — união das fontes tocadas pelos refs de
+// uma fórmula (mesmo coletor interno collectRefSources do `source` efetivo;
+// consumido pela validação de campo de membro da Remuneração — nunca montar
+// coletor paralelo).
 // Versão: 1.5 | Data: 20/07/2026
 // v1.5 (20/07/2026): unifiedMembers RAIZ primeiro — pai e sub (0078) compartilham
 //   o record_type e o Object.fromEntries deixava o membro da SUB sobrescrever o
@@ -24,7 +29,7 @@ import {
   type FieldDefinition,
 } from "@/lib/records/types";
 import { splitCoreDefs } from "@/lib/records/core-defs";
-import { formulaRefs, formulaToText } from "@/lib/records/formulas";
+import { formulaRefs, formulaToText, type Formula } from "@/lib/records/formulas";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   BUILTIN_SOURCES,
@@ -199,6 +204,23 @@ function collectRefSources(
         collectRefSources(r, byKey, visited, out);
     }
   }
+}
+
+/**
+ * União das fontes (keys — inclusive de sub-fonte, vindas de escopo `@fonte`)
+ * tocadas pelos refs de uma fórmula. Mesmo coletor do `source` efetivo
+ * (collectRefSources) — consumidor externo: validação de campo de membro da
+ * Remuneração (fator com sources [] resolve as fontes pelos operandos).
+ */
+export function formulaSourceKeys(
+  formula: Formula,
+  allFields: FieldDefinition[]
+): SourceKey[] {
+  const byKey = new Map(allFields.map((f) => [f.field_key, f]));
+  const out = new Set<SourceKey>();
+  const visited = new Set<string>();
+  for (const r of formulaRefs(formula)) collectRefSources(r, byKey, visited, out);
+  return [...out];
 }
 
 // Fonte única efetiva de uma FieldDefinition: applies_to com exatamente 1 fonte

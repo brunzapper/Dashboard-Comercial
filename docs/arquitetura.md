@@ -2681,6 +2681,24 @@ total opcional por plano.
   prévia da fórmula os aplica; valor de relação grava NOME
   (`FilterValuePicker` storeAs "label", resolvido em runtime — §4.10),
   etapa/seleção gravam o rótulo.
+- **Validação por fator no save (02/08/2026).** O `save()` do plan-editor
+  valida a identidade básica de CADA fator com mensagem própria ANTES de
+  montar o config — nome vazio, peso vazio (a mensagem diz que 0 vale: fator
+  só de gatilho/base de comissão) e fórmula vazia; antes, esses três morriam
+  no parse fail-closed do `savePlan` com o genérico "Configuração do plano
+  inválida." (o sentinel `weightPct: -1` foi removido; o parse do servidor
+  segue como muralha, nunca como UX). No servidor, o `savePlan` também
+  rejeita campo de membro que não existe em NENHUMA fonte EFETIVA do fator —
+  `memberFieldSourceError` (`lib/comp/member-field.ts`), helper puro sobre
+  `formulaSourceKeys` (`lib/widgets/fields.ts`, o MESMO coletor interno do
+  `source` efetivo — nunca coletor paralelo): fontes efetivas =
+  `factor.sources` ∪ fontes tocadas pelos operandos da fórmula (fatores do
+  preset usam `sources: []` + refs `@fonte`); sub-fonte conta pelo
+  record_type da PAI; presente em ALGUMA fonte passa (perna sem o campo não
+  credita ninguém — design aceito, ex. SDR Responsável × Vendas Site);
+  fail-open sem fontes resolvíveis ou campo sem applies_to. Motivação: campo
+  de texto de OUTRA fonte (ex. "SDR da Reunião", de lead, num fator de
+  vendas) era aceito, salvava e computava 0 em SILÊNCIO para todo membro.
 - **Apuração sobre o mês anterior (31/07/2026).** `config.apuracao:
   "mes_anterior"` faz o lançamento do mês M (pagamento) apurar
   realizado/metas/taxas sobre M-1 — caso Zapper: a variável paga em Julho
