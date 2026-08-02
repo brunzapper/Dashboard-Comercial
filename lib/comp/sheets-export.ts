@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 02/08/2026
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: demonstrativo por COLABORADOR — kinds novos `planHeader`/`memberTotal`
+// na whitelist; `summaryHeader`/`summary` viram RESERVADOS (o builder não os
+// emite mais — ficam na whitelist p/ compat de payload antigo em trânsito e
+// porque o script formata por lookup, kind não emitido é inofensivo).
 // v1.1: payload v2 — o relatório vira DEMONSTRATIVO (resumo + detalhe na aba
 // do mês) e cada linha carrega um KIND (`COMP_SHEET_KINDS`, whitelist deste
 // módulo — dono do contrato) que o Apps Script usa p/ formatar (moeda, %,
@@ -28,8 +32,10 @@ export type CompSheetScope = "visao-geral" | "minha";
 
 /**
  * Kinds de linha do demonstrativo (payload v2) — o Apps Script formata por
- * kind ("note" reservado p/ linhas discretas futuras). Whitelist do
- * validador; o builder (lib/export/comp-sheet.ts) importa o tipo daqui.
+ * kind. Whitelist do validador; o builder (lib/export/comp-sheet.ts) importa
+ * o tipo daqui. Reservados (não emitidos hoje): "note" (linhas discretas
+ * futuras) e "summaryHeader"/"summary" (quadro-resumo do layout antigo,
+ * mantidos p/ compat).
  */
 export const COMP_SHEET_KINDS = [
   "summaryHeader",
@@ -37,6 +43,7 @@ export const COMP_SHEET_KINDS = [
   "summaryTotal",
   "blank",
   "section",
+  "planHeader",
   "detailHeader",
   "factor",
   "factorMoney",
@@ -44,6 +51,7 @@ export const COMP_SHEET_KINDS = [
   "bonus",
   "info",
   "blockTotal",
+  "memberTotal",
   "note",
 ] as const;
 

@@ -1,4 +1,5 @@
-// Versão: 1.1 | Data: 02/08/2026
+// Versão: 1.2 | Data: 02/08/2026
+// v1.2: kinds novos do layout por pessoa (planHeader/memberTotal) aceitos.
 // v1.1: payload v2 — kinds obrigatório (paralelo às rows, whitelist
 // COMP_SHEET_KINDS) no validateReportPayload.
 // Testes puros do export p/ Google Planilhas (lib/comp/sheets-export.ts):
@@ -103,6 +104,19 @@ describe("validateReportPayload", () => {
 
   it("payload válido passa", () => {
     expect(validateReportPayload(base)).toEqual({ ok: true });
+  });
+
+  it("kinds novos do layout por pessoa passam", () => {
+    expect(
+      validateReportPayload({
+        ...base,
+        rows: [
+          ["Plano A", ""],
+          ["Total — Ana", 550],
+        ] as (string | number)[][],
+        kinds: ["planHeader", "memberTotal"],
+      })
+    ).toEqual({ ok: true });
   });
 
   it("kinds ausente, dessincronizado ou fora da whitelist falha", () => {

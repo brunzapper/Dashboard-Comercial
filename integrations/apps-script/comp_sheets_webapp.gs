@@ -1,8 +1,13 @@
-// Versão: 2.0 | Data: 02/08/2026
+// Versão: 2.1 | Data: 02/08/2026
 // Apps Script — Export da Remuneração p/ Google Planilhas (Web App).
+// v2.1: layout por COLABORADOR — estilos p/ os kinds novos `planHeader`
+// (sub-cabeçalho do plano dentro da seção da pessoa) e `memberTotal` (fecho
+// do bloco da pessoa), e moeda no total que agora mora no cabeçalho da seção
+// (`section`, coluna F). Script 2.0 renderiza os kinds novos como texto puro
+// (degradação aceita) — republique p/ ver os estilos.
 // v2: o payload traz `kinds` (um por linha) e o script renderiza um
-// DEMONSTRATIVO formatado — título, quadro-resumo, seções por pessoa, moeda
-// R$, percentuais, larguras fixas e quebra de linha na memória de cálculo.
+// DEMONSTRATIVO formatado — título, seções por pessoa, moeda R$,
+// percentuais, larguras fixas e quebra de linha na memória de cálculo.
 // Payload antigo (sem kinds) cai no rendering simples de sempre.
 // Fluxo: o dashboard cria um TICKET single-use e abre <esta URL>?token=...
 // numa aba nova → este doGet (rodando como o USUÁRIO que acessa) busca o
@@ -139,19 +144,23 @@ var FMT_MOEDA_ = 'R$ #,##0.00';
 var FMT_PCT_ = '0.00"%"';
 // Segmentos CONTÍGUOS de colunas (1-based, [de, até]) formatados por kind.
 // Independe de escopo (visão geral × minha usam as mesmas colunas numéricas).
+// summary/summaryHeader não são mais emitidos pelo builder — as entradas
+// cobrem tickets antigos em trânsito (moeda em célula vazia é inócua).
 var MOEDA_POR_KIND_ = {
   summary: [[3, 7]],
   summaryTotal: [[4, 7]],
+  section: [[6, 6]],
   factor: [[6, 6]],
   factorMoney: [[2, 3], [6, 6]],
   commission: [[6, 6]],
   bonus: [[6, 6]],
   info: [[6, 6]],
-  blockTotal: [[6, 6]]
+  blockTotal: [[6, 6]],
+  memberTotal: [[6, 6]]
 };
 var PCT_POR_KIND_ = { factor: [[4, 5]], factorMoney: [[4, 5]] };
-var BOLD_KINDS_ = { summaryHeader: 1, summaryTotal: 1, section: 1, detailHeader: 1, blockTotal: 1 };
-var HEADER_BG_KINDS_ = { summaryHeader: 1, detailHeader: 1 };
+var BOLD_KINDS_ = { summaryHeader: 1, summaryTotal: 1, section: 1, planHeader: 1, detailHeader: 1, blockTotal: 1, memberTotal: 1 };
+var HEADER_BG_KINDS_ = { summaryHeader: 1, planHeader: 1, detailHeader: 1 };
 var NOTA_KINDS_ = { info: 1, note: 1 };
 var COL_LETRAS_ = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
@@ -190,7 +199,8 @@ function gravarDemonstrativo_(ss, sh, titleRow, rows, kinds) {
     var linha = 'A' + rowA1 + ':G' + rowA1;
     if (BOLD_KINDS_[kind]) bold.push(linha);
     if (HEADER_BG_KINDS_[kind]) headerBg.push(linha);
-    if (kind === 'section') sectionBg.push(linha);
+    // memberTotal fecha o bloco da pessoa com o MESMO fundo do cabeçalho.
+    if (kind === 'section' || kind === 'memberTotal') sectionBg.push(linha);
     if (NOTA_KINDS_[kind]) nota.push(linha);
     if (MOEDA_POR_KIND_[kind]) segsA1(rowA1, MOEDA_POR_KIND_[kind], moeda);
     if (PCT_POR_KIND_[kind]) segsA1(rowA1, PCT_POR_KIND_[kind], pct);

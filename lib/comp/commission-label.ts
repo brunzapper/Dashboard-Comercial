@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 02/08/2026
+// Versão: 1.3 | Data: 02/08/2026
+// v1.3: demonstrativo por COLABORADOR — `sheetSummaryNote` (composição
+// consolidada dos planos da pessoa, no cabeçalho da seção) e
+// `SHEET_MEMBER_TOTAL_NOTE` (linha "Total — <nome>"/"Total do mês").
 // v1.2: frases do DEMONSTRATIVO do Google Planilhas (`sheetFactorNote`,
 // `sheetCommissionSumNote`, `sheetTotalNote`, SHEET_*_NOTE) — linguagem p/
 // RH/gestor, sem jargão interno; consumidas só pelo builder
@@ -249,6 +252,28 @@ export function sheetCommissionSumNote(
   return overridden
     ? `Ajuste manual (calculado: ${fmtMoneyBRL(calculated)})`
     : "Soma dos blocos de comissão";
+}
+
+export const SHEET_MEMBER_TOTAL_NOTE = "Soma dos planos acima.";
+
+/**
+ * Composição consolidada da remuneração da pessoa (cabeçalho da seção do
+ * demonstrativo): "Fatores R$ X + Comissão R$ Y + Bônus R$ Z". Componente
+ * estruturalmente ausente (commission null = nenhum plano com blocos) ou
+ * zerado fica fora; com menos de 2 termos devolve "" (o total na coluna ao
+ * lado já conta a história) — mesma convenção de sheetTotalNote.
+ */
+export function sheetSummaryNote(
+  factors: number,
+  commission: number | null,
+  bonus: number
+): string {
+  const terms: string[] = [];
+  if (factors !== 0) terms.push(`Fatores ${fmtMoneyBRL(factors)}`);
+  if (commission != null && commission !== 0)
+    terms.push(`Comissão ${fmtMoneyBRL(commission)}`);
+  if (bonus !== 0) terms.push(`Bônus ${fmtMoneyBRL(bonus)}`);
+  return terms.length >= 2 ? terms.join(" + ") : "";
 }
 
 /** Nota da linha "Total" do bloco no demonstrativo. */
