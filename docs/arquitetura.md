@@ -2933,6 +2933,18 @@ principalmente — para mantenedores humanos.
     as origens de ingestão como options (distintos da org ∪
     bitrix/sheet_site/manual/csv) — ao contrário do pipeline, NADA as
     reescreve depois: origem nova entra pelo /campos.
+    **"Aplica-se a" editável (02/08/2026):** o form de /campos expõe
+    `applies_to` como checkboxes das bases RAIZ (sub-base herda os campos da
+    pai — nunca é opção; nenhuma marcada = campo geral). Grava SÓ em campo
+    LOCAL/app (`source_system` NULL): linha Bitrix exibe o controle
+    desabilitado (o upsert do `syncFieldCatalog` é o dono da coluna — edição
+    manual viraria churn) e linha core não usa `applies_to`. A action processa
+    apenas com o hidden `applies_to_present` no payload (form sem o controle
+    preserva a coluna); parse/guardas ÚNICOS em `lib/records/applies-to.ts` —
+    `parseAppliesTo` (só record_types de raiz) e `appliesToPeriodConflict`
+    (estreitar não pode deixar órfão um campo usado como
+    `default_period_field` de base/sub — o espelho do
+    `validateCustomPeriodField` de registros/bases).
 
 14. **Board na Lixeira não abre; duplicação sempre remapeia.** `dashboards.status
     = 'trashed'` (0087) significa 404 em `/dashboards/[id]`, `/kanbans/[id]` E

@@ -271,7 +271,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
   Loaders de builder usam `show_in_builder OR source_system='core'` (a linha
   core precisa chegar ao merge mesmo oculta). Options do `pipeline` são
   reescritas a cada sync (`lookups.categoryNames()` em `syncFieldCatalog`) —
-  não as edite à mão esperando que sobrevivam. Terminologia de UI: fonte de
+  não as edite à mão esperando que sobrevivam. O "Aplica-se a" (`applies_to`)
+  é editável na UI de Campos SÓ para campo LOCAL/app (02/08/2026): checkboxes
+  das bases RAIZ + hidden `applies_to_present` (form sem o controle preserva a
+  coluna); parse/guardas únicos em `lib/records/applies-to.ts` (record_types
+  de raiz; estreitar não pode deixar órfão um campo de período de base/sub).
+  Campo BITRIX fica read-only (o upsert do sync do catálogo é o dono da
+  coluna); linha core não usa `applies_to`. Terminologia de UI: fonte de
   dados do sistema = "Base"/"Sub-base"; "Fonte" ficou só para o campo CRM
   (`custom:fonte`). Ver `docs/arquitetura.md` invariante 13.
 - **Editor/validação/catálogo de fórmulas são ÚNICOS (20/07/2026):** o catálogo

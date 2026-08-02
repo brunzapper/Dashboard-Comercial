@@ -139,7 +139,11 @@ const FIELDS: PresetField[] = [
     visible_to_roles: ["admin", "gestor", "vendedor"],
     editable_by_roles: ["admin", "gestor", "vendedor"],
     is_local: true,
-    applies_to: ["lead"],
+    // Comum a Leads/Deals/Estudo (02/08/2026): o crédito de SDR também é
+    // atribuível nas vendas — habilita memberField em fator de VENDAS e
+    // filtros/dimensões nas 3 bases. Org existente ajusta em /campos
+    // ("Aplica-se a" — ensure-if-absent nunca reescreve campo existente).
+    applies_to: ["lead", "negocio", "venda_site"],
   },
 ];
 

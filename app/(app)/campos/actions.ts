@@ -1,4 +1,11 @@
-// Versão: 1.6 | Data: 30/07/2026
+// Versão: 1.7 | Data: 02/08/2026
+// v1.7 (02/08/2026): "Aplica-se a" editável — create/updateField leem as
+//   checkboxes `applies_to` (só quando o hidden `applies_to_present` veio:
+//   form sem o controle não toca na coluna). Grava SÓ em campo local/app
+//   (source_system null) — linha Bitrix tem a coluna reescrita pelo sync do
+//   catálogo e core nem a usa; validação por parseAppliesTo (record_types de
+//   bases RAIZ) + guarda de estreitamento appliesToPeriodConflict (campo usado
+//   como período de base/sub não pode perder a base — lib/records/applies-to).
 // v1.6 (30/07/2026): resolução/validação de fórmula (catálogos, ciclo, nomes de
 //   FK) extraída p/ lib/records/formula-server.ts — compartilhada com a criação
 //   de campos por IA (lib/ai/create-fields.ts); sem mudança de comportamento.
@@ -35,6 +42,11 @@ import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/records/slug";
 import { CORE_SELECT_CAPABLE, isCoreDef } from "@/lib/records/core-defs";
+import {
+  appliesToPeriodConflict,
+  parseAppliesTo,
+} from "@/lib/records/applies-to";
+import { loadSources } from "@/lib/config/sources";
 import { PERCENT_DATA_TYPES, type DataType } from "@/lib/records/types";
 import type { Formula } from "@/lib/records/formulas";
 import { formulaReferencesField } from "@/lib/records/formula-deps";
@@ -116,6 +128,10 @@ function readForm(formData: FormData) {
   // Exibição percentual: checkbox (tipo numero) ou hidden derivado do combobox
   // "Formato do resultado" (calculado/calculado_agg) — ambos enviam "on".
   const showAsPercent = formData.get("show_as_percent") === "on";
+  // "Aplica-se a" (02/08/2026): checkboxes das bases raiz. Só processado com o
+  // marcador presente — form sem o controle (legado/em voo) preserva a coluna.
+  const appliesToPresent = formData.get("applies_to_present") === "1";
+  const appliesTo = formData.getAll("applies_to").map(String);
   return {
     label,
     dataType,
@@ -133,6 +149,8 @@ function readForm(formData: FormData) {
     currencyCodeRaw,
     currencyModeRaw,
     showAsPercent,
+    appliesToPresent,
+    appliesTo,
   };
 }
 
@@ -221,11 +239,21 @@ export async function createField(
   }
 
   const currency = resolveCurrencyColumns(f);
+  // "Aplica-se a" (02/08/2026): campo criado no app é local por definição —
+  // valida e grava direto. Sem o marcador, o insert segue no default '{}'
+  // (geral), comportamento de sempre.
+  let appliesTo: string[] | null = null;
+  if (f.appliesToPresent) {
+    const parsed = parseAppliesTo(f.appliesTo, await loadSources(supabase));
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    appliesTo = parsed.appliesTo;
+  }
   // Carimbo de org (multi-org, 0090): sem ele, o default (Zapper) falharia no
   // WITH CHECK da RLS para um admin de outra org.
   const orgId = await getActiveOrgId();
   const { error } = await supabase.from("field_definitions").insert({
     ...(orgId ? { organization_id: orgId } : {}),
+    ...(appliesTo != null ? { applies_to: appliesTo } : {}),
     field_key: fieldKey,
     label: f.label,
     data_type: f.dataType,
@@ -328,9 +356,23 @@ export async function updateField(
   }
 
   const currency = resolveCurrencyColumns(f);
+  // "Aplica-se a" (02/08/2026): SÓ campo local/app (source_system null) — a
+  // linha Bitrix tem a coluna reescrita pelo upsert do sync do catálogo (a
+  // edição viraria churn; o form a exibe desabilitada). Estreitar não pode
+  // órfãr campo usado como período de base/sub (appliesToPeriodConflict).
+  let appliesPatch: { applies_to: string[] } | null = null;
+  if (f.appliesToPresent && existing && !existing.source_system && fieldKey) {
+    const catalog = await loadSources(supabase);
+    const parsed = parseAppliesTo(f.appliesTo, catalog);
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    const conflict = appliesToPeriodConflict(fieldKey, parsed.appliesTo, catalog);
+    if (conflict) return { ok: false, message: conflict };
+    appliesPatch = { applies_to: parsed.appliesTo };
+  }
   const { error } = await supabase
     .from("field_definitions")
     .update({
+      ...(appliesPatch ?? {}),
       label: f.label,
       data_type: f.dataType,
       options: f.dataType === "selecao" ? f.options : [],

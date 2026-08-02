@@ -317,7 +317,9 @@ describe("preset remuneracao_variavel — estrutura", () => {
     const sdr = P.fields!.find((f) => f.field_key === "sdr_reuniao")!;
     expect(sdr.options_source).toBe("responsibles");
     expect(sdr.data_type).toBe("selecao");
-    expect(sdr.applies_to).toEqual(["lead"]);
+    // Comum às 3 bases (02/08/2026): crédito de SDR atribuível também nas
+    // vendas (memberField em fator de vendas; filtros/dimensões nas 3 bases).
+    expect(sdr.applies_to).toEqual(["lead", "negocio", "venda_site"]);
     const sub = P.subSources!.find((s) => s.key === "reunioes_qualificadas")!;
     expect(sub.default_period_field).toBe("custom:bitrix_uf_crm_1743441331");
     expect(sub.filter).toContainEqual({
