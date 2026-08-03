@@ -1,3 +1,14 @@
+<!-- Versão: 1.58 | Data: 03/08/2026 -->
+<!-- v1.58 (03/08/2026): §4.5 — rotas de push sem cauda global: /api/sync/sheets
+     (e /api/ingest) trocam runAutoMatch + recalcAllFormulaFields (O(N) na
+     tabela toda, estourava o teto de 60s da Vercel — 504 em todo push) pela
+     cauda INCREMENTAL única de lib/sync/post-ingest.ts (auto-match dos types
+     tocados + recalc dos touched ∪ recém-casados ∪ parceiros, com orçamento
+     de tempo); adapter da planilha reescrito em LOTE (responsáveis/existentes/
+     leads por e-mail em chunks; UPDATE só quando algo muda — sem bump de
+     last_synced_at em linha inalterada) e Apps Script v1.1 envia em chunks de
+     ≤500 (o servidor segue aceitando o push inteiro legado, com guardas
+     20k linhas/4 MB). Guarda: tests/sync-tails.test.ts. -->
 <!-- Versão: 1.57 | Data: 03/08/2026 -->
 <!-- v1.57 (03/08/2026): §4.2 — listas "Aplicar a" dos filtros ofertam widgets
      de TODAS as abas, agrupados por aba com check-all tri-state (mudança SÓ
@@ -778,7 +789,24 @@ exceção: sempre recomputados).
   dois regimes (texto custom e instante do núcleo) finalmente concordam no
   mesmo dia.
 - **Sheets**: o Apps Script (`integrations/apps-script/push_estudo_fechamentos.gs`)
-  faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET`.
+  faz POST horário em `/api/sync/sheets`, protegido por `SYNC_SECRET` — desde
+  o v1.1 (03/08/2026) em chunks de ≤500 linhas (o servidor segue aceitando o
+  push inteiro legado; guardas de 20k linhas/4 MB só falham rápido). O adapter
+  (`lib/sync/sheets/adapter.ts` v1.4) trabalha em LOTE, na forma do
+  `ingestRows`: responsáveis via `resolveResponsiblesByName` (1 leitura por
+  push), existentes por `.in("source_id")`, leads por e-mail via `ilikeAnyOf`
+  com pós-filtro de igualdade (o índice `lower()` de 0013 não é usado — 1
+  varredura por chunk, não por linha), insert em lote e **UPDATE só quando
+  algo muda** (linha inalterada não ganha bump de `last_synced_at` — o push
+  horário em regime estável é ~todo `skipped`). A cauda pós-push é a
+  INCREMENTAL de `lib/sync/post-ingest.ts` (`runIncrementalPostSync`):
+  auto-match dos record_types tocados (`runAutoMatchIncremental`, `since` =
+  início do push) + recalc direcionado de touched ∪ recém-casados ∪ PARCEIROS
+  já casados (repõe o reparo de fórmulas `match:` de registros antigos que a
+  cauda global fazia), com orçamento de tempo e best-effort. NUNCA reintroduza
+  `runAutoMatch`/`recalcAllFormulaFields` nas rotas de push — O(N) na tabela
+  inteira estourava o teto de 60s da Vercel (504 em todo push); fiscalizado
+  por `tests/sync-tails.test.ts` + `lib/sync/sheets/adapter.test.ts`.
 - **API/webhooks de entrada**: `/api/ingest/<fonte>` com chaves de API
   (`api_keys`, hash sha256) — ver `docs/webhooks.md`.
 - **Write-back**: campos com `field_definitions.write_back = true` editados no app

@@ -1,4 +1,8 @@
-<!-- Versão: 1.23 | Data: 31/07/2026 -->
+<!-- Versão: 1.24 | Data: 03/08/2026 -->
+<!-- v1.24 (03/08/2026): §1 item 7 — Apps Script do Estudo v1.1 (chunks de
+     ≤500; recolar o arquivo ativa; servidor aceita o formato antigo) + nota
+     sobre regra de match com venda_site só no lado B (botão "Executar todas"
+     como mitigação). -->
 <!-- v1.23 (31/07/2026): §4.12 — ação "Definir campo" das automações do kanban
      (idempotente; teto único de 200 ações; como estender via
      executeFieldWrites/setFieldTargetError) e novo §4.13 — atualização em
@@ -120,7 +124,14 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
    lista em Configurações → Responsáveis e monte as Operações.
 7. **Planilha "Estudo de Fechamentos"** — instale o Apps Script
    `integrations/apps-script/push_estudo_fechamentos.gs` na planilha (instruções no
-   cabeçalho do arquivo) e rode `installHourlyTrigger()`.
+   cabeçalho do arquivo) e rode `installHourlyTrigger()`. O script v1.1
+   (03/08/2026) envia em chunks de ≤500 linhas — se a instalação for antiga
+   (push da planilha inteira, que estourava o teto de 60s da rota com 504),
+   basta recolar o arquivo: o trigger existente continua válido (mesmo nome de
+   função) e o servidor aceita os dois formatos. Nota: regra de auto-match em
+   que `venda_site` é só o lado B roda por inteiro na cauda incremental
+   pós-push (limitada por orçamento de tempo); se um par antigo-A × novo-B
+   ficar sem casar, use "Executar todas" em Campos → Matches.
 8. **Conferência** — rode as queries de verificação do `supabase/README.md`
    (políticas `anon` em snapshots = 0 linhas; EXECUTE das funções de snapshot só
    `service_role`; contagem de mocks = 302).

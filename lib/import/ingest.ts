@@ -1,4 +1,4 @@
-// Versão: 2.0 | Data: 17/07/2026
+// Versão: 2.2 | Data: 03/08/2026
 // Motor server-side do import em massa (CSV hoje; a futura API de ingestão
 // chama exatamente esta função com um mapeamento salvo). Espelha os princípios
 // dos adapters de sync (lib/sync/sheets/adapter.ts, lib/sync/bitrix/sync.ts):
@@ -20,6 +20,8 @@
 // — o naive do CSV entrava como UTC e o dia recuava no read side — e
 // comparadas por INSTANTE no update (timestampValuesDiffer; reimport não
 // churna contra o "+00:00" do PostgREST).
+// v2.2 (03/08/2026): resolveResponsibles movida p/ lib/sync/shared.ts
+// (resolveResponsiblesByName) — compartilhada com o adapter da planilha.
 // Requer service role (INSERT em records é admin-only na RLS) — o chamador
 // (server action) valida a sessão/papel ANTES de chegar aqui.
 import { createHash } from "node:crypto";
@@ -39,6 +41,7 @@ import {
   primaryOperationId,
   recordError,
   recordOutcome,
+  resolveResponsiblesByName,
   timestampValuesDiffer,
   valuesDiffer,
   type ExistingRecord,
@@ -190,45 +193,6 @@ function buildRow(
     custom,
     responsibleName,
   };
-}
-
-// Resolve (ou cria) responsáveis por nome — mesma política do adapter da
-// planilha (lib/sync/sheets/adapter.ts), em lote por chunk. Também devolve o
-// vínculo Bitrix (bitrix_user_id) por responsável, p/ o write-back do import.
-async function resolveResponsibles(
-  db: SupabaseClient,
-  names: string[]
-): Promise<{
-  byName: Map<string, string>;
-  bitrixUserById: Map<string, string | null>;
-}> {
-  const byName = new Map<string, string>();
-  const bitrixUserById = new Map<string, string | null>();
-  if (names.length === 0) return { byName, bitrixUserById };
-  const { data: all } = await db
-    .from("responsibles")
-    .select("id, display_name, bitrix_user_id");
-  for (const r of all ?? []) {
-    byName.set(normalizeName(r.display_name as string), r.id as string);
-    bitrixUserById.set(
-      r.id as string,
-      (r.bitrix_user_id as string | null) ?? null
-    );
-  }
-  for (const name of names) {
-    const key = normalizeName(name);
-    if (!key || byName.has(key)) continue;
-    const { data: created } = await db
-      .from("responsibles")
-      .insert({ display_name: name })
-      .select("id")
-      .maybeSingle();
-    if (created?.id) {
-      byName.set(key, created.id as string);
-      bitrixUserById.set(created.id as string, null);
-    }
-  }
-  return { byName, bitrixUserById };
 }
 
 const EXISTING_COLS =
@@ -478,7 +442,7 @@ export async function ingestRows(
   // 2) Responsáveis (resolve/cria) + operação primária.
   const names = [...new Set(built.map((b) => b.responsibleName).filter(Boolean))] as string[];
   const { byName: responsibleByName, bitrixUserById } =
-    await resolveResponsibles(db, names);
+    await resolveResponsiblesByName(db, names);
   const operationByResponsible = new Map<string, string | null>();
   for (const id of new Set(responsibleByName.values())) {
     operationByResponsible.set(id, await primaryOperationId(db, id));
