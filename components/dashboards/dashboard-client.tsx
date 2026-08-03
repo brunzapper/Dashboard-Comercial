@@ -1,4 +1,6 @@
-// Versão: 2.7 | Data: 26/07/2026
+// Versão: 2.8 | Data: 03/08/2026
+// v2.8 (03/08/2026): boardWidgets={widgets} (TODAS as abas) no DashboardGrid
+//   e no builder da toolbar — listas "Aplicar a" dos filtros globais ao board.
 // v2.7 (26/07/2026): engine deferido — busca em LOTE dos widgets de engine
 //   (runDeferredWidgets; deferredEngineIds + fingerprint deferredScopeById +
 //   event bus como gatilhos; stale-while-refetch) e mescla nos mapas
@@ -990,6 +992,7 @@ export function DashboardClient({
               dashboardId={dashboardId}
               available={availableForBuilder}
               siblings={widgets}
+              boardWidgets={widgets}
               canManageFields={canManageFields}
               fields={fields}
               currencyOptions={currencyOptions}
@@ -1081,6 +1084,7 @@ export function DashboardClient({
           <WidgetFocusProvider focus={focusWidget}>
           <DashboardGrid
             widgets={visibleWidgets}
+            boardWidgets={widgets}
             dataById={effDataById}
             deferredPendingIds={enginePendingIds}
             recordListById={recordListById}

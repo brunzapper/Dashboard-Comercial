@@ -1,3 +1,10 @@
+<!-- Versão: 1.57 | Data: 03/08/2026 -->
+<!-- v1.57 (03/08/2026): §4.2 — listas "Aplicar a" dos filtros ofertam widgets
+     de TODAS as abas, agrupados por aba com check-all tri-state (mudança SÓ
+     de UI — o runtime sempre foi global; prop boardWidgets ao lado de
+     siblings, que segue só-da-aba p/ Páginas). A migração legada
+     targets→excludedTargets computa sobre o pool global (antes o re-save
+     re-incluía em silêncio widgets de outras abas fora da whitelist). -->
 <!-- Versão: 1.56 | Data: 02/08/2026 -->
 <!-- v1.56 (02/08/2026): §4.18 — demonstrativo do export p/ Google Planilhas
      reorganizado por COLABORADOR: sem quadro-resumo no topo — seção única por
@@ -661,6 +668,20 @@ segue honrada quando `excludedTargets` está ausente — snapshots congelados a
 guardam; ramo permanente em `computeWidgetPeriods`. Re-save no editor migra
 (grava `excludedTargets` e apaga `targets`); runbook p/ migrar em massa:
 `supabase/apply/backfill-filter-targets.sql` (rodar só APÓS o deploy).
+
+**Lista "Aplicar a" global ao board (03/08/2026):** o builder oferta os alvos
+de TODAS as abas, agrupados por aba com check-all tri-state
+(`TargetTabChecklist`, `components/dashboards/target-tab-checklist.tsx`) —
+mudança SÓ de UI: o runtime sempre foi global (nenhum choke point compara
+abas). A prop nova `boardWidgets` (dashboard-client → grid → card/line-layer →
+builder) carrega o board inteiro; `siblings` segue sendo os widgets da ABA
+(AddPageDialog/posicionamento dependem disso — não alargar). Desmarcar uma aba
+é bulk-toggle dos ids ATUAIS dela (persistência inalterada: `excludedTargets`
+por id; widget futuro entra marcado). A migração legada computa a blacklist
+sobre o pool global — fiel à whitelist, que sempre valeu para o board inteiro
+(antes o re-save re-incluía em silêncio os widgets das outras abas). Vale
+igualmente para o "Aplicar a" do filtro_campo (recorte por sobreposição de
+bases roda antes do agrupamento).
 
 Fontes dinâmicas (`data_sources`, criáveis via UI sem migração) precisam estar
 cobertas no mapa `fieldBySource` do resolver — o `@period` do RPC **exclui**

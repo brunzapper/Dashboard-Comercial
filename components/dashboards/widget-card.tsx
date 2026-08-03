@@ -1,4 +1,7 @@
-// Versão: 2.16 | Data: 26/07/2026
+// Versão: 2.17 | Data: 03/08/2026
+// v2.17 (03/08/2026): prop boardWidgets (widgets de TODAS as abas) repassada
+//   ao WidgetBuilder — alimenta as listas "Aplicar a" dos filtros; `siblings`
+//   segue só-da-aba (AddPageDialog depende disso).
 // v2.16 (26/07/2026): engine deferido — prop deferredPending liga o overlay
 //   "Atualizando…" enquanto o lote runDeferredWidgets do DashboardClient roda.
 // v2.15 (26/07/2026): janela incremental do full fetch — prop
@@ -231,6 +234,7 @@ export const WidgetCard = memo(function WidgetCard({
   dashboardId,
   dateFormat,
   siblings,
+  boardWidgets,
   tabs,
   canEdit,
   canExport = false,
@@ -298,6 +302,9 @@ export const WidgetCard = memo(function WidgetCard({
   dashboardId: string;
   dateFormat?: DateFormat;
   siblings: Widget[];
+  // TODOS os widgets do board (todas as abas) — só para as listas "Aplicar a"
+  // do WidgetBuilder; `siblings` segue sendo os da aba (AddPageDialog).
+  boardWidgets?: Widget[];
   tabs?: { id: string; name: string; color?: string }[];
   canEdit: boolean;
   // Itens "Exportar CSV" do menu ⋮. Desligado por padrão — o viewer público de
@@ -971,6 +978,7 @@ export const WidgetCard = memo(function WidgetCard({
         available={availableForBuilder}
         widget={widget}
         siblings={siblings}
+        boardWidgets={boardWidgets}
         canManageFields={canManageFields}
         fields={fields}
         currencyOptions={currencyOptions}

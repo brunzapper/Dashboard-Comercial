@@ -1,4 +1,7 @@
-// Versão: 2.18 | Data: 26/07/2026
+// Versão: 2.19 | Data: 03/08/2026
+// v2.19 (03/08/2026): prop boardWidgets (TODAS as abas) repassada a
+//   WidgetCard/LineLayer → WidgetBuilder (listas "Aplicar a" dos filtros);
+//   `widgets` segue sendo só a aba visível.
 // v2.18 (26/07/2026): engine deferido — repassa deferredPendingIds →
 //   WidgetCard.deferredPending (overlay "Atualizando…" por card).
 // v2.17 (26/07/2026): repassa recordListWindowTotalById → WidgetCard
@@ -379,6 +382,7 @@ function resolveDropCollisions(
 
 export function DashboardGrid({
   widgets,
+  boardWidgets,
   dataById,
   recordListById,
   recordListExtraById,
@@ -435,6 +439,9 @@ export function DashboardGrid({
   onWidgetDeleted,
 }: {
   widgets: Widget[];
+  // TODOS os widgets do board (todas as abas) — alimenta só as listas
+  // "Aplicar a" do WidgetBuilder; `widgets` segue sendo a aba visível.
+  boardWidgets?: Widget[];
   dataById: Record<string, WidgetData>;
   recordListById: Record<string, RecordRow[]>;
   // Registros EXTRAS por widget (fontes de Metric.sources fora das do widget):
@@ -1335,6 +1342,7 @@ export function DashboardGrid({
                 currencyOptions={currencyOptions}
                 tabs={tabs}
                 siblings={widgets}
+                boardWidgets={boardWidgets}
                 canManageFields={canManageFields}
               />
             ) : null}
@@ -1450,6 +1458,7 @@ export function DashboardGrid({
                         dashboardId={dashboardId}
                         dateFormat={dateFormat}
                         siblings={effWidgets}
+                        boardWidgets={boardWidgets}
                         tabs={tabs}
                         canEdit={canEdit}
                         canExport={canExport}
