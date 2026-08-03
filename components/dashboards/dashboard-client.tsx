@@ -1,4 +1,9 @@
-// Versão: 2.8 | Data: 03/08/2026
+// Versão: 2.9 | Data: 03/08/2026
+// v2.9 (03/08/2026): Ponteiro Laser — estado efêmero laserMode (ativado pelo
+//   menu do clique-direito sobre um widget, no grid); ligar a edição desliga
+//   o laser (efeito) e ativar o laser sai da edição (handleLaserChange);
+//   toggleEditMode alimenta o item "Editar layout" do mesmo menu; laserColor
+//   (Configurações → Tema) desce da page ao grid.
 // v2.8 (03/08/2026): boardWidgets={widgets} (TODAS as abas) no DashboardGrid
 //   e no builder da toolbar — listas "Aplicar a" dos filtros globais ao board.
 // v2.7 (26/07/2026): engine deferido — busca em LOTE dos widgets de engine
@@ -191,6 +196,7 @@ export function DashboardClient({
   deferredEngineIds,
   initialTabId,
   focusWidgetId,
+  laserColor,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -268,10 +274,35 @@ export function DashboardClient({
   // Widget a focar ao montar (?focus= — atalho vindo de outro dashboard). A
   // page já entrega initialTabId apontando para a aba do alvo.
   focusWidgetId?: string;
+  // Cor do Ponteiro Laser (Configurações → Tema; resolveLaserColor na page).
+  laserColor?: string;
 }) {
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+  // Ponteiro Laser (modo apresentação): estado EFÊMERO — nunca persiste.
+  // Ativado pelo menu do clique-direito sobre um widget (dashboard-grid).
+  const [laserMode, setLaserMode] = useState(false);
+  // Ligar a edição desliga o laser — cobre TODAS as entradas em editMode
+  // (botão do topo, dropdown Manual/IA e o item do próprio menu).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (editMode) setLaserMode(false);
+  }, [editMode]);
+  // Espelho da regra acima: ativar o laser sai do modo edição.
+  const handleLaserChange = useCallback((on: boolean) => {
+    setLaserMode(on);
+    if (on) {
+      setEditMode(false);
+      setConnectMode(false);
+    }
+  }, []);
+  // "Editar layout"/"Concluir edição" do menu de contexto — mesmo efeito do
+  // botão do topo (liga E desliga; conectar sempre reseta).
+  const toggleEditMode = useCallback(() => {
+    setEditMode((v) => !v);
+    setConnectMode(false);
+  }, []);
 
   // ---- widgets de ENGINE deferidos (26/07/2026) ----
   // A page não computa gráficos/KPIs/cards/…: este client busca TODOS em uma
@@ -1135,6 +1166,10 @@ export function DashboardClient({
             placing={placing}
             onPlace={onPlaceAt}
             onPlaceCancel={resolveAutoPlacement}
+            laserMode={laserMode}
+            onLaserModeChange={handleLaserChange}
+            laserColor={laserColor}
+            onToggleEditMode={canEdit ? toggleEditMode : undefined}
             autoEditWidgetId={autoEditId}
             onAutoEditConsumed={clearAutoEdit}
             onQuickCreate={quickCreateWidget}

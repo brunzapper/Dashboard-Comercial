@@ -1,4 +1,10 @@
-// Versão: 2.19 | Data: 03/08/2026
+// Versão: 2.20 | Data: 03/08/2026
+// v2.20 (03/08/2026): Ponteiro Laser (modo apresentação) — clique-direito
+//   SOBRE um widget abre o menu do apresentador (ativar/desativar o laser —
+//   disponível a qualquer usuário — e "Editar layout"/"Concluir edição" para
+//   canEdit, via onToggleEditMode). Com o modo ativo, LaserPointerOverlay
+//   cobre o canvas (pan/menus suspensos, como drawMode/placing); props
+//   opcionais — o viewer de snapshots não as passa e nada muda lá.
 // v2.19 (03/08/2026): prop boardWidgets (TODAS as abas) repassada a
 //   WidgetCard/LineLayer → WidgetBuilder (listas "Aplicar a" dos filtros);
 //   `widgets` segue sendo só a aba visível.
@@ -104,7 +110,15 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, ClipboardPaste, Loader2, Plus } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  ClipboardPaste,
+  Loader2,
+  Pencil,
+  Plus,
+  Presentation,
+} from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout, LayoutItem } from "react-grid-layout/legacy";
 
@@ -114,6 +128,7 @@ import "react-resizable/css/styles.css";
 import { cn } from "@/lib/utils";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { useDragPan } from "@/lib/use-drag-pan";
+import { DEFAULT_LASER } from "@/lib/theme";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
@@ -174,6 +189,7 @@ import { useNavPending } from "./pending-context";
 import { FloatingPanel, MenuBtn } from "./appearance-editing";
 import { DrawToCreateOverlay } from "./draw-to-create";
 import { PlaceWidgetOverlay } from "./place-widget-overlay";
+import { LaserPointerOverlay } from "./laser-pointer-overlay";
 import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
@@ -433,6 +449,10 @@ export function DashboardGrid({
   placing = null,
   onPlace,
   onPlaceCancel,
+  laserMode = false,
+  onLaserModeChange,
+  laserColor,
+  onToggleEditMode,
   autoEditWidgetId = null,
   onAutoEditConsumed,
   onQuickCreate,
@@ -530,6 +550,14 @@ export function DashboardGrid({
   placing?: { w: number; h: number } | null;
   onPlace?: (pos: GridPosition) => void;
   onPlaceCancel?: () => void;
+  // Ponteiro Laser (modo apresentação): clique-direito sobre um widget abre o
+  // menu do apresentador. Opcionais — o viewer de snapshots não os passa
+  // (menu/overlay ficam estruturalmente desligados lá).
+  laserMode?: boolean;
+  onLaserModeChange?: (on: boolean) => void;
+  laserColor?: string;
+  // Alterna o modo edição a partir do menu (mesmo efeito do botão do topo).
+  onToggleEditMode?: () => void;
   // Abertura automática do editor de um widget recém-criado pelo Inserir
   // (tipos que exigem configuração). Consumo one-shot avisado ao shell.
   autoEditWidgetId?: string | null;
@@ -561,6 +589,12 @@ export function DashboardGrid({
   } | null>(null);
   // Flyout "Inserir ▸" aberto? Reseta a cada abertura do menu.
   const [insertOpen, setInsertOpen] = useState(false);
+  // Menu do APRESENTADOR (clique-direito SOBRE um widget): Ponteiro Laser +
+  // Editar layout. Só a posição do clique — não há célula-alvo.
+  const [laserMenuAt, setLaserMenuAt] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Dimensões dinâmicas: tamanho medido do conteúdo (unidades do grid), por
   // widget, reportado pelos cards. Só infla a renderização — o `grid_position`
@@ -849,26 +883,43 @@ export function DashboardGrid({
   );
 
   // Botão esquerdo no espaço vazio arma o pan (useDragPan). Durante o desenho
-  // de criação o overlay é dono do gesto.
+  // de criação (ou com o Ponteiro Laser ativo) o overlay é dono do gesto — o
+  // pointerdown do laser BORBULHA até aqui e armaria o pan sem a guarda.
   function onCanvasPointerDown(e: React.PointerEvent) {
-    if (drawMode || placing) return; // o overlay ativo é dono do gesto
+    if (drawMode || placing || laserMode) return; // o overlay ativo é dono do gesto
     panPointerDown(e);
   }
 
-  // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
-  // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
-  // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
+  // Clique-direito no grid: SOBRE um widget (`.react-grid-item`) abre o menu
+  // do APRESENTADOR (Ponteiro Laser — qualquer usuário — + Editar layout p/
+  // canEdit); no espaço vazio, o menu "Inserir/Colar widget" (só canEdit; sem
+  // edição o menu nativo segue valendo). A célula-alvo do colar vem da posição
+  // do clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
   function onCanvasContextMenu(e: React.MouseEvent) {
-    if (!canEdit || drawMode || placing) return;
-    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
-    if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
-    if ((e.target as HTMLElement).closest("[data-line-ui]")) return;
+    if (drawMode || placing || laserMode) return; // c/ laser o overlay é o dono
+    // Menus internos dos widgets (quick-table/charts em edição/aparência) já
+    // trataram o clique com preventDefault (sem stopPropagation) — não abre
+    // um segundo menu por cima.
+    if (e.defaultPrevented) return;
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-conn-ui]")) return;
+    if (t.closest("[data-line-ui]")) return;
+    if (t.closest(".react-grid-item")) {
+      if (!onLaserModeChange) return; // snapshot viewer: menu nativo
+      e.preventDefault();
+      setInsertOpen(false);
+      setPasteAt(null);
+      setLaserMenuAt({ x: e.clientX, y: e.clientY });
+      return;
+    }
+    if (!canEdit) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || cellW <= 0) return;
     e.preventDefault();
     const gx = Math.max(0, Math.floor((e.clientX - rect.left - MX) / (cellW + MX)));
     const gy = Math.max(0, Math.floor((e.clientY - rect.top - MY) / (ROW_H + MY)));
     setInsertOpen(false);
+    setLaserMenuAt(null);
     setPasteAt({
       x: e.clientX,
       y: e.clientY,
@@ -1210,6 +1261,45 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
+  // Menu do APRESENTADOR (clique-direito sobre um widget): ativar/desativar o
+  // Ponteiro Laser (qualquer usuário) e alternar o modo edição (só canEdit —
+  // mesmo efeito do botão do topo, via onToggleEditMode do shell). Também é
+  // reaberto pelo clique-direito com o laser ATIVO (onOpenMenu do overlay).
+  const laserMenu =
+    laserMenuAt && onLaserModeChange ? (
+      <FloatingPanel
+        x={laserMenuAt.x}
+        y={laserMenuAt.y}
+        onClose={() => setLaserMenuAt(null)}
+        className="w-56"
+      >
+        <MenuBtn
+          onClick={() => {
+            setLaserMenuAt(null);
+            onLaserModeChange(!laserMode);
+          }}
+        >
+          <Presentation />
+          <span className="flex-1">
+            {laserMode ? "Desativar Ponteiro Laser" : "Ponteiro Laser"}
+          </span>
+        </MenuBtn>
+        {canEdit && onToggleEditMode ? (
+          <MenuBtn
+            onClick={() => {
+              setLaserMenuAt(null);
+              onToggleEditMode();
+            }}
+          >
+            {editMode ? <Check /> : <Pencil />}
+            <span className="flex-1">
+              {editMode ? "Concluir edição" : "Editar layout"}
+            </span>
+          </MenuBtn>
+        ) : null}
+      </FloatingPanel>
+    ) : null;
+
   // Diálogo "Adicionar página?" (mescla por drop). Confirmar fecha NA HORA e
   // aplica o efeito otimista (performMerge: membro some, pager aparece, card
   // volta à base — a posição solta nunca persiste) enquanto a action corre por
@@ -1515,6 +1605,13 @@ export function DashboardGrid({
                 onCancel={onPlaceCancel}
               />
             ) : null}
+            {laserMode && !editMode && onLaserModeChange ? (
+              <LaserPointerOverlay
+                color={laserColor ?? DEFAULT_LASER}
+                onExit={() => onLaserModeChange(false)}
+                onOpenMenu={(x, y) => setLaserMenuAt({ x, y })}
+              />
+            ) : null}
             {editMode && !drawMode ? (
               <>
                 {/* Barra inferior: arrasta a ALTURA (adiciona linhas vazias). */}
@@ -1570,6 +1667,7 @@ export function DashboardGrid({
         ) : null}
       </div>
       {pasteMenu}
+      {laserMenu}
       {mergeDialog}
     </div>
   );

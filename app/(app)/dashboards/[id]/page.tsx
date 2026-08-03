@@ -1,6 +1,8 @@
-// Versão: 3.3 | Data: 31/07/2026
+// Versão: 3.4 | Data: 03/08/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.4 (03/08/2026): Ponteiro Laser — carrega user_settings (loadUserSettings,
+//   React cache) e entrega laserColor (resolveLaserColor) ao DashboardClient.
 // v3.3 (31/07/2026): fingerprint deferido ganha a CONFIG do widget
 //   (widgetConfigFingerprint — hash das colunas de config, posição fora):
 //   editar um widget deferido re-busca sem F5 (antes o payload velho do lote
@@ -139,6 +141,8 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { loadUserSettings } from "@/lib/config/user-settings";
+import { resolveLaserColor } from "@/lib/theme";
 import {
   applySourceScope,
   collectBoardSourceKeys,
@@ -283,6 +287,7 @@ export default async function DashboardPage({
     enabledCurrencies,
     currencyRates,
     allSources,
+    userSettings,
   ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
@@ -314,8 +319,17 @@ export default async function DashboardPage({
     // Catálogo da ORG do board (multi-org): a RLS já escopa; o filtro cobre a
     // visão de quem pertence a 2+ orgs.
     loadSources(supabase, dash.organization_id as string | null),
+    // Preferências GLOBAIS (user_settings — cor do Ponteiro Laser). React
+    // cache(): o layout autenticado já leu a linha nesta request.
+    session
+      ? loadUserSettings(session.user.id)
+      : Promise.resolve({} as Record<string, unknown>),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
+  // Cor do Ponteiro Laser (Configurações → Tema; default vermelho).
+  const laserColor = resolveLaserColor(
+    userSettings as { laserColor?: string | null }
+  );
 
   // Último período consultado pelo usuário neste dashboard (se houver). No modo
   // "por aba", cada aba guarda o seu em `lastPeriodByTab` (chave = id da aba).
@@ -1540,6 +1554,7 @@ export default async function DashboardPage({
         deferredEngineIds={deferredEngineIds}
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
+        laserColor={laserColor}
       />
     </SourcesProvider>
   );
