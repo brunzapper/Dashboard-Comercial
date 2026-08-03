@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 03/08/2026
+// v1.5 (03/08/2026): Semana Fechada — `dimensions[].closedWeek` ("seg_dom" |
+//   "sab_sex") aceito nos transforms de semana (week_year/week_month; "week"
+//   legado idem); transform incompatível REMOVE com aviso (padrão do dateAgg),
+//   valor fora do enum é descartado em silêncio.
 // v1.4 (31/07/2026): filtros de widget sobre relações aceitam NOMES (o engine
 //   resolve nome→id→grupo canônico em runtime — resolveFkFilterNames): valor
 //   string ou elementos de array não-UUID em responsible_id/operation_id devem
