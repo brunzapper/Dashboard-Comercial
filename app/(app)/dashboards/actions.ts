@@ -906,6 +906,9 @@ export interface UserAppSettings {
   // Resolução/sanitização em lib/theme.ts (resolveTheme).
   theme?: "light" | "dark" | "system" | null;
   accentColor?: string | null;
+  // Cor do Ponteiro Laser (Configurações → Tema): null/ausente = vermelho
+  // padrão (DEFAULT_LASER, lib/theme.ts). Pessoal — sem padrão de org.
+  laserColor?: string | null;
   // Controles da Agenda do Workspace (/agenda): conteúdo ("todas" | "propria"
   // | "widget:<id>"), recortes e visão — a página reabre como ficou.
   agendaHub?: {

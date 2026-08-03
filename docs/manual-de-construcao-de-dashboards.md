@@ -403,6 +403,16 @@ No topo da página do dashboard:
   editar abas, acessar menus de contexto, editar nota/Tabela Livre in-loco.
 - **"Conectar"** (submodo do modo edição) — desenhar linhas/setas entre
   widgets (§9.6).
+- **"Ponteiro Laser"** (modo apresentação) — clique-direito **sobre um
+  widget** abre um menu com "Ponteiro Laser": o cursor vira um ponto colorido
+  (cor em Configurações → Tema; vermelho por padrão) e, **com o botão esquerdo
+  pressionado**, desenha rastros que esmaecem sozinhos em ~2,5 s — para
+  apontar, circular e conectar informações durante uma apresentação. Enquanto
+  o modo está ativo os widgets não reagem a cliques (a rolagem continua
+  funcionando). Para sair: Esc, o mesmo menu (clique-direito → "Desativar"),
+  parar o cursor por 2 s sobre uma área **vazia** (volta a "mãozinha" de pan)
+  ou entrar no modo edição. O mesmo menu traz **"Editar layout"/"Concluir
+  edição"** para quem pode editar — o mesmo alternar do botão do topo.
 - **"Adicionar widget"** — abre o editor de widget (capítulo 6).
 - **Menu "⋮"** do dashboard (§3.6).
 

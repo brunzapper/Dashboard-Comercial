@@ -1,5 +1,6 @@
-// Versão: 1.0 | Data: 27/07/2026
-// Tema visual (claro/escuro/sistema) + cor de destaque (--brand-base).
+// Versão: 1.1 | Data: 03/08/2026
+// Tema visual (claro/escuro/sistema) + cor de destaque (--brand-base) + cor
+// do Ponteiro Laser (modo apresentação do dashboard).
 // Fonte ÚNICA de: defaults, nomes de cookie, sanitização e resolução de
 // precedência (usuário ?? org ?? padrão do app). Módulo PURO (sem
 // server-only): importado pelo root layout, pelas actions e pelo client.
@@ -11,6 +12,9 @@
 // passe SEMPRE por normalizeThemeMode/normalizeHexColor (whitelists).
 
 export const DEFAULT_ACCENT = "#7431B3";
+// Cor padrão do Ponteiro Laser (vermelho). Preferência PESSOAL — sem padrão
+// de org e sem cookie (só a página do dashboard a lê, via SSR autenticado).
+export const DEFAULT_LASER = "#dc2626";
 export const THEME_COOKIE = "theme_mode";
 export const ACCENT_COOKIE = "theme_accent";
 
@@ -63,4 +67,11 @@ export function resolveTheme(
     normalizeHexColor(org?.accentColor) ??
     DEFAULT_ACCENT;
   return { mode, accent };
+}
+
+/** Cor do Ponteiro Laser: escolha do USUÁRIO ?? padrão do app (vermelho). */
+export function resolveLaserColor(
+  user: { laserColor?: string | null } | null
+): string {
+  return normalizeHexColor(user?.laserColor) ?? DEFAULT_LASER;
 }
