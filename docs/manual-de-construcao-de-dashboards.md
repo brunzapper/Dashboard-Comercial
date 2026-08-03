@@ -1,4 +1,8 @@
-<!-- Versão: 1.23 | Data: 31/07/2026 -->
+<!-- Versão: 1.24 | Data: 03/08/2026 -->
+<!-- v1.24 (03/08/2026): §4.2/§4.3 — a checklist "Aplicar a" dos filtros lista
+     widgets de TODAS as abas, agrupados por aba (ordem da barra), com
+     checkbox de cabeçalho por aba (marca/desmarca a aba inteira; parcial =
+     traço). Só UI — o efeito dos filtros sempre foi o dashboard inteiro. -->
 <!-- v1.23 (31/07/2026): §12.2.1 — Automações ganham a ação "Definir campo"
      (grava valor fixo num campo gravável; idempotente; regra contínua;
      seletor de ação Mover/Definir + picker de campo + valor por tipo). -->
@@ -754,13 +758,17 @@ pode mirar widgets específicos:
 
 - **"Campo de data"** — qual coluna filtra (padrão: data de fechamento).
 - **"Período padrão"** — "Todo o período" ou qualquer preset da tabela acima.
-- **"Aplicar a"** — checklist dos widgets afetados. Por padrão TODOS marcados
-  e o alvo é dinâmico: widgets criados depois também reagem ao filtro;
-  desmarcar exclui um widget do efeito (mesma semântica do Filtro por campo).
-  Quando um Filtro de período mira um widget, a seleção dele **sobrepõe** a
-  barra global para aquele widget. (Filtros salvos antes dessa mudança
-  guardavam a lista fixa dos marcados — "congelada" no save; um re-save no
-  editor migra para o modo dinâmico.)
+- **"Aplicar a"** — checklist dos widgets afetados, de **todas as abas** do
+  dashboard, agrupados por aba (na ordem da barra de abas). O checkbox no
+  cabeçalho de cada aba marca/desmarca a aba inteira (seleção parcial =
+  traço); desmarcar a aba desmarca os widgets ATUAIS dela — um widget criado
+  depois naquela aba entra marcado (o padrão é dinâmico e global). Por padrão
+  TODOS marcados e o alvo é dinâmico: widgets criados depois também reagem ao
+  filtro; desmarcar exclui um widget do efeito (mesma semântica do Filtro por
+  campo). Quando um Filtro de período mira um widget, a seleção dele
+  **sobrepõe** a barra global para aquele widget. (Filtros salvos antes dessa
+  mudança guardavam a lista fixa dos marcados — "congelada" no save; um
+  re-save no editor migra para o modo dinâmico.)
 
 ### 4.3 Widget "Filtro por campo"
 
@@ -775,7 +783,9 @@ Painel de busca + filtros estruturados que afeta outros widgets:
   campo com operador "em (lista)" vira multi-seleção por checkbox; um campo
   de seleção vira dropdown com "— todos —".
 - **"Aplicar a"** — checklist dos widgets afetados (desmarcar exclui um
-  widget do efeito do filtro).
+  widget do efeito do filtro). Lista só widgets com Bases sobrepostas às do
+  filtro, de **todas as abas**, agrupados por aba com checkbox de cabeçalho
+  (marca/desmarca a aba inteira; mesmo comportamento do §4.2).
 
 A seleção do usuário no Filtro por campo é **individual** (cada usuário tem a
 sua, lembrada entre visitas) e também vive na URL (URL vence). Contraste com

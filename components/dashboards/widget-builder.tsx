@@ -1,4 +1,10 @@
-// Versão: 1.22 | Data: 28/07/2026
+// Versão: 1.23 | Data: 03/08/2026
+// v1.23 (03/08/2026): listas "Aplicar a" dos filtros (filtro/filtro_campo)
+//   passam a ofertar widgets de TODAS as abas (prop nova boardWidgets;
+//   siblings segue só-da-aba p/ Páginas/posicionamento), agrupados por aba com
+//   check-all tri-state (TargetTabChecklist). Persistência inalterada
+//   (excludedTargets por id); a migração legada targets→excludedTargets agora
+//   computa sobre o pool global (fiel ao runtime, que sempre foi global).
 // v1.22 (28/07/2026): métricas expandidas do kanban — métrica do cabeçalho
 //   com agregação escolhível (columnMetric; indicadores calculados no engine:
 //   "Leads vinculados"/tarefas/idade + campos numéricos), até 3 indicadores
@@ -238,6 +244,7 @@ import type { FilterValueSource } from "@/components/filters/filter-value-picker
 import { ComparisonSection } from "@/components/dashboards/widget-builder-comparison";
 import { GoalsSection } from "@/components/dashboards/widget-builder-goals";
 import { CardModeSection } from "@/components/dashboards/card-mode-section";
+import { TargetTabChecklist } from "@/components/dashboards/target-tab-checklist";
 import { groupByLevels } from "@/lib/widgets/appearance";
 import { DATE_FORMAT_LABELS, DATE_FORMATS } from "@/lib/widgets/format";
 import { isLabelTransform } from "@/lib/widgets/date-buckets";
@@ -268,6 +275,7 @@ export function WidgetBuilder({
   available,
   widget,
   siblings = [],
+  boardWidgets,
   trigger,
   canManageFields = false,
   fields = [],
@@ -286,6 +294,11 @@ export function WidgetBuilder({
   available: AvailableField[];
   widget?: Widget;
   siblings?: Widget[];
+  // TODOS os widgets do board (todas as abas) — alimenta só as listas
+  // "Aplicar a" dos filtros (o runtime dos filtros é global ao dashboard).
+  // `siblings` segue sendo os widgets da ABA (Páginas/posicionamento dependem
+  // disso); ausente, as listas caem em `siblings` (comportamento antigo).
+  boardWidgets?: Widget[];
   trigger?: React.ReactNode;
   canManageFields?: boolean;
   // Definições completas dos campos personalizados (p/ o ⋮ "Configurar campo").
@@ -728,9 +741,13 @@ export function WidgetBuilder({
   const [filterPreset, setFilterPreset] = useState(
     widget?.settings?.defaultPreset ?? ""
   );
+  // Pool dos alvos de filtro: o board INTEIRO (todas as abas) quando quem
+  // monta passa boardWidgets; fallback em siblings (só a aba) p/ call sites
+  // antigos. O runtime dos filtros sempre foi global ao dashboard.
+  const targetPool = boardWidgets ?? siblings;
   // Widgets que este filtro pode controlar (exclui a si mesmo, os controles e
   // forma/linha divisória/imagem, que não têm dados/período).
-  const targetable = siblings.filter(
+  const targetable = targetPool.filter(
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
@@ -742,7 +759,10 @@ export function WidgetBuilder({
   // Alvos do filtro de período: guarda os DESMARCADOS (excludedTargets) — o
   // default é dinâmico ("todos, inclusive widgets criados depois"). Widget
   // legado com `targets` (whitelist congelada) abre com esses alvos marcados
-  // e o re-save migra para excludedTargets.
+  // e o re-save migra para excludedTargets. Com o pool global, a migração
+  // exclui também widgets de OUTRAS abas fora da whitelist — fiel ao runtime
+  // (a whitelist sempre valeu para o board inteiro; antes o re-save os
+  // re-incluía em silêncio por só enxergar a aba ativa).
   const [filterExcluded, setFilterExcluded] = useState<string[]>(() => {
     const s = widget?.settings;
     if (s?.excludedTargets) return s.excludedTargets;
@@ -757,6 +777,21 @@ export function WidgetBuilder({
     setFilterExcluded((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
+  }
+
+  // Check-all da aba nas listas "Aplicar a": adiciona/remove um LOTE de ids na
+  // blacklist (snapshot dos widgets atuais da aba — o default dinâmico segue
+  // global, widget futuro entra marcado).
+  function bulkExclude(setter: React.Dispatch<React.SetStateAction<string[]>>) {
+    return (ids: string[], exclude: boolean) =>
+      setter((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) {
+          if (exclude) next.add(id);
+          else next.delete(id);
+        }
+        return [...next];
+      });
   }
 
   // Config do widget de "Filtro por campo" (visual_type 'filtro_campo').
@@ -775,7 +810,7 @@ export function WidgetBuilder({
     widget?.settings?.valueScope === "all"
   );
   // Widgets de dados que este filtro pode atingir (mesmas fontes; vazio = todas).
-  const dataSiblings = siblings.filter(
+  const dataSiblings = targetPool.filter(
     (s) =>
       s.id !== widget?.id &&
       s.visual_type !== "filtro" &&
@@ -2126,28 +2161,22 @@ export function WidgetBuilder({
               <div className="flex flex-col gap-2">
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
-                  Por padrão o filtro controla o dashboard inteiro — inclusive
-                  widgets criados depois. Desmarque os que não devem reagir.
+                  Por padrão o filtro controla o dashboard inteiro, em todas as
+                  abas — inclusive widgets criados depois. Desmarque os que não
+                  devem reagir (o checkbox da aba marca/desmarca a aba inteira).
                 </p>
                 {targetable.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
                     Nenhum outro widget para vincular ainda.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2 rounded-md border p-3">
-                    {targetable.map((s) => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={!filterExcluded.includes(s.id)}
-                          onCheckedChange={() => toggleFilterExcluded(s.id)}
-                        />
-                        {s.title ?? "Sem título"}
-                      </label>
-                    ))}
-                  </div>
+                  <TargetTabChecklist
+                    targets={targetable}
+                    tabs={tabs}
+                    excluded={filterExcluded}
+                    onToggle={toggleFilterExcluded}
+                    onBulk={bulkExclude(setFilterExcluded)}
+                  />
                 )}
               </div>
             </>
@@ -2320,28 +2349,22 @@ export function WidgetBuilder({
               <div className="flex flex-col gap-2 border-t pt-4">
                 <Label>Aplicar a</Label>
                 <p className="text-muted-foreground text-xs">
-                  Por padrão atinge todos os widgets com base sobreposta.
-                  Desmarque os que não devem reagir.
+                  Por padrão atinge todos os widgets com base sobreposta, em
+                  todas as abas. Desmarque os que não devem reagir (o checkbox
+                  da aba marca/desmarca a aba inteira).
                 </p>
                 {affectedSiblings.length === 0 ? (
                   <p className="text-muted-foreground text-sm">
                     Nenhum widget de dados compatível ainda.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-2 rounded-md border p-3">
-                    {affectedSiblings.map((s) => (
-                      <label
-                        key={s.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={!excludedTargets.includes(s.id)}
-                          onCheckedChange={() => toggleExcluded(s.id)}
-                        />
-                        {s.title ?? "Sem título"}
-                      </label>
-                    ))}
-                  </div>
+                  <TargetTabChecklist
+                    targets={affectedSiblings}
+                    tabs={tabs}
+                    excluded={excludedTargets}
+                    onToggle={toggleExcluded}
+                    onBulk={bulkExclude(setExcludedTargets)}
+                  />
                 )}
               </div>
 

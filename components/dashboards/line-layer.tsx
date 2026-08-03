@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 25/07/2026
+// Versão: 1.1 | Data: 03/08/2026
+// v1.1 (03/08/2026): prop boardWidgets (todas as abas) repassada ao
+//   WidgetBuilder — listas "Aplicar a" caso o Visual seja trocado p/ filtro.
 // Camada livre das Formas "linha" (ShapeKind "linha"): renderiza e manipula os
 // widgets-linha FORA do react-grid-layout — SVG absoluto sobre o canvas, ANTES
 // do RGL no DOM (pinta sob os cards, mesmo plano dos conectores; o container
@@ -80,6 +82,7 @@ export function LineLayer({
   currencyOptions,
   tabs,
   siblings,
+  boardWidgets,
   canManageFields = false,
 }: {
   widgets: Widget[]; // só os widgets-linha da aba visível
@@ -99,6 +102,8 @@ export function LineLayer({
   currencyOptions?: { value: string; label: string }[];
   tabs?: { id: string; name: string; color?: string }[];
   siblings: Widget[];
+  // TODOS os widgets do board — só p/ as listas "Aplicar a" do builder.
+  boardWidgets?: Widget[];
   canManageFields?: boolean;
 }) {
   const focus = useFocusWidget();
@@ -416,6 +421,7 @@ export function LineLayer({
             available={availableForBuilder}
             widget={active}
             siblings={siblings}
+            boardWidgets={boardWidgets}
             canManageFields={canManageFields}
             fields={fields}
             currencyOptions={currencyOptions}
