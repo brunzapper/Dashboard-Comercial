@@ -1,4 +1,9 @@
-// Versão: 1.7 | Data: 31/07/2026
+// Versão: 1.8 | Data: 03/08/2026
+// v1.8 (03/08/2026): Semana Fechada — a seção Dimensões documenta
+//   `dimensions[].closedWeek` ("seg_dom" | "sab_sex", só week_year/week_month;
+//   regra da maioria, weekMode efetivo "full"). Ponto MANUAL: closedWeek é
+//   chave de DIMENSÃO (fora dos dicionários de settings-docs); o validador a
+//   aceita/remove com aviso desde a mesma entrega (validate.ts v1.5).
 // v1.7 (31/07/2026): filtros sobre relações por NOME — a seção Filtros e a
 //   regra 6 documentam que responsible_id/operation_id aceitam o nome exato do
 //   cadastro como "value" (o engine resolve nome→id em runtime); nunca
@@ -278,6 +283,10 @@ promovida a tipo próprio).
 - "transform" (só campo de data): ${transformList}.
   Só p/ week_month: "weekMode": "restricted" (recorta na virada do mês) |
   "full" (semana cheia seg→dom).
+- Só p/ week_year/week_month: "closedWeek": "seg_dom" | "sab_sex" — Semana
+  Fechada: o período da consulta expande p/ semanas COMPLETAS nas bordas
+  (a semana entra se 4+ dos 7 dias caem no período); com week_month o
+  weekMode passa a valer como "full". Omitir = desligada.
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 

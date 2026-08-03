@@ -1,4 +1,7 @@
-// Versão: 2.2 | Data: 22/07/2026
+// Versão: 2.3 | Data: 03/08/2026
+// v2.3 (03/08/2026): DimensionRow ganha o select "Semana fechada" (Desligada |
+//   Seg–Dom | Sáb–Sex) nos transforms de semana (Dimension.closedWeek); ativo,
+//   o select "Semana" trava exibindo "Cheia" (weekMode efetivo do engine).
 // v2.2 (22/07/2026): VisibleOptionsPicker — popover com checklist das opções
 //   do dropdown (blacklist hiddenOptions do filtro_campo/filtros rápidos),
 //   carregadas lazy no primeiro open; valores antigos da blacklist aparecem
@@ -77,6 +80,7 @@ import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { SourceConceptsHint } from "@/components/formula/source-concepts-hint";
 import type { SourceDef, SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
+import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import type {
   Aggregation,
   DateAgg,
@@ -234,7 +238,16 @@ export function DimensionRow({
               searchable={false}
               options={transformOptions}
               value={dim.transform ?? "none"}
-              onValueChange={(t) => onChange({ transform: t as Transform })}
+              onValueChange={(t) =>
+                // Semana fechada só vale em transform de semana: trocar para
+                // outro formato limpa a opção (nunca fica órfã na dim).
+                onChange({
+                  transform: t as Transform,
+                  ...(isClosedWeekTransform(t as Transform)
+                    ? {}
+                    : { closedWeek: undefined }),
+                })
+              }
               aria-label="Transformação de data"
             />
           </div>
@@ -248,11 +261,38 @@ export function DimensionRow({
                   { value: "restricted", label: "Restrita" },
                   { value: "full", label: "Cheia" },
                 ]}
-                value={dim.weekMode ?? "restricted"}
+                // Semana fechada força "Cheia" — o controle mostra o valor
+                // efetivo desabilitado (weekMode gravado fica preservado).
+                value={dim.closedWeek ? "full" : dim.weekMode ?? "restricted"}
+                disabled={Boolean(dim.closedWeek)}
                 onValueChange={(wm) =>
                   onChange({ weekMode: wm as "full" | "restricted" })
                 }
                 aria-label="Modo da semana do mês"
+              />
+            </div>
+          ) : null}
+          {isClosedWeekTransform(dim.transform) ? (
+            <div className="flex flex-col gap-1">
+              <Label className="text-muted-foreground text-xs">
+                Semana fechada
+              </Label>
+              <Combobox
+                className="h-8 text-sm"
+                searchable={false}
+                options={[
+                  { value: "", label: "Desligada" },
+                  { value: "seg_dom", label: "Seg–Dom" },
+                  { value: "sab_sex", label: "Sáb–Sex" },
+                ]}
+                value={dim.closedWeek ?? ""}
+                onValueChange={(cw) =>
+                  onChange({
+                    closedWeek:
+                      cw === "seg_dom" || cw === "sab_sex" ? cw : undefined,
+                  })
+                }
+                aria-label="Semana fechada"
               />
             </div>
           ) : null}

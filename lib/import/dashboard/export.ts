@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 03/08/2026
+// v1.3 (03/08/2026): Semana Fechada — exportDimension emite `closedWeek`
+//   (round-trip com validate.ts v1.5; a IA enxerga a opção no ESTADO ATUAL).
 // v1.2 (31/07/2026): filtros sobre relações saem por NOME — `fkNames`
 //   (opcional; carregado pelo chamador via loadExportFkNames, canon-aware)
 //   mapeia UUID→nome em responsible_id/operation_id (por elemento em arrays);
@@ -21,7 +23,7 @@
 //   reemitida), `connectors` e `kanban` (carregam uuids de widget que não
 //   sobrevivem a um import-como-novo).
 // - dimensions/filters: só os campos do REBUILD ({field,label,transform,
-//   weekMode,dateAgg} / {field,op,value,sources}).
+//   weekMode,closedWeek,dateAgg} / {field,op,value,sources}).
 // - metrics: caminho A (normal) e B (calc ad-hoc com `formula` em TOKENS —
 //   aceitos pelo validador e revalidados); métrica `custom:`+calc é emitida
 //   como A simples (caminho C do validador é lossy — perda documentada).
@@ -164,6 +166,7 @@ function exportDimension(d: Dimension): Dimension {
     label: d.label,
     transform: d.transform,
     weekMode: d.weekMode,
+    closedWeek: d.closedWeek,
     dateAgg: d.dateAgg,
   }) as Dimension;
 }
