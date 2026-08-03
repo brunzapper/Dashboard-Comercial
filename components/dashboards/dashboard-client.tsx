@@ -1,9 +1,11 @@
-// Versão: 2.8 | Data: 03/08/2026
-// v2.8 (03/08/2026): Ponteiro Laser — estado efêmero laserMode (ativado pelo
+// Versão: 2.9 | Data: 03/08/2026
+// v2.9 (03/08/2026): Ponteiro Laser — estado efêmero laserMode (ativado pelo
 //   menu do clique-direito sobre um widget, no grid); ligar a edição desliga
 //   o laser (efeito) e ativar o laser sai da edição (handleLaserChange);
 //   toggleEditMode alimenta o item "Editar layout" do mesmo menu; laserColor
 //   (Configurações → Tema) desce da page ao grid.
+// v2.8 (03/08/2026): boardWidgets={widgets} (TODAS as abas) no DashboardGrid
+//   e no builder da toolbar — listas "Aplicar a" dos filtros globais ao board.
 // v2.7 (26/07/2026): engine deferido — busca em LOTE dos widgets de engine
 //   (runDeferredWidgets; deferredEngineIds + fingerprint deferredScopeById +
 //   event bus como gatilhos; stale-while-refetch) e mescla nos mapas
@@ -1021,6 +1023,7 @@ export function DashboardClient({
               dashboardId={dashboardId}
               available={availableForBuilder}
               siblings={widgets}
+              boardWidgets={widgets}
               canManageFields={canManageFields}
               fields={fields}
               currencyOptions={currencyOptions}
@@ -1112,6 +1115,7 @@ export function DashboardClient({
           <WidgetFocusProvider focus={focusWidget}>
           <DashboardGrid
             widgets={visibleWidgets}
+            boardWidgets={widgets}
             dataById={effDataById}
             deferredPendingIds={enginePendingIds}
             recordListById={recordListById}
