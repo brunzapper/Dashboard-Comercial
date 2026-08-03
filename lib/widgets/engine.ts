@@ -127,6 +127,14 @@ import {
 import { applyFilterSourceTargets } from "./filter-sources";
 import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
 import {
+  closedWeekOf,
+  dimWeekStart,
+  effectiveWeekMode,
+  rpcDimForClosedWeek,
+  snapPeriodToClosedWeek,
+  snapRangeToClosedWeek,
+} from "./closed-week";
+import {
   EMPTY_CANON,
   canonicalOf,
   expandResponsibleFilters,
@@ -2018,6 +2026,12 @@ export async function runWidget(
     runPeriod?: DashboardPeriod | null
   ): Promise<WidgetRow[]> => {
     const filters = filtersOf(effMainSources);
+    // Payload de dims p/ os RPCs desta rodada (Semana Fechada): sáb–sex desce
+    // como 'day' (o merge client-side funde adiante) e seg_dom+week_month
+    // desce weekMode "full". As `dims` ORIGINAIS seguem mandando no merge,
+    // nos rótulos e na ordenação — todas as pernas da rodada usam o MESMO
+    // payload, então as tuplas continuam casando entre si.
+    const rpcDims = dims.map(rpcDimForClosedWeek);
     const rpcMetrics: Metric[] = [];
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
@@ -2071,7 +2085,7 @@ export async function runWidget(
     // max(principal, condição, moeda) em vez da soma das três.
     const mainPromise = supabase.rpc("run_widget_query", {
       p_source: config.source,
-      p_dimensions: dims,
+      p_dimensions: rpcDims,
       p_metrics: rpcMetrics,
       p_filters: filters,
       p_correspondences: correspondencesMap,
@@ -2120,7 +2134,7 @@ export async function runWidget(
             "run_widget_query",
             {
               p_source: config.source,
-              p_dimensions: dims,
+              p_dimensions: rpcDims,
               p_metrics: g.keys.map(basisMetric),
               p_filters: [...(scoped ? scoped.filters : filters), ...condExtra],
               p_correspondences: scoped ? scoped.corr : correspondencesMap,
@@ -2199,7 +2213,7 @@ export async function runWidget(
       metricInfos.length + basisInfos.length > 0
         ? buildMoneyBreakdowns(
             supabase,
-            dims,
+            rpcDims,
             filters,
             correspondencesMap,
             [...metricInfos, ...basisInfos],
@@ -2297,7 +2311,7 @@ export async function runWidget(
         legMetrics.length > 0
           ? supabase.rpc("run_widget_query", {
               p_source: config.source,
-              p_dimensions: dims,
+              p_dimensions: rpcDims,
               p_metrics: legMetrics,
               p_filters: legFilters,
               p_correspondences: legCorr,
@@ -2342,7 +2356,7 @@ export async function runWidget(
               "run_widget_query",
               {
                 p_source: config.source,
-                p_dimensions: dims,
+                p_dimensions: rpcDims,
                 p_metrics: g.keys.map(basisMetric),
                 p_filters: [
                   ...(scoped ? scoped.filters : legFilters),
@@ -2385,7 +2399,7 @@ export async function runWidget(
         legMetricInfos.length + legBasisInfos.length > 0
           ? buildMoneyBreakdowns(
               supabase,
-              dims,
+              rpcDims,
               legFilters,
               legCorr,
               [...legMetricInfos, ...legBasisInfos],
@@ -2630,9 +2644,13 @@ export async function runWidget(
     divide: boolean;
   } | null> => {
     if (!cmpSpec || !period) return null;
+    // Snapshot do spec NA EXECUÇÃO (pós-snap da Semana Fechada — o reassign
+    // acontece antes do Promise.all que nos invoca); também preserva o
+    // narrowing dentro das closures abaixo.
+    const spec = cmpSpec;
     try {
       const isWindow =
-        cmpSpec.base === "window_avg" || cmpSpec.base === "window_median";
+        spec.base === "window_avg" || spec.base === "window_median";
       // Janelas: dims cronológicas saem da consulta de comparação — cada
       // bucket do período atual compara contra a média/mediana por bucket da
       // janela inteira (por tupla das demais dims).
@@ -2641,16 +2659,13 @@ export async function runWidget(
         .filter((i) => !isWindow || !isChronoDim(dims[i]));
       let cmpDims = sharedIdx.map((i) => dims[i]);
       let bucketed = false;
-      let divide = cmpSpec.base === "window_avg";
-      if (cmpSpec.base === "window_median" && cmpSpec.bucket) {
+      let divide = spec.base === "window_avg";
+      if (spec.base === "window_median" && spec.bucket) {
         // Mediana precisa de UMA coluna de data p/ bucketizar; fontes com
         // campos divergentes degradam p/ média (total ÷ nº de buckets).
         const bucketField = uniquePeriodField(period);
         if (bucketField) {
-          cmpDims = [
-            ...cmpDims,
-            { field: bucketField, transform: cmpSpec.bucket },
-          ];
+          cmpDims = [...cmpDims, { field: bucketField, transform: spec.bucket }];
           bucketed = true;
         } else {
           divide = true;
@@ -2658,12 +2673,12 @@ export async function runWidget(
       }
       const cmpRows = await computeRows(
         cmpDims,
-        (srcs) => cmpFiltersFor(cmpSpec, srcs),
+        (srcs) => cmpFiltersFor(spec, srcs),
         // Período DESTA rodada (range de comparação) — auxes escopadas.
         {
           field: period!.field,
-          from: cmpSpec.from,
-          to: cmpSpec.to,
+          from: spec.from,
+          to: spec.to,
           fieldBySource: period?.fieldBySource,
         }
       );
@@ -2807,6 +2822,32 @@ export async function runWidget(
     return { legs, n, holidays, refIso: ref, reference };
   })();
 
+  // Semana Fechada (03/08/2026): expande o período da RODADA p/ semanas
+  // completas nas bordas (regra da maioria — lib/widgets/closed-week.ts).
+  // 100% engine: o snap acontece AQUI (depois do cmpSpec, que nasce do período
+  // ORIGINAL p/ preservar a semântica do preset, e do lowerCalcGoalOperands,
+  // que precisa do período original — expandido cruzaria o mês e degradaria a
+  // meta p/ anual). bd-align ativo vence (pernas mensais); comparação
+  // previous_period/previous_year snapa junto; previous_period_bd e window_*
+  // seguem sem snap (limitação documentada).
+  const closedWeek = bdAlignCtx ? null : closedWeekOf(dims);
+  const runPeriod = closedWeek
+    ? snapPeriodToClosedWeek(period, closedWeek)
+    : period;
+  if (
+    closedWeek &&
+    cmpSpec &&
+    (cmpSpec.base === "previous_period" || cmpSpec.base === "previous_year")
+  ) {
+    // Bounds do spec são não-nulos — o snap devolve null SÓ p/ entrada null.
+    const snapped = snapRangeToClosedWeek(cmpSpec.from, cmpSpec.to, closedWeek);
+    cmpSpec = {
+      ...cmpSpec,
+      from: snapped.from ?? cmpSpec.from,
+      to: snapped.to ?? cmpSpec.to,
+    };
+  }
+
   const [rows, cmpRun] = await Promise.all([
     bdAlignCtx
       ? Promise.all(
@@ -2814,7 +2855,7 @@ export async function runWidget(
             computeRows(dims, (srcs) => legFiltersFor(leg, srcs), leg)
           )
         ).then((parts) => parts.flat())
-      : computeRows(dims, (srcs) => legFiltersFor(period, srcs), period),
+      : computeRows(dims, (srcs) => legFiltersFor(runPeriod, srcs), runPeriod),
     bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);
 
@@ -3014,9 +3055,16 @@ export async function runWidget(
     const dim = dims[i];
     const key = `dim_${i + 1}`;
     if (isLabelTransform(dim.transform)) {
+      // weekMode/âncora EFETIVOS (Semana Fechada força "full"; sáb–sex rotula
+      // a partir do bucket de sábado).
       for (const r of rows) {
         if (r[key] != null)
-          r[key] = formatBucketLabel(dim.transform!, r[key], dim.weekMode);
+          r[key] = formatBucketLabel(
+            dim.transform!,
+            r[key],
+            effectiveWeekMode(dim),
+            dimWeekStart(dim)
+          );
       }
       continue;
     }

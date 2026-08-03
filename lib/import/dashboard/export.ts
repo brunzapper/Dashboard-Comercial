@@ -164,6 +164,7 @@ function exportDimension(d: Dimension): Dimension {
     label: d.label,
     transform: d.transform,
     weekMode: d.weekMode,
+    closedWeek: d.closedWeek,
     dateAgg: d.dateAgg,
   }) as Dimension;
 }

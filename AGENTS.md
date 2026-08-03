@@ -75,6 +75,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   client-side decide-se SÓ em `resolveListFilters` (record-list.ts); não a
   duplique nem a resolva via RPC. Ver `docs/arquitetura.md` §4.1 e
   invariante 9.
+- **Semana Fechada se resolve no ENGINE, nunca no RPC (03/08/2026):**
+  `Dimension.closedWeek` ("seg_dom" | "sab_sex", só transforms de semana)
+  snapa o período da RODADA p/ semanas completas (regra da maioria — 4+ dias;
+  `lib/widgets/closed-week.ts`) em `runWidget`, DEPOIS do `comparisonSpec` e
+  do `lowerCalcGoalOperands` (ambos precisam do período ORIGINAL); sáb–sex
+  desce ao RPC como transform 'day' e o `bucket-merge` funde client-side
+  (o gate `dimNeedsClientBucket` também ativa p/ core/`unified:`/`match:`
+  nesse caso). weekMode/âncora efetivos SÓ por `effectiveWeekMode`/
+  `dimWeekStart`. NÃO recrie os RPCs p/ semana de sábado nem reintroduza o
+  recorte "restrita" com a opção ativa. Ver `docs/arquitetura.md` §4.1.
 - **Operando com escopo de fonte se resolve no ENGINE, nunca no RPC:** o ref
   `agg:<agg>:<campo>@<fonte>` é ABAIXADO em runtime para a chave condicional
   `aggif:` já existente (predicado `record_type =` + filtro da sub) por

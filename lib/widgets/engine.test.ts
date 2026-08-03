@@ -770,3 +770,127 @@ describe("operando de META em métrica calculada", () => {
     expect(calcFormula?.tokens).toContainEqual({ kind: "const", value: 50000 });
   });
 });
+
+describe("Semana Fechada (Dimension.closedWeek)", () => {
+  it("seg_dom: período snapado p/ semanas completas + weekMode 'full' no payload", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "seg_dom" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    expect(rpcCalls).toHaveLength(1);
+    const args = rpcCalls[0].args;
+    // Julho/26 seg–dom: 29/06–02/08 (bounds core ancorados em -03:00).
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "gte",
+      value: "2026-06-29T00:00:00-03:00",
+    });
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-08-02T23:59:59-03:00",
+    });
+    // Payload da dim desce weekMode "full" (mata o recorte na virada do mês).
+    const dim = (args.p_dimensions as Record<string, unknown>[])[0];
+    expect(dim.weekMode).toBe("full");
+    expect(dim.transform).toBe("week_month");
+  });
+
+  it("sab_sex: dim desce como 'day' e as linhas fundem em semanas de sábado rotuladas", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          // Buckets 'day' (timestamp) de duas semanas sáb–sex de julho/26:
+          // 04/07–10/07 e 11/07–17/07.
+          data: [
+            { dim_1: "2026-07-04T00:00:00", metric_1: 1 },
+            { dim_1: "2026-07-06T00:00:00", metric_1: 2 },
+            { dim_1: "2026-07-10T00:00:00", metric_1: 4 },
+            { dim_1: "2026-07-15T00:00:00", metric_1: 8 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "sab_sex" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    const args = rpcCalls[0].args;
+    // O RPC não produz semana de sábado: a dim desce como 'day'…
+    expect((args.p_dimensions as Record<string, unknown>[])[0].transform).toBe(
+      "day"
+    );
+    // …e o período snapa p/ 04/07–31/07 (a semana 27/06–03/07 tem só 3 dias
+    // em julho — fica com junho).
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "gte",
+      value: "2026-07-04T00:00:00-03:00",
+    });
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-07-31T23:59:59-03:00",
+    });
+    // Fusão client-side + rótulo pela âncora de sábado (mês da terça).
+    expect(data.rows).toHaveLength(2);
+    expect(data.rows[0].dim_1).toBe("1ª semana de Julho");
+    expect(data.rows[0].metric_1).toBe(7);
+    expect(data.rows[1].dim_1).toBe("2ª semana de Julho");
+    expect(data.rows[1].metric_1).toBe(8);
+  });
+
+  it("comparação previous_period também compara semanas fechadas", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "seg_dom" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+        settings: { comparison: { enabled: true, base: "previous_period" } },
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    // Junho/26 em semanas fechadas seg–dom: 01/06–28/06 (a semana 29/06–05/07
+    // é de julho).
+    const cmpCall = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).some(
+        (f) => f.op === "gte" && String(f.value).startsWith("2026-06-01")
+      )
+    );
+    expect(cmpCall).toBeDefined();
+    expect(cmpCall!.args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-06-28T23:59:59-03:00",
+    });
+    expect(data.comparison?.from).toBe("2026-06-01");
+    expect(data.comparison?.to).toBe("2026-06-28");
+  });
+});

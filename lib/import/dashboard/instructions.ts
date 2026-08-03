@@ -278,6 +278,10 @@ promovida a tipo próprio).
 - "transform" (só campo de data): ${transformList}.
   Só p/ week_month: "weekMode": "restricted" (recorta na virada do mês) |
   "full" (semana cheia seg→dom).
+- Só p/ week_year/week_month: "closedWeek": "seg_dom" | "sab_sex" — Semana
+  Fechada: o período da consulta expande p/ semanas COMPLETAS nas bordas
+  (a semana entra se 4+ dos 7 dias caem no período); com week_month o
+  weekMode passa a valer como "full". Omitir = desligada.
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 

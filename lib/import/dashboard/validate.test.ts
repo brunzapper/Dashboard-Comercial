@@ -160,3 +160,72 @@ describe("recorte de sub-base — relação exige UUID", () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe("Semana Fechada (dimensions[].closedWeek)", () => {
+  function docWithDim(dim: Record<string, unknown>): string {
+    return JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_cw",
+      bases: ["deals"],
+      dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+      widgets: [
+        {
+          key: "w1",
+          title: "Semanal",
+          visual_type: "barra",
+          sources: ["deals"],
+          dimensions: [dim],
+          metrics: [{ field: "*", agg: "count" }],
+          filters: [],
+          grid_position: { x: 0, y: 0, w: 6, h: 8 },
+        },
+      ],
+    });
+  }
+
+  it("closedWeek válido em transform de semana faz round-trip", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "closed_at",
+        transform: "week_month",
+        closedWeek: "seg_dom",
+      }),
+      ctx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+    expect(res.preset?.widgets[0].dimensions?.[0]).toMatchObject({
+      field: "closed_at",
+      transform: "week_month",
+      closedWeek: "seg_dom",
+    });
+  });
+
+  it("closedWeek com transform não-semanal é removido com aviso", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "closed_at",
+        transform: "month_year",
+        closedWeek: "sab_sex",
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join("\n")).toContain('"closedWeek" removido');
+    expect(res.preset?.widgets[0].dimensions?.[0].closedWeek).toBeUndefined();
+  });
+
+  it("valor fora do enum é descartado em silêncio", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "closed_at",
+        transform: "week_year",
+        closedWeek: "dom_seg",
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.preset?.widgets[0].dimensions?.[0].closedWeek).toBeUndefined();
+  });
+});

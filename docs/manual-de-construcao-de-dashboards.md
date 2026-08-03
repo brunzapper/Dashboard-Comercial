@@ -1107,6 +1107,18 @@ fatias). Por linha de dimensão:
 - **"Semana"** (só com "Semana do mês"): **"Restrita"** (padrão — a semana é
   recortada na virada do mês) ou **"Cheia"** (segunda→domingo inteira; a
   semana pertence ao mês da sua quinta-feira).
+- **"Semana fechada"** (só com "Semana do ano"/"Semana do mês"): **"Desligada"**
+  (padrão), **"Seg–Dom"** ou **"Sáb–Sex"**. Ativa, o widget IGNORA o corte do
+  período nas bordas e sempre mostra semanas COMPLETAS: o período da consulta
+  expande/encolhe para a fronteira de semana, e uma semana entra se 4+ dos 7
+  dias dela caem no período (a semana pertence ao mês do seu 4º dia — quinta
+  no Seg–Dom, terça no Sáb–Sex; cada semana aparece em exatamente um mês).
+  Exemplo: julho/26 com Seg–Dom exibe da semana 29/06–05/07 até a 27/07–02/08;
+  agosto/26 começa em 03/08 (os dias 01–02/08 contam na última semana de
+  julho). Com "Semana do mês", o seletor "Semana" trava em "Cheia" (o recorte
+  "Restrita" anularia a opção). A comparação com período anterior/ano anterior
+  também compara semanas fechadas. Não vale em KPI/cartão, "Agrupar período"
+  nem no modo lista.
 - O agrupamento pelo bucket vale para qualquer campo de data — inclusive
   campos personalizados com hora no valor (cada mês/trimestre vira UMA
   categoria). Única ressalva: métrica de **Média** simples sobre dimensão de

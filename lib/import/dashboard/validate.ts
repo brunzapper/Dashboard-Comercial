@@ -56,6 +56,7 @@ import { PERIOD_PRESETS, PERIOD_ALL } from "@/lib/widgets/period";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
+import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
 import {
   BASE_COLS,
@@ -870,6 +871,23 @@ export function validateDashboardImport(
         );
         dateAgg = "";
       }
+      // Semana fechada (03/08/2026): só nos transforms de semana; valor fora
+      // do enum é descartado em silêncio, transform incompatível remove com
+      // aviso (padrão do dateAgg acima).
+      const cwRaw = d.closedWeek;
+      let closedWeek: Dimension["closedWeek"] =
+        cwRaw === "seg_dom" || cwRaw === "sab_sex" ? cwRaw : undefined;
+      if (
+        closedWeek &&
+        !isClosedWeekTransform(
+          (transform || undefined) as Dimension["transform"]
+        )
+      ) {
+        warnings.push(
+          `${dw}: "closedWeek" removido — só é suportado com transform de semana (week_year/week_month).`
+        );
+        closedWeek = undefined;
+      }
       dimensions.push({
         field,
         label: asString(d.label) || undefined,
@@ -878,6 +896,7 @@ export function validateDashboardImport(
           d.weekMode === "full" || d.weekMode === "restricted"
             ? d.weekMode
             : undefined,
+        closedWeek,
         dateAgg: (dateAgg || undefined) as Dimension["dateAgg"],
       });
     });

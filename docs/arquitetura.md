@@ -592,6 +592,30 @@ cronológica, casamento ordinal da comparação e a regex mensal do goalLine.
 do RPC não carrega peso — mesma limitação do Total geral). RPCs INTOCADAS
 (não aciona a invariante 1).
 
+**Semana Fechada (`Dimension.closedWeek`, 03/08/2026):** widgets semanais
+(`week_year`/`week_month`) podem exibir semanas COMPLETAS mesmo com o período
+cortando as bordas — "seg_dom" ou "sab_sex". 100% engine
+(`lib/widgets/closed-week.ts`; RPCs INTOCADAS): (a) o período da RODADA é
+SNAPADO pela regra da MAIORIA (a semana entra se 4+ dos 7 dias caem no
+período — a mesma convenção "mês do 4º dia" do week_month cheio: quinta p/
+seg–dom, terça p/ sáb–sex; cada semana pertence a exatamente um mês) em
+`runWidget`, DEPOIS de `comparisonSpec` (que nasce do período ORIGINAL p/
+preservar a semântica do preset; previous_period/previous_year são snapados
+em seguida — previous_period_bd/window_* não) e de `lowerCalcGoalOperands`
+(período original — o expandido cruzaria o mês e degradaria a meta p/ anual);
+o snap é idempotente (pernas de sub-fonte recursam e re-snapam sem efeito) e
+`from > to` resultante = consulta vazia, nunca erro; (b) a bucketização:
+seg–dom reusa o bucket de segunda do servidor (week_month desce com weekMode
+"full" no payload — `rpcDimForClosedWeek`); sáb–sex desce como transform
+'day' (legal em todos os ramos do RPC) e o `bucket-merge` acima funde as
+linhas diárias em semanas de SÁBADO client-side (`dimNeedsClientBucket`
+também ativa p/ ref core/`unified:`/`match:` nesse caso; a aproximação da
+média simples passa a valer aqui também). `weekMode`/âncora efetivos saem de
+`effectiveWeekMode`/`dimWeekStart` (closedWeek força "full"). `bdAlignCtx`
+ativo VENCE (pernas mensais; snap desligado). Fora do escopo: KPI/card,
+"Agrupar período" (dateAgg), modo lista, quick-table e chips de filtro
+rápido semanais (`@bucket` segue segunda-feira).
+
 **Dia de Brasília no read side (0085):** a sessão do banco é UTC, então colunas
 `timestamptz` do núcleo (`source_created_at`…) comparadas a literais naive
 deslocavam o limite do dia em 3h, e o `date_trunc` bucketizava registros de
