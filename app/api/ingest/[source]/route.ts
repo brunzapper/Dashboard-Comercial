@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 03/08/2026
+// v1.1 (03/08/2026): cauda global (runAutoMatch + recalcAllFormulaFields —
+// O(N) na tabela inteira a cada push) trocada pela incremental de
+// lib/sync/post-ingest, escopada no record_type da fonte e com orçamento de
+// tempo — mesmo conserto da rota de sheets (que estourava o teto de 60s).
 // API de ingestão (push): sistemas externos empurram dados para o dashboard.
 // POST /api/ingest/<source_key> com Authorization: Bearer dck_... — chave POR
 // integração criada em Configurações → Integrações (api_keys, migração 0074;
@@ -17,8 +21,7 @@ import { hashKey, isApiKeyShaped } from "@/lib/integrations/keys";
 import { ingestRows } from "@/lib/import/ingest";
 import type { ColumnMapping } from "@/lib/import/csv";
 import { loadSources } from "@/lib/config/sources";
-import { runAutoMatch } from "@/lib/records/matching-engine";
-import { recalcAllFormulaFields } from "@/lib/records/recalc";
+import { runIncrementalPostSync } from "@/lib/sync/post-ingest";
 import { ensureAutoOperationsForSource } from "@/lib/operations/auto-operations";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +30,8 @@ export const maxDuration = 60;
 // Mesmo teto do importCsvChunk; quem tem mais linhas, pagina (upsert é idempotente).
 const MAX_ROWS = 500;
 const MAX_BODY_BYTES = 1_000_000;
+// Orçamento da cauda incremental best-effort (padrão da rota de sheets).
+const TAIL_BUDGET_MS = 40_000;
 // Regex de key de data_sources (0060) — pré-gate antes de tocar o banco.
 const SOURCE_RE = /^[a-z][a-z0-9_]{1,39}$/;
 
@@ -193,6 +198,8 @@ export async function POST(
     }
 
     try {
+      const startedAt = new Date().toISOString();
+      const t0 = Date.now();
       const result = await ingestRows(
         db,
         {
@@ -213,10 +220,25 @@ export async function POST(
           result,
         })
         .eq("id", inboundId);
-      // Cauda best-effort, como na rota de sheets: auto-match + fórmulas.
+      // Cauda best-effort, como na rota de sheets: auto-match + fórmulas —
+      // INCREMENTAL, escopada no record_type da fonte. Os ids tocados saem de
+      // last_synced_at >= startedAt (o ingestRows só escreve linha alterada e
+      // carimba o instante; ≤500 linhas/push — superset por sync concorrente
+      // é inócuo, o recalc é idempotente).
       try {
-        await runAutoMatch(db);
-        await recalcAllFormulaFields();
+        if (result.inserted + result.updated > 0) {
+          const { data: touchedRows } = await db
+            .from("records")
+            .select("id")
+            .eq("record_type", sourceDef.recordType)
+            .gte("last_synced_at", startedAt);
+          await runIncrementalPostSync(db, {
+            recordTypes: [sourceDef.recordType],
+            since: startedAt,
+            touchedIds: (touchedRows ?? []).map((r) => r.id as string),
+            budgetUntil: t0 + TAIL_BUDGET_MS,
+          });
+        }
       } catch {
         /* ignora: as linhas já foram persistidas. */
       }

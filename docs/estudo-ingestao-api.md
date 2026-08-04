@@ -29,7 +29,7 @@ que o import de CSV já usa:
 | Motor de ingestão | `lib/import/ingest.ts` (`ingestRows`) | upsert idempotente em lote, dedup por hash, conflito por campo (edições manuais preservadas), responsável por nome, fórmulas, auditoria |
 | Mapeamento de colunas | `ColumnMapping` (`lib/import/csv.ts`) | o payload da API usa o mesmo shape; coerção pt-BR incluída |
 | Registro de campos | `prepareImportFields` (`app/(app)/registros/importar/actions.ts`) | criar/reusar `field_definitions` por fonte |
-| Endpoint de referência | `app/api/sync/sheets/route.ts` | POST + secret + service role + `runAutoMatch`/`recalcAllFormulaFields` |
+| Endpoint de referência | `app/api/sync/sheets/route.ts` | POST + secret + service role + cauda incremental (`runIncrementalPostSync`, `lib/sync/post-ingest.ts`) |
 
 O wizard de CSV é o front interativo; a API é o front *headless* do mesmo
 engine. A única peça nova de verdade é a **gestão de chaves por integração**.
@@ -111,8 +111,12 @@ Content-Type: application/json
 - ≤ 500 linhas por request (mesmo teto do `importCsvChunk`); quem tem mais,
   pagina — o upsert idempotente torna reenvio seguro.
 - Resposta: o `SyncResult` (inseridos/atualizados/ignorados/erros + amostras).
-- `export const maxDuration = 60` e cauda `runAutoMatch`/`recalc` best-effort,
-  como na rota de sheets.
+- `export const maxDuration = 60` e cauda best-effort INCREMENTAL
+  (`runIncrementalPostSync`, `lib/sync/post-ingest.ts` — auto-match dos types
+  tocados + recalc direcionado, com orçamento de tempo), como na rota de
+  sheets. A cauda global antiga (`runAutoMatch` + `recalcAllFormulaFields`)
+  era O(N) na tabela inteira e estourava o teto de 60s — guarda em
+  `tests/sync-tails.test.ts`.
 - Rate limiting: desnecessário para uso interno; ver §6 para o caminho SaaS.
 
 ## 3. Conectores de pull (o app consulta o CRM) — fase 2
