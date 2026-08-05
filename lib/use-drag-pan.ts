@@ -10,7 +10,8 @@
 //   (p.scrollLeft), então um pointermove posterior parte do acumulado, sem
 //   snap-back. Opt-in por chamador (Registros liga; DashboardGrid não).
 // v1.2 (05/08/2026): verticalScroller exportada (o auto-pan de borda do
-//   Ponteiro Laser, lib/use-laser-edge-pan.ts, precisa do mesmo ancestral).
+//   Ponteiro Laser, hoje lib/use-hover-edge-pan.ts, precisa do mesmo
+//   ancestral).
 "use client";
 
 import { useEffect, useRef, useState } from "react";

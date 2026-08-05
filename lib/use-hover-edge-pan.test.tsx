@@ -1,25 +1,28 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 05/08/2026
-// Auto-pan de borda do laser: sample na zona rola o eixo correspondente e
+// Versão: 1.1 | Data: 05/08/2026
+// Auto-pan de borda por hover: sample na zona rola o eixo correspondente e
 // CONTINUA rolando sem samples novos (sem idle — diferença deliberada do DnD);
 // canto rola os dois eixos; miolo dorme com onSettle; stop() para na hora sem
-// onSettle. jsdom não tem layout: rects mockados, scrollHeight definido à mão
-// para o verticalScroller achar o "main" e o rAF vem dos fake timers.
+// onSettle; com engageMs, travessia rápida da zona nunca rola (v1.1). jsdom
+// não tem layout: rects mockados, scrollHeight definido à mão para o
+// verticalScroller achar o "main" e o rAF vem dos fake timers.
 import { act, fireEvent, render } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useLaserEdgePan } from "@/lib/use-laser-edge-pan";
+import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
 
 function Probe({
+  engageMs,
   onPan,
   onSettle,
 }: {
+  engageMs?: number;
   onPan?: () => void;
   onSettle?: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const { onSample, stop } = useLaserEdgePan(ref, { onPan, onSettle });
+  const { onSample, stop } = useHoverEdgePan(ref, { engageMs, onPan, onSettle });
   return (
     <div data-testid="main" style={{ overflowY: "auto" }}>
       <div
@@ -44,8 +47,18 @@ const RECT = {
   toJSON: () => ({}),
 } as DOMRect;
 
-function mountProbe(onPan?: () => void, onSettle?: () => void) {
-  const utils = render(<Probe onPan={onPan} onSettle={onSettle} />);
+function mountProbe(opts?: {
+  engageMs?: number;
+  onPan?: () => void;
+  onSettle?: () => void;
+}) {
+  const utils = render(
+    <Probe
+      engageMs={opts?.engageMs}
+      onPan={opts?.onPan}
+      onSettle={opts?.onSettle}
+    />
+  );
   const el = utils.getByTestId("scroller");
   el.getBoundingClientRect = () => RECT;
   const main = utils.getByTestId("main");
@@ -89,10 +102,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("useLaserEdgePan", () => {
+describe("useHoverEdgePan", () => {
   it("zona direita rola o scrollLeft e continua rolando sem samples novos", () => {
     const onPan = vi.fn();
-    const { el } = mountProbe(onPan);
+    const { el } = mountProbe({ onPan });
     sampleAt(el, 390, 150);
     advance(200);
     const parcial = el.scrollLeft;
@@ -121,7 +134,7 @@ describe("useLaserEdgePan", () => {
 
   it("no miolo não rola; sair da zona assenta com onSettle", () => {
     const onSettle = vi.fn();
-    const { el } = mountProbe(undefined, onSettle);
+    const { el } = mountProbe({ onSettle });
     sampleAt(el, 200, 150);
     advance(200);
     expect(el.scrollLeft).toBe(0);
@@ -139,7 +152,7 @@ describe("useLaserEdgePan", () => {
 
   it("stop() para imediatamente e NÃO dispara onSettle", () => {
     const onSettle = vi.fn();
-    const { el, getByTestId } = mountProbe(undefined, onSettle);
+    const { el, getByTestId } = mountProbe({ onSettle });
     sampleAt(el, 390, 150);
     advance(100);
     act(() => {
@@ -157,5 +170,42 @@ describe("useLaserEdgePan", () => {
     advance(50);
     unmount();
     expect(() => advance(300)).not.toThrow();
+  });
+
+  it("engageMs: só engata depois da espera e então segue rolando", () => {
+    const { el } = mountProbe({ engageMs: 180 });
+    sampleAt(el, 390, 150);
+    advance(100); // ainda dentro da espera
+    expect(el.scrollLeft).toBe(0);
+    advance(300); // passou do engate
+    const rolado = el.scrollLeft;
+    expect(rolado).toBeGreaterThan(0);
+    advance(200); // sem idle: continua
+    expect(el.scrollLeft).toBeGreaterThan(rolado);
+  });
+
+  it("engageMs: travessia rápida da zona nunca rola nem assenta", () => {
+    const onSettle = vi.fn();
+    const { el } = mountProbe({ engageMs: 180, onSettle });
+    sampleAt(el, 390, 150);
+    advance(100); // sai da zona antes do engate
+    sampleAt(el, 200, 150);
+    advance(300);
+    expect(el.scrollLeft).toBe(0);
+    expect(onSettle).not.toHaveBeenCalled();
+  });
+
+  it("engageMs: stop() durante a espera reseta a contagem", () => {
+    const { el, getByTestId } = mountProbe({ engageMs: 180 });
+    sampleAt(el, 390, 150);
+    advance(100);
+    act(() => {
+      fireEvent.click(getByTestId("stop"));
+    });
+    sampleAt(el, 390, 150);
+    advance(100); // contagem recomeçou — ainda não engatou
+    expect(el.scrollLeft).toBe(0);
+    advance(200);
+    expect(el.scrollLeft).toBeGreaterThan(0);
   });
 });

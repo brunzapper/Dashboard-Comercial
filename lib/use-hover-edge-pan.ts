@@ -1,14 +1,21 @@
-// Versão: 1.0 | Data: 05/08/2026
-// Auto-pan de borda do Ponteiro Laser: com o modo apresentação ativo, aproximar
-// o ponteiro das bordas/cantos da área visível rola a área de trabalho na
-// direção da borda — os DOIS eixos: horizontal no container do grid
-// (scrollRef), vertical no ancestral rolável (verticalScroller — no app, o
-// <main> do AppShell). Alimentado por onSample (pointermove do overlay).
-// DIFERENÇA deliberada do auto-scroll de DnD (use-edge-autoscroll): SEM timeout
-// de idle — ponteiro PARADO na zona continua rolando (é o gesto: encostar na
-// borda e esperar). O loop dorme só com as duas velocidades zeradas (onSettle;
-// o próximo sample religa); stop() cancela na hora e NÃO dispara onSettle
-// (leave/menu/unmount tratam o dwell por conta própria).
+// Versão: 1.1 | Data: 05/08/2026
+// Auto-pan de borda por HOVER: aproximar o ponteiro (sem botão pressionado)
+// das bordas/cantos da área visível rola a área de trabalho na direção da
+// borda — os DOIS eixos: horizontal no container do grid (scrollRef), vertical
+// no ancestral rolável (verticalScroller — no app, o <main> do AppShell).
+// Alimentado por onSample (pointermove do chamador). DIFERENÇA deliberada do
+// auto-scroll de DnD (use-edge-autoscroll): SEM timeout de idle — ponteiro
+// PARADO na zona continua rolando (é o gesto: encostar na borda e esperar).
+// O loop dorme só com as duas velocidades zeradas (onSettle; o próximo sample
+// religa); stop() cancela na hora e NÃO dispara onSettle (leave/menu/unmount
+// tratam as consequências por conta própria).
+// Consumidores: LaserPointerOverlay (engate imediato — no modo apresentação o
+// gesto é deliberado) e o canvas do DashboardGrid (com engageMs — ver v1.1).
+// v1.1 (05/08/2026): renomeado de use-laser-edge-pan (o gesto passou a valer
+//   também FORA do laser) + opção `engageMs`: o scroll só engata depois de o
+//   ponteiro acumular engageMs contínuos em zona — atravessar a zona ao sair
+//   do canvas (ir ao menu lateral/outra janela) não dá "chute" de scroll.
+//   panningRef/onPan só valem a partir do engate; default 0 (laser intocado).
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
@@ -17,10 +24,11 @@ import { verticalScroller } from "@/lib/use-drag-pan";
 import { edgeScrollVelocity } from "@/lib/use-edge-autoscroll";
 
 // Estado mutável do loop (vive num ref — o pan não pode re-renderizar).
-interface LaserPanState {
+interface HoverPanState {
   scrollRef: React.RefObject<HTMLElement | null>;
   edge: number;
   maxSpeed: number;
+  engageMs: number;
   // Última posição do ponteiro (client): o loop rola a partir dela mesmo sem
   // pointermove novo.
   last: { x: number; y: number } | null;
@@ -28,15 +36,18 @@ interface LaserPanState {
   v: HTMLElement | null;
   raf: number | null;
   prevTs: number | null;
+  // Timestamp (rAF) da ENTRADA na zona — base da espera de engate.
+  zoneSince: number | null;
   panningRef: { current: boolean };
   onPan?: () => void;
   onSettle?: () => void;
 }
 
-function panStop(st: LaserPanState) {
+function panStop(st: HoverPanState) {
   if (st.raf != null) cancelAnimationFrame(st.raf);
   st.raf = null;
   st.prevTs = null;
+  st.zoneSince = null;
   st.last = null;
   st.v = null;
   st.panningRef.current = false;
@@ -53,7 +64,7 @@ function verticalBounds(v: HTMLElement): { top: number; bottom: number } {
   return { top: r.top, bottom: r.bottom };
 }
 
-function panTick(st: LaserPanState, ts: number) {
+function panTick(st: HoverPanState, ts: number) {
   st.raf = null;
   const el = st.scrollRef.current;
   if (!st.last || !el) {
@@ -78,12 +89,22 @@ function panTick(st: LaserPanState, ts: number) {
     st.maxSpeed
   );
   if (vx === 0 && vy === 0) {
-    // Fora das zonas: dorme (o próximo sample religa) e devolve o dwell.
+    // Fora das zonas: dorme (o próximo sample religa), reseta o engate e
+    // avisa quem rolou de fato.
     st.prevTs = null;
+    st.zoneSince = null;
     if (st.panningRef.current) {
       st.panningRef.current = false;
       st.onSettle?.();
     }
+    return;
+  }
+  // Em zona mas ainda dentro da espera de engate: segue armado sem rolar
+  // (travessia rápida da zona nunca chega a engatar).
+  if (st.zoneSince == null) st.zoneSince = ts;
+  if (ts - st.zoneSince < st.engageMs) {
+    st.prevTs = null;
+    st.raf = requestAnimationFrame((t) => panTick(st, t));
     return;
   }
   st.panningRef.current = true;
@@ -98,12 +119,14 @@ function panTick(st: LaserPanState, ts: number) {
   st.raf = requestAnimationFrame((t) => panTick(st, t));
 }
 
-export function useLaserEdgePan(
+export function useHoverEdgePan(
   scrollRef: React.RefObject<HTMLElement | null>,
   opts?: {
     edge?: number;
     maxSpeed?: number;
-    /** A cada frame EM ZONA, depois de aplicar o scroll. */
+    /** Tempo contínuo em zona antes de o scroll engatar (default 0). */
+    engageMs?: number;
+    /** A cada frame EM ZONA (já engatado), depois de aplicar o scroll. */
     onPan?: () => void;
     /** Ao sair da zona naturalmente (loop dorme) — não dispara no stop(). */
     onSettle?: () => void;
@@ -115,17 +138,20 @@ export function useLaserEdgePan(
 } {
   const edge = opts?.edge ?? 56;
   const maxSpeed = opts?.maxSpeed ?? 640;
+  const engageMs = opts?.engageMs ?? 0;
   const { onPan, onSettle } = opts ?? {};
   const panningRef = useRef(false);
 
-  const stRef = useRef<LaserPanState>({
+  const stRef = useRef<HoverPanState>({
     scrollRef,
     edge,
     maxSpeed,
+    engageMs,
     last: null,
     v: null,
     raf: null,
     prevTs: null,
+    zoneSince: null,
     panningRef,
     onPan,
     onSettle,
@@ -137,18 +163,19 @@ export function useLaserEdgePan(
       // Opções/callbacks re-sincronizados fora do render (objeto do mount).
       st.edge = edge;
       st.maxSpeed = maxSpeed;
+      st.engageMs = engageMs;
       st.onPan = onPan;
       st.onSettle = onSettle;
       st.last = { x: clientX, y: clientY };
-      if (!st.scrollRef.current) return; // overlay sem container: inerte
+      if (!st.scrollRef.current) return; // chamador sem container: inerte
       if (st.raf == null) st.raf = requestAnimationFrame((t) => panTick(st, t));
     },
-    [edge, maxSpeed, onPan, onSettle]
+    [edge, maxSpeed, engageMs, onPan, onSettle]
   );
 
   const stop = useCallback(() => panStop(stRef.current), []);
 
-  // Desmontar no meio (Esc/desativar o modo) não pode vazar o rAF.
+  // Desmontar no meio não pode vazar o rAF.
   useEffect(() => stop, [stop]);
 
   return { onSample, stop, panningRef };
