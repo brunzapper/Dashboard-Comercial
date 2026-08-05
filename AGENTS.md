@@ -768,11 +768,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`org_features` 0114, feature "remuneracao"; parse fail-closed em
   `lib/config/org-features.ts`): feature-off vence TUDO — inclusive override
   allow — em `requireSettingsArea`/`checkSettingsArea`/`isSettingsAreaDenied`
-  (`AREA_FEATURES`, lib/auth/access.ts), esconde a aba/matriz de Acessos e
+  (`AREA_FEATURES`, lib/auth/access.ts), esconde o card/sub-aba de Operação e
+  a linha da matriz de Acessos e
   barra/pula o preset (`PresetDashboard.requiresFeature` na lista, no
   `applyPreset` e no `generatePresets`). Habilitação SÓ pelo console `/owner`
   (escrita de org_features é service-role-only — org_admin NUNCA se
   auto-habilita); desligar nunca apaga/esconde DADOS (RLS da 0112 intocada).
+  **Desde 05/08/2026 a página vive em `/operacao/remuneracao`** (ex-aba de
+  Configurações; chave de área histórica intocada): sub-aba da área Operação
+  e CARD DE OPERAÇÃO do hub Workspace (aba "Operação" de `/`, `?aba=`) —
+  cards de Operação são catálogo em CÓDIGO (`lib/operacao/cards.ts`), nunca
+  linhas de `dashboards`, sem menu "⋮"/UI de exclusão (só o banco remove);
+  Agenda/Tarefas são os cards PADRÃO (ex-itens do nav lateral; páginas em
+  `/operacao/agenda|tarefas`, rotas antigas = stubs de redirect); card
+  org-específico novo = entrada no catálogo + chave em
+  `ORG_FEATURES`/`AREA_GATES`/`AREA_FEATURES`, habilitado só via `/owner`.
   Fiscalizado por `lib/comp/*.test.ts` +
   `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
   `docs/arquitetura.md` §4.18 e invariante 26.

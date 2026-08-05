@@ -1,3 +1,11 @@
+<!-- Versão: 1.58 | Data: 05/08/2026 -->
+<!-- v1.58 (05/08/2026): hub Workspace com abas internas Painéis/Operação
+     (?aba=) e CARDS DE OPERAÇÃO (lib/operacao/cards.ts — catálogo em código,
+     sem UI de exclusão): Agenda/Tarefas viraram cards padrão (saíram do nav
+     lateral; páginas movidas p/ /operacao/agenda|tarefas com stubs de
+     redirect) e Remuneração virou card org-específico em
+     /operacao/remuneracao (ex-aba de Configurações; chave de área histórica
+     "remuneracao" intocada). §4.18, bullets do hub/agenda e overrides. -->
 <!-- Versão: 1.57 | Data: 03/08/2026 -->
 <!-- v1.57 (03/08/2026): §4.2 — listas "Aplicar a" dos filtros ofertam widgets
      de TODAS as abas, agrupados por aba com check-all tri-state (mudança SÓ
@@ -853,7 +861,9 @@ sub-pages, `isSettingsAreaDenied` nos guards de escrita das actions;
 `checkSettingsArea` é a variante sem redirect (condiciona LINKS, ex.:
 botões Bases/Log no header de Registros). **As chaves de área são HISTÓRICAS
 e desacopladas da rota** (27/07/2026): `fontes` vive em `/registros/bases`,
-`log` em `/registros/log` e `moedas` na aba Moedas de `/campos` — NUNCA
+`log` em `/registros/log`, `moedas` na aba Moedas de `/campos` e
+`remuneracao` em `/operacao/remuneracao` (05/08/2026 — card de Operação do
+hub; deny esconde card + sub-aba) — NUNCA
 renomear uma chave (os overrides gravados a referenciam); a matriz de Acessos
 mostra a nova casa no rótulo ("Bases (Registros)" etc.). Estreitamento aceito
 em Moedas: as taxas eram visíveis a qualquer autenticado; hoje só quem chega
@@ -1312,15 +1322,18 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   hoje/fim de semana/densidade/chips; cores de STATUS e a cor da anotação
   vencem a estética), editada no sheet de Aparência (canStyle inclui agenda;
   o save branch do builder preserva `widget.settings` — paridade com kanban).
-  **Página `/agenda` do Workspace:** acesso pelo item "Agenda" do nav
-  lateral (o card fixo da Home foi removido em 28/07/2026 — redundante);
+  **Página `/operacao/agenda` do Workspace (ex-`/agenda`):** desde
+  05/08/2026 o acesso é pelo card padrão "Agenda" da aba Operação do hub
+  (o item do nav lateral saiu; `/agenda` virou stub de redirect — o card
+  fixo da Home tinha sido removido em 28/07/2026 e voltou nessa forma);
   `fetchWorkspaceAgenda` mistura os record-legs de TODOS os widgets agenda
   visíveis (dedupe por `(source, dateField)`, teto de 12 legs) ou de um
   específico, ou só entradas diretas (tarefas + anotações); recortes por
   Responsável e por Operação TRADUZIDA no server (`loadOperationScopes` +
   `operationFilterSet` — nunca `operation_id` literal; perfil profile-only
   recorta só registros; anotações nunca filtram). Prefs por usuário em
-  `user_settings.agendaHub`; `validateLastView` aceita o literal `/agenda`.
+  `user_settings.agendaHub`; `validateLastView` aceita o literal
+  `/operacao/agenda` e MIGRA o valor legado `/agenda` na leitura.
   A agenda segue FORA dos filtros de dashboard (invariante 12) e FORA de
   snapshots (`agenda_notes`/`tasks` fora de `PASSTHROUGH_TABLES`). `classifyDue`
   segue por DIA CIVIL (hora é exibicional — decisão registrada). RPCs
@@ -1343,6 +1356,22 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   identidade de preset REMOVIDA (`settings.preset`/`presetKey` — o applyPreset
   nunca adota/sobrescreve a cópia), células (`dashboard_table_cells`) e
   `kanban_placements` copiados; snapshots/user_preferences/tasks NÃO.
+- **Abas do hub e cards de OPERAÇÃO (05/08/2026):** o hub tem duas abas
+  internas por query param (`/?aba=` — RSC puro, barra = `<Link>`s):
+  "Painéis" (default; todo o conteúdo acima) e "Operação", que lista os
+  CARDS DE OPERAÇÃO — catálogo definido em CÓDIGO (`lib/operacao/cards.ts`),
+  nunca linhas de `dashboards`, sem menu "⋮" nem UI de exclusão (indeletáveis
+  por construção; só o banco os remove). Padrões de toda org: Agenda e
+  Tarefas (ex-itens do nav lateral; páginas movidas p/ `/operacao/agenda` e
+  `/operacao/tarefas`, rotas antigas viram stubs de redirect). Org-específico:
+  card com `area` (Remuneração) aparece só com `checkSettingsArea(area)` ok
+  (feature-off > deny > allow > papel) — liga/desliga por org via
+  `org_features` no console `/owner`. A área `/operacao` tem layout de
+  sub-abas (reusa `SettingsTabs`; index redireciona à 1ª visível) espelhando
+  os mesmos cards via `allowedOperacaoCards()` (cache()d — hub/layout/index
+  na mesma request sem custo extra). Card novo org-específico = entrada no
+  catálogo + chave em `ORG_FEATURES` + `AREA_GATES`/`AREA_FEATURES` (chave de
+  área HISTÓRICA — nunca renomear).
 - **Realtime** (0071): `records`/`tasks`/`comments` publicam em
   `supabase_realtime`; o app usa os eventos só como sinal de "algo mudou"
   (`components/realtime-refresher.tsx`).
@@ -2578,8 +2607,10 @@ anti-divergência validador↔escrita). Ver invariante 25.
 
 ### 4.18 Remuneração variável (0112, 30/07/2026)
 
-Configurações → Remuneração calcula, edita e publica a remuneração variável do
-time. Duas tabelas (0112): `comp_plans` (plano por org: nome, base variável
+Operação → Remuneração (`/operacao/remuneracao` — sub-aba da área Operação e
+card org-específico do hub Workspace desde 05/08/2026; ex-aba de
+Configurações, chave de ÁREA `remuneracao` intocada) calcula, edita e publica
+a remuneração variável do time. Duas tabelas (0112): `comp_plans` (plano por org: nome, base variável
 default e `config` jsonb VERSIONADO — parse FAIL-CLOSED em `lib/comp/model.ts`,
 padrão kanban_automations) e `comp_entries` (lançamento por plano×responsável×
 ano×mês: base individual, `inputs` com overrides/bônus, `computed` com o
@@ -2937,7 +2968,9 @@ total opcional por plano.
   = OFF; só `true` literal liga). O gate vive em `lib/auth/access.ts`
   (`AREA_FEATURES`): feature-off vence TUDO — inclusive override allow —
   na page (`requireSettingsArea`/`checkSettingsArea`), na ESCRITA
-  (`isSettingsAreaDenied`), na aba do settings layout (`disabledAreas`) e na
+  (`isSettingsAreaDenied`), no card/sub-aba de Operação
+  (`allowedOperacaoCards` via `checkSettingsArea` — desde 05/08/2026 a
+  Remuneração vive em `/operacao/remuneracao`, fora do settings layout) e na
   matriz de Acessos (linha some). O preset "Remuneração Variável" carrega
   `requiresFeature: "remuneracao"` (`PresetDashboard`): some da lista de
   Presets, `applyPreset` barra com erro amigável e `generatePresets` PULA —

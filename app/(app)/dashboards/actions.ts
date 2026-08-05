@@ -2845,7 +2845,7 @@ export async function applyPreset(
   revalidatePath("/configuracoes/presets");
   revalidatePath(`/dashboards/${result.dashboardId}`);
   if (result.operationsCreated > 0) revalidatePath("/configuracoes/operacoes");
-  if (result.compPlansCreated > 0) revalidatePath("/configuracoes/remuneracao");
+  if (result.compPlansCreated > 0) revalidatePath("/operacao/remuneracao");
   const w = result.widgets;
   const extras = [
     result.operationsCreated > 0 ? `${result.operationsCreated} operação(ões)` : null,

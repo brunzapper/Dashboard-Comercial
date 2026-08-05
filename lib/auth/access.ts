@@ -1,6 +1,9 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 05/08/2026
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
+// v1.5 (05/08/2026): Remuneração moveu p/ /operacao/remuneracao (área
+//   Operação, cards do hub) — chave "remuneracao" segue histórica; só o
+//   rótulo da matriz de Acessos ganhou o sufixo de localização.
 // v1.4 (31/07/2026): recursos SOB DEMANDA por org (0114) — AREA_FEATURES liga
 //   área → feature de org_features; feature-off vence TUDO (até override
 //   allow: não dá para "allowar" recurso que a org não contratou). Precedência
@@ -48,6 +51,8 @@ export const AREA_GATES: Record<
   // (admin = gestão completa; demais = "Minha remuneração", read-only, com a
   // RLS de comp_entries entregando só o próprio grupo canônico). Deny esconde
   // a área inteira; a escrita segue admin nas actions + RLS.
+  // Chave histórica — página em /operacao/remuneracao desde 05/08/2026 (card
+  // de Operação do hub Workspace; precedente fontes/log/moedas).
   remuneracao: {},
   fontes: { role: "admin" }, // chave histórica — página em /registros/bases
   presets: { role: "admin" },
@@ -67,7 +72,7 @@ export const AREA_LABELS: Record<string, string> = {
   operacoes: "Operações",
   responsaveis: "Responsáveis",
   metas: "Metas",
-  remuneracao: "Remuneração",
+  remuneracao: "Remuneração (Operação)",
   fontes: "Bases (Registros)",
   presets: "Presets",
   snapshots: "Snapshots",

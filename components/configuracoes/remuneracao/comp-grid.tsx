@@ -83,7 +83,7 @@ import {
   saveEntryInputs,
   saveTarget,
   type EntryPatch,
-} from "@/app/(app)/configuracoes/remuneracao/actions";
+} from "@/app/(app)/operacao/remuneracao/actions";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,

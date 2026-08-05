@@ -1,3 +1,6 @@
+<!-- Versão: 1.6 | Data: 05/08/2026 -->
+<!-- v1.6 (05/08/2026): referências de caminho — Remuneração vive em
+     /operacao/remuneracao (card de Operação do hub Workspace). -->
 <!-- Versão: 1.5 | Data: 02/08/2026 -->
 <!-- v1.5 (02/08/2026): seção da 0115 (comp_sheet_links/tickets — export p/
      Google Planilhas via Apps Script Web App; runbook do deploy do script).
@@ -517,7 +520,8 @@ config jsonb versionado; SELECT org-wide, escrita admin) e `comp_entries`
 `auth_responsible_ids()`, escrita admin), com triggers `updated_at`, índices e
 `revoke` de `anon`. Requer as migrações 0089–0091 (org/RLS) e 0101
 (`auth_responsible_ids`). Aplicar de preferência ANTES do deploy; pré-migração
-a aba Configurações → Remuneração falha só no load da page (tabela ausente) e
+a página Operação → Remuneração (`/operacao/remuneracao`, card do hub
+Workspace) falha só no load da page (tabela ausente) e
 as actions retornam erro legível — nenhum outro fluxo depende dela. A base
 espelho "Remuneração" NÃO é criada pela migração: nasce no primeiro "Publicar"
 (data_sources key `remuneracao` + campos `rem_*`, ponteiro em `sync_config`
@@ -543,8 +547,8 @@ cabeçalho de `integrations/apps-script/comp_sheets_webapp.gs`):
    barra final).
 3. Implantar → App da Web → Executar como **"Usuário que acessa"** + acesso
    **"Qualquer pessoa com Conta do Google"** → copiar a URL `/exec`.
-4. No dashboard (admin): Configurações → Remuneração → Visão geral →
-   "Google Planilhas — Configurar…" → colar a URL.
+4. No dashboard (admin): Workspace → aba Operação → Remuneração → Visão
+   geral → "Google Planilhas — Configurar…" → colar a URL.
 5. Primeiro uso de cada usuário: consentimento do Google (app "não
    verificado": Avançado → continuar; em Workspace o admin pode precisar
    liberar o app interno). A planilha nasce no Drive do PRÓPRIO usuário —

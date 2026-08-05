@@ -24,8 +24,8 @@
 //      Executar como:      "Usuário que acessa o app da web"
 //      Quem pode acessar:  "Qualquer pessoa com Conta do Google"
 //    Copie a URL /exec.
-// 4) No dashboard: Configurações → Remuneração → Visão geral → botão
-//    "Google Planilhas — Configurar…" → cole a URL /exec.
+// 4) No dashboard: Workspace → aba Operação → Remuneração → Visão geral →
+//    botão "Google Planilhas — Configurar…" → cole a URL /exec.
 // 5) Primeiro uso de CADA usuário: o Google pede consentimento (app "não
 //    verificado": Avançado → Acessar <projeto> (não seguro) em conta pessoal;
 //    em Workspace o admin pode precisar liberar o app interno).

@@ -12,7 +12,7 @@ import type { CompPlanConfig } from "@/lib/comp/model";
 import { PlanEditor } from "./plan-editor";
 
 const savePlan = vi.fn();
-vi.mock("@/app/(app)/configuracoes/remuneracao/actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   savePlan: (...args: unknown[]) => savePlan(...args),
   deletePlan: vi.fn(),
 }));

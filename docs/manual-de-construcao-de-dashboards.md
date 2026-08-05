@@ -1,3 +1,9 @@
+<!-- Versão: 1.25 | Data: 05/08/2026 -->
+<!-- v1.25 (05/08/2026): §12.4/§13 — Agenda mudou de /agenda para
+     /operacao/agenda (card padrão da aba "Operação" do Workspace; saiu do
+     menu lateral) e a Remuneração de Configurações → Remuneração para
+     Operação → Remuneração (/operacao/remuneracao). Só referências de
+     caminho — comportamento inalterado. -->
 <!-- Versão: 1.24 | Data: 03/08/2026 -->
 <!-- v1.24 (03/08/2026): §4.2/§4.3 — a checklist "Aplicar a" dos filtros lista
      widgets de TODAS as abas, agrupados por aba (ordem da barra), com
@@ -26,7 +32,7 @@
      rolagem por dia, ordem cronológica com hora "14:00–15:30", "+" de
      criação rápida de tarefa/anotação, post-its arrastáveis, painel
      Feed/Dados no clique) + checkbox "Mostrar anotações do dia"; §12.4 —
-     Agenda do Workspace (/agenda: Conteúdo/Responsável/Operação); §9.3 —
+     Agenda do Workspace (/operacao/agenda: Conteúdo/Responsável/Operação); §9.3 —
      aparência da Agenda. -->
 <!-- v1.17 (27/07/2026): §12.2.1 — seleção em massa no kanban (barra Mover
      para/Gerar tarefa/Concluir tarefas/Excluir, otimista com revert parcial)
@@ -2067,10 +2073,10 @@ Comportamento do calendário:
   rápidos etc. não a afetam) — ela é um calendário operacional, não um
   gráfico filtrável.
 
-### 12.4 Agenda do Workspace (página `/agenda`)
+### 12.4 Agenda do Workspace (página `/operacao/agenda`)
 
-Além do widget, o item **"Agenda"** do menu lateral abre a página
-**"Agenda do workspace"**: um calendário cheio
+Além do widget, o card **"Agenda"** da aba **Operação** do Workspace abre a
+página **"Agenda do workspace"** (`/operacao/agenda`): um calendário cheio
 com barra própria de controles — as escolhas ficam salvas por usuário:
 
 - **"Conteúdo"**: "Todas as agendas" (mistura os registros de TODOS os
@@ -2104,8 +2110,8 @@ Lista completa:
    cards por pessoa, SDRs e Remuneração — esta última sobre o espelho
    publicado, populada após o "Publicar" mensal). O preset também cria a
    árvore de operações AEs/SDR-BDR já com os vínculos das pessoas e os 5
-   planos de remuneração em Configurações → Remuneração (onde vive o cálculo
-   autoritativo do payout). Nada já existente é sobrescrito; os passos
+   planos de remuneração em Operação → Remuneração (card do Workspace; onde
+   vive o cálculo autoritativo do payout). Nada já existente é sobrescrito; os passos
    pós-geração (cotação USD, preencher "SDR da Reunião", publicar o mês)
    estão no runbook do manual de manutenção (§4.7).
 

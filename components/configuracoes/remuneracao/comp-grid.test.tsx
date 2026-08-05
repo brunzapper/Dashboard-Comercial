@@ -12,7 +12,7 @@ import type { CompPlanConfig } from "@/lib/comp/model";
 
 import { CompGrid } from "./comp-grid";
 
-vi.mock("@/app/(app)/configuracoes/remuneracao/actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   publishMonth: vi.fn(),
   recomputeMonth: vi.fn(),
   saveEntryInputs: vi.fn(async () => ({ ok: true })),

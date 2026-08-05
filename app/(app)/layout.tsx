@@ -1,4 +1,8 @@
-// Versão: 1.7 | Data: 27/07/2026
+// Versão: 1.8 | Data: 05/08/2026
+// v1.8 (05/08/2026): Agenda e Tarefas saíram do nav lateral — viraram cards
+//   padrão de OPERAÇÃO no hub Workspace (aba "Operação" de /; páginas em
+//   /operacao/*, catálogo em lib/operacao/cards.ts). O TaskBell segue
+//   linkando /operacao/tarefas; as rotas antigas viraram stubs de redirect.
 // v1.7 (27/07/2026): ThemeSync — reconcilia os cookies de tema (theme_mode/
 //   theme_accent) com a preferência do usuário × padrão da org (resolveTheme).
 // v1.6 (26/07/2026): SourceFoldersProvider — pastas de bases (source_folders,
@@ -50,11 +54,10 @@ import { Toaster } from "@/components/ui/sonner";
 // Cada item pode exigir uma `permission`, um `role` ou qualquer papel em `roles`;
 // sem nenhum, é visível a todos. Operações/Responsáveis/Metas/Usuários viraram
 // sub-abas de "Configurações" — o item pai é inserido abaixo conforme o acesso.
+// Agenda/Tarefas viraram cards de Operação no hub (aba "Operação" de /).
 // Registros só é visível a Gestores/Administradores.
 const NAV: (NavItem & { permission?: string; role?: string; roles?: string[] })[] = [
   { href: "/", label: "Workspace" },
-  { href: "/agenda", label: "Agenda" },
-  { href: "/tarefas", label: "Tarefas" },
   { href: "/registros", label: "Registros", roles: ["admin", "gestor"] },
   { href: "/campos", label: "Campos", permission: "manage_field_definitions" },
 ];

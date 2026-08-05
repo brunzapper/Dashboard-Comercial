@@ -6,8 +6,9 @@
 // — árvore de operações AEs/SDR-BDR COM os vínculos de responsáveis, 5 planos
 // de remuneração (comp_plans, ensure por config.presetKey), a base espelho
 // "Remuneração" (ensureCompMirror) e um dashboard de CONFERÊNCIA em 5
-// abas. O payout AUTORITATIVO vive em /configuracoes/remuneracao (grade
-// mensal + Publicar) — o dashboard exibe o ESPELHO publicado.
+// abas. O payout AUTORITATIVO vive em /operacao/remuneracao (grade
+// mensal + Publicar; ex-/configuracoes/remuneracao até 05/08/2026) — o
+// dashboard exibe o ESPELHO publicado.
 // v3 (31/07/2026): dashboard reorientado p/ CONFERÊNCIA de RH — a Visão
 // geral vira o resumo da REMUNERAÇÃO (KPIs de folha/comissões/prêmios/
 // atingimento + tabela de conferência por membro em modo registros + total
@@ -513,7 +514,7 @@ const VISAO: PresetWidget[] = [
         text:
           "Os valores desta aba vêm do ESPELHO PUBLICADO da remuneração. " +
           "Fluxo de conferência: 1) calcule e confira o payout em " +
-          "Configurações → Remuneração (grade mensal); 2) clique em " +
+          "Operação → Remuneração (grade mensal); 2) clique em " +
           "Publicar; 3) esta aba e a aba Remuneração refletem o publicado — " +
           "é o que se repassa ao RH. Mês sem publicação aparece vazio. " +
           "Reuniões sem SDR atribuído não contam para ninguém — atribua na " +

@@ -97,7 +97,7 @@ import {
 import {
   deletePlan,
   savePlan,
-} from "@/app/(app)/configuracoes/remuneracao/actions";
+} from "@/app/(app)/operacao/remuneracao/actions";
 import { listFilterOptionCandidates } from "@/app/(app)/dashboards/actions";
 import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import type { CompPlanClientRow } from "./remuneracao-manager";

@@ -1,3 +1,8 @@
+<!-- Versão: 1.24 | Data: 05/08/2026 -->
+<!-- v1.24 (05/08/2026): Remuneração mudou de Configurações → Remuneração
+     para Operação → Remuneração (/operacao/remuneracao — card org-específico
+     da aba "Operação" do hub Workspace; chave de área "remuneracao"
+     intocada). Só referências de caminho. -->
 <!-- Versão: 1.23 | Data: 31/07/2026 -->
 <!-- v1.23 (31/07/2026): §4.12 — ação "Definir campo" das automações do kanban
      (idempotente; teto único de 200 ações; como estender via
@@ -469,7 +474,9 @@ antigo no MESMO período.
 Zapper): entrar como OWNER em `/owner` → card da organização → seção
 "Recursos sob demanda" → marcar o toggle. Só o owner habilita (a escrita de
 `org_features` é service-role-only; org_admin não se auto-habilita). Com o
-recurso DESLIGADO a org não vê a aba Configurações → Remuneração, a linha na
+recurso DESLIGADO a org não vê o card/sub-aba Operação → Remuneração
+(`/operacao/remuneracao`, no hub Workspace — ex-aba de Configurações até
+05/08/2026), a linha na
 matriz de Acessos nem o preset "Remuneração Variável" (aplicar/gerar também
 barram); os DADOS de quem já usou nunca são apagados/escondidos — religar
 restaura tudo. A Zapper já nasce ligada pela própria migração 0114.
@@ -481,7 +488,7 @@ controle de remuneração do comercial: árvore de operações AEs/SDR-BDR JÁ C
 os vínculos das pessoas (Gabriella Salles, Daniela Drielsma, Paulo Vitor
 Santos, Marcus Barcelos, Marcos Hernandes — re-garantidos a cada Atualizar;
 vínculo manual nunca é tocado; remover permanentemente = tirar do preset), 5
-planos de remuneração (Configurações → Remuneração), campos
+planos de remuneração (Operação → Remuneração, card do hub Workspace), campos
 `adicional_ao_mrr` e `sdr_reuniao` (dropdown vivo de responsáveis), sub-base
 `reunioes_qualificadas`, a base espelho "Remuneração" e um dashboard de
 CONFERÊNCIA em 5 abas (Visão geral — resumo da remuneração sobre o espelho;

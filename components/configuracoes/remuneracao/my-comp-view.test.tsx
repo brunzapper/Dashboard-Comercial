@@ -11,19 +11,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSheetExportTicket } from "@/app/(app)/configuracoes/remuneracao/sheets-actions";
+import { createSheetExportTicket } from "@/app/(app)/operacao/remuneracao/sheets-actions";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
 import { MyCompView, type MyCompViewProps } from "./my-comp-view";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => "/configuracoes/remuneracao",
+  usePathname: () => "/operacao/remuneracao",
 }));
 vi.mock("@/components/dashboards/pending-context", () => ({
   useNavPending: () => ({ pending: false, run: (fn: () => void) => fn() }),
 }));
-vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(async () => ({
     ok: true,
     token: "tok-de-teste",

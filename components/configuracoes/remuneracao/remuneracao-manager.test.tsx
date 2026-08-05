@@ -17,21 +17,21 @@ import {
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
-  usePathname: () => "/configuracoes/remuneracao",
+  usePathname: () => "/operacao/remuneracao",
 }));
 vi.mock("@/components/dashboards/pending-context", () => ({
   useNavPending: () => ({ pending: false, run: (fn: () => void) => fn() }),
 }));
 // O editor puxa a árvore inteira de fórmulas/actions — fora do foco daqui.
 vi.mock("./plan-editor", () => ({ PlanEditor: () => null }));
-vi.mock("@/app/(app)/configuracoes/remuneracao/actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   publishMonth: vi.fn(),
   recomputeMonth: vi.fn(),
   saveEntryInputs: vi.fn(),
   saveTarget: vi.fn(),
 }));
 // O botão de Sheets (via comp-overview) importa actions server-only.
-vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(),
   saveCompSheetsWebappUrl: vi.fn(),
 }));
