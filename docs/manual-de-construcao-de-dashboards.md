@@ -470,7 +470,11 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
 - **Arrastar**: pela barra de título do widget (modo edição). Widgets sem
   barra (forma, imagem, nota "sem moldura", "Ocultar barra de título" do
   §9.1) têm uma alça flutuante no canto superior esquerdo. **Pan**: clicar
-  e arrastar uma área vazia move a viewport ("mãozinha").
+  e arrastar uma área vazia move a viewport ("mãozinha"). Além disso,
+  **parar o ponteiro perto de uma borda/canto sobre o espaço vazio** rola a
+  área de trabalho na direção da borda após uma pausa curta (funciona em
+  visualização e edição; sobre widgets não atua — a mãozinha e a rolagem
+  normal seguem como sempre).
 - **Redimensionar**: alças nas bordas do widget (modo edição).
 - **Tamanho dinâmico**: widgets com "Largura dinâmica"/"Altura dinâmica"
   (§6.9) crescem visualmente para caber o conteúdo; o tamanho gravado no grid

@@ -1,6 +1,10 @@
-// Versão: 2.21 | Data: 05/08/2026
+// Versão: 2.22 | Data: 05/08/2026
+// v2.22 (05/08/2026): auto-pan de borda TAMBÉM sem o laser — pointermove no
+//   espaço vazio do canvas (sem botão; touch fora; submodos com overlay fora)
+//   alimenta useHoverEdgePan com engate de ~180ms (travessia da zona ao sair
+//   do dashboard não dá "chute" de scroll). Mãozinha/wheel intocados.
 // v2.21 (05/08/2026): auto-pan de borda no Ponteiro Laser — scrollRef
-//   repassado ao LaserPointerOverlay (useLaserEdgePan rola os dois eixos ao
+//   repassado ao LaserPointerOverlay (useHoverEdgePan rola os dois eixos ao
 //   encostar o ponteiro nas bordas, sem sair do modo para a "mãozinha").
 // v2.20 (03/08/2026): Ponteiro Laser (modo apresentação) — clique-direito
 //   SOBRE um widget abre o menu do apresentador (ativar/desativar o laser —
@@ -131,6 +135,7 @@ import "react-resizable/css/styles.css";
 import { cn } from "@/lib/utils";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { useDragPan } from "@/lib/use-drag-pan";
+import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
 import { DEFAULT_LASER } from "@/lib/theme";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -869,6 +874,19 @@ export function DashboardGrid({
       !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
+  // Auto-pan de borda por HOVER (v2.22): ponteiro parado perto das bordas/
+  // cantos sobre o ESPAÇO VAZIO rola a área de trabalho na direção da borda
+  // (useHoverEdgePan — mesmo gesto do modo laser). O engate de ~180ms evita o
+  // "chute" ao atravessar a zona saindo do dashboard; a mãozinha/wheel seguem
+  // como antes (com botão pressionado o hover-pan não amostra).
+  const hoverPan = useHoverEdgePan(scrollRef, { engageMs: 180 });
+  const hoverPanStop = hoverPan.stop;
+  // Submodo com overlay ativado com o loop vivo: para na hora (o laser tem o
+  // edge-pan PRÓPRIO no overlay; rodar os dois dobraria a velocidade).
+  useEffect(() => {
+    if (drawMode || placing || laserMode) hoverPanStop();
+  }, [drawMode, placing, laserMode, hoverPanStop]);
+
   // Célula constante: `baseCols` colunas preenchem a largura visível (sem
   // margens), então widgets não mudam de tamanho quando o canvas cresce.
   const cellW = baseWidth > 0 ? baseWidth / baseCols : 0;
@@ -891,6 +909,26 @@ export function DashboardGrid({
   function onCanvasPointerDown(e: React.PointerEvent) {
     if (drawMode || placing || laserMode) return; // o overlay ativo é dono do gesto
     panPointerDown(e);
+  }
+
+  // Hover-pan de borda (v2.22): amostra só ponteiro LIVRE (sem botão — a
+  // mãozinha e o drag/resize do RGL ficam de fora) sobre o espaço vazio
+  // (mesmo predicado de ignore do pan); nos submodos com overlay o dono do
+  // gesto é o overlay (o pointermove do laser BORBULHA até aqui — sem a
+  // guarda, dois loops rolariam em dobro). Toque mantém a rolagem nativa.
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    if (drawMode || placing || laserMode) return;
+    if (e.pointerType === "touch") return;
+    if (e.buttons !== 0) {
+      hoverPan.stop();
+      return;
+    }
+    const t = e.target as HTMLElement;
+    if (t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]")) {
+      hoverPan.stop();
+      return;
+    }
+    hoverPan.onSample(e.clientX, e.clientY);
   }
 
   // Clique-direito no grid: SOBRE um widget (`.react-grid-item`) abre o menu
@@ -1389,6 +1427,8 @@ export function DashboardGrid({
             ref={canvasRef}
             onContextMenu={onCanvasContextMenu}
             onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerLeave={() => hoverPan.stop()}
             className={cn(
               "relative",
               panning ? "cursor-grabbing" : "cursor-grab",

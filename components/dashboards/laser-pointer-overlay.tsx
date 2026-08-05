@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 05/08/2026
+// Versão: 1.2 | Data: 05/08/2026
 // Overlay do Ponteiro Laser (modo apresentação): a bolinha colorida segue o
 // cursor SEMPRE; o traço só é desenhado com o botão esquerdo pressionado
 // (traços independentes por pressionada, esmaecendo em TRAIL_TTL_MS —
@@ -9,7 +9,9 @@
 // menu do apresentador via onOpenMenu) ou DWELL_MS parado sobre espaço VAZIO
 // do canvas — nunca com o botão pressionado (pausa no meio de um desenho não
 // encerra o modo). Puro de UI — quem liga/desliga é o dashboard-grid.
-// v1.1 (05/08/2026): auto-pan de borda (useLaserEdgePan) — aproximar o
+// v1.2 (05/08/2026): hook renomeado p/ useHoverEdgePan (o gesto passou a
+//   valer também fora do laser, com engate atrasado; aqui segue imediato).
+// v1.1 (05/08/2026): auto-pan de borda (useHoverEdgePan) — aproximar o
 //   ponteiro das bordas/cantos rola a área de trabalho na direção da borda
 //   (os dois eixos) sem sair do modo para a "mãozinha". Enquanto rola, o
 //   dwell NÃO conta (senão o pan de apresentação encerraria o modo) e a
@@ -19,7 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { useLaserEdgePan } from "@/lib/use-laser-edge-pan";
+import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
 
 import {
   DWELL_MOVE_PX,
@@ -110,10 +112,10 @@ export function LaserPointerOverlay({
   };
 
   // Auto-pan de borda: perto das bordas/cantos a área de trabalho rola na
-  // direção da borda (useLaserEdgePan — sem idle: parado na zona segue
+  // direção da borda (useHoverEdgePan — sem idle: parado na zona segue
   // rolando). Sem scrollRef (viewer sem grid) o hook fica inerte.
   const noScrollRef = useRef<HTMLElement | null>(null);
-  const edgePan = useLaserEdgePan(scrollRef ?? noScrollRef, {
+  const edgePan = useHoverEdgePan(scrollRef ?? noScrollRef, {
     // Rolando: o dwell não conta e a bolinha (e o traço em curso) seguem o
     // CURSOR — o canvas desliza por baixo e as coords locais mudam sem
     // pointermove novo.
