@@ -1,3 +1,5 @@
+// Versão: 1.1 | Data: 05/08/2026 (v1.1: rota movida p/ /operacao/remuneracao
+// — revalidatePath atualizado; gates/chave de área "remuneracao" intocados.)
 // Versão: 1.0 | Data: 02/08/2026
 // Actions do export p/ Google Planilhas (0115) — separadas de actions.ts
 // (884 linhas; este fluxo puxa imports próprios: token + service client).
@@ -175,6 +177,6 @@ export async function saveCompSheetsWebappUrl(
     if (error)
       return { ok: false, message: "Não foi possível salvar a configuração." };
   }
-  revalidatePath("/configuracoes/remuneracao");
+  revalidatePath("/operacao/remuneracao");
   return { ok: true };
 }

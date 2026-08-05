@@ -21,7 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fmtMoneyBRL } from "@/lib/comp/commission-label";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
-import { createSheetExportTicket } from "@/app/(app)/configuracoes/remuneracao/sheets-actions";
+import { createSheetExportTicket } from "@/app/(app)/operacao/remuneracao/sheets-actions";
 import { CompOverview } from "./comp-overview";
 import type {
   CompEntryClientRow,
@@ -32,7 +32,7 @@ import type {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
-vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(async () => ({
     ok: true,
     token: "tok-de-teste",

@@ -1,3 +1,5 @@
+// Versão: 1.7 | Data: 05/08/2026 (v1.7: rota movida p/ /operacao/remuneracao
+// — revalidatePath atualizado; gates/chave de área "remuneracao" intocados.)
 // Versão: 1.6 | Data: 02/08/2026 (v1.6: savePlan valida campo de membro ×
 // fontes EFETIVAS do fator via memberFieldSourceError (lib/comp/member-field
 // — helper puro sobre o coletor de fontes de fields.ts): campo de outra
@@ -398,7 +400,7 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
       })
       .eq("id", input.planId);
     if (error) return { ok: false, message: error.message };
-    revalidatePath("/configuracoes/remuneracao");
+    revalidatePath("/operacao/remuneracao");
     return { ok: true, message: "Plano salvo.", planId: input.planId };
   }
   const { data: inserted, error } = await supabase
@@ -407,7 +409,7 @@ export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
     .select("id")
     .maybeSingle();
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/configuracoes/remuneracao");
+  revalidatePath("/operacao/remuneracao");
   return {
     ok: true,
     message: "Plano criado.",
@@ -423,7 +425,7 @@ export async function deletePlan(planId: string): Promise<CompActionState> {
   // (histórico — o dialog do cliente avisa; limpeza manual em /registros).
   const { error } = await supabase.from("comp_plans").delete().eq("id", planId);
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/configuracoes/remuneracao");
+  revalidatePath("/operacao/remuneracao");
   return { ok: true, message: "Plano excluído." };
 }
 
@@ -479,7 +481,7 @@ export async function saveTarget(input: {
     month: input.month,
   });
   if (totalErr) return { ok: false, message: totalErr };
-  revalidatePath("/configuracoes/remuneracao");
+  revalidatePath("/operacao/remuneracao");
   revalidatePath("/configuracoes/metas");
   return { ok: true };
 }
@@ -567,7 +569,7 @@ export async function saveEntryInputs(input: {
         ...(orgId ? { organization_id: orgId } : {}),
       });
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/configuracoes/remuneracao");
+  revalidatePath("/operacao/remuneracao");
   return { ok: true };
 }
 
@@ -646,7 +648,7 @@ export async function recomputeMonth(
     month,
     orgId,
   });
-  if (result.ok) revalidatePath("/configuracoes/remuneracao");
+  if (result.ok) revalidatePath("/operacao/remuneracao");
   return result;
 }
 
@@ -769,7 +771,7 @@ export async function publishMonth(
 
   // Base nova entra em todos os catálogos (pickers/builder) — revalida geral.
   if (mirror.created) revalidatePath("/", "layout");
-  else revalidatePath("/configuracoes/remuneracao");
+  else revalidatePath("/operacao/remuneracao");
   return {
     ok: true,
     message:

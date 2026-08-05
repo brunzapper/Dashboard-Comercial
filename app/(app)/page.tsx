@@ -1,5 +1,13 @@
-// Versão: 2.7 | Data: 28/07/2026
+// Versão: 2.8 | Data: 05/08/2026
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
+// v2.8 (05/08/2026): hub com DUAS ABAS internas por query param (?aba=,
+//   default "paineis" — RSC puro, barra de abas = <Link>s): "Painéis" é todo
+//   o conteúdo anterior (grids + Criar/Importar) e "Operação" traz os CARDS
+//   DE OPERAÇÃO (lib/operacao/cards.ts — catálogo em código, sem menu ⋮/UI de
+//   exclusão): Agenda e Tarefas (padrões; ex-itens do nav lateral) e módulos
+//   org-específicos como Remuneração (checkSettingsArea via
+//   allowedOperacaoCards). validateLastView migra o lastView legado "/agenda"
+//   p/ /operacao/agenda na leitura.
 // v2.7 (28/07/2026): card "Agenda" removido da Home (redundante com o item
 //   do nav lateral, que segue sendo o acesso à página /agenda).
 //   validateLastView continua aceitando o literal "/agenda".
@@ -22,7 +30,14 @@
 // v2.1 (16/07/2026): botão "Criar" (Dashboard | Kanban) no lugar do form fixo;
 //   seções separadas p/ dashboards e kanbans (mesma tabela, kinds distintos).
 import Link from "next/link";
-import { SquareKanban } from "lucide-react";
+import {
+  CalendarDays,
+  HandCoins,
+  LayoutGrid,
+  ListChecks,
+  SquareKanban,
+  type LucideIcon,
+} from "lucide-react";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
@@ -46,6 +61,11 @@ import {
 import { CreateMenu } from "@/components/dashboards/create-menu";
 import { ImportDashboardSheet } from "@/components/dashboards/import-dashboard-sheet";
 import { loadOrgAiConfigPublic } from "@/lib/ai/config";
+import {
+  allowedOperacaoCards,
+  type OperacaoCard as OperacaoCardDef,
+} from "@/lib/operacao/cards";
+import { cn } from "@/lib/utils";
 import {
   BoardCardMenu,
   type BoardStatus,
@@ -83,8 +103,10 @@ function validateLastView(
   widgetKanbanIds: Set<string>
 ): string | null {
   if (!view) return null;
-  // Agenda do Workspace: rota fixa, sem id — literal exato (sem open redirect).
-  if (view === "/agenda") return view;
+  // Agenda do Workspace: rota fixa, sem id — literal exato (sem open
+  // redirect). O valor legado "/agenda" (pré-Operação) migra na leitura.
+  if (view === "/agenda" || view === "/operacao/agenda")
+    return "/operacao/agenda";
   const w = /^\/kanbans\/w\/([0-9a-f-]{36})$/.exec(view);
   if (w) return widgetKanbanIds.has(w[1]) ? view : null;
   const m = /^\/(dashboards|kanbans)\/([0-9a-f-]{36})(?:\?tab=[\w%-]+)?$/.exec(
@@ -159,6 +181,34 @@ function BoardCard({
   );
 }
 
+// Ícone por key de card de Operação — mapeado AQUI (o catálogo de
+// lib/operacao/cards.ts fica dados puros); key nova cai no fallback.
+const OPERACAO_ICONS: Record<string, LucideIcon> = {
+  agenda: CalendarDays,
+  tarefas: ListChecks,
+  remuneracao: HandCoins,
+};
+
+// Card de OPERAÇÃO (aba "Operação" do hub): módulo do catálogo em código —
+// sem menu "⋮" e sem UI de exclusão POR CONSTRUÇÃO (não é linha de
+// dashboards; org-específico liga/desliga só via org_features no /owner).
+function OperacaoCardItem({ card }: { card: OperacaoCardDef }) {
+  const Icon = OPERACAO_ICONS[card.key] ?? LayoutGrid;
+  return (
+    <Card className="relative">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Icon className="text-muted-foreground size-4 shrink-0" />
+          <Link href={card.href} className="hover:underline">
+            {card.label}
+          </Link>
+        </CardTitle>
+        <CardDescription>{card.description}</CardDescription>
+      </CardHeader>
+    </Card>
+  );
+}
+
 // Card de um kanban de WIDGET na seção Kanbans: sem menu "⋮" (ciclo de vida é
 // do dashboard pai; renomear é o título do widget no builder) — só o link da
 // página cheia + o link "No dashboard X".
@@ -186,7 +236,15 @@ function WidgetKanbanCard({ item }: { item: WidgetKanbanHubItem }) {
   );
 }
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // Aba interna do hub (?aba=): "paineis" (default) = dashboards/kanbans;
+  // "operacao" = cards de Operação. Qualquer outro valor cai no default.
+  const sp = await searchParams;
+  const aba = sp.aba === "operacao" ? "operacao" : "paineis";
   const session = await getSessionInfo();
   const canCreate = session?.permissions.includes("create_dashboards") ?? false;
   const isAdmin = session?.roles.includes("admin") ?? false;
@@ -237,7 +295,8 @@ export default async function HomePage() {
   // Lixeira: só de quem pode geri-la (dono/admin), e nunca itens vencidos —
   // mesmo antes de o cron de purga (pg-cron-purge-trash.sql) removê-los.
   const trashed = rows.filter(
-    (r) => r.status === "trashed" && canManageRow(r) && withinTrashTtl(r.trashed_at)
+    (r) =>
+      r.status === "trashed" && canManageRow(r) && withinTrashTtl(r.trashed_at)
   );
 
   // Última view p/ restaurar na REABERTURA do app (RestoreLastView). Leitura
@@ -266,10 +325,15 @@ export default async function HomePage() {
       };
     });
 
+  // Cards de Operação (aba "Operação"): catálogo em código recortado por
+  // área (checkSettingsArea é cache()d — o layout de /operacao reusa).
+  const operacaoCards = aba === "operacao" ? await allowedOperacaoCards() : [];
+
   let sources: Awaited<ReturnType<typeof loadSources>> = [];
   let fields: FieldDefinition[] = [];
   let aiConfig: Awaited<ReturnType<typeof loadOrgAiConfigPublic>> = null;
-  if (canCreate) {
+  // Insumos dos botões Criar/Importar — só existem na aba Painéis.
+  if (canCreate && aba === "paineis") {
     sources = await loadSources(supabase, orgId);
     aiConfig = await loadOrgAiConfigPublic(orgId);
     // Campos p/ o seletor de colunas do kanban: NÃO filtramos por show_in_builder
@@ -298,20 +362,18 @@ export default async function HomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <RestoreLastView
-        target={restoreTarget}
-        hadStored={storedView !== null}
-      />
+      <RestoreLastView target={restoreTarget} hadStored={storedView !== null} />
       {/* pr-8: afasta o cluster de botões do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-start justify-between gap-4 pr-8">
         <div>
           <h1 className="text-2xl font-semibold">Workspace</h1>
           <p className="text-muted-foreground text-sm">
-            Seu workspace: crie dashboards e kanbans a partir dos seus
-            registros.
+            {aba === "operacao"
+              ? "Módulos de operação do dia a dia: agenda, tarefas e os módulos da sua organização."
+              : "Seu workspace: crie dashboards e kanbans a partir dos seus registros."}
           </p>
         </div>
-        {canCreate ? (
+        {canCreate && aba === "paineis" ? (
           <div className="flex items-center gap-2">
             <ImportDashboardSheet
               sources={sources}
@@ -323,61 +385,95 @@ export default async function HomePage() {
         ) : null}
       </div>
 
-      {dashboards.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          Nenhum dashboard no workspace ainda.
-          {canCreate ? " Use o botão Criar acima." : ""}
-        </p>
-      ) : (
-        cardGrid(dashboards)
-      )}
+      {/* Abas internas do hub (?aba=) — <Link>s puros, estilo do SettingsTabs
+          (que não serve aqui: destaca por usePathname, cego a query). */}
+      <nav className="flex flex-wrap gap-1 border-b">
+        {(
+          [
+            { key: "paineis", href: "/", label: "Painéis" },
+            { key: "operacao", href: "/?aba=operacao", label: "Operação" },
+          ] as const
+        ).map((t) => (
+          <Link
+            key={t.key}
+            href={t.href}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              aba === t.key
+                ? "border-brand text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.label}
+          </Link>
+        ))}
+      </nav>
 
-      {kanbans.length > 0 || widgetKanbans.length > 0 ? (
+      {aba === "operacao" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {operacaoCards.map((c) => (
+            <OperacaoCardItem key={c.key} card={c} />
+          ))}
+        </div>
+      ) : (
         <>
-          <div>
-            <h2 className="text-lg font-semibold">Kanbans</h2>
+          {dashboards.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              Quadros de cards para gerir projetos e funis — mover um card
-              altera o valor do campo no registro.
+              Nenhum dashboard no workspace ainda.
+              {canCreate ? " Use o botão Criar acima." : ""}
             </p>
-          </div>
-          {kanbans.length > 0 ? cardGrid(kanbans) : null}
-          {widgetKanbans.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {widgetKanbans.map((w) => (
-                <WidgetKanbanCard key={w.widgetId} item={w} />
-              ))}
-            </div>
+          ) : (
+            cardGrid(dashboards)
+          )}
+
+          {kanbans.length > 0 || widgetKanbans.length > 0 ? (
+            <>
+              <div>
+                <h2 className="text-lg font-semibold">Kanbans</h2>
+                <p className="text-muted-foreground text-sm">
+                  Quadros de cards para gerir projetos e funis — mover um card
+                  altera o valor do campo no registro.
+                </p>
+              </div>
+              {kanbans.length > 0 ? cardGrid(kanbans) : null}
+              {widgetKanbans.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {widgetKanbans.map((w) => (
+                    <WidgetKanbanCard key={w.widgetId} item={w} />
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          {/* Seções recolhidas do ciclo de vida (0087): arquivados seguem abrindo;
+          a Lixeira não abre e é purgada em 14 dias. <details> = RSC puro. */}
+          {archived.length > 0 ? (
+            <details className="group">
+              <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
+                Arquivados ({archived.length})
+              </summary>
+              <p className="text-muted-foreground mt-1 mb-3 text-sm">
+                Fora da tela principal, mas ainda podem ser abertos.
+              </p>
+              {cardGrid(archived)}
+            </details>
+          ) : null}
+
+          {trashed.length > 0 ? (
+            <details className="group">
+              <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
+                Lixeira ({trashed.length})
+              </summary>
+              <p className="text-muted-foreground mt-1 mb-3 text-sm">
+                Excluídos automaticamente após 14 dias. Itens aqui não podem ser
+                abertos — restaure para voltar a usar.
+              </p>
+              {cardGrid(trashed)}
+            </details>
           ) : null}
         </>
-      ) : null}
-
-      {/* Seções recolhidas do ciclo de vida (0087): arquivados seguem abrindo;
-          a Lixeira não abre e é purgada em 14 dias. <details> = RSC puro. */}
-      {archived.length > 0 ? (
-        <details className="group">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
-            Arquivados ({archived.length})
-          </summary>
-          <p className="text-muted-foreground mt-1 mb-3 text-sm">
-            Fora da tela principal, mas ainda podem ser abertos.
-          </p>
-          {cardGrid(archived)}
-        </details>
-      ) : null}
-
-      {trashed.length > 0 ? (
-        <details className="group">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm font-medium select-none">
-            Lixeira ({trashed.length})
-          </summary>
-          <p className="text-muted-foreground mt-1 mb-3 text-sm">
-            Excluídos automaticamente após 14 dias. Itens aqui não podem ser
-            abertos — restaure para voltar a usar.
-          </p>
-          {cardGrid(trashed)}
-        </details>
-      ) : null}
+      )}
     </div>
   );
 }

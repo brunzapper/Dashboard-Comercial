@@ -1,3 +1,8 @@
+// Versão: 1.8 | Data: 05/08/2026 (v1.8: página movida de
+// /configuracoes/remuneracao para /operacao/remuneracao — sub-aba da área
+// Operação (cards do hub Workspace). A chave de ÁREA "remuneracao" segue
+// HISTÓRICA (requireSettingsArea/isSettingsAreaDenied intocados — precedente
+// fontes/log/moedas); conteúdo/props/params (?ano/?mes/?plano/?aba) idênticos.)
 // Versão: 1.7 | Data: 02/08/2026 (v1.7: export p/ Google Planilhas (0115) —
 // os dois ramos carregam a URL do Web App configurada (sync_config
 // 'comp_sheets_webapp' via loadCompSheetsWebappUrl): admin recebe a URL
