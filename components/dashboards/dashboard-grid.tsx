@@ -1,4 +1,7 @@
-// Versão: 2.20 | Data: 03/08/2026
+// Versão: 2.21 | Data: 05/08/2026
+// v2.21 (05/08/2026): auto-pan de borda no Ponteiro Laser — scrollRef
+//   repassado ao LaserPointerOverlay (useLaserEdgePan rola os dois eixos ao
+//   encostar o ponteiro nas bordas, sem sair do modo para a "mãozinha").
 // v2.20 (03/08/2026): Ponteiro Laser (modo apresentação) — clique-direito
 //   SOBRE um widget abre o menu do apresentador (ativar/desativar o laser —
 //   disponível a qualquer usuário — e "Editar layout"/"Concluir edição" para
@@ -1610,6 +1613,7 @@ export function DashboardGrid({
                 color={laserColor ?? DEFAULT_LASER}
                 onExit={() => onLaserModeChange(false)}
                 onOpenMenu={(x, y) => setLaserMenuAt({ x, y })}
+                scrollRef={scrollRef}
               />
             ) : null}
             {editMode && !drawMode ? (

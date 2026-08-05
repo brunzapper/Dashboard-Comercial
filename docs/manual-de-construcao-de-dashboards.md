@@ -419,8 +419,11 @@ No topo da página do dashboard:
   pressionado**, desenha rastros que esmaecem sozinhos em ~2,5 s — para
   apontar, circular e conectar informações durante uma apresentação. Enquanto
   o modo está ativo os widgets não reagem a cliques (a rolagem continua
-  funcionando). Para sair: Esc, o mesmo menu (clique-direito → "Desativar"),
-  parar o cursor por 2 s sobre uma área **vazia** (volta a "mãozinha" de pan)
+  funcionando) e **aproximar o ponteiro das bordas/cantos da área visível rola
+  a área de trabalho na direção da borda** (nos dois eixos; parado na borda
+  continua rolando) — não precisa sair do modo para usar a "mãozinha". Para
+  sair: Esc, o mesmo menu (clique-direito → "Desativar"), parar o cursor por
+  2 s sobre uma área **vazia** fora das bordas (volta a "mãozinha" de pan)
   ou entrar no modo edição. O mesmo menu traz **"Editar layout"/"Concluir
   edição"** para quem pode editar — o mesmo alternar do botão do topo.
 - **"Adicionar widget"** — abre o editor de widget (capítulo 6).

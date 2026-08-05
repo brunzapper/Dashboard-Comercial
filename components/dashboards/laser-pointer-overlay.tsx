@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 03/08/2026
+// Versão: 1.1 | Data: 05/08/2026
 // Overlay do Ponteiro Laser (modo apresentação): a bolinha colorida segue o
 // cursor SEMPRE; o traço só é desenhado com o botão esquerdo pressionado
 // (traços independentes por pressionada, esmaecendo em TRAIL_TTL_MS —
@@ -9,9 +9,17 @@
 // menu do apresentador via onOpenMenu) ou DWELL_MS parado sobre espaço VAZIO
 // do canvas — nunca com o botão pressionado (pausa no meio de um desenho não
 // encerra o modo). Puro de UI — quem liga/desliga é o dashboard-grid.
+// v1.1 (05/08/2026): auto-pan de borda (useLaserEdgePan) — aproximar o
+//   ponteiro das bordas/cantos rola a área de trabalho na direção da borda
+//   (os dois eixos) sem sair do modo para a "mãozinha". Enquanto rola, o
+//   dwell NÃO conta (senão o pan de apresentação encerraria o modo) e a
+//   bolinha/traço em curso são re-ancorados ao cursor a cada frame (o canvas
+//   desliza por baixo sem pointermove novo).
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
+import { useLaserEdgePan } from "@/lib/use-laser-edge-pan";
 
 import {
   DWELL_MOVE_PX,
@@ -27,12 +35,16 @@ export function LaserPointerOverlay({
   color,
   onExit,
   onOpenMenu,
+  scrollRef,
 }: {
   color: string;
   /** Desativa o modo (dwell no vazio ou Esc). */
   onExit: () => void;
   /** Clique-direito: reabre o menu do apresentador ("Desativar…"). */
   onOpenMenu: (x: number, y: number) => void;
+  /** Container de rolagem horizontal do grid (auto-pan de borda); sem ele o
+   * auto-pan fica inerte. */
+  scrollRef?: React.RefObject<HTMLElement | null>;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   // Traços em ref (fora do estado React): o loop de rAF muta e força render.
@@ -97,6 +109,34 @@ export function LaserPointerOverlay({
     rafRef.current = requestAnimationFrame(tick);
   };
 
+  // Auto-pan de borda: perto das bordas/cantos a área de trabalho rola na
+  // direção da borda (useLaserEdgePan — sem idle: parado na zona segue
+  // rolando). Sem scrollRef (viewer sem grid) o hook fica inerte.
+  const noScrollRef = useRef<HTMLElement | null>(null);
+  const edgePan = useLaserEdgePan(scrollRef ?? noScrollRef, {
+    // Rolando: o dwell não conta e a bolinha (e o traço em curso) seguem o
+    // CURSOR — o canvas desliza por baixo e as coords locais mudam sem
+    // pointermove novo.
+    onPan: () => {
+      clearDwell();
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const p = {
+        x: clientRef.current.x - r.left,
+        y: clientRef.current.y - r.top,
+        t: performance.now(),
+      };
+      setDot({ x: p.x, y: p.y });
+      if (drawingRef.current) {
+        appendPoint(strokesRef.current, p);
+        ensureLoop();
+      }
+    },
+    // Saiu da zona: devolve o dwell (mesmo contrato do pointerup — o timer já
+    // ignora disparo com o botão pressionado).
+    onSettle: () => armDwell(clientRef.current.x, clientRef.current.y),
+  });
+
   // Esc sai do modo a qualquer momento (padrão dos overlays do canvas).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -128,11 +168,13 @@ export function LaserPointerOverlay({
         clientRef.current = { x: e.clientX, y: e.clientY };
         const p = localPoint(e);
         setDot({ x: p.x, y: p.y });
+        edgePan.onSample(e.clientX, e.clientY);
         if (drawingRef.current) {
           appendPoint(strokesRef.current, p);
           ensureLoop();
           return;
         }
+        if (edgePan.panningRef.current) return; // rolando: o loop rege o dwell
         const d = dwellRef.current;
         if (
           d.timer == null ||
@@ -161,12 +203,14 @@ export function LaserPointerOverlay({
       }}
       onPointerLeave={() => {
         drawingRef.current = false;
+        edgePan.stop();
         clearDwell();
         setDot(null);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation(); // o menu é nosso — não duplica no canvas
+        edgePan.stop(); // com o menu aberto a rolagem não continua por baixo
         clearDwell(); // com o menu aberto o dwell não desativa por baixo
         onOpenMenu(e.clientX, e.clientY);
       }}

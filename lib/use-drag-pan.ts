@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 05/08/2026
 // Hook de pan ("mãozinha"): segurar o botão esquerdo e arrastar rola o
 // container horizontal passado em `scrollRef` e o ancestral rolável vertical
 // (no app, o <main> do AppShell). Extraído do DashboardGrid para reuso na
@@ -9,6 +9,8 @@
 //   auto-scroll de DnD, que segue a borda). O loop acumula na BASE do gesto
 //   (p.scrollLeft), então um pointermove posterior parte do acumulado, sem
 //   snap-back. Opt-in por chamador (Registros liga; DashboardGrid não).
+// v1.2 (05/08/2026): verticalScroller exportada (o auto-pan de borda do
+//   Ponteiro Laser, lib/use-laser-edge-pan.ts, precisa do mesmo ancestral).
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -18,7 +20,7 @@ import { edgeScrollVelocity } from "@/lib/use-edge-autoscroll";
 // Sobe do elemento até o ancestral que rola verticalmente (no app é o
 // <main className="flex-1 overflow-auto">). Fallback para o scroller do
 // documento caso, em algum layout, quem role seja a própria janela.
-function verticalScroller(from: HTMLElement): HTMLElement {
+export function verticalScroller(from: HTMLElement): HTMLElement {
   let el: HTMLElement | null = from;
   while (el) {
     const oy = getComputedStyle(el).overflowY;
