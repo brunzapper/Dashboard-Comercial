@@ -457,7 +457,8 @@ async function SnapshotContent({
                   (w.sources ?? []) as SourceKey[],
                   w.metrics,
                   fieldByKeyAll
-                )
+                ),
+                sources
               );
             }
           } else if (

@@ -2459,6 +2459,7 @@ async function ensurePresetSubSources(
       short_label: sub.short_label ?? sub.label,
       default_period_field: sub.default_period_field,
       filter: sub.filter,
+      ignore_period: sub.ignore_period ?? false,
     });
     if (!error) created += 1;
     else skipped += 1;

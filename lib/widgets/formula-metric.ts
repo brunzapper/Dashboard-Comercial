@@ -69,6 +69,7 @@ import {
 } from "@/lib/config/responsible-canon";
 import {
   BUILTIN_SOURCES,
+  ignoresPeriod,
   planSourceLegs,
   recordTypeOf,
   rootSources,
@@ -104,6 +105,7 @@ import { resolveRate, yearQuarterOf, type CurrencyRates } from "./currency";
 import {
   applyPeriodToFilters,
   patchAuxPeriodByType,
+  PERIOD_FIELD_SENTINEL,
   scopedAuxPeriod,
   type DashboardPeriod,
 } from "./period";
@@ -297,8 +299,12 @@ export async function runCalculatedWidget(
     const p = scopedAuxPeriod(runPeriod, scope, catalog);
     if (p) f = applyPeriodToFilters(f, p, [scope], catalog);
     f = [...sourceFilters([scope], catalog), ...f];
+    // Escopo que ignora o período (0116): remove o sentinela pré-sintetizado em
+    // vez de patchear (mesma guarda do engine.scopedAuxInputs).
     return {
-      filters: patchAuxPeriodByType(f, rt, scopeField),
+      filters: ignoresPeriod(scope, catalog)
+        ? f.filter((x) => x.field !== PERIOD_FIELD_SENTINEL)
+        : patchAuxPeriodByType(f, rt, scopeField),
       corr: correspondenceMapForSources(
         input.correspondences ?? [],
         [scope],

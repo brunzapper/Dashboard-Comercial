@@ -85,6 +85,8 @@ export interface PresetSubSource {
   short_label?: string;
   default_period_field: string;
   filter: WidgetFilter[];
+  // 0116: a sub NÃO respeita o filtro de período (linhas sempre consideradas).
+  ignore_period?: boolean;
 }
 
 export interface PresetWidget {

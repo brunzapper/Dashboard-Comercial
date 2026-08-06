@@ -1,3 +1,8 @@
+<!-- Versão: 3.8 | Data: 06/08/2026 -->
+<!-- v3.8 (06/08/2026): 0116 — sub_sources.ignore_period boolean (sub-base que
+     NÃO respeita o filtro de período do dashboard: linhas sempre em "todo
+     período"; resolvido no engine — applyPeriodToFilters/planSourceLegs — via
+     pass-through record_types do wrapper 0054). Não recria as RPCs. -->
 <!-- Versão: 3.7 | Data: 02/08/2026 -->
 <!-- v3.7 (02/08/2026): 0115 — comp_sheet_links + comp_sheet_export_tickets
      (export da Remuneração p/ Google Planilhas via Apps Script Web App:
@@ -212,7 +217,10 @@ pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
 a 0082, um campo personalizado de data `custom:<field_key>` — ex.: sub "SQLs"
 datada pela Data Reunião; a action valida que o campo existe e é de data),
 `filter` jsonb (`WidgetFilter[]` — o recorte), `sort_order` (0107 — ordem manual
-dentro da PAI). A sub COMPARTILHA o `record_type` da
+dentro da PAI), `ignore_period` boolean not null default false (0116 — a sub NÃO
+respeita o filtro de período do dashboard: linhas sempre consideradas, "todo
+período"; resolvido no engine via `applyPeriodToFilters`/`planSourceLegs`, nunca
+no RPC). A sub COMPARTILHA o `record_type` da
 pai (por isso mora em tabela separada, para não quebrar `data_sources.record_type
 unique`/FK de `records`). Resolvida no ENGINE (perna por source-key); NÃO toca nas
 RPCs de widget. O loader (`lib/config/sources.ts`) une `data_sources` + `sub_sources`

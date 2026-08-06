@@ -169,6 +169,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   multi-perna, operando escopado em fonte-IRMÃ é ZERADO por perna
   (`zeroSiblingScopedOperands` + backfill 0 na basis) — cada perna exibe a
   PRÓPRIA contribuição, nunca o total global repetido. RPCs seguem intocados.
+  **Sub que IGNORA o período (`sub_sources.ignore_period`, 0116):** também
+  100% engine — `applyPeriodToFilters` particiona as fontes cobertas
+  (record_type todo-isento sai do `byType`; caso misto força o sintético com
+  `record_types` = quem respeita, pass-through do wrapper 0054, espelhado no
+  `.or()` do modo lista), `planSourceLegs` NUNCA a absorve (vira perna extra
+  tipo "conviver"; demovida da principal se houver candidata do mesmo
+  `record_type` que respeite) e os `scopedAuxInputs` removem o sentinela
+  pré-sintetizado p/ escopo isento — NÃO recrie as RPCs para isso.
   Ver `docs/arquitetura.md` §4.8 e invariante 10.
 - **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
   `records.operation_id` é derivada (priority=1 do responsável no sync) e pode

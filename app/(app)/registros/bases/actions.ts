@@ -428,6 +428,7 @@ function readSubSourceForm(formData: FormData): {
   periodField: string;
   parentKey: string;
   filter: WidgetFilter[];
+  ignorePeriod: boolean;
   error?: string;
 } {
   const label = cleanText(formData.get("label"), 60);
@@ -435,19 +436,22 @@ function readSubSourceForm(formData: FormData): {
   const periodField = cleanText(formData.get("default_period_field"), 40);
   const parentKey = cleanText(formData.get("parent_key"), 40);
   const filter = parseSubFilter(formData.get("filter"));
+  // ignore_period (0116): sub-base isenta do filtro de período do dashboard.
+  const ignorePeriod = String(formData.get("ignore_period") ?? "") === "1";
+  const base = { label, shortLabel, periodField, parentKey, filter, ignorePeriod };
   if (label.length < 2) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Informe o nome da sub-base." };
+    return { ...base, error: "Informe o nome da sub-base." };
   }
   if (!parentKey) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Escolha a base pai." };
+    return { ...base, error: "Escolha a base pai." };
   }
   if (!isPeriodFieldValue(periodField)) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Campo de período inválido." };
+    return { ...base, error: "Campo de período inválido." };
   }
   if (filter.length === 0) {
-    return { label, shortLabel, periodField, parentKey, filter, error: "Defina ao menos uma condição de filtro." };
+    return { ...base, error: "Defina ao menos uma condição de filtro." };
   }
-  return { label, shortLabel, periodField, parentKey, filter };
+  return base;
 }
 
 // Campo 'custom:<key>' como período (bases 0110 e subs 0082): o campo precisa
@@ -487,7 +491,7 @@ export async function createSubSource(
   formData: FormData
 ): Promise<SourceActionState> {
   await requireFontesWrite();
-  const { label, shortLabel, periodField, parentKey, filter, error } =
+  const { label, shortLabel, periodField, parentKey, filter, ignorePeriod, error } =
     readSubSourceForm(formData);
   if (error) return { ok: false, message: error };
 
@@ -537,6 +541,7 @@ export async function createSubSource(
     short_label: shortLabel || label,
     default_period_field: periodField,
     filter,
+    ignore_period: ignorePeriod,
   });
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
@@ -551,7 +556,7 @@ export async function updateSubSource(
 ): Promise<SourceActionState> {
   await requireFontesWrite();
   const key = cleanText(formData.get("key"), 40);
-  const { label, shortLabel, periodField, filter, error } =
+  const { label, shortLabel, periodField, filter, ignorePeriod, error } =
     readSubSourceForm(formData);
   if (error) return { ok: false, message: error };
 
@@ -589,6 +594,7 @@ export async function updateSubSource(
       short_label: shortLabel || label,
       default_period_field: periodField,
       filter,
+      ignore_period: ignorePeriod,
     })
     .eq("key", key);
   if (updateError) {

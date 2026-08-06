@@ -1,4 +1,9 @@
-// Versão: 2.2 | Data: 25/07/2026
+// Versão: 2.3 | Data: 06/08/2026
+// v2.3 (06/08/2026): ignore_period (0116) — applyPeriodToFilters particiona as
+// fontes cobertas: record_type cujas fontes cobertas TODAS ignoram o período
+// sai do byType e o sintético ganha `record_types` (pass-through do wrapper do
+// RPC/modo lista); todas isentas = período não se aplica. Sem isenta, saída
+// byte-idêntica à anterior.
 // v2.2 (25/07/2026): DATE_TOKENS + resolveDateToken — os tokens dinâmicos de
 // valor de filtro (@today, @month_start, …) viram constante exportada com
 // resolvers exaustivos (token novo sem resolver quebra o typecheck). O engine
@@ -20,6 +25,7 @@ import type { WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   BUILTIN_SOURCES,
+  ignoresPeriod,
   recordTypeOf,
   SOURCE_KEYS,
   type SourceDef,
@@ -389,18 +395,35 @@ export function applyPeriodToFilters(
 
   // Mapa por fonte → campo de data das fontes cobertas por este widget.
   // record_type ciente do catálogo (sub-fonte → record_type da pai).
+  // ignore_period (0116): um record_type só fica ISENTO quando TODAS as fontes
+  // cobertas dele ignoram o período (fonte que respeita vence — o universo
+  // principal segue filtrado; a isenção real da sub acontece na perna dela,
+  // `sources:[key]`; limitação documentada em §4.8).
   const covered = coveredSources(sources, period.fieldBySource, catalog);
   const byType: Record<string, string> = {};
   const distinct = new Set<string>();
+  const exemptRts = new Set<string>();
   for (const s of covered) {
+    const rt = recordTypeOf(s, catalog);
+    if (ignoresPeriod(s, catalog)) {
+      if (!(rt in byType)) exemptRts.add(rt);
+      continue;
+    }
+    exemptRts.delete(rt);
     const col = periodFieldForSource(period, s);
-    byType[recordTypeOf(s, catalog)] = col;
+    byType[rt] = col;
     distinct.add(col);
   }
+  const hasExempt = exemptRts.size > 0;
+  // Todas as fontes cobertas isentas → o período não se aplica a esta consulta
+  // (filtros de data explícitos do widget seguem intactos).
+  if (hasExempt && Object.keys(byType).length === 0) return filters;
 
   // Caminho uniforme: 1 único campo entre as fontes cobertas (ou sem mapa por
   // fonte). Filtro simples de intervalo — não depende da migração 0040.
-  if (!period.fieldBySource || distinct.size <= 1) {
+  // Com fonte isenta na cobertura, força o caminho sintético: o gte/lte plano é
+  // NÃO-escopado e recortaria também as linhas da fonte isenta.
+  if (!hasExempt && (!period.fieldBySource || distinct.size <= 1)) {
     const field = distinct.size === 1 ? [...distinct][0] : period.field;
     const next = filters.filter(
       (f) => !(f.field === field && RANGE_OPS.has(f.op))
@@ -428,10 +451,16 @@ export function applyPeriodToFilters(
   const value: PeriodBetweenValue = { from: period.from, to, byType };
   // `between` é um operador interno (não faz parte de FilterOp/da UI); só o RPC
   // e o modo lista o reconhecem para o campo sintético `@period`.
+  // Com fonte isenta (0116), `record_types` = record_types que RESPEITAM: o
+  // wrapper `_widget_wrap_record_types` do RPC (e o pass-through do modo lista)
+  // deixa os isentos passarem sem recorte. Sem isenta, sem `record_types` —
+  // filtro byte-idêntico ao anterior (record_type fora do byType segue
+  // EXCLUÍDO, semântica de que as pernas por métrica dependem).
   const synthetic = {
     field: PERIOD_FIELD_SENTINEL,
     op: "between",
     value,
+    ...(hasExempt ? { record_types: Object.keys(byType) } : {}),
   } as unknown as WidgetFilter;
   return [...filters, synthetic];
 }

@@ -68,7 +68,7 @@ export const loadSources = cache(async function loadSources(
     const { data: subData } = await supabase
       .from("sub_sources")
       .select(
-        "key, parent_key, label, short_label, default_period_field, filter, sort_order"
+        "key, parent_key, label, short_label, default_period_field, filter, sort_order, ignore_period"
       )
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -91,6 +91,7 @@ export const loadSources = cache(async function loadSources(
           manualEntry: false,
           parentKey,
           filter,
+          ignorePeriod: Boolean(r.ignore_period),
           sortOrder: Number(r.sort_order ?? 0),
         };
       })

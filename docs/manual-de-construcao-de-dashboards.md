@@ -1,3 +1,8 @@
+<!-- Versão: 1.26 | Data: 06/08/2026 -->
+<!-- v1.26 (06/08/2026): §2.2/§6.1 — Sub-base com "Ignorar filtro de período"
+     (checkbox no gerenciador): as linhas dela entram nos widgets sem recorte
+     de período (só ela; as demais Bases seguem filtradas); junto com a mãe
+     nunca é absorvida — vira série própria como o "conviver". -->
 <!-- Versão: 1.25 | Data: 05/08/2026 -->
 <!-- v1.25 (05/08/2026): §12.4/§13 — Agenda mudou de /agenda para
      /operacao/agenda (card padrão da aba "Operação" do Workspace; saiu do
@@ -324,6 +329,14 @@ o botão de auto-match serve para a primeira carga ou para conferência.
   recorta as linhas (mesma sintaxe dos filtros de widget, §6.4) e o **campo de
   data** próprio para o período. Ex.: Sub-base "Reuniões" = Leads com
   "Data Reunião" não vazio, período por "Data Reunião".
+  - **"Ignorar filtro de período"** (checkbox): a Sub-base deixa de respeitar o
+    período selecionado no dashboard — as linhas dela entram nos widgets
+    SEMPRE, como se fosse "todo o período" (só para ela; as demais Bases do
+    widget seguem filtradas). Serve para misturar um resultado que depende do
+    período (ex.: leads com fechamento no mês) com um que não depende (ex.:
+    todos os leads que constam como ATIVOS hoje, não importa quando entraram).
+    Filtros de data configurados no próprio widget continuam valendo. A
+    Sub-base ganha a marca "ignora período" na lista.
 - **Rótulos curtos** por Base (usados em espaços apertados da UI).
 
 ### 2.3 Configurações → Operações e Responsáveis
@@ -1073,6 +1086,13 @@ Checklist das Bases do catálogo.
     barras distintas; quem liga garante que a leitura faz sentido).
   - **2+ Sub-bases da MESMA mãe** (sem a mãe): cada uma vira uma série
     própria automaticamente, com a contagem PRÓPRIA do seu recorte.
+  - **Sub-base com "Ignorar filtro de período"** (§2.2): as linhas dela entram
+    sem recorte de período, sempre. Selecionada junto com a mãe (ou com outra
+    Sub-base da mesma mãe), ela NUNCA é absorvida — vira série própria
+    automaticamente (como o "conviver"), com a mãe filtrada pelo período e a
+    Sub-base em "todo o período". Num widget de comparação ("vs período
+    anterior") uma Base que ignora o período mostra variação 0 (não há período
+    a deslocar).
 - **"Exibição das sub-bases"** (`settings.subSeriesMode`; aparece só quando há
   2+ Sub-bases da mesma mãe, ou Sub-base "conviver", em Barra/Barra
   horizontal/Linha/Tabela):

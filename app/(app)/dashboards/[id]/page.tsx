@@ -690,7 +690,8 @@ export default async function DashboardPage({
                   (w.sources ?? []) as SourceKey[],
                   w.metrics,
                   fieldByKeyAll
-                )
+                ),
+                sources
               );
             }
           } else if (
