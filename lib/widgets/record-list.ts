@@ -288,6 +288,11 @@ function buildRecordListQuery(
           );
         groups.push(`and(${conds.join(",")})`);
       }
+      // ignore_period (0116): espelho do wrapper do RPC — record_types no
+      // sentinela = record_types que RESPEITAM o período; os demais (fontes
+      // isentas) passam sem recorte de data.
+      const prts = rtsOf(f);
+      if (prts) groups.push(passThrough(prts));
       if (groups.length > 0) q = q.or(groups.join(","));
       continue;
     }

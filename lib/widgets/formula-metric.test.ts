@@ -267,3 +267,55 @@ describe("operando de META (meta:<chave>)", () => {
     expect(rpcCalls).toHaveLength(0);
   });
 });
+
+describe("operando @sub que ignora o período (ignore_period, 0116)", () => {
+  const ATIVOS = {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+    ignorePeriod: true,
+  };
+  const CAT = [...CATALOG, ATIVOS];
+
+  it("aux do escopo isento sai SEM sentinela @period (nem o pré-sintetizado)", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({ data: [{ metric_1: 9 }], error: null }),
+      },
+    });
+    // @period PRÉ-sintetizado (filtro rápido): sem a guarda, o
+    // patchAuxPeriodByType reintroduziria byType.lead na aux da sub isenta.
+    const presynth = {
+      field: PERIOD_FIELD_SENTINEL,
+      op: "between",
+      value: {
+        from: "2026-07-01",
+        to: "2026-07-31T23:59:59",
+        byType: { lead: "source_created_at", negocio: "closed_at" },
+      },
+    } as unknown as WidgetFilter;
+
+    const out = await runCalculatedWidget(db, {
+      formula: f("agg:count:*@leads_ativos"),
+      sources: ["deals"],
+      sourceDefs: CAT,
+      filters: [presynth],
+    });
+    expect(out.value).toBe(9);
+    expect(rpcCalls).toHaveLength(1);
+    const filters = rpcCalls[0].args.p_filters as WidgetFilter[];
+    expect(filters.some((x) => x.field === PERIOD_FIELD_SENTINEL)).toBe(false);
+    // A perna segue restrita à fonte do escopo.
+    expect(filters).toContainEqual({
+      field: "record_type",
+      op: "in",
+      value: ["lead"],
+    });
+  });
+});

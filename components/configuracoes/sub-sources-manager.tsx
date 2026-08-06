@@ -1,4 +1,4 @@
-// Versão: 1.3 | Data: 31/07/2026
+// Versão: 1.4 | Data: 06/08/2026
 // SUB-FONTES (0078): CRUD das sub-fontes (fonte derivada de uma pai, recortada
 // por um filtro). Tabela + Sheet com formulário: pai (imutável na edição), nome,
 // nome curto, campo de período e um editor de CONDIÇÕES (field/op/value) que
@@ -16,12 +16,15 @@
 //   da sub compara a coluna CRUA (fora do pipeline do engine), então relações
 //   GRAVAM O ID (storeAs "value") e o picker só exibe o rótulo; `in` guarda
 //   array (valor com vírgula sobrevive).
+// v1.4 (06/08/2026): checkbox "Ignorar filtro de período" (0116) + badge na
+//   tabela — a sub isenta entra nos widgets sem recorte de período (engine).
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
@@ -200,6 +203,9 @@ function SubSourceForm({
       ? toConds(sub.filter)
       : [{ field: "", op: "eq", value: "" }]
   );
+  const [ignorePeriod, setIgnorePeriod] = useState(
+    Boolean(sub?.ignorePeriod)
+  );
 
   useEffect(() => {
     if (state.ok && onDone) onDone();
@@ -232,6 +238,11 @@ function SubSourceForm({
       <input type="hidden" name="parent_key" value={parentKey} />
       <input type="hidden" name="default_period_field" value={periodField} />
       <input type="hidden" name="filter" value={filterJson} />
+      <input
+        type="hidden"
+        name="ignore_period"
+        value={ignorePeriod ? "1" : ""}
+      />
 
       <div className="flex flex-col gap-1.5">
         <Label>Base pai</Label>
@@ -289,6 +300,21 @@ function SubSourceForm({
         <p className="text-muted-foreground text-xs">
           Só aparecem campos de data com ao menos um registro preenchido na
           base pai (mocks não contam).
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={ignorePeriod}
+            onCheckedChange={(v) => setIgnorePeriod(v === true)}
+          />
+          Ignorar filtro de período
+        </label>
+        <p className="text-muted-foreground text-xs">
+          As linhas desta sub-base entram nos widgets independentemente do
+          período selecionado no dashboard (ex.: &quot;todos os leads ativos
+          hoje&quot;). Filtros de data do próprio widget seguem valendo.
         </p>
       </div>
 
@@ -523,7 +549,14 @@ export function SubSourcesManager({
             ) : (
               subs.map((s) => (
                 <TableRow key={s.key}>
-                  <TableCell className="font-medium">{s.label}</TableCell>
+                  <TableCell className="font-medium">
+                    {s.label}
+                    {s.ignorePeriod ? (
+                      <span className="text-muted-foreground ml-2 rounded border px-1.5 py-0.5 text-[10px] font-normal whitespace-nowrap">
+                        ignora período
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell>
                     <code className="text-xs">{s.key}</code>
                   </TableCell>

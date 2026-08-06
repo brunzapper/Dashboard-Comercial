@@ -530,12 +530,17 @@ export function validateDashboardImport(
       );
       return;
     }
+    // ignore_period (0116): a Sub-base não respeita o filtro de período.
+    const ignorePeriod = s.ignore_period === true;
     // Recorte IGUAL ao de uma Sub-base existente (ou declarada acima)?
     // Reutiliza a existente e remapeia as referências — nunca duplicar.
+    // A flag ignore_period entra no critério: comportamento de período
+    // diferente NÃO é o mesmo recorte (reusar mudaria a semântica).
     const dup = workingSources.find(
       (x) =>
         x.parentKey === parent &&
         x.defaultPeriodField === period &&
+        Boolean(x.ignorePeriod) === ignorePeriod &&
         normSubFilter(x.filter ?? []) === normSubFilter(filter)
     );
     if (dup) {
@@ -552,6 +557,7 @@ export function validateDashboardImport(
       short_label: asString(s.short_label) || undefined,
       default_period_field: period,
       filter,
+      ignore_period: ignorePeriod || undefined,
     });
     workingSources.push({
       key,
@@ -563,6 +569,7 @@ export function validateDashboardImport(
       manualEntry: false,
       parentKey: parent,
       filter,
+      ignorePeriod,
     });
   });
 

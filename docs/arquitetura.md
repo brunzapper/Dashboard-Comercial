@@ -1,3 +1,13 @@
+<!-- Versão: 1.59 | Data: 06/08/2026 -->
+<!-- v1.59 (06/08/2026): §4.8 — sub-base que IGNORA o filtro de período
+     (sub_sources.ignore_period, 0116): applyPeriodToFilters particiona as
+     fontes cobertas (record_type todo-isento sai do byType; misto força o
+     sintético com record_types = quem respeita — pass-through do wrapper
+     _widget_wrap_record_types de 0054, espelhado no modo lista),
+     planSourceLegs nunca absorve a sub-ignorante (vira perna extra; demovida
+     da principal quando há candidata do mesmo record_type que respeite) e os
+     scopedAuxInputs removem o sentinela pré-sintetizado p/ escopo isento.
+     RPCs intocados; invariante 10 atualizada. -->
 <!-- Versão: 1.58 | Data: 05/08/2026 -->
 <!-- v1.58 (05/08/2026): hub Workspace com abas internas Painéis/Operação
      (?aba=) e CARDS DE OPERAÇÃO (lib/operacao/cards.ts — catálogo em código,
@@ -1456,6 +1466,44 @@ Reunião* e a sub Leads/Clientes Lite → *Data da mudança de etapa*.
   TODAS as pernas e cairiam também sobre a sub. "Agrupar período" e o modo
   lista ficam no **absorver** (a perna extra não vira série nesses tipos) —
   limitação v1.
+- **Sub-base que IGNORA o filtro de período (`ignore_period`, 0116):** flag por
+  sub (checkbox "Ignorar filtro de período" em `/registros/bases` →
+  `SourceDef.ignorePeriod`): as linhas dela entram nas consultas SEM recorte de
+  período — barra do dashboard, filtro rápido de período e janela do card,
+  TODOS ignorados (filtros de data explícitos do widget seguem valendo). Uso:
+  misturar métricas dependentes de período (fechamentos no período) com
+  independentes (todos os "ativos" hoje). Resolução 100% no engine, em três
+  pontos:
+  - `applyPeriodToFilters` (period.ts) particiona as fontes cobertas: um
+    `record_type` só fica ISENTO quando TODAS as fontes cobertas dele ignoram
+    (fonte que respeita vence — a isenção real de uma sub com pai/irmã na mesma
+    consulta acontece na perna dela, `sources:[key]`). Todas isentas ⇒ o
+    período não se aplica (filtros inalterados). Misto ⇒ força o caminho
+    SINTÉTICO (o gte/lte uniforme é não-escopado) com `byType` só dos
+    record_types que respeitam e `record_types = Object.keys(byType)` no
+    sentinela — o wrapper JÁ EXISTENTE `_widget_wrap_record_types` (0054) deixa
+    os isentos passarem no RPC, e o modo lista espelha com o `passThrough`
+    (`record_type.not.in`). Sem fonte isenta na cobertura, a saída é
+    byte-idêntica à anterior (record_type fora do `byType` segue EXCLUÍDO —
+    semântica de que as pernas por métrica dependem).
+  - `planSourceLegs` NUNCA absorve uma sub-ignorante (com a pai selecionada ela
+    vira perna extra, comportamento de "conviver": pai filtrada pelo período +
+    sub em "todo período"; a sobreposição de linhas é responsabilidade do
+    usuário, como no conviver) e a DEMOVE a perna extra quando há candidata do
+    mesmo `record_type` que respeite — a consulta principal fica com o universo
+    filtrado independentemente da ordem de seleção (o modo lista, que só
+    consulta `mainSources`, mantém o comportamento de absorver).
+  - Aux de operando escopado (`agg:…@subIgnorante`): o período sintetizado no
+    engine já cai pela partição (`sources:[scope]` todo-isento); para o
+    `@period` PRÉ-sintetizado (filtro rápido), os `scopedAuxInputs`
+    (engine/formula-metric) REMOVEM o sentinela em vez de `patchAuxPeriodByType`.
+  - Limitações documentadas: comparação ("vs anterior") num widget 100% isento
+    devolve variação 0 (não há período a deslocar); `businessDayAlign` +
+    fonte isenta não faz sentido (cada perna mensal repetiria as mesmas linhas)
+    — sem guarda no v1; metas (`goalPeriodScope`) seguem resolvendo pelo
+    período do dashboard; mocks 0052: sem a coluna Data Reunião nos filtros, a
+    consulta deixa de "referenciar Data Reunião" e os mocks saem — mesma
+    semântica de "todo período" hoje (paridade client/RPC por construção).
 - **Exibição das pernas (`settings.subSeriesMode`, 24/07/2026):** como o
   branch multi-perna apresenta as pernas — seletor "Exibição das sub-bases" no
   builder (seção Bases), visível só quando há pernas extras num visual que as
@@ -3065,7 +3113,12 @@ principalmente — para mantenedores humanos.
     das pernas (`settings.subSeriesMode` — empilhado/total/lado a lado) e o
     zeroing de operandos escopados em fonte-irmã também se resolvem no
     ENGINE/chart (`zeroSiblingScopedOperands`, `foldRowGroup`,
-    `lib/widgets/sub-series.ts`) — nunca nos RPCs. Ver §4.8.
+    `lib/widgets/sub-series.ts`) — nunca nos RPCs. `ignore_period` (0116 — sub
+    que não respeita o filtro de período) idem: `applyPeriodToFilters`
+    particiona o `byType` e usa o pass-through `record_types` do wrapper
+    `_widget_wrap_record_types` JÁ EXISTENTE (0054), `planSourceLegs` nunca a
+    absorve, e o modo lista espelha o pass-through no `.or()` — nunca recrie as
+    RPCs para isso. Ver §4.8.
 
 11. **Datas são strings no fuso de Brasília.** Valores **datetime** ingeridos de
     fonte com `data_sources.timezone` configurado (0079) são convertidos para

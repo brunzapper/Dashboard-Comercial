@@ -894,3 +894,128 @@ describe("Semana Fechada (Dimension.closedWeek)", () => {
     expect(data.comparison?.to).toBe("2026-06-28");
   });
 });
+
+describe("sub-base que ignora o período (ignore_period, 0116)", () => {
+  const ATIVOS = {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+    ignorePeriod: true,
+  };
+  const CAT = [...CATALOG, ATIVOS];
+  const period = {
+    field: "closed_at",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    fieldBySource: {
+      deals: "closed_at",
+      leads: "source_created_at",
+      leads_ativos: "source_created_at",
+    },
+  };
+
+  it("misto: @period sai com record_types SÓ de quem respeita (pass-through)", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals", "leads_ativos"],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    expect(rpcCalls).toHaveLength(1);
+    const filters = rpcCalls[0].args.p_filters as WidgetFilter[];
+    const synth = filters.find((f) => f.field === "@period")!;
+    expect(synth).toBeDefined();
+    expect(
+      (synth.value as { byType: Record<string, string> }).byType
+    ).toEqual({ negocio: "closed_at" });
+    expect(synth.record_types).toEqual(["negocio"]);
+    // O universo segue restrito às fontes (a isenção é SÓ de data).
+    expect(recordTypesOf(rpcCalls[0].args)).toEqual(["negocio", "lead"]);
+  });
+
+  it("só a sub isenta: nenhum filtro de período desce ao RPC", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["leads_ativos"],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    const filters = rpcCalls[0].args.p_filters as WidgetFilter[];
+    expect(filters.some((f) => f.field === "@period")).toBe(false);
+    expect(filters.some((f) => f.op === "gte" || f.op === "lte")).toBe(false);
+    // O predicado da sub segue aplicado (a isenção não derruba o recorte).
+    expect(filters).toContainEqual({
+      field: "stage",
+      op: "eq",
+      value: "Ativo",
+      record_types: ["lead"],
+    });
+  });
+
+  it("pai + sub-ignorante: perna extra com o MESMO período — mas sem recorte na sub", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["leads", "leads_ativos"],
+        dimensions: [{ field: "pipeline" }],
+        metrics: [{ field: "*", agg: "count" }],
+        visual_type: "barra_horizontal",
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    // Principal (pai) + perna extra (sub) = 2 RPCs.
+    expect(rpcCalls).toHaveLength(2);
+    const main = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).every((f) => f.field !== "stage")
+    )!;
+    const leg = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).some((f) => f.field === "stage")
+    )!;
+    // Pai: período normal (campo único → uniforme com bounds ancorados).
+    expect(main.args.p_filters).toContainEqual({
+      field: "source_created_at",
+      op: "gte",
+      value: "2026-07-01T00:00:00-03:00",
+    });
+    // Sub: nenhum recorte de data.
+    expect(
+      (leg.args.p_filters as WidgetFilter[]).some(
+        (f) => f.field === "@period" || f.op === "gte" || f.op === "lte"
+      )
+    ).toBe(false);
+  });
+});

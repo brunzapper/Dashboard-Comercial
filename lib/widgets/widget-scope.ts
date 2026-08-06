@@ -255,7 +255,8 @@ export async function resolveWidgetViewScope(
             const applied = applyPeriodToFilters(
               viewFilters.splice(0),
               pMap,
-              coverageSources()
+              coverageSources(),
+              sources
             );
             viewFilters.push(...applied);
           }

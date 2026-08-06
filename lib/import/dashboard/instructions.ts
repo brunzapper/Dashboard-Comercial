@@ -246,7 +246,8 @@ de data próprio (essencial p/ métricas tipo "reuniões"):
   "parent_key": "<key de Base raiz>",
   "label": "Reuniões",
   "default_period_field": "custom:data_reuniao",  // coluna core de data OU custom:<key> tipo data
-  "filter": [ { "field": "custom:data_reuniao", "op": "not_null" } ]
+  "filter": [ { "field": "custom:data_reuniao", "op": "not_null" } ],
+  "ignore_period": true                // opcional: a Sub-base NÃO respeita o filtro de período do dashboard (linhas sempre em "todo período" — ex.: "todos os ativos hoje")
 }
 
 ## "correspondences" — campos unificados a criar

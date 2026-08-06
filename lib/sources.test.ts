@@ -175,3 +175,57 @@ describe("planSourceLegs (invariante 10)", () => {
     });
   });
 });
+
+describe("planSourceLegs — ignore_period (0116)", () => {
+  const ATIVOS: SourceDef = {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+    ignorePeriod: true,
+  };
+  const CAT = [...CATALOG, ATIVOS];
+
+  it("pai + sub-ignorante → NUNCA absorvida (perna extra, como conviver)", () => {
+    expect(planSourceLegs(["leads", "leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["leads"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+  });
+
+  it("demovida da principal mesmo selecionada ANTES de quem respeita", () => {
+    // Sem a demoção, a ordem de seleção trocaria o universo da principal (o
+    // modo lista só consulta mainSources).
+    expect(planSourceLegs(["leads_ativos", "leads"], undefined, CAT)).toEqual({
+      mainSources: ["leads"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+    expect(
+      planSourceLegs(["leads_ativos", "leads_lite"], undefined, CAT)
+    ).toEqual({
+      mainSources: ["leads_lite"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+  });
+
+  it("sozinha (ou sem candidata do mesmo record_type) segue na principal", () => {
+    expect(planSourceLegs(["leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["leads_ativos"],
+      allMain: false,
+      extraLegs: [],
+    });
+    expect(planSourceLegs(["deals", "leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["deals", "leads_ativos"],
+      allMain: false,
+      extraLegs: [],
+    });
+  });
+});

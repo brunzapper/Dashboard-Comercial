@@ -179,6 +179,7 @@ import {
   applyPeriodToFilters,
   CORE_DATE_COLS,
   patchAuxPeriodByType,
+  PERIOD_FIELD_SENTINEL,
   resolveDateToken,
   scopedAuxPeriod,
   type DashboardPeriod,
@@ -205,6 +206,7 @@ import {
 } from "@/lib/metas/resolve";
 import {
   BUILTIN_SOURCES,
+  ignoresPeriod,
   isSubSource,
   planSourceLegs,
   recordTypeOf,
@@ -2007,8 +2009,14 @@ export async function runWidget(
     const f = legFiltersFor(scopedAuxPeriod(runPeriod, scope, catalog), [
       scope,
     ]);
+    // Escopo que ignora o período (0116): o applyPeriodToFilters já derruba o
+    // período sintetizado no engine; o patch reintroduziria byType[rt] num
+    // @period PRÉ-sintetizado (filtro rápido) — remove o sentinela em vez de
+    // patchear (a aux é `record_type in (rt)` só, remoção segura).
     return {
-      filters: patchAuxPeriodByType(f, rt, scopeField),
+      filters: ignoresPeriod(scope, catalog)
+        ? f.filter((x) => x.field !== PERIOD_FIELD_SENTINEL)
+        : patchAuxPeriodByType(f, rt, scopeField),
       corr: corrMapForKeys([scope]),
     };
   };
