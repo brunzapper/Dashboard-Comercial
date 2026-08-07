@@ -1,3 +1,9 @@
+// Versão: 1.7 | Data: 07/08/2026 (v1.7: célula persiste OTIMISTA em background
+// — useBackgroundSave com revalidate:false: o await volta após a gravação (sem
+// re-render RSC dentro da transition), erro → toast + REVERT da linha ao
+// estado pré-edição, e o reseed por dataKey é GUARDADO por hasPending —
+// digitação durante um save em voo não é mais descartada pelo eco stale;
+// o refresh debounced do hook reconcilia ao drenar)
 // Versão: 1.6 | Data: 01/08/2026 (v1.6: linha de DETALHE sempre visível sob
 // cada membro — a memória da linha inteira (fatores base × peso × ating.,
 // blocos de comissão, soma/override, bônus, composição do total) em texto
@@ -58,6 +64,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { notifyActionError } from "@/lib/feedback/notify";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
   commissionMemory,
   entryMemoryLines,
@@ -133,7 +140,10 @@ interface RowState {
 }
 
 export function CompGrid(props: CompGridProps) {
+  // Transition SÓ para Recalcular/Publicar (operações longas, bloqueio
+  // deliberado por busy); os saves de célula rodam em background pelo hook.
   const [pending, startTransition] = useTransition();
+  const { save: backgroundSave, hasPending } = useBackgroundSave();
   const [busy, setBusy] = useState<"recompute" | "publish" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -175,12 +185,21 @@ export function CompGrid(props: CompGridProps) {
     return m;
   }
   // Reconcilia quando o dataset da page muda (mês/plano/refresh pós-ação).
-  const dataKey = `${props.plan.id}:${props.year}-${props.month}:${props.entries
+  // Guard hasPending (espelho do skipNextData do kanban): com save em voo, um
+  // eco de CONTEÚDO (mesmas plano/mês) é stale — o reseed descartaria a
+  // digitação feita durante a espera. ADOTA a key sem aplicar (consome o eco;
+  // aplicá-lo no drain clobberaria o otimista); o refresh do hook traz o dado
+  // gravado numa key nova (updated_at das entries muda) e o reseed normal
+  // aplica. Mudança de ESCOPO (plano/mês) re-semeia SEMPRE — otimista de
+  // outro mês em tela gravaria/exibiria no mês errado.
+  const scopeKey = `${props.plan.id}:${props.year}-${props.month}`;
+  const dataKey = `${scopeKey}:${props.entries
     .map((e) => `${e.id}@${e.updated_at}`)
     .join(",")}:${JSON.stringify(props.targets)}`;
   if (dataKey !== seedKey) {
+    const sameScope = seedKey.startsWith(`${scopeKey}:`);
     setSeedKey(dataKey);
-    setRows(seed());
+    if (!hasPending || !sameScope) setRows(seed());
   }
 
   const patchRow = (memberId: string, patch: Partial<RowState>) =>
@@ -191,30 +210,52 @@ export function CompGrid(props: CompGridProps) {
       return next;
     });
 
-  const persistPatch = (memberId: string, patch: EntryPatch) =>
-    startTransition(async () => {
-      const res = await saveEntryInputs({
-        planId: props.plan.id,
-        responsibleId: memberId,
-        year: props.year,
-        month: props.month,
-        patch,
-      });
-      if (!res.ok) notifyActionError("Salvar lançamento", res.message);
+  // Saves de célula em background: o closure vê `rows` ANTES do patchRow do
+  // mesmo evento — baseline do revert (erro restaura a linha pré-edição).
+  const persistPatch = (memberId: string, patch: EntryPatch) => {
+    const prev = rows.get(memberId);
+    backgroundSave({
+      key: memberId,
+      context: "Salvar lançamento",
+      action: () =>
+        saveEntryInputs(
+          {
+            planId: props.plan.id,
+            responsibleId: memberId,
+            year: props.year,
+            month: props.month,
+            patch,
+          },
+          { revalidate: false }
+        ),
+      revert: () => {
+        if (prev) setRows((cur) => new Map(cur).set(memberId, prev));
+      },
     });
+  };
 
-  const persistTarget = (memberId: string, factorId: string, value: number | null) =>
-    startTransition(async () => {
-      const res = await saveTarget({
-        planId: props.plan.id,
-        responsibleId: memberId,
-        year: props.year,
-        month: props.month,
-        factorId,
-        value,
-      });
-      if (!res.ok) notifyActionError("Salvar alvo", res.message);
+  const persistTarget = (memberId: string, factorId: string, value: number | null) => {
+    const prev = rows.get(memberId);
+    backgroundSave({
+      key: memberId,
+      context: "Salvar alvo",
+      action: () =>
+        saveTarget(
+          {
+            planId: props.plan.id,
+            responsibleId: memberId,
+            year: props.year,
+            month: props.month,
+            factorId,
+            value,
+          },
+          { revalidate: false }
+        ),
+      revert: () => {
+        if (prev) setRows((cur) => new Map(cur).set(memberId, prev));
+      },
     });
+  };
 
   const runRecompute = () => {
     setBusy("recompute");
@@ -283,7 +324,7 @@ export function CompGrid(props: CompGridProps) {
         {notice ? (
           <span className="text-muted-foreground text-xs">{notice}</span>
         ) : null}
-        {pending ? (
+        {pending || hasPending ? (
           <span className="text-muted-foreground ml-auto text-xs">Salvando…</span>
         ) : null}
       </div>

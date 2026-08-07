@@ -1452,7 +1452,10 @@ RLS ligado com **zero políticas de escrita** — escrita só via service role.
   `createRecord` revalidam no servidor. Não reintroduza `revalidatePath` (nem
   `router.refresh()` síncrono no `onSaved`) no caminho de célula: Server Actions
   serializam por cliente e o re-render RSC da rota inteira a cada blur é o que
-  travava a navegação.
+  travava a navegação. Este é o caso-mãe do padrão **save otimista em
+  background** (`useBackgroundSave` — ver "Feedback de carregamento" em §4.10),
+  generalizado em 07/08/2026 para filtros do dashboard, Nota, Aparência,
+  célula por entidade e comp-grid.
 - **Linha divisória** (25/07/2026): a antiga Forma "linha" virou o
   `visual_type 'linha_divisoria'` (0100 — CHECK + backfill dos widgets vivos);
   os settings seguem `{ shape: { kind: "linha", line } }` e a renderização
@@ -1910,11 +1913,41 @@ não apaga mais o `lastPeriod` salvo do usuário.
 
 **Feedback de carregamento (política):**
 
-- Recompute RSC (qualquer filtro): overlay global "Carregando…" + dim do grid
-  (`dashboard-grid.tsx`), via transition compartilhado (`useNavPending().run`
-  em TODO caminho que muda filtro/recorte — barra de período, filtros
-  rápidos, filtro por campo, barra da tabela, `PeriodWindowControl` e o
-  refresh pós-save da Nota).
+- Navegação RSC real (barra de período, busca da tabela por URL, branches de
+  snapshot): overlay global "Carregando…" + dim do grid
+  (`dashboard-grid.tsx`), via transition compartilhado (`useNavPending().run`).
+  Desde 07/08/2026 o overlay é **não-bloqueante** (`pointer-events-none`) — o
+  board segue interativo com os dados antigos — e `run()` é EXCLUSIVO de
+  navegação: **save de widget não passa mais por ele** (o `await` de uma
+  action que revalida só resolve após o re-render RSC da rota inteira, o que
+  congelava o board por segundos a cada filtro salvo).
+- **Save otimista em background (07/08/2026) — o padrão para gravação fora de
+  formulário:** o controle aplica o estado otimista ANTES do await; a action
+  roda com `{ revalidate: false }` (opt-out por parâmetro, padrão
+  `createWidget`; o await volta logo após o INSERT/UPDATE); o erro vira toast
+  + `revert()` granular do controle; o sucesso agenda UM `router.refresh()`
+  debounced — o reconciliador ÚNICO desses fluxos (o realtime NÃO cobre
+  `dashboard_table_cells`/`widgets`/`entity_custom_values`/tabelas de
+  remuneração). Tudo isso empacotado em `useBackgroundSave`
+  (`lib/feedback/use-background-save.ts` — compõe `notifyOnError` +
+  `useDebouncedRefresh`; refcount por key ⇒ `pendingKeys`/`hasPending`).
+  Pending é GRANULAR por controle (spinner pequeno/`busyKey` por linha —
+  snapshots-panel, access-matrix, presets), nunca por tela. Consumidores:
+  filtros rápidos (`__qf__`), filtro por campo compartilhado (`__ff__`),
+  janela de períodos (`__pw__`), Nota, Aparência de widget, célula por
+  entidade e comp-grid. **Guard anti-eco (`hasPending`)**: no padrão seedKey,
+  props que aterrissam com save em voo são stale (renderizaram antes do
+  commit) — o reseed ADOTA a key sem aplicar (consome o eco; espelho do
+  `skipNextData` do kanban) e o refresh do hook traz o definitivo; mudança de
+  ESCOPO (ex.: mês/plano no comp-grid) re-semeia SEMPRE. Caso-mãe do padrão:
+  célula inline de /registros (§4.10 "Edição inline sem re-render global").
+  Formulários `useActionState` cujas actions deixaram de revalidar (CRUDs de
+  Bases — antes 13× `revalidatePath("/", "layout")` que travavam o form pelo
+  re-render do layout raiz) disparam o refresh pós-sucesso no CLIENTE via
+  `useRefreshOnActionOk` (`lib/use-debounced-refresh.ts`) — o refresh
+  re-renderiza a rota atual INCLUINDO o layout (sidebar/providers atualizam)
+  como transition não-urgente; rotas dinâmicas não guardam client cache
+  (staleTimes dynamic = 0), então navegação subsequente sempre re-busca.
 - Widgets deferidos re-buscando com dados antigos em tela: estado
   `refreshing` próprio (dim `opacity-60` + "Atualizando…" com spinner), sem
   bloquear interação (drag do kanban continua; um resultado que aterrisse

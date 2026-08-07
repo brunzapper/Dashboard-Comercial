@@ -1,4 +1,4 @@
-// Versão: 1.4 | Data: 23/07/2026
+// Versão: 1.5 | Data: 07/08/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -21,6 +21,11 @@
 // removido na primeira edição — senão o viewer ficaria pinado no valor do
 // mount) e o estado ressincroniza do seed do servidor quando outro usuário
 // muda o valor. Em snapshot, `shared` é ignorado (URL-only por visitante).
+// v1.5 (07/08/2026): o save do modo compartilhado roda OTIMISTA em background
+// (useBackgroundSave, revalidate:false): os controles respondem na hora e o
+// refresh debounced do hook reconcilia; erro → toast + revert de q/values ao
+// último estado aplicado. O transition global segue SÓ no branch de URL
+// (navegação real).
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -42,6 +47,7 @@ import type {
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
   saveLastFieldFilter,
   saveSharedFieldFilter,
@@ -127,6 +133,7 @@ export function FieldFilterControls({
   const pathname = usePathname();
   const sp = useSearchParams();
   const { run } = useNavPending();
+  const { save } = useBackgroundSave();
   // Viewer de snapshot: filtros seguem funcionando via URL, mas NUNCA
   // persistem preferência (visitante pode nem ter sessão; e um usuário
   // autenticado vendo o snapshot não pode poluir o dashboard vivo).
@@ -184,13 +191,27 @@ export function FieldFilterControls({
           const qs = params.toString();
           window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
         }
+        const prevApplied = serverAppliedRef.current;
         serverAppliedRef.current = encoded;
         if (dashboardId && widgetId) {
-          // Transition: o overlay cobre a gravação + a revalidação da página
-          // disparada pela action (padrão QuickFiltersBar). encoded vazio
-          // APAGA a célula (o usuário removeu o filtro — vale para todos).
-          run(async () => {
-            await saveSharedFieldFilter(dashboardId, widgetId, encoded || null);
+          // Save otimista em background (padrão QuickFiltersBar v1.3): os
+          // controles já mostram o valor novo; a action volta logo após o
+          // upsert (revalidate:false) e o refresh debounced reconcilia.
+          // encoded vazio APAGA a célula (o usuário removeu o filtro — vale
+          // para todos). Erro → toast + revert ao último estado aplicado.
+          save({
+            key: "ff",
+            context: "Não foi possível salvar o filtro",
+            action: () =>
+              saveSharedFieldFilter(dashboardId, widgetId, encoded || null, {
+                revalidate: false,
+              }),
+            revert: () => {
+              serverAppliedRef.current = prevApplied;
+              const parsed = parseViewFilter(prevApplied || null);
+              setQ(parsed.q ?? "");
+              setValues(initialValues(fields, parsed.filters));
+            },
           });
         }
       }, 350);

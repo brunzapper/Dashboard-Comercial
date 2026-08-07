@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 26/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): as actions não revalidam mais ("/", "layout") — refresh
+//   pós-sucesso via useRefreshOnActionOk (form libera quando a action retorna).
 // Gestão das PASTAS DE BASES (source_folders, 0107): criar, renomear,
 // reordenar (↑/↓) e excluir pastas. Pasta é agrupamento de EXIBIÇÃO — a
 // exclusão devolve as bases para "sem pasta" (FK on delete set null), nunca
@@ -30,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useRefreshOnActionOk } from "@/lib/use-debounced-refresh";
 import type { SourceDef } from "@/lib/sources";
 import type { SourceFolder } from "@/lib/source-folders";
 import {
@@ -52,6 +55,8 @@ function FolderForm({
   const isEdit = Boolean(folder);
   const action = isEdit ? updateSourceFolder : createSourceFolder;
   const [state, formAction, pending] = useActionState(action, initial);
+  // A action não revalida — o refresh pós-sucesso reconcilia lista/sidebar.
+  useRefreshOnActionOk(state);
 
   useEffect(() => {
     if (state.ok && onDone) onDone();
@@ -95,7 +100,9 @@ function FolderForm({
 }
 
 function MoveFolderButtons({ folderId }: { folderId: string }) {
-  const [, formAction, pending] = useActionState(reorderSourceFolder, initial);
+  const [state, formAction, pending] = useActionState(reorderSourceFolder, initial);
+  // Rajada de ↑/↓ coalesce num único refresh (debounce do hook).
+  useRefreshOnActionOk(state);
   return (
     <form action={formAction} className="flex items-center">
       <input type="hidden" name="id" value={folderId} />
@@ -133,6 +140,7 @@ function DeleteFolderButton({
   label: string;
 }) {
   const [state, formAction, pending] = useActionState(deleteSourceFolder, initial);
+  useRefreshOnActionOk(state);
   const [confirm, setConfirm] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   return (

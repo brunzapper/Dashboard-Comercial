@@ -1,4 +1,6 @@
-// Versão: 2.0 | Data: 16/07/2026
+// Versão: 2.1 | Data: 07/08/2026
+// v2.1 (07/08/2026): a action não revalida mais ("/", "layout") — refresh
+//   pós-sucesso via useRefreshOnActionOk (o provider do layout re-renderiza).
 // Form do rótulo dos campos "GERAIS" (presentes em todas as fontes) — grava em
 // sync_config 'source_labels' via Server Action. Os nomes curtos POR FONTE
 // migraram para o catálogo (data_sources.short_label, editados na própria
@@ -10,6 +12,7 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRefreshOnActionOk } from "@/lib/use-debounced-refresh";
 import {
   saveSourceLabels,
   type SourceLabelsActionState,
@@ -19,6 +22,8 @@ const initial: SourceLabelsActionState = {};
 
 export function SourceLabelsManager({ geral }: { geral: string }) {
   const [state, formAction, pending] = useActionState(saveSourceLabels, initial);
+  // A action não revalida — o refresh pós-sucesso atualiza o provider do layout.
+  useRefreshOnActionOk(state);
 
   return (
     <form action={formAction} className="flex max-w-md flex-col gap-4">

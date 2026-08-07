@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): pending POR SNAPSHOT (busyId) nas ações de linha —
+// "Atualizar agora" (que pode demorar) desabilita só a linha acionada, com
+// spinner no botão; o resto do painel segue utilizável. O transition único
+// fica para criar/editar/revogar (formulários one-shot).
 // Painel "Snapshots" do menu ⋮ do dashboard: lista os snapshots deste
 // dashboard e cria novos. O link público (/s/<token>) aparece UMA única vez,
 // logo após a criação — o token não é recuperável depois (o banco guarda só o
@@ -189,12 +193,20 @@ export function SnapshotsPanel({
     });
   }
 
-  function runAction(fn: () => Promise<{ ok?: boolean; message?: string }>) {
+  // Ação de LINHA (atualizar/pausar/retomar): pending por snapshot — só a
+  // linha acionada desabilita; as demais seguem utilizáveis.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  function runAction(
+    id: string,
+    fn: () => Promise<{ ok?: boolean; message?: string }>
+  ) {
     setMessage(null);
+    setBusyId(id);
     startTransition(async () => {
       const res = await fn();
       if (!res.ok) setMessage(res.message ?? "Falha na ação.");
       await reload();
+      setBusyId(null);
     });
   }
 
@@ -302,7 +314,6 @@ export function SnapshotsPanel({
             size="sm"
             className="self-start"
             onClick={() => setView({ kind: "create" })}
-            disabled={pending}
           >
             <Plus className="size-4" /> Novo snapshot
           </Button>
@@ -336,18 +347,23 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
-                      onClick={() => runAction(() => refreshSnapshotNow(s.id))}
+                      disabled={busyId === s.id}
+                      onClick={() => runAction(s.id, () => refreshSnapshotNow(s.id))}
                     >
-                      <RefreshCw className="size-3.5" /> Atualizar agora
+                      {busyId === s.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-3.5" />
+                      )}{" "}
+                      Atualizar agora
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() =>
-                        runAction(() =>
+                        runAction(s.id, () =>
                           s.status === "active"
                             ? pauseSnapshot(s.id)
                             : resumeSnapshot(s.id)
@@ -368,7 +384,7 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() => setView({ kind: "edit", item: s })}
                     >
                       <Pencil className="size-3.5" /> Editar
@@ -377,7 +393,7 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="text-destructive h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() => setConfirmRevoke(s)}
                     >
                       <Trash2 className="size-3.5" /> Revogar
