@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 10/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): ResizeHandle extraído p/ components/ui/resize-handle.tsx
+//   (reuso na tabela de /registros); re-export aqui preserva os imports.
 // Fase 10.1: peças de UI compartilhadas para a edição de aparência IN-LOCO
 // (direto na tabela e no gráfico), mais o hook de persistência. Reutilizado por
 // widget-chart (tabela agregada + gráficos) e record-list-table.
@@ -644,71 +646,9 @@ export function ColorOrderDialog({
 }
 
 // -------- alça de redimensionamento (largura de coluna / altura de linha) --------
-// Faixa fina posicionada na borda da célula. Aparece ao passar o mouse (mesmo com
-// as linhas de grade ocultas) durante a edição de layout. Arrastar altera o
-// tamanho: `getStart` lê o tamanho atual no início; `onResize` recebe o novo (px).
-export function ResizeHandle({
-  axis,
-  onResize,
-  minSize = 40,
-}: {
-  axis: "col" | "row";
-  onResize: (size: number) => void;
-  minSize?: number;
-}) {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const dragRef = useRef<{ pos: number; size: number } | null>(null);
-
-  function onPointerDown(e: React.PointerEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    // Mede a célula/linha que contém a alça como tamanho inicial.
-    const cell = ref.current?.parentElement as HTMLElement | null;
-    const size = cell
-      ? axis === "col"
-        ? cell.offsetWidth
-        : cell.offsetHeight
-      : minSize;
-    dragRef.current = { pos: axis === "col" ? e.clientX : e.clientY, size };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    const d = dragRef.current;
-    if (!d) return;
-    const delta = (axis === "col" ? e.clientX : e.clientY) - d.pos;
-    onResize(Math.max(minSize, Math.round(d.size + delta)));
-  }
-  function endDrag(e: React.PointerEvent) {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // capture pode já ter sido liberada
-    }
-  }
-
-  return (
-    <span
-      ref={ref}
-      role="separator"
-      aria-orientation={axis === "col" ? "vertical" : "horizontal"}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onDoubleClick={(e) => e.stopPropagation()}
-      title={axis === "col" ? "Arraste para largura" : "Arraste para altura"}
-      className={cn(
-        "absolute z-10 opacity-0 transition-opacity hover:opacity-100",
-        "before:absolute before:bg-primary/60 before:content-['']",
-        axis === "col"
-          ? "top-0 right-0 h-full w-2 cursor-col-resize before:top-0 before:right-0 before:h-full before:w-0.5"
-          : "bottom-0 left-0 h-2 w-full cursor-row-resize before:bottom-0 before:left-0 before:h-0.5 before:w-full"
-      )}
-    />
-  );
-}
+// Extraída p/ components/ui/resize-handle.tsx (07/08/2026 — a tabela de
+// /registros também usa); re-export preserva os imports existentes daqui.
+export { ResizeHandle } from "@/components/ui/resize-handle";
 
 // -------- alça de arraste (cabeçalho de coluna / gutter de linha) --------
 export function DragHandle({

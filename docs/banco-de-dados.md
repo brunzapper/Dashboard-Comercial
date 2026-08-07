@@ -1,3 +1,10 @@
+<!-- Versão: 3.12 | Data: 07/08/2026 -->
+<!-- v3.12 (07/08/2026): 0120 — registros_populated_refs(record_type): função
+     SECURITY INVOKER (RLS de records recorta por usuário) que devolve as
+     colunas núcleo e chaves de custom_fields com >=1 valor não-vazio (mocks
+     fora). Consumida pela página /registros p/ colunas dirigidas por dados
+     (100% das populadas visíveis; vazias fora da base ocultas). EXECUTE só
+     authenticated/service_role; nunca anon. Não recria as RPCs. -->
 <!-- Versão: 3.11 | Data: 07/08/2026 -->
 <!-- v3.11 (07/08/2026): 0119 — mapping_domains (domínios DINÂMICOS de
      reclassificação, criados pela aba Campos → Reclassificações): key com o
@@ -694,6 +701,7 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
 | `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
 | `maintenance_analyze` | 0102 | `ANALYZE` de `records`/`record_matches` (SECURITY DEFINER — service role não é dona das tabelas); EXECUTE só service role. Disparada pelo runner do sync ao concluir job com >= 2.000 linhas escritas |
+| `registros_populated_refs` | 0120 | Refs núcleo + chaves de `custom_fields` com >=1 valor não-vazio num `record_type` (mocks fora) — SECURITY INVOKER (RLS de `records` recorta por usuário). Consumida pela página /registros (colunas dirigidas por dados). EXECUTE só authenticated/service_role |
 
 ## 5. Triggers
 
@@ -870,6 +878,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0117 | value_mappings | Mapeamentos de VALORES (de-para de classificação): entradas por org+domínio+`raw_norm` com `outputs` jsonb; domínios em código (`lib/mappings/domains.ts`), aplicação como espelho derivado em `custom_fields`, pendências em tarefa do org_admin; RLS select org / escrita admin. Seed `supabase/apply/seed-value-mappings.sql`. Não recria as RPCs |
 | 0118 | value_mappings_origin | `value_mappings.origin` (`manual|seed|auto|ai`) — origem da entrada (badge; auto = classificador V5 portado, ai = assistente). Backfill pré-0118 → 'seed'. Não recria as RPCs |
 | 0119 | mapping_domains | Domínios DINÂMICOS de reclassificação (aba Campos → Reclassificações): key (mesmo slug-check de `value_mappings.domain`), record_types[], campo cru + targets jsonb com categorias canônicas; registry efetivo = código ∪ banco (`lib/mappings/registry.ts`, fail-closed). RLS select org / escrita admin. Não recria as RPCs |
+| 0120 | registros_populated_refs | Função `registros_populated_refs(record_type)` — colunas núcleo e chaves custom populadas (>=1 valor não-vazio, mocks fora), SECURITY INVOKER (RLS recorta por usuário); base das colunas dirigidas por dados da página /registros. EXECUTE só authenticated/service_role. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

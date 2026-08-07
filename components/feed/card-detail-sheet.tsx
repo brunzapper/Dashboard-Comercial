@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): aba "Dados" repassa o catálogo completo do detalhe
+//   (detailFields/offBaseDefs/coreDefs/knownFieldKeys do recordCtx) — 100%
+//   dos campos consultáveis no painel do card.
 // Painel de DETALHE de um card do kanban (clique no corpo do card): duas abas
 // — "Feed" (padrão: tarefas/subtarefas + comentários, EntityFeed) e "Dados"
 // (o formulário de edição existente: RecordEditForm ou TaskForm). Uma única
@@ -136,6 +139,10 @@ export function CardDetailSheet({
           <RecordEditForm
             record={target.record}
             fields={recordCtx.fields}
+            detailFields={recordCtx.detailFields}
+            offBaseDefs={recordCtx.offBaseDefs}
+            coreDefs={recordCtx.coreDefs}
+            knownFieldKeys={recordCtx.knownFieldKeys}
             responsibles={recordCtx.responsibles}
             operations={recordCtx.operations}
             relatedLeadLabel={null}

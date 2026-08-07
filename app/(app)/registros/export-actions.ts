@@ -1,5 +1,10 @@
 "use server";
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): paridade de ORDENAÇÃO com a tela — `ordenar`/`dir`
+//   validados pelo MESMO helper da página (lib/records/list-sort) e aplicados
+//   em cada lote (+ tiebreak por id); o CSV sai na ordem exibida. O conjunto
+//   de colunas do export segue o da v1.0 (divergência conhecida: não reflete
+//   as colunas dirigidas por dados da tela).
 // Exportação CSV da tela de Registros: reexecuta a MESMA query filtrada da
 // página (client do usuário → RLS decide o que sai) sem paginação de tela,
 // varrendo em lotes de 1000 até o teto. Devolve headers+rows já em string
@@ -17,6 +22,7 @@ import {
 } from "@/lib/sources";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
+import { parseRecordListSort, sortColumnExpr } from "@/lib/records/list-sort";
 import {
   recordCellValue,
   recordRefLabel,
@@ -60,6 +66,9 @@ export interface ExportRecordsParams {
   de?: string;
   ate?: string;
   busca?: string;
+  // Ordenação ativa da tela (re-validada aqui pelo mesmo helper da página).
+  ordenar?: string;
+  dir?: string;
 }
 
 export type ExportCsvResult =
@@ -84,6 +93,40 @@ export async function exportRecordsCsv(
     : (sources[0]?.key ?? "leads");
   const recordType = toRecordType(fonte);
 
+  // Colunas custom da fonte visíveis ao papel — buscadas ANTES do laço: a
+  // ordenação valida contra o catálogo (mesmo helper da página).
+  const { data: fieldsData } = await supabase
+    .from("field_definitions")
+    .select(
+      "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, formula, sort_order, applies_to, source_system, source_field_id, currency_code, currency_mode, show_as_percent"
+    )
+    // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
+      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
+      .or("show_in_builder.eq.true,source_system.eq.core")
+    .order("sort_order", { ascending: true });
+  const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
+    (f) =>
+      f.data_type !== "calculado_agg" &&
+      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
+      !isCoreDef(f) &&
+      fieldAppliesToSource(f.applies_to, fonte) &&
+      (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
+  );
+
+  // Catálogo de VALIDAÇÃO do sort: qualquer custom visível ao papel (a tela
+  // pode ordenar por coluna populada de outra base, fora de `fields`).
+  const sortCatalog = ((fieldsData ?? []) as FieldDefinition[]).filter(
+    (f) =>
+      f.data_type !== "calculado_agg" &&
+      !isCoreDef(f) &&
+      (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
+  );
+  const sort = parseRecordListSort(
+    params.ordenar ?? "",
+    params.dir ?? "",
+    sortCatalog
+  );
+
   // Varre em lotes (mesma ordenação da tela); o 1º lote traz o count p/ o teto.
   const records: RecordRow[] = [];
   for (let from = 0; ; from += BATCH) {
@@ -102,9 +145,20 @@ export async function exportRecordsCsv(
     }
     if (params.busca) query = query.ilike("title", `%${params.busca}%`);
 
-    const { data, count, error } = await query
-      .order("source_created_at", { ascending: false, nullsFirst: false })
-      .range(from, from + BATCH - 1);
+    const ordered = (
+      sort
+        ? query.order(sortColumnExpr(sort, sortCatalog), {
+            ascending: sort.dir === "asc",
+            nullsFirst: false,
+          })
+        : query.order("source_created_at", {
+            ascending: false,
+            nullsFirst: false,
+          })
+    )
+      // Tiebreak estável entre lotes (mesma técnica da página).
+      .order("id", { ascending: true });
+    const { data, count, error } = await ordered.range(from, from + BATCH - 1);
     if (error) return { ok: false, message: error.message };
 
     if (from === 0) {
@@ -122,25 +176,6 @@ export async function exportRecordsCsv(
     records.push(...((data ?? []) as unknown as RecordRow[]));
     if (!data || data.length < BATCH) break;
   }
-
-  // Colunas custom da fonte visíveis ao papel (mesma regra da página).
-  const { data: fieldsData } = await supabase
-    .from("field_definitions")
-    .select(
-      "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, formula, sort_order, applies_to, source_system, source_field_id, currency_code, currency_mode, show_as_percent"
-    )
-    // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
-      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
-      .or("show_in_builder.eq.true,source_system.eq.core")
-    .order("sort_order", { ascending: true });
-  const fields = ((fieldsData ?? []) as FieldDefinition[]).filter(
-    (f) =>
-      f.data_type !== "calculado_agg" &&
-      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
-      !isCoreDef(f) &&
-      fieldAppliesToSource(f.applies_to, fonte) &&
-      (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
-  );
 
   // Rótulos de FKs (responsável/operação/lead relacionado).
   const [{ data: respData }, { data: opsData }] = await Promise.all([

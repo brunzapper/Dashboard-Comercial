@@ -1,4 +1,7 @@
-// Versão: 1.5 | Data: 20/07/2026
+// Versão: 1.6 | Data: 07/08/2026
+// v1.6 (07/08/2026): RecordRow.stage_semantic? (situação derivada do sync) —
+//   presente nos selects de /registros e do modo lista p/ a grade núcleo do
+//   painel de detalhe.
 // v1.5 (20/07/2026): rótulos dos tipos calculados mais claros — "Calculado
 //   (por registro)" e "Calculado (totais do recorte)" (keys intactas).
 // v1.4 (15/07/2026): exibição percentual — FieldDefinition.show_as_percent,
@@ -125,6 +128,9 @@ export interface RecordRow {
   channel: string | null;
   closed: boolean;
   closed_at: string | null;
+  // Situação derivada do sync (open/won/lose). Presente só em selects que a
+  // pedem (Registros e avaliação de fórmulas a trazem; kanban não).
+  stage_semantic?: string | null;
   // Datas de abertura/criação na origem (fallback p/ conversão de moeda quando o
   // registro ainda não tem fechamento). Podem vir ausentes em selects antigos.
   opened_at?: string | null;
