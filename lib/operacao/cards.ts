@@ -47,6 +47,14 @@ export const OPERACAO_CARDS: OperacaoCard[] = [
     href: "/operacao/remuneracao",
     area: "remuneracao",
   },
+  {
+    key: "mapeamentos",
+    label: "Mapeamentos",
+    description:
+      "De-para de classificação: cargos → área/nível e segmentos → categoria, aplicados aos registros.",
+    href: "/operacao/mapeamentos",
+    area: "mapeamentos",
+  },
 ];
 
 /** Recorte puro do catálogo: padrões sempre; org-específicos conforme o

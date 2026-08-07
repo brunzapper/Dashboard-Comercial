@@ -1,3 +1,17 @@
+<!-- Versão: 1.60 | Data: 07/08/2026 -->
+<!-- v1.60 (07/08/2026): §4.19 — MAPEAMENTOS DE VALORES (de-para, 0117):
+     tabela value_mappings + domínios em código (lib/mappings/domains.ts:
+     cargo → cargo_area/cargo_nivel; segmento → segmento_classificado, base
+     Meetime), aplicação como ESPELHO DERIVADO (lib/mappings/apply.ts,
+     service role + org explícita, carimbos fmod+locally_modified_at, sem
+     audit/webhook), pendências notificadas por TAREFA do org_admin
+     (lib/mappings/notify.ts), card de Operação org-específico
+     /operacao/mapeamentos (feature "mapeamentos") e hooks nas caudas de
+     import CSV/API. Preset novo "Outbound — Pré-Vendas"
+     (lib/presets/outbound.ts — regras jul/2026+ do dashboard legado: subs
+     ob_rr/ob_rq/ob_noshow sobre leads fonte "Outro" por Data Reunião;
+     perfil/esforço sobre a base meetime_outbound; meta rq_outbound). RPCs
+     intocados; invariante 28. -->
 <!-- Versão: 1.59 | Data: 06/08/2026 -->
 <!-- v1.59 (06/08/2026): §4.8 — sub-base que IGNORA o filtro de período
      (sub_sources.ignore_period, 0116): applyPeriodToFilters particiona as
@@ -3038,6 +3052,61 @@ toca inputs, erro isolado, total por membro com tabela própria),
 `lib/comp/mirror.test.ts` (builders do form, rem_comissao) e
 `lib/metas/upsert.test.ts` (find-then-update, registry). Ver invariante 26.
 
+### 4.19 Mapeamentos de valores (de-para, 0117 — 07/08/2026)
+
+Substitui os caches "Map Cargos"/"Map Segmentos" do dashboard antigo em Apps
+Script: um **domínio** liga um campo CRU de uma base aos campos ALVO derivados,
+e a tabela `value_mappings` guarda as entradas do de-para (unicidade por
+`organization_id + domain + raw_norm`; `raw_norm = lower(trim(valor))` —
+byte-igual à chave do cache antigo).
+
+- **Domínios em CÓDIGO** (`lib/mappings/domains.ts`, puro): hoje `cargo`
+  (`custom:cargo` do Meetime → `cargo_area` + `cargo_nivel`) e `segmento`
+  (`custom:segmento` → `segmento_classificado`), ambos na base
+  `meetime_outbound`. Valor sem entrada (ou vazio) recebe o fallback
+  `"Não Classificado"`; só o valor NÃO-vazio sem entrada é PENDÊNCIA. O
+  planejamento (`planMappingWrites`) é puro e devolve só DIFERENÇAS —
+  aplicar N vezes não reescreve nada.
+- **Aplicação = ESPELHO DERIVADO** (`lib/mappings/apply.ts` —
+  `applyValueMappings`, service role com org EXPLÍCITA em toda consulta):
+  merge em `custom_fields` com carimbos `field_modified_at[campo]` +
+  `locally_modified_at` (protege do re-import/reconcile), SEM audit/webhook
+  (mesma família da alocação-como-campo), mock nunca recebe escrita, UM
+  `recalcFormulaFieldsForRecords` ao final. Os campos alvo são
+  `field_definitions` locais (texto) garantidos por `ensureMappingFields`
+  (ensure-if-absent). RPCs de widget INTOCADOS — o de-para nunca desce ao SQL
+  das consultas.
+- **Notificação por TAREFA** (`lib/mappings/notify.ts` — `syncUnmappedTasks`):
+  UMA tarefa aberta por domínio, criada em nome do org_admin
+  (`created_by` = admin ⇒ só ele a vê no sino, `notifyMeFilter`); pendência
+  nova ATUALIZA a descrição; zero pendências AUTO-COMPLETA; webhooks
+  `task.*` emitidos à mão (insert cru não passa pelas actions). Textos puros
+  em `lib/mappings/messages.ts`.
+- **Hooks**: caudas do import CSV (`finalizeCsvImport(recordType)`) e da rota
+  `/api/ingest/[source]` chamam `maybeApplyMappingsAfterImport` (best-effort,
+  nunca lança) quando o `record_type` pertence a um domínio; as actions da
+  página reaplicam o domínio tocado a cada edição.
+- **UI**: card de Operação org-específico `/operacao/mapeamentos` (feature
+  `mapeamentos` em `org_features`, área `mapeamentos` com gate admin —
+  precedência feature-off > deny > allow > papel). Página lista pendências
+  (com classificação inline), mapeamentos (busca/edição/exclusão) e "Aplicar
+  agora"; loaders em `lib/mappings/overview.ts` (client do usuário, RLS).
+- **Seed**: `supabase/apply/seed-value-mappings.sql` (importado dos CSVs do
+  dashboard antigo; `on conflict do nothing` — nunca sobrescreve edições).
+
+O preset **"Outbound — Pré-Vendas"** (`lib/presets/outbound.ts`) consome os
+campos derivados na aba Perfil e porta as regras de jul/2026+ do dashboard
+legado: RR/RQ = leads Bitrix com `custom:fonte = "Outro"` alocados pela Data
+Reunião ≥ 01/07/2026 (subs `ob_rr`/`ob_rq`; `ob_noshow` pela mudança de etapa
+— o Bitrix não preenche DR no no-show), funil/perfil/esforço sobre a base
+`meetime_outbound` (sub `ganhos_meetime` compartilhada com os dashboards
+feitos à mão), tier por `Quantidade de contas` (campo calculado
+`tier_contas`), origem da reunião via `match:meetime_outbound:…` (regra de
+match "Meets Outbound") e meta mensal na chave `rq_outbound` do registry.
+Testes: `lib/mappings/domains.test.ts` (catálogo, normalização, plano
+idempotente, mensagens) e `lib/presets/outbound.test.ts` (estrutura, regra
+jul/2026 pinada, fórmulas validadas nos catálogos reais). Ver invariante 28.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -3462,6 +3531,22 @@ principalmente — para mantenedores humanos.
     cujos predicados comparam a coluna crua (sub-base, perfil de operação,
     automações do kanban) seguem gravando ID (picker exibe rótulo; storeAs
     "value") — nome lá NÃO resolve e no validador de import é erro dedicado.
+
+28. **Mapeamentos de valores são ESPELHO DERIVADO, escritos SÓ pela rotina
+    única (§4.19).** Os campos alvo (`cargo_area`/`cargo_nivel`/
+    `segmento_classificado`) são derivados de `value_mappings` + campo cru
+    pela rotina `applyValueMappings` (service role, org EXPLÍCITA, carimbos
+    `field_modified_at` + `locally_modified_at`, sem audit/webhook, mock
+    fora, UM recalc) — NUNCA os edite à mão esperando que sobrevivam à
+    reaplicação, e NUNCA resolva o de-para no RPC/SQL das consultas (widgets
+    leem o campo materializado). Domínio novo = entrada em
+    `lib/mappings/domains.ts` (nunca lista paralela); o lookup é por
+    `raw_norm = lower(trim())` e o app grava SEMPRE `raw_value` + `raw_norm`.
+    A notificação de pendências é UMA tarefa aberta por domínio em nome do
+    org_admin (atualizada in-place; auto-completa em zero) — não crie
+    tarefas novas por rodada nem outra via de notificação. O seed
+    (`supabase/apply/seed-value-mappings.sql`) é `on conflict do nothing` —
+    reexecutar nunca sobrescreve edições feitas na página.
 
 ## 6. Convenções do projeto
 

@@ -517,8 +517,8 @@ export function ImportWizard({
         setProgress({ done: Math.min(i + chunkSize, total), total });
       }
 
-      // 4) Auto-match + recálculo, uma vez só.
-      const fin = await finalizeCsvImport();
+      // 4) Auto-match + recálculo (+ mapeamentos de valores da base), uma vez só.
+      const fin = await finalizeCsvImport(source.recordType);
       setReport({ result: acc, finalized: fin.ok });
       // Linhas já importadas mesmo se o finalize falhou → tela de conclusão
       // (com aviso); falha de chunk fica na Revisão com "Importar novamente".

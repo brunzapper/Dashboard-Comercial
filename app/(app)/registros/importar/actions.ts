@@ -29,6 +29,8 @@ import type { SyncResult } from "@/lib/sync/shared";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { ensureAllAutoOperations } from "@/lib/operations/auto-operations";
+import { maybeApplyMappingsAfterImport } from "@/lib/mappings/apply";
+import { getActiveOrgId } from "@/lib/auth/org";
 
 const MAX_CHUNK_ROWS = 500;
 // Fonte única com o wizard e a sugestão por IA (lib/import/csv.ts).
@@ -280,7 +282,9 @@ export async function importCsvChunk(
 
 // ============ Finalização ============
 
-export async function finalizeCsvImport(): Promise<{ ok: boolean; message?: string }> {
+export async function finalizeCsvImport(
+  recordType?: string
+): Promise<{ ok: boolean; message?: string }> {
   const auth = await ensureAdmin();
   if (!auth.ok) return { ok: false, message: auth.message };
 
@@ -298,6 +302,11 @@ export async function finalizeCsvImport(): Promise<{ ok: boolean; message?: stri
     await ensureAllAutoOperations(db);
   } catch {
     /* ignora: o botão "Gerar sub-operações agora" em Fontes cobre depois. */
+  }
+  // Mapeamentos de valores (0117): base de domínio (ex.: Meetime) ganha a
+  // classificação derivada + tarefa de pendências. Best-effort (não lança).
+  if (recordType) {
+    await maybeApplyMappingsAfterImport(db, await getActiveOrgId(), recordType);
   }
   // Dados de REGISTROS não afetam os providers do layout raiz (fontes/rótulos):
   // revalida só as superfícies que exibem registros, em vez de "/" + layout

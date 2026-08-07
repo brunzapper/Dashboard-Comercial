@@ -1,3 +1,7 @@
+<!-- Versão: 1.25 | Data: 07/08/2026 -->
+<!-- v1.25 (07/08/2026): §4.14 — mapeamentos de valores (de-para 0117) e o
+     preset "Outbound — Pré-Vendas": runbook de seed/feature/reaplicação e
+     pré-requisitos de dado do preset. -->
 <!-- Versão: 1.24 | Data: 05/08/2026 -->
 <!-- v1.24 (05/08/2026): Remuneração mudou de Configurações → Remuneração
      para Operação → Remuneração (/operacao/remuneracao — card org-específico
@@ -738,6 +742,45 @@ CRM vira Paulo Vitor Santos" viram UMA operação filtros + alterações
   `lib/ai/update-records.ts`; escrita SÓ por `updateRecordValuesBulk`
   (`lib/records/bulk-update.ts` — client RLS, nunca service role). Testes:
   `update-validate.test.ts` + `bulk-update.test.ts`.
+
+### 4.14 Mapeamentos de valores e o preset Outbound (0117, 07/08/2026)
+
+**Mapeamentos (de-para)** — Workspace → Operação → Mapeamentos
+(`/operacao/mapeamentos`; feature de org `mapeamentos`, ligada só pelo
+console `/owner`; a Zapper já nasce ON):
+
+- **Seed inicial por org**: rodar `supabase/apply/seed-value-mappings.sql`
+  (idempotente; `on conflict do nothing` — nunca sobrescreve edições feitas
+  na página). A Zapper foi semeada em 07/08/2026 (1.683 cargos + 273
+  segmentos dos caches do Apps Script).
+- **Reaplicar aos registros**: botão "Aplicar agora" da página (ou qualquer
+  edição de mapeamento — a action reaplica o domínio tocado). O import
+  CSV/API da base Meetime reaplica sozinho na cauda
+  (`maybeApplyMappingsAfterImport`).
+- **Pendências**: valores sem classificação viram UMA tarefa aberta por
+  domínio no sino do org_admin (atualizada in-place; auto-completa quando
+  zera). A lista completa está na própria página.
+- **Domínio novo** (outro campo/base): entrada em
+  `lib/mappings/domains.ts` + testes (`lib/mappings/domains.test.ts`) —
+  nunca lista paralela; os campos alvo são criados pelo
+  `ensureMappingFields` no primeiro apply.
+
+**Preset "Outbound — Pré-Vendas"** (Configurações → Presets → Gerar) —
+pré-requisitos de DADO:
+
+- Base `meetime_outbound` criada e com o CSV do Meetime importado (campos
+  `custom:cargo`, `custom:segmento`, `custom:status`, `custom:cadencia`,
+  atividades etc.). O funil RR/RQ usa os LEADS do Bitrix com
+  `custom:fonte = "Outro"` e Data Reunião ≥ 01/07/2026 (regra jul/2026+ do
+  dashboard legado; subs `ob_rr`/`ob_rq`/`ob_noshow`).
+- Mapeamentos aplicados (aba Perfil usa `custom:cargo_area`,
+  `custom:cargo_nivel`, `custom:segmento_classificado`) e recalc dos campos
+  calculados rodado (campo `tier_contas`).
+- Regra de match "Meets Outbound" (leads ↔ meetime_outbound por e-mail) —
+  alimenta "Origem das Reuniões" (`match:meetime_outbound:…`).
+- Meta mensal na chave `rq_outbound` (área Metas) — alimenta o card "Meta de
+  RQ" e a linha de meta da Evolução Histórica; sem meta o card mostra só o
+  realizado.
 
 ## 5. Troubleshooting
 
