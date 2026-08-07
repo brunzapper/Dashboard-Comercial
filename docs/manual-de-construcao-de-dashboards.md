@@ -1,3 +1,9 @@
+<!-- Versão: 1.27 | Data: 07/08/2026 -->
+<!-- v1.27 (07/08/2026): §6.2 — "Expressão condicional" da dimensão (fórmula
+     Se/E/Ou que reclassifica os valores em rótulos e agrupa por eles; sem
+     "senão" preserva o original; multi-campo permitido; exclusiva de
+     Formato/"Agrupar período"; não vale em lista/kanban) e §2.1 — sub-abas
+     opcionais Moedas/Reclassificações da página Campos. -->
 <!-- Versão: 1.26 | Data: 06/08/2026 -->
 <!-- v1.26 (06/08/2026): §2.2/§6.1 — Sub-base com "Ignorar filtro de período"
      (checkbox no gerenciador): as linhas dela entram nos widgets sem recorte
@@ -254,8 +260,12 @@ avançados dependem deles.
 
 ### 2.1 Aba "Campos" (menu lateral → Campos)
 
-Página com três sub-abas: **Campos**, **Correspondências** e **Conexões**.
-Requer a permissão de gestão de campos.
+Página com as sub-abas **Campos**, **Correspondências** e **Conexões** — e,
+conforme a organização, **Moedas** (§2.5) e **Reclassificações** (de-para de
+valores: um campo cru vira campo(s) classificado(s) por categorias canônicas,
+com classificação automática dos valores e pendências notificadas por tarefa;
+os campos classificados são campos de texto normais e podem ser usados em
+qualquer widget). Requer a permissão de gestão de campos.
 
 #### 2.1.1 Sub-aba Campos
 
@@ -1158,6 +1168,22 @@ fatias). Por linha de dimensão:
   campo personalizado com Formato é aproximada (média das médias diárias);
   médias monetárias e fórmulas são exatas.
 - **"Nome exibido"** — rótulo estético da dimensão (não muda o campo).
+- **"Expressão condicional"** (seção recolhível; só widget AGREGADO, campo que
+  não seja de data nem de relação, sem Formato/"Agrupar período"): uma fórmula
+  `Se`/`E`/`Ou` que RECLASSIFICA os valores da dimensão em rótulos e agrupa
+  por eles — ex.: `Se([Fruta]="Mamão";"Doce";Se([Fruta]="Pera";"Dura";
+  "Outros"))` transforma N frutas em 3 grupos. Regras:
+  - `Se` sem o "senão" preserva o valor original (só o que casa é renomeado).
+  - A expressão pode combinar OUTROS campos do registro (`E`/`Ou` entre
+    campos) — ex.: `Se(E([Etapa]="Lead Qualificado";[Fonte]="Outro");
+    "RQ Outbound";"Outros")`; o campo da dimensão segue sendo o principal.
+  - Comparações numéricas funcionam sobre campos de texto numérico
+    (`Se([Qtd]>=10;"Grande";"Pequeno")`).
+  - Só fórmula VÁLIDA é salva; trocar o campo ou escolher um Formato limpa a
+    expressão. Nada é gravado nos registros — é reclassificação de exibição
+    do próprio widget (para materializar um de-para reutilizável em campo,
+    use Campos → Reclassificações).
+  - Não vale no modo lista da Tabela nem no Kanban.
 - **"Agrupar período"** (só campo de data COM formato): colapsa os registros
   de cada bucket usando uma agregação por período — opções: "Individual (por
   registro)" (padrão em listas: uma linha por registro), "Soma", "Contagem",

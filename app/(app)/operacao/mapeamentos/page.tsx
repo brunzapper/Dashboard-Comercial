@@ -7,17 +7,23 @@
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { loadMappingOverview } from "@/lib/mappings/overview";
 import { MappingsManager } from "@/components/operacao/mappings-manager";
 
 export const metadata = { title: "Mapeamentos" };
+// Turno do assistente de IA tem orçamento de 240s (AI_LOOP_TURN_BUDGET_MS).
+export const maxDuration = 300;
 
 export default async function MapeamentosPage() {
   await requireSettingsArea("mapeamentos");
   const orgId = await getActiveOrgId();
   if (!orgId) return null;
   const supabase = await createClient();
-  const overview = await loadMappingOverview(supabase, orgId);
+  const [overview, ai] = await Promise.all([
+    loadMappingOverview(supabase, orgId),
+    loadOrgAiConfigPublic(orgId),
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -30,7 +36,7 @@ export default async function MapeamentosPage() {
           tarefa de pendência no sino.
         </p>
       </div>
-      <MappingsManager overview={overview} />
+      <MappingsManager overview={overview} ai={ai} />
     </div>
   );
 }

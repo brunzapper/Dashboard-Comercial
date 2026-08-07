@@ -1,9 +1,11 @@
-// Versão: 1.0 | Data: 07/08/2026
-// Loader da página /operacao/mapeamentos: entradas do de-para + PENDÊNCIAS
-// (valores crus distintos sem entrada) por domínio. Roda com o client do
-// USUÁRIO (RLS — a page é de admin via requireSettingsArea("mapeamentos")).
+// Versão: 1.1 | Data: 07/08/2026
+// Loader da página /operacao/mapeamentos e da aba Campos → Reclassificações:
+// entradas do de-para + PENDÊNCIAS (valores crus distintos sem entrada) por
+// domínio. Roda com o client do USUÁRIO (RLS — superfícies de admin).
 // A contagem varre os registros do domínio paginada, lendo SÓ o campo cru
-// (custom_fields->>key) — volume atual ~4k linhas por base, tranquilo p/ RSC.
+// (custom_fields->>key) — volume atual ~4k linhas por base, tranquilo p/ RSC;
+// com N domínios dinâmicos o custo cresce linearmente, por isso `opts.keys`
+// permite carregar só um domínio e a aba de Campos carrega LAZY (na ativação).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -12,12 +14,15 @@ import {
   normalizeRawValue,
   type MappingDomain,
 } from "./domains";
+import { loadMappingDomains } from "./registry";
 
 export interface MappingRow {
   id: string;
   rawValue: string;
   rawNorm: string;
   outputs: Record<string, string>;
+  /** Origem da entrada (0118): manual | seed | auto | ai. */
+  origin: string;
 }
 
 export interface UnmappedValue {
@@ -30,10 +35,14 @@ export interface DomainOverview {
   label: string;
   rawFieldLabel: string;
   targets: { fieldKey: string; label: string }[];
+  /** Sugestões do dropdown por target: canônicas do domínio ∪ já usadas. */
+  optionsByTarget: Record<string, string[]>;
   mappings: MappingRow[];
   unmapped: UnmappedValue[];
   /** Registros do domínio com o campo cru preenchido. */
   recordsWithValue: number;
+  /** true = domínio em CÓDIGO (badge "Sistema", não editável/excluível). */
+  system: boolean;
 }
 
 const PAGE = 1000;
@@ -47,7 +56,7 @@ async function loadDomainMappings(
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await db
       .from("value_mappings")
-      .select("id, raw_value, raw_norm, outputs")
+      .select("id, raw_value, raw_norm, outputs, origin")
       .eq("organization_id", orgId)
       .eq("domain", domain.key)
       .order("raw_norm", { ascending: true })
@@ -59,6 +68,7 @@ async function loadDomainMappings(
         rawValue: r.raw_value as string,
         rawNorm: r.raw_norm as string,
         outputs: (r.outputs ?? {}) as Record<string, string>,
+        origin: (r.origin as string | null) ?? "manual",
       });
     }
     if (!data || data.length < PAGE) break;
@@ -114,10 +124,14 @@ async function loadDomainUnmapped(
 
 export async function loadMappingOverview(
   db: SupabaseClient,
-  orgId: string
+  orgId: string,
+  opts?: { domains?: MappingDomain[]; keys?: string[] }
 ): Promise<DomainOverview[]> {
+  const all = opts?.domains ?? (await loadMappingDomains(db, orgId));
+  const selected = opts?.keys ? all.filter((d) => opts.keys!.includes(d.key)) : all;
+  const codeKeys = new Set(MAPPING_DOMAINS.map((d) => d.key));
   const out: DomainOverview[] = [];
-  for (const domain of MAPPING_DOMAINS) {
+  for (const domain of selected) {
     const mappings = await loadDomainMappings(db, orgId, domain);
     const { unmapped, recordsWithValue } = await loadDomainUnmapped(
       db,
@@ -125,14 +139,29 @@ export async function loadMappingOverview(
       domain,
       mappings
     );
+    // Dropdowns: categorias canônicas do domínio ∪ valores já usados nas
+    // entradas (reaproveita a "inteligência" acumulada), ordem pt-BR.
+    const optionsByTarget: Record<string, string[]> = {};
+    for (const t of domain.targets) {
+      const set = new Set<string>(domain.options[t.fieldKey] ?? []);
+      for (const m of mappings) {
+        const v = m.outputs[t.fieldKey];
+        if (typeof v === "string" && v.trim() !== "") set.add(v.trim());
+      }
+      optionsByTarget[t.fieldKey] = [...set].sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
+      );
+    }
     out.push({
       key: domain.key,
       label: domain.label,
       rawFieldLabel: domain.rawFieldLabel,
       targets: domain.targets,
+      optionsByTarget,
       mappings,
       unmapped,
       recordsWithValue,
+      system: codeKeys.has(domain.key),
     });
   }
   return out;

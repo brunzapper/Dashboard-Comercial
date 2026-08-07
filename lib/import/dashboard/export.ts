@@ -168,6 +168,9 @@ function exportDimension(d: Dimension): Dimension {
     weekMode: d.weekMode,
     closedWeek: d.closedWeek,
     dateAgg: d.dateAgg,
+    // Expressão condicional: tokens passam direto no validador (round-trip,
+    // mesmo racional do calc ad-hoc das métricas).
+    caseFormula: d.caseFormula,
   }) as Dimension;
 }
 

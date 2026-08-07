@@ -1,3 +1,34 @@
+<!-- Versão: 1.63 | Data: 07/08/2026 -->
+<!-- v1.63 (07/08/2026): §4.19 v4 — domínios DINÂMICOS de reclassificação
+     (tabela mapping_domains 0119, criados pela aba Campos → Reclassificações;
+     registry EFETIVO código ∪ banco em lib/mappings/registry.ts, parse
+     fail-closed, colisão de key: código vence; export CSV/JSON do domínio em
+     lib/mappings/export.ts — CSV template byte-compatível com o colar do
+     assistente) e §4.20 — dimensão CONDICIONAL (Dimension.caseFormula:
+     expressão SE/E/OU que reclassifica os valores da dim em rótulos, 100%
+     engine via lib/widgets/case-dim.ts — fold simples no bucket-merge p/ refs
+     do próprio campo, expansão/contração client-side p/ multi-campo; RPCs
+     intocados). Invariantes 28 (dinâmicos) e 29 (case dim) atualizadas. -->
+<!-- Versão: 1.62 | Data: 07/08/2026 -->
+<!-- v1.62 (07/08/2026): §4.19 v3 — motor de classificação APRENDIDO genérico
+     (banco de palavras auto-alimentado, lib/mappings/classify/learned.ts:
+     buildWordBank/suggestFromBank sobre as entradas do próprio domínio,
+     votos por token ponderados por pureza + thresholds de confiança; nunca
+     chuta), composto ao classificador codificado por composeSuggester
+     (lib/mappings/domains.ts — específico V5 primeiro, aprendido como
+     fallback e ÚNICO motor de domínio novo sem código) e resposta da IA
+     EXTERNA aceita também CSV (lib/import/mappings/csv.ts —
+     csvToClassifyJson converte cabeçalho "valor,<fieldKey|rótulo>" ao
+     contrato antes do validador; só no fluxo colado do preview). -->
+<!-- Versão: 1.61 | Data: 07/08/2026 -->
+<!-- v1.61 (07/08/2026): §4.19 v2 — classificação AUTOMÁTICA (port fiel do
+     classificador V5 do Apps Script em lib/mappings/classify/*; valores sem
+     entrada viram entradas origin='auto' na aplicação — 0118 adiciona a
+     coluna origin manual/seed/auto/ai), dropdowns com categorias canônicas ∪
+     usadas (datalist) e ASSISTENTE DE IA "Classificar com IA" (contrato
+     mapeamentos-classify v1 em lib/import/mappings/*, core em
+     lib/ai/classify-mappings.ts, padrão §4.17 com prévia EDITÁVEL e fluxo
+     copiar-prompt → colar-JSON). Invariante 28 atualizada. -->
 <!-- Versão: 1.60 | Data: 07/08/2026 -->
 <!-- v1.60 (07/08/2026): §4.19 — MAPEAMENTOS DE VALORES (de-para, 0117):
      tabela value_mappings + domínios em código (lib/mappings/domains.ts:
@@ -3093,6 +3124,79 @@ byte-igual à chave do cache antigo).
   agora"; loaders em `lib/mappings/overview.ts` (client do usuário, RLS).
 - **Seed**: `supabase/apply/seed-value-mappings.sql` (importado dos CSVs do
   dashboard antigo; `on conflict do nothing` — nunca sobrescreve edições).
+- **Classificação AUTOMÁTICA (07/08/2026)**: o registry ganha `suggest` por
+  domínio (port FIEL do classificador V5 do Apps Script —
+  `lib/mappings/classify/cargo.ts` com keywords 40% + contexto 50% + padrões
+  10% + 24 overrides + nível hierárquico; `segmento.ts` com pesos/exclusões
+  + tech verticals + genéricos) e `options` por target (categorias
+  canônicas). Na aplicação, valor sem entrada passa pelo sugestor EFETIVO
+  (varredura leve `collectRawValues` + `autoClassifyValues` puro): resultado
+  classificável vira entrada **`origin='auto'`** (0118 — upsert
+  `ignoreDuplicates`, nunca sobrescreve manual/seed/IA) e a pendência fica só
+  com o que a heurística não resolveu — mesmo comportamento do Apps Script,
+  que gravava o cache automaticamente. `origin`
+  (`manual|seed|auto|ai`) é informativa (badge na página) e nunca muda o
+  lookup. Paridade com o legado pinada em
+  `lib/mappings/classify/classify.test.ts` (casos reais do cache).
+- **Motor APRENDIDO (banco de palavras — genérico p/ qualquer domínio)**:
+  `lib/mappings/classify/learned.ts` constrói um índice token → categoria a
+  partir das PRÓPRIAS entradas do domínio (`buildWordBank`) e sugere por
+  votos ponderados pela PUREZA do token com thresholds conservadores
+  (`MIN_EVIDENCE`/`MIN_PURITY`/`MIN_SINGLE_TOKEN_COUNT` — sem confiança ⇒
+  pendência, nunca chuta; match exato por norm vence). O sugestor EFETIVO é
+  `composeSuggester(domain, index)` (domains.ts): classificador ESPECÍFICO
+  (V5) primeiro, banco aprendido como fallback — e como ÚNICO motor de
+  domínio novo SEM classificador codificado. É a RETROALIMENTAÇÃO: cada
+  correção manual/IA ensina a rodada seguinte (pinado em
+  `learned.test.ts`). Domínio futuro de reclassificação = entrada no
+  registry, zero código de classificação.
+- **Domínios DINÂMICOS (0119 — 07/08/2026)**: a tabela `mapping_domains`
+  guarda domínios criados pela UI (aba **Campos → Reclassificações**) — a
+  LINHA é o registry do domínio: `key` (= `value_mappings.domain` das
+  entradas; passa no MESMO check de slug da 0117), bases raiz
+  (`record_types`), campo cru (`raw_field_key`, check de slug como defesa —
+  o valor é interpolado em select PostgREST) e `targets` jsonb
+  (`fieldKey`/`label`/`options` canônicas — nunca lista paralela). O registry
+  EFETIVO em runtime é **código ∪ banco** (`lib/mappings/registry.ts` —
+  `loadMappingDomains(db, orgId)`, org SEMPRE explícita; parse FAIL-CLOSED
+  linha a linha, malformada é ignorada com aviso; colisão de key: código
+  VENCE, e a action de criação também barra). Domínio dinâmico NÃO tem
+  classificador codificado — o motor aprendido é o único sugestor dele.
+  Consumidores (apply/overview/notify/actions/IA) recebem os domínios JÁ
+  carregados — `messages.ts`/`notify.ts` recebem rótulos/domínios por
+  parâmetro, nunca resolvem `MAPPING_DOMAINS` por conta. CRUD nas actions da
+  aba (`app/(app)/campos/reclassificacoes-actions.ts` — gate admin + área
+  `mapeamentos`; key IMUTÁVEL na edição; alvo homônimo existente precisa ser
+  texto; máx. 3 targets; salvar aplica na hora): excluir domínio EXCLUI as
+  entradas do de-para e fecha a tarefa de pendências, mas PRESERVA os campos
+  alvo e os valores já materializados (padrão "desligar nunca apaga dados").
+  A aba carrega o overview LAZY (1ª ativação) e some com a área/feature
+  negada (slot opcional, padrão da aba Moedas). RLS: select da org, escrita
+  admin; NUNCA policy anon.
+- **Export do domínio p/ trabalho externo** (`lib/mappings/export.ts`, puro):
+  CSV = TEMPLATE das pendências (`valor;<fieldKeys>` com saídas vazias —
+  byte-compatível com `csvToClassifyJson`, o arquivo preenchido cola de volta
+  no assistente) e JSON = dump de trabalho (categorias aceitas + mapeados
+  como exemplos + pendências). Round-trip pinado em
+  `lib/mappings/export.test.ts`.
+- **Dropdowns**: os inputs de classificação usam `<Input list>` + `datalist`
+  (padrão do repo — sugestão + valor livre) com `optionsByTarget` do
+  overview = canônicas do domínio ∪ valores já usados nas entradas.
+- **Assistente de IA "Classificar com IA"** (padrão §4.17; modelo
+  manage-operations): contrato `mapeamentos-classify` v1
+  (`lib/import/mappings/{types,validate,instructions}.ts` — valor DEVE ser
+  um pendente, categorias DEVEM ser as aceitas, teto por resposta, mensagens
+  pt-BR que guiam o laço; SPEC derivado das constantes e fiscalizado por
+  `instructions.test.ts`); core `lib/ai/classify-mappings.ts` com as 4
+  funções do padrão (gate admin + área `mapeamentos`; apply RE-VALIDA com
+  contexto fresco, grava `origin='ai'` pelos mesmos upserts da página e
+  reaplica o domínio + tarefas); UI `mappings-ai-sheet.tsx` com prévia
+  **EDITÁVEL** (datalist por target + remover item) e o fluxo copiar-prompt
+  → colar-JSON (funciona SEM IA configurada). No fluxo COLADO, a resposta
+  também pode vir em **CSV** (`valor,<campos>` — fieldKey ou rótulo no
+  cabeçalho): `lib/import/mappings/csv.ts` converte ao MESMO contrato antes
+  do validador (nenhuma regra duplicada); o laço do chat interno segue
+  JSON-only.
 
 O preset **"Outbound — Pré-Vendas"** (`lib/presets/outbound.ts`) consome os
 campos derivados na aba Perfil e porta as regras de jul/2026+ do dashboard
@@ -3104,8 +3208,59 @@ feitos à mão), tier por `Quantidade de contas` (campo calculado
 `tier_contas`), origem da reunião via `match:meetime_outbound:…` (regra de
 match "Meets Outbound") e meta mensal na chave `rq_outbound` do registry.
 Testes: `lib/mappings/domains.test.ts` (catálogo, normalização, plano
-idempotente, mensagens) e `lib/presets/outbound.test.ts` (estrutura, regra
-jul/2026 pinada, fórmulas validadas nos catálogos reais). Ver invariante 28.
+idempotente, mensagens), `lib/mappings/registry.test.ts` (parse fail-closed,
+merge código ∪ banco), `lib/mappings/export.test.ts` (round-trip do CSV
+template) e `lib/presets/outbound.test.ts` (estrutura, regra jul/2026 pinada,
+fórmulas validadas nos catálogos reais). Ver invariante 28.
+
+### 4.20 Dimensão condicional (`Dimension.caseFormula` — 07/08/2026)
+
+Uma dimensão de widget AGREGADO pode carregar uma **expressão condicional**
+(fórmula `SE`/`E`/`OU` do avaliador único de `lib/records/formulas`) que
+reclassifica os valores em rótulos e agrupa por eles — ex.:
+`Se([Fruta]="Mamão";"Doce";Se([Fruta]="Pera";"Dura";"Outros"))`. É a versão
+"ad-hoc, só de exibição" do de-para do §4.19 (que MATERIALIZA campos): nada é
+gravado em registro — a reclassificação vive na config do widget e resolve em
+runtime. **100% engine, RPCs intocados** (não aciona a invariante 1):
+
+- **Helpers ÚNICOS** em `lib/widgets/case-dim.ts` — gates
+  (`caseDimActive`/`dimNeedsCaseFold`/`dimNeedsCaseExpand`), avaliação
+  (`caseDimValue` — coerção numérica do texto cru do RPC, espelho da
+  semântica `*_num`; resultado `null` — SE sem "senão", ref ausente —
+  PRESERVA o valor cru; booleano vira "VERDADEIRO"/"FALSO") e o plano de
+  expansão (`planCaseExpansion`). Engine, bucket-merge, UI e validador de
+  import derivam TODOS daqui — nunca duplique os gates.
+- **Mecanismo SIMPLES** (refs SÓ do próprio campo da dim): o RPC agrupa pelo
+  valor cru como hoje e `mergeRowsByBucket` funde valor→rótulo na MESMA
+  passada dos buckets custom/apelidos (`caseIdx` — fold pelo
+  `foldRowGroup`, métricas/`__money`/basis das calculadas).
+- **Mecanismo ROBUSTO** (refs de MAIS campos — `E`/`OU` entre campos): o
+  engine troca o payload de dims de TODOS os RPCs da rodada
+  (principal/aux monetária/pernas por métrica/comparação) pelas dims CRUAS
+  expandidas (`planCaseExpansion` — o campo da dim + as refs extras) e
+  `contractCaseRows` (bucket-merge) contrai as linhas de volta ao shape da
+  config ANTES do merge por bucket, avaliando a expressão por TUPLA de refs
+  e fundindo os grupos que caem no mesmo rótulo. Os laços de tupla da rodada
+  (bdMap, pernas, condValueByKey) usam `rpcDims.length` — as linhas cruas
+  têm as colunas expandidas.
+- **Exclusões**: mutuamente exclusiva com `transform`/`dateAgg` (com eles
+  presentes a expressão fica INERTE — `caseDimActive` — nunca meio-aplicada);
+  proibida em campo de data/relação e com refs de data/relação/`today` na
+  expressão; fora do escopo: modo lista, kanban. A UI (`DimensionRow`, seção
+  recolhível "Expressão condicional") só oferece quando capaz, limpa a
+  expressão ao trocar campo/formato (nunca fica órfã) e exibe aviso com
+  "Limpar" para expressão órfã vinda de JSON antigo; só fórmula VÁLIDA
+  persiste (FormulaEditor + `validateFormulaForContext`, contexto record).
+- **Import/export da IA**: a dim aceita `case_formula_text` (texto estilo
+  planilha, preferido) OU `caseFormula` tokens (round-trip do export);
+  incompatibilidade remove com AVISO (padrão closedWeek) e o SPEC documenta
+  como ponto MANUAL da seção Dimensões (chave de DIMENSÃO — fora dos
+  dicionários de settings-docs).
+
+Testes: `lib/widgets/case-dim.test.ts` (gates, avaliação, fold, expansão/
+contração) + blocos em `lib/widgets/engine.test.ts` (simples e robusto de
+ponta a ponta com cliente fake) + `lib/import/dashboard/validate.test.ts`
+(texto→tokens, remoções com aviso, round-trip). Ver invariante 29.
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -3540,13 +3695,40 @@ principalmente — para mantenedores humanos.
     fora, UM recalc) — NUNCA os edite à mão esperando que sobrevivam à
     reaplicação, e NUNCA resolva o de-para no RPC/SQL das consultas (widgets
     leem o campo materializado). Domínio novo = entrada em
-    `lib/mappings/domains.ts` (nunca lista paralela); o lookup é por
-    `raw_norm = lower(trim())` e o app grava SEMPRE `raw_value` + `raw_norm`.
+    `lib/mappings/domains.ts` OU linha de `mapping_domains` (0119 — criada
+    pela aba Campos → Reclassificações; nunca lista paralela); o registry
+    EFETIVO é SEMPRE `loadMappingDomains` (código ∪ banco, parse
+    fail-closed, colisão: código vence) — consumidor novo NUNCA itera
+    `MAPPING_DOMAINS` direto para resolver domínios de uma org. O lookup é
+    por `raw_norm = lower(trim())` e o app grava SEMPRE `raw_value` +
+    `raw_norm`.
     A notificação de pendências é UMA tarefa aberta por domínio em nome do
     org_admin (atualizada in-place; auto-completa em zero) — não crie
     tarefas novas por rodada nem outra via de notificação. O seed
     (`supabase/apply/seed-value-mappings.sql`) é `on conflict do nothing` —
-    reexecutar nunca sobrescreve edições feitas na página.
+    reexecutar nunca sobrescreve edições feitas na página. A classificação
+    AUTOMÁTICA (`suggest` do domínio — port do V5) e a de IA (contrato
+    `mapeamentos-classify`) criam entradas `origin='auto'`/`'ai'` SÓ pelos
+    mesmos upserts (auto = `ignoreDuplicates`, nunca sobrescreve; IA passa
+    pelo validador que restringe valores aos PENDENTES e categorias às
+    aceitas) — categorias canônicas vivem no registry
+    (`domain.options`), nunca em lista paralela do validador/UI.
+
+29. **A dimensão condicional (`Dimension.caseFormula`) se resolve no ENGINE,
+    nunca no RPC (§4.20).** Refs só do próprio campo ⇒ fold valor→rótulo no
+    `mergeRowsByBucket`; refs de mais campos ⇒ expansão das refs em dims
+    CRUAS no payload dos RPCs (`planCaseExpansion`) + contração client-side
+    (`contractCaseRows`) ANTES do merge por bucket — NÃO recrie
+    `run_widget_query`/`_snapshot` para agrupamento condicional (acionaria a
+    invariante 1 sem necessidade). Os gates/avaliação vivem SÓ em
+    `lib/widgets/case-dim.ts` (engine, bucket-merge, UI do builder e
+    validador de import derivam de lá — nunca os duplique): expressão com
+    `transform`/`dateAgg` presentes é INERTE (`caseDimActive` — nunca
+    meio-aplicada), campo/refs de data/relação são proibidos e `SE` sem
+    "senão" PRESERVA o valor cru. No mecanismo robusto os laços de tupla da
+    rodada (bdMap, pernas por métrica, condValueByKey) iteram por
+    `rpcDims.length` — consulta auxiliar nova que case tuplas com a
+    principal DEVE usar as dims do PAYLOAD, não as da config.
 
 ## 6. Convenções do projeto
 

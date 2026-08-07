@@ -14,13 +14,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import {
-  MAPPING_DOMAINS,
+  autoClassifyValues,
   buildMappingIndex,
-  mappingDomainsForRecordType,
+  normalizeRawValue,
   planMappingWrites,
   type MappingDomain,
+  type MappingIndex,
   type MappingRecordRow,
 } from "./domains";
+import { domainsForRecordType, loadMappingDomains } from "./registry";
 import { syncUnmappedTasks, type UnmappedByDomain } from "./notify";
 
 const PAGE = 500;
@@ -29,6 +31,8 @@ const WRITE_CHUNK = 50;
 export interface ApplyMappingsResult {
   /** Registros efetivamente alterados (todas as gravações somadas). */
   changedRecords: number;
+  /** Entradas criadas pelo classificador heurístico (origin='auto'). */
+  autoMapped: number;
   /** Pendências por domínio: valor cru → nº de registros. */
   unmapped: UnmappedByDomain;
   errors: string[];
@@ -41,7 +45,8 @@ export interface ApplyMappingsResult {
  */
 export async function ensureMappingFields(
   db: SupabaseClient,
-  orgId: string
+  orgId: string,
+  domains: MappingDomain[]
 ): Promise<void> {
   const { data } = await db
     .from("field_definitions")
@@ -49,7 +54,7 @@ export async function ensureMappingFields(
     .eq("organization_id", orgId);
   const have = new Set((data ?? []).map((f) => f.field_key as string));
   const rows: Record<string, unknown>[] = [];
-  for (const domain of MAPPING_DOMAINS) {
+  for (const domain of domains) {
     for (const target of domain.targets) {
       if (have.has(target.fieldKey)) continue;
       have.add(target.fieldKey);
@@ -99,6 +104,89 @@ async function loadMappingIndex(
   return buildMappingIndex(entries);
 }
 
+/**
+ * Varredura LEVE dos valores crus distintos do domínio (só o campo cru, sem
+ * custom_fields inteiro) — insumo da auto-classificação. norm → 1ª forma
+ * vista (exibição).
+ */
+async function collectRawValues(
+  db: SupabaseClient,
+  orgId: string,
+  domain: MappingDomain
+): Promise<Map<string, string>> {
+  const seen = new Map<string, string>();
+  // String NÃO-literal de propósito (parser de tipos do supabase-js não
+  // entende o campo renomeado dinâmico).
+  const selectRaw: string = `raw:custom_fields->>${domain.rawFieldKey}, is_mock`;
+  for (const recordType of domain.recordTypes) {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db
+        .from("records")
+        .select(selectRaw)
+        .eq("organization_id", orgId)
+        .eq("record_type", recordType)
+        .order("id", { ascending: true })
+        .range(from, from + 999);
+      if (error) throw new Error(`records (${recordType}): ${error.message}`);
+      for (const r of (data ?? []) as unknown as {
+        raw: string | null;
+        is_mock: boolean | null;
+      }[]) {
+        if (r.is_mock) continue;
+        const norm = normalizeRawValue(r.raw);
+        if (!norm || seen.has(norm)) continue;
+        seen.set(norm, String(r.raw).trim());
+      }
+      if (!data || data.length < 1000) break;
+    }
+  }
+  return seen;
+}
+
+/**
+ * Auto-atribuição (comportamento do Apps Script antigo): valores sem entrada
+ * passam pelo sugestor EFETIVO do domínio (classificador específico +
+ * banco de palavras APRENDIDO das entradas atuais — retroalimentado a cada
+ * correção); os classificáveis viram entradas `origin='auto'` (upsert
+ * ignoreDuplicates — nunca sobrescreve manual/seed/IA) e entram no índice
+ * desta rodada. Devolve o nº de entradas criadas.
+ */
+async function autoClassifyDomain(
+  db: SupabaseClient,
+  orgId: string,
+  domain: MappingDomain,
+  index: MappingIndex,
+  result: ApplyMappingsResult
+): Promise<number> {
+  const seen = await collectRawValues(db, orgId, domain);
+  const missing = [...seen.entries()]
+    .filter(([norm]) => !index.has(norm))
+    .map(([norm, display]) => ({ norm, display }));
+  if (missing.length === 0) return 0;
+  const entries = autoClassifyValues(domain, missing, index);
+  if (entries.length === 0) return 0;
+  for (let i = 0; i < entries.length; i += 500) {
+    const slice = entries.slice(i, i + 500);
+    const { error } = await db.from("value_mappings").upsert(
+      slice.map((e) => ({
+        organization_id: orgId,
+        domain: domain.key,
+        raw_value: e.rawValue,
+        raw_norm: e.rawNorm,
+        outputs: e.outputs,
+        origin: "auto",
+      })),
+      { onConflict: "organization_id,domain,raw_norm", ignoreDuplicates: true }
+    );
+    if (error) {
+      result.errors.push(`auto-classificação (${domain.key}): ${error.message}`);
+      return 0;
+    }
+  }
+  for (const e of entries) index.set(e.rawNorm, e.outputs);
+  return entries.length;
+}
+
 async function applyDomain(
   db: SupabaseClient,
   orgId: string,
@@ -106,6 +194,7 @@ async function applyDomain(
   result: ApplyMappingsResult
 ): Promise<string[]> {
   const index = await loadMappingIndex(db, orgId, domain.key);
+  result.autoMapped += await autoClassifyDomain(db, orgId, domain, index, result);
   const now = new Date().toISOString();
   const changedIds: string[] = [];
   const unmappedTally = new Map<string, number>();
@@ -177,14 +266,14 @@ export async function applyValueMappings(
 ): Promise<ApplyMappingsResult> {
   const result: ApplyMappingsResult = {
     changedRecords: 0,
+    autoMapped: 0,
     unmapped: {},
     errors: [],
   };
-  const domains = MAPPING_DOMAINS.filter(
-    (d) => !domainKeys || domainKeys.includes(d.key)
-  );
+  const all = await loadMappingDomains(db, orgId);
+  const domains = all.filter((d) => !domainKeys || domainKeys.includes(d.key));
   if (domains.length === 0) return result;
-  await ensureMappingFields(db, orgId);
+  await ensureMappingFields(db, orgId, domains);
 
   const changedIds: string[] = [];
   for (const domain of domains) {
@@ -212,14 +301,15 @@ export async function maybeApplyMappingsAfterImport(
 ): Promise<void> {
   try {
     if (!orgId) return;
-    const domains = mappingDomainsForRecordType(recordType);
+    const all = await loadMappingDomains(db, orgId);
+    const domains = domainsForRecordType(all, recordType);
     if (domains.length === 0) return;
     const res = await applyValueMappings(
       db,
       orgId,
       domains.map((d) => d.key)
     );
-    await syncUnmappedTasks(db, orgId, res.unmapped, domains.map((d) => d.key));
+    await syncUnmappedTasks(db, orgId, res.unmapped, domains);
     if (res.errors.length > 0) {
       console.warn("[mappings] aplicação pós-import com erros:", res.errors.slice(0, 3));
     }

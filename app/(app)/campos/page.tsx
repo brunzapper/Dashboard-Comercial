@@ -1,5 +1,9 @@
-// Versão: 1.5 | Data: 30/07/2026
+// Versão: 1.6 | Data: 07/08/2026
 // Campos personalizados (field_definitions). Só admin (manage_field_definitions).
+// v1.6 (07/08/2026): aba Reclassificações (domínios dinâmicos de mapeamento,
+//   0119) — cria de-para de valores pela UI; slot opcional escondido quando a
+//   área/feature "mapeamentos" está negada (padrão da aba Moedas). O conteúdo
+//   pesado (overview por domínio) carrega LAZY dentro da aba.
 // v1.5 (30/07/2026): botão "Criar com IA" (FieldsAiCreateSheet, org com IA
 //   configurada 0096) — até 10 campos por leva, inclusive calculados, com
 //   prévia obrigatória; maxDuration 300 (turno da IA tem orçamento de 240s).
@@ -28,11 +32,16 @@ import {
   loadEnabledCurrencies,
   type SystemCurrency,
 } from "@/lib/widgets/currency";
-import { fieldAppliesToSource, type SourceKey } from "@/lib/sources";
+import { fieldAppliesToSource, rootSources, type SourceKey } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { CamposTabs } from "@/components/campos/campos-tabs";
 import { FieldsManager } from "@/components/campos/fields-manager";
+import {
+  ReclassDomainsTab,
+  type ReclassBaseOption,
+  type ReclassFieldOption,
+} from "@/components/campos/reclass-domains-tab";
 import {
   CorrespondencesManager,
   type RefOption,
@@ -59,7 +68,7 @@ export default async function CamposPage() {
   // IA por org (0096): habilita o botão "Criar com IA" (só config pública).
   const orgId = await getActiveOrgId();
   const ai = orgId ? await loadOrgAiConfigPublic(orgId) : null;
-  const [{ data }, correspondences, matchRules, currencies, moedasDenied, allCurrencies, { data: ratesData }] =
+  const [{ data }, correspondences, matchRules, currencies, moedasDenied, allCurrencies, { data: ratesData }, reclassDenied] =
     await Promise.all([
       supabase
         .from("field_definitions")
@@ -77,6 +86,7 @@ export default async function CamposPage() {
         .from("currency_rates")
         .select("code, year, quarter, rate, source")
         .order("year", { ascending: false }),
+      isSettingsAreaDenied("mapeamentos"),
     ]);
 
   const fields = (data ?? []) as FieldDefinition[];
@@ -113,6 +123,22 @@ export default async function CamposPage() {
       ],
     ])
   ) as Record<SourceKey, RefOption[]>;
+
+  // Aba Reclassificações (0119): bases RAIZ + campos custom de texto/seleção
+  // como candidatos a campo de ORIGEM do de-para.
+  const reclassBases: ReclassBaseOption[] = rootSources(sources).map((s) => ({
+    recordType: s.recordType,
+    label: s.label,
+  }));
+  const reclassFields: ReclassFieldOption[] = fields
+    .filter(
+      (f) => !isCoreDef(f) && (f.data_type === "texto" || f.data_type === "selecao")
+    )
+    .map((f) => ({
+      fieldKey: f.field_key,
+      label: f.label,
+      appliesTo: f.applies_to ?? null,
+    }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -161,6 +187,15 @@ export default async function CamposPage() {
                 readOnly={false}
               />
             </div>
+          )
+        }
+        reclassificacoes={
+          reclassDenied ? null : (
+            <ReclassDomainsTab
+              bases={reclassBases}
+              fieldOptions={reclassFields}
+              ai={ai}
+            />
           )
         }
       />

@@ -221,6 +221,17 @@ export interface Dimension {
   // agregação da métrica). Definido → engine agrega por registro (ver DateAgg):
   // 'individual' = 1 ponto/linha por registro; demais colapsam por período.
   dateAgg?: DateAgg;
+  // Expressão CONDICIONAL da dimensão (07/08/2026): fórmula SE/E/OU que
+  // reclassifica os valores em rótulos — ex.:
+  // Se([Fruta]="Mamão";"Doce";Se([Fruta]="Pera";"Dura";"Outros")).
+  // 100% engine (RPCs intocados): refs SÓ do próprio campo ⇒ o RPC agrupa
+  // pelo cru e o bucket-merge funde valor→rótulo (mecanismo simples); refs de
+  // MAIS campos ⇒ o engine expande as refs em dims extras no RPC e contrai
+  // client-side (mecanismo robusto — lib/widgets/case-dim.ts). SE sem
+  // "senão" preserva o valor cru. Mutuamente exclusivo com transform/
+  // dateAgg/closedWeek; proibido em campo de data/FK (UI não oferece; import
+  // remove com aviso). Fora do escopo: modo lista, dateAgg, kanban.
+  caseFormula?: Formula;
 }
 export interface Metric {
   field: string;

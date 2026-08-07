@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAPPING_DOMAINS,
   UNCLASSIFIED,
+  autoClassifyValues,
   buildMappingIndex,
   mappingDomain,
   mappingDomainsForRecordType,
@@ -133,11 +134,47 @@ describe("planMappingWrites", () => {
   });
 });
 
+describe("autoClassifyValues (heurística V5 no registry)", () => {
+  it("cargo classificável vira entrada; lixo não; options canônicas presentes", () => {
+    const cargo = mappingDomain("cargo")!;
+    const entries = autoClassifyValues(cargo, [
+      { norm: "it manager", display: "IT Manager" },
+      { norm: "1440", display: "1440" },
+    ]);
+    expect(entries).toEqual([
+      {
+        rawValue: "IT Manager",
+        rawNorm: "it manager",
+        outputs: { cargo_area: "TI", cargo_nivel: "Gerente" },
+      },
+    ]);
+    expect(cargo.options.cargo_area).toContain("TI");
+    expect(cargo.options.cargo_nivel).toContain("C-Level");
+    expect(cargo.options.cargo_area).toContain(UNCLASSIFIED);
+  });
+
+  it("segmento: vertical de tech classifica; genérico fica pendente", () => {
+    const segmento = mappingDomain("segmento")!;
+    const entries = autoClassifyValues(segmento, [
+      { norm: "fintech de credito", display: "Fintech de crédito" },
+      { norm: "-", display: "-" },
+    ]);
+    expect(entries).toEqual([
+      {
+        rawValue: "Fintech de crédito",
+        rawNorm: "fintech de credito",
+        outputs: { segmento_classificado: "Serviços Financeiros" },
+      },
+    ]);
+    expect(segmento.options.segmento_classificado).toContain("Agronegócio");
+  });
+});
+
 describe("mensagens da tarefa de pendências", () => {
   it("título e descrição estáveis", () => {
-    expect(unmappedTaskTitle("cargo")).toBe("Mapeamentos pendentes — Cargos");
+    expect(unmappedTaskTitle("Cargos")).toBe("Mapeamentos pendentes — Cargos");
     const desc = unmappedTaskDescription(
-      "segmento",
+      "Segmento",
       new Map([
         ["Fintech", 3],
         ["Aviação", 1],

@@ -18,6 +18,7 @@ import {
   runWidget,
 } from "@/lib/widgets/engine";
 import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
+import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { fakeSupabase } from "@/tests/helpers/fake-supabase";
 import { AVAILABLE, CATALOG, CORRS } from "@/tests/helpers/engine-fixtures";
 
@@ -1017,5 +1018,96 @@ describe("sub-base que ignora o período (ignore_period, 0116)", () => {
         (f) => f.field === "@period" || f.op === "gte" || f.op === "lte"
       )
     ).toBe(false);
+  });
+});
+
+describe("dimensão condicional (Dimension.caseFormula)", () => {
+  const caseCatalog = [
+    { ref: "pipeline", label: "Pipeline" },
+    { ref: "stage", label: "Etapa" },
+  ];
+  const tokens = (src: string) => {
+    const res = tokenizeFormulaText(src, caseCatalog);
+    if (!res.ok) throw new Error(res.error);
+    return res.formula;
+  };
+
+  it("campo único: RPC agrupa pelo cru e o engine funde valor→rótulo", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "Inbound", metric_1: 4 },
+            { dim_1: "Outbound", metric_1: 3 },
+            { dim_1: "Parceria", metric_1: 2 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        dimensions: [
+          {
+            field: "pipeline",
+            caseFormula: tokens(
+              'SE(OU([Pipeline] = "Inbound"; [Pipeline] = "Outbound"); "Vendas"; "Canais")'
+            ),
+          },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE
+    );
+    // Payload segue com UMA dim (a expressão viaja inerte no jsonb).
+    expect(rpcCalls).toHaveLength(1);
+    expect(
+      (rpcCalls[0].args.p_dimensions as { field: string }[]).map((d) => d.field)
+    ).toEqual(["pipeline"]);
+    expect(data.rows).toEqual([
+      { dim_1: "Vendas", metric_1: 7 },
+      { dim_1: "Canais", metric_1: 2 },
+    ]);
+  });
+
+  it("multi-campo: refs viram dims extras no RPC e o engine contrai/funde", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "Inbound", dim_2: "Ganho", metric_1: 4 },
+            { dim_1: "Inbound", dim_2: "Perdido", metric_1: 3 },
+            { dim_1: "Outbound", dim_2: "Ganho", metric_1: 5 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        dimensions: [
+          {
+            field: "pipeline",
+            caseFormula: tokens(
+              'SE(E([Pipeline] = "Inbound"; [Etapa] = "Ganho"); "Inbound ganho"; "Resto")'
+            ),
+          },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE
+    );
+    // Payload EXPANDIDO: o campo da dim + a ref extra, como dims cruas.
+    expect(
+      (rpcCalls[0].args.p_dimensions as { field: string }[]).map((d) => d.field)
+    ).toEqual(["pipeline", "stage"]);
+    // Contração de volta a UMA dim, com fold dos grupos no mesmo rótulo.
+    expect(data.rows).toEqual([
+      { dim_1: "Inbound ganho", metric_1: 4 },
+      { dim_1: "Resto", metric_1: 8 },
+    ]);
+    expect(data.dimensions).toHaveLength(1);
   });
 });

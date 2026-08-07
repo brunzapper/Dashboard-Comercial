@@ -1046,6 +1046,18 @@ export function WidgetBuilder({
     available.filter((f) => !f.displayOnly && !f.aggCalc),
     sourceLabels
   );
+  // Catálogo da EXPRESSÃO CONDICIONAL de dimensão (Dimension.caseFormula):
+  // campos agrupáveis no RPC que não sejam data/FK (a expressão compararia
+  // UUID/ISO cru — e em responsible_id furaria o agrupamento canônico 0101).
+  const caseDimCatalog: RefOption[] = available
+    .filter((f) => !f.displayOnly && !f.aggCalc && !f.isDate && !f.fk)
+    .map((f) => ({ ref: f.field, label: f.label }));
+  const caseCapableFor = (d: Dimension): boolean =>
+    !isRecordList &&
+    d.field !== "" &&
+    (d.transform ?? "none") === "none" &&
+    !d.dateAgg &&
+    caseDimCatalog.some((o) => o.ref === d.field);
   // Opções de fontes-alvo por linha de filtro: fontes cobertas pelo widget ∪
   // alvos já gravados no filtro. Alvo "órfão" (fonte que saiu do widget) vem
   // marcado como stale — visível e removível, nunca escondido em silêncio; em
@@ -3427,6 +3439,8 @@ export function WidgetBuilder({
                       return next;
                     })
                   }
+                  caseCapable={caseCapableFor(d)}
+                  caseCatalog={caseDimCatalog}
                   editable={effEditable(d.field)}
                   writeBack={columnFlags[d.field]?.writeBack ?? false}
                   editableCapable={af?.editableCapable ?? false}

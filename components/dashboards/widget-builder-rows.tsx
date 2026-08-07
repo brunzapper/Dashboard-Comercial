@@ -1,4 +1,11 @@
-// Versão: 2.3 | Data: 03/08/2026
+// Versão: 2.4 | Data: 07/08/2026
+// v2.4 (07/08/2026): DimensionRow ganha a seção recolhível "Expressão
+//   condicional" (Dimension.caseFormula) — FormulaEditor (contexto record,
+//   catálogo dos campos agrupáveis do widget) que reclassifica os valores da
+//   dimensão em rótulos via SE/E/OU; fórmula inválida nunca persiste (o
+//   onChange só grava com validação ok). Trocar campo/formato limpa a
+//   expressão (nunca fica órfã); dim com expressão órfã (JSON antigo) exibe
+//   aviso com "Limpar" — nada some em silêncio.
 // v2.3 (03/08/2026): DimensionRow ganha o select "Semana fechada" (Desligada |
 //   Seg–Dom | Sáb–Sex) nos transforms de semana (Dimension.closedWeek); ativo,
 //   o select "Semana" trava exibindo "Cheia" (weekMode efetivo do engine).
@@ -177,6 +184,8 @@ export function DimensionRow({
   unifiedSourceOptions,
   unifiedSourcesValue,
   onUnifiedSourcesChange,
+  caseCapable,
+  caseCatalog,
   editable,
   writeBack,
   editableCapable,
@@ -202,6 +211,11 @@ export function DimensionRow({
   unifiedSourceOptions?: ComboboxOption[];
   unifiedSourcesValue?: string[];
   onUnifiedSourcesChange?: (list: string[]) => void;
+  // Expressão condicional (Dimension.caseFormula): capaz = agregado, campo
+  // não-data/não-FK, sem transform/dateAgg; o catálogo traz os campos
+  // agrupáveis do widget (multi-campo permitido — mecanismo robusto).
+  caseCapable?: boolean;
+  caseCatalog?: RefOption[];
   editable: boolean;
   writeBack: boolean;
   editableCapable: boolean;
@@ -212,6 +226,8 @@ export function DimensionRow({
   onColumnAggChange: (a: DateAgg) => void;
   onFlagChange: (patch: { editable?: boolean; writeBack?: boolean }) => void;
 }) {
+  const hasCase = (dim.caseFormula?.tokens?.length ?? 0) > 0;
+  const [caseOpen, setCaseOpen] = useState(hasCase);
   return (
     <div className="bg-card flex flex-col gap-2 rounded-md border p-2.5">
       <div className="flex items-center gap-2">
@@ -221,7 +237,15 @@ export function DimensionRow({
           chips={fieldChips}
           value={dim.field}
           placeholder="— campo —"
-          onValueChange={(field) => onChange({ field })}
+          onValueChange={(field) =>
+            // Trocar o campo limpa a expressão condicional (as refs eram do
+            // campo antigo — nunca fica órfã).
+            onChange(
+              field !== dim.field
+                ? { field, caseFormula: undefined }
+                : { field }
+            )
+          }
           aria-label="Campo da dimensão"
         />
         {dim.field ? fieldMenu : null}
@@ -240,12 +264,14 @@ export function DimensionRow({
               value={dim.transform ?? "none"}
               onValueChange={(t) =>
                 // Semana fechada só vale em transform de semana: trocar para
-                // outro formato limpa a opção (nunca fica órfã na dim).
+                // outro formato limpa a opção (nunca fica órfã na dim). O
+                // mesmo p/ a expressão condicional (exclusiva de transform).
                 onChange({
                   transform: t as Transform,
                   ...(isClosedWeekTransform(t as Transform)
                     ? {}
                     : { closedWeek: undefined }),
+                  ...(t !== "none" ? { caseFormula: undefined } : {}),
                 })
               }
               aria-label="Transformação de data"
@@ -306,6 +332,69 @@ export function DimensionRow({
           onChange={(e) => onChange({ label: e.target.value })}
           aria-label="Nome exibido da dimensão"
         />
+      ) : null}
+      {caseCapable && caseCatalog ? (
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 self-start text-xs font-medium"
+            onClick={() => setCaseOpen((o) => !o)}
+            aria-expanded={caseOpen}
+          >
+            {caseOpen ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+            Expressão condicional
+            {hasCase ? (
+              <Badge variant="secondary" className="ml-1 text-[10px]">
+                ativa
+              </Badge>
+            ) : null}
+          </button>
+          {caseOpen ? (
+            <div className="flex flex-col gap-1.5">
+              <FormulaEditor
+                context="record"
+                catalog={caseCatalog}
+                initial={dim.caseFormula ?? null}
+                onChange={(f, v) =>
+                  // Só fórmula VÁLIDA persiste; editor vazio limpa a chave.
+                  onChange({
+                    caseFormula:
+                      v.ok && f.tokens.length > 0 ? f : undefined,
+                  })
+                }
+              />
+              <p className="text-muted-foreground text-xs">
+                Agrupa pelos rótulos da expressão — ex.:{" "}
+                <code>
+                  Se([Fruta]=&quot;Mamão&quot;;&quot;Doce&quot;;Se([Fruta]=&quot;Pera&quot;;&quot;Dura&quot;;&quot;Outros&quot;))
+                </code>
+                . Sem o &quot;senão&quot;, o valor original é mantido; a
+                expressão pode combinar outros campos (E/OU).
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : hasCase ? (
+        // Expressão órfã (formato de data/campo incompatível vindo de JSON
+        // antigo): inativa no engine — nunca some em silêncio.
+        <div className="text-muted-foreground flex items-center justify-between rounded-md border border-dashed px-2 py-1 text-xs">
+          <span>
+            Expressão condicional inativa (incompatível com o formato/campo).
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs"
+            onClick={() => onChange({ caseFormula: undefined })}
+          >
+            Limpar
+          </Button>
+        </div>
       ) : null}
       {isDateField && dim.transform && dim.transform !== "none" ? (
         <div className="flex items-center gap-2">
