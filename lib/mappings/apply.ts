@@ -14,16 +14,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
 import {
-  MAPPING_DOMAINS,
   autoClassifyValues,
   buildMappingIndex,
-  mappingDomainsForRecordType,
   normalizeRawValue,
   planMappingWrites,
   type MappingDomain,
   type MappingIndex,
   type MappingRecordRow,
 } from "./domains";
+import { domainsForRecordType, loadMappingDomains } from "./registry";
 import { syncUnmappedTasks, type UnmappedByDomain } from "./notify";
 
 const PAGE = 500;
@@ -46,7 +45,8 @@ export interface ApplyMappingsResult {
  */
 export async function ensureMappingFields(
   db: SupabaseClient,
-  orgId: string
+  orgId: string,
+  domains: MappingDomain[]
 ): Promise<void> {
   const { data } = await db
     .from("field_definitions")
@@ -54,7 +54,7 @@ export async function ensureMappingFields(
     .eq("organization_id", orgId);
   const have = new Set((data ?? []).map((f) => f.field_key as string));
   const rows: Record<string, unknown>[] = [];
-  for (const domain of MAPPING_DOMAINS) {
+  for (const domain of domains) {
     for (const target of domain.targets) {
       if (have.has(target.fieldKey)) continue;
       have.add(target.fieldKey);
@@ -270,11 +270,10 @@ export async function applyValueMappings(
     unmapped: {},
     errors: [],
   };
-  const domains = MAPPING_DOMAINS.filter(
-    (d) => !domainKeys || domainKeys.includes(d.key)
-  );
+  const all = await loadMappingDomains(db, orgId);
+  const domains = all.filter((d) => !domainKeys || domainKeys.includes(d.key));
   if (domains.length === 0) return result;
-  await ensureMappingFields(db, orgId);
+  await ensureMappingFields(db, orgId, domains);
 
   const changedIds: string[] = [];
   for (const domain of domains) {
@@ -302,14 +301,15 @@ export async function maybeApplyMappingsAfterImport(
 ): Promise<void> {
   try {
     if (!orgId) return;
-    const domains = mappingDomainsForRecordType(recordType);
+    const all = await loadMappingDomains(db, orgId);
+    const domains = domainsForRecordType(all, recordType);
     if (domains.length === 0) return;
     const res = await applyValueMappings(
       db,
       orgId,
       domains.map((d) => d.key)
     );
-    await syncUnmappedTasks(db, orgId, res.unmapped, domains.map((d) => d.key));
+    await syncUnmappedTasks(db, orgId, res.unmapped, domains);
     if (res.errors.length > 0) {
       console.warn("[mappings] aplicação pós-import com erros:", res.errors.slice(0, 3));
     }

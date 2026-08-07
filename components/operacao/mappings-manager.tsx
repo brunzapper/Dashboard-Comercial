@@ -1,14 +1,18 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 07/08/2026
 // Gestor de mapeamentos de valores (0117): abas por domínio (Cargos /
-// Segmentos), seção de PENDÊNCIAS com classificação inline (vira entrada do
-// de-para + reaplica), tabela de mapeamentos com busca/edição/exclusão e
-// botão "Aplicar agora". As actions reaplicam o domínio tocado — a resposta
-// já volta com o efeito nos registros.
+// Segmentos + reclassificações dinâmicas 0119), seção de PENDÊNCIAS com
+// classificação inline (vira entrada do de-para + reaplica), tabela de
+// mapeamentos com busca/edição/exclusão e botão "Aplicar agora". As actions
+// reaplicam o domínio tocado — a resposta já volta com o efeito nos registros.
+// v1.1: export CSV (template das pendências, cola de volta no assistente) e
+// JSON (dump p/ IA externa); prop opcional `onChanged` p/ superfícies que
+// carregam o overview em ESTADO (aba Campos → Reclassificações) — o
+// router.refresh() sozinho não as atualiza.
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Trash2 } from "lucide-react";
+import { Download, Play, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +27,8 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { MappingsAiSheet } from "@/components/operacao/mappings-ai-sheet";
 import type { DomainOverview, MappingRow } from "@/lib/mappings/overview";
+import { domainCsv, domainJson } from "@/lib/mappings/export";
+import { csvFilename, downloadCsv } from "@/lib/export/csv";
 import {
   applyAllMappings,
   deleteMapping,
@@ -35,12 +41,27 @@ interface DraftOutputs {
   [fieldKey: string]: string;
 }
 
+function downloadJson(filename: string, json: string): void {
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function MappingsManager({
   overview,
   ai,
+  onChanged,
 }: {
   overview: DomainOverview[];
   ai: { provider: string; model: string; hasKey: boolean } | null;
+  /** Notifica a superfície dona do estado (aba Campos) após cada escrita. */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -96,6 +117,7 @@ export function MappingsManager({
         clearDraft(scope);
         if (scope === "new") setNewRaw("");
         router.refresh();
+        onChanged?.();
       }
     });
   }
@@ -106,6 +128,7 @@ export function MappingsManager({
       const res = await applyAllMappings();
       setMessage(res.message ?? null);
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -118,6 +141,7 @@ export function MappingsManager({
       const res = await deleteMapping(row.id);
       setMessage(res.message ?? null);
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -220,6 +244,39 @@ export function MappingsManager({
           ))}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            title="Baixa as pendências como planilha-modelo (valor + colunas de classificação vazias) — preenchida, ela cola de volta no assistente de IA."
+            onClick={() =>
+              downloadCsv(
+                csvFilename(`reclassificacao-${domain.key}`),
+                domainCsv(domain)
+              )
+            }
+          >
+            <Download className="size-4" />
+            CSV
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            title="Baixa o domínio inteiro em JSON (categorias, mapeados e pendências) para trabalhar numa IA externa."
+            onClick={() =>
+              downloadJson(
+                csvFilename(`reclassificacao-${domain.key}`).replace(
+                  /\.csv$/,
+                  ".json"
+                ),
+                domainJson(domain)
+              )
+            }
+          >
+            <Download className="size-4" />
+            JSON
+          </Button>
           <MappingsAiSheet
             key={domain.key}
             ai={ai}
@@ -229,6 +286,7 @@ export function MappingsManager({
             targets={domain.targets}
             optionsByTarget={domain.optionsByTarget}
             pendingCount={domain.unmapped.length}
+            onApplied={onChanged}
           />
           <Button type="button" size="sm" onClick={applyNow} disabled={pending}>
             <Play className="size-4" />

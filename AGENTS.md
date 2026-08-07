@@ -855,7 +855,45 @@ This version has breaking changes — APIs, conventions, and file structure may 
   core `lib/ai/classify-mappings.ts` com apply que RE-VALIDA e grava
   `origin='ai'` pelos mesmos upserts; prévia EDITÁVEL + copiar-prompt/
   colar-JSON sem IA configurada). Categorias canônicas SÓ no registry
-  (`domain.options`) — nunca lista paralela em validador/UI. Fiscalizado por
-  `lib/mappings/domains.test.ts` + `lib/mappings/classify/classify.test.ts` +
+  (`domain.options`) — nunca lista paralela em validador/UI.
+  **Domínios DINÂMICOS (0119, 07/08/2026):** a tabela `mapping_domains`
+  guarda domínios criados pela aba **Campos → Reclassificações** (CRUD em
+  `app/(app)/campos/reclassificacoes-actions.ts` — gate admin + área
+  `mapeamentos`; key IMUTÁVEL na edição e = `value_mappings.domain`, passa no
+  MESMO check de slug da 0117; excluir remove as entradas mas PRESERVA campos
+  alvo e valores gravados). O registry EFETIVO é SEMPRE
+  `loadMappingDomains(db, orgId)` (`lib/mappings/registry.ts` — código ∪
+  banco, parse FAIL-CLOSED por linha, colisão de key: código VENCE; org
+  explícita mesmo com service role) — consumidor novo NUNCA itera
+  `MAPPING_DOMAINS` direto p/ resolver domínios de uma org
+  (`messages.ts`/`notify.ts` recebem rótulos/domínios por parâmetro).
+  Domínio dinâmico não tem classificador codificado — o motor aprendido é o
+  único sugestor. Export por domínio em `lib/mappings/export.ts` (CSV =
+  template das pendências byte-compatível com `csvToClassifyJson`; JSON =
+  dump de trabalho). Fiscalizado por
+  `lib/mappings/domains.test.ts` + `lib/mappings/registry.test.ts` +
+  `lib/mappings/export.test.ts` + `lib/mappings/classify/classify.test.ts` +
   `lib/import/mappings/instructions.test.ts` + `lib/presets/outbound.test.ts`.
   Ver `docs/arquitetura.md` §4.19 e invariante 28.
+- **Dimensão condicional (`Dimension.caseFormula`) se resolve no ENGINE,
+  nunca no RPC (07/08/2026):** expressão SE/E/OU (avaliador único de
+  `lib/records/formulas`) que reclassifica os valores da dim em rótulos e
+  agrupa por eles — versão ad-hoc/de exibição do de-para (nada é gravado em
+  registro). Gates/avaliação/plano SÓ em `lib/widgets/case-dim.ts` (engine,
+  bucket-merge, UI do builder e validador de import derivam de lá): refs SÓ
+  do próprio campo ⇒ fold valor→rótulo no `mergeRowsByBucket` (caseIdx);
+  refs de MAIS campos ⇒ `planCaseExpansion` troca o payload de dims de TODOS
+  os RPCs da rodada pelas dims CRUAS expandidas e `contractCaseRows` contrai
+  client-side ANTES do merge — os laços de tupla (bdMap/pernas/
+  condValueByKey) iteram por `rpcDims.length`, não pelas dims da config.
+  Mutuamente exclusiva com transform/dateAgg (presentes ⇒ INERTE, nunca
+  meio-aplicada); proibida em campo/refs de data/relação; SE sem "senão"
+  preserva o cru; fora do escopo: modo lista, kanban. Import da IA:
+  `case_formula_text` (texto) OU tokens (round-trip do export);
+  incompatibilidade remove com AVISO (padrão closedWeek; ponto MANUAL do
+  SPEC — chave de DIMENSÃO, fora de settings-docs). A UI (DimensionRow)
+  limpa a expressão ao trocar campo/formato e só persiste fórmula válida.
+  NÃO recrie `run_widget_query`/`_snapshot` p/ agrupamento condicional.
+  Fiscalizado por `lib/widgets/case-dim.test.ts` + blocos em
+  `engine.test.ts`/`validate.test.ts`. Ver `docs/arquitetura.md` §4.20 e
+  invariante 29.

@@ -125,7 +125,12 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
+import {
+  contractCaseRows,
+  foldRowGroup,
+  mergeRowsByBucket,
+} from "./bucket-merge";
+import { planCaseExpansion } from "./case-dim";
 import {
   closedWeekOf,
   dimWeekStart,
@@ -2039,7 +2044,15 @@ export async function runWidget(
     // desce weekMode "full". As `dims` ORIGINAIS seguem mandando no merge,
     // nos rótulos e na ordenação — todas as pernas da rodada usam o MESMO
     // payload, então as tuplas continuam casando entre si.
-    const rpcDims = dims.map(rpcDimForClosedWeek);
+    // Dimensão CONDICIONAL multi-campo (caseFormula com refs além do próprio
+    // campo): as refs viram dims CRUAS extras no payload (planCaseExpansion) e
+    // a contração de volta ao shape da config roda client-side ANTES do merge
+    // por bucket (contractCaseRows). Por isso os laços de tupla desta rodada
+    // usam rpcDims.length — as linhas cruas têm as colunas EXPANDIDAS.
+    const caseExpansion = planCaseExpansion(dims, rpcDimForClosedWeek);
+    const rpcDims = caseExpansion
+      ? caseExpansion.rpcDims
+      : dims.map(rpcDimForClosedWeek);
     const rpcMetrics: Metric[] = [];
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
@@ -2153,7 +2166,8 @@ export async function runWidget(
           for (const key of g.keys) condValueByKey.set(key, {});
           for (const r of condRows) {
             const tuple: unknown[] = [];
-            for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+            for (let i = 1; i <= rpcDims.length; i++)
+              tuple.push(r[`dim_${i}`] ?? null);
             const tk = JSON.stringify(tuple);
             g.keys.forEach((key, ki) => {
               const v = r[`metric_${ki + 1}`];
@@ -2380,7 +2394,7 @@ export async function runWidget(
             for (const key of g.keys) out.condValueByKey.set(key, {});
             for (const r of condRows) {
               const tuple: unknown[] = [];
-              for (let i = 1; i <= dims.length; i++)
+              for (let i = 1; i <= rpcDims.length; i++)
                 tuple.push(r[`dim_${i}`] ?? null);
               const tk = JSON.stringify(tuple);
               g.keys.forEach((key, ki) => {
@@ -2426,7 +2440,7 @@ export async function runWidget(
           : []) as Record<string, unknown>[];
         for (const r of legRows) {
           const tuple: unknown[] = [];
-          for (let i = 1; i <= dims.length; i++)
+          for (let i = 1; i <= rpcDims.length; i++)
             tuple.push(r[`dim_${i}`] ?? null);
           out.rowByTuple.set(JSON.stringify(tuple), r);
         }
@@ -2505,9 +2519,10 @@ export async function runWidget(
           src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
         });
         // Chave do grupo desta linha nas consultas auxiliares/pernas (dims
-        // cruas do RPC).
+        // cruas do RPC — expandidas quando há dim condicional multi-campo).
         const tuple: unknown[] = [];
-        for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
+        for (let i = 1; i <= rpcDims.length; i++)
+          tuple.push(row[`dim_${i}`] ?? null);
         const tk = JSON.stringify(tuple);
         const bdArr = hasBd ? bdMap[tk] : undefined;
         const basis: BasisValues = {};
@@ -2588,47 +2603,59 @@ export async function runWidget(
     }
 
     // Métricas monetárias: anexa `__money` a cada linha (ANTES da rotulagem, que
-    // muta os dim_* usados como chave de grupo). Charts plotam `metric_<n>`
-    // numérico. bdMap vazio = degradação (aux falhou): não anexa __money nem
-    // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
+    // muta os dim_* usados como chave de grupo — por isso rpcDims: as chaves do
+    // bdMap saíram das linhas CRUAS, expandidas quando há dim condicional
+    // multi-campo). Charts plotam `metric_<n>` numérico. bdMap vazio =
+    // degradação (aux falhou): não anexa __money nem sobrescreve os valores,
+    // deixando o número cru do RPC — melhor que zerar.
     if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
-      attachMoney(rows, dims, moneyEntries, bdMap);
+      attachMoney(rows, rpcDims, moneyEntries, bdMap);
     }
     // Métricas monetárias de PERNA: mesmo attach, com o detalhamento da perna
     // (attachMoney faz merge em __money — chamadas múltiplas não se clobberam).
     for (const lr of legRuns) {
       if (!lr.ok || lr.moneyEntries.length === 0 || rows.length === 0) continue;
       if (Object.keys(lr.bdMap).length === 0) continue;
-      attachMoney(rows, dims, lr.moneyEntries, lr.bdMap);
+      attachMoney(rows, rpcDims, lr.moneyEntries, lr.bdMap);
     }
+
+    const mergeSpecs = config.metrics.map((m, i) => {
+      const rc = calcResolved.get(i);
+      return {
+        key: `metric_${i + 1}`,
+        kind: rc
+          ? ("calc" as const)
+          : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
+        evalBasis: rc?.formula
+          ? (b: BasisValues) =>
+              evalCalcMoney(
+                rc.formula!,
+                b,
+                calcMoneyMeta(rc, rates, conversionPeriod)
+              ).value
+          : undefined,
+      };
+    });
+
+    // Dimensão condicional MULTI-CAMPO: contrai as colunas expandidas de
+    // volta ao shape da config (tupla de refs → rótulo da expressão) e funde
+    // os grupos que caíram no mesmo rótulo — daqui em diante o shape é o de
+    // qualquer rodada.
+    const contracted = caseExpansion
+      ? contractCaseRows(rows, dims, caseExpansion, mergeSpecs)
+      : rows;
 
     // Dimensão `custom:` com transform: o RPC agrupa pelo valor CRU (0085,
     // ramo custom — o transform é só rótulo). Funde aqui pelo bucket, no
     // choke point único — principal, comparação, pernas do businessDayAlign,
     // card, quick-table e snapshot (mesmo engine) recebem linhas já fundidas.
-    // Dimensão responsible_id com apelidos (0101) funde apelido→principal na
-    // MESMA passada. Sem dim custom+transform nem apelido, `merged === rows`
-    // (caminho atual intocado).
+    // Dimensão responsible_id com apelidos (0101) funde apelido→principal e a
+    // dim condicional de campo ÚNICO funde valor→rótulo na MESMA passada. Sem
+    // nada disso, `merged === rows` (caminho atual intocado).
     const merged = mergeRowsByBucket(
-      rows,
+      contracted,
       dims,
-      config.metrics.map((m, i) => {
-        const rc = calcResolved.get(i);
-        return {
-          key: `metric_${i + 1}`,
-          kind: rc
-            ? ("calc" as const)
-            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
-          evalBasis: rc?.formula
-            ? (b: BasisValues) =>
-                evalCalcMoney(
-                  rc.formula!,
-                  b,
-                  calcMoneyMeta(rc, rates, conversionPeriod)
-                ).value
-            : undefined,
-        };
-      }),
+      mergeSpecs,
       respCanon.canonicalById
     );
     if (merged !== rows) {

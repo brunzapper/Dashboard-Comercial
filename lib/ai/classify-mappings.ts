@@ -19,7 +19,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { loadOrgAiConfig } from "@/lib/ai/config";
 import { aiSection, runJsonGenerationLoop } from "@/lib/ai/json-loop";
 import { loadMappingOverview } from "@/lib/mappings/overview";
-import { mappingDomain, normalizeRawValue } from "@/lib/mappings/domains";
+import { normalizeRawValue } from "@/lib/mappings/domains";
+import { loadMappingDomains } from "@/lib/mappings/registry";
 import { applyValueMappings } from "@/lib/mappings/apply";
 import { syncUnmappedTasks } from "@/lib/mappings/notify";
 import { buildMappingsClassifyPromptText } from "@/lib/import/mappings/instructions";
@@ -77,12 +78,17 @@ interface LoadedContext {
 async function loadClassifyContext(
   domainKey: string
 ): Promise<LoadedContext | { error: string }> {
-  const domain = mappingDomain(domainKey);
-  if (!domain) return { error: "Domínio de mapeamento desconhecido." };
   const orgId = await getActiveOrgId();
   if (!orgId) return { error: "Organização ativa não identificada." };
   const supabase = await createClient();
-  const overview = await loadMappingOverview(supabase, orgId);
+  // Registry efetivo = código ∪ domínios dinâmicos (0119) da org.
+  const domains = await loadMappingDomains(supabase, orgId);
+  const domain = domains.find((d) => d.key === domainKey);
+  if (!domain) return { error: "Domínio de mapeamento desconhecido." };
+  const overview = await loadMappingOverview(supabase, orgId, {
+    domains,
+    keys: [domainKey],
+  });
   const dom = overview.find((d) => d.key === domainKey);
   if (!dom) return { error: "Domínio de mapeamento desconhecido." };
 
@@ -306,7 +312,10 @@ export async function applyMappingsClassifyCore(
   if (appliedCount > 0) {
     const service = createServiceClient();
     const res = await applyValueMappings(service, orgId, [domainKey]);
-    await syncUnmappedTasks(service, orgId, res.unmapped, [domainKey]);
+    const domains = (await loadMappingDomains(service, orgId)).filter(
+      (d) => d.key === domainKey
+    );
+    await syncUnmappedTasks(service, orgId, res.unmapped, domains);
     const pend = Object.values(res.unmapped).reduce((s, m) => s + m.size, 0);
     applyNote = ` ${res.changedRecords} registro(s) atualizado(s); ${pend} valor(es) seguem pendentes.`;
   }

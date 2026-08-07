@@ -75,6 +75,7 @@ import { isCoreDef } from "@/lib/records/core-defs";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import {
   formulaCondAggInfo,
+  formulaRefs,
   type Formula,
 } from "@/lib/records/formulas";
 import { findFormulaCycle, refCustomKey } from "@/lib/records/formula-deps";
@@ -899,6 +900,77 @@ export function validateDashboardImport(
         );
         closedWeek = undefined;
       }
+      // Expressão condicional (07/08/2026): "case_formula_text" (texto estilo
+      // planilha, preferido) OU "caseFormula" {tokens} (round-trip do
+      // export). Reclassifica os valores da dim em rótulos (SE/E/OU) — 100%
+      // engine. Incompatibilidades removem com AVISO (padrão closedWeek):
+      // modo lista, transform/dateAgg presentes, campo de data ou relação —
+      // e refs de data/relação/today dentro da expressão.
+      let caseFormula: Dimension["caseFormula"];
+      const caseText = asString(
+        (d as Record<string, unknown>).case_formula_text
+      );
+      const caseTokens =
+        isRecord(d.caseFormula) && Array.isArray(d.caseFormula.tokens)
+          ? (d.caseFormula as unknown as Formula)
+          : null;
+      if (caseText || caseTokens) {
+        const isDateRef = (ref: string): boolean =>
+          ref === "today" ||
+          PERIOD_FIELDS.has(ref) ||
+          (ref.startsWith("custom:") &&
+            (workingDefs.some(
+              (df) =>
+                df.field_key === ref.slice("custom:".length) &&
+                df.data_type === "data"
+            ) ||
+              declaredFieldTypes.get(ref.slice("custom:".length)) === "data"));
+        const isFkRef = (ref: string): boolean =>
+          ref === "responsible_id" || ref === "operation_id";
+        if (
+          isListTable ||
+          (transform && transform !== "none") ||
+          dateAgg ||
+          isDateRef(field) ||
+          isFkRef(field)
+        ) {
+          warnings.push(
+            `${dw}: expressão condicional removida — não é suportada em modo lista, com "transform"/"dateAgg", nem em campo de data/relação.`
+          );
+        } else {
+          let f: Formula | null = null;
+          if (caseText) {
+            const tok = tokenizeFormulaText(caseText, recordCatalog());
+            if (tok.ok) f = tok.formula;
+            else errors.push(`${dw}: ${tok.error}`);
+          } else {
+            f = caseTokens;
+          }
+          if (f) {
+            const v = validateFormulaForContext(f, {
+              kind: "record",
+              catalog: recordCatalog(),
+              sources: workingSources,
+            });
+            if (!v.ok) {
+              errors.push(`${dw}: ${v.error ?? "Expressão inválida."}`);
+              f = null;
+            }
+          }
+          if (f) {
+            const badRef = [...new Set(formulaRefs(f))].find(
+              (ref) => isDateRef(ref) || isFkRef(ref)
+            );
+            if (badRef) {
+              warnings.push(
+                `${dw}: expressão condicional removida — a ref "${badRef}" é de data/relação (não agrupável por rótulo).`
+              );
+              f = null;
+            }
+          }
+          if (f) caseFormula = f;
+        }
+      }
       dimensions.push({
         field,
         label: asString(d.label) || undefined,
@@ -909,6 +981,7 @@ export function validateDashboardImport(
             : undefined,
         closedWeek,
         dateAgg: (dateAgg || undefined) as Dimension["dateAgg"],
+        caseFormula,
       });
     });
 

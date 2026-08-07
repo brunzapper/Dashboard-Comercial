@@ -1,4 +1,10 @@
-// Versão: 1.8 | Data: 03/08/2026
+// Versão: 1.9 | Data: 07/08/2026
+// v1.9 (07/08/2026): dimensão condicional — a seção Dimensões documenta
+//   `dimensions[].case_formula_text` (expressão SE/E/OU que reclassifica os
+//   valores em rótulos; multi-campo permitido; proibições e o preserva-cru
+//   do SE sem "senão"). Ponto MANUAL como o closedWeek: chave de DIMENSÃO,
+//   fora dos dicionários de settings-docs; validador aceita texto OU tokens
+//   (round-trip do export) e remove incompatibilidades com aviso.
 // v1.8 (03/08/2026): Semana Fechada — a seção Dimensões documenta
 //   `dimensions[].closedWeek` ("seg_dom" | "sab_sex", só week_year/week_month;
 //   regra da maioria, weekMode efetivo "full"). Ponto MANUAL: closedWeek é
@@ -289,6 +295,14 @@ promovida a tipo próprio).
   (a semana entra se 4+ dos 7 dias caem no período); com week_month o
   weekMode passa a valer como "full". Omitir = desligada.
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
+- "case_formula_text" (opcional, só widget AGREGADO): expressão SE/E/OU que
+  RECLASSIFICA os valores da dimensão em rótulos e agrupa por eles — ex.:
+  'SE([Fruta] = "Mamão"; "Doce"; SE(OU([Fruta] = "Pera"; [Fruta] = "Maçã");
+  "Dura"; "Outros"))'. SE sem "senão" preserva o valor original do "field".
+  Pode combinar OUTROS campos do registro (E/OU entre campos); "field" segue
+  sendo o campo PRINCIPAL da dimensão. Proibido com "transform"/"dateAgg",
+  em campo de data/relação e com refs de data/relação na expressão
+  (removida com aviso).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 
 ### Métricas

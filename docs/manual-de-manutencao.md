@@ -1,3 +1,8 @@
+<!-- Versão: 1.26 | Data: 07/08/2026 -->
+<!-- v1.26 (07/08/2026): §4.14 — domínio de reclassificação DINÂMICO pela UI
+     (aba Campos → Reclassificações, tabela mapping_domains 0119): criar/
+     editar/excluir sem código; o caminho em código segue para domínio com
+     classificador próprio. -->
 <!-- Versão: 1.25 | Data: 07/08/2026 -->
 <!-- v1.25 (07/08/2026): §4.14 — mapeamentos de valores (de-para 0117) e o
      preset "Outbound — Pré-Vendas": runbook de seed/feature/reaplicação e
@@ -764,10 +769,15 @@ console `/owner`; a Zapper já nasce ON):
   badge **auto** (revisável/editável na página); só o resto fica pendente.
   Erro do automático? Corrija a entrada na página — a reaplicação nunca
   sobrescreve entradas existentes.
-- **Domínio novo (qualquer correlação futura)**: basta a entrada em
-  `lib/mappings/domains.ts` (base + campo cru + campos alvo + categorias) —
-  SEM classificador codificado o banco aprendido já sugere a partir do que
-  for classificado à mão/por IA/importado.
+- **Domínio novo (qualquer correlação futura)**: o caminho SEM código é a
+  aba **Campos → Reclassificações** (0119) — o admin escolhe base(s), campo
+  cru, campo(s) classificado(s) e categorias, e o salvar já aplica; o motor
+  aprendido é o classificador (sugere a partir do que for classificado à
+  mão/por IA/importado). Excluir uma reclassificação dinâmica remove o
+  de-para mas PRESERVA os campos e valores já gravados. Entrada em
+  `lib/mappings/domains.ts` fica reservada a domínio que precise de
+  classificador CODIFICADO próprio (padrão V5) — colisão de chave com um
+  dinâmico: o código vence.
 - **Assistente de IA**: botão "Classificar com IA" (por domínio) propõe
   classificações para os pendentes com prévia EDITÁVEL; funciona também SEM
   IA configurada via copiar-prompt → colar-JSON de IA externa (contrato
@@ -775,10 +785,12 @@ console `/owner`; a Zapper já nasce ON):
 - **Pendências**: valores sem classificação viram UMA tarefa aberta por
   domínio no sino do org_admin (atualizada in-place; auto-completa quando
   zera). A lista completa está na própria página.
-- **Domínio novo** (outro campo/base): entrada em
-  `lib/mappings/domains.ts` + testes (`lib/mappings/domains.test.ts`) —
-  nunca lista paralela; os campos alvo são criados pelo
-  `ensureMappingFields` no primeiro apply.
+- **Export para trabalhar fora**: cada domínio exporta CSV (template das
+  pendências — preenchido, cola de volta no assistente) e JSON (dump com
+  categorias + exemplos) pelo gestor de mapeamentos (na página de
+  Mapeamentos e na aba Reclassificações). Os campos alvo são
+  criados pelo `ensureMappingFields` no primeiro apply, em código ou
+  dinâmico.
 
 **Preset "Outbound — Pré-Vendas"** (Configurações → Presets → Gerar) —
 pré-requisitos de DADO:

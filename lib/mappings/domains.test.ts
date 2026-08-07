@@ -172,9 +172,9 @@ describe("autoClassifyValues (heurística V5 no registry)", () => {
 
 describe("mensagens da tarefa de pendências", () => {
   it("título e descrição estáveis", () => {
-    expect(unmappedTaskTitle("cargo")).toBe("Mapeamentos pendentes — Cargos");
+    expect(unmappedTaskTitle("Cargos")).toBe("Mapeamentos pendentes — Cargos");
     const desc = unmappedTaskDescription(
-      "segmento",
+      "Segmento",
       new Map([
         ["Fintech", 3],
         ["Aviação", 1],

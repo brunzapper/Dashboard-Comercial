@@ -55,6 +55,7 @@ export function MappingsAiSheet({
   targets,
   optionsByTarget,
   pendingCount,
+  onApplied,
 }: {
   ai: { provider: string; model: string; hasKey: boolean } | null;
   domainKey: string;
@@ -63,6 +64,8 @@ export function MappingsAiSheet({
   targets: { fieldKey: string; label: string }[];
   optionsByTarget: Record<string, string[]>;
   pendingCount: number;
+  /** Superfícies com overview em estado (aba Campos) recarregam por aqui. */
+  onApplied?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -200,6 +203,7 @@ export function MappingsAiSheet({
       if (applied > 0) {
         setPending([]);
         router.refresh();
+        onApplied?.();
       }
       const failLines = (res.failed ?? []).map(
         (f) => `${f.rawValue}: ${f.message}`

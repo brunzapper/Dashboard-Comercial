@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 03/08/2026
+// Versão: 1.4 | Data: 07/08/2026
+// v1.4 (07/08/2026): dimensão CONDICIONAL (Dimension.caseFormula) — dim com
+// expressão SE sobre o PRÓPRIO campo funde valor→rótulo aqui (caseIdx, via
+// caseDimValue de lib/widgets/case-dim.ts), pela MESMA mecânica dos buckets;
+// expressão multi-campo NÃO passa por aqui (expansão/contração no engine).
 // v1.3 (03/08/2026): "Semana Fechada" sáb–sex — dimNeedsClientBucket também
 // ativa p/ dim core/`unified:`/`match:` com closedWeek "sab_sex" (as linhas
 // chegam como 'day' do servidor — rpcDimForClosedWeek) e bucketCanonicalValue
@@ -40,6 +44,11 @@ import {
   effectiveWeekMode,
   isClosedWeekTransform,
 } from "./closed-week";
+import {
+  caseDimValue,
+  dimNeedsCaseFold,
+  type CaseExpansion,
+} from "./case-dim";
 
 const DAY_MS = 86_400_000;
 
@@ -194,8 +203,12 @@ export function mergeRowsByBucket(
 ): WidgetRow[] {
   const bucketIdx: number[] = [];
   const respIdx: number[] = [];
+  const caseIdx: number[] = [];
   dims.forEach((d, i) => {
-    if (dimNeedsClientBucket(d)) bucketIdx.push(i);
+    // Expressão condicional de campo ÚNICO tem precedência (sem transform por
+    // definição — caseDimActive — então nunca disputa com o bucket de data).
+    if (dimNeedsCaseFold(d)) caseIdx.push(i);
+    else if (dimNeedsClientBucket(d)) bucketIdx.push(i);
     else if (
       d.field === "responsible_id" &&
       respCanon != null &&
@@ -203,10 +216,14 @@ export function mergeRowsByBucket(
     )
       respIdx.push(i);
   });
-  if ((bucketIdx.length === 0 && respIdx.length === 0) || rows.length === 0)
+  if (
+    (bucketIdx.length === 0 && respIdx.length === 0 && caseIdx.length === 0) ||
+    rows.length === 0
+  )
     return rows;
   const bucketSet = new Set(bucketIdx);
   const respSet = new Set(respIdx);
+  const caseSet = new Set(caseIdx);
 
   const groups = new Map<string, { rows: WidgetRow[]; canon: unknown[] }>();
   const order: string[] = [];
@@ -215,7 +232,12 @@ export function mergeRowsByBucket(
     const canon: unknown[] = [];
     dims.forEach((d, i) => {
       const raw = row[`dim_${i + 1}`] ?? null;
-      if (bucketSet.has(i)) {
+      if (caseSet.has(i)) {
+        // Valor cru → rótulo da expressão (SE sem "senão" preserva o cru).
+        const label = caseDimValue(d.caseFormula!, d, { [d.field]: raw });
+        tuple.push(label);
+        canon.push(label);
+      } else if (bucketSet.has(i)) {
         // weekMode/âncora EFETIVOS: semana fechada força "full" e sáb–sex
         // ancora a semana no sábado (lib/widgets/closed-week.ts).
         const c = bucketCanonicalValue(
@@ -257,6 +279,63 @@ export function mergeRowsByBucket(
     const merged = foldRowGroup(g.rows, metrics);
     dims.forEach((_, i) => {
       merged[`dim_${i + 1}`] = g.canon[i] ?? null;
+    });
+    out.push(merged);
+  }
+  return out;
+}
+
+/**
+ * CONTRAÇÃO do mecanismo robusto da dimensão condicional (expressão
+ * multi-campo): as linhas do RPC chegam com as dims EXPANDIDAS
+ * (planCaseExpansion — o campo da dim + as refs extras como colunas cruas);
+ * aqui cada dim expandida vira o RÓTULO avaliado da expressão (tupla de refs
+ * → caseDimValue), as demais são re-endereçadas às posições da CONFIG e os
+ * grupos que caíram no mesmo rótulo fundem por foldRowGroup (métricas/
+ * `__money`/basis — o engine replota as monetárias depois). Colunas
+ * excedentes são removidas — a jusante (comparação, rotulagem, charts) o
+ * shape é o da config, como em qualquer rodada.
+ */
+export function contractCaseRows(
+  rows: WidgetRow[],
+  dims: Dimension[],
+  expansion: CaseExpansion,
+  metrics: MergeMetricSpec[]
+): WidgetRow[] {
+  if (rows.length === 0) return rows;
+  const groups = new Map<string, { rows: WidgetRow[]; values: unknown[] }>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const values: unknown[] = [];
+    dims.forEach((d, i) => {
+      const cols = expansion.colsOfDim[i];
+      const refs = expansion.refsOfDim[i];
+      if (!refs) {
+        values.push(row[`dim_${cols[0] + 1}`] ?? null);
+        return;
+      }
+      const rawByRef: Record<string, unknown> = {};
+      refs.forEach((ref, k) => {
+        rawByRef[ref] = row[`dim_${cols[k] + 1}`] ?? null;
+      });
+      values.push(caseDimValue(d.caseFormula!, d, rawByRef));
+    });
+    const key = JSON.stringify(values);
+    const g = groups.get(key);
+    if (g) g.rows.push(row);
+    else {
+      groups.set(key, { rows: [row], values });
+      order.push(key);
+    }
+  }
+  const expandedCount = expansion.rpcDims.length;
+  const out: WidgetRow[] = [];
+  for (const key of order) {
+    const g = groups.get(key)!;
+    const merged = foldRowGroup(g.rows, metrics);
+    for (let i = 0; i < expandedCount; i++) delete merged[`dim_${i + 1}`];
+    dims.forEach((_, i) => {
+      merged[`dim_${i + 1}`] = g.values[i] ?? null;
     });
     out.push(merged);
   }

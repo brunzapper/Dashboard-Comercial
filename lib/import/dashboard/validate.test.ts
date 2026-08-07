@@ -229,3 +229,106 @@ describe("Semana Fechada (dimensions[].closedWeek)", () => {
     expect(res.preset?.widgets[0].dimensions?.[0].closedWeek).toBeUndefined();
   });
 });
+
+describe("dimensão condicional (dimensions[].case_formula_text)", () => {
+  function docWithDim(dim: Record<string, unknown>): string {
+    return JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_case",
+      bases: ["deals"],
+      dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+      widgets: [
+        {
+          key: "w1",
+          title: "Condicional",
+          visual_type: "barra",
+          sources: ["deals"],
+          dimensions: [dim],
+          metrics: [{ field: "*", agg: "count" }],
+          filters: [],
+          grid_position: { x: 0, y: 0, w: 6, h: 8 },
+        },
+      ],
+    });
+  }
+
+  it("texto válido vira tokens e faz round-trip com o export (tokens)", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "pipeline",
+        case_formula_text:
+          'SE(OU([pipeline] = "Inbound"; [pipeline] = "Outbound"); "Vendas"; "Canais")',
+      }),
+      ctx
+    );
+    expect(res.errors).toEqual([]);
+    expect(res.ok).toBe(true);
+    const dim = res.preset?.widgets[0].dimensions?.[0];
+    expect(dim?.caseFormula?.tokens.length).toBeGreaterThan(0);
+    // Round-trip: os TOKENS emitidos pelo export passam direto.
+    const again = validateDashboardImport(
+      docWithDim({ field: "pipeline", caseFormula: dim?.caseFormula }),
+      ctx
+    );
+    expect(again.errors).toEqual([]);
+    expect(again.preset?.widgets[0].dimensions?.[0].caseFormula).toEqual(
+      dim?.caseFormula
+    );
+  });
+
+  it("ref desconhecida na expressão é erro do validador de fórmula", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "pipeline",
+        case_formula_text: 'SE([campo_fantasma] = "X"; "A"; "B")',
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(false);
+  });
+
+  it("com transform é removida com aviso; campo de data idem", () => {
+    const withTransform = validateDashboardImport(
+      docWithDim({
+        field: "pipeline",
+        transform: "month_year",
+        case_formula_text: 'SE([pipeline] = "Inbound"; "A"; "B")',
+      }),
+      ctx
+    );
+    expect(withTransform.ok).toBe(true);
+    expect(withTransform.warnings.join("\n")).toContain(
+      "expressão condicional removida"
+    );
+    expect(
+      withTransform.preset?.widgets[0].dimensions?.[0].caseFormula
+    ).toBeUndefined();
+
+    const onDate = validateDashboardImport(
+      docWithDim({
+        field: "closed_at",
+        case_formula_text: 'SE([pipeline] = "Inbound"; "A"; "B")',
+      }),
+      ctx
+    );
+    expect(onDate.ok).toBe(true);
+    expect(onDate.warnings.join("\n")).toContain(
+      "expressão condicional removida"
+    );
+  });
+
+  it("ref de relação DENTRO da expressão é removida com aviso", () => {
+    const res = validateDashboardImport(
+      docWithDim({
+        field: "pipeline",
+        case_formula_text:
+          'SE([responsible_id] = "Maria Silva"; "Dela"; "Dos outros")',
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join("\n")).toContain("data/relação");
+    expect(res.preset?.widgets[0].dimensions?.[0].caseFormula).toBeUndefined();
+  });
+});

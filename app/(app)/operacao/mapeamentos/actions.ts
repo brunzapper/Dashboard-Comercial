@@ -16,7 +16,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { applyValueMappings } from "@/lib/mappings/apply";
 import { syncUnmappedTasks } from "@/lib/mappings/notify";
-import { mappingDomain, normalizeRawValue } from "@/lib/mappings/domains";
+import { normalizeRawValue } from "@/lib/mappings/domains";
+import { loadMappingDomains } from "@/lib/mappings/registry";
 
 export interface MappingActionState {
   ok?: boolean;
@@ -41,7 +42,9 @@ async function applyDomains(domainKeys?: string[]): Promise<string> {
   if (!orgId) return "Organização ativa não identificada.";
   const service = createServiceClient();
   const res = await applyValueMappings(service, orgId, domainKeys);
-  await syncUnmappedTasks(service, orgId, res.unmapped, domainKeys);
+  const all = await loadMappingDomains(service, orgId);
+  const domains = domainKeys ? all.filter((d) => domainKeys.includes(d.key)) : all;
+  await syncUnmappedTasks(service, orgId, res.unmapped, domains);
   const pend = Object.values(res.unmapped).reduce((s, m) => s + m.size, 0);
   const errs = res.errors.length > 0 ? ` (${res.errors.length} erro(s))` : "";
   const auto =
@@ -56,6 +59,7 @@ async function applyDomains(domainKeys?: string[]): Promise<string> {
 
 function revalidate() {
   revalidatePath("/operacao/mapeamentos");
+  revalidatePath("/campos");
   revalidatePath("/dashboards/[id]", "page");
 }
 
@@ -72,7 +76,11 @@ export async function saveMapping(
   if (err) return { ok: false, message: err };
 
   const domainKey = String(formData.get("domain") ?? "");
-  const domain = mappingDomain(domainKey);
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+  const supabase = await createClient();
+  const domains = await loadMappingDomains(supabase, orgId);
+  const domain = domains.find((d) => d.key === domainKey);
   if (!domain) return { ok: false, message: "Domínio desconhecido." };
   const rawValue = String(formData.get("raw_value") ?? "").trim();
   const rawNorm = normalizeRawValue(rawValue);
@@ -87,9 +95,6 @@ export async function saveMapping(
     return { ok: false, message: "Preencha ao menos uma classificação." };
   }
 
-  const orgId = await getActiveOrgId();
-  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
-  const supabase = await createClient();
   const { error } = await supabase.from("value_mappings").upsert(
     {
       organization_id: orgId,

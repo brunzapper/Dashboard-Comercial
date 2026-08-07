@@ -1,9 +1,11 @@
-// Versão: 1.0 | Data: 07/08/2026
-// Loader da página /operacao/mapeamentos: entradas do de-para + PENDÊNCIAS
-// (valores crus distintos sem entrada) por domínio. Roda com o client do
-// USUÁRIO (RLS — a page é de admin via requireSettingsArea("mapeamentos")).
+// Versão: 1.1 | Data: 07/08/2026
+// Loader da página /operacao/mapeamentos e da aba Campos → Reclassificações:
+// entradas do de-para + PENDÊNCIAS (valores crus distintos sem entrada) por
+// domínio. Roda com o client do USUÁRIO (RLS — superfícies de admin).
 // A contagem varre os registros do domínio paginada, lendo SÓ o campo cru
-// (custom_fields->>key) — volume atual ~4k linhas por base, tranquilo p/ RSC.
+// (custom_fields->>key) — volume atual ~4k linhas por base, tranquilo p/ RSC;
+// com N domínios dinâmicos o custo cresce linearmente, por isso `opts.keys`
+// permite carregar só um domínio e a aba de Campos carrega LAZY (na ativação).
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -12,6 +14,7 @@ import {
   normalizeRawValue,
   type MappingDomain,
 } from "./domains";
+import { loadMappingDomains } from "./registry";
 
 export interface MappingRow {
   id: string;
@@ -38,6 +41,8 @@ export interface DomainOverview {
   unmapped: UnmappedValue[];
   /** Registros do domínio com o campo cru preenchido. */
   recordsWithValue: number;
+  /** true = domínio em CÓDIGO (badge "Sistema", não editável/excluível). */
+  system: boolean;
 }
 
 const PAGE = 1000;
@@ -119,10 +124,14 @@ async function loadDomainUnmapped(
 
 export async function loadMappingOverview(
   db: SupabaseClient,
-  orgId: string
+  orgId: string,
+  opts?: { domains?: MappingDomain[]; keys?: string[] }
 ): Promise<DomainOverview[]> {
+  const all = opts?.domains ?? (await loadMappingDomains(db, orgId));
+  const selected = opts?.keys ? all.filter((d) => opts.keys!.includes(d.key)) : all;
+  const codeKeys = new Set(MAPPING_DOMAINS.map((d) => d.key));
   const out: DomainOverview[] = [];
-  for (const domain of MAPPING_DOMAINS) {
+  for (const domain of selected) {
     const mappings = await loadDomainMappings(db, orgId, domain);
     const { unmapped, recordsWithValue } = await loadDomainUnmapped(
       db,
@@ -152,6 +161,7 @@ export async function loadMappingOverview(
       mappings,
       unmapped,
       recordsWithValue,
+      system: codeKeys.has(domain.key),
     });
   }
   return out;
