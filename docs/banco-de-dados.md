@@ -1,3 +1,10 @@
+<!-- Versão: 3.9 | Data: 07/08/2026 -->
+<!-- v3.9 (07/08/2026): 0117 — value_mappings (MAPEAMENTOS DE VALORES/de-para:
+     cargo → área/nível, segmento → categoria; entradas por org+domínio+
+     raw_norm; domínios em código em lib/mappings/domains.ts; aplicação como
+     espelho derivado em custom_fields via lib/mappings/apply.ts). Seed dos
+     CSVs legados em supabase/apply/seed-value-mappings.sql. Feature de org
+     "mapeamentos" (card /operacao/mapeamentos). Não recria as RPCs. -->
 <!-- Versão: 3.8 | Data: 06/08/2026 -->
 <!-- v3.8 (06/08/2026): 0116 — sub_sources.ignore_period boolean (sub-base que
      NÃO respeita o filtro de período do dashboard: linhas sempre em "todo
@@ -583,6 +590,19 @@ nasce com `remuneracao` ligado (`on conflict do nothing` — reaplicar não
 sobrescreve toggles). O gate de app vive em `AREA_FEATURES`
 (lib/auth/access.ts) + `PresetDashboard.requiresFeature`.
 
+**`value_mappings`** (0117) — MAPEAMENTOS DE VALORES (de-para de
+classificação, ex-caches "Map Cargos"/"Map Segmentos" do Apps Script):
+`organization_id`, `domain` (chave do catálogo em CÓDIGO —
+`lib/mappings/domains.ts`; hoje `cargo` e `segmento`), `raw_value` (exibição),
+`raw_norm` (lookup — `lower(trim())`, unique por org+domínio), `outputs` jsonb
+(`{"cargo_area": "TI", "cargo_nivel": "Gerente"}`). A APLICAÇÃO é engine-side
+(`lib/mappings/apply.ts`): grava os campos alvo em `records.custom_fields`
+como espelho derivado (carimbos `field_modified_at` + `locally_modified_at`;
+sem audit/webhook); valores sem entrada viram pendência notificada por
+TAREFA do org_admin. RLS: SELECT p/ membros da org; escrita admin (espelho de
+`source_auto_operations`). Seed idempotente:
+`supabase/apply/seed-value-mappings.sql`.
+
 **`comp_sheet_links`** (0115) — vínculo DURÁVEL do export da Remuneração p/
 Google Planilhas: PK composta `(organization_id, user_id, scope_key)`
 (`scope_key` check `'visao-geral' | 'minha'` — uma planilha por usuário×
@@ -817,6 +837,8 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0113 | field_options_source | `field_definitions.options_source` (check `in ('responsibles')`): campo `selecao` de dropdown VIVO — options reescritas pelo app com os responsáveis ativos principais (`refreshResponsibleOptionFields`; refresh no apply de preset, pós-sync e actions de Responsáveis). Não recria as RPCs |
 | 0114 | org_features | Recursos SOB DEMANDA por org (config custom — hoje `remuneracao`): linha por org com jsonb de toggles; SELECT p/ membros, escrita SÓ service role (console /owner); seed liga `remuneracao` p/ a Zapper (`on conflict do nothing`). Gate de app em AREA_FEATURES + requiresFeature de preset. Não recria as RPCs |
 | 0115 | comp_sheet_links | Export da Remuneração p/ Google Planilhas via Apps Script Web App (sem credencial Google no app): `comp_sheet_links` (vínculo durável usuário×escopo→planilha; RLS linha-própria) + `comp_sheet_export_tickets` (ticket single-use do handshake: token sha256, payload jsonb, consumed/completed; SEM policies — service role only). Não recria as RPCs |
+| 0116 | sub_sources_ignore_period | `sub_sources.ignore_period` boolean (sub-base que NÃO respeita o filtro de período do dashboard; resolvido 100% no engine via pass-through `record_types` do wrapper 0054). Não recria as RPCs |
+| 0117 | value_mappings | Mapeamentos de VALORES (de-para de classificação): entradas por org+domínio+`raw_norm` com `outputs` jsonb; domínios em código (`lib/mappings/domains.ts`), aplicação como espelho derivado em `custom_fields`, pendências em tarefa do org_admin; RLS select org / escrita admin. Seed `supabase/apply/seed-value-mappings.sql`. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

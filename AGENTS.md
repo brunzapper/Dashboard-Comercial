@@ -812,3 +812,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   auto-desliga o vínculo; desligar/excluir mantém campo e valores. Fiscalizado
   por `lib/kanban/allocation-field.test.ts`. Ver `docs/arquitetura.md` §4.16 e
   invariante 24.
+- **Mapeamentos de valores (de-para 0117) são ESPELHO derivado, escritos SÓ
+  pela rotina única (07/08/2026):** `value_mappings` guarda o de-para (lookup
+  por `raw_norm = lower(trim())`; unicidade org+domínio+raw_norm) e os
+  DOMÍNIOS vivem em código (`lib/mappings/domains.ts` — cargo →
+  `cargo_area`/`cargo_nivel`; segmento → `segmento_classificado`; base
+  Meetime). A aplicação é SÓ por `applyValueMappings` (`lib/mappings/apply.ts`
+  — service role com org EXPLÍCITA, só DIFERENÇAS, carimbos
+  `field_modified_at`+`locally_modified_at`, SEM audit/webhook, mock fora, UM
+  `recalcFormulaFieldsForRecords`); NUNCA resolva o de-para em RPC/SQL de
+  consulta (widgets leem o campo materializado) nem edite os campos alvo à
+  mão. Valor sem entrada = fallback "Não Classificado" + pendência; pendências
+  viram UMA tarefa aberta por domínio em nome do org_admin
+  (`lib/mappings/notify.ts` — atualizada in-place, auto-completa em zero,
+  webhooks `task.*` manuais). Hooks: caudas do import CSV
+  (`finalizeCsvImport(recordType)`) e de `/api/ingest` via
+  `maybeApplyMappingsAfterImport` (best-effort, nunca lança). UI = card de
+  Operação org-específico `/operacao/mapeamentos` (feature `mapeamentos` +
+  área `mapeamentos`, gate admin). Seed dos CSVs legados em
+  `supabase/apply/seed-value-mappings.sql` (`on conflict do nothing`). O
+  preset "Outbound — Pré-Vendas" (`lib/presets/outbound.ts`) consome os
+  campos derivados (aba Perfil) e porta as regras jul/2026+ do dashboard
+  legado (subs `ob_rr`/`ob_rq`/`ob_noshow` sobre leads `custom:fonte="Outro"`
+  por Data Reunião ≥ 2026-07-01; esforço sobre `meetime_outbound`; meta
+  `rq_outbound`). Fiscalizado por `lib/mappings/domains.test.ts` +
+  `lib/presets/outbound.test.ts`. Ver `docs/arquitetura.md` §4.19 e
+  invariante 28.
