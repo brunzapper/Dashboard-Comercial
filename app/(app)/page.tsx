@@ -35,6 +35,7 @@ import {
   HandCoins,
   LayoutGrid,
   ListChecks,
+  Shuffle,
   SquareKanban,
   type LucideIcon,
 } from "lucide-react";
@@ -187,6 +188,7 @@ const OPERACAO_ICONS: Record<string, LucideIcon> = {
   agenda: CalendarDays,
   tarefas: ListChecks,
   remuneracao: HandCoins,
+  mapeamentos: Shuffle,
 };
 
 // Card de OPERAÇÃO (aba "Operação" do hub): módulo do catálogo em código —

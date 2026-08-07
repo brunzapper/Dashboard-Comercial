@@ -20,6 +20,7 @@ import { loadSources } from "@/lib/config/sources";
 import { runAutoMatch } from "@/lib/records/matching-engine";
 import { recalcAllFormulaFields } from "@/lib/records/recalc";
 import { ensureAutoOperationsForSource } from "@/lib/operations/auto-operations";
+import { maybeApplyMappingsAfterImport } from "@/lib/mappings/apply";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -58,7 +59,7 @@ export async function POST(
     const { data: key } = await db
       .from("api_keys")
       .select(
-        "id, key_hash, source_key, mapping, dedup_columns, created_by, revoked_at"
+        "id, key_hash, source_key, mapping, dedup_columns, created_by, revoked_at, organization_id"
       )
       .eq("key_hash", computedHash)
       .maybeSingle();
@@ -226,6 +227,13 @@ export async function POST(
       } catch {
         /* ignora: idem — botão em Fontes cobre depois. */
       }
+      // Mapeamentos de valores (0117): base de domínio (ex.: Meetime) ganha a
+      // classificação derivada + tarefa de pendências. Best-effort (não lança).
+      await maybeApplyMappingsAfterImport(
+        db,
+        (key.organization_id as string | null) ?? null,
+        sourceDef.recordType
+      );
       return NextResponse.json({ ok: true, result });
     } catch (e) {
       await db
