@@ -932,6 +932,8 @@ export async function searchRecords(
     .from("records")
     .select("id, title, source_created_at")
     .eq("is_mock", false)
+    // Lixeira (0121): registro na lixeira não é candidato a vínculo.
+    .is("deleted_at", null)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(20);
   if (recordType) builder = builder.eq("record_type", recordType);

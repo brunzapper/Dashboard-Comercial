@@ -199,6 +199,9 @@ export async function searchRecordsForMatch(
     .from("records")
     .select("id, title")
     .eq("record_type", rt)
+    // Lixeira (0121): registro na lixeira não é candidato a conexão nova
+    // (conexões EXISTENTES seguem exibindo o parceiro — listRecordMatches).
+    .is("deleted_at", null)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(20);
   const t = term.trim();

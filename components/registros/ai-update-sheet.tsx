@@ -1,4 +1,11 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): MODO SELEÇÃO (prop `selection`) — alvo = registros
+//   marcados na tabela: os 4 fluxos (chat / copiar-prompt / colar-JSON /
+//   aplicar) chamam as actions de seleção com os ids; chips de filtro viram
+//   "Seleção manual: N"; a IA emite SÓ "alteracoes". Painel de prévia
+//   extraído p/ update-preview.tsx (compartilhado com o bulk-edit-sheet).
+//   Props controladas open/onOpenChange/hideTrigger (a barra de seleção é a
+//   dona do gatilho) + onApplied (limpa a seleção na tabela).
 // Sheet "Atualizar com IA" (/registros): o usuário descreve uma correção em
 // massa ("todo SDR da reunião cuja fonte seja X vira Y") e a IA propõe UMA
 // operação filtros + alterações (contrato registros-update). A PRÉVIA é
@@ -16,7 +23,6 @@ import { useRouter } from "next/navigation";
 import { ClipboardCopy, Wand2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -27,35 +33,49 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { AiChatLog, type AiChatEntry } from "@/components/dashboards/ai-chat-log";
+  AiChatLog,
+  type AiChatEntry,
+} from "@/components/dashboards/ai-chat-log";
 import type {
   ApplyRecordsUpdateState,
   GenerateRecordsUpdateState,
   RecordsUpdatePreview,
 } from "@/lib/ai/update-records";
 import {
+  applyRecordsSelectionUpdate,
   applyRecordsUpdate,
+  buildRecordsSelectionUpdatePrompt,
   buildRecordsUpdatePrompt,
+  generateRecordsSelectionUpdateWithAi,
   generateRecordsUpdateWithAi,
+  previewRecordsSelectionUpdateJson,
   previewRecordsUpdateJson,
 } from "@/app/(app)/registros/ai-update-actions";
+import { UpdatePreviewPanel } from "./update-preview";
 
 export function RecordsAiUpdateSheet({
   source,
   ai,
+  selection,
+  open: openProp,
+  onOpenChange,
+  hideTrigger,
+  onApplied,
 }: {
   source: { key: string; label: string };
   ai: { provider: string; model: string; hasKey: boolean } | null;
+  /** Modo seleção: alvo = estes ids (a IA emite só "alteracoes"). */
+  selection?: { ids: string[] };
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  /** Chamado após um apply que escreveu algo (limpar seleção na tabela). */
+  onApplied?: () => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [selfOpen, setSelfOpen] = useState(false);
+  const open = openProp ?? selfOpen;
+  const setOpen = onOpenChange ?? setSelfOpen;
   const [chat, setChat] = useState<AiChatEntry[]>([]);
   const [turns, setTurns] = useState<string[]>([]);
   // Proposta pendente: JSON canônico (reenviado no apply/turno seguinte) +
@@ -120,12 +140,18 @@ export function RecordsAiUpdateSheet({
     setDescription("");
     setBusy(true);
     try {
-      const res = await generateRecordsUpdateWithAi({
+      const input = {
         sourceKey: source.key,
         description: text,
         priorTurns: turns,
         pendingJson: pendingJson ?? undefined,
-      });
+      };
+      const res = selection
+        ? await generateRecordsSelectionUpdateWithAi({
+            ...input,
+            recordIds: selection.ids,
+          })
+        : await generateRecordsUpdateWithAi(input);
       setTurns((t) => [...t, text]);
       pushResult(res);
     } catch {
@@ -144,7 +170,9 @@ export function RecordsAiUpdateSheet({
     setBusy(true);
     setChat((c) => [...c, { kind: "user", text: "(JSON colado de IA externa)" }]);
     try {
-      const res = await previewRecordsUpdateJson(raw, source.key);
+      const res = selection
+        ? await previewRecordsSelectionUpdateJson(raw, source.key, selection.ids)
+        : await previewRecordsUpdateJson(raw, source.key);
       if (res.ok) setPasteJson("");
       pushResult(res);
     } catch {
@@ -160,7 +188,9 @@ export function RecordsAiUpdateSheet({
   async function copyPrompt() {
     setBusy(true);
     try {
-      const res = await buildRecordsUpdatePrompt(source.key);
+      const res = selection
+        ? await buildRecordsSelectionUpdatePrompt(source.key, selection.ids)
+        : await buildRecordsUpdatePrompt(source.key);
       if (!res.ok || !res.prompt) {
         setChat((c) => [
           ...c,
@@ -192,13 +222,17 @@ export function RecordsAiUpdateSheet({
     if (preview.overCap || preview.total === 0 || !confirmed) return;
     setApplying(true);
     try {
-      const res: ApplyRecordsUpdateState = await applyRecordsUpdate(
-        pendingJson,
-        source.key
-      );
+      const res: ApplyRecordsUpdateState = selection
+        ? await applyRecordsSelectionUpdate(
+            pendingJson,
+            source.key,
+            selection.ids
+          )
+        : await applyRecordsUpdate(pendingJson, source.key);
       if ((res.changedCount ?? 0) > 0) {
         clearPending();
         router.refresh();
+        onApplied?.();
       }
       setChat((c) => [
         ...c,
@@ -225,22 +259,30 @@ export function RecordsAiUpdateSheet({
     }
   }
 
-  const applyBlocked =
-    !preview || preview.overCap || preview.total === 0 || !confirmed;
-
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <Wand2 className="size-4" />
-        Atualizar com IA
-      </Button>
+      {hideTrigger ? null : (
+        <Button variant="outline" onClick={() => setOpen(true)}>
+          <Wand2 className="size-4" />
+          Atualizar com IA
+        </Button>
+      )}
       <SheetContent className="flex flex-col overflow-y-auto sm:max-w-2xl">
         <SheetHeader>
-          <SheetTitle>Atualizar registros com IA — {source.label}</SheetTitle>
+          <SheetTitle>
+            {selection
+              ? `Editar com IA — ${selection.ids.length} selecionado(s)`
+              : `Atualizar registros com IA — ${source.label}`}
+          </SheetTitle>
           <SheetDescription>
-            Descreva uma correção em massa (ex.: &quot;todos com fonte X ficam
-            com SDR Fulano&quot;). O servidor mostra quantos registros casam e
-            uma amostra antes de você confirmar — nada é gravado sem isso.
+            {selection
+              ? "Descreva a alteração para os registros selecionados (ex.: " +
+                '"marque todos como Perdido"). O servidor mostra a prévia ' +
+                "antes → depois — nada é gravado sem a sua confirmação."
+              : "Descreva uma correção em massa (ex.: “todos com fonte X " +
+                "ficam com SDR Fulano”). O servidor mostra quantos " +
+                "registros casam e uma amostra antes de você confirmar — " +
+                "nada é gravado sem isso."}
           </SheetDescription>
         </SheetHeader>
 
@@ -254,105 +296,16 @@ export function RecordsAiUpdateSheet({
           />
 
           {preview && pendingJson ? (
-            <div className="rounded-md border border-amber-300/60 bg-amber-50/60 p-3 dark:border-amber-400/30 dark:bg-amber-950/20">
-              <p className="mb-1 text-sm font-medium">
-                Prévia — {preview.total} registro(s) casam os filtros
-                {preview.mockCount > 0
-                  ? ` (${preview.mockCount} de demonstração serão pulados)`
-                  : ""}
-                .
-              </p>
-              <div className="text-muted-foreground mb-2 flex flex-wrap gap-1 text-xs">
-                {preview.filterLabels.map((f, i) => (
-                  <span key={i} className="bg-muted rounded px-1.5 py-0.5">
-                    {f}
-                  </span>
-                ))}
-              </div>
-              <ul className="mb-2 text-sm">
-                {preview.changeLabels.map((ch) => (
-                  <li key={ch.key}>
-                    <span className="font-medium">{ch.label}</span> → {ch.value}
-                    {ch.sync ? (
-                      <span className="text-muted-foreground text-xs">
-                        {" "}
-                        (campo de Sync — escrita local)
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              {preview.sample.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Registro</TableHead>
-                        {preview.changeLabels.map((ch) => (
-                          <TableHead key={ch.key}>{ch.label}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {preview.sample.map((row) => (
-                        <TableRow key={row.id}>
-                          <TableCell className="max-w-48 truncate font-medium">
-                            {row.title}
-                          </TableCell>
-                          {row.cells.map((cell) => (
-                            <TableCell
-                              key={cell.key}
-                              className="text-muted-foreground text-xs"
-                            >
-                              {cell.from} → {cell.to}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {preview.total > preview.sample.length ? (
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      Amostra de {preview.sample.length} — a alteração vale para
-                      os {preview.total} registro(s) do recorte.
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-              {preview.overCap ? (
-                <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-                  Recorte acima do teto — peça filtros mais específicos pelo
-                  chat antes de aplicar.
-                </p>
-              ) : preview.total > 0 ? (
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={confirmed}
-                    onCheckedChange={(v) => setConfirmed(v === true)}
-                    disabled={applying}
-                  />
-                  Confirmo a alteração de {preview.total - preview.mockCount}{" "}
-                  registro(s)
-                </label>
-              ) : null}
-              <div className="mt-3 flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={applyPending}
-                  disabled={applying || busy || applyBlocked}
-                >
-                  {applying ? "Aplicando…" : "Aplicar alteração"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={clearPending}
-                  disabled={applying}
-                >
-                  Descartar
-                </Button>
-              </div>
-            </div>
+            <UpdatePreviewPanel
+              preview={preview}
+              selectionCount={selection?.ids.length}
+              confirmed={confirmed}
+              onConfirmedChange={setConfirmed}
+              applying={applying}
+              busy={busy}
+              onApply={applyPending}
+              onDiscard={clearPending}
+            />
           ) : null}
 
           {ai?.hasKey ? (

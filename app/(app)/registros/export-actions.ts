@@ -134,7 +134,9 @@ export async function exportRecordsCsv(
       .from("records")
       .select(EXPORT_COLS, from === 0 ? { count: "exact" } : undefined)
       .eq("record_type", recordType)
-      .eq("is_mock", false);
+      .eq("is_mock", false)
+      // Lixeira (0121): o export espelha a listagem — soft delete fora.
+      .is("deleted_at", null);
     if (params.etapa) query = query.ilike("stage", `%${params.etapa}%`);
     if (params.responsavel) {
       query = query.eq("responsible_id", params.responsavel);

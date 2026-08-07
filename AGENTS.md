@@ -918,3 +918,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/feedback/use-background-save.test.ts` + blocos em
   `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`. Ver `docs/arquitetura.md`
   §4.10 ("Feedback de carregamento").
+- **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
+  nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
+  soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
+  `lib/records/trash-actions.ts` (gate admin + trigger
+  `enforce_records_trash_guard`: trash é UPDATE e cairia na `records_update`
+  de qualquer editor; relaxar exige mudar os DOIS juntos). Consulta nova
+  filtra `deleted_at is null` (o funil `buildRecordListQuery` e os RPCs 0121
+  cobrem os caminhos canônicos) — EXCETO upserts do sync/import, SEM filtro
+  de propósito (linha trashed atualiza in-place e SEGUE na lixeira; é o que
+  impede ressurreição no reconcile). O predicado dos RPCs é ESPELHADO
+  byte a byte: `snapshot_records.deleted_at` é espelho MORTO sempre-null (a
+  captura exclui a lixeira) — não remova a coluna nem o predicado do
+  snapshot. `record.deleted` no envio à lixeira, `record.restored` no
+  restore, purga silenciosa (`pg-cron-purge-records-trash.sql`, 30d); nenhum
+  caminho do app faz hard delete fora de `purgeRecordsPermanently`
+  (predicado `deleted_at not null`). Ações em massa de /registros
+  (checkboxes + `RecordsBulkBar`): edição manual e IA sobre selecionados
+  usam o MODO SELEÇÃO do contrato registros-update
+  (`validateRecordsUpdate(..., { selection: true })` — `filtros` proibido;
+  ids viajam como ARGUMENTO das actions, nunca no JSON; `resolveSelection`
+  + `updateRecordValuesBulk`, nunca caminho paralelo). Fiscalizado por
+  `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
+  de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
+  Ver `docs/arquitetura.md` §4.21 e invariante 30.

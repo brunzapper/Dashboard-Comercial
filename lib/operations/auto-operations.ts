@@ -95,6 +95,9 @@ async function loadSourceRecords(
       .select("id, record_type, title, custom_fields")
       .eq("record_type", recordType)
       .eq("is_mock", false)
+      // Lixeira (0121): registro-fonte na lixeira "some" — a rotina INATIVA a
+      // operação de parceria dele (nunca exclui), semântica desejada.
+      .is("deleted_at", null)
       .order("id", { ascending: true })
       .range(from, from + BATCH - 1);
     if (error) throw new Error(error.message);

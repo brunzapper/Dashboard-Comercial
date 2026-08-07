@@ -226,7 +226,7 @@ export function BulkActionBar({
                 <AlertDialogDescription>
                   {isTasks
                     ? "Tarefas travadas ou de outros usuários não serão excluídas."
-                    : "Esta ação não pode ser desfeita. Tarefas, conexões e posicionamentos vinculados também serão excluídos."}
+                    : "Os registros vão para a Lixeira e podem ser restaurados por um administrador em até 30 dias (Registros → Lixeira). Depois disso são excluídos definitivamente."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

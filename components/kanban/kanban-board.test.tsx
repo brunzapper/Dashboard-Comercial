@@ -20,8 +20,10 @@ vi.mock("@/lib/kanban/bulk-actions", () => ({
   moveRecordCardsBulk: vi.fn(),
   createTasksBulk: vi.fn(),
   completeTasksBulk: vi.fn(),
-  deleteRecordsBulk: vi.fn(),
   deleteTasksBulk: vi.fn(),
+}));
+vi.mock("@/lib/records/trash-actions", () => ({
+  trashRecordsBulk: vi.fn(),
 }));
 vi.mock("@/lib/tasks/actions", () => ({
   completeTask: vi.fn(),

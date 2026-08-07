@@ -125,6 +125,8 @@ async function collectRawValues(
         .select(selectRaw)
         .eq("organization_id", orgId)
         .eq("record_type", recordType)
+        // Lixeira (0121): valor que só existe na lixeira não vira pendência.
+        .is("deleted_at", null)
         .order("id", { ascending: true })
         .range(from, from + 999);
       if (error) throw new Error(`records (${recordType}): ${error.message}`);
@@ -206,6 +208,8 @@ async function applyDomain(
         .select("id, is_mock, custom_fields, field_modified_at")
         .eq("organization_id", orgId)
         .eq("record_type", recordType)
+        // Lixeira (0121): não classifica nem escreve em registro na lixeira.
+        .is("deleted_at", null)
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) throw new Error(`records (${recordType}): ${error.message}`);

@@ -1,4 +1,14 @@
-<!-- Versão: 3.12 | Data: 07/08/2026 -->
+<!-- Versão: 3.13 | Data: 07/08/2026 -->
+<!-- v3.13 (07/08/2026): 0121 — LIXEIRA de registros (soft delete):
+     records.deleted_at/deleted_by + índice parcial; trigger
+     enforce_records_trash_guard (mudança de deleted_at exige papel admin;
+     escape GUC app.allow_protected_change); snapshot_records.deleted_at
+     (espelho MORTO sempre-null — só p/ o predicado espelhado dos RPCs e o
+     .is() do engine no viewer); recria o PAR de RPCs com `deleted_at is
+     null` ESPELHADO (paridade byte a byte), snapshot_refresh_copy (lixeira
+     fora das linhas de DADOS; ramo partner-only sem filtro) e
+     registros_populated_refs (lixeira fora). Purga 30d:
+     apply/pg-cron-purge-records-trash.sql. -->
 <!-- v3.12 (07/08/2026): 0120 — registros_populated_refs(record_type): função
      SECURITY INVOKER (RLS de records recorta por usuário) que devolve as
      colunas núcleo e chaves de custom_fields com >=1 valor não-vazio (mocks
@@ -212,6 +222,7 @@ do site ou linha de fonte dinâmica.
 | `created_at`, `updated_at`, `last_synced_at`, `locally_modified_at` | |
 | `responsible_id`, `operation_id`, `related_lead_id` uuid, `lead_time_days` numeric | (0012) |
 | `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5. Mocks Inbound carregam `custom_fields.fonte = "Formulário de CRM"` (0084 — predicados de sub-fonte valem em AND p/ mocks); Outbound (0053) ficam sem fonte de propósito |
+| `deleted_at` timestamptz, `deleted_by` uuid | (0121) — LIXEIRA (soft delete, 30 dias): preenchido = registro "excluído" (fora de TODA leitura de consulta; restaurável). Só admin muda (`trg_records_trash_guard`); índice parcial `idx_records_deleted_at`; purga física diária via `apply/pg-cron-purge-records-trash.sql`. Ver `arquitetura.md` §4.21/invariante 30 |
 
 **`data_sources`** (0060) — catálogo de fontes (dinâmicas, criáveis via UI).
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
@@ -538,7 +549,7 @@ restrições `allowed_responsible_ids`/`allowed_operation_ids`/`allowed_sources`
 shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 (`last_refreshed_at`, `last_refresh_error`, `last_accessed_at`, `access_count`).
 
-**`snapshot_records`** (0056) — cópia congelada dos registros permitidos
+**`snapshot_records`** (0056; +`deleted_at` sempre-null na 0121 — espelho morto p/ o predicado espelhado dos RPCs e o `.is()` do engine) — cópia congelada dos registros permitidos
 (PK `(snapshot_id, id)`; espelha as colunas consultáveis de `records`, incl.
 `is_mock`). **`snapshot_record_matches`** (0056) — cópia dos matches.
 
@@ -663,8 +674,8 @@ de `anon`/`authenticated`.
 
 | Função | Versão vigente | Papel |
 |---|---|---|
-| `run_widget_query` | **0105** (recriada 19×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085, 0105) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget. 0105: op interno `in_ci` (pertencimento normalizado — fusão de perfis de operação) |
-| `run_widget_query_snapshot` | **0105** (0056, 0057, 0072, 0085, 0105) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
+| `run_widget_query` | **0121** (recriada 20×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085, 0105, 0121) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget. 0105: op interno `in_ci` (fusão de perfis de operação); 0121: predicado `deleted_at is null` (lixeira fora) |
+| `run_widget_query_snapshot` | **0121** (0056, 0057, 0072, 0085, 0105, 0121) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role. 0121: o predicado da lixeira é ESPELHADO e NO-OP (`snapshot_records.deleted_at` é sempre null — a captura exclui a lixeira) |
 
 **Invariante:** toda migração que recriar `run_widget_query` DEVE recriar
 `run_widget_query_snapshot` (e `_widget_match_expr` ↔ `_widget_match_expr_snap`) no
@@ -688,8 +699,9 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `auth_roles`, `auth_has_role`, `auth_has_permission` | 0003 | Helpers de RLS (SECURITY DEFINER); desde 0068, sempre chamados como `(select ...)` nas policies |
 | `auth_responsible_ids` | 0037 (redefinida 0101) | IDs de `responsibles` vinculados ao usuário logado — base da visibilidade do vendedor. Desde a 0101 devolve o GRUPO (ids próprios + principais + apelidos desses principais): registros no id do apelido continuam visíveis |
 | `operation_subtree` | 0016 | Subárvore de operações (aninhamento) |
-| `snapshot_refresh_copy` | 0056 (recriada 0057) | Cópia atômica de `records` → `snapshot_records` (mock-aware); EXECUTE só service role |
+| `snapshot_refresh_copy` | 0056 (recriada 0057, 0121) | Cópia atômica de `records` → `snapshot_records` (mock-aware); 0121: lixeira FORA das linhas de dados (ramo partner-only segue sem filtro — colunas match: resolvem parceiro na lixeira); EXECUTE só service role |
 | `enforce_reuniao_freeze` | 0051 | Trigger: descarta escrita de Data Reunião < 01/06/2026 e protege mocks |
+| `enforce_records_trash_guard` | 0121 | Trigger: mudança de `records.deleted_at` (lixeira) exige papel admin; escape = GUC `app.allow_protected_change` (padrão 0089). Inerte p/ escritores service-role (não mandam a coluna); a purga é DELETE (fora do trigger) |
 | `enforce_task_lock` | 0063 | Trigger: só admin/gestor excluem/destravam tarefa `locked` |
 | `enforce_task_global` | 0066 | Trigger: só admin/gestor alteram tarefas globais |
 | `recalc_apply_updates` | 0070 | Aplica um lote de recálculo num único UPDATE set-based |
@@ -701,12 +713,13 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
 | `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
 | `maintenance_analyze` | 0102 | `ANALYZE` de `records`/`record_matches` (SECURITY DEFINER — service role não é dona das tabelas); EXECUTE só service role. Disparada pelo runner do sync ao concluir job com >= 2.000 linhas escritas |
-| `registros_populated_refs` | 0120 | Refs núcleo + chaves de `custom_fields` com >=1 valor não-vazio num `record_type` (mocks fora) — SECURITY INVOKER (RLS de `records` recorta por usuário). Consumida pela página /registros (colunas dirigidas por dados). EXECUTE só authenticated/service_role |
+| `registros_populated_refs` | 0120 (recriada 0121 — lixeira fora) | Refs núcleo + chaves de `custom_fields` com >=1 valor não-vazio num `record_type` (mocks e lixeira fora) — SECURITY INVOKER (RLS de `records` recorta por usuário). Consumida pela página /registros (colunas dirigidas por dados). EXECUTE só authenticated/service_role |
 
 ## 5. Triggers
 
 - **`trg_*_updated_at`** em ~28 tabelas → `set_updated_at` (padrão da 0001).
 - **`trg_records_reuniao_freeze`** (0051) em `records` → `enforce_reuniao_freeze`.
+- **`trg_records_trash_guard`** (0121) em `records` → `enforce_records_trash_guard`.
 - **`trg_tasks_lock`** (0063) e **`trg_tasks_global`** (0066) em `tasks`.
 - **Triggers de stamp de org** (0090; +0098): `trg_records_set_org`,
   `trg_audit_log_set_org`, `trg_record_matches_set_org`,
@@ -879,6 +892,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0118 | value_mappings_origin | `value_mappings.origin` (`manual|seed|auto|ai`) — origem da entrada (badge; auto = classificador V5 portado, ai = assistente). Backfill pré-0118 → 'seed'. Não recria as RPCs |
 | 0119 | mapping_domains | Domínios DINÂMICOS de reclassificação (aba Campos → Reclassificações): key (mesmo slug-check de `value_mappings.domain`), record_types[], campo cru + targets jsonb com categorias canônicas; registry efetivo = código ∪ banco (`lib/mappings/registry.ts`, fail-closed). RLS select org / escrita admin. Não recria as RPCs |
 | 0120 | registros_populated_refs | Função `registros_populated_refs(record_type)` — colunas núcleo e chaves custom populadas (>=1 valor não-vazio, mocks fora), SECURITY INVOKER (RLS recorta por usuário); base das colunas dirigidas por dados da página /registros. EXECUTE só authenticated/service_role. Não recria as RPCs |
+| 0121 | records_trash | LIXEIRA de registros (soft delete 30d): `records.deleted_at/deleted_by` + índice parcial + trigger `enforce_records_trash_guard` (admin-only) + `snapshot_records.deleted_at` (espelho morto); recria o PAR de RPCs (`deleted_at is null` espelhado), `snapshot_refresh_copy` e `registros_populated_refs`. Purga: `apply/pg-cron-purge-records-trash.sql` |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

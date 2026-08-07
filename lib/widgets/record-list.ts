@@ -251,6 +251,10 @@ function buildRecordListQuery(
   let q = supabase
     .from("records")
     .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
+  // Lixeira (0121): soft delete fora de TODO modo lista/kanban/agenda/card.
+  // No viewer de snapshot o predicado é no-op (snapshot_records.deleted_at é
+  // o espelho morto sempre-null da 0121).
+  q = q.is("deleted_at", null);
   if (opts?.orgId) q = q.eq("organization_id", opts.orgId);
   if (opts?.onlyMocks) q = q.eq("is_mock", true);
   else if (!includeMocks) q = q.eq("is_mock", false);
