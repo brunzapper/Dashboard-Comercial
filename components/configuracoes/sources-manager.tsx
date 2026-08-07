@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 28/07/2026
+// Versão: 1.5 | Data: 07/08/2026
+// v1.5 (07/08/2026): as actions não revalidam mais ("/", "layout") — cada
+//   form/botão dispara o refresh pós-sucesso via useRefreshOnActionOk (o form
+//   libera quando a action retorna; sidebar/lista atualizam ~0,3s depois).
 // Gestão do catálogo de fontes (data_sources, 0060): listar, criar, editar e
 // excluir fontes dinâmicas. Fontes novas mapeiam key === record_type; a chave
 // é gerada do nome (slugify) e imutável após a criação. Excluir exige fonte
@@ -42,6 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useRefreshOnActionOk } from "@/lib/use-debounced-refresh";
 import type { SourceDef } from "@/lib/sources";
 import {
   CORE_PERIOD_FIELD_OPTIONS,
@@ -89,6 +93,8 @@ function SourceForm({
   const isEdit = Boolean(source);
   const action = isEdit ? updateSource : createSource;
   const [state, formAction, pending] = useActionState(action, initial);
+  // A action não revalida — o refresh pós-sucesso reconcilia lista/sidebar.
+  useRefreshOnActionOk(state);
   const [periodField, setPeriodField] = useState(
     source?.defaultPeriodField ?? "source_created_at"
   );
@@ -253,7 +259,9 @@ function SourceForm({
 // ↑/↓ dentro da pasta (0107): cada clique re-sequencia o grupo no servidor
 // (reorderSource). Bordas viram no-op na action (resequenceAfterMove).
 function MoveSourceButtons({ sourceKey }: { sourceKey: string }) {
-  const [, formAction, pending] = useActionState(reorderSource, initial);
+  const [state, formAction, pending] = useActionState(reorderSource, initial);
+  // Rajada de ↑/↓ coalesce num único refresh (debounce do hook).
+  useRefreshOnActionOk(state);
   return (
     <form action={formAction} className="flex items-center">
       <input type="hidden" name="key" value={sourceKey} />
@@ -291,6 +299,7 @@ function DeleteSourceButton({
   label: string;
 }) {
   const [state, formAction, pending] = useActionState(deleteSource, initial);
+  useRefreshOnActionOk(state);
   const [confirm, setConfirm] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   return (

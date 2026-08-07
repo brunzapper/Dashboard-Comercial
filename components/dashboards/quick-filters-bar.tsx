@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 22/07/2026
+// Versão: 1.3 | Data: 07/08/2026
+// v1.3 (07/08/2026): persistência OTIMISTA em background (useBackgroundSave):
+// o chip responde na hora, a action roda com revalidate:false e a
+// reconciliação vem do refresh debounced do hook; erro → toast + revert do
+// chip. O transition global (useNavPending) ficou SÓ para o modo snapshot
+// (navegação de URL real). Guard hasPending: o reseed por props é pulado com
+// save em voo (eco stale não clobbera o otimista).
 // v1.2 (22/07/2026): entry.hiddenOptions oculta opções do dropdown de
 // multi-seleção (só exibição — visibleOptions com `keep` = valores
 // selecionados, p/ o rótulo do chip resolver e dar para desmarcar).
@@ -14,8 +20,8 @@
 //   global) + intervalo personalizado.
 // Ao contrário da barra de busca (URL), a seleção é PERSISTIDA no servidor
 // (dashboard_table_cells '__qf__', via saveQuickFilterValue) — compartilhada
-// entre usuários e sobrevive a reloads. Estado otimista + debounce; a action
-// revalida a página e o RSC recomputa o widget (overlay via useNavPending).
+// entre usuários e sobrevive a reloads. Estado otimista + debounce; o save
+// roda em background (revalidate:false) e o refresh debounced reconcilia.
 // EXCEÇÃO — modo snapshot (viewer público /s/<token>): a seleção é POR
 // VISITANTE e vai para a URL (qf_<widget>_<entry>, mesma técnica da
 // TableFilterBar); nada é gravado no servidor.
@@ -49,6 +55,7 @@ import {
 } from "@/lib/widgets/quick-filters";
 import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { TRANSFORM_LABELS, type QuickFilterEntry } from "@/lib/widgets/types";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
@@ -78,6 +85,7 @@ export function QuickFiltersBar({
   className?: string;
 }) {
   const { run } = useNavPending();
+  const { save, hasPending } = useBackgroundSave();
   const { snapshot } = useSnapshotMode();
   const router = useRouter();
   const pathname = usePathname();
@@ -85,6 +93,11 @@ export function QuickFiltersBar({
 
   // Estado otimista, ressincronizado quando o servidor manda valores novos
   // (outro usuário mudou / sync da barra global) — padrão seedKey do app.
+  // Guard hasPending (espelho do skipNextData do kanban-board): com save em
+  // voo o eco de props é stale (renderizou antes do commit) — ADOTA a key sem
+  // aplicar (consome o eco; aplicá-lo no drain clobberaria o otimista); o
+  // refresh do hook traz o valor gravado numa key nova e o reseed normal
+  // reconcilia.
   const serverKey = JSON.stringify(qf.values);
   const [seedKey, setSeedKey] = useState(serverKey);
   const [values, setValues] = useState<Record<string, QuickFilterValue>>(
@@ -92,7 +105,7 @@ export function QuickFiltersBar({
   );
   if (seedKey !== serverKey) {
     setSeedKey(serverKey);
-    setValues(qf.values);
+    if (!hasPending) setValues(qf.values);
   }
 
   // Debounce por entry: agrupa cliques rápidos numa única gravação.
@@ -120,10 +133,25 @@ export function QuickFiltersBar({
         );
         return;
       }
-      // Transition assíncrona: o overlay "Carregando…" cobre a gravação + a
-      // revalidação da página disparada pela action.
-      run(async () => {
-        await saveQuickFilterValue(dashboardId, widgetId, entryId, value);
+      // Save otimista em background: o chip já mostra o valor novo; a action
+      // volta logo após o upsert (revalidate:false) e o refresh debounced do
+      // hook reconcilia os widgets. Erro → toast + chip volta ao último valor
+      // confirmado pelo servidor (props deste render).
+      const prev = qf.values[entryId] ?? null;
+      save({
+        key: entryId,
+        context: "Não foi possível salvar o filtro",
+        action: () =>
+          saveQuickFilterValue(dashboardId, widgetId, entryId, value, {
+            revalidate: false,
+          }),
+        revert: () =>
+          setValues((cur) => {
+            const next = { ...cur };
+            if (prev == null) delete next[entryId];
+            else next[entryId] = prev;
+            return next;
+          }),
       });
     }, 400);
   };

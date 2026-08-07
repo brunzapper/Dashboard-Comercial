@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 12/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): seedJson memoizado por referência do seed — o stringify
+// do estado COMPLETO do dashboard rodava a cada render do provider (custo
+// síncrono somado a cada re-render em board grande); a referência só muda
+// quando o RSC re-renderiza, que é exatamente quando o observer precisa rodar.
 // Histórico de Desfazer/Refazer do dashboard (em memória, por sessão — máx. 10).
 // A unidade é um SNAPSHOT completo do estado (nome + settings + widgets +
 // células); desfazer = gravar de volta um snapshot anterior via server action.
@@ -96,7 +100,9 @@ export function DashboardHistoryProvider({
 
   // Observer: só re-executa quando o CONTEÚDO do seed muda (dep = string), então
   // uma captura explícita (que não mexe na prop) nunca dispara aqui por engano.
-  const seedJson = JSON.stringify(seed);
+  // Memo por referência: a prop só troca de identidade no re-render RSC — sem
+  // isso o stringify do dashboard INTEIRO rodava em todo render do provider.
+  const seedJson = useMemo(() => JSON.stringify(seed), [seed]);
   useEffect(() => {
     recordSnapshot(seed);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1069,7 +1069,11 @@ export async function createWidget(
 export async function updateWidget(
   widgetId: string,
   dashboardId: string,
-  input: WidgetInput
+  input: WidgetInput,
+  // revalidate: false = save em background (aparência in-loco): o await volta
+  // logo após o UPDATE; o cliente reconcilia por refresh debounced
+  // (useBackgroundSave). Default true (builder e demais chamadores).
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1110,7 +1114,7 @@ export async function updateWidget(
   if (maintenance) {
     await reconcileAllocationBestEffort({ kind: "widget", id: widgetId });
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1258,7 +1262,10 @@ export async function saveQuickFilterValue(
   dashboardId: string,
   widgetId: string,
   entryId: string,
-  value: QuickFilterValue | null
+  value: QuickFilterValue | null,
+  // revalidate: false = save em background (chip otimista na barra): o await
+  // volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1289,7 +1296,7 @@ export async function saveQuickFilterValue(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1372,7 +1379,10 @@ export async function listFilterOptionCandidates(
 export async function savePeriodWindowChoice(
   dashboardId: string,
   widgetId: string,
-  choice: PeriodWindowChoice | null
+  choice: PeriodWindowChoice | null,
+  // revalidate: false = save em background (controle otimista no card): o
+  // await volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1399,7 +1409,7 @@ export async function savePeriodWindowChoice(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1412,7 +1422,10 @@ export async function savePeriodWindowChoice(
 export async function saveSharedFieldFilter(
   dashboardId: string,
   widgetId: string,
-  encoded: string | null
+  encoded: string | null,
+  // revalidate: false = save em background (filtro otimista no widget): o
+  // await volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1438,7 +1451,7 @@ export async function saveSharedFieldFilter(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1640,7 +1653,10 @@ export async function updateEntityField(
   // Dashboard de origem: revalida SÓ ele (outros dashboards que exibem o mesmo
   // valor global atualizam na próxima navegação — páginas dinâmicas). Ausente
   // (compat) = revalida todos, como antes.
-  dashboardId?: string
+  dashboardId?: string,
+  // revalidate: false = save em background (célula otimista): o await volta
+  // após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1691,8 +1707,10 @@ export async function updateEntityField(
     );
     if (error) return { ok: false, message: error.message };
   }
-  if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
-  else revalidatePath("/dashboards/[id]", "page");
+  if (opts?.revalidate !== false) {
+    if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
+    else revalidatePath("/dashboards/[id]", "page");
+  }
   return { ok: true };
 }
 

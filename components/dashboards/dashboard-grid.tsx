@@ -1410,9 +1410,12 @@ export function DashboardGrid({
   return (
     <div className="relative">
       {/* Overlay de recarregamento: aparece enquanto o servidor recomputa os
-          widgets após uma mudança de período/filtro. */}
+          widgets após uma navegação de período/URL. pointer-events-none: o
+          board segue INTERATIVO com os dados antigos — o overlay informa, não
+          bloqueia (saves de widget nem passam mais por aqui: rodam em
+          background via useBackgroundSave). */}
       {pending ? (
-        <div className="bg-background/50 absolute inset-0 z-20 flex items-start justify-center rounded-lg backdrop-blur-[1px]">
+        <div className="bg-background/50 pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-lg backdrop-blur-[1px]">
           <div className="bg-background text-muted-foreground mt-6 flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm shadow-sm">
             <Loader2 className="size-4 animate-spin" />
             Carregando…

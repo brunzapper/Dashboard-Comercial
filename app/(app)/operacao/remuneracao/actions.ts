@@ -431,14 +431,19 @@ export async function deletePlan(planId: string): Promise<CompActionState> {
 
 // ===================== Célula: alvo (linha de goals) =====================
 
-export async function saveTarget(input: {
-  planId: string;
-  responsibleId: string;
-  year: number;
-  month: number;
-  factorId: string;
-  value: number | null;
-}): Promise<CompActionState> {
+export async function saveTarget(
+  input: {
+    planId: string;
+    responsibleId: string;
+    year: number;
+    month: number;
+    factorId: string;
+    value: number | null;
+  },
+  // revalidate: false = save em background (célula otimista da grade): o await
+  // volta após a gravação; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
+): Promise<CompActionState> {
   const err = await ensureAdmin();
   if (err) return { ok: false, message: err };
   if (!periodOk(input.year, input.month))
@@ -481,8 +486,10 @@ export async function saveTarget(input: {
     month: input.month,
   });
   if (totalErr) return { ok: false, message: totalErr };
-  revalidatePath("/operacao/remuneracao");
-  revalidatePath("/configuracoes/metas");
+  if (opts?.revalidate !== false) {
+    revalidatePath("/operacao/remuneracao");
+    revalidatePath("/configuracoes/metas");
+  }
   return { ok: true };
 }
 
@@ -507,13 +514,18 @@ export interface EntryPatch {
   note?: string | null;
 }
 
-export async function saveEntryInputs(input: {
-  planId: string;
-  responsibleId: string;
-  year: number;
-  month: number;
-  patch: EntryPatch;
-}): Promise<CompActionState> {
+export async function saveEntryInputs(
+  input: {
+    planId: string;
+    responsibleId: string;
+    year: number;
+    month: number;
+    patch: EntryPatch;
+  },
+  // revalidate: false = save em background (célula otimista da grade): o await
+  // volta após a gravação; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
+): Promise<CompActionState> {
   const err = await ensureAdmin();
   if (err) return { ok: false, message: err };
   if (!periodOk(input.year, input.month))
@@ -569,7 +581,7 @@ export async function saveEntryInputs(input: {
         ...(orgId ? { organization_id: orgId } : {}),
       });
   if (error) return { ok: false, message: error.message };
-  revalidatePath("/operacao/remuneracao");
+  if (opts?.revalidate !== false) revalidatePath("/operacao/remuneracao");
   return { ok: true };
 }
 

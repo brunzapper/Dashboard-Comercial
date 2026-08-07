@@ -1,4 +1,12 @@
-// Versão: 2.5 | Data: 28/07/2026
+// Versão: 2.6 | Data: 07/08/2026
+// v2.6 (07/08/2026): fim do revalidatePath("/", "layout") nos CRUDs — a
+//   resposta da action voltava só depois do re-render RSC do layout raiz +
+//   página (o formulário ficava travado segundos por operação). O form agora
+//   libera quando o INSERT/UPDATE retorna e o CLIENTE dispara router.refresh()
+//   pós-sucesso (useRefreshOnActionOk nos managers) — o refresh re-renderiza a
+//   rota atual INCLUINDO o layout (sidebar/providers atualizam ~0,3s depois),
+//   como transition não-urgente. Outras rotas dinâmicas não guardam cache de
+//   cliente (staleTimes dynamic = 0) — sempre re-buscam na navegação.
 // v2.5 (28/07/2026): campo de período CUSTOM nas BASES (0110, espelho da 0082
 //   das subs) — create/updateSource aceitam 'custom:<field_key>' e
 //   validateCustomPeriodField (agora usado por bases E subs) confere também
@@ -275,7 +283,6 @@ export async function createSource(
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
-  revalidatePath("/", "layout");
   return {
     ok: true,
     message: `Base "${label}" criada (chave: ${finalKey}).`,
@@ -335,7 +342,6 @@ export async function updateSource(
   if (updateError) {
     return { ok: false, message: `Falha ao salvar: ${updateError.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true, message: "Base atualizada." };
 }
 
@@ -376,7 +382,6 @@ export async function deleteSource(
     // 23503 = FK (registros criados entre a contagem e o delete).
     return { ok: false, message: `Falha ao excluir: ${deleteError.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true, message: "Base excluída." };
 }
 
@@ -415,8 +420,8 @@ export async function saveSourceLabels(
       { onConflict: "organization_id,key" }
     );
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
-  // Os rótulos entram via provider do layout raiz → revalida o app inteiro.
-  revalidatePath("/", "layout");
+  // Os rótulos entram via provider do layout raiz — o refresh pós-sucesso do
+  // cliente re-renderiza layout+página (useRefreshOnActionOk no manager).
   return { ok: true, message: "Rótulo salvo." };
 }
 
@@ -546,7 +551,6 @@ export async function createSubSource(
   if (insertError) {
     return { ok: false, message: `Falha ao criar: ${insertError.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true, message: `Sub-base "${label}" criada (chave: ${key}).`, key };
 }
 
@@ -600,7 +604,6 @@ export async function updateSubSource(
   if (updateError) {
     return { ok: false, message: `Falha ao salvar: ${updateError.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true, message: "Sub-base atualizada." };
 }
 
@@ -613,7 +616,6 @@ export async function deleteSubSource(
   const supabase = await createClient();
   const { error } = await supabase.from("sub_sources").delete().eq("key", key);
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
-  revalidatePath("/", "layout");
   return { ok: true, message: "Sub-base excluída." };
 }
 
@@ -652,7 +654,6 @@ export async function createSourceFolder(
     ...(orgId ? { organization_id: orgId } : {}),
   });
   if (error) return { ok: false, message: `Falha ao criar: ${error.message}` };
-  revalidatePath("/", "layout");
   return { ok: true, message: `Pasta "${label}" criada.` };
 }
 
@@ -672,7 +673,6 @@ export async function updateSourceFolder(
     .update({ label })
     .eq("id", id);
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
-  revalidatePath("/", "layout");
   return { ok: true, message: "Pasta atualizada." };
 }
 
@@ -688,7 +688,6 @@ export async function deleteSourceFolder(
   // pasta" — nunca somem.
   const { error } = await supabase.from("source_folders").delete().eq("id", id);
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
-  revalidatePath("/", "layout");
   return {
     ok: true,
     message: 'Pasta excluída. As bases voltaram para "sem pasta".',
@@ -726,7 +725,6 @@ export async function reorderSourceFolder(
   if (failed?.error) {
     return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -774,7 +772,6 @@ export async function reorderSource(
   if (failed?.error) {
     return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -817,7 +814,6 @@ export async function reorderSubSource(
   if (failed?.error) {
     return { ok: false, message: `Falha ao reordenar: ${failed.error.message}` };
   }
-  revalidatePath("/", "layout");
   return { ok: true };
 }
 

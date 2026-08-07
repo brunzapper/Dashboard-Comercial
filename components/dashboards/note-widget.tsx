@@ -1,7 +1,8 @@
-// Versão: 1.1 | Data: 21/07/2026
-// v1.1 (21/07/2026): o refresh pós-save roda no transition COMPARTILHADO do
-// dashboard (useNavPending) — o overlay global cobre o recompute dos valores
-// {=…} em vez de trocá-los silenciosamente.
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): save OTIMISTA em background (useBackgroundSave): o editor
+// fecha na hora com o texto novo em tela; os {=…} novos mostram "…" até o
+// refresh debounced do hook trazer os valores; erro → toast + o editor REABRE
+// com o draft intacto. O transition global (useNavPending) saiu deste fluxo.
 // Widget Nota (post-it): texto dinâmico com expressões {=fórmula} (campos,
 // campos calculados, totais e condicionais — avaliadas no servidor, ver
 // page.tsx noteById) e hyperlinks [rótulo](@destino) para widgets (mesmo
@@ -9,13 +10,12 @@
 // Edição IN-PLACE: no modo edição, clicar no papel abre um textarea no próprio
 // card com autocomplete de [variáveis], botão {=} e inserção de link via
 // picker. Salvar tokeniza cada {=…} (refs estáveis; renomear campo não quebra
-// notas salvas), grava settings.note {text, exprs} e router.refresh() traz os
-// valores novos (agregações SQL não são avaliáveis no cliente); um cache local
-// por expressão evita "piscar" os valores já conhecidos.
+// notas salvas), grava settings.note {text, exprs} e o refresh debounced traz
+// os valores novos (agregações SQL não são avaliáveis no cliente); um cache
+// local por expressão evita "piscar" os valores já conhecidos.
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useRef, useState } from "react";
 import { Check, CircleAlert, Link2, Loader2, SquareSigma, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -43,10 +43,10 @@ import type {
   Widget,
   WidgetLinkTarget,
 } from "@/lib/widgets/types";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 import { useFocusWidget } from "./focus-context";
 import { useFontScale } from "./font-scale-context";
-import { useNavPending } from "./pending-context";
 import { WidgetLinkPicker } from "./widget-link-picker";
 
 const DEFAULT_NOTE_BG = "#fef9c3"; // amarelo post-it
@@ -82,9 +82,7 @@ export function NoteWidget({
 }) {
   const focus = useFocusWidget();
   const fontScale = useFontScale();
-  const router = useRouter();
-  const { run } = useNavPending();
-  const [saving, startSaving] = useTransition();
+  const { save: backgroundSave, hasPending: saving } = useBackgroundSave();
 
   // Texto otimista: após salvar, o texto novo vale até o refresh trazer a prop
   // atualizada (padrão seedKey — reseta quando o servidor muda de fato).
@@ -219,20 +217,24 @@ export function NoteWidget({
       exprs.push(t.formula);
     }
     setError(null);
-    startSaving(async () => {
-      const res = await saveWidgetSettings(widget.id, dashboardId, {
-        ...(widget.settings ?? {}),
-        note: { text: draft, exprs },
-      });
-      if (!res.ok) {
-        setError(res.message ?? "Falha ao salvar.");
-        return;
-      }
-      setOptimistic(draft);
-      setEditing(false);
-      // Transition compartilhado: overlay global cobre o recompute dos {=…}
-      // (agregações SQL não são avaliáveis no cliente).
-      run(() => router.refresh());
+    // Otimista: fecha o editor JÁ com o texto novo em tela ({=…} novos mostram
+    // "…" até o refresh debounced reconciliar — valueBySource preserva os
+    // valores das expressões inalteradas). Erro → toast + o editor REABRE com
+    // o draft intacto (setEditing direto, sem startEditing — não reseta draft).
+    setOptimistic(draft);
+    setEditing(false);
+    backgroundSave({
+      key: "note",
+      context: "Não foi possível salvar a nota",
+      action: () =>
+        saveWidgetSettings(widget.id, dashboardId, {
+          ...(widget.settings ?? {}),
+          note: { text: draft, exprs },
+        }),
+      revert: () => {
+        setOptimistic(null);
+        setEditing(true);
+      },
     });
   };
 

@@ -18,6 +18,8 @@
 //   array (valor com vírgula sobrevive).
 // v1.4 (06/08/2026): checkbox "Ignorar filtro de período" (0116) + badge na
 //   tabela — a sub isenta entra nos widgets sem recorte de período (engine).
+// v1.5 (07/08/2026): as actions não revalidam mais ("/", "layout") — refresh
+//   pós-sucesso via useRefreshOnActionOk (form libera quando a action retorna).
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
@@ -48,6 +50,7 @@ import {
   CORE_PERIOD_FIELD_OPTIONS,
   ensurePeriodOption,
 } from "@/lib/source-date-fields";
+import { useRefreshOnActionOk } from "@/lib/use-debounced-refresh";
 import { sourceLabel, type SourceDef, type SourceKey } from "@/lib/sources";
 import type { WidgetFilter } from "@/lib/widgets/types";
 import {
@@ -192,6 +195,8 @@ function SubSourceForm({
   const isEdit = Boolean(sub);
   const action = isEdit ? updateSubSource : createSubSource;
   const [state, formAction, pending] = useActionState(action, initial);
+  // A action não revalida — o refresh pós-sucesso reconcilia lista/sidebar.
+  useRefreshOnActionOk(state);
   const [parentKey, setParentKey] = useState(
     sub?.parentKey ?? roots[0]?.key ?? ""
   );
@@ -406,7 +411,9 @@ function SubSourceForm({
 
 // ↑/↓ dentro da PAI (0107): re-sequencia as subs da mesma pai no servidor.
 function MoveSubButtons({ subKey }: { subKey: string }) {
-  const [, formAction, pending] = useActionState(reorderSubSource, initial);
+  const [state, formAction, pending] = useActionState(reorderSubSource, initial);
+  // Rajada de ↑/↓ coalesce num único refresh (debounce do hook).
+  useRefreshOnActionOk(state);
   return (
     <form action={formAction} className="flex items-center">
       <input type="hidden" name="key" value={subKey} />
@@ -438,6 +445,7 @@ function MoveSubButtons({ subKey }: { subKey: string }) {
 
 function DeleteSubButton({ subKey, label }: { subKey: string; label: string }) {
   const [state, formAction, pending] = useActionState(deleteSubSource, initial);
+  useRefreshOnActionOk(state);
   const [confirm, setConfirm] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   return (

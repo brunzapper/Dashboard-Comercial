@@ -897,3 +897,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   Fiscalizado por `lib/widgets/case-dim.test.ts` + blocos em
   `engine.test.ts`/`validate.test.ts`. Ver `docs/arquitetura.md` §4.20 e
   invariante 29.
+- **Save fora de formulário é OTIMISTA em background — nunca no transition
+  global nem com revalidate dentro do await (07/08/2026):** o padrão único é
+  `useBackgroundSave` (`lib/feedback/use-background-save.ts`): estado otimista
+  ANTES do await → action com `{ revalidate: false }` (opt-out por parâmetro,
+  padrão `createWidget`) → erro = toast (`notifyOnError`) + `revert()` granular
+  → sucesso agenda UM `router.refresh()` debounced, o reconciliador ÚNICO
+  (realtime NÃO cobre `dashboard_table_cells`/`widgets`/`entity_custom_values`/
+  remuneração). Pending GRANULAR por controle (`pendingKeys`/`busyKey` por
+  linha), nunca por tela. O `useNavPending().run()` do dashboard é EXCLUSIVO
+  de navegação real (período/URL; overlay agora `pointer-events-none`) — NÃO
+  reintroduza save de widget nele (`__qf__`/`__ff__`/`__pw__`/Nota/Aparência
+  já migraram). Guard anti-eco no padrão seedKey: com save em voo
+  (`hasPending`) o reseed ADOTA a key sem aplicar (eco stale nunca clobbera o
+  otimista; espelho do `skipNextData` do kanban); mudança de ESCOPO (mês/plano
+  no comp-grid) re-semeia SEMPRE. CRUDs de Bases não fazem mais
+  `revalidatePath("/", "layout")` — os managers disparam o refresh pós-sucesso
+  via `useRefreshOnActionOk` (`lib/use-debounced-refresh.ts`), que re-renderiza
+  rota + layout como transition não-urgente. Fiscalizado por
+  `lib/feedback/use-background-save.test.ts` + blocos em
+  `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`. Ver `docs/arquitetura.md`
+  §4.10 ("Feedback de carregamento").
