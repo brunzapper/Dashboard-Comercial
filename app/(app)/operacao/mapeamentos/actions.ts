@@ -44,8 +44,12 @@ async function applyDomains(domainKeys?: string[]): Promise<string> {
   await syncUnmappedTasks(service, orgId, res.unmapped, domainKeys);
   const pend = Object.values(res.unmapped).reduce((s, m) => s + m.size, 0);
   const errs = res.errors.length > 0 ? ` (${res.errors.length} erro(s))` : "";
+  const auto =
+    res.autoMapped > 0
+      ? `${res.autoMapped} valor(es) classificado(s) automaticamente; `
+      : "";
   return (
-    `${res.changedRecords} registro(s) atualizado(s); ` +
+    `${auto}${res.changedRecords} registro(s) atualizado(s); ` +
     `${pend} valor(es) pendente(s)${errs}.`
   );
 }

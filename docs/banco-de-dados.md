@@ -1,3 +1,8 @@
+<!-- Versão: 3.10 | Data: 07/08/2026 -->
+<!-- v3.10 (07/08/2026): 0118 — value_mappings.origin (manual/seed/auto/ai):
+     origem da entrada do de-para (badge na página; auto = classificador
+     heurístico V5 portado, ai = assistente "Classificar com IA"). Backfill
+     das linhas pré-0118 → 'seed'. Não recria as RPCs. -->
 <!-- Versão: 3.9 | Data: 07/08/2026 -->
 <!-- v3.9 (07/08/2026): 0117 — value_mappings (MAPEAMENTOS DE VALORES/de-para:
      cargo → área/nível, segmento → categoria; entradas por org+domínio+
@@ -595,7 +600,8 @@ classificação, ex-caches "Map Cargos"/"Map Segmentos" do Apps Script):
 `organization_id`, `domain` (chave do catálogo em CÓDIGO —
 `lib/mappings/domains.ts`; hoje `cargo` e `segmento`), `raw_value` (exibição),
 `raw_norm` (lookup — `lower(trim())`, unique por org+domínio), `outputs` jsonb
-(`{"cargo_area": "TI", "cargo_nivel": "Gerente"}`). A APLICAÇÃO é engine-side
+(`{"cargo_area": "TI", "cargo_nivel": "Gerente"}`), `origin` (0118 —
+`manual|seed|auto|ai`; informativa, nunca muda o lookup). A APLICAÇÃO é engine-side
 (`lib/mappings/apply.ts`): grava os campos alvo em `records.custom_fields`
 como espelho derivado (carimbos `field_modified_at` + `locally_modified_at`;
 sem audit/webhook); valores sem entrada viram pendência notificada por
@@ -839,6 +845,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0115 | comp_sheet_links | Export da Remuneração p/ Google Planilhas via Apps Script Web App (sem credencial Google no app): `comp_sheet_links` (vínculo durável usuário×escopo→planilha; RLS linha-própria) + `comp_sheet_export_tickets` (ticket single-use do handshake: token sha256, payload jsonb, consumed/completed; SEM policies — service role only). Não recria as RPCs |
 | 0116 | sub_sources_ignore_period | `sub_sources.ignore_period` boolean (sub-base que NÃO respeita o filtro de período do dashboard; resolvido 100% no engine via pass-through `record_types` do wrapper 0054). Não recria as RPCs |
 | 0117 | value_mappings | Mapeamentos de VALORES (de-para de classificação): entradas por org+domínio+`raw_norm` com `outputs` jsonb; domínios em código (`lib/mappings/domains.ts`), aplicação como espelho derivado em `custom_fields`, pendências em tarefa do org_admin; RLS select org / escrita admin. Seed `supabase/apply/seed-value-mappings.sql`. Não recria as RPCs |
+| 0118 | value_mappings_origin | `value_mappings.origin` (`manual|seed|auto|ai`) — origem da entrada (badge; auto = classificador V5 portado, ai = assistente). Backfill pré-0118 → 'seed'. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`

@@ -1,3 +1,12 @@
+<!-- Versão: 1.61 | Data: 07/08/2026 -->
+<!-- v1.61 (07/08/2026): §4.19 v2 — classificação AUTOMÁTICA (port fiel do
+     classificador V5 do Apps Script em lib/mappings/classify/*; valores sem
+     entrada viram entradas origin='auto' na aplicação — 0118 adiciona a
+     coluna origin manual/seed/auto/ai), dropdowns com categorias canônicas ∪
+     usadas (datalist) e ASSISTENTE DE IA "Classificar com IA" (contrato
+     mapeamentos-classify v1 em lib/import/mappings/*, core em
+     lib/ai/classify-mappings.ts, padrão §4.17 com prévia EDITÁVEL e fluxo
+     copiar-prompt → colar-JSON). Invariante 28 atualizada. -->
 <!-- Versão: 1.60 | Data: 07/08/2026 -->
 <!-- v1.60 (07/08/2026): §4.19 — MAPEAMENTOS DE VALORES (de-para, 0117):
      tabela value_mappings + domínios em código (lib/mappings/domains.ts:
@@ -3093,6 +3102,34 @@ byte-igual à chave do cache antigo).
   agora"; loaders em `lib/mappings/overview.ts` (client do usuário, RLS).
 - **Seed**: `supabase/apply/seed-value-mappings.sql` (importado dos CSVs do
   dashboard antigo; `on conflict do nothing` — nunca sobrescreve edições).
+- **Classificação AUTOMÁTICA (07/08/2026)**: o registry ganha `suggest` por
+  domínio (port FIEL do classificador V5 do Apps Script —
+  `lib/mappings/classify/cargo.ts` com keywords 40% + contexto 50% + padrões
+  10% + 24 overrides + nível hierárquico; `segmento.ts` com pesos/exclusões
+  + tech verticals + genéricos) e `options` por target (categorias
+  canônicas). Na aplicação, valor sem entrada passa pelo `suggest`
+  (varredura leve `collectRawValues` + `autoClassifyValues` puro): resultado
+  classificável vira entrada **`origin='auto'`** (0118 — upsert
+  `ignoreDuplicates`, nunca sobrescreve manual/seed/IA) e a pendência fica só
+  com o que a heurística não resolveu — mesmo comportamento do Apps Script,
+  que gravava o cache automaticamente. `origin`
+  (`manual|seed|auto|ai`) é informativa (badge na página) e nunca muda o
+  lookup. Paridade com o legado pinada em
+  `lib/mappings/classify/classify.test.ts` (casos reais do cache).
+- **Dropdowns**: os inputs de classificação usam `<Input list>` + `datalist`
+  (padrão do repo — sugestão + valor livre) com `optionsByTarget` do
+  overview = canônicas do domínio ∪ valores já usados nas entradas.
+- **Assistente de IA "Classificar com IA"** (padrão §4.17; modelo
+  manage-operations): contrato `mapeamentos-classify` v1
+  (`lib/import/mappings/{types,validate,instructions}.ts` — valor DEVE ser
+  um pendente, categorias DEVEM ser as aceitas, teto por resposta, mensagens
+  pt-BR que guiam o laço; SPEC derivado das constantes e fiscalizado por
+  `instructions.test.ts`); core `lib/ai/classify-mappings.ts` com as 4
+  funções do padrão (gate admin + área `mapeamentos`; apply RE-VALIDA com
+  contexto fresco, grava `origin='ai'` pelos mesmos upserts da página e
+  reaplica o domínio + tarefas); UI `mappings-ai-sheet.tsx` com prévia
+  **EDITÁVEL** (datalist por target + remover item) e o fluxo copiar-prompt
+  → colar-JSON (funciona SEM IA configurada).
 
 O preset **"Outbound — Pré-Vendas"** (`lib/presets/outbound.ts`) consome os
 campos derivados na aba Perfil e porta as regras de jul/2026+ do dashboard
@@ -3546,7 +3583,13 @@ principalmente — para mantenedores humanos.
     org_admin (atualizada in-place; auto-completa em zero) — não crie
     tarefas novas por rodada nem outra via de notificação. O seed
     (`supabase/apply/seed-value-mappings.sql`) é `on conflict do nothing` —
-    reexecutar nunca sobrescreve edições feitas na página.
+    reexecutar nunca sobrescreve edições feitas na página. A classificação
+    AUTOMÁTICA (`suggest` do domínio — port do V5) e a de IA (contrato
+    `mapeamentos-classify`) criam entradas `origin='auto'`/`'ai'` SÓ pelos
+    mesmos upserts (auto = `ignoreDuplicates`, nunca sobrescreve; IA passa
+    pelo validador que restringe valores aos PENDENTES e categorias às
+    aceitas) — categorias canônicas vivem no registry
+    (`domain.options`), nunca em lista paralela do validador/UI.
 
 ## 6. Convenções do projeto
 

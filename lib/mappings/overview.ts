@@ -18,6 +18,8 @@ export interface MappingRow {
   rawValue: string;
   rawNorm: string;
   outputs: Record<string, string>;
+  /** Origem da entrada (0118): manual | seed | auto | ai. */
+  origin: string;
 }
 
 export interface UnmappedValue {
@@ -30,6 +32,8 @@ export interface DomainOverview {
   label: string;
   rawFieldLabel: string;
   targets: { fieldKey: string; label: string }[];
+  /** Sugestões do dropdown por target: canônicas do domínio ∪ já usadas. */
+  optionsByTarget: Record<string, string[]>;
   mappings: MappingRow[];
   unmapped: UnmappedValue[];
   /** Registros do domínio com o campo cru preenchido. */
@@ -47,7 +51,7 @@ async function loadDomainMappings(
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await db
       .from("value_mappings")
-      .select("id, raw_value, raw_norm, outputs")
+      .select("id, raw_value, raw_norm, outputs, origin")
       .eq("organization_id", orgId)
       .eq("domain", domain.key)
       .order("raw_norm", { ascending: true })
@@ -59,6 +63,7 @@ async function loadDomainMappings(
         rawValue: r.raw_value as string,
         rawNorm: r.raw_norm as string,
         outputs: (r.outputs ?? {}) as Record<string, string>,
+        origin: (r.origin as string | null) ?? "manual",
       });
     }
     if (!data || data.length < PAGE) break;
@@ -125,11 +130,25 @@ export async function loadMappingOverview(
       domain,
       mappings
     );
+    // Dropdowns: categorias canônicas do domínio ∪ valores já usados nas
+    // entradas (reaproveita a "inteligência" acumulada), ordem pt-BR.
+    const optionsByTarget: Record<string, string[]> = {};
+    for (const t of domain.targets) {
+      const set = new Set<string>(domain.options[t.fieldKey] ?? []);
+      for (const m of mappings) {
+        const v = m.outputs[t.fieldKey];
+        if (typeof v === "string" && v.trim() !== "") set.add(v.trim());
+      }
+      optionsByTarget[t.fieldKey] = [...set].sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
+      );
+    }
     out.push({
       key: domain.key,
       label: domain.label,
       rawFieldLabel: domain.rawFieldLabel,
       targets: domain.targets,
+      optionsByTarget,
       mappings,
       unmapped,
       recordsWithValue,

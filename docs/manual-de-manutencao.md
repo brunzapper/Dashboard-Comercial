@@ -757,6 +757,15 @@ console `/owner`; a Zapper já nasce ON):
   edição de mapeamento — a action reaplica o domínio tocado). O import
   CSV/API da base Meetime reaplica sozinho na cauda
   (`maybeApplyMappingsAfterImport`).
+- **Classificação automática**: valor novo passa pelo classificador
+  heurístico (port do V5 do Apps Script) na própria aplicação — o
+  classificável vira entrada com badge **auto** (revisável/editável na
+  página); só o resto fica pendente. Erro do automático? Corrija a entrada
+  na página — a reaplicação nunca sobrescreve entradas existentes.
+- **Assistente de IA**: botão "Classificar com IA" (por domínio) propõe
+  classificações para os pendentes com prévia EDITÁVEL; funciona também SEM
+  IA configurada via copiar-prompt → colar-JSON de IA externa (contrato
+  `mapeamentos-classify` v1). Entradas aplicadas ganham badge **IA**.
 - **Pendências**: valores sem classificação viram UMA tarefa aberta por
   domínio no sino do org_admin (atualizada in-place; auto-completa quando
   zera). A lista completa está na própria página.

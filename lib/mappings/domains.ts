@@ -8,11 +8,17 @@
 // do cache antigo: lower(trim(valor)).
 // Este módulo é PURO (sem I/O) — a aplicação vive em lib/mappings/apply.ts e
 // a notificação de não-mapeados em lib/mappings/notify.ts. Valor SEM entrada
-// no de-para recebe o fallback "Não Classificado" (igual ao dashboard antigo)
-// e entra no relatório de pendências; valor VAZIO recebe o fallback mas não é
-// pendência (não há o que mapear).
+// no de-para passa pelo `suggest` do domínio (classificador heurístico V5
+// portado — lib/mappings/classify/*): classificável ⇒ vira entrada
+// `origin='auto'`; senão recebe o fallback "Não Classificado" e entra nas
+// pendências; valor VAZIO recebe o fallback mas não é pendência.
+// `options` por target = categorias CANÔNICAS (dropdowns da página +
+// validação do assistente de IA) — a UI ainda aceita valor livre (datalist).
+import { classifyCargo, CARGO_AREAS, CARGO_NIVEIS } from "./classify/cargo";
+import { classifySegmento, SEGMENTO_CATEGORIAS } from "./classify/segmento";
+import { UNCLASSIFIED } from "./classify/shared";
 
-export const UNCLASSIFIED = "Não Classificado";
+export { UNCLASSIFIED };
 
 export interface MappingTarget {
   /** field_key do field_definition local alvo (sem prefixo `custom:`). */
@@ -32,6 +38,27 @@ export interface MappingDomain {
   targets: MappingTarget[];
   /** Saídas aplicadas quando o valor cru não tem entrada (ou é vazio). */
   fallback: Record<string, string>;
+  /** Categorias CANÔNICAS por target (dropdown + validação da IA). */
+  options: Record<string, string[]>;
+  /**
+   * Classificador heurístico do domínio (port do V5): devolve as saídas
+   * sugeridas ou null quando NADA foi classificável (⇒ pendência). Resultado
+   * não-nulo vira entrada `origin='auto'` na aplicação.
+   */
+  suggest?: (raw: string) => Record<string, string> | null;
+}
+
+/** Sugestão de cargo: null quando área E nível saem "Não Classificado". */
+function suggestCargo(raw: string): Record<string, string> | null {
+  const { area, nivel } = classifyCargo(raw);
+  if (area === UNCLASSIFIED && nivel === UNCLASSIFIED) return null;
+  return { cargo_area: area, cargo_nivel: nivel };
+}
+
+function suggestSegmento(raw: string): Record<string, string> | null {
+  const categoria = classifySegmento(raw);
+  if (categoria === UNCLASSIFIED) return null;
+  return { segmento_classificado: categoria };
 }
 
 export const MAPPING_DOMAINS: MappingDomain[] = [
@@ -46,6 +73,11 @@ export const MAPPING_DOMAINS: MappingDomain[] = [
       { fieldKey: "cargo_nivel", label: "Cargo — Nível hierárquico" },
     ],
     fallback: { cargo_area: UNCLASSIFIED, cargo_nivel: UNCLASSIFIED },
+    options: {
+      cargo_area: [...CARGO_AREAS, UNCLASSIFIED],
+      cargo_nivel: [...CARGO_NIVEIS, UNCLASSIFIED],
+    },
+    suggest: suggestCargo,
   },
   {
     key: "segmento",
@@ -55,6 +87,8 @@ export const MAPPING_DOMAINS: MappingDomain[] = [
     rawFieldLabel: "Segmento",
     targets: [{ fieldKey: "segmento_classificado", label: "Segmento (classificado)" }],
     fallback: { segmento_classificado: UNCLASSIFIED },
+    options: { segmento_classificado: [...SEGMENTO_CATEGORIAS, UNCLASSIFIED] },
+    suggest: suggestSegmento,
   },
 ];
 
@@ -115,6 +149,33 @@ export function resolveOutputs(
         : domain.fallback[t.fieldKey] ?? UNCLASSIFIED;
   }
   return { outputs, unmapped: entry === undefined };
+}
+
+/** Entrada de auto-classificação pronta p/ upsert (origin='auto'). */
+export interface AutoClassifiedEntry {
+  rawValue: string;
+  rawNorm: string;
+  outputs: Record<string, string>;
+}
+
+/**
+ * Roda o classificador do domínio sobre valores AINDA sem entrada e devolve
+ * as entradas auto-classificadas (suggest não-nulo). Puro — a aplicação
+ * (apply.ts) faz o upsert com origin='auto' ANTES de planejar as escritas,
+ * replicando o Apps Script antigo (que classificava e gravava no cache).
+ */
+export function autoClassifyValues(
+  domain: MappingDomain,
+  values: { norm: string; display: string }[]
+): AutoClassifiedEntry[] {
+  if (!domain.suggest) return [];
+  const out: AutoClassifiedEntry[] = [];
+  for (const v of values) {
+    if (!v.norm) continue;
+    const outputs = domain.suggest(v.display);
+    if (outputs) out.push({ rawValue: v.display, rawNorm: v.norm, outputs });
+  }
+  return out;
 }
 
 /** Linha mínima de `records` que o planejador consome. */

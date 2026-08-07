@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { MappingsAiSheet } from "@/components/operacao/mappings-ai-sheet";
 import type { DomainOverview, MappingRow } from "@/lib/mappings/overview";
 import {
   applyAllMappings,
@@ -34,7 +35,13 @@ interface DraftOutputs {
   [fieldKey: string]: string;
 }
 
-export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
+export function MappingsManager({
+  overview,
+  ai,
+}: {
+  overview: DomainOverview[];
+  ai: { provider: string; model: string; hasKey: boolean } | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [domainKey, setDomainKey] = useState(overview[0]?.key ?? "");
@@ -114,6 +121,11 @@ export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
     });
   }
 
+  // Dropdown com valor livre (padrão datalist do repo): sugestões = categorias
+  // canônicas do domínio ∪ classificações já usadas — reaproveita a
+  // inteligência acumulada sem travar valor novo.
+  const optionsListId = (fieldKey: string) => `vm-opts-${domain.key}-${fieldKey}`;
+
   const outputsRowInputs = (
     scope: string,
     current: DraftOutputs,
@@ -127,6 +139,7 @@ export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
           <Input
             value={value}
             placeholder={t.label}
+            list={optionsListId(t.fieldKey)}
             onChange={(e) => setDraft(scope, t.fieldKey, e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") onEnter();
@@ -139,8 +152,50 @@ export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
       );
     });
 
+  const ORIGIN_BADGES: Record<string, { label: string; className: string }> = {
+    auto: {
+      label: "auto",
+      className: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    },
+    ai: {
+      label: "IA",
+      className: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+    },
+    seed: {
+      label: "seed",
+      className: "bg-muted text-muted-foreground",
+    },
+  };
+
+  const originBadge = (origin: string) => {
+    const b = ORIGIN_BADGES[origin];
+    if (!b) return null;
+    return (
+      <span
+        className={`ml-1 rounded-full px-1.5 text-[10px] font-semibold ${b.className}`}
+        title={
+          origin === "auto"
+            ? "Classificado automaticamente (heurística)"
+            : origin === "ai"
+              ? "Classificado pelo assistente de IA"
+              : "Importado do mapeamento legado"
+        }
+      >
+        {b.label}
+      </span>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-5">
+      {/* Sugestões dos dropdowns (datalist nativo — aceita valor livre). */}
+      {domain.targets.map((t) => (
+        <datalist key={t.fieldKey} id={optionsListId(t.fieldKey)}>
+          {(domain.optionsByTarget[t.fieldKey] ?? []).map((opt) => (
+            <option key={opt} value={opt} />
+          ))}
+        </datalist>
+      ))}
       {/* Abas de domínio + aplicar */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rounded-lg border p-1">
@@ -164,10 +219,22 @@ export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
             </Button>
           ))}
         </div>
-        <Button type="button" size="sm" onClick={applyNow} disabled={pending}>
-          <Play className="size-4" />
-          Aplicar agora
-        </Button>
+        <div className="flex items-center gap-2">
+          <MappingsAiSheet
+            key={domain.key}
+            ai={ai}
+            domainKey={domain.key}
+            domainLabel={domain.label}
+            rawFieldLabel={domain.rawFieldLabel}
+            targets={domain.targets}
+            optionsByTarget={domain.optionsByTarget}
+            pendingCount={domain.unmapped.length}
+          />
+          <Button type="button" size="sm" onClick={applyNow} disabled={pending}>
+            <Play className="size-4" />
+            Aplicar agora
+          </Button>
+        </div>
       </div>
 
       <p className="text-muted-foreground text-sm">
@@ -299,6 +366,7 @@ export function MappingsManager({ overview }: { overview: DomainOverview[] }) {
                       title={m.rawValue}
                     >
                       {m.rawValue}
+                      {originBadge(m.origin)}
                     </TableCell>
                     {outputsRowInputs(scope, m.outputs, () =>
                       submit(m.rawValue, scope, m.outputs)

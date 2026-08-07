@@ -835,6 +835,20 @@ This version has breaking changes — APIs, conventions, and file structure may 
   campos derivados (aba Perfil) e porta as regras jul/2026+ do dashboard
   legado (subs `ob_rr`/`ob_rq`/`ob_noshow` sobre leads `custom:fonte="Outro"`
   por Data Reunião ≥ 2026-07-01; esforço sobre `meetime_outbound`; meta
-  `rq_outbound`). Fiscalizado por `lib/mappings/domains.test.ts` +
-  `lib/presets/outbound.test.ts`. Ver `docs/arquitetura.md` §4.19 e
-  invariante 28.
+  `rq_outbound`). **Classificação automática + IA (07/08/2026):** o registry
+  tem `options` (categorias canônicas por target) e `suggest` por domínio
+  (port FIEL do classificador V5 do Apps Script —
+  `lib/mappings/classify/{cargo,segmento}.ts`; paridade pinada em
+  `classify.test.ts`): na aplicação, valor sem entrada classificável vira
+  entrada `origin='auto'` (0118 — upsert `ignoreDuplicates`, NUNCA
+  sobrescreve manual/seed/IA) e a pendência fica só com o resto. O assistente
+  "Classificar com IA" segue o padrão §4.17 (contrato `mapeamentos-classify`
+  v1 em `lib/import/mappings/*` — valor restrito aos PENDENTES, categoria
+  restrita às aceitas do registry, SPEC derivado + `instructions.test.ts`;
+  core `lib/ai/classify-mappings.ts` com apply que RE-VALIDA e grava
+  `origin='ai'` pelos mesmos upserts; prévia EDITÁVEL + copiar-prompt/
+  colar-JSON sem IA configurada). Categorias canônicas SÓ no registry
+  (`domain.options`) — nunca lista paralela em validador/UI. Fiscalizado por
+  `lib/mappings/domains.test.ts` + `lib/mappings/classify/classify.test.ts` +
+  `lib/import/mappings/instructions.test.ts` + `lib/presets/outbound.test.ts`.
+  Ver `docs/arquitetura.md` §4.19 e invariante 28.
