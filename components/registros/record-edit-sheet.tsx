@@ -1,4 +1,17 @@
-// Versão: 1.3 | Data: 17/07/2026
+// Versão: 2.0 | Data: 07/08/2026
+// v2.0 (07/08/2026): 100% dos campos consultáveis no detalhe.
+//   - Seção núcleo COMPLETA: grade read-only gerada de coreDetailRows
+//     (CORE_FIELDS + rótulo/ordem das linhas core do /campos) — pipeline,
+//     situação, tipo de venda, fechado, data de fechamento/abertura etc.,
+//     que o bloco hardcoded antigo nunca exibia. O guard `ref in record` pula
+//     colunas que o select da superfície não trouxe.
+//   - Catálogo do detalhe ≠ colunas da tabela: `detailFields` (campos da base,
+//     olho irrelevante) + `offBaseDefs` (campos de outras bases — só entram
+//     quando o registro tem valor). Partição editável/read-only inalterada
+//     (o servidor re-gateia por editable_by_roles em updateRecord).
+//   - Seção "Outros dados": chaves de custom_fields SEM definição alguma
+//     (knownFieldKeys vem PRÉ-ACL — valor de campo restrito nunca vaza aqui).
+//   Props novas são opcionais: call sites legados seguem funcionando.
 // v1.3 (17/07/2026): formulário extraído em RecordEditForm (exportado) — a aba
 //   "Dados" do CardDetailSheet (feed dos cards do kanban) embute o mesmo form;
 //   este Sheet segue funcionando igual para os call sites existentes. Sucesso
@@ -7,11 +20,12 @@
 //   (listar/criar/concluir), carregadas sob demanda.
 // v1.1 (15/07/2026): campos read-only formatados (moeda/percentual/data) em vez
 //   do valor cru.
-// Painel lateral de edição de um registro: núcleo (read-only) + relações
-// (responsável/operação/lead) + campos personalizados editáveis pelo papel.
+// Painel lateral de edição de um registro: núcleo (editável por permissão +
+// grade read-only completa) + relações (responsável/operação/lead) + campos
+// personalizados editáveis pelo papel.
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +47,15 @@ import {
   type RecordRow,
 } from "@/lib/records/types";
 import { updateRecord, type EditActionState } from "@/lib/records/actions";
+import {
+  coreCellValue,
+  coreDetailRows,
+  DETAIL_EDITABLE_CORE_REFS,
+  DETAIL_HEADER_REFS,
+  orphanCustomKeys,
+  type CoreDetailRow,
+} from "@/lib/records/detail-fields";
+import type { RecordLabels } from "@/lib/export/record-cells";
 import { emitDataChanged } from "@/lib/tasks/events";
 import {
   CURRENCY_OPTIONS,
@@ -123,12 +146,48 @@ function CustomFieldInput({
 export interface RecordEditFormProps {
   record: RecordRow;
   fields: FieldDefinition[];
+  // Catálogo COMPLETO do detalhe (07/08/2026) — opcionais: call site legado
+  // (sem eles) degrada para `fields` e pula as seções extras.
+  detailFields?: FieldDefinition[]; // campos da base (olho irrelevante)
+  offBaseDefs?: FieldDefinition[]; // campos de outras bases — só com valor
+  coreDefs?: FieldDefinition[]; // linhas core do /campos (rótulo/ordem)
+  knownFieldKeys?: string[]; // TODAS as keys com definição (pré-ACL)
   responsibles: OptionItem[];
   operations: OptionItem[];
   relatedLeadLabel: string | null;
   userRoles: string[];
   canEditValues: boolean;
   canManageFields: boolean;
+}
+
+// Grade read-only de colunas do núcleo (rótulo → valor formatado).
+function CoreGrid({
+  rows,
+  record,
+  labels,
+  title,
+}: {
+  rows: CoreDetailRow[];
+  record: RecordRow;
+  labels: RecordLabels;
+  title?: string;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {title ? (
+        <p className="text-muted-foreground text-xs font-medium">{title}</p>
+      ) : null}
+      <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
+        {rows.map(({ ref, label }) => (
+          <span key={ref} className="contents">
+            <span className="text-muted-foreground">{label}</span>
+            <span>{coreCellValue(record, ref, labels)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -139,6 +198,10 @@ export interface RecordEditFormProps {
 export function RecordEditForm({
   record,
   fields,
+  detailFields,
+  offBaseDefs,
+  coreDefs,
+  knownFieldKeys,
   responsibles,
   operations,
   relatedLeadLabel,
@@ -160,18 +223,58 @@ export function RecordEditForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.ok]);
 
+  // Rótulos de FK p/ a grade núcleo (formatação única de record-cells).
+  const labels: RecordLabels = useMemo(
+    () => ({
+      responsibles: Object.fromEntries(responsibles.map((r) => [r.id, r.label])),
+      operations: Object.fromEntries(operations.map((o) => [o.id, o.label])),
+      leads:
+        record.related_lead_id && relatedLeadLabel
+          ? { [record.related_lead_id]: relatedLeadLabel }
+          : {},
+    }),
+    [responsibles, operations, record.related_lead_id, relatedLeadLabel]
+  );
+
+  // Catálogo do detalhe: campos da base (detailFields ?? fields) + campos de
+  // OUTRAS bases apenas quando o registro tem valor neles (evita poluir o
+  // painel com vazios alheios).
+  const catalog = useMemo(() => {
+    const base = detailFields ?? fields;
+    const extras = (offBaseDefs ?? []).filter(
+      (f) => customValue(record, f.field_key) !== ""
+    );
+    return [...base, ...extras];
+  }, [detailFields, fields, offBaseDefs, record]);
+
   // Campos de Sync (vindos do Bitrix): nos Registros ficam SEMPRE editáveis para
   // quem tem permissão (canEditValues), independentemente de editable_by_roles.
   const isBitrixSync = (f: FieldDefinition) =>
     f.source_system === "bitrix" && Boolean(f.source_field_id);
   // Campos calculados nunca são editáveis (o valor é derivado da fórmula).
-  const editableFields = fields.filter(
+  const editableFields = catalog.filter(
     (f) =>
       f.data_type !== "calculado" &&
       (f.editable_by_roles.some((r) => userRoles.includes(r)) ||
         (canEditValues && isBitrixSync(f)))
   );
-  const readOnlyFields = fields.filter((f) => !editableFields.includes(f));
+  const readOnlyFields = catalog.filter((f) => !editableFields.includes(f));
+
+  // Grade núcleo COMPLETA: no modo edição pula o que já tem input próprio; no
+  // read-only mostra tudo (fora título/tipo/base, que estão no cabeçalho).
+  const coreSkip = useMemo(
+    () =>
+      canEditValues
+        ? new Set([...DETAIL_HEADER_REFS, ...DETAIL_EDITABLE_CORE_REFS])
+        : DETAIL_HEADER_REFS,
+    [canEditValues]
+  );
+  const coreRows = coreDetailRows(record, coreDefs, coreSkip);
+
+  // Chaves de custom_fields sem definição alguma → "Outros dados" (read-only).
+  const orphanKeys = knownFieldKeys
+    ? orphanCustomKeys(record.custom_fields, knownFieldKeys)
+    : [];
 
   return (
     <form action={formAction} className="flex flex-col gap-5 px-4 pb-6">
@@ -221,39 +324,19 @@ export function RecordEditForm({
                   aria-label="Moeda"
                 />
               </div>
-              <div className="text-muted-foreground col-span-2 text-xs">
-                Lead time (dias): {record.lead_time_days ?? "—"}
-              </div>
-              {/* Timestamp de sistema (DATE_CREATE na origem) — nunca editável. */}
-              <div className="text-muted-foreground col-span-2 text-xs">
-                Data de criação (origem):{" "}
-                {record.source_created_at
-                  ? formatDateValue(record.source_created_at, DEFAULT_DATE_FORMAT)
-                  : "—"}
-              </div>
             </div>
-          ) : (
-            <div className="bg-muted/40 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md p-3 text-sm">
-              <span className="text-muted-foreground">Etapa</span>
-              <span>{record.stage ?? "—"}</span>
-              <span className="text-muted-foreground">MRR</span>
-              <span>{formatMoney(record.mrr, record.currency)}</span>
-              <span className="text-muted-foreground">Valor</span>
-              <span>{formatMoney(record.value, record.currency)}</span>
-              <span className="text-muted-foreground">Moeda</span>
-              <span>{record.currency ?? "—"}</span>
-              <span className="text-muted-foreground">Canal</span>
-              <span>{record.channel ?? "—"}</span>
-              <span className="text-muted-foreground">Lead time (dias)</span>
-              <span>{record.lead_time_days ?? "—"}</span>
-              <span className="text-muted-foreground">Data de criação (origem)</span>
-              <span>
-                {record.source_created_at
-                  ? formatDateValue(record.source_created_at, DEFAULT_DATE_FORMAT)
-                  : "—"}
-              </span>
-            </div>
-          )}
+          ) : null}
+
+          {/* Grade núcleo completa (100% dos campos): no modo edição são os
+              "demais" (sem input próprio) — pipeline, situação, tipo de venda,
+              fechado, datas…; no read-only é o núcleo INTEIRO, relações
+              inclusas. */}
+          <CoreGrid
+            rows={coreRows}
+            record={record}
+            labels={labels}
+            title={canEditValues ? "Demais dados do registro" : undefined}
+          />
 
           {canEditValues ? (
             <div className="flex flex-col gap-4">
@@ -347,6 +430,25 @@ export function RecordEditForm({
                   </span>
                 </span>
               ))}
+            </div>
+          ) : null}
+
+          {/* Chaves de custom_fields sem definição alguma — consulta apenas.
+              (knownFieldKeys vem PRÉ-ACL: campo restrito por papel tem
+              definição e nunca cai aqui.) */}
+          {orphanKeys.length > 0 ? (
+            <div className="flex flex-col gap-1.5 border-t pt-4">
+              <p className="text-muted-foreground text-xs font-medium">
+                Outros dados
+              </p>
+              <div className="text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                {orphanKeys.map((k) => (
+                  <span key={k} className="contents">
+                    <span>{k}</span>
+                    <span>{customValue(record, k)}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           ) : null}
 

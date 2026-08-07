@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): filtrar preserva a ordenação ativa (`ordenar`/`dir` da
+//   URL são re-emitidos no apply; a página já volta a 1 porque `page` não é
+//   re-emitido). "Limpar" segue zerando tudo — ordenação inclusa, de projeto.
 // v1.1 (09/07/2026): Fase 8 — o seletor "Tipo" saiu (virou aba de fonte); a
 //   barra preserva o parâmetro `fonte` ao filtrar/limpar.
 // Barra de filtros da listagem de registros. Reflete/atualiza a URL
@@ -34,6 +37,11 @@ export function FiltersBar({ responsibles }: { responsibles: OptionItem[] }) {
     if (de) params.set("de", de);
     if (ate) params.set("ate", ate);
     if (busca) params.set("busca", busca);
+    // Ordenação ativa sobrevive ao filtrar (o server re-valida os valores).
+    const ordenar = sp.get("ordenar");
+    const dir = sp.get("dir");
+    if (ordenar) params.set("ordenar", ordenar);
+    if (dir) params.set("dir", dir);
     router.push(`/registros?${params.toString()}`);
   }
 

@@ -1,5 +1,15 @@
-// Versão: 1.9 | Data: 31/07/2026
+// Versão: 2.0 | Data: 07/08/2026
 // Registros: listagem com filtros + edição por permissão + campos dinâmicos.
+// v2.0 (07/08/2026): 100% dos campos + ordenação.
+//   - Colunas dirigidas por DADOS: registros_populated_refs (0120) informa as
+//     colunas núcleo e chaves custom populadas na base; a tabela mostra toda
+//     coluna com dados e oculta campo vazio que não pertence à base. O olho
+//     (show_in_builder) DEIXOU de afetar Registros — vale só nos dropdowns do
+//     construtor; o ACL por papel (visible_to_roles) segue intacto.
+//   - Painel de detalhe recebe o catálogo COMPLETO (detailFields/offBaseDefs/
+//     coreDefs/knownFieldKeys) — 100% dos campos consultáveis ao abrir.
+//   - Ordenação server-side por URL (`ordenar`/`dir`, lib/records/list-sort):
+//     whitelist núcleo + custom da fonte; tiebreak por id p/ paginação estável.
 // v1.9 (31/07/2026): botão "Atualizar com IA" (RecordsAiUpdateSheet) em
 //   QUALQUER base/sub p/ quem tem edit_record_values — atualização em massa
 //   (contrato registros-update) com prévia server-side obrigatória; funciona
@@ -32,7 +42,13 @@ import { checkSettingsArea } from "@/lib/auth/access";
 import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
-import { isCoreDef } from "@/lib/records/core-defs";
+import { splitCoreDefs } from "@/lib/records/core-defs";
+import {
+  parsePopulatedRefs,
+  tableCoreColumns,
+  tableCustomFields,
+} from "@/lib/records/detail-fields";
+import { parseRecordListSort, sortColumnExpr } from "@/lib/records/list-sort";
 import {
   fieldAppliesToSource,
   isKnownSource,
@@ -75,7 +91,7 @@ export const maxDuration = 300;
 
 const PAGE_SIZE = 50;
 const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at";
+  "id, record_type, source_system, title, pipeline, stage, stage_semantic, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at";
 
 function str(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
@@ -132,6 +148,95 @@ export default async function RegistrosPage({
     ? sourcePredicate(fonte, sources)
     : [];
 
+  // Catálogo de campos, responsáveis/operações ativos e colunas POPULADAS na
+  // base (registros_populated_refs, 0120) — buscados ANTES da query de
+  // registros: a ordenação valida contra o catálogo da fonte e as colunas da
+  // tabela derivam das populadas.
+  const [
+    { data: fieldsData },
+    { data: respData },
+    { data: opsData },
+    populatedRes,
+  ] = await Promise.all([
+    supabase
+      .from("field_definitions")
+      .select(
+        "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
+      )
+      // TODAS as defs (07/08/2026): o olho (show_in_builder) não recorta mais
+      // Registros — colunas saem das POPULADAS; linhas core (0086) dão
+      // rótulo/ordem às colunas núcleo.
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("responsibles")
+      .select("id, display_name, bitrix_user_id, canonical_id")
+      .eq("active", true)
+      .order("display_name"),
+    supabase
+      .from("operations")
+      .select("id, name")
+      .eq("active", true)
+      .order("name"),
+    supabase.rpc("registros_populated_refs", { p_record_type: recordType }),
+  ]);
+
+  const allFields = (fieldsData ?? []) as FieldDefinition[];
+  const { custom: customDefs, core } = splitCoreDefs(allFields);
+  const coreDefs = [...core.values()];
+  // RPC indisponível/erro ⇒ null: a tabela cai no conjunto legado de colunas.
+  const populated = populatedRes.error
+    ? null
+    : parsePopulatedRefs(populatedRes.data);
+
+  // ACL por papel (visible_to_roles) aplicado na camada de app: os metadados
+  // de campo são legíveis por qualquer autenticado (RLS afrouxada), então
+  // filtramos as colunas restritas aqui para não vazar valores ao gestor.
+  // Admin vê tudo.
+  const visibleTo = (f: FieldDefinition) =>
+    isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]);
+  const appliesTo = (f: FieldDefinition) =>
+    fieldAppliesToSource(f.applies_to, fonte, sources);
+
+  // Colunas custom da tabela: aplica-se à base OU populada nela
+  // ('calculado_agg' não tem valor por registro — nunca vira coluna).
+  const fields = tableCustomFields(customDefs, {
+    applies: appliesTo,
+    visible: visibleTo,
+    populatedCustom: new Set(populated?.custom ?? []),
+  });
+  // Colunas núcleo populadas; fallback (sem RPC/migração) = conjunto legado.
+  const legacyCore = [
+    ...(fonte === "deals" ? ["pipeline"] : []),
+    "stage",
+    "responsible_id",
+    ...(fonte === "deals" || fonte === "estudo" ? ["mrr"] : []),
+    "value",
+    "currency",
+    "source_created_at",
+  ];
+  const coreColumns = tableCoreColumns(populated, coreDefs, legacyCore);
+  // Chaves populadas SEM definição alguma → colunas read-only.
+  const defKeys = new Set(customDefs.map((f) => f.field_key));
+  const orphanColumns = (populated?.custom ?? [])
+    .filter((k) => !defKeys.has(k))
+    .sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  // Catálogo do painel de detalhe (100% dos campos): campos da base (mesmo sem
+  // dado) + de outras bases (o painel só exibe estes quando o registro tem
+  // valor neles).
+  const detailFields = customDefs.filter(
+    (f) => f.data_type !== "calculado_agg" && visibleTo(f) && appliesTo(f)
+  );
+  const offBaseDefs = customDefs.filter(
+    (f) => f.data_type !== "calculado_agg" && visibleTo(f) && !appliesTo(f)
+  );
+  // PRÉ-ACL de propósito: chave com definição nunca é tratada como órfã no
+  // painel — valor de campo restrito por papel não vaza via "Outros dados".
+  const knownFieldKeys = customDefs.map((f) => f.field_key);
+
+  // Ordenação por URL, validada contra o catálogo da fonte (inválida ⇒ padrão).
+  const sort = parseRecordListSort(str(sp.ordenar), str(sp.dir), fields);
+
   // Filtros + paginação (RLS decide o que o usuário vê).
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -141,8 +246,20 @@ export default async function RegistrosPage({
     .eq("record_type", recordType)
     // Fase 12: leads mock de "Data Reunião" (records.is_mock) ficam fora da
     // listagem e da contagem — só existem para consultas por Data Reunião.
-    .eq("is_mock", false)
-    .order("source_created_at", { ascending: false, nullsFirst: false })
+    .eq("is_mock", false);
+  query = (
+    sort
+      ? query.order(sortColumnExpr(sort, fields), {
+          ascending: sort.dir === "asc",
+          nullsFirst: false,
+        })
+      : query.order("source_created_at", {
+          ascending: false,
+          nullsFirst: false,
+        })
+  )
+    // Tiebreak estável p/ paginação (mesma técnica do modo lista de widgets).
+    .order("id", { ascending: true })
     .range(from, to);
   if (etapa) query = query.ilike("stage", `%${etapa}%`);
   // Agrupamento (0101): filtrar por um responsável alcança o grupo inteiro
@@ -184,46 +301,6 @@ export default async function RegistrosPage({
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Definições de campo visíveis (RLS), responsáveis e operações ativos.
-  const [{ data: fieldsData }, { data: respData }, { data: opsData }] =
-    await Promise.all([
-      supabase
-        .from("field_definitions")
-        .select(
-          "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
-        )
-        // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
-      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
-      .or("show_in_builder.eq.true,source_system.eq.core")
-        .order("sort_order", { ascending: true }),
-      supabase
-        .from("responsibles")
-        .select("id, display_name, bitrix_user_id, canonical_id")
-        .eq("active", true)
-        .order("display_name"),
-      supabase
-        .from("operations")
-        .select("id, name")
-        .eq("active", true)
-        .order("name"),
-    ]);
-
-  const allFields = (fieldsData ?? []) as FieldDefinition[];
-  // Só as colunas que pertencem à fonte da aba (applies_to) — campos locais/app
-  // (applies_to vazio) aparecem em todas. Além disso, o ACL por papel
-  // (visible_to_roles) agora é aplicado aqui: os metadados de campo são legíveis
-  // por qualquer autenticado (RLS afrouxada), então filtramos as colunas
-  // restritas na camada de app para não vazar valores ao gestor. Admin vê tudo.
-  const fields = allFields.filter(
-    (f) =>
-      // 'calculado_agg' não tem valor por registro (é métrica de dashboard) —
-      // nunca vira coluna de Registros.
-      f.data_type !== "calculado_agg" &&
-      // Linhas core (0086) são overrides das colunas núcleo — nunca coluna custom.
-      !isCoreDef(f) &&
-      fieldAppliesToSource(f.applies_to, fonte, sources) &&
-      (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
-  );
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,
@@ -292,6 +369,12 @@ export default async function RegistrosPage({
     if (de) params.set("de", de);
     if (ate) params.set("ate", ate);
     if (busca) params.set("busca", busca);
+    // Eco do sort VALIDADO (nunca o cru da URL): paginação/abas o preservam;
+    // ao trocar de aba o server re-valida contra a nova fonte e cai no padrão.
+    if (sort) {
+      params.set("ordenar", sort.ref);
+      params.set("dir", sort.dir);
+    }
     return params;
   }
 
@@ -332,11 +415,15 @@ export default async function RegistrosPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Criação usa o catálogo da BASE (detailFields — inclui campos com
+              olho desligado; o form filtra os editáveis pelo papel), nunca as
+              colunas da tabela (que podem ter campos de outra base
+              só-populados). */}
           {canEditValues && fonteDef?.manualEntry ? (
             <RecordCreateSheet
               source={{ key: fonte, label: fonteDef.label }}
               recordType={fonteDef.recordType}
-              fields={fields}
+              fields={detailFields}
               responsibles={responsibles}
               operations={operations}
               userRoles={userRoles}
@@ -358,7 +445,16 @@ export default async function RegistrosPage({
             />
           ) : null}
           <ExportCsvButton
-            params={{ fonte, etapa, responsavel, de, ate, busca }}
+            params={{
+              fonte,
+              etapa,
+              responsavel,
+              de,
+              ate,
+              busca,
+              ordenar: sort?.ref,
+              dir: sort?.dir,
+            }}
           />
           {isAdmin ? (
             <Button asChild variant="outline">
@@ -470,6 +566,13 @@ export default async function RegistrosPage({
         source={fonte}
         records={records}
         fields={fields}
+        coreColumns={coreColumns}
+        orphanColumns={orphanColumns}
+        coreDefs={coreDefs}
+        detailFields={detailFields}
+        offBaseDefs={offBaseDefs}
+        knownFieldKeys={knownFieldKeys}
+        sort={sort}
         responsibles={responsibles}
         operations={operations}
         relatedLeadLabels={relatedLeadLabels}

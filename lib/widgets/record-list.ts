@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 27/07/2026
+// Versão: 2.2 | Data: 07/08/2026
+// v2.2 (07/08/2026): stage_semantic no RECORD_COLS — paridade da grade núcleo
+//   do painel de detalhe (coreDetailRows pula refs ausentes do select; sem a
+//   coluna, o kanban não exibia a Situação no card).
 // v2.1 (27/07/2026): opts.orgId — escopo EXPLÍCITO de organização na consulta
 //   (eq organization_id). Para chamadores com SERVICE ROLE (engine de
 //   automações do kanban), onde a RLS não escopa; caminhos de sessão seguem
@@ -92,7 +95,7 @@ import type { WidgetConfig, WidgetFilter } from "./types";
 // Exportada p/ consultas irmãs que precisam de linhas RecordRow completas
 // (ex.: contagem de conectados das automações do kanban).
 export const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
+  "id, record_type, source_system, title, pipeline, stage, stage_semantic, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
 // ESPELHO: mudanças aqui, em filterColumn ou no ramo ilike abaixo devem ser

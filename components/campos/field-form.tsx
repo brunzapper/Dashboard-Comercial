@@ -1,4 +1,7 @@
-// Versão: 2.2 | Data: 02/08/2026
+// Versão: 2.3 | Data: 07/08/2026
+// v2.3 (07/08/2026): rótulo do olho atualizado — show_in_builder deixou de
+//   recortar as colunas de /registros (agora dirigidas por dados: colunas
+//   populadas sempre visíveis); o toggle vale só nos dropdowns do construtor.
 // v2.2 (02/08/2026): controle "Aplica-se a" — checkboxes das bases RAIZ
 //   (rootSources do catálogo `sources`) gravadas em applies_to; nenhuma
 //   marcada = campo geral. Editável só em campo local/app; campo Bitrix exibe
@@ -620,7 +623,7 @@ export function FieldForm({
           defaultChecked={field?.show_in_builder ?? true}
           className="size-4 accent-primary"
         />
-        Exibir nos seletores (dropdowns do construtor e colunas de Registros)
+        Exibir nos seletores (dropdowns do construtor de dashboards)
       </label>
 
       {isEdit && field?.source_system === "bitrix" && field?.source_field_id ? (
