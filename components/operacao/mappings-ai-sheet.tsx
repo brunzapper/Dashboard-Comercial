@@ -443,7 +443,7 @@ export function MappingsAiSheet({
             <Textarea
               value={pasteJson}
               onChange={(e) => setPasteJson(e.target.value)}
-              placeholder="Cole aqui o JSON devolvido pela IA externa…"
+              placeholder="Cole aqui a resposta da IA externa (JSON ou CSV valor,<campos>)…"
               rows={4}
               className="font-mono text-xs"
               disabled={busy || applying}
@@ -455,7 +455,7 @@ export function MappingsAiSheet({
                 onClick={validatePasted}
                 disabled={busy || applying || pasteJson.trim() === ""}
               >
-                Validar JSON
+                Validar resposta
               </Button>
             </div>
           </div>

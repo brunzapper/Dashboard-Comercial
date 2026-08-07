@@ -758,10 +758,16 @@ console `/owner`; a Zapper já nasce ON):
   CSV/API da base Meetime reaplica sozinho na cauda
   (`maybeApplyMappingsAfterImport`).
 - **Classificação automática**: valor novo passa pelo classificador
-  heurístico (port do V5 do Apps Script) na própria aplicação — o
-  classificável vira entrada com badge **auto** (revisável/editável na
-  página); só o resto fica pendente. Erro do automático? Corrija a entrada
-  na página — a reaplicação nunca sobrescreve entradas existentes.
+  heurístico (port do V5 do Apps Script) e pelo **banco de palavras
+  aprendido** das próprias entradas (retroalimentado: cada correção
+  manual/IA ensina a próxima rodada) — o classificável vira entrada com
+  badge **auto** (revisável/editável na página); só o resto fica pendente.
+  Erro do automático? Corrija a entrada na página — a reaplicação nunca
+  sobrescreve entradas existentes.
+- **Domínio novo (qualquer correlação futura)**: basta a entrada em
+  `lib/mappings/domains.ts` (base + campo cru + campos alvo + categorias) —
+  SEM classificador codificado o banco aprendido já sugere a partir do que
+  for classificado à mão/por IA/importado.
 - **Assistente de IA**: botão "Classificar com IA" (por domínio) propõe
   classificações para os pendentes com prévia EDITÁVEL; funciona também SEM
   IA configurada via copiar-prompt → colar-JSON de IA externa (contrato

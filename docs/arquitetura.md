@@ -1,3 +1,14 @@
+<!-- Versão: 1.62 | Data: 07/08/2026 -->
+<!-- v1.62 (07/08/2026): §4.19 v3 — motor de classificação APRENDIDO genérico
+     (banco de palavras auto-alimentado, lib/mappings/classify/learned.ts:
+     buildWordBank/suggestFromBank sobre as entradas do próprio domínio,
+     votos por token ponderados por pureza + thresholds de confiança; nunca
+     chuta), composto ao classificador codificado por composeSuggester
+     (lib/mappings/domains.ts — específico V5 primeiro, aprendido como
+     fallback e ÚNICO motor de domínio novo sem código) e resposta da IA
+     EXTERNA aceita também CSV (lib/import/mappings/csv.ts —
+     csvToClassifyJson converte cabeçalho "valor,<fieldKey|rótulo>" ao
+     contrato antes do validador; só no fluxo colado do preview). -->
 <!-- Versão: 1.61 | Data: 07/08/2026 -->
 <!-- v1.61 (07/08/2026): §4.19 v2 — classificação AUTOMÁTICA (port fiel do
      classificador V5 do Apps Script em lib/mappings/classify/*; valores sem
@@ -3107,7 +3118,7 @@ byte-igual à chave do cache antigo).
   `lib/mappings/classify/cargo.ts` com keywords 40% + contexto 50% + padrões
   10% + 24 overrides + nível hierárquico; `segmento.ts` com pesos/exclusões
   + tech verticals + genéricos) e `options` por target (categorias
-  canônicas). Na aplicação, valor sem entrada passa pelo `suggest`
+  canônicas). Na aplicação, valor sem entrada passa pelo sugestor EFETIVO
   (varredura leve `collectRawValues` + `autoClassifyValues` puro): resultado
   classificável vira entrada **`origin='auto'`** (0118 — upsert
   `ignoreDuplicates`, nunca sobrescreve manual/seed/IA) e a pendência fica só
@@ -3116,6 +3127,18 @@ byte-igual à chave do cache antigo).
   (`manual|seed|auto|ai`) é informativa (badge na página) e nunca muda o
   lookup. Paridade com o legado pinada em
   `lib/mappings/classify/classify.test.ts` (casos reais do cache).
+- **Motor APRENDIDO (banco de palavras — genérico p/ qualquer domínio)**:
+  `lib/mappings/classify/learned.ts` constrói um índice token → categoria a
+  partir das PRÓPRIAS entradas do domínio (`buildWordBank`) e sugere por
+  votos ponderados pela PUREZA do token com thresholds conservadores
+  (`MIN_EVIDENCE`/`MIN_PURITY`/`MIN_SINGLE_TOKEN_COUNT` — sem confiança ⇒
+  pendência, nunca chuta; match exato por norm vence). O sugestor EFETIVO é
+  `composeSuggester(domain, index)` (domains.ts): classificador ESPECÍFICO
+  (V5) primeiro, banco aprendido como fallback — e como ÚNICO motor de
+  domínio novo SEM classificador codificado. É a RETROALIMENTAÇÃO: cada
+  correção manual/IA ensina a rodada seguinte (pinado em
+  `learned.test.ts`). Domínio futuro de reclassificação = entrada no
+  registry, zero código de classificação.
 - **Dropdowns**: os inputs de classificação usam `<Input list>` + `datalist`
   (padrão do repo — sugestão + valor livre) com `optionsByTarget` do
   overview = canônicas do domínio ∪ valores já usados nas entradas.
@@ -3129,7 +3152,11 @@ byte-igual à chave do cache antigo).
   contexto fresco, grava `origin='ai'` pelos mesmos upserts da página e
   reaplica o domínio + tarefas); UI `mappings-ai-sheet.tsx` com prévia
   **EDITÁVEL** (datalist por target + remover item) e o fluxo copiar-prompt
-  → colar-JSON (funciona SEM IA configurada).
+  → colar-JSON (funciona SEM IA configurada). No fluxo COLADO, a resposta
+  também pode vir em **CSV** (`valor,<campos>` — fieldKey ou rótulo no
+  cabeçalho): `lib/import/mappings/csv.ts` converte ao MESMO contrato antes
+  do validador (nenhuma regra duplicada); o laço do chat interno segue
+  JSON-only.
 
 O preset **"Outbound — Pré-Vendas"** (`lib/presets/outbound.ts`) consome os
 campos derivados na aba Perfil e porta as regras de jul/2026+ do dashboard

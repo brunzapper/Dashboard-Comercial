@@ -145,9 +145,11 @@ async function collectRawValues(
 
 /**
  * Auto-atribuição (comportamento do Apps Script antigo): valores sem entrada
- * passam pelo classificador do domínio; os classificáveis viram entradas
- * `origin='auto'` (upsert ignoreDuplicates — nunca sobrescreve manual/seed/IA)
- * e entram no índice desta rodada. Devolve o nº de entradas criadas.
+ * passam pelo sugestor EFETIVO do domínio (classificador específico +
+ * banco de palavras APRENDIDO das entradas atuais — retroalimentado a cada
+ * correção); os classificáveis viram entradas `origin='auto'` (upsert
+ * ignoreDuplicates — nunca sobrescreve manual/seed/IA) e entram no índice
+ * desta rodada. Devolve o nº de entradas criadas.
  */
 async function autoClassifyDomain(
   db: SupabaseClient,
@@ -156,13 +158,12 @@ async function autoClassifyDomain(
   index: MappingIndex,
   result: ApplyMappingsResult
 ): Promise<number> {
-  if (!domain.suggest) return 0;
   const seen = await collectRawValues(db, orgId, domain);
   const missing = [...seen.entries()]
     .filter(([norm]) => !index.has(norm))
     .map(([norm, display]) => ({ norm, display }));
   if (missing.length === 0) return 0;
-  const entries = autoClassifyValues(domain, missing);
+  const entries = autoClassifyValues(domain, missing, index);
   if (entries.length === 0) return 0;
   for (let i = 0; i < entries.length; i += 500) {
     const slice = entries.slice(i, i + 500);

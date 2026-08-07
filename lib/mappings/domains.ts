@@ -16,6 +16,7 @@
 // validação do assistente de IA) — a UI ainda aceita valor livre (datalist).
 import { classifyCargo, CARGO_AREAS, CARGO_NIVEIS } from "./classify/cargo";
 import { classifySegmento, SEGMENTO_CATEGORIAS } from "./classify/segmento";
+import { buildWordBank, suggestFromBank } from "./classify/learned";
 import { UNCLASSIFIED } from "./classify/shared";
 
 export { UNCLASSIFIED };
@@ -41,11 +42,30 @@ export interface MappingDomain {
   /** Categorias CANÔNICAS por target (dropdown + validação da IA). */
   options: Record<string, string[]>;
   /**
-   * Classificador heurístico do domínio (port do V5): devolve as saídas
-   * sugeridas ou null quando NADA foi classificável (⇒ pendência). Resultado
-   * não-nulo vira entrada `origin='auto'` na aplicação.
+   * Classificador ESPECÍFICO do domínio (opcional — ex.: port do V5):
+   * devolve as saídas sugeridas ou null. É complementado pelo motor
+   * APRENDIDO (banco de palavras das próprias entradas — classify/learned):
+   * domínio SEM classificador codificado já sugere a partir do que foi
+   * classificado à mão/por IA. Resultado não-nulo vira entrada
+   * `origin='auto'` na aplicação.
    */
   suggest?: (raw: string) => Record<string, string> | null;
+}
+
+/**
+ * Sugestor EFETIVO do domínio: específico (quando existe) primeiro, banco de
+ * palavras aprendido das entradas atuais como fallback — a retroalimentação
+ * acontece aqui (cada correção manual/IA ensina a próxima rodada). Puro.
+ */
+export function composeSuggester(
+  domain: MappingDomain,
+  index: MappingIndex
+): (raw: string) => Record<string, string> | null {
+  const bank = buildWordBank(
+    [...index.entries()].map(([rawNorm, outputs]) => ({ rawNorm, outputs })),
+    domain.targets.map((t) => t.fieldKey)
+  );
+  return (raw: string) => domain.suggest?.(raw) ?? suggestFromBank(bank, raw);
 }
 
 /** Sugestão de cargo: null quando área E nível saem "Não Classificado". */
@@ -159,20 +179,22 @@ export interface AutoClassifiedEntry {
 }
 
 /**
- * Roda o classificador do domínio sobre valores AINDA sem entrada e devolve
- * as entradas auto-classificadas (suggest não-nulo). Puro — a aplicação
- * (apply.ts) faz o upsert com origin='auto' ANTES de planejar as escritas,
- * replicando o Apps Script antigo (que classificava e gravava no cache).
+ * Roda o sugestor EFETIVO do domínio (específico + banco aprendido do
+ * `index`) sobre valores AINDA sem entrada e devolve as entradas
+ * auto-classificadas. Puro — a aplicação (apply.ts) faz o upsert com
+ * origin='auto' ANTES de planejar as escritas, replicando o Apps Script
+ * antigo (que classificava e gravava no cache).
  */
 export function autoClassifyValues(
   domain: MappingDomain,
-  values: { norm: string; display: string }[]
+  values: { norm: string; display: string }[],
+  index: MappingIndex = new Map()
 ): AutoClassifiedEntry[] {
-  if (!domain.suggest) return [];
+  const suggest = composeSuggester(domain, index);
   const out: AutoClassifiedEntry[] = [];
   for (const v of values) {
     if (!v.norm) continue;
-    const outputs = domain.suggest(v.display);
+    const outputs = suggest(v.display);
     if (outputs) out.push({ rawValue: v.display, rawNorm: v.norm, outputs });
   }
   return out;

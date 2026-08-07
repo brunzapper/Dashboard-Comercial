@@ -15,6 +15,7 @@ import {
   serializeMappingsClassify,
   validateMappingsClassify,
 } from "./validate";
+import { csvToClassifyJson, looksLikeCsv } from "./csv";
 import {
   MAPPINGS_CLASSIFY_FORMAT,
   MAPPINGS_CLASSIFY_VERSION,
@@ -122,6 +123,38 @@ describe("validador — fail-closed com mensagens que guiam", () => {
     );
     expect(dup.ok).toBe(false);
     expect(dup.errors.some((e) => e.includes("repetido"))).toBe(true);
+  });
+
+  it("CSV colado (fieldKey OU rótulo no cabeçalho) converte e valida", () => {
+    const ctx = cargoCtx();
+    const csv =
+      "valor,cargo_area,Cargo — Nível hierárquico\n" +
+      '"Head of Data Analytics",TI,Gerente\n' +
+      '"Sócio-Administrador",Administração,C-Level\n';
+    expect(looksLikeCsv(csv)).toBe(true);
+    expect(looksLikeCsv(MAPPINGS_SPEC_EXAMPLE)).toBe(false);
+    const conv = csvToClassifyJson(csv, ctx);
+    expect(conv.ok, conv.ok ? "" : conv.errors.join("; ")).toBe(true);
+    if (!conv.ok) return;
+    const res = validateMappingsClassify(conv.json, ctx);
+    expect(res.errors).toEqual([]);
+    expect(res.items).toHaveLength(2);
+    expect(res.items[1].outputs).toEqual({
+      cargo_area: "Administração",
+      cargo_nivel: "C-Level",
+    });
+  });
+
+  it("CSV com coluna desconhecida lista as aceitas", () => {
+    const conv = csvToClassifyJson("valor,campo_x\nA,B\n", cargoCtx());
+    expect(conv.ok).toBe(false);
+    if (conv.ok) return;
+    expect(conv.errors[0]).toContain('Coluna desconhecida no CSV: "campo_x"');
+    expect(conv.errors[0]).toContain("cargo_area");
+  });
+
+  it("SPEC menciona a alternativa CSV do fluxo manual", () => {
+    expect(MAPPINGS_SPEC).toContain('cabeçalho\n   "valor,<campos de saída>"');
   });
 
   it("serialização faz round-trip pelo validador", () => {

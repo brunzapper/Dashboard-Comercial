@@ -839,9 +839,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   tem `options` (categorias canônicas por target) e `suggest` por domínio
   (port FIEL do classificador V5 do Apps Script —
   `lib/mappings/classify/{cargo,segmento}.ts`; paridade pinada em
-  `classify.test.ts`): na aplicação, valor sem entrada classificável vira
-  entrada `origin='auto'` (0118 — upsert `ignoreDuplicates`, NUNCA
-  sobrescreve manual/seed/IA) e a pendência fica só com o resto. O assistente
+  `classify.test.ts`) COMPOSTO com o motor APRENDIDO genérico
+  (`classify/learned.ts` — banco de palavras das próprias entradas, votos
+  por pureza com thresholds conservadores; `composeSuggester` = específico
+  primeiro, aprendido como fallback e ÚNICO motor de domínio novo sem
+  código — retroalimentação pinada em `learned.test.ts`): na aplicação,
+  valor sem entrada classificável vira entrada `origin='auto'` (0118 —
+  upsert `ignoreDuplicates`, NUNCA sobrescreve manual/seed/IA) e a
+  pendência fica só com o resto. Resposta de IA externa COLADA aceita
+  também CSV (`lib/import/mappings/csv.ts` — converte ao MESMO contrato
+  antes do validador; nunca duplique regra lá). O assistente
   "Classificar com IA" segue o padrão §4.17 (contrato `mapeamentos-classify`
   v1 em `lib/import/mappings/*` — valor restrito aos PENDENTES, categoria
   restrita às aceitas do registry, SPEC derivado + `instructions.test.ts`;

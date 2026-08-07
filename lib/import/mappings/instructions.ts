@@ -55,6 +55,8 @@ REGRAS
    contagem de registros e diga em "notas" que há mais.
 5. Numa conversa, sua resposta SUBSTITUI a proposta pendente INTEIRA —
    re-inclua os itens que continuarem desejados.
+6. Alternativa SÓ no fluxo manual (colar resposta): um CSV com cabeçalho
+   "valor,<campos de saída>" (mesmas regras) também é aceito.
 
 EXEMPLO (domínio "cargo")
 ${MAPPINGS_SPEC_EXAMPLE}`;

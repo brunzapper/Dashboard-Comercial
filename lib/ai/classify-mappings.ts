@@ -24,6 +24,7 @@ import { applyValueMappings } from "@/lib/mappings/apply";
 import { syncUnmappedTasks } from "@/lib/mappings/notify";
 import { buildMappingsClassifyPromptText } from "@/lib/import/mappings/instructions";
 import { validateMappingsClassify } from "@/lib/import/mappings/validate";
+import { csvToClassifyJson, looksLikeCsv } from "@/lib/import/mappings/csv";
 import type {
   MappingsClassifyContext,
   ParsedMappingItem,
@@ -190,21 +191,37 @@ export async function generateMappingsCore(
   };
 }
 
-/** Valida um JSON COLADO (fluxo de IA externa) — mesma prévia, sem IA. */
+/** Valida uma resposta COLADA (fluxo de IA externa) — mesma prévia, sem IA.
+ *  Aceita o JSON do contrato OU CSV (`valor,<campos>`) convertido ao MESMO
+ *  contrato antes do validador (nenhuma regra duplicada). */
 export async function previewMappingsCore(
   domainKey: string,
   raw: string
 ): Promise<GenerateMappingsState> {
   const err = await gate();
   if (err) return { ok: false, message: err };
-  if (!raw.trim()) return { ok: false, message: "Cole o JSON devolvido pela IA." };
+  if (!raw.trim()) {
+    return { ok: false, message: "Cole a resposta (JSON ou CSV) devolvida pela IA." };
+  }
   const loaded = await loadClassifyContext(domainKey);
   if ("error" in loaded) return { ok: false, message: loaded.error };
-  const v = validateMappingsClassify(raw, loaded.ctx);
+  let payload = raw;
+  if (looksLikeCsv(raw)) {
+    const csv = csvToClassifyJson(raw, loaded.ctx);
+    if (!csv.ok) {
+      return {
+        ok: false,
+        message: "O CSV tem problemas — corrija na IA externa e cole de novo.",
+        errors: csv.errors,
+      };
+    }
+    payload = csv.json;
+  }
+  const v = validateMappingsClassify(payload, loaded.ctx);
   if (!v.ok) {
     return {
       ok: false,
-      message: "O JSON tem problemas — corrija na IA externa e cole de novo.",
+      message: "A resposta tem problemas — corrija na IA externa e cole de novo.",
       errors: v.errors,
     };
   }
