@@ -196,6 +196,7 @@ export const PRESET_FIELDS: PresetField[] = [
 ];
 
 import { INBOUND_PRESET } from "./inbound";
+import { OUTBOUND_PRESET } from "./outbound";
 import { REMUNERACAO_VARIAVEL_PRESET } from "./remuneracao-variavel";
 
 // Filtros reutilizáveis
@@ -211,6 +212,7 @@ const closedThisYear: WidgetFilter[] = [
 
 export const PRESETS: PresetDashboard[] = [
   INBOUND_PRESET,
+  OUTBOUND_PRESET,
   REMUNERACAO_VARIAVEL_PRESET,
   {
     presetKey: "performance_mes",
