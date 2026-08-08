@@ -52,10 +52,10 @@ import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import {
   completeTasksBulk,
   createTasksBulk,
-  deleteRecordsBulk,
   deleteTasksBulk,
   moveRecordCardsBulk,
 } from "@/lib/kanban/bulk-actions";
+import { trashRecordsBulk } from "@/lib/records/trash-actions";
 import { completeTask, reopenTask } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
@@ -1025,7 +1025,9 @@ export function KanbanBoard({
       exec: (chunk) =>
         isTasksMode
           ? deleteTasksBulk(chunk.map((i) => i.id))
-          : deleteRecordsBulk(chunk.map((i) => i.id)),
+          : // Lixeira (0121): registro vai para a lixeira (30 dias), não é
+            // mais hard delete — mesmo contrato por item.
+            trashRecordsBulk(chunk.map((i) => i.id)),
     });
   }
 

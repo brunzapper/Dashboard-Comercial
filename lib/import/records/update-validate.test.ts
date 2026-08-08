@@ -385,3 +385,59 @@ describe("validateRecordsUpdate", () => {
     ).toBe("SDR da Reunião é vazio");
   });
 });
+
+// v1.1 (07/08/2026): MODO SELEÇÃO ({ selection: true }) — alvo = registros
+// selecionados na tabela; "filtros" proibido (ausente/[] ok), resto idêntico.
+describe("validateRecordsUpdate — modo seleção", () => {
+  it("aceita envelope SEM a chave filtros (só alteracoes)", () => {
+    const raw = JSON.stringify({
+      formato: "registros-update",
+      versao: 1,
+      alteracoes: { "custom:sdr_reuniao": "Paulo Vitor Santos" },
+    });
+    const v = validateRecordsUpdate(raw, ctx(), { selection: true });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.update.filters).toEqual([]);
+    expect(v.update.changes["custom:sdr_reuniao"]).toBe("Paulo Vitor Santos");
+  });
+
+  it("aceita filtros: [] (vazio explícito)", () => {
+    const v = validateRecordsUpdate(
+      envelope([], { "custom:obs": "x" }),
+      ctx(),
+      { selection: true }
+    );
+    expect(v.ok).toBe(true);
+  });
+
+  it("rejeita filtros com condições (o recorte JÁ é a seleção)", () => {
+    const v = validateRecordsUpdate(
+      envelope(
+        [{ field: "custom:fonte", op: "eq", value: "X" }],
+        { "custom:obs": "x" }
+      ),
+      ctx(),
+      { selection: true }
+    );
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.errors[0]).toContain("SELECIONADOS");
+  });
+
+  it("title continua nunca podendo ser limpo", () => {
+    const v = validateRecordsUpdate(
+      envelope([], { title: null }),
+      ctx(),
+      { selection: true }
+    );
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.errors[0]).toContain("title");
+  });
+
+  it("o modo padrão segue exigindo ≥1 filtro (sem regressão)", () => {
+    const v = validateRecordsUpdate(envelope([], { "custom:obs": "x" }), ctx());
+    expect(v.ok).toBe(false);
+  });
+});

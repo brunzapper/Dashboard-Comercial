@@ -1,3 +1,16 @@
+<!-- Versão: 1.64 | Data: 07/08/2026 -->
+<!-- v1.64 (07/08/2026): §4.21 — LIXEIRA de registros (soft delete 0121:
+     records.deleted_at/deleted_by; trigger enforce_records_trash_guard —
+     admin-only; leitores filtram deleted_at is null nos choke points; RPCs
+     0121 com o predicado ESPELHADO — snapshot_records ganha deleted_at
+     sempre-null; purga 30d por pg_cron; página /registros/lixeira;
+     record.deleted no trash + record.restored no restore) e SELEÇÃO EM MASSA
+     em /registros (checkboxes + RecordsBulkBar: edição manual de campos e IA
+     sobre selecionados via MODO SELEÇÃO do contrato registros-update —
+     validador { selection: true }, ids por argumento das actions; exclusão →
+     lixeira; kanban trocou deleteRecordsBulk por trashRecordsBulk). Duplo
+     clique na linha abre o painel (instância única içada) e a tabela ganhou
+     hover-edge pan (useHoverEdgePan). Invariante 30 nova. -->
 <!-- Versão: 1.63 | Data: 07/08/2026 -->
 <!-- v1.63 (07/08/2026): §4.19 v4 — domínios DINÂMICOS de reclassificação
      (tabela mapping_domains 0119, criados pela aba Campos → Reclassificações;
@@ -3295,6 +3308,97 @@ contração) + blocos em `lib/widgets/engine.test.ts` (simples e robusto de
 ponta a ponta com cliente fake) + `lib/import/dashboard/validate.test.ts`
 (texto→tokens, remoções com aviso, round-trip). Ver invariante 29.
 
+### 4.21 Lixeira de registros e seleção em massa em /registros (07/08/2026)
+
+**Lixeira (soft delete, 30 dias — migração 0121).** Excluir registro deixou
+de ser hard delete em TODO o app: `records.deleted_at` (+ `deleted_by`) marca
+a linha como "na lixeira" e as três actions de
+`lib/records/trash-actions.ts` (`trashRecordsBulk`/`restoreRecordsBulk`/
+`purgeRecordsPermanently` — contrato por item de `bulk-helpers`, teto 200,
+client RLS, sem revalidatePath) são o ÚNICO caminho de escrita:
+
+- **Permissão**: as três são ADMIN-only (gate único `trashGateError`, espelho
+  da `records_delete`) E o banco reforça — o trigger
+  `enforce_records_trash_guard` (0121) rejeita mudança de `deleted_at` sem
+  papel admin (escape: GUC `app.allow_protected_change`, padrão 0089).
+  Trash/restore são UPDATE (cairiam na `records_update` de qualquer editor —
+  o trigger fecha a escalação); RLS intocada (precedente 0087). Escritores
+  service-role (sync/mappings/automações/alocação) nunca incluem
+  `deleted_at` no payload — trigger inerte; a purga é DELETE (fora do
+  trigger). Para abrir a editores um dia: mudar `trashGateError` E o trigger
+  JUNTOS. Mock nunca vai à lixeira (pulado por item).
+- **Leitura**: a lixeira some de TODA consulta. No banco, a 0121 recriou
+  `run_widget_query` + `run_widget_query_snapshot` com o predicado
+  `deleted_at is null` ESPELHADO (paridade byte a byte mantida —
+  `snapshot_records` ganhou uma coluna `deleted_at` SEMPRE NULL só para o
+  predicado e o filtro do engine resolverem no dataset congelado; a CAPTURA
+  `snapshot_refresh_copy` exclui a lixeira das linhas de DADOS e o ramo
+  PARTNER-only segue sem filtro — colunas `match:` resolvem parceiro na
+  lixeira, limitação documentada; a purga cascateia `record_matches` e se
+  auto-corrige) e `registros_populated_refs` filtrado. No app, o funil
+  `buildRecordListQuery` (modo lista/kanban/agenda/card/prévia da IA) e os
+  leitores diretos (/registros, export CSV, buscas de vínculo/match,
+  auto-match, sonda de período, amostras da IA, mapeamentos,
+  auto-operações, related-count, leitura fresca do bulk-update) aplicam
+  `.is("deleted_at", null)`. **Intencionalmente SEM filtro**: upserts do
+  sync/import (atualizam a linha trashed in-place SEM ressuscitar — é o que
+  torna o soft delete reconcile-safe), lookups de rótulo por id, hidratação
+  de matches, caminhos single-record por id explícito e o join de título em
+  tarefas (tarefas de registro na lixeira seguem visíveis até a purga).
+- **UI/ciclo**: `/registros/lixeira` (page admin-only; link no header de
+  /registros) lista com "Expira em N dias" (`lib/records/trash.ts`, TTL 30d
+  como defesa em profundidade) + Restaurar + Excluir definitivamente
+  (ConfirmDialog; predicado `deleted_at not null` no DELETE — registro ativo
+  nunca é hard-deleted pela action, padrão `deleteBoardPermanently`). Purga
+  física diária por `supabase/apply/pg-cron-purge-records-trash.sql` (03:35
+  UTC, SQL puro; cascatas levam audit/tarefas/comentários/placements/
+  conexões). Webhooks: `record.deleted` ao ENVIAR à lixeira, novo
+  `record.restored` ao restaurar, purga silenciosa; trash/restore AUDITAM
+  (`audit_log`, campo `deleted_at`, origin 'app'). O "Excluir" do kanban
+  passou a chamar `trashRecordsBulk` (deleteRecordsBulk foi removido).
+
+**Seleção em massa em /registros (records-table v2.2).** Checkboxes na 1ª
+coluna (só com `canEditValues`/`canDeleteRecords`; select-all da página no
+header, Esc limpa, prune contra os ids vivos a cada re-render RSC —
+precedentes do kanban) + barra flutuante `RecordsBulkBar`:
+
+- **Editar campos** (manual) — `BulkEditSheet`: campos/valores/"limpar"
+  escolhidos na UI viram o MESMO contrato registros-update
+  (`serializeRecordsUpdate([], changes)`) em **modo seleção**
+  (`validateRecordsUpdate(raw, ctx, { selection: true })` — `filtros`
+  proibido; resto idêntico), prévia server-side obrigatória e apply pelos
+  MESMOS cores/actions da IA — validador/coerção/choke point únicos
+  (`updateRecordValuesBulk`), nunca caminho paralelo.
+- **Editar com IA** — `RecordsAiUpdateSheet` com prop `selection`: os 4
+  fluxos (chat/copiar-prompt/colar-JSON/aplicar) chamam os cores de seleção
+  (`generateRecordsSelectionUpdateCore` etc., `lib/ai/update-records.ts`);
+  os IDS viajam como ARGUMENTO das actions (nunca no JSON — a IA não os
+  conhece); `resolveSelection` lê os selecionados direto (RLS +
+  `record_type` da base + fora da lixeira, cap 200) e serve prévia manual,
+  prévia da IA e apply; amostras do prompt = os PRÓPRIOS selecionados
+  (`SELECTION_SAMPLE_ROWS`); SPEC derivado
+  (`RECORDS_UPDATE_SELECTION_SPEC`) fiscalizado por
+  `update-instructions.test.ts`. Painel de prévia compartilhado
+  (`update-preview.tsx`) entre os dois sheets.
+- **Excluir** — AlertDialog ("vão para a Lixeira… 30 dias") →
+  `trashRecordsBulk`. Pós-ação: limpar seleção + `emitDataChanged` +
+  refresh debounced.
+
+**Duplo clique + hover-pan (records-table v2.1).** O painel de edição virou
+UMA instância CONTROLADA içada (`RecordEditSheet` com
+`open`/`onOpenChange`/`hideTrigger`; `key` por id reseta o form) — duplo
+clique no corpo da linha (fora de `INTERACTIVE_SELECTOR` — sem guarda de
+`getSelection`: dblclick seleciona a palavra sob o cursor por padrão) e o
+lápis abrem o mesmo painel. A tabela ganhou hover-edge pan
+(`useHoverEdgePan`, engageMs 180 como o DashboardGrid): ponteiro parado nas
+bordas/cantos rola nos 2 eixos; suspenso sobre controles interativos, com
+botão pressionado (drag-pan em voo) e com qualquer sheet da tela aberto.
+
+Testes: `lib/records/trash.test.ts` +
+`components/registros/records-table.selection.test.tsx` + blocos de modo
+seleção em `update-validate.test.ts`/`update-instructions.test.ts` +
+`tests/rpc-parity.test.ts` (paridade segue byte a byte). Ver invariante 30.
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -3762,6 +3866,26 @@ principalmente — para mantenedores humanos.
     rodada (bdMap, pernas por métrica, condValueByKey) iteram por
     `rpcDims.length` — consulta auxiliar nova que case tuplas com a
     principal DEVE usar as dims do PAYLOAD, não as da config.
+
+30. **Lixeira de registros (soft delete 0121, §4.21): `deleted_at` só muda
+    por admin e toda leitura nova decide EXPLICITAMENTE sobre a lixeira.**
+    Enviar/restaurar/purgar passam SÓ pelas actions de
+    `lib/records/trash-actions.ts` (gate admin + trigger
+    `enforce_records_trash_guard` no banco — trash é UPDATE e cairia na
+    `records_update` de qualquer editor sem o trigger; relaxar exige mudar
+    os DOIS juntos). Consulta nova sobre `records` DEVE filtrar
+    `deleted_at is null` (o funil `buildRecordListQuery` e os RPCs 0121 já
+    cobrem os caminhos canônicos) — EXCETO os upserts do sync/import, que
+    ficam SEM filtro de propósito: atualizam a linha trashed in-place e ela
+    SEGUE na lixeira (é o que impede ressurreição/duplicata no reconcile por
+    `source_system+source_id`). O predicado dos RPCs é ESPELHADO
+    (`snapshot_records.deleted_at` é espelho morto sempre-null — a captura
+    exclui a lixeira; NÃO remova a coluna "inútil": o `.is()` do engine via
+    snapshotClient e a paridade byte a byte dependem dela). `record.deleted`
+    é emitido no ENVIO à lixeira, `record.restored` no restore, purga
+    silenciosa. Nenhum caminho do app faz hard delete fora de
+    `purgeRecordsPermanently` (predicado `deleted_at not null`) e do cron
+    `pg-cron-purge-records-trash.sql` (30 dias).
 
 ## 6. Convenções do projeto
 

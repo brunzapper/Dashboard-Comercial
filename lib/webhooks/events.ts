@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 27/07/2026
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): record.restored — com a Lixeira (0121), record.deleted
+//   passa a ser emitido no ENVIO à lixeira (o registro some das leituras);
+//   restaurar emite record.restored; a purga definitiva não emite nada.
 // v1.1 (27/07/2026): record.deleted — a exclusão em massa do kanban (admin)
 //   remove registros de verdade; sem o evento, integrações ficariam cegas.
 // Catálogo dos tipos de evento de webhook de SAÍDA. Adicionar um tipo novo é
@@ -12,6 +15,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "record.created",
   "record.updated",
   "record.deleted",
+  "record.restored",
   "task.created",
   "task.updated",
   "task.completed",

@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): SPEC do MODO SELEÇÃO — variante do contrato para "Editar
+//   com IA" sobre registros SELECIONADOS na tabela: sem "filtros" (o alvo já
+//   é a seleção; o validador roda com { selection: true }), amostras = os
+//   próprios selecionados. buildRecordsUpdatePromptText ganha o parâmetro
+//   `mode` ("filters" default | "selection").
 // SPEC do prompt de "Atualizar registros com IA" — DERIVADO do código (mesma
 // regra dos SPECs de dashboards/inserção): operadores de filtro saem de
 // FILTER_OPS (lib/widgets/filter-ops — op novo sem cobertura quebra o teste de
@@ -101,6 +106,63 @@ Exemplo:
 ${RECORDS_UPDATE_SPEC_EXAMPLE}
 `;
 
+// ---------------------------------------------------------------------------
+// MODO SELEÇÃO: os alvos JÁ estão selecionados na tela — só "alteracoes".
+// ---------------------------------------------------------------------------
+
+export const RECORDS_UPDATE_SELECTION_SPEC_EXAMPLE = `{
+  "formato": "${RECORDS_UPDATE_FORMAT}",
+  "versao": ${RECORDS_UPDATE_VERSION},
+  "alteracoes": {
+    "custom:sdr_reuniao": "Paulo Vitor Santos"
+  },
+  "notas": [
+    "Registros de demonstração são pulados automaticamente."
+  ]
+}`;
+
+export const RECORDS_UPDATE_SELECTION_SPEC = `
+Responda SEMPRE com UM único bloco de JSON no formato abaixo — sem nenhum texto
+fora do bloco. Os registros-alvo JÁ ESTÃO SELECIONADOS na tela pelo usuário (o
+cabeçalho informa a contagem; a seção REGISTROS SELECIONADOS traz uma amostra
+deles) — o JSON descreve APENAS as ALTERAÇÕES aplicadas a TODOS os
+selecionados. NADA é gravado sem o usuário revisar a prévia (antes → depois) e
+confirmar. Você NUNCA emite ids de registro e NUNCA emite "filtros": omita a
+chave "filtros" (ou envie []) — emiti-la com condições é erro.
+
+Envelope:
+- "formato": "${RECORDS_UPDATE_FORMAT}" e "versao": ${RECORDS_UPDATE_VERSION} (fixos).
+- "alteracoes": objeto { chave: valor } com os campos a gravar em TODOS os
+  registros selecionados — ao menos 1 chave.
+- "notas": lista opcional de avisos ao usuário.
+- No MÁXIMO ${MAX_AI_UPDATE_RECORDS} registros por operação (a seleção da tela já respeita
+  esse teto).
+
+Chaves aceitas em "alteracoes" (QUALQUER outra é erro):
+- Colunas do núcleo (nome cru):
+${coreLines}
+- Campos personalizados da base: "custom:<field_key>" — só os listados em
+  CAMPOS DA BASE. Campo de Seleção aceita APENAS uma das opções listadas.
+- "responsible_id" e "operation_id": o NOME cadastrado exatamente como listado.
+
+Formato dos valores de alteração:
+- Número/Moeda: número JSON puro (1250.5) — nunca "R$ 1.250,50".
+- "currency": um dos códigos ${currencyCodes}.
+- Booleano: true/false.
+- Datas: "YYYY-MM-DD" (sem hora). Resolva expressões relativas ("hoje",
+  "ontem") pela data de HOJE informada no cabeçalho.
+- null LIMPA o campo em todos os selecionados ("title" nunca pode ser limpo).
+  Campo que o usuário não mandou alterar: OMITA a chave.
+- NUNCA invente valores: use somente o que o usuário pediu, apenas
+  normalizando o formato às convenções dos REGISTROS SELECIONADOS.
+
+Uma resposta = UMA operação. O usuário pode pedir ajustes na sequência: sua
+resposta SUBSTITUI a proposta anterior INTEIRA.
+
+Exemplo:
+${RECORDS_UPDATE_SELECTION_SPEC_EXAMPLE}
+`;
+
 export interface RecordsUpdatePromptParts {
   /** Rótulo + key da base alvo (ex.: Reunião ("reunioes_qualificadas")). */
   baseLabel: string;
@@ -112,11 +174,33 @@ export interface RecordsUpdatePromptParts {
   samplesJson: string;
   /** Observação sobre a amostra (vazia/colunas descobertas). */
   samplesNote: string;
+  /** Modo seleção: contagem de registros selecionados (cabeçalho). */
+  selectionCount?: number;
 }
 
 export function buildRecordsUpdatePromptText(
-  parts: RecordsUpdatePromptParts
+  parts: RecordsUpdatePromptParts,
+  mode: "filters" | "selection" = "filters"
 ): string {
+  if (mode === "selection") {
+    const header =
+      `Você é um assistente de manutenção de registros comerciais. O usuário ` +
+      `SELECIONOU ${parts.selectionCount ?? 0} registro(s) da base ${parts.baseLabel} e descreve ` +
+      `uma correção em massa sobre ELES (e somente eles). ` +
+      `Data de HOJE (Brasília): ${parts.todayIso}.`;
+    return (
+      header +
+      section(
+        "FORMATO DA RESPOSTA (obrigatório)",
+        RECORDS_UPDATE_SELECTION_SPEC
+      ) +
+      section("CAMPOS DA BASE (JSON)", parts.catalogJson) +
+      section(
+        "REGISTROS SELECIONADOS (amostra e convenções de valor)",
+        `${parts.samplesNote}\n\n${parts.samplesJson}`
+      )
+    );
+  }
   const header =
     `Você é um assistente de manutenção de registros comerciais. O usuário ` +
     `descreve uma correção em massa e você a traduz em filtros + alterações ` +

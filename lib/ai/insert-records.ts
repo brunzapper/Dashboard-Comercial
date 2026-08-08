@@ -114,6 +114,9 @@ async function findDuplicateTitles(
       .select("id")
       .eq("record_type", recordType)
       .eq("is_mock", false)
+      // Lixeira (0121): duplicado na lixeira não conta (restaurar pode
+      // recriar o aviso — aceito, é só um aviso).
+      .is("deleted_at", null)
       .ilike("title", ilikeExact(title))
       .limit(1);
     if ((data ?? []).length > 0) out.push(title);

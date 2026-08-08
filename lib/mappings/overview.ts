@@ -97,6 +97,8 @@ async function loadDomainUnmapped(
         .select(selectRaw)
         .eq("organization_id", orgId)
         .eq("record_type", recordType)
+        // Lixeira (0121): contagens do painel só com registros vivos.
+        .is("deleted_at", null)
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) throw new Error(error.message);

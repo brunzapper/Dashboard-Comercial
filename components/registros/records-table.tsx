@@ -1,4 +1,22 @@
-// Versão: 2.0 | Data: 07/08/2026
+// Versão: 2.2 | Data: 07/08/2026
+// v2.2 (07/08/2026): SELEÇÃO EM MASSA — checkboxes na 1ª coluna (só com
+//   canEditValues/canDeleteRecords), select-all da página no header, Esc
+//   limpa, prune contra os ids vivos a cada re-render RSC (precedentes do
+//   kanban) e a barra flutuante RecordsBulkBar (Editar campos / Editar com
+//   IA / Excluir → Lixeira). Pós-ação: limpa seleção + emitDataChanged +
+//   refresh debounced. O hover-pan também pausa com os sheets da barra.
+// v2.1 (07/08/2026): duplo clique abre o registro + pan por hover de borda.
+//   - O painel de edição virou UMA instância CONTROLADA içada no fim da
+//     tabela (antes: um Sheet montado por linha). Duplo clique no corpo da
+//     linha (fora de controle interativo — INTERACTIVE_SELECTOR, o mesmo
+//     conjunto ignorado pelo pan) e o lápis da última coluna abrem o mesmo
+//     painel. SEM guarda de getSelection aqui: dblclick seleciona a palavra
+//     sob o cursor por padrão (a guarda do kanban vale para click simples).
+//   - Hover-edge pan (useHoverEdgePan, engageMs 180 como o DashboardGrid):
+//     ponteiro PARADO perto das bordas/cantos rola nos dois eixos, sem botão
+//     pressionado. Suspenso sobre controles interativos, com botão
+//     pressionado (drag-pan em voo) e com o painel aberto (overlay do Radix
+//     engoliria o pointermove e o loop rolaria por baixo).
 // v2.0 (07/08/2026): 100% das colunas populadas + redimensionar + ordenar.
 //   - Colunas núcleo deixam de ser hardcoded: a page envia `coreColumns`
 //     (refs populadas na base — registros_populated_refs 0120), renderizadas
@@ -26,11 +44,13 @@
 // cada linha abre o painel de edição (RecordEditSheet).
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -54,11 +74,20 @@ import {
 import type { RecordLabels } from "@/lib/export/record-cells";
 import type { SourceKey } from "@/lib/sources";
 import { cn } from "@/lib/utils";
+import { emitDataChanged } from "@/lib/tasks/events";
 import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { useDragPan } from "@/lib/use-drag-pan";
+import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
 import { useColWidths } from "./use-col-widths";
 import { EditableCell } from "./editable-cell";
 import { RecordEditSheet } from "./record-edit-sheet";
+import { RecordsBulkBar } from "./records-bulk-bar";
+
+// Controles que ficam FORA do pan (drag e hover) e do duplo clique de linha:
+// EditableCell, lápis, links de ordenação, alça de largura. Checkbox de
+// seleção é um input — entra de graça.
+const INTERACTIVE_SELECTOR =
+  "button, a, input, select, textarea, [contenteditable], [role=separator]";
 
 // Header com ordenação (Link RSC — mesma navegação da paginação) + alça de
 // largura. O ciclo do clique é asc → desc → limpa; trocar de ordenação volta
@@ -137,6 +166,7 @@ function SortHead({
 
 export function RecordsTable({
   source,
+  sourceLabel,
   records,
   fields,
   coreColumns,
@@ -152,8 +182,12 @@ export function RecordsTable({
   userRoles,
   canEditValues,
   canManageFields,
+  canDeleteRecords,
+  ai,
 }: {
   source: SourceKey;
+  /** Rótulo da base (cabeçalhos dos sheets de ação em massa). */
+  sourceLabel: string;
   records: RecordRow[];
   // Colunas custom (com definição) da tabela.
   fields: FieldDefinition[];
@@ -175,6 +209,10 @@ export function RecordsTable({
   userRoles: string[];
   canEditValues: boolean;
   canManageFields: boolean;
+  /** Excluir (→ Lixeira) — só admin (espelha as trash-actions). */
+  canDeleteRecords: boolean;
+  /** Config de IA da org (sheet "Editar com IA" da seleção). */
+  ai: { provider: string; model: string; hasKey: boolean } | null;
 }) {
   const labels: RecordLabels = useMemo(
     () => ({
@@ -200,12 +238,72 @@ export function RecordsTable({
   // ordenação) e a alça de largura ([role=separator]) ficam de fora.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { panning, onPointerDown } = useDragPan(scrollRef, {
-    ignore: (t) =>
-      !!t.closest(
-        "button, a, input, select, textarea, [contenteditable], [role=separator]"
-      ),
+    ignore: (t) => !!t.closest(INTERACTIVE_SELECTOR),
     edgeAutoScroll: true,
   });
+
+  // Painel de edição içado (v2.1): `detailOpen` separado preserva a animação
+  // de saída do Sheet (o registro segue montado enquanto fecha).
+  const [detailRecord, setDetailRecord] = useState<RecordRow | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const openDetail = (r: RecordRow) => {
+    setDetailRecord(r);
+    setDetailOpen(true);
+  };
+  // Refresh com o painel aberto: re-aponta para a linha fresca (as seções
+  // read-only re-renderizam; inputs não resetam — o `key` é o id). Registro
+  // que saiu da página segue montado com o snapshot até fechar.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDetailRecord((cur) =>
+      cur ? records.find((r) => r.id === cur.id) ?? cur : cur
+    );
+  }, [records]);
+
+  // Seleção em massa (checkboxes da 1ª coluna) — precedentes do kanban:
+  // Set de ids, Esc limpa, prune contra os ids vivos a cada re-render RSC.
+  const canBulk = canEditValues || canDeleteRecords;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkSheetOpen, setBulkSheetOpen] = useState(false);
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  useEffect(() => {
+    // Página nova/refresh: seleção só sobrevive para linhas ainda visíveis.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(records.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [records]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const clearSelection = () => setSelected(new Set());
+  const bulkDone = () => {
+    clearSelection();
+    emitDataChanged({ kind: "record" });
+    refresh();
+  };
+
+  // Hover-edge pan: ponteiro parado na borda rola. Suspenso com qualquer
+  // painel da tela aberto — o overlay engole pointermove e o loop seguiria
+  // rolando por baixo.
+  const hoverPan = useHoverEdgePan(scrollRef, { engageMs: 180 });
+  const hoverStop = hoverPan.stop;
+  useEffect(() => {
+    if (detailOpen || bulkSheetOpen) hoverStop();
+  }, [detailOpen, bulkSheetOpen, hoverStop]);
 
   if (records.length === 0) {
     return (
@@ -221,19 +319,58 @@ export function RecordsTable({
   };
 
   return (
-    <div
-      ref={scrollRef}
-      onPointerDown={onPointerDown}
-      className={cn(
-        "rounded-lg border overflow-x-auto",
-        panning ? "cursor-grabbing" : "cursor-grab"
-      )}
-    >
+    <div className="flex flex-col gap-2">
+      <div
+        ref={scrollRef}
+        onPointerDown={(e) => {
+          // Press parado não emite pointermove — sem o stop o loop de hover
+          // continuaria rolando durante o clique/drag.
+          hoverStop();
+          onPointerDown(e);
+        }}
+        onPointerMove={(e) => {
+          if (e.pointerType === "touch") return;
+          if (
+            e.buttons !== 0 ||
+            (e.target as HTMLElement).closest(INTERACTIVE_SELECTOR)
+          ) {
+            hoverStop();
+            return;
+          }
+          hoverPan.onSample(e.clientX, e.clientY);
+        }}
+        onPointerLeave={hoverStop}
+        className={cn(
+          "rounded-lg border overflow-x-auto",
+          panning ? "cursor-grabbing" : "cursor-grab"
+        )}
+      >
       {/* O wrapper interno do Table NÃO pode rolar (overflow-x-visible): o
           scroller é o div acima — é nele que o pan escreve scrollLeft. */}
       <Table containerClassName="overflow-x-visible">
         <TableHeader>
           <TableRow>
+            {canBulk ? (
+              <TableHead className="w-8">
+                <Checkbox
+                  checked={
+                    selected.size === records.length
+                      ? true
+                      : selected.size > 0
+                        ? "indeterminate"
+                        : false
+                  }
+                  onCheckedChange={(v) =>
+                    setSelected(
+                      v === true
+                        ? new Set(records.map((r) => r.id))
+                        : new Set()
+                    )
+                  }
+                  aria-label="Selecionar todos da página"
+                />
+              </TableHead>
+            ) : null}
             <SortHead
               colKey="title"
               label={coreRefLabel("title", coreDefs)}
@@ -281,7 +418,26 @@ export function RecordsTable({
         </TableHeader>
         <TableBody>
           {records.map((r) => (
-            <TableRow key={r.id}>
+            <TableRow
+              key={r.id}
+              onDoubleClick={(e) => {
+                // Duplo clique no CORPO da linha abre o painel; controles
+                // interativos (célula editável, lápis, links) mantêm o
+                // comportamento próprio — mesmo conjunto ignorado pelo pan.
+                if ((e.target as HTMLElement).closest(INTERACTIVE_SELECTOR))
+                  return;
+                openDetail(r);
+              }}
+            >
+              {canBulk ? (
+                <TableCell className="w-8">
+                  <Checkbox
+                    checked={selected.has(r.id)}
+                    onCheckedChange={() => toggleSelect(r.id)}
+                    aria-label="Selecionar registro"
+                  />
+                </TableCell>
+              ) : null}
               <TableCell
                 style={widthStyle("title")}
                 className={cn(
@@ -335,29 +491,60 @@ export function RecordsTable({
                 </TableCell>
               ))}
               <TableCell className="text-right">
-                <RecordEditSheet
-                  record={r}
-                  fields={fields}
-                  detailFields={detailFields}
-                  offBaseDefs={offBaseDefs}
-                  coreDefs={coreDefs}
-                  knownFieldKeys={knownFieldKeys}
-                  responsibles={responsibles}
-                  operations={operations}
-                  relatedLeadLabel={
-                    r.related_lead_id
-                      ? relatedLeadLabels[r.related_lead_id] ?? null
-                      : null
-                  }
-                  userRoles={userRoles}
-                  canEditValues={canEditValues}
-                  canManageFields={canManageFields}
-                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Editar registro"
+                  onClick={() => openDetail(r)}
+                >
+                  <Pencil className="size-4" />
+                </Button>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+      </div>
+
+      {canBulk ? (
+        <RecordsBulkBar
+          source={{ key: source, label: sourceLabel }}
+          ai={ai}
+          selectedIds={[...selected]}
+          canEditValues={canEditValues}
+          canDelete={canDeleteRecords}
+          onClear={clearSelection}
+          onDone={bulkDone}
+          onSheetOpenChange={setBulkSheetOpen}
+        />
+      ) : null}
+
+      {/* Instância ÚNICA do painel — `key` reseta o form ao trocar de
+          registro (estado interno inicializa do record). */}
+      {detailRecord ? (
+        <RecordEditSheet
+          key={detailRecord.id}
+          record={detailRecord}
+          fields={fields}
+          detailFields={detailFields}
+          offBaseDefs={offBaseDefs}
+          coreDefs={coreDefs}
+          knownFieldKeys={knownFieldKeys}
+          responsibles={responsibles}
+          operations={operations}
+          relatedLeadLabel={
+            detailRecord.related_lead_id
+              ? relatedLeadLabels[detailRecord.related_lead_id] ?? null
+              : null
+          }
+          userRoles={userRoles}
+          canEditValues={canEditValues}
+          canManageFields={canManageFields}
+          open={detailOpen}
+          onOpenChange={setDetailOpen}
+          hideTrigger
+        />
+      ) : null}
     </div>
   );
 }

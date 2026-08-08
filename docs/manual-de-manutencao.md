@@ -1,3 +1,7 @@
+<!-- Versão: 1.27 | Data: 07/08/2026 -->
+<!-- v1.27 (07/08/2026): job pg_cron nº 7 (purge-records-trash — purga da
+     Lixeira de REGISTROS, 0121: soft delete de 30 dias; SQL puro 03:35
+     UTC). -->
 <!-- Versão: 1.26 | Data: 07/08/2026 -->
 <!-- v1.26 (07/08/2026): §4.14 — domínio de reclassificação DINÂMICO pela UI
      (aba Campos → Reclassificações, tabela mapping_domains 0119): criar/
@@ -126,9 +130,16 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
       cada minuto (`/api/kanban-automations/tick`; ocioso = 1 SELECT
       indexado). Sem o job as regras só rodam no pós-sync e no "Executar
       agora".
+   7. `apply/pg-cron-purge-records-trash.sql` — purga diária (03:35 UTC) da
+      Lixeira de REGISTROS (0121: `records.deleted_at` há mais de 30 dias;
+      SQL puro, não usa os segredos). O DELETE cascateia audit/tarefas/
+      comentários/posicionamentos/conexões; sem webhook (o `record.deleted`
+      já saiu no envio à lixeira). Sem o job, /registros/lixeira apenas
+      ESCONDE os vencidos — a limpeza física depende dele.
    Os ticks (2–4 e 6) **pressupõem os segredos criados pelo primeiro**.
    Verificar/remover: `select * from cron.job;` /
-   `select cron.unschedule('purge-dashboard-trash');`.
+   `select cron.unschedule('purge-dashboard-trash');` /
+   `select cron.unschedule('purge-records-trash');`.
 6. **Sync Bitrix** — logado como admin, em Registros: **Backfill inicial** (importa o
    ano) e depois **Reconciliar**. Os responsáveis são criados automaticamente; cure a
    lista em Configurações → Responsáveis e monte as Operações.

@@ -1,4 +1,8 @@
-// Versão: 2.0 | Data: 07/08/2026
+// Versão: 2.1 | Data: 07/08/2026
+// v2.1 (07/08/2026): modo CONTROLADO opcional (open/onOpenChange/hideTrigger) —
+//   a tabela de registros iça UMA instância (aberta por duplo clique/lápis) em
+//   vez de montar um Sheet por linha. Sem as props novas, o gatilho lápis
+//   interno segue mandando (call site do kanban-list intocado).
 // v2.0 (07/08/2026): 100% dos campos consultáveis no detalhe.
 //   - Seção núcleo COMPLETA: grade read-only gerada de coreDetailRows
 //     (CORE_FIELDS + rótulo/ordem das linhas core do /campos) — pipeline,
@@ -476,21 +480,33 @@ export function RecordEditForm({
   );
 }
 
-/** Painel lateral de edição (gatilho lápis) — wrapper do RecordEditForm. */
-export function RecordEditSheet(props: RecordEditFormProps) {
-  const { record, responsibles, userRoles } = props;
-  const [open, setOpen] = useState(false);
+/** Painel lateral de edição — wrapper do RecordEditForm. Não controlado por
+ * padrão (gatilho lápis próprio); com `open`/`onOpenChange` o host manda na
+ * abertura e `hideTrigger` suprime o lápis (instância única içada). */
+export function RecordEditSheet(
+  props: RecordEditFormProps & {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    hideTrigger?: boolean;
+  }
+) {
+  const { record, responsibles, userRoles, hideTrigger } = props;
+  const [selfOpen, setSelfOpen] = useState(false);
+  const open = props.open ?? selfOpen;
+  const setOpen = props.onOpenChange ?? setSelfOpen;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Editar registro"
-        onClick={() => setOpen(true)}
-      >
-        <Pencil className="size-4" />
-      </Button>
+      {hideTrigger ? null : (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Editar registro"
+          onClick={() => setOpen(true)}
+        >
+          <Pencil className="size-4" />
+        </Button>
+      )}
       <ResizableSheetContent
         storageKey="panel-w:record-edit"
         defaultWidth={512}

@@ -17,8 +17,10 @@ vi.mock("@/lib/kanban/bulk-actions", () => ({
   moveRecordCardsBulk: vi.fn(),
   createTasksBulk: vi.fn(),
   completeTasksBulk: vi.fn(),
-  deleteRecordsBulk: vi.fn(),
   deleteTasksBulk: vi.fn(),
+}));
+vi.mock("@/lib/records/trash-actions", () => ({
+  trashRecordsBulk: vi.fn(),
 }));
 vi.mock("@/lib/tasks/actions", () => ({
   completeTask: vi.fn(),
@@ -31,10 +33,8 @@ vi.mock("@/components/tarefas/task-sheet", () => ({
   TaskSheet: () => null,
 }));
 
-import {
-  deleteRecordsBulk,
-  moveRecordCardsBulk,
-} from "@/lib/kanban/bulk-actions";
+import { moveRecordCardsBulk } from "@/lib/kanban/bulk-actions";
+import { trashRecordsBulk } from "@/lib/records/trash-actions";
 import type { BulkActionState } from "@/lib/kanban/bulk-helpers";
 import type { RecordRow } from "@/lib/records/types";
 import type { KanbanBoardData, KanbanCard } from "@/lib/kanban/data";
@@ -99,7 +99,7 @@ const colDiv = (label: string) =>
 
 beforeEach(() => {
   vi.mocked(moveRecordCardsBulk).mockReset();
-  vi.mocked(deleteRecordsBulk).mockReset();
+  vi.mocked(trashRecordsBulk).mockReset();
 });
 
 describe("seleção em massa", () => {

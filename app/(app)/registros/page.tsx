@@ -246,7 +246,9 @@ export default async function RegistrosPage({
     .eq("record_type", recordType)
     // Fase 12: leads mock de "Data Reunião" (records.is_mock) ficam fora da
     // listagem e da contagem — só existem para consultas por Data Reunião.
-    .eq("is_mock", false);
+    .eq("is_mock", false)
+    // Lixeira (0121): soft delete fora da listagem — só /registros/lixeira.
+    .is("deleted_at", null);
   query = (
     sort
       ? query.order(sortColumnExpr(sort, fields), {
@@ -471,6 +473,13 @@ export default async function RegistrosPage({
               <Link href="/registros/log">Log</Link>
             </Button>
           ) : null}
+          {/* Lixeira (0121): restauração/exclusão definitiva — só admin (o
+              mesmo gate das actions de lixeira). */}
+          {isAdmin ? (
+            <Button asChild variant="outline">
+              <Link href="/registros/lixeira">Lixeira</Link>
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -564,6 +573,7 @@ export default async function RegistrosPage({
 
       <RecordsTable
         source={fonte}
+        sourceLabel={fonteDef?.label ?? fonte}
         records={records}
         fields={fields}
         coreColumns={coreColumns}
@@ -579,6 +589,8 @@ export default async function RegistrosPage({
         userRoles={userRoles}
         canEditValues={canEditValues}
         canManageFields={canManageFields}
+        canDeleteRecords={isAdmin}
+        ai={ai}
       />
 
       {totalPages > 1 ? (

@@ -68,14 +68,20 @@ com os tipos de evento desejados (nenhum marcado = todos). O segredo
 
 ### Catálogo de eventos
 
-`record.created` · `record.updated` · `task.created` · `task.updated` ·
-`task.completed` · `task.deleted` · `comment.created` · `comment.updated` ·
-`comment.deleted` · `test.ping`
+`record.created` · `record.updated` · `record.deleted` · `record.restored` ·
+`task.created` · `task.updated` · `task.completed` · `task.deleted` ·
+`comment.created` · `comment.updated` · `comment.deleted` · `test.ping`
 
 Emitem apenas as ações feitas POR USUÁRIOS no app (registros, tarefas,
 comentários). **Sync (Bitrix/Sheets), import de CSV e a própria API de
 ingestão NÃO emitem** — evita tempestade de eventos em reconciliações e loop
 entrada→saída entre sistemas.
+
+**Lixeira de registros (07/08/2026):** `record.deleted` é emitido quando o
+registro vai para a Lixeira (soft delete — ele some de todas as leituras);
+`record.restored` quando um admin o restaura. A exclusão definitiva (manual
+ou a purga automática de 30 dias) NÃO emite evento — o `record.deleted` já
+saiu na entrada da lixeira. `data` carrega só `{ "recordId": "..." }`.
 
 ### Envelope e headers
 
