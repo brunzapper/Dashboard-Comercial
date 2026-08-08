@@ -1,3 +1,11 @@
+<!-- Versão: 1.65 | Data: 08/08/2026 -->
+<!-- v1.65 (08/08/2026): §4.19 — gestor de mapeamentos migrado ao save
+     otimista em background (§4.10, useBackgroundSave; sem transition global):
+     pending/revert por linha, action em LOTE saveMappings (UM upsert + UMA
+     reaplicação) alimentada por fila COALESCEDORA por domínio (flushes
+     encadeados — nunca duas reaplicações em paralelo) e botão "Mapear
+     preenchidos (N)" p/ salvar todas as pendências preenchidas de uma vez.
+     Opt-out { revalidate: false } nas actions da página. -->
 <!-- Versão: 1.64 | Data: 07/08/2026 -->
 <!-- v1.64 (07/08/2026): §4.21 — LIXEIRA de registros (soft delete 0121:
      records.deleted_at/deleted_by; trigger enforce_records_trash_guard —
@@ -1948,7 +1956,8 @@ não apaga mais o `lastPeriod` salvo do usuário.
   snapshots-panel, access-matrix, presets), nunca por tela. Consumidores:
   filtros rápidos (`__qf__`), filtro por campo compartilhado (`__ff__`),
   janela de períodos (`__pw__`), Nota, Aparência de widget, célula por
-  entidade e comp-grid. **Guard anti-eco (`hasPending`)**: no padrão seedKey,
+  entidade, comp-grid e o gestor de mapeamentos (§4.19 — com fila
+  COALESCEDORA por domínio: saves em sequência viram UMA chamada em lote). **Guard anti-eco (`hasPending`)**: no padrão seedKey,
   props que aterrissam com save em voo são stale (renderizaram antes do
   commit) — o reseed ADOTA a key sem aplicar (consome o eco; espelho do
   `skipNextData` do kanban) e o refresh do hook traz o definitivo; mudança de
@@ -3168,6 +3177,19 @@ byte-igual à chave do cache antigo).
   precedência feature-off > deny > allow > papel). Página lista pendências
   (com classificação inline), mapeamentos (busca/edição/exclusão) e "Aplicar
   agora"; loaders em `lib/mappings/overview.ts` (client do usuário, RLS).
+  **Save em background coalescedor (08/08/2026)**: o gestor
+  (`mappings-manager.tsx`) segue o padrão `useBackgroundSave` do §4.10 — sem
+  transition global: "Mapear"/editar/adicionar/excluir aplicam o otimista na
+  hora (pendência some da lista; revert granular por linha + toast na falha)
+  e uma fila COALESCEDORA por domínio junta os saves em sequência numa única
+  chamada `saveMappings` (action em LOTE: UM upsert + UMA reaplicação;
+  flushes/tarefas do mesmo domínio se ENCADEIAM — nunca duas reaplicações em
+  paralelo, o que duplicaria varredura e deixaria `syncUnmappedTasks` gravar
+  pendência stale). O botão **"Mapear preenchidos (N)"** salva todas as
+  pendências com rascunho válido de uma vez pela mesma fila (⇒ mesma chamada
+  única). As 3 actions ganharam opt-out `{ revalidate: false }` (o cliente
+  reconcilia pelo refresh debounced do hook). Fiscalizado por
+  `components/operacao/mappings-manager.test.tsx`.
 - **Seed**: `supabase/apply/seed-value-mappings.sql` (importado dos CSVs do
   dashboard antigo; `on conflict do nothing` — nunca sobrescreve edições).
 - **Classificação AUTOMÁTICA (07/08/2026)**: o registry ganha `suggest` por
