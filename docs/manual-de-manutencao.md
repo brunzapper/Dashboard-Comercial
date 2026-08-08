@@ -1,3 +1,7 @@
+<!-- Versão: 1.28 | Data: 08/08/2026 -->
+<!-- v1.28 (08/08/2026): §4.14 — salvar mapeamento não trava mais a página
+     (save em background com fila coalescedora por domínio) e botão "Mapear
+     preenchidos (N)" salva as pendências preenchidas de uma vez. -->
 <!-- Versão: 1.27 | Data: 07/08/2026 -->
 <!-- v1.27 (07/08/2026): job pg_cron nº 7 (purge-records-trash — purga da
      Lixeira de REGISTROS, 0121: soft delete de 30 dias; SQL puro 03:35
@@ -773,6 +777,12 @@ console `/owner`; a Zapper já nasce ON):
   edição de mapeamento — a action reaplica o domínio tocado). O import
   CSV/API da base Meetime reaplica sozinho na cauda
   (`maybeApplyMappingsAfterImport`).
+- **Salvar não trava a tela (08/08/2026)**: "Mapear"/editar/excluir rodam em
+  background — a linha some/atualiza na hora e as demais seguem editáveis;
+  saves em sequência são JUNTADOS numa única gravação + reaplicação (fila por
+  domínio), e falha reverte a linha com toast. O botão **"Mapear preenchidos
+  (N)"** (cabeçalho das pendências) salva de uma vez todas as pendências com
+  classificação digitada — também com uma única reaplicação.
 - **Classificação automática**: valor novo passa pelo classificador
   heurístico (port do V5 do Apps Script) e pelo **banco de palavras
   aprendido** das próprias entradas (retroalimentado: cada correção

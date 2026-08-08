@@ -1,10 +1,13 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 08/08/2026
 // Server Actions de /operacao/mapeamentos (de-para de valores, 0117).
 // Escrita em value_mappings com o client do USUÁRIO (RLS: admin da org);
 // a APLICAÇÃO aos registros roda com service role + org EXPLÍCITA
 // (lib/mappings/apply.ts — espelho derivado) e sincroniza a tarefa de
 // pendências do admin (lib/mappings/notify.ts). Gate: papel admin + área
 // "mapeamentos" (feature org "mapeamentos"; deny barra escrita também).
+// v1.1: saveMappings em LOTE (o gestor coalesce linhas → UM upsert + UMA
+// reaplicação) e opt-out `revalidate: false` nas 3 actions — padrão do save
+// otimista em background (§4.10; o cliente reconcilia via refresh debounced).
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -63,57 +66,76 @@ function revalidate() {
   revalidatePath("/dashboards/[id]", "page");
 }
 
+export interface MappingEntryInput {
+  rawValue: string;
+  /** Classificação por target do domínio; vazio/ausente limpa o target. */
+  outputs: Record<string, string>;
+}
+
 /**
- * Cria/edita uma entrada do de-para. `outputs` chega como campos de form
- * `out_<fieldKey>` (um por target do domínio); vazio limpa o target (cai no
- * fallback "Não Classificado" na aplicação).
+ * Cria/edita entradas do de-para em LOTE — o gestor coalesce as linhas
+ * salvas em sequência numa chamada só: UM upsert + UMA reaplicação do
+ * domínio. Outputs substituem a coluna inteira (target vazio cai no fallback
+ * "Não Classificado" na aplicação); dedup por raw_norm (última vence).
  */
-export async function saveMapping(
-  _prev: MappingActionState,
-  formData: FormData
+export async function saveMappings(
+  domainKey: string,
+  entries: MappingEntryInput[],
+  opts?: { revalidate?: boolean }
 ): Promise<MappingActionState> {
   const err = await ensureCanManage();
   if (err) return { ok: false, message: err };
 
-  const domainKey = String(formData.get("domain") ?? "");
   const orgId = await getActiveOrgId();
   if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
   const supabase = await createClient();
   const domains = await loadMappingDomains(supabase, orgId);
   const domain = domains.find((d) => d.key === domainKey);
   if (!domain) return { ok: false, message: "Domínio desconhecido." };
-  const rawValue = String(formData.get("raw_value") ?? "").trim();
-  const rawNorm = normalizeRawValue(rawValue);
-  if (!rawNorm) return { ok: false, message: "Informe o valor a mapear." };
 
-  const outputs: Record<string, string> = {};
-  for (const t of domain.targets) {
-    const v = String(formData.get(`out_${t.fieldKey}`) ?? "").trim();
-    if (v) outputs[t.fieldKey] = v;
-  }
-  if (Object.keys(outputs).length === 0) {
-    return { ok: false, message: "Preencha ao menos uma classificação." };
-  }
-
-  const { error } = await supabase.from("value_mappings").upsert(
-    {
+  const byNorm = new Map<string, Record<string, unknown>>();
+  for (const entry of entries) {
+    const rawValue = String(entry.rawValue ?? "").trim();
+    const rawNorm = normalizeRawValue(rawValue);
+    if (!rawNorm) return { ok: false, message: "Informe o valor a mapear." };
+    const outputs: Record<string, string> = {};
+    for (const t of domain.targets) {
+      const v = String(entry.outputs?.[t.fieldKey] ?? "").trim();
+      if (v) outputs[t.fieldKey] = v;
+    }
+    if (Object.keys(outputs).length === 0) {
+      return {
+        ok: false,
+        message: `Preencha ao menos uma classificação ("${rawValue}").`,
+      };
+    }
+    byNorm.set(rawNorm, {
       organization_id: orgId,
       domain: domain.key,
       raw_value: rawValue,
       raw_norm: rawNorm,
       outputs,
-    },
-    { onConflict: "organization_id,domain,raw_norm" }
-  );
+    });
+  }
+  if (byNorm.size === 0) return { ok: false, message: "Nenhum valor a mapear." };
+
+  const { error } = await supabase
+    .from("value_mappings")
+    .upsert([...byNorm.values()], {
+      onConflict: "organization_id,domain,raw_norm",
+    });
   if (error) return { ok: false, message: `Falha ao salvar: ${error.message}` };
 
   const message = await applyDomains([domain.key]);
-  revalidate();
-  return { ok: true, message: `Mapeamento salvo. ${message}` };
+  if (opts?.revalidate !== false) revalidate();
+  return { ok: true, message: `${byNorm.size} mapeamento(s) salvo(s). ${message}` };
 }
 
 /** Exclui uma entrada; os registros voltam ao fallback na reaplicação. */
-export async function deleteMapping(id: string): Promise<MappingActionState> {
+export async function deleteMapping(
+  id: string,
+  opts?: { revalidate?: boolean }
+): Promise<MappingActionState> {
   const err = await ensureCanManage();
   if (err) return { ok: false, message: err };
   const supabase = await createClient();
@@ -126,15 +148,17 @@ export async function deleteMapping(id: string): Promise<MappingActionState> {
   if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
   const domainKey = (data?.domain as string | undefined) ?? undefined;
   const message = await applyDomains(domainKey ? [domainKey] : undefined);
-  revalidate();
+  if (opts?.revalidate !== false) revalidate();
   return { ok: true, message: `Mapeamento excluído. ${message}` };
 }
 
 /** Reaplica todos os domínios aos registros (botão "Aplicar agora"). */
-export async function applyAllMappings(): Promise<MappingActionState> {
+export async function applyAllMappings(
+  opts?: { revalidate?: boolean }
+): Promise<MappingActionState> {
   const err = await ensureCanManage();
   if (err) return { ok: false, message: err };
   const message = await applyDomains();
-  revalidate();
+  if (opts?.revalidate !== false) revalidate();
   return { ok: true, message };
 }
