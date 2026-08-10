@@ -4,7 +4,9 @@
 // diante", `to` null) deriva o range com `to` EFETIVO = hoje — a comparação
 // não some mais em período personalizado; `from` futuro e só-"Até" seguem sem
 // comparação. "Hoje" é INJETADO pelo parâmetro (o módulo segue determinístico
-// nos testes; bdCtx.todayIso vence quando presente).
+// nos testes; bdCtx.todayIso vence quando presente). v1.3: previous_period_bd
+// nunca devolve range invertido (`from > to`) — personalizado de meio de mês
+// mantém o range cheio.
 import { describe, expect, it } from "vitest";
 
 import { comparisonSpec, type BusinessDayContext } from "./comparison";
@@ -91,6 +93,27 @@ describe("comparisonSpec — intervalo aberto (to efetivo = hoje)", () => {
       from: "2026-07-22",
       to: "2026-07-31",
     });
+  });
+
+  it("previous_period_bd NUNCA inverte o range: personalizado de meio de mês mantém o range cheio", () => {
+    // Fechado 01–10/08 (todo decorrido; hoje 15/08): anterior = 22–31/07 e o
+    // corte cairia no 6º dia útil de JULHO (08/07) — antes do from. O recorte
+    // não se aplica: range cheio, nunca `from > to` (consulta vazia ⇒ "—").
+    const bd: BusinessDayContext = {
+      holidays: new Set(),
+      todayIso: "2026-08-15",
+    };
+    const spec = comparisonSpec(
+      period("2026-08-01", "2026-08-10"),
+      cmp({ base: "previous_period_bd" }),
+      bd
+    );
+    expect(spec).toEqual({
+      base: "previous_period_bd",
+      from: "2026-07-22",
+      to: "2026-07-31",
+    });
+    expect(spec!.from <= spec!.to).toBe(true);
   });
 
   it("previous_period_bd com bdCtx recorta no N-ésimo dia útil do último mês", () => {

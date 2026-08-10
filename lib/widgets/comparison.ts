@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 10/08/2026
+// Versão: 1.3 | Data: 10/08/2026
 // Comparação com período anterior (Frente "variação"): matemática PURA de
 // ranges e alinhamento de linhas — sem I/O. O engine (runWidget) usa
 // `comparisonSpec` para montar a segunda consulta (mesmos filtros, datas
@@ -13,6 +13,10 @@
 //   segue aberta. `from` no futuro ou só "Até" (`from` null, sem duração
 //   derivável) seguem sem comparação. "Hoje" entra por parâmetro com default
 //   (mesmo padrão do presetRange de period.ts) — testes o injetam.
+// v1.3 (10/08/2026): previous_period_bd nunca INVERTE o range: personalizado
+//   de meio de mês (range anterior deslocado pela duração) podia receber um
+//   corte ANTERIOR ao próprio início (consulta vazia ⇒ badge "—"); corte que
+//   inverteria mantém o range cheio.
 //
 // Bases:
 //  - previous_period: período imediatamente anterior; presets deslocam
@@ -227,6 +231,12 @@ export function comparisonSpec(
       return { base, ...range };
     }
     const cut = nthBusinessDayOfMonth(end.y, end.m + 1, n, bdCtx.holidays);
+    // Corte que INVERTERIA o range (personalizado de meio de mês, já todo
+    // decorrido — ex.: 01–10/08 ⇒ anterior 22–31/07, corte no 6º dia útil de
+    // julho = 08/07 < from): recorte não se aplica — range cheio, como nos
+    // fallbacks acima. O clamp existe p/ preset que se estende além de hoje
+    // (mês cheio); range já decorrido é o recorte do próprio usuário.
+    if (cut < range.from) return { base, ...range };
     return {
       base,
       from: range.from,

@@ -1735,7 +1735,13 @@ invariantes 9/10).
   recortado no N-ésimo dia útil do último mês do range ("vs. mês anterior no
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto
   (feriados + hoje) chega por parâmetro opcional; sem contexto (chamador
-  antigo, ex.: widget calculado) degrada para `previous_period`.
+  antigo, ex.: widget calculado) degrada para `previous_period`. O corte
+  NUNCA inverte o range (10/08/2026): personalizado de meio de mês desloca o
+  anterior pela duração (ex.: 01–10/08 ⇒ 22–31/07) e o N-ésimo dia útil do
+  mês final podia cair ANTES do início (consulta vazia ⇒ badge "—") — corte
+  que inverteria mantém o range cheio, como nos demais fallbacks (o clamp
+  compensa preset que se estende além de hoje; range já decorrido é o recorte
+  do próprio usuário).
 - **Comparação com período personalizado ABERTO** (10/08/2026): intervalo
   "de X em diante" (`to` null — commit deliberado do "Aplicar" da barra)
   deriva o range de comparação com `to` EFETIVO = hoje (Brasília) — só na

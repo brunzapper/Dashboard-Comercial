@@ -1371,7 +1371,7 @@ Card. Configura `settings.comparison`:
 | Rótulo | Chave | Base de comparação |
 |---|---|---|
 | "Período anterior" | `previous_period` (padrão) | o período imediatamente anterior de mesma duração — presets deslocam SEMANTICAMENTE ("Este mês" → mês passado inteiro; "Hoje" → ontem; semanas → −7 dias; "Este trimestre" → trimestre anterior; anos → ano anterior); intervalos personalizados/últimos-N deslocam pela duração em dias, terminando na véspera |
-| "Período anterior (mesmo dia útil)" | `previous_period_bd` | igual ao anterior, mas recortado no mesmo Nº de dia útil do mês (usa o calendário de dias não úteis) |
+| "Período anterior (mesmo dia útil)" | `previous_period_bd` | igual ao anterior, mas recortado no mesmo Nº de dia útil do mês (usa o calendário de dias não úteis); se o corte cair antes do início do range (intervalo personalizado já todo decorrido), o recorte não se aplica e vale o range cheio |
 | "Mesmo período do ano passado" | `previous_year` | mesmo intervalo, um ano antes (29/02 vira 28/02) |
 | "Média de uma janela anterior" | `window_avg` | média por bucket equivalente numa janela maior |
 | "Mediana de uma janela anterior" | `window_median` | mediana por bucket equivalente numa janela maior |
