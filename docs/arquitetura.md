@@ -1736,6 +1736,15 @@ invariantes 9/10).
   mesmo dia útil" dos KPIs). `comparisonSpec` segue pura — o contexto
   (feriados + hoje) chega por parâmetro opcional; sem contexto (chamador
   antigo, ex.: widget calculado) degrada para `previous_period`.
+- **Comparação com período personalizado ABERTO** (10/08/2026): intervalo
+  "de X em diante" (`to` null — commit deliberado do "Aplicar" da barra)
+  deriva o range de comparação com `to` EFETIVO = hoje (Brasília) — só na
+  matemática do `comparisonSpec` (parâmetro `todayIso` com default
+  `todayBrasiliaIso()`, injetável nos testes; `bdCtx.todayIso` vence quando
+  presente); a consulta PRINCIPAL segue aberta (só `gte`). `from` no futuro
+  e intervalo só-"Até" (`from` null, sem duração derivável) seguem SEM
+  comparação. Vale p/ todos os chamadores (engine, card de fórmula e
+  `ANTERIOR`/`VARPCT`/`VARABS` de formula-metric) sem mudança de call site.
 - **Cromo dos cards** (26/07/2026, 100% client): o texto do rótulo de
   comparação ("vs. período anterior…") no Card/KPI e o selo "Nº dia útil"
   podem ser ocultados — padrão do dashboard em
@@ -1846,6 +1855,17 @@ garantias:
   (`operation-scope.ts`) e `__pw__` nos settings efetivos. A
   cobertura do `@period` (invariante 9) usa as métricas EFETIVAS (Tabela
   Livre: colunas BI de `settings.quickTable`; kanban: a fonte do quadro).
+  **Filtro rápido de período no MESMO campo do período efetivo (10/08/2026):**
+  o valor persistido ASSUME o período do widget (`periodByWidget[w.id]` /
+  `period` do scope = seleção do filtro rápido, preset ou datas) em vez de
+  anulá-lo e virar filtros pré-sintetizados — comparação, closedWeek,
+  `goalPeriodScope` e moeda passam a ancorar no período rápido; os bounds
+  SUBSTITUEM filtros de data do widget no mesmo campo (semântica da barra).
+  "Todo o período" (PERIOD_ALL) segue anulando; campo DIFERENTE (cruzamento)
+  segue pré-sintetizado. Espelhado nos 3 pontos: page, `widget-scope` e
+  viewer de snapshot. Limitação: com a barra em "todo o período"
+  (`wPeriod` null) o valor rápido segue como filtro pré-sintetizado — sem
+  comparação nessa combinação.
   O kanban aplica o MESMO recorte dos demais widgets (colunas continuam
   derivadas das opções do campo — filtro só reduz cards); a **Agenda ignora
   os filtros do dashboard POR DESIGN** (range próprio mês/semana). A **página
