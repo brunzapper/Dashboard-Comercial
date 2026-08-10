@@ -1,4 +1,9 @@
-// Versão: 1.6 | Data: 26/07/2026
+// Versão: 1.7 | Data: 10/08/2026
+// v1.7 (10/08/2026): filtro rápido de período no MESMO campo do período
+//   efetivo ASSUME o período (period = pMap) em vez de anulá-lo e virar
+//   filtros pré-sintetizados — a comparação (e closedWeek/metas/moeda) volta
+//   a funcionar com o período rápido; PERIOD_ALL segue anulando; cruzamento
+//   (campo diferente) inalterado. Espelho da page e do viewer de snapshot.
 // v1.6 (26/07/2026): loadWidgetScope fatiado em loadDashboardScopeBundle
 //   (parte compartilhada: catálogo/prefs/períodos, 1× por dashboard) +
 //   scopeForWidget (parte por-widget) — a action deferida em LOTE
@@ -236,13 +241,12 @@ export async function resolveWidgetViewScope(
       if (isPeriodEntry(entry, available)) {
         const val = stored?.kind === "period" ? stored : null;
         if (val && hasQuickValue(val)) {
-          if (period && period.field === entry.field) period = null;
           const p = resolvePeriodSelection(
             { preset: val.preset ?? "", de: val.de ?? "", ate: val.ate ?? "" },
             entry.field
           );
-          if (p) {
-            const pMap = entry.field.startsWith("unified:")
+          const pMap =
+            p && entry.field.startsWith("unified:")
               ? {
                   ...p,
                   fieldBySource: args.resolver.resolveFieldBySource(
@@ -250,8 +254,18 @@ export async function resolveWidgetViewScope(
                   ),
                 }
               : p;
-            // Cobertura = fontes do widget ∪ fontes das métricas (mesma regra
-            // da page): as pernas por métrica reusam este @period.
+          if (period && period.field === entry.field) {
+            // Takeover (MESMO campo): o filtro rápido VIRA o período do
+            // widget — o engine aplica os bounds por perna e a comparação/
+            // closedWeek/metas seguem funcionando. PERIOD_ALL (p = null)
+            // segue anulando o período. NÃO pré-sintetiza filtros aqui
+            // (seria dupla aplicação de @period).
+            period = pMap;
+          } else if (pMap) {
+            // Cruzamento (campo ≠ período efetivo): pré-sintetizado como
+            // antes. Cobertura = fontes do widget ∪ fontes das métricas
+            // (mesma regra da page): as pernas por métrica reusam este
+            // @period.
             const applied = applyPeriodToFilters(
               viewFilters.splice(0),
               pMap,

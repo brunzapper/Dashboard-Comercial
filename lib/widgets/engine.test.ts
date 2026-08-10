@@ -9,7 +9,7 @@
 // v1.1 (26/07/2026): agrupamento de responsáveis (0101, invariante 20) —
 // fusão da dimensão apelido→principal, expansão de filtro p/ o grupo e o gate
 // (widget sem referência a responsável não consulta responsibles).
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   aggregateMoneyBreakdowns,
@@ -240,6 +240,127 @@ describe("comparação com período anterior", () => {
       { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
     ]);
     expect(data.comparison).toBeDefined();
+  });
+
+  it("período personalizado FECHADO (sem preset): desloca pela duração", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const fs = args.p_filters as WidgetFilter[];
+          const from = String(fs.find((f) => f.op === "gte")?.value ?? "");
+          return from.startsWith("2026-08")
+            ? { data: [{ dim_1: "A", metric_1: 10 }], error: null }
+            : { data: [{ dim_1: "A", metric_1: 8 }], error: null };
+        },
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [{ field: "pipeline" }],
+        metrics: [{ field: "*", agg: "count" }],
+        settings: { comparison: { enabled: true, base: "previous_period" } },
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-08-01", to: "2026-08-10" }
+    );
+
+    // 10 dias terminando na véspera do início: 22–31/07, ancorado -03:00.
+    expect(rpcCalls).toHaveLength(2);
+    const cmp = rpcCalls[1].args.p_filters as WidgetFilter[];
+    expect(cmp.find((f) => f.op === "gte")?.value).toBe(
+      "2026-07-22T00:00:00-03:00"
+    );
+    expect(cmp.find((f) => f.op === "lte")?.value).toBe(
+      "2026-07-31T23:59:59-03:00"
+    );
+    expect(data.rows).toEqual([
+      { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
+    ]);
+    expect(data.comparison).toBeDefined();
+  });
+
+  describe("período personalizado ABERTO (to null — relógio fake)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("compara com to efetivo = hoje; a principal segue sem lte", async () => {
+      // Meio-dia UTC: mesmo dia civil em UTC e em Brasília (padrão do
+      // period.test).
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-10T12:00:00Z"));
+      const { db, rpcCalls } = fakeSupabase({
+        rpc: {
+          run_widget_query: (args) => {
+            const fs = args.p_filters as WidgetFilter[];
+            const from = String(fs.find((f) => f.op === "gte")?.value ?? "");
+            return from.startsWith("2026-08")
+              ? { data: [{ dim_1: "A", metric_1: 10 }], error: null }
+              : { data: [{ dim_1: "A", metric_1: 8 }], error: null };
+          },
+        },
+      });
+      const data = await runWidget(
+        db,
+        baseConfig({
+          sources: ["deals"],
+          dimensions: [{ field: "pipeline" }],
+          metrics: [{ field: "*", agg: "count" }],
+          settings: { comparison: { enabled: true, base: "previous_period" } },
+        }),
+        AVAILABLE,
+        { field: "closed_at", from: "2026-08-01", to: null }
+      );
+
+      expect(rpcCalls).toHaveLength(2);
+      // Rodada principal: intervalo aberto de verdade (só gte).
+      const main = rpcCalls[0].args.p_filters as WidgetFilter[];
+      expect(main.find((f) => f.op === "gte")?.value).toBe(
+        "2026-08-01T00:00:00-03:00"
+      );
+      expect(main.find((f) => f.op === "lte")).toBeUndefined();
+      // Comparação: duração 01–10/08 (hoje) → 22–31/07.
+      const cmp = rpcCalls[1].args.p_filters as WidgetFilter[];
+      expect(cmp.find((f) => f.op === "gte")?.value).toBe(
+        "2026-07-22T00:00:00-03:00"
+      );
+      expect(cmp.find((f) => f.op === "lte")?.value).toBe(
+        "2026-07-31T23:59:59-03:00"
+      );
+      expect(data.rows).toEqual([
+        { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
+      ]);
+      expect(data.comparison).toBeDefined();
+    });
+
+    it("from no futuro: sem comparação (uma rodada só)", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-10T12:00:00Z"));
+      const { db, rpcCalls } = fakeSupabase({
+        rpc: {
+          run_widget_query: () => ({
+            data: [{ dim_1: "A", metric_1: 10 }],
+            error: null,
+          }),
+        },
+      });
+      const data = await runWidget(
+        db,
+        baseConfig({
+          sources: ["deals"],
+          dimensions: [{ field: "pipeline" }],
+          metrics: [{ field: "*", agg: "count" }],
+          settings: { comparison: { enabled: true, base: "previous_period" } },
+        }),
+        AVAILABLE,
+        { field: "closed_at", from: "2026-09-01", to: null }
+      );
+
+      expect(rpcCalls).toHaveLength(1);
+      expect(data.comparison).toBeUndefined();
+    });
   });
 });
 

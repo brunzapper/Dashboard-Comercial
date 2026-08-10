@@ -665,24 +665,27 @@ export default async function DashboardPage({
             stored?.kind === "period" ? stored : null;
           const wPeriod = periodByWidget[w.id];
           if (val && hasQuickValue(val)) {
-            // Com valor persistido o filtro rápido ASSUME o campo: se é o
-            // mesmo campo do período efetivo do widget, o geral deixa de
-            // aplicar (senão o applyPeriodToFilters do engine sobrescreveria a
-            // divergência local). Campos diferentes convivem (cruzamento).
-            if (wPeriod && wPeriod.field === entry.field) {
-              periodByWidget[w.id] = null;
-            }
             const p = resolvePeriodSelection(
               { preset: val.preset ?? "", de: val.de ?? "", ate: val.ate ?? "" },
               entry.field
             );
-            if (p) {
-              const pMap = entry.field.startsWith("unified:")
+            const pMap =
+              p && entry.field.startsWith("unified:")
                 ? { ...p, fieldBySource: resolveFieldBySource(entry.field) }
                 : p;
-              // Cobertura = fontes do widget ∪ fontes das métricas: o @period
-              // byType EXCLUI record_types fora do mapa, e as pernas por
-              // métrica (Metric.sources) reusam este filtro pré-sintetizado.
+            if (wPeriod && wPeriod.field === entry.field) {
+              // Takeover (MESMO campo do período efetivo): o filtro rápido
+              // VIRA o período do widget — o engine aplica os bounds por
+              // perna e a comparação/closedWeek/metas seguem funcionando.
+              // PERIOD_ALL (p = null) segue anulando. NÃO pré-sintetiza
+              // filtros aqui (dupla aplicação de @period).
+              periodByWidget[w.id] = pMap;
+            } else if (pMap) {
+              // Cruzamento (campo diferente): convive com o período geral,
+              // pré-sintetizado como antes. Cobertura = fontes do widget ∪
+              // fontes das métricas: o @period byType EXCLUI record_types
+              // fora do mapa, e as pernas por métrica (Metric.sources)
+              // reusam este filtro pré-sintetizado.
               filters = applyPeriodToFilters(
                 filters,
                 pMap,

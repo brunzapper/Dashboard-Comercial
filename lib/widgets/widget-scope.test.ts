@@ -1,9 +1,12 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 10/08/2026
 // Testes de resolveWidgetViewScope (assembly única do recorte de visualização
 // — invariante 12): filtros rápidos persistidos em dashboard_table_cells,
 // exceção do vendedor no responsible_id e filtro rápido de período assumindo o
 // campo do período geral. O módulo importa getActiveOrgId (via next/headers) —
 // mockamos SÓ esse módulo (vi.mock) sem dividir o widget-scope.
+// v1.1 (10/08/2026): takeover do período rápido no MESMO campo agora ASSUME o
+// período (period = seleção do filtro rápido, sem bounds pré-sintetizados) —
+// a comparação segue funcionando; PERIOD_ALL anula; cruzamento inalterado.
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/auth/org", () => ({
@@ -60,7 +63,7 @@ const qfCells = (cells: { col_key: string; value: unknown }[]) => ({
 });
 
 describe("resolveWidgetViewScope", () => {
-  it("filtro rápido de opções vira filtro in; período rápido no MESMO campo anula o período geral", async () => {
+  it("filtro rápido de opções vira filtro in; período rápido no MESMO campo VIRA o período do widget", async () => {
     const { db } = fakeSupabase({
       tables: qfCells([
         { col_key: "c1", value: { kind: "options", values: ["Vendas"] } },
@@ -81,21 +84,68 @@ describe("resolveWidgetViewScope", () => {
       period: { field: "closed_at", from: "2026-01-01", to: "2026-12-31" },
     });
 
-    // O período geral (mesmo campo) foi assumido pelo filtro rápido.
-    expect(out.period).toBeNull();
+    // Takeover: o filtro rápido ASSUME o período (o engine aplica os bounds
+    // por perna; comparação/closedWeek/metas seguem funcionando).
+    expect(out.period).toEqual({
+      field: "closed_at",
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
     expect(out.filters).toContainEqual({
       field: "pipeline",
       op: "in",
       value: ["Vendas"],
     });
-    // Bounds do filtro rápido de período, ancorados (coluna do núcleo).
+    // SEM bounds pré-sintetizados (seria dupla aplicação de @period).
+    expect(out.filters.some((f) => f.op === "gte" || f.op === "lte")).toBe(
+      false
+    );
+  });
+
+  it("período rápido em 'todo o período' (PERIOD_ALL) anula o período, sem bounds", async () => {
+    const { db } = fakeSupabase({
+      tables: qfCells([{ col_key: "c2", value: { kind: "period", preset: "all" } }]),
+    });
+    const w = widget({ quickFilters: [{ id: "c2", field: "closed_at" }] });
+    const out = await resolveWidgetViewScope(db, session(["view_all_records"]), {
+      ...baseArgs(w),
+      period: { field: "closed_at", from: "2026-01-01", to: "2026-12-31" },
+    });
+
+    expect(out.period).toBeNull();
+    expect(out.filters).toEqual([]);
+  });
+
+  it("cruzamento (campo ≠ período efetivo): período preservado + bounds pré-sintetizados", async () => {
+    const { db } = fakeSupabase({
+      tables: qfCells([
+        {
+          col_key: "c2",
+          value: { kind: "period", preset: "", de: "2026-07-01", ate: "2026-07-31" },
+        },
+      ]),
+    });
+    const w = widget({ quickFilters: [{ id: "c2", field: "opened_at" }] });
+    const barPeriod = { field: "closed_at", from: "2026-01-01", to: "2026-12-31" };
+    const out = await resolveWidgetViewScope(db, session(["view_all_records"]), {
+      ...baseArgs(w),
+      available: [
+        ...AVAILABLE,
+        { field: "opened_at", label: "Criação", isNumeric: false, isDate: true },
+      ],
+      period: barPeriod,
+    });
+
+    // O período geral segue regendo o widget; o campo diferente convive como
+    // filtro pré-sintetizado (ancorado — coluna do núcleo).
+    expect(out.period).toEqual(barPeriod);
     expect(out.filters).toContainEqual({
-      field: "closed_at",
+      field: "opened_at",
       op: "gte",
       value: "2026-07-01T00:00:00-03:00",
     });
     expect(out.filters).toContainEqual({
-      field: "closed_at",
+      field: "opened_at",
       op: "lte",
       value: "2026-07-31T23:59:59-03:00",
     });

@@ -431,25 +431,27 @@ async function SnapshotContent({
           let val = stored?.kind === "period" ? stored : null;
           const wPeriod = periodByWidget[w.id];
           if (val && hasQuickValue(val)) {
-            // Mesma interação da page: o filtro rápido assume o campo — se o
-            // período congelado ou um widget `filtro` rege este widget no
-            // MESMO campo, o dele sai.
-            if (wPeriod && wPeriod.field === entry.field) {
-              periodByWidget[w.id] = null;
-            }
             const p = resolvePeriodSelection(
               { preset: val.preset ?? "", de: val.de ?? "", ate: val.ate ?? "" },
               entry.field
             );
-            if (p) {
-              const pMap = entry.field.startsWith("unified:")
+            const pMap =
+              p && entry.field.startsWith("unified:")
                 ? {
                     ...p,
                     fieldBySource: resolver.resolveFieldBySource(entry.field),
                   }
                 : p;
-              // Cobertura = fontes do widget ∪ fontes das métricas (espelho da
-              // page viva): as pernas por métrica reusam este @period.
+            if (wPeriod && wPeriod.field === entry.field) {
+              // Takeover (mesma interação da page viva): o filtro rápido
+              // VIRA o período do widget quando o período congelado ou um
+              // widget `filtro` o rege no MESMO campo — comparação e afins
+              // seguem funcionando; PERIOD_ALL (p = null) segue anulando.
+              periodByWidget[w.id] = pMap;
+            } else if (pMap) {
+              // Cruzamento (campo diferente): pré-sintetizado como antes.
+              // Cobertura = fontes do widget ∪ fontes das métricas (espelho
+              // da page viva): as pernas por métrica reusam este @period.
               filters = applyPeriodToFilters(
                 filters,
                 pMap,

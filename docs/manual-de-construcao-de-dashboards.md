@@ -1396,10 +1396,13 @@ Card. Configura `settings.comparison`:
 - **"Rótulo de variação nas barras"** (Barra/Barra horizontal).
 
 Regras: **sem período ativo ("Todo o período") não há comparação** (não
-existe "anterior" de um período infinito). Mutuamente exclusiva com o
-alinhamento por dia útil. No widget Métrica calculada, as bases de janela
-(média/mediana) não são oferecidas. Semântica fina (alinhamento de linhas,
-métricas intensivas × extensivas) no §7.9.
+existe "anterior" de um período infinito). Período personalizado ABERTO
+("de X em diante", só a data inicial) COMPARA: a duração é contada até hoje
+e o período anterior termina na véspera do início; intervalo só-"Até" (sem
+data inicial) e início no futuro seguem sem comparação. Mutuamente exclusiva
+com o alinhamento por dia útil. No widget Métrica calculada, as bases de
+janela (média/mediana) não são oferecidas. Semântica fina (alinhamento de
+linhas, métricas intensivas × extensivas) no §7.9.
 
 ### 6.9 Seção "Opções avançadas"
 
