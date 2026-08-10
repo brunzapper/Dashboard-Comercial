@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 20/07/2026
+// Versão: 1.2 | Data: 10/08/2026
 // Comparação com período anterior (Frente "variação"): matemática PURA de
 // ranges e alinhamento de linhas — sem I/O. O engine (runWidget) usa
 // `comparisonSpec` para montar a segunda consulta (mesmos filtros, datas
@@ -7,6 +7,12 @@
 //   mesmo dia útil. O módulo segue puro: o contexto de feriados/hoje chega por
 //   parâmetro opcional (o engine o carrega); sem contexto, degrada para
 //   previous_period.
+// v1.2 (10/08/2026): intervalo personalizado ABERTO ("de X em diante", `to`
+//   null) deixa de perder a comparação: o range se deriva com `to` EFETIVO =
+//   hoje (Brasília) — só para a matemática da comparação; a consulta principal
+//   segue aberta. `from` no futuro ou só "Até" (`from` null, sem duração
+//   derivável) seguem sem comparação. "Hoje" entra por parâmetro com default
+//   (mesmo padrão do presetRange de period.ts) — testes o injetam.
 //
 // Bases:
 //  - previous_period: período imediatamente anterior; presets deslocam
@@ -26,6 +32,7 @@ import {
   businessDaysInMonth,
   nthBusinessDayOfMonth,
 } from "@/lib/date/business-days";
+import { todayBrasiliaIso } from "@/lib/date/today";
 
 import type { DashboardPeriod } from "./period";
 import type {
@@ -179,15 +186,26 @@ function windowRange(
 
 /**
  * Resolve o range (e bucket, p/ janelas) da comparação. null = base
- * indisponível (sem período ativo, datas incompletas ou janela vazia).
+ * indisponível (sem período ativo, sem data inicial, `from` futuro ou janela
+ * vazia). Intervalo aberto ("de X em diante") deriva o range com `to` efetivo
+ * = hoje.
  */
 export function comparisonSpec(
   period: DashboardPeriod | null | undefined,
   cmp: ComparisonSettings | undefined,
-  bdCtx?: BusinessDayContext
+  bdCtx?: BusinessDayContext,
+  todayIso: string = todayBrasiliaIso()
 ): ComparisonSpec | null {
-  if (!cmp?.enabled || !period?.from || !period?.to) return null;
-  const full = period as DashboardPeriod & { from: string; to: string };
+  if (!cmp?.enabled || !period?.from) return null;
+  // Noção ÚNICA de "hoje": o bdCtx (quando presente) vence — duas leituras de
+  // relógio poderiam divergir na virada do dia.
+  const today = bdCtx?.todayIso ?? todayIso;
+  let to = period.to;
+  if (!to) {
+    if (period.from > today) return null; // "de X em diante" com X no futuro
+    to = today; // to EFETIVO só p/ derivar o range — a principal segue aberta
+  }
+  const full = { ...period, to } as DashboardPeriod & { from: string; to: string };
   const base = cmp.base ?? "previous_period";
   if (base === "previous_period") {
     return { base, ...previousPeriodRange(full) };
