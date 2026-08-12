@@ -915,6 +915,8 @@ individuais. Recursos exclusivos (seção "Opções da tabela" do editor, §6.6)
 - **"Agrupar por"** hierárquico (multi-nível) com seções recolhíveis e
   **subtotais por grupo** (e formato de data próprio por nível de grupo).
 - Barra de busca/filtro embutida (ligável/desligável).
+- Botão **"+" de criação manual** no modo lista (opt-in nas Opções avançadas —
+  §6.9): abre o formulário de novo registro da Base do widget.
 - Comparação com período anterior (inline na célula ou coluna exclusiva).
 - No modo agregado, a última linha é o **Total geral** (respeitando a
   matemática exata de fórmulas — §7.8).
@@ -1412,6 +1414,18 @@ linhas, métricas intensivas × extensivas) no §7.9.
 
 - **"Largura dinâmica"** / **"Altura dinâmica"** (`autoSize`): o card cresce
   na tela para caber o conteúdo (nunca encolhe abaixo do tamanho do grid).
+- **"Botão '+' para criar registro"** (`showAddRecord`, só tabela em modo
+  lista): exibe um "+" no canto superior direito da tabela (ao lado do botão
+  de filtros; com a barra oculta, no topo do card) que abre o formulário de
+  novo registro da Base do widget. O toggle só aparece quando o widget aponta
+  para **exatamente uma Base raiz de criação manual** (`manual_entry` — Bases
+  alimentadas por Sync ficam de fora); trocar de Base/modo limpa a opção. Em
+  runtime o botão exige a permissão de edição de registros e nunca aparece no
+  viewer público de snapshot. No formulário, cada campo opcional tem um "x"
+  que o oculta dos próximos registros (preferência por usuário e por Base,
+  local do navegador — vale também no "Novo registro" da aba Registros e no
+  kanban); os ocultos reativam-se pela lista "Campos ocultos (N)" no fim do
+  formulário.
 
 ---
 

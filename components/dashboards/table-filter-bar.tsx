@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 12/08/2026
+// v1.3 (12/08/2026): prop `actions` — slot de ações do widget (ex.: botão "+"
+//   de criação manual) renderizado ao lado do botão de filtros.
 // v1.2 (31/07/2026): valor de filtro AMIGÁVEL — responsável/operação/etapa
 //   ganham picker de rótulos (FilterValuePicker; options lazy via a server
 //   action listFilterOptionCandidates, cache local). Relações GRAVAM O NOME
@@ -58,6 +60,7 @@ export function TableFilterBar({
   available,
   className,
   onSearchChange,
+  actions,
 }: {
   paramKey: string;
   available: AvailableField[];
@@ -66,6 +69,9 @@ export function TableFilterBar({
   // tecla filtra na hora via callback e o `q` sincroniza com a URL de forma
   // RASA (history.replaceState), sem navegação RSC. Ausente = tudo no servidor.
   onSearchChange?: (q: string) => void;
+  // Ações do widget (ex.: botão "+" de criação manual), renderizadas ao lado
+  // do botão de filtros. O conteúdo vem pronto do WidgetCard.
+  actions?: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -196,6 +202,7 @@ export function TableFilterBar({
             <span className="tabular-nums">{activeCount}</span>
           ) : null}
         </Button>
+        {actions}
         {hasState ? (
           <Button
             type="button"

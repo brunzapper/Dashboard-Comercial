@@ -1,15 +1,17 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 12/08/2026
 // Testes dos resolvers de fonte — em especial os cientes do catálogo (0078):
 // sub-fonte compartilha o record_type da PAI, então toRecordType/toSourceKey
 // por identidade NÃO servem para subs. planSourceLegs é a invariante 10 em
 // código: pai cobre sub (absorção, sem duplicar), sub avulsa recorta a pai, e
 // "conviver"/2 subs da mesma pai viram pernas extras.
+// v1.1 (12/08/2026): manualEntryRootSource (gate do botão "+" do widget).
 import { describe, expect, it } from "vitest";
 
 import {
   BUILTIN_SOURCES,
   fieldAppliesToSource,
   isSubSource,
+  manualEntryRootSource,
   parentKeyOf,
   planSourceLegs,
   recordTypeOf,
@@ -118,6 +120,32 @@ describe("fieldAppliesToSource", () => {
     expect(fieldAppliesToSource(["negocio"], "leads_lite", CATALOG)).toBe(
       false
     );
+  });
+});
+
+describe("manualEntryRootSource (gate do botão '+' do widget)", () => {
+  it("exatamente UMA fonte raiz com manualEntry → devolve a def", () => {
+    expect(manualEntryRootSource(["csv_vendas"], CATALOG)?.key).toBe(
+      "csv_vendas"
+    );
+  });
+
+  it("seleção vazia/undefined (= todas as fontes) → null", () => {
+    expect(manualEntryRootSource(undefined, CATALOG)).toBeNull();
+    expect(manualEntryRootSource([], CATALOG)).toBeNull();
+  });
+
+  it("2+ fontes → null (base de destino ambígua)", () => {
+    expect(manualEntryRootSource(["csv_vendas", "deals"], CATALOG)).toBeNull();
+  });
+
+  it("sub-fonte → null (subs nunca têm manualEntry)", () => {
+    expect(manualEntryRootSource(["leads_lite"], CATALOG)).toBeNull();
+  });
+
+  it("raiz de Sync (sem manualEntry) ou desconhecida → null", () => {
+    expect(manualEntryRootSource(["leads"], CATALOG)).toBeNull();
+    expect(manualEntryRootSource(["inexistente"], CATALOG)).toBeNull();
   });
 });
 

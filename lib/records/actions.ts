@@ -1,7 +1,11 @@
-// Versão: 1.6 | Data: 30/07/2026
+// Versão: 1.7 | Data: 12/08/2026
 // Server Actions de edição de registros. Gravação com o client do usuário
 // (RLS: records_update exige edit_record_values E owner/view_all). Toda edição
 // grava field_modified_at[campo]=now (protege do sync) + audit_log origin 'app'.
+// v1.7 (12/08/2026): listRecordCreateOptions — opções (responsáveis/operações)
+//   do form de criação manual carregadas sob demanda pelo botão "+" do widget
+//   de tabela (espelho do recorte do quick-create do kanban; lista completa,
+//   nunca colapsada — regra 0101).
 // v1.6 (30/07/2026): coerção extraída p/ lib/records/coerce.ts (puro, testável;
 //   compartilhada com a inserção por IA). coerceCore de data passa a ancorar em
 //   Brasília (anchorNaiveToBrasilia — invariante 11, write side): o dia digitado
@@ -56,7 +60,7 @@ import {
   type CalcFieldRow,
 } from "@/lib/records/formulas";
 import { loadCurrencyRates } from "@/lib/widgets/currency";
-import type { DataType } from "@/lib/records/types";
+import type { DataType, OptionItem } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import {
   EDITABLE_CORE_COLUMNS,
@@ -625,6 +629,45 @@ export interface CreateRecordState {
   message?: string;
   // id do registro criado (consumido pelo quick-create do kanban).
   id?: string;
+}
+
+export interface RecordCreateOptions {
+  responsibles: OptionItem[];
+  operations: OptionItem[];
+}
+
+/**
+ * Opções dos dropdowns do formulário de criação manual (botão "+" do widget de
+ * tabela, 12/08/2026) — carregadas sob demanda no cliente, espelho do recorte
+ * do quick-create do kanban (kanban-actions): responsáveis e operações ATIVOS,
+ * lista COMPLETA (nunca colapsada por canônico — atribuição grava o responsável
+ * REAL, regra 0101). Client do usuário: RLS/org fazem o recorte.
+ */
+export async function listRecordCreateOptions(): Promise<RecordCreateOptions> {
+  const session = await getSessionInfo();
+  if (!session || !session.permissions.includes("edit_record_values")) {
+    return { responsibles: [], operations: [] };
+  }
+  const supabase = await createClient();
+  const [{ data: respData }, { data: opsData }] = await Promise.all([
+    supabase
+      .from("responsibles")
+      .select("id, display_name, bitrix_user_id")
+      .eq("active", true)
+      .order("display_name"),
+    supabase.from("operations").select("id, name").eq("active", true).order("name"),
+  ]);
+  return {
+    responsibles: (respData ?? []).map((r) => ({
+      id: r.id as string,
+      label: r.display_name as string,
+      bitrixLinked: Boolean(r.bitrix_user_id),
+    })),
+    operations: (opsData ?? []).map((o) => ({
+      id: o.id as string,
+      label: o.name as string,
+    })),
+  };
 }
 
 /**
