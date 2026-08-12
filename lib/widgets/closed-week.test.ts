@@ -1,7 +1,10 @@
-// Versão: 1.0 | Data: 03/08/2026
+// Versão: 1.1 | Data: 12/08/2026
+// v1.1 (12/08/2026): regra do snap trocada da maioria pela EXPANSÃO (toda
+//   semana tocada entra inteira) — bounds esperados atualizados; o caso
+//   from > to deixou de existir (período curto vira a semana que o contém).
 // Testes da "Semana Fechada" (lib/widgets/closed-week.ts): snap do período
-// pela regra da MAIORIA (4+ dias), idempotência, bounds únicos, range vazio
-// sem erro e o rewrite da dim enviada ao RPC (rpcDimForClosedWeek).
+// pela regra da EXPANSÃO, idempotência, bounds únicos e o rewrite da dim
+// enviada ao RPC (rpcDimForClosedWeek).
 import { describe, expect, it } from "vitest";
 
 import {
@@ -30,22 +33,28 @@ describe("weekStartIso", () => {
   });
 });
 
-describe("snapRangeToClosedWeek — regra da maioria", () => {
-  it("julho/26 seg–dom: 29/06–02/08 (as duas semanas de borda são de julho)", () => {
+describe("snapRangeToClosedWeek — regra da expansão", () => {
+  it("julho/26 seg–dom: 29/06–02/08 (as duas semanas de borda entram inteiras)", () => {
     expect(snapRangeToClosedWeek("2026-07-01", "2026-07-31", "seg_dom")).toEqual(
       { from: "2026-06-29", to: "2026-08-02" }
     );
   });
 
-  it("julho/26 sáb–sex: 04/07–31/07 (semana 27/06–03/07 tem só 3 dias em julho)", () => {
+  it("julho/26 sáb–sex: 27/06–31/07 (a semana 27/06–03/07 toca julho ⇒ entra)", () => {
     expect(snapRangeToClosedWeek("2026-07-01", "2026-07-31", "sab_sex")).toEqual(
-      { from: "2026-07-04", to: "2026-07-31" }
+      { from: "2026-06-27", to: "2026-07-31" }
     );
   });
 
-  it("agosto/26 seg–dom: começa em 03/08 (01–02/08 são da última semana de julho)", () => {
+  it("agosto/26 seg–dom: 27/07–06/09 (01–02/08 puxam a semana de 27/07; 31/08 puxa a de 31/08–06/09)", () => {
     expect(snapRangeToClosedWeek("2026-08-01", "2026-08-31", "seg_dom")).toEqual(
-      { from: "2026-08-03", to: "2026-08-30" }
+      { from: "2026-07-27", to: "2026-09-06" }
+    );
+  });
+
+  it("agosto/26 sáb–sex: 01/08–04/09 (começa exato no sábado 01/08; 29–31/08 puxam a semana até 04/09)", () => {
+    expect(snapRangeToClosedWeek("2026-08-01", "2026-08-31", "sab_sex")).toEqual(
+      { from: "2026-08-01", to: "2026-09-04" }
     );
   });
 
@@ -67,12 +76,12 @@ describe("snapRangeToClosedWeek — regra da maioria", () => {
     });
   });
 
-  it("período curto sem semana majoritária vira from > to (vazio, sem erro)", () => {
-    // Sexta 03/07 sozinha: a semana seg–dom 29/06–05/07 só tem 1 dia dentro do
-    // período — from abre p/ a semana seguinte (06/07) e to fecha na própria
-    // (05/07): from > to = consulta vazia por design.
+  it("período curto vira a semana inteira que o contém (nunca from > to)", () => {
+    // Sexta 03/07 sozinha: a semana seg–dom 29/06–05/07 a contém — o período
+    // abre p/ as duas fronteiras dela (a regra antiga da maioria devolvia
+    // from > to = consulta vazia; a expansão nunca esvazia).
     expect(snapRangeToClosedWeek("2026-07-03", "2026-07-03", "seg_dom")).toEqual(
-      { from: "2026-07-06", to: "2026-07-05" }
+      { from: "2026-06-29", to: "2026-07-05" }
     );
   });
 

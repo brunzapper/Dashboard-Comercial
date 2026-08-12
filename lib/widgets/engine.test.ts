@@ -962,12 +962,12 @@ describe("Semana Fechada (Dimension.closedWeek)", () => {
     expect((args.p_dimensions as Record<string, unknown>[])[0].transform).toBe(
       "day"
     );
-    // …e o período snapa p/ 04/07–31/07 (a semana 27/06–03/07 tem só 3 dias
-    // em julho — fica com junho).
+    // …e o período snapa p/ 27/06–31/07 (expansão: a semana 27/06–03/07 toca
+    // julho, então entra inteira).
     expect(args.p_filters).toContainEqual({
       field: "closed_at",
       op: "gte",
-      value: "2026-07-04T00:00:00-03:00",
+      value: "2026-06-27T00:00:00-03:00",
     });
     expect(args.p_filters).toContainEqual({
       field: "closed_at",
@@ -999,8 +999,9 @@ describe("Semana Fechada (Dimension.closedWeek)", () => {
       AVAILABLE,
       { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
     );
-    // Junho/26 em semanas fechadas seg–dom: 01/06–28/06 (a semana 29/06–05/07
-    // é de julho).
+    // Junho/26 em semanas fechadas seg–dom (expansão): 01/06 (segunda) a
+    // 05/07 — a semana 29/06–05/07 toca junho e entra inteira (aparece também
+    // em julho: dupla contagem consciente da borda).
     const cmpCall = rpcCalls.find((c) =>
       (c.args.p_filters as WidgetFilter[]).some(
         (f) => f.op === "gte" && String(f.value).startsWith("2026-06-01")
@@ -1010,10 +1011,10 @@ describe("Semana Fechada (Dimension.closedWeek)", () => {
     expect(cmpCall!.args.p_filters).toContainEqual({
       field: "closed_at",
       op: "lte",
-      value: "2026-06-28T23:59:59-03:00",
+      value: "2026-07-05T23:59:59-03:00",
     });
     expect(data.comparison?.from).toBe("2026-06-01");
-    expect(data.comparison?.to).toBe("2026-06-28");
+    expect(data.comparison?.to).toBe("2026-07-05");
   });
 });
 

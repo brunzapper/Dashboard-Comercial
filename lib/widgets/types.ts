@@ -210,7 +210,8 @@ export interface Dimension {
   // "full" (semana cheia seg→dom, pega dias do mês vizinho). Default restricted.
   weekMode?: "full" | "restricted";
   // Semana fechada (03/08/2026), só transforms de semana: o período da RODADA
-  // expande p/ semanas COMPLETAS nas bordas (regra da maioria, 4+ dias —
+  // expande p/ semanas COMPLETAS nas bordas (regra da expansão desde
+  // 12/08/2026: toda semana tocada entra inteira —
   // lib/widgets/closed-week.ts). "seg_dom" usa o bucket de segunda do servidor;
   // "sab_sex" desce ao RPC como 'day' e o engine funde client-side
   // (bucket-merge). Com week_month, weekMode é tratado como "full". Engine-only

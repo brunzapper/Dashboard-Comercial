@@ -1,16 +1,20 @@
-// Versão: 1.0 | Data: 03/08/2026
+// Versão: 1.1 | Data: 12/08/2026
+// v1.1 (12/08/2026): regra do snap trocada da MAIORIA (4+ dias) pela
+//   EXPANSÃO — ver abaixo. O RÓTULO/dono de mês do bucket (date-buckets:
+//   mês do 4º dia) NÃO mudou: snap e rótulo seguem convenções distintas.
 // "Semana Fechada" (Dimension.closedWeek): widgets semanais exibem semanas
 // COMPLETAS mesmo quando o período filtrado corta as bordas (ex.: "Este mês").
 // Módulo PURO (sem I/O), consumido pelo engine — os RPCs de widget seguem
 // intocados (invariante 1): a expansão acontece no período da RODADA e a
 // bucketização sáb–sex é client-side (bucket-merge).
 //
-// Regra da MAIORIA: uma semana pertence ao período se 4+ dos 7 dias dela caem
-// dentro dele — a mesma convenção ISO do modo "Semana cheia" (a semana é do
-// mês do seu 4º dia: quinta p/ seg–dom, terça p/ sáb–sex). Consequência: cada
-// semana pertence a exatamente um mês (julho/26 seg–dom termina na semana
-// 27/07–02/08 e agosto/26 começa em 03/08). O snap é IDEMPOTENTE; `from > to`
-// resultante = consulta vazia (nunca erro).
+// Regra da EXPANSÃO: o período cobre TODA semana que ele toca, inteira — o
+// `from` abre p/ trás até o início da semana e o `to` p/ frente até o fim
+// dela. Consequência: semanas de borda aparecem nos períodos dos DOIS meses
+// vizinhos (agosto/26 seg–dom exibe de 27/07–02/08 até 31/08–06/09; julho/26
+// termina na MESMA semana 27/07–02/08 — dupla contagem consciente em
+// comparações mês a mês). O snap é IDEMPOTENTE e nunca produz `from > to`
+// (período curto vira a semana inteira que o contém).
 import type { Dimension, Transform } from "./types";
 import type { DashboardPeriod } from "./period";
 import type { WeekMode, WeekStart } from "./date-buckets";
@@ -78,9 +82,10 @@ export function weekStartIso(iso: string, mode: ClosedWeek): string {
 }
 
 /**
- * Snap das bordas pela regra da maioria. Cada bound presente é snapado
- * independente; bound null segue null. Pode devolver from > to (período curto
- * cujas semanas de borda pertencem aos vizinhos) — consulta vazia, por design.
+ * Snap das bordas pela regra da expansão: cada bound presente abre até a
+ * fronteira da semana que o contém (`from` p/ trás, `to` p/ frente) — toda
+ * semana tocada entra inteira. Bound null segue null; token não-ISO
+ * (`@today` etc.) é passthrough. Nunca produz from > to.
  */
 export function snapRangeToClosedWeek(
   from: string | null | undefined,
@@ -91,18 +96,11 @@ export function snapRangeToClosedWeek(
   let outTo = to ?? null;
   if (outFrom != null) {
     const utc = ymdUtc(outFrom);
-    if (utc != null) {
-      const ws = weekStartUtc(utc, mode);
-      // 4º dia (ws+3) dentro do período ⇒ a semana é do período: abre p/ trás.
-      outFrom = isoOf(utc <= ws + 3 * DAY_MS ? ws : ws + 7 * DAY_MS);
-    }
+    if (utc != null) outFrom = isoOf(weekStartUtc(utc, mode));
   }
   if (outTo != null) {
     const utc = ymdUtc(outTo);
-    if (utc != null) {
-      const ws = weekStartUtc(utc, mode);
-      outTo = isoOf(utc >= ws + 3 * DAY_MS ? ws + 6 * DAY_MS : ws - DAY_MS);
-    }
+    if (utc != null) outTo = isoOf(weekStartUtc(utc, mode) + 6 * DAY_MS);
   }
   return { from: outFrom, to: outTo };
 }
