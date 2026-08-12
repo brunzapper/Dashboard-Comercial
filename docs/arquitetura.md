@@ -680,15 +680,21 @@ do RPC não carrega peso — mesma limitação do Total geral). RPCs INTOCADAS
 (`week_year`/`week_month`) podem exibir semanas COMPLETAS mesmo com o período
 cortando as bordas — "seg_dom" ou "sab_sex". 100% engine
 (`lib/widgets/closed-week.ts`; RPCs INTOCADAS): (a) o período da RODADA é
-SNAPADO pela regra da MAIORIA (a semana entra se 4+ dos 7 dias caem no
-período — a mesma convenção "mês do 4º dia" do week_month cheio: quinta p/
-seg–dom, terça p/ sáb–sex; cada semana pertence a exatamente um mês) em
+SNAPADO pela regra da EXPANSÃO (12/08/2026; era a regra da maioria de 4+
+dias): TODA semana que o período toca entra inteira — o `from` abre p/ trás
+até o início da semana e o `to` p/ frente até o fim dela (agosto/26 seg–dom
+exibe de 27/07–02/08 até 31/08–06/09). Consequência: semanas de borda
+aparecem nos períodos dos DOIS meses vizinhos (dupla contagem consciente em
+comparações mês a mês); o RÓTULO/dono de mês do bucket segue a convenção do
+4º dia (date-buckets, intocado) — a 1ª barra de agosto/26 sai como "5ª
+semana de julho". O snap roda em
 `runWidget`, DEPOIS de `comparisonSpec` (que nasce do período ORIGINAL p/
 preservar a semântica do preset; previous_period/previous_year são snapados
 em seguida — previous_period_bd/window_* não) e de `lowerCalcGoalOperands`
 (período original — o expandido cruzaria o mês e degradaria a meta p/ anual);
 o snap é idempotente (pernas de sub-fonte recursam e re-snapam sem efeito) e
-`from > to` resultante = consulta vazia, nunca erro; (b) a bucketização:
+nunca produz `from > to` (período curto vira a semana inteira que o contém);
+(b) a bucketização:
 seg–dom reusa o bucket de segunda do servidor (week_month desce com weekMode
 "full" no payload — `rpcDimForClosedWeek`); sáb–sex desce como transform
 'day' (legal em todos os ramos do RPC) e o `bucket-merge` acima funde as

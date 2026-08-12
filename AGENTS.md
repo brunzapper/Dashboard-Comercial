@@ -77,8 +77,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   invariante 9.
 - **Semana Fechada se resolve no ENGINE, nunca no RPC (03/08/2026):**
   `Dimension.closedWeek` ("seg_dom" | "sab_sex", só transforms de semana)
-  snapa o período da RODADA p/ semanas completas (regra da maioria — 4+ dias;
-  `lib/widgets/closed-week.ts`) em `runWidget`, DEPOIS do `comparisonSpec` e
+  snapa o período da RODADA p/ semanas completas (regra da EXPANSÃO desde
+  12/08/2026: toda semana que o período toca entra inteira — semanas de borda
+  aparecem nos dois meses vizinhos; o RÓTULO segue o dono do 4º dia em
+  date-buckets; `lib/widgets/closed-week.ts`) em `runWidget`, DEPOIS do `comparisonSpec` e
   do `lowerCalcGoalOperands` (ambos precisam do período ORIGINAL); sáb–sex
   desce ao RPC como transform 'day' e o `bucket-merge` funde client-side
   (o gate `dimNeedsClientBucket` também ativa p/ core/`unified:`/`match:`

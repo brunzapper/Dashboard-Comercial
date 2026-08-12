@@ -2858,7 +2858,8 @@ export async function runWidget(
   })();
 
   // Semana Fechada (03/08/2026): expande o período da RODADA p/ semanas
-  // completas nas bordas (regra da maioria — lib/widgets/closed-week.ts).
+  // completas nas bordas (regra da expansão desde 12/08/2026 — toda semana
+  // tocada entra inteira; lib/widgets/closed-week.ts).
   // 100% engine: o snap acontece AQUI (depois do cmpSpec, que nasce do período
   // ORIGINAL p/ preservar a semântica do preset, e do lowerCalcGoalOperands,
   // que precisa do período original — expandido cruzaria o mês e degradaria a

@@ -1,4 +1,7 @@
-// Versão: 1.9 | Data: 07/08/2026
+// Versão: 1.10 | Data: 12/08/2026
+// v1.10 (12/08/2026): Semana Fechada — regra do snap trocada da maioria
+//   (4+ dias) pela EXPANSÃO: o período cobre toda semana que ele toca,
+//   inteira (closed-week.ts v1.1); só o texto da seção Dimensões muda.
 // v1.9 (07/08/2026): dimensão condicional — a seção Dimensões documenta
 //   `dimensions[].case_formula_text` (expressão SE/E/OU que reclassifica os
 //   valores em rótulos; multi-campo permitido; proibições e o preserva-cru
@@ -292,8 +295,9 @@ promovida a tipo próprio).
   "full" (semana cheia seg→dom).
 - Só p/ week_year/week_month: "closedWeek": "seg_dom" | "sab_sex" — Semana
   Fechada: o período da consulta expande p/ semanas COMPLETAS nas bordas
-  (a semana entra se 4+ dos 7 dias caem no período); com week_month o
-  weekMode passa a valer como "full". Omitir = desligada.
+  (TODA semana que o período toca entra inteira — o início abre p/ trás e o
+  fim p/ frente; semanas de borda aparecem nos dois períodos vizinhos); com
+  week_month o weekMode passa a valer como "full". Omitir = desligada.
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
 - "case_formula_text" (opcional, só widget AGREGADO): expressão SE/E/OU que
   RECLASSIFICA os valores da dimensão em rótulos e agrupa por eles — ex.:
