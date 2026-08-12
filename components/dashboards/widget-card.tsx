@@ -1,4 +1,9 @@
-// Versão: 2.17 | Data: 03/08/2026
+// Versão: 2.18 | Data: 12/08/2026
+// v2.18 (12/08/2026): botão "+" de criação manual (settings.showAddRecord) —
+//   gate em runtime (manualEntryRootSource + canEditValues) e 3 slots: dentro
+//   da TableFilterBar (primário), no header com a barra oculta, no flutuante
+//   com a barra de título oculta. Campos recortados como no quick-create do
+//   kanban; WidgetAddRecordButton embrulha o RecordCreateSheet.
 // v2.17 (03/08/2026): prop boardWidgets (widgets de TODAS as abas) repassada
 //   ao WidgetBuilder — alimenta as listas "Aplicar a" dos filtros; `siblings`
 //   segue só-da-aba (AddPageDialog depende disso).
@@ -105,6 +110,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
+import { isCoreDef } from "@/lib/records/core-defs";
+import { hasAnyRole, type RoleKey } from "@/lib/auth/roles";
+import { fieldAppliesToSource, manualEntryRootSource } from "@/lib/sources";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
   CalcWidgetResult,
@@ -161,6 +169,7 @@ import {
 import { EntityListTable } from "./charts/entity-list-table";
 import { PeriodControls } from "./period-controls";
 import { TableFilterBar } from "./table-filter-bar";
+import { WidgetAddRecordButton } from "./widget-add-record-button";
 import { QuickFiltersBar } from "./quick-filters-bar";
 import {
   PeriodWindowControl,
@@ -462,6 +471,38 @@ export const WidgetCard = memo(function WidgetCard({
   const titleHidden = !frameless && title?.hidden === true;
   // Barra de busca/filtro embutida nas tabelas (ocultável na config do widget).
   const showTableBar = isTable && widget.settings?.showFilterBar !== false;
+  // Botão "+" de criação manual (settings.showAddRecord, 12/08/2026): re-checa
+  // o gate do builder em runtime — lista de registros + edit_record_values +
+  // exatamente UMA Base raiz com manual_entry (import da IA pode trazer a chave
+  // num widget inelegível; o viewer público passa canEditValues=false).
+  const addRecordDef =
+    isRecordList &&
+    !isEntityList &&
+    canEditValues &&
+    widget.settings?.showAddRecord === true
+      ? manualEntryRootSource(widget.sources ?? undefined, sourcesCatalog)
+      : null;
+  // Mesmo recorte de campos do quick-create do kanban (kanban-actions):
+  // custom não-agg da base, visíveis ao papel (o sheet filtra os editáveis).
+  const addRecordFields = useMemo(() => {
+    if (!addRecordDef) return [];
+    const isAdminRole = userRoles.includes("admin");
+    return fields.filter(
+      (f) =>
+        !isCoreDef(f) &&
+        f.data_type !== "calculado_agg" &&
+        fieldAppliesToSource(f.applies_to, addRecordDef.key, sourcesCatalog) &&
+        (isAdminRole || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
+    );
+  }, [addRecordDef, fields, userRoles, sourcesCatalog]);
+  const addRecordButton = addRecordDef ? (
+    <WidgetAddRecordButton
+      source={{ key: addRecordDef.key, label: addRecordDef.label }}
+      recordType={addRecordDef.recordType}
+      fields={addRecordFields}
+      userRoles={userRoles}
+    />
+  ) : null;
   // Busca textual client-side (lista de registros sem limit, barra visível):
   // a barra alimenta clientQ e a RecordListTable filtra em memória — o servidor
   // pula o q do tf_ nesses widgets (page.tsx usa o MESMO critério; ver
@@ -1157,8 +1198,11 @@ export const WidgetCard = memo(function WidgetCard({
               <GripVertical className="size-4" />
             </span>
           ) : null}
-          {menu ? (
-            <div className="absolute top-1 right-1 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          {menu || (!showTableBar && addRecordButton) ? (
+            <div className="absolute top-1 right-1 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              {/* "+" no flutuante SÓ quando a barra de filtro (slot primário)
+                  está oculta — senão ele já vive nela. */}
+              {!showTableBar ? addRecordButton : null}
               {menu}
             </div>
           ) : null}
@@ -1182,6 +1226,9 @@ export const WidgetCard = memo(function WidgetCard({
           >
             {widget.title ?? "Sem título"}
           </span>
+          {/* "+" no header SÓ com a barra de filtro oculta (slot primário é a
+              barra, ao lado do botão de filtros). */}
+          {!showTableBar ? addRecordButton : null}
           {menu}
           {isCalculator && canEdit ? (
             // Fechar fácil (sem confirmação): a exclusão entra no histórico do
@@ -1220,6 +1267,7 @@ export const WidgetCard = memo(function WidgetCard({
             paramKey={`tf_${widget.id}`}
             available={available}
             onSearchChange={clientSearch ? setClientQ : undefined}
+            actions={addRecordButton}
           />
         ) : null}
         {/* Filtros rápidos: lado a lado, abaixo da barra de busca (tabelas) ou

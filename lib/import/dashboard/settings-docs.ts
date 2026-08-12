@@ -1,4 +1,6 @@
-// Versão: 1.4 | Data: 30/07/2026
+// Versão: 1.5 | Data: 12/08/2026
+// v1.5 (12/08/2026): `showAddRecord` (tabela modo lista: botão "+" de criação
+//   manual; só com UMA Base raiz com manual_entry — gate re-checado em runtime).
 // v1.4 (30/07/2026): FORMULA_FUNC_GROUPS/FormulaFuncGroup passam a DERIVAR do
 //   catálogo único FORMULA_FUNCS (lib/records/formula-funcs.ts — exaustivo por
 //   `satisfies Record<FormulaFuncName, …>`, mesma ordem histórica de chaves);
@@ -248,6 +250,7 @@ export const WIDGET_SETTINGS_DOC = {
             { "field": "custom:fonte", "label": "Origem" } ],   // modo lista: colunas ordenadas`,
   limit: `"limit": 10,                               // modo lista: teto de linhas (ausente = sem limite)`,
   showFilterBar: `"showFilterBar": false,                    // tabela: oculta a barra de busca/filtro embutida`,
+  showAddRecord: `"showAddRecord": true,                     // tabela modo lista: botão "+" de criação manual (só com UMA Base raiz com manual_entry)`,
   card: `"card": { "mode": "topn", "labelField": "responsible_id",       // Card: ${enumKeys(CARD_MODE_LABELS)}
           "metric": { "field": "mrr", "agg": "sum" }, "limit": 5 },`,
   note: `"note": { "text": "Texto livre da nota." },  // widget "nota": texto do post-it`,

@@ -1,4 +1,6 @@
-// Versão: 1.13 | Data: 25/07/2026
+// Versão: 1.14 | Data: 12/08/2026
+// v1.14 (12/08/2026): RecordListSettings.showAddRecord — botão "+" de criação
+//   manual na tabela modo lista (gate manualEntryRootSource, lib/sources.ts).
 // v1.13 (25/07/2026): visual_type 'linha_divisoria' (a Forma "linha" vira
 //   widget próprio; ShapeKind "linha" segue existindo p/ linhas legadas e
 //   como formato interno do novo tipo — ver isLineShapeWidget em lines.ts);
@@ -427,6 +429,12 @@ export interface RecordListSettings {
   // Barra de busca/filtro embutida na tabela (registros e agregada), aplicada
   // pelo servidor. Ausente/true = visível; false = oculta ("ocultável na config").
   showFilterBar?: boolean;
+  // Botão "+" de criação manual no canto da tabela modo lista (12/08/2026).
+  // Opt-in (ausente = desligado); só tem efeito quando o widget aponta para
+  // exatamente UMA Base raiz com manual_entry (manualEntryRootSource,
+  // lib/sources.ts) e o usuário tem edit_record_values — o card re-checa em
+  // runtime e o servidor (createRecord) revalida.
+  showAddRecord?: boolean;
 }
 
 // Config do widget "Métrica calculada" (Fase 3): uma fórmula avaliada com um

@@ -1,3 +1,14 @@
+<!-- Versão: 1.66 | Data: 12/08/2026 -->
+<!-- v1.66 (12/08/2026): §4.10 — botão "+" de criação manual no widget de
+     tabela modo lista (settings.showAddRecord, opt-in nas Opções avançadas;
+     gate único manualEntryRootSource em lib/sources.ts: UMA Base raiz com
+     manual_entry + edit_record_values; 3 slots de render no card; opções via
+     listRecordCreateOptions lazy; refresh debounced pós-criação) e campos
+     OCULTÁVEIS do RecordCreateSheet ("x" por campo opcional + lista "Campos
+     ocultos (N)"; chrome de UI em localStorage
+     registros:hiddenCreateFields:<fonte> — useHiddenCreateFields; prefill
+     oculto vira input hidden p/ o quick-create do kanban não perder a
+     coluna). RPCs e createRecord intocados. -->
 <!-- Versão: 1.65 | Data: 08/08/2026 -->
 <!-- v1.65 (08/08/2026): §4.19 — gestor de mapeamentos migrado ao save
      otimista em background (§4.10, useBackgroundSave; sem transition global):
@@ -1916,6 +1927,32 @@ lists seguem inline no RSC (alimentam FK labels e a janela incremental);
 snapshot viewer segue computando tudo inline (link público de leitura). Env
 de escape `DEFER_ENGINE_WIDGETS=0` restaura o cômputo inline na page sem
 deploy. RPCs de widget INTOCADOS.
+
+**Botão "+" de criação manual no widget de tabela (12/08/2026):** a tabela em
+modo lista pode expor um "+" no canto superior direito
+(`settings.showAddRecord`, opt-in na seção "Opções avançadas" do builder) que
+abre o MESMO `RecordCreateSheet` de /registros e do quick-create do kanban. O
+gate é ÚNICO — `manualEntryRootSource` (`lib/sources.ts`): a seleção do widget
+precisa ser exatamente UMA Base raiz com `manual_entry` (multi-fonte/"todas"/
+sub-fonte/base de Sync ⇒ sem botão) — e o card re-checa em runtime junto com
+`canEditValues` (import da IA pode trazer a chave num widget inelegível; o
+viewer público de snapshot passa `canEditValues=false`, então nunca renderiza).
+Slots de render: dentro da `TableFilterBar` (prop `actions`, ao lado do botão
+de filtros); com a barra oculta, no header do card; com a barra de título
+oculta, no ⋮ flutuante. As opções dos dropdowns carregam sob demanda por
+`listRecordCreateOptions` (lib/records/actions — lista completa, nunca
+colapsada, regra 0101) com cache de módulo, e o pós-criação usa
+`useDebouncedRefresh` (a lista é RSC). O servidor (`createRecord`) revalida
+permissão e `manual_entry` de todo jeito — RPCs intocados. **Campos ocultáveis
+do form:** cada campo opcional (núcleo + Responsável/Operação + custom; o Nome
+obrigatório nunca) tem um "x" que o remove dos PRÓXIMOS registros — chrome de
+UI por usuário e por BASE em localStorage
+(`registros:hiddenCreateFields:<fonte>`, hook `useHiddenCreateFields` no
+padrão use-col-widths: SSR determinístico + leitura pós-mount), valendo em
+TODAS as superfícies do form; a lista "Campos ocultos (N)" no fim do form
+reativa por toggle. Campo oculto com valor (prefill do kanban/seleção feita)
+submete via `<input type="hidden">` — o quick-create não perde a coluna; ref
+órfã no storage (campo excluído) é ignorada em silêncio.
 
 **Filtros de relação por NOME (31/07/2026):** filtros de
 `responsible_id`/`operation_id` (widget, `tf_`, JSON de import/export, preset)

@@ -1,4 +1,4 @@
-// Versão: 2.2 | Data: 19/07/2026
+// Versão: 2.3 | Data: 12/08/2026
 // Fase 8: definição das FONTES do produto. Cada fonte mapeia 1:1 num record_type
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
 // Registros (abas por fonte) e no construtor de widgets (seleção de fontes).
@@ -23,6 +23,8 @@
 //   para subs — quem monta consulta usa os resolvers cientes do catálogo abaixo
 //   (recordTypeOf, sourcePredicate, planSourceLegs). Resolvidas no ENGINE
 //   (perna por source-key); NÃO tocam nas RPCs de widget.
+// v2.3 (12/08/2026): manualEntryRootSource — gate único do botão "+" de criação
+//   manual no widget de tabela (builder e card usam o MESMO critério).
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export type SourceKey = string;
@@ -240,6 +242,22 @@ export function subSourcesOf(
   sources: SourceDef[] = BUILTIN_SOURCES
 ): SourceDef[] {
   return sources.filter((s) => s.parentKey === parentKey);
+}
+
+/**
+ * Fonte de destino da criação manual pelo widget (botão "+", 12/08/2026):
+ * devolve a def SÓ quando a seleção do widget é exatamente UMA fonte RAIZ com
+ * manualEntry — multi-fonte/"todas"/sub-fonte/fonte de Sync ⇒ null (sem botão).
+ * Gate único: builder (oferece o toggle) e card (renderiza) usam este critério;
+ * o servidor (createRecord) revalida permissão e manual_entry de todo jeito.
+ */
+export function manualEntryRootSource(
+  selected: SourceKey[] | undefined,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): SourceDef | null {
+  if (!selected || selected.length !== 1) return null;
+  const def = sources.find((s) => s.key === selected[0]);
+  return def && !def.parentKey && def.manualEntry ? def : null;
 }
 
 /** Fontes RAIZ (não-sub) do catálogo. */
