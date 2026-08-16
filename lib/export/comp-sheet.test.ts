@@ -120,7 +120,7 @@ const inputs = () => [
   statement({ config: configA, planName: "Plano A", entry: entryA }),
 ];
 
-const OPTS = { scope: "visao-geral", monthLabel: "Agosto de 2026" } as const;
+const OPTS = { monthLabel: "Agosto de 2026" } as const;
 
 const rowOf = (
   report: ReturnType<typeof compSheetReport>,
@@ -165,8 +165,49 @@ describe("compSheetReport", () => {
       "Plano A",
       "Plano B",
     ]);
-    // Pessoa com UM plano não ganha memberTotal (o Total do bloco basta).
-    expect(report.kinds).not.toContain("memberTotal");
+    // O fecho da pessoa existe SEMPRE (marca o fim do bloco); com um único
+    // plano ele substitui o blockTotal — nunca duas linhas "Total" iguais.
+    expect(rowsOf(report, "memberTotal").map((r) => r[0])).toEqual([
+      "Total — Ana",
+      "Total — Bruno",
+    ]);
+    expect(report.kinds).not.toContain("blockTotal");
+    // Duas linhas de respiro abrem cada bloco.
+    const primeiraSecao = report.kinds.indexOf("section");
+    expect(report.kinds[primeiraSecao - 1]).toBe("blank");
+    expect(report.kinds[primeiraSecao - 2]).toBe("blank");
+  });
+
+  it("links: a linha da pessoa aponta p/ a aba de detalhe (nome determinístico)", () => {
+    const report = compSheetReport(inputs(), OPTS);
+    expect(report.links).toHaveLength(report.rows.length);
+    expect(report.detailTabs).toEqual([
+      { label: "Ana", tabName: "Det-Ana" },
+      { label: "Bruno", tabName: "Det-Bruno" },
+    ]);
+    // Só as linhas `section` linkam; o resto é null.
+    const linkadas = report.links
+      .map((l, i) => (l == null ? null : { kind: report.kinds[i], l }))
+      .filter(Boolean);
+    expect(linkadas).toEqual([
+      { kind: "section", l: "Det-Ana" },
+      { kind: "section", l: "Det-Bruno" },
+    ]);
+    // Homônimos não colidem: a 2ª aba ganha sufixo.
+    const homonimos = compSheetReport(
+      [
+        statement({ config: configA, planName: "Plano A", entry: entryA }),
+        statement({
+          config: configB,
+          planName: "Plano B",
+          memberLabel: "Ana",
+          entry: entryB,
+        }),
+      ],
+      OPTS
+    );
+    // Mesma pessoa (mesmo rótulo) = UMA seção, UMA aba.
+    expect(homonimos.detailTabs).toEqual([{ label: "Ana", tabName: "Det-Ana" }]);
   });
 
   it("total geral no rodapé com 2+ pessoas; ausente com uma só", () => {
@@ -235,8 +276,9 @@ describe("compSheetReport", () => {
     );
     // Plano A (sem fator com peso nem comissão sobre a base): sem linha de
     // base variável no bloco; o total do bloco fecha em 550.
-    const blocoTotais = rowsOf(report, "blockTotal");
-    expect(blocoTotais.some((r) => r[5] === 550)).toBe(true);
+    // Ana tem um plano só: o fecho da pessoa é quem carrega o total do bloco.
+    const totaisPessoa = rowsOf(report, "memberTotal");
+    expect(totaisPessoa.some((r) => r[5] === 550)).toBe(true);
     expect(rowOf(report, "info", "Base variável")).toBeTruthy(); // do Plano B
   });
 
@@ -311,46 +353,24 @@ describe("compSheetReport", () => {
     expect(all).not.toContain("sem lançamento no mês"); // virou SHEET_NO_ENTRY_NOTE
   });
 
-  it('escopo "minha": sem menção a Pessoa, seção por plano, Total do mês', () => {
-    const mine = (planos: CompStatementInput[]) =>
-      compSheetReport(planos, { scope: "minha", monthLabel: "Agosto de 2026" });
-    const one = mine([
-      statement({
-        config: configB,
-        planName: "Plano B",
-        memberLabel: "",
-        baseAmountDefault: 1000,
-        entry: entryB,
-        targets: { vendas: 100000 },
-      }),
-    ]);
-    expect(one.headers[0]).toBe("Minha remuneração — Agosto de 2026");
-    expect(JSON.stringify(one.rows)).not.toContain("Pessoa");
-    expect(rowOf(one, "section", "Plano B")).toBeTruthy();
-    // Sem cabeçalho de pessoa p/ subordinar: nada de planHeader/memberTotal.
-    expect(one.kinds).not.toContain("planHeader");
-    expect(one.kinds).not.toContain("memberTotal");
-    // Com 2+ planos o fecho é "Total do mês".
-    const two = mine([
-      statement({
-        config: configB,
-        planName: "Plano B",
-        memberLabel: "",
-        baseAmountDefault: 1000,
-        entry: entryB,
-        targets: { vendas: 100000 },
-      }),
-      statement({
-        config: configA,
-        planName: "Plano A",
-        memberLabel: "",
-        entry: entryA,
-      }),
-    ]);
-    const total = rowOf(two, "memberTotal", "Total do mês")!;
-    expect(total[5]).toBe(1050);
-    expect(total[6]).toBe(SHEET_MEMBER_TOTAL_NOTE);
-    expect(two.kinds).not.toContain("summaryTotal");
+  it("com 2+ planos o blockTotal por plano volta, além do fecho da pessoa", () => {
+    const report = compSheetReport(
+      [
+        statement({ config: configA, planName: "Plano A", entry: entryA }),
+        statement({
+          config: configB,
+          planName: "Plano B",
+          baseAmountDefault: 1000,
+          entry: entryB,
+          targets: { vendas: 100000 },
+        }),
+      ],
+      OPTS
+    );
+    expect(rowsOf(report, "blockTotal")).toHaveLength(2);
+    expect(rowOf(report, "memberTotal", "Total — Ana")![6]).toBe(
+      SHEET_MEMBER_TOTAL_NOTE
+    );
   });
 
   it("o payload do builder passa no validador do contrato", () => {
@@ -362,6 +382,7 @@ describe("compSheetReport", () => {
         headers: report.headers,
         rows: report.rows,
         kinds: report.kinds,
+        links: report.links,
       })
     ).toEqual({ ok: true });
   });

@@ -114,6 +114,19 @@ function filterColumn(field: string): string | null {
   return CORE_COLS.has(field) ? field : null;
 }
 
+/**
+ * O modo lista consegue aplicar um filtro NESTE campo? Campo fora da whitelist
+ * é descartado em SILÊNCIO por filterColumn — quem usa a listagem como
+ * EVIDÊNCIA de um número agregado (detalhamento da Remuneração,
+ * lib/comp/detail.ts) precisa saber disso para avisar, em vez de exibir um
+ * recorte mais largo que o do cálculo sem explicação. `unified:` conta como
+ * suportado: é expandido por fonte ANTES, no loop de filtros.
+ */
+export function listFilterFieldSupported(field: string): boolean {
+  if (field.startsWith("unified:")) return true;
+  return filterColumn(field) !== null;
+}
+
 // Condição de UMA coluna na sintaxe de `.or()` do PostgREST para um operador do
 // widget; null = operador sem tradução (filtro ignorado). Valores são
 // higienizados p/ a sintaxe (sem vírgula/parênteses), como na busca textual.

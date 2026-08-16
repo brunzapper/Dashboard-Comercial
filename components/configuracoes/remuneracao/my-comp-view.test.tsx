@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// Versão: 1.2 | Data: 16/08/2026
+// v1.2: o export p/ Google Planilhas SAIU desta tela (exclusivo da Visão geral
+// do admin) — o teste pina a AUSÊNCIA do botão; CSV e PDF seguem cobertos.
 // Versão: 1.1 | Data: 02/08/2026
 // v1.1: botão "Google Planilhas" (0115) — some sem config (vendedor não é
 // admin); configurado, o clique chama a action com scope "minha". Actions de
@@ -11,7 +14,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSheetExportTicket } from "@/app/(app)/operacao/remuneracao/sheets-actions";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
 import { MyCompView, type MyCompViewProps } from "./my-comp-view";
@@ -23,15 +25,6 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/dashboards/pending-context", () => ({
   useNavPending: () => ({ pending: false, run: (fn: () => void) => fn() }),
 }));
-vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
-  createSheetExportTicket: vi.fn(async () => ({
-    ok: true,
-    token: "tok-de-teste",
-    webappUrl: "https://script.google.com/macros/s/x/exec",
-  })),
-  saveCompSheetsWebappUrl: vi.fn(async () => ({ ok: true })),
-}));
-
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
@@ -101,7 +94,6 @@ function renderView(over: Partial<MyCompViewProps> = {}) {
       year={2026}
       month={8}
       linked
-      sheetsConfigured={false}
       {...over}
     />
   );
@@ -136,26 +128,10 @@ describe("MyCompView export", () => {
     ).toBeNull();
   });
 
-  it("Sheets não configurado: vendedor não vê o botão", () => {
-    renderView({ sheetsConfigured: false });
+  it("o export p/ Google Planilhas não existe nesta tela", () => {
+    renderView();
     expect(
       screen.queryByRole("button", { name: /Google Planilhas/ })
     ).toBeNull();
-  });
-
-  it("Sheets configurado: clique chama a action com scope 'minha'", async () => {
-    const fakeWin = { close: vi.fn(), location: { href: "" } };
-    window.open = vi.fn(() => fakeWin as unknown as Window);
-    renderView({ sheetsConfigured: true });
-    fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
-    await waitFor(() =>
-      expect(vi.mocked(createSheetExportTicket)).toHaveBeenCalled()
-    );
-    const arg = vi.mocked(createSheetExportTicket).mock.calls[0][0];
-    expect(arg.scope).toBe("minha");
-    // Demonstrativo do vendedor: título próprio e nenhuma coluna "Pessoa"
-    // (a page não carrega display_name — o layout omite a coluna).
-    expect(arg.headers[0]).toContain("Minha remuneração");
-    expect(JSON.stringify(arg.rows)).not.toContain("Pessoa");
   });
 });
