@@ -706,9 +706,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   crus, título em `headers`), SEM quadro-resumo no topo: uma seção por
   pessoa (`section` = nome 1×, total consolidado na col F + composição
   `sheetSummaryNote` na col G), sub-cabeçalho `planHeader` por plano e fecho
-  `memberTotal` ("Total — <nome>"/"Total do mês") SÓ com 2+ planos;
-  `summaryTotal` ("Total geral") virou rodapé, SÓ com 2+ pessoas; escopo
-  "minha" segue com `section` = nome do plano (sem `planHeader`). O que não
+  `memberTotal` ("Total — <nome>"); desde 16/08/2026 o fecho é SEMPRE emitido
+  (é ele que marca o FIM do bloco no `.gs`) e, com um ÚNICO plano, ele
+  SUBSTITUI o `blockTotal` daquele plano (herdando o `sheetTotalNote`) — nunca
+  duas linhas "Total" idênticas; 2 linhas `blank` (era 1) abrem cada bloco.
+  `summaryTotal` ("Total geral") virou rodapé, SÓ com 2+ pessoas; o ramo do
+  escopo "minha" SAIU do builder junto com o botão da tela do vendedor (o
+  valor segue no contrato/constraint por causa de `comp_sheet_links` já
+  gravados). O que não
   participa é OMITIDO: rótulo "Peso" some do `detailHeader` quando nenhum
   fator tem peso, e a linha "Base variável" só entra quando a base participa
   — comissão `flat` sobre a base NÃO conta (computeEntry ignora o basis) e
@@ -716,15 +721,48 @@ This version has breaking changes — APIs, conventions, and file structure may 
   builder; o CSV mantém a linha incondicional). `kinds` paralelo às rows
   (whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts`, validada no
   `validateReportPayload`; `summaryHeader`/`summary`/`note` reservados — não
-  emitidos); o `.gs` (v2.1) formata POR KIND (moeda/%/bold/larguras fixas,
-  SEM autoResize e SEM merge — `clear()` não desfaz merge) com degradação
-  bidirecional (script v1 × payload v2 e vice-versa; script 2.0 rende os
-  kinds novos como texto puro até republicar); frases novas do demonstrativo
+  emitidos); o `.gs` (v3.0) formata POR KIND (moeda/%/bold/fundos/larguras
+  fixas + borda e altura que ABREM em `section` e FECHAM em `memberTotal`,
+  SEM merge — `clear()` não desfaz merge; larguras próprias nas abas de
+  detalhe) e escreve em DUAS PASSADAS (cria/limpa todas as abas p/ colher os
+  `gid`, depois preenche com os hiperlinks resolvidos), com degradação
+  bidirecional (script v2.1 × payload v3 = só a aba do mês, sem links nem
+  detalhe; script v3 × ticket v2 = comportamento anterior); frases novas do demonstrativo
   SÓ em `commission-label.ts` (`sheetFactorNote`/`sheetTotalNote`/
   `sheetSummaryNote`/`SHEET_*`), sem jargão interno (pinado em
   `comp-sheet.test.ts`); o CSV NÃO passa por aí (builder `compReportCsv`
   intocado, byte-idêntico; `compReportValues` foi removido — deriva via
-  `statementBreakdown` de `lib/export/comp.ts`). NUNCA gerar fórmula a
+  `statementBreakdown` de `lib/export/comp.ts`).
+  **DETALHAMENTO por registro — tela e planilha do MESMO núcleo (16/08/2026):**
+  `lib/comp/detail.ts` é o dono ÚNICO de "quais registros compõem este membro ×
+  fator × mês", consumido pelo painel de conferência da tela
+  (`comp-detail-panel.tsx` + `detail-actions.ts`, gate admin) E pelas abas
+  `Det-<Nome>` do export (`lib/export/comp-detail-sheet.ts`) — nunca monte um
+  segundo caminho. A listagem é **EVIDÊNCIA**: o realizado por membro×fator
+  continua saindo SÓ de `runCalculatedWidget` (via `computeEntry`/
+  `statementBreakdown`) e é exibido AO LADO da soma das linhas, com
+  `detailReconcileNote`; jamais derive o realizado da lista. O recorte sai do
+  choke point `factorRecordQuery` (espelha o engine: `apuracaoRef`→
+  `monthPeriod`, `factor.filters` e DEPOIS `memberFilterFor` — helper
+  IMPORTADO de `engine.ts`) e a consulta é `runRecordListWindow`; a coluna de
+  valor vem dos operandos `agg:` da fórmula (`parseAggRef`; contagem não vira
+  coluna) e `listedSum` só existe para soma/contagem — média/mín/máx não somam.
+  Divergência ESTRUTURAL vira aviso visível, nunca silêncio: filtro em campo
+  fora da whitelist do modo lista (`listFilterFieldSupported`, exportado de
+  `record-list.ts` ao lado do `filterColumn` que o descarta) e operando com
+  escopo `@fonte` fora de `factor.sources`. Consulta sempre pelo client RLS do
+  usuário — NUNCA service role. **Payload v3:** `details` (uma
+  `CompSheetPayloadSheet` por colaborador) + `links` paralelo às rows (nome da
+  aba alvo; o `gid` só existe no Apps Script — a fórmula `=HYPERLINK("#gid=…")`
+  é montada LÁ). O nome da aba sai de `detailTabName` (PURO — o cliente calcula
+  os mesmos nomes do servidor); a action monta o detalhe server-side (os
+  registros não existem no cliente), ANULA link sem aba correspondente e
+  degrada BEST-EFFORT (falha/teto ⇒ planilha sai só com o demonstrativo +
+  aviso). Abas `Det-*` órfãs são APAGADAS pelo script a cada export (só com
+  payload v3). Frases do detalhe em `commission-label.ts` com prefixo
+  `detail*`/`DETAIL_*` (compartilhadas pelos dois consumidores — não `sheet*`).
+  Kind novo exige entrada em `COMP_SHEET_KINDS` **e** nas tabelas de estilo do
+  `.gs` **e** republicar o script. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
@@ -793,7 +831,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `/operacao/agenda|tarefas`, rotas antigas = stubs de redirect); card
   org-específico novo = entrada no catálogo + chave em
   `ORG_FEATURES`/`AREA_GATES`/`AREA_FEATURES`, habilitado só via `/owner`.
-  Fiscalizado por `lib/comp/*.test.ts` +
+  Fiscalizado por `lib/comp/*.test.ts` (incl. `detail.test.ts`) +
+  `lib/export/comp-detail-sheet.test.ts` + `tests/apps-script-sheets.test.ts`
+  (o `.gs` avaliado num `vm` com stubs do SpreadsheetApp — abas, hiperlinks
+  por `gid`, limpeza de órfãs e as duas degradações) +
   `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
   `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle

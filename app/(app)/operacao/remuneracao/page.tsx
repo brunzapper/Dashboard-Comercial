@@ -121,7 +121,6 @@ export default async function RemuneracaoPage({
       canon,
       { data: plansData },
       { data: entriesData },
-      sheetsUrl,
     ] = await Promise.all([
       supabase
         .from("responsibles")
@@ -141,8 +140,6 @@ export default async function RemuneracaoPage({
         )
         .eq("period_year", year)
         .eq("period_month", month),
-      (async () =>
-        loadCompSheetsWebappUrl(supabase, await getActiveOrgId()))(),
     ]);
     const ownIds = ((own ?? []) as { id: string }[]).map((r) => r.id);
     const canonId = ownIds.length > 0 ? canonicalOf(ownIds[0], canon) : null;
@@ -187,7 +184,6 @@ export default async function RemuneracaoPage({
           year={year}
           month={month}
           linked={canonId != null}
-          sheetsConfigured={sheetsUrl != null}
         />
       </div>
     );

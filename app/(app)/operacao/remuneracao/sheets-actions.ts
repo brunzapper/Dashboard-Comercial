@@ -1,3 +1,11 @@
+// Versão: 1.2 | Data: 16/08/2026
+// v1.2: payload v3 — a action passa a MONTAR o detalhamento por registro no
+// servidor (lib/comp/detail.ts + lib/export/comp-detail-sheet.ts) e grava
+// `details` (uma aba Det-<Nome> por colaborador) e `links` (aba alvo do
+// hiperlink de cada linha `section`) junto do demonstrativo que o cliente já
+// derivava. Os registros NÃO existem no cliente — mas continuam saindo pelo
+// client RLS do usuário, nunca por service role. O detalhe é BEST-EFFORT: se
+// falhar ou estourar teto, o export sai sem ele com aviso, em vez de abortar.
 // Versão: 1.1 | Data: 05/08/2026 (v1.1: rota movida p/ /operacao/remuneracao
 // — revalidatePath atualizado; gates/chave de área "remuneracao" intocados.)
 // Versão: 1.0 | Data: 02/08/2026
@@ -21,13 +29,18 @@ import { revalidatePath } from "next/cache";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { getSessionInfo } from "@/lib/auth/session";
+import { loadCompDetail, loadCompDetailContext } from "@/lib/comp/detail";
 import {
   COMP_SHEETS_CONFIG_KEY,
   isCompSheetsWebappUrl,
   loadCompSheetsWebappUrl,
   validateReportPayload,
+  MAX_DETAIL_SHEETS,
+  type CompSheetPayloadSheet,
   type CompSheetScope,
 } from "@/lib/comp/sheets-export";
+import { compDetailSheets } from "@/lib/export/comp-detail-sheet";
+import { MONTH_LABELS } from "@/lib/date/month-labels";
 import { generateToken, hashToken } from "@/lib/snapshots/token";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -43,6 +56,12 @@ export interface SheetTicketInput {
   // Payload v2: kind por linha (paralelo a rows) — o Apps Script formata o
   // demonstrativo por kind; whitelist validada em validateReportPayload.
   kinds: string[];
+  // Payload v3 — paralelo a rows: nome da aba de detalhe alvo do hiperlink da
+  // coluna A (o servidor ANULA os que não viraram aba de fato).
+  links?: (string | null)[];
+  // Payload v3 — colaboradores das seções, com o nome de aba que o builder
+  // calculou (detailTabName, puro): a matriz de detalhe é montada AQUI.
+  members?: { id: string; label: string; tabName: string }[];
 }
 
 export interface SheetTicketResult {
@@ -72,14 +91,18 @@ export async function createSheetExportTicket(
     input.month > 12
   )
     return { ok: false, message: "Período inválido." };
-  const payloadCheck = validateReportPayload({
+  const members = (input.members ?? []).slice(0, MAX_DETAIL_SHEETS);
+  // Demonstrativo primeiro (rejeita entrada malformada ANTES de gastar
+  // consultas montando o detalhamento dela).
+  const baseCheck = validateReportPayload({
     title: input.title,
     tabName: input.tabName,
     headers: input.headers,
     rows: input.rows,
     kinds: input.kinds,
+    links: input.links,
   });
-  if (!payloadCheck.ok) return { ok: false, message: payloadCheck.message };
+  if (!baseCheck.ok) return { ok: false, message: baseCheck.message };
 
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
@@ -102,6 +125,61 @@ export async function createSheetExportTicket(
   const knownSpreadsheetId =
     (link as { spreadsheet_id?: string } | null)?.spreadsheet_id ?? null;
 
+  // ---- Detalhamento por registro (payload v3) ----
+  // Os registros não existem no cliente; saem daqui pelo client RLS do
+  // usuário. BEST-EFFORT: qualquer falha degrada o export para "só o
+  // demonstrativo" com aviso — nunca derruba a exportação inteira.
+  let details: CompSheetPayloadSheet[] = [];
+  let detailWarning: string | undefined;
+  if (members.length > 0) {
+    try {
+      const ctx = await loadCompDetailContext(supabase, {
+        orgId,
+        year: input.year,
+        month: input.month,
+        memberIds: members.map((m) => m.id),
+      });
+      const matrix = await loadCompDetail(supabase, ctx, members);
+      details = compDetailSheets(matrix, {
+        monthLabel: `${MONTH_LABELS[input.month - 1]} de ${input.year}`,
+        overviewTabName: input.tabName,
+      });
+    } catch (e) {
+      details = [];
+      detailWarning =
+        e instanceof Error && e.message
+          ? `A planilha foi gerada sem o detalhamento: ${e.message}`
+          : "A planilha foi gerada sem o detalhamento por registro.";
+    }
+  }
+  // Só linka o que virou aba de fato (membro sem lançamento no mês não gera
+  // detalhe) — link para aba inexistente viraria célula quebrada.
+  const linkOf = (produzidas: Set<string>) =>
+    (input.links ?? input.rows.map(() => null)).map((l) =>
+      l && produzidas.has(l) ? l : null
+    );
+  let links = linkOf(new Set(details.map((d) => d.tabName)));
+
+  // O demonstrativo já passou sozinho: se o payload COM detalhe estoura algum
+  // teto, a planilha do mês sai mesmo assim, sem as abas — perder o export
+  // inteiro por causa do anexo seria o pior dos mundos.
+  if (details.length > 0) {
+    const comDetalhe = validateReportPayload({
+      title: input.title,
+      tabName: input.tabName,
+      headers: input.headers,
+      rows: input.rows,
+      kinds: input.kinds,
+      links,
+      details,
+    });
+    if (!comDetalhe.ok) {
+      details = [];
+      links = linkOf(new Set());
+      detailWarning = `A planilha foi gerada sem o detalhamento: ${comDetalhe.message}`;
+    }
+  }
+
   const token = generateToken();
   const db = createServiceClient();
   // Carimbo de org (multi-org, 0090): insert via service role bypassa a RLS —
@@ -114,12 +192,14 @@ export async function createSheetExportTicket(
     period_month: input.month,
     token_hash: hashToken(token),
     payload: {
-      v: 2,
+      v: 3,
       spreadsheetTitle: input.title,
       tabName: input.tabName,
       headers: input.headers,
       rows: input.rows,
       kinds: input.kinds,
+      links,
+      details,
       knownSpreadsheetId,
     },
   });
@@ -133,7 +213,7 @@ export async function createSheetExportTicket(
     .lt("created_at", new Date(Date.now() - 24 * 3600e3).toISOString())
     .then(() => undefined);
 
-  return { ok: true, token, webappUrl };
+  return { ok: true, token, webappUrl, message: detailWarning };
 }
 
 /** Grava/limpa a URL do Web App (sync_config, por org) — admin. */

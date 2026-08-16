@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+// Versão: 1.2 | Data: 16/08/2026
+// v1.2 (16/08/2026): conferência por registro — o ícone da célula Realizado
+// abre o painel de detalhe SEM disparar o override de duplo-clique (o gesto
+// de edição da célula não pode ser sequestrado). Action de detalhe mockada
+// (server-only).
 // Versão: 1.1 | Data: 07/08/2026
 // v1.1 (07/08/2026): blocos do save OTIMISTA em background (v1.7 da grade) —
 // digitação sobrevive a um eco de props com save em voo (guard hasPending
@@ -19,6 +24,27 @@ import { CompGrid } from "./comp-grid";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), replace: vi.fn(), push: vi.fn() }),
+}));
+vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
+  loadCompFactorDetail: vi.fn(async () => ({
+    ok: true as const,
+    planName: "SDR Inbound FC",
+    memberLabel: "Ana",
+    apuracaoShifted: false,
+    detail: {
+      factorId: "reunioes",
+      label: "Reuniões",
+      money: false,
+      valueLabel: "Registros",
+      aggNote: "Contagem de registros · 44 registros no recorte",
+      realized: 44,
+      listedSum: 44,
+      rows: [],
+      total: 44,
+      truncated: false,
+      warnings: [],
+    },
+  })),
 }));
 vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   publishMonth: vi.fn(),
@@ -161,6 +187,32 @@ describe("CompGrid — memória de cálculo", () => {
     renderGrid();
     const dash = screen.getByTitle(/^Peso 0%/);
     expect(dash.textContent).toBe("—");
+  });
+
+  it("ícone do Realizado abre a conferência SEM disparar o override", async () => {
+    const { loadCompFactorDetail } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderGrid();
+    const gatilho = screen.getByRole("button", {
+      name: "Ver os registros que compõem este realizado",
+    });
+    fireEvent.click(gatilho);
+    await waitFor(() =>
+      expect(vi.mocked(loadCompFactorDetail)).toHaveBeenCalled()
+    );
+    // O clique no ícone NÃO entra no modo de edição da célula.
+    expect(document.querySelector("input")).toBeNull();
+  });
+
+  it("duplo clique na célula Realizado segue abrindo o override manual", () => {
+    renderGrid();
+    const gatilho = screen.getByRole("button", {
+      name: "Ver os registros que compõem este realizado",
+    });
+    // A célula é o ancestral <td> do ícone.
+    fireEvent.doubleClick(gatilho.closest("td")!);
+    expect(document.querySelector("input")).not.toBeNull();
   });
 });
 

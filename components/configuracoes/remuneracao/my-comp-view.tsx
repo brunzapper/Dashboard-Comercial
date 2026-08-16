@@ -1,3 +1,9 @@
+// Versão: 1.8 | Data: 16/08/2026
+// v1.8: o botão "Google Planilhas" SAIU desta tela (o export é agora exclusivo
+// da Visão geral do admin): a RLS de `records` do vendedor não alcança os
+// registros de fator casado por memberField, e as abas de detalhamento sairiam
+// silenciosamente parciais. CSV e PDF do próprio demonstrativo seguem aqui,
+// inalterados.
 // Versão: 1.7 | Data: 02/08/2026
 // v1.7: botão "Google Planilhas" (SheetsExportButton, 0115) — planilha
 // "Minha remuneração" na conta Google do próprio vendedor; sem config aqui
@@ -47,7 +53,6 @@ import { compReportCsv, type CompStatementInput } from "@/lib/export/comp";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
 import { CompPlanCard } from "./comp-plan-card";
 import { CompReportPrint } from "./comp-report-print";
-import { SheetsExportButton } from "./sheets-export-button";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -65,9 +70,6 @@ export interface MyCompViewProps {
   year: number;
   month: number;
   linked: boolean; // usuário tem responsável vinculado?
-  // Export p/ Google Planilhas configurado na org? (vendedor recebe só o
-  // boolean — a URL fica na action, fonte única no clique.)
-  sheetsConfigured: boolean;
 }
 
 export function MyCompView(props: MyCompViewProps) {
@@ -154,14 +156,6 @@ export function MyCompView(props: MyCompViewProps) {
               >
                 <Printer className="size-4" /> Exportar PDF
               </Button>
-              <SheetsExportButton
-                scope="minha"
-                year={props.year}
-                month={props.month}
-                configured={props.sheetsConfigured}
-                admin={false}
-                getStatements={buildStatements}
-              />
             </div>
             {cards.map(({ plan, entry }) => (
               <CompPlanCard

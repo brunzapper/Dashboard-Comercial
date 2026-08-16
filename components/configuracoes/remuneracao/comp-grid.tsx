@@ -1,3 +1,7 @@
+// Versão: 1.8 | Data: 16/08/2026 (v1.8: CONFERÊNCIA por registro — ícone
+// próprio na célula Realizado (aparece no hover) abre o CompDetailPanel com os
+// registros por trás do número; o duplo-clique da célula segue sendo o
+// override manual, nunca sequestrado)
 // Versão: 1.7 | Data: 07/08/2026 (v1.7: célula persiste OTIMISTA em background
 // — useBackgroundSave com revalidate:false: o await volta após a gravação (sem
 // re-render RSC dentro da transition), erro → toast + REVERT da linha ao
@@ -91,6 +95,10 @@ import {
   saveTarget,
   type EntryPatch,
 } from "@/app/(app)/operacao/remuneracao/actions";
+import {
+  CompDetailPanel,
+  type CompDetailTarget,
+} from "./comp-detail-panel";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -146,6 +154,11 @@ export function CompGrid(props: CompGridProps) {
   const { save: backgroundSave, hasPending } = useBackgroundSave();
   const [busy, setBusy] = useState<"recompute" | "publish" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Instância ÚNICA içada do painel de conferência (os registros por trás do
+  // Realizado); as células só apontam o alvo.
+  const [detailTarget, setDetailTarget] = useState<CompDetailTarget | null>(
+    null
+  );
 
   // Mesma lista efetiva do servidor: manual ∪ operações (helpers do model —
   // nunca importar engine.ts num client component).
@@ -402,6 +415,14 @@ export function CompGrid(props: CompGridProps) {
                     });
                   persistTarget(member.id, factorId, value);
                 }}
+                onOpenDetail={(factorId) =>
+                  setDetailTarget({
+                    planId: props.plan.id,
+                    memberId: member.id,
+                    memberLabel: member.label,
+                    factorId,
+                  })
+                }
               />
             ))}
           </TableBody>
@@ -415,6 +436,12 @@ export function CompGrid(props: CompGridProps) {
           ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Alvo/Real. referem-se ao mês apurado."
           : ""}
       </p>
+      <CompDetailPanel
+        target={detailTarget}
+        year={props.year}
+        month={props.month}
+        onClose={() => setDetailTarget(null)}
+      />
     </div>
   );
 }
@@ -465,6 +492,7 @@ function GridRow(props: {
   onRow: (patch: Partial<{ baseAmount: number | null; inputs: CompEntryInputs }>) => void;
   onPersist: (patch: EntryPatch) => void;
   onTarget: (factorId: string, value: number | null) => void;
+  onOpenDetail: (factorId: string) => void;
 }) {
   const { config, row } = props;
   const computed = (props.entry?.computed ?? null) as CompComputedRaw | null;
@@ -555,6 +583,7 @@ function GridRow(props: {
             hasComputed={computed != null}
             onTarget={(v) => props.onTarget(f.id, v)}
             onOverride={(key, v) => setOverride(f.id, key, v)}
+            onOpenDetail={() => props.onOpenDetail(f.id)}
           />
         );
       })}
@@ -668,6 +697,7 @@ function FactorCells(props: {
   hasComputed: boolean;
   onTarget: (v: number | null) => void;
   onOverride: (key: "realized" | "attainmentPct" | "payout", v: number | null) => void;
+  onOpenDetail: () => void;
 }) {
   const fmt = props.money ? fmtMoney : fmtNum;
   // Alvo: exibido na moeda DIGITADA; tooltip traz o convertido em R$ (decisão
@@ -728,23 +758,38 @@ function FactorCells(props: {
         current={props.targetSource === "goal" ? props.target : null}
       />
       <EditableCell
+        className="group"
         display={
-          props.queryError && props.realized == null ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-destructive inline-flex items-center gap-1">
-                  <CircleAlert className="size-3.5" /> —
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{props.queryError}</TooltipContent>
-            </Tooltip>
-          ) : props.realized != null ? (
-            fmt(props.realized)
-          ) : props.hasComputed ? (
-            "—"
-          ) : (
-            <span className="text-muted-foreground">…</span>
-          )
+          <span className="inline-flex items-center gap-1">
+            {/* Conferência dos registros: BOTÃO próprio (o duplo-clique da
+                célula continua sendo o override manual — não sequestrar). */}
+            <button
+              type="button"
+              aria-label="Ver os registros que compõem este realizado"
+              title="Ver os registros que compõem este realizado"
+              className="text-muted-foreground hover:text-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={() => props.onOpenDetail()}
+            >
+              <ListTree className="size-3.5" />
+            </button>
+            {props.queryError && props.realized == null ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-destructive inline-flex items-center gap-1">
+                    <CircleAlert className="size-3.5" /> —
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{props.queryError}</TooltipContent>
+              </Tooltip>
+            ) : props.realized != null ? (
+              fmt(props.realized)
+            ) : props.hasComputed ? (
+              "—"
+            ) : (
+              <span className="text-muted-foreground">…</span>
+            )}
+          </span>
         }
         overridden={props.overridden.realized}
         onSave={(v) => props.onOverride("realized", v)}

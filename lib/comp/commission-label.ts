@@ -1,4 +1,9 @@
-// Versão: 1.3 | Data: 02/08/2026
+// Versão: 1.4 | Data: 16/08/2026
+// v1.4: frases do DETALHAMENTO por registro (`detail*`/`DETAIL_*`) —
+// compartilhadas pelo diálogo de conferência da tela e pelas abas Det-<Nome>
+// do Google Planilhas (por isso o prefixo `detail`, não `sheet`). A listagem
+// é EVIDÊNCIA: as frases confrontam a soma listada com o realizado oficial
+// sem nunca afirmar que uma substitui a outra.
 // v1.3: demonstrativo por COLABORADOR — `sheetSummaryNote` (composição
 // consolidada dos planos da pessoa, no cabeçalho da seção) e
 // `SHEET_MEMBER_TOTAL_NOTE` (linha "Total — <nome>"/"Total do mês").
@@ -274,6 +279,53 @@ export function sheetSummaryNote(
     terms.push(`Comissão ${fmtMoneyBRL(commission)}`);
   if (bonus !== 0) terms.push(`Bônus ${fmtMoneyBRL(bonus)}`);
   return terms.length >= 2 ? terms.join(" + ") : "";
+}
+
+// ============ Frases do DETALHAMENTO por registro ============
+// Compartilhadas pelo diálogo de conferência da tela e pelas abas Det-<Nome>
+// do Google Planilhas — por isso o prefixo é `detail`, não `sheet`. Regra do
+// módulo: a listagem é EVIDÊNCIA; o realizado oficial continua vindo do
+// cálculo. As frases nunca afirmam que a soma listada É o realizado.
+
+export const DETAIL_BACK_NOTE = "← Voltar para a visão geral";
+
+export const DETAIL_EMPTY_NOTE =
+  "Nenhum registro no recorte deste fator neste período.";
+
+export const DETAIL_DROPPED_FILTER_NOTE =
+  "Uma condição do fator não pôde ser aplicada nesta listagem — os registros abaixo podem ser mais amplos que o recorte usado no cálculo.";
+
+export const DETAIL_SCOPED_SOURCE_NOTE =
+  "A fórmula do fator usa dados de bases fora desta listagem — os registros abaixo cobrem apenas as bases do recorte.";
+
+/** Cabeçalho do bloco do fator: o que a coluna de valor mostra e o tamanho do recorte. */
+export function detailAggNote(aggLabel: string, total: number): string {
+  const registros = total === 1 ? "1 registro" : `${fmtNumBR(total)} registros`;
+  return `${aggLabel} · ${registros} no recorte`;
+}
+
+/** Aviso de janela: a listagem mostra só os primeiros N do recorte. */
+export function detailTruncatedNote(shown: number, total: number): string {
+  return `Mostrando os ${fmtNumBR(shown)} primeiros de ${fmtNumBR(total)} registros.`;
+}
+
+/**
+ * Confronto entre a soma da coluna listada e o realizado OFICIAL do fator.
+ * Divergência não é erro: fórmula composta, operando de outra base ou condição
+ * não reproduzível fazem a soma direta não bater — a frase diz isso sem
+ * sugerir que um dos dois números esteja errado.
+ */
+export function detailReconcileNote(
+  realized: number | null,
+  listedSum: number | null,
+  money: boolean
+): string {
+  if (realized == null) return "Realizado não apurado neste mês.";
+  if (listedSum == null) return "";
+  const fmt = money ? fmtMoneyBRL : fmtNumBR;
+  if (Math.abs(realized - listedSum) < 0.01)
+    return "Soma dos registros confere com o realizado do fator.";
+  return `Soma dos registros difere do realizado (${fmt(realized)}) — a fórmula do fator não é a soma direta desta coluna.`;
 }
 
 /** Nota da linha "Total" do bloco no demonstrativo. */

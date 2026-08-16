@@ -1,3 +1,14 @@
+<!-- Versão: 1.67 | Data: 16/08/2026 -->
+<!-- v1.67 (16/08/2026): §4.18 — DETALHAMENTO por registro da Remuneração:
+     núcleo único lib/comp/detail.ts (factorRecordQuery espelha o recorte do
+     engine; runRecordListWindow; avisos de divergência estrutural) servindo
+     o painel de conferência da tela (comp-detail-panel + detail-actions,
+     admin) e as abas Det-<Nome> do export (payload v3: `details` + `links`,
+     detailTabName puro, abas órfãs apagadas pelo script). Demonstrativo com
+     início/fim de cada colaborador destacados (memberTotal sempre emitido,
+     2 blanks, fundo/borda/altura no .gs v3.0 em duas passadas com
+     =HYPERLINK("#gid=…")). Export do vendedor removido. RPCs de widget
+     INTOCADOS; o realizado segue só do runCalculatedWidget. -->
 <!-- Versão: 1.66 | Data: 12/08/2026 -->
 <!-- v1.66 (12/08/2026): §4.10 — botão "+" de criação manual no widget de
      tabela modo lista (settings.showAddRecord, opt-in nas Opções avançadas;
@@ -3051,9 +3062,58 @@ total opcional por plano.
   CSV segue byte-idêntico — CSV e demonstrativo derivam do MESMO
   `statementBreakdown` (`lib/export/comp.ts`). Atualização do script
   publicado: nova VERSÃO da MESMA implantação (URL /exec não muda — runbook
-  em `supabase/README.md`). Fiscalizado por `lib/comp/sheets-export.test.ts`
-  + `lib/export/comp-sheet.test.ts` + os pinos do CSV em
-  `lib/export/comp.test.ts` + casos de botão nos testes das duas telas.
+  em `supabase/README.md`).
+  **Detalhamento por REGISTRO — tela e planilha do mesmo núcleo (payload v3,
+  16/08/2026).** A pergunta "quais registros compõem o realizado deste
+  membro × fator × mês" tem um dono só: `lib/comp/detail.ts`. Ele serve o
+  painel de conferência da tela (`comp-detail-panel.tsx` sobre
+  `detail-actions.ts` — gates sessão/área/**admin**; gatilhos no Realizado
+  dos cards da Visão geral e da grade de Lançamentos, este por ÍCONE próprio
+  no hover porque o duplo-clique da célula já é o override manual) e as abas
+  `Det-<Nome>` do export (`lib/export/comp-detail-sheet.ts`). Tela e planilha
+  nunca divergem porque o recorte nasce num choke point único,
+  `factorRecordQuery`, que ESPELHA o que `recomputePlanMonth` manda ao
+  `runCalculatedWidget`: período do mês apurado (`apuracaoRef` →
+  `monthPeriod`), `factor.filters` e, por ÚLTIMO, o filtro de membro do
+  `memberFilterFor` (helper IMPORTADO do engine, nunca reimplementado). A
+  consulta é o funil canônico do modo lista (`runRecordListWindow`, client
+  RLS do usuário — nunca service role), que já traz predicado de sub-fonte,
+  coluna de data por fonte, nome→id de FK, grupo canônico e a regra 0052.
+  **A listagem é EVIDÊNCIA, não a fonte do número:** o realizado continua
+  saindo de `computeEntry` sobre o snapshot do `runCalculatedWidget` e
+  aparece AO LADO da soma das linhas (`detailReconcileNote`); `listedSum` só
+  existe para soma/contagem (média/mín/máx não se reconstroem por adição) e
+  a coluna de valor sai dos operandos `agg:` da fórmula (`parseAggRef`;
+  contagem não vira coluna — a evidência é a própria linha). Divergência
+  ESTRUTURAL entre lista e agregação vira aviso visível, nunca silêncio:
+  filtro em campo que o modo lista descarta (`listFilterFieldSupported`,
+  exportado ao lado do `filterColumn` que o derruba) e operando com escopo
+  `@fonte` fora de `factor.sources` (o `runCalculatedWidget` une essa fonte,
+  a lista não). No payload, `details` leva uma aba por colaborador e `links`
+  (paralelo às rows) o NOME da aba alvo — o `gid` só existe dentro do Apps
+  Script, então a fórmula `=HYPERLINK("#gid=…")` é montada LÁ, o que obriga o
+  script a rodar em DUAS PASSADAS (cria/limpa tudo, colhe os ids, depois
+  escreve). O nome vem de `detailTabName` (puro e determinístico — o cliente
+  chega aos mesmos nomes que o servidor); a action monta a matriz no
+  SERVIDOR (os registros não existem no cliente), anula link sem aba
+  correspondente e degrada BEST-EFFORT: falha ou teto ⇒ a planilha do mês sai
+  assim mesmo, com aviso. Abas `Det-*` fora do payload são APAGADAS a cada
+  export (só com payload v3 — um ticket v2 em trânsito não varre o que não
+  conhece), e o bloco de cada pessoa passa a abrir/fechar visualmente
+  (`memberTotal` agora SEMPRE emitido; com um único plano ele substitui o
+  `blockTotal`; 2 linhas `blank`; fundo, borda e altura no `.gs` v3.0).
+  Frases do detalhe nascem em `commission-label.ts` com prefixo
+  `detail*`/`DETAIL_*` (não `sheet*`: são compartilhadas pelos dois
+  consumidores). O botão de export SAIU da tela do vendedor — a RLS de
+  `records` dele não alcança registros de fator casado por `memberField` e o
+  detalhe sairia silenciosamente parcial (o valor `minha` segue no contrato e
+  na constraint por causa dos `comp_sheet_links` já gravados). Fiscalizado
+  por `lib/comp/sheets-export.test.ts`
+  + `lib/comp/detail.test.ts` + `tests/apps-script-sheets.test.ts` (o `.gs`
+  rodado num `vm` com stubs do SpreadsheetApp — é a única cobertura possível
+  de um script que só existe publicado) + `lib/export/comp-sheet.test.ts` +
+  `lib/export/comp-detail-sheet.test.ts` + os pinos do CSV em
+  `lib/export/comp.test.ts` + casos de botão/gatilho nos testes das telas.
 - **Match de membro por campo, alvo padrão e alvo em moeda (31/07/2026).**
   Três extensões POR FATOR, todas resolvidas no engine/modelo (RPCs
   intocados): (a) `factor.memberField` (ref de campo texto/seleção, ex.

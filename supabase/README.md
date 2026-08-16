@@ -553,11 +553,20 @@ cabeçalho de `integrations/apps-script/comp_sheets_webapp.gs`):
    verificado": Avançado → continuar; em Workspace o admin pode precisar
    liberar o app interno). A planilha nasce no Drive do PRÓPRIO usuário —
    nenhuma credencial Google fica no app.
-6. ATUALIZAÇÃO do script (nova versão do `.gs`, ex. o rendering v2 do
-   demonstrativo): colar o código novo por cima no editor → Implantar →
+6. ATUALIZAÇÃO do script (nova versão do `.gs`, ex. o rendering v3 com abas
+   de detalhamento): colar o código novo por cima no editor → Implantar →
    **Gerenciar implantações** → ✏️ na implantação ativa → Versão: **"Nova
    versão"** → Implantar. A URL `/exec` NÃO muda (não reconfigurar o
    dashboard). Atenção: **"Nova implantação"** geraria uma URL nova e
    exigiria recolar no app. Script desatualizado não quebra: payload v2 num
-   script v1 rende o grid cru com título (degradação documentada em
-   `docs/arquitetura.md` §4.18).
+   script v1 rende o grid cru com título, e o payload v3 num script v2.1 rende
+   só a aba do mês, sem hiperlinks e sem as abas `Det-<Nome>` (degradação
+   documentada em `docs/arquitetura.md` §4.18).
+
+**Pré-requisito das abas de detalhamento (16/08/2026).** O
+`Det-<Nome>` por colaborador, o hiperlink na visão geral e o destaque de
+início/fim de cada bloco só aparecem com o script **v3.0** publicado (passo 6
+acima). Sem republicar, a exportação segue funcionando — apenas sem essas
+partes. Nada disso exige migração: as abas viajam no `payload` jsonb do
+ticket, e a conferência equivalente na tela (Remuneração → clicar no Realizado
+de um fator) independe do Apps Script.

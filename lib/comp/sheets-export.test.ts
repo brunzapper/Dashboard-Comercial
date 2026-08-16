@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 16/08/2026
+// v1.3: payload v3 — detailTabName (sanitização/truncamento/desempate), kinds
+// de detalhe na whitelist e validação de `links`/`details` (coerência com as
+// rows, nomes únicos, colisão com a aba do mês e tetos próprios).
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: kinds novos do layout por pessoa (planHeader/memberTotal) aceitos.
 // v1.1: payload v2 — kinds obrigatório (paralelo às rows, whitelist
@@ -8,9 +12,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COMP_SHEET_KINDS,
+  MAX_DETAIL_ROWS_TOTAL,
+  MAX_DETAIL_SHEETS,
   MAX_PAYLOAD_BYTES,
   MAX_REPORT_ROWS,
+  MAX_TAB_NAME,
   TICKET_TTL_MIN,
+  detailTabName,
   isCompSheetsWebappUrl,
   isSpreadsheetId,
   isSpreadsheetUrl,
@@ -169,7 +178,8 @@ describe("validateReportPayload", () => {
     ).toBe(false);
     expect(validateReportPayload({ ...base, title: "" }).ok).toBe(false);
     expect(
-      validateReportPayload({ ...base, tabName: "x".repeat(81) }).ok
+      validateReportPayload({ ...base, tabName: "x".repeat(MAX_TAB_NAME + 1) })
+        .ok
     ).toBe(false);
     expect(validateReportPayload({ ...base, headers: [] }).ok).toBe(false);
     expect(
@@ -194,5 +204,108 @@ describe("validateReportPayload", () => {
         kinds: rows.map(() => "summary"),
       }).ok
     ).toBe(false);
+  });
+});
+
+describe("detailTabName", () => {
+  it("prefixa, higieniza os caracteres proibidos e colapsa espaços", () => {
+    const taken = new Set<string>();
+    expect(detailTabName("Ana Souza", taken)).toBe("Det-Ana Souza");
+    expect(detailTabName("Bruno [SDR] / Vendas", taken)).toBe(
+      "Det-Bruno SDR Vendas"
+    );
+    expect(detailTabName("", taken)).toBe("Det-colaborador");
+  });
+
+  it("desempata homônimos e respeita o limite de nome de aba", () => {
+    const taken = new Set<string>();
+    expect(detailTabName("Ana", taken)).toBe("Det-Ana");
+    expect(detailTabName("Ana", taken)).toBe("Det-Ana (2)");
+    expect(detailTabName("Ana", taken)).toBe("Det-Ana (3)");
+    const longo = detailTabName("x".repeat(200), taken);
+    expect(longo).toHaveLength(MAX_TAB_NAME);
+    const longo2 = detailTabName("x".repeat(200), taken);
+    expect(longo2).toHaveLength(MAX_TAB_NAME);
+    expect(longo2).not.toBe(longo);
+  });
+});
+
+describe("validateReportPayload — links e abas de detalhe (v3)", () => {
+  const base = {
+    title: "Remuneração — Visão geral",
+    tabName: "Agosto 2026",
+    headers: ["A", "B"],
+    rows: [["x", 1.5]] as (string | number)[][],
+    kinds: ["section"],
+  };
+  const aba = (tabName: string, linhas = 1) => ({
+    tabName,
+    headers: ["A", "B"],
+    rows: Array.from({ length: linhas }, () => ["y", 2]) as (
+      | string
+      | number
+    )[][],
+    kinds: Array.from({ length: linhas }, () => "detailRow" as const),
+    links: Array.from({ length: linhas }, () => null),
+  });
+
+  it("kinds de detalhe estão na whitelist", () => {
+    for (const k of [
+      "detailBack",
+      "detailFactor",
+      "detailFactorMoney",
+      "detailRow",
+      "detailRowMoney",
+      "detailSubtotal",
+      "detailSubtotalMoney",
+    ])
+      expect(COMP_SHEET_KINDS).toContain(k);
+  });
+
+  it("payload v3 completo passa", () => {
+    expect(
+      validateReportPayload({
+        ...base,
+        links: ["Det-Ana"],
+        details: [aba("Det-Ana")],
+      })
+    ).toEqual({ ok: true });
+  });
+
+  it("links com comprimento diferente das rows falham", () => {
+    expect(
+      validateReportPayload({ ...base, links: ["Det-Ana", null] }).ok
+    ).toBe(false);
+  });
+
+  it("aba de detalhe duplicada ou colidindo com a do mês falha", () => {
+    expect(
+      validateReportPayload({
+        ...base,
+        details: [aba("Det-Ana"), aba("Det-Ana")],
+      }).ok
+    ).toBe(false);
+    expect(
+      validateReportPayload({ ...base, details: [aba("Agosto 2026")] }).ok
+    ).toBe(false);
+  });
+
+  it("aba de detalhe malformada falha pelas MESMAS regras da aba do mês", () => {
+    const quebrada = { ...aba("Det-Ana"), kinds: ["linhaMagica"] };
+    expect(validateReportPayload({ ...base, details: [quebrada] }).ok).toBe(
+      false
+    );
+  });
+
+  it("tetos de abas e de linhas somadas do detalhamento", () => {
+    const muitas = Array.from({ length: MAX_DETAIL_SHEETS + 1 }, (_, i) =>
+      aba(`Det-${i}`)
+    );
+    expect(validateReportPayload({ ...base, details: muitas }).ok).toBe(false);
+    const gordas = [
+      aba("Det-Ana", MAX_DETAIL_ROWS_TOTAL),
+      aba("Det-Bruno", 1),
+    ];
+    expect(validateReportPayload({ ...base, details: gordas }).ok).toBe(false);
   });
 });

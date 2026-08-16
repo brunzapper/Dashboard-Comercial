@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+// Versão: 1.3 | Data: 16/08/2026
+// v1.3: payload v3 — o clique no export manda o roster (`members`, com o nome
+// da aba Det-<Nome>) e os `links` por linha; e o Realizado de cada fator abre
+// o painel de conferência (a action de detalhe é mockada — server-only).
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: botão "Google Planilhas" (0115) — sem config, admin vê só o
 // "Configurar…"; configurado, o clique abre a aba SINCRONAMENTE
@@ -31,6 +35,27 @@ import type {
 // O botão de Sheets importa as actions (server-only) e o popover usa o router.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
+}));
+vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
+  loadCompFactorDetail: vi.fn(async () => ({
+    ok: true as const,
+    planName: "Plano A",
+    memberLabel: "Ana",
+    apuracaoShifted: false,
+    detail: {
+      factorId: "reunioes",
+      label: "Reuniões",
+      money: false,
+      valueLabel: "Registros",
+      aggNote: "Contagem de registros · 2 registros no recorte",
+      realized: 44,
+      listedSum: 2,
+      rows: [],
+      total: 2,
+      truncated: false,
+      warnings: [],
+    },
+  })),
 }));
 vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(async () => ({
@@ -275,6 +300,15 @@ describe("CompOverview", () => {
     expect(arg.rows.flat().some((c) => typeof c === "number")).toBe(true);
     // Título do demonstrativo viaja em headers (linha 1 da aba).
     expect(arg.headers[0]).toContain("Demonstrativo de remuneração");
+    // Payload v3: roster p/ o servidor montar as abas + links por linha.
+    expect(arg.links).toHaveLength(arg.rows.length);
+    expect(arg.members).toEqual([
+      { id: "r_ana", label: "Ana", tabName: "Det-Ana" },
+      { id: "r_bruno", label: "Bruno", tabName: "Det-Bruno" },
+    ]);
+    // Toda aba referenciada por um link existe no roster.
+    const abas = new Set(arg.members!.map((m) => m.tabName));
+    for (const l of arg.links!) if (l != null) expect(abas.has(l)).toBe(true);
     await waitFor(() =>
       expect(fakeWin.location.href).toContain(
         "https://script.google.com/macros/s/x/exec?token="
@@ -292,6 +326,25 @@ describe("CompOverview", () => {
     renderOverview("https://script.google.com/macros/s/x/exec");
     fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
     await waitFor(() => expect(fakeWin.close).toHaveBeenCalled());
+  });
+
+  it("Realizado do fator abre a conferência dos registros", async () => {
+    const { loadCompFactorDetail } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    const gatilhos = screen.getAllByTitle(
+      "Ver os registros que compõem este realizado"
+    );
+    expect(gatilhos.length).toBeGreaterThan(0);
+    fireEvent.click(gatilhos[0]);
+    await waitFor(() =>
+      expect(vi.mocked(loadCompFactorDetail)).toHaveBeenCalled()
+    );
+    const arg = vi.mocked(loadCompFactorDetail).mock.calls[0][0];
+    expect(arg).toMatchObject({ year: 2026, month: 8 });
+    expect(arg.planId).toBeTruthy();
+    expect(arg.memberId).toBeTruthy();
   });
 
   it("preferência salva abre por pessoa; 'Usar como padrão' grava a chave", async () => {

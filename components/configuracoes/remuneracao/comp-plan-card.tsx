@@ -1,3 +1,7 @@
+// Versão: 1.1 | Data: 16/08/2026
+// v1.1: prop OPCIONAL onOpenFactorDetail — o Realizado do fator vira gatilho
+// da conferência dos registros por trás do número (CompDetailPanel). Só a
+// Visão geral do admin passa a prop; sem ela o card é idêntico ao de antes.
 // Versão: 1.0 | Data: 01/08/2026
 // Card de detalhamento de UM lançamento (plano × membro × mês) — extraído da
 // my-comp-view para ser o card ÚNICO da visão do vendedor E da Visão geral do
@@ -86,6 +90,11 @@ export function CompPlanCard(props: {
   // Cabeçalho do card — default: nome do plano (Visão geral por plano passa o
   // nome do MEMBRO; por pessoa, o default já serve).
   title?: string;
+  // Conferência dos registros por trás do realizado. AUSENTE = card sem
+  // gatilho (é assim na visão do vendedor: a RLS de `records` dele não alcança
+  // registros de fator casado por memberField, e o detalhe sairia parcial sem
+  // explicação). Sem a prop o card renderiza exatamente como antes.
+  onOpenFactorDetail?: (factorId: string) => void;
 }) {
   const config = parseCompPlanConfig(props.plan.config);
   if (!config) return null;
@@ -165,7 +174,20 @@ export function CompPlanCard(props: {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {b.overridden.realized ? <OverrideDot /> : null}
-                  {b.realized != null ? fmt(b.realized) : "—"}
+                  {props.onOpenFactorDetail ? (
+                    <button
+                      type="button"
+                      className="hover:text-primary underline-offset-2 hover:underline"
+                      title="Ver os registros que compõem este realizado"
+                      onClick={() => props.onOpenFactorDetail?.(f.id)}
+                    >
+                      {b.realized != null ? fmt(b.realized) : "—"}
+                    </button>
+                  ) : b.realized != null ? (
+                    fmt(b.realized)
+                  ) : (
+                    "—"
+                  )}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {b.overridden.attainmentPct ? <OverrideDot /> : null}
