@@ -1,3 +1,11 @@
+// Versão: 3.1 | Data: 17/08/2026
+// v3.1: MEMÓRIA DE CÁLCULO no detalhamento — kinds novos `detailMemory` (linha
+// explicativa) e `detailTier`/`detailTierApplied` (escada de faixas, com a
+// aplicada em negrito). O valor do degrau vem como TEXTO já formatado (a
+// unidade muda por tipo de bloco), então essas linhas NÃO levam formato de
+// moeda; o subtotal passa a trazer realizado e somado lado a lado (colunas E e
+// F). Script 3.0 renderiza os kinds novos como texto puro — republique p/ ver
+// os estilos.
 // Versão: 3.0 | Data: 16/08/2026
 // Apps Script — Export da Remuneração p/ Google Planilhas (Web App).
 // v3.0: ABAS DE DETALHAMENTO + navegação + bloco da pessoa destacado.
@@ -250,19 +258,22 @@ var MOEDA_POR_KIND_ = {
   // puro mostra o valor cru.
   detailFactorMoney: [[6, 6]],
   detailRowMoney: [[6, 6]],
-  detailSubtotalMoney: [[6, 6]]
+  // Subtotal: E = realizado do fator, F = soma dos registros listados.
+  detailSubtotalMoney: [[5, 6]]
 };
 var PCT_POR_KIND_ = { factor: [[4, 5]], factorMoney: [[4, 5]] };
 var BOLD_KINDS_ = {
   summaryHeader: 1, summaryTotal: 1, section: 1, planHeader: 1,
   detailHeader: 1, blockTotal: 1, memberTotal: 1,
-  detailFactor: 1, detailFactorMoney: 1, detailSubtotal: 1, detailSubtotalMoney: 1
+  detailFactor: 1, detailFactorMoney: 1, detailSubtotal: 1, detailSubtotalMoney: 1,
+  // A faixa APLICADA é a que explica o valor pago — destacada entre os degraus.
+  detailTierApplied: 1
 };
 var HEADER_BG_KINDS_ = {
   summaryHeader: 1, planHeader: 1, detailHeader: 1,
   detailFactor: 1, detailFactorMoney: 1
 };
-var NOTA_KINDS_ = { info: 1, note: 1, detailBack: 1 };
+var NOTA_KINDS_ = { info: 1, note: 1, detailBack: 1, detailMemory: 1 };
 var COL_LETRAS_ = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
 // Fórmula de link interno. A API do Apps Script usa SEMPRE vírgula como

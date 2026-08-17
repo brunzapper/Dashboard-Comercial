@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 17/08/2026
+// v1.2: memória de cálculo — a conta do payout no cabeçalho, "cada X vale
+// R$ Y", a escada de faixas (com as NÃO alcançadas visíveis e a aplicada
+// marcada), o bloco de comissão do plano e a coluna de origem do bloco somado.
 // Versão: 1.1 | Data: 16/08/2026
 // v1.1: o detalhamento é por OPERANDO — os testes cobrem o sub-bloco por
 // operando e, principalmente, que fator com 2+ operandos NÃO emite nota de
@@ -11,8 +15,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   DETAIL_BACK_NOTE,
-  DETAIL_COMBINED_NOTE,
+  DETAIL_DIVERGE_MARK,
   DETAIL_EMPTY_NOTE,
+  DETAIL_TIER_APPLIED,
+  DETAIL_TIER_MISSED,
+  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailFactor,
@@ -51,6 +58,8 @@ const operando = (
       stage: "Ganho",
       value: 100,
       valueText: "R$ 100,00",
+      contribution: 12.5,
+      origin: "Soma de Valor",
     },
     {
       id: "r2",
@@ -61,6 +70,8 @@ const operando = (
       stage: "Ganho",
       value: 200,
       valueText: "R$ 200,00",
+      contribution: 25,
+      origin: "Soma de Valor",
     },
   ],
   ...over,
@@ -71,6 +82,10 @@ const fator = (over: Partial<CompDetailFactor> = {}): CompDetailFactor => ({
   label: "Vendas",
   money: true,
   realized: 300,
+  payoutFormula: null,
+  unitValue: null,
+  unitLabel: "Vendas",
+  commissions: [],
   operands: [operando()],
   listedForCompare: 300,
   warnings: [],
@@ -82,7 +97,9 @@ const membro = (over: Partial<CompDetailMember> = {}): CompDetailMember => ({
   label: "Ana",
   tabName: "Det-Ana",
   monthTotal: 1050,
-  plans: [{ planId: "p1", planName: "Plano A", factors: [fator()] }],
+  plans: [
+    { planId: "p1", planName: "Plano A", factors: [fator()], commissions: [] },
+  ],
   ...over,
 });
 
@@ -96,6 +113,7 @@ const planoCom = (f: CompDetailFactor) => ({
   planId: "p1",
   planName: "Plano A",
   factors: [f],
+  commissions: [],
 });
 
 const kindsDe = (
@@ -129,7 +147,8 @@ describe("compDetailSheets", () => {
     const header = kindsDe(sheet, "detailFactorMoney")[0];
     expect(header[0]).toBe("Vendas");
     expect(header[5]).toBe(300); // realizado OFICIAL, cru
-    expect(header[6]).toContain("Soma de Valor");
+    // A coluna de texto é MEMÓRIA agora: a conta do payout, não prosa.
+    expect(header[6]).toBe("");
 
     const colunas = kindsDe(sheet, "detailHeader")[0];
     expect(colunas).toEqual([
@@ -139,7 +158,7 @@ describe("compDetailSheets", () => {
       "Responsável",
       "Etapa",
       "Valor",
-      "Observações",
+      "Vale (R$)",
     ]);
 
     const linhas = kindsDe(sheet, "detailRowMoney");
@@ -151,14 +170,16 @@ describe("compDetailSheets", () => {
       "Ana",
       "Ganho",
       200,
-      "",
+      25, // quanto ESTE registro vale para a remuneração
     ]);
 
     const subtotal = kindsDe(sheet, "detailSubtotalMoney")[0];
     // O subtotal fecha o OPERANDO (é dele o recorte), não o fator.
     expect(subtotal[0]).toBe("Subtotal — Soma de Valor");
+    // Confronto NUMÉRICO: realizado (E) x somado (F), sem frase.
+    expect(subtotal[4]).toBe(300);
     expect(subtotal[5]).toBe(300);
-    expect(norm(String(subtotal[6]))).toContain("Confere com o realizado");
+    expect(subtotal[6]).toBe("");
   });
 
   it("fator não-monetário usa os kinds sem moeda", () => {
@@ -197,8 +218,9 @@ describe("compDetailSheets", () => {
     );
     const subtotal = kindsDe(sheet, "detailSubtotalMoney")[0];
     expect(subtotal[5]).toBe(300); // a soma listada segue sendo a soma listada
-    expect(kindsDe(sheet, "detailFactorMoney")[0][5]).toBe(500); // e o oficial, o oficial
-    expect(norm(String(subtotal[6]))).toContain("Difere do realizado");
+    expect(subtotal[4]).toBe(500); // e o oficial, o oficial — lado a lado
+    expect(kindsDe(sheet, "detailFactorMoney")[0][5]).toBe(500);
+    expect(subtotal[6]).toBe(DETAIL_DIVERGE_MARK);
   });
 
   it("fator com 2+ operandos: um bloco cada e NENHUM alarme de divergência", () => {
@@ -227,11 +249,117 @@ describe("compDetailSheets", () => {
       "Soma de Valor",
       "Soma de MRR",
     ]);
-    expect(norm(String(headers[0][6]))).toBe(norm(DETAIL_COMBINED_NOTE));
     const subtotais = kindsDe(sheet, "detailSubtotalMoney");
     expect(subtotais.map((r) => r[5])).toEqual([300, 80]);
-    // O ponto da correção: nada de "difere do realizado" numa combinação.
-    for (const st of subtotais) expect(st[6]).toBe("");
+    // Nada de confronto numa combinação: sem realizado ao lado, sem marca.
+    for (const st of subtotais) {
+      expect(st[4]).toBe("");
+      expect(st[6]).toBe("");
+    }
+  });
+
+  it("memória do fator: a conta do payout e quanto vale cada unidade", () => {
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            planoCom(
+              fator({
+                payoutFormula: "R$ 1.000,00 × 60% × 90% = R$ 540,00",
+                unitValue: 12.5,
+                unitLabel: "reunião",
+              })
+            ),
+          ],
+        }),
+      ],
+      OPTS
+    );
+    // A coluna de texto do cabeçalho é a CONTA, não prosa explicativa.
+    expect(kindsDe(sheet, "detailFactorMoney")[0][6]).toBe(
+      "R$ 1.000,00 × 60% × 90% = R$ 540,00"
+    );
+    const memoria = kindsDe(sheet, "detailMemory").map((r) => norm(String(r[0])));
+    expect(memoria[0]).toBe("Cada R$ 1,00 de realizado vale R$ 12,50.");
+  });
+
+  it("escada: as faixas NÃO alcançadas aparecem, a aplicada vem marcada", () => {
+    const comissao = {
+      blockId: "premio",
+      label: "Prêmio por reunião",
+      kind: "per_unit" as const,
+      tierBy: "realized" as const,
+      triggerMoney: false,
+      formula: "44 (Reuniões) × R$ 12,50 = R$ 550,00",
+      tierNote: "faixa a partir de 40 (Reuniões: 44)",
+      memberTiers: false,
+      value: 550,
+      tiers: [
+        { fromPct: 0, amount: 10, applied: false, reached: true },
+        { fromPct: 40, amount: 12.5, applied: true, reached: true },
+        { fromPct: 80, amount: 15, applied: false, reached: false },
+      ],
+    };
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            {
+              planId: "p1",
+              planName: "Plano A",
+              factors: [fator({ commissions: [comissao], unitValue: 12.5 })],
+              commissions: [comissao],
+            },
+          ],
+        }),
+      ],
+      OPTS
+    );
+    // Dentro do fator E como bloco próprio do plano: a escada sai duas vezes.
+    const aplicada = kindsDe(sheet, "detailTierApplied");
+    const demais = kindsDe(sheet, "detailTier");
+    expect(aplicada).toHaveLength(2);
+    expect(demais).toHaveLength(4);
+    expect(aplicada[0][0]).toBe("A partir de 40");
+    expect(norm(String(aplicada[0][5]))).toBe("R$ 12,50");
+    expect(aplicada[0][6]).toBe(DETAIL_TIER_APPLIED);
+    // A faixa de cima fica VISÍVEL — é ela que explica o valor aplicado.
+    const naoAlcancada = demais.find((r) => r[0] === "A partir de 80");
+    expect(naoAlcancada?.[6]).toBe(DETAIL_TIER_MISSED);
+    // O bloco de comissão do plano leva o valor que soma no total.
+    const cabecalhos = kindsDe(sheet, "detailFactorMoney").map((r) => r[0]);
+    expect(cabecalhos.filter((l) => l === "Prêmio por reunião")).toHaveLength(2);
+  });
+
+  it("bloco somado: a coluna de responsável vira a ORIGEM da linha", () => {
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            planoCom(
+              fatorCom(
+                [
+                  operando({
+                    label: SOMADOS_LABEL,
+                    valueLabel: "Valor",
+                    rows: [
+                      {
+                        ...operando().rows[0],
+                        origin: "Soma de MRR",
+                      },
+                    ],
+                  }),
+                ],
+                { listedForCompare: null }
+              )
+            ),
+          ],
+        }),
+      ],
+      OPTS
+    );
+    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Operando");
+    expect(kindsDe(sheet, "detailRowMoney")[0][3]).toBe("Soma de MRR");
   });
 
   it("operando sem registros: nota de vazio, sem cabeçalho nem subtotal", () => {
@@ -259,11 +387,7 @@ describe("compDetailSheets", () => {
       [
         membro({
           plans: [
-            {
-              planId: "p1",
-              planName: "Plano A",
-              factors: [fator({ warnings: ["Aviso de teste"] })],
-            },
+            planoCom(fator({ warnings: ["Aviso de teste"] })),
           ],
         }),
       ],

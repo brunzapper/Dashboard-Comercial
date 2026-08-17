@@ -1,10 +1,14 @@
+// Versão: 1.6 | Data: 17/08/2026
+// v1.6: MEMÓRIA DE CÁLCULO no lugar da prosa. A conferência virou NUMÉRICA
+// (realizado × somado lado a lado, com `DETAIL_DIVERGE_MARK` discreto), então
+// `detailReconcileNote` e `DETAIL_COMBINED_NOTE` saíram — no lugar entraram
+// `detailUnitValueNote` (quanto vale uma unidade), a escada de faixas
+// (`detailTierLabel`/`detailTierValue`/`detailTierMark`) e `SOMADOS_LABEL`.
 // Versão: 1.5 | Data: 16/08/2026
 // v1.5: o detalhamento passou a ser por OPERANDO da fórmula, então a
-// conferência só compara quando há um número único a confrontar
-// (detailReconcileNote com `listed` nulo devolve "" em vez de acusar
-// divergência). DETAIL_SCOPED_SOURCE_NOTE saiu (o escopo de fonte agora é
-// tratado, não avisado); entraram DETAIL_UNSUPPORTED_FIELD_NOTE e
-// DETAIL_COMBINED_NOTE.
+// conferência só compara quando há um número único a confrontar.
+// DETAIL_SCOPED_SOURCE_NOTE saiu (o escopo de fonte agora é tratado, não
+// avisado); entrou DETAIL_UNSUPPORTED_FIELD_NOTE.
 // Versão: 1.4 | Data: 16/08/2026
 // v1.4: frases do DETALHAMENTO por registro (`detail*`/`DETAIL_*`) —
 // compartilhadas pelo diálogo de conferência da tela e pelas abas Det-<Nome>
@@ -305,8 +309,8 @@ export const DETAIL_DROPPED_FILTER_NOTE =
 export const DETAIL_UNSUPPORTED_FIELD_NOTE =
   "Este operando agrega um campo que a listagem não consegue recortar (campo unificado ou de registro casado) — os registros abaixo podem ser mais amplos que o do cálculo.";
 
-export const DETAIL_COMBINED_NOTE =
-  "O valor do fator combina os operandos abaixo — confira cada bloco pelo seu próprio subtotal.";
+/** Rótulo do bloco que reúne os operandos não separados pela engrenagem. */
+export const SOMADOS_LABEL = "Somados";
 
 /** Cabeçalho do bloco do fator: o que a coluna de valor mostra e o tamanho do recorte. */
 export function detailAggNote(aggLabel: string, total: number): string {
@@ -320,24 +324,58 @@ export function detailTruncatedNote(shown: number, total: number): string {
 }
 
 /**
- * Confronto entre a quantidade listada e o realizado OFICIAL do fator. Só é
- * chamada quando existe algo a confrontar — fórmula de UM operando puro, em que
- * o valor do fator É a soma (ou a contagem) daquele recorte. `listed` nulo
- * significa "não há número único a comparar": devolve "" em vez de acusar uma
- * divergência que não existe.
+ * Quanto UMA unidade do realizado vale — a frase que fecha o elo entre o
+ * registro e o dinheiro. `unitLabel` é o que se conta (ex.: "reunião"); sem
+ * ele, cai em "registro". Caminho `weight`: o realizado é um MONTANTE, então
+ * a frase fala de R$ 1,00, não de unidade.
  */
-export function detailReconcileNote(
-  realized: number | null,
-  listed: number | null,
+export function detailUnitValueNote(
+  perUnit: number,
+  kind: "commission" | "weight",
+  unitLabel?: string
+): string {
+  const valor = fmtMoneyBRL(perUnit);
+  if (kind === "weight")
+    return `Cada ${fmtMoneyBRL(1)} de realizado vale ${valor}.`;
+  return `Cada ${unitLabel || "registro"} vale ${valor}.`;
+}
+
+/** Limiar de um degrau da escada, na unidade do gatilho. */
+export function detailTierLabel(
+  fromPct: number,
+  tierBy: "attainment" | "realized",
   money: boolean
 ): string {
-  if (listed == null) return "";
-  if (realized == null) return "Realizado não apurado neste mês.";
-  const fmt = money ? fmtMoneyBRL : fmtNumBR;
-  if (Math.abs(realized - listed) < 0.01)
-    return "Confere com o realizado do fator.";
-  return `Difere do realizado (${fmt(realized)}) — revise o recorte do fator.`;
+  if (tierBy === "attainment") return `A partir de ${fmtNumBR(fromPct)}%`;
+  return `A partir de ${money ? fmtMoneyBRL(fromPct) : fmtNumBR(fromPct)}`;
 }
+
+/**
+ * Valor do degrau JÁ formatado — a unidade muda por tipo de bloco (% na
+ * comissão percentual, R$ nas de valor fixo/por unidade), então mandar texto é
+ * mais honesto que um número cru que a planilha formataria de um jeito só.
+ */
+export function detailTierValue(
+  rung: { ratePct?: number; amount?: number },
+  kind: "pct" | "flat" | "per_unit"
+): string {
+  if (kind === "pct")
+    return rung.ratePct != null ? `${fmtNumBR(rung.ratePct)}%` : "";
+  return rung.amount != null ? fmtMoneyBRL(rung.amount) : "";
+}
+
+/** Marcador do degrau: a aplicada, as alcançadas e as que ficaram acima. */
+export const DETAIL_TIER_APPLIED = "faixa aplicada";
+export const DETAIL_TIER_REACHED = "alcançada";
+export const DETAIL_TIER_MISSED = "não alcançada";
+
+export function detailTierMark(applied: boolean, reached: boolean): string {
+  if (applied) return DETAIL_TIER_APPLIED;
+  return reached ? DETAIL_TIER_REACHED : DETAIL_TIER_MISSED;
+}
+
+/** Marca discreta de divergência no subtotal (os números ficam lado a lado). */
+export const DETAIL_DIVERGE_MARK = "≠ realizado";
 
 /** Nota da linha "Total" do bloco no demonstrativo. */
 export function sheetTotalNote(breakdown: CompBreakdown): string {

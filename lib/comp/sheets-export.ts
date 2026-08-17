@@ -79,6 +79,10 @@ export const COMP_SHEET_KINDS = [
   "detailRowMoney",
   "detailSubtotal",
   "detailSubtotalMoney",
+  // v3.1 — memória de cálculo: linha de explicação e escada de faixas.
+  "detailMemory",
+  "detailTier",
+  "detailTierApplied",
 ] as const;
 
 export type CompSheetRowKind = (typeof COMP_SHEET_KINDS)[number];

@@ -51,6 +51,10 @@ import {
   CompDetailPanel,
   type CompDetailTarget,
 } from "./comp-detail-panel";
+import {
+  CompGroupingDialog,
+  type CompGroupingTarget,
+} from "./comp-grouping-dialog";
 import { CompPlanCard } from "./comp-plan-card";
 import {
   CompReportPrint,
@@ -137,6 +141,10 @@ export function CompOverview(props: CompOverviewProps) {
   const [detailTarget, setDetailTarget] = useState<CompDetailTarget | null>(
     null
   );
+  // Engrenagem do agrupamento dos blocos (config POR PLANO) — instância única
+  // içada, como o painel de detalhe.
+  const [groupingTarget, setGroupingTarget] =
+    useState<CompGroupingTarget | null>(null);
 
   const { cells, invalidPlans } = useMemo(() => {
     const byId = new Map(props.responsibles.map((r) => [r.id, r]));
@@ -311,6 +319,9 @@ export function CompOverview(props: CompOverviewProps) {
             memberLabel: c.member.label,
             factorId,
           })
+        }
+        onOpenGrouping={() =>
+          setGroupingTarget({ planId: c.plan.id, planName: c.plan.name })
         }
       />
     ) : (
@@ -490,6 +501,13 @@ export function CompOverview(props: CompOverviewProps) {
         year={props.year}
         month={props.month}
         onClose={() => setDetailTarget(null)}
+      />
+
+      <CompGroupingDialog
+        target={groupingTarget}
+        year={props.year}
+        month={props.month}
+        onClose={() => setGroupingTarget(null)}
       />
     </div>
   );

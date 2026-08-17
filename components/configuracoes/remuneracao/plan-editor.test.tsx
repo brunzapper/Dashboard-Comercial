@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// Versão: 1.1 | Data: 17/08/2026
+// v1.1: mesma regra do presetKey para `detailGrouping` (engrenagem dos blocos
+// do detalhamento) — o editor não o edita, mas precisa RE-EMITI-LO no save.
 // Versão: 1.0 | Data: 01/08/2026
 // Testes do editor de planos — round-trip das CONDIÇÕES DO RECORTE
 // (factor.filters, v1.5): o save RE-EMITE os filtros do config (antes o
@@ -101,6 +104,15 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     // O resto do fator segue intacto (memberField incluso).
     expect(payload.config.factors[0].memberField).toBe("custom:sdr_reuniao");
     expect(notifyActionError).not.toHaveBeenCalled();
+  });
+
+  it("save RE-EMITE detailGrouping (senão a engrenagem sumiria no 1º save)", async () => {
+    const grouping = { separateByFactor: { f_r: ["count:*"] } };
+    renderEditor(makeConfig({ detailGrouping: grouping }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.detailGrouping).toEqual(grouping);
   });
 
   it("condição com valor vazio é erro amigável e o savePlan nem dispara", async () => {

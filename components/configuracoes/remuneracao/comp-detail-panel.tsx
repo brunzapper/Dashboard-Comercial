@@ -39,13 +39,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  DETAIL_COMBINED_NOTE,
   DETAIL_EMPTY_NOTE,
-  detailReconcileNote,
+  detailTierLabel,
+  detailTierMark,
+  detailTierValue,
+  detailUnitValueNote,
   fmtMoneyBRL,
   fmtNumBR,
+  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
-import type { CompDetailFactor, CompDetailOperand } from "@/lib/comp/detail";
+import type {
+  CompDetailCommission,
+  CompDetailFactor,
+  CompDetailOperand,
+} from "@/lib/comp/detail";
 import { MONTH_LABELS } from "@/lib/date/month-labels";
 
 const PAGE_SIZE = 50;
@@ -78,11 +85,11 @@ function fmtValue(v: number | null, money: boolean): string {
 
 function Summary(props: { detail: CompDetailFactor }) {
   const { detail } = props;
-  const multi = detail.operands.length > 1;
-  const note = multi
-    ? DETAIL_COMBINED_NOTE
-    : detailReconcileNote(detail.realized, detail.listedForCompare, detail.money);
   const registros = detail.operands.reduce((a, o) => a + o.total, 0);
+  const diverge =
+    detail.listedForCompare != null &&
+    detail.realized != null &&
+    Math.abs(detail.realized - detail.listedForCompare) >= 0.01;
   return (
     <div className="bg-muted/40 flex flex-col gap-2 rounded-md border p-3">
       <div className="flex flex-wrap gap-x-8 gap-y-2">
@@ -92,13 +99,15 @@ function Summary(props: { detail: CompDetailFactor }) {
             {fmtValue(detail.realized, detail.money)}
           </div>
         </div>
-        {/* Só faz sentido confrontar quando a fórmula é um operando puro. */}
+        {/* Confronto NUMÉRICO — só existe com um número único a comparar. */}
         {detail.listedForCompare != null ? (
           <div>
             <div className="text-muted-foreground text-xs">
               Registros listados somam
             </div>
-            <div className="text-base font-semibold">
+            <div
+              className={`text-base font-semibold${diverge ? " text-destructive" : ""}`}
+            >
               {fmtValue(detail.listedForCompare, detail.money)}
             </div>
           </div>
@@ -108,7 +117,71 @@ function Summary(props: { detail: CompDetailFactor }) {
           <div className="text-base font-semibold">{fmtNumBR(registros)}</div>
         </div>
       </div>
-      {note ? <p className="text-muted-foreground text-xs">{note}</p> : null}
+      {/* Memória: a conta do valor e quanto cada unidade vale. */}
+      {detail.payoutFormula ? (
+        <p className="text-xs tabular-nums">{detail.payoutFormula}</p>
+      ) : null}
+      {detail.unitValue != null ? (
+        <p className="text-xs font-medium">
+          {detailUnitValueNote(
+            detail.unitValue,
+            detail.commissions.length > 0 ? "commission" : "weight",
+            detail.unitLabel
+          )}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Escada de faixas de um bloco de comissão, com a aplicada destacada. */
+function CommissionBlock(props: { commission: CompDetailCommission }) {
+  const c = props.commission;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">{c.label}</h3>
+        <span className="font-semibold">{fmtMoneyBRL(c.value)}</span>
+      </div>
+      {c.formula ? (
+        <p className="text-xs tabular-nums">{c.formula}</p>
+      ) : null}
+      <p className="text-muted-foreground text-xs">{c.tierNote}</p>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Faixa</TableHead>
+              <TableHead className="text-right">
+                {c.kind === "pct" ? "Taxa" : "Valor"}
+              </TableHead>
+              <TableHead>Situação</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {c.tiers.map((t, i) => (
+              <TableRow
+                key={`${i}-${t.fromPct}`}
+                className={t.applied ? "font-semibold" : undefined}
+              >
+                <TableCell>
+                  {detailTierLabel(t.fromPct, c.tierBy, c.triggerMoney)}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {detailTierValue(t, c.kind)}
+                </TableCell>
+                <TableCell
+                  className={
+                    t.applied ? undefined : "text-muted-foreground text-xs"
+                  }
+                >
+                  {detailTierMark(t.applied, t.reached)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
@@ -120,6 +193,7 @@ function OperandBlock(props: {
   showLabel: boolean;
 }) {
   const { operand, money } = props;
+  const merged = operand.label === SOMADOS_LABEL;
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(operand.rows.length / PAGE_SIZE));
   const slice = operand.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -150,11 +224,12 @@ function OperandBlock(props: {
                   <TableHead>Data</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead>Base</TableHead>
-                  <TableHead>Responsável</TableHead>
+                  <TableHead>{merged ? "Operando" : "Responsável"}</TableHead>
                   <TableHead>Etapa</TableHead>
                   <TableHead className="text-right">
                     {operand.valueLabel}
                   </TableHead>
+                  <TableHead className="text-right">Vale</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -163,10 +238,17 @@ function OperandBlock(props: {
                     <TableCell className="whitespace-nowrap">{r.date}</TableCell>
                     <TableCell>{r.title}</TableCell>
                     <TableCell>{r.sourceLabel}</TableCell>
-                    <TableCell>{r.responsibleLabel}</TableCell>
+                    <TableCell>
+                      {merged ? r.origin : r.responsibleLabel}
+                    </TableCell>
                     <TableCell>{r.stage}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {r.value != null ? fmtValue(r.value, money) : r.valueText}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      {r.contribution != null
+                        ? fmtMoneyBRL(r.contribution)
+                        : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -295,6 +377,9 @@ function DetailBody(props: {
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                 <span>{w}</span>
               </p>
+            ))}
+            {detail.commissions.map((c) => (
+              <CommissionBlock key={c.blockId} commission={c} />
             ))}
             {detail.operands.length === 0 ? (
               <p className="text-muted-foreground text-sm">{DETAIL_EMPTY_NOTE}</p>

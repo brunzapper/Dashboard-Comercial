@@ -1,3 +1,8 @@
+// Versão: 1.4 | Data: 17/08/2026
+// v1.4: `detailGrouping` (agrupamento dos blocos do detalhamento). Pino do
+// round-trip — o parse descarta chave desconhecida e o savePlan grava o objeto
+// PARSEADO, então sem cláusula a config sumiria no 1º save do editor (a mesma
+// armadilha do presetKey). Cláusula LENIENTE: sujeira some, o config vive.
 // Versão: 1.3 | Data: 01/08/2026
 // v1.3: recorte do fator (factor.filters) — parse endurecido: só os 10 ops de
 // UI (FILTER_OPS; internos eq_ci/*_num rejeitados), `in` normalizado p/ array
@@ -311,6 +316,41 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(reparse(moedaRuim)).toBeNull();
     const pkVazio = makeConfig({ presetKey: "" as unknown as string });
     expect(reparse(pkVazio)).toBeNull();
+  });
+
+  it("detailGrouping sobrevive ao round-trip (senão o save do editor o apagaria)", () => {
+    const cfg = makeConfig({
+      detailGrouping: { separateByFactor: { f_a: ["sum:value", "sum:value"] } },
+    });
+    const parsed = reparse(cfg);
+    // Chave duplicada colapsa; a config chega inteira do outro lado do parse.
+    expect(parsed!.detailGrouping).toEqual({
+      separateByFactor: { f_a: ["sum:value"] },
+    });
+  });
+
+  it("detailGrouping é LENIENTE: sujeira some, o resto do config segue vivo", () => {
+    const parsed = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: {
+        separateByFactor: {
+          f_a: ["sum:value", "", 7],
+          f_fantasma: ["sum:value"], // fator que não existe
+          f_b: "nao-e-lista",
+        },
+      },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.detailGrouping).toEqual({
+      separateByFactor: { f_a: ["sum:value"] },
+    });
+    // Vazio depois da limpeza = chave ausente (volta ao padrão), não mapa vazio.
+    const semNada = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: { separateByFactor: { f_fantasma: ["x"] } },
+    });
+    expect(semNada).not.toBeNull();
+    expect("detailGrouping" in semNada!).toBe(false);
   });
 
   it("apuracao: preserva mes_anterior, normaliza mes_corrente p/ ausência e rejeita inválido", () => {
