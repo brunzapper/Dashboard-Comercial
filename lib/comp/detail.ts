@@ -27,7 +27,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   DETAIL_DROPPED_FILTER_NOTE,
-  DETAIL_SCOPED_SOURCE_NOTE,
+  DETAIL_UNSUPPORTED_FIELD_NOTE,
   detailAggNote,
   detailTruncatedNote,
 } from "@/lib/comp/commission-label";
@@ -41,22 +41,38 @@ import { loadSources } from "@/lib/config/sources";
 import { statementBreakdown } from "@/lib/export/comp";
 import {
   recordCellValue,
+  recordColumnValue,
   recordRefLabel,
   resolveRecordRef,
   type RecordLabels,
 } from "@/lib/export/record-cells";
+import { isCoreDef } from "@/lib/records/core-defs";
+import { expandAggFormula } from "@/lib/records/formula-deps";
+import type { AggCondition } from "@/lib/records/formulas";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
-import type { SourceDef } from "@/lib/sources";
-import { parseAggRef } from "@/lib/widgets/calc-metrics";
+import type { SourceDef, SourceKey } from "@/lib/sources";
+import {
+  basisKeysFor,
+  basisMetric,
+  lowerSourceScopedOperands,
+  parseCondBasisKey,
+} from "@/lib/widgets/calc-metrics";
 import { loadCurrencyRates, yearQuarterOf } from "@/lib/widgets/currency";
 import { buildAvailableFields, type AvailableField } from "@/lib/widgets/fields";
-import type { DashboardPeriod } from "@/lib/widgets/period";
+import { formulaScopedSources } from "@/lib/widgets/metric-sources";
+import { scopedAuxPeriod, type DashboardPeriod } from "@/lib/widgets/period";
 import {
   listFilterFieldSupported,
   runRecordListWindow,
 } from "@/lib/widgets/record-list";
 import { createTaskLimiter, WIDGET_TASK_CONCURRENCY } from "@/lib/widgets/task-limiter";
-import { AGG_LABELS, type WidgetConfig } from "@/lib/widgets/types";
+import {
+  AGG_LABELS,
+  type Aggregation,
+  type FilterOp,
+  type WidgetConfig,
+  type WidgetFilter,
+} from "@/lib/widgets/types";
 
 import {
   loadTargetsByMember,
@@ -98,28 +114,47 @@ export interface CompDetailRecordRow {
   sourceLabel: string;
   responsibleLabel: string;
   stage: string;
-  /** Operando agregado principal, CRU (a formatação é da planilha/da tela). */
+  /** Valor do campo DESTE operando, CRU (a formatação é da planilha/da tela). */
   value: number | null;
-  /** Demais operandos da fórmula: "Campo: v · Campo2: v". */
-  extras: string;
+  /** Texto do campo quando ele não é numérico (unified:/match:). */
+  valueText: string;
+}
+
+/**
+ * Um OPERANDO da fórmula do fator — a unidade real do cálculo. Cada operando
+ * tem recorte próprio (fontes, condições de SOMASE, escopo de fonte), então
+ * cada um vira um bloco com sua própria lista e seu próprio subtotal.
+ */
+export interface CompDetailOperand {
+  /** "Soma de MRR do contrato" | "Contagem de registros". */
+  label: string;
+  /** Rótulo da coluna de valor ("MRR do contrato" | "Registros"). */
+  valueLabel: string;
+  /** "Soma de MRR do contrato · 42 registros no recorte". */
+  aggNote: string;
+  rows: CompDetailRecordRow[];
+  /** Σ da coluna listada; null quando o campo não é somável (unified:/match:). */
+  listedSum: number | null;
+  /** Tamanho do recorte inteiro (contagem exata), mesmo com lista truncada. */
+  total: number;
+  truncated: boolean;
+  warnings: string[];
 }
 
 export interface CompDetailFactor {
   factorId: string;
   label: string;
   money: boolean;
-  /** Rótulo da coluna de valor ("Valor", "Registros"…). */
-  valueLabel: string;
-  /** "Soma de Valor · 42 registros no recorte". */
-  aggNote: string;
   /** AUTORIDADE — realizado efetivo do fator (computeEntry). */
   realized: number | null;
-  /** Σ da coluna listada; null quando somar não faz sentido (média/mín/máx). */
-  listedSum: number | null;
-  rows: CompDetailRecordRow[];
-  /** Tamanho do recorte inteiro (contagem exata), mesmo com lista truncada. */
-  total: number;
-  truncated: boolean;
+  operands: CompDetailOperand[];
+  /**
+   * Quantidade listada que DEVE bater com o realizado — só existe quando a
+   * fórmula é UM operando puro (Σ de uma soma, contagem de uma contagem).
+   * Fórmula que combina operandos não tem um número único a confrontar, e
+   * inventar um seria o alarme falso que essa tela existe para evitar.
+   */
+  listedForCompare: number | null;
   warnings: string[];
 }
 
@@ -292,44 +327,148 @@ export async function loadCompDetailContext(
   };
 }
 
-/** Coluna de valor por registro derivada de um operando `agg:` da fórmula. */
-export interface FactorValueColumn {
-  ref: string;
-  agg: string;
+/**
+ * Um operando da fórmula, já resolvido para consulta. Espelha 1:1 uma chave de
+ * basis do runCalculatedWidget — que é a unidade real de consulta do cálculo.
+ */
+export interface FactorOperand {
+  /** Campo agregado ("*" = contagem de linhas). */
+  field: string;
+  /** Agregações que a fórmula pede sobre este campo (avg emite sum + count). */
+  aggs: Set<Aggregation>;
+  /** Condições do SOMASE/CONT.SE e/ou o predicado do escopo de fonte. */
+  conds: AggCondition[];
+  /** Fonte do operando escopado (`agg:…@<fonte>`), quando houver. */
+  scope?: SourceKey;
+  /** Rótulo do campo p/ a coluna de valor. */
+  fieldLabel: string;
+  /** "Soma de MRR do contrato" | "Contagem de registros". */
   label: string;
 }
 
+/** Agregação efetiva do operando: sum+count juntos vieram de uma MÉDIA. */
+function effectiveAgg(aggs: Set<Aggregation>): Aggregation {
+  if (aggs.has("sum") && aggs.has("count")) return "avg";
+  return aggs.has("sum") ? "sum" : "count";
+}
+
+function operandLabel(field: string, agg: Aggregation, fieldLabel: string): string {
+  if (agg === "count" && (field === "*" || !field)) return "Contagem de registros";
+  return `${AGG_LABELS[agg]} de ${fieldLabel}`;
+}
+
 /**
- * Operandos agregados da fórmula do fator, em ordem de aparição e sem repetir
- * o mesmo campo. Contagens (`agg:count:*`) não viram coluna — a evidência
- * delas é a própria existência da linha.
+ * OPERANDOS do fator, reproduzindo o lowering do runCalculatedWidget passo a
+ * passo (expandAggFormula → lowerSourceScopedOperands → basisKeysFor). É o que
+ * garante que a listagem enxergue o MESMO recorte do cálculo: campo calculado
+ * agregado aninhado já expandido, operando com escopo de fonte já abaixado para
+ * chave condicional, e as condições de SOMASE presentes.
+ *
+ * Chaves de basis do mesmo recorte (mesmo campo + mesmas condições + mesmo
+ * escopo) colapsam num operando só — uma MÉDIA gera `sum:` e `count:` sobre a
+ * mesma consulta e não deve virar dois blocos idênticos.
  */
-export function factorValueColumns(
-  factor: CompFactor,
-  allFields: FieldDefinition[]
-): FactorValueColumn[] {
-  const out: FactorValueColumn[] = [];
-  const seen = new Set<string>();
-  for (const token of factor.formula?.tokens ?? []) {
-    if (token.kind !== "field" || !token.ref.startsWith("agg:")) continue;
-    const { agg, field } = parseAggRef(token.ref);
-    if (agg === "count" || field === "*" || field === "id") continue;
-    if (seen.has(field)) continue;
-    seen.add(field);
-    out.push({ ref: field, agg, label: recordRefLabel(field, allFields) });
+export function factorOperands(
+  ctx: CompDetailContext,
+  factor: CompFactor
+): FactorOperand[] {
+  const fieldByKey = new Map(
+    ctx.allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
+  const expanded = expandAggFormula(factor.formula, (k) => fieldByKey.get(k));
+  const lowered = lowerSourceScopedOperands(expanded, ctx.sources);
+
+  const byRecorte = new Map<string, FactorOperand>();
+  for (const key of basisKeysFor(lowered)) {
+    const cond = parseCondBasisKey(key);
+    const metric = basisMetric(key);
+    const field = metric.field || "*";
+    const conds = cond?.conds ?? [];
+    const scope = cond?.scope;
+    const gk = JSON.stringify([field, conds, scope ?? null]);
+    const cur = byRecorte.get(gk);
+    if (cur) {
+      cur.aggs.add(metric.agg);
+      continue;
+    }
+    byRecorte.set(gk, {
+      field,
+      aggs: new Set([metric.agg]),
+      conds,
+      ...(scope ? { scope } : {}),
+      fieldLabel: recordRefLabel(field, ctx.allFields),
+      label: "",
+    });
+  }
+
+  return [...byRecorte.values()].map((op) => {
+    const agg = effectiveAgg(op.aggs);
+    return { ...op, label: operandLabel(op.field, agg, op.fieldLabel) };
+  });
+}
+
+/**
+ * Condições do operando (SOMASE / predicado do escopo) como filtros que o MODO
+ * LISTA sabe aplicar. NÃO dá para reusar o `condFilters` do RPC aqui: ele emite
+ * operadores INTERNOS (`eq_ci`/`neq_ci`/`*_num`, normalizados na 0050) que o
+ * funil da listagem não traduz e DESCARTA em silêncio — o filtro sumiria e o
+ * recorte voltaria a ser "tudo do responsável", que é justamente o bug que este
+ * módulo corrige. O mapeamento é direto e sem operador interno.
+ *
+ * Limitação assumida: o RPC compara texto normalizado (trim + minúsculas) e
+ * número com cast; aqui a comparação é literal. Valor gravado fora do padrão
+ * pode ficar de FORA da listagem — erra para menos, nunca para mais.
+ */
+function listCondFilters(conds: AggCondition[]): WidgetFilter[] {
+  const OPS: Record<string, FilterOp> = {
+    "=": "eq",
+    "<>": "neq",
+    "<": "lt",
+    ">": "gt",
+    "<=": "lte",
+    ">=": "gte",
+  };
+  const out: WidgetFilter[] = [];
+  for (const c of conds) {
+    if (c.op === "is_null" || c.op === "not_null") {
+      out.push({ field: c.ref, op: c.op });
+      continue;
+    }
+    if (c.op === "in") {
+      out.push({
+        field: c.ref,
+        op: "in",
+        value: Array.isArray(c.value) ? c.value : [c.value],
+      });
+      continue;
+    }
+    const op = OPS[c.op];
+    if (!op) continue;
+    out.push({
+      field: c.ref,
+      op,
+      value: typeof c.value === "boolean" ? String(c.value) : c.value,
+    });
   }
   return out;
 }
 
-/** Fontes citadas por operandos com escopo `@<fonte>` na fórmula do fator. */
-function scopedSourceKeys(factor: CompFactor): string[] {
-  const out = new Set<string>();
-  for (const token of factor.formula?.tokens ?? []) {
-    if (token.kind !== "field" || !token.ref.startsWith("agg:")) continue;
-    const { source } = parseAggRef(token.ref);
-    if (source) out.add(source);
-  }
-  return [...out];
+/**
+ * Predicado de "registro útil" para um operando, derivado do SQL da RPC
+ * (0054): `sum`/`avg` operam sobre `nullif(campo,'')::numeric` e `count(campo)`
+ * conta `nullif(campo,'')` — ou seja, campo vazio/nulo NÃO contribui. Sem esse
+ * recorte a listagem enche de linhas "R$ 0,00" que o cálculo ignorou.
+ * `count(*)` (campo "*") não filtra nada: ali o recorte É a linha.
+ */
+function nonEmptyFilters(field: string): WidgetFilter[] {
+  if (!field || field === "*") return [];
+  if (!listFilterFieldSupported(field)) return [];
+  const out: WidgetFilter[] = [{ field, op: "not_null" }];
+  // custom:<k> mora como TEXTO no jsonb — string vazia existe e o RPC a
+  // descarta. Coluna numérica do núcleo não leva o `neq ""` (o PostgREST
+  // rejeitaria o literal vazio num numérico).
+  if (field.startsWith("custom:")) out.push({ field, op: "neq", value: "" });
+  return out;
 }
 
 export type FactorQuery =
@@ -337,14 +476,19 @@ export type FactorQuery =
   | { ok: false; error: string };
 
 /**
- * CHOKE POINT do recorte — espelha o que recomputePlanMonth manda ao
- * runCalculatedWidget. A ordem dos filtros (`factor.filters` e DEPOIS o filtro
- * de membro) é carregada: mantenha idêntica à do engine.
+ * CHOKE POINT do recorte de UM operando — espelha a consulta que o
+ * runCalculatedWidget dispara para a chave de basis correspondente:
+ *  - universo: fontes do fator ∪ fontes dos operandos escopados; operando COM
+ *    escopo roda como perna só da fonte dele (e com a coluna de data DELA);
+ *  - filtros, nesta ordem: `factor.filters` → filtro de membro → condições do
+ *    operando (SOMASE / predicado do escopo) → recorte de "campo preenchido".
+ * A ordem dos dois primeiros é carregada: mantenha idêntica à do engine.
  */
-export function factorRecordQuery(
+export function operandRecordQuery(
   ctx: CompDetailContext,
   plan: DetailPlan,
   factor: CompFactor,
+  operand: FactorOperand,
   memberId: string
 ): FactorQuery {
   const memberFilter = memberFilterFor(factor, memberId, ctx.canon, ctx.nameById);
@@ -353,27 +497,53 @@ export function factorRecordQuery(
   const warnings: string[] = [];
   if ((factor.filters ?? []).some((f) => !listFilterFieldSupported(f.field)))
     warnings.push(DETAIL_DROPPED_FILTER_NOTE);
+  if (operand.field !== "*" && !listFilterFieldSupported(operand.field))
+    warnings.push(DETAIL_UNSUPPORTED_FIELD_NOTE);
+
   const factorSources = factor.sources ?? [];
-  if (
-    factorSources.length > 0 &&
-    scopedSourceKeys(factor).some((k) => !factorSources.includes(k))
-  )
-    warnings.push(DETAIL_SCOPED_SOURCE_NOTE);
+  const sources = operand.scope
+    ? [operand.scope]
+    : factorSources.length > 0
+      ? [...new Set([...factorSources, ...scopedSourcesOf(ctx, factor)])]
+      : factorSources;
+  // Operando escopado janela pela coluna de data da PRÓPRIA fonte (mesma regra
+  // da perna auxiliar do engine).
+  const period = operand.scope
+    ? (scopedAuxPeriod(plan.period, operand.scope, ctx.sources) ?? plan.period)
+    : plan.period;
 
   return {
     ok: true,
     warnings,
-    period: plan.period,
+    period,
     config: {
       source: "records",
-      sources: factorSources,
+      sources,
       dimensions: [],
       metrics: [],
-      filters: [...(factor.filters ?? []), memberFilter],
+      filters: [
+        ...(factor.filters ?? []),
+        memberFilter,
+        ...listCondFilters(operand.conds),
+        ...nonEmptyFilters(operand.field),
+      ],
       visual_type: "tabela",
       settings: { rowMode: "records" },
     },
   };
+}
+
+/** Fontes citadas por operandos com escopo, já na fórmula EXPANDIDA. */
+function scopedSourcesOf(
+  ctx: CompDetailContext,
+  factor: CompFactor
+): SourceKey[] {
+  const fieldByKey = new Map(
+    ctx.allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
+  return formulaScopedSources(
+    expandAggFormula(factor.formula, (k) => fieldByKey.get(k))
+  );
 }
 
 function planStatement(plan: DetailPlan, memberId: string, label: string) {
@@ -393,15 +563,16 @@ function planStatement(plan: DetailPlan, memberId: string, label: string) {
 function toDetailRow(
   record: RecordRow,
   ctx: CompDetailContext,
-  cols: FactorValueColumn[],
+  operand: FactorOperand,
   labels: RecordLabels,
   period: DashboardPeriod
 ): CompDetailRecordRow {
   const root = ctx.rootByRecordType.get(record.record_type);
   const dateRef =
     (root && period.fieldBySource?.[root.key]) ?? period.field ?? "closed_at";
-  const primary = cols[0];
-  const raw = primary ? Number(resolveRecordRef(record, primary.ref)) : 1;
+  // `count(*)` não tem campo: cada linha vale 1 (é o que a contagem soma).
+  const numeric =
+    operand.field === "*" ? 1 : Number(resolveRecordRef(record, operand.field));
   return {
     id: record.id,
     date: recordCellValue(record, dateRef, ctx.allFields, labels),
@@ -414,51 +585,41 @@ function toDetailRow(
       labels
     ),
     stage: recordCellValue(record, "stage", ctx.allFields, labels),
-    value: Number.isFinite(raw) ? raw : null,
-    extras: cols
-      .slice(1)
-      .map(
-        (c) => `${c.label}: ${recordCellValue(record, c.ref, ctx.allFields, labels)}`
-      )
-      .join(" · "),
+    value: Number.isFinite(numeric) ? numeric : null,
+    // recordColumnValue (não recordCellValue): resolve também `unified:` e
+    // `match:`, que podem ser o campo do operando.
+    valueText:
+      operand.field === "*"
+        ? ""
+        : recordColumnValue(
+            record,
+            operand.field,
+            ctx.allFields,
+            labels,
+            ctx.available
+          ),
   };
 }
 
-/**
- * Registros de UM membro × fator (janela de MAX_DETAIL_ROWS_PER_FACTOR, com a
- * contagem exata do recorte). `realized` vem de FORA (do breakdown do plano) —
- * nunca é derivado das linhas.
- */
-export async function loadFactorRecords(
+/** Registros de UM operando (janela + contagem exata do recorte). */
+async function loadOperandRecords(
   supabase: SupabaseClient,
   ctx: CompDetailContext,
   plan: DetailPlan,
   factor: CompFactor,
-  memberId: string,
-  realized: number | null,
-  rowBudget = MAX_DETAIL_ROWS_PER_FACTOR
-): Promise<CompDetailFactor> {
-  const cols = factorValueColumns(factor, ctx.allFields);
-  const primary = cols[0];
-  const valueLabel = primary ? primary.label : "Registros";
-  const aggLabel = primary
-    ? `${AGG_LABELS[primary.agg as keyof typeof AGG_LABELS] ?? primary.agg} de ${primary.label}`
-    : "Contagem de registros";
-  const base = {
-    factorId: factor.id,
-    label: factor.label,
-    money: factor.money,
-    valueLabel,
-    realized,
-  };
-
-  const query = factorRecordQuery(ctx, plan, factor, memberId);
+  operand: FactorOperand,
+  rowBudget: number,
+  memberId: string
+): Promise<CompDetailOperand> {
+  const valueLabel = operand.field === "*" ? "Registros" : operand.fieldLabel;
+  const query = operandRecordQuery(ctx, plan, factor, operand, memberId);
   if (!query.ok) {
     return {
-      ...base,
-      aggNote: aggLabel,
-      listedSum: null,
+      label: operand.label,
+      valueLabel,
+      aggNote: operand.label,
       rows: [],
+      listedSum: null,
       total: 0,
       truncated: false,
       warnings: [query.error],
@@ -476,28 +637,112 @@ export async function loadFactorRecords(
   );
   const kept = rows.slice(0, maxRows);
   const detailRows = kept.map((r) =>
-    toDetailRow(r, ctx, cols, ctx.fkLabels, query.period)
+    toDetailRow(r, ctx, operand, ctx.fkLabels, query.period)
   );
-  // Somar só faz sentido para soma/contagem — média/mín/máx não se reconstroem
-  // por adição, e um Σ ali sugeriria uma conferência que não existe.
-  const summable = !primary || primary.agg === "sum";
-  const listedSum = summable
-    ? detailRows.reduce((a, r) => a + (r.value ?? 0), 0)
-    : null;
+  // Campo que o modo lista não sabe resolver (unified:/match:) não vira Σ — um
+  // número ali seria pior que a ausência dele.
+  const summable =
+    operand.field === "*" || listFilterFieldSupported(operand.field);
   const truncated = total > kept.length;
 
   const warnings = [...query.warnings];
   if (truncated) warnings.push(detailTruncatedNote(kept.length, total));
 
   return {
-    ...base,
-    aggNote: detailAggNote(aggLabel, total),
-    listedSum,
+    label: operand.label,
+    valueLabel,
+    aggNote: detailAggNote(operand.label, total),
     rows: detailRows,
+    listedSum:
+      summable && !truncated
+        ? detailRows.reduce((a, r) => a + (r.value ?? 0), 0)
+        : null,
     total,
     truncated,
     warnings,
   };
+}
+
+/**
+ * Registros de UM membro × fator, um bloco por OPERANDO da fórmula (é assim que
+ * o cálculo consulta). `realized` vem de FORA (do breakdown do plano) — nunca é
+ * derivado das linhas.
+ */
+export async function loadFactorRecords(
+  supabase: SupabaseClient,
+  ctx: CompDetailContext,
+  plan: DetailPlan,
+  factor: CompFactor,
+  memberId: string,
+  realized: number | null,
+  rowBudget = MAX_DETAIL_ROWS_PER_FACTOR
+): Promise<CompDetailFactor> {
+  const operands = factorOperands(ctx, factor);
+  const base = {
+    factorId: factor.id,
+    label: factor.label,
+    money: factor.money,
+    realized,
+    warnings: [] as string[],
+  };
+  if (operands.length === 0) {
+    return { ...base, operands: [], listedForCompare: null };
+  }
+
+  // Orçamento repartido entre os operandos do fator (o teto por fator continua
+  // valendo p/ o conjunto).
+  const perOperand = Math.max(
+    1,
+    Math.floor(Math.max(0, rowBudget) / operands.length)
+  );
+  const blocks: CompDetailOperand[] = [];
+  for (const operand of operands) {
+    blocks.push(
+      await loadOperandRecords(
+        supabase,
+        ctx,
+        plan,
+        factor,
+        operand,
+        perOperand,
+        memberId
+      )
+    );
+  }
+
+  return {
+    ...base,
+    operands: blocks,
+    listedForCompare: comparableQuantity(ctx, factor, operands, blocks),
+  };
+}
+
+/**
+ * Quantidade listada confrontável com o realizado. Existe SÓ quando a fórmula
+ * é um operando puro (um único token de campo): aí o valor do fator É a soma
+ * (ou a contagem) daquele recorte e a conferência é exata. Qualquer combinação
+ * — média, diferença de somas, constante — não tem um número único a comparar.
+ */
+function comparableQuantity(
+  ctx: CompDetailContext,
+  factor: CompFactor,
+  operands: FactorOperand[],
+  blocks: CompDetailOperand[]
+): number | null {
+  if (operands.length !== 1 || blocks.length !== 1) return null;
+  const fieldByKey = new Map(
+    ctx.allFields.filter((f) => !isCoreDef(f)).map((f) => [f.field_key, f])
+  );
+  const lowered = lowerSourceScopedOperands(
+    expandAggFormula(factor.formula, (k) => fieldByKey.get(k)),
+    ctx.sources
+  );
+  if (lowered.tokens.length !== 1 || lowered.tokens[0].kind !== "field")
+    return null;
+  const agg = effectiveAgg(operands[0].aggs);
+  if (agg === "count") return blocks[0].total;
+  if (agg === "sum") return blocks[0].listedSum;
+  return null; // média: o Σ das linhas não é o valor do operando
 }
 
 export type FactorDetailResult =
@@ -598,7 +843,8 @@ export async function loadCompDetail(
           realized,
           take
         );
-        budget += take - detail.rows.length;
+        const usadas = detail.operands.reduce((a, o) => a + o.rows.length, 0);
+        budget += take - usadas;
         results.set(`${member.id}:${plan.row.id}:${factor.id}`, detail);
       })
     )

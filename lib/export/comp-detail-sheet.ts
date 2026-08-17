@@ -1,3 +1,9 @@
+// Versão: 1.1 | Data: 16/08/2026
+// v1.1: um sub-bloco por OPERANDO da fórmula (é assim que o cálculo consulta —
+// ver lib/comp/detail.ts). Com um operando só, o cabeçalho do fator já o
+// descreve e a conferência mora no subtotal; com dois ou mais, cada operando
+// ganha cabeçalho e subtotal próprios e o fator avisa que o valor vem da
+// combinação — nada de comparar um Σ que não corresponde ao número.
 // Versão: 1.0 | Data: 16/08/2026
 // Builder PURO das abas de DETALHAMENTO por colaborador (Det-<Nome>) do export
 // p/ Google Planilhas — payload v3. Consome a matriz do núcleo
@@ -14,12 +20,14 @@
 // abas Det-* órfãs são removidas pelo script.
 import {
   DETAIL_BACK_NOTE,
+  DETAIL_COMBINED_NOTE,
   DETAIL_EMPTY_NOTE,
   detailReconcileNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailFactor,
   CompDetailMember,
+  CompDetailOperand,
 } from "@/lib/comp/detail";
 import type {
   CompSheetPayloadSheet,
@@ -41,11 +49,60 @@ function detailHeaderCells(valueLabel: string): SheetCell[] {
   ];
 }
 
+function pushOperand(
+  operand: CompDetailOperand,
+  money: boolean,
+  // Rótulo próprio só quando o fator tem mais de um operando — com um só, o
+  // cabeçalho do fator já disse tudo e repetir seria ruído.
+  withHeader: boolean,
+  reconcileNote: string,
+  push: (kind: CompSheetRowKind, cells: SheetCell[], link?: string | null) => void
+) {
+  if (withHeader) {
+    push(money ? "detailFactorMoney" : "detailFactor", [
+      operand.label,
+      "",
+      "",
+      "",
+      "",
+      "",
+      operand.aggNote,
+    ]);
+  }
+  for (const warning of operand.warnings) push("info", [warning]);
+  if (operand.rows.length === 0) {
+    push("info", [DETAIL_EMPTY_NOTE]);
+    return;
+  }
+  push("detailHeader", detailHeaderCells(operand.valueLabel));
+  for (const r of operand.rows) {
+    push(money ? "detailRowMoney" : "detailRow", [
+      r.date,
+      r.title,
+      r.sourceLabel,
+      r.responsibleLabel,
+      r.stage,
+      r.value ?? r.valueText,
+      "",
+    ]);
+  }
+  push(money ? "detailSubtotalMoney" : "detailSubtotal", [
+    `Subtotal — ${operand.label}`,
+    "",
+    "",
+    "",
+    "",
+    operand.listedSum ?? "",
+    reconcileNote,
+  ]);
+}
+
 function pushFactor(
   factor: CompDetailFactor,
   push: (kind: CompSheetRowKind, cells: SheetCell[], link?: string | null) => void
 ) {
   const money = factor.money;
+  const multi = factor.operands.length > 1;
   push(money ? "detailFactorMoney" : "detailFactor", [
     factor.label,
     "",
@@ -53,34 +110,28 @@ function pushFactor(
     "",
     "",
     factor.realized ?? "",
-    factor.aggNote,
+    multi ? DETAIL_COMBINED_NOTE : (factor.operands[0]?.aggNote ?? ""),
   ]);
   for (const warning of factor.warnings) push("info", [warning]);
-  if (factor.rows.length === 0) {
+  if (factor.operands.length === 0) {
     push("info", [DETAIL_EMPTY_NOTE]);
     return;
   }
-  push("detailHeader", detailHeaderCells(factor.valueLabel));
-  for (const r of factor.rows) {
-    push(money ? "detailRowMoney" : "detailRow", [
-      r.date,
-      r.title,
-      r.sourceLabel,
-      r.responsibleLabel,
-      r.stage,
-      r.value ?? "",
-      r.extras,
-    ]);
+  // A conferência só existe quando há um número único a confrontar (fórmula de
+  // um operando puro) — nesse caso ela mora ao lado do Σ, no subtotal.
+  const reconcile = multi
+    ? ""
+    : detailReconcileNote(factor.realized, factor.listedForCompare, money);
+  for (let i = 0; i < factor.operands.length; i += 1) {
+    if (i > 0) push("blank", []);
+    pushOperand(
+      factor.operands[i],
+      money,
+      multi,
+      multi ? "" : reconcile,
+      push
+    );
   }
-  push(money ? "detailSubtotalMoney" : "detailSubtotal", [
-    `Subtotal — ${factor.label}`,
-    "",
-    "",
-    "",
-    "",
-    factor.listedSum ?? "",
-    detailReconcileNote(factor.realized, factor.listedSum, money),
-  ]);
 }
 
 /**

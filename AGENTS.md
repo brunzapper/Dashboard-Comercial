@@ -747,10 +747,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   IMPORTADO de `engine.ts`) e a consulta é `runRecordListWindow`; a coluna de
   valor vem dos operandos `agg:` da fórmula (`parseAggRef`; contagem não vira
   coluna) e `listedSum` só existe para soma/contagem — média/mín/máx não somam.
-  Divergência ESTRUTURAL vira aviso visível, nunca silêncio: filtro em campo
-  fora da whitelist do modo lista (`listFilterFieldSupported`, exportado de
-  `record-list.ts` ao lado do `filterColumn` que o descarta) e operando com
-  escopo `@fonte` fora de `factor.sources`. Consulta sempre pelo client RLS do
+  **O recorte é por OPERANDO, nunca por fator (16/08/2026):** o realizado não
+  sai de UMA consulta — `runCalculatedWidget` decompõe a fórmula e dispara uma
+  por recorte. `factorOperands` repete a MESMA sequência do choke point
+  (`expandAggFormula` → `lowerSourceScopedOperands` → `basisKeysFor` →
+  `basisMetric`/`parseCondBasisKey`) e `operandRecordQuery` monta o recorte de
+  cada operando: universo `factor.sources ∪ formulaScopedSources` (operando com
+  escopo roda SÓ na fonte dele, com a coluna de data DELA via
+  `scopedAuxPeriod`), filtros `factor.filters` → membro → `condFilters` do
+  SOMASE/escopo → **campo preenchido**. Esse último vem do SQL da RPC
+  (`sum(nullif(campo,'')::numeric)`, `count(nullif(campo,''))`): campo vazio
+  NÃO contribui, e listá-lo enchia a tela de linhas R$ 0,00; `count(*)` não
+  filtra nada. Chaves de basis do mesmo recorte colapsam num operando
+  (MÉDIA emite sum+count). Um bloco por operando, com subtotal próprio.
+  **A conferência só compara quando há um número único a confrontar**
+  (`listedForCompare`: fórmula de um operando puro ⇒ Σ para soma, contagem do
+  recorte para contagem) — fórmula combinada exibe `DETAIL_COMBINED_NOTE` em
+  vez de acusar divergência inexistente. Divergência ESTRUTURAL segue como
+  aviso visível: filtro em campo fora da whitelist do modo lista
+  (`listFilterFieldSupported`, exportado de `record-list.ts` ao lado do
+  `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
+  (sem Σ, `DETAIL_UNSUPPORTED_FIELD_NOTE`). Consulta sempre pelo client RLS do
   usuário — NUNCA service role. **Payload v3:** `details` (uma
   `CompSheetPayloadSheet` por colaborador) + `links` paralelo às rows (nome da
   aba alvo; o `gid` só existe no Apps Script — a fórmula `=HYPERLINK("#gid=…")`
