@@ -1,3 +1,11 @@
+<!-- Versão: 1.68 | Data: 16/08/2026 -->
+<!-- v1.68 (16/08/2026): §4.18 — CORREÇÃO do recorte do detalhamento: passa a
+     ser por OPERANDO (factorOperands/operandRecordQuery espelham
+     expandAggFormula → lowerSourceScopedOperands → basisKeysFor), com as
+     condições de SOMASE, o escopo de fonte (universo + data própria) e o
+     recorte de "campo preenchido" derivado do SQL da RPC. A conferência só
+     compara quando há número único (listedForCompare); fórmula combinada não
+     acusa mais divergência falsa. -->
 <!-- Versão: 1.67 | Data: 16/08/2026 -->
 <!-- v1.67 (16/08/2026): §4.18 — DETALHAMENTO por registro da Remuneração:
      núcleo único lib/comp/detail.ts (factorRecordQuery espelha o recorte do
@@ -3087,9 +3095,37 @@ total opcional por plano.
   contagem não vira coluna — a evidência é a própria linha). Divergência
   ESTRUTURAL entre lista e agregação vira aviso visível, nunca silêncio:
   filtro em campo que o modo lista descarta (`listFilterFieldSupported`,
-  exportado ao lado do `filterColumn` que o derruba) e operando com escopo
-  `@fonte` fora de `factor.sources` (o `runCalculatedWidget` une essa fonte,
-  a lista não). No payload, `details` leva uma aba por colaborador e `links`
+  exportado ao lado do `filterColumn` que o derruba) e operando que agrega um
+  campo `unified:`/`match:` (bloco sem Σ, em vez de um número errado).
+  **O recorte é por OPERANDO (correção de 16/08/2026).** A primeira versão
+  montava UMA consulta por fator e errava por três motivos ao mesmo tempo:
+  trazia todos os registros do responsável (as condições de um `SOMASE` ficavam
+  de fora), enchia a lista de linhas "R$ 0,00" (registros com o campo agregado
+  vazio, que o banco ignora) e às vezes devolvia "0 registros" com realizado
+  positivo (operando com escopo de fonte ou campo `calculado_agg` aninhado, que
+  agregam sobre uma base fora de `factor.sources`). A causa raiz é que o
+  realizado nunca sai de uma consulta só: `runCalculatedWidget` decompõe a
+  fórmula em operandos e dispara uma consulta por recorte distinto. Então
+  `factorOperands` repete a MESMA sequência do choke point (`expandAggFormula`
+  → `lowerSourceScopedOperands` → `basisKeysFor` →
+  `basisMetric`/`parseCondBasisKey`) e `operandRecordQuery` monta, por
+  operando: universo `factor.sources ∪ formulaScopedSources` — operando com
+  escopo roda SÓ na fonte dele e janela pela coluna de data DELA
+  (`scopedAuxPeriod`, o mesmo helper da perna auxiliar do engine) — e filtros
+  na ordem `factor.filters` → membro → `condFilters` (SOMASE/predicado do
+  escopo) → **campo preenchido**. Esse último recorte é lido do SQL da RPC, não
+  inventado: `sum`/`avg` operam sobre `nullif(campo,'')::numeric` e
+  `count(campo)` conta `nullif(campo,'')`, logo campo vazio não contribui;
+  `count(*)` não filtra nada, porque ali o recorte É a linha. Registro com
+  valor ZERO permanece na lista — ele conta na quantidade e soma zero, e
+  escondê-lo faria a contagem listada divergir da oficial. Chaves de basis do
+  mesmo recorte colapsam num operando só (uma MÉDIA emite `sum:` e `count:`
+  sobre a mesma consulta e não deve virar dois blocos). Cada operando vira um
+  bloco com subtotal próprio, e a **conferência só compara quando existe um
+  número único a confrontar** (`listedForCompare`, preenchido apenas quando a
+  fórmula é um operando puro: Σ para soma, contagem do recorte para contagem) —
+  fórmula que combina operandos mostra `DETAIL_COMBINED_NOTE` em vez do alarme
+  falso de divergência que a primeira versão produzia. No payload, `details` leva uma aba por colaborador e `links`
   (paralelo às rows) o NOME da aba alvo — o `gid` só existe dentro do Apps
   Script, então a fórmula `=HYPERLINK("#gid=…")` é montada LÁ, o que obriga o
   script a rodar em DUAS PASSADAS (cria/limpa tudo, colhe os ids, depois

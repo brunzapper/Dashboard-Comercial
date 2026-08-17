@@ -1,3 +1,10 @@
+// Versão: 1.5 | Data: 16/08/2026
+// v1.5: o detalhamento passou a ser por OPERANDO da fórmula, então a
+// conferência só compara quando há um número único a confrontar
+// (detailReconcileNote com `listed` nulo devolve "" em vez de acusar
+// divergência). DETAIL_SCOPED_SOURCE_NOTE saiu (o escopo de fonte agora é
+// tratado, não avisado); entraram DETAIL_UNSUPPORTED_FIELD_NOTE e
+// DETAIL_COMBINED_NOTE.
 // Versão: 1.4 | Data: 16/08/2026
 // v1.4: frases do DETALHAMENTO por registro (`detail*`/`DETAIL_*`) —
 // compartilhadas pelo diálogo de conferência da tela e pelas abas Det-<Nome>
@@ -295,8 +302,11 @@ export const DETAIL_EMPTY_NOTE =
 export const DETAIL_DROPPED_FILTER_NOTE =
   "Uma condição do fator não pôde ser aplicada nesta listagem — os registros abaixo podem ser mais amplos que o recorte usado no cálculo.";
 
-export const DETAIL_SCOPED_SOURCE_NOTE =
-  "A fórmula do fator usa dados de bases fora desta listagem — os registros abaixo cobrem apenas as bases do recorte.";
+export const DETAIL_UNSUPPORTED_FIELD_NOTE =
+  "Este operando agrega um campo que a listagem não consegue recortar (campo unificado ou de registro casado) — os registros abaixo podem ser mais amplos que o do cálculo.";
+
+export const DETAIL_COMBINED_NOTE =
+  "O valor do fator combina os operandos abaixo — confira cada bloco pelo seu próprio subtotal.";
 
 /** Cabeçalho do bloco do fator: o que a coluna de valor mostra e o tamanho do recorte. */
 export function detailAggNote(aggLabel: string, total: number): string {
@@ -310,22 +320,23 @@ export function detailTruncatedNote(shown: number, total: number): string {
 }
 
 /**
- * Confronto entre a soma da coluna listada e o realizado OFICIAL do fator.
- * Divergência não é erro: fórmula composta, operando de outra base ou condição
- * não reproduzível fazem a soma direta não bater — a frase diz isso sem
- * sugerir que um dos dois números esteja errado.
+ * Confronto entre a quantidade listada e o realizado OFICIAL do fator. Só é
+ * chamada quando existe algo a confrontar — fórmula de UM operando puro, em que
+ * o valor do fator É a soma (ou a contagem) daquele recorte. `listed` nulo
+ * significa "não há número único a comparar": devolve "" em vez de acusar uma
+ * divergência que não existe.
  */
 export function detailReconcileNote(
   realized: number | null,
-  listedSum: number | null,
+  listed: number | null,
   money: boolean
 ): string {
+  if (listed == null) return "";
   if (realized == null) return "Realizado não apurado neste mês.";
-  if (listedSum == null) return "";
   const fmt = money ? fmtMoneyBRL : fmtNumBR;
-  if (Math.abs(realized - listedSum) < 0.01)
-    return "Soma dos registros confere com o realizado do fator.";
-  return `Soma dos registros difere do realizado (${fmt(realized)}) — a fórmula do fator não é a soma direta desta coluna.`;
+  if (Math.abs(realized - listed) < 0.01)
+    return "Confere com o realizado do fator.";
+  return `Difere do realizado (${fmt(realized)}) — revise o recorte do fator.`;
 }
 
 /** Nota da linha "Total" do bloco no demonstrativo. */
