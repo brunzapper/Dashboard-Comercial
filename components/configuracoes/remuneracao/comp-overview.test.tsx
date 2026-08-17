@@ -23,6 +23,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fmtMoneyBRL } from "@/lib/comp/commission-label";
+import type { CompDetailFactor } from "@/lib/comp/detail";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
 import { createSheetExportTicket } from "@/app/(app)/operacao/remuneracao/sheets-actions";
@@ -46,15 +47,22 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       factorId: "reunioes",
       label: "Reuniões",
       money: false,
-      valueLabel: "Registros",
-      aggNote: "Contagem de registros · 2 registros no recorte",
       realized: 44,
-      listedSum: 2,
-      rows: [],
-      total: 2,
-      truncated: false,
+      listedForCompare: 2,
       warnings: [],
-    },
+      operands: [
+        {
+          label: "Contagem de registros",
+          valueLabel: "Registros",
+          aggNote: "Contagem de registros · 2 registros no recorte",
+          rows: [],
+          listedSum: null,
+          total: 2,
+          truncated: false,
+          warnings: [],
+        },
+      ],
+    } satisfies CompDetailFactor,
   })),
 }));
 vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({

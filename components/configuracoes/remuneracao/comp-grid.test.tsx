@@ -17,6 +17,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { CompDetailFactor } from "@/lib/comp/detail";
 import type { CompPlanConfig } from "@/lib/comp/model";
 import { saveEntryInputs } from "@/app/(app)/operacao/remuneracao/actions";
 
@@ -35,15 +36,22 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       factorId: "reunioes",
       label: "Reuniões",
       money: false,
-      valueLabel: "Registros",
-      aggNote: "Contagem de registros · 44 registros no recorte",
       realized: 44,
-      listedSum: 44,
-      rows: [],
-      total: 44,
-      truncated: false,
+      listedForCompare: 44,
       warnings: [],
-    },
+      operands: [
+        {
+          label: "Contagem de registros",
+          valueLabel: "Registros",
+          aggNote: "Contagem de registros · 44 registros no recorte",
+          rows: [],
+          listedSum: null,
+          total: 44,
+          truncated: false,
+          warnings: [],
+        },
+      ],
+    } satisfies CompDetailFactor,
   })),
 }));
 vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
