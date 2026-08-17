@@ -26,11 +26,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  commissionMemory,
   DETAIL_DROPPED_FILTER_NOTE,
   DETAIL_UNSUPPORTED_FIELD_NOTE,
   detailAggNote,
   detailTruncatedNote,
+  factorPayoutFormula,
+  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
+import {
+  commissionRolesOf,
+  resolvedUnitValue,
+  tierLadder,
+} from "@/lib/comp/payout-math";
 import { loadCorrespondences } from "@/lib/correspondences";
 import {
   canonicalOf,
@@ -85,6 +93,11 @@ import {
   apuracaoRef,
   monthPeriod,
   parseCompPlanConfig,
+  roundMoney,
+  type CompBreakdown,
+  type CompCommissionBlock,
+  type CompCommissionBlockBreakdown,
+  type CompDetailGrouping,
   type CompFactor,
   type CompPlanConfig,
 } from "./model";
@@ -118,6 +131,42 @@ export interface CompDetailRecordRow {
   value: number | null;
   /** Texto do campo quando ele não é numérico (unified:/match:). */
   valueText: string;
+  /**
+   * Quanto ESTE registro vale em reais para a remuneração — o elo que a lista
+   * sozinha não mostrava. null quando a relação não é linear (ver unitValue em
+   * lib/comp/payout-math.ts): aí um número enganaria.
+   */
+  contribution: number | null;
+  /** Operando de origem — só preenchido em bloco SOMADO (mistura operandos). */
+  origin: string;
+}
+
+/** Um degrau da escada de faixas, pronto para exibição. */
+export interface CompDetailTier {
+  fromPct: number;
+  ratePct?: number;
+  amount?: number;
+  applied: boolean;
+  reached: boolean;
+}
+
+/** Memória de UM bloco de comissão: o que multiplicou o quê, e a escada. */
+export interface CompDetailCommission {
+  blockId: string;
+  label: string;
+  /** pct | flat | per_unit — define a unidade do valor de cada degrau. */
+  kind: "pct" | "flat" | "per_unit";
+  /** Unidade do limiar das faixas: atingimento % ou realizado absoluto. */
+  tierBy: "attainment" | "realized";
+  /** Limiar em R$ (tierBy "realized" sobre fator monetário). */
+  triggerMoney: boolean;
+  /** "20% × R$ 9.450,00 (Vendas) = R$ 1.890,00" — de commissionMemory. */
+  formula: string | null;
+  /** Faixa aplicada + gatilho, ou o motivo do zero. */
+  tierNote: string;
+  memberTiers: boolean;
+  value: number;
+  tiers: CompDetailTier[];
 }
 
 /**
@@ -147,6 +196,14 @@ export interface CompDetailFactor {
   money: boolean;
   /** AUTORIDADE — realizado efetivo do fator (computeEntry). */
   realized: number | null;
+  /** Conta do valor por atingimento: "base × peso × ating. = valor". */
+  payoutFormula: string | null;
+  /** Quanto UMA unidade do realizado vale em R$; null = relação não linear. */
+  unitValue: number | null;
+  /** O que se conta (ex.: "reunião") — rótulo da unidade na frase do valor. */
+  unitLabel: string;
+  /** Comissões que este fator dispara e/ou embasa, com a escada completa. */
+  commissions: CompDetailCommission[];
   operands: CompDetailOperand[];
   /**
    * Quantidade listada que DEVE bater com o realizado — só existe quando a
@@ -162,6 +219,8 @@ export interface CompDetailPlan {
   planId: string;
   planName: string;
   factors: CompDetailFactor[];
+  /** Todos os blocos de comissão do plano (bloco próprio no detalhamento). */
+  commissions: CompDetailCommission[];
 }
 
 export interface CompDetailMember {
@@ -332,6 +391,11 @@ export async function loadCompDetailContext(
  * basis do runCalculatedWidget — que é a unidade real de consulta do cálculo.
  */
 export interface FactorOperand {
+  /**
+   * Chave ESTÁVEL do operando (1ª chave de basis do recorte) — é ela que a
+   * engrenagem grava em `config.detailGrouping` para dizer quem fica separado.
+   */
+  key: string;
   /** Campo agregado ("*" = contagem de linhas). */
   field: string;
   /** Agregações que a fórmula pede sobre este campo (avg emite sum + count). */
@@ -392,6 +456,7 @@ export function factorOperands(
       continue;
     }
     byRecorte.set(gk, {
+      key,
       field,
       aggs: new Set([metric.agg]),
       conds,
@@ -565,7 +630,9 @@ function toDetailRow(
   ctx: CompDetailContext,
   operand: FactorOperand,
   labels: RecordLabels,
-  period: DashboardPeriod
+  period: DashboardPeriod,
+  // R$ por unidade do realizado; null = relação não linear (nada de inventar).
+  perUnit: number | null
 ): CompDetailRecordRow {
   const root = ctx.rootByRecordType.get(record.record_type);
   const dateRef =
@@ -586,6 +653,11 @@ function toDetailRow(
     ),
     stage: recordCellValue(record, "stage", ctx.allFields, labels),
     value: Number.isFinite(numeric) ? numeric : null,
+    contribution:
+      perUnit != null && Number.isFinite(numeric)
+        ? roundMoney(perUnit * numeric)
+        : null,
+    origin: operand.label,
     // recordColumnValue (não recordCellValue): resolve também `unified:` e
     // `match:`, que podem ser o campo do operando.
     valueText:
@@ -609,7 +681,8 @@ async function loadOperandRecords(
   factor: CompFactor,
   operand: FactorOperand,
   rowBudget: number,
-  memberId: string
+  memberId: string,
+  perUnit: number | null
 ): Promise<CompDetailOperand> {
   const valueLabel = operand.field === "*" ? "Registros" : operand.fieldLabel;
   const query = operandRecordQuery(ctx, plan, factor, operand, memberId);
@@ -637,7 +710,7 @@ async function loadOperandRecords(
   );
   const kept = rows.slice(0, maxRows);
   const detailRows = kept.map((r) =>
-    toDetailRow(r, ctx, operand, ctx.fkLabels, query.period)
+    toDetailRow(r, ctx, operand, ctx.fkLabels, query.period, perUnit)
   );
   // Campo que o modo lista não sabe resolver (unified:/match:) não vira Σ — um
   // número ali seria pior que a ausência dele.
@@ -664,9 +737,81 @@ async function loadOperandRecords(
 }
 
 /**
- * Registros de UM membro × fator, um bloco por OPERANDO da fórmula (é assim que
- * o cálculo consulta). `realized` vem de FORA (do breakdown do plano) — nunca é
- * derivado das linhas.
+ * Agrupa os operandos para EXIBIÇÃO conforme `config.detailGrouping` (por
+ * plano). Operando marcado como separado vira um grupo só dele; os demais caem
+ * num grupo único ("Somados"). Sem config, cada operando fica no próprio grupo
+ * — o comportamento padrão. Isto é APRESENTAÇÃO: o recorte consultado de cada
+ * operando não muda, a fusão acontece depois da consulta.
+ */
+export function groupOperands(
+  operands: FactorOperand[],
+  factorId: string,
+  grouping: CompDetailGrouping | undefined
+): FactorOperand[][] {
+  const separate = grouping?.separateByFactor?.[factorId];
+  if (!separate || operands.length < 2) return operands.map((o) => [o]);
+  const own: FactorOperand[][] = [];
+  const merged: FactorOperand[] = [];
+  for (const op of operands) {
+    if (separate.includes(op.key)) own.push([op]);
+    else merged.push(op);
+  }
+  if (merged.length === 0) return own;
+  // Sobrando UM, o grupo tem um membro só e `mergeOperandBlocks` o devolve
+  // intacto — soma de um é ele mesmo, sem virar bloco "Somados".
+  return [...own, merged];
+}
+
+/** Funde os blocos de um grupo num só (rows concatenadas, subtotal somado). */
+function mergeOperandBlocks(blocks: CompDetailOperand[]): CompDetailOperand {
+  if (blocks.length === 1) return blocks[0];
+  const total = blocks.reduce((a, b) => a + b.total, 0);
+  const somavel = blocks.every((b) => b.listedSum != null);
+  return {
+    label: SOMADOS_LABEL,
+    // Operandos distintos podem medir coisas diferentes; o rótulo da coluna
+    // deixa de prometer um campo específico.
+    valueLabel: "Valor",
+    aggNote: detailAggNote(
+      blocks.map((b) => b.label).join(" + "),
+      total
+    ),
+    rows: blocks.flatMap((b) => b.rows),
+    listedSum: somavel
+      ? blocks.reduce((a, b) => a + (b.listedSum ?? 0), 0)
+      : null,
+    total,
+    truncated: blocks.some((b) => b.truncated),
+    warnings: [...new Set(blocks.flatMap((b) => b.warnings))],
+  };
+}
+
+/** Memória de um bloco de comissão, com a escada completa. */
+function commissionDetail(
+  cb: CompCommissionBlockBreakdown,
+  block: CompCommissionBlock,
+  memberId: string
+): CompDetailCommission {
+  const mem = commissionMemory(cb);
+  return {
+    blockId: cb.blockId,
+    label: cb.label,
+    kind: cb.kind,
+    tierBy: cb.tierBy,
+    triggerMoney: cb.triggerMoney,
+    formula: mem.formula,
+    tierNote: mem.tierNote,
+    memberTiers: mem.memberTiers,
+    value: cb.value,
+    tiers: tierLadder(block, memberId, cb.triggerValue),
+  };
+}
+
+/**
+ * Registros de UM membro × fator, um bloco por GRUPO de operandos (a fórmula é
+ * decomposta em operandos porque é assim que o cálculo consulta; o agrupamento
+ * de EXIBIÇÃO vem da engrenagem). O `breakdown` vem de FORA — realizado, payout
+ * e comissão continuam saindo do computeEntry, nunca das linhas.
  */
 export async function loadFactorRecords(
   supabase: SupabaseClient,
@@ -674,15 +819,46 @@ export async function loadFactorRecords(
   plan: DetailPlan,
   factor: CompFactor,
   memberId: string,
-  realized: number | null,
+  breakdown: CompBreakdown | null,
   rowBudget = MAX_DETAIL_ROWS_PER_FACTOR
 ): Promise<CompDetailFactor> {
+  const fb = breakdown?.byFactor[factor.id] ?? null;
   const operands = factorOperands(ctx, factor);
+
+  // ---- Memória de cálculo (o "como isso vira dinheiro") ----
+  const roles = commissionRolesOf(plan.config, factor.id);
+  const blocksById = new Map(
+    (breakdown?.commissionBlocks ?? []).map((b) => [b.blockId, b])
+  );
+  const uv =
+    fb && breakdown
+      ? resolvedUnitValue(factor, fb, roles, blocksById, breakdown.base)
+      : null;
+  const payoutFormula =
+    fb && breakdown && factor.weightPct > 0 && !fb.overridden.payout && fb.attainmentPct != null
+      ? factorPayoutFormula(
+          breakdown.base,
+          factor.weightPct,
+          fb.attainmentPct,
+          fb.payout
+        )
+      : null;
+  const commissions = roles.flatMap((role) => {
+    const cb = blocksById.get(role.block.id);
+    return cb ? [commissionDetail(cb, role.block, memberId)] : [];
+  });
+
   const base = {
     factorId: factor.id,
     label: factor.label,
     money: factor.money,
-    realized,
+    realized: fb?.realized ?? null,
+    payoutFormula,
+    unitValue: uv?.perUnit ?? null,
+    // Operando de contagem conta LINHAS: a unidade é o registro. Operando de
+    // campo mede o próprio campo, então a frase fala em reais.
+    unitLabel: operands[0]?.field === "*" ? "registro" : factor.label,
+    commissions,
     warnings: [] as string[],
   };
   if (operands.length === 0) {
@@ -695,9 +871,10 @@ export async function loadFactorRecords(
     1,
     Math.floor(Math.max(0, rowBudget) / operands.length)
   );
-  const blocks: CompDetailOperand[] = [];
+  const byKey = new Map<string, CompDetailOperand>();
   for (const operand of operands) {
-    blocks.push(
+    byKey.set(
+      operand.key,
       await loadOperandRecords(
         supabase,
         ctx,
@@ -705,15 +882,33 @@ export async function loadFactorRecords(
         factor,
         operand,
         perOperand,
-        memberId
+        memberId,
+        uv?.perUnit ?? null
       )
     );
   }
+  const grupos = groupOperands(
+    operands,
+    factor.id,
+    plan.config.detailGrouping
+  );
+  const blocks = grupos.map((g) =>
+    mergeOperandBlocks(
+      g.flatMap((o) => {
+        const b = byKey.get(o.key);
+        return b ? [b] : [];
+      })
+    )
+  );
 
   return {
     ...base,
     operands: blocks,
-    listedForCompare: comparableQuantity(ctx, factor, operands, blocks),
+    // A conferência exige um operando puro E nenhuma fusão em jogo.
+    listedForCompare:
+      blocks.length === 1
+        ? comparableQuantity(ctx, factor, operands, blocks)
+        : null,
   };
 }
 
@@ -767,14 +962,13 @@ export async function loadFactorDetail(
   if (!factor) return { ok: false, message: "Fator não encontrado no plano." };
 
   const derived = planStatement(plan, opts.memberId, opts.memberLabel);
-  const realized = derived?.breakdown.byFactor[factor.id]?.realized ?? null;
   const detail = await loadFactorRecords(
     supabase,
     ctx,
     plan,
     factor,
     opts.memberId,
-    realized
+    derived?.breakdown ?? null
   );
   return {
     ok: true,
@@ -828,7 +1022,6 @@ export async function loadCompDetail(
     planned.map(({ member, plan, factor }) =>
       runLimited(async () => {
         const derived = planStatement(plan, member.id, member.label);
-        const realized = derived?.breakdown.byFactor[factor.id]?.realized ?? null;
         const take = Math.max(
           0,
           Math.min(MAX_DETAIL_ROWS_PER_FACTOR, budget - DETAIL_ROWS_OVERHEAD)
@@ -840,7 +1033,7 @@ export async function loadCompDetail(
           plan,
           factor,
           member.id,
-          realized,
+          derived?.breakdown ?? null,
           take
         );
         const usadas = detail.operands.reduce((a, o) => a + o.rows.length, 0);
@@ -862,7 +1055,21 @@ export async function loadCompDetail(
       const factors = plan.config.factors
         .map((f) => results.get(`${member.id}:${plan.row.id}:${f.id}`))
         .filter((f): f is CompDetailFactor => Boolean(f));
-      plans.push({ planId: plan.row.id, planName: plan.row.name, factors });
+      const blockById = new Map(
+        (plan.config.commissions ?? []).map((b) => [b.id, b])
+      );
+      const commissions = (derived?.breakdown.commissionBlocks ?? []).flatMap(
+        (cb) => {
+          const block = blockById.get(cb.blockId);
+          return block ? [commissionDetail(cb, block, member.id)] : [];
+        }
+      );
+      plans.push({
+        planId: plan.row.id,
+        planName: plan.row.name,
+        factors,
+        commissions,
+      });
     }
     if (plans.length === 0) continue;
     out.push({

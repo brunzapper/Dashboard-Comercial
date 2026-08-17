@@ -740,8 +740,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `Det-<Nome>` do export (`lib/export/comp-detail-sheet.ts`) — nunca monte um
   segundo caminho. A listagem é **EVIDÊNCIA**: o realizado por membro×fator
   continua saindo SÓ de `runCalculatedWidget` (via `computeEntry`/
-  `statementBreakdown`) e é exibido AO LADO da soma das linhas, com
-  `detailReconcileNote`; jamais derive o realizado da lista. O recorte sai do
+  `statementBreakdown`) e é exibido AO LADO da soma das linhas (confronto
+  NUMÉRICO, sem frase); jamais derive o realizado da lista. O recorte sai do
   choke point `factorRecordQuery` (espelha o engine: `apuracaoRef`→
   `monthPeriod`, `factor.filters` e DEPOIS `memberFilterFor` — helper
   IMPORTADO de `engine.ts`) e a consulta é `runRecordListWindow`; a coluna de
@@ -762,8 +762,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (MÉDIA emite sum+count). Um bloco por operando, com subtotal próprio.
   **A conferência só compara quando há um número único a confrontar**
   (`listedForCompare`: fórmula de um operando puro ⇒ Σ para soma, contagem do
-  recorte para contagem) — fórmula combinada exibe `DETAIL_COMBINED_NOTE` em
-  vez de acusar divergência inexistente. Divergência ESTRUTURAL segue como
+  recorte para contagem) — fórmula combinada (ou com fusão da engrenagem em
+  jogo) simplesmente não exibe o confronto, em vez de acusar divergência
+  inexistente. Divergência ESTRUTURAL segue como
   aviso visível: filtro em campo fora da whitelist do modo lista
   (`listFilterFieldSupported`, exportado de `record-list.ts` ao lado do
   `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
@@ -779,7 +780,33 @@ This version has breaking changes — APIs, conventions, and file structure may 
   payload v3). Frases do detalhe em `commission-label.ts` com prefixo
   `detail*`/`DETAIL_*` (compartilhadas pelos dois consumidores — não `sheet*`).
   Kind novo exige entrada em `COMP_SHEET_KINDS` **e** nas tabelas de estilo do
-  `.gs` **e** republicar o script. NUNCA gerar fórmula a
+  `.gs` **e** republicar o script.
+  **MEMÓRIA DE CÁLCULO no lugar da prosa + agrupamento configurável
+  (17/08/2026):** a aritmética "registro → dinheiro" vive no módulo PURO
+  `lib/comp/payout-math.ts` (`commissionRolesOf` = blocos que o fator dispara
+  e/ou embasa; `tierLadder` = escada COMPLETA com a aplicada marcada e as NÃO
+  alcançadas visíveis — é ela que explica o valor pago; `unitValue`/
+  `resolvedUnitValue` = quanto UMA unidade vale, derivado de
+  `resolveCommissionTiers`/`selectCommissionTier` e do breakdown, NUNCA
+  recalculando comissão por fora do `computeEntry`). `unitValue` devolve null
+  quando a relação não é linear (cap/piso ATIVO, valor manual, sem alvo, fator
+  só-gatilho, comissão `flat`) — número ali seria mentira. Isso alimenta a
+  coluna "Vale (R$)" por registro, a linha "cada X vale R$ Y", a conta do
+  payout (`factorPayoutFormula`) no cabeçalho e a escada; a comissão aparece
+  nos DOIS lugares (dentro do fator que a dispara e como bloco do plano). Saíram
+  `detailReconcileNote`/`DETAIL_COMBINED_NOTE` (a conferência virou
+  realizado × somado lado a lado + `DETAIL_DIVERGE_MARK`); frases novas seguem
+  SÓ em `commission-label.ts`. O **agrupamento dos blocos** é config POR PLANO
+  (`config.detailGrouping.separateByFactor`: factorId → basis keys com bloco
+  próprio; ausente = cada operando separado, o padrão), aplicada em
+  `groupOperands`/`mergeOperandBlocks` DEPOIS da consulta — é APRESENTAÇÃO: o
+  recorte de cada operando segue consultado igual, e bloco fundido perde o
+  confronto (`listedForCompare` null). A cláusula do parse é LENIENTE (sujeira/
+  fator órfão somem, o config vive) e o `save()` do plan-editor RE-EMITE a
+  chave — sem isso a config sumiria no 1º save (regra do presetKey). A UI é a
+  engrenagem do `CompPlanCard` (prop OPCIONAL `onOpenGrouping` — ausente na
+  visão do vendedor) → `comp-grouping-dialog.tsx`, com as chaves vindas do
+  servidor pelo MESMO `factorOperands` (`loadPlanOperands`), nunca adivinhadas. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
@@ -848,7 +875,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `/operacao/agenda|tarefas`, rotas antigas = stubs de redirect); card
   org-específico novo = entrada no catálogo + chave em
   `ORG_FEATURES`/`AREA_GATES`/`AREA_FEATURES`, habilitado só via `/owner`.
-  Fiscalizado por `lib/comp/*.test.ts` (incl. `detail.test.ts`) +
+  Fiscalizado por `lib/comp/*.test.ts` (incl. `detail.test.ts` e
+  `payout-math.test.ts`) +
   `lib/export/comp-detail-sheet.test.ts` + `tests/apps-script-sheets.test.ts`
   (o `.gs` avaliado num `vm` com stubs do SpreadsheetApp — abas, hiperlinks
   por `gid`, limpeza de órfãs e as duas degradações) +

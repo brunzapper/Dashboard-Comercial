@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+// Versão: 1.4 | Data: 17/08/2026
+// v1.4: engrenagem do card — abre a config dos BLOCOS do detalhamento (por
+// plano), com as chaves dos operandos vindas do servidor; desmarcar um manda
+// só os separados para a action.
 // Versão: 1.3 | Data: 16/08/2026
 // v1.3: payload v3 — o clique no export manda o roster (`members`, com o nome
 // da aba Det-<Nome>) e os `links` por linha; e o Realizado de cada fator abre
@@ -48,6 +52,10 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       label: "Reuniões",
       money: false,
       realized: 44,
+      payoutFormula: null,
+      unitValue: null,
+      unitLabel: "registro",
+      commissions: [],
       listedForCompare: 2,
       warnings: [],
       operands: [
@@ -64,6 +72,25 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       ],
     } satisfies CompDetailFactor,
   })),
+  loadPlanOperands: vi.fn(async () => ({
+    ok: true as const,
+    operands: [
+      {
+        factorId: "reunioes",
+        factorLabel: "Reuniões",
+        key: "count:*",
+        label: "Contagem de registros",
+      },
+      {
+        factorId: "reunioes",
+        factorLabel: "Reuniões",
+        key: "sum:value",
+        label: "Soma de Valor",
+      },
+    ],
+    separateByFactor: {} as Record<string, string[]>,
+  })),
+  saveDetailGrouping: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(async () => ({
@@ -353,6 +380,37 @@ describe("CompOverview", () => {
     expect(arg).toMatchObject({ year: 2026, month: 8 });
     expect(arg.planId).toBeTruthy();
     expect(arg.memberId).toBeTruthy();
+  });
+
+  it("engrenagem do card configura os blocos do detalhamento (por PLANO)", async () => {
+    const { loadPlanOperands, saveDetailGrouping } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    const engrenagens = screen.getAllByLabelText(
+      "Configurar os blocos do detalhamento"
+    );
+    expect(engrenagens.length).toBeGreaterThan(0);
+    fireEvent.click(engrenagens[0]);
+    await waitFor(() => expect(vi.mocked(loadPlanOperands)).toHaveBeenCalled());
+    // As chaves vêm do servidor (mesmo factorOperands dos blocos), nunca da UI.
+    expect(vi.mocked(loadPlanOperands).mock.calls[0][0]).toMatchObject({
+      year: 2026,
+      month: 8,
+    });
+    const somaDeValor = await screen.findByRole("checkbox", {
+      name: "Soma de Valor",
+    });
+    // Sem config gravada o padrão é "cada operando no próprio bloco".
+    expect(somaDeValor.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(somaDeValor);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() =>
+      expect(vi.mocked(saveDetailGrouping)).toHaveBeenCalledWith({
+        planId: "pA",
+        separateByFactor: { reunioes: ["count:*"] },
+      })
+    );
   });
 
   it("preferência salva abre por pessoa; 'Usar como padrão' grava a chave", async () => {

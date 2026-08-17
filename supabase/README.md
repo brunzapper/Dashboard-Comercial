@@ -1,3 +1,6 @@
+<!-- Versão: 1.7 | Data: 17/08/2026 -->
+<!-- v1.7 (17/08/2026): Apps Script v3.1 (kinds da memória de cálculo do
+     detalhamento) — republicação NECESSÁRIA; sem migração envolvida. -->
 <!-- Versão: 1.6 | Data: 05/08/2026 -->
 <!-- v1.6 (05/08/2026): referências de caminho — Remuneração vive em
      /operacao/remuneracao (card de Operação do hub Workspace). -->
@@ -570,3 +573,13 @@ acima). Sem republicar, a exportação segue funcionando — apenas sem essas
 partes. Nada disso exige migração: as abas viajam no `payload` jsonb do
 ticket, e a conferência equivalente na tela (Remuneração → clicar no Realizado
 de um fator) independe do Apps Script.
+
+**REPUBLICAR o script — v3.1 (17/08/2026).** A memória de cálculo do
+detalhamento (linha "cada X vale R$ Y" e a escada de faixas de atingimento)
+usa três kinds novos — `detailMemory`, `detailTier` e `detailTierApplied`.
+Diferente da entrega anterior, aqui o passo 6 é **necessário** para o
+resultado ficar legível: num script v3.0 as linhas novas até aparecem, mas
+como texto puro (sem itálico na nota, sem negrito na faixa aplicada). Nenhuma
+migração é envolvida, e a mesma memória já aparece formatada na tela
+(Remuneração → Visão geral → clicar no Realizado de um fator) sem depender do
+Apps Script. Regra geral: **kind novo no payload exige republicar o `.gs`**.

@@ -140,6 +140,19 @@ export interface CompCommissionBlock {
   memberTiers?: Record<string, CompCommissionTier[]>;
 }
 
+/**
+ * Apresentação do DETALHAMENTO por registro (lib/comp/detail.ts), por PLANO —
+ * vale para todos os membros, porque a fórmula é do plano. Governa só o
+ * AGRUPAMENTO dos blocos; o recorte de cada operando é intocado.
+ *
+ * `separateByFactor[factorId]` = chaves de basis que ganham bloco PRÓPRIO; os
+ * demais operandos daquele fator somam num bloco único. Fator ausente do mapa
+ * = comportamento padrão (cada operando em seu bloco).
+ */
+export interface CompDetailGrouping {
+  separateByFactor: Record<string, string[]>;
+}
+
 export interface CompPlanConfig {
   v: 1;
   factors: CompFactor[];
@@ -160,6 +173,10 @@ export interface CompPlanConfig {
   // para um bloco `{id:"comissao", kind:"pct", tierBy:"attainment", ...}` —
   // o tipo parseado expõe SÓ esta chave.
   commissions?: CompCommissionBlock[];
+  // Agrupamento dos blocos do detalhamento (engrenagem da Visão geral).
+  // Ausente = cada operando em bloco próprio. Como o `presetKey`, precisa ser
+  // preservado explicitamente no parse E re-emitido pelo save do editor.
+  detailGrouping?: CompDetailGrouping;
   // Identidade de plano criado por PRESET (ensure-only no apply). O parse a
   // preserva explicitamente para que o round-trip do save do editor não a
   // derrube (senão o re-apply do preset duplicaria o plano).
@@ -547,6 +564,18 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
   if (raw.presetKey != null) {
     if (typeof raw.presetKey !== "string" || raw.presetKey === "") return null;
     out.presetKey = raw.presetKey;
+  }
+  // Agrupamento do detalhamento: LENIENTE (diferente do resto do config).
+  // É preferência de apresentação — entrada torta deve cair sozinha, nunca
+  // invalidar o plano e travar o cálculo da remuneração de todo mundo.
+  if (isRecord(raw.detailGrouping) && isRecord(raw.detailGrouping.separateByFactor)) {
+    const sep: Record<string, string[]> = {};
+    for (const [fid, keys] of Object.entries(raw.detailGrouping.separateByFactor)) {
+      if (!seen.has(fid) || !Array.isArray(keys)) continue; // fator sumiu: entrada órfã cai
+      const list = keys.filter((k): k is string => typeof k === "string" && k !== "");
+      if (list.length > 0) sep[fid] = [...new Set(list)];
+    }
+    if (Object.keys(sep).length > 0) out.detailGrouping = { separateByFactor: sep };
   }
   if (raw.apuracao != null) {
     // "mes_corrente" é aceito no raw mas normalizado para AUSÊNCIA da chave

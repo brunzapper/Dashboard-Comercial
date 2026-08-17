@@ -1,3 +1,8 @@
+// Versão: 1.1 | Data: 17/08/2026
+// v1.1: o fake passou a registrar o estilo em LOTE (getRangeList(a1s).setX()),
+// o que permite pinar os kinds da memória de cálculo (v3.1 do script):
+// `detailMemory` em itálico, `detailTierApplied` em negrito e a escada FORA da
+// formatação numérica (o valor do degrau já vem formatado no payload).
 // Versão: 1.0 | Data: 16/08/2026
 // Guarda do Apps Script do export da Remuneração
 // (integrations/apps-script/comp_sheets_webapp.gs). O arquivo não é importável
@@ -25,12 +30,16 @@ const GS_PATH = path.resolve(
   "../integrations/apps-script/comp_sheets_webapp.gs"
 );
 
+/** Estilo aplicado em lote: método → notações A1 alcançadas. */
+type Styles = Record<string, string[]>;
+
 interface FakeSheet {
   _name: string;
   _id: number;
   _values: unknown[][] | null;
   _widths: Record<number, number>;
   _heights: Record<number, number>;
+  _styles: Styles;
   getName(): string;
   setName(n: string): FakeSheet;
   getSheetId(): number;
@@ -50,6 +59,7 @@ function makeSheet(name: string, id: number): FakeSheet {
     _values: null,
     _widths: {},
     _heights: {},
+    _styles: {},
     getName() { return sh._name; },
     setName(n: string) { sh._name = n; return sh; },
     getSheetId() { return sh._id; },
@@ -66,7 +76,21 @@ function makeSheet(name: string, id: number): FakeSheet {
         }
       );
     },
-    getRangeList: () => chain,
+    // Estilo vai em LOTE (getRangeList(a1s).setX()): registra método → faixas,
+    // que é o único jeito de pinar "este kind saiu em negrito/itálico".
+    getRangeList(a1s: string[]) {
+      const rec: Record<string, () => unknown> = new Proxy(
+        {},
+        {
+          get: (_t, prop) => () => {
+            const k = String(prop);
+            sh._styles[k] = [...(sh._styles[k] ?? []), ...a1s];
+            return rec;
+          },
+        }
+      ) as Record<string, () => unknown>;
+      return rec;
+    },
     setColumnWidth(c: number, w: number) { sh._widths[c] = w; return sh; },
     setRowHeight(r: number, h: number) { sh._heights[r] = h; return sh; },
     setFrozenRows: () => sh,
@@ -218,6 +242,46 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
     expect(Object.keys(ss.getSheetByName("Det-Ana")!._widths)).toHaveLength(7);
     // Uma altura por linha `section` (as duas pessoas).
     expect(Object.keys(ss.getSheetByName("Agosto 2026")!._heights)).toHaveLength(2);
+  });
+
+  it("memória e escada: nota em itálico, faixa aplicada em negrito, texto sem moeda", () => {
+    // A escada carrega o valor JÁ FORMATADO (a unidade muda por tipo de
+    // bloco), então formatar como moeda estragaria a linha da comissão %.
+    const det = {
+      tabName: "Det-Ana",
+      headers: pad(["Detalhamento — Ana — Agosto de 2026"]),
+      rows: [
+        pad(["Vendas", "", "", "", "", 300, "R$ 1.000,00 × 60% × 90% = R$ 540,00"]),
+        pad(["Cada reunião vale R$ 12,50."]),
+        pad(["A partir de 0", "", "", "", "", "R$ 10,00", "alcançada"]),
+        pad(["A partir de 40", "", "", "", "", "R$ 12,50", "faixa aplicada"]),
+        pad(["A partir de 80", "", "", "", "", "R$ 15,00", "não alcançada"]),
+        pad(["Total — Ana", "", "", "", "", 1050, ""]),
+      ],
+      kinds: [
+        "detailFactorMoney",
+        "detailMemory",
+        "detailTier",
+        "detailTierApplied",
+        "detailTier",
+        "memberTotal",
+      ],
+      links: [null, null, null, null, null, null],
+    };
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, { ...PAYLOAD_V3, details: [det] });
+    const estilos = ss.getSheetByName("Det-Ana")!._styles;
+    // rows[i] mora na linha A1 i+2 (o título ocupa a 1).
+    expect(estilos.setFontStyle).toContain("A3:G3"); // detailMemory
+    expect(estilos.setFontWeight).toContain("A5:G5"); // detailTierApplied
+    expect(estilos.setFontWeight).not.toContain("A4:G4"); // detailTier comum
+    // Nenhuma linha da escada entra na formatação numérica (moeda ou %).
+    const linhasFormatadas = new Set(
+      (estilos.setNumberFormat ?? []).map((a1) =>
+        Number(a1.split(":")[0].replace(/[A-Z]/g, ""))
+      )
+    );
+    for (const r of [4, 5, 6]) expect(linhasFormatadas.has(r)).toBe(false);
   });
 
   it("aba de detalhe malformada é ignorada sem derrubar o export", () => {

@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 17/08/2026
+// v1.2: prop OPCIONAL onOpenGrouping — engrenagem à direita do total, que abre
+// a configuração dos blocos do detalhamento (por PLANO). Ausente, o card segue
+// idêntico (é assim que a visão do vendedor fica limpa).
 // Versão: 1.1 | Data: 16/08/2026
 // v1.1: prop OPCIONAL onOpenFactorDetail — o Realizado do fator vira gatilho
 // da conferência dos registros por trás do número (CompDetailPanel). Só a
@@ -12,6 +16,8 @@
 // AQUI (importar do manager criaria ciclo manager → overview → card →
 // manager); OverrideDot/fmtMoneyIn idem.
 "use client";
+
+import { Settings2 } from "lucide-react";
 
 import {
   Table,
@@ -95,6 +101,9 @@ export function CompPlanCard(props: {
   // registros de fator casado por memberField, e o detalhe sairia parcial sem
   // explicação). Sem a prop o card renderiza exatamente como antes.
   onOpenFactorDetail?: (factorId: string) => void;
+  // Engrenagem do agrupamento dos blocos do detalhamento (config POR PLANO).
+  // AUSENTE = card sem engrenagem, como na visão do vendedor.
+  onOpenGrouping?: () => void;
 }) {
   const config = parseCompPlanConfig(props.plan.config);
   if (!config) return null;
@@ -119,9 +128,22 @@ export function CompPlanCard(props: {
             <ApuracaoBadge year={props.year} month={props.month} />
           ) : null}
         </h2>
-        <span className="text-xl font-semibold">
-          {breakdown.total != null ? fmtMoney(breakdown.total) : "—"}
-          {breakdown.totalOverridden ? <OverrideDot /> : null}
+        <span className="flex items-baseline gap-2">
+          <span className="text-xl font-semibold">
+            {breakdown.total != null ? fmtMoney(breakdown.total) : "—"}
+            {breakdown.totalOverridden ? <OverrideDot /> : null}
+          </span>
+          {props.onOpenGrouping ? (
+            <button
+              type="button"
+              aria-label="Configurar os blocos do detalhamento"
+              title="Configurar os blocos do detalhamento"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={props.onOpenGrouping}
+            >
+              <Settings2 className="size-4" />
+            </button>
+          ) : null}
         </span>
       </div>
       <Table>

@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 17/08/2026
+// v1.2: agrupamento configurável dos blocos (engrenagem da Visão geral). O
+// pino é que a fusão é de EXIBIÇÃO: cada operando segue sendo CONSULTADO no
+// próprio recorte, só a apresentação soma — e com fusão em jogo não existe
+// número único a confrontar com o realizado.
 // Versão: 1.1 | Data: 16/08/2026
 // v1.1: o detalhamento passou a ser por OPERANDO — a unidade que o
 // runCalculatedWidget realmente consulta. Os testes pinam a PARIDADE do
@@ -22,8 +27,10 @@ import { EMPTY_CANON } from "@/lib/config/responsible-canon";
 import { fakeSupabase } from "@/tests/helpers/fake-supabase";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 
+import { SOMADOS_LABEL } from "./commission-label";
 import {
   factorOperands,
+  groupOperands,
   loadFactorRecords,
   operandRecordQuery,
   MAX_DETAIL_ROWS_PER_FACTOR,
@@ -31,7 +38,12 @@ import {
   type DetailPlan,
   type FactorOperand,
 } from "./detail";
-import { monthPeriod, type CompFactor, type CompPlanConfig } from "./model";
+import {
+  monthPeriod,
+  type CompBreakdown,
+  type CompFactor,
+  type CompPlanConfig,
+} from "./model";
 
 const M1 = "11111111-1111-4111-8111-111111111111";
 
@@ -127,6 +139,34 @@ function planWith(
     targetsByMember: new Map(),
   };
 }
+
+/**
+ * Breakdown mínimo — o loader lê realizado/base/comissões DAQUI, nunca das
+ * linhas. É o pino de que o número exibido vem do cálculo.
+ */
+const breakdownStub = (realized: number | null) =>
+  ({
+    base: 1000,
+    byFactor: {
+      f_v: {
+        target: null,
+        realized,
+        attainmentPct: null,
+        payout: 0,
+        overridden: { realized: false, attainmentPct: false, payout: false },
+        targetSource: null,
+        targetBRL: null,
+      },
+    },
+    factorsTotal: 0,
+    bonusTotal: 0,
+    commission: null,
+    commissionBlocks: [],
+    total: null,
+    totalOverridden: false,
+    totalFromFormula: false,
+    totalFormulaError: false,
+  }) as unknown as CompBreakdown;
 
 const opsOf = (over: Partial<CompFactor> = {}): FactorOperand[] =>
   factorOperands(ctxWith(), factor(over));
@@ -339,7 +379,7 @@ describe("loadFactorRecords", () => {
       planWith(),
       factor(over),
       M1,
-      999 // realizado oficial: NUNCA recalculado a partir das linhas
+      breakdownStub(999) // realizado oficial: NUNCA derivado das linhas
     );
 
   it("operando único de soma: Σ vira a quantidade confrontável", async () => {
@@ -410,10 +450,79 @@ describe("loadFactorRecords", () => {
       planWith(),
       fac,
       M1,
-      null
+      breakdownStub(null)
     );
     expect(out.operands[0].rows).toEqual([]);
     expect(out.operands[0].warnings).toHaveLength(1);
     expect(out.operands[0].warnings[0]).toContain("memberField");
+  });
+
+  it("fusão da engrenagem é de EXIBIÇÃO: consulta cada operando, exibe somado", async () => {
+    const fac = factor({
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato", "agg:count:*"),
+    });
+    const keys = factorOperands(ctxWith(), fac).map((o) => o.key);
+    const s = supa(recRows(2));
+    const out = await loadFactorRecords(
+      s.db,
+      ctxWith(),
+      planWith({
+        factors: [fac],
+        detailGrouping: { separateByFactor: { f_v: [keys[0]] } },
+      }),
+      fac,
+      M1,
+      breakdownStub(999)
+    );
+    // O recorte NÃO muda com o agrupamento: os 3 operandos seguem consultados.
+    expect(s.queries.filter((q) => q.table === "records")).toHaveLength(3);
+    expect(out.operands).toHaveLength(2);
+    expect(out.operands[0].label).toBe("Soma de Valor");
+    const somados = out.operands[1];
+    expect(somados.label).toBe(SOMADOS_LABEL);
+    expect(somados.rows).toHaveLength(4); // 2 linhas de cada operando fundido
+    expect(somados.total).toBe(4);
+    // Com fusão em jogo não há número único a confrontar com o realizado.
+    expect(out.listedForCompare).toBeNull();
+  });
+});
+
+describe("groupOperands", () => {
+  const ops3 = () =>
+    opsOf({
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato", "agg:count:*"),
+    });
+  const keysOf = (grupos: FactorOperand[][]) =>
+    grupos.map((g) => g.map((o) => o.key));
+
+  it("sem config, cada operando fica no próprio bloco (padrão de hoje)", () => {
+    const ops = ops3();
+    expect(keysOf(groupOperands(ops, "f_v", undefined))).toEqual(
+      ops.map((o) => [o.key])
+    );
+  });
+
+  it("marcado ganha bloco próprio; os demais caem num grupo só", () => {
+    const ops = ops3();
+    const g = groupOperands(ops, "f_v", {
+      separateByFactor: { f_v: [ops[0].key] },
+    });
+    expect(keysOf(g)).toEqual([[ops[0].key], [ops[1].key, ops[2].key]]);
+  });
+
+  it("sobrando UM operando, ele não vira grupo somado", () => {
+    const ops = ops3();
+    const g = groupOperands(ops, "f_v", {
+      separateByFactor: { f_v: [ops[0].key, ops[1].key] },
+    });
+    expect(keysOf(g)).toEqual(ops.map((o) => [o.key]));
+  });
+
+  it("config de OUTRO fator não agrupa este", () => {
+    const ops = ops3();
+    const g = groupOperands(ops, "f_v", {
+      separateByFactor: { f_outro: [ops[0].key] },
+    });
+    expect(g).toHaveLength(3);
   });
 });

@@ -1,3 +1,9 @@
+// Versão: 1.2 | Data: 17/08/2026
+// v1.2: MEMÓRIA DE CÁLCULO no lugar da prosa — a coluna de texto do cabeçalho
+// do fator carrega a conta do payout, entra a linha "cada X vale R$ Y", a
+// escada de faixas (com as NÃO alcançadas visíveis, que é o que explica a
+// aplicada), a coluna "Vale (R$)" por registro e o bloco de comissão do plano.
+// A conferência virou numérica (realizado × somado lado a lado).
 // Versão: 1.1 | Data: 16/08/2026
 // v1.1: um sub-bloco por OPERANDO da fórmula (é assim que o cálculo consulta —
 // ver lib/comp/detail.ts). Com um operando só, o cabeçalho do fator já o
@@ -20,11 +26,16 @@
 // abas Det-* órfãs são removidas pelo script.
 import {
   DETAIL_BACK_NOTE,
-  DETAIL_COMBINED_NOTE,
+  DETAIL_DIVERGE_MARK,
   DETAIL_EMPTY_NOTE,
-  detailReconcileNote,
+  detailTierLabel,
+  detailTierMark,
+  detailTierValue,
+  detailUnitValueNote,
+  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
 import type {
+  CompDetailCommission,
   CompDetailFactor,
   CompDetailMember,
   CompDetailOperand,
@@ -37,16 +48,37 @@ import type {
 import { COMP_SHEET_COLS, padSheetRow, type SheetCell, type SheetRow } from "./comp-sheet";
 
 /** Cabeçalho da tabela de registros (a 6ª coluna é o rótulo do valor do fator). */
-function detailHeaderCells(valueLabel: string): SheetCell[] {
+function detailHeaderCells(valueLabel: string, merged: boolean): SheetCell[] {
   return [
     "Data",
     "Registro",
     "Base",
-    "Responsável",
+    // Bloco somado mistura operandos: a coluna diz de qual veio cada linha.
+    merged ? "Operando" : "Responsável",
     "Etapa",
     valueLabel,
-    "Observações",
+    "Vale (R$)",
   ];
+}
+
+/** Escada de faixas + memória de UM bloco de comissão. */
+function pushCommission(
+  c: CompDetailCommission,
+  push: (kind: CompSheetRowKind, cells: SheetCell[], link?: string | null) => void
+) {
+  push("detailFactorMoney", [c.label, "", "", "", "", c.value, c.formula ?? ""]);
+  push("detailMemory", [c.tierNote]);
+  for (const t of c.tiers) {
+    push(t.applied ? "detailTierApplied" : "detailTier", [
+      detailTierLabel(t.fromPct, c.tierBy, c.triggerMoney),
+      "",
+      "",
+      "",
+      "",
+      detailTierValue(t, c.kind),
+      detailTierMark(t.applied, t.reached),
+    ]);
+  }
 }
 
 function pushOperand(
@@ -55,7 +87,8 @@ function pushOperand(
   // Rótulo próprio só quando o fator tem mais de um operando — com um só, o
   // cabeçalho do fator já disse tudo e repetir seria ruído.
   withHeader: boolean,
-  reconcileNote: string,
+  /** Realizado a confrontar; null quando não há número único a comparar. */
+  compareTo: number | null,
   push: (kind: CompSheetRowKind, cells: SheetCell[], link?: string | null) => void
 ) {
   if (withHeader) {
@@ -74,26 +107,33 @@ function pushOperand(
     push("info", [DETAIL_EMPTY_NOTE]);
     return;
   }
-  push("detailHeader", detailHeaderCells(operand.valueLabel));
+  const merged = operand.label === SOMADOS_LABEL;
+  push("detailHeader", detailHeaderCells(operand.valueLabel, merged));
   for (const r of operand.rows) {
     push(money ? "detailRowMoney" : "detailRow", [
       r.date,
       r.title,
       r.sourceLabel,
-      r.responsibleLabel,
+      merged ? r.origin : r.responsibleLabel,
       r.stage,
       r.value ?? r.valueText,
-      "",
+      r.contribution ?? "",
     ]);
   }
+  // Confronto NUMÉRICO (o texto explicativo saiu): realizado e somado lado a
+  // lado, com marca discreta só quando divergem.
+  const diverge =
+    compareTo != null &&
+    operand.listedSum != null &&
+    Math.abs(compareTo - operand.listedSum) >= 0.01;
   push(money ? "detailSubtotalMoney" : "detailSubtotal", [
     `Subtotal — ${operand.label}`,
     "",
     "",
     "",
-    "",
+    compareTo ?? "",
     operand.listedSum ?? "",
-    reconcileNote,
+    diverge ? DETAIL_DIVERGE_MARK : "",
   ]);
 }
 
@@ -110,8 +150,21 @@ function pushFactor(
     "",
     "",
     factor.realized ?? "",
-    multi ? DETAIL_COMBINED_NOTE : (factor.operands[0]?.aggNote ?? ""),
+    // Coluna de MEMÓRIA, não de prosa: a conta do valor por atingimento.
+    factor.payoutFormula ?? "",
   ]);
+  // Quanto cada unidade vale, e as comissões que este fator move (com a escada
+  // completa — inclusive as faixas que ficaram acima do alcançado).
+  if (factor.unitValue != null) {
+    push("detailMemory", [
+      detailUnitValueNote(
+        factor.unitValue,
+        factor.commissions.length > 0 ? "commission" : "weight",
+        factor.unitLabel
+      ),
+    ]);
+  }
+  for (const c of factor.commissions) pushCommission(c, push);
   for (const warning of factor.warnings) push("info", [warning]);
   if (factor.operands.length === 0) {
     push("info", [DETAIL_EMPTY_NOTE]);
@@ -119,18 +172,11 @@ function pushFactor(
   }
   // A conferência só existe quando há um número único a confrontar (fórmula de
   // um operando puro) — nesse caso ela mora ao lado do Σ, no subtotal.
-  const reconcile = multi
-    ? ""
-    : detailReconcileNote(factor.realized, factor.listedForCompare, money);
+  const compareTo =
+    !multi && factor.listedForCompare != null ? factor.realized : null;
   for (let i = 0; i < factor.operands.length; i += 1) {
     if (i > 0) push("blank", []);
-    pushOperand(
-      factor.operands[i],
-      money,
-      multi,
-      multi ? "" : reconcile,
-      push
-    );
+    pushOperand(factor.operands[i], money, multi, multi ? null : compareTo, push);
   }
 }
 
@@ -163,6 +209,13 @@ export function compDetailSheets(
       for (let i = 0; i < plan.factors.length; i += 1) {
         if (i > 0) push("blank", []);
         pushFactor(plan.factors[i], push);
+      }
+      // A comissão aparece nos DOIS lugares: dentro do fator que a dispara
+      // (onde a escada explica o número do fator) e aqui, como bloco do plano
+      // — é ela que soma no total, e sem bloco próprio o leitor não a acha.
+      for (const c of plan.commissions) {
+        push("blank", []);
+        pushCommission(c, push);
       }
     }
     push("blank", []);

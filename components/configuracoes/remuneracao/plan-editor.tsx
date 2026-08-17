@@ -680,6 +680,13 @@ export function PlanEditor(props: PlanEditorProps) {
         // Identidade de plano criado por preset SOBREVIVE ao round-trip do
         // save — sem isso o re-apply do preset duplicaria o plano.
         ...(props.config?.presetKey ? { presetKey: props.config.presetKey } : {}),
+        // Agrupamento do detalhamento (engrenagem da Visão geral): o editor
+        // não o edita, mas PRECISA re-emitir — o save grava o config parseado,
+        // e chave ausente aqui apagaria a configuração de quem usa a
+        // engrenagem (mesma regra do presetKey).
+        ...(props.config?.detailGrouping
+          ? { detailGrouping: props.config.detailGrouping }
+          : {}),
       };
       const res = await savePlan({
         planId: props.plan?.id ?? null,

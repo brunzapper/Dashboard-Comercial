@@ -1,3 +1,14 @@
+<!-- Versão: 1.69 | Data: 17/08/2026 -->
+<!-- v1.69 (17/08/2026): §4.18 — MEMÓRIA DE CÁLCULO no detalhamento no lugar da
+     prosa: módulo puro lib/comp/payout-math.ts (commissionRolesOf, tierLadder
+     com as faixas não alcançadas visíveis, unitValue/resolvedUnitValue — null
+     quando a relação não é linear), coluna "Vale (R$)" por registro, conta do
+     payout no cabeçalho, escada de faixas e bloco de comissão do plano;
+     conferência virou numérica (detailReconcileNote/DETAIL_COMBINED_NOTE
+     saíram). Agrupamento dos blocos configurável POR PLANO
+     (config.detailGrouping + groupOperands: fusão de APRESENTAÇÃO, recorte
+     intocado) pela engrenagem do card da Visão geral. Apps Script v3.1 —
+     REPUBLICAR. RPCs de widget INTOCADOS. -->
 <!-- Versão: 1.68 | Data: 16/08/2026 -->
 <!-- v1.68 (16/08/2026): §4.18 — CORREÇÃO do recorte do detalhamento: passa a
      ser por OPERANDO (factorOperands/operandRecordQuery espelham
@@ -3089,7 +3100,8 @@ total opcional por plano.
   coluna de data por fonte, nome→id de FK, grupo canônico e a regra 0052.
   **A listagem é EVIDÊNCIA, não a fonte do número:** o realizado continua
   saindo de `computeEntry` sobre o snapshot do `runCalculatedWidget` e
-  aparece AO LADO da soma das linhas (`detailReconcileNote`); `listedSum` só
+  aparece AO LADO da soma das linhas (confronto NUMÉRICO, sem frase);
+  `listedSum` só
   existe para soma/contagem (média/mín/máx não se reconstroem por adição) e
   a coluna de valor sai dos operandos `agg:` da fórmula (`parseAggRef`;
   contagem não vira coluna — a evidência é a própria linha). Divergência
@@ -3124,8 +3136,49 @@ total opcional por plano.
   bloco com subtotal próprio, e a **conferência só compara quando existe um
   número único a confrontar** (`listedForCompare`, preenchido apenas quando a
   fórmula é um operando puro: Σ para soma, contagem do recorte para contagem) —
-  fórmula que combina operandos mostra `DETAIL_COMBINED_NOTE` em vez do alarme
-  falso de divergência que a primeira versão produzia. No payload, `details` leva uma aba por colaborador e `links`
+  fórmula que combina operandos (ou bloco fundido pela engrenagem) simplesmente
+  não exibe o confronto, em vez do alarme falso de divergência que a primeira
+  versão produzia.
+  **Memória de cálculo no lugar da prosa, e agrupamento configurável
+  (17/08/2026).** A listagem certa ainda não dizia COMO aquilo vira dinheiro.
+  O elo passou a ter um módulo puro só dele, `lib/comp/payout-math.ts`:
+  `commissionRolesOf` acha os blocos que o fator dispara e/ou embasa (não
+  existia helper fator → comissão), `tierLadder` devolve a escada COMPLETA de
+  `resolveCommissionTiers` com a faixa aplicada marcada — as faixas NÃO
+  alcançadas ficam visíveis, porque sem elas o valor pago parece arbitrário —
+  e `unitValue`/`resolvedUnitValue` respondem quanto UMA unidade vale:
+  `per_unit` paga o `amount` da faixa por unidade, `pct` paga a taxa, e um
+  fator com peso vale `base × peso/100 ÷ alvo` por unidade de realizado. O
+  módulo devolve `null` sempre que a relação NÃO é linear (cap/piso ATIVO,
+  payout ou atingimento com override manual, alvo ausente, fator só-gatilho,
+  comissão `flat`) — ali um "cada X vale Y" seria mentira, e "—" é a resposta
+  honesta. Nada disso recalcula comissão: tudo deriva do breakdown que o
+  `computeEntry` já produziu. Com isso a coluna de texto do detalhamento deixa
+  de ser prosa: cabeçalho do fator leva a conta do payout
+  (`factorPayoutFormula`), entra a linha "cada X vale R$ Y", a escada aparece
+  em uma linha por faixa e cada REGISTRO ganha a coluna "Vale (R$)" com sua
+  contribuição. A comissão aparece nos DOIS lugares — dentro do fator que a
+  dispara (onde a escada explica o número dele) e como bloco do plano (é ela
+  que soma no total). A conferência virou numérica: realizado e somado lado a
+  lado com `DETAIL_DIVERGE_MARK` discreto, e `detailReconcileNote`/
+  `DETAIL_COMBINED_NOTE` saíram do módulo de frases.
+  O **agrupamento dos blocos** é configuração POR PLANO
+  (`config.detailGrouping.separateByFactor`: factorId → basis keys que ficam
+  com bloco próprio; ausente = cada operando separado, o comportamento
+  anterior). Ela é aplicada por `groupOperands`/`mergeOperandBlocks` DEPOIS da
+  consulta — a fusão é de APRESENTAÇÃO: cada operando continua sendo
+  consultado no próprio recorte (é assim que o cálculo funciona), só a
+  exibição soma, com a coluna de responsável virando a ORIGEM da linha e o
+  confronto desligado. A cláusula no `parseCompPlanConfig` é LENIENTE por
+  decisão — chave de fator órfã ou lista inválida some e o config segue vivo,
+  porque perder a preferência de exibição não pode derrubar um plano — e o
+  `save()` do plan-editor RE-EMITE a chave: o save grava o objeto PARSEADO, e
+  sem isso a config sumiria no primeiro save do editor (a mesma armadilha do
+  `presetKey`). A UI é uma engrenagem no `CompPlanCard`, via prop OPCIONAL
+  `onOpenGrouping` (ausente = card idêntico, mantendo a visão do vendedor
+  limpa), abrindo o `comp-grouping-dialog.tsx`; as chaves dos operandos vêm do
+  servidor pelo MESMO `factorOperands` que monta os blocos (`loadPlanOperands`),
+  nunca adivinhadas pelo cliente — senão o que se marca não seria o que se vê. No payload, `details` leva uma aba por colaborador e `links`
   (paralelo às rows) o NOME da aba alvo — o `gid` só existe dentro do Apps
   Script, então a fórmula `=HYPERLINK("#gid=…")` é montada LÁ, o que obriga o
   script a rodar em DUAS PASSADAS (cria/limpa tudo, colhe os ids, depois
@@ -3145,7 +3198,8 @@ total opcional por plano.
   detalhe sairia silenciosamente parcial (o valor `minha` segue no contrato e
   na constraint por causa dos `comp_sheet_links` já gravados). Fiscalizado
   por `lib/comp/sheets-export.test.ts`
-  + `lib/comp/detail.test.ts` + `tests/apps-script-sheets.test.ts` (o `.gs`
+  + `lib/comp/detail.test.ts` + `lib/comp/payout-math.test.ts`
+  + `tests/apps-script-sheets.test.ts` (o `.gs`
   rodado num `vm` com stubs do SpreadsheetApp — é a única cobertura possível
   de um script que só existe publicado) + `lib/export/comp-sheet.test.ts` +
   `lib/export/comp-detail-sheet.test.ts` + os pinos do CSV em
