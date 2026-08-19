@@ -797,15 +797,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `detailReconcileNote`/`DETAIL_COMBINED_NOTE` (a conferência virou
   realizado × somado lado a lado + `DETAIL_DIVERGE_MARK`); frases novas seguem
   SÓ em `commission-label.ts`. O **agrupamento dos blocos** é config POR PLANO
-  (`config.detailGrouping.separateByFactor`: factorId → basis keys com bloco
-  próprio; ausente = cada operando separado, o padrão), aplicada em
+  (`config.detailGrouping.byFactor[factorId] = { into, folded }`: `into` é o
+  bloco PRINCIPAL que RECEBE, `folded` são as basis keys somadas nele, o resto
+  mantém bloco próprio; ausente = cada operando separado, o padrão), aplicada em
   `groupOperands`/`mergeOperandBlocks` DEPOIS da consulta — é APRESENTAÇÃO: o
   recorte de cada operando segue consultado igual, e bloco fundido perde o
-  confronto (`listedForCompare` null). A cláusula do parse é LENIENTE (sujeira/
+  confronto (`listedForCompare` null). O bloco fundido herda rótulo/coluna do
+  PRINCIPAL e marca `mergedFrom` (consumidor NUNCA detecta fusão comparando o
+  rótulo); Σ só vira número único com as partes na MESMA unidade — soma com
+  contagem expõe `sumParts` em vez de um total sem significado. Entrada com
+  `folded` vazio é DESCARTADA no parse e no save: foi a lista vazia lida como
+  "sem config" que deixou a 1ª versão (`separateByFactor`, só-leitura hoje —
+  convertida em `resolveFactorGrouping`, que tem a lista de operandos) INERTE
+  num fator de 2 operandos. A cláusula do parse é LENIENTE (sujeira/
   fator órfão somem, o config vive) e o `save()` do plan-editor RE-EMITE a
   chave — sem isso a config sumiria no 1º save (regra do presetKey). A UI é a
   engrenagem do `CompPlanCard` (prop OPCIONAL `onOpenGrouping` — ausente na
-  visão do vendedor) → `comp-grouping-dialog.tsx`, com as chaves vindas do
+  visão do vendedor) → `comp-grouping-dialog.tsx` (rádio do principal +
+  checkbox "somar no principal"), com as chaves vindas do
   servidor pelo MESMO `factorOperands` (`loadPlanOperands`), nunca adivinhadas. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma

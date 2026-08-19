@@ -52,6 +52,8 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
           listedSum: null,
           total: 44,
           truncated: false,
+          mergedFrom: [],
+          sumParts: [],
           warnings: [],
         },
       ],

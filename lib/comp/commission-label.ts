@@ -1,9 +1,14 @@
+// Versão: 1.7 | Data: 17/08/2026
+// v1.7: a fusão de operandos passou a ter um bloco PRINCIPAL que recebe os
+// demais, então o rótulo genérico `SOMADOS_LABEL` saiu: o bloco usa o rótulo
+// do principal e `detailMergedAggNote` diz o que entrou junto.
+// `detailSumPartsNote` cobre o subtotal de partes com unidades diferentes.
 // Versão: 1.6 | Data: 17/08/2026
 // v1.6: MEMÓRIA DE CÁLCULO no lugar da prosa. A conferência virou NUMÉRICA
 // (realizado × somado lado a lado, com `DETAIL_DIVERGE_MARK` discreto), então
 // `detailReconcileNote` e `DETAIL_COMBINED_NOTE` saíram — no lugar entraram
 // `detailUnitValueNote` (quanto vale uma unidade), a escada de faixas
-// (`detailTierLabel`/`detailTierValue`/`detailTierMark`) e `SOMADOS_LABEL`.
+// (`detailTierLabel`/`detailTierValue`/`detailTierMark`).
 // Versão: 1.5 | Data: 16/08/2026
 // v1.5: o detalhamento passou a ser por OPERANDO da fórmula, então a
 // conferência só compara quando há um número único a confrontar.
@@ -309,8 +314,31 @@ export const DETAIL_DROPPED_FILTER_NOTE =
 export const DETAIL_UNSUPPORTED_FIELD_NOTE =
   "Este operando agrega um campo que a listagem não consegue recortar (campo unificado ou de registro casado) — os registros abaixo podem ser mais amplos que o do cálculo.";
 
-/** Rótulo do bloco que reúne os operandos não separados pela engrenagem. */
-export const SOMADOS_LABEL = "Somados";
+/**
+ * Nota do bloco que RECEBEU outros operandos (engrenagem): o rótulo do bloco
+ * segue sendo o do principal, então é aqui que se diz o que entrou junto —
+ * sem isso o subtotal cresceria sem explicação.
+ */
+export function detailMergedAggNote(
+  principal: string,
+  folded: string[],
+  total: number
+): string {
+  return detailAggNote([principal, ...folded].join(" + "), total);
+}
+
+/**
+ * Parcelas do subtotal quando as partes não compartilham unidade (soma em R$
+ * dobrada com contagem). Somar daria um número sem significado; mostrar as
+ * parcelas mantém o cálculo visível.
+ */
+export function detailSumPartsNote(
+  parts: { label: string; value: number; money: boolean }[]
+): string {
+  return parts
+    .map((p) => `${p.label}: ${p.money ? fmtMoneyBRL(p.value) : fmtNumBR(p.value)}`)
+    .join(" · ");
+}
 
 /** Cabeçalho do bloco do fator: o que a coluna de valor mostra e o tamanho do recorte. */
 export function detailAggNote(aggLabel: string, total: number): string {

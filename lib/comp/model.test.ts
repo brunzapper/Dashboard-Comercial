@@ -1,3 +1,7 @@
+// Versão: 1.5 | Data: 17/08/2026
+// v1.5: detailGrouping virou { byFactor: { into, folded } }. Pinos: entrada
+// sem nada dobrado CAI (a lista vazia era o que tornava a engrenagem inerte),
+// o legado separateByFactor sobrevive só-leitura e o shape novo vence.
 // Versão: 1.4 | Data: 17/08/2026
 // v1.4: `detailGrouping` (agrupamento dos blocos do detalhamento). Pino do
 // round-trip — o parse descarta chave desconhecida e o savePlan grava o objeto
@@ -320,12 +324,14 @@ describe("parseCompPlanConfig (fail-closed)", () => {
 
   it("detailGrouping sobrevive ao round-trip (senão o save do editor o apagaria)", () => {
     const cfg = makeConfig({
-      detailGrouping: { separateByFactor: { f_a: ["sum:value", "sum:value"] } },
+      detailGrouping: {
+        byFactor: { f_a: { into: "sum:value", folded: ["count:*", "count:*"] } },
+      },
     });
     const parsed = reparse(cfg);
     // Chave duplicada colapsa; a config chega inteira do outro lado do parse.
     expect(parsed!.detailGrouping).toEqual({
-      separateByFactor: { f_a: ["sum:value"] },
+      byFactor: { f_a: { into: "sum:value", folded: ["count:*"] } },
     });
   });
 
@@ -333,24 +339,54 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     const parsed = parseCompPlanConfig({
       ...JSON.parse(JSON.stringify(makeConfig())),
       detailGrouping: {
-        separateByFactor: {
-          f_a: ["sum:value", "", 7],
-          f_fantasma: ["sum:value"], // fator que não existe
-          f_b: "nao-e-lista",
+        byFactor: {
+          f_a: { into: "sum:value", folded: ["count:*", "", 7] },
+          f_fantasma: { into: "sum:value", folded: ["count:*"] }, // fator inexistente
+          f_b: { into: "", folded: ["x"] }, // principal vazio
         },
       },
     });
     expect(parsed).not.toBeNull();
     expect(parsed!.detailGrouping).toEqual({
+      byFactor: { f_a: { into: "sum:value", folded: ["count:*"] } },
+    });
+  });
+
+  it("entrada sem nada dobrado CAI: era a lista vazia que inertizava a engrenagem", () => {
+    const semDobrado = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: {
+        byFactor: {
+          // folded vazio, e folded == into (dobrar em si mesmo não existe).
+          f_a: { into: "sum:value", folded: [] },
+          f_b: { into: "sum:value", folded: ["sum:value"] },
+        },
+      },
+    });
+    expect(semDobrado).not.toBeNull();
+    expect("detailGrouping" in semDobrado!).toBe(false);
+  });
+
+  it("separateByFactor LEGADO é preservado só-leitura (conversão é no engine)", () => {
+    const parsed = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: { separateByFactor: { f_a: ["sum:value"], f_orfao: ["x"] } },
+    });
+    expect(parsed!.detailGrouping).toEqual({
+      byFactor: {},
       separateByFactor: { f_a: ["sum:value"] },
     });
-    // Vazio depois da limpeza = chave ausente (volta ao padrão), não mapa vazio.
-    const semNada = parseCompPlanConfig({
+    // Shape novo do mesmo fator vence o legado.
+    const ambos = parseCompPlanConfig({
       ...JSON.parse(JSON.stringify(makeConfig())),
-      detailGrouping: { separateByFactor: { f_fantasma: ["x"] } },
+      detailGrouping: {
+        byFactor: { f_a: { into: "count:*", folded: ["sum:value"] } },
+        separateByFactor: { f_a: ["sum:value"] },
+      },
     });
-    expect(semNada).not.toBeNull();
-    expect("detailGrouping" in semNada!).toBe(false);
+    expect(ambos!.detailGrouping).toEqual({
+      byFactor: { f_a: { into: "count:*", folded: ["sum:value"] } },
+    });
   });
 
   it("apuracao: preserva mes_anterior, normaliza mes_corrente p/ ausência e rejeita inválido", () => {

@@ -107,7 +107,7 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
   });
 
   it("save RE-EMITE detailGrouping (senão a engrenagem sumiria no 1º save)", async () => {
-    const grouping = { separateByFactor: { f_r: ["count:*"] } };
+    const grouping = { byFactor: { f_r: { into: "count:*", folded: ["sum:value"] } } };
     renderEditor(makeConfig({ detailGrouping: grouping }));
     fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
     await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));

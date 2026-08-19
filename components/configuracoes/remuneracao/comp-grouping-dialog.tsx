@@ -1,6 +1,12 @@
+// Versão: 1.1 | Data: 17/08/2026
+// v1.1: a escolha virou "quem RECEBE": um rádio marca o bloco PRINCIPAL do
+// fator e os checkboxes dizem quem é somado DENTRO dele. A 1ª versão só
+// marcava "bloco próprio" e os desmarcados se juntavam entre si — num fator de
+// 2 operandos isso nunca fundia nada (um desmarcado sozinho continuava bloco
+// próprio), e desmarcar os dois esvaziava a lista, que o save descartava.
 // Versão: 1.0 | Data: 17/08/2026
-// Engrenagem do card da Visão geral: escolhe quais OPERANDOS da fórmula ganham
-// bloco próprio no detalhamento e quais aparecem somados num bloco único.
+// Engrenagem do card da Visão geral: escolhe qual OPERANDO da fórmula é o
+// bloco principal do detalhamento e quais são somados dentro dele.
 //
 // A configuração é POR PLANO (vale para todos os membros — a fórmula é do
 // plano), então o diálogo é aberto do card de um colaborador mas o que ele
@@ -20,7 +26,6 @@ import {
 } from "@/app/(app)/operacao/remuneracao/detail-actions";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetDescription,
@@ -28,6 +33,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
+import type { CompFactorGrouping } from "@/lib/comp/model";
 import { notifyOnError } from "@/lib/feedback/notify";
 
 export interface CompGroupingTarget {
@@ -55,8 +61,8 @@ function Body(props: {
 }) {
   const { target } = props;
   const [state, setState] = useState<State>({ kind: "pending" });
-  // Operandos com bloco PRÓPRIO, por fator. Ausência de fator = padrão.
-  const [separate, setSeparate] = useState<Record<string, string[]>>({});
+  // factorId → { into, folded }. Fator ausente = padrão (cada um no seu bloco).
+  const [byFactor, setByFactor] = useState<Record<string, CompFactorGrouping>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -73,7 +79,7 @@ function Body(props: {
           return;
         }
         setState({ kind: "ok", operands: res.operands });
-        setSeparate(res.separateByFactor);
+        setByFactor(res.byFactor);
       })
       .catch(() => {
         if (alive)
@@ -85,32 +91,42 @@ function Body(props: {
   }, [target.planId, props.year, props.month]);
 
   const operands = state.kind === "ok" ? state.operands : [];
-  const byFactor = new Map<string, PlanOperandOption[]>();
+  const byFactorOps = new Map<string, PlanOperandOption[]>();
   for (const op of operands) {
-    byFactor.set(op.factorId, [...(byFactor.get(op.factorId) ?? []), op]);
+    byFactorOps.set(op.factorId, [...(byFactorOps.get(op.factorId) ?? []), op]);
   }
 
-  // Sem config para o fator, o padrão é "todos separados" — o checkbox precisa
-  // refletir isso para que desmarcar UM já signifique "some com os demais".
-  const isSeparate = (factorId: string, key: string) => {
-    const list = separate[factorId];
-    return list ? list.includes(key) : true;
+  // Principal EFETIVO: o gravado, ou o 1º operando (ordem da fórmula).
+  const principalOf = (factorId: string, ops: PlanOperandOption[]) =>
+    byFactor[factorId]?.into ?? ops[0]?.key ?? "";
+
+  const isFolded = (factorId: string, key: string) =>
+    (byFactor[factorId]?.folded ?? []).includes(key);
+
+  const setPrincipal = (factorId: string, key: string) => {
+    setByFactor((cur) => {
+      const atual = cur[factorId];
+      // Trocar o principal nunca dobra o antigo automaticamente: o usuário
+      // decide isso no checkbox. O novo principal sai da lista de dobrados.
+      const folded = (atual?.folded ?? []).filter((k) => k !== key);
+      return { ...cur, [factorId]: { into: key, folded } };
+    });
   };
 
-  const toggle = (factorId: string, key: string, all: string[]) => {
-    setSeparate((cur) => {
-      const list = cur[factorId] ?? all;
-      const next = list.includes(key)
-        ? list.filter((k) => k !== key)
-        : [...list, key];
-      return { ...cur, [factorId]: next };
+  const toggleFold = (factorId: string, key: string, principal: string) => {
+    setByFactor((cur) => {
+      const atual = cur[factorId] ?? { into: principal, folded: [] };
+      const folded = atual.folded.includes(key)
+        ? atual.folded.filter((k) => k !== key)
+        : [...atual.folded, key];
+      return { ...cur, [factorId]: { into: atual.into, folded } };
     });
   };
 
   const save = async () => {
     setSaving(true);
     const res = await notifyOnError(
-      saveDetailGrouping({ planId: target.planId, separateByFactor: separate }),
+      saveDetailGrouping({ planId: target.planId, byFactor }),
       "Não foi possível salvar o agrupamento"
     );
     setSaving(false);
@@ -137,39 +153,86 @@ function Body(props: {
         {state.kind === "ok" ? (
           <>
             <p className="text-muted-foreground text-sm">
-              Operando marcado ganha um bloco próprio, com sua lista e seu
-              subtotal. Os desmarcados de um mesmo fator aparecem juntos num
-              bloco somado.
+              Escolha o bloco principal de cada fator e marque quais operandos
+              entram somados dentro dele. Os não marcados seguem em blocos
+              separados, com lista e subtotal próprios.
             </p>
-            {[...byFactor.entries()].map(([factorId, ops]) => (
-              <div key={factorId} className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold">{ops[0].factorLabel}</h3>
-                {ops.length < 2 ? (
-                  <p className="text-muted-foreground text-xs">
-                    Este fator tem um operando só — nada a agrupar.
-                  </p>
-                ) : (
-                  ops.map((op) => (
-                    <Label
-                      key={op.key}
-                      className="flex items-center gap-2 text-sm font-normal"
-                    >
-                      <Checkbox
-                        checked={isSeparate(factorId, op.key)}
-                        onCheckedChange={() =>
-                          toggle(
-                            factorId,
-                            op.key,
-                            ops.map((o) => o.key)
-                          )
-                        }
-                      />
-                      {op.label}
-                    </Label>
-                  ))
-                )}
-              </div>
-            ))}
+            {[...byFactorOps.entries()].map(([factorId, ops]) => {
+              const principal = principalOf(factorId, ops);
+              const dobrados = ops.filter((o) => isFolded(factorId, o.key));
+              const principalLabel =
+                ops.find((o) => o.key === principal)?.label ?? "";
+              return (
+                <div key={factorId} className="flex flex-col gap-2">
+                  <h3 className="text-sm font-semibold">{ops[0].factorLabel}</h3>
+                  {ops.length < 2 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Este fator tem um operando só — nada a agrupar.
+                    </p>
+                  ) : (
+                    <>
+                      <table className="text-sm">
+                        <thead>
+                          <tr className="text-muted-foreground text-xs">
+                            <th className="w-20 pb-1 text-left font-normal">
+                              Principal
+                            </th>
+                            <th className="w-20 pb-1 text-left font-normal">
+                              Somar
+                            </th>
+                            <th className="pb-1 text-left font-normal">
+                              Operando
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ops.map((op) => {
+                            const ehPrincipal = op.key === principal;
+                            return (
+                              <tr key={op.key}>
+                                <td className="py-1">
+                                  <input
+                                    type="radio"
+                                    name={`principal-${factorId}`}
+                                    aria-label={`Bloco principal: ${op.label}`}
+                                    checked={ehPrincipal}
+                                    onChange={() =>
+                                      setPrincipal(factorId, op.key)
+                                    }
+                                  />
+                                </td>
+                                <td className="py-1">
+                                  <Checkbox
+                                    aria-label={`Somar no principal: ${op.label}`}
+                                    // O principal não se soma em si mesmo.
+                                    disabled={ehPrincipal}
+                                    checked={
+                                      !ehPrincipal && isFolded(factorId, op.key)
+                                    }
+                                    onCheckedChange={() =>
+                                      toggleFold(factorId, op.key, principal)
+                                    }
+                                  />
+                                </td>
+                                <td className="py-1">{op.label}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {/* Prévia: o efeito precisa ser óbvio ANTES de salvar. */}
+                      <p className="text-muted-foreground text-xs">
+                        {dobrados.length === 0
+                          ? "Cada operando em seu próprio bloco."
+                          : `${dobrados
+                              .map((o) => o.label)
+                              .join(", ")} entra${dobrados.length > 1 ? "m" : ""} em ${principalLabel}.`}
+                      </p>
+                    </>
+                  )}
+                </div>
+              );
+            })}
             <div className="flex justify-end">
               <Button type="button" size="sm" disabled={saving} onClick={save}>
                 {saving ? "Salvando…" : "Salvar"}

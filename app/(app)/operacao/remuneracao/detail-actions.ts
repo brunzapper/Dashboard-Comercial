@@ -1,3 +1,9 @@
+// Versão: 1.1 | Data: 17/08/2026
+// v1.1: agrupamento do detalhamento no shape { into, folded } — quem RECEBE e
+// o que foi dobrado. Fator sem nada dobrado não vira entrada (era a lista
+// vazia descartada que deixava a engrenagem inerte), e o load devolve o
+// agrupamento já RESOLVIDO pelo mesmo helper do detalhamento, para o diálogo
+// nunca discordar da tela.
 // Versão: 1.0 | Data: 16/08/2026
 // Action do DIÁLOGO de conferência da Remuneração: "quais registros compõem o
 // realizado deste membro × fator × mês". Casca fina — gates + client RLS do
@@ -19,9 +25,10 @@ import {
   factorOperands,
   loadCompDetailContext,
   loadFactorDetail,
+  resolveFactorGrouping,
   type FactorDetailResult,
 } from "@/lib/comp/detail";
-import { parseCompPlanConfig, type CompDetailGrouping } from "@/lib/comp/model";
+import { parseCompPlanConfig, type CompFactorGrouping } from "@/lib/comp/model";
 import { createClient } from "@/lib/supabase/server";
 
 export interface FactorDetailInput {
@@ -86,13 +93,22 @@ export interface PlanOperandOption {
 }
 
 export type PlanOperandsResult =
-  | { ok: true; operands: PlanOperandOption[]; separateByFactor: Record<string, string[]> }
+  | {
+      ok: true;
+      operands: PlanOperandOption[];
+      /** Agrupamento gravado, já normalizado para o shape atual. */
+      byFactor: Record<string, CompFactorGrouping>;
+    }
   | { ok: false; message: string };
 
 /**
  * Operandos de um plano (a decomposição real da fórmula) + o agrupamento
  * gravado. A engrenagem não pode adivinhar as chaves: elas saem do MESMO
  * `factorOperands` que monta os blocos, senão o que se marca não é o que se vê.
+ *
+ * O agrupamento devolvido já vem RESOLVIDO pelo mesmo helper do detalhamento
+ * (`resolveFactorGrouping`), então config legado abre no diálogo exatamente
+ * como será exibido — nunca uma tela que discorda do resultado.
  */
 export async function loadPlanOperands(input: {
   planId: string;
@@ -112,8 +128,10 @@ export async function loadPlanOperands(input: {
   const plan = ctx.plans.find((p) => p.row.id === input.planId);
   if (!plan) return { ok: false, message: "Plano não encontrado ou inativo." };
   const operands: PlanOperandOption[] = [];
+  const byFactor: Record<string, CompFactorGrouping> = {};
   for (const factor of plan.config.factors) {
-    for (const op of factorOperands(ctx, factor)) {
+    const ops = factorOperands(ctx, factor);
+    for (const op of ops) {
       operands.push({
         factorId: factor.id,
         factorLabel: factor.label,
@@ -121,12 +139,10 @@ export async function loadPlanOperands(input: {
         label: op.label,
       });
     }
+    const cfg = resolveFactorGrouping(ops, factor.id, plan.config.detailGrouping);
+    if (cfg) byFactor[factor.id] = cfg;
   }
-  return {
-    ok: true,
-    operands,
-    separateByFactor: plan.config.detailGrouping?.separateByFactor ?? {},
-  };
+  return { ok: true, operands, byFactor };
 }
 
 /**
@@ -136,7 +152,7 @@ export async function loadPlanOperands(input: {
  */
 export async function saveDetailGrouping(input: {
   planId: string;
-  separateByFactor: Record<string, string[]>;
+  byFactor: Record<string, CompFactorGrouping>;
 }): Promise<{ ok: boolean; message?: string }> {
   const gate = await requireCompAdmin();
   if (gate) return gate;
@@ -149,18 +165,28 @@ export async function saveDetailGrouping(input: {
   const config = parseCompPlanConfig((data as { config?: unknown } | null)?.config);
   if (!config) return { ok: false, message: "Configuração do plano inválida." };
 
-  // Entrada vazia = volta ao padrão (cada operando em bloco próprio): a chave
-  // some do config em vez de guardar um mapa vazio.
-  const sep: Record<string, string[]> = {};
-  for (const [fid, keys] of Object.entries(input.separateByFactor)) {
-    const list = [...new Set(keys.filter((k) => typeof k === "string" && k !== ""))];
-    if (list.length > 0) sep[fid] = list;
+  // Fator sem nada dobrado não vira entrada: "cada operando no seu bloco" é o
+  // padrão, e guardar a chave vazia é o que tornava a engrenagem inerte.
+  const byFactor: Record<string, CompFactorGrouping> = {};
+  for (const [fid, entry] of Object.entries(input.byFactor)) {
+    if (!entry || typeof entry.into !== "string" || entry.into === "") continue;
+    const folded = [
+      ...new Set(
+        (entry.folded ?? []).filter(
+          (k) => typeof k === "string" && k !== "" && k !== entry.into
+        )
+      ),
+    ];
+    if (folded.length > 0) byFactor[fid] = { into: entry.into, folded };
   }
-  const grouping: CompDetailGrouping | undefined =
-    Object.keys(sep).length > 0 ? { separateByFactor: sep } : undefined;
   const next = { ...config };
-  if (grouping) next.detailGrouping = grouping;
-  else delete next.detailGrouping;
+  if (Object.keys(byFactor).length > 0) {
+    next.detailGrouping = { byFactor };
+  } else {
+    // Some inclusive o legado: sem isso, desfazer o agrupamento na engrenagem
+    // deixaria o `separateByFactor` antigo mandando na tela.
+    delete next.detailGrouping;
+  }
 
   const { error } = await supabase
     .from("comp_plans")

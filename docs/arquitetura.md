@@ -1,3 +1,11 @@
+<!-- Versão: 1.70 | Data: 17/08/2026 -->
+<!-- v1.70 (17/08/2026): §4.18 — CONSERTO do agrupamento do detalhamento: a
+     config virou `byFactor[factorId] = { into, folded }` (bloco PRINCIPAL que
+     RECEBE os dobrados). O shape anterior (separateByFactor) era inerte num
+     fator de 2 operandos — um desmarcado sozinho seguia em bloco próprio e a
+     lista vazia era descartada pelo save. Bloco fundido herda o rótulo do
+     principal e marca mergedFrom; Σ só com unidades iguais (senão sumParts).
+     Legado convertido em resolveFactorGrouping. Apps Script INTOCADO. -->
 <!-- Versão: 1.69 | Data: 17/08/2026 -->
 <!-- v1.69 (17/08/2026): §4.18 — MEMÓRIA DE CÁLCULO no detalhamento no lugar da
      prosa: módulo puro lib/comp/payout-math.ts (commissionRolesOf, tierLadder
@@ -3195,13 +3203,28 @@ total opcional por plano.
   lado com `DETAIL_DIVERGE_MARK` discreto, e `detailReconcileNote`/
   `DETAIL_COMBINED_NOTE` saíram do módulo de frases.
   O **agrupamento dos blocos** é configuração POR PLANO
-  (`config.detailGrouping.separateByFactor`: factorId → basis keys que ficam
-  com bloco próprio; ausente = cada operando separado, o comportamento
-  anterior). Ela é aplicada por `groupOperands`/`mergeOperandBlocks` DEPOIS da
+  (`config.detailGrouping.byFactor[factorId] = { into, folded }`: `into` é o
+  bloco PRINCIPAL que recebe, `folded` são os operandos somados nele, e quem
+  fica fora dos dois mantém bloco próprio; ausente = cada operando separado, o
+  comportamento anterior). Ela é aplicada por
+  `groupOperands`/`mergeOperandBlocks` DEPOIS da
   consulta — a fusão é de APRESENTAÇÃO: cada operando continua sendo
   consultado no próprio recorte (é assim que o cálculo funciona), só a
   exibição soma, com a coluna de responsável virando a ORIGEM da linha e o
-  confronto desligado. A cláusula no `parseCompPlanConfig` é LENIENTE por
+  confronto desligado. O bloco fundido herda o rótulo e a coluna de valor do
+  principal e marca `mergedFrom` — o sinal de fusão para os consumidores, que
+  antes comparavam o rótulo com um texto fixo. O Σ só vira número único quando
+  as partes compartilham unidade: dobrar uma contagem numa soma em R$ produz
+  `sumParts` (as parcelas à vista), nunca um total que soma laranja com banana.
+  **Conserto de 17/08/2026:** a primeira versão gravava
+  `separateByFactor` (quem tem bloco próprio) e juntava os DEMAIS entre si —
+  o que num fator de 2 operandos nunca fundia nada: desmarcar um deixava um
+  sobrando (grupo de um = o próprio bloco) e desmarcar os dois esvaziava a
+  lista, que o save descartava por não distinguir "vazio" de "sem config". Daí
+  a regra dura de hoje: entrada sem nada dobrado CAI, no parse e no save. O
+  formato legado segue lido e é convertido em `resolveFactorGrouping` (não no
+  parse — só ali existe a lista de operandos), com o não-listado dobrando no
+  primeiro listado, que é o que o usuário esperava ao desmarcar. A cláusula no `parseCompPlanConfig` é LENIENTE por
   decisão — chave de fator órfã ou lista inválida some e o config segue vivo,
   porque perder a preferência de exibição não pode derrubar um plano — e o
   `save()` do plan-editor RE-EMITE a chave: o save grava o objeto PARSEADO, e
