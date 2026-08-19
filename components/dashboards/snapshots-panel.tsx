@@ -59,9 +59,11 @@ import {
 import { SnapshotForm } from "@/components/snapshots/snapshot-form";
 import {
   DEFAULT_PERIOD_FIELD,
+  effectivePeriodBar,
   hasSelection,
   PERIOD_ALL,
   periodKeys,
+  type EffectivePeriodBar,
   type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
@@ -73,6 +75,9 @@ import type { DashboardSettings } from "@/lib/widgets/types";
 // defaults por bucket resolvidos no servidor > config da barra).
 export interface SnapshotPeriodCapture {
   periodBar?: DashboardSettings["periodBar"];
+  // Config EFETIVA da barra por bucket (herança de periodBar.byTab resolvida no
+  // servidor). Fallback local pelo mesmo helper quando o bucket não está aqui.
+  barByTab?: Record<string, EffectivePeriodBar>;
   scope: PeriodScope;
   defaultsByTab: Record<string, PeriodSelection>;
   defaultFieldByTab: Record<string, string>;
@@ -92,22 +97,30 @@ export function SnapshotsPanel({
   // defaults do bucket ("" no escopo global; id da aba no escopo por aba).
   const capturePeriod = period
     ? (tabId: string): SavedPeriod | null => {
-        if (period.periodBar?.enabled === false) return null;
         const keys = periodKeys(period.scope, tabId);
         const bucket = period.scope === "tab" ? tabId : "";
-        const urlSel: PeriodSelection = {
-          preset: sp.get(keys.preset) ?? "",
-          de: sp.get(keys.de) ?? "",
-          ate: sp.get(keys.ate) ?? "",
-        };
+        // Config efetiva do bucket: barra OCULTA não significa mais "sem
+        // período" — o padrão do bucket segue valendo (e é ele que o board
+        // mostra), então é ele que o snapshot congela. Só a URL sai de cena.
+        const bar =
+          period.barByTab?.[bucket] ??
+          effectivePeriodBar(period.periodBar, period.scope, bucket);
+        const hidden = bar.enabled === false;
+        const urlSel: PeriodSelection = hidden
+          ? {}
+          : {
+              preset: sp.get(keys.preset) ?? "",
+              de: sp.get(keys.de) ?? "",
+              ate: sp.get(keys.ate) ?? "",
+            };
         const defaults = period.defaultsByTab[bucket] ?? {
-          preset: period.periodBar?.defaultPreset ?? "",
+          preset: bar.defaultPreset ?? "",
         };
         const sel = hasSelection(urlSel) ? urlSel : defaults;
         const campo =
-          sp.get(keys.campo) ||
+          (hidden ? "" : sp.get(keys.campo)) ||
           period.defaultFieldByTab[bucket] ||
-          period.periodBar?.field ||
+          bar.field ||
           DEFAULT_PERIOD_FIELD;
         const preset =
           sel.preset && sel.preset !== PERIOD_ALL ? sel.preset : "";

@@ -73,7 +73,12 @@ import {
 } from "@/app/(app)/dashboards/deferred-widget-actions";
 import { useDataChanged } from "@/lib/tasks/events";
 import type { AvailableField } from "@/lib/widgets/fields";
-import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
+import {
+  effectivePeriodBar,
+  type EffectivePeriodBar,
+  type PeriodScope,
+  type PeriodSelection,
+} from "@/lib/widgets/period";
 import type {
   CalcWidgetResult,
   Connector,
@@ -186,6 +191,7 @@ export function DashboardClient({
   dateFormat,
   periodBar,
   periodScope,
+  periodBarByTab,
   periodDefaultsByTab,
   periodDefaultFieldByTab,
   filterOptionsById,
@@ -251,6 +257,9 @@ export function DashboardClient({
   dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
   periodScope?: PeriodScope;
+  // Config EFETIVA da barra por bucket (herança de periodBar.byTab já
+  // resolvida no servidor). Fallback local p/ buckets fora do mapa.
+  periodBarByTab?: Record<string, EffectivePeriodBar>;
   periodDefaultsByTab?: Record<string, PeriodSelection>;
   periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
@@ -389,7 +398,6 @@ export function DashboardClient({
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const barEnabled = periodBar?.enabled !== false;
   const backgroundCss = dashboardBackgroundCss(settings.background);
 
   // Contexto do período p/ o painel de Snapshots capturar a seleção efetiva no
@@ -397,6 +405,7 @@ export function DashboardClient({
   const snapshotPeriod = useMemo<SnapshotPeriodCapture>(
     () => ({
       periodBar,
+      barByTab: periodBarByTab ?? {},
       scope: periodScope ?? "global",
       defaultsByTab: periodDefaultsByTab ?? {},
       defaultFieldByTab: periodDefaultFieldByTab ?? {},
@@ -406,6 +415,7 @@ export function DashboardClient({
     }),
     [
       periodBar,
+      periodBarByTab,
       periodScope,
       periodDefaultsByTab,
       periodDefaultFieldByTab,
@@ -439,6 +449,15 @@ export function DashboardClient({
       : (tabs[0]?.id ?? "")
   );
   const firstTabId = tabs[0]?.id ?? "";
+  // Bucket da barra de período na aba ATIVA ("" no escopo global) e a config
+  // EFETIVA dele: com escopo por aba, cada aba pode ter padrão/campo próprios
+  // e pode esconder a barra. O mapa vem do servidor; o fallback local usa o
+  // MESMO helper de herança, então os dois lados nunca divergem.
+  const periodBucket = periodScope === "tab" ? activeTabId : "";
+  const activeBar =
+    periodBarByTab?.[periodBucket] ??
+    effectivePeriodBar(periodBar, periodScope, periodBucket);
+  const barEnabled = activeBar.enabled !== false;
   // Troca de aba: além do estado, espelha na URL via history.replaceState (sem
   // navegação RSC — a page é pesada; o Next sincroniza useSearchParams). A
   // primeira aba fica sem ?tab para manter URLs limpas.
@@ -667,11 +686,26 @@ export function DashboardClient({
     });
   }
 
+  // Reexibe a barra. No escopo por aba a visibilidade é da ABA ATIVA (grava em
+  // periodBar.byTab[aba]) — mostrar numa aba não reexibe nas outras.
   function showBar() {
+    const next =
+      periodScope === "tab" && periodBucket
+        ? {
+            ...periodBar,
+            byTab: {
+              ...(periodBar?.byTab ?? {}),
+              [periodBucket]: {
+                ...(periodBar?.byTab?.[periodBucket] ?? {}),
+                enabled: true,
+              },
+            },
+          }
+        : { ...periodBar, enabled: true };
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
-        periodBar: { ...periodBar, enabled: true },
+        periodBar: next,
       });
     });
   }
@@ -1076,8 +1110,10 @@ export function DashboardClient({
             dashboardId={dashboardId}
             settings={settings}
             periodBar={periodBar}
+            activeBar={activeBar}
             periodScope={periodScope}
             activeTabId={activeTabId}
+            tabName={tabs.find((t) => t.id === activeTabId)?.name}
             firstTabId={firstTabId}
             hasTabs={tabs.length > 0}
             periodDefaultsByTab={periodDefaultsByTab}
@@ -1091,7 +1127,10 @@ export function DashboardClient({
             disabled={pending}
             onClick={showBar}
           >
-            <Clock className="size-4" /> Mostrar barra de período
+            <Clock className="size-4" />{" "}
+            {periodScope === "tab" && periodBucket
+              ? "Mostrar barra de período nesta aba"
+              : "Mostrar barra de período"}
           </Button>
         ) : null}
 

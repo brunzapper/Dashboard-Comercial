@@ -329,6 +329,13 @@ export function exportDashboardJson(input: {
     const root = rootOf(k, sources);
     if (root) based.add(root);
   }
+  // Idem para os overrides por aba (periodBar.byTab[<aba>].fieldBySource).
+  for (const over of Object.values(settings.periodBar?.byTab ?? {})) {
+    for (const k of Object.keys(over?.fieldBySource ?? {})) {
+      const root = rootOf(k, sources);
+      if (root) based.add(root);
+    }
+  }
   const scopeKeys = settings.sourceScope?.keys ?? [];
   for (const k of scopeKeys) {
     const root = rootOf(k, sources);

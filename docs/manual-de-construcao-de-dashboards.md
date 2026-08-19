@@ -755,8 +755,20 @@ configurada pela engrenagem da própria barra:
   pela SUA coluna de data (ex.: Deals por fechamento, Estudo por criação).
   Essencial em dashboards multi-Base; ver §7.2.
 - **Escopo**: **global** (uma seleção para o dashboard inteiro) ou **por aba**
-  (cada aba tem sua própria seleção).
-- **Ocultar** a barra (o período padrão continua valendo).
+  (cada aba tem sua própria seleção). O escopo vale para o dashboard inteiro.
+- **Ocultar** a barra — o período padrão continua valendo, e passa a valer
+  **igual para todos os usuários** (a seleção pessoal de quem já tinha mexido
+  na barra deixa de contar, porque não há mais como mudá-la na tela). É assim
+  que se trava a janela de um dashboard. Para não filtrar por período,
+  escolha "Todo o período" como padrão antes de ocultar.
+
+**Com o escopo "por aba", a engrenagem configura a ABA ATIVA.** Período padrão,
+campo de data, campo por Base e o ocultar passam a ser da aba — uma aba pode
+abrir em "Este mês" e a vizinha em "Este ano", e você pode esconder a barra só
+onde a janela é fixa. A caixa **"Usar a configuração global do dashboard"**
+(marcada por padrão) devolve a aba à herança: enquanto ela estiver marcada, a
+aba segue o que estiver configurado para o dashboard. Trocar o escopo de volta
+para global não apaga o que você configurou por aba.
 
 **As 13 opções do dropdown de período** (idênticas na barra global, no widget
 "Filtro de período" e nos filtros rápidos de período dos cards):

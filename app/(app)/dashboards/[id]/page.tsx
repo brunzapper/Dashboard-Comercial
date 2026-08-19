@@ -96,6 +96,7 @@ import {
   hasSelection,
   periodKeys,
   resolvePeriodSelection,
+  type EffectivePeriodBar,
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
@@ -432,14 +433,22 @@ export default async function DashboardPage({
 
   // Defaults por bucket, entregues ao cliente para exibir a seleção efetiva de
   // cada aba (deve bater com o que o servidor resolveu). Bucket "" cobre o modo
-  // global e dashboards sem abas / widgets sem aba.
+  // global e dashboards sem abas / widgets sem aba. `periodBarByTab` leva junto
+  // a config EFETIVA da barra em cada bucket (herança de periodBar.byTab já
+  // resolvida) — é dela que o cliente tira a visibilidade da barra na aba ativa.
   const buckets = scope === "tab" ? [...tabIds, firstTabId] : [""];
   const periodDefaultsByTab: Record<string, PeriodSelection> = {};
   const periodDefaultFieldByTab: Record<string, string> = {};
+  const periodBarByTab: Record<string, EffectivePeriodBar> = {};
   for (const b of new Set(buckets)) {
-    const d = resolveDefaults(savedFor(b));
+    const bar = resolver.effectiveBar(b);
+    // Bucket com a barra OCULTA: os defaults entregues ao cliente ignoram a
+    // preferência do usuário, exatamente como o resolver faz ao fixar o
+    // período — senão a UI exibiria uma janela que os dados não usam.
+    const d = resolveDefaults(savedFor(b), b, bar.enabled === false);
     periodDefaultsByTab[b] = d.periodDefaults;
     periodDefaultFieldByTab[b] = d.defaultField;
+    periodBarByTab[b] = bar;
   }
 
   // Período efetivo por widget: barra global (por bucket) + overrides dos
@@ -638,8 +647,14 @@ export default async function DashboardPage({
 
     // Seleção CRUA efetiva da barra de período de um bucket (URL > default),
     // p/ o filtro rápido de período sem valor espelhar o que a barra mostra.
+    // Barra OCULTA no bucket: espelha só o padrão dali (mesma regra do
+    // resolver — nem URL nem preferência entram).
     const rawSelectionForBucket = (bucket: string): PeriodSelection => {
-      const { periodDefaults } = resolveDefaults(savedFor(bucket));
+      const hidden = resolver.effectiveBar(bucket).enabled === false;
+      const periodDefaults =
+        periodDefaultsByTab[bucket] ??
+        resolveDefaults(savedFor(bucket), bucket, hidden).periodDefaults;
+      if (hidden) return periodDefaults;
       const keys = periodKeys(scope, bucket);
       const urlSel: PeriodSelection = {
         preset: str(sp[keys.preset]),
@@ -1548,6 +1563,7 @@ export default async function DashboardPage({
         dateFormat={dashSettings.dateFormat}
         periodBar={periodBar}
         periodScope={scope}
+        periodBarByTab={periodBarByTab}
         periodDefaultsByTab={periodDefaultsByTab}
         periodDefaultFieldByTab={periodDefaultFieldByTab}
         filterOptionsById={filterOptionsById}

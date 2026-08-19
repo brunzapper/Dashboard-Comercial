@@ -838,6 +838,38 @@ sobre o pool global — fiel à whitelist, que sempre valeu para o board inteiro
 igualmente para o "Aplicar a" do filtro_campo (recorte por sobreposição de
 bases roda antes do agrupamento).
 
+**Padrão POR ABA e barra oculta (19/08/2026):** com `periodBar.scope = "tab"`, o
+escopo por aba separava só a *seleção do usuário* (`lastPeriodByTab`, uma linha
+de `user_preferences` por usuário) — o padrão (`defaultPreset`), o campo e o
+`fieldBySource` seguiam únicos do board, então abas com janelas diferentes
+brigavam pelo mesmo default. `periodBar.byTab[<tabId>]` passa a guardar os
+**overrides da aba** (`enabled`/`defaultPreset`/`field`/`fieldBySource`);
+sub-chave ausente **herda** a global (`fieldBySource` é herdado inteiro, nunca
+merge parcial) e board sem `byTab` se comporta como antes. A herança tem um
+**choke point único**, `effectivePeriodBar` (`lib/widgets/period.ts`), usado por
+servidor e cliente — nenhum outro módulo lê `byTab` direto. Fora do escopo
+`"tab"` (ou sem bucket) o `byTab` é ignorado por completo, o que mantém o viewer
+de snapshot — que sintetiza `scope: "global"` — alheio à chave.
+
+A **visibilidade também é por bucket**, e `enabled: false` mudou de significado:
+antes zerava o período de todos os widgets ("todo o período"); agora **fixa o
+padrão daquele bucket**, ignorando URL e preferência do usuário
+(`resolvePinnedPeriodForBucket`) — é assim que se trava a mesma janela para
+todos, e é o que o manual de construção sempre prometeu. Sem controle na tela,
+honrar a preferência salva prenderia cada usuário a uma janela divergente e
+invisível. "Todo o período" com a barra oculta se declara com
+`defaultPreset: PERIOD_ALL`. A origem continua `"bar"` nos dois modos — o
+espelho "barra → filtro rápido" da page depende disso. Boards já ocultos **com**
+um `defaultPreset` esquecido mudam de janela no deploy; runbook opcional para
+preservar o comportamento antigo:
+`supabase/apply/backfill-hidden-period-bar.sql`. A page entrega ao cliente
+`periodBarByTab` (config efetiva por bucket) ao lado de
+`periodDefaultsByTab`/`periodDefaultFieldByTab`, e num bucket oculto esses
+defaults também descartam a preferência — UI e dados não podem divergir.
+Quem varre `periodBar.fieldBySource` para descobrir as Bases do board
+(`collectBoardSourceKeys`, export da IA) precisa varrer também os overrides,
+senão uma Base usada só numa aba some do catálogo efetivo.
+
 Fontes dinâmicas (`data_sources`, criáveis via UI sem migração) precisam estar
 cobertas no mapa `fieldBySource` do resolver — o `@period` do RPC **exclui**
 `record_types` fora do mapa.

@@ -110,6 +110,11 @@ export function collectBoardSourceKeys(
     out,
     Object.keys(dashSettings?.periodBar?.fieldBySource ?? {}) as SourceKey[]
   );
+  // Overrides por aba do campo de data por Base: uma Base usada SÓ no override
+  // de uma aba também é referenciada pelo board.
+  for (const over of Object.values(dashSettings?.periodBar?.byTab ?? {})) {
+    addAll(out, Object.keys(over?.fieldBySource ?? {}) as SourceKey[]);
+  }
   return out;
 }
 
