@@ -332,3 +332,86 @@ describe("dimensão condicional (dimensions[].case_formula_text)", () => {
     expect(res.preset?.widgets[0].dimensions?.[0].caseFormula).toBeUndefined();
   });
 });
+
+describe("periodBar.byTab — overrides por aba", () => {
+  function docWithBar(periodBar: unknown): string {
+    return JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_bar",
+      bases: ["deals"],
+      dashboard: {
+        name: "Teste",
+        visible_to_roles: [],
+        settings: {
+          tabs: [
+            { id: "t1", name: "Aba 1" },
+            { id: "t2", name: "Aba 2" },
+          ],
+          periodBar,
+        },
+      },
+      widgets: [
+        {
+          key: "kpi",
+          title: "KPI",
+          visual_type: "kpi",
+          sources: ["deals"],
+          dimensions: [],
+          metrics: [{ field: "*", agg: "count" }],
+          filters: [],
+          grid_position: { x: 0, y: 0, w: 4, h: 4 },
+        },
+      ],
+    });
+  }
+
+  it("override válido é preservado", () => {
+    const res = validateDashboardImport(
+      docWithBar({
+        scope: "tab",
+        defaultPreset: "este_mes",
+        byTab: { t2: { enabled: false, defaultPreset: "este_ano" } },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.preset?.settings?.periodBar?.byTab).toEqual({
+      t2: { enabled: false, defaultPreset: "este_ano" },
+    });
+  });
+
+  it("aba desconhecida some com AVISO (não derruba o import)", () => {
+    const res = validateDashboardImport(
+      docWithBar({
+        scope: "tab",
+        byTab: { tX: { defaultPreset: "este_ano" } },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.warnings.join("\n")).toContain("aba desconhecida");
+    expect(res.preset?.settings?.periodBar?.byTab).toBeUndefined();
+  });
+
+  it("preset inválido no override é ERRO", () => {
+    const res = validateDashboardImport(
+      docWithBar({ scope: "tab", byTab: { t1: { defaultPreset: "semana_xyz" } } }),
+      ctx
+    );
+    expect(res.ok).toBe(false);
+    expect(res.errors.join("\n")).toContain("byTab.t1.defaultPreset");
+  });
+
+  it("Base desconhecida no fieldBySource do override é ERRO", () => {
+    const res = validateDashboardImport(
+      docWithBar({
+        scope: "tab",
+        byTab: { t1: { fieldBySource: { nao_existe: "closed_at" } } },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(false);
+    expect(res.errors.join("\n")).toContain("Base desconhecida");
+  });
+});

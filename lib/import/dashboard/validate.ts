@@ -769,6 +769,47 @@ export function validateDashboardImport(
         checkRef(f, `dashboard.settings.periodBar.fieldBySource.${sk}`);
       }
     }
+    // Overrides por aba: mesmas checagens do global, chave = id de uma aba
+    // declarada. Aba desconhecida some com AVISO (padrão do closedWeek) — um id
+    // errado não pode derrubar o import inteiro.
+    if (isRecord(pb.byTab)) {
+      const byTab: NonNullable<typeof pb.byTab> = {};
+      for (const [tabId, raw] of Object.entries(pb.byTab)) {
+        const where = `dashboard.settings.periodBar.byTab.${tabId}`;
+        if (!isRecord(raw)) continue;
+        if (!tabIds.has(tabId)) {
+          warnings.push(`${where}: aba desconhecida — override removido.`);
+          continue;
+        }
+        const over = { ...raw } as NonNullable<typeof pb.byTab>[string];
+        if (over.field) checkRef(over.field, `${where}.field`);
+        if (over.defaultPreset != null && !PERIOD_PRESET_KEYS.has(over.defaultPreset)) {
+          errors.push(
+            `${where}.defaultPreset inválido ("${over.defaultPreset}"). Válidos: ${Object.keys(PERIOD_PRESETS).join(", ")}, "${PERIOD_ALL}".`
+          );
+        }
+        if (over.fieldBySource && subRemap.size > 0) {
+          over.fieldBySource = Object.fromEntries(
+            Object.entries(over.fieldBySource).map(([sk, f]) => [
+              remapSourceKey(sk),
+              f,
+            ])
+          );
+        }
+        for (const [sk, f] of Object.entries(over.fieldBySource ?? {})) {
+          if (!sourceKeySet().has(sk)) {
+            errors.push(`${where}.fieldBySource: Base desconhecida ("${sk}").`);
+          } else if (typeof f === "string") {
+            checkRef(f, `${where}.fieldBySource.${sk}`);
+          }
+        }
+        byTab[tabId] = over;
+      }
+      if (Object.keys(byTab).length > 0) pb.byTab = byTab;
+      else delete pb.byTab;
+    } else if (pb.byTab != null) {
+      delete pb.byTab;
+    }
   }
   // Espaço de grid do JSON: canvas.gridVersion 2 = unidades FINAS (export de
   // board pós-grade-fina; deltas da IA herdam o carimbo via currentCanvas do

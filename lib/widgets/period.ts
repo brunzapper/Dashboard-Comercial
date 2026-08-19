@@ -1,4 +1,9 @@
-// Versão: 2.3 | Data: 06/08/2026
+// Versão: 2.4 | Data: 19/08/2026
+// v2.4 (19/08/2026): periodBar.byTab — overrides POR ABA (padrão, campo,
+// campo por Base e visibilidade da barra) quando o escopo é "por aba".
+// `effectivePeriodBar` é o CHOKE POINT ÚNICO da herança (global ← byTab[aba]),
+// compartilhado por servidor (period-resolve) e cliente (barra, shell do
+// board, painel de snapshots) — ninguém mais lê `byTab` direto.
 // v2.3 (06/08/2026): ignore_period (0116) — applyPeriodToFilters particiona as
 // fontes cobertas: record_type cujas fontes cobertas TODAS ignoram o período
 // sai do byType e o sintético ganha `record_types` (pass-through do wrapper do
@@ -21,7 +26,7 @@
 // ausente; o sentinel "all" representa "todo o período" explícito (sobrepõe o
 // default). Ao aplicar aos filtros de um widget, substitui os filtros de data
 // do próprio widget no mesmo campo.
-import type { WidgetFilter } from "./types";
+import type { DashboardSettings, WidgetFilter } from "./types";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   BUILTIN_SOURCES,
@@ -132,6 +137,38 @@ export function periodKeys(scope: PeriodScope | undefined, tabId: string) {
     de: `de${suffix}`,
     ate: `ate${suffix}`,
     campo: `campo${suffix}`,
+  };
+}
+
+/** Config da barra de período já resolvida para um bucket (sem `byTab`). */
+export type EffectivePeriodBar = Omit<
+  NonNullable<DashboardSettings["periodBar"]>,
+  "byTab" | "scope"
+>;
+
+/**
+ * Config EFETIVA da barra para um bucket ("" no escopo global; id da aba no
+ * escopo por aba). CHOKE POINT ÚNICO da herança `periodBar` ← `byTab[bucket]`:
+ * sub-chave ausente (undefined) HERDA a global; `fieldBySource` é herdado
+ * INTEIRO quando ausente (nunca merge parcial de Bases — override de aba tem
+ * de ser previsível). Fora do escopo "tab" (ou sem bucket), `byTab` é ignorado
+ * por completo — é o que mantém o viewer de snapshot (que sintetiza
+ * `scope: "global"`) alheio à chave.
+ */
+export function effectivePeriodBar(
+  bar: DashboardSettings["periodBar"],
+  scope: PeriodScope | undefined,
+  bucket: string
+): EffectivePeriodBar {
+  const { byTab: _byTab, scope: _scope, ...global } = bar ?? {};
+  if (scope !== "tab" || !bucket) return global;
+  const over = bar?.byTab?.[bucket];
+  if (!over) return global;
+  return {
+    enabled: over.enabled ?? global.enabled,
+    defaultPreset: over.defaultPreset ?? global.defaultPreset,
+    field: over.field ?? global.field,
+    fieldBySource: over.fieldBySource ?? global.fieldBySource,
   };
 }
 

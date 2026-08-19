@@ -1,4 +1,10 @@
-// Versão: 3.1 | Data: 26/07/2026
+// Versão: 3.2 | Data: 19/08/2026
+// v3.2 (19/08/2026): com escopo POR ABA, a engrenagem configura a ABA ATIVA —
+//   período padrão, campo primário, campo por Base e visibilidade da barra vão
+//   para `periodBar.byTab[<aba>]` (herança do global resolvida em
+//   `effectivePeriodBar`). O escopo em si segue sendo chave do board inteiro.
+//   Ocultar a barra numa aba FIXA o período padrão dela para todos os usuários
+//   (ver lib/widgets/period-resolve.ts) — deixou de significar "todo o período".
 // v3.1 (26/07/2026): PASTAS (0107) — "Campo de data por base" agrupado por
 //   pasta, com as subs logo abaixo da própria pai (↳).
 // Barra de período do dashboard: filtra todos os widgets não cobertos por um
@@ -33,8 +39,10 @@ import {
 import { useSourceFolders } from "@/components/source-folders-context";
 import {
   DEFAULT_PERIOD_FIELD,
+  effectivePeriodBar,
   PERIOD_PRESETS,
   periodKeys,
+  type EffectivePeriodBar,
   type PeriodPresetKey,
   type PeriodScope,
   type PeriodSelection,
@@ -59,8 +67,10 @@ export function PeriodFilter({
   dashboardId,
   settings,
   periodBar,
+  activeBar,
   periodScope,
   activeTabId,
+  tabName,
   firstTabId = "",
   hasTabs,
   periodDefaultsByTab,
@@ -71,8 +81,13 @@ export function PeriodFilter({
   dashboardId: string;
   settings: DashboardSettings;
   periodBar?: PeriodBar;
+  // Config EFETIVA do bucket ativo (global ← byTab[aba]), resolvida pelo
+  // servidor. Ausente = derivada aqui pelo MESMO helper.
+  activeBar?: EffectivePeriodBar;
   periodScope?: PeriodScope;
   activeTabId: string;
+  // Nome da aba ativa — só rotula o popover no escopo por aba.
+  tabName?: string;
   // Id da 1ª aba (widgets sem etiqueta pertencem a ela) — usado pelo sync dos
   // filtros rápidos no escopo por aba.
   firstTabId?: string;
@@ -95,13 +110,17 @@ export function PeriodFilter({
   const bucket = scope === "tab" ? activeTabId : "";
   const keys = periodKeys(scope, bucket);
 
+  // Config efetiva deste bucket (global ← byTab[aba]): o servidor já resolveu a
+  // herança; o fallback usa o MESMO helper p/ os dois lados nunca divergirem.
+  const bar = activeBar ?? effectivePeriodBar(periodBar, scope, bucket);
   // Default (URL vazia): usa o que o servidor resolveu para este bucket (último
   // período do usuário > config do dashboard > default), p/ UI e dados baterem.
+  // Num bucket com a barra oculta o servidor já descarta a preferência.
   const periodDefaults = periodDefaultsByTab?.[bucket] ?? {
-    preset: periodBar?.defaultPreset ?? "",
+    preset: bar.defaultPreset ?? "",
   };
   const defaultField =
-    periodDefaultFieldByTab?.[bucket] || periodBar?.field || DEFAULT_PERIOD_FIELD;
+    periodDefaultFieldByTab?.[bucket] || bar.field || DEFAULT_PERIOD_FIELD;
   const field = sp.get(keys.campo) || defaultField;
 
   return (
@@ -142,10 +161,18 @@ export function PeriodFilter({
       />
       {canEdit ? (
         <PeriodBarConfig
+          // Reidrata o estado interno ao trocar de aba (mesmo motivo do `key`
+          // do PeriodControls): sem isso o popover mostraria — e salvaria — os
+          // valores da aba anterior.
+          key={bucket}
           dashboardId={dashboardId}
           settings={settings}
           dateFields={dateFields}
           periodBar={periodBar}
+          effective={bar}
+          scope={scope}
+          bucket={bucket}
+          tabName={tabName}
           hasTabs={hasTabs}
         />
       ) : null}
@@ -153,27 +180,53 @@ export function PeriodFilter({
   );
 }
 
-// Popover de configuração da barra (editores): período/campo/escopo padrão + ocultar.
+// Popover de configuração da barra (editores): período/campo padrão, escopo e
+// ocultar. Com escopo POR ABA tudo (menos o escopo, que é do board) vale para a
+// ABA ATIVA e é gravado em periodBar.byTab[<aba>]; a caixa "Usar a configuração
+// global" REMOVE a chave da aba, devolvendo-a à herança.
 function PeriodBarConfig({
   dashboardId,
   settings,
   dateFields,
   periodBar,
+  effective,
+  scope: currentScope,
+  bucket,
+  tabName,
   hasTabs,
 }: {
   dashboardId: string;
   settings: DashboardSettings;
   dateFields: AvailableField[];
   periodBar?: PeriodBar;
+  effective: EffectivePeriodBar;
+  scope: PeriodScope;
+  bucket: string;
+  tabName?: string;
   hasTabs: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [preset, setPreset] = useState(periodBar?.defaultPreset ?? "");
-  const [field, setField] = useState(periodBar?.field ?? DEFAULT_PERIOD_FIELD);
-  const [scope, setScope] = useState<PeriodScope>(
-    periodBar?.scope === "tab" ? "tab" : "global"
+  // Override JÁ salvo desta aba, lido pelo escopo VIGENTE (é o que está no
+  // banco). A caixa "usar o global" governa os VALORES (período padrão, campo,
+  // campo por Base) — a visibilidade é dos botões Ocultar/Mostrar, então uma
+  // aba pode esconder a barra e ainda herdar os valores.
+  const tabOverride =
+    currentScope === "tab" && bucket ? periodBar?.byTab?.[bucket] : undefined;
+  const [inherit, setInherit] = useState(
+    !(
+      tabOverride &&
+      (tabOverride.defaultPreset !== undefined ||
+        tabOverride.field !== undefined ||
+        tabOverride.fieldBySource !== undefined)
+    )
   );
+  const [preset, setPreset] = useState(effective.defaultPreset ?? "");
+  const [field, setField] = useState(effective.field ?? DEFAULT_PERIOD_FIELD);
+  const [scope, setScope] = useState<PeriodScope>(currentScope);
+  // Editando a config DA ABA? Usa o escopo PENDENTE (o do combobox): trocar
+  // para global no popover faz o Salvar gravar as chaves de topo.
+  const perTab = scope === "tab" && Boolean(bucket);
   // Campo de data por fonte (secundária/terciária/…): a mesma seleção de
   // calendário filtra cada fonte pela sua coluna. Default por fonte quando não
   // configurado (ex.: Estudo → Data de criação).
@@ -182,7 +235,7 @@ function PeriodBarConfig({
     Partial<Record<SourceKey, string>>
   >(() => ({
     ...defaultPeriodFieldBySource(catalog),
-    ...(periodBar?.fieldBySource ?? {}),
+    ...(effective.fieldBySource ?? {}),
   }));
   // PASTAS (0107): lista "Campo de data por base" agrupada por pasta (heading
   // só quando há pasta) e cada raiz seguida das PRÓPRIAS subs. Puro visual —
@@ -208,6 +261,9 @@ function PeriodBarConfig({
     { value: "global", label: "Global (todas as abas)" },
     { value: "tab", label: "Por aba" },
   ];
+  // Editando a aba mas herdando do global: os controles abaixo são só leitura
+  // (mostram o valor herdado) — desmarcar a caixa os libera.
+  const locked = perTab && inherit;
 
   function persist(next: PeriodBar) {
     startTransition(async () => {
@@ -216,6 +272,71 @@ function PeriodBarConfig({
       await updateDashboardSettings(dashboardId, { ...settings, periodBar: next });
       setOpen(false);
     });
+  }
+
+  // Grava os overrides DESTA aba preservando as demais (e o global). Passar
+  // `null` remove a chave da aba = volta a herdar. Trocar o escopo nunca apaga
+  // o `byTab`: o editor pode ir e voltar sem perder o que configurou.
+  function persistTab(over: NonNullable<PeriodBar["byTab"]>[string] | null) {
+    const byTab = { ...(periodBar?.byTab ?? {}) };
+    if (over) byTab[bucket] = over;
+    else delete byTab[bucket];
+    const next: PeriodBar = { ...periodBar, scope };
+    if (Object.keys(byTab).length > 0) next.byTab = byTab;
+    else delete next.byTab;
+    persist(next);
+  }
+
+  // "Salvar": no escopo por aba escreve o override da aba (ou o remove, se
+  // marcada a herança); no global, as chaves de topo, como sempre.
+  function save() {
+    if (perTab) {
+      // Herdando: some com os valores da aba, PRESERVANDO a visibilidade dela.
+      persistTab(
+        inherit
+          ? tabOverride?.enabled !== undefined
+            ? { enabled: tabOverride.enabled }
+            : null
+          : {
+              ...(tabOverride?.enabled !== undefined
+                ? { enabled: tabOverride.enabled }
+                : {}),
+              defaultPreset: preset,
+              field,
+              fieldBySource,
+            }
+      );
+      return;
+    }
+    persist({
+      ...periodBar,
+      enabled: true,
+      defaultPreset: preset,
+      field,
+      scope,
+      fieldBySource,
+    });
+  }
+
+  // "Ocultar barra": no escopo por aba esconde só a ABA ATIVA. Herdando o
+  // global, grava SÓ `enabled: false` — congelar preset/campo aqui faria a aba
+  // parar de acompanhar mudanças futuras do dashboard sem o editor pedir.
+  function hideBar() {
+    if (perTab) {
+      persistTab(
+        inherit
+          ? { ...(tabOverride ?? {}), enabled: false }
+          : {
+              ...(tabOverride ?? {}),
+              enabled: false,
+              defaultPreset: preset,
+              field,
+              fieldBySource,
+            }
+      );
+      return;
+    }
+    persist({ ...periodBar, enabled: false });
   }
 
   return (
@@ -241,6 +362,30 @@ function PeriodBarConfig({
               searchable={false}
               aria-label="Escopo do período"
             />
+            <p className="text-muted-foreground text-xs">
+              Vale para o dashboard inteiro.
+            </p>
+          </div>
+        ) : null}
+        {perTab ? (
+          <div className="flex flex-col gap-1.5 rounded-md border p-2">
+            <p className="text-xs font-medium">
+              Configurações da aba{tabName ? ` “${tabName}”` : ""}
+            </p>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={inherit}
+                onChange={(e) => setInherit(e.target.checked)}
+                aria-label="Usar a configuração global"
+              />
+              Usar a configuração global do dashboard
+            </label>
+            <p className="text-muted-foreground text-xs">
+              {inherit
+                ? "Esta aba segue o período padrão e os campos definidos abaixo para o dashboard."
+                : "O período padrão e os campos abaixo valem só nesta aba."}
+            </p>
           </div>
         ) : null}
         <div className="flex flex-col gap-1.5">
@@ -250,6 +395,7 @@ function PeriodBarConfig({
             value={preset}
             onValueChange={setPreset}
             searchable={false}
+            disabled={locked}
             aria-label="Período padrão"
           />
         </div>
@@ -260,6 +406,7 @@ function PeriodBarConfig({
             chips={fieldSourceChips}
             value={field}
             onValueChange={setField}
+            disabled={locked}
             aria-label="Campo de data primário"
           />
         </div>
@@ -294,6 +441,7 @@ function PeriodBarConfig({
                       onValueChange={(v) =>
                         setFieldBySource((prev) => ({ ...prev, [s.key]: v }))
                       }
+                      disabled={locked}
                       aria-label={`Campo de data — ${s.label}`}
                     />
                   </div>
@@ -301,28 +449,21 @@ function PeriodBarConfig({
             </div>
           ))}
         </div>
+        <p className="text-muted-foreground text-xs">
+          Com a barra oculta, o período padrão acima continua valendo — e vale
+          igual para todos os usuários{perTab ? " desta aba" : ""}. Para não
+          filtrar por período, escolha “Todo o período”.
+        </p>
         <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
             size="sm"
             disabled={pending}
-            onClick={() => persist({ ...periodBar, enabled: false })}
+            onClick={hideBar}
           >
-            Ocultar barra
+            {perTab ? "Ocultar nesta aba" : "Ocultar barra"}
           </Button>
-          <Button
-            size="sm"
-            disabled={pending}
-            onClick={() =>
-              persist({
-                enabled: true,
-                defaultPreset: preset,
-                field,
-                scope,
-                fieldBySource,
-              })
-            }
-          >
+          <Button size="sm" disabled={pending} onClick={save}>
             Salvar
           </Button>
         </div>

@@ -1,8 +1,10 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 19/08/2026
 // Testes do resolver de período efetivo por widget (compartilhado entre a
 // page e as actions deferidas — uma única implementação). Precedência da
 // barra: URL > preferência salva > config do dashboard > default. Widgets de
 // filtro de período sobrescrevem seus alvos (periodSourceByWidget "filter").
+// v1.1: overrides POR ABA (periodBar.byTab) e a nova semântica da barra
+// OCULTA — fixa o padrão do bucket, ignorando URL e preferência.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Correspondence } from "@/lib/correspondences";
@@ -169,13 +171,163 @@ describe("escopo por aba", () => {
   });
 });
 
+describe("periodBar.byTab — padrão/campo/visibilidade por aba", () => {
+  const tabs = [
+    { id: "t1", name: "Aba 1" },
+    { id: "t2", name: "Aba 2" },
+  ];
+  const withBar = (bar: Record<string, unknown>) =>
+    ({ periodBar: { scope: "tab", ...bar }, tabs }) as DashboardSettings;
+
+  it("aba sem override herda o padrão e o campo globais", () => {
+    const r = resolver({
+      dashSettings: withBar({
+        defaultPreset: "este_mes",
+        field: "custom:data",
+        byTab: { t2: { defaultPreset: "este_ano" } },
+      }),
+    });
+    expect(r.resolvePeriodForBucket("t1")).toMatchObject({
+      field: "custom:data",
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+    expect(r.resolvePeriodForBucket("t2")).toMatchObject({
+      field: "custom:data",
+      from: "2026-01-01",
+      to: "2026-12-31",
+    });
+  });
+
+  it("sub-chave ausente no override herda a global (não zera)", () => {
+    const r = resolver({
+      dashSettings: withBar({
+        defaultPreset: "este_mes",
+        field: "custom:data",
+        byTab: { t2: { field: "source_created_at" } },
+      }),
+    });
+    // t2 troca só o campo; o preset segue o global.
+    expect(r.resolvePeriodForBucket("t2")).toMatchObject({
+      field: "source_created_at",
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+  });
+
+  it("escopo GLOBAL ignora byTab por completo", () => {
+    const r = resolver({
+      dashSettings: {
+        periodBar: {
+          scope: "global",
+          defaultPreset: "este_mes",
+          byTab: { t1: { defaultPreset: "este_ano" } },
+        },
+        tabs,
+      } as DashboardSettings,
+    });
+    expect(r.resolvePeriodForBucket("")).toMatchObject({
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+  });
+
+  it("URL e preferência da aba ainda vencem o padrão dela (barra visível)", () => {
+    const r = resolver({
+      sp: { periodo__t1: "hoje" },
+      dashSettings: withBar({
+        byTab: {
+          t1: { defaultPreset: "este_mes" },
+          t2: { defaultPreset: "este_mes" },
+        },
+      }),
+      prefSettings: { lastPeriodByTab: { t2: { periodo: "este_ano" } } },
+    });
+    expect(r.resolvePeriodForBucket("t1")).toMatchObject({ from: "2026-07-15" });
+    expect(r.resolvePeriodForBucket("t2")).toMatchObject({
+      from: "2026-01-01",
+    });
+  });
+
+  it("barra oculta em UMA aba: fixa o padrão dela e não afeta a outra", () => {
+    const r = resolver({
+      sp: { periodo__t1: "hoje", periodo__t2: "hoje" },
+      dashSettings: withBar({
+        defaultPreset: "este_mes",
+        byTab: { t2: { enabled: false, defaultPreset: "este_ano" } },
+      }),
+      prefSettings: { lastPeriodByTab: { t2: { periodo: "mes_passado" } } },
+    });
+    const out = r.computeWidgetPeriods(
+      [widget("w1", { tab: "t1" }), widget("w2", { tab: "t2" })],
+      []
+    );
+    // t1 segue com a barra: a URL vence.
+    expect(out.periodByWidget.w1).toMatchObject({ from: "2026-07-15" });
+    // t2 está oculta: padrão da aba, ignorando URL e preferência.
+    expect(out.periodByWidget.w2).toMatchObject({
+      from: "2026-01-01",
+      to: "2026-12-31",
+    });
+  });
+
+  it("effectiveBar expõe a config resolvida do bucket", () => {
+    const r = resolver({
+      dashSettings: withBar({
+        defaultPreset: "este_mes",
+        field: "closed_at",
+        byTab: { t2: { enabled: false, defaultPreset: "este_ano" } },
+      }),
+    });
+    expect(r.effectiveBar("t1")).toMatchObject({
+      defaultPreset: "este_mes",
+      field: "closed_at",
+    });
+    expect(r.effectiveBar("t2")).toMatchObject({
+      enabled: false,
+      defaultPreset: "este_ano",
+      field: "closed_at",
+    });
+  });
+});
+
 describe("computeWidgetPeriods", () => {
   const dataWidgets = [widget("w1"), widget("w2")];
 
-  it("barra desabilitada → período null para todos", () => {
+  it("barra oculta SEM padrão → período null para todos", () => {
     const r = resolver({
       sp: { periodo: "hoje" },
       dashSettings: { periodBar: { enabled: false } } as DashboardSettings,
+    });
+    const out = r.computeWidgetPeriods(dataWidgets, []);
+    expect(out.periodByWidget).toEqual({ w1: null, w2: null });
+  });
+
+  it("barra oculta COM padrão → fixa o padrão, ignorando URL e preferência", () => {
+    const r = resolver({
+      sp: { periodo: "hoje", campo: "custom:data" },
+      dashSettings: {
+        periodBar: { enabled: false, defaultPreset: "este_mes" },
+      } as DashboardSettings,
+      prefSettings: { lastPeriod: { periodo: "ano_passado" } },
+    });
+    const out = r.computeWidgetPeriods(dataWidgets, []);
+    expect(out.periodByWidget.w1).toMatchObject({
+      field: "closed_at",
+      from: "2026-07-01",
+      to: "2026-07-31",
+    });
+    expect(out.periodByWidget.w2).toMatchObject({ from: "2026-07-01" });
+    // Segue sendo a barra que rege (o espelho do filtro rápido depende disso).
+    expect(out.periodSourceByWidget.w1).toBe("bar");
+  });
+
+  it('barra oculta com defaultPreset "all" → todo o período', () => {
+    const r = resolver({
+      sp: { periodo: "hoje" },
+      dashSettings: {
+        periodBar: { enabled: false, defaultPreset: "all" },
+      } as DashboardSettings,
     });
     const out = r.computeWidgetPeriods(dataWidgets, []);
     expect(out.periodByWidget).toEqual({ w1: null, w2: null });

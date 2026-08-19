@@ -1163,6 +1163,24 @@ export interface DashboardSettings {
     // dashboard; "tab" = cada aba tem sua própria seleção (parâmetros de URL
     // namespados por id da aba). Ver components/dashboards/period-filter.tsx.
     scope?: "global" | "tab";
+    // Overrides POR ABA (19/08/2026), válidos SÓ com scope === "tab" — no
+    // escopo global são ignorados por inteiro. Chave = id de `tabs[]`; chave
+    // (ou sub-chave) AUSENTE herda o valor global acima, nunca "vazio", então
+    // board sem `byTab` se comporta exatamente como antes. A herança se resolve
+    // num único lugar: `effectivePeriodBar` (lib/widgets/period.ts) — nenhum
+    // outro módulo lê `byTab` direto.
+    byTab?: Record<
+      string,
+      {
+        // Barra visível NESTA aba. false = oculta, e então o período dos
+        // widgets da aba é o PADRÃO dela (ignora URL e preferência do
+        // usuário) — é assim que se fixa uma janela igual para todos.
+        enabled?: boolean;
+        defaultPreset?: string;
+        field?: string;
+        fieldBySource?: Partial<Record<SourceKey, string>>;
+      }
+    >;
   };
   // Formato padrão das datas exibidas nas tabelas deste dashboard (pode ser
   // sobrescrito por coluna em AppearanceSettings.table.dateFormats).

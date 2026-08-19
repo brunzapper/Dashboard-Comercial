@@ -281,7 +281,12 @@ export const DASHBOARD_SETTINGS_DOC = {
   "defaultPreset": "este_mes",       // ${[...Object.keys(PERIOD_PRESETS), PERIOD_ALL].join("|")}
   "field": "closed_at",              // campo de data primário
   "fieldBySource": { "<baseKey>": "<campo de data daquela Base>" },
-  "scope": "global"                  // "global" | "tab"
+  "scope": "global",                 // "global" | "tab"
+  "byTab": { "<tabId>": { "enabled": true, "defaultPreset": "este_ano", "field": "closed_at",
+                          "fieldBySource": { "<baseKey>": "<campo>" } } }
+  // SÓ com "scope": "tab" — override por aba; chave ausente HERDA o global acima.
+  // "enabled": false numa aba = barra oculta E período FIXO no padrão dela p/ todos
+  // (para não filtrar, use "defaultPreset": "all").
 },`,
   canvas: `"canvas": { "cols": 12, "rowHeight": 30 },   // escala CLÁSSICA (sem gridVersion); com "gridVersion": 2 = grade FINA (base 120) — ver regra 8 do SPEC`,
   dateFormat: `"dateFormat": "dd/mm/aaaa",          // dd/mm/aaaa | dd/mm/aa | mm/aa`,

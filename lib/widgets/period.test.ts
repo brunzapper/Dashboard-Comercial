@@ -13,6 +13,7 @@ import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import {
   anchorCoreDateBound,
   applyPeriodToFilters,
+  effectivePeriodBar,
   PERIOD_ALL,
   PERIOD_FIELD_SENTINEL,
   patchAuxPeriodByType,
@@ -72,6 +73,60 @@ describe("periodKeys", () => {
       ate: "ate__t1",
       campo: "campo__t1",
     });
+  });
+});
+
+describe("effectivePeriodBar — herança global ← byTab[aba]", () => {
+  const bar = {
+    enabled: true,
+    defaultPreset: "este_mes",
+    field: "closed_at",
+    fieldBySource: { negocio: "closed_at" },
+    scope: "tab" as const,
+    byTab: {
+      t2: { defaultPreset: "este_ano" },
+      t3: { enabled: false, field: "custom:data" },
+    },
+  };
+
+  it("escopo global (ou bucket vazio) devolve a config global sem byTab/scope", () => {
+    expect(effectivePeriodBar(bar, "global", "t2")).toEqual({
+      enabled: true,
+      defaultPreset: "este_mes",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+    expect(effectivePeriodBar(bar, "tab", "")).toEqual(
+      effectivePeriodBar(bar, "global", "")
+    );
+  });
+
+  it("aba sem override herda tudo", () => {
+    expect(effectivePeriodBar(bar, "tab", "t1")).toEqual({
+      enabled: true,
+      defaultPreset: "este_mes",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+  });
+
+  it("sub-chave ausente herda; presente sobrepõe", () => {
+    expect(effectivePeriodBar(bar, "tab", "t2")).toEqual({
+      enabled: true,
+      defaultPreset: "este_ano",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+    expect(effectivePeriodBar(bar, "tab", "t3")).toEqual({
+      enabled: false,
+      defaultPreset: "este_mes",
+      field: "custom:data",
+      fieldBySource: { negocio: "closed_at" },
+    });
+  });
+
+  it("barra ausente devolve objeto vazio", () => {
+    expect(effectivePeriodBar(undefined, "tab", "t1")).toEqual({});
   });
 });
 

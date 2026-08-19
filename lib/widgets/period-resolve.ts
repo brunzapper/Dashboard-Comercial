@@ -1,4 +1,12 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 19/08/2026
+// v1.1 (19/08/2026): a config da barra passa a ser resolvida POR BUCKET
+//   (`effectivePeriodBar`, period.ts) — padrão, campo, campo por Base e
+//   VISIBILIDADE podem variar por aba (`periodBar.byTab`). E barra OCULTA num
+//   bucket deixou de zerar o período: passa a aplicar o PADRÃO daquele bucket,
+//   ignorando URL e preferência do usuário (sem controle na tela, honrar a
+//   preferência prenderia cada usuário a uma janela divergente e invisível —
+//   era o bug relatado). "Todo o período" com a barra oculta se declara com
+//   `defaultPreset: PERIOD_ALL`.
 // Resolução do PERÍODO EFETIVO por widget, extraída da page do dashboard para
 // ser compartilhada com o runQuickTable (server action deferida da Tabela
 // rápida) — uma única implementação evita divergência entre o que a página
@@ -12,10 +20,12 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { Correspondence } from "@/lib/correspondences";
 import {
   DEFAULT_PERIOD_FIELD,
+  effectivePeriodBar,
   periodKeys,
   resolvePeriodSelection,
   resolveUnifiedPeriodField,
   type DashboardPeriod,
+  type EffectivePeriodBar,
   type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
@@ -107,22 +117,43 @@ export function createPeriodResolver(input: {
   };
   const widgetBucket = (w: Widget) => (scope === "tab" ? widgetTab(w) : "");
 
+  // Config EFETIVA da barra num bucket: global ← periodBar.byTab[bucket]
+  // (herança resolvida no choke point único de period.ts). No escopo global o
+  // bucket é "" e o `byTab` é ignorado.
+  const barCache = new Map<string, EffectivePeriodBar>();
+  function effectiveBar(bucket: string): EffectivePeriodBar {
+    let bar = barCache.get(bucket);
+    if (!bar) {
+      bar = effectivePeriodBar(periodBar, scope, bucket);
+      barCache.set(bucket, bar);
+    }
+    return bar;
+  }
+
   // Defaults (campo + período) de um bucket quando a URL está vazia:
-  // preferência do usuário > config do dashboard > default.
-  function resolveDefaults(saved: SavedPeriod): {
+  // preferência do usuário > config do dashboard (do bucket) > default.
+  // `ignoreSaved` descarta a preferência do usuário — usado quando a barra está
+  // oculta no bucket, para todo mundo ver a MESMA janela.
+  function resolveDefaults(
+    saved: SavedPeriod,
+    bucket = "",
+    ignoreSaved = false
+  ): {
     defaultField: string;
     periodDefaults: PeriodSelection;
   } {
+    const bar = effectiveBar(bucket);
+    const eff = ignoreSaved ? {} : saved;
     const defaultField =
-      saved.campo && isPeriodDateField(saved.campo)
-        ? saved.campo
-        : periodBar?.field && isPeriodDateField(periodBar.field)
-          ? periodBar.field
+      eff.campo && isPeriodDateField(eff.campo)
+        ? eff.campo
+        : bar.field && isPeriodDateField(bar.field)
+          ? bar.field
           : DEFAULT_PERIOD_FIELD;
-    const hasContent = Boolean(saved.periodo || saved.de || saved.ate);
+    const hasContent = Boolean(eff.periodo || eff.de || eff.ate);
     const periodDefaults: PeriodSelection = hasContent
-      ? { preset: saved.periodo ?? "", de: saved.de ?? "", ate: saved.ate ?? "" }
-      : { preset: periodBar?.defaultPreset ?? "" };
+      ? { preset: eff.periodo ?? "", de: eff.de ?? "", ate: eff.ate ?? "" }
+      : { preset: bar.defaultPreset ?? "" };
     return { defaultField, periodDefaults };
   }
 
@@ -131,7 +162,10 @@ export function createPeriodResolver(input: {
 
   // Resolve o período de um bucket lendo suas próprias chaves de URL.
   function resolvePeriodForBucket(bucket: string): DashboardPeriod | null {
-    const { defaultField, periodDefaults } = resolveDefaults(savedFor(bucket));
+    const { defaultField, periodDefaults } = resolveDefaults(
+      savedFor(bucket),
+      bucket
+    );
     const keys = periodKeys(scope, bucket);
     const campoRaw = str(sp[keys.campo]);
     const userPickedField = isPeriodDateField(campoRaw);
@@ -153,7 +187,27 @@ export function createPeriodResolver(input: {
     }
     return {
       ...p,
-      fieldBySource: resolveFieldBySource(field, periodBar?.fieldBySource),
+      fieldBySource: resolveFieldBySource(field, effectiveBar(bucket).fieldBySource),
+    };
+  }
+
+  // Barra OCULTA no bucket: o período é o PADRÃO configurado dali, sem ler a
+  // URL nem a preferência do usuário — é o que fixa a mesma janela para todos.
+  // `defaultPreset: PERIOD_ALL` (ou ausente) devolve null = todo o período.
+  function resolvePinnedPeriodForBucket(bucket: string): DashboardPeriod | null {
+    const { defaultField, periodDefaults } = resolveDefaults(
+      savedFor(bucket),
+      bucket,
+      true
+    );
+    const p = resolvePeriodSelection({}, defaultField, periodDefaults);
+    if (!p) return null;
+    return {
+      ...p,
+      fieldBySource: resolveFieldBySource(
+        defaultField,
+        effectiveBar(bucket).fieldBySource
+      ),
     };
   }
 
@@ -165,18 +219,25 @@ export function createPeriodResolver(input: {
     const periodByWidget: Record<string, DashboardPeriod | null> = {};
     const periodSourceByWidget: Record<string, "bar" | "filter"> = {};
 
-    if (periodBar?.enabled !== false) {
-      const cache = new Map<string, DashboardPeriod | null>();
-      const periodOf = (bucket: string) => {
-        if (!cache.has(bucket)) cache.set(bucket, resolvePeriodForBucket(bucket));
-        return cache.get(bucket) ?? null;
-      };
-      for (const w of dataWidgets) {
-        periodByWidget[w.id] = periodOf(widgetBucket(w));
-        periodSourceByWidget[w.id] = "bar";
+    // Gate da barra é POR BUCKET (uma aba pode escondê-la e outra não). Oculta
+    // = período FIXO no padrão do bucket; visível = URL > preferência > padrão.
+    // Nos dois casos a origem é "bar": o espelho "barra → filtro rápido" da
+    // page depende disso para exibir a janela efetiva no card.
+    const cache = new Map<string, DashboardPeriod | null>();
+    const periodOf = (bucket: string) => {
+      if (!cache.has(bucket)) {
+        cache.set(
+          bucket,
+          effectiveBar(bucket).enabled === false
+            ? resolvePinnedPeriodForBucket(bucket)
+            : resolvePeriodForBucket(bucket)
+        );
       }
-    } else {
-      for (const w of dataWidgets) periodByWidget[w.id] = null;
+      return cache.get(bucket) ?? null;
+    };
+    for (const w of dataWidgets) {
+      periodByWidget[w.id] = periodOf(widgetBucket(w));
+      periodSourceByWidget[w.id] = "bar";
     }
 
     for (const fw of filterWidgets) {
@@ -220,6 +281,7 @@ export function createPeriodResolver(input: {
     scope,
     tabs,
     firstTabId,
+    effectiveBar,
     isPeriodDateField,
     resolveFieldBySource,
     resolveDefaults,
