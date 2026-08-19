@@ -128,7 +128,10 @@ export function PeriodFilter({
       <CalendarDays className="text-muted-foreground size-4 shrink-0" />
       <PeriodControls
         // `key` força o controle a reidratar (estado interno) ao trocar de aba.
-        key={bucket}
+        // O PREFIXO é obrigatório: o irmão abaixo também é chaveado por bucket
+        // e duas keys IGUAIS entre irmãos fazem o React duplicar/omitir nós
+        // (botões de período acumulando a cada troca de aba).
+        key={`controls-${bucket}`}
         keys={{ preset: keys.preset, de: keys.de, ate: keys.ate }}
         defaults={periodDefaults}
         persist={(sel: SavedPeriod) => {
@@ -163,8 +166,8 @@ export function PeriodFilter({
         <PeriodBarConfig
           // Reidrata o estado interno ao trocar de aba (mesmo motivo do `key`
           // do PeriodControls): sem isso o popover mostraria — e salvaria — os
-          // valores da aba anterior.
-          key={bucket}
+          // valores da aba anterior. Prefixo distinto do irmão acima — ver lá.
+          key={`config-${bucket}`}
           dashboardId={dashboardId}
           settings={settings}
           dateFields={dateFields}
