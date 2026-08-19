@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 17/08/2026
+// v1.3: bloco fundido herda o rótulo do PRINCIPAL (o genérico "Somados" saiu)
+// e a fusão é detectada por `mergedFrom`; subtotal com PARCELAS quando as
+// partes dobradas não compartilham unidade.
 // Versão: 1.2 | Data: 17/08/2026
 // v1.2: memória de cálculo — a conta do payout no cabeçalho, "cada X vale
 // R$ Y", a escada de faixas (com as NÃO alcançadas visíveis e a aplicada
@@ -19,7 +23,7 @@ import {
   DETAIL_EMPTY_NOTE,
   DETAIL_TIER_APPLIED,
   DETAIL_TIER_MISSED,
-  SOMADOS_LABEL,
+  detailSumPartsNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailFactor,
@@ -47,6 +51,8 @@ const operando = (
   listedSum: 300,
   total: 2,
   truncated: false,
+  mergedFrom: [],
+  sumParts: [],
   warnings: [],
   rows: [
     {
@@ -331,7 +337,7 @@ describe("compDetailSheets", () => {
     expect(cabecalhos.filter((l) => l === "Prêmio por reunião")).toHaveLength(2);
   });
 
-  it("bloco somado: a coluna de responsável vira a ORIGEM da linha", () => {
+  it("bloco fundido: rótulo do PRINCIPAL e a coluna vira a ORIGEM da linha", () => {
     const [sheet] = compDetailSheets(
       [
         membro({
@@ -340,14 +346,9 @@ describe("compDetailSheets", () => {
               fatorCom(
                 [
                   operando({
-                    label: SOMADOS_LABEL,
-                    valueLabel: "Valor",
-                    rows: [
-                      {
-                        ...operando().rows[0],
-                        origin: "Soma de MRR",
-                      },
-                    ],
+                    label: "Soma de Valor",
+                    mergedFrom: ["Soma de MRR"],
+                    rows: [{ ...operando().rows[0], origin: "Soma de MRR" }],
                   }),
                 ],
                 { listedForCompare: null }
@@ -360,6 +361,41 @@ describe("compDetailSheets", () => {
     );
     expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Operando");
     expect(kindsDe(sheet, "detailRowMoney")[0][3]).toBe("Soma de MRR");
+    // O subtotal fecha com o rótulo do principal, não um genérico.
+    expect(kindsDe(sheet, "detailSubtotalMoney")[0][0]).toBe(
+      "Subtotal — Soma de Valor"
+    );
+  });
+
+  it("fusão de unidades diferentes: subtotal traz as PARCELAS, não um total", () => {
+    const parts = [
+      { label: "Soma de Valor", value: 300, money: true },
+      { label: "Contagem de registros", value: 4, money: false },
+    ];
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            planoCom(
+              fatorCom(
+                [
+                  operando({
+                    mergedFrom: ["Contagem de registros"],
+                    listedSum: null,
+                    sumParts: parts,
+                  }),
+                ],
+                { listedForCompare: null }
+              )
+            ),
+          ],
+        }),
+      ],
+      OPTS
+    );
+    const st = kindsDe(sheet, "detailSubtotalMoney")[0];
+    expect(st[5]).toBe(""); // sem número único — somar seria mentira
+    expect(st[6]).toBe(detailSumPartsNote(parts));
   });
 
   it("operando sem registros: nota de vazio, sem cabeçalho nem subtotal", () => {

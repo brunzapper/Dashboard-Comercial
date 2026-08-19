@@ -46,7 +46,7 @@ import {
   detailUnitValueNote,
   fmtMoneyBRL,
   fmtNumBR,
-  SOMADOS_LABEL,
+  detailSumPartsNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailCommission,
@@ -193,7 +193,7 @@ function OperandBlock(props: {
   showLabel: boolean;
 }) {
   const { operand, money } = props;
-  const merged = operand.label === SOMADOS_LABEL;
+  const merged = operand.mergedFrom.length > 0;
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(operand.rows.length / PAGE_SIZE));
   const slice = operand.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -258,8 +258,12 @@ function OperandBlock(props: {
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm">
               <span className="text-muted-foreground">Subtotal: </span>
+              {/* Partes de unidades diferentes não somam num número só — as
+                  parcelas ficam à vista em vez de um total sem significado. */}
               <span className="font-semibold">
-                {fmtValue(operand.listedSum, money)}
+                {operand.sumParts.length > 0
+                  ? detailSumPartsNote(operand.sumParts)
+                  : fmtValue(operand.listedSum, money)}
               </span>
             </span>
             {pages > 1 ? (

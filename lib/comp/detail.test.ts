@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 17/08/2026
+// v1.3: o agrupamento virou "bloco PRINCIPAL que recebe os dobrados"
+// ({into, folded}). O pino central é a REGRESSÃO do relato: com 2 operandos,
+// dobrar UM tem de gerar UM bloco (a versão anterior não fundia nada em
+// nenhuma combinação). Também pinado: unidades diferentes não viram um Σ
+// inventado, e o config LEGADO passa a fundir como o usuário esperava.
 // Versão: 1.2 | Data: 17/08/2026
 // v1.2: agrupamento configurável dos blocos (engrenagem da Visão geral). O
 // pino é que a fusão é de EXIBIÇÃO: cada operando segue sendo CONSULTADO no
@@ -27,7 +33,6 @@ import { EMPTY_CANON } from "@/lib/config/responsible-canon";
 import { fakeSupabase } from "@/tests/helpers/fake-supabase";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 
-import { SOMADOS_LABEL } from "./commission-label";
 import {
   factorOperands,
   groupOperands,
@@ -457,33 +462,91 @@ describe("loadFactorRecords", () => {
     expect(out.operands[0].warnings[0]).toContain("memberField");
   });
 
-  it("fusão da engrenagem é de EXIBIÇÃO: consulta cada operando, exibe somado", async () => {
+  it("REGRESSÃO: 2 operandos, um dobrado ⇒ UM bloco com o subtotal somado", async () => {
+    // O relato: desmarcar um operando não fundia nada. Com 2 operandos — o
+    // caso comum — a 1ª versão era inerte em QUALQUER combinação.
     const fac = factor({
-      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato", "agg:count:*"),
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato"),
     });
     const keys = factorOperands(ctxWith(), fac).map((o) => o.key);
-    const s = supa(recRows(2));
+    // Linhas com os DOIS campos preenchidos: só assim o subtotal fundido
+    // exercita a soma das duas partes (100+100 de Valor, 50+50 de MRR).
+    const rows = recRows(2).map((r) => ({
+      ...r,
+      custom_fields: { mrr_contrato: 50 },
+    }));
+    const s = supa(rows);
     const out = await loadFactorRecords(
       s.db,
       ctxWith(),
       planWith({
         factors: [fac],
-        detailGrouping: { separateByFactor: { f_v: [keys[0]] } },
+        detailGrouping: { byFactor: { f_v: { into: keys[0], folded: [keys[1]] } } },
       }),
       fac,
       M1,
       breakdownStub(999)
     );
-    // O recorte NÃO muda com o agrupamento: os 3 operandos seguem consultados.
-    expect(s.queries.filter((q) => q.table === "records")).toHaveLength(3);
-    expect(out.operands).toHaveLength(2);
-    expect(out.operands[0].label).toBe("Soma de Valor");
-    const somados = out.operands[1];
-    expect(somados.label).toBe(SOMADOS_LABEL);
-    expect(somados.rows).toHaveLength(4); // 2 linhas de cada operando fundido
-    expect(somados.total).toBe(4);
+    // O recorte NÃO muda: os dois operandos seguem consultados em separado.
+    expect(s.queries.filter((q) => q.table === "records")).toHaveLength(2);
+    expect(out.operands).toHaveLength(1);
+    const bloco = out.operands[0];
+    // O bloco é do PRINCIPAL — herda o rótulo dele, não um genérico.
+    expect(bloco.label).toBe("Soma de Valor");
+    expect(bloco.mergedFrom).toEqual(["Soma de MRR do contrato"]);
+    expect(bloco.aggNote).toContain("Soma de Valor + Soma de MRR do contrato");
+    expect(bloco.rows).toHaveLength(4); // 2 de cada operando
+    expect(bloco.total).toBe(4);
+    // Ambas as partes somam em R$: o subtotal é um número único.
+    expect(bloco.listedSum).toBe(300); // 200 de Valor + 100 de MRR
+    expect(bloco.sumParts).toEqual([]);
     // Com fusão em jogo não há número único a confrontar com o realizado.
     expect(out.listedForCompare).toBeNull();
+  });
+
+  it("fusão de unidades DIFERENTES não inventa um total: mostra as parcelas", async () => {
+    const fac = factor({ formula: f("agg:sum:value", "agg:count:*") });
+    const keys = factorOperands(ctxWith(), fac).map((o) => o.key);
+    const out = await loadFactorRecords(
+      supa(recRows(2)).db,
+      ctxWith(),
+      planWith({
+        factors: [fac],
+        detailGrouping: { byFactor: { f_v: { into: keys[0], folded: [keys[1]] } } },
+      }),
+      fac,
+      M1,
+      breakdownStub(999)
+    );
+    const bloco = out.operands[0];
+    // Somar contagem com dinheiro daria um número sem significado.
+    expect(bloco.listedSum).toBeNull();
+    expect(bloco.sumParts).toEqual([
+      { label: "Soma de Valor", value: 200, money: true },
+      { label: "Contagem de registros", value: 2, money: false },
+    ]);
+  });
+
+  it("operando fora do principal e dos dobrados mantém bloco próprio", async () => {
+    const fac = factor({
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato", "agg:count:*"),
+    });
+    const keys = factorOperands(ctxWith(), fac).map((o) => o.key);
+    const out = await loadFactorRecords(
+      supa(recRows(1)).db,
+      ctxWith(),
+      planWith({
+        factors: [fac],
+        detailGrouping: { byFactor: { f_v: { into: keys[0], folded: [keys[1]] } } },
+      }),
+      fac,
+      M1,
+      breakdownStub(999)
+    );
+    expect(out.operands).toHaveLength(2);
+    expect(out.operands[0].mergedFrom).toHaveLength(1);
+    expect(out.operands[1].label).toBe("Contagem de registros");
+    expect(out.operands[1].mergedFrom).toEqual([]);
   });
 });
 
@@ -495,34 +558,70 @@ describe("groupOperands", () => {
   const keysOf = (grupos: FactorOperand[][]) =>
     grupos.map((g) => g.map((o) => o.key));
 
-  it("sem config, cada operando fica no próprio bloco (padrão de hoje)", () => {
+  it("sem config, cada operando fica no próprio bloco (padrão)", () => {
     const ops = ops3();
     expect(keysOf(groupOperands(ops, "f_v", undefined))).toEqual(
       ops.map((o) => [o.key])
     );
   });
 
-  it("marcado ganha bloco próprio; os demais caem num grupo só", () => {
+  it("o principal RECEBE os dobrados e vem primeiro no grupo", () => {
     const ops = ops3();
     const g = groupOperands(ops, "f_v", {
-      separateByFactor: { f_v: [ops[0].key] },
+      byFactor: { f_v: { into: ops[1].key, folded: [ops[2].key] } },
     });
+    // Ordem da fórmula preservada; o dobrado sai do bloco próprio.
     expect(keysOf(g)).toEqual([[ops[0].key], [ops[1].key, ops[2].key]]);
   });
 
-  it("sobrando UM operando, ele não vira grupo somado", () => {
+  it("dobrar UM operando já funde (era exatamente o que faltava)", () => {
     const ops = ops3();
     const g = groupOperands(ops, "f_v", {
-      separateByFactor: { f_v: [ops[0].key, ops[1].key] },
+      byFactor: { f_v: { into: ops[0].key, folded: [ops[1].key] } },
+    });
+    expect(keysOf(g)).toEqual([
+      [ops[0].key, ops[1].key],
+      [ops[2].key],
+    ]);
+  });
+
+  it("config apontando para operando inexistente volta ao padrão", () => {
+    const ops = ops3();
+    const g = groupOperands(ops, "f_v", {
+      byFactor: { f_v: { into: "sumiu", folded: [ops[1].key] } },
     });
     expect(keysOf(g)).toEqual(ops.map((o) => [o.key]));
+    const semDobrado = groupOperands(ops, "f_v", {
+      byFactor: { f_v: { into: ops[0].key, folded: ["sumiu"] } },
+    });
+    expect(keysOf(semDobrado)).toEqual(ops.map((o) => [o.key]));
   });
 
   it("config de OUTRO fator não agrupa este", () => {
     const ops = ops3();
     const g = groupOperands(ops, "f_v", {
-      separateByFactor: { f_outro: [ops[0].key] },
+      byFactor: { f_outro: { into: ops[0].key, folded: [ops[1].key] } },
     });
     expect(g).toHaveLength(3);
+  });
+
+  it("LEGADO separateByFactor: o resto entra no 1º listado", () => {
+    const ops = ops3();
+    // Era "estes têm bloco próprio"; agora o não-listado é dobrado no 1º —
+    // config já gravado passa a fazer o que o usuário esperava.
+    const g = groupOperands(ops, "f_v", {
+      byFactor: {},
+      separateByFactor: { f_v: [ops[0].key] },
+    });
+    expect(keysOf(g)).toEqual([[ops[0].key, ops[1].key, ops[2].key]]);
+  });
+
+  it("shape novo VENCE o legado do mesmo fator", () => {
+    const ops = ops3();
+    const g = groupOperands(ops, "f_v", {
+      byFactor: { f_v: { into: ops[2].key, folded: [ops[0].key] } },
+      separateByFactor: { f_v: [ops[0].key] },
+    });
+    expect(keysOf(g)).toEqual([[ops[1].key], [ops[2].key, ops[0].key]]);
   });
 });

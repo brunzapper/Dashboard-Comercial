@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// Versão: 1.5 | Data: 17/08/2026
+// v1.5: a engrenagem virou "quem RECEBE" — rádio do bloco principal + checkbox
+// "somar no principal" (o do principal desabilitado), gravando {into, folded}.
 // Versão: 1.4 | Data: 17/08/2026
 // v1.4: engrenagem do card — abre a config dos BLOCOS do detalhamento (por
 // plano), com as chaves dos operandos vindas do servidor; desmarcar um manda
@@ -67,6 +70,8 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
           listedSum: null,
           total: 2,
           truncated: false,
+          mergedFrom: [],
+          sumParts: [],
           warnings: [],
         },
       ],
@@ -88,7 +93,7 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
         label: "Soma de Valor",
       },
     ],
-    separateByFactor: {} as Record<string, string[]>,
+    byFactor: {} as Record<string, { into: string; folded: string[] }>,
   })),
   saveDetailGrouping: vi.fn(async () => ({ ok: true })),
 }));
@@ -382,7 +387,7 @@ describe("CompOverview", () => {
     expect(arg.memberId).toBeTruthy();
   });
 
-  it("engrenagem do card configura os blocos do detalhamento (por PLANO)", async () => {
+  it("engrenagem: marcar 'somar' manda o dobrado para o bloco PRINCIPAL", async () => {
     const { loadPlanOperands, saveDetailGrouping } = await import(
       "@/app/(app)/operacao/remuneracao/detail-actions"
     );
@@ -398,17 +403,53 @@ describe("CompOverview", () => {
       year: 2026,
       month: 8,
     });
-    const somaDeValor = await screen.findByRole("checkbox", {
-      name: "Soma de Valor",
+
+    // Sem config, o principal é o 1º operando (ordem da fórmula).
+    const principal = await screen.findByRole("radio", {
+      name: "Bloco principal: Contagem de registros",
     });
-    // Sem config gravada o padrão é "cada operando no próprio bloco".
-    expect(somaDeValor.getAttribute("data-state")).toBe("checked");
-    fireEvent.click(somaDeValor);
+    expect((principal as HTMLInputElement).checked).toBe(true);
+    // O principal não pode ser somado em si mesmo.
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Somar no principal: Contagem de registros" })
+        .hasAttribute("disabled")
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Somar no principal: Soma de Valor" })
+    );
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     await waitFor(() =>
       expect(vi.mocked(saveDetailGrouping)).toHaveBeenCalledWith({
         planId: "pA",
-        separateByFactor: { reunioes: ["count:*"] },
+        byFactor: { reunioes: { into: "count:*", folded: ["sum:value"] } },
+      })
+    );
+  });
+
+  it("engrenagem: trocar o principal tira o novo principal dos dobrados", async () => {
+    const { saveDetailGrouping } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    fireEvent.click(
+      screen.getAllByLabelText("Configurar os blocos do detalhamento")[0]
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Somar no principal: Soma de Valor",
+      })
+    );
+    // Promove a Soma de Valor a principal: ela não pode ficar dobrada em si.
+    fireEvent.click(
+      screen.getByRole("radio", { name: "Bloco principal: Soma de Valor" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() =>
+      expect(vi.mocked(saveDetailGrouping)).toHaveBeenCalledWith({
+        planId: "pA",
+        byFactor: { reunioes: { into: "sum:value", folded: [] } },
       })
     );
   });

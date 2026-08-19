@@ -1,3 +1,7 @@
+// Versão: 1.3 | Data: 17/08/2026
+// v1.3: fusão detectada por `mergedFrom` (não mais pelo rótulo "Somados", que
+// saiu quando o bloco passou a herdar o rótulo do PRINCIPAL) e subtotal com as
+// parcelas quando as partes dobradas têm unidades diferentes.
 // Versão: 1.2 | Data: 17/08/2026
 // v1.2: MEMÓRIA DE CÁLCULO no lugar da prosa — a coluna de texto do cabeçalho
 // do fator carrega a conta do payout, entra a linha "cada X vale R$ Y", a
@@ -30,9 +34,9 @@ import {
   DETAIL_EMPTY_NOTE,
   detailTierLabel,
   detailTierMark,
+  detailSumPartsNote,
   detailTierValue,
   detailUnitValueNote,
-  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailCommission,
@@ -107,7 +111,7 @@ function pushOperand(
     push("info", [DETAIL_EMPTY_NOTE]);
     return;
   }
-  const merged = operand.label === SOMADOS_LABEL;
+  const merged = operand.mergedFrom.length > 0;
   push("detailHeader", detailHeaderCells(operand.valueLabel, merged));
   for (const r of operand.rows) {
     push(money ? "detailRowMoney" : "detailRow", [
@@ -133,7 +137,13 @@ function pushOperand(
     "",
     compareTo ?? "",
     operand.listedSum ?? "",
-    diverge ? DETAIL_DIVERGE_MARK : "",
+    // Parcelas quando as partes dobradas não compartilham unidade: some o
+    // número único, mas o cálculo continua visível.
+    operand.sumParts.length > 0
+      ? detailSumPartsNote(operand.sumParts)
+      : diverge
+        ? DETAIL_DIVERGE_MARK
+        : "",
   ]);
 }
 

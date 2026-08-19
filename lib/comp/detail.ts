@@ -30,9 +30,9 @@ import {
   DETAIL_DROPPED_FILTER_NOTE,
   DETAIL_UNSUPPORTED_FIELD_NOTE,
   detailAggNote,
+  detailMergedAggNote,
   detailTruncatedNote,
   factorPayoutFormula,
-  SOMADOS_LABEL,
 } from "@/lib/comp/commission-label";
 import {
   commissionRolesOf,
@@ -99,6 +99,7 @@ import {
   type CompCommissionBlockBreakdown,
   type CompDetailGrouping,
   type CompFactor,
+  type CompFactorGrouping,
   type CompPlanConfig,
 } from "./model";
 
@@ -187,6 +188,18 @@ export interface CompDetailOperand {
   /** Tamanho do recorte inteiro (contagem exata), mesmo com lista truncada. */
   total: number;
   truncated: boolean;
+  /**
+   * Rótulos dos operandos DOBRADOS neste bloco (engrenagem). Vazio = bloco de
+   * um operando só. É o sinal de fusão para os consumidores — antes eles
+   * comparavam o label com "Somados", que quebra assim que o rótulo muda.
+   */
+  mergedFrom: string[];
+  /**
+   * Parcelas do Σ quando as partes NÃO compartilham a unidade (ex.: uma soma
+   * em R$ dobrada com uma contagem): somá-las daria um número sem significado,
+   * e omitir sem dizer nada esconde o cálculo. Vazio no caso homogêneo.
+   */
+  sumParts: { label: string; value: number; money: boolean }[];
   warnings: string[];
 }
 
@@ -695,6 +708,8 @@ async function loadOperandRecords(
       listedSum: null,
       total: 0,
       truncated: false,
+      mergedFrom: [],
+      sumParts: [],
       warnings: [query.error],
     };
   }
@@ -732,57 +747,125 @@ async function loadOperandRecords(
         : null,
     total,
     truncated,
+    mergedFrom: [],
+    sumParts: [],
     warnings,
   };
 }
 
 /**
+ * Agrupamento efetivo de um fator, já resolvido contra os operandos que existem
+ * de fato. Traduz também o formato LEGADO (`separateByFactor`, chaves com bloco
+ * próprio) — a conversão mora AQUI porque só aqui existe a lista de operandos:
+ * o que não tinha bloco próprio passa a ser dobrado no PRIMEIRO que tinha, que
+ * é o que o usuário esperava ao desmarcar.
+ */
+export function resolveFactorGrouping(
+  operands: FactorOperand[],
+  factorId: string,
+  grouping: CompDetailGrouping | undefined
+): CompFactorGrouping | null {
+  const atual = grouping?.byFactor?.[factorId];
+  if (atual) return atual;
+  const legado = grouping?.separateByFactor?.[factorId];
+  if (!legado || legado.length === 0) return null;
+  const proprios = operands.filter((o) => legado.includes(o.key));
+  const dobrados = operands.filter((o) => !legado.includes(o.key));
+  if (proprios.length === 0 || dobrados.length === 0) return null;
+  return { into: proprios[0].key, folded: dobrados.map((o) => o.key) };
+}
+
+/**
  * Agrupa os operandos para EXIBIÇÃO conforme `config.detailGrouping` (por
- * plano). Operando marcado como separado vira um grupo só dele; os demais caem
- * num grupo único ("Somados"). Sem config, cada operando fica no próprio grupo
- * — o comportamento padrão. Isto é APRESENTAÇÃO: o recorte consultado de cada
- * operando não muda, a fusão acontece depois da consulta.
+ * plano): o operando `into` vira o bloco PRINCIPAL e recebe os `folded`; quem
+ * está fora dos dois mantém bloco próprio. Sem config, cada operando fica no
+ * seu — o padrão. O principal sai na PRIMEIRA posição do grupo (é dele o
+ * rótulo) e a ordem da fórmula é preservada entre os blocos.
+ *
+ * Isto é APRESENTAÇÃO: o recorte consultado de cada operando não muda, a fusão
+ * acontece depois da consulta.
  */
 export function groupOperands(
   operands: FactorOperand[],
   factorId: string,
   grouping: CompDetailGrouping | undefined
 ): FactorOperand[][] {
-  const separate = grouping?.separateByFactor?.[factorId];
-  if (!separate || operands.length < 2) return operands.map((o) => [o]);
-  const own: FactorOperand[][] = [];
-  const merged: FactorOperand[] = [];
-  for (const op of operands) {
-    if (separate.includes(op.key)) own.push([op]);
-    else merged.push(op);
+  const cfg = resolveFactorGrouping(operands, factorId, grouping);
+  const soltos = () => operands.map((o) => [o]);
+  if (!cfg || operands.length < 2) return soltos();
+  const byKey = new Map(operands.map((o) => [o.key, o]));
+  const principal = byKey.get(cfg.into);
+  const dobrados = cfg.folded
+    .filter((k) => k !== cfg.into)
+    .map((k) => byKey.get(k))
+    .filter((o): o is FactorOperand => o != null);
+  // Config apontando para operando que não existe mais (fórmula editada):
+  // volta ao padrão em vez de esconder bloco.
+  if (!principal || dobrados.length === 0) return soltos();
+  const dobradosKeys = new Set(dobrados.map((o) => o.key));
+  const out: FactorOperand[][] = [];
+  for (const o of operands) {
+    if (dobradosKeys.has(o.key)) continue; // entra no principal, não em bloco próprio
+    out.push(o.key === principal.key ? [principal, ...dobrados] : [o]);
   }
-  if (merged.length === 0) return own;
-  // Sobrando UM, o grupo tem um membro só e `mergeOperandBlocks` o devolve
-  // intacto — soma de um é ele mesmo, sem virar bloco "Somados".
-  return [...own, merged];
+  return out;
 }
 
-/** Funde os blocos de um grupo num só (rows concatenadas, subtotal somado). */
-function mergeOperandBlocks(blocks: CompDetailOperand[]): CompDetailOperand {
-  if (blocks.length === 1) return blocks[0];
-  const total = blocks.reduce((a, b) => a + b.total, 0);
-  const somavel = blocks.every((b) => b.listedSum != null);
+/** Agregação efetiva soma um MONTANTE? (contagem não soma com dinheiro.) */
+function operandSums(o: FactorOperand): boolean {
+  return effectiveAgg(o.aggs) === "sum";
+}
+
+/**
+ * Funde um grupo num bloco só: o PRINCIPAL (1º do grupo) empresta rótulo e
+ * coluna de valor, e os dobrados entram nas linhas e no subtotal.
+ *
+ * O Σ só vira número único quando as partes compartilham a unidade. Misturar
+ * uma soma em R$ com uma contagem daria um total sem significado (a contagem
+ * entraria como zero), então nesse caso o bloco expõe as PARCELAS — nunca um
+ * número silenciosamente errado, nem um "—" mudo.
+ */
+function mergeOperandBlocks(
+  parts: { operand: FactorOperand; block: CompDetailOperand }[],
+  money: boolean
+): CompDetailOperand {
+  if (parts.length === 1) return parts[0].block;
+  const [principal, ...dobrados] = parts;
+  const total = parts.reduce((a, p) => a + p.block.total, 0);
+
+  const parcelas: { label: string; value: number; money: boolean }[] = [];
+  let completo = true;
+  for (const p of parts) {
+    if (!operandSums(p.operand)) {
+      parcelas.push({ label: p.block.label, value: p.block.total, money: false });
+      continue;
+    }
+    // Soma sem Σ (lista truncada ou campo que o modo lista não recorta): não
+    // dá para quantificar a parcela, e inventá-la seria pior.
+    if (p.block.listedSum == null) {
+      completo = false;
+      continue;
+    }
+    parcelas.push({ label: p.block.label, value: p.block.listedSum, money });
+  }
+  const homogeneo = parts.every((p) => operandSums(p.operand));
+  const somavel = homogeneo && completo;
+
   return {
-    label: SOMADOS_LABEL,
-    // Operandos distintos podem medir coisas diferentes; o rótulo da coluna
-    // deixa de prometer um campo específico.
-    valueLabel: "Valor",
-    aggNote: detailAggNote(
-      blocks.map((b) => b.label).join(" + "),
+    label: principal.block.label,
+    valueLabel: principal.block.valueLabel,
+    aggNote: detailMergedAggNote(
+      principal.block.label,
+      dobrados.map((p) => p.block.label),
       total
     ),
-    rows: blocks.flatMap((b) => b.rows),
-    listedSum: somavel
-      ? blocks.reduce((a, b) => a + (b.listedSum ?? 0), 0)
-      : null,
+    rows: parts.flatMap((p) => p.block.rows),
+    listedSum: somavel ? parcelas.reduce((a, x) => a + x.value, 0) : null,
     total,
-    truncated: blocks.some((b) => b.truncated),
-    warnings: [...new Set(blocks.flatMap((b) => b.warnings))],
+    truncated: parts.some((p) => p.block.truncated),
+    mergedFrom: dobrados.map((p) => p.block.label),
+    sumParts: somavel ? [] : parcelas,
+    warnings: [...new Set(parts.flatMap((p) => p.block.warnings))],
   };
 }
 
@@ -894,10 +977,11 @@ export async function loadFactorRecords(
   );
   const blocks = grupos.map((g) =>
     mergeOperandBlocks(
-      g.flatMap((o) => {
-        const b = byKey.get(o.key);
-        return b ? [b] : [];
-      })
+      g.flatMap((operand) => {
+        const block = byKey.get(operand.key);
+        return block ? [{ operand, block }] : [];
+      }),
+      factor.money
     )
   );
 
