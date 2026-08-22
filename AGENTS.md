@@ -791,13 +791,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
   recalculando comissão por fora do `computeEntry`). `unitValue` devolve null
   quando a relação não é linear (cap/piso ATIVO, valor manual, sem alvo, fator
   só-gatilho, comissão `flat`) — número ali seria mentira. Isso alimenta a
-  coluna "Vale (R$)" por registro, a linha "cada X vale R$ Y", a conta do
+  coluna "Vale (R$)" por registro, a Descrição da linha em bloco fundido
+  (`detailRowPartsNote` sobre `CompDetailRecordRow.parts` — parcela ZERO fora),
+  a linha "cada X vale R$ Y", a conta do
   payout (`factorPayoutFormula`) no cabeçalho e a escada — que com
   `tierBy:"attainment"` declara a META do gatilho (`detailTargetNote` + o
   absoluto por degrau em `detailTierLabel`, vindos do breakdown do fator-gatilho
   via `commissionDetail`; sem alvo apurado segue só o percentual, nunca um
   absoluto inventado); a comissão aparece
-  nos DOIS lugares (dentro do fator que a dispara e como bloco do plano). Saíram
+  UMA vez, no fator que a DISPARA (`role.isTrigger`) — o fator que é só BASE não
+  repete a escada, e o bloco de nível de plano virou FALLBACK (só o que nenhum
+  fator exibiu): saía 3× quando gatilho e base eram fatores distintos. Saíram
   `detailReconcileNote`/`DETAIL_COMBINED_NOTE` (a conferência virou
   realizado × somado lado a lado + `DETAIL_DIVERGE_MARK`); frases novas seguem
   SÓ em `commission-label.ts`. O **agrupamento dos blocos** é config POR PLANO
@@ -814,7 +818,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   MESMOS registros mudando só o campo, então concatenar repetia a empresa uma
   vez por operando — valor/contribuição viram a SOMA das partes, `total` conta
   DISTINTOS (exceto truncado, onde o distinto do recorte é desconhecido) e a
-  coluna "Operando" não existe (linha fundida não tem origem única). Operando
+  coluna "Operando" deu lugar a "Descrição" (a composição da linha, já que a
+  coluna de valor mostra o rótulo do PRINCIPAL e o dinheiro pode vir de outro
+  campo). Operando
   SEM registros não vira bloco: `loadFactorRecords` o descarta e sobe os
   `warnings` dele para o fator; com todos vazios, `operands` fica `[]` e os
   consumidores declaram o vazio UMA vez (nada de "· 0 registros" por soma). Entrada com

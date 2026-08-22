@@ -1,3 +1,10 @@
+<!-- Versão: 1.72 | Data: 22/08/2026 -->
+<!-- v1.72 (22/08/2026): §4.18 — comissão exibida UMA vez (no fator-gatilho;
+     plano vira fallback), coluna "Descrição" com a composição da linha no
+     bloco fundido, e CONSERTO dos hiperlinks do Apps Script: a fórmula
+     =HYPERLINK escrita por setValues é parseada no LOCALE da planilha (pt-BR
+     usa ';'), então toda célula de link virava #ERROR!; agora é rich text
+     (setLinkUrl). Script v3.2 — REPUBLICAR. -->
 <!-- Versão: 1.71 | Data: 19/08/2026 -->
 <!-- v1.71 (19/08/2026): §4.18 — detalhamento: linhas do bloco fundido COLAPSAM
      por registro (a mesma empresa saía uma vez por operando; total passa a
@@ -3210,9 +3217,12 @@ total opcional por plano.
   Reuniões: 20 · realizado 3 = 15%" (`detailTargetNote`) e o absoluto ao lado
   de cada degrau ("A partir de 50% (10)") — sem alvo apurado o degrau segue só
   no percentual, porque inventar o absoluto seria pior que omiti-lo. Antes a
-  escada dizia "não alcançada" sem nunca revelar o alvo. A comissão aparece nos DOIS lugares — dentro do fator que a
-  dispara (onde a escada explica o número dele) e como bloco do plano (é ela
-  que soma no total). A conferência virou numérica: realizado e somado lado a
+  escada dizia "não alcançada" sem nunca revelar o alvo. A comissão aparece UMA vez, dentro do fator que a
+  **dispara** (onde a escada explica o número dele); o fator que serve só de
+  BASE não repete o bloco, e o bloco de nível de plano ficou como FALLBACK — só
+  entra a comissão que nenhum fator exibiu, para ela nunca sumir da
+  conferência. Antes saíam três cópias da mesma escada quando gatilho e base
+  eram fatores distintos. A conferência virou numérica: realizado e somado lado a
   lado com `DETAIL_DIVERGE_MARK` discreto, e `detailReconcileNote`/
   `DETAIL_COMBINED_NOTE` saíram do módulo de frases.
   O **agrupamento dos blocos** é configuração POR PLANO
@@ -3231,7 +3241,12 @@ total opcional por plano.
   valor somado das partes; o `total` conta registros DISTINTOS — só com a lista
   truncada ele volta a ser a soma das partes, porque aí o distinto do recorte
   inteiro não é conhecido — e a coluna "Operando" deixou de existir, já que a
-  linha fundida não tem origem única (a composição está no rótulo do bloco).
+  linha fundida não tem origem única. No lugar dela entrou **"Descrição"**: as
+  parcelas do registro por CAMPO (`CompDetailRecordRow.parts` →
+  `detailRowPartsNote`, "R$ 1.000,00 de Implementação + R$ 3.000,00 de MRR do
+  contrato"), porque a coluna de valor mostra o rótulo do principal e o dinheiro
+  pode ter vindo de outro campo. Parcela ZERO fica de fora — "R$ 0,00 de X" é o
+  mesmo ruído que tirou os registros vazios da lista.
   **Operando sem registros não vira bloco:** o núcleo o descarta e sobe os
   avisos dele para o fator; quando nenhum sobra, `operands` fica vazio e os
   consumidores emitem UMA declaração de vazio do fator — em vez de um

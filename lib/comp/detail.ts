@@ -139,6 +139,13 @@ export interface CompDetailRecordRow {
    * lib/comp/payout-math.ts): aí um número enganaria.
    */
   contribution: number | null;
+  /**
+   * Parcelas que compõem o `value` desta linha, por CAMPO ("MRR do contrato").
+   * Só existe em bloco FUNDIDO (é lá que a coluna de valor mostra o rótulo do
+   * principal e o dinheiro pode vir de outro campo); parcela zerada fica de
+   * fora, para não encher a coluna de "R$ 0,00 de X".
+   */
+  parts: { label: string; value: number }[];
 }
 
 /** Um degrau da escada de faixas, pronto para exibição. */
@@ -691,6 +698,8 @@ function toDetailRow(
             labels,
             ctx.available
           ),
+    // Preenchido só no colapso de bloco fundido (collapseRowsByRecord).
+    parts: [],
   };
 }
 
@@ -862,8 +871,11 @@ function mergeOperandBlocks(
   // UMA linha por REGISTRO. Os operandos consultam os MESMOS registros mudando
   // só o campo agregado, então concatenar as listas repetia a empresa uma vez
   // por operando; aqui o valor da linha vira a SOMA das partes em que ela
-  // aparece (registro presente em um operando só entra com o que tem).
-  const rows = collapseRowsByRecord(parts.flatMap((p) => p.block.rows));
+  // aparece (registro presente em um operando só entra com o que tem), e cada
+  // parcela fica registrada para a coluna Descrição.
+  const rows = collapseRowsByRecord(
+    parts.map((p) => ({ label: p.block.valueLabel, rows: p.block.rows }))
+  );
   const truncated = parts.some((p) => p.block.truncated);
 
   return {
@@ -887,24 +899,38 @@ function mergeOperandBlocks(
 }
 
 /**
- * Funde as linhas do MESMO registro somando valor e contribuição. Preserva a
- * ordem de primeira aparição (a lista já vem ordenada pela consulta) e mantém
- * `value` nulo quando nenhuma parte tinha número — somar nada não vira zero.
+ * Funde as linhas do MESMO registro somando valor e contribuição, guardando as
+ * parcelas por CAMPO (a coluna Descrição). Preserva a ordem de primeira
+ * aparição (a lista já vem ordenada pela consulta) e mantém `value` nulo quando
+ * nenhuma parte tinha número — somar nada não vira zero.
  */
 function collapseRowsByRecord(
-  rows: CompDetailRecordRow[]
+  fontes: { label: string; rows: CompDetailRecordRow[] }[]
 ): CompDetailRecordRow[] {
   const byId = new Map<string, CompDetailRecordRow>();
-  for (const row of rows) {
-    const atual = byId.get(row.id);
-    if (!atual) {
-      byId.set(row.id, { ...row });
-      continue;
+  for (const fonte of fontes) {
+    for (const row of fonte.rows) {
+      // Parcela ZERO não descreve nada e enche a coluna de "R$ 0,00 de X" —
+      // o mesmo ruído que fez os registros vazios saírem da lista.
+      const parcela =
+        row.value != null && row.value !== 0
+          ? [{ label: fonte.label, value: row.value }]
+          : [];
+      const atual = byId.get(row.id);
+      if (!atual) {
+        byId.set(row.id, { ...row, parts: parcela });
+        continue;
+      }
+      if (row.value != null) atual.value = (atual.value ?? 0) + row.value;
+      if (row.contribution != null)
+        atual.contribution = (atual.contribution ?? 0) + row.contribution;
+      atual.parts = [...atual.parts, ...parcela];
     }
-    if (row.value != null) atual.value = (atual.value ?? 0) + row.value;
-    if (row.contribution != null)
-      atual.contribution = (atual.contribution ?? 0) + row.contribution;
   }
+  // Parcela única PERMANECE: num bloco fundido a coluna de valor mostra o
+  // rótulo do principal, então dizer "R$ 100,00 de Valor" é o que revela de
+  // qual campo veio aquele dinheiro. (Em bloco não fundido este colapso nem
+  // roda — mergeOperandBlocks devolve o bloco intacto.)
   return [...byId.values()];
 }
 
@@ -972,7 +998,13 @@ export async function loadFactorRecords(
           fb.payout
         )
       : null;
+  // A comissão sai UMA vez, no fator que a DISPARA — é o atingimento dele que
+  // escolhe a faixa, então é ali que a escada e a meta fazem sentido. O fator
+  // que serve só de BASE não repete o bloco (na aba da Gabriella o mesmo
+  // "% sobre o valor" saía no gatilho, na base e no plano: três escadas
+  // idênticas).
   const commissions = roles.flatMap((role) => {
+    if (!role.isTrigger) return [];
     const cb = blocksById.get(role.block.id);
     const trigger = breakdown?.byFactor[role.block.triggerFactorId] ?? null;
     return cb ? [commissionDetail(cb, role.block, memberId, trigger)] : [];
@@ -1202,8 +1234,15 @@ export async function loadCompDetail(
       const blockById = new Map(
         (plan.config.commissions ?? []).map((b) => [b.id, b])
       );
+      // Bloco de plano é FALLBACK: só entra a comissão que nenhum fator exibiu
+      // (fator-gatilho sem operandos, removido do detalhe...). Sem isso a
+      // escada saía duas vezes; sem o fallback, sumiria da conferência.
+      const jaExibidas = new Set(
+        factors.flatMap((f) => f.commissions.map((c) => c.blockId))
+      );
       const commissions = (derived?.breakdown.commissionBlocks ?? []).flatMap(
         (cb) => {
+          if (jaExibidas.has(cb.blockId)) return [];
           const block = blockById.get(cb.blockId);
           const trigger =
             derived?.breakdown.byFactor[block?.triggerFactorId ?? ""] ?? null;

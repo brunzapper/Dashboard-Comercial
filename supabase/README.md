@@ -1,3 +1,7 @@
+<!-- Versão: 1.8 | Data: 22/08/2026 -->
+<!-- v1.8 (22/08/2026): Apps Script v3.2 — conserto dos hiperlinks (fórmula
+     parseada no locale pt-BR virava #ERROR!; agora rich text). Republicação
+     NECESSÁRIA; sem migração. -->
 <!-- Versão: 1.7 | Data: 17/08/2026 -->
 <!-- v1.7 (17/08/2026): Apps Script v3.1 (kinds da memória de cálculo do
      detalhamento) — republicação NECESSÁRIA; sem migração envolvida. -->
@@ -573,6 +577,15 @@ acima). Sem republicar, a exportação segue funcionando — apenas sem essas
 partes. Nada disso exige migração: as abas viajam no `payload` jsonb do
 ticket, e a conferência equivalente na tela (Remuneração → clicar no Realizado
 de um fator) independe do Apps Script.
+
+**REPUBLICAR o script — v3.2 (22/08/2026).** Os hiperlinks (o "voltar" das
+abas de detalhe e o link de cada colaborador na visão geral) nunca funcionaram:
+o script escrevia `=HYPERLINK("#gid=…","texto")` via `setValues`, que parseia a
+string no **locale da planilha** — e como o próprio script força `pt_BR`, onde
+o separador de argumentos é `;`, a célula virava `#ERROR!`. Agora o rótulo vai
+como texto e o link é aplicado em **rich text** (`setLinkUrl`), que independe de
+locale. Sem republicar (passo 6), os links seguem com `#ERROR!`; o resto da
+planilha continua correto.
 
 **REPUBLICAR o script — v3.1 (17/08/2026).** A memória de cálculo do
 detalhamento (linha "cada X vale R$ Y" e a escada de faixas de atingimento)

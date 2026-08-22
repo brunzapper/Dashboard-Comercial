@@ -1,3 +1,6 @@
+// Versão: 1.9 | Data: 22/08/2026
+// v1.9: `detailRowPartsNote` — a composição do valor de cada linha do bloco
+// fundido (coluna Descrição), que antes ficava só no total do registro.
 // Versão: 1.8 | Data: 19/08/2026
 // v1.8: a escada de faixas por ATINGIMENTO passa a dizer de que meta os
 // percentuais falam — `detailTierLabel` mostra o absoluto de cada degrau e
@@ -329,6 +332,19 @@ export function detailMergedAggNote(
   total: number
 ): string {
   return detailAggNote([principal, ...folded].join(" + "), total);
+}
+
+/**
+ * O que compõe o valor de UMA linha do bloco fundido:
+ * "R$ 1.000,00 de Implementação + R$ 3.000,00 de MRR do contrato". Sem isto o
+ * registro mostra só o total e não se sabe o que entrou nele.
+ */
+export function detailRowPartsNote(
+  parts: { label: string; value: number }[],
+  money: boolean
+): string {
+  const fmt = money ? fmtMoneyBRL : fmtNumBR;
+  return parts.map((p) => `${fmt(p.value)} de ${p.label}`).join(" + ");
 }
 
 /**
