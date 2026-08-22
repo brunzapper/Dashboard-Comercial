@@ -1,3 +1,8 @@
+// Versão: 1.10 | Data: 22/08/2026
+// v1.10: `sheetFactorNote` devolve VAZIO para fator de peso 0 — a coluna Valor
+// já sai vazia e a frase "não gera valor próprio" (mais o anexo do alvo) era
+// comentário repetido em toda linha. Ajuste MANUAL segue sendo dito: é o que
+// o leitor não infere das colunas.
 // Versão: 1.9 | Data: 22/08/2026
 // v1.9: `detailRowPartsNote` — a composição do valor de cada linha do bloco
 // fundido (coluna Descrição), que antes ficava só no total do registro.
@@ -246,30 +251,42 @@ export function sheetFactorNote(
   b: CompFactorBreakdown,
   base: number
 ): string {
-  let main: string;
+  // Fator de peso 0 não tem conta a mostrar: a coluna Valor já sai vazia, e
+  // repetir "não gera valor próprio" em toda linha de todo colaborador é
+  // comentário sobre o que a tabela já diz. A célula fica em BRANCO — só uma
+  // intervenção MANUAL (que o leitor não tem como inferir das colunas) ainda
+  // fala nessa linha.
+  const semValorProprio = f.weightPct === 0 && !b.overridden.payout;
+
+  let main = "";
   if (b.overridden.payout) {
     main = "Valor definido manualmente";
-  } else if (f.weightPct === 0) {
-    main = "Usado no cálculo da comissão — não gera valor próprio";
+  } else if (semValorProprio) {
+    main = "";
   } else if (b.attainmentPct != null) {
     main = factorPayoutFormula(base, f.weightPct, b.attainmentPct, b.payout);
   } else {
     main = `Sem atingimento (alvo ou realizado vazio) ⇒ ${fmtMoneyBRL(0)}`;
   }
+
   const extras: string[] = [];
-  if (b.targetSource === "default") extras.push("Alvo padrão do plano");
-  if (f.targetCurrency && b.target != null) {
-    extras.push(
-      b.targetRateMissing
-        ? `Sem cotação ${f.targetCurrency} no mês — atingimento não calculado`
-        : `Alvo em ${f.targetCurrency}` +
-            (b.targetBRL != null ? ` ≈ ${fmtMoneyBRL(b.targetBRL)}` : "")
-    );
+  // Anexos sobre o ALVO só interessam onde ele vira valor; num fator de peso 0
+  // o alvo já aparece na coluna dele e o resto é ruído.
+  if (!semValorProprio) {
+    if (b.targetSource === "default") extras.push("Alvo padrão do plano");
+    if (f.targetCurrency && b.target != null) {
+      extras.push(
+        b.targetRateMissing
+          ? `Sem cotação ${f.targetCurrency} no mês — atingimento não calculado`
+          : `Alvo em ${f.targetCurrency}` +
+              (b.targetBRL != null ? ` ≈ ${fmtMoneyBRL(b.targetBRL)}` : "")
+      );
+    }
   }
   if (b.overridden.realized) extras.push("Realizado informado manualmente");
   if (b.overridden.attainmentPct)
     extras.push("Atingimento informado manualmente");
-  return [main, ...extras].join(" · ");
+  return [main, ...extras].filter(Boolean).join(" · ");
 }
 
 /** Nota da linha "Comissão (total)" do demonstrativo. */
