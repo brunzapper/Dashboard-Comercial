@@ -306,7 +306,7 @@ export async function loadCompDetailContext(
         .select(
           "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent"
         ),
-      loadCurrencyRates(supabase),
+      loadCurrencyRates(supabase, opts.orgId),
       loadResponsibleCanon(supabase),
       // TODOS os responsáveis (apelidos/inativos inclusos): o memberFilterFor
       // casa por CONJUNTO de nomes do grupo canônico.

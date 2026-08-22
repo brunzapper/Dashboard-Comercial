@@ -335,7 +335,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   goals/non_working_days). Loader novo de catálogo/campos/correspondências
   deve aceitar `orgId` e as actions de criação carimbam `organization_id`
   (sem carimbo, usuário de outra org falha ALTO no WITH CHECK — nunca vaza
-  linha p/ a Zapper). `data_sources.key`/`record_type` seguem GLOBAIS
+  linha p/ a Zapper). Desde 22/08/2026 isso inclui `currencies`/`currency_rates`
+  (0123 — antes GLOBAIS): PK/FK compostas com a org, e os loaders de
+  `lib/widgets/currency.ts` aceitam `orgId` — OBRIGATÓRIO no caminho service
+  role (`lib/snapshots/refresh.ts`), senão as taxas de todas as orgs colidem
+  no mesmo `rateKey(code, year, quarter)`. Catálogo do SISTEMA
+  (`roles`/`permissions`/`role_permissions`) é service-role-only (0122): não
+  tem `organization_id`, então escrita por permissão de usuário valia p/ TODAS
+  as orgs.
+- **`visible_to_roles` de campo é ACL de VALOR, não só de coluna
+  (22/08/2026):** `records.custom_fields` é UMA coluna jsonb — a RLS não
+  esconde uma CHAVE dela. Escolher quais colunas RENDERIZAR esconde o dado da
+  tela, não do payload RSC. Todo caminho que entrega `RecordRow` a um Client
+  Component peneira os VALORES no servidor com `redactRestrictedFields`
+  (`lib/records/field-acl.ts`; deny-list — chave órfã sem definição sobrevive):
+  hoje `/registros` e a agenda. EXCEÇÃO consciente: widget de lista/tabela no
+  dashboard NÃO peneira (o construtor já barra não-admin de adicionar coluna
+  restrita; widget montado por admin exibe de propósito) — ver
+  `docs/seguranca.md`. `data_sources.key`/`record_type` seguem GLOBAIS
   (colisão → sufixo na action). Unicidades por-org: upserts nessas tabelas
   usam onConflict composto (`organization_id,key` etc.).
 - **org_admin e Owner protegidos por TRIGGER + GUC (0089):** um org_admin por

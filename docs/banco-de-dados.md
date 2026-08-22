@@ -359,6 +359,14 @@ Desde a 0092, a gestão de `user_roles` é confinada à própria org
 (`auth_org_member_ids`) e o papel `admin` só é concedido/removido por
 org_admin (`auth_can_grant_admin`). org_admin/Owner NÃO são linhas de
 `roles` (rótulos em `SPECIAL_ROLE_LABELS`, `lib/auth/roles.ts`).
+As três primeiras são catálogo do SISTEMA (não têm `organization_id` e a 0091
+não as recriou): desde a **0122** a escrita é service-role-only (sem policy de
+escrita + `revoke all` seguido de `grant select`; o `revoke` enumerado deixaria
+TRUNCATE para trás). Antes, `manage_field_definitions`… não — bastava
+`manage_users_roles`, permissão de USUÁRIO: um admin de qualquer org inseria
+`('vendedor','view_all_records')` em `role_permissions` e o grant valia para
+TODAS as orgs, porque `records_select` (0091) lê exatamente essa permissão.
+O app apenas LÊ essas tabelas.
 
 **`responsibles`** (0012) — lista curada de responsáveis. `display_name`,
 `bitrix_user_id` unique (ASSIGNED_BY_ID, para o matching do sync), `user_id` →
@@ -583,9 +591,22 @@ casado por linha. O sync do Bitrix dispara auto-match INCREMENTAL ao concluir
 job (lado A restrito por `last_synced_at` — índice `idx_records_type_synced`,
 0104).
 
-**`currencies`** (0036) — moedas habilitáveis (seed: BRL/USD ligadas, EUR/GBP/ARS
-desligadas). **`currency_rates`** (0036) — taxa R$ por unidade, PK
-`(code, year, quarter)` com `quarter` 0 = anual, 1–4 = trimestral.
+**`currencies`** (0036; POR ORG desde a **0123**) — moedas habilitáveis (seed:
+BRL/USD ligadas, EUR/GBP/ARS desligadas), PK `(organization_id, code)`.
+**`currency_rates`** (0036; idem) — taxa R$ por unidade, PK
+`(organization_id, code, year, quarter)` com `quarter` 0 = anual, 1–4 =
+trimestral, e FK COMPOSTA `(organization_id, code)` → `currencies` (taxa nunca
+aponta para a moeda de outra org). A 0090 as deixara GLOBAIS de propósito; a
+auditoria de 22/08/2026 reverteu: a escrita só exigia
+`manage_field_definitions` (permissão de usuário), então alguém da org A mexia
+na taxa que a org B usa nos widgets de dinheiro e nos ALVOS de remuneração
+(`factor.targetCurrency` → BRL). `seed_org_defaults` (0093, recriada na 0123)
+passa a semear o catálogo de moedas da org nova.
+**Read side:** os loaders de `lib/widgets/currency.ts` aceitam `orgId` —
+opcional no client do usuário (a RLS recorta), **obrigatório** em caminho
+service role: `lib/snapshots/refresh.ts` congela moedas/taxas com o service
+client e, sem o filtro, as taxas de todas as orgs colidiriam na mesma chave
+`rateKey(code, year, quarter)`.
 
 **`api_keys`** (0074) — chaves de ingestão: `key_hash` (sha256; nunca plaintext),
 `key_prefix` (exibição), `label`, `source_key` → `data_sources`, `mapping` jsonb
@@ -756,8 +777,17 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
   board é gate de ACTION, não de RLS (resolução de acesso a board continua só
   nos helpers `auth_board_*`).
 - **Tabelas de configuração** (`field_definitions`, `currencies`, `match_rules`,
-  correspondências...): leitura para autenticados; escrita exige
-  `manage_field_definitions`.
+  correspondências...): leitura para membros da org; escrita exige
+  `manage_field_definitions` **e** o gate de org (`currencies`/`currency_rates`
+  entraram nesse padrão na 0123).
+- **Catálogo do sistema** (`roles`, `permissions`, `role_permissions`): SELECT
+  para autenticados (é catálogo, não dado de tenant); escrita SÓ service role
+  (0122). `user_roles` NÃO entra aqui — a 0092 já a recorta por org.
+- **`reuniao_freeze_backup`** (0051): era a ÚNICA tabela do schema sem RLS —
+  com os grants default do Supabase, qualquer autenticado de qualquer org lia e
+  escrevia o backup de Data Reunião de registros REAIS. A 0122 liga a RLS sem
+  nenhuma policy (service-role-only; o único consumidor é o runbook
+  `supabase/apply/undo-mock-reuniao.sql`).
 - **Tabelas de segredo/operacão** (`api_keys`, `webhook_*`, `sync_jobs`,
   `bitrix_writeback_queue`): SELECT admin (ou `view_all_records`/autenticado nos
   casos do 0038); escrita SÓ service role (`revoke` explícito na 0074).
@@ -905,3 +935,13 @@ AEs/SDR-BDR), `comp_plans` (5 planos, identidade `config.presetKey`),
 `field_definitions` (`adicional_ao_mrr`, `sdr_reuniao` com
 `options_source='responsibles'`), `sub_sources` (`reunioes_qualificadas`) e
 chaves `comp_*` no registry — tudo ensure-only pelo caminho de fábrica.
+
+### 0122 / 0123 (22/08/2026) — auditoria de segurança
+
+`0122_security_tenant_isolation.sql`: escrita de `roles`/`permissions`/
+`role_permissions` vira service-role-only (escalada de privilégio entre orgs) e
+`reuniao_freeze_backup` ganha RLS (única tabela sem tranca no schema).
+`0123_currencies_por_org.sql`: `currencies`/`currency_rates` passam a ser
+org-scoped (PK e FK compostas + policies do padrão 0091), `seed_org_defaults`
+semeia o catálogo da org nova e as orgs existentes recebem o delas no backfill.
+Detalhe e prova em [`seguranca.md`](./seguranca.md).
