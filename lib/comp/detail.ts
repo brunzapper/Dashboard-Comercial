@@ -98,6 +98,7 @@ import {
   type CompCommissionBlock,
   type CompCommissionBlockBreakdown,
   type CompDetailGrouping,
+  type CompFactorBreakdown,
   type CompFactor,
   type CompFactorGrouping,
   type CompPlanConfig,
@@ -138,8 +139,6 @@ export interface CompDetailRecordRow {
    * lib/comp/payout-math.ts): aí um número enganaria.
    */
   contribution: number | null;
-  /** Operando de origem — só preenchido em bloco SOMADO (mistura operandos). */
-  origin: string;
 }
 
 /** Um degrau da escada de faixas, pronto para exibição. */
@@ -161,6 +160,16 @@ export interface CompDetailCommission {
   tierBy: "attainment" | "realized";
   /** Limiar em R$ (tierBy "realized" sobre fator monetário). */
   triggerMoney: boolean;
+  /** Rótulo do fator-gatilho ("Reuniões") — usado na frase da meta. */
+  triggerLabel: string;
+  /**
+   * META do fator-gatilho, em BRL quando o alvo é em moeda. Com tierBy
+   * "attainment" é ela que dá sentido ao "A partir de 50%" — sem ela a escada
+   * fala em percentual de coisa nenhuma. null = sem alvo apurado.
+   */
+  triggerTarget: number | null;
+  /** Realizado do gatilho, para a frase "X de meta Y". */
+  triggerRealized: number | null;
   /** "20% × R$ 9.450,00 (Vendas) = R$ 1.890,00" — de commissionMemory. */
   formula: string | null;
   /** Faixa aplicada + gatilho, ou o motivo do zero. */
@@ -670,7 +679,6 @@ function toDetailRow(
       perUnit != null && Number.isFinite(numeric)
         ? roundMoney(perUnit * numeric)
         : null,
-    origin: operand.label,
     // recordColumnValue (não recordCellValue): resolve também `unified:` e
     // `match:`, que podem ser o campo do operando.
     valueText:
@@ -851,29 +859,62 @@ function mergeOperandBlocks(
   const homogeneo = parts.every((p) => operandSums(p.operand));
   const somavel = homogeneo && completo;
 
+  // UMA linha por REGISTRO. Os operandos consultam os MESMOS registros mudando
+  // só o campo agregado, então concatenar as listas repetia a empresa uma vez
+  // por operando; aqui o valor da linha vira a SOMA das partes em que ela
+  // aparece (registro presente em um operando só entra com o que tem).
+  const rows = collapseRowsByRecord(parts.flatMap((p) => p.block.rows));
+  const truncated = parts.some((p) => p.block.truncated);
+
   return {
     label: principal.block.label,
     valueLabel: principal.block.valueLabel,
     aggNote: detailMergedAggNote(
       principal.block.label,
       dobrados.map((p) => p.block.label),
-      total
+      // Com lista truncada não dá para saber o distinto do recorte INTEIRO —
+      // aí fica a soma das partes e o aviso de truncamento explica a lista.
+      truncated ? total : rows.length
     ),
-    rows: parts.flatMap((p) => p.block.rows),
+    rows,
     listedSum: somavel ? parcelas.reduce((a, x) => a + x.value, 0) : null,
-    total,
-    truncated: parts.some((p) => p.block.truncated),
+    total: truncated ? total : rows.length,
+    truncated,
     mergedFrom: dobrados.map((p) => p.block.label),
     sumParts: somavel ? [] : parcelas,
     warnings: [...new Set(parts.flatMap((p) => p.block.warnings))],
   };
 }
 
+/**
+ * Funde as linhas do MESMO registro somando valor e contribuição. Preserva a
+ * ordem de primeira aparição (a lista já vem ordenada pela consulta) e mantém
+ * `value` nulo quando nenhuma parte tinha número — somar nada não vira zero.
+ */
+function collapseRowsByRecord(
+  rows: CompDetailRecordRow[]
+): CompDetailRecordRow[] {
+  const byId = new Map<string, CompDetailRecordRow>();
+  for (const row of rows) {
+    const atual = byId.get(row.id);
+    if (!atual) {
+      byId.set(row.id, { ...row });
+      continue;
+    }
+    if (row.value != null) atual.value = (atual.value ?? 0) + row.value;
+    if (row.contribution != null)
+      atual.contribution = (atual.contribution ?? 0) + row.contribution;
+  }
+  return [...byId.values()];
+}
+
 /** Memória de um bloco de comissão, com a escada completa. */
 function commissionDetail(
   cb: CompCommissionBlockBreakdown,
   block: CompCommissionBlock,
-  memberId: string
+  memberId: string,
+  /** Breakdown do fator-GATILHO — é dele que sai a meta da escada. */
+  trigger: CompFactorBreakdown | null
 ): CompDetailCommission {
   const mem = commissionMemory(cb);
   return {
@@ -882,6 +923,11 @@ function commissionDetail(
     kind: cb.kind,
     tierBy: cb.tierBy,
     triggerMoney: cb.triggerMoney,
+    triggerLabel: cb.triggerLabel,
+    // targetBRL é o alvo já convertido (alvo em moeda estrangeira); sem
+    // conversão os dois são o mesmo número.
+    triggerTarget: trigger?.targetBRL ?? trigger?.target ?? null,
+    triggerRealized: trigger?.realized ?? null,
     formula: mem.formula,
     tierNote: mem.tierNote,
     memberTiers: mem.memberTiers,
@@ -928,7 +974,8 @@ export async function loadFactorRecords(
       : null;
   const commissions = roles.flatMap((role) => {
     const cb = blocksById.get(role.block.id);
-    return cb ? [commissionDetail(cb, role.block, memberId)] : [];
+    const trigger = breakdown?.byFactor[role.block.triggerFactorId] ?? null;
+    return cb ? [commissionDetail(cb, role.block, memberId, trigger)] : [];
   });
 
   const base = {
@@ -985,13 +1032,26 @@ export async function loadFactorRecords(
     )
   );
 
+  // Bloco sem registro não vira sub-bloco: uma linha "· 0 registros" por
+  // operando é ruído. Quando NENHUM tem registro, `operands` fica vazio e os
+  // consumidores emitem UMA declaração de vazio do fator inteiro (é o caminho
+  // que eles já tratam). Os avisos do bloco descartado sobem para o fator —
+  // aviso nunca some junto com o bloco.
+  const comLinhas = blocks.filter((b) => b.rows.length > 0);
+  const descartados = blocks.filter((b) => b.rows.length === 0);
+  const visiveis = comLinhas.length > 0 ? comLinhas : [];
+
   return {
     ...base,
-    operands: blocks,
+    warnings: [
+      ...base.warnings,
+      ...new Set(descartados.flatMap((b) => b.warnings)),
+    ],
+    operands: visiveis,
     // A conferência exige um operando puro E nenhuma fusão em jogo.
     listedForCompare:
-      blocks.length === 1
-        ? comparableQuantity(ctx, factor, operands, blocks)
+      visiveis.length === 1
+        ? comparableQuantity(ctx, factor, operands, visiveis)
         : null,
   };
 }
@@ -1145,7 +1205,9 @@ export async function loadCompDetail(
       const commissions = (derived?.breakdown.commissionBlocks ?? []).flatMap(
         (cb) => {
           const block = blockById.get(cb.blockId);
-          return block ? [commissionDetail(cb, block, member.id)] : [];
+          const trigger =
+            derived?.breakdown.byFactor[block?.triggerFactorId ?? ""] ?? null;
+          return block ? [commissionDetail(cb, block, member.id, trigger)] : [];
         }
       );
       plans.push({

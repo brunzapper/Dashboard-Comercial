@@ -47,6 +47,7 @@ import {
   fmtMoneyBRL,
   fmtNumBR,
   detailSumPartsNote,
+  detailTargetNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailCommission,
@@ -137,6 +138,16 @@ function Summary(props: { detail: CompDetailFactor }) {
 /** Escada de faixas de um bloco de comissão, com a aplicada destacada. */
 function CommissionBlock(props: { commission: CompDetailCommission }) {
   const c = props.commission;
+  // Faixa por atingimento sem a meta declarada é percentual de coisa nenhuma.
+  const meta =
+    c.tierBy === "attainment"
+      ? detailTargetNote(
+          c.triggerLabel,
+          c.triggerTarget,
+          c.triggerRealized,
+          c.triggerMoney
+        )
+      : null;
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3">
       <div className="flex items-baseline justify-between gap-2">
@@ -147,6 +158,7 @@ function CommissionBlock(props: { commission: CompDetailCommission }) {
         <p className="text-xs tabular-nums">{c.formula}</p>
       ) : null}
       <p className="text-muted-foreground text-xs">{c.tierNote}</p>
+      {meta ? <p className="text-xs font-medium">{meta}</p> : null}
       <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
@@ -165,7 +177,12 @@ function CommissionBlock(props: { commission: CompDetailCommission }) {
                 className={t.applied ? "font-semibold" : undefined}
               >
                 <TableCell>
-                  {detailTierLabel(t.fromPct, c.tierBy, c.triggerMoney)}
+                  {detailTierLabel(
+                    t.fromPct,
+                    c.tierBy,
+                    c.triggerMoney,
+                    c.triggerTarget
+                  )}
                 </TableCell>
                 <TableCell className="text-right whitespace-nowrap">
                   {detailTierValue(t, c.kind)}
@@ -193,7 +210,6 @@ function OperandBlock(props: {
   showLabel: boolean;
 }) {
   const { operand, money } = props;
-  const merged = operand.mergedFrom.length > 0;
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(operand.rows.length / PAGE_SIZE));
   const slice = operand.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -224,7 +240,7 @@ function OperandBlock(props: {
                   <TableHead>Data</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead>Base</TableHead>
-                  <TableHead>{merged ? "Operando" : "Responsável"}</TableHead>
+                  <TableHead>Responsável</TableHead>
                   <TableHead>Etapa</TableHead>
                   <TableHead className="text-right">
                     {operand.valueLabel}
@@ -238,9 +254,7 @@ function OperandBlock(props: {
                     <TableCell className="whitespace-nowrap">{r.date}</TableCell>
                     <TableCell>{r.title}</TableCell>
                     <TableCell>{r.sourceLabel}</TableCell>
-                    <TableCell>
-                      {merged ? r.origin : r.responsibleLabel}
-                    </TableCell>
+                    <TableCell>{r.responsibleLabel}</TableCell>
                     <TableCell>{r.stage}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {r.value != null ? fmtValue(r.value, money) : r.valueText}

@@ -792,7 +792,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   quando a relação não é linear (cap/piso ATIVO, valor manual, sem alvo, fator
   só-gatilho, comissão `flat`) — número ali seria mentira. Isso alimenta a
   coluna "Vale (R$)" por registro, a linha "cada X vale R$ Y", a conta do
-  payout (`factorPayoutFormula`) no cabeçalho e a escada; a comissão aparece
+  payout (`factorPayoutFormula`) no cabeçalho e a escada — que com
+  `tierBy:"attainment"` declara a META do gatilho (`detailTargetNote` + o
+  absoluto por degrau em `detailTierLabel`, vindos do breakdown do fator-gatilho
+  via `commissionDetail`; sem alvo apurado segue só o percentual, nunca um
+  absoluto inventado); a comissão aparece
   nos DOIS lugares (dentro do fator que a dispara e como bloco do plano). Saíram
   `detailReconcileNote`/`DETAIL_COMBINED_NOTE` (a conferência virou
   realizado × somado lado a lado + `DETAIL_DIVERGE_MARK`); frases novas seguem
@@ -805,7 +809,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   confronto (`listedForCompare` null). O bloco fundido herda rótulo/coluna do
   PRINCIPAL e marca `mergedFrom` (consumidor NUNCA detecta fusão comparando o
   rótulo); Σ só vira número único com as partes na MESMA unidade — soma com
-  contagem expõe `sumParts` em vez de um total sem significado. Entrada com
+  contagem expõe `sumParts` em vez de um total sem significado. As linhas
+  COLAPSAM por registro (`collapseRowsByRecord`): os operandos consultam os
+  MESMOS registros mudando só o campo, então concatenar repetia a empresa uma
+  vez por operando — valor/contribuição viram a SOMA das partes, `total` conta
+  DISTINTOS (exceto truncado, onde o distinto do recorte é desconhecido) e a
+  coluna "Operando" não existe (linha fundida não tem origem única). Operando
+  SEM registros não vira bloco: `loadFactorRecords` o descarta e sobe os
+  `warnings` dele para o fator; com todos vazios, `operands` fica `[]` e os
+  consumidores declaram o vazio UMA vez (nada de "· 0 registros" por soma). Entrada com
   `folded` vazio é DESCARTADA no parse e no save: foi a lista vazia lida como
   "sem config" que deixou a 1ª versão (`separateByFactor`, só-leitura hoje —
   convertida em `resolveFactorGrouping`, que tem a lista de operandos) INERTE

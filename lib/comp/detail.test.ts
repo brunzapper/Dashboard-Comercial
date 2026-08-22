@@ -1,3 +1,8 @@
+// Versão: 1.4 | Data: 19/08/2026
+// v1.4: bloco fundido traz UMA linha por REGISTRO (valor somado das partes —
+// a mesma empresa saía repetida uma vez por operando) e operando SEM registros
+// não vira bloco: o fator fica sem operandos e os consumidores declaram o
+// vazio uma vez só, com os avisos do bloco descartado subindo para o fator.
 // Versão: 1.3 | Data: 17/08/2026
 // v1.3: o agrupamento virou "bloco PRINCIPAL que recebe os dobrados"
 // ({into, folded}). O pino central é a REGRESSÃO do relato: com 2 operandos,
@@ -457,9 +462,42 @@ describe("loadFactorRecords", () => {
       M1,
       breakdownStub(null)
     );
-    expect(out.operands[0].rows).toEqual([]);
-    expect(out.operands[0].warnings).toHaveLength(1);
-    expect(out.operands[0].warnings[0]).toContain("memberField");
+    // Bloco vazio não vira sub-bloco (era "· 0 registros" por operando); o
+    // fator fica sem operandos — os consumidores dizem UMA vez que não houve
+    // registro — e o AVISO sobe para o fator, nunca some junto com o bloco.
+    expect(out.operands).toEqual([]);
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0]).toContain("memberField");
+  });
+
+  it("operando vazio some do detalhe, mas o que TEM registro fica", async () => {
+    const fac = factor({
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato"),
+    });
+    // A 2ª consulta (MRR) devolve vazio: o bloco dela não pode virar linha
+    // "· 0 registros no recorte" ao lado do bloco populado.
+    const s = fakeSupabase({
+      tables: {
+        records: (q) =>
+          q.steps.some((st) =>
+            JSON.stringify(st.args).includes("mrr_contrato")
+          )
+            ? { data: [], error: null, count: 0 }
+            : { data: recRows(2), error: null, count: 2 },
+        record_matches: [],
+        responsibles: [{ id: M1, display_name: "Ana" }],
+      },
+    });
+    const out = await loadFactorRecords(
+      s.db,
+      ctxWith(),
+      planWith({ factors: [fac] }),
+      fac,
+      M1,
+      breakdownStub(999)
+    );
+    expect(out.operands).toHaveLength(1);
+    expect(out.operands[0].label).toBe("Soma de Valor");
   });
 
   it("REGRESSÃO: 2 operandos, um dobrado ⇒ UM bloco com o subtotal somado", async () => {
@@ -495,13 +533,44 @@ describe("loadFactorRecords", () => {
     expect(bloco.label).toBe("Soma de Valor");
     expect(bloco.mergedFrom).toEqual(["Soma de MRR do contrato"]);
     expect(bloco.aggNote).toContain("Soma de Valor + Soma de MRR do contrato");
-    expect(bloco.rows).toHaveLength(4); // 2 de cada operando
-    expect(bloco.total).toBe(4);
+    // UMA linha por REGISTRO (2 registros), com o valor somado das partes —
+    // era o mesmo negócio repetido uma vez por operando.
+    expect(bloco.rows).toHaveLength(2);
+    expect(bloco.rows.map((r) => r.value)).toEqual([150, 150]);
+    expect(bloco.total).toBe(2); // registros DISTINTOS, não 2+2
+    expect(bloco.aggNote).toContain("2 registros");
     // Ambas as partes somam em R$: o subtotal é um número único.
     expect(bloco.listedSum).toBe(300); // 200 de Valor + 100 de MRR
     expect(bloco.sumParts).toEqual([]);
     // Com fusão em jogo não há número único a confrontar com o realizado.
     expect(out.listedForCompare).toBeNull();
+  });
+
+  it("registro presente em UM operando só entra com o valor que tem", async () => {
+    const fac = factor({
+      formula: f("agg:sum:value", "agg:sum:custom:mrr_contrato"),
+    });
+    const keys = factorOperands(ctxWith(), fac).map((o) => o.key);
+    // Só o 2º negócio tem MRR — como o "Adicional ao MRR" do relato, que só
+    // uma empresa tinha. Ele NÃO pode virar linha separada.
+    const rows = recRows(2).map((r, i) => ({
+      ...r,
+      custom_fields: i === 1 ? { mrr_contrato: 70 } : {},
+    }));
+    const out = await loadFactorRecords(
+      supa(rows).db,
+      ctxWith(),
+      planWith({
+        factors: [fac],
+        detailGrouping: { byFactor: { f_v: { into: keys[0], folded: [keys[1]] } } },
+      }),
+      fac,
+      M1,
+      breakdownStub(999)
+    );
+    const bloco = out.operands[0];
+    expect(bloco.rows).toHaveLength(2);
+    expect(bloco.rows.map((r) => r.value)).toEqual([100, 170]);
   });
 
   it("fusão de unidades DIFERENTES não inventa um total: mostra as parcelas", async () => {

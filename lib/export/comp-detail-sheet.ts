@@ -1,3 +1,6 @@
+// Versão: 1.4 | Data: 19/08/2026
+// v1.4: a coluna "Operando" saiu (bloco fundido agora traz UMA linha por
+// registro, sem origem única) e a escada por atingimento declara a meta.
 // Versão: 1.3 | Data: 17/08/2026
 // v1.3: fusão detectada por `mergedFrom` (não mais pelo rótulo "Somados", que
 // saiu quando o bloco passou a herdar o rótulo do PRINCIPAL) e subtotal com as
@@ -35,6 +38,7 @@ import {
   detailTierLabel,
   detailTierMark,
   detailSumPartsNote,
+  detailTargetNote,
   detailTierValue,
   detailUnitValueNote,
 } from "@/lib/comp/commission-label";
@@ -52,17 +56,8 @@ import type {
 import { COMP_SHEET_COLS, padSheetRow, type SheetCell, type SheetRow } from "./comp-sheet";
 
 /** Cabeçalho da tabela de registros (a 6ª coluna é o rótulo do valor do fator). */
-function detailHeaderCells(valueLabel: string, merged: boolean): SheetCell[] {
-  return [
-    "Data",
-    "Registro",
-    "Base",
-    // Bloco somado mistura operandos: a coluna diz de qual veio cada linha.
-    merged ? "Operando" : "Responsável",
-    "Etapa",
-    valueLabel,
-    "Vale (R$)",
-  ];
+function detailHeaderCells(valueLabel: string): SheetCell[] {
+  return ["Data", "Registro", "Base", "Responsável", "Etapa", valueLabel, "Vale (R$)"];
 }
 
 /** Escada de faixas + memória de UM bloco de comissão. */
@@ -72,9 +67,20 @@ function pushCommission(
 ) {
   push("detailFactorMoney", [c.label, "", "", "", "", c.value, c.formula ?? ""]);
   push("detailMemory", [c.tierNote]);
+  // A escada por atingimento só faz sentido com a meta declarada.
+  const meta =
+    c.tierBy === "attainment"
+      ? detailTargetNote(
+          c.triggerLabel,
+          c.triggerTarget,
+          c.triggerRealized,
+          c.triggerMoney
+        )
+      : null;
+  if (meta) push("detailMemory", [meta]);
   for (const t of c.tiers) {
     push(t.applied ? "detailTierApplied" : "detailTier", [
-      detailTierLabel(t.fromPct, c.tierBy, c.triggerMoney),
+      detailTierLabel(t.fromPct, c.tierBy, c.triggerMoney, c.triggerTarget),
       "",
       "",
       "",
@@ -111,14 +117,13 @@ function pushOperand(
     push("info", [DETAIL_EMPTY_NOTE]);
     return;
   }
-  const merged = operand.mergedFrom.length > 0;
-  push("detailHeader", detailHeaderCells(operand.valueLabel, merged));
+  push("detailHeader", detailHeaderCells(operand.valueLabel));
   for (const r of operand.rows) {
     push(money ? "detailRowMoney" : "detailRow", [
       r.date,
       r.title,
       r.sourceLabel,
-      merged ? r.origin : r.responsibleLabel,
+      r.responsibleLabel,
       r.stage,
       r.value ?? r.valueText,
       r.contribution ?? "",

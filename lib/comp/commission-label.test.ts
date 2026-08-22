@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   commissionMemory,
+  detailTargetNote,
+  detailTierLabel,
   entryMemoryLines,
   factorPayoutFormula,
   fmtMoneyBRL,
@@ -350,5 +352,43 @@ describe("entryMemoryLines", () => {
     expect(entryMemoryLines(cfgPesos, bd)).toContain(
       `Total manual: ${fmtMoneyBRL(999)}`
     );
+  });
+});
+
+describe("meta da escada de faixas", () => {
+  it("faixa por atingimento mostra o ABSOLUTO da meta ao lado do percentual", () => {
+    // "A partir de 50%" sozinho é percentual de coisa nenhuma — com meta 20,
+    // o degrau diz que são 10 reuniões.
+    expect(detailTierLabel(50, "attainment", false, 20)).toBe(
+      `A partir de ${fmtNumBR(50)}% (${fmtNumBR(10)})`
+    );
+    expect(detailTierLabel(120, "attainment", true, 1000)).toBe(
+      `A partir de ${fmtNumBR(120)}% (${fmtMoneyBRL(1200)})`
+    );
+  });
+
+  it("sem meta apurada, o degrau segue só no percentual (nada de inventar)", () => {
+    expect(detailTierLabel(50, "attainment", false, null)).toBe(
+      `A partir de ${fmtNumBR(50)}%`
+    );
+    expect(detailTierLabel(50, "attainment", false)).toBe(
+      `A partir de ${fmtNumBR(50)}%`
+    );
+  });
+
+  it("faixa por REALIZADO não fala em meta — o limiar já é absoluto", () => {
+    expect(detailTierLabel(500, "realized", true, 1000)).toBe(
+      `A partir de ${fmtMoneyBRL(500)}`
+    );
+  });
+
+  it("a nota declara meta e realizado; sem meta não há nota", () => {
+    expect(detailTargetNote("Reuniões", 20, 3, false)).toBe(
+      `Meta de Reuniões: ${fmtNumBR(20)} · realizado ${fmtNumBR(3)} = ${fmtNumBR(15)}%`
+    );
+    expect(detailTargetNote("Vendas", 1000, null, true)).toBe(
+      `Meta de Vendas: ${fmtMoneyBRL(1000)}`
+    );
+    expect(detailTargetNote("Reuniões", null, 3, false)).toBeNull();
   });
 });
