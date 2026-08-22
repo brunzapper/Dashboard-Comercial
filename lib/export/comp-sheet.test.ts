@@ -262,12 +262,14 @@ describe("compSheetReport", () => {
     expect(norm(String(vendas[6]))).toContain(
       "R$ 1.000,00 × 100% × 50% = R$ 500,00"
     );
-    // Fator peso 0 (não-money) = factor com Peso/Valor vazios e nota humana.
+    // Fator peso 0 (não-money) = factor com Peso/Valor vazios. A nota fica em
+    // BRANCO: sem valor próprio não há conta a explicar, e a frase se repetia
+    // em toda linha de todo colaborador.
     const reunioes = rowOf(report, "factor", "Reuniões")!;
     expect(reunioes[2]).toBe(44);
     expect(reunioes[4]).toBe("");
     expect(reunioes[5]).toBe("");
-    expect(String(reunioes[6])).toContain("não gera valor próprio");
+    expect(reunioes[6]).toBe("");
     // Memória do bloco de comissão via commissionMemory.
     const premio = rowOf(report, "commission", "Prêmio por reunião")!;
     expect(premio[5]).toBe(550);

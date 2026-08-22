@@ -12,11 +12,14 @@ import {
   factorPayoutFormula,
   fmtMoneyBRL,
   fmtNumBR,
+  sheetFactorNote,
 } from "./commission-label";
 import {
   computeEntry,
   parseCompEntryInputs,
   type CompCommissionBlockBreakdown,
+  type CompFactor,
+  type CompFactorBreakdown,
   type CompPlanConfig,
 } from "./model";
 
@@ -390,5 +393,53 @@ describe("meta da escada de faixas", () => {
       `Meta de Vendas: ${fmtMoneyBRL(1000)}`
     );
     expect(detailTargetNote("Reuniões", null, 3, false)).toBeNull();
+  });
+});
+
+describe("sheetFactorNote", () => {
+  const fator = (over: Partial<CompFactor> = {}): CompFactor => ({
+    id: "f_r",
+    label: "Reuniões",
+    weightPct: 0,
+    metricKey: "m_r",
+    money: false,
+    formula: { tokens: [{ kind: "field", ref: "agg:count:*" }] },
+    sources: [],
+    ...over,
+  });
+  const bd = (over: Partial<CompFactorBreakdown> = {}): CompFactorBreakdown => ({
+    target: 20,
+    realized: 44,
+    attainmentPct: 220,
+    payout: 0,
+    overridden: { realized: false, attainmentPct: false, payout: false },
+    targetSource: "default",
+    targetBRL: 20,
+    ...over,
+  });
+
+  it("fator de peso 0: célula VAZIA (a coluna Valor já sai vazia)", () => {
+    // Antes saía "Usado no cálculo da comissão — não gera valor próprio ·
+    // Alvo padrão do plano" em toda linha de todo colaborador.
+    expect(sheetFactorNote(fator(), bd(), 1000)).toBe("");
+  });
+
+  it("mesmo sem valor próprio, AJUSTE MANUAL continua sendo dito", () => {
+    // É o que o leitor não tem como inferir das colunas.
+    expect(
+      sheetFactorNote(
+        fator(),
+        bd({
+          overridden: { realized: true, attainmentPct: false, payout: false },
+        }),
+        1000
+      )
+    ).toBe("Realizado informado manualmente");
+  });
+
+  it("fator COM peso segue com a conta e os anexos do alvo", () => {
+    const nota = sheetFactorNote(fator({ weightPct: 40 }), bd(), 1000);
+    expect(nota).toContain("×");
+    expect(nota).toContain("Alvo padrão do plano");
   });
 });
