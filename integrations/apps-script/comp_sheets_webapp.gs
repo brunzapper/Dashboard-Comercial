@@ -1,3 +1,9 @@
+// Versão: 3.2 | Data: 22/08/2026
+// v3.2: CONSERTO dos hiperlinks — eles saíam como fórmula
+// =HYPERLINK("#gid=…","texto") escrita via setValues, que PARSEIA no locale da
+// planilha; como o script força pt_BR (separador ';'), toda célula de link
+// virava #ERROR!. Agora o rótulo vai como texto e o link é aplicado em rich
+// text (setLinkUrl), que independe de locale. REQUER republicar o script.
 // Versão: 3.1 | Data: 17/08/2026
 // v3.1: MEMÓRIA DE CÁLCULO no detalhamento — kinds novos `detailMemory` (linha
 // explicativa) e `detailTier`/`detailTierApplied` (escada de faixas, com a
@@ -276,10 +282,17 @@ var HEADER_BG_KINDS_ = {
 var NOTA_KINDS_ = { info: 1, note: 1, detailBack: 1, detailMemory: 1 };
 var COL_LETRAS_ = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
-// Fórmula de link interno. A API do Apps Script usa SEMPRE vírgula como
-// separador de argumentos, independente do locale pt-BR da planilha.
-function formulaLink_(gid, rotulo) {
-  return '=HYPERLINK("#gid=' + gid + '","' + String(rotulo).replace(/"/g, '""') + '")';
+// Link interno por RICH TEXT — nunca por fórmula. `setValues` parseia a string
+// "=HYPERLINK(...)" no LOCALE DA PLANILHA, e este script força pt_BR, onde o
+// separador de argumentos é ';': a fórmula com ',' virava #ERROR! em toda aba.
+// Rich text não tem sintaxe para errar.
+function aplicarLink_(sh, linhaA1, rotulo, gid) {
+  sh.getRange(linhaA1, 1).setRichTextValue(
+    SpreadsheetApp.newRichTextValue()
+      .setText(String(rotulo))
+      .setLinkUrl('#gid=' + gid)
+      .build()
+  );
 }
 
 function gravarDemonstrativo_(aba, gidPorNome) {
@@ -297,12 +310,8 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   };
   var values = [pad(aba.headers)];
   for (var i = 0; i < rows.length; i++) {
-    var linha = pad(rows[i]);
-    // Hiperlink na coluna A: o rótulo continua sendo o texto da célula.
-    if (links && links[i] && gidPorNome[links[i]] != null) {
-      linha[0] = formulaLink_(gidPorNome[links[i]], linha[0]);
-    }
-    values.push(linha);
+    // O rótulo vai como TEXTO; o link é aplicado depois, em rich text.
+    values.push(pad(rows[i]));
   }
   sh.getRange(1, 1, values.length, ncols).setValues(values);
 
@@ -363,6 +372,15 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   }
 
   sh.getRange(1, 1).setFontSize(12);
+
+  // Links por ÚLTIMO: assim nenhuma passada de estilo sobrescreve o rich text.
+  if (links) {
+    for (var L = 0; L < rows.length; L++) {
+      var alvo = links[L] ? gidPorNome[links[L]] : null;
+      if (alvo == null) continue;
+      aplicarLink_(sh, L + 2, pad(rows[L])[0], alvo); // +1 do título, +1 do 1-based
+    }
+  }
   for (var c = 0; c < ncols; c++) sh.setColumnWidth(c + 1, larguras[c]);
   // Wrap SÓ na coluna de memória/observações (números não são afetados).
   sh.getRange(1, ncols, values.length, 1).setWrap(true);

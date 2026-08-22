@@ -1,3 +1,5 @@
+// Versão: 1.5 | Data: 22/08/2026
+// v1.5: coluna "Descrição" em bloco fundido, com a composição da linha.
 // Versão: 1.4 | Data: 19/08/2026
 // v1.4: bloco fundido traz UMA linha por registro (a coluna "Operando" saiu —
 // não há origem única) e a escada por atingimento declara a meta, com o
@@ -27,8 +29,10 @@ import {
   DETAIL_EMPTY_NOTE,
   DETAIL_TIER_APPLIED,
   DETAIL_TIER_MISSED,
+  detailRowPartsNote,
   detailSumPartsNote,
   detailTargetNote,
+  fmtMoneyBRL,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailFactor,
@@ -70,6 +74,7 @@ const operando = (
       value: 100,
       valueText: "R$ 100,00",
       contribution: 12.5,
+      parts: [],
     },
     {
       id: "r2",
@@ -81,6 +86,7 @@ const operando = (
       value: 200,
       valueText: "R$ 200,00",
       contribution: 25,
+      parts: [],
     },
   ],
   ...over,
@@ -388,7 +394,7 @@ describe("compDetailSheets", () => {
     expect(faixas[1]).toContain("(20)");
   });
 
-  it("bloco fundido: rótulo do PRINCIPAL e coluna de Responsável (sem origem)", () => {
+  it("bloco fundido: rótulo do PRINCIPAL e a 4ª coluna descrevendo a linha", () => {
     const [sheet] = compDetailSheets(
       [
         membro({
@@ -410,10 +416,43 @@ describe("compDetailSheets", () => {
       ],
       OPTS
     );
-    // A linha fundida é do REGISTRO (valor somado das partes), então não há
-    // operando único para nomear — a coluna volta a ser o responsável.
-    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Responsável");
-    expect(kindsDe(sheet, "detailRowMoney")[0][3]).toBe("Ana");
+    // A linha fundida é do REGISTRO, então a 4ª coluna descreve a composição
+    // em vez de repetir o responsável (que é o dono da aba).
+    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Descrição");
+  });
+
+  it("bloco fundido: a 4ª coluna vira Descrição com a composição da linha", () => {
+    const parts = [
+      { label: "Implementação", value: 1000 },
+      { label: "MRR do contrato", value: 3000 },
+    ];
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            planoCom(
+              fatorCom(
+                [
+                  operando({
+                    mergedFrom: ["Soma de Implementação"],
+                    rows: [{ ...operando().rows[0], value: 4000, parts }],
+                  }),
+                ],
+                { listedForCompare: null }
+              )
+            ),
+          ],
+        }),
+      ],
+      OPTS
+    );
+    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Descrição");
+    expect(norm(String(kindsDe(sheet, "detailRowMoney")[0][3]))).toBe(
+      norm(detailRowPartsNote(parts, true))
+    );
+    expect(norm(detailRowPartsNote(parts, true))).toBe(
+      `${norm(fmtMoneyBRL(1000))} de Implementação + ${norm(fmtMoneyBRL(3000))} de MRR do contrato`
+    );
     // O subtotal fecha com o rótulo do principal, não um genérico.
     expect(kindsDe(sheet, "detailSubtotalMoney")[0][0]).toBe(
       "Subtotal — Soma de Valor"

@@ -46,6 +46,7 @@ import {
   detailUnitValueNote,
   fmtMoneyBRL,
   fmtNumBR,
+  detailRowPartsNote,
   detailSumPartsNote,
   detailTargetNote,
 } from "@/lib/comp/commission-label";
@@ -210,6 +211,8 @@ function OperandBlock(props: {
   showLabel: boolean;
 }) {
   const { operand, money } = props;
+  // Bloco fundido: a coluna do responsável dá lugar à composição da linha.
+  const merged = operand.mergedFrom.length > 0;
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(operand.rows.length / PAGE_SIZE));
   const slice = operand.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -240,7 +243,7 @@ function OperandBlock(props: {
                   <TableHead>Data</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead>Base</TableHead>
-                  <TableHead>Responsável</TableHead>
+                  <TableHead>{merged ? "Descrição" : "Responsável"}</TableHead>
                   <TableHead>Etapa</TableHead>
                   <TableHead className="text-right">
                     {operand.valueLabel}
@@ -254,7 +257,11 @@ function OperandBlock(props: {
                     <TableCell className="whitespace-nowrap">{r.date}</TableCell>
                     <TableCell>{r.title}</TableCell>
                     <TableCell>{r.sourceLabel}</TableCell>
-                    <TableCell>{r.responsibleLabel}</TableCell>
+                    <TableCell>
+                      {merged && r.parts.length > 0
+                        ? detailRowPartsNote(r.parts, money)
+                        : r.responsibleLabel}
+                    </TableCell>
                     <TableCell>{r.stage}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {r.value != null ? fmtValue(r.value, money) : r.valueText}

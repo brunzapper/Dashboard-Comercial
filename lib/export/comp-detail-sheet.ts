@@ -1,3 +1,6 @@
+// Versão: 1.5 | Data: 22/08/2026
+// v1.5: coluna "Descrição" em bloco fundido — a composição do valor de cada
+// linha ("R$ 1.000,00 de Implementação + R$ 3.000,00 de MRR do contrato").
 // Versão: 1.4 | Data: 19/08/2026
 // v1.4: a coluna "Operando" saiu (bloco fundido agora traz UMA linha por
 // registro, sem origem única) e a escada por atingimento declara a meta.
@@ -37,6 +40,7 @@ import {
   DETAIL_EMPTY_NOTE,
   detailTierLabel,
   detailTierMark,
+  detailRowPartsNote,
   detailSumPartsNote,
   detailTargetNote,
   detailTierValue,
@@ -55,9 +59,23 @@ import type {
 
 import { COMP_SHEET_COLS, padSheetRow, type SheetCell, type SheetRow } from "./comp-sheet";
 
-/** Cabeçalho da tabela de registros (a 6ª coluna é o rótulo do valor do fator). */
-function detailHeaderCells(valueLabel: string): SheetCell[] {
-  return ["Data", "Registro", "Base", "Responsável", "Etapa", valueLabel, "Vale (R$)"];
+/**
+ * Cabeçalho da tabela de registros (a 6ª coluna é o rótulo do valor do fator).
+ * Em bloco FUNDIDO a 4ª vira "Descrição": ali o valor da linha soma campos
+ * diferentes, e é isso que o leitor precisa ver. Em bloco de um operando só o
+ * cabeçalho da coluna de valor já diz o que está somado, então fica o
+ * responsável.
+ */
+function detailHeaderCells(valueLabel: string, merged: boolean): SheetCell[] {
+  return [
+    "Data",
+    "Registro",
+    "Base",
+    merged ? "Descrição" : "Responsável",
+    "Etapa",
+    valueLabel,
+    "Vale (R$)",
+  ];
 }
 
 /** Escada de faixas + memória de UM bloco de comissão. */
@@ -117,13 +135,16 @@ function pushOperand(
     push("info", [DETAIL_EMPTY_NOTE]);
     return;
   }
-  push("detailHeader", detailHeaderCells(operand.valueLabel));
+  const merged = operand.mergedFrom.length > 0;
+  push("detailHeader", detailHeaderCells(operand.valueLabel, merged));
   for (const r of operand.rows) {
     push(money ? "detailRowMoney" : "detailRow", [
       r.date,
       r.title,
       r.sourceLabel,
-      r.responsibleLabel,
+      merged && r.parts.length > 0
+        ? detailRowPartsNote(r.parts, money)
+        : r.responsibleLabel,
       r.stage,
       r.value ?? r.valueText,
       r.contribution ?? "",

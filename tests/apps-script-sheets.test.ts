@@ -1,3 +1,7 @@
+// Versão: 1.2 | Data: 22/08/2026
+// v1.2: o pino do hiperlink passou a ser o LINK (rich text), não a string da
+// fórmula. Foi essa afirmação sobre a string que deixou passar o #ERROR!: a
+// fórmula que o script escrevia era válida em US, e a planilha é pt-BR.
 // Versão: 1.1 | Data: 17/08/2026
 // v1.1: o fake passou a registrar o estilo em LOTE (getRangeList(a1s).setX()),
 // o que permite pinar os kinds da memória de cálculo (v3.1 do script):
@@ -40,6 +44,8 @@ interface FakeSheet {
   _widths: Record<number, number>;
   _heights: Record<number, number>;
   _styles: Styles;
+  /** Links aplicados por rich text: linha A1 → { texto, url }. */
+  _links: Record<number, { text: string; url: string }>;
   getName(): string;
   setName(n: string): FakeSheet;
   getSheetId(): number;
@@ -60,19 +66,27 @@ function makeSheet(name: string, id: number): FakeSheet {
     _widths: {},
     _heights: {},
     _styles: {},
+    _links: {},
     getName() { return sh._name; },
     setName(n: string) { sh._name = n; return sh; },
     getSheetId() { return sh._id; },
     getLastRow() { return sh._values ? sh._values.length : 0; },
     clear() { sh._values = null; return sh; },
-    getRange() {
+    getRange(row?: number) {
       return new Proxy(
         {},
         {
-          get: (_t, prop) =>
-            prop === "setValues"
-              ? (v: unknown[][]) => { sh._values = v; return chain; }
-              : () => chain,
+          get: (_t, prop) => {
+            if (prop === "setValues")
+              return (v: unknown[][]) => { sh._values = v; return chain; };
+            // Link por rich text: é o que substituiu a fórmula =HYPERLINK.
+            if (prop === "setRichTextValue")
+              return (v: { text: string; url: string }) => {
+                if (row != null) sh._links[row] = v;
+                return chain;
+              };
+            return () => chain;
+          },
         }
       );
     },
@@ -130,7 +144,19 @@ type Gs = {
 
 function loadGs(): Gs {
   const sandbox: Record<string, unknown> = {
-    SpreadsheetApp: { BorderStyle: { SOLID_MEDIUM: "SOLID_MEDIUM" } },
+    SpreadsheetApp: {
+      BorderStyle: { SOLID_MEDIUM: "SOLID_MEDIUM" },
+      // Builder encadeável que devolve { text, url } no build().
+      newRichTextValue: () => {
+        const v: { text: string; url: string } = { text: "", url: "" };
+        const b = {
+          setText: (t: string) => { v.text = t; return b; },
+          setLinkUrl: (u: string) => { v.url = u; return b; },
+          build: () => v,
+        };
+        return b;
+      },
+    },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
     UrlFetchApp: {},
     DriveApp: {},
@@ -204,18 +230,29 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
     expect(ss.names().sort()).toEqual(["Agosto 2026", "Det-Ana", "Det-Bruno"]);
   });
 
-  it("resolve o hiperlink com o gid REAL da aba de destino (duas passadas)", () => {
+  it("liga com o gid REAL por RICH TEXT, nunca por fórmula (duas passadas)", () => {
+    // A fórmula =HYPERLINK escrita por setValues é parseada no LOCALE da
+    // planilha; em pt-BR (que o script força) o separador é ';' e a fórmula
+    // com ',' virava #ERROR! em toda célula de link. Rich text não tem
+    // sintaxe para errar — por isso o pino é o LINK, não a string.
     const ss = makeSpreadsheet(["Agosto 2026"]);
     gs.gravarPlanilha_(ss, PAYLOAD_V3);
     const mes = ss.getSheetByName("Agosto 2026")!;
     const gidAna = ss.getSheetByName("Det-Ana")!.getSheetId();
-    // +1 da linha-título: a 3ª row (`section` da Ana) está no índice 3.
-    expect(mes._values![3][0]).toBe(`=HYPERLINK("#gid=${gidAna}","Ana")`);
+    // +1 da linha-título: a 3ª row (`section` da Ana) está na linha A1 4.
+    expect(mes._links[4]).toEqual({ text: "Ana", url: `#gid=${gidAna}` });
+    // A célula guarda o RÓTULO, não uma fórmula.
+    expect(mes._values![3][0]).toBe("Ana");
     // E a volta aponta p/ a aba do mês.
     const det = ss.getSheetByName("Det-Ana")!;
-    expect(det._values![1][0]).toBe(
-      `=HYPERLINK("#gid=${mes.getSheetId()}","← Voltar para a visão geral")`
-    );
+    expect(det._links[2]).toEqual({
+      text: "← Voltar para a visão geral",
+      url: `#gid=${mes.getSheetId()}`,
+    });
+    expect(det._values![1][0]).toBe("← Voltar para a visão geral");
+    // Nenhuma célula pode sair como fórmula.
+    const todas = [...mes._values!, ...det._values!].flat();
+    expect(todas.some((c) => String(c).startsWith("="))).toBe(false);
   });
 
   it("apaga abas Det-* órfãs, mas nunca a última aba da planilha", () => {

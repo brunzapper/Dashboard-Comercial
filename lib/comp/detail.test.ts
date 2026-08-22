@@ -537,6 +537,12 @@ describe("loadFactorRecords", () => {
     // era o mesmo negócio repetido uma vez por operando.
     expect(bloco.rows).toHaveLength(2);
     expect(bloco.rows.map((r) => r.value)).toEqual([150, 150]);
+    // A composição da linha alimenta a coluna Descrição: sem ela o registro
+    // mostra só o total e não se sabe o que entrou nele.
+    expect(bloco.rows[0].parts).toEqual([
+      { label: "Valor", value: 100 },
+      { label: "MRR do contrato", value: 50 },
+    ]);
     expect(bloco.total).toBe(2); // registros DISTINTOS, não 2+2
     expect(bloco.aggNote).toContain("2 registros");
     // Ambas as partes somam em R$: o subtotal é um número único.
@@ -571,6 +577,9 @@ describe("loadFactorRecords", () => {
     const bloco = out.operands[0];
     expect(bloco.rows).toHaveLength(2);
     expect(bloco.rows.map((r) => r.value)).toEqual([100, 170]);
+    // A parcela única permanece: é ela que diz de qual campo veio o valor.
+    expect(bloco.rows[0].parts).toEqual([{ label: "Valor", value: 100 }]);
+    expect(bloco.rows[1].parts).toHaveLength(2);
   });
 
   it("fusão de unidades DIFERENTES não inventa um total: mostra as parcelas", async () => {
@@ -616,6 +625,106 @@ describe("loadFactorRecords", () => {
     expect(out.operands[0].mergedFrom).toHaveLength(1);
     expect(out.operands[1].label).toBe("Contagem de registros");
     expect(out.operands[1].mergedFrom).toEqual([]);
+  });
+});
+
+describe("comissão no detalhe do fator", () => {
+  const recRows2 = [
+    {
+      id: "r1",
+      record_type: "negocio",
+      title: "Negócio 1",
+      value: 100,
+      currency: "BRL",
+      stage: "Ganho",
+      closed_at: "2026-08-01",
+      responsible_id: M1,
+      custom_fields: {},
+      is_mock: false,
+    },
+  ];
+  const supa2 = () =>
+    fakeSupabase({
+      tables: {
+        records: () => ({ data: recRows2, error: null, count: 1 }),
+        record_matches: [],
+        responsibles: [{ id: M1, display_name: "Ana" }],
+      },
+    });
+
+  // Espelha o plano da Gabriella: o gatilho é um fator e a BASE é outro.
+  const bloco = {
+    id: "pct_valor",
+    label: "% sobre o valor",
+    triggerFactorId: "f_gerado",
+    basisKind: "factor" as const,
+    basisFactorId: "f_v",
+    tierBy: "attainment" as const,
+    kind: "pct" as const,
+    tiers: [{ fromPct: 0, ratePct: 40 }],
+  };
+  const fbOf = (over = {}) => ({
+    target: 100,
+    realized: 100,
+    attainmentPct: 100,
+    payout: 0,
+    overridden: { realized: false, attainmentPct: false, payout: false },
+    targetSource: null,
+    targetBRL: 100,
+    ...over,
+  });
+  const bd = {
+    base: 1000,
+    byFactor: { f_v: fbOf(), f_gerado: fbOf() },
+    factorsTotal: 0,
+    bonusTotal: 0,
+    commission: { value: 40, overridden: false },
+    commissionBlocks: [
+      {
+        blockId: "pct_valor",
+        label: "% sobre o valor",
+        value: 40,
+        tier: { fromPct: 0, ratePct: 40 },
+        triggerValue: 100,
+        tierBy: "attainment",
+        kind: "pct",
+        basis: 100,
+        basisLabel: "Vendas",
+        basisMoney: true,
+        triggerLabel: "Valor gerado",
+        triggerMoney: true,
+        memberTiersApplied: false,
+      },
+    ],
+    total: 40,
+    totalOverridden: false,
+    totalFromFormula: false,
+    totalFormulaError: false,
+  } as unknown as CompBreakdown;
+
+  const carrega = (factorId: string) =>
+    loadFactorRecords(
+      supa2().db,
+      ctxWith(),
+      planWith({
+        factors: [factor({ id: factorId })],
+        commissions: [bloco],
+      }),
+      factor({ id: factorId }),
+      M1,
+      bd
+    );
+
+  it("o fator-GATILHO exibe a comissão", async () => {
+    const out = await carrega("f_gerado");
+    expect(out.commissions.map((c) => c.blockId)).toEqual(["pct_valor"]);
+  });
+
+  it("o fator que é só BASE não repete a escada", async () => {
+    // Na aba da Gabriella a mesma "% sobre o valor" saía no gatilho, na base
+    // e no plano — três escadas idênticas.
+    const out = await carrega("f_v");
+    expect(out.commissions).toEqual([]);
   });
 });
 
