@@ -793,7 +793,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   só-gatilho, comissão `flat`) — número ali seria mentira. Isso alimenta a
   coluna "Vale (R$)" por registro, a Descrição da linha em bloco fundido
   (`detailRowPartsNote` sobre `CompDetailRecordRow.parts` — parcela ZERO fora),
-  a linha "cada X vale R$ Y", a conta do
+  a conta do
   payout (`factorPayoutFormula`) no cabeçalho e a escada — que com
   `tierBy:"attainment"` declara a META do gatilho (`detailTargetNote` + o
   absoluto por degrau em `detailTierLabel`, vindos do breakdown do fator-gatilho

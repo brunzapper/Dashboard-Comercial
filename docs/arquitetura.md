@@ -1,3 +1,9 @@
+<!-- Versão: 1.73 | Data: 22/08/2026 -->
+<!-- v1.73 (22/08/2026): §4.18 — saiu a linha "Cada X vale R$ Y" do
+     detalhamento (repetia a fórmula do bloco de comissão logo abaixo; em fator
+     de dinheiro era a taxa em outras palavras). Com ela saíram
+     detailUnitValueNote e os campos unitValue/unitLabel do CompDetailFactor.
+     A coluna "Vale (R$)" por registro FICA. -->
 <!-- Versão: 1.72 | Data: 22/08/2026 -->
 <!-- v1.72 (22/08/2026): §4.18 — comissão exibida UMA vez (no fator-gatilho;
      plano vira fallback), coluna "Descrição" com a composição da linha no
@@ -3209,7 +3215,7 @@ total opcional por plano.
   honesta. Nada disso recalcula comissão: tudo deriva do breakdown que o
   `computeEntry` já produziu. Com isso a coluna de texto do detalhamento deixa
   de ser prosa: cabeçalho do fator leva a conta do payout
-  (`factorPayoutFormula`), entra a linha "cada X vale R$ Y", a escada aparece
+  (`factorPayoutFormula`), a escada aparece
   em uma linha por faixa e cada REGISTRO ganha a coluna "Vale (R$)" com sua
   contribuição. Quando as faixas são por ATINGIMENTO, a escada declara a
   **meta**: `commissionDetail` recebe o breakdown do fator-GATILHO e leva

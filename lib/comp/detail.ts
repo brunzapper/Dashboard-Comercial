@@ -227,10 +227,6 @@ export interface CompDetailFactor {
   realized: number | null;
   /** Conta do valor por atingimento: "base × peso × ating. = valor". */
   payoutFormula: string | null;
-  /** Quanto UMA unidade do realizado vale em R$; null = relação não linear. */
-  unitValue: number | null;
-  /** O que se conta (ex.: "reunião") — rótulo da unidade na frase do valor. */
-  unitLabel: string;
   /** Comissões que este fator dispara e/ou embasa, com a escada completa. */
   commissions: CompDetailCommission[];
   operands: CompDetailOperand[];
@@ -1016,10 +1012,6 @@ export async function loadFactorRecords(
     money: factor.money,
     realized: fb?.realized ?? null,
     payoutFormula,
-    unitValue: uv?.perUnit ?? null,
-    // Operando de contagem conta LINHAS: a unidade é o registro. Operando de
-    // campo mede o próprio campo, então a frase fala em reais.
-    unitLabel: operands[0]?.field === "*" ? "registro" : factor.label,
     commissions,
     warnings: [] as string[],
   };
