@@ -1,3 +1,7 @@
+// Versão: 1.4 | Data: 19/08/2026
+// v1.4: bloco fundido traz UMA linha por registro (a coluna "Operando" saiu —
+// não há origem única) e a escada por atingimento declara a meta, com o
+// absoluto de cada faixa.
 // Versão: 1.3 | Data: 17/08/2026
 // v1.3: bloco fundido herda o rótulo do PRINCIPAL (o genérico "Somados" saiu)
 // e a fusão é detectada por `mergedFrom`; subtotal com PARCELAS quando as
@@ -24,6 +28,7 @@ import {
   DETAIL_TIER_APPLIED,
   DETAIL_TIER_MISSED,
   detailSumPartsNote,
+  detailTargetNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailFactor,
@@ -65,7 +70,6 @@ const operando = (
       value: 100,
       valueText: "R$ 100,00",
       contribution: 12.5,
-      origin: "Soma de Valor",
     },
     {
       id: "r2",
@@ -77,7 +81,6 @@ const operando = (
       value: 200,
       valueText: "R$ 200,00",
       contribution: 25,
-      origin: "Soma de Valor",
     },
   ],
   ...over,
@@ -296,6 +299,9 @@ describe("compDetailSheets", () => {
       kind: "per_unit" as const,
       tierBy: "realized" as const,
       triggerMoney: false,
+      triggerLabel: "Reuniões",
+      triggerTarget: null,
+      triggerRealized: 44,
       formula: "44 (Reuniões) × R$ 12,50 = R$ 550,00",
       tierNote: "faixa a partir de 40 (Reuniões: 44)",
       memberTiers: false,
@@ -337,7 +343,52 @@ describe("compDetailSheets", () => {
     expect(cabecalhos.filter((l) => l === "Prêmio por reunião")).toHaveLength(2);
   });
 
-  it("bloco fundido: rótulo do PRINCIPAL e a coluna vira a ORIGEM da linha", () => {
+  it("escada por ATINGIMENTO declara a meta e o absoluto de cada faixa", () => {
+    const comissao = {
+      blockId: "meta_reunioes",
+      label: "Prêmio por meta de reuniões",
+      kind: "flat" as const,
+      tierBy: "attainment" as const,
+      triggerMoney: false,
+      triggerLabel: "Reuniões",
+      triggerTarget: 20,
+      triggerRealized: 3,
+      formula: null,
+      tierNote: "nenhuma faixa atingida (gatilho: 15%)",
+      memberTiers: false,
+      value: 0,
+      tiers: [
+        { fromPct: 50, amount: 500, applied: false, reached: false },
+        { fromPct: 100, amount: 1000, applied: false, reached: false },
+      ],
+    };
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            {
+              planId: "p1",
+              planName: "Plano A",
+              factors: [fator({ commissions: [comissao] })],
+              commissions: [],
+            },
+          ],
+        }),
+      ],
+      OPTS
+    );
+    // Sem isto o leitor via "não alcançada" sem saber o alvo.
+    const memoria = kindsDe(sheet, "detailMemory").map((r) => norm(String(r[0])));
+    expect(memoria).toContain(
+      norm(detailTargetNote("Reuniões", 20, 3, false) ?? "")
+    );
+    // 50% de 20 reuniões = 10.
+    const faixas = kindsDe(sheet, "detailTier").map((r) => norm(String(r[0])));
+    expect(faixas[0]).toContain("(10)");
+    expect(faixas[1]).toContain("(20)");
+  });
+
+  it("bloco fundido: rótulo do PRINCIPAL e coluna de Responsável (sem origem)", () => {
     const [sheet] = compDetailSheets(
       [
         membro({
@@ -348,7 +399,7 @@ describe("compDetailSheets", () => {
                   operando({
                     label: "Soma de Valor",
                     mergedFrom: ["Soma de MRR"],
-                    rows: [{ ...operando().rows[0], origin: "Soma de MRR" }],
+                    rows: [operando().rows[0]],
                   }),
                 ],
                 { listedForCompare: null }
@@ -359,8 +410,10 @@ describe("compDetailSheets", () => {
       ],
       OPTS
     );
-    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Operando");
-    expect(kindsDe(sheet, "detailRowMoney")[0][3]).toBe("Soma de MRR");
+    // A linha fundida é do REGISTRO (valor somado das partes), então não há
+    // operando único para nomear — a coluna volta a ser o responsável.
+    expect(kindsDe(sheet, "detailHeader")[0][3]).toBe("Responsável");
+    expect(kindsDe(sheet, "detailRowMoney")[0][3]).toBe("Ana");
     // O subtotal fecha com o rótulo do principal, não um genérico.
     expect(kindsDe(sheet, "detailSubtotalMoney")[0][0]).toBe(
       "Subtotal — Soma de Valor"

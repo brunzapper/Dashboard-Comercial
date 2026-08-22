@@ -1,3 +1,7 @@
+// Versão: 1.8 | Data: 19/08/2026
+// v1.8: a escada de faixas por ATINGIMENTO passa a dizer de que meta os
+// percentuais falam — `detailTierLabel` mostra o absoluto de cada degrau e
+// `detailTargetNote` declara meta e realizado do gatilho.
 // Versão: 1.7 | Data: 17/08/2026
 // v1.7: a fusão de operandos passou a ter um bloco PRINCIPAL que recebe os
 // demais, então o rótulo genérico `SOMADOS_LABEL` saiu: o bloco usa o rótulo
@@ -372,10 +376,41 @@ export function detailUnitValueNote(
 export function detailTierLabel(
   fromPct: number,
   tierBy: "attainment" | "realized",
-  money: boolean
+  money: boolean,
+  /**
+   * META do gatilho. Com faixas por ATINGIMENTO, "50%" sozinho é percentual de
+   * coisa nenhuma — com a meta o degrau mostra também quanto isso é em
+   * absoluto. Ausente (sem alvo apurado) mantém só o percentual: inventar o
+   * absoluto seria pior que não mostrá-lo.
+   */
+  target?: number | null
 ): string {
-  if (tierBy === "attainment") return `A partir de ${fmtNumBR(fromPct)}%`;
+  if (tierBy === "attainment") {
+    const pct = `A partir de ${fmtNumBR(fromPct)}%`;
+    if (target == null) return pct;
+    const abs = (target * fromPct) / 100;
+    return `${pct} (${money ? fmtMoneyBRL(abs) : fmtNumBR(abs)})`;
+  }
   return `A partir de ${money ? fmtMoneyBRL(fromPct) : fmtNumBR(fromPct)}`;
+}
+
+/**
+ * Declara a META que a escada de atingimento usa como referência, com o
+ * realizado ao lado. Sem isso o leitor vê "não alcançada" sem saber o alvo.
+ * null quando não há meta apurada — aí a escada fala só em percentual.
+ */
+export function detailTargetNote(
+  triggerLabel: string,
+  target: number | null,
+  realized: number | null,
+  money: boolean
+): string | null {
+  if (target == null) return null;
+  const fmt = money ? fmtMoneyBRL : fmtNumBR;
+  const meta = `Meta de ${triggerLabel}: ${fmt(target)}`;
+  if (realized == null) return meta;
+  const pct = target !== 0 ? ` = ${fmtNumBR((realized / target) * 100)}%` : "";
+  return `${meta} · realizado ${fmt(realized)}${pct}`;
 }
 
 /**

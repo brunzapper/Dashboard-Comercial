@@ -1,3 +1,10 @@
+<!-- Versão: 1.71 | Data: 19/08/2026 -->
+<!-- v1.71 (19/08/2026): §4.18 — detalhamento: linhas do bloco fundido COLAPSAM
+     por registro (a mesma empresa saía uma vez por operando; total passa a
+     contar distintos e a coluna "Operando" saiu), operando sem registros não
+     vira bloco (avisos sobem para o fator; fator todo vazio declara o vazio uma
+     vez) e a escada por atingimento declara a META do gatilho (detailTargetNote
+     + absoluto por degrau). Apps Script INTOCADO. -->
 <!-- Versão: 1.70 | Data: 17/08/2026 -->
 <!-- v1.70 (17/08/2026): §4.18 — CONSERTO do agrupamento do detalhamento: a
      config virou `byFactor[factorId] = { into, folded }` (bloco PRINCIPAL que
@@ -3197,7 +3204,13 @@ total opcional por plano.
   de ser prosa: cabeçalho do fator leva a conta do payout
   (`factorPayoutFormula`), entra a linha "cada X vale R$ Y", a escada aparece
   em uma linha por faixa e cada REGISTRO ganha a coluna "Vale (R$)" com sua
-  contribuição. A comissão aparece nos DOIS lugares — dentro do fator que a
+  contribuição. Quando as faixas são por ATINGIMENTO, a escada declara a
+  **meta**: `commissionDetail` recebe o breakdown do fator-GATILHO e leva
+  `triggerTarget`/`triggerRealized` ao detalhe, o que rende a linha "Meta de
+  Reuniões: 20 · realizado 3 = 15%" (`detailTargetNote`) e o absoluto ao lado
+  de cada degrau ("A partir de 50% (10)") — sem alvo apurado o degrau segue só
+  no percentual, porque inventar o absoluto seria pior que omiti-lo. Antes a
+  escada dizia "não alcançada" sem nunca revelar o alvo. A comissão aparece nos DOIS lugares — dentro do fator que a
   dispara (onde a escada explica o número dele) e como bloco do plano (é ela
   que soma no total). A conferência virou numérica: realizado e somado lado a
   lado com `DETAIL_DIVERGE_MARK` discreto, e `detailReconcileNote`/
@@ -3210,8 +3223,19 @@ total opcional por plano.
   `groupOperands`/`mergeOperandBlocks` DEPOIS da
   consulta — a fusão é de APRESENTAÇÃO: cada operando continua sendo
   consultado no próprio recorte (é assim que o cálculo funciona), só a
-  exibição soma, com a coluna de responsável virando a ORIGEM da linha e o
-  confronto desligado. O bloco fundido herda o rótulo e a coluna de valor do
+  exibição soma, e o confronto fica desligado. **As linhas colapsam por
+  registro** (`collapseRowsByRecord`): como os operandos consultam os MESMOS
+  registros mudando só o campo agregado, concatenar as listas fazia a mesma
+  empresa aparecer uma vez por operando (uma linha de MRR, outra de
+  Implementação, outra de Adicional). Agora é uma linha por registro com o
+  valor somado das partes; o `total` conta registros DISTINTOS — só com a lista
+  truncada ele volta a ser a soma das partes, porque aí o distinto do recorte
+  inteiro não é conhecido — e a coluna "Operando" deixou de existir, já que a
+  linha fundida não tem origem única (a composição está no rótulo do bloco).
+  **Operando sem registros não vira bloco:** o núcleo o descarta e sobe os
+  avisos dele para o fator; quando nenhum sobra, `operands` fica vazio e os
+  consumidores emitem UMA declaração de vazio do fator — em vez de um
+  "· 0 registros no recorte" por soma. O bloco fundido herda o rótulo e a coluna de valor do
   principal e marca `mergedFrom` — o sinal de fusão para os consumidores, que
   antes comparavam o rótulo com um texto fixo. O Σ só vira número único quando
   as partes compartilham unidade: dobrar uma contagem numa soma em R$ produz
