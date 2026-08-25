@@ -44,6 +44,10 @@ import { createClient } from "@/lib/supabase/server";
 import type { FieldDefinition, OptionItem, RecordRow } from "@/lib/records/types";
 import { splitCoreDefs } from "@/lib/records/core-defs";
 import {
+  redactRestrictedFields,
+  restrictedFieldKeys,
+} from "@/lib/records/field-acl";
+import {
   parsePopulatedRefs,
   tableCoreColumns,
   tableCustomFields,
@@ -190,8 +194,12 @@ export default async function RegistrosPage({
 
   // ACL por papel (visible_to_roles) aplicado na camada de app: os metadados
   // de campo são legíveis por qualquer autenticado (RLS afrouxada), então
-  // filtramos as colunas restritas aqui para não vazar valores ao gestor.
-  // Admin vê tudo.
+  // filtramos as colunas restritas aqui. Admin vê tudo.
+  // ATENÇÃO: escolher as COLUNAS esconde o dado da tela, não do payload —
+  // `custom_fields` é uma coluna jsonb só, e a linha crua vai inteira para o
+  // Client Component. Os VALORES são peneirados logo antes do <RecordsTable>
+  // por redactRestrictedFields (lib/records/field-acl.ts); as duas coisas
+  // andam juntas.
   const visibleTo = (f: FieldDefinition) =>
     isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]);
   const appliesTo = (f: FieldDefinition) =>
@@ -299,7 +307,13 @@ export default async function RegistrosPage({
   }
 
   const { data: recordsData, count } = await query;
-  const records = (recordsData ?? []) as unknown as RecordRow[];
+  // Peneira de ACL sobre os VALORES (ver nota acima): chave com definição que o
+  // papel não alcança sai do custom_fields antes de a linha virar payload RSC.
+  // Chave órfã (sem def) fica — ela já é coluna read-only e não tem ACL.
+  const records = redactRestrictedFields(
+    (recordsData ?? []) as unknown as RecordRow[],
+    restrictedFieldKeys(customDefs, userRoles, isAdmin)
+  );
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 

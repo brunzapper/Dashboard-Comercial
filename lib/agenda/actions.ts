@@ -29,6 +29,10 @@ import {
 import type { FieldDefinition, OptionItem } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
 import type { DashboardSettings, WidgetFilter } from "@/lib/widgets/types";
+import {
+  redactRestrictedFields,
+  restrictedFieldKeys,
+} from "@/lib/records/field-acl";
 import { runAgenda } from "./data";
 import { mergeAgendaItems } from "./day-items";
 import type { AgendaData, AgendaSettings } from "./types";
@@ -90,6 +94,15 @@ async function loadContext(
       (!source || fieldAppliesToSource(f.applies_to, source)) &&
       (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
   );
+  // O ACL acima recorta o CATÁLOGO exibido; os VALORES vêm no
+  // AgendaItem.record (RecordRow com custom_fields inteiro), então a agenda
+  // precisa da deny-list para peneirar as linhas antes de virarem payload —
+  // filtrar só o catálogo esconderia o campo restrito da tela, não do payload.
+  const denied = restrictedFieldKeys(
+    (fieldsData ?? []) as FieldDefinition[],
+    roles,
+    isAdmin
+  );
   const responsibles: OptionItem[] = (respData ?? []).map((r) => ({
     id: r.id as string,
     label: r.display_name as string,
@@ -99,7 +112,23 @@ async function loadContext(
     id: o.id as string,
     label: o.name as string,
   }));
-  return { fields, responsibles, operations };
+  return { fields, responsibles, operations, denied };
+}
+
+/** Peneira de ACL nos registros da agenda (ver nota em loadContext). */
+function redactAgendaData(
+  data: AgendaData | null,
+  denied: Set<string>
+): AgendaData | null {
+  if (!data || denied.size === 0) return data;
+  return {
+    ...data,
+    items: data.items.map((item) => {
+      if (!item.record) return item;
+      const [record] = redactRestrictedFields([item.record], denied);
+      return record === item.record ? item : { ...item, record };
+    }),
+  };
 }
 
 /** Agenda de um widget 'agenda' (config própria em settings.agenda). */
@@ -135,7 +164,8 @@ export async function fetchAgendaWidget(
     { from: fromIso, to: toIso },
     Object.fromEntries(ctx.responsibles.map((r) => [r.id, r.label]))
   );
-  return { data, settings, ...ctx };
+  const { denied, ...rest } = ctx;
+  return { data: redactAgendaData(data, denied), settings, ...rest };
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +313,13 @@ export async function fetchWorkspaceAgenda(
     to: toIso,
     items: mergeAgendaItems(legs.map((l) => l.items)),
   };
-  return { data, settings: null, ...ctx, ...(warning ? { warning } : {}) };
+  const { denied, ...rest } = ctx;
+  return {
+    data: redactAgendaData(data, denied),
+    settings: null,
+    ...rest,
+    ...(warning ? { warning } : {}),
+  };
 }
 
 /** Agenda da página de um kanban dedicado (fonte/campo de data do board). */
@@ -329,5 +365,6 @@ export async function fetchBoardAgenda(
     { from: fromIso, to: toIso },
     Object.fromEntries(ctx.responsibles.map((r) => [r.id, r.label]))
   );
-  return { data, settings, ...ctx };
+  const { denied, ...rest } = ctx;
+  return { data: redactAgendaData(data, denied), settings, ...rest };
 }
