@@ -1,3 +1,6 @@
+// Versão: 1.6 | Data: 22/08/2026
+// v1.6: saiu a linha "Cada X vale R$ Y" — a fórmula do bloco de comissão logo
+// abaixo já diz o valor por unidade. A coluna "Vale (R$)" por registro fica.
 // Versão: 1.5 | Data: 22/08/2026
 // v1.5: coluna "Descrição" em bloco fundido — a composição do valor de cada
 // linha ("R$ 1.000,00 de Implementação + R$ 3.000,00 de MRR do contrato").
@@ -44,7 +47,6 @@ import {
   detailSumPartsNote,
   detailTargetNote,
   detailTierValue,
-  detailUnitValueNote,
 } from "@/lib/comp/commission-label";
 import type {
   CompDetailCommission,
@@ -189,17 +191,8 @@ function pushFactor(
     // Coluna de MEMÓRIA, não de prosa: a conta do valor por atingimento.
     factor.payoutFormula ?? "",
   ]);
-  // Quanto cada unidade vale, e as comissões que este fator move (com a escada
-  // completa — inclusive as faixas que ficaram acima do alcançado).
-  if (factor.unitValue != null) {
-    push("detailMemory", [
-      detailUnitValueNote(
-        factor.unitValue,
-        factor.commissions.length > 0 ? "commission" : "weight",
-        factor.unitLabel
-      ),
-    ]);
-  }
+  // As comissões que este fator move, com a escada completa — inclusive as
+  // faixas acima do alcançado.
   for (const c of factor.commissions) pushCommission(c, push);
   for (const warning of factor.warnings) push("info", [warning]);
   if (factor.operands.length === 0) {

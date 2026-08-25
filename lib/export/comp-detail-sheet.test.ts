@@ -1,3 +1,6 @@
+// Versão: 1.6 | Data: 22/08/2026
+// v1.6: a linha "Cada X vale R$ Y" saiu do detalhamento (repetia a fórmula do
+// bloco de comissão); a coluna "Vale (R$)" por registro segue pinada.
 // Versão: 1.5 | Data: 22/08/2026
 // v1.5: coluna "Descrição" em bloco fundido, com a composição da linha.
 // Versão: 1.4 | Data: 19/08/2026
@@ -98,8 +101,6 @@ const fator = (over: Partial<CompDetailFactor> = {}): CompDetailFactor => ({
   money: true,
   realized: 300,
   payoutFormula: null,
-  unitValue: null,
-  unitLabel: "Vendas",
   commissions: [],
   operands: [operando()],
   listedForCompare: 300,
@@ -273,7 +274,7 @@ describe("compDetailSheets", () => {
     }
   });
 
-  it("memória do fator: a conta do payout e quanto vale cada unidade", () => {
+  it("memória do fator é a CONTA do payout — sem a linha 'cada X vale'", () => {
     const [sheet] = compDetailSheets(
       [
         membro({
@@ -281,8 +282,6 @@ describe("compDetailSheets", () => {
             planoCom(
               fator({
                 payoutFormula: "R$ 1.000,00 × 60% × 90% = R$ 540,00",
-                unitValue: 12.5,
-                unitLabel: "reunião",
               })
             ),
           ],
@@ -294,8 +293,11 @@ describe("compDetailSheets", () => {
     expect(kindsDe(sheet, "detailFactorMoney")[0][6]).toBe(
       "R$ 1.000,00 × 60% × 90% = R$ 540,00"
     );
-    const memoria = kindsDe(sheet, "detailMemory").map((r) => norm(String(r[0])));
-    expect(memoria[0]).toBe("Cada R$ 1,00 de realizado vale R$ 12,50.");
+    // A linha "Cada X vale R$ Y" saiu: a fórmula do bloco de comissão logo
+    // abaixo já diz o valor por unidade ("40 × R$ 12,50 = R$ 500,00"), e num
+    // fator em dinheiro ela era a própria taxa em outras palavras. Sem
+    // comissão neste fator, não sobra linha de memória alguma.
+    expect(kindsDe(sheet, "detailMemory")).toEqual([]);
   });
 
   it("escada: as faixas NÃO alcançadas aparecem, a aplicada vem marcada", () => {
@@ -325,7 +327,7 @@ describe("compDetailSheets", () => {
             {
               planId: "p1",
               planName: "Plano A",
-              factors: [fator({ commissions: [comissao], unitValue: 12.5 })],
+              factors: [fator({ commissions: [comissao] })],
               commissions: [comissao],
             },
           ],

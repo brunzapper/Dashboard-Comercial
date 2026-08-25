@@ -43,7 +43,6 @@ import {
   detailTierLabel,
   detailTierMark,
   detailTierValue,
-  detailUnitValueNote,
   fmtMoneyBRL,
   fmtNumBR,
   detailRowPartsNote,
@@ -122,15 +121,6 @@ function Summary(props: { detail: CompDetailFactor }) {
       {/* Memória: a conta do valor e quanto cada unidade vale. */}
       {detail.payoutFormula ? (
         <p className="text-xs tabular-nums">{detail.payoutFormula}</p>
-      ) : null}
-      {detail.unitValue != null ? (
-        <p className="text-xs font-medium">
-          {detailUnitValueNote(
-            detail.unitValue,
-            detail.commissions.length > 0 ? "commission" : "weight",
-            detail.unitLabel
-          )}
-        </p>
       ) : null}
     </div>
   );

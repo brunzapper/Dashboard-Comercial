@@ -56,8 +56,6 @@ vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
       money: false,
       realized: 44,
       payoutFormula: null,
-      unitValue: null,
-      unitLabel: "registro",
       commissions: [],
       listedForCompare: 2,
       warnings: [],

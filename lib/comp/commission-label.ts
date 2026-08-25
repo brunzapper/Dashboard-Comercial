@@ -1,3 +1,9 @@
+// Versão: 1.11 | Data: 22/08/2026
+// v1.11: `detailUnitValueNote` SAIU. A linha "Cada X vale R$ Y" repetia o que
+// a fórmula do bloco de comissão diz logo abaixo ("40 (Reuniões) × R$ 12,50 =
+// R$ 500,00") e, em fator de dinheiro, era a própria taxa em outras palavras.
+// A coluna "Vale (R$)" por registro FICA — lá o número é de cada registro, e
+// não está em nenhuma outra coluna.
 // Versão: 1.10 | Data: 22/08/2026
 // v1.10: `sheetFactorNote` devolve VAZIO para fator de peso 0 — a coluna Valor
 // já sai vazia e a frase "não gera valor próprio" (mais o anexo do alvo) era
@@ -19,7 +25,7 @@
 // v1.6: MEMÓRIA DE CÁLCULO no lugar da prosa. A conferência virou NUMÉRICA
 // (realizado × somado lado a lado, com `DETAIL_DIVERGE_MARK` discreto), então
 // `detailReconcileNote` e `DETAIL_COMBINED_NOTE` saíram — no lugar entraram
-// `detailUnitValueNote` (quanto vale uma unidade), a escada de faixas
+// a escada de faixas
 // (`detailTierLabel`/`detailTierValue`/`detailTierMark`).
 // Versão: 1.5 | Data: 16/08/2026
 // v1.5: o detalhamento passou a ser por OPERANDO da fórmula, então a
@@ -386,23 +392,6 @@ export function detailAggNote(aggLabel: string, total: number): string {
 /** Aviso de janela: a listagem mostra só os primeiros N do recorte. */
 export function detailTruncatedNote(shown: number, total: number): string {
   return `Mostrando os ${fmtNumBR(shown)} primeiros de ${fmtNumBR(total)} registros.`;
-}
-
-/**
- * Quanto UMA unidade do realizado vale — a frase que fecha o elo entre o
- * registro e o dinheiro. `unitLabel` é o que se conta (ex.: "reunião"); sem
- * ele, cai em "registro". Caminho `weight`: o realizado é um MONTANTE, então
- * a frase fala de R$ 1,00, não de unidade.
- */
-export function detailUnitValueNote(
-  perUnit: number,
-  kind: "commission" | "weight",
-  unitLabel?: string
-): string {
-  const valor = fmtMoneyBRL(perUnit);
-  if (kind === "weight")
-    return `Cada ${fmtMoneyBRL(1)} de realizado vale ${valor}.`;
-  return `Cada ${unitLabel || "registro"} vale ${valor}.`;
 }
 
 /** Limiar de um degrau da escada, na unidade do gatilho. */
