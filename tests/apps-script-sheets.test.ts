@@ -37,6 +37,12 @@ const GS_PATH = path.resolve(
 /** Estilo aplicado em lote: método → notações A1 alcançadas. */
 type Styles = Record<string, string[]>;
 
+/** Uma chamada setBorder em lote: as faixas alvo + os argumentos crus. */
+interface BorderCall {
+  ranges: string[];
+  args: unknown[];
+}
+
 interface FakeSheet {
   _name: string;
   _id: number;
@@ -46,6 +52,10 @@ interface FakeSheet {
   _styles: Styles;
   /** Links aplicados por rich text: linha A1 → { texto, url }. */
   _links: Record<number, { text: string; url: string }>;
+  /** Uma entrada por chamada getRangeList(...).setBorder(...). */
+  _borders: BorderCall[];
+  /** Uma entrada por chamada autoResizeColumns(from, to). */
+  _autoResizeCols: [number, number][];
   getName(): string;
   setName(n: string): FakeSheet;
   getSheetId(): number;
@@ -67,6 +77,8 @@ function makeSheet(name: string, id: number): FakeSheet {
     _heights: {},
     _styles: {},
     _links: {},
+    _borders: [],
+    _autoResizeCols: [],
     getName() { return sh._name; },
     setName(n: string) { sh._name = n; return sh; },
     getSheetId() { return sh._id; },
@@ -90,26 +102,31 @@ function makeSheet(name: string, id: number): FakeSheet {
         }
       );
     },
-    // Estilo vai em LOTE (getRangeList(a1s).setX()): registra método → faixas,
-    // que é o único jeito de pinar "este kind saiu em negrito/itálico".
+    // Estilo vai em LOTE (getRangeList(a1s).setX()): registra método → faixas
+    // (+ args crus p/ setBorder, o único que precisa dos parâmetros p/ pinar
+    // "isto é caixa externa" × "isto é divisória interna").
     getRangeList(a1s: string[]) {
-      const rec: Record<string, () => unknown> = new Proxy(
+      const rec: Record<string, (...args: unknown[]) => unknown> = new Proxy(
         {},
         {
-          get: (_t, prop) => () => {
+          get: (_t, prop) => (...args: unknown[]) => {
             const k = String(prop);
             sh._styles[k] = [...(sh._styles[k] ?? []), ...a1s];
+            if (k === "setBorder") sh._borders.push({ ranges: a1s, args });
             return rec;
           },
         }
-      ) as Record<string, () => unknown>;
+      ) as Record<string, (...args: unknown[]) => unknown>;
       return rec;
     },
     setColumnWidth(c: number, w: number) { sh._widths[c] = w; return sh; },
     setRowHeight(r: number, h: number) { sh._heights[r] = h; return sh; },
     setFrozenRows: () => sh,
     autoResizeRows: () => sh,
-    autoResizeColumns: () => sh,
+    autoResizeColumns(from: number, to: number) {
+      sh._autoResizeCols.push([from, to]);
+      return sh;
+    },
   };
   return sh;
 }
@@ -145,7 +162,7 @@ type Gs = {
 function loadGs(): Gs {
   const sandbox: Record<string, unknown> = {
     SpreadsheetApp: {
-      BorderStyle: { SOLID_MEDIUM: "SOLID_MEDIUM" },
+      BorderStyle: { SOLID_MEDIUM: "SOLID_MEDIUM", SOLID: "SOLID" },
       // Builder encadeável que devolve { text, url } no build().
       newRichTextValue: () => {
         const v: { text: string; url: string } = { text: "", url: "" };
@@ -273,12 +290,56 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
     expect(ss.names().sort()).toEqual(["Agosto 2026", "Det-Ana", "Det-Bruno"]);
   });
 
-  it("larguras próprias nas abas de detalhe e altura extra nas seções", () => {
+  it("largura por autoResize (sem preset fixo) em toda aba e altura extra nas seções", () => {
     const ss = makeSpreadsheet(["Agosto 2026"]);
     gs.gravarPlanilha_(ss, PAYLOAD_V3);
-    expect(Object.keys(ss.getSheetByName("Det-Ana")!._widths)).toHaveLength(7);
+    // Sem largura fixa: nenhum setColumnWidth, e autoResizeColumns cobre as 7
+    // colunas do grid — tanto na aba do mês quanto na de detalhe.
+    expect(ss.getSheetByName("Agosto 2026")!._widths).toEqual({});
+    expect(ss.getSheetByName("Agosto 2026")!._autoResizeCols).toEqual([[1, 7]]);
+    expect(ss.getSheetByName("Det-Ana")!._widths).toEqual({});
+    expect(ss.getSheetByName("Det-Ana")!._autoResizeCols).toEqual([[1, 7]]);
     // Uma altura por linha `section` (as duas pessoas).
     expect(Object.keys(ss.getSheetByName("Agosto 2026")!._heights)).toHaveLength(2);
+  });
+
+  it("card da pessoa (visão geral): caixa externa + divisórias verticais, nunca horizontal", () => {
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, PAYLOAD_V3);
+    const mes = ss.getSheetByName("Agosto 2026")!;
+    // Ana: section na linha A1 4, memberTotal na 6. Bruno: 9 e 11.
+    const caixaAna = mes._borders.find(
+      (b) => b.ranges.includes("A4:G6") && b.args[4] == null && b.args[5] == null
+    );
+    const verticalAna = mes._borders.find(
+      (b) => b.ranges.includes("A4:G6") && b.args[4] === true
+    );
+    expect(caixaAna).toBeTruthy();
+    expect(caixaAna!.args.slice(0, 4)).toEqual([true, true, true, true]);
+    expect(verticalAna).toBeTruthy();
+    // Nenhuma faixa horizontal (args[5]) é desenhada em nenhuma chamada do card.
+    expect(mes._borders.some((b) => b.ranges.includes("A4:G6") && b.args[5] === true)).toBe(false);
+    expect(mes._borders.some((b) => b.ranges.includes("A9:G11"))).toBe(true);
+  });
+
+  it("tabela de registros (detalhamento): caixa externa + só o cabeçalho com régua horizontal", () => {
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, PAYLOAD_V3);
+    const det = ss.getSheetByName("Det-Ana")!;
+    // detailHeader na linha A1 4, detailSubtotalMoney na 6 (ver `detalhe()`).
+    const caixa = det._borders.find(
+      (b) => b.ranges.includes("A4:G6") && b.args[4] == null
+    );
+    expect(caixa).toBeTruthy();
+    expect(caixa!.args.slice(0, 4)).toEqual([true, true, true, true]);
+    // Só a linha do cabeçalho (A4:G4) ganha a régua horizontal — nenhuma
+    // outra linha da tabela (registro ou subtotal) é tocada.
+    const regua = det._borders.find(
+      (b) => b.ranges.includes("A4:G4") && b.args[2] === true
+    );
+    expect(regua).toBeTruthy();
+    expect(det._borders.some((b) => b.ranges.includes("A5:G5"))).toBe(false);
+    expect(det._borders.some((b) => b.ranges.includes("A6:G6"))).toBe(false);
   });
 
   it("memória e escada: nota em itálico, faixa aplicada em negrito, texto sem moeda", () => {

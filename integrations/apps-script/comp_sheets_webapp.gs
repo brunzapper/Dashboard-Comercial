@@ -1,3 +1,15 @@
+// Versão: 3.3 | Data: 27/08/2026
+// v3.3: FORMATAÇÃO — larguras de coluna passam a se AJUSTAR ao conteúdo
+// (autoResizeColumns; saíram os arrays de largura fixa e o wrap forçado da
+// coluna de memória, que existia só por causa da largura fixa). Na aba de
+// visão geral, o card de cada colaborador (do `section` ao `memberTotal`)
+// ganha CAIXA EXTERNA (borda média) + divisórias VERTICAIS entre colunas no
+// interior — sem nenhuma linha horizontal interna (regra explícita: só a
+// borda externa conta como horizontal, no topo/base do card). Na aba de
+// detalhamento, cada TABELA de registros (do `detailHeader` ao
+// `detailSubtotal(Money)` correspondente) ganha caixa externa fina; dentro
+// dela, só a linha do cabeçalho (a que já sai colorida) recebe uma régua
+// horizontal separando-a dos registros — nenhuma outra linha interna.
 // Versão: 3.2 | Data: 22/08/2026
 // v3.2: CONSERTO dos hiperlinks — eles saíam como fórmula
 // =HYPERLINK("#gid=…","texto") escrita via setValues, que PARSEIA no locale da
@@ -236,8 +248,9 @@ function gravarSimples_(sh, headers, rows) {
 // headers = linha-TÍTULO da aba; rows/kinds = grid (kinds[i] descreve rows[i]);
 // links[i] = nome da aba p/ onde a coluna A deve apontar. Estilos aplicados em
 // LOTE via getRangeList (nunca célula a célula).
-var LARGURAS_ = [220, 110, 110, 100, 80, 130, 420];
-var LARGURAS_DET_ = [100, 300, 140, 160, 130, 130, 300];
+// Largura fixa do grid dos dois payloads (espelha COMP_SHEET_COLS) — a
+// largura VISUAL da coluna vem de autoResizeColumns, não mais de um preset.
+var NCOLS_ = 7;
 var FMT_MOEDA_ = 'R$ #,##0.00';
 // Aspas no % = literal (o valor já vem 0–100; "%" nu multiplicaria por 100).
 var FMT_PCT_ = '0.00"%"';
@@ -300,8 +313,7 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   var rows = aba.rows;
   var kinds = aba.kinds;
   var links = ehLista_(aba.links) && aba.links.length === rows.length ? aba.links : null;
-  var larguras = aba.detalhe ? LARGURAS_DET_ : LARGURAS_;
-  var ncols = larguras.length;
+  var ncols = NCOLS_;
 
   var pad = function (src) {
     var row = (src || []).slice(0, ncols);
@@ -323,9 +335,16 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   var nota = [];
   var moeda = [];
   var pct = [];
-  var abre = [];
-  var fecha = [];
   var alturas = [];
+  // Visão geral: caixa do card da pessoa (`section` → `memberTotal`).
+  var cardInicio = null;
+  var cardsFaixas = [];
+  // Detalhamento: caixa de cada tabela de registros (`detailHeader` →
+  // `detailSubtotal(Money)`) + a linha do cabeçalho, que já sai colorida e
+  // ganha régua horizontal própria — a ÚNICA horizontal no interior.
+  var tabelaInicio = null;
+  var tabelasFaixas = [];
+  var cabecalhoTabelaFaixas = [];
   var ultima = COL_LETRAS_[ncols - 1];
   var segsA1 = function (rowA1, segs, out) {
     for (var s = 0; s < segs.length; s++) {
@@ -340,15 +359,30 @@ function gravarDemonstrativo_(aba, gidPorNome) {
     if (BOLD_KINDS_[kind]) bold.push(faixa);
     if (HEADER_BG_KINDS_[kind]) headerBg.push(faixa);
     // O bloco da pessoa ABRE em `section` e FECHA em `memberTotal`: mesmo
-    // fundo nos dois + borda grossa no topo e na base p/ delimitar.
+    // fundo nos dois, e é esse intervalo inteiro que vira a caixa do card.
     if (kind === 'section') {
       pessoaBg.push(faixa);
-      abre.push(faixa);
       alturas.push(rowA1);
+      if (!aba.detalhe) cardInicio = rowA1;
     }
     if (kind === 'memberTotal') {
       pessoaBg.push(faixa);
-      fecha.push(faixa);
+      if (!aba.detalhe && cardInicio != null) {
+        cardsFaixas.push('A' + cardInicio + ':' + ultima + rowA1);
+        cardInicio = null;
+      }
+    }
+    if (aba.detalhe) {
+      if (kind === 'detailHeader') {
+        tabelaInicio = rowA1;
+        cabecalhoTabelaFaixas.push(faixa);
+      } else if (
+        (kind === 'detailSubtotal' || kind === 'detailSubtotalMoney') &&
+        tabelaInicio != null
+      ) {
+        tabelasFaixas.push('A' + tabelaInicio + ':' + ultima + rowA1);
+        tabelaInicio = null;
+      }
     }
     if (kind === 'summaryTotal') geralBg.push(faixa);
     if (NOTA_KINDS_[kind]) nota.push(faixa);
@@ -362,13 +396,26 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   if (nota.length) sh.getRangeList(nota).setFontStyle('italic').setFontColor('#5f6368');
   if (moeda.length) sh.getRangeList(moeda).setNumberFormat(FMT_MOEDA_);
   if (pct.length) sh.getRangeList(pct).setNumberFormat(FMT_PCT_);
-  if (abre.length) {
-    sh.getRangeList(abre).setBorder(
-      true, null, null, null, null, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  if (cardsFaixas.length) {
+    // Caixa externa (borda média) — null nos parâmetros não tocados preserva
+    // o que já foi desenhado (não apaga a caixa ao aplicar a régua vertical
+    // logo abaixo, e vice-versa).
+    sh.getRangeList(cardsFaixas).setBorder(
+      true, true, true, true, null, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    // Divisórias verticais entre TODAS as colunas do card — nenhuma horizontal
+    // no interior (regra explícita do card).
+    sh.getRangeList(cardsFaixas).setBorder(
+      null, null, null, null, true, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID);
   }
-  if (fecha.length) {
-    sh.getRangeList(fecha).setBorder(
-      null, null, true, null, null, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  if (tabelasFaixas.length) {
+    sh.getRangeList(tabelasFaixas).setBorder(
+      true, true, true, true, null, null, null, SpreadsheetApp.BorderStyle.SOLID);
+  }
+  if (cabecalhoTabelaFaixas.length) {
+    // Só a linha colorida (o cabeçalho) ganha régua horizontal, separando-a
+    // dos registros — nenhuma outra linha interna da tabela leva horizontal.
+    sh.getRangeList(cabecalhoTabelaFaixas).setBorder(
+      null, null, true, null, null, null, null, SpreadsheetApp.BorderStyle.SOLID);
   }
 
   sh.getRange(1, 1).setFontSize(12);
@@ -381,9 +428,9 @@ function gravarDemonstrativo_(aba, gidPorNome) {
       aplicarLink_(sh, L + 2, pad(rows[L])[0], alvo); // +1 do título, +1 do 1-based
     }
   }
-  for (var c = 0; c < ncols; c++) sh.setColumnWidth(c + 1, larguras[c]);
-  // Wrap SÓ na coluna de memória/observações (números não são afetados).
-  sh.getRange(1, ncols, values.length, 1).setWrap(true);
+  // Largura ajustada ao texto mais longo de cada coluna — sem preset fixo, e
+  // sem wrap forçado (que existia só por causa da largura fixa anterior).
+  try { sh.autoResizeColumns(1, ncols); } catch (err) { /* best-effort */ }
   sh.setFrozenRows(1);
   // Alturas: autoResize primeiro (zera resíduo de exports anteriores — clear()
   // não mexe em altura de linha), depois a folga do cabeçalho da pessoa.
