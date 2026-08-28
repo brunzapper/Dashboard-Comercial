@@ -83,6 +83,15 @@ export const COMP_SHEET_KINDS = [
   "detailMemory",
   "detailTier",
   "detailTierApplied",
+  // v3.4 — contexto no topo (competência, mês apurado, situação, gerado em),
+  // resumo da folha p/ o RH e legenda das colunas. São linhas de LEITURA: o
+  // demonstrativo por pessoa segue idêntico abaixo delas.
+  "meta",
+  "rosterHeader",
+  "rosterRow",
+  "rosterTotal",
+  "legendHeader",
+  "legend",
 ] as const;
 
 export type CompSheetRowKind = (typeof COMP_SHEET_KINDS)[number];

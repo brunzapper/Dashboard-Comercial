@@ -34,8 +34,10 @@ import {
 } from "@/components/ui/tooltip";
 import {
   commissionMemory,
+  entryMemoryLines,
   fmtMoneyBRL as fmtMoney,
   fmtNumBR as fmtNum,
+  SHEET_BASE_NOTE,
 } from "@/lib/comp/commission-label";
 import {
   apuracaoRef,
@@ -60,11 +62,26 @@ export function fmtMoneyIn(currency: string, v: number): string {
   }
 }
 
+/**
+ * Marca de valor ajustado à mão. Cor + tooltip NÃO bastam: é um fato material
+ * num documento de pagamento, e tooltip não existe em toque, não é impresso e
+ * não chega a leitor de tela. Por isso o ponto carrega nome acessível e, na
+ * impressão, vira a palavra "manual" (`print:` do Tailwind).
+ */
 export function OverrideDot() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="mr-1 inline-block size-1.5 rounded-full bg-amber-500" />
+        <span className="mr-1 inline-flex items-center align-middle">
+          <span
+            role="img"
+            aria-label="Valor ajustado manualmente pelo gestor"
+            className="inline-block size-1.5 rounded-full bg-amber-500 print:hidden"
+          />
+          <span className="hidden text-[10px] font-normal text-amber-700 print:inline">
+            manual{" "}
+          </span>
+        </span>
       </TooltipTrigger>
       <TooltipContent>Valor ajustado manualmente pelo gestor.</TooltipContent>
     </Tooltip>
@@ -118,20 +135,33 @@ export function CompPlanCard(props: {
     props.entry.responsible_id,
     props.targetRates
   );
+  const memoryLines = entryMemoryLines(config, breakdown);
 
   return (
     <div className="bg-card rounded-md border p-4">
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <h2 className="flex items-baseline gap-2 text-lg font-medium">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <h2 className="flex flex-wrap items-baseline gap-2 text-lg font-medium">
           {props.title ?? props.plan.name}
+          {/* Com título próprio (o nome da pessoa), o plano vira subtítulo —
+              senão o leitor não sabe de qual plano o valor saiu. */}
+          {props.title ? (
+            <span className="text-muted-foreground text-xs font-normal">
+              {props.plan.name}
+            </span>
+          ) : null}
           {config.apuracao === "mes_anterior" ? (
             <ApuracaoBadge year={props.year} month={props.month} />
           ) : null}
         </h2>
-        <span className="flex items-baseline gap-2">
-          <span className="text-xl font-semibold">
-            {breakdown.total != null ? fmtMoney(breakdown.total) : "—"}
-            {breakdown.totalOverridden ? <OverrideDot /> : null}
+        <span className="flex items-end gap-2">
+          {/* O total é o número que o leitor veio buscar — e era o único
+              elemento do card sem rótulo. */}
+          <span className="flex flex-col items-end leading-tight">
+            <span className="text-muted-foreground text-xs">Total do mês</span>
+            <span className="text-xl font-semibold">
+              {breakdown.totalOverridden ? <OverrideDot /> : null}
+              {breakdown.total != null ? fmtMoney(breakdown.total) : "—"}
+            </span>
           </span>
           {props.onOpenGrouping ? (
             <button
@@ -149,10 +179,10 @@ export function CompPlanCard(props: {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Fator</TableHead>
-            <TableHead className="text-right">Alvo</TableHead>
+            <TableHead>Indicador</TableHead>
+            <TableHead className="text-right">Meta</TableHead>
             <TableHead className="text-right">Realizado</TableHead>
-            <TableHead className="text-right">Ating.%</TableHead>
+            <TableHead className="text-right">Atingimento</TableHead>
             <TableHead className="text-right">Valor</TableHead>
           </TableRow>
         </TableHeader>
@@ -164,8 +194,10 @@ export function CompPlanCard(props: {
               <TableRow key={f.id}>
                 <TableCell>
                   {f.label}{" "}
+                  {/* "(40%)" solto ao lado de uma coluna Atingimento em %
+                      confundia as duas porcentagens — o rótulo desfaz isso. */}
                   <span className="text-muted-foreground text-xs">
-                    ({f.weightPct.toLocaleString("pt-BR")}%)
+                    peso {f.weightPct.toLocaleString("pt-BR")}%
                   </span>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
@@ -218,12 +250,17 @@ export function CompPlanCard(props: {
                 <TableCell className="text-right tabular-nums">
                   {b.overridden.payout ? <OverrideDot /> : null}
                   {f.weightPct === 0 && !b.overridden.payout ? (
-                    <span
-                      className="text-muted-foreground"
-                      title="Peso 0% — este fator não compõe a parcela por atingimento; serve de gatilho/base de comissão."
-                    >
-                      —
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-muted-foreground cursor-help">
+                          —
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Este indicador não gera valor próprio — ele define a
+                        faixa da comissão.
+                      </TooltipContent>
+                    </Tooltip>
                   ) : (
                     fmtMoney(b.payout)
                   )}
@@ -266,9 +303,19 @@ export function CompPlanCard(props: {
               </TableCell>
             </TableRow>
           ) : null}
-          <TableRow>
-            <TableCell className="text-muted-foreground">Base variável</TableCell>
-            <TableCell colSpan={4} className="text-right tabular-nums">
+          {/* A Base variável NÃO soma no total — ela multiplica dentro de cada
+              indicador. Numa coluna de números empilhados, uma linha que se
+              comporta diferente sem aviso convida à conta errada; a borda a
+              separa das que somam e a nota diz o que ela é. */}
+          <TableRow className="border-t-2">
+            <TableCell className="text-muted-foreground">
+              Base variável
+              <span className="block text-xs">{SHEET_BASE_NOTE}</span>
+            </TableCell>
+            <TableCell
+              colSpan={4}
+              className="text-muted-foreground text-right align-top tabular-nums"
+            >
               {fmtMoney(breakdown.base)}
             </TableCell>
           </TableRow>
@@ -287,6 +334,21 @@ export function CompPlanCard(props: {
           </TableRow>
         </TableBody>
       </Table>
+      {/* Memória de cálculo EM TELA. Ela já era derivada e impressa no PDF, mas
+          o colaborador só a via se imprimisse — ou seja, a explicação do
+          próprio número não chegava a quem mais precisa dela. */}
+      {memoryLines.length > 0 ? (
+        <div className="mt-3 border-t pt-2">
+          <p className="text-muted-foreground mb-1 text-xs font-medium">
+            Memória de cálculo
+          </p>
+          <ul className="text-muted-foreground list-disc space-y-0.5 pl-5 text-xs">
+            {memoryLines.map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

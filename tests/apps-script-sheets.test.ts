@@ -56,6 +56,8 @@ interface FakeSheet {
   _borders: BorderCall[];
   /** Uma entrada por chamada autoResizeColumns(from, to). */
   _autoResizeCols: [number, number][];
+  /** Colunas que receberam setWrap(true) — as que estouraram o teto. */
+  _wrapped: Set<number>;
   getName(): string;
   setName(n: string): FakeSheet;
   getSheetId(): number;
@@ -79,12 +81,13 @@ function makeSheet(name: string, id: number): FakeSheet {
     _links: {},
     _borders: [],
     _autoResizeCols: [],
+    _wrapped: new Set<number>(),
     getName() { return sh._name; },
     setName(n: string) { sh._name = n; return sh; },
     getSheetId() { return sh._id; },
     getLastRow() { return sh._values ? sh._values.length : 0; },
     clear() { sh._values = null; return sh; },
-    getRange(row?: number) {
+    getRange(row?: number, col?: number) {
       return new Proxy(
         {},
         {
@@ -95,6 +98,12 @@ function makeSheet(name: string, id: number): FakeSheet {
             if (prop === "setRichTextValue")
               return (v: { text: string; url: string }) => {
                 if (row != null) sh._links[row] = v;
+                return chain;
+              };
+            // Quebra de linha: só a coluna que estourou o teto de largura.
+            if (prop === "setWrap")
+              return (on: boolean) => {
+                if (col != null && on) sh._wrapped.add(col);
                 return chain;
               };
             return () => chain;
@@ -120,11 +129,21 @@ function makeSheet(name: string, id: number): FakeSheet {
       return rec;
     },
     setColumnWidth(c: number, w: number) { sh._widths[c] = w; return sh; },
+    getColumnWidth(c: number) { return sh._widths[c] ?? 100; },
     setRowHeight(r: number, h: number) { sh._heights[r] = h; return sh; },
     setFrozenRows: () => sh,
     autoResizeRows: () => sh,
+    // Simula o ajuste ao conteúdo (≈7px por caractere da célula mais longa) —
+    // é o que torna o TETO de largura observável no teste.
     autoResizeColumns(from: number, to: number) {
       sh._autoResizeCols.push([from, to]);
+      for (let c = from; c <= to; c++) {
+        let max = 0;
+        for (const row of sh._values ?? []) {
+          max = Math.max(max, String(row[c - 1] ?? "").length);
+        }
+        sh._widths[c] = Math.max(40, max * 7);
+      }
       return sh;
     },
   };
@@ -290,17 +309,37 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
     expect(ss.names().sort()).toEqual(["Agosto 2026", "Det-Ana", "Det-Bruno"]);
   });
 
-  it("largura por autoResize (sem preset fixo) em toda aba e altura extra nas seções", () => {
+  it("largura ajustada ao conteúdo, com TETO e quebra na coluna que estoura", () => {
     const ss = makeSpreadsheet(["Agosto 2026"]);
     gs.gravarPlanilha_(ss, PAYLOAD_V3);
-    // Sem largura fixa: nenhum setColumnWidth, e autoResizeColumns cobre as 7
-    // colunas do grid — tanto na aba do mês quanto na de detalhe.
-    expect(ss.getSheetByName("Agosto 2026")!._widths).toEqual({});
-    expect(ss.getSheetByName("Agosto 2026")!._autoResizeCols).toEqual([[1, 7]]);
-    expect(ss.getSheetByName("Det-Ana")!._widths).toEqual({});
+    const mes = ss.getSheetByName("Agosto 2026")!;
+    // O ajuste cobre as 7 colunas do grid, nas duas abas.
+    expect(mes._autoResizeCols).toEqual([[1, 7]]);
     expect(ss.getSheetByName("Det-Ana")!._autoResizeCols).toEqual([[1, 7]]);
     // Uma altura por linha `section` (as duas pessoas).
-    expect(Object.keys(ss.getSheetByName("Agosto 2026")!._heights)).toHaveLength(2);
+    expect(Object.keys(mes._heights)).toHaveLength(2);
+
+    // Com uma memória de cálculo de tamanho REAL, a coluna G estoura o teto:
+    // é fixada nele e ganha quebra de linha (sem isso ela empurraria as demais
+    // colunas para fora da tela). As curtas seguem justas ao conteúdo.
+    const longo = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(longo, {
+      ...PAYLOAD_V3,
+      rows: [
+        ...PAYLOAD_V3.rows,
+        pad([
+          "Vendas", 50000, 42000, 84, 60, 1080,
+          "R$ 3.000,00 × 60% × 84% = R$ 1.512,00 · Meta padrão do plano · Realizado informado manualmente",
+        ]),
+      ],
+      kinds: [...PAYLOAD_V3.kinds, "factorMoney"],
+      links: [...PAYLOAD_V3.links, null],
+    });
+    const sh = longo.getSheetByName("Agosto 2026")!;
+    for (const w of Object.values(sh._widths)) expect(w).toBeLessThanOrEqual(420);
+    expect(sh._widths[7]).toBe(420);
+    expect(sh._wrapped.has(7)).toBe(true);
+    expect(sh._wrapped.has(4)).toBe(false);
   });
 
   it("card da pessoa (visão geral): caixa externa + divisórias verticais, nunca horizontal", () => {
@@ -380,6 +419,54 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
       )
     );
     for (const r of [4, 5, 6]) expect(linhasFormatadas.has(r)).toBe(false);
+  });
+
+  it("contexto, resumo da folha e legenda: estilos próprios e link por pessoa", () => {
+    // O resumo é a resposta do RH na primeira tela: fundo próprio, caixa em
+    // volta e o nome de cada pessoa ligado à aba de detalhe dela.
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, {
+      ...PAYLOAD_V3,
+      rows: [
+        pad(["Competência: Agosto de 2026"]),
+        pad(["Desempenho apurado sobre: Julho de 2026"]),
+        pad(["Situação: prévia — ainda não publicado"]),
+        pad([]),
+        pad(["Resumo do mês"]),
+        pad(["Colaborador", "Plano", "", "", "", "Total (R$)", "Situação"]),
+        pad(["Ana", "Plano A", "", "", "", 1050, "Prévia"]),
+        pad(["Total geral", "", "", "", "", 1050, "1 colaborador"]),
+        pad(["Como ler este demonstrativo"]),
+        pad(["Meta", "", "", "", "", "", "Quanto era esperado no período."]),
+      ],
+      kinds: [
+        "meta", "meta", "meta", "blank",
+        "rosterHeader", "rosterHeader", "rosterRow", "rosterTotal",
+        "legendHeader", "legend",
+      ],
+      links: [null, null, null, null, null, null, "Det-Ana", null, null, null],
+      details: [detalhe("Ana")],
+    });
+    const mes = ss.getSheetByName("Agosto 2026")!;
+    const est = mes._styles;
+    // Contexto e legenda em itálico discreto (rows[i] → linha A1 i+2).
+    expect(est.setFontStyle).toContain("A2:G2"); // meta
+    expect(est.setFontStyle).toContain("A11:G11"); // legend
+    // Cabeçalhos do resumo e o fecho em negrito; a linha da pessoa não.
+    expect(est.setFontWeight).toContain("A6:G6");
+    expect(est.setFontWeight).toContain("A9:G9"); // rosterTotal
+    expect(est.setFontWeight).not.toContain("A8:G8"); // rosterRow
+    // Fundo próprio do resumo (nem cabeçalho de tabela, nem bloco de pessoa).
+    expect(est.setBackground).toContain("A6:G6");
+    // Caixa do resumo, do 1º rosterHeader ao rosterTotal.
+    expect(mes._borders.some((b) => b.ranges.includes("A6:G9"))).toBe(true);
+    // O nome da pessoa no resumo leva à aba de detalhe dela.
+    expect(mes._links[8]).toEqual({
+      text: "Ana",
+      url: `#gid=${ss.getSheetByName("Det-Ana")!.getSheetId()}`,
+    });
+    // O total do resumo é moeda.
+    expect(est.setNumberFormat).toContain("F9:F9");
   });
 
   it("aba de detalhe malformada é ignorada sem derrubar o export", () => {

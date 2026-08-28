@@ -123,7 +123,7 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Condição sem valor no fator "Reuniões".'
+        'Condição sem valor no indicador "Reuniões".'
       )
     );
     expect(savePlan).not.toHaveBeenCalled();
@@ -145,7 +145,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
   // fail-closed do servidor com o genérico "Configuração do plano inválida.".
   it("nome, peso e fórmula vazios têm mensagem própria; savePlan nem dispara", async () => {
     renderEditor(makeConfig());
-    fireEvent.click(screen.getByRole("button", { name: /Adicionar fator/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar indicador/ }));
     const saveBtn = screen.getByRole("button", { name: "Salvar plano" });
 
     // Sem nome.
@@ -153,7 +153,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        "Dê um nome ao fator 2."
+        "Dê um nome ao indicador 2."
       )
     );
 
@@ -165,7 +165,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Informe o peso do fator "Valor gerado (SDR)" — 0 vale (fator só de gatilho/base de comissão).'
+        'Informe o peso do indicador "Valor gerado (SDR)" — 0 vale (indicador que só define a faixa da comissão).'
       )
     );
 
@@ -177,7 +177,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Monte a fórmula do realizado do fator "Valor gerado (SDR)".'
+        'Monte a fórmula do realizado do indicador "Valor gerado (SDR)".'
       )
     );
     expect(savePlan).not.toHaveBeenCalled();

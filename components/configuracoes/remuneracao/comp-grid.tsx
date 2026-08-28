@@ -360,8 +360,8 @@ export function CompGrid(props: CompGridProps) {
                   className="border-l text-center"
                   title={
                     props.config.apuracao === "mes_anterior"
-                      ? "Alvo e Realizado referem-se ao mês APURADO (anterior ao do lançamento). Alvos são metas — também editáveis em Configurações → Metas, no mês apurado."
-                      : "Alvos são metas — também editáveis em Configurações → Metas"
+                      ? "Meta e Realizado referem-se ao mês APURADO (anterior ao do lançamento). As metas também são editáveis em Configurações → Metas, no mês apurado."
+                      : "As metas também são editáveis em Configurações → Metas"
                   }
                 >
                   {f.label}{" "}
@@ -428,12 +428,15 @@ export function CompGrid(props: CompGridProps) {
           </TableBody>
         </Table>
       </div>
+      {/* A frase "Alvos são metas" saiu: a coluna passou a se chamar Meta, que
+          é como o resto do produto (e a área de Metas) já a chamava. Legenda
+          que existe só para traduzir o próprio vocabulário é sintoma, não ajuda. */}
       <p className="text-muted-foreground text-xs">
-        Alvo, Base e Bônus são digitados. Real., Ating.%, valores e Comissão
+        Meta, Base e Bônus são digitados. Real., Atingimento, valores e Comissão
         são calculados — duplo clique sobrescreve à mão (ponto âmbar; ✕ volta
-        ao calculado). Alvos são metas (Configurações → Metas).
+        ao calculado). As metas também são editáveis em Configurações → Metas.
         {props.config.apuracao === "mes_anterior"
-          ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Alvo/Real. referem-se ao mês apurado."
+          ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Meta/Real. referem-se ao mês apurado."
           : ""}
       </p>
       <CompDetailPanel
@@ -449,9 +452,9 @@ export function CompGrid(props: CompGridProps) {
 function FactorSubHeader() {
   return (
     <>
-      <TableHead className="border-l text-right text-xs">Alvo</TableHead>
+      <TableHead className="border-l text-right text-xs">Meta</TableHead>
       <TableHead className="text-right text-xs">Real.</TableHead>
-      <TableHead className="text-right text-xs">Ating.%</TableHead>
+      <TableHead className="text-right text-xs">Ating.</TableHead>
       <TableHead className="text-right text-xs">Valor</TableHead>
     </>
   );
@@ -718,7 +721,7 @@ function FactorCells(props: {
     targetTip.push(`≈ ${fmtMoney(props.targetBRL)} na cotação do trimestre`);
   if (props.targetSource === "default")
     targetTip.push(
-      "Alvo padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
+      "Meta padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
     );
   return (
     <>
@@ -810,7 +813,7 @@ function FactorCells(props: {
           props.weightPct === 0 && !props.overridden.payout ? (
             <span
               className="text-muted-foreground"
-              title="Peso 0% — este fator não compõe a parcela por atingimento; serve de gatilho/base de comissão."
+              title="Peso 0% — este indicador não gera valor próprio; ele define a faixa da comissão."
             >
               —
             </span>

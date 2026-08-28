@@ -1,4 +1,13 @@
-// Versão: 1.11 | Data: 22/08/2026
+// Versão: 1.12 | Data: 27/08/2026
+// v1.12: VOCABULÁRIO DE LEITOR. O demonstrativo é lido por colaboradores e pelo
+// RH, não por quem construiu o modelo — então o jargão interno saiu de TODA
+// frase visível: "fator" → "indicador", "alvo" → "meta" (o app já se explicava
+// com "Alvos são metas", frase-muleta agora removida da grade), "gatilho" →
+// "o que define a faixa", "recorte"/"operando" → linguagem comum, e os
+// símbolos soltos (⇒, ≥, ≠) viraram palavras. Entram as frases do CONTEXTO do
+// topo (competência, mês apurado, situação publicado/prévia, gerado em), do
+// RESUMO da folha e da LEGENDA das colunas. Este módulo passa a ser o registro
+// ÚNICO dos três exports: o PDF e o CSV deixaram de usar o texto interno.
 // v1.11: `detailUnitValueNote` SAIU. A linha "Cada X vale R$ Y" repetia o que
 // a fórmula do bloco de comissão diz logo abaixo ("40 (Reuniões) × R$ 12,50 =
 // R$ 500,00") e, em fator de dinheiro, era a própria taxa em outras palavras.
@@ -100,20 +109,20 @@ export function commissionMemory(
   if (cb.triggerValue == null) {
     return {
       formula: null,
-      tierNote: "sem gatilho apurado (atingimento/realizado vazio)",
+      tierNote: "sem base para escolher a faixa (atingimento ou realizado em branco)",
       memberTiers,
     };
   }
   if (cb.tier == null) {
     return {
       formula: null,
-      tierNote: `nenhuma faixa atingida (gatilho: ${triggerFmt(cb, cb.triggerValue)})`,
+      tierNote: `nenhuma faixa alcançada (${cb.triggerLabel}: ${triggerFmt(cb, cb.triggerValue)})`,
       memberTiers,
     };
   }
   const tierNote =
     cb.tierBy === "attainment"
-      ? `faixa ≥ ${fmtNumBR(cb.tier.fromPct)}% (atingimento de ${cb.triggerLabel}: ${triggerFmt(cb, cb.triggerValue)})`
+      ? `faixa a partir de ${fmtNumBR(cb.tier.fromPct)}% (atingimento de ${cb.triggerLabel}: ${triggerFmt(cb, cb.triggerValue)})`
       : `faixa a partir de ${triggerFmt(cb, cb.tier.fromPct)} (${cb.triggerLabel}: ${triggerFmt(cb, cb.triggerValue)})`;
   if (cb.kind === "flat") {
     return {
@@ -126,7 +135,7 @@ export function commissionMemory(
   if (cb.basis == null) {
     return {
       formula: null,
-      tierNote: `${tierNote} — fator-base sem realizado ⇒ ${fmtMoneyBRL(0)}`,
+      tierNote: `${tierNote} — indicador de base sem realizado: ${fmtMoneyBRL(0)}`,
       memberTiers,
     };
   }
@@ -179,7 +188,7 @@ export function entryMemoryLines(
         );
       } else {
         lines.push(
-          `${f.label}: sem atingimento (alvo/realizado vazio) ⇒ ${fmtMoneyBRL(0)}`
+          `${f.label}: sem atingimento (meta ou realizado em branco): ${fmtMoneyBRL(0)}`
         );
       }
     } else {
@@ -187,7 +196,7 @@ export function entryMemoryLines(
         b.realized != null
           ? `realizado ${f.money ? fmtMoneyBRL(b.realized) : fmtNumBR(b.realized)}`
           : "sem realizado";
-      lines.push(`${f.label}: ${real} (gatilho/base de comissão)`);
+      lines.push(`${f.label}: ${real} (usado para definir a faixa da comissão)`);
     }
   }
   for (const cb of breakdown.commissionBlocks) {
@@ -239,14 +248,93 @@ export function entryMemoryLines(
 }
 
 // ============ Frases do DEMONSTRATIVO (Google Planilhas) ============
-// Linguagem p/ leitor externo (RH/gestor): nada de "gatilho/base de
-// comissão", "peso N%" solto ou "não soma no total". O peso já tem coluna
-// própria no demonstrativo — a nota conta só a HISTÓRIA do valor.
+// Linguagem p/ leitor externo (RH/colaborador): nada de "gatilho", "recorte",
+// "operando" ou símbolo matemático solto (⇒, ≥, ≠). O peso já tem coluna
+// própria no demonstrativo — a nota conta só a HISTÓRIA do valor. Desde a
+// v1.12 este é o registro ÚNICO: o PDF e o CSV também o consomem.
 
 export const SHEET_BASE_NOTE =
-  "Base que multiplica o peso × atingimento de cada fator — já refletida no valor dos fatores acima.";
+  "Não é somada ao total: multiplica o peso × atingimento de cada indicador e já está refletida no valor deles.";
 
 export const SHEET_NO_ENTRY_NOTE = "Sem lançamento neste mês.";
+
+// ---- Contexto do topo da planilha ----
+// Responde, antes de qualquer número, as três perguntas que todo leitor faz:
+// de que mês é isto, sobre qual desempenho, e se o valor já é final.
+
+/** Mês do PAGAMENTO (competência do demonstrativo). */
+export function sheetCompetenciaNote(monthLabel: string): string {
+  return `Competência: ${monthLabel}`;
+}
+
+/**
+ * Mês do DESEMPENHO, quando difere do de pagamento (planos com apuração sobre
+ * o mês anterior). É a primeira dúvida de quem vê metas que não batem com o
+ * mês — omitir isso é o que gera a pergunta.
+ */
+export function sheetApuracaoNote(
+  apuradoLabel: string,
+  /** false = só parte dos planos desloca; dizer isso evita generalizar errado. */
+  allPlans: boolean
+): string {
+  const base = `Desempenho apurado sobre: ${apuradoLabel}`;
+  return allPlans
+    ? base
+    : `${base} — vale para os planos que apuram sobre o mês anterior`;
+}
+
+/**
+ * Situação da folha. Status MISTO é dito, nunca arredondado para "publicado" —
+ * o RH precisa saber que parte ainda pode mudar.
+ */
+export function sheetStatusNote(published: number, total: number): string {
+  if (total === 0) return "Situação: sem lançamentos";
+  if (published >= total) return "Situação: publicado";
+  if (published === 0) return "Situação: prévia — ainda não publicado";
+  return `Situação: prévia — ${fmtNumBR(total - published)} de ${fmtNumBR(total)} lançamentos ainda não publicados`;
+}
+
+export function sheetGeneratedNote(date: Date): string {
+  return `Gerado em: ${date.toLocaleDateString("pt-BR")}`;
+}
+
+// ---- Resumo da folha (uma linha por pessoa, para o RH) ----
+export const SHEET_ROSTER_TITLE = "Resumo do mês";
+export const SHEET_ROSTER_HEADERS = [
+  "Colaborador",
+  "Plano",
+  "",
+  "",
+  "",
+  "Total (R$)",
+  "Situação",
+] as const;
+export const SHEET_ROSTER_TOTAL_LABEL = "Total geral";
+export const SHEET_ROSTER_PUBLISHED = "Publicado";
+export const SHEET_ROSTER_DRAFT = "Prévia";
+
+/** Rodapé do resumo: quantas pessoas ele soma. */
+export function sheetRosterTotalNote(people: number): string {
+  return people === 1 ? "1 colaborador" : `${fmtNumBR(people)} colaboradores`;
+}
+
+// ---- Legenda das colunas ----
+// Sete colunas sem definição obrigam o leitor a adivinhar. A legenda fecha a
+// planilha porque é consulta, não introdução.
+export const SHEET_LEGEND_TITLE = "Como ler este demonstrativo";
+export const SHEET_LEGEND: readonly (readonly [string, string])[] = [
+  ["Indicador", "O que é medido para calcular a remuneração (ex.: Vendas, Reuniões)."],
+  ["Meta", "Quanto era esperado no período."],
+  ["Realizado", "Quanto a pessoa efetivamente fez."],
+  ["Atingimento", "O realizado dividido pela meta, em porcentagem."],
+  ["Peso", "Quanto o indicador pesa no cálculo do valor."],
+  ["Valor (R$)", "Quanto o indicador gerou em reais."],
+  ["Comissão", "Prêmio por faixa, escolhida pelo atingimento ou pelo realizado."],
+  ["Base variável", "Valor de referência que multiplica os indicadores. Não é somada ao total."],
+  ["Bônus", "Valores avulsos lançados pela gestão."],
+  ["Memória de cálculo", "A conta que levou ao valor daquela linha."],
+  ["—", "Não se aplica a esta linha."],
+];
 
 /**
  * Nota do fator p/ o demonstrativo (sem prefixo de label — o label vai na
@@ -272,20 +360,20 @@ export function sheetFactorNote(
   } else if (b.attainmentPct != null) {
     main = factorPayoutFormula(base, f.weightPct, b.attainmentPct, b.payout);
   } else {
-    main = `Sem atingimento (alvo ou realizado vazio) ⇒ ${fmtMoneyBRL(0)}`;
+    main = `Sem atingimento (meta ou realizado em branco): ${fmtMoneyBRL(0)}`;
   }
 
   const extras: string[] = [];
-  // Anexos sobre o ALVO só interessam onde ele vira valor; num fator de peso 0
-  // o alvo já aparece na coluna dele e o resto é ruído.
+  // Anexos sobre a META só interessam onde ela vira valor; num indicador de
+  // peso 0 a meta já aparece na coluna dela e o resto é ruído.
   if (!semValorProprio) {
-    if (b.targetSource === "default") extras.push("Alvo padrão do plano");
+    if (b.targetSource === "default") extras.push("Meta padrão do plano");
     if (f.targetCurrency && b.target != null) {
       extras.push(
         b.targetRateMissing
           ? `Sem cotação ${f.targetCurrency} no mês — atingimento não calculado`
-          : `Alvo em ${f.targetCurrency}` +
-              (b.targetBRL != null ? ` ≈ ${fmtMoneyBRL(b.targetBRL)}` : "")
+          : `Meta em ${f.targetCurrency}` +
+              (b.targetBRL != null ? ` (equivale a ${fmtMoneyBRL(b.targetBRL)})` : "")
       );
     }
   }
@@ -336,13 +424,13 @@ export function sheetSummaryNote(
 export const DETAIL_BACK_NOTE = "← Voltar para a visão geral";
 
 export const DETAIL_EMPTY_NOTE =
-  "Nenhum registro no recorte deste fator neste período.";
+  "Nenhum registro considerado neste indicador neste período.";
 
 export const DETAIL_DROPPED_FILTER_NOTE =
-  "Uma condição do fator não pôde ser aplicada nesta listagem — os registros abaixo podem ser mais amplos que o recorte usado no cálculo.";
+  "Uma das condições deste indicador não pôde ser aplicada a esta lista — os registros abaixo podem ser mais amplos que os usados no cálculo.";
 
 export const DETAIL_UNSUPPORTED_FIELD_NOTE =
-  "Este operando agrega um campo que a listagem não consegue recortar (campo unificado ou de registro casado) — os registros abaixo podem ser mais amplos que o do cálculo.";
+  "Esta lista não consegue reproduzir exatamente o filtro usado no cálculo — os registros abaixo podem ser mais amplos que os que entraram no valor.";
 
 /**
  * Nota do bloco que RECEBEU outros operandos (engrenagem): o rótulo do bloco
@@ -383,10 +471,10 @@ export function detailSumPartsNote(
     .join(" · ");
 }
 
-/** Cabeçalho do bloco do fator: o que a coluna de valor mostra e o tamanho do recorte. */
+/** Cabeçalho do bloco: o que a coluna de valor mostra e quantos registros entraram. */
 export function detailAggNote(aggLabel: string, total: number): string {
   const registros = total === 1 ? "1 registro" : `${fmtNumBR(total)} registros`;
-  return `${aggLabel} · ${registros} no recorte`;
+  return `${aggLabel} · ${registros} considerados`;
 }
 
 /** Aviso de janela: a listagem mostra só os primeiros N do recorte. */
@@ -460,7 +548,7 @@ export function detailTierMark(applied: boolean, reached: boolean): string {
 }
 
 /** Marca discreta de divergência no subtotal (os números ficam lado a lado). */
-export const DETAIL_DIVERGE_MARK = "≠ realizado";
+export const DETAIL_DIVERGE_MARK = "difere do realizado";
 
 /** Nota da linha "Total" do bloco no demonstrativo. */
 export function sheetTotalNote(breakdown: CompBreakdown): string {

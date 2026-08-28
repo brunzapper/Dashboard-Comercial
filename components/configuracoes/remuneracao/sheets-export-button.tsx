@@ -143,9 +143,15 @@ export function SheetsExportButton(props: SheetsExportButtonProps) {
     const w = window.open("", "_blank");
     setPending(true);
     try {
+      // year/month alimentam o bloco de contexto (mês APURADO via apuracaoRef);
+      // sem eles o builder omite a linha em vez de inventá-la.
       const { headers, rows, kinds, links, detailTabs } = compSheetReport(
         props.getStatements(),
-        { monthLabel: `${MONTH_LABELS[props.month - 1]} de ${props.year}` }
+        {
+          monthLabel: `${MONTH_LABELS[props.month - 1]} de ${props.year}`,
+          year: props.year,
+          month: props.month,
+        }
       );
       // O builder ordena/nomeia as abas; o roster só empresta os ids. Rótulo
       // sem id (roster fora de sincronia) fica sem aba — nunca vira id vazio.

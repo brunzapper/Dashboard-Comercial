@@ -1,3 +1,18 @@
+// Versão: 3.4 | Data: 27/08/2026
+// v3.4: LEITURA PARA LEIGOS E PARA O RH. Kinds novos: `meta` (bloco de
+// contexto do topo — competência, mês apurado, situação, gerado em),
+// `rosterHeader`/`rosterRow`/`rosterTotal` (resumo da folha, uma linha por
+// pessoa com hiperlink p/ a aba de detalhe) e `legendHeader`/`legend`
+// (legenda das colunas, no fim). Além disso:
+//   - LARGURA: autoResizeColumns continua (largura ajustada ao conteúdo), mas
+//     agora com TETO — a coluna de prosa cresceria centenas de pixels e jogaria
+//     o resto para fora da tela. Colunas acima do teto são fixadas nele e a
+//     última coluna volta a ter quebra de linha;
+//   - `FMT_PCT_` passa a 1 casa: 84,3% em vez de 84,32%. Zero casas criaria a
+//     ilusão de fronteira de faixa (79,6% exibido como 80% numa faixa ≥80% que
+//     não se aplicou).
+// Script 3.3 renderiza os kinds novos como texto puro — republique p/ ver os
+// estilos.
 // Versão: 3.3 | Data: 27/08/2026
 // v3.3: FORMATAÇÃO — larguras de coluna passam a se AJUSTAR ao conteúdo
 // (autoResizeColumns; saíram os arrays de largura fixa e o wrap forçado da
@@ -251,13 +266,19 @@ function gravarSimples_(sh, headers, rows) {
 // Largura fixa do grid dos dois payloads (espelha COMP_SHEET_COLS) — a
 // largura VISUAL da coluna vem de autoResizeColumns, não mais de um preset.
 var NCOLS_ = 7;
+// Teto de largura por coluna: autoResize ajusta ao conteúdo, mas a coluna de
+// memória/legenda carrega frases inteiras e cresceria a ponto de empurrar as
+// demais para fora da tela. Acima do teto, fixa no teto + quebra de linha.
+var LARGURA_MAX_ = 420;
 var FMT_MOEDA_ = 'R$ #,##0.00';
 // Aspas no % = literal (o valor já vem 0–100; "%" nu multiplicaria por 100).
-var FMT_PCT_ = '0.00"%"';
+var FMT_PCT_ = '0.0"%"';
 var BG_CABECALHO_ = '#eef1f5';
 var BG_PESSOA_ = '#cfe2f3';
 var BG_TOTAL_GERAL_ = '#a4c2f4';
+var BG_RESUMO_ = '#d9ead3';
 var COR_BORDA_ = '#5b8fd6';
+var COR_META_ = '#5f6368';
 var ALTURA_SECAO_ = 30;
 // Segmentos CONTÍGUOS de colunas (1-based, [de, até]) formatados por kind.
 // summary/summaryHeader não são mais emitidos pelo builder — as entradas
@@ -278,7 +299,10 @@ var MOEDA_POR_KIND_ = {
   detailFactorMoney: [[6, 6]],
   detailRowMoney: [[6, 6]],
   // Subtotal: E = realizado do fator, F = soma dos registros listados.
-  detailSubtotalMoney: [[5, 6]]
+  detailSubtotalMoney: [[5, 6]],
+  // Resumo da folha: F = total da pessoa / total geral.
+  rosterRow: [[6, 6]],
+  rosterTotal: [[6, 6]]
 };
 var PCT_POR_KIND_ = { factor: [[4, 5]], factorMoney: [[4, 5]] };
 var BOLD_KINDS_ = {
@@ -286,13 +310,20 @@ var BOLD_KINDS_ = {
   detailHeader: 1, blockTotal: 1, memberTotal: 1,
   detailFactor: 1, detailFactorMoney: 1, detailSubtotal: 1, detailSubtotalMoney: 1,
   // A faixa APLICADA é a que explica o valor pago — destacada entre os degraus.
-  detailTierApplied: 1
+  detailTierApplied: 1,
+  // Resumo e legenda: só os cabeçalhos e o fecho do resumo.
+  rosterHeader: 1, rosterTotal: 1, legendHeader: 1
 };
 var HEADER_BG_KINDS_ = {
   summaryHeader: 1, planHeader: 1, detailHeader: 1,
-  detailFactor: 1, detailFactorMoney: 1
+  detailFactor: 1, detailFactorMoney: 1, legendHeader: 1
 };
-var NOTA_KINDS_ = { info: 1, note: 1, detailBack: 1, detailMemory: 1 };
+// Fundo próprio do resumo da folha (verde discreto) — não é o bloco de uma
+// pessoa nem um cabeçalho de tabela; é a visão consolidada.
+var RESUMO_BG_KINDS_ = { rosterHeader: 1, rosterTotal: 1 };
+var NOTA_KINDS_ = {
+  info: 1, note: 1, detailBack: 1, detailMemory: 1, meta: 1, legend: 1
+};
 var COL_LETRAS_ = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
 // Link interno por RICH TEXT — nunca por fórmula. `setValues` parseia a string
@@ -333,9 +364,13 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   var pessoaBg = [];
   var geralBg = [];
   var nota = [];
+  var resumoBg = [];
   var moeda = [];
   var pct = [];
   var alturas = [];
+  // Resumo da folha: do 1º rosterHeader ao rosterTotal, uma caixa só.
+  var resumoInicio = null;
+  var resumoFaixas = [];
   // Visão geral: caixa do card da pessoa (`section` → `memberTotal`).
   var cardInicio = null;
   var cardsFaixas = [];
@@ -385,6 +420,14 @@ function gravarDemonstrativo_(aba, gidPorNome) {
       }
     }
     if (kind === 'summaryTotal') geralBg.push(faixa);
+    if (RESUMO_BG_KINDS_[kind]) resumoBg.push(faixa);
+    // O resumo abre no PRIMEIRO rosterHeader (são dois: título + rótulos das
+    // colunas) e fecha no rosterTotal.
+    if (kind === 'rosterHeader' && resumoInicio == null) resumoInicio = rowA1;
+    if (kind === 'rosterTotal' && resumoInicio != null) {
+      resumoFaixas.push('A' + resumoInicio + ':' + ultima + rowA1);
+      resumoInicio = null;
+    }
     if (NOTA_KINDS_[kind]) nota.push(faixa);
     if (MOEDA_POR_KIND_[kind]) segsA1(rowA1, MOEDA_POR_KIND_[kind], moeda);
     if (PCT_POR_KIND_[kind]) segsA1(rowA1, PCT_POR_KIND_[kind], pct);
@@ -393,7 +436,8 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   if (headerBg.length) sh.getRangeList(headerBg).setBackground(BG_CABECALHO_);
   if (pessoaBg.length) sh.getRangeList(pessoaBg).setBackground(BG_PESSOA_);
   if (geralBg.length) sh.getRangeList(geralBg).setBackground(BG_TOTAL_GERAL_);
-  if (nota.length) sh.getRangeList(nota).setFontStyle('italic').setFontColor('#5f6368');
+  if (resumoBg.length) sh.getRangeList(resumoBg).setBackground(BG_RESUMO_);
+  if (nota.length) sh.getRangeList(nota).setFontStyle('italic').setFontColor(COR_META_);
   if (moeda.length) sh.getRangeList(moeda).setNumberFormat(FMT_MOEDA_);
   if (pct.length) sh.getRangeList(pct).setNumberFormat(FMT_PCT_);
   if (cardsFaixas.length) {
@@ -405,6 +449,14 @@ function gravarDemonstrativo_(aba, gidPorNome) {
     // Divisórias verticais entre TODAS as colunas do card — nenhuma horizontal
     // no interior (regra explícita do card).
     sh.getRangeList(cardsFaixas).setBorder(
+      null, null, null, null, true, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID);
+  }
+  if (resumoFaixas.length) {
+    // Mesmo tratamento do card da pessoa: caixa externa + divisórias verticais,
+    // nenhuma horizontal no interior.
+    sh.getRangeList(resumoFaixas).setBorder(
+      true, true, true, true, null, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    sh.getRangeList(resumoFaixas).setBorder(
       null, null, null, null, true, null, COR_BORDA_, SpreadsheetApp.BorderStyle.SOLID);
   }
   if (tabelasFaixas.length) {
@@ -428,9 +480,18 @@ function gravarDemonstrativo_(aba, gidPorNome) {
       aplicarLink_(sh, L + 2, pad(rows[L])[0], alvo); // +1 do título, +1 do 1-based
     }
   }
-  // Largura ajustada ao texto mais longo de cada coluna — sem preset fixo, e
-  // sem wrap forçado (que existia só por causa da largura fixa anterior).
-  try { sh.autoResizeColumns(1, ncols); } catch (err) { /* best-effort */ }
+  // Largura ajustada ao texto mais longo de cada coluna, COM TETO: a coluna de
+  // memória/legenda carrega frases inteiras e sem limite empurraria as demais
+  // para fora da tela. Quem passa do teto é fixada nele e ganha quebra de
+  // linha (autoResize sozinho não quebra — só alarga).
+  try {
+    sh.autoResizeColumns(1, ncols);
+    for (var w = 1; w <= ncols; w++) {
+      if (sh.getColumnWidth(w) <= LARGURA_MAX_) continue;
+      sh.setColumnWidth(w, LARGURA_MAX_);
+      sh.getRange(1, w, values.length, 1).setWrap(true);
+    }
+  } catch (err) { /* best-effort */ }
   sh.setFrozenRows(1);
   // Alturas: autoResize primeiro (zera resíduo de exports anteriores — clear()
   // não mexe em altura de linha), depois a folga do cabeçalho da pessoa.

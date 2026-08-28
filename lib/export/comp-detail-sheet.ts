@@ -72,11 +72,15 @@ function detailHeaderCells(valueLabel: string, merged: boolean): SheetCell[] {
   return [
     "Data",
     "Registro",
-    "Base",
+    // "Base" colidia com "Base variável" (o R$ que multiplica os indicadores)
+    // na MESMA planilha — aqui é a fonte de onde o registro veio.
+    "Origem",
     merged ? "Descrição" : "Responsável",
     "Etapa",
     valueLabel,
-    "Vale (R$)",
+    // "Vale (R$)" era lido como vale-refeição/vale-transporte num documento
+    // que circula no RH.
+    "Quanto gerou (R$)",
   ];
 }
 
