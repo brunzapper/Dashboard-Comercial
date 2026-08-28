@@ -1,3 +1,12 @@
+// Versão: 1.3 | Data: 27/08/2026
+// v1.3: o CSV deixa de ser byte-idêntico à v1.0 (pino atualizado de propósito).
+// Ele é lido pelas MESMAS pessoas que leem a planilha — RH e colaborador — mas
+// ainda falava o registro interno ("peso 40%", "gatilho/base de comissão",
+// "alvo padrão do plano", "não soma no total"). Agora a coluna de observação
+// consome as frases `sheet*` de commission-label (registro único dos três
+// exports), o tipo "Fator" virou "Indicador", a coluna "Alvo" virou "Meta" e
+// "Observação" virou "Memória de cálculo". A ORDEM e a quantidade de colunas
+// seguem iguais — quebra só quem dependia do TEXTO.
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: o export ao Google Planilhas ganhou builder PRÓPRIO com layout de
 // demonstrativo (lib/export/comp-sheet.ts) — compReportValues (grid espelho
@@ -18,7 +27,11 @@
 // CSV injection fica no buildCsv/sanitizeCsvCell — aqui as células saem cruas.
 import {
   commissionMemory,
-  fmtMoneyBRL,
+  sheetCommissionSumNote,
+  sheetFactorNote,
+  sheetTotalNote,
+  SHEET_BASE_NOTE,
+  SHEET_NO_ENTRY_NOTE,
 } from "@/lib/comp/commission-label";
 import {
   computeEntry,
@@ -37,6 +50,10 @@ export interface CompEntryLike {
   base_amount: number | null;
   inputs: unknown;
   computed: unknown;
+  // Situação da folha no demonstrativo (prévia × publicado). OPCIONAL: os call
+  // sites já passam a linha inteira de comp_entries, que a carrega; ausente
+  // conta como não publicado (fail-safe — nunca afirma "final" sem prova).
+  published_at?: string | null;
 }
 
 /** Um demonstrativo (plano × membro × mês) a exportar. */
@@ -55,11 +72,11 @@ export const COMP_CSV_HEADERS = [
   "Pessoa",
   "Tipo",
   "Item",
-  "Alvo",
+  "Meta",
   "Realizado",
   "Atingimento %",
   "Valor (R$)",
-  "Observação",
+  "Memória de cálculo",
 ];
 
 /**
@@ -113,7 +130,7 @@ function compStatementCells(input: CompStatementInput): ReportCell[][] {
 
   const derived = statementBreakdown(input);
   if (!derived) {
-    return [row("Total", "", null, null, null, null, "sem lançamento no mês")];
+    return [row("Total", "", null, null, null, null, SHEET_NO_ENTRY_NOTE)];
   }
   const { breakdown, inputs } = derived;
 
@@ -121,30 +138,18 @@ function compStatementCells(input: CompStatementInput): ReportCell[][] {
   for (const f of input.config.factors) {
     const b = breakdown.byFactor[f.id];
     if (!b) continue;
-    const notes: string[] = [`peso ${csvNumber(f.weightPct)}%`];
-    if (b.targetSource === "default") notes.push("alvo padrão do plano");
-    if (f.targetCurrency && b.target != null) {
-      notes.push(
-        b.targetRateMissing
-          ? `sem cotação ${f.targetCurrency} — atingimento vazio`
-          : `alvo em ${f.targetCurrency}` +
-              (b.targetBRL != null ? ` ≈ ${fmtMoneyBRL(b.targetBRL)}` : "")
-      );
-    }
-    if (b.overridden.realized) notes.push("realizado manual");
-    if (b.overridden.attainmentPct) notes.push("atingimento manual");
-    if (b.overridden.payout) notes.push("valor manual");
-    if (f.weightPct === 0) notes.push("gatilho/base de comissão");
     rows.push(
       row(
-        "Fator",
+        "Indicador",
         f.label,
         b.target,
         b.realized,
         b.attainmentPct != null ? roundMoney(b.attainmentPct) : null,
         // Paridade com o card: peso 0 sem override exibe "—" (aqui vazio).
         f.weightPct === 0 && !b.overridden.payout ? null : b.payout,
-        notes.join(" · ")
+        // MESMA frase da planilha: o CSV também é lido por RH/colaborador, e
+        // manter dois registros para o mesmo fato era só dívida de linguagem.
+        sheetFactorNote(f, b, breakdown.base)
       )
     );
   }
@@ -163,6 +168,10 @@ function compStatementCells(input: CompStatementInput): ReportCell[][] {
     breakdown.commission != null &&
     (breakdown.commission.overridden || breakdown.commissionBlocks.length > 1)
   ) {
+    const calculated = breakdown.commissionBlocks.reduce(
+      (a, b) => a + b.value,
+      0
+    );
     rows.push(
       row(
         "Comissão (total)",
@@ -171,34 +180,21 @@ function compStatementCells(input: CompStatementInput): ReportCell[][] {
         null,
         null,
         breakdown.commission.value,
-        breakdown.commission.overridden ? "ajuste manual" : ""
+        sheetCommissionSumNote(breakdown.commission.overridden, calculated)
       )
     );
   }
 
   rows.push(
-    row(
-      "Base variável",
-      "",
-      null,
-      null,
-      null,
-      breakdown.base,
-      "não soma no total — multiplica os fatores"
-    )
+    row("Base variável", "", null, null, null, breakdown.base, SHEET_BASE_NOTE)
   );
   for (const b of inputs.bonuses) {
     rows.push(row("Bônus", b.label, null, null, null, b.amount, ""));
   }
 
-  const totalObs = breakdown.totalOverridden
-    ? "total manual"
-    : breakdown.totalFormulaError
-      ? "fórmula do total sem resultado"
-      : breakdown.totalFromFormula
-        ? "total pela fórmula do plano"
-        : "";
-  rows.push(row("Total", "", null, null, null, breakdown.total, totalObs));
+  rows.push(
+    row("Total", "", null, null, null, breakdown.total, sheetTotalNote(breakdown))
+  );
   return rows;
 }
 

@@ -170,11 +170,13 @@ describe("compDetailSheets", () => {
     expect(colunas).toEqual([
       "Data",
       "Registro",
-      "Base",
+      // "Base" colidia com "Base variável" (o R$ do demonstrativo); "Vale"
+      // era lido como vale-refeição num documento que circula no RH.
+      "Origem",
       "Responsável",
       "Etapa",
       "Valor",
-      "Vale (R$)",
+      "Quanto gerou (R$)",
     ]);
 
     const linhas = kindsDe(sheet, "detailRowMoney");

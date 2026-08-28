@@ -166,7 +166,9 @@ describe("CompGrid — memória de cálculo", () => {
     // Sem nenhum clique: a memória está no corpo da tabela (linha de detalhe).
     expect(bodyText()).toContain("44 (Reuniões) × R$ 12,50 = R$ 550,00");
     expect(bodyText()).toContain("faixa a partir de 26 (Reuniões: 44)");
-    expect(bodyText()).toContain("realizado 44 (gatilho/base de comissão)");
+    expect(bodyText()).toContain(
+      "realizado 44 (usado para definir a faixa da comissão)"
+    );
   });
 
   it("colSpan da linha de detalhe == soma dos colSpans do thead (layout pinado)", () => {

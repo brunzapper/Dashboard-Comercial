@@ -1,3 +1,21 @@
+<!-- Versão: 1.74 | Data: 27/08/2026 -->
+<!-- v1.74 (27/08/2026): §4.18 — a Remuneração passou por uma revisão de
+     LEITURA: o demonstrativo tem dois públicos (colaborador e RH) e atendia
+     só o primeiro. (a) Planilha ganha bloco de CONTEXTO no topo (competência,
+     mês APURADO via apuracaoRef, situação publicado/prévia de published_at,
+     data de geração), RESUMO da folha por pessoa com link p/ a aba de detalhe
+     — que substitui o rodapé summaryTotal — e LEGENDA das colunas no fim;
+     peso 0 emite "—" em vez de célula vazia. Kinds novos meta/roster*/legend*.
+     (b) Apps Script v3.4: estilos dos kinds novos, TETO de largura (autoResize
+     sem limite alargava a coluna de prosa e empurrava o resto para fora da
+     tela) e percentual com 1 casa. (c) VOCABULÁRIO de leitor em todas as
+     superfícies: fator→indicador, alvo→meta (some a frase-muleta "Alvos são
+     metas"), Base→Origem no detalhe, "Vale (R$)"→"Quanto gerou (R$)", sem
+     ⇒/≥/≠ nem jargão de modelo de dados. (d) O card do colaborador rotula o
+     total (era o único elemento sem rótulo), separa a "Base variável" das
+     linhas que somam e passa a mostrar a memória de cálculo EM TELA. (e) CSV
+     e PDF adotam o MESMO registro — o CSV deixa de ser byte-idêntico
+     (colunas/ordem seguem pinadas) e o PDF ganha a legenda impressa. -->
 <!-- Versão: 1.73 | Data: 22/08/2026 -->
 <!-- v1.73 (22/08/2026): §4.18 — saiu a linha "Cada X vale R$ Y" do
      detalhamento (repetia a fórmula do bloco de comissão logo abaixo; em fator
@@ -3108,8 +3126,30 @@ total opcional por plano.
   alvo/realizado/atingimento/peso/valor, comissões com a fórmula de
   `commissionMemory`, bônus, base variável quando participa e total do
   bloco) e o fecho `memberTotal` ("Total — <nome>") SÓ com 2+ planos;
-  `summaryTotal` ("Total geral", col F) é RODAPÉ, SÓ com 2+ pessoas — a base
-  variável nunca soma em total nenhum (multiplica os fatores). O que não
+  a base
+  variável nunca soma em total nenhum (multiplica os indicadores).
+  **Payload v3.4 — leitura para leigos e para o RH (27/08/2026).** A planilha
+  tem DOIS públicos com necessidades opostas: o colaborador ("quanto eu
+  recebo e por quê?") e o RH ("quem recebe quanto, e isso é final?"). O
+  layout por pessoa atendia só o primeiro — o RH abria 40 pessoas e tinha de
+  rolar tudo até o rodapé para saber quanto ia pagar. Entram, ANTES dos cards
+  e sem alterá-los: (a) BLOCO DE CONTEXTO (kind `meta`) com competência, mês
+  APURADO (derivado de `apuracaoRef` — a diferença entre mês de PAGAMENTO e
+  mês de DESEMPENHO existia só como badge na tela e era invisível na
+  planilha, sendo a 1ª dúvida de quem lê), situação publicado × prévia (de
+  `comp_entries.published_at`; status MISTO é dito por extenso, nunca
+  arredondado para "publicado") e data de geração (paridade com o PDF);
+  (b) RESUMO DA FOLHA (`rosterHeader`/`rosterRow`/`rosterTotal`), uma linha
+  por pessoa — plano, total e situação — com hiperlink p/ a aba `Det-<Nome>`,
+  que SUBSTITUIU o rodapé `summaryTotal` (o kind fica na whitelist só p/
+  ticket antigo em trânsito; o builder não o emite mais). No FIM da aba, a
+  LEGENDA das colunas (`legendHeader`/`legend`): o termo na col A e a
+  definição na ÚLTIMA coluna — a de prosa, que o script quebra e limita;
+  texto longo numa coluna do meio alargaria a planilha inteira. A
+  consolidação por pessoa virou UM cálculo (`summaries`) que o resumo, o
+  cabeçalho da seção e o fecho compartilham. Indicador de peso 0 sem override
+  passa a emitir "—" em vez de célula vazia (vazio lê-se como dado faltando;
+  a legenda explica o traço). O que não
   participa é OMITIDO: rótulo "Peso" sai do `detailHeader` quando nenhum
   fator do plano tem peso, e a linha "Base variável" segue o helper
   `baseParticipates` do builder — fator com peso OU comissão sobre a base
@@ -3121,25 +3161,47 @@ total opcional por plano.
   `validateReportPayload` exige kinds↔rows; `summaryHeader`/`summary`/
   `note` reservados — não emitidos, mantidos p/ compat) e o `.gs` (v2.1)
   formata POR KIND em lote (getRangeList): moeda `R$ #,##0.00`, percentual
-  `0.00"%"` (aspas — valor já vem 0–100), bold/fundos em headers/seções
+  `0.0"%"` (aspas — valor já vem 0–100; 1 casa desde v3.4: 2 casas eram ruído
+  e 0 casas criaria a ilusão de fronteira de faixa, com 79,6% exibido como
+  80% numa faixa ≥80% que não se aplicou), bold/fundos em headers/seções
   (`planHeader` no fundo claro dos headers; `memberTotal` no fundo da seção,
-  fechando o bloco), larguras FIXAS (sem autoResize — a memória de cálculo
-  tem coluna larga com wrap) e SEM merge (`clear()` não desfaz merge —
-  re-export deixaria merges órfãos). Frases novas do demonstrativo nascem SÓ
-  em `commission-label.ts` (`sheetFactorNote`/`sheetCommissionSumNote`/
-  `sheetTotalNote`/`sheetSummaryNote`/`SHEET_BASE_NOTE`/
-  `SHEET_NO_ENTRY_NOTE`/`SHEET_MEMBER_TOTAL_NOTE`) — sem jargão interno
-  ("peso 0%", "gatilho/base de comissão"), ausência PINADA em
-  `lib/export/comp-sheet.test.ts`. Escopo `minha` não menciona pessoa:
+  fechando o bloco) e SEM merge (`clear()` não desfaz merge — re-export
+  deixaria merges órfãos). LARGURA (v3.4): `autoResizeColumns` ajusta ao
+  conteúdo, com TETO (`LARGURA_MAX_`) — sem ele a coluna de prosa cresce
+  centenas de px e joga o resto para fora da tela; quem estoura é fixada no
+  teto e recebe `setWrap`. BORDAS (v3.3/v3.4): o card de cada pessoa
+  (`section` → `memberTotal`) e o resumo da folha levam caixa externa +
+  divisórias VERTICAIS, sem nenhuma horizontal interna; cada tabela de
+  registros do detalhe leva caixa externa e régua horizontal SÓ sob o
+  cabeçalho. **Vocabulário (27/08/2026):** toda frase visível dos TRÊS
+  exports nasce SÓ em `commission-label.ts` (`sheetFactorNote`/
+  `sheetCommissionSumNote`/`sheetTotalNote`/`sheetSummaryNote`/
+  `sheetCompetenciaNote`/`sheetApuracaoNote`/`sheetStatusNote`/
+  `sheetGeneratedNote`/`SHEET_LEGEND`/`SHEET_*`/`detail*`), no registro de
+  QUEM LÊ e não de quem modelou: "fator" → "indicador", "alvo" → "meta"
+  (a frase-muleta "Alvos são metas" saiu da grade — legenda que só traduz o
+  próprio vocabulário é sintoma, não ajuda), "gatilho" → "o que define a
+  faixa", "recorte"/"operando" → linguagem comum, ⇒/≥/≠ por extenso, "Base"
+  do detalhe → "Origem" (colidia com "Base variável" na MESMA planilha) e
+  "Vale (R$)" → "Quanto gerou (R$)" ("vale" é lido como vale-refeição num
+  documento que circula no RH). Ausência de jargão PINADA em
+  `lib/export/comp-sheet.test.ts`/`comp.test.ts`/`commission-label.test.ts`. Escopo `minha` não menciona pessoa:
   `section` = nome do plano, sem `planHeader`, fecho "Total do mês" com 2+
   planos (colunas numéricas NÃO deslocam — o mapa kind→coluna do script
   independe de escopo). Degradação bidirecional na transição: script v1 ×
   payload v2 = grid cru com título; script v2 × ticket v1 (rota devolve
   `kinds: null`) = rendering simples antigo; script 2.0 × payload novo =
   kinds novos como texto puro e total da seção sem R$ (republicar p/ os
-  estilos). `compReportValues` foi REMOVIDO (era o grid espelho do CSV); o
-  CSV segue byte-idêntico — CSV e demonstrativo derivam do MESMO
-  `statementBreakdown` (`lib/export/comp.ts`). Atualização do script
+  estilos). `compReportValues` foi REMOVIDO (era o grid espelho do CSV).
+  CSV e demonstrativo derivam do MESMO `statementBreakdown`
+  (`lib/export/comp.ts`); desde 27/08/2026 o CSV NÃO é mais byte-idêntico à
+  v1.0 (pino atualizado de propósito): ele é lido pelas mesmas pessoas e
+  falava o registro interno, e agora consome as frases `sheet*` — a ORDEM e a
+  quantidade de colunas seguem pinadas, que é o que quebraria integração de
+  terceiro. O PDF idem: o `entryMemoryLines` saiu do `comp-report-print`
+  porque o `CompPlanCard` passou a renderizar a memória EM TELA (antes o
+  colaborador só via a explicação do próprio número se imprimisse), e a
+  impressão ganhou a mesma legenda da planilha — papel não tem tooltip. Atualização do script
   publicado: nova VERSÃO da MESMA implantação (URL /exec não muda — runbook
   em `supabase/README.md`).
   **Detalhamento por REGISTRO — tela e planilha do mesmo núcleo (payload v3,

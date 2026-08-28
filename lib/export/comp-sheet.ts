@@ -1,3 +1,23 @@
+// Versão: 1.3 | Data: 27/08/2026
+// v1.3: a planilha passou a ser lida por DOIS públicos com necessidades
+// opostas — o colaborador ("quanto eu recebo e por quê?") e o RH ("quem recebe
+// quanto, isso é final?"). O demonstrativo por pessoa (v1.1/v1.2) atendia só o
+// primeiro. Entram, sem tocar nos cards:
+// (a) BLOCO DE CONTEXTO no topo (kind `meta`) — competência, mês APURADO
+//     (derivado de apuracaoRef; a diferença entre mês de pagamento e mês de
+//     desempenho era invisível na planilha e é a 1ª dúvida de quem lê),
+//     situação publicado/prévia (de comp_entries.published_at, com status
+//     misto dito por extenso) e data de geração (paridade com o PDF);
+// (b) RESUMO DA FOLHA (`rosterHeader`/`rosterRow`/`rosterTotal`) antes dos
+//     cards, uma linha por pessoa com link p/ a aba Det-<Nome> — é a resposta
+//     do RH na primeira tela; SUBSTITUI o antigo rodapé `summaryTotal` (que
+//     obrigava a rolar a planilha inteira e só existia com 2+ pessoas);
+// (c) LEGENDA das colunas no fim (`legendHeader`/`legend`);
+// (d) peso 0 sem override passa a emitir "—" em vez de célula vazia — vazio
+//     lê-se como dado faltando; e a coluna "Alvo" virou "Meta" (vocabulário
+//     único, ver commission-label v1.12).
+// A consolidação por pessoa virou UM cálculo (`summaries`) que o resumo, o
+// cabeçalho do card e o fecho compartilham.
 // Versão: 1.2 | Data: 16/08/2026
 // v1.2: bloco da pessoa com INÍCIO e FIM marcados e navegação para o detalhe.
 // (a) 2 linhas de respiro entre colaboradores (era 1); (b) `memberTotal` passa
@@ -30,15 +50,28 @@
 // byte-idêntico e NÃO passa por aqui.
 import {
   commissionMemory,
+  sheetApuracaoNote,
   sheetCommissionSumNote,
+  sheetCompetenciaNote,
   sheetFactorNote,
+  sheetGeneratedNote,
+  sheetRosterTotalNote,
+  sheetStatusNote,
   sheetSummaryNote,
   sheetTotalNote,
   SHEET_BASE_NOTE,
+  SHEET_LEGEND,
+  SHEET_LEGEND_TITLE,
   SHEET_MEMBER_TOTAL_NOTE,
   SHEET_NO_ENTRY_NOTE,
+  SHEET_ROSTER_DRAFT,
+  SHEET_ROSTER_HEADERS,
+  SHEET_ROSTER_PUBLISHED,
+  SHEET_ROSTER_TITLE,
+  SHEET_ROSTER_TOTAL_LABEL,
 } from "@/lib/comp/commission-label";
 import {
+  apuracaoRef,
   COMP_BASE_REF,
   roundMoney,
   type CompPlanConfig,
@@ -47,6 +80,7 @@ import {
   detailTabName,
   type CompSheetRowKind,
 } from "@/lib/comp/sheets-export";
+import { MONTH_LABELS } from "@/lib/date/month-labels";
 import { statementBreakdown, type CompStatementInput } from "./comp";
 
 export const COMP_SHEET_COLS = 7;
@@ -98,7 +132,16 @@ function baseParticipates(config: CompPlanConfig): boolean {
 
 export function compSheetReport(
   inputs: CompStatementInput[],
-  opts: { monthLabel: string }
+  opts: {
+    monthLabel: string;
+    // Mês do PAGAMENTO — usados para derivar a janela apurada (apuracaoRef).
+    // Opcionais por compat: sem eles o bloco de contexto omite a linha de
+    // apuração em vez de inventá-la.
+    year?: number;
+    month?: number;
+    /** Injetável p/ teste; default = agora. */
+    generatedAt?: Date;
+  }
 ): CompSheetReport {
   const title = `Demonstrativo de remuneração — ${opts.monthLabel}`;
 
@@ -136,18 +179,22 @@ export function compSheetReport(
     links.push(link);
   };
 
-  let grandTotal = 0;
-  let grandHasTotal = false;
-
-  for (const [label, list] of people) {
-    // Consolidado da pessoa (cabeçalho da seção + memberTotal).
+  // ---- Consolidação por pessoa, UMA vez: o resumo do topo, o cabeçalho do
+  // card e o fecho da pessoa leem daqui (nunca dois caminhos p/ o mesmo total).
+  const summaries = people.map(([label, list]) => {
     let factors = 0;
     let commission = 0;
     let hasCommission = false;
     let bonus = 0;
     let total = 0;
     let hasTotal = false;
-    for (const { derived } of list) {
+    let entries = 0;
+    let publishedEntries = 0;
+    for (const { input, derived } of list) {
+      if (input.entry) {
+        entries += 1;
+        if (input.entry.published_at) publishedEntries += 1;
+      }
       if (!derived) continue;
       const { breakdown } = derived;
       factors += breakdown.factorsTotal;
@@ -162,10 +209,96 @@ export function compSheetReport(
         hasTotal = true;
       }
     }
-    if (hasTotal) {
-      grandTotal += total;
-      grandHasTotal = true;
+    return {
+      label,
+      list,
+      planNames: list.map((d) => d.input.planName).join(" · "),
+      factors,
+      commission,
+      hasCommission,
+      bonus,
+      total,
+      hasTotal,
+      entries,
+      publishedEntries,
+    };
+  });
+
+  const grandTotal = summaries.reduce(
+    (a, s) => a + (s.hasTotal ? s.total : 0),
+    0
+  );
+  const grandHasTotal = summaries.some((s) => s.hasTotal);
+
+  // ---- Contexto: de que mês é, sobre qual desempenho, e se o valor é final.
+  // Vem antes de qualquer número — são as perguntas que o leitor faz primeiro.
+  push("meta", [sheetCompetenciaNote(opts.monthLabel)]);
+  if (opts.year != null && opts.month != null) {
+    const shifted = inputs.filter((i) => i.config.apuracao === "mes_anterior");
+    if (shifted.length > 0) {
+      const ref = apuracaoRef(opts.year, opts.month, {
+        apuracao: "mes_anterior",
+      });
+      push("meta", [
+        sheetApuracaoNote(
+          `${MONTH_LABELS[ref.month - 1]} de ${ref.year}`,
+          shifted.length === inputs.length
+        ),
+      ]);
     }
+  }
+  push("meta", [
+    sheetStatusNote(
+      summaries.reduce((a, s) => a + s.publishedEntries, 0),
+      summaries.reduce((a, s) => a + s.entries, 0)
+    ),
+  ]);
+  push("meta", [sheetGeneratedNote(opts.generatedAt ?? new Date())]);
+
+  // ---- Resumo da folha: a resposta do RH na primeira tela, com link p/ o
+  // detalhe de cada pessoa. Os cards por pessoa seguem abaixo, intactos.
+  push("blank", []);
+  push("rosterHeader", [SHEET_ROSTER_TITLE]);
+  push("rosterHeader", [...SHEET_ROSTER_HEADERS]);
+  for (const s of summaries) {
+    push(
+      "rosterRow",
+      [
+        s.label,
+        s.planNames,
+        "",
+        "",
+        "",
+        s.hasTotal ? roundMoney(s.total) : "",
+        s.entries === 0
+          ? SHEET_NO_ENTRY_NOTE
+          : s.publishedEntries === s.entries
+            ? SHEET_ROSTER_PUBLISHED
+            : SHEET_ROSTER_DRAFT,
+      ],
+      tabByLabel.get(s.label) ?? null
+    );
+  }
+  push("rosterTotal", [
+    SHEET_ROSTER_TOTAL_LABEL,
+    "",
+    "",
+    "",
+    "",
+    grandHasTotal ? roundMoney(grandTotal) : "",
+    sheetRosterTotalNote(summaries.length),
+  ]);
+
+  for (const {
+    label,
+    list,
+    factors,
+    commission,
+    hasCommission,
+    bonus,
+    total,
+    hasTotal,
+  } of summaries) {
 
     // Cabeçalho da pessoa (nome 1× + total resumido). Duas linhas de respiro
     // abrem o bloco — o script ainda reforça início/fim com fundo e borda.
@@ -200,10 +333,10 @@ export function compSheetReport(
       const { breakdown, inputs: entryInputs } = derived;
       push("detailHeader", [
         "Item",
-        "Alvo",
+        "Meta",
         "Realizado",
         "Atingimento",
-        // Coluna sem uso no plano (nenhum fator com peso) fica sem rótulo.
+        // Coluna sem uso no plano (nenhum indicador com peso) fica sem rótulo.
         input.config.factors.some((f) => f.weightPct > 0) ? "Peso" : "",
         "Valor (R$)",
         "Memória de cálculo",
@@ -217,8 +350,10 @@ export function compSheetReport(
           b.realized ?? "",
           b.attainmentPct != null ? roundMoney(b.attainmentPct) : "",
           f.weightPct > 0 ? f.weightPct : "",
-          // Paridade com o card: peso 0 sem override exibe "—" (aqui vazio).
-          f.weightPct === 0 && !b.overridden.payout ? "" : b.payout,
+          // Peso 0 sem override não gera valor próprio: "—" (e não célula em
+          // branco) diz que a ausência é deliberada — a legenda explica o
+          // traço. Célula vazia lê-se como dado faltando.
+          f.weightPct === 0 && !b.overridden.payout ? "—" : b.payout,
           sheetFactorNote(f, b, breakdown.base),
         ]);
       }
@@ -300,18 +435,14 @@ export function compSheetReport(
     ]);
   }
 
-  // Rodapé — só quando há mais de uma pessoa p/ somar.
-  if (people.length > 1) {
-    push("blank", []);
-    push("summaryTotal", [
-      "Total geral",
-      "",
-      "",
-      "",
-      "",
-      grandHasTotal ? roundMoney(grandTotal) : "",
-      "",
-    ]);
+  // Legenda no FIM: é material de consulta, não de abertura — quem já entende
+  // as colunas não deveria rolar por cima dela para chegar aos números.
+  // A definição vai na última coluna (a de prosa, que o script quebra e
+  // limita); pôr texto longo numa coluna do meio alargaria a planilha inteira.
+  push("blank", []);
+  push("legendHeader", [SHEET_LEGEND_TITLE]);
+  for (const [term, meaning] of SHEET_LEGEND) {
+    push("legend", [term, "", "", "", "", "", meaning]);
   }
 
   return {

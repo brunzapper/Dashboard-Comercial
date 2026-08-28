@@ -727,10 +727,25 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (é ele que marca o FIM do bloco no `.gs`) e, com um ÚNICO plano, ele
   SUBSTITUI o `blockTotal` daquele plano (herdando o `sheetTotalNote`) — nunca
   duas linhas "Total" idênticas; 2 linhas `blank` (era 1) abrem cada bloco.
-  `summaryTotal` ("Total geral") virou rodapé, SÓ com 2+ pessoas; o ramo do
+  o ramo do
   escopo "minha" SAIU do builder junto com o botão da tela do vendedor (o
   valor segue no contrato/constraint por causa de `comp_sheet_links` já
-  gravados). O que não
+  gravados). **Payload v3.4 = LEITURA PARA LEIGOS E PARA O RH (27/08/2026):**
+  a planilha tem DOIS públicos com necessidades opostas (o colaborador quer
+  "quanto e por quê"; o RH quer "quem recebe quanto e se é final") e o layout
+  por pessoa atendia só o primeiro. Entram, ANTES dos cards e sem tocá-los:
+  bloco `meta` (competência, mês APURADO derivado de `apuracaoRef` — a
+  diferença entre mês de pagamento e mês de desempenho era invisível na
+  planilha; situação publicado/prévia de `comp_entries.published_at`, status
+  MISTO dito por extenso; data de geração) e RESUMO da folha
+  (`rosterHeader`/`rosterRow`/`rosterTotal`, uma linha por pessoa com link p/
+  a aba `Det-<Nome>`), que SUBSTITUIU o rodapé `summaryTotal` (kind mantido na
+  whitelist só p/ ticket antigo em trânsito — o builder não o emite mais); e,
+  no FIM, a LEGENDA das colunas (`legendHeader`/`legend`, definição na coluna
+  de prosa — texto longo numa coluna do meio alargaria a planilha inteira).
+  Peso 0 sem override emite "—" (célula vazia lia-se como dado faltando). A
+  consolidação por pessoa é UM cálculo (`summaries`) compartilhado pelo
+  resumo, pelo cabeçalho do card e pelo fecho. O que não
   participa é OMITIDO: rótulo "Peso" some do `detailHeader` quando nenhum
   fator tem peso, e a linha "Base variável" só entra quando a base participa
   — comissão `flat` sobre a base NÃO conta (computeEntry ignora o basis) e
@@ -744,12 +759,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
   detalhe) e escreve em DUAS PASSADAS (cria/limpa todas as abas p/ colher os
   `gid`, depois preenche com os hiperlinks resolvidos), com degradação
   bidirecional (script v2.1 × payload v3 = só a aba do mês, sem links nem
-  detalhe; script v3 × ticket v2 = comportamento anterior); frases novas do demonstrativo
-  SÓ em `commission-label.ts` (`sheetFactorNote`/`sheetTotalNote`/
-  `sheetSummaryNote`/`SHEET_*`), sem jargão interno (pinado em
-  `comp-sheet.test.ts`); o CSV NÃO passa por aí (builder `compReportCsv`
-  intocado, byte-idêntico; `compReportValues` foi removido — deriva via
-  `statementBreakdown` de `lib/export/comp.ts`).
+  detalhe; script v3 × ticket v2 = comportamento anterior). LARGURA de coluna
+  (v3.4): `autoResizeColumns` ajusta ao conteúdo, mas com TETO
+  (`LARGURA_MAX_`) — a coluna de prosa cresceria centenas de px e jogaria o
+  resto para fora da tela; quem estoura é fixada no teto e ganha `setWrap`.
+  **VOCABULÁRIO (27/08/2026):** TODA frase visível dos três exports sai de
+  `commission-label.ts` (dono ÚNICO — `sheetFactorNote`/`sheetTotalNote`/
+  `sheetSummaryNote`/`SHEET_*`/`detail*`) no registro de QUEM LÊ, não de quem
+  modelou: "fator" → "indicador", "alvo" → "meta" (a frase-muleta "Alvos são
+  metas" saiu da grade), "gatilho" → "o que define a faixa",
+  "recorte"/"operando" → linguagem comum, e ⇒/≥/≠ viraram palavras. O CSV
+  DEIXOU de ser byte-idêntico (v1.3, pino atualizado de propósito): ele é lido
+  pelas mesmas pessoas e agora consome as frases `sheet*` — a ORDEM e a
+  quantidade de colunas seguem pinadas. O PDF idem (o `entryMemoryLines` saiu
+  do `comp-report-print`: quem renderiza a memória agora é o próprio
+  `CompPlanCard`, em tela — antes o colaborador só a via se imprimisse) e
+  ganhou a legenda impressa. Pinado em `comp-sheet.test.ts`/`comp.test.ts`/
+  `commission-label.test.ts`.
   **DETALHAMENTO por registro — tela e planilha do MESMO núcleo (16/08/2026):**
   `lib/comp/detail.ts` é o dono ÚNICO de "quais registros compõem este membro ×
   fator × mês", consumido pelo painel de conferência da tela

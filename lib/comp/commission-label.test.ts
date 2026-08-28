@@ -83,7 +83,7 @@ describe("commissionMemory", () => {
       `${fmtNumBR(40)}% × ${fmtMoneyBRL(9450)} (Vendas) = ${fmtMoneyBRL(3780)}`
     );
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(80)}% (atingimento de Vendas: ${fmtNumBR(90)}%)`
+      `faixa a partir de ${fmtNumBR(80)}% (atingimento de Vendas: ${fmtNumBR(90)}%)`
     );
   });
 
@@ -130,7 +130,7 @@ describe("commissionMemory", () => {
     );
     expect(mem.formula).toBe(`${fmtMoneyBRL(750)} (valor fixo da faixa)`);
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(75)}% (atingimento de Reuniões: ${fmtNumBR(90)}%)`
+      `faixa a partir de ${fmtNumBR(75)}% (atingimento de Reuniões: ${fmtNumBR(90)}%)`
     );
   });
 
@@ -138,12 +138,12 @@ describe("commissionMemory", () => {
     const below = commissionMemory(block({ triggerValue: 40 }));
     expect(below.formula).toBeNull();
     expect(below.tierNote).toBe(
-      `nenhuma faixa atingida (gatilho: ${fmtNumBR(40)}%)`
+      `nenhuma faixa alcançada (Vendas: ${fmtNumBR(40)}%)`
     );
     const empty = commissionMemory(block());
     expect(empty.formula).toBeNull();
     expect(empty.tierNote).toBe(
-      "sem gatilho apurado (atingimento/realizado vazio)"
+      "sem base para escolher a faixa (atingimento ou realizado em branco)"
     );
   });
 
@@ -159,7 +159,7 @@ describe("commissionMemory", () => {
     );
     expect(mem.formula).toBeNull();
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(50)}% (atingimento de Vendas: ${fmtNumBR(90)}%) — fator-base sem realizado ⇒ ${fmtMoneyBRL(0)}`
+      `faixa a partir de ${fmtNumBR(50)}% (atingimento de Vendas: ${fmtNumBR(90)}%) — indicador de base sem realizado: ${fmtMoneyBRL(0)}`
     );
   });
 
@@ -250,7 +250,7 @@ describe("entryMemoryLines", () => {
     );
     const lines = entryMemoryLines(cfgSoComissao, bd);
     expect(lines[0]).toBe(
-      `Reuniões: realizado ${fmtNumBR(44)} (gatilho/base de comissão)`
+      `Reuniões: realizado ${fmtNumBR(44)} (usado para definir a faixa da comissão)`
     );
     expect(lines[1]).toBe(
       `Prêmio por reunião: ${fmtNumBR(44)} (Reuniões) × ${fmtMoneyBRL(12.5)} = ${fmtMoneyBRL(550)} — faixa a partir de ${fmtNumBR(26)} (Reuniões: ${fmtNumBR(44)})`
@@ -309,7 +309,7 @@ describe("entryMemoryLines", () => {
     const lines = entryMemoryLines(cfgPesos, bd);
     expect(lines[0]).toBe(`Vendas: ${fmtMoneyBRL(500)} (manual)`);
     expect(lines[1]).toBe(
-      `Reuniões: sem atingimento (alvo/realizado vazio) ⇒ ${fmtMoneyBRL(0)}`
+      `Reuniões: sem atingimento (meta ou realizado em branco): ${fmtMoneyBRL(0)}`
     );
   });
 
@@ -440,6 +440,6 @@ describe("sheetFactorNote", () => {
   it("fator COM peso segue com a conta e os anexos do alvo", () => {
     const nota = sheetFactorNote(fator({ weightPct: 40 }), bd(), 1000);
     expect(nota).toContain("×");
-    expect(nota).toContain("Alvo padrão do plano");
+    expect(nota).toContain("Meta padrão do plano");
   });
 });

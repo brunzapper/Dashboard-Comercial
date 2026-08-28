@@ -543,9 +543,9 @@ export function PlanEditor(props: PlanEditorProps) {
     for (const [i, b] of commBlocks.entries()) {
       const who = b.label.trim() || `Comissão ${i + 1}`;
       if (!factorIds.has(b.trigger))
-        return `Escolha o fator gatilho (${who}).`;
+        return `Escolha o indicador que define a faixa (${who}).`;
       if (b.kind === "per_unit" && (b.basis === BASIS_BASE || b.basis === ""))
-        return `"R$ por unidade" exige um fator como base (${who}).`;
+        return `"R$ por unidade" exige um indicador como base (${who}).`;
       if (b.basis !== BASIS_BASE && !factorIds.has(b.basis))
         return `Escolha a base da comissão (${who}).`;
       const parsed = parseTierDrafts(b.tiers, b.kind);
@@ -589,7 +589,7 @@ export function PlanEditor(props: PlanEditorProps) {
       const empty = Array.isArray(flt.value)
         ? flt.value.length === 0
         : String(flt.value ?? "").trim() === "";
-      if (empty) return `Condição sem valor no fator "${who}".`;
+      if (empty) return `Condição sem valor no indicador "${who}".`;
     }
     return cleaned;
   };
@@ -602,21 +602,21 @@ export function PlanEditor(props: PlanEditorProps) {
       for (const [i, f] of factors.entries()) {
         const who = f.label.trim() || `Fator ${i + 1}`;
         if (f.label.trim() === "") {
-          notifyActionError("Salvar plano", `Dê um nome ao fator ${i + 1}.`);
+          notifyActionError("Salvar plano", `Dê um nome ao indicador ${i + 1}.`);
           return;
         }
         const w = numOrNull(f.weightPct);
         if (w == null || w < 0) {
           notifyActionError(
             "Salvar plano",
-            `Informe o peso do fator "${who}" — 0 vale (fator só de gatilho/base de comissão).`
+            `Informe o peso do indicador "${who}" — 0 vale (indicador que só define a faixa da comissão).`
           );
           return;
         }
         if (f.formula.tokens.length === 0) {
           notifyActionError(
             "Salvar plano",
-            `Monte a fórmula do realizado do fator "${who}".`
+            `Monte a fórmula do realizado do indicador "${who}".`
           );
           return;
         }
@@ -808,7 +808,7 @@ export function PlanEditor(props: PlanEditorProps) {
       {/* Fatores */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-medium">Fatores</h2>
+          <h2 className="text-lg font-medium">Indicadores</h2>
           <Badge variant={Math.round(weightSum) === 100 ? "secondary" : "outline"}>
             Σ pesos: {weightSum.toLocaleString("pt-BR")}%
           </Badge>
@@ -822,7 +822,7 @@ export function PlanEditor(props: PlanEditorProps) {
           <div key={f.id} className="bg-card flex flex-col gap-3 rounded-md border p-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               <div className="flex flex-col gap-1.5 lg:col-span-2">
-                <Label>Nome do fator</Label>
+                <Label>Nome do indicador</Label>
                 <Input
                   value={f.label}
                   onChange={(e) => patchFactor(f.id, { label: e.target.value })}
@@ -867,7 +867,7 @@ export function PlanEditor(props: PlanEditorProps) {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label>Métrica de meta (alvos)</Label>
+                <Label>Métrica de meta</Label>
                 <Combobox
                   options={metricOptions}
                   value={f.metricKey}
@@ -876,7 +876,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   }
                 />
                 <p className="text-muted-foreground text-xs">
-                  Os alvos digitados na grade viram METAS desta métrica — também
+                  As metas digitadas na grade viram METAS desta métrica — também
                   gerenciáveis em Configurações → Metas.
                 </p>
               </div>
@@ -898,7 +898,7 @@ export function PlanEditor(props: PlanEditorProps) {
                 onChange={(formula) => patchFactor(f.id, { formula })}
                 preview={{
                   title:
-                    "Prévia do realizado (todo período, com as condições do fator, sem recorte de membro)",
+                    "Prévia do realizado (todo período, com as condições do indicador, sem recorte de membro)",
                   manualStart: true,
                   run: (formula) =>
                     previewAggregateFormula({
@@ -960,9 +960,9 @@ export function PlanEditor(props: PlanEditorProps) {
                 </Button>
               </div>
               <p className="text-muted-foreground text-xs">
-                Condições em E aplicadas ao realizado deste fator, antes do
-                recorte de membro. Um fator com peso 0 pode servir só de
-                gatilho de comissão.
+                Condições em E aplicadas ao realizado deste indicador, antes do
+                recorte de membro. Um indicador com peso 0 pode servir só de
+                gatilho de comissão — ele define a faixa sem gerar valor próprio.
               </p>
             </div>
             {/* Avançado: campo de membro / alvo padrão / moeda do alvo */}
@@ -985,7 +985,7 @@ export function PlanEditor(props: PlanEditorProps) {
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Alvo padrão do plano</Label>
+                <Label>Meta padrão do plano</Label>
                 <Input
                   inputMode="decimal"
                   value={f.defaultTarget}
@@ -1000,7 +1000,7 @@ export function PlanEditor(props: PlanEditorProps) {
                 </p>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Moeda do alvo</Label>
+                <Label>Moeda da meta</Label>
                 <Combobox
                   options={currencyOptions}
                   value={f.targetCurrency || CURRENCY_DEFAULT}
@@ -1011,7 +1011,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   }
                 />
                 <p className="text-muted-foreground text-xs">
-                  Alvos digitados nesta moeda são convertidos a R$ pela
+                  Metas digitadas nesta moeda são convertidas a R$ pela
                   cotação do trimestre (Campos → Moedas). Sem cotação, o
                   atingimento fica em erro — nunca converte 1:1.
                 </p>
@@ -1037,7 +1037,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   );
                 }}
               >
-                <Trash2 className="size-4" /> Remover fator {idx + 1}
+                <Trash2 className="size-4" /> Remover indicador {idx + 1}
               </Button>
             </div>
           </div>
@@ -1050,7 +1050,7 @@ export function PlanEditor(props: PlanEditorProps) {
             disabled={factors.length >= MAX_FACTORS}
             onClick={() => setFactors((cur) => [...cur, emptyFactor()])}
           >
-            <Plus className="size-4" /> Adicionar fator
+            <Plus className="size-4" /> Adicionar indicador
           </Button>
         </div>
       </div>
@@ -1092,7 +1092,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label>Fator gatilho</Label>
+                  <Label>Indicador que define a faixa</Label>
                   <Combobox
                     options={factorOptions}
                     value={b.trigger}
@@ -1100,7 +1100,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   />
                   {b.trigger === "" ? (
                     <p className="text-destructive text-xs">
-                      Escolha o fator que decide a faixa.
+                      Escolha o indicador que decide a faixa.
                     </p>
                   ) : null}
                 </div>
@@ -1159,7 +1159,7 @@ export function PlanEditor(props: PlanEditorProps) {
                   {b.basis === "" ? (
                     <p className="text-destructive text-xs">
                       {b.kind === "per_unit"
-                        ? "Escolha o fator cujo realizado multiplica o R$ da faixa."
+                        ? "Escolha o indicador cujo realizado multiplica o R$ da faixa."
                         : "Escolha sobre o que a % incide."}
                     </p>
                   ) : null}
