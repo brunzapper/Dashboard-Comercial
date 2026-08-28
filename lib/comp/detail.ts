@@ -1,3 +1,12 @@
+// Versão: 1.8 | Data: 28/08/2026
+// v1.8: (a) BÔNUS na aba de detalhe — CompDetailPlan.bonuses sai do MESMO
+// `derived` que alimenta o monthTotal (inputs.bonuses, sem consulta nova). O
+// bônus entra no total (computeEntry) mas não tinha linha: a aba fechava com
+// um "Total" que incluía um valor ausente dela inteira, justo no documento
+// onde se vai conferir. (b) CRÉDITO DE EQUIPE — com factor.memberTeams a
+// listagem passa a trazer registros em nome dos liderados, e um warning
+// (detailTeamNote) diz de quem são: sem isso o líder lê nomes que não são os
+// dele e conclui que a conta está errada.
 // Versão: 1.0 | Data: 16/08/2026
 // Detalhamento por REGISTRO da remuneração — núcleo ÚNICO da pergunta "quais
 // registros compõem este membro × fator × mês", consumido pelo diálogo de
@@ -31,6 +40,7 @@ import {
   DETAIL_UNSUPPORTED_FIELD_NOTE,
   detailAggNote,
   detailMergedAggNote,
+  detailTeamNote,
   detailTruncatedNote,
   factorPayoutFormula,
 } from "@/lib/comp/commission-label";
@@ -246,6 +256,13 @@ export interface CompDetailPlan {
   factors: CompDetailFactor[];
   /** Todos os blocos de comissão do plano (bloco próprio no detalhamento). */
   commissions: CompDetailCommission[];
+  /**
+   * Bônus do lançamento. Não têm registros por trás (são valores manuais com
+   * um motivo), mas ENTRAM no total do mês (`computeEntry`) — sem eles a aba
+   * fechava com um "Total" que incluía um valor ausente da aba inteira, que é
+   * justamente o documento onde se vai conferir. `[]` quando não há.
+   */
+  bonuses: { label: string; amount: number }[];
 }
 
 export interface CompDetailMember {
@@ -585,6 +602,15 @@ export function operandRecordQuery(
   if ("error" in memberFilter) return { ok: false, error: memberFilter.error };
 
   const warnings: string[] = [];
+  // Com crédito de equipe, a lista traz registros em nome de outras pessoas —
+  // dizer de quem evita que o líder leia isso como erro de cálculo.
+  const team = factor.memberTeams?.[canonicalOf(memberId, ctx.canon) ?? memberId];
+  if (team && team.length > 0) {
+    const nomes = team
+      .map((id) => ctx.nameById.get(id))
+      .filter((n): n is string => Boolean(n && n.trim() !== ""));
+    if (nomes.length > 0) warnings.push(detailTeamNote(nomes));
+  }
   if ((factor.filters ?? []).some((f) => !listFilterFieldSupported(f.field)))
     warnings.push(DETAIL_DROPPED_FILTER_NOTE);
   if (operand.field !== "*" && !listFilterFieldSupported(operand.field))
@@ -1246,6 +1272,12 @@ export async function loadCompDetail(
         planName: plan.row.name,
         factors,
         commissions,
+        // Mesmo `derived` que alimentou o monthTotal acima — o bônus vem do
+        // lançamento, sem consulta nova.
+        bonuses: (derived?.inputs.bonuses ?? []).map((b) => ({
+          label: b.label,
+          amount: b.amount,
+        })),
       });
     }
     if (plans.length === 0) continue;

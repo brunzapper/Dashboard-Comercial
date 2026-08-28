@@ -49,6 +49,7 @@
 // rótulos de coluna/junção, que são layout). O CSV (compReportCsv) segue
 // byte-idêntico e NÃO passa por aqui.
 import {
+  bonusRowLabel,
   commissionMemory,
   sheetApuracaoNote,
   sheetCommissionSumNote,
@@ -386,7 +387,7 @@ export function compSheetReport(
       }
       for (const b of entryInputs.bonuses) {
         push("bonus", [
-          b.label ? `Bônus — ${b.label}` : "Bônus",
+          bonusRowLabel(b.label),
           "",
           "",
           "",

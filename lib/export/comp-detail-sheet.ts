@@ -1,3 +1,9 @@
+// Versão: 1.7 | Data: 28/08/2026
+// v1.7: linhas de BÔNUS por plano (kind `bonus`, já existente na whitelist e
+// já formatado pelo .gs — não exige republicar o script). O bônus não tem
+// registros por trás, mas ENTRA no total do mês; sem estas linhas a aba
+// fechava com um "Total" que incluía um valor que não aparecia nela.
+// Rótulo compartilhado com a aba do mês via bonusRowLabel (commission-label).
 // Versão: 1.6 | Data: 22/08/2026
 // v1.6: saiu a linha "Cada X vale R$ Y" — a fórmula do bloco de comissão logo
 // abaixo já diz o valor por unidade. A coluna "Vale (R$)" por registro fica.
@@ -38,6 +44,7 @@
 // A cada export a aba é recriada do zero (clear()) e só com o período pedido —
 // abas Det-* órfãs são removidas pelo script.
 import {
+  bonusRowLabel,
   DETAIL_BACK_NOTE,
   DETAIL_DIVERGE_MARK,
   DETAIL_EMPTY_NOTE,
@@ -249,6 +256,14 @@ export function compDetailSheets(
       for (const c of plan.commissions) {
         push("blank", []);
         pushCommission(c, push);
+      }
+      // Bônus: sem registros por trás (é valor manual com um motivo), mas
+      // ENTRA no total do mês. Sem estas linhas a aba fechava com um "Total"
+      // que incluía um valor ausente da aba inteira — no documento onde a
+      // pessoa vai justamente conferir. Mesma ordem da aba do mês.
+      if (plan.bonuses.length > 0) push("blank", []);
+      for (const b of plan.bonuses) {
+        push("bonus", [bonusRowLabel(b.label), "", "", "", "", b.amount, ""]);
       }
     }
     push("blank", []);

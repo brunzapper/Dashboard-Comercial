@@ -114,7 +114,13 @@ const membro = (over: Partial<CompDetailMember> = {}): CompDetailMember => ({
   tabName: "Det-Ana",
   monthTotal: 1050,
   plans: [
-    { planId: "p1", planName: "Plano A", factors: [fator()], commissions: [] },
+    {
+      planId: "p1",
+      planName: "Plano A",
+      factors: [fator()],
+      commissions: [],
+      bonuses: [],
+    },
   ],
   ...over,
 });
@@ -130,6 +136,7 @@ const planoCom = (f: CompDetailFactor) => ({
   planName: "Plano A",
   factors: [f],
   commissions: [],
+  bonuses: [],
 });
 
 const kindsDe = (
@@ -331,6 +338,7 @@ describe("compDetailSheets", () => {
               planName: "Plano A",
               factors: [fator({ commissions: [comissao] })],
               commissions: [comissao],
+              bonuses: [],
             },
           ],
         }),
@@ -381,6 +389,7 @@ describe("compDetailSheets", () => {
               planName: "Plano A",
               factors: [fator({ commissions: [comissao] })],
               commissions: [],
+              bonuses: [],
             },
           ],
         }),
@@ -536,6 +545,44 @@ describe("compDetailSheets", () => {
     expect(total[0]).toBe("Total — Ana");
     expect(total[5]).toBe(1050);
     expect(sheet.kinds[sheet.kinds.length - 1]).toBe("memberTotal");
+  });
+
+  it("bônus do lançamento entra na aba — sem ele o Total não fechava", () => {
+    // O bônus não tem registros por trás, mas ENTRA no total do mês
+    // (computeEntry). Antes, a aba fechava com um "Total — Ana" que incluía um
+    // valor ausente da aba inteira: quem abria o detalhamento para conferir
+    // encontrava uma diferença sem explicação.
+    const [sheet] = compDetailSheets(
+      [
+        membro({
+          plans: [
+            {
+              planId: "p1",
+              planName: "Plano A",
+              factors: [fator()],
+              commissions: [],
+              bonuses: [
+                { label: "Aceleração", amount: 200 },
+                { label: "", amount: 50 },
+              ],
+            },
+          ],
+        }),
+      ],
+      OPTS
+    );
+    const linhas = kindsDe(sheet, "bonus");
+    expect(linhas.map((r) => r[0])).toEqual(["Bônus — Aceleração", "Bônus"]);
+    expect(linhas.map((r) => r[5])).toEqual([200, 50]);
+    // Vêm depois dos blocos do plano e antes do fecho da pessoa.
+    expect(sheet.kinds.lastIndexOf("bonus")).toBeLessThan(
+      sheet.kinds.indexOf("memberTotal")
+    );
+  });
+
+  it("sem bônus, nenhuma linha `bonus` é emitida", () => {
+    const [sheet] = compDetailSheets([membro()], OPTS);
+    expect(sheet.kinds).not.toContain("bonus");
   });
 
   it("as abas passam no validador do contrato", () => {
