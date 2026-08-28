@@ -27,11 +27,12 @@ import type { Formula } from "@/lib/records/formulas";
 import { fakeSupabase, type RecordedQuery } from "@/tests/helpers/fake-supabase";
 
 import {
+  memberFilterFor,
   memberResponsibles,
   operationMembersFromScopes,
   recomputePlanMonth,
 } from "./engine";
-import { parseCompPlanConfig } from "./model";
+import { parseCompPlanConfig, type CompFactor } from "./model";
 
 const f = (...refs: string[]): Formula => ({
   tokens: refs.map((ref) => ({ kind: "field", ref })),
@@ -114,6 +115,103 @@ function respFilterOf(args: Record<string, unknown>): unknown {
   const filters = (args.p_filters ?? []) as { field: string; value?: unknown }[];
   return filters.find((x) => x.field === "responsible_id")?.value;
 }
+
+describe("memberFilterFor", () => {
+  const canon = {
+    canonicalById: new Map([[M1A, M1]]),
+    groupById: new Map([
+      [M1, [M1, M1A]],
+      [M1A, [M1, M1A]],
+    ]),
+  };
+  const nameById = new Map([
+    [M1, "Líder"],
+    [M1A, "Líder (apelido)"],
+    [M2, "Liderado"],
+  ]);
+  const fator = (over: Partial<CompFactor> = {}): CompFactor => ({
+    id: "f1",
+    label: "Vendas",
+    weightPct: 100,
+    metricKey: "comp_vendas",
+    money: true,
+    formula: { tokens: [{ kind: "field", ref: "agg:sum:value" }] },
+    sources: [],
+    ...over,
+  });
+
+  it("sem equipe: filtro byte-idêntico ao clássico (nenhum plano existente muda)", () => {
+    // É a invariante que protege todo plano já configurado — o ramo sem
+    // memberField tem de continuar devolvendo o MESMO `eq` de sempre.
+    expect(memberFilterFor(fator(), M1, canon, nameById)).toEqual({
+      field: "responsible_id",
+      op: "eq",
+      value: M1,
+    });
+    // Com memberField, só os nomes do próprio grupo canônico.
+    expect(
+      memberFilterFor(fator({ memberField: "custom:sdr" }), M1, canon, nameById)
+    ).toEqual({
+      field: "custom:sdr",
+      op: "in",
+      value: ["Líder", "Líder (apelido)"],
+    });
+  });
+
+  it("com equipe e memberField: nomes do líder E dos liderados", () => {
+    const f = fator({
+      memberField: "custom:sdr",
+      memberTeams: { [M1]: [M2] },
+    });
+    expect(memberFilterFor(f, M1, canon, nameById)).toEqual({
+      field: "custom:sdr",
+      op: "in",
+      // O líder segue contando o próprio nome; a equipe entra ALÉM dele.
+      value: ["Líder", "Líder (apelido)", "Liderado"],
+    });
+  });
+
+  it("com equipe e sem memberField: responsible_id in, expandido pelo canon", () => {
+    const f = fator({ memberTeams: { [M1]: [M2] } });
+    expect(memberFilterFor(f, M1, canon, nameById)).toEqual({
+      field: "responsible_id",
+      op: "in",
+      value: [M1, M1A, M2],
+    });
+  });
+
+  it("equipe é do LÍDER: membro sem entrada segue só com o próprio", () => {
+    const f = fator({
+      memberField: "custom:sdr",
+      memberTeams: { [M1]: [M2] },
+    });
+    expect(memberFilterFor(f, M2, canon, nameById)).toEqual({
+      field: "custom:sdr",
+      op: "in",
+      value: ["Liderado"],
+    });
+  });
+
+  it("apelido do líder resolve para a equipe do canônico", () => {
+    const f = fator({
+      memberField: "custom:sdr",
+      memberTeams: { [M1]: [M2] },
+    });
+    // A chave do mapa é o id CANÔNICO; chamar com o apelido não pode perder a
+    // equipe (o canonicalOf é a rede defensiva).
+    expect(memberFilterFor(f, M1A, canon, nameById)).toEqual({
+      field: "custom:sdr",
+      op: "in",
+      value: ["Líder", "Líder (apelido)", "Liderado"],
+    });
+  });
+
+  it("ninguém com nome ⇒ erro, nunca consulta sem filtro", () => {
+    const f = fator({ memberField: "custom:sdr", memberTeams: { [M1]: [M2] } });
+    const res = memberFilterFor(f, M1, canon, new Map());
+    expect(res).toHaveProperty("error");
+  });
+});
 
 describe("memberResponsibles", () => {
   it("sem memberIds = ativos canônicos; com memberIds = interseção ordenada", () => {

@@ -167,6 +167,44 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(parseCompPlanConfig(JSON.parse(JSON.stringify(cfg)))).toBeNull();
   });
 
+  it("memberTeams: equipe por líder preservada; entrada vazia descartada", () => {
+    const cfg = makeConfig();
+    (cfg.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: ["a", "b"],
+      // Lista vazia = "sem equipe": descartada, nunca gravada como [] (lista
+      // vazia lida como config foi o que deixou o detailGrouping inerte).
+      semEquipe: [],
+      // O próprio líder e duplicatas somem — já entram sempre no filtro.
+      outro: ["outro", "c", "c"],
+    };
+    const parsed = reparse(cfg);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.factors[0].memberTeams).toEqual({
+      lider: ["a", "b"],
+      outro: ["c"],
+    });
+    // Sem a chave, o fator segue sem equipe (retrocompat).
+    expect(reparse(makeConfig())!.factors[0].memberTeams).toBeUndefined();
+  });
+
+  it("memberTeams: sujeira derruba o config inteiro (fail-closed)", () => {
+    const naoObjeto = makeConfig();
+    (naoObjeto.factors[0] as { memberTeams?: unknown }).memberTeams = ["a"];
+    expect(reparse(naoObjeto)).toBeNull();
+
+    const valorNaoArray = makeConfig();
+    (valorNaoArray.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: "a",
+    };
+    expect(reparse(valorNaoArray)).toBeNull();
+
+    const idVazio = makeConfig();
+    (idVazio.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: ["a", ""],
+    };
+    expect(reparse(idVazio)).toBeNull();
+  });
+
   it("comissão: aceita bloco válido (memberTiers preservado) e segue sem ele", () => {
     const parsed = reparse(
       withCommission({ memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] } })

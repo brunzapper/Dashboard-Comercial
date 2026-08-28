@@ -102,6 +102,13 @@ export interface CompFactor {
   // com os display_names do grupo canônico do membro) é do ENGINE — aqui só o
   // contrato. Ausente = filtro responsible_id eq (comportamento clássico).
   memberField?: string;
+  // EQUIPE creditada a um membro: id CANÔNICO do líder → ids dos liderados.
+  // Serve à remuneração de LÍDER, cujas oportunidades ficam em nome do time —
+  // sem isto o líder não casa nada e o realizado sai 0. O engine soma a equipe
+  // ao próprio membro (memberFilterFor); ausência = só o próprio, como sempre.
+  // Sobreposição entre líderes é INTENCIONAL: cada um é medido pela própria
+  // equipe, então a mesma pessoa pode contar para dois (nada a validar).
+  memberTeams?: Record<string, string[]>;
   // Alvo padrão do mês quando NÃO há linha de goals p/ membro×mês (meta "por
   // sub-operação"). Fallback de LEITURA — nunca vira linha de goals; digitar
   // na célula grava um goal (override), limpar deleta e volta ao padrão.
@@ -431,6 +438,26 @@ function parseFactor(raw: unknown): CompFactor | null {
   if (floorPct != null) out.floorPct = floorPct;
   if (typeof raw.memberField === "string" && raw.memberField !== "")
     out.memberField = raw.memberField;
+  // Equipe por líder — fail-closed no molde do memberTiers: sujeira derruba o
+  // config inteiro, entrada VAZIA é descartada (lista vazia lida como "sem
+  // config" foi o que deixou a 1ª versão do detailGrouping inerte).
+  if (raw.memberTeams != null) {
+    if (!isRecord(raw.memberTeams)) return null;
+    const memberTeams: Record<string, string[]> = {};
+    for (const [leaderId, ids] of Object.entries(raw.memberTeams)) {
+      if (typeof leaderId !== "string" || leaderId === "") return null;
+      if (!Array.isArray(ids)) return null;
+      const team: string[] = [];
+      for (const id of ids) {
+        if (typeof id !== "string" || id === "") return null;
+        // O próprio líder já entra sempre; repetir só duplicaria o nome no
+        // filtro. Duplicata na lista idem.
+        if (id !== leaderId && !team.includes(id)) team.push(id);
+      }
+      if (team.length > 0) memberTeams[leaderId] = team;
+    }
+    if (Object.keys(memberTeams).length > 0) out.memberTeams = memberTeams;
+  }
   if (defaultTarget != null) out.defaultTarget = defaultTarget;
   if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")
     out.targetCurrency = raw.targetCurrency;

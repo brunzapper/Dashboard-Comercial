@@ -126,6 +126,9 @@ interface FactorDraft {
   capPct: string;
   floorPct: string;
   memberField: string; // "" = Responsável (padrão)
+  // Equipe creditada a cada líder: id do líder → ids dos liderados. Chave
+  // ausente/lista vazia = sem equipe (só o próprio, comportamento clássico).
+  memberTeams: Record<string, string[]>;
   defaultTarget: string;
   targetCurrency: string; // "" = R$ (sem conversão)
   filters: WidgetFilter[]; // condições do recorte (linhas cruas da UI)
@@ -147,6 +150,7 @@ function emptyFactor(): FactorDraft {
     capPct: "",
     floorPct: "",
     memberField: "",
+    memberTeams: {},
     defaultTarget: "",
     targetCurrency: "",
     filters: [],
@@ -166,6 +170,10 @@ function draftsFromConfig(config: CompPlanConfig | null): FactorDraft[] {
     capPct: f.capPct != null ? String(f.capPct) : "",
     floorPct: f.floorPct != null ? String(f.floorPct) : "",
     memberField: f.memberField ?? "",
+    // Clona por líder — e, como os filtros, PRECISA ser re-emitido no save.
+    memberTeams: Object.fromEntries(
+      Object.entries(f.memberTeams ?? {}).map(([k, v]) => [k, [...v]])
+    ),
     defaultTarget: f.defaultTarget != null ? String(f.defaultTarget) : "",
     targetCurrency: f.targetCurrency ?? "",
     // Clona (nunca mutar o config das props) — e RE-EMITIR no save é
@@ -655,6 +663,15 @@ export function PlanEditor(props: PlanEditorProps) {
             ? { floorPct: numOrNull(f.floorPct) }
             : {}),
           ...(f.memberField !== "" ? { memberField: f.memberField } : {}),
+          // RE-EMITIR a equipe (mesma regra dos filtros logo abaixo): sem isto
+          // o primeiro save apagaria o crédito de equipe em silêncio.
+          // Entradas vazias saem aqui — o parse do servidor também as descarta.
+          ...(() => {
+            const teams = Object.fromEntries(
+              Object.entries(f.memberTeams).filter(([, ids]) => ids.length > 0)
+            );
+            return Object.keys(teams).length > 0 ? { memberTeams: teams } : {};
+          })(),
           ...(numOrNull(f.defaultTarget) != null
             ? { defaultTarget: numOrNull(f.defaultTarget) }
             : {}),
@@ -1017,6 +1034,42 @@ export function PlanEditor(props: PlanEditorProps) {
                 </p>
               </div>
             </div>
+            {/* Crédito de EQUIPE: remuneração de líder, cujas oportunidades
+                ficam em nome do time. Sem isto o líder não casa nada e o
+                realizado sai 0. Só aparece com membros efetivos resolvidos —
+                sem eles não há a quem atribuir equipe. */}
+            {commissionMembers.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Crédito de equipe (para líderes)</Label>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {commissionMembers.map((m) => (
+                    <div key={m.id} className="flex flex-col gap-1">
+                      <span className="text-muted-foreground text-xs">
+                        {m.label}
+                      </span>
+                      <MemberPicker
+                        responsibles={props.responsibles.filter(
+                          (r) => r.id !== m.id
+                        )}
+                        value={f.memberTeams[m.id] ?? []}
+                        emptyLabel="Sem equipe"
+                        onChange={(v) =>
+                          patchFactor(f.id, {
+                            memberTeams: { ...f.memberTeams, [m.id]: v },
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  O realizado de quem tem equipe passa a somar também os
+                  registros dos selecionados — além dos próprios. Serve para
+                  remunerar líderes cujas oportunidades ficam em nome do time.
+                  Sem seleção, nada muda.
+                </p>
+              </div>
+            ) : null}
             <div className="flex justify-end">
               <Button
                 type="button"
@@ -1486,10 +1539,15 @@ function MemberPicker(props: {
   responsibles: { id: string; label: string }[];
   value: string[];
   onChange: (v: string[]) => void;
+  /**
+   * Rótulo do vazio. No crédito de equipe vazio significa "sem equipe" — o
+   * default "todos os ativos" diria exatamente o oposto do que acontece.
+   */
+  emptyLabel?: string;
 }) {
   const label =
     props.value.length === 0
-      ? "Todos os responsáveis ativos"
+      ? (props.emptyLabel ?? "Todos os responsáveis ativos")
       : `${props.value.length} selecionado(s)`;
   return (
     <Popover>

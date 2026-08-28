@@ -106,6 +106,31 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     expect(notifyActionError).not.toHaveBeenCalled();
   });
 
+  it("save RE-EMITE memberTeams (senão o crédito de equipe sumiria no 1º save)", async () => {
+    // Mesma armadilha dos filtros e do detailGrouping: o editor remonta o
+    // config inteiro no save, então tudo que não for re-emitido é destruído em
+    // silêncio — aqui, um líder perderia a equipe e voltaria a realizar 0.
+    const teams = { lider: ["liderado_a", "liderado_b"] };
+    const cfg = makeConfig();
+    cfg.factors[0].memberTeams = teams;
+    renderEditor(cfg);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors[0].memberTeams).toEqual(teams);
+    expect(notifyActionError).not.toHaveBeenCalled();
+  });
+
+  it("equipe vazia não vira chave no config (vazio = sem equipe)", async () => {
+    const cfg = makeConfig();
+    cfg.factors[0].memberTeams = { lider: [] };
+    renderEditor(cfg);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors[0].memberTeams).toBeUndefined();
+  });
+
   it("save RE-EMITE detailGrouping (senão a engrenagem sumiria no 1º save)", async () => {
     const grouping = { byFactor: { f_r: { into: "count:*", folded: ["sum:value"] } } };
     renderEditor(makeConfig({ detailGrouping: grouping }));
