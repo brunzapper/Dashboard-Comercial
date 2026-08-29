@@ -43,6 +43,7 @@ import {
   groupOperands,
   loadFactorRecords,
   operandRecordQuery,
+  planAppliesToMember,
   MAX_DETAIL_ROWS_PER_FACTOR,
   type CompDetailContext,
   type DetailPlan,
@@ -147,6 +148,8 @@ function planWith(
     targetRates: {},
     entryByMember: new Map(),
     targetsByMember: new Map(),
+    // null = plano de todos os ativos (sem restrição de membro).
+    memberIds: null,
   };
 }
 
@@ -844,5 +847,47 @@ describe("groupOperands", () => {
       separateByFactor: { f_v: [ops[0].key] },
     });
     expect(keysOf(g)).toEqual([[ops[1].key], [ops[2].key, ops[0].key]]);
+  });
+});
+
+describe("planAppliesToMember", () => {
+  const LIDER = "f22e4eba-6b3c-48c4-82e1-73e174309366";
+  const OUTRO = "22222222-2222-4222-8222-222222222222";
+  const entry = { id: "e1", responsible_id: "", base_amount: null, inputs: {},
+    computed: {}, total: 0, mirror_record_id: null, published_at: null };
+
+  /** Plano com lançamento para os dois, mas configurado só para o líder. */
+  const planoDoLider = (memberIds: Set<string> | null): DetailPlan => ({
+    ...planWith(),
+    memberIds,
+    entryByMember: new Map([
+      [LIDER, { ...entry, responsible_id: LIDER }],
+      [OUTRO, { ...entry, responsible_id: OUTRO }],
+    ]),
+  });
+
+  it("lançamento órfão NÃO faz o plano vazar para quem saiu da lista", () => {
+    // Regressão real: estreitar `memberIds` não apaga os comp_entries já
+    // gravados. O detalhe enumerava por LANÇAMENTO e a Visão geral por MEMBRO
+    // configurado, então o indicador de um plano de uma pessoa só aparecia na
+    // aba de todo mundo que um dia teve lançamento nele.
+    const plano = planoDoLider(new Set([LIDER]));
+    expect(planAppliesToMember(plano, LIDER)).toBe(true);
+    expect(planAppliesToMember(plano, OUTRO)).toBe(false);
+  });
+
+  it("plano sem lista de membros (todos os ativos) segue valendo para quem tem lançamento", () => {
+    const plano = planoDoLider(null);
+    expect(planAppliesToMember(plano, LIDER)).toBe(true);
+    expect(planAppliesToMember(plano, OUTRO)).toBe(true);
+  });
+
+  it("membro configurado SEM lançamento não vira bloco (nada a detalhar)", () => {
+    const plano: DetailPlan = {
+      ...planWith(),
+      memberIds: new Set([LIDER]),
+      entryByMember: new Map(),
+    };
+    expect(planAppliesToMember(plano, LIDER)).toBe(false);
   });
 });

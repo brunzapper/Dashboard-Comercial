@@ -1,3 +1,14 @@
+<!-- Versão: 1.76 | Data: 29/08/2026 -->
+<!-- v1.76 (29/08/2026): §4.18 — VAZAMENTO de plano entre pessoas no
+     detalhamento do export. A matriz de lib/comp/detail.ts enumerava
+     membro × plano pela presença de LANÇAMENTO; a Visão geral enumera pelos
+     membros CONFIGURADOS (explicitMemberIds). Como estreitar memberIds não
+     apaga os comp_entries já gravados, quem saiu do plano continuava levando
+     os indicadores dele para a aba Det-<Nome> — duas metades do mesmo export
+     discordando sobre quem está no plano. DetailPlan ganha `memberIds`
+     (subárvore de operações resolvida viva, como no recompute; null = todos os
+     ativos) e as duas passadas do loadCompDetail compartilham o gate único
+     planAppliesToMember (configurado E com lançamento). -->
 <!-- Versão: 1.75 | Data: 28/08/2026 -->
 <!-- v1.75 (28/08/2026): §4.18 — duas adições. (a) BÔNUS no detalhamento: o
      bônus entra no total do mês (computeEntry) mas não tinha linha na aba
