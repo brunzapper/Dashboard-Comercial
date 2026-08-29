@@ -1,3 +1,13 @@
+<!-- Versão: 1.77 | Data: 29/08/2026 -->
+<!-- v1.77 (29/08/2026): §4.18 — acabamento da planilha (Apps Script v3.5):
+     (a) linhas de grade do Sheets desligadas por aba (setHiddenGridlines) —
+     a grade nativa risca a planilha inteira, inclusive o vazio entre cards, e
+     competia com as bordas desenhadas; (b) divisórias VERTICAIS dentro das
+     tabelas de registros do detalhamento, a tabela mais densa da planilha (as
+     horizontais seguem só sob o cabeçalho); (c) a coluna "Quanto gerou (R$)"
+     passa a ser MOEDA nas duas variantes de linha (detailRow e
+     detailRowMoney) — é sempre reais, mesmo em fator de contagem, e saía como
+     número comum. Exige republicar o .gs. -->
 <!-- Versão: 1.76 | Data: 29/08/2026 -->
 <!-- v1.76 (29/08/2026): §4.18 — VAZAMENTO de plano entre pessoas no
      detalhamento do export. A matriz de lib/comp/detail.ts enumerava

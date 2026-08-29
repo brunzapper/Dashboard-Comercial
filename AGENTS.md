@@ -762,7 +762,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   detalhe; script v3 × ticket v2 = comportamento anterior). LARGURA de coluna
   (v3.4): `autoResizeColumns` ajusta ao conteúdo, mas com TETO
   (`LARGURA_MAX_`) — a coluna de prosa cresceria centenas de px e jogaria o
-  resto para fora da tela; quem estoura é fixada no teto e ganha `setWrap`.
+  resto para fora da tela; quem estoura é fixada no teto e ganha `setWrap`. ACABAMENTO
+  (v3.5): linhas de grade do Sheets DESLIGADAS (`setHiddenGridlines`) — a
+  grade nativa risca a planilha inteira, inclusive o vazio entre cards, e
+  compete com as bordas desenhadas; as tabelas de registros do detalhe
+  ganham divisórias VERTICAIS (a horizontal segue só sob o cabeçalho); e a
+  coluna "Quanto gerou (R$)" entra em `MOEDA_POR_KIND_` nas DUAS variantes
+  de linha (`detailRow` e `detailRowMoney`) — ela é sempre reais, mesmo em
+  fator de contagem, e saía como número comum.
   **VOCABULÁRIO (27/08/2026):** TODA frase visível dos três exports sai de
   `commission-label.ts` (dono ÚNICO — `sheetFactorNote`/`sheetTotalNote`/
   `sheetSummaryNote`/`SHEET_*`/`detail*`) no registro de QUEM LÊ, não de quem

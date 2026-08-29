@@ -58,6 +58,8 @@ interface FakeSheet {
   _autoResizeCols: [number, number][];
   /** Colunas que receberam setWrap(true) — as que estouraram o teto. */
   _wrapped: Set<number>;
+  /** Linhas de grade do Sheets escondidas nesta aba. */
+  _gridlinesHidden: boolean;
   getName(): string;
   setName(n: string): FakeSheet;
   getSheetId(): number;
@@ -82,6 +84,7 @@ function makeSheet(name: string, id: number): FakeSheet {
     _borders: [],
     _autoResizeCols: [],
     _wrapped: new Set<number>(),
+    _gridlinesHidden: false,
     getName() { return sh._name; },
     setName(n: string) { sh._name = n; return sh; },
     getSheetId() { return sh._id; },
@@ -132,6 +135,7 @@ function makeSheet(name: string, id: number): FakeSheet {
     getColumnWidth(c: number) { return sh._widths[c] ?? 100; },
     setRowHeight(r: number, h: number) { sh._heights[r] = h; return sh; },
     setFrozenRows: () => sh,
+    setHiddenGridlines(hide: boolean) { sh._gridlinesHidden = hide; return sh; },
     autoResizeRows: () => sh,
     // Simula o ajuste ao conteúdo (≈7px por caractere da célula mais longa) —
     // é o que torna o TETO de largura observável no teste.
@@ -467,6 +471,68 @@ describe("comp_sheets_webapp.gs — rendering v3", () => {
     });
     // O total do resumo é moeda.
     expect(est.setNumberFormat).toContain("F9:F9");
+  });
+
+  it("linhas de grade do Sheets desligadas em TODA aba", () => {
+    // A grade nativa risca a planilha inteira, inclusive o vazio entre um card
+    // e outro, competindo com as bordas que o demonstrativo desenha.
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, PAYLOAD_V3);
+    for (const nome of ["Agosto 2026", "Det-Ana", "Det-Bruno"]) {
+      expect(ss.getSheetByName(nome)!._gridlinesHidden).toBe(true);
+    }
+  });
+
+  it("tabela de registros: divisórias VERTICAIS além da caixa e da régua do cabeçalho", () => {
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, PAYLOAD_V3);
+    const det = ss.getSheetByName("Det-Ana")!;
+    // detailHeader na linha A1 4, detailSubtotalMoney na 6 (ver `detalhe()`).
+    const verticais = det._borders.find(
+      (b) => b.ranges.includes("A4:G6") && b.args[4] === true
+    );
+    expect(verticais).toBeTruthy();
+    // A caixa externa segue lá, e nenhuma horizontal interna foi adicionada.
+    expect(
+      det._borders.some(
+        (b) => b.ranges.includes("A4:G6") && b.args.slice(0, 4).every((x) => x === true)
+      )
+    ).toBe(true);
+    expect(
+      det._borders.some((b) => b.ranges.includes("A4:G6") && b.args[5] === true)
+    ).toBe(false);
+  });
+
+  it('"Quanto gerou (R$)" sai como moeda mesmo em fator de contagem', () => {
+    // A coluna G é sempre reais — é quanto o registro rendeu de remuneração.
+    // Um fator de CONTAGEM também gera dinheiro, então a variante não-Money
+    // precisa formatar a G (só ela; a F ali é contagem crua).
+    const det = {
+      tabName: "Det-Ana",
+      headers: pad(["Detalhamento — Ana — Agosto de 2026"]),
+      rows: [
+        pad(["Reuniões", "", "", "", "", 44, "44 × R$ 12,50 = R$ 550,00"]),
+        pad(["Data", "Registro", "Origem", "Responsável", "Etapa", "Reuniões", "Quanto gerou (R$)"]),
+        pad(["01/08/2026", "Empresa X", "Reuniões", "Ana", "Realizada", 1, 12.5]),
+        pad(["Subtotal — Reuniões", "", "", "", 44, 44, ""]),
+      ],
+      kinds: ["detailFactor", "detailHeader", "detailRow", "detailSubtotal"],
+      links: [null, null, null, null],
+    };
+    const ss = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(ss, { ...PAYLOAD_V3, details: [det] });
+    const fmt = ss.getSheetByName("Det-Ana")!._styles.setNumberFormat ?? [];
+    // rows[2] (`detailRow`) mora na linha A1 4: a G entra, a F não.
+    expect(fmt).toContain("G4:G4");
+    expect(fmt).not.toContain("F4:F4");
+
+    // Na variante Money a G também estava de fora (só a F era formatada).
+    const outra = makeSpreadsheet(["Agosto 2026"]);
+    gs.gravarPlanilha_(outra, PAYLOAD_V3);
+    const fmtMoney = outra.getSheetByName("Det-Ana")!._styles.setNumberFormat ?? [];
+    // `detailRowMoney` é a 4ª row do fixture → linha A1 5.
+    expect(fmtMoney).toContain("F5:F5");
+    expect(fmtMoney).toContain("G5:G5");
   });
 
   it("aba de detalhe malformada é ignorada sem derrubar o export", () => {
