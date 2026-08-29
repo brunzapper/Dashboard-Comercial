@@ -1,3 +1,13 @@
+// Versão: 3.5 | Data: 29/08/2026
+// v3.5: acabamento da grade. (a) LINHAS DE GRADE do Sheets desligadas
+// (setHiddenGridlines) — elas riscam a planilha inteira, inclusive o vazio
+// entre um card e outro, competindo com as bordas que o demonstrativo desenha;
+// sem elas a única grade visível delimita conteúdo REAL. (b) Divisórias
+// VERTICAIS dentro das tabelas de registros do detalhamento: é a tabela mais
+// densa da planilha e os campos adjacentes se embolavam na horizontal (as
+// horizontais seguem só sob o cabeçalho). (c) A coluna "Quanto gerou (R$)"
+// passa a sair como MOEDA nas duas variantes de linha — ela é sempre reais,
+// mesmo em fator de contagem, e saía como número comum.
 // Versão: 3.4 | Data: 27/08/2026
 // v3.4: LEITURA PARA LEIGOS E PARA O RH. Kinds novos: `meta` (bloco de
 // contexto do topo — competência, mês apurado, situação, gerado em),
@@ -294,10 +304,13 @@ var MOEDA_POR_KIND_ = {
   info: [[6, 6]],
   blockTotal: [[6, 6]],
   memberTotal: [[6, 6]],
-  // Detalhamento: só as variantes "Money" levam R$ — fator de contagem/número
-  // puro mostra o valor cru.
+  // Detalhamento: a coluna F segue o fator (só a variante "Money" leva R$ —
+  // contagem/número puro mostra o valor cru), mas a G ("Quanto gerou (R$)") é
+  // SEMPRE dinheiro: é quanto aquele registro rendeu de remuneração, e um
+  // fator de contagem também gera reais. Por isso ela entra nas DUAS variantes.
   detailFactorMoney: [[6, 6]],
-  detailRowMoney: [[6, 6]],
+  detailRow: [[7, 7]],
+  detailRowMoney: [[6, 6], [7, 7]],
   // Subtotal: E = realizado do fator, F = soma dos registros listados.
   detailSubtotalMoney: [[5, 6]],
   // Resumo da folha: F = total da pessoa / total geral.
@@ -462,6 +475,12 @@ function gravarDemonstrativo_(aba, gidPorNome) {
   if (tabelasFaixas.length) {
     sh.getRangeList(tabelasFaixas).setBorder(
       true, true, true, true, null, null, null, SpreadsheetApp.BorderStyle.SOLID);
+    // Divisórias VERTICAIS entre as colunas da tabela de registros. Sem elas,
+    // campos adjacentes de tamanhos diferentes (data, empresa, responsável,
+    // etapa, valor) se embolam na horizontal — é a tabela mais densa da
+    // planilha. As horizontais seguem só sob o cabeçalho, abaixo.
+    sh.getRangeList(tabelasFaixas).setBorder(
+      null, null, null, null, true, null, null, SpreadsheetApp.BorderStyle.SOLID);
   }
   if (cabecalhoTabelaFaixas.length) {
     // Só a linha colorida (o cabeçalho) ganha régua horizontal, separando-a
@@ -493,6 +512,11 @@ function gravarDemonstrativo_(aba, gidPorNome) {
     }
   } catch (err) { /* best-effort */ }
   sh.setFrozenRows(1);
+  // Linhas de grade do Sheets DESLIGADAS: elas riscam a planilha inteira,
+  // inclusive as áreas vazias entre um card e outro, competindo com as bordas
+  // que o demonstrativo desenha de propósito. Sem elas, a única grade visível
+  // é a que delimita conteúdo REAL.
+  try { sh.setHiddenGridlines(true); } catch (err) { /* best-effort */ }
   // Alturas: autoResize primeiro (zera resíduo de exports anteriores — clear()
   // não mexe em altura de linha), depois a folga do cabeçalho da pessoa.
   try { sh.autoResizeRows(1, values.length); } catch (err) { /* best-effort */ }
