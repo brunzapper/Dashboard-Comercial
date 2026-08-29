@@ -1,3 +1,12 @@
+// Versão: 1.9 | Data: 29/08/2026
+// v1.9: VAZAMENTO DE PLANO entre pessoas. A matriz do detalhe enumerava
+// membro × plano pela presença de LANÇAMENTO, enquanto a Visão geral enumera
+// pelos membros CONFIGURADOS (explicitMemberIds) — duas metades do MESMO
+// export discordando sobre quem está no plano. Como estreitar `memberIds` não
+// apaga os `comp_entries` já gravados, quem saiu do plano continuava levando
+// os indicadores dele para a própria aba Det-<Nome>. DetailPlan passa a
+// carregar `memberIds` (operações resolvidas VIVAS, como no recompute) e as
+// duas passadas compartilham o gate único `planAppliesToMember`.
 // Versão: 1.8 | Data: 28/08/2026
 // v1.8: (a) BÔNUS na aba de detalhe — CompDetailPlan.bonuses sai do MESMO
 // `derived` que alimenta o monthTotal (inputs.bonuses, sem consulta nova). O
@@ -51,6 +60,10 @@ import {
 } from "@/lib/comp/payout-math";
 import { loadCorrespondences } from "@/lib/correspondences";
 import {
+  loadOperationScopes,
+  type OperationScope,
+} from "@/lib/config/operation-scope";
+import {
   canonicalOf,
   loadResponsibleCanon,
   type ResponsibleCanon,
@@ -95,12 +108,14 @@ import {
 import {
   loadTargetsByMember,
   memberFilterFor,
+  operationMembersFromScopes,
   resolveTargetRates,
   type CompEntryRow,
   type CompPlanRow,
 } from "./engine";
 import {
   apuracaoRef,
+  explicitMemberIds,
   monthPeriod,
   parseCompPlanConfig,
   roundMoney,
@@ -281,6 +296,15 @@ export interface DetailPlan {
   targetRates: Record<string, number | null>;
   entryByMember: Map<string, CompEntryRow>;
   targetsByMember: Map<string, Record<string, number | null>>;
+  /**
+   * Membros CONFIGURADOS do plano (memberIds ∪ operações resolvidas), ou null
+   * quando o plano vale para todos os ativos. É o mesmo critério da Visão geral
+   * (`explicitMemberIds`) — e não a presença de LANÇAMENTO: estreitar a
+   * lista de membros não apaga os `comp_entries` já gravados, então quem saiu
+   * do plano continua com entry e vazaria para o detalhe os indicadores de um
+   * plano que não é dele.
+   */
+  memberIds: Set<string> | null;
 }
 
 export interface CompDetailContext {
@@ -391,6 +415,15 @@ export async function loadCompDetailContext(
           .filter((e) => e.plan_id === row.id)
           .map((e) => [e.responsible_id, e as CompEntryRow])
       );
+      // Membros configurados (subárvore de operações resolvida VIVA, como no
+      // recompute e na Visão geral). null = plano de todos os ativos.
+      const opScopes = config.memberOperationIds?.length
+        ? await loadOperationScopes(supabase, config.memberOperationIds)
+        : new Map<string, OperationScope>();
+      const explicit = explicitMemberIds(
+        config,
+        Object.values(operationMembersFromScopes(opScopes, canon)).flat()
+      );
       return {
         row,
         config,
@@ -398,6 +431,7 @@ export async function loadCompDetailContext(
         targetRates: resolveTargetRates(config, rates, yearQuarterOf(period.to)),
         entryByMember,
         targetsByMember,
+        memberIds: explicit === null ? null : new Set(explicit),
       };
     })
   );
@@ -1173,13 +1207,35 @@ export async function loadFactorDetail(
   };
 }
 
+/**
+ * O membro participa deste plano no mês? Regra ÚNICA das duas passadas do
+ * loadCompDetail (planejamento das consultas e montagem da saída) — separar as
+ * duas condições em dois pontos foi o que deixou elas divergirem.
+ *
+ * São DUAS: ser membro CONFIGURADO (memberIds ∪ operações; null = todos os
+ * ativos) e ter LANÇAMENTO. Só a segunda não basta — estreitar a lista de
+ * membros não apaga os `comp_entries` já gravados, então quem saiu do plano
+ * continuava levando os indicadores dele para o próprio detalhe.
+ */
+export function planAppliesToMember(plan: DetailPlan, memberId: string): boolean {
+  if (plan.memberIds && !plan.memberIds.has(memberId)) return false;
+  return plan.entryByMember.has(memberId);
+}
+
 /** Erro de TETO — o export degrada (sai sem detalhamento) em vez de falhar. */
 export class CompDetailTooLargeError extends Error {}
 
 /**
- * Matriz inteira do export: um bloco por membro × plano COM lançamento no mês
- * (sem lançamento não há realizado a detalhar). Membro sem nenhum lançamento
- * sai de fora — a visão geral simplesmente não ganha hiperlink para ele.
+ * Matriz inteira do export: um bloco por membro × plano em que ele é MEMBRO
+ * CONFIGURADO e tem lançamento no mês (sem lançamento não há realizado a
+ * detalhar). Membro sem nenhum bloco sai de fora — a visão geral simplesmente
+ * não ganha hiperlink para ele.
+ *
+ * As DUAS condições importam. Só a presença de lançamento não basta: estreitar
+ * `memberIds` não apaga os `comp_entries` já gravados, e quem saiu do plano
+ * continuava recebendo, no detalhe, os indicadores de um plano que não é dele
+ * — enquanto a Visão geral (que filtra por membro configurado) já não o
+ * mostrava. Duas metades do MESMO export discordando sobre quem está no plano.
  */
 export async function loadCompDetail(
   supabase: SupabaseClient,
@@ -1193,7 +1249,7 @@ export async function loadCompDetail(
   }[] = [];
   for (const member of members) {
     for (const plan of ctx.plans) {
-      if (!plan.entryByMember.has(member.id)) continue;
+      if (!planAppliesToMember(plan, member.id)) continue;
       for (const factor of plan.config.factors)
         planned.push({ member, plan, factor });
     }
@@ -1242,7 +1298,7 @@ export async function loadCompDetail(
     const plans: CompDetailPlan[] = [];
     let monthTotal: number | null = null;
     for (const plan of ctx.plans) {
-      if (!plan.entryByMember.has(member.id)) continue;
+      if (!planAppliesToMember(plan, member.id)) continue;
       const derived = planStatement(plan, member.id, member.label);
       if (derived?.breakdown.total != null)
         monthTotal = (monthTotal ?? 0) + derived.breakdown.total;

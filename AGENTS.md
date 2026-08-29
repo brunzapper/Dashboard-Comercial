@@ -812,7 +812,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`listFilterFieldSupported`, exportado de `record-list.ts` ao lado do
   `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
   (sem Σ, `DETAIL_UNSUPPORTED_FIELD_NOTE`). Consulta sempre pelo client RLS do
-  usuário — NUNCA service role. **Payload v3:** `details` (uma
+  usuário — NUNCA service role. **Quem participa do plano é o membro CONFIGURADO,
+  nunca a presença de lançamento (29/08/2026):** estreitar `memberIds` NÃO
+  apaga os `comp_entries` já gravados, então enumerar por entry fazia quem
+  saiu do plano levar os indicadores dele para a própria aba `Det-<Nome>` —
+  enquanto a Visão geral, que filtra por `explicitMemberIds`, já não o
+  mostrava. `DetailPlan.memberIds` (operações resolvidas VIVAS, como no
+  recompute; null = todos os ativos) + o gate ÚNICO `planAppliesToMember`
+  nas duas passadas do `loadCompDetail`. As duas metades do export têm de
+  concordar sobre quem está no plano. **Payload v3:** `details` (uma
   `CompSheetPayloadSheet` por colaborador) + `links` paralelo às rows (nome da
   aba alvo; o `gid` só existe no Apps Script — a fórmula `=HYPERLINK("#gid=…")`
   é montada LÁ). O nome da aba sai de `detailTabName` (PURO — o cliente calcula
