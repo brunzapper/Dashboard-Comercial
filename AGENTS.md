@@ -821,7 +821,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   degrada BEST-EFFORT (falha/teto ⇒ planilha sai só com o demonstrativo +
   aviso). Abas `Det-*` órfãs são APAGADAS pelo script a cada export (só com
   payload v3). Frases do detalhe em `commission-label.ts` com prefixo
-  `detail*`/`DETAIL_*` (compartilhadas pelos dois consumidores — não `sheet*`).
+  `detail*`/`DETAIL_*` (compartilhadas pelos dois consumidores — não `sheet*`). **BÔNUS na aba de detalhe (28/08/2026):** `CompDetailPlan.bonuses` sai do
+  MESMO `derived` que alimenta o `monthTotal` (`inputs.bonuses`, sem consulta
+  nova) e vira linha com o kind `bonus` JÁ existente (não exige republicar o
+  `.gs`). Sem ela a aba fechava com um "Total" que incluía um valor ausente
+  dela inteira — no documento onde se vai justamente conferir. Rótulo único
+  em `bonusRowLabel` (commission-label), compartilhado com a aba do mês.
   Kind novo exige entrada em `COMP_SHEET_KINDS` **e** nas tabelas de estilo do
   `.gs` **e** republicar o script.
   **MEMÓRIA DE CÁLCULO no lugar da prosa + agrupamento configurável
@@ -907,7 +912,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `<campo> in (display_names do grupo canônico)` via `memberFilterFor`
   (engine — expansão por CONJUNTO DE NOMES, apelidos/inativos inclusos;
   `expandResponsibleFilters` segue SÓ p/ responsible_id, intocado; membro sem
-  nome ⇒ `errors[fid]`, nunca consulta sem filtro). `factor.defaultTarget` é
+  nome ⇒ `errors[fid]`, nunca consulta sem filtro). **CRÉDITO DE EQUIPE (28/08/2026):**
+  `factor.memberTeams` (id CANÔNICO do líder → ids dos liderados) faz o
+  `memberFilterFor` somar a equipe ao próprio membro — com `memberField` o
+  CONJUNTO DE NOMES cresce, sem ele o filtro vira `responsible_id in [...]`
+  (o choke point já expande `in` pelo canon). SEM equipe o ramo clássico
+  devolve o MESMO `eq` de antes, BYTE-IDÊNTICO — nenhum plano existente
+  muda; é a invariante que o teste pina. Serve à remuneração de LÍDER,
+  cujas oportunidades ficam em nome do time; sobreposição entre líderes é
+  INTENCIONAL (cada um é medido pela própria equipe). O detalhamento avisa
+  de quem são os registros de terceiros (`detailTeamNote`), e o save do
+  plan-editor RE-EMITE `memberTeams` (regra do presetKey — sem isso o
+  round-trip apagaria a equipe no 1º save). `factor.defaultTarget` é
   alvo FALLBACK de leitura (meta "por sub-operação"): linha de `goals` vence;
   limpar a célula segue DELETANDO a linha (restaura o padrão); nunca vira
   linha de goals. `factor.targetCurrency` = moeda em que o alvo é DIGITADO —

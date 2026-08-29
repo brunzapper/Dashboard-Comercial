@@ -343,6 +343,49 @@ describe("operandRecordQuery", () => {
     expect(semNome.ok).toBe(false);
   });
 
+  it("crédito de EQUIPE soma os nomes dos liderados e avisa de quem são", () => {
+    // Remuneração de líder: as oportunidades ficam em nome do time, então sem
+    // a equipe o líder não casa nada e realiza 0.
+    const M2 = "22222222-2222-4222-8222-222222222222";
+    const lider = factor({
+      memberField: "custom:sdr_reuniao",
+      memberTeams: { [M1]: [M2] },
+    });
+    const ctx = ctxWith({
+      nameById: new Map([
+        [M1, "Ana"],
+        [M2, "Bruno"],
+      ]),
+    });
+    const ops = factorOperands(ctx, lider);
+    const q = operandRecordQuery(ctx, planWith(), lider, ops[0], M1);
+    if (!q.ok) throw new Error("esperava ok");
+    expect(q.config.filters[0]).toEqual({
+      field: "custom:sdr_reuniao",
+      op: "in",
+      value: ["Ana", "Bruno"],
+    });
+    // A lista vai trazer registros em nome de OUTRA pessoa — sem uma palavra,
+    // o líder lê isso como erro de cálculo.
+    expect(q.warnings.join(" ")).toContain("Bruno");
+
+    // Sem equipe, nada muda e nenhum aviso aparece.
+    const semEquipe = operandRecordQuery(
+      ctx,
+      planWith(),
+      factor({ memberField: "custom:sdr_reuniao" }),
+      ops[0],
+      M1
+    );
+    if (!semEquipe.ok) throw new Error("esperava ok");
+    expect(semEquipe.config.filters[0]).toEqual({
+      field: "custom:sdr_reuniao",
+      op: "in",
+      value: ["Ana"],
+    });
+    expect(semEquipe.warnings).toEqual([]);
+  });
+
   it("avisa quando uma condição do fator não é reproduzível na listagem", () => {
     const q = query({
       filters: [{ field: "match:leads:stage", op: "eq", value: "x" }],

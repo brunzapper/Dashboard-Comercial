@@ -396,6 +396,14 @@ export function sheetCommissionSumNote(
 export const SHEET_MEMBER_TOTAL_NOTE = "Soma dos planos acima.";
 
 /**
+ * Rótulo da linha de bônus. Compartilhado pelo demonstrativo do mês e pela aba
+ * de detalhamento — a mesma linha nos dois lugares, uma única frase.
+ */
+export function bonusRowLabel(label: string): string {
+  return label ? `Bônus — ${label}` : "Bônus";
+}
+
+/**
  * Composição consolidada da remuneração da pessoa (cabeçalho da seção do
  * demonstrativo): "Fatores R$ X + Comissão R$ Y + Bônus R$ Z". Componente
  * estruturalmente ausente (commission null = nenhum plano com blocos) ou
@@ -425,6 +433,19 @@ export const DETAIL_BACK_NOTE = "← Voltar para a visão geral";
 
 export const DETAIL_EMPTY_NOTE =
   "Nenhum registro considerado neste indicador neste período.";
+
+/**
+ * Crédito de equipe ligado: a lista traz registros em nome de OUTRAS pessoas.
+ * Sem esta frase o líder vê nomes que não são o dele e conclui que a conta
+ * está errada — a explicação tem de vir junto do dado, não do suporte.
+ */
+export function detailTeamNote(names: string[]): string {
+  const quem =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`;
+  return `Inclui registros da equipe creditada a este membro: ${quem}.`;
+}
 
 export const DETAIL_DROPPED_FILTER_NOTE =
   "Uma das condições deste indicador não pôde ser aplicada a esta lista — os registros abaixo podem ser mais amplos que os usados no cálculo.";

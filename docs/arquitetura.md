@@ -1,3 +1,17 @@
+<!-- Versão: 1.75 | Data: 28/08/2026 -->
+<!-- v1.75 (28/08/2026): §4.18 — duas adições. (a) BÔNUS no detalhamento: o
+     bônus entra no total do mês (computeEntry) mas não tinha linha na aba
+     Det-<Nome>, que fechava com um "Total" incluindo um valor ausente da aba
+     inteira — justo o documento onde se vai conferir. CompDetailPlan.bonuses
+     sai do MESMO `derived` do monthTotal (inputs.bonuses, sem consulta nova) e
+     usa o kind `bonus` já existente (não exige republicar o .gs); rótulo único
+     em bonusRowLabel, compartilhado com a aba do mês. (b) CRÉDITO DE EQUIPE:
+     factor.memberTeams (id canônico do líder → ids dos liderados) faz o
+     memberFilterFor somar a equipe ao próprio membro, para remunerar LÍDER
+     cujas oportunidades ficam em nome do time. Vale nos dois modos de crédito;
+     SEM equipe o filtro sai byte-idêntico ao de hoje (invariante pinada). O
+     detalhamento avisa de quem são os registros de terceiros (detailTeamNote) e
+     o save do plan-editor RE-EMITE memberTeams (regra do presetKey). -->
 <!-- Versão: 1.74 | Data: 27/08/2026 -->
 <!-- v1.74 (27/08/2026): §4.18 — a Remuneração passou por uma revisão de
      LEITURA: o demonstrativo tem dois públicos (colaborador e RH) e atendia

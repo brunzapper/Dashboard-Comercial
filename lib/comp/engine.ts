@@ -1,3 +1,11 @@
+// Versão: 1.5 | Data: 28/08/2026
+// v1.5: CRÉDITO DE EQUIPE (factor.memberTeams — id CANÔNICO do líder → ids dos
+// liderados). memberFilterFor soma a equipe ao próprio membro nos DOIS modos:
+// com memberField o conjunto de NOMES cresce; sem ele o filtro vira
+// `responsible_id in [...]` (o choke point já expande `in` pelo canon —
+// expandResponsibleFilters). SEM equipe configurada o ramo clássico devolve o
+// MESMO `eq` de antes, byte-idêntico: nenhum plano existente muda. Serve à
+// remuneração de LÍDER, cujas oportunidades ficam em nome do time.
 // Versão: 1.4 | Data: 31/07/2026
 // v1.4: APURAÇÃO SOBRE O MÊS ANTERIOR (config.apuracao) — o recompute do
 // lançamento M consulta realizado/metas/taxas de M-1 via apuracaoRef. O
@@ -134,6 +142,13 @@ export function memberResponsibles(
  * grava (lookups.userName / responsibles.display_name). Membro sem nenhum
  * nome ⇒ erro (a célula isola como falha de consulta; NUNCA consultar sem o
  * filtro — vazaria o realizado global p/ todo membro).
+ *
+ * EQUIPE (factor.memberTeams): remuneração de LÍDER credita também os
+ * registros dos liderados. A equipe entra nos DOIS modos; sem equipe
+ * configurada o ramo clássico devolve o MESMO `eq` de sempre (byte-idêntico —
+ * nenhum plano existente muda de comportamento). No ramo `responsible_id` a
+ * expansão canônica de cada id fica com o choke point, que já trata `in` com
+ * array (expandResponsibleFilters).
  */
 export function memberFilterFor(
   factor: CompFactor,
@@ -141,11 +156,19 @@ export function memberFilterFor(
   canon: ResponsibleCanon,
   nameById: Map<string, string | null>
 ): WidgetFilter | { error: string } {
+  // Chave é o id CANÔNICO (convenção do memberTiers); o membro já chega
+  // canonicalizado pelos callers, e o canonicalOf é a rede defensiva.
+  const leaderId = canonicalOf(memberId, canon) ?? memberId;
+  const team = factor.memberTeams?.[leaderId] ?? [];
+  const ids = team.length > 0 ? [memberId, ...team] : [memberId];
+
   if (!factor.memberField) {
-    return { field: "responsible_id", op: "eq", value: memberId };
+    return team.length === 0
+      ? { field: "responsible_id", op: "eq", value: memberId }
+      : { field: "responsible_id", op: "in", value: expandResponsibleIds(ids, canon) };
   }
   const names: string[] = [];
-  for (const id of expandResponsibleIds([memberId], canon)) {
+  for (const id of expandResponsibleIds(ids, canon)) {
     const name = nameById.get(id);
     if (name && name.trim() !== "" && !names.includes(name)) names.push(name);
   }
