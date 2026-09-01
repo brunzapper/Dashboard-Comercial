@@ -495,9 +495,11 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
   §9.1) têm uma alça flutuante no canto superior esquerdo. **Pan**: clicar
   e arrastar uma área vazia move a viewport ("mãozinha"). Além disso,
   **parar o ponteiro perto de uma borda/canto sobre o espaço vazio** rola a
-  área de trabalho na direção da borda após uma pausa curta (funciona em
-  visualização e edição; sobre widgets não atua — a mãozinha e a rolagem
-  normal seguem como sempre).
+  área de trabalho na direção da borda — mas só depois de **~2 segundos**
+  parado ali, então passar perto do canto não move nada. Funciona em
+  visualização e edição; **não** atua sobre widgets nem com um painel aberto
+  por cima (editor de widget, aparência, "Área de trabalho"…), e a mãozinha e
+  a rolagem normal seguem como sempre.
 - **Redimensionar**: alças nas bordas do widget (modo edição).
 - **Tamanho dinâmico**: widgets com "Largura dinâmica"/"Altura dinâmica"
   (§6.9) crescem visualmente para caber o conteúdo; o tamanho gravado no grid
@@ -837,9 +839,15 @@ Painel de busca + filtros estruturados que afeta outros widgets:
   (padrão: título). A busca usa "contém".
 - **"Campos filtráveis"** — lista de controles exibidos; cada linha define
   Campo + Operador (os mesmos 10 do §6.4) + "Opções visíveis" (esconder
-  opções específicas do dropdown — só estética, não muda a consulta). Um
-  campo com operador "em (lista)" vira multi-seleção por checkbox; um campo
-  de seleção vira dropdown com "— todos —".
+  opções específicas do dropdown — só estética, não muda a consulta). Todo
+  campo com lista de opções (responsável, operação, etapa, campo de seleção)
+  e operador "=" ou "em (lista)" vira **multi-seleção**: um popover com
+  checkboxes e "Limpar", igual ao dos filtros rápidos (§4.4), mostrando
+  "todos" / o nome escolhido / "N selecionados". Marcar dois ou mais valores
+  passa a filtrar por qualquer um deles (o operador vira "em (lista)"
+  sozinho — não é preciso configurar nada). Os demais operadores (≠, contém,
+  comparações) seguem com um valor só, e campo sem lista de opções segue com
+  digitação livre.
 - **"Aplicar a"** — checklist dos widgets afetados (desmarcar exclui um
   widget do efeito do filtro). Lista só widgets com Bases sobrepostas às do
   filtro, de **todas as abas**, agrupados por aba com checkbox de cabeçalho

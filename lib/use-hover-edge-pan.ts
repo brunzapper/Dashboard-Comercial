@@ -1,4 +1,4 @@
-// Versão: 1.1 | Data: 05/08/2026
+// Versão: 1.2 | Data: 01/09/2026
 // Auto-pan de borda por HOVER: aproximar o ponteiro (sem botão pressionado)
 // das bordas/cantos da área visível rola a área de trabalho na direção da
 // borda — os DOIS eixos: horizontal no container do grid (scrollRef), vertical
@@ -16,6 +16,13 @@
 //   ponteiro acumular engageMs contínuos em zona — atravessar a zona ao sair
 //   do canvas (ir ao menu lateral/outra janela) não dá "chute" de scroll.
 //   panningRef/onPan só valem a partir do engate; default 0 (laser intocado).
+// v1.2 (01/09/2026): opção `shouldPan` — predicado consultado A CADA TICK
+//   (não só no sample): false = trata como FORA da zona (dorme, zera o
+//   engate, assenta se estava rolando). Existe porque o hook NÃO tem idle:
+//   um modal Radix aberto sobre um ponteiro PARADO em zona põe
+//   `pointer-events: none` no body, então nunca mais chega pointermove nem
+//   pointerleave e o rAF rolaria para sempre por baixo do painel. Ausente =
+//   comportamento byte-idêntico ao da v1.1 (laser e Registros intocados).
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
@@ -39,6 +46,7 @@ interface HoverPanState {
   // Timestamp (rAF) da ENTRADA na zona — base da espera de engate.
   zoneSince: number | null;
   panningRef: { current: boolean };
+  shouldPan?: (clientX: number, clientY: number) => boolean;
   onPan?: () => void;
   onSettle?: () => void;
 }
@@ -51,6 +59,17 @@ function panStop(st: HoverPanState) {
   st.last = null;
   st.v = null;
   st.panningRef.current = false;
+}
+
+// Dorme o loop mantendo `last` (o próximo sample religa): fora das zonas ou
+// com o gate `shouldPan` negando. Assenta só quem chegou a rolar de fato.
+function panSleep(st: HoverPanState) {
+  st.prevTs = null;
+  st.zoneSince = null;
+  if (st.panningRef.current) {
+    st.panningRef.current = false;
+    st.onSettle?.();
+  }
 }
 
 // O rect do <html> não é o viewport (top negativo com a página rolada); se o
@@ -69,6 +88,13 @@ function panTick(st: HoverPanState, ts: number) {
   const el = st.scrollRef.current;
   if (!st.last || !el) {
     panStop(st);
+    return;
+  }
+  // Gate do chamador (v1.2): ponteiro que não está mais DIRETAMENTE sobre a
+  // área de trabalho (painel/menu portado por cima, widget sob o cursor) é
+  // tratado como fora da zona — sem isso o loop rolaria por baixo do painel.
+  if (st.shouldPan && !st.shouldPan(st.last.x, st.last.y)) {
+    panSleep(st);
     return;
   }
   const v = st.v ?? (st.v = verticalScroller(el));
@@ -91,12 +117,7 @@ function panTick(st: HoverPanState, ts: number) {
   if (vx === 0 && vy === 0) {
     // Fora das zonas: dorme (o próximo sample religa), reseta o engate e
     // avisa quem rolou de fato.
-    st.prevTs = null;
-    st.zoneSince = null;
-    if (st.panningRef.current) {
-      st.panningRef.current = false;
-      st.onSettle?.();
-    }
+    panSleep(st);
     return;
   }
   // Em zona mas ainda dentro da espera de engate: segue armado sem rolar
@@ -126,6 +147,11 @@ export function useHoverEdgePan(
     maxSpeed?: number;
     /** Tempo contínuo em zona antes de o scroll engatar (default 0). */
     engageMs?: number;
+    /**
+     * Consultado a CADA tick com a última posição do ponteiro: false = trata
+     * como fora da zona (dorme, zera o engate). Ausente = sempre permitido.
+     */
+    shouldPan?: (clientX: number, clientY: number) => boolean;
     /** A cada frame EM ZONA (já engatado), depois de aplicar o scroll. */
     onPan?: () => void;
     /** Ao sair da zona naturalmente (loop dorme) — não dispara no stop(). */
@@ -139,7 +165,7 @@ export function useHoverEdgePan(
   const edge = opts?.edge ?? 56;
   const maxSpeed = opts?.maxSpeed ?? 640;
   const engageMs = opts?.engageMs ?? 0;
-  const { onPan, onSettle } = opts ?? {};
+  const { shouldPan, onPan, onSettle } = opts ?? {};
   const panningRef = useRef(false);
 
   const stRef = useRef<HoverPanState>({
@@ -153,6 +179,7 @@ export function useHoverEdgePan(
     prevTs: null,
     zoneSince: null,
     panningRef,
+    shouldPan,
     onPan,
     onSettle,
   });
@@ -164,13 +191,14 @@ export function useHoverEdgePan(
       st.edge = edge;
       st.maxSpeed = maxSpeed;
       st.engageMs = engageMs;
+      st.shouldPan = shouldPan;
       st.onPan = onPan;
       st.onSettle = onSettle;
       st.last = { x: clientX, y: clientY };
       if (!st.scrollRef.current) return; // chamador sem container: inerte
       if (st.raf == null) st.raf = requestAnimationFrame((t) => panTick(st, t));
     },
-    [edge, maxSpeed, engageMs, onPan, onSettle]
+    [edge, maxSpeed, engageMs, shouldPan, onPan, onSettle]
   );
 
   const stop = useCallback(() => panStop(stRef.current), []);

@@ -1,4 +1,11 @@
-// Versão: 2.22 | Data: 05/08/2026
+// Versão: 2.23 | Data: 01/09/2026
+// v2.23 (01/09/2026): auto-pan de borda só ENGATA depois de 2s contínuos na
+//   zona (HOVER_PAN_ENGAGE_MS) e só com o ponteiro DIRETAMENTE sobre o espaço
+//   vazio do canvas: guarda por containment DOM (`canvasRef.contains`) no
+//   sample + gate por tick (`shouldPan` do hook, via elementFromPoint). Os
+//   Sheets/menus do widget nascem na árvore REACT do canvas mas são portados
+//   p/ body — o pointermove deles chegava aqui e rolava o board por baixo do
+//   painel. Laser e tabela de Registros intocados.
 // v2.22 (05/08/2026): auto-pan de borda TAMBÉM sem o laser — pointermove no
 //   espaço vazio do canvas (sem botão; touch fora; submodos com overlay fora)
 //   alimenta useHoverEdgePan com engate de ~180ms (travessia da zona ao sair
@@ -212,6 +219,9 @@ import type { ResponsibleOption } from "./charts/record-list-table";
 // as fórmulas px↔célula daqui e dos overlays são paramétricas nelas.
 const MX = 0;
 const MY = 0;
+
+// Pausa contínua na borda antes de o auto-pan de HOVER engatar (ms) — v2.23.
+const HOVER_PAN_ENGAGE_MS = 2000;
 
 // Fallbacks ESTÁVEIS para os cards sem dados: um literal novo por render
 // derrotaria o React.memo do WidgetCard (props sempre "diferentes").
@@ -874,12 +884,38 @@ export function DashboardGrid({
       !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
-  // Auto-pan de borda por HOVER (v2.22): ponteiro parado perto das bordas/
+  // Só o ponteiro DIRETAMENTE sobre o espaço vazio da área de trabalho arma o
+  // auto-pan. `canvasRef.current.contains` é a peça central: os Sheets/menus
+  // do widget (editor, aparência) são renderizados de dentro do WidgetCard —
+  // logo dentro da árvore REACT do canvas, e o evento sintético chega aqui —
+  // mas ficam PORTADOS em document.body, então não são descendentes DOM do
+  // canvas. Sem essa checagem, passear o mouse dentro do painel (encostado na
+  // borda direita da tela) rolava o dashboard por baixo.
+  const overCanvasEmptySpace = useCallback((el: Element | null) => {
+    const canvas = canvasRef.current;
+    if (!el || !canvas || !canvas.contains(el)) return false;
+    return !el.closest(".react-grid-item, [data-conn-ui], [data-line-ui]");
+  }, []);
+  // Versão por COORDENADA (gate do loop): quem está no topo naquele ponto.
+  const hoverPanAllowedAt = useCallback(
+    (x: number, y: number) => overCanvasEmptySpace(document.elementFromPoint(x, y)),
+    [overCanvasEmptySpace]
+  );
+
+  // Auto-pan de borda por HOVER (v2.23): ponteiro parado perto das bordas/
   // cantos sobre o ESPAÇO VAZIO rola a área de trabalho na direção da borda
-  // (useHoverEdgePan — mesmo gesto do modo laser). O engate de ~180ms evita o
-  // "chute" ao atravessar a zona saindo do dashboard; a mãozinha/wheel seguem
+  // (useHoverEdgePan — mesmo gesto do modo laser). A mãozinha/wheel seguem
   // como antes (com botão pressionado o hover-pan não amostra).
-  const hoverPan = useHoverEdgePan(scrollRef, { engageMs: 180 });
+  const hoverPan = useHoverEdgePan(scrollRef, {
+    // Pausa DELIBERADA de 2s: com o engate curto de antes, qualquer
+    // aproximação do canto já arrastava a tela. Só quem encosta na borda e
+    // ESPERA quer rolar.
+    engageMs: HOVER_PAN_ENGAGE_MS,
+    // Gate por tick: o loop não tem idle, então um painel aberto sobre um
+    // ponteiro PARADO em zona rolaria para sempre por baixo (Radix põe
+    // pointer-events:none no body — nem pointermove nem pointerleave chegam).
+    shouldPan: hoverPanAllowedAt,
+  });
   const hoverPanStop = hoverPan.stop;
   // Submodo com overlay ativado com o loop vivo: para na hora (o laser tem o
   // edge-pan PRÓPRIO no overlay; rodar os dois dobraria a velocidade).
@@ -911,11 +947,12 @@ export function DashboardGrid({
     panPointerDown(e);
   }
 
-  // Hover-pan de borda (v2.22): amostra só ponteiro LIVRE (sem botão — a
-  // mãozinha e o drag/resize do RGL ficam de fora) sobre o espaço vazio
-  // (mesmo predicado de ignore do pan); nos submodos com overlay o dono do
-  // gesto é o overlay (o pointermove do laser BORBULHA até aqui — sem a
-  // guarda, dois loops rolariam em dobro). Toque mantém a rolagem nativa.
+  // Hover-pan de borda (v2.23): amostra só ponteiro LIVRE (sem botão — a
+  // mãozinha e o drag/resize do RGL ficam de fora) e DIRETAMENTE sobre o
+  // espaço vazio do canvas (overCanvasEmptySpace, que também barra o conteúdo
+  // portado dos painéis do widget); nos submodos com overlay o dono do gesto
+  // é o overlay (o pointermove do laser BORBULHA até aqui — sem a guarda,
+  // dois loops rolariam em dobro). Toque mantém a rolagem nativa.
   function onCanvasPointerMove(e: React.PointerEvent) {
     if (drawMode || placing || laserMode) return;
     if (e.pointerType === "touch") return;
@@ -923,8 +960,7 @@ export function DashboardGrid({
       hoverPan.stop();
       return;
     }
-    const t = e.target as HTMLElement;
-    if (t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]")) {
+    if (!overCanvasEmptySpace(e.target as HTMLElement)) {
       hoverPan.stop();
       return;
     }

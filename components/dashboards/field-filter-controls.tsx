@@ -1,4 +1,4 @@
-// Versão: 1.5 | Data: 07/08/2026
+// Versão: 1.6 | Data: 01/09/2026
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -21,6 +21,14 @@
 // removido na primeira edição — senão o viewer ficaria pinado no valor do
 // mount) e o estado ressincroniza do seed do servidor quando outro usuário
 // muda o valor. Em snapshot, `shared` é ignorado (URL-only por visitante).
+// v1.6 (01/09/2026): MULTI-SELEÇÃO automática — todo campo com opções cujo
+// operador é "=" ou "em (lista)" vira um MultiSelectPopover (checkboxes,
+// controle compartilhado com os filtros rápidos). O operador configurado
+// deixa de decidir a forma do controle: com 2+ marcações o filtro emitido
+// vira `in` sozinho; com 1 marcação num entry "=" segue `eq` (round-trip
+// byte-idêntico ao que já estava gravado). Por isso o estado de um entry
+// agora é string[] (multi) OU string (Input de texto, Combobox dos demais
+// operadores e o "1" de is_null/not_null — todos inalterados).
 // v1.5 (07/08/2026): o save do modo compartilhado roda OTIMISTA em background
 // (useBackgroundSave, revalidate:false): os controles respondem na hora e o
 // refresh debounced do hook reconcilia; erro → toast + revert de q/values ao
@@ -34,6 +42,7 @@ import { Search } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
+import { MultiSelectPopover } from "@/components/filters/multi-select-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -55,19 +64,52 @@ import {
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 
+// Valor local de um controle: ARRAY para os de multi-seleção, string para o
+// resto (Input de texto, Combobox de um valor, "1" dos operadores sem valor).
+type EntryValue = string | string[];
+
+/**
+ * A entrada vira multi-seleção? Só campo com dropdown de opções e operador de
+ * igualdade — "=" (multi automática, v1.6) ou "em (lista)". Os demais
+ * operadores (≠, contém, >, ≥, <, ≤) comparam com UM valor: `not_in` não
+ * existe no vocabulário de filtros, então multi ali não teria como ser
+ * traduzida. Régua ÚNICA — initialValues, buildFilters e o render usam esta.
+ */
+function isMultiEntry(
+  entry: FieldFilterEntry,
+  options?: FieldFilterOptions
+): boolean {
+  const op = entry.op ?? "eq";
+  if (op !== "eq" && op !== "in") return false;
+  return (options?.[entry.field]?.length ?? 0) > 0;
+}
+
 // Reconstrói os valores iniciais dos controles a partir dos filtros da URL,
-// casando pelo campo+operador de cada entrada configurada.
+// casando pelo campo+operador de cada entrada configurada. Entrada MULTI casa
+// tanto `eq` quanto `in` (o mesmo controle emite os dois conforme a contagem):
+// sem isso, um seed com `in` numa entrada configurada como `eq` não
+// round-triparia e o widget navegaria/persistiria sozinho na montagem.
 function initialValues(
   entries: FieldFilterEntry[],
-  urlFilters: WidgetFilter[]
-): string[] {
+  urlFilters: WidgetFilter[],
+  options?: FieldFilterOptions
+): EntryValue[] {
   return entries.map((entry) => {
     const op = entry.op ?? "eq";
-    const match = urlFilters.find(
-      (f) => f.field === entry.field && (f.op ?? "eq") === op
-    );
-    if (!match) return "";
+    const multi = isMultiEntry(entry, options);
+    const match = urlFilters.find((f) => {
+      if (f.field !== entry.field) return false;
+      const fop = f.op ?? "eq";
+      return multi ? fop === "eq" || fop === "in" : fop === op;
+    });
+    if (!match) return multi ? [] : "";
     if (opHasNoValue(op)) return "1";
+    if (multi) {
+      if (Array.isArray(match.value))
+        return match.value.map((v) => String(v)).filter(Boolean);
+      const s = String(match.value ?? "").trim();
+      return s ? [s] : [];
+    }
     if (op === "in" && Array.isArray(match.value)) return match.value.join(",");
     return String(match.value ?? "");
   });
@@ -75,12 +117,27 @@ function initialValues(
 
 function buildFilters(
   entries: FieldFilterEntry[],
-  values: string[]
+  values: EntryValue[]
 ): WidgetFilter[] {
   const out: WidgetFilter[] = [];
   entries.forEach((entry, i) => {
     const op = (entry.op ?? "eq") as FilterOp;
     const raw = values[i] ?? "";
+    // Multi-seleção: 1 valor num entry "=" segue emitindo `eq` (o que já
+    // estava gravado continua idêntico); 2+ (ou entry "em (lista)") vira `in`
+    // com array. A ordem das chaves é {field, op, value} em todos os ramos —
+    // encodeViewFilter é JSON.stringify e o compare com serverAppliedRef é
+    // por STRING.
+    if (Array.isArray(raw)) {
+      const vals = raw.map((v) => v.trim()).filter(Boolean);
+      if (vals.length === 0) return;
+      if (op === "eq" && vals.length === 1) {
+        out.push({ field: entry.field, op, value: vals[0] });
+        return;
+      }
+      out.push({ field: entry.field, op: "in", value: vals });
+      return;
+    }
     if (opHasNoValue(op)) {
       if (raw === "1") out.push({ field: entry.field, op });
       return;
@@ -141,8 +198,8 @@ export function FieldFilterControls({
 
   const initial = parseViewFilter(sp.get(paramKey) ?? savedValue ?? null);
   const [q, setQ] = useState(initial.q ?? "");
-  const [values, setValues] = useState<string[]>(() =>
-    initialValues(fields, initial.filters)
+  const [values, setValues] = useState<EntryValue[]>(() =>
+    initialValues(fields, initial.filters, options)
   );
   // Último estado que o SERVIDOR já aplicou, na forma canônica encode∘parse do
   // valor inicial bruto (URL ou seed — a page renderizou com ele). Enquanto
@@ -167,7 +224,7 @@ export function FieldFilterControls({
       serverAppliedRef.current = canonSaved;
       const parsed = parseViewFilter(savedValue ?? null);
       setQ(parsed.q ?? "");
-      setValues(initialValues(fields, parsed.filters));
+      setValues(initialValues(fields, parsed.filters, options));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedMode, canonSaved]);
@@ -210,7 +267,7 @@ export function FieldFilterControls({
               serverAppliedRef.current = prevApplied;
               const parsed = parseViewFilter(prevApplied || null);
               setQ(parsed.q ?? "");
-              setValues(initialValues(fields, parsed.filters));
+              setValues(initialValues(fields, parsed.filters, options));
             },
           });
         }
@@ -252,7 +309,7 @@ export function FieldFilterControls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encoded]);
 
-  const setValue = (i: number, v: string) =>
+  const setValue = (i: number, v: EntryValue) =>
     setValues((prev) => {
       const next = [...prev];
       next[i] = v;
@@ -277,11 +334,12 @@ export function FieldFilterControls({
       {fields.map((entry, i) => {
         const label = entry.label || fieldLabel(entry.field, available);
         const op = (entry.op ?? "eq") as FilterOp;
+        const raw = values[i];
         if (opHasNoValue(op)) {
           return (
             <label key={i} className="flex items-center gap-2 text-sm">
               <Checkbox
-                checked={values[i] === "1"}
+                checked={raw === "1"}
                 onCheckedChange={(c) => setValue(i, c ? "1" : "")}
               />
               {label} {op === "is_null" ? "(vazio)" : "(preenchido)"}
@@ -289,58 +347,46 @@ export function FieldFilterControls({
           );
         }
         const opts = options?.[entry.field];
-        // Campo com opções (responsável/operação/etapa): dropdown fechado. Para o
-        // operador "em (lista)" vira multi-seleção por checkbox (valores em CSV,
-        // que buildFilters já divide); os demais operadores usam um select único.
+        // Campo com opções (responsável/operação/etapa/seleção) e operador de
+        // igualdade: multi-seleção por checkbox — o MESMO popover dos filtros
+        // rápidos. Os demais operadores (≠, contém, comparações) seguem com o
+        // select de um valor.
         if (opts && opts.length > 0) {
-          if (op === "in") {
-            const chosen = new Set(
-              (values[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
-            );
+          if (isMultiEntry(entry, options)) {
+            // Defensivo: se as opções chegarem só num render posterior, o
+            // estado do entry pode ter nascido como string (controle único).
+            // Exibe como seleção de um item — buildFilters emite `eq` para
+            // esse mesmo estado, então tela e filtro seguem de acordo.
+            const chosen = Array.isArray(raw) ? raw : raw ? [raw] : [];
+            // Opção oculta mas SELECIONADA continua na lista (keep) — sem isso
+            // não daria para desmarcá-la.
             const shown = visibleOptions(opts, entry.hiddenOptions, chosen);
-            const toggle = (v: string) => {
-              const next = new Set(chosen);
-              if (next.has(v)) next.delete(v);
-              else next.add(v);
-              setValue(i, [...next].join(","));
-            };
             return (
               <div key={i} className="flex flex-col gap-1">
                 <Label className="text-xs">{label}</Label>
-                <div className="flex max-h-40 flex-col gap-1 overflow-auto rounded-md border p-2">
-                  {shown.length === 0 ? (
-                    <p className="text-muted-foreground text-xs">
-                      Nenhuma opção visível.
-                    </p>
-                  ) : (
-                    shown.map((o) => (
-                      <label
-                        key={o.value}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={chosen.has(o.value)}
-                          onCheckedChange={() => toggle(o.value)}
-                        />
-                        <span className="truncate">{o.label}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
+                <MultiSelectPopover
+                  options={shown}
+                  values={chosen}
+                  onChange={(next) => setValue(i, next)}
+                  className="w-full max-w-none justify-between text-sm"
+                  emptyText="Nenhuma opção visível."
+                  ariaLabel={label}
+                />
               </div>
             );
           }
+          const single = typeof raw === "string" ? raw : "";
           const shown = visibleOptions(
             opts,
             entry.hiddenOptions,
-            values[i] ? [values[i]] : []
+            single ? [single] : []
           );
           return (
             <div key={i} className="flex flex-col gap-1">
               <Label className="text-xs">{label}</Label>
               <Combobox
                 options={[{ value: "", label: "— todos —" }, ...shown]}
-                value={values[i] ?? ""}
+                value={single}
                 onValueChange={(v) => setValue(i, v)}
                 placeholder="— todos —"
                 className="h-8 text-sm"
@@ -353,7 +399,7 @@ export function FieldFilterControls({
           <div key={i} className="flex flex-col gap-1">
             <Label className="text-xs">{label}</Label>
             <Input
-              value={values[i] ?? ""}
+              value={typeof raw === "string" ? raw : ""}
               onChange={(e) => setValue(i, e.target.value)}
               placeholder={op === "in" ? "valores separados por vírgula" : "valor"}
               aria-label={label}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Versão: 1.1 | Data: 05/08/2026
+// Versão: 1.2 | Data: 01/09/2026
 // Auto-pan de borda por hover: sample na zona rola o eixo correspondente e
 // CONTINUA rolando sem samples novos (sem idle — diferença deliberada do DnD);
 // canto rola os dois eixos; miolo dorme com onSettle; stop() para na hora sem
@@ -14,15 +14,22 @@ import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
 
 function Probe({
   engageMs,
+  shouldPan,
   onPan,
   onSettle,
 }: {
   engageMs?: number;
+  shouldPan?: (x: number, y: number) => boolean;
   onPan?: () => void;
   onSettle?: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const { onSample, stop } = useHoverEdgePan(ref, { engageMs, onPan, onSettle });
+  const { onSample, stop } = useHoverEdgePan(ref, {
+    engageMs,
+    shouldPan,
+    onPan,
+    onSettle,
+  });
   return (
     <div data-testid="main" style={{ overflowY: "auto" }}>
       <div
@@ -49,12 +56,14 @@ const RECT = {
 
 function mountProbe(opts?: {
   engageMs?: number;
+  shouldPan?: (x: number, y: number) => boolean;
   onPan?: () => void;
   onSettle?: () => void;
 }) {
   const utils = render(
     <Probe
       engageMs={opts?.engageMs}
+      shouldPan={opts?.shouldPan}
       onPan={opts?.onPan}
       onSettle={opts?.onSettle}
     />
@@ -193,6 +202,56 @@ describe("useHoverEdgePan", () => {
     advance(300);
     expect(el.scrollLeft).toBe(0);
     expect(onSettle).not.toHaveBeenCalled();
+  });
+
+  it("shouldPan false nunca rola nem assenta (ponteiro fora da área útil)", () => {
+    const onSettle = vi.fn();
+    const { el } = mountProbe({ shouldPan: () => false, onSettle });
+    sampleAt(el, 390, 150);
+    advance(400);
+    expect(el.scrollLeft).toBe(0);
+    expect(onSettle).not.toHaveBeenCalled(); // nunca rolou — nada a assentar
+  });
+
+  it("shouldPan que vira false com o loop rolando dorme e assenta uma vez", () => {
+    // Um painel aberto sobre o ponteiro PARADO: sem o gate, o loop (que não
+    // tem idle) seguiria rolando por baixo dele.
+    let allowed = true;
+    const onSettle = vi.fn();
+    const { el } = mountProbe({ shouldPan: () => allowed, onSettle });
+    sampleAt(el, 390, 150);
+    advance(200);
+    const rolado = el.scrollLeft;
+    expect(rolado).toBeGreaterThan(0);
+
+    allowed = false;
+    advance(300);
+    expect(el.scrollLeft).toBe(rolado); // parou no lugar
+    expect(onSettle).toHaveBeenCalledTimes(1);
+
+    // Loop dormindo: o sample seguinte só religa se o gate voltar a permitir.
+    sampleAt(el, 390, 150);
+    advance(300);
+    expect(el.scrollLeft).toBe(rolado);
+    allowed = true;
+    sampleAt(el, 390, 150);
+    advance(300);
+    expect(el.scrollLeft).toBeGreaterThan(rolado);
+  });
+
+  it("shouldPan false durante a espera de engate zera a contagem", () => {
+    let allowed = true;
+    const { el } = mountProbe({ engageMs: 180, shouldPan: () => allowed });
+    sampleAt(el, 390, 150);
+    advance(100); // ainda dentro da espera
+    allowed = false;
+    advance(100); // gate nega: loop dorme e o engate volta ao zero
+    allowed = true;
+    sampleAt(el, 390, 150);
+    advance(100);
+    expect(el.scrollLeft).toBe(0); // contagem recomeçou
+    advance(200);
+    expect(el.scrollLeft).toBeGreaterThan(0);
   });
 
   it("engageMs: stop() durante a espera reseta a contagem", () => {
