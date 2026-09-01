@@ -2506,6 +2506,25 @@ célula). Unidades de `grid_position`/`ShapeLine` ficaram 10× mais finas no X e
   Clipboard de widget idem (`gridVersion` no payload; antigo é convertido na
   leitura).
 
+**Auto-pan de borda do canvas (01/09/2026).** Ponteiro LIVRE parado perto de
+uma borda/canto rola a área de trabalho (`useHoverEdgePan` alimentado pelo
+`onPointerMove` do canvas). Duas regras: engate de `HOVER_PAN_ENGAGE_MS`
+(2000 — antes 180: qualquer aproximação do canto arrastava a tela) e o gesto
+só vale com o ponteiro DIRETAMENTE sobre o espaço vazio do canvas. Essa
+segunda parte é sutil: os Sheets/menus do widget (editor, aparência) são
+renderizados de dentro do `WidgetCard`, ou seja, dentro da árvore REACT do
+canvas — o evento sintético CHEGA no handler — mas ficam PORTADOS em
+`document.body`, então `closest(".react-grid-item")` não os reconhece e o
+board rolava por baixo do painel. A régua é containment DOM
+(`canvasRef.current.contains`), aplicada nos DOIS pontos: no sample
+(`overCanvasEmptySpace`) e A CADA TICK, pela opção `shouldPan` do hook (via
+`document.elementFromPoint`) — o tick importa porque o hook NÃO tem idle por
+design: um modal aberto sobre um ponteiro PARADO em zona põe
+`pointer-events: none` no body e nem `pointermove` nem `pointerleave` chegam
+mais, então o rAF rolaria para sempre. `shouldPan` ausente = comportamento
+anterior byte-idêntico (LaserPointerOverlay e a tabela de Registros seguem
+intocados).
+
 **Páginas de widget (mescla).** Dois ou mais widgets dividindo o MESMO espaço,
 alternados por setinhas acima do card (`WidgetPager`). Vínculo:
 `settings.pages: string[]` no HOST (ids dos membros; host = página 1; ordem =
@@ -3828,9 +3847,10 @@ UMA instância CONTROLADA içada (`RecordEditSheet` com
 clique no corpo da linha (fora de `INTERACTIVE_SELECTOR` — sem guarda de
 `getSelection`: dblclick seleciona a palavra sob o cursor por padrão) e o
 lápis abrem o mesmo painel. A tabela ganhou hover-edge pan
-(`useHoverEdgePan`, engageMs 180 como o DashboardGrid): ponteiro parado nas
-bordas/cantos rola nos 2 eixos; suspenso sobre controles interativos, com
-botão pressionado (drag-pan em voo) e com qualquer sheet da tela aberto.
+(`useHoverEdgePan`, engageMs 180 — o DashboardGrid usa 2000 desde 01/09/2026):
+ponteiro parado nas bordas/cantos rola nos 2 eixos; suspenso sobre controles
+interativos, com botão pressionado (drag-pan em voo) e com qualquer sheet da
+tela aberto.
 
 Testes: `lib/records/trash.test.ts` +
 `components/registros/records-table.selection.test.tsx` + blocos de modo

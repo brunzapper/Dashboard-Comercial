@@ -1,4 +1,8 @@
-// Versão: 1.3 | Data: 07/08/2026
+// Versão: 1.4 | Data: 01/09/2026
+// v1.4 (01/09/2026): o popover de multi-seleção saiu daqui para
+// components/filters/multi-select-popover.tsx (controle ÚNICO, agora também
+// usado pelo widget "Filtro por campo"); MultiQuickFilter virou o wrapper que
+// mapeia QuickFilterValue ↔ string[]. Marcação e comportamento inalterados.
 // v1.3 (07/08/2026): persistência OTIMISTA em background (useBackgroundSave):
 // o chip responde na hora, a action roda com revalidate:false e a
 // reconciliação vem do refresh debounced do hook; erro → toast + revert do
@@ -29,16 +33,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { MultiSelectPopover } from "@/components/filters/multi-select-popover";
 import { cn } from "@/lib/utils";
 import type { AvailableField } from "@/lib/widgets/fields";
 import { fieldLabel } from "@/lib/widgets/fields";
@@ -198,7 +195,9 @@ export function QuickFiltersBar({
   );
 }
 
-// Dropdown de multi-seleção (responsável / operação / bucket de data).
+// Dropdown de multi-seleção (responsável / operação / bucket de data): mapeia
+// QuickFilterValue ↔ string[] sobre o controle compartilhado (seleção vazia =
+// valor nulo, ou seja, "todos" — nada persistido).
 function MultiQuickFilter({
   label,
   options,
@@ -210,73 +209,15 @@ function MultiQuickFilter({
   value?: QuickFilterValue;
   onChange: (v: QuickFilterValue | null) => void;
 }) {
-  const chosen = new Set(value?.kind === "options" ? value.values : []);
-  const count = chosen.size;
-
-  const toggle = (v: string) => {
-    const next = new Set(chosen);
-    if (next.has(v)) next.delete(v);
-    else next.add(v);
-    onChange(next.size > 0 ? { kind: "options", values: [...next] } : null);
-  };
-
-  // Resumo no chip: 1 seleção mostra o nome; várias, a contagem.
-  const summary =
-    count === 0
-      ? "todos"
-      : count === 1
-        ? (options.find((o) => chosen.has(o.value))?.label ?? "1")
-        : `${count} selecionados`;
-
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant={count > 0 ? "secondary" : "outline"}
-          size="sm"
-          className="h-8 max-w-56 gap-1 px-2 text-xs"
-        >
-          <span className="truncate">
-            {label}: <span className="font-semibold">{summary}</span>
-          </span>
-          <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="flex w-64 flex-col gap-2 p-2">
-        <div className="flex max-h-56 flex-col gap-1 overflow-auto">
-          {options.length === 0 ? (
-            <p className="text-muted-foreground p-1 text-xs">
-              Nenhuma opção disponível.
-            </p>
-          ) : (
-            options.map((o) => (
-              <label
-                key={o.value}
-                className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm"
-              >
-                <Checkbox
-                  checked={chosen.has(o.value)}
-                  onCheckedChange={() => toggle(o.value)}
-                />
-                <span className="truncate">{o.label}</span>
-              </label>
-            ))
-          )}
-        </div>
-        {count > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 self-start gap-1 px-2 text-xs"
-            onClick={() => onChange(null)}
-          >
-            <X className="size-3.5" /> Limpar ({count})
-          </Button>
-        ) : null}
-      </PopoverContent>
-    </Popover>
+    <MultiSelectPopover
+      label={label}
+      options={options}
+      values={value?.kind === "options" ? value.values : []}
+      onChange={(next) =>
+        onChange(next.length > 0 ? { kind: "options", values: next } : null)
+      }
+    />
   );
 }
 
