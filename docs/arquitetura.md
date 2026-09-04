@@ -2175,6 +2175,36 @@ não apaga mais o `lastPeriod` salvo do usuário.
   `skipNextData` do kanban) e o refresh do hook traz o definitivo; mudança de
   ESCOPO (ex.: mês/plano no comp-grid) re-semeia SEMPRE. Caso-mãe do padrão:
   célula inline de /registros (§4.10 "Edição inline sem re-render global").
+  **O refresh de reconciliação SOBREVIVE ao desmonte de quem o agendou
+  (04/09/2026)**: o timer vive em escopo de MÓDULO (`use-debounced-refresh`
+  v1.2), disparado com o `startTransition` global e descartado só quando o
+  PATHNAME muda (a troca de aba mexe na query `?tab=`, não na rota). Antes ele
+  era um `useRef` por controle e o cleanup o cancelava — como a troca de aba do
+  dashboard DESMONTA os widgets da aba anterior (`dashboard-client`: só os da
+  aba ativa são renderizados), o filtro era gravado e a página nunca
+  reconciliava. Consequência OBRIGATÓRIA para todo controle com debounce
+  próprio dentro de um card: **flushar o payload pendente no desmonte**
+  (`pendingRef` + effect MOUNT-ONLY que o executa), senão a gravação é
+  descartada junto com o timer. O flush precisa ser idempotente e disparar só
+  o que o USUÁRIO causou — em dev o StrictMode monta → desmonta → monta e roda
+  esse cleanup de graça: `quick-filters-bar` só arma em `setValue`;
+  `field-filter-controls`/`table-filter-bar` ignoram o payload armado pelo
+  primeiro run do effect (sincronização de seed, não interação);
+  `appearance-editing` compara por VALOR (`savedRef`). No branch de URL o
+  `replace` do flush vai DIRETO ao router (acender o overlay de um card que já
+  morreu é ruído) e a URL é lida de `window.location`, nunca de um
+  `useSearchParams` capturado — a troca de aba já escreveu `?tab=` por
+  `replaceState` e o snapshot velho o apagaria. Valor otimista que o servidor
+  ainda não ecoou precisa de cache de MÓDULO com `baseline` (o serverKey do
+  instante da escrita, descartado assim que o servidor passa dele) para o
+  controle não piscar o valor antigo na remontagem — `__qf__` e `__ff__`
+  compartilhado; o transporte por URL não precisa (a URL sobrevive e
+  re-semeia). Seguem o padrão: `quick-filters-bar`, `field-filter-controls`,
+  `table-filter-bar`, `period-range-inputs`, `appearance-editing` e o
+  `calculator-widget` (que estreou o flush + cache de módulo). Um filho pode
+  commitar DEPOIS do dreno do pai (o React destrói a subárvore de cima para
+  baixo): `quick-filters-bar` fica re-entrante por `flushedRef` — persist
+  recebido após o dreno grava na hora em vez de armar um timer órfão.
   Formulários `useActionState` cujas actions deixaram de revalidar (CRUDs de
   Bases — antes 13× `revalidatePath("/", "layout")` que travavam o form pelo
   re-render do layout raiz) disparam o refresh pós-sucesso no CLIENTE via

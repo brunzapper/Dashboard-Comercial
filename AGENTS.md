@@ -1100,12 +1100,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   já migraram). Guard anti-eco no padrão seedKey: com save em voo
   (`hasPending`) o reseed ADOTA a key sem aplicar (eco stale nunca clobbera o
   otimista; espelho do `skipNextData` do kanban); mudança de ESCOPO (mês/plano
-  no comp-grid) re-semeia SEMPRE. CRUDs de Bases não fazem mais
+  no comp-grid) re-semeia SEMPRE. **O refresh de reconciliação é de MÓDULO e
+  SOBREVIVE ao desmonte de quem o agendou (04/09/2026)** — a troca de aba do
+  dashboard desmonta os widgets da aba anterior, e o timer por controle fazia a
+  gravação acontecer sem a página nunca reconciliar; só o PATHNAME cancela (a
+  aba mexe na query). Consequência OBRIGATÓRIA: todo controle com debounce
+  PRÓPRIO dentro de um card FLUSHA o payload pendente no desmonte (`pendingRef`
+  + effect mount-only) — sem isso a gravação morre com o timer —, o flush
+  dispara só o que o USUÁRIO causou e é idempotente (o StrictMode do dev roda
+  esse cleanup na montagem), a URL do flush sai de `window.location` (nunca de
+  um `useSearchParams` capturado — apagaria o `?tab=` recém-escrito) e o valor
+  otimista que o servidor ainda não ecoou vive em cache de MÓDULO com
+  `baseline`, descartado assim que o servidor passa dele. Seguem o padrão:
+  `quick-filters-bar`, `field-filter-controls`, `table-filter-bar`,
+  `period-range-inputs`, `appearance-editing`, `calculator-widget`.
+  CRUDs de Bases não fazem mais
   `revalidatePath("/", "layout")` — os managers disparam o refresh pós-sucesso
   via `useRefreshOnActionOk` (`lib/use-debounced-refresh.ts`), que re-renderiza
   rota + layout como transition não-urgente. Fiscalizado por
-  `lib/feedback/use-background-save.test.ts` + blocos em
-  `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`. Ver `docs/arquitetura.md`
+  `lib/feedback/use-background-save.test.ts` + `lib/use-debounced-refresh.test.ts`
+  + blocos em `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`/
+  `field-filter-controls.test.tsx`. Ver `docs/arquitetura.md`
   §4.10 ("Feedback de carregamento").
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**

@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 07/08/2026
+// Versão: 1.2 | Data: 04/09/2026
+// v1.2 (04/09/2026): useWidgetAppearance FLUSHA a gravação pendente no
+//   desmonte. Mesma classe do bug dos filtros: a troca de aba do dashboard
+//   desmonta os widgets da aba anterior e o cleanup matava o debounce de 500ms
+//   — mudar cor/ordem e trocar de aba na sequência perdia a alteração. O flush
+//   é idempotente por VALOR (savedRef), porque aqui o payload pendente pode
+//   existir sem interação do usuário e o StrictMode do dev roda o cleanup na
+//   montagem. O router.refresh() cru deu lugar ao useDebouncedRefresh (v1.2),
+//   que coalesce com os demais saves e também sobrevive ao desmonte.
 // v1.1 (07/08/2026): ResizeHandle extraído p/ components/ui/resize-handle.tsx
 //   (reuso na tabela de /registros); re-export aqui preserva os imports.
 // Fase 10.1: peças de UI compartilhadas para a edição de aparência IN-LOCO
@@ -19,7 +27,6 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 import {
   AlignCenter,
   AlignLeft,
@@ -36,6 +43,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { notifyOnError } from "@/lib/feedback/notify";
+import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
 import { Button } from "@/components/ui/button";
 import { ColorField } from "./appearance-controls";
 import type {
@@ -55,7 +63,7 @@ import { saveWidgetSettings } from "@/app/(app)/dashboards/actions";
 // Estado otimista local + escrita DEBOUNCED (500ms) — cores mexem o input
 // continuamente; sem debounce cada frame gravaria no banco + router.refresh().
 export function useWidgetAppearance(widget: Widget, dashboardId: string) {
-  const router = useRouter();
+  const refresh = useDebouncedRefresh();
   const [ap, setAp] = useState<AppearanceSettings>(
     widget.settings?.appearance ?? {}
   );
@@ -66,29 +74,45 @@ export function useWidgetAppearance(widget: Widget, dashboardId: string) {
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<AppearanceSettings>(ap);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  // Última aparência JÁ gravada: o flush do desmonte compara por VALOR antes de
+  // agir (idempotência), então a montagem/desmontagem simulada do StrictMode
+  // nunca grava a aparência intocada.
+  const savedRef = useRef(JSON.stringify(widget.settings?.appearance ?? {}));
 
-  const save = useCallback(
-    (next: AppearanceSettings) => {
-      setAp(next); // otimista imediato
-      latest.current = next;
+  const commit = useCallback(() => {
+    const json = JSON.stringify(latest.current);
+    if (json === savedRef.current) return;
+    savedRef.current = json;
+    void notifyOnError(
+      saveWidgetSettings(widget.id, dashboardId, {
+        ...widget.settings,
+        appearance: latest.current,
+      }),
+      "Não foi possível salvar a aparência"
+    ).then((res) => {
+      if (res?.ok) refresh();
+    });
+  }, [widget.id, widget.settings, dashboardId, refresh]);
+
+  // O commit sempre pela versão mais recente, sem re-armar o debounce.
+  const commitRef = useRef(commit);
+  useEffect(() => {
+    commitRef.current = commit;
+  });
+  useEffect(
+    () => () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        void notifyOnError(
-          saveWidgetSettings(widget.id, dashboardId, {
-            ...widget.settings,
-            appearance: latest.current,
-          }),
-          "Não foi possível salvar a aparência"
-        ).then((res) => {
-          if (res?.ok) router.refresh();
-        });
-      }, 500);
+      commitRef.current(); // flush no desmonte (troca de aba)
     },
-    [widget.id, widget.settings, dashboardId, router]
+    []
   );
+
+  const save = useCallback((next: AppearanceSettings) => {
+    setAp(next); // otimista imediato
+    latest.current = next;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => commitRef.current(), 500);
+  }, []);
 
   return { ap, save };
 }

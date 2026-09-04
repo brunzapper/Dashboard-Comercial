@@ -1,4 +1,10 @@
-// Versão: 1.3 | Data: 12/08/2026
+// Versão: 1.4 | Data: 04/09/2026
+// v1.4 (04/09/2026): a escrita na URL SOBREVIVE ao desmonte da barra. A troca
+//   de aba do dashboard desmonta os widgets da aba anterior e o cleanup do
+//   debounce (350ms) matava o timer — o filtro recém-aplicado/limpo era
+//   descartado. O payload pendente passa a viver em pendingRef e um effect
+//   MOUNT-ONLY o FLUSHA no desmonte; nesse flush o replace vai direto ao
+//   router, sem o overlay do useNavPending (o componente já morreu).
 // v1.3 (12/08/2026): prop `actions` — slot de ações do widget (ex.: botão "+"
 //   de criação manual) renderizado ao lado do botão de filtros.
 // v1.2 (31/07/2026): valor de filtro AMIGÁVEL — responsável/operação/etapa
@@ -125,11 +131,36 @@ export function TableFilterBar({
   const encoded = encodeViewFilter({ q, filters: cleanFilters(filters) });
   const filtersKey = JSON.stringify(cleanFilters(filters));
   const lastNavFiltersKey = useRef(filtersKey); // filtros da última navegação RSC
+  // Payload pendente do debounce: o timer o CONSOME e o effect mount-only abaixo
+  // o FLUSHA no desmonte (troca de aba). Sem isso os 350ms pendentes morriam
+  // junto com o card e o filtro nunca chegava à URL.
+  const pendingRef = useRef<((viaUnmount?: boolean) => void) | null>(null);
+  // Só o payload armado por uma mudança do USUÁRIO é flushado. O primeiro
+  // disparo do effect de debounce acontece na MONTAGEM e pode armar um payload
+  // de mera sincronização (seed que não round-tripa numa config antiga dos
+  // campos); flushá-lo no desmonte gravaria sem ninguém ter mexido — e em dev o
+  // StrictMode (monta → desmonta → monta) faria isso em toda montagem.
+  const armedByUserRef = useRef(false);
+  useEffect(
+    () => () => {
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (armedByUserRef.current) pending?.(true);
+    },
+    []
+  );
+  const firstEffectRunRef = useRef(true);
   useEffect(() => {
+    const bySeed = firstEffectRunRef.current;
+    firstEffectRunRef.current = false;
     const currentVal =
       new URLSearchParams(window.location.search).get(paramKey) ?? "";
-    if (encoded === currentVal) return;
-    const timer = setTimeout(() => {
+    if (encoded === currentVal) {
+      // Já está na URL: nada pendente pode sobreviver ao desmonte.
+      pendingRef.current = null;
+      return;
+    }
+    const dispatch = (viaUnmount = false) => {
       const params = new URLSearchParams(window.location.search);
       if (encoded) params.set(paramKey, encoded);
       else params.delete(paramKey);
@@ -139,8 +170,19 @@ export function TableFilterBar({
         window.history.replaceState(null, "", url);
       } else {
         lastNavFiltersKey.current = filtersKey;
-        run(() => router.replace(url, { scroll: false }));
+        // No flush do desmonte o overlay não faz sentido (o componente já
+        // morreu) — a navegação vai direto ao router.
+        if (viaUnmount) router.replace(url, { scroll: false });
+        else run(() => router.replace(url, { scroll: false }));
       }
+    };
+    pendingRef.current = dispatch;
+    armedByUserRef.current = !bySeed;
+    const timer = setTimeout(() => {
+      // Só o agendamento VIGENTE dispara (um `encoded` mais novo o substituiu).
+      if (pendingRef.current !== dispatch) return;
+      pendingRef.current = null;
+      dispatch();
     }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
