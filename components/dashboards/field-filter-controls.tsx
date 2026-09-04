@@ -1,4 +1,15 @@
-// Versão: 1.6 | Data: 01/09/2026
+// Versão: 1.7 | Data: 04/09/2026
+// v1.7 (04/09/2026): a gravação SOBREVIVE ao desmonte do card. A troca de aba
+// do dashboard desmonta os widgets da aba anterior e o cleanup do debounce
+// (350ms) matava o timer — o filtro recém-aplicado/limpo não chegava nem ao
+// banco (modo compartilhado) nem à URL/preferência (modo URL). O payload
+// pendente passa a viver em pendingRef e um effect MOUNT-ONLY o FLUSHA no
+// desmonte (o cleanup do effect de debounce roda a cada mudança de `encoded`,
+// então não serve de gancho de desmonte). No flush do branch de URL o replace
+// vai DIRETO ao router, sem o `run` do useNavPending — acender o overlay de um
+// componente que já morreu não faz sentido. Cache de módulo do valor otimista
+// (modo compartilhado) evita o pisca do valor antigo ao voltar à aba antes do
+// refresh de reconciliação (que também sobrevive — use-debounced-refresh v1.2).
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -63,6 +74,17 @@ import {
 } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
+
+// Valor otimista do modo COMPARTILHADO por widget, vivo enquanto a página está
+// aberta: a troca de aba desmonta o card e o remonta com as props RSC do último
+// render, ainda antigas enquanto o refresh não aterrissa. `baseline` é o
+// savedValue canônico no instante da escrita — a entrada é descartada assim que
+// o servidor passa dele (nossa gravação chegou, ou outro usuário mudou), então
+// nada fica pinado em valor stale. Mesmo padrão do exprCache do CalculatorWidget.
+const sharedOptimisticCache = new Map<
+  string,
+  { encoded: string; baseline: string }
+>();
 
 // Valor local de um controle: ARRAY para os de multi-seleção, string para o
 // resto (Input de texto, Combobox de um valor, "1" dos operadores sem valor).
@@ -196,7 +218,28 @@ export function FieldFilterControls({
   // autenticado vendo o snapshot não pode poluir o dashboard vivo).
   const { snapshot } = useSnapshotMode();
 
-  const initial = parseViewFilter(sp.get(paramKey) ?? savedValue ?? null);
+  // Modo compartilhado e seed canônico do servidor — declarados ANTES do estado
+  // porque o cache de otimistas participa da semente da montagem.
+  const sharedMode = Boolean(shared) && !snapshot;
+  const canonSaved = encodeViewFilter(parseViewFilter(savedValue ?? null));
+  const cacheKey = `${dashboardId ?? ""}:${widgetId ?? ""}`;
+  const cachedShared = sharedMode
+    ? sharedOptimisticCache.get(cacheKey)
+    : undefined;
+  // Entrada obsoleta: o servidor já passou do baseline dela. Descarta (idempotente).
+  if (cachedShared && cachedShared.baseline !== canonSaved) {
+    sharedOptimisticCache.delete(cacheKey);
+  }
+  // Otimista ainda não confirmado (remontagem por troca de aba): vence o seed do
+  // servidor, que neste render ainda traz o valor ANTIGO. serverAppliedRef nasce
+  // dele também, senão a montagem re-gravaria o mesmo valor.
+  const pendingShared =
+    cachedShared && cachedShared.baseline === canonSaved
+      ? cachedShared.encoded
+      : null;
+  const initial = parseViewFilter(
+    pendingShared ?? sp.get(paramKey) ?? savedValue ?? null
+  );
   const [q, setQ] = useState(initial.q ?? "");
   const [values, setValues] = useState<EntryValue[]>(() =>
     initialValues(fields, initial.filters, options)
@@ -214,8 +257,6 @@ export function FieldFilterControls({
   // não reseta — um ff_ de bookmark segue honrado naquele render), e o compare
   // com o último valor aplicado localmente evita clobber do que o usuário
   // digita durante um debounce pendente e no eco do próprio save.
-  const sharedMode = Boolean(shared) && !snapshot;
-  const canonSaved = encodeViewFilter(parseViewFilter(savedValue ?? null));
   const sharedSeedRef = useRef(canonSaved);
   useEffect(() => {
     if (!sharedMode || canonSaved === sharedSeedRef.current) return;
@@ -232,14 +273,41 @@ export function FieldFilterControls({
   const showSearch = (searchFields?.length ?? 0) > 0 || fields.length === 0;
 
   const encoded = encodeViewFilter({ q, filters: buildFilters(fields, values) });
+  // Payload pendente do debounce. O timer o CONSOME; o effect mount-only abaixo
+  // o FLUSHA no desmonte — a troca de aba desmonta o card e, sem isso, os 350ms
+  // pendentes eram simplesmente descartados. O cleanup do effect de debounce NÃO
+  // serve de gancho de desmonte: ele roda a cada mudança de `encoded`.
+  const pendingRef = useRef<((viaUnmount?: boolean) => void) | null>(null);
+  // Só o payload armado por uma mudança do USUÁRIO é flushado. O primeiro
+  // disparo do effect de debounce acontece na MONTAGEM e pode armar um payload
+  // de mera sincronização (seed que não round-tripa numa config antiga dos
+  // campos); flushá-lo no desmonte gravaria sem ninguém ter mexido — e em dev o
+  // StrictMode (monta → desmonta → monta) faria isso em toda montagem.
+  const armedByUserRef = useRef(false);
+  useEffect(
+    () => () => {
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (armedByUserRef.current) pending?.(true);
+    },
+    []
+  );
+  const firstEffectRunRef = useRef(true);
   useEffect(() => {
+    const bySeed = firstEffectRunRef.current;
+    firstEffectRunRef.current = false;
     // Modo compartilhado (não-snapshot): o transporte é o BANCO (célula
     // __ff__), nunca a URL — espelhá-la pinaria cada viewer no valor do mount
     // (a URL vence no servidor). A comparação de "nada mudou" é contra o
     // último valor aplicado, não contra a URL.
     if (sharedMode) {
-      if (encoded === serverAppliedRef.current) return;
-      const timer = setTimeout(() => {
+      if (encoded === serverAppliedRef.current) {
+        // Voltou ao valor já aplicado: um payload pendente de antes não pode
+        // sobreviver ao desmonte gravando um valor que o usuário desfez.
+        pendingRef.current = null;
+        return;
+      }
+      const dispatch = () => {
         // ff_ residual (bookmark antigo): removido na primeira edição, para o
         // viewer convergir para a célula compartilhada nas próximas renders.
         const params = new URLSearchParams(window.location.search);
@@ -251,6 +319,8 @@ export function FieldFilterControls({
         const prevApplied = serverAppliedRef.current;
         serverAppliedRef.current = encoded;
         if (dashboardId && widgetId) {
+          // Sobrevive à remontagem por troca de aba até o servidor confirmar.
+          sharedOptimisticCache.set(cacheKey, { encoded, baseline: canonSaved });
           // Save otimista em background (padrão QuickFiltersBar v1.3): os
           // controles já mostram o valor novo; a action volta logo após o
           // upsert (revalidate:false) e o refresh debounced reconcilia.
@@ -264,6 +334,8 @@ export function FieldFilterControls({
                 revalidate: false,
               }),
             revert: () => {
+              // O otimista morreu: o cache não pode ressuscitá-lo na remontagem.
+              sharedOptimisticCache.delete(cacheKey);
               serverAppliedRef.current = prevApplied;
               const parsed = parseViewFilter(prevApplied || null);
               setQ(parsed.q ?? "");
@@ -271,6 +343,14 @@ export function FieldFilterControls({
             },
           });
         }
+      };
+      pendingRef.current = dispatch;
+      armedByUserRef.current = !bySeed;
+      const timer = setTimeout(() => {
+        // Só o agendamento VIGENTE dispara (um `encoded` mais novo o substituiu).
+        if (pendingRef.current !== dispatch) return;
+        pendingRef.current = null;
+        dispatch();
       }, 350);
       return () => clearTimeout(timer);
     }
@@ -278,8 +358,12 @@ export function FieldFilterControls({
     // outro controle entre o agendamento e o disparo não é sobrescrita.
     const currentVal =
       new URLSearchParams(window.location.search).get(paramKey) ?? "";
-    if (encoded === currentVal) return;
-    const timer = setTimeout(() => {
+    if (encoded === currentVal) {
+      // Já está na URL: nada pendente pode sobreviver ao desmonte.
+      pendingRef.current = null;
+      return;
+    }
+    const dispatch = (viaUnmount = false) => {
       const params = new URLSearchParams(window.location.search);
       if (encoded) params.set(paramKey, encoded);
       else params.delete(paramKey);
@@ -293,7 +377,10 @@ export function FieldFilterControls({
         return;
       }
       serverAppliedRef.current = encoded;
-      run(() => router.replace(url, { scroll: false }));
+      // No flush do desmonte o overlay não faz sentido (o componente já morreu)
+      // — a navegação vai direto ao router.
+      if (viaUnmount) router.replace(url, { scroll: false });
+      else run(() => router.replace(url, { scroll: false }));
       // Persistência por usuário (fire-and-forget): encoded vazio LIMPA a
       // preferência (o usuário removeu o filtro — não pode ressuscitar).
       if (!snapshot && dashboardId && widgetId) {
@@ -304,6 +391,14 @@ export function FieldFilterControls({
           }
         );
       }
+    };
+    pendingRef.current = dispatch;
+    armedByUserRef.current = !bySeed;
+    const timer = setTimeout(() => {
+      // Só o agendamento VIGENTE dispara (um `encoded` mais novo o substituiu).
+      if (pendingRef.current !== dispatch) return;
+      pendingRef.current = null;
+      dispatch();
     }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

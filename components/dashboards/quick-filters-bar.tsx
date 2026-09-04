@@ -1,4 +1,13 @@
-// Versão: 1.4 | Data: 01/09/2026
+// Versão: 1.5 | Data: 04/09/2026
+// v1.5 (04/09/2026): a gravação SOBREVIVE ao desmonte do card. A troca de aba
+// do dashboard é client-side e desmonta os widgets da aba anterior — o cleanup
+// do debounce (400ms) matava o timer e o filtro recém-aplicado/limpo nunca era
+// gravado ("preciso ficar parado um bom tempo na tela para trocar de aba").
+// Agora o payload pendente vive em pendingRef e o cleanup o FLUSHA (padrão do
+// CalculatorWidget), e um cache de MÓDULO guarda o valor otimista com o
+// serverKey de baseline, para o chip não piscar o valor antigo ao voltar à aba
+// antes de o refresh de reconciliação aterrissar (que agora também sobrevive —
+// lib/use-debounced-refresh v1.2).
 // v1.4 (01/09/2026): o popover de multi-seleção saiu daqui para
 // components/filters/multi-select-popover.tsx (controle ÚNICO, agora também
 // usado pelo widget "Filtro por campo"); MultiQuickFilter virou o wrapper que
@@ -32,7 +41,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { MultiSelectPopover } from "@/components/filters/multi-select-popover";
@@ -57,6 +66,18 @@ import { saveQuickFilterValue } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 import { PeriodRangeDraft } from "./period-range-inputs";
+
+// Valores otimistas por widget, vivos enquanto a página está aberta: a troca de
+// aba desmonta o card e o remonta com as props RSC do último render, que ainda
+// são as ANTIGAS enquanto o refresh de reconciliação não aterrissa. `baseline` é
+// o serverKey no instante da escrita — a entrada é descartada assim que o
+// servidor passa dele (nossa gravação chegou, ou outro usuário mudou o valor),
+// então nada fica pinado em valor stale. Mesmo padrão do exprCache do
+// CalculatorWidget.
+const optimisticCache = new Map<
+  string,
+  { values: Record<string, QuickFilterValue>; baseline: string }
+>();
 
 const CUSTOM = "__custom__";
 
@@ -86,7 +107,6 @@ export function QuickFiltersBar({
   const { snapshot } = useSnapshotMode();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   // Estado otimista, ressincronizado quando o servidor manda valores novos
   // (outro usuário mudou / sync da barra global) — padrão seedKey do app.
@@ -96,31 +116,67 @@ export function QuickFiltersBar({
   // refresh do hook traz o valor gravado numa key nova e o reseed normal
   // reconcilia.
   const serverKey = JSON.stringify(qf.values);
+  const cacheKey = `${dashboardId}:${widgetId}`;
+  const cached = optimisticCache.get(cacheKey);
+  // Entrada obsoleta: o servidor já passou do baseline dela. Descarta (idempotente).
+  if (cached && cached.baseline !== serverKey) optimisticCache.delete(cacheKey);
   const [seedKey, setSeedKey] = useState(serverKey);
   const [values, setValues] = useState<Record<string, QuickFilterValue>>(
-    qf.values
+    cached && cached.baseline === serverKey ? cached.values : qf.values
   );
+  // Espelho do estado (padrão exprRef do CalculatorWidget): setValue monta o
+  // próximo mapa a partir dele, então duas escritas no MESMO tick (dois chips)
+  // não se sobrescrevem — e o cache de módulo recebe o objeto resultante sem
+  // efeito colateral dentro de um updater (que o StrictMode duplicaria).
+  const valuesRef = useRef(values);
   if (seedKey !== serverKey) {
     setSeedKey(serverKey);
     if (!hasPending) setValues(qf.values);
   }
-
-  // Debounce por entry: agrupa cliques rápidos numa única gravação.
-  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Espelho sincronizado APÓS o commit (ref não se escreve em render). setValue
+  // só roda em evento do usuário, sempre depois deste effect, então nunca lê
+  // um mapa defasado.
   useEffect(() => {
+    valuesRef.current = values;
+  }, [values]);
+
+  // Debounce por entry: agrupa cliques rápidos numa única gravação. O payload
+  // pendente fica em pendingRef; o timer o CONSOME e o desmonte o FLUSHA — sem
+  // isso, trocar de aba dentro dos 400ms descartava a gravação inteira.
+  const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pendingRef = useRef<Record<string, () => void>>({});
+  // Já drenou? O React destrói a subárvore de cima para baixo, então um filho
+  // (o rascunho de intervalo personalizado) pode commitar DEPOIS do dreno deste
+  // componente — o persist resultante precisa gravar na hora, senão arma um
+  // timer que ninguém mais dispara.
+  const flushedRef = useRef(false);
+  useEffect(() => {
+    flushedRef.current = false; // remontagem (StrictMode) volta ao normal
     const timers = timersRef.current;
+    const pending = pendingRef.current;
     return () => {
+      flushedRef.current = true;
       for (const t of Object.values(timers)) clearTimeout(t);
+      // Vazio na montagem — o StrictMode do dev (monta → desmonta → monta) roda
+      // este cleanup sem nada pendente, então nunca dispara save espúrio.
+      for (const id of Object.keys(pending)) {
+        const pendingRun = pending[id];
+        delete pending[id];
+        pendingRun();
+      }
     };
   }, []);
 
   const persist = (entryId: string, value: QuickFilterValue | null) => {
     clearTimeout(timersRef.current[entryId]);
-    timersRef.current[entryId] = setTimeout(() => {
+    const dispatch = () => {
       // Modo snapshot: seleção por visitante na URL; o RSC público a lê e
       // recomputa sobre o dataset congelado. Nada persiste no servidor.
       if (snapshot) {
-        const params = new URLSearchParams(searchParams.toString());
+        // URL lida de window.location, nunca do `searchParams` capturado: este
+        // dispatch pode rodar no flush do DESMONTE, depois de a troca de aba
+        // ter escrito ?tab= por replaceState — o snapshot velho apagaria isso.
+        const params = new URLSearchParams(window.location.search);
         const key = `qf_${widgetId}_${entryId}`;
         if (value) params.set(key, JSON.stringify(value));
         else params.delete(key);
@@ -142,24 +198,40 @@ export function QuickFiltersBar({
           saveQuickFilterValue(dashboardId, widgetId, entryId, value, {
             revalidate: false,
           }),
-        revert: () =>
-          setValues((cur) => {
-            const next = { ...cur };
-            if (prev == null) delete next[entryId];
-            else next[entryId] = prev;
-            return next;
-          }),
+        revert: () => {
+          // O otimista morreu: o cache não pode ressuscitá-lo numa remontagem.
+          optimisticCache.delete(cacheKey);
+          const next = { ...valuesRef.current };
+          if (prev == null) delete next[entryId];
+          else next[entryId] = prev;
+          valuesRef.current = next;
+          setValues(next);
+        },
       });
+    };
+    pendingRef.current[entryId] = dispatch;
+    if (flushedRef.current) {
+      // Commit tardio de um filho, já com o card desmontado: grava agora.
+      delete pendingRef.current[entryId];
+      dispatch();
+      return;
+    }
+    timersRef.current[entryId] = setTimeout(() => {
+      // Só o agendamento VIGENTE dispara (um persist mais novo já o substituiu).
+      if (pendingRef.current[entryId] !== dispatch) return;
+      delete pendingRef.current[entryId];
+      dispatch();
     }, 400);
   };
 
   const setValue = (entryId: string, value: QuickFilterValue | null) => {
-    setValues((prev) => {
-      const next = { ...prev };
-      if (value == null) delete next[entryId];
-      else next[entryId] = value;
-      return next;
-    });
+    const next = { ...valuesRef.current };
+    if (value == null) delete next[entryId];
+    else next[entryId] = value;
+    valuesRef.current = next;
+    setValues(next);
+    // Sobrevive à remontagem por troca de aba até o servidor confirmar.
+    optimisticCache.set(cacheKey, { values: next, baseline: serverKey });
     persist(entryId, value);
   };
 

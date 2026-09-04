@@ -1,4 +1,11 @@
-// Versão: 1.0 | Data: 07/08/2026
+// Versão: 1.1 | Data: 04/09/2026
+// v1.1 (04/09/2026): só documentação. O save já sobrevivia ao desmonte de quem
+// o disparou (a IIFE não é cancelada), mas o refresh de reconciliação NÃO — ele
+// vivia num timer do componente. Com useDebouncedRefresh v1.2 o timer é de
+// módulo e sobrevive: gravação e reconciliação seguem valendo quando o controle
+// desmonta no meio (troca de aba do dashboard). Quem tem debounce PRÓPRIO antes
+// do save (filtros rápidos, filtro por campo, barra de tabela) precisa flushar o
+// payload pendente no desmonte — o save aqui só recebe o que já foi disparado.
 // Hook ÚNICO do padrão "save otimista em background" (docs/arquitetura.md
 // §Feedback de carregamento): o chamador aplica o estado otimista ANTES e
 // dispara `save()` — a UI segue interativa. A action deve rodar SEM
