@@ -1,4 +1,6 @@
-// Versão: 2.8 | Data: 07/08/2026
+// Versão: 2.9 | Data: 06/09/2026
+// v2.9 (06/09/2026): Tabela Livre — caixa "Barra de fórmula e régua A/B/C"
+//   (appearance.table.formulaBar; ausente = visível p/ quem pode digitar).
 // v2.8 (07/08/2026): "Aplicar" OTIMISTA em background (useBackgroundSave): o
 //   sheet fecha na hora, updateWidget roda com revalidate:false e o refresh
 //   debounced traz a aparência aplicada (antes: await revalidate + refresh =
@@ -136,6 +138,7 @@ export function WidgetAppearanceSheet({
   const isPie = vt === "pizza" || vt === "funil";
   // A Tabela Livre reusa a seção de tabela (cores globais/grade/alinhamento).
   const isTable = vt === "tabela" || vt === "tabela_editavel";
+  const isQuickTable = vt === "tabela_editavel";
   const isKpi = vt === "kpi";
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";
@@ -1110,6 +1113,23 @@ export function WidgetAppearanceSheet({
                     { value: "right", label: "Direita" },
                   ]}
                 />
+                {isQuickTable ? (
+                  <>
+                    <CheckRow
+                      label="Barra de fórmula e régua A/B/C"
+                      checked={ap.table?.formulaBar !== false}
+                      onChange={(c) =>
+                        patchTable({ formulaBar: c ? undefined : false })
+                      }
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      A barra mostra o endereço e a fórmula da célula
+                      selecionada; a régua exibe as letras/números usados nas
+                      contas (=A1+B2). Desligue em tabelas usadas só como
+                      layout.
+                    </p>
+                  </>
+                ) : null}
                 <p className="text-muted-foreground text-xs">
                   Reordenar colunas/linhas, ordenar e colorir coluna/linha/célula:
                   arraste a alça ou dê duplo-clique direto na tabela.

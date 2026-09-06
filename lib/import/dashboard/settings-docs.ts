@@ -1,4 +1,6 @@
-// Versão: 1.5 | Data: 12/08/2026
+// Versão: 1.6 | Data: 06/09/2026
+// v1.6 (06/09/2026): `formulaBar` (Tabela Livre: barra de fórmula "fx" + régua
+//   A/B/C; false oculta).
 // v1.5 (12/08/2026): `showAddRecord` (tabela modo lista: botão "+" de criação
 //   manual; só com UMA Base raiz com manual_entry — gate re-checado em runtime).
 // v1.4 (30/07/2026): FORMULA_FUNC_GROUPS/FormulaFuncGroup passam a DERIVAR do
@@ -133,6 +135,7 @@ export const APPEARANCE_TABLE_DOC = {
   orientation: `"orientation": "columns",              // "rows" (default) | "columns" (transposta: grupos viram colunas)`,
   groupBy: `"groupBy": ["dim_1"],                  // "Agrupar por": níveis com subtotais recolhíveis (dim_<n> na agregada; field na lista)`,
   groupDateFormats: `"groupDateFormats": { "dim_1": "month_year" },  // formato/bucket do CABEÇALHO do grupo (transform "por nome" ou máscara de data)`,
+  formulaBar: `"formulaBar": false,                  // Tabela Livre: oculta a barra de fórmula "fx" e a régua A/B/C (default: visíveis p/ quem pode digitar)`,
   colDim: `"colDim": "dim_2",                     // transposta: qual dimensão vira as colunas do topo`,
   colWidths: null, // resize manual (px por coluna) — manipulação direta, não gerar
   rowHeights: null, // resize manual (px por linha) — manipulação direta, não gerar
