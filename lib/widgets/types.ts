@@ -1,4 +1,6 @@
-// Versão: 1.14 | Data: 12/08/2026
+// Versão: 1.15 | Data: 06/09/2026
+// v1.15 (06/09/2026): AppearanceSettings.table.formulaBar — barra "fx" + régua
+//   A/B/C da Tabela Livre (endereços das células no cálculo entre elas).
 // v1.14 (12/08/2026): RecordListSettings.showAddRecord — botão "+" de criação
 //   manual na tabela modo lista (gate manualEntryRootSource, lib/sources.ts).
 // v1.13 (25/07/2026): visual_type 'linha_divisoria' (a Forma "linha" vira
@@ -1006,6 +1008,11 @@ export interface AppearanceSettings {
     // ou (agregada) a dimensão tem transform "por nome" — o engine troca o
     // ISO da linha pelo rótulo e não sobra data crua p/ re-bucketizar.
     groupDateFormats?: Record<string, GroupDateFormat>;
+    // Tabela Livre (06/09/2026): barra de fórmula "fx" + régua A/B/C ao redor
+    // da grade (endereços das células, para o cálculo entre elas). Ausente/
+    // true = visível para quem pode digitar; false = oculta (tabela usada só
+    // como layout). Nunca aparece no viewer de snapshot (leitura pública).
+    formulaBar?: boolean;
     // Transposta: qual dimensão vira as colunas do topo. Mesma convenção de
     // chaves do groupBy (agregada `dim_<n>`; registros `<field>`). Ausente ou
     // órfã (dimensões mudaram) = 1ª dimensão, comportamento original.
