@@ -1,4 +1,12 @@
-// Versão: 1.24 | Data: 12/08/2026
+// Versão: 1.25 | Data: 07/09/2026
+// v1.25 (07/09/2026): (a) as opções de "Período de cada coluna" saem de
+//   KANBAN_DATE_BUCKET_LABELS (lib/kanban/types.ts) — rótulo com dono único,
+//   compartilhado com o SPEC de importação por IA; (b) CORREÇÃO: o `clean`
+//   que RECONSTRÓI settings.kanban no ramo "registros" passa a re-emitir
+//   `writeBack` e `tasks`. Eles são editados fora do builder (popover de
+//   colunas → saveWidgetSettings) e `clean` substitui o objeto inteiro:
+//   salvar o widget pelo builder DESLIGAVA o write-back em silêncio — o
+//   mesmo furo que o allocationFieldKey já tinha resolvido ao lado.
 // v1.24 (12/08/2026): Opções avançadas ganham o toggle "Botão '+' para criar
 //   registro" (settings.showAddRecord) — só lista de registros com UMA Base
 //   raiz de criação manual (manualEntryRootSource); o save limpa a chave
@@ -124,8 +132,10 @@ import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import {
   DEFAULT_CUSTOM_COLUMNS,
+  KANBAN_DATE_BUCKET_LABELS,
   KANBAN_MAX_BADGES,
   type KanbanAgg,
+  type KanbanDateBucket,
   type KanbanMetricSpec,
   type KanbanSettings,
 } from "@/lib/kanban/types";
@@ -1575,6 +1585,13 @@ export function WidgetBuilder({
                   : {}),
               },
               ...(!isCustomCols && k.columns ? { columns: k.columns } : {}),
+              // Chaves que a UI do QUADRO edita (ColumnConfigPopover →
+              // saveWidgetSettings), não o builder: como `clean` SUBSTITUI
+              // settings.kanban inteiro, não re-emiti-las aqui desligava o
+              // write-back e zerava as opções de tarefa a cada save do
+              // builder — mesmo motivo do allocationFieldKey acima.
+              ...(k.writeBack ? { writeBack: true } : {}),
+              ...(k.tasks ? { tasks: k.tasks } : {}),
               ...(k.appearance ? { appearance: k.appearance } : {}),
             };
       const input = {
@@ -2871,17 +2888,15 @@ export function WidgetBuilder({
                             <Label>Período de cada coluna</Label>
                             <Combobox
                               searchable={false}
-                              options={[
-                                { value: "weekday", label: "Dia da semana" },
-                                { value: "month_name", label: "Mês do ano" },
-                                { value: "month_year", label: "Mês/Ano" },
-                              ]}
+                              options={Object.entries(
+                                KANBAN_DATE_BUCKET_LABELS
+                              ).map(([value, label]) => ({ value, label }))}
                               value={k.dateBucket}
                               onValueChange={(v) =>
                                 patchKanban({
                                   dateBucket:
-                                    v === "month_name" || v === "month_year"
-                                      ? v
+                                    v in KANBAN_DATE_BUCKET_LABELS
+                                      ? (v as KanbanDateBucket)
                                       : "weekday",
                                 })
                               }

@@ -2493,6 +2493,50 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
 - `app/(app)/dashboards/[id]/page.tsx` exporta `maxDuration = 300` (as actions
   do painel rodam sob o segment config DESTA rota — espelho da Home).
 
+**Kanban e Agenda ao alcance da IA (07/09/2026).** Até aqui
+`WidgetSettings.kanban`/`.agenda` estavam marcados `null` em
+`settings-docs.ts` ("fora do escopo da IA") e o SPEC nunca citava as duas
+palavras. Como `visual_type: "kanban"` sempre esteve no enum de tipos válidos,
+o efeito prático era o pior dos dois mundos: a IA criava o widget e o quadro
+nascia VAZIO. Pior ainda, `settings` era **passthrough** no validador e o
+`applyPresetDefinition` gravava o objeto cru — um JSON com
+`allocationFieldKey` escrevia no campo-espelho do quadro de ORIGEM
+(invariante 24) sem nenhuma barreira. Três mudanças, na mesma entrega:
+
+- **SPEC**: `WIDGET_SETTINGS_DOC.kanban`/`.agenda` passam a ser blocos de
+  pseudo-JSON DERIVADOS dos mapas de rótulo (`KANBAN_MODE_LABELS`,
+  `KANBAN_DATE_BUCKET_LABELS`, `KANBAN_AGG_LABELS`,
+  `KANBAN_METRIC_KIND_LABELS`, `AGENDA_VIEW_LABELS` — todos
+  `satisfies Record<União, string>` em `lib/kanban/types.ts` e
+  `lib/agenda/types.ts`, que também são a fonte dos selects da UI) e dos tetos
+  reais (`KANBAN_MAX_COLUMNS`, `KANBAN_MAX_BADGES`, `KANBAN_MAX_EXTRA_FIELDS`,
+  `DEFAULT_CUSTOM_COLUMNS`, `DEFAULT_TASK_PHASES`). Variante nova sem entrada
+  quebra o `typecheck`; rótulo que não chega ao texto reprova em
+  `instructions.test.ts`.
+- **Saneamento** (`lib/import/dashboard/kanban-settings.ts`, régua ÚNICA):
+  `sanitizeKanbanSettings`/`sanitizeAgendaSettings` são PUROS e recebem as
+  dependências por injeção (`checkRef` é uma closure do validador), o que os
+  deixa testáveis sem banco e reusáveis por qualquer assistente futuro do
+  quadro. Fazem STRIP dos vínculos locais (`KANBAN_LOCAL_KEYS =
+  allocationFieldKey/taskBoardId`), conferem enums contra os mapas, refs pelo
+  `checkRef`, keys de Base (métrica `linked` só aceita Base RAIZ — sub-base
+  compartilha o `record_type` da pai e nunca casa) e os tetos. Doutrina:
+  chave inválida vira **aviso + descarte**, nunca erro duro — um widget bom
+  não se perde por um enum errado.
+- **Vínculos locais**: o export os remove (mesma razão de `pages`), o
+  validador os descarta e o `applyPresetDefinition` os PRESERVA do settings
+  existente no update in-place, só quando o widget CONTINUA kanban. Sem essa
+  preservação, o strip do export faria uma edição por IA desligar a
+  alocação-como-campo em silêncio.
+
+Coerência extra: em widget kanban/agenda, `widgets.sources` é ALINHADO com a
+Base da config (com aviso quando diverge) — é de `sources` que a page resolve
+o período do quadro, e é o que o widget-builder grava. Na mesma entrega, o
+`clean` do builder passou a re-emitir `writeBack` e `tasks`: como ele
+RECONSTRÓI `settings.kanban` inteiro e essas duas chaves são editadas fora
+dele (popover de colunas → `saveWidgetSettings`), salvar o widget pelo builder
+desligava o write-back em silêncio.
+
 ### 4.12 Espaço de grid v2 (grade fina) e Páginas de widget (25/07/2026)
 
 **Grade fina (espaço v2).** A célula do grid deixou de ser ancorada em 12

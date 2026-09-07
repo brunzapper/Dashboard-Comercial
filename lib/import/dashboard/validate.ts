@@ -1,4 +1,13 @@
-// Versão: 1.5 | Data: 03/08/2026
+// Versão: 1.6 | Data: 07/09/2026
+// v1.6 (07/09/2026): `settings.kanban`/`settings.agenda` deixam de ser
+//   PASSTHROUGH — passam por sanitizeKanbanSettings/sanitizeAgendaSettings
+//   (lib/import/dashboard/kanban-settings.ts, régua ÚNICA compartilhada com
+//   o assistente de IA do quadro): STRIP dos vínculos locais
+//   (allocationFieldKey/taskBoardId — invariante 24), enums contra os mapas
+//   de rótulo, refs por checkRef, keys de Base e os tetos de colunas/badges/
+//   extraFields. Além disso, `sources` de um widget kanban/agenda é ALINHADO
+//   com a Base da config (é de lá que a page resolve o período). Doutrina:
+//   aviso + descarte, nunca erro duro.
 // v1.5 (03/08/2026): Semana Fechada — `dimensions[].closedWeek` ("seg_dom" |
 //   "sab_sex") aceito nos transforms de semana (week_year/week_month; "week"
 //   legado idem); transform incompatível REMOVE com aviso (padrão do dateAgg),
@@ -70,6 +79,10 @@ import {
   normalizePresetGridSpace,
 } from "@/lib/widgets/grid-space";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
+import {
+  sanitizeAgendaSettings,
+  sanitizeKanbanSettings,
+} from "@/lib/import/dashboard/kanban-settings";
 import { slugify } from "@/lib/records/slug";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { ROLE_LABELS } from "@/lib/auth/roles";
@@ -1161,6 +1174,49 @@ export function validateDashboardImport(
       warnings.push(
         `${where}: "settings.pages" é gerida pelo sistema (mescla de widgets) e foi removida do JSON.`
       );
+    }
+
+    // Kanban/Agenda: config própria com refs, keys de Base e enums — passavam
+    // como PASSTHROUGH até 07/09/2026 (quadro nascia vazio, e um
+    // `allocationFieldKey` do JSON escrevia no campo-espelho do quadro de
+    // ORIGEM — invariante 24). A régua é única: lib/import/dashboard/
+    // kanban-settings.ts, compartilhada com o assistente de IA do quadro.
+    const sanitizeDeps = {
+      checkRef,
+      knownSources: sourceKeySet(),
+      rootSources: rootSourceKeySet(),
+      where,
+      warnings,
+    };
+    if ((wSettings as Record<string, unknown>).kanban !== undefined) {
+      const kanban = sanitizeKanbanSettings(wSettings.kanban, sanitizeDeps);
+      if (kanban) wSettings.kanban = kanban;
+      else delete (wSettings as Record<string, unknown>).kanban;
+    }
+    if ((wSettings as Record<string, unknown>).agenda !== undefined) {
+      const agenda = sanitizeAgendaSettings(wSettings.agenda, sanitizeDeps);
+      if (agenda) wSettings.agenda = agenda;
+      else delete (wSettings as Record<string, unknown>).agenda;
+    }
+
+    // Coerência kanban/agenda × `sources`: é de `widgets.sources` que a page
+    // resolve o período do quadro/calendário, e o widget-builder grava
+    // exatamente [config.source]. JSON que divirja deixaria o período sem
+    // âncora — alinhamos com aviso em vez de recusar o widget.
+    const ownSource =
+      visualType === "kanban"
+        ? asString(wSettings.kanban?.source)
+        : visualType === "agenda"
+          ? asString(wSettings.agenda?.source)
+          : "";
+    if (ownSource && (sources.length !== 1 || sources[0] !== ownSource)) {
+      if (sources.length > 0) {
+        warnings.push(
+          `${where}: "sources" (${sources.join(", ")}) não bate com a Base do ${visualType} ("${ownSource}") — alinhado com a config.`
+        );
+      }
+      sources.length = 0;
+      sources.push(ownSource);
     }
     if (tabIds.size > 0) {
       const tab = asString(wSettings.tab);

@@ -478,6 +478,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   exemplo do SPEC aceito pelo validador REAL e contagens `**Label (N)**` do
   §16.2 do manual — o conteúdo do manual segue humano (regra do topo), só as
   contagens são conferidas.
+- **Kanban/Agenda no import: settings SANEADO, vínculo local NUNCA no JSON
+  (07/09/2026):** `WidgetSettings.kanban`/`.agenda` deixaram de ser `null` no
+  dicionário (a IA CONFIGURA quadro e calendário) e deixaram de ser
+  passthrough no validador. A régua é ÚNICA —
+  `sanitizeKanbanSettings`/`sanitizeAgendaSettings`
+  (`lib/import/dashboard/kanban-settings.ts`, PUROS, deps por injeção porque o
+  `checkRef` é closure do validador): enums contra os mapas de rótulo de
+  `lib/kanban/types.ts`/`lib/agenda/types.ts` (`KANBAN_MODE_LABELS`/
+  `KANBAN_DATE_BUCKET_LABELS`/`KANBAN_AGG_LABELS`/
+  `KANBAN_METRIC_KIND_LABELS`/`AGENDA_VIEW_LABELS` — `satisfies`, e os MESMOS
+  que a UI consome), refs por `checkRef`, keys de Base (`linked` só aceita
+  Base RAIZ), tetos de colunas/badges/extraFields. Chave inválida = AVISO +
+  descarte, NUNCA erro duro. `KANBAN_LOCAL_KEYS`
+  (`allocationFieldKey`/`taskBoardId`) referenciam campo e board do quadro de
+  ORIGEM: o export as REMOVE, o validador as DESCARTA e o
+  `applyPresetDefinition` as PRESERVA do settings existente (só em widget que
+  segue kanban) — os três juntos, ou o strip do export desliga a alocação
+  (invariante 24) em silêncio na primeira edição por IA. `widgets.sources` de
+  kanban/agenda é ALINHADO com a Base da config (âncora do período da page).
+  NÃO documente os vínculos locais no SPEC e NÃO monte régua paralela de
+  saneamento — o assistente do quadro reusa este módulo. Fiscalizado por
+  `lib/import/dashboard/kanban-settings.test.ts` + blocos em
+  `validate.test.ts`/`instructions.test.ts`.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:

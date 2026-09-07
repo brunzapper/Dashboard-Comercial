@@ -1,4 +1,9 @@
-// Versão: 2.0 | Data: 28/07/2026
+// Versão: 2.1 | Data: 07/09/2026
+// v2.1 (07/09/2026): mapas de RÓTULO exaustivos (AGENDA_VIEW_LABELS,
+//   AGENDA_DENSITY_LABELS) e os tipos AgendaView/AgendaDensity — fonte ÚNICA dos
+//   rótulos da UI E do SPEC de importação por IA, que passou a documentar
+//   settings.agenda (lib/import/dashboard/settings-docs.ts). O `satisfies`
+//   faz variante nova quebrar o typecheck em vez de virar prosa duplicada.
 // Tipos da AGENDA (calendário): registros alocados no dia pelo campo de data
 // escolhido + tarefas pelo vencimento + anotações do dia (agenda_notes, 0111).
 // Sem imports de lib/widgets (o types.ts de widgets importa daqui — mesmo
@@ -9,6 +14,23 @@
 //   NOTE_COLORS (paleta de post-it).
 import type { RecordRow } from "@/lib/records/types";
 import type { TaskRow } from "@/lib/tasks/types";
+
+/** Visões do calendário. */
+export type AgendaView = "month" | "week";
+
+export const AGENDA_VIEW_LABELS = {
+  month: "Mês",
+  week: "Semana",
+} satisfies Record<AgendaView, string>;
+
+/** Altura de linha da grade (preset — px livre quebraria as 6 semanas). */
+export type AgendaDensity = "compacta" | "normal" | "espacosa";
+
+export const AGENDA_DENSITY_LABELS = {
+  compacta: "Compacta",
+  normal: "Normal",
+  espacosa: "Espaçosa",
+} satisfies Record<AgendaDensity, string>;
 
 /** Aparência do calendário (settings.agenda.appearance — editor no sheet de
  *  Aparência do card, espelho do KanbanAppearance). Cores de STATUS de tarefa
@@ -26,7 +48,7 @@ export interface AgendaAppearance {
   // Esmaecer dias fora do mês exibido (default true).
   dimOutsideMonth?: boolean;
   // Altura de linha (preset seguro — px livre quebraria a grade de 6 semanas).
-  density?: "compacta" | "normal" | "espacosa";
+  density?: AgendaDensity;
   chip?: {
     fontSize?: number; // px (telão pede maior)
     radius?: number;
@@ -47,7 +69,7 @@ export interface AgendaSettings {
   // Exibe anotações do dia (default true).
   showNotes?: boolean;
   // Visão inicial (default 'month').
-  defaultView?: "month" | "week";
+  defaultView?: AgendaView;
   // Aparência do calendário (editor no sheet de Aparência).
   appearance?: AgendaAppearance;
 }
