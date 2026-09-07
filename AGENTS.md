@@ -501,6 +501,23 @@ This version has breaking changes — APIs, conventions, and file structure may 
   saneamento — o assistente do quadro reusa este módulo. Fiscalizado por
   `lib/import/dashboard/kanban-settings.test.ts` + blocos em
   `validate.test.ts`/`instructions.test.ts`.
+- **Assistente do QUADRO kanban não tem régua própria (`kanban-config` v1,
+  07/09/2026):** o contrato (`lib/import/kanban/*`, core
+  `lib/ai/kanban-config.ts`, sheet `components/kanban/kanban-ai-sheet.tsx`,
+  actions em `app/(app)/kanbans/ai-actions.ts`) cobre `quadro` (delta de
+  `KanbanSettings`) + `automacoes` (lista COMPLETA). Toda validação REUSA o que
+  já existia: `deepMergeValue` (exportado de `lib/import/dashboard/rewrite.ts`
+  — mesma semântica de delta da IA de dashboards) → `sanitizeKanbanSettings`;
+  `parseAutomationRule` fail-closed para cada regra (por isso condição/ação
+  viajam na forma INTERNA — camada de tradução derivaria do parse);
+  `settableFields` do `getAutomationFieldOptions` como alvo de `set_field` (é
+  ele que aplica `setFieldTargetError`). NÃO monte validação paralela nem
+  traduza o vocabulário das regras. Apply SÓ por
+  `updateBoardSettings`/`saveWidgetSettings` + `saveAutomation`; reconciliação
+  por NOME e regra ausente é DESATIVADA, nunca excluída (precedente de
+  operações). Alvo = o quadro da UI (`KanbanOwner`), nunca do JSON; as colunas
+  chegam da página (como no `AutomationsSheet`) e só AMPLIAM os alvos aceitos.
+  Fiscalizado por `lib/import/kanban/{validate,instructions}.test.ts`.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:

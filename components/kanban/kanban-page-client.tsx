@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 28/07/2026
+// Versão: 1.6 | Data: 07/09/2026
+// v1.6 (07/09/2026): botão "Configurar com IA" (KanbanAiSheet) ao lado das
+//   Automações, no MESMO recorte delas (modo registros, sem colunas por
+//   data). Prop `ai` = metadados públicos do provedor da org; sem ela o
+//   sheet ainda serve o fluxo copiar-prompt → colar-JSON de IA externa.
 // Shell client da página dedicada de kanban (/kanbans/[id]): cabeçalho (nome,
 // visões kanban|lista, barra de período simples, config de colunas, criação) +
 // o quadro/lista. Os dados chegam computados do RSC; navegação de período muda
@@ -78,6 +82,7 @@ import { ColumnConfigPopover } from "./column-config-popover";
 import { MetricsPopover } from "./metrics-popover";
 import { BoardAppearancePopover } from "./board-appearance-popover";
 import { AutomationsSheet } from "./automations-sheet";
+import { KanbanAiSheet } from "@/components/kanban/kanban-ai-sheet";
 
 const PERIOD_OPTIONS: ComboboxOption[] = [
   { value: "", label: "Todo o período" },
@@ -98,6 +103,7 @@ export function KanbanPageClient({
   responsibleLabels = {},
   canConfig,
   widgetCtx,
+  ai,
 }: {
   boardId: string;
   boardName: string;
@@ -109,6 +115,10 @@ export function KanbanPageClient({
   taskCtx?: TaskFormContext;
   responsibleLabels?: Record<string, string>;
   canConfig: boolean;
+  // Config de IA da org (loadOrgAiConfigPublic — nunca a chave): habilita o
+  // chat do "Configurar com IA". Ausente/sem chave, o sheet ainda serve o
+  // fluxo copiar-prompt → colar-JSON de IA externa.
+  ai: { provider: string; model: string; hasKey: boolean } | null;
   // Página cheia de um WIDGET kanban (/kanbans/w/[widgetId]): persistência em
   // widgets.settings (o save sobrescreve o jsonb inteiro — widgetSettings é o
   // settings COMPLETO do widget) e placements por widget_id. Ausente = board.
@@ -406,6 +416,20 @@ export function KanbanPageClient({
                   source={kanban.source}
                   columns={data.columns}
                   isCustomColumns={isCustom}
+                />
+              ) : null}
+              {/* Configurar com IA: mesmo recorte das automações (o contrato
+                  cobre quadro + regras, e regra sobre coluna de DATA está
+                  fora do escopo do engine). */}
+              {!isTasks && !(kanban.dateBucket && kanban.dateField) ? (
+                <KanbanAiSheet
+                  owner={
+                    widgetCtx
+                      ? { kind: "widget", id: widgetCtx.widgetId }
+                      : { kind: "board", id: boardId }
+                  }
+                  columns={data.columns}
+                  ai={ai}
                 />
               ) : null}
               {/* Aparência do WIDGET se edita no builder do dashboard. */}

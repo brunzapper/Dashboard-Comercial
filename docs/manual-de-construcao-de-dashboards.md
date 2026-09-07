@@ -2189,6 +2189,30 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
   ao valor da regra no próximo tick. Cards de demonstração nunca movem nem
   recebem escrita.
 
+#### Configurar com IA (07/09/2026)
+
+Na página cheia do quadro (tanto o kanban dedicado quanto a de um widget) há o
+botão **Configurar com IA**, ao lado de Automações. Você descreve o quadro que
+quer — "crie as fases Entrada, Proposta e Fechamento, mostre o valor somado no
+topo de cada coluna e mande para Entrada o que ficar 7 dias parado" — e a IA
+devolve uma **prévia**: nada é gravado antes de você clicar em Aplicar.
+
+Vale saber:
+
+- A proposta cobre as duas coisas de uma vez, quadro **e** automações, e uma
+  regra pode mirar uma coluna criada no mesmo pedido.
+- A lista de automações que a IA devolve é a lista **completa** desejada: uma
+  regra que ela não repetir é **desativada**, não excluída. Excluir de vez
+  continua sendo pelo painel de Automações.
+- Regras são reconhecidas pelo **nome**: repetir o nome de uma regra existente
+  a atualiza; um nome novo cria outra.
+- Sem provedor de IA configurado o botão continua útil: **Copiar prompt** gera
+  o texto para colar numa IA externa, e você traz o JSON de volta pelo campo
+  "Validar JSON colado" — mesma prévia, mesma aplicação.
+- O botão aparece no mesmo recorte das Automações: modo registros e colunas que
+  não sejam por período (mover um card numa coluna de data reescreveria a data
+  do registro a cada execução).
+
 ### 12.3 Agenda
 
 Widget de calendário (redesenhado em 28/07/2026):

@@ -2880,6 +2880,40 @@ copiadas) e popover "Métricas" na página dedicada/cheia
 `persistKanban`). Formatação única em `components/kanban/format.ts`
 (dinheiro / "N d" / número pt-BR).
 
+**Assistente de IA do quadro (contrato `kanban-config` v1, 07/09/2026).**
+Botão "Configurar com IA" das páginas `/kanbans/[id]` e `/kanbans/w/[widgetId]`
+(`components/kanban/kanban-ai-sheet.tsx` + wrappers em
+`app/(app)/kanbans/ai-actions.ts`; núcleo `lib/ai/kanban-config.ts`; gate
+`ensureKanbanConfigGate`). Uma resposta traz duas seções OPCIONAIS: `quadro`
+(delta de `KanbanSettings`) e `automacoes` (a lista COMPLETA desejada). Padrão
+§4.17 em tudo: a IA nunca escreve, o alvo vem da UI, ids nunca viajam no JSON,
+e as quatro entradas do contrato (chat · colar-JSON sem IA · copiar-prompt ·
+apply) compartilham validador e prévia.
+
+O validador (`lib/import/kanban/validate.ts`) não tem régua PRÓPRIA — é o que
+o torna seguro de estender: o quadro é mesclado sobre a config atual com
+`deepMergeValue` (o MESMO merge por delta do rewrite da IA de dashboards, agora
+exportado) e passa por `sanitizeKanbanSettings`; cada regra passa por
+`parseAutomationRule` (o parse fail-closed que o `saveAutomation` já usa — por
+isso o payload de condição/ação viaja na forma INTERNA, sem camada de tradução
+que pudesse derivar); e o alvo de `set_field` é conferido contra
+`settableFields`, que o servidor deriva do próprio `setFieldTargetError`. As
+colunas alvo de `move_to_column` incluem as CRIADAS no mesmo lote — pedir "crie
+a coluna Perdido e mande para lá o que ficar 30 dias parado" funciona num
+turno só.
+
+Apply pelos choke points existentes: `updateBoardSettings`/`saveWidgetSettings`
+(que já normalizam a alocação-como-campo) e `saveAutomation`. A reconciliação
+das regras é por NOME (case-insensitive): nome repetido ATUALIZA, nome novo
+cria, e regra que sumiu da lista é **DESATIVADA**, nunca excluída — excluir
+fica na tela, precedente explícito do contrato de operações. Resultado POR
+ITEM (falha parcial não desfaz). O recorte do botão é o MESMO das automações
+(modo registros, sem colunas por data), e as duas pages exportam
+`maxDuration = 300`. As colunas derivadas chegam ao core como `columns` vindas
+da página (mesmo arranjo do `AutomationsSheet`) — recomputá-las exigiria rodar
+o quadro inteiro só para montar um prompt; elas só ampliam o universo de alvos
+aceitos, e alvo inexistente já cai no `last_error` da avaliação.
+
 ### 4.16 Alocação do kanban como campo do registro (28/07/2026)
 
 Num quadro **Personalizar** a coluna de cada card é dado da VISÃO
