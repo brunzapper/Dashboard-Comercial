@@ -1,3 +1,8 @@
+<!-- Versão: 1.29 | Data: 07/09/2026 -->
+<!-- v1.29 (07/09/2026): job pg_cron nº 8 (purge-audit-log — retenção de 100
+     alterações por organização×origem×campo, SQL puro 03:40 UTC) +
+     saneamento único apply/sanitize-audit-log.sql; linha de troubleshooting
+     para audit_log inchado. -->
 <!-- Versão: 1.28 | Data: 08/08/2026 -->
 <!-- v1.28 (08/08/2026): §4.14 — salvar mapeamento não trava mais a página
      (save em background com fila coalescedora por domínio) e botão "Mapear
@@ -140,10 +145,18 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
       comentários/posicionamentos/conexões; sem webhook (o `record.deleted`
       já saiu no envio à lixeira). Sem o job, /registros/lixeira apenas
       ESCONDE os vencidos — a limpeza física depende dele.
+   8. `apply/pg-cron-purge-audit-log.sql` — retenção diária (03:40 UTC) do
+      `audit_log`: mantém as 100 alterações mais recentes por
+      (organização, origem, campo). SQL puro, não usa os segredos. **Rode
+      `apply/sanitize-audit-log.sql` ANTES** — ele aplica a mesma regra ao
+      acumulado e faz o `VACUUM FULL` que devolve o espaço (o DELETE diário
+      não devolve). Sem o job a tabela cresce sem teto: em 07/09/2026 estava
+      com 868 mil linhas / 163 MB = 40% do banco, 99,4% churn do sync.
    Os ticks (2–4 e 6) **pressupõem os segredos criados pelo primeiro**.
    Verificar/remover: `select * from cron.job;` /
    `select cron.unschedule('purge-dashboard-trash');` /
-   `select cron.unschedule('purge-records-trash');`.
+   `select cron.unschedule('purge-records-trash');` /
+   `select cron.unschedule('purge-audit-log');`.
 6. **Sync Bitrix** — logado como admin, em Registros: **Backfill inicial** (importa o
    ano) e depois **Reconciliar**. Os responsáveis são criados automaticamente; cure a
    lista em Configurações → Responsáveis e monte as Operações.
@@ -844,7 +857,8 @@ pré-requisitos de DADO:
 | Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
-| Tick não roda (sync/snapshot/webhook/automações) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 6 jobs (ticks + purga da Lixeira); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Tick não roda (sync/snapshot/webhook/automações) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 8 jobs (ticks + purgas das Lixeiras + retenção do audit_log); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Banco crescendo sem explicação / `audit_log` ocupando a maior parte | Retenção não instalada — a tabela é write-only e o sync grava ~99% das linhas | `select origin, count(*) from audit_log group by 1;`. Rode `apply/sanitize-audit-log.sql` (uma vez, inclui `VACUUM FULL`) e instale `apply/pg-cron-purge-audit-log.sql`. Não acelera dashboards — o ganho é cache/backup |
 | Board na Lixeira não some após 14 dias | Job `purge-dashboard-trash` não agendado (o hub esconde o card, mas a linha continua no banco) | Aplique `apply/pg-cron-purge-trash.sql`; para purgar já, rode o `DELETE` do arquivo à mão no SQL editor |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
 | Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |

@@ -1,3 +1,8 @@
+<!-- Versão: 1.28 | Data: 06/09/2026 -->
+<!-- v1.28 (06/09/2026): §5.11 — cálculo entre células da Tabela Livre
+     documentado (endereços A1, barra de fórmula "fx", régua A/B/C, clique/
+     arrasto inserindo o endereço, realce das células citadas, funções e
+     limites) + caixa "Barra de fórmula e régua A/B/C" na aparência. -->
 <!-- Versão: 1.27 | Data: 07/08/2026 -->
 <!-- v1.27 (07/08/2026): §6.2 — "Expressão condicional" da dimensão (fórmula
      Se/E/Ou que reclassifica os valores em rótulos e agrupa por eles; sem
@@ -1078,6 +1083,44 @@ Mais: rótulo do cabeçalho por coluna, exibir/ocultar linha de cabeçalho,
 excluir coluna/linha. Os valores digitados são **compartilhados** (todos os
 usuários veem o mesmo conteúdo). É o único tipo com criação por desenho
 (§3.5). Não usa o bloco de dados do editor — a estrutura é toda in-card.
+
+#### 5.11.1 Cálculo entre células (fórmulas "=…")
+
+Cada célula tem um **endereço** de planilha: letra da coluna + número da linha
+(A1, B3…). A **régua** mostra as letras no cabeçalho e os números à esquerda,
+e a **barra de fórmula** (faixa "fx" no topo do card) mostra o endereço da
+célula selecionada e o **conteúdo cru** dela — a fórmula, não o resultado —,
+podendo editá-lo por ali. Régua e barra aparecem para quem pode digitar; o
+botão "?" da barra abre a ajuda de sintaxe.
+
+Para calcular, comece a célula com `=`:
+
+| Exemplo | Resultado |
+|---|---|
+| `=A1+B2`, `=(A1-B1)/B1`, `=A1*0,1` | contas entre células (decimal com vírgula ou ponto) |
+| `=SOMA(A1:A10)` | intervalo retangular; `A2:A` vai até a última linha e `A:A` é a coluna inteira |
+| `=SE(A1>B1; "bateu"; "faltou")` | condicional |
+
+- **Inserir endereço sem digitar**: com a fórmula em edição, **clique** numa
+  célula para inserir o endereço dela no ponto do cursor; **arraste** para
+  inserir o intervalo (`A1:B3`). As células citadas ficam **realçadas** na
+  grade enquanto você digita.
+- **Funções aceitas**: SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED,
+  ABS, CONCATENAR, SE, E, OU (as mesmas do editor de fórmulas, §8).
+- **Dados do sistema na conta**: uma célula com `{= … }` (mesma expressão
+  agregada da Nota, §5.8) traz um número dos dados do dashboard; o endereço
+  dessa célula pode ser usado nas fórmulas normalmente.
+- **Como a conta é feita**: as fórmulas de célula são avaliadas **no
+  navegador**, sobre os valores já exibidos na grade — nunca consultam o banco
+  por conta própria. Célula com texto que "parece número" entra como número.
+- **Limites**: os endereços são **posicionais** — colunas de Dimensão/Métrica
+  que expandem em várias linhas deslocam quem está abaixo, então prefira
+  ancorar as contas em linhas livres. Um intervalo carrega no máximo 512
+  células. Referência circular exibe `#CICLO!` e erro de sintaxe aparece em
+  vermelho na célula (o texto do erro também vai para a barra de título).
+- Barra e régua podem ser desligadas em **Aparência → Grade e texto → "Barra
+  de fórmula e régua A/B/C"** (tabela usada só como layout). No **snapshot**
+  (link público) elas nunca aparecem — as células são somente leitura.
 
 ### 5.12 Filtro de período (`filtro`) e Filtro por campo (`filtro_campo`)
 

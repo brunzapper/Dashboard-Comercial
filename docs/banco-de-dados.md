@@ -1,3 +1,10 @@
+<!-- Versão: 3.14 | Data: 07/09/2026 -->
+<!-- v3.14 (07/09/2026): audit_log — documentada a natureza append-only/
+     write-only (ninguém lê: sem select em TS, sem trigger/view/função em SQL,
+     sem tela de histórico) e a RETENÇÃO de 100 alterações por
+     (organization_id, origin, field): job pg_cron purge-audit-log
+     (apply/pg-cron-purge-audit-log.sql) + saneamento único
+     (apply/sanitize-audit-log.sql). Sem mudança de schema; RPCs intocados. -->
 <!-- Versão: 3.13 | Data: 07/08/2026 -->
 <!-- v3.13 (07/08/2026): 0121 — LIXEIRA de registros (soft delete):
      records.deleted_at/deleted_by + índice parcial; trigger
@@ -306,6 +313,20 @@ responsável/operação (não a um registro): `(entity_type, entity_id, field_ke
 via sync/automação), `field`, `old_value`/`new_value` jsonb, `origin`
 (`app|sync_bitrix|sync_sheet` + `api` desde 0074 + `automation` desde 0109 —
 movimentos executados pelas automações do kanban, via service role).
+Tabela **append-only e write-only**: só há policy de SELECT e INSERT (nenhuma de
+UPDATE/DELETE — só service role apaga), e nada no app a LÊ — não existe `select`
+na tabela em todo o TypeScript, nenhum trigger/view/função em SQL e nenhuma tela
+de histórico. É folha: nada a referencia, e o `record_id` cascateia a partir de
+`records`.
+**Retenção (07/09/2026):** as 100 alterações mais recentes por
+`(organization_id, origin, field)`; o resto é apagado diariamente pelo job
+`purge-audit-log` (`apply/pg-cron-purge-audit-log.sql`, 03:40 UTC). A partição
+inclui a organização porque a tabela é global e o sync de uma org sozinho gera
+~99% das linhas — sem isso uma org despejaria o rastro da outra. O saneamento
+retroativo é `apply/sanitize-audit-log.sql` (rodar UMA vez, antes do cron:
+868.178 → 17.515 linhas, 163 MB → poucos MB). Sem retenção a tabela chegou a
+40% do banco inteiro, sendo 99,4% churn do sync do Bitrix contra 594 edições
+humanas.
 
 **`reuniao_freeze_backup`** (0051) — valores originais de Data Reunião zerados pela
 Fase 12 (usado pelo `undo-mock-reuniao.sql`).
