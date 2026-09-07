@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 28/07/2026
+// Versão: 1.1 | Data: 07/09/2026
+// v1.1 (07/09/2026): as opções de densidade saem de AGENDA_DENSITY_LABELS
+//   (lib/agenda/types.ts) — rótulo com dono único, compartilhado com o SPEC
+//   de importação por IA.
 // Campos de APARÊNCIA da agenda (controlado): cabeçalho Seg–Dom, células
 // (fundo/grade/raio/densidade, hoje, fim de semana) e chips por tipo de item
 // (tarefa/registro/anotação). Montado na seção "Agenda" do
@@ -13,18 +16,19 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { ColorField } from "@/components/dashboards/appearance-controls";
-import type { AgendaAppearance } from "@/lib/agenda/types";
+import {
+  AGENDA_DENSITY_LABELS,
+  type AgendaAppearance,
+} from "@/lib/agenda/types";
 
 function numOrUndef(v: string): number | undefined {
   const n = Number(v);
   return v === "" || !Number.isFinite(n) || n <= 0 ? undefined : n;
 }
 
-const DENSITY_OPTIONS = [
-  { value: "compacta", label: "Compacta" },
-  { value: "normal", label: "Normal" },
-  { value: "espacosa", label: "Espaçosa" },
-];
+const DENSITY_OPTIONS = Object.entries(AGENDA_DENSITY_LABELS).map(
+  ([value, label]) => ({ value, label })
+);
 
 export function AgendaAppearanceSection({
   value,

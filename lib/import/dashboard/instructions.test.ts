@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 25/07/2026
+// Versão: 1.1 | Data: 07/09/2026
+// v1.1 (07/09/2026): paridade dos mapas de rótulo de kanban/agenda (o SPEC
+//   passou a documentar settings.kanban/settings.agenda) e guarda de que os
+//   vínculos LOCAIS do quadro (allocationFieldKey/taskBoardId) NÃO são
+//   oferecidos à IA.
 // Guarda de paridade do prompt de importação por IA (mesmo espírito de
 // tests/rpc-parity.test.ts): o SPEC é DERIVADO do código (instructions.ts +
 // settings-docs.ts), e este teste garante que a derivação chega inteira ao
@@ -28,6 +32,13 @@ import { validateDashboardImport } from "@/lib/import/dashboard/validate";
 import { BUILTIN_GOAL_METRICS } from "@/lib/metas/metrics";
 import { DATA_TYPE_LABELS } from "@/lib/records/types";
 import { BUILTIN_SOURCES } from "@/lib/sources";
+import {
+  KANBAN_AGG_LABELS,
+  KANBAN_DATE_BUCKET_LABELS,
+  KANBAN_METRIC_KIND_LABELS,
+  KANBAN_MODE_LABELS,
+} from "@/lib/kanban/types";
+import { AGENDA_VIEW_LABELS } from "@/lib/agenda/types";
 import { DATE_TRANSFORMS } from "@/lib/widgets/fields";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { PALETTES } from "@/lib/widgets/palettes";
@@ -115,6 +126,30 @@ describe("prompt de importação por IA — paridade com o código", () => {
     expect(prompt).not.toMatch(/\bday \(/);
     expect(prompt).not.toMatch(/\bweek \(/);
     expect(prompt).not.toMatch(/\bmonth \(/);
+  });
+
+  // Kanban/Agenda (07/09/2026): o SPEC passou a documentar settings.kanban e
+  // settings.agenda; os rótulos têm dono único em lib/kanban/types.ts e
+  // lib/agenda/types.ts. Variante nova nesses mapas sem entrada no SPEC
+  // reprova aqui (o typecheck sozinho não vê o texto do prompt).
+  it.each([
+    ["KANBAN_MODE_LABELS", KANBAN_MODE_LABELS],
+    ["KANBAN_DATE_BUCKET_LABELS", KANBAN_DATE_BUCKET_LABELS],
+    ["KANBAN_AGG_LABELS", KANBAN_AGG_LABELS],
+    ["KANBAN_METRIC_KIND_LABELS", KANBAN_METRIC_KIND_LABELS],
+    ["AGENDA_VIEW_LABELS", AGENDA_VIEW_LABELS],
+  ])("%s chega inteiro ao prompt", (_nome, labels) => {
+    for (const key of Object.keys(labels)) {
+      expect(prompt).toContain(key);
+    }
+  });
+
+  it("os vínculos LOCAIS do quadro NÃO são oferecidos à IA", () => {
+    // allocationFieldKey/taskBoardId apontam campo e board do quadro de ORIGEM
+    // (invariante 24): o validador os descarta e o apply os preserva do
+    // settings existente — documentá-los convidaria a IA a inventar ids.
+    expect(prompt).not.toContain("allocationFieldKey");
+    expect(prompt).not.toContain("taskBoardId");
   });
 
   it("dicionários de settings renderizados por inteiro (nenhuma entrada engolida)", () => {

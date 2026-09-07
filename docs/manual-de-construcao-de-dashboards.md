@@ -1134,6 +1134,20 @@ livres) ou de tarefas; Agenda = calendário mensal/semanal com registros
 alocados por um campo de data, tarefas com vencimento (e hora) e anotações
 do dia (post-its).
 
+Desde 07/09/2026 os dois são **configuráveis pela IA** no JSON de importação
+(`settings.kanban` e `settings.agenda`) — antes ela conseguia criar o widget
+mas não configurá-lo, e o quadro nascia vazio. Duas regras valem a pena
+conhecer ao pedir um quadro à IA:
+
+- A Base do quadro/calendário e a lista `sources` do widget são a MESMA coisa
+  (é de lá que o painel resolve o período); se você mandar as duas diferentes,
+  o sistema alinha pela config e avisa.
+- Os vínculos **locais** de um quadro — a fase exposta como campo do registro
+  ("Expor a fase como campo", §12.2) e o quadro de tarefas apontado por um
+  widget de tarefas — nunca viajam no JSON: são ids daquele quadro
+  específico. A IA não os cria nem os apaga; eles são preservados quando ela
+  edita o widget, e você continua ligando/desligando pela UI.
+
 ---
 
 ## 6. O editor de widget, seção por seção

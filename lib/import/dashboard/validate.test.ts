@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 07/09/2026
+// v1.1 (07/09/2026): bloco do saneamento de settings.kanban/settings.agenda
+//   (antes PASSTHROUGH) — STRIP dos vínculos locais do quadro, alinhamento
+//   de `sources` com a Base da config e refs pelo checkRef do validador.
 // Guarda dos filtros de relação POR NOME no validador de import (31/07/2026):
 // responsible_id/operation_id aceitam o nome exato do cadastro (o engine
 // resolve nome→id→grupo canônico em runtime — resolveFkFilterNames); nome
@@ -413,5 +416,107 @@ describe("periodBar.byTab — overrides por aba", () => {
     );
     expect(res.ok).toBe(false);
     expect(res.errors.join("\n")).toContain("Base desconhecida");
+  });
+});
+
+describe("settings.kanban / settings.agenda — saneamento no import", () => {
+  function boardWith(widget: Record<string, unknown>): string {
+    return JSON.stringify({
+      formato: "dashboard-import",
+      versao: 1,
+      chave: "teste_kanban",
+      bases: ["deals"],
+      dashboard: { name: "Teste", visible_to_roles: [], settings: {} },
+      widgets: [widget],
+    });
+  }
+
+  it("faz STRIP dos vínculos locais do quadro (invariante 24)", () => {
+    const res = validateDashboardImport(
+      boardWith({
+        key: "quadro",
+        title: "Funil",
+        visual_type: "kanban",
+        sources: ["deals"],
+        settings: {
+          kanban: {
+            mode: "registros",
+            source: "deals",
+            columnSource: "custom",
+            allocationFieldKey: "fase_do_outro_quadro",
+            columns: [{ key: "novo", label: "Novo" }],
+          },
+        },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    const kanban = res.preset?.widgets[0].settings?.kanban as
+      | Record<string, unknown>
+      | undefined;
+    expect(kanban).toBeDefined();
+    expect(kanban).not.toHaveProperty("allocationFieldKey");
+    expect(kanban?.columnSource).toBe("custom");
+    expect(res.warnings.join("\n")).toContain("allocationFieldKey");
+  });
+
+  it("alinha `sources` com a Base do quadro (âncora do período da page)", () => {
+    const res = validateDashboardImport(
+      boardWith({
+        key: "quadro",
+        title: "Funil",
+        visual_type: "kanban",
+        sources: ["leads"],
+        settings: {
+          kanban: { mode: "registros", source: "deals", groupField: "stage" },
+        },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.preset?.widgets[0].sources).toEqual(["deals"]);
+    expect(res.warnings.join("\n")).toContain("não bate com a Base");
+  });
+
+  it("descarta a config do quadro quando a Base é desconhecida (widget sobrevive)", () => {
+    const res = validateDashboardImport(
+      boardWith({
+        key: "quadro",
+        title: "Funil",
+        visual_type: "kanban",
+        settings: {
+          kanban: { mode: "registros", source: "fantasma", groupField: "stage" },
+        },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.preset?.widgets[0].settings?.kanban).toBeUndefined();
+    expect(res.warnings.join("\n")).toContain("source");
+  });
+
+  it("valida o campo de data da agenda pelo checkRef do validador", () => {
+    const res = validateDashboardImport(
+      boardWith({
+        key: "cal",
+        title: "Agenda",
+        visual_type: "agenda",
+        sources: ["deals"],
+        settings: {
+          agenda: {
+            source: "deals",
+            dateField: "closed_at",
+            defaultView: "week",
+          },
+        },
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(true);
+    expect(res.preset?.widgets[0].settings?.agenda).toMatchObject({
+      source: "deals",
+      dateField: "closed_at",
+      defaultView: "week",
+    });
   });
 });

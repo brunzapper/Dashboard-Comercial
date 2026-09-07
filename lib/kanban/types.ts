@@ -1,4 +1,10 @@
-// Versão: 1.4 | Data: 28/07/2026
+// Versão: 1.5 | Data: 07/09/2026
+// v1.5 (07/09/2026): mapas de RÓTULO exaustivos (KANBAN_MODE_LABELS,
+//   KANBAN_DATE_BUCKET_LABELS, KANBAN_AGG_LABELS, KANBAN_METRIC_KIND_LABELS).
+//   São a fonte ÚNICA dos rótulos da UI E do SPEC de importação por IA
+//   (lib/import/dashboard/settings-docs.ts, que passou a documentar
+//   settings.kanban) — `satisfies Record<União, string>` faz variante nova
+//   quebrar o typecheck em vez de virar prosa duplicada no prompt.
 // v1.4 (28/07/2026): KanbanSettings.allocationFieldKey — alocação do quadro
 //   "Personalizar" exposta como CAMPO do registro (fase filtrável fora do
 //   kanban; ver lib/kanban/allocation-field.ts e invariante 24).
@@ -32,13 +38,35 @@ export interface KanbanColumnOverride {
 
 export type KanbanMode = "registros" | "tarefas";
 
+/** Rótulos dos modos (UI e SPEC da IA). */
+export const KANBAN_MODE_LABELS = {
+  registros: "Registros",
+  tarefas: "Tarefas",
+} satisfies Record<KanbanMode, string>;
+
 /** Buckets de data suportados como colunas (mover realoca a data — D9). */
 export type KanbanDateBucket = "weekday" | "month_name" | "month_year";
+
+/** Rótulos dos buckets de data usados como colunas. */
+export const KANBAN_DATE_BUCKET_LABELS = {
+  weekday: "Dia da semana",
+  month_name: "Mês do ano",
+  month_year: "Mês/Ano",
+} satisfies Record<KanbanDateBucket, string>;
 
 // ---- Métricas do kanban (28/07/2026) ----
 // Espelho ESTRUTURAL de Aggregation (lib/widgets/types.ts) — sem import daqui
 // para não criar ciclo (o types.ts de widgets importa deste módulo).
 export type KanbanAgg = "sum" | "count" | "avg" | "min" | "max";
+
+/** Rótulos das agregações do cabeçalho da coluna. */
+export const KANBAN_AGG_LABELS = {
+  sum: "Soma",
+  count: "Contagem",
+  avg: "Média",
+  min: "Mínimo",
+  max: "Máximo",
+} satisfies Record<KanbanAgg, string>;
 
 /**
  * Uma métrica de kanban: valor de campo numérico, contagem de registros
@@ -52,6 +80,23 @@ export type KanbanMetricSpec =
   | { kind: "linked"; source: string } // key de base RAIZ do catálogo
   | { kind: "tasks"; metric: "open" | "overdue" }
   | { kind: "age" };
+
+/** Rótulos dos kinds de métrica (UI e SPEC da IA). */
+export const KANBAN_METRIC_KIND_LABELS = {
+  field: "Campo do registro",
+  linked: "Registros conectados",
+  tasks: "Tarefas do registro",
+  age: "Idade em dias",
+} satisfies Record<KanbanMetricSpec["kind"], string>;
+
+/** Rótulos das métricas de tarefa da spec `tasks`. */
+export const KANBAN_TASK_METRIC_LABELS = {
+  open: "Abertas",
+  overdue: "Atrasadas",
+} satisfies Record<
+  Extract<KanbanMetricSpec, { kind: "tasks" }>["metric"],
+  string
+>;
 
 /** Métrica do cabeçalho da coluna, com agregação escolhível. */
 export interface KanbanColumnMetricSettings {
