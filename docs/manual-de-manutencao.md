@@ -1,4 +1,5 @@
-<!-- Versão: 1.32 | Data: 08/09/2026 -->
+<!-- Versão: 1.33 | Data: 08/09/2026 -->
+<!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
 <!-- v1.32 (08/09/2026): §4.15 — 0126: onde o formulário vive agora (rota
      própria + card), como pegar o link para o time, e o que fazer quando o
      card não aparece. -->
@@ -767,6 +768,28 @@ Regras que movem cards ou DEFINEM CAMPOS automaticamente
   `record.deleted`; falhas parciais aparecem num painel no topo do quadro
   com "Tentar novamente" — os cards falhos voltam sozinhos à coluna de
   origem.
+
+#### Automação sem quadro (0127, 08/09/2026)
+
+Aplicar `0127_automation_source_scope.sql`. A regra passa a poder ter uma BASE
+como universo: `kanban_automations.source_key` em vez de `widget_id`/`board_id`.
+
+O que muda na prática:
+
+- **Quem configura**: admin da org (as de quadro seguem em "editor do board").
+  É mais restrito de propósito — a regra alcança a base inteira.
+- **O que ela pode fazer**: "Definir campo". Mover de coluna exige quadro e é
+  recusado no save.
+- **Condições**: todas, menos "parado na coluna há N dias" (não há coluna).
+  "Campo alterado há N dias" e "criado há N dias" funcionam igual.
+- **Write-back**: automação de Base escreve LOCAL. O toggle "devolver ao
+  Bitrix" é do quadro, e sem quadro ele não existe.
+
+**Regra de Base não roda.** Confira, nesta ordem: a base existe (`source_key`
+tem que casar com `data_sources.key` — base renomeada vira fatal legível no
+`last_error`); a regra está habilitada; e o tick está de pé
+(`pg-cron-kanban-automations.sql`). O tick enumera os três tipos de dono no
+mesmo round-robin.
 
 ### 4.13 Atualização em massa por IA (registros-update, 31/07/2026)
 

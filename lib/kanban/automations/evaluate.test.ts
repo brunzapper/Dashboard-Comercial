@@ -1,4 +1,6 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): helpers de dono (0127) — a coluna de cada tipo e o
+//   predicado "é quadro?", que decidem placements, moves e guardas.
 // Avaliador puro das automações do kanban: parse fail-closed, condições das 4
 // famílias (mescláveis em E na MESMA regra), first-match-wins, guardas de
 // mock/overflow/coluna sumida e dias de calendário com todayIso fixo.
@@ -20,6 +22,8 @@ import {
   type EvalContext,
 } from "./evaluate";
 import {
+  isBoardOwner,
+  ownerColumn,
   parseAutomationRule,
   relatedCountKey,
   type AutomationCondition,
@@ -538,5 +542,21 @@ describe("decideActions — set_field", () => {
     ]);
     expect(sets).toHaveLength(1);
     expect(sets[0].ruleId).toBe("r-ok");
+  });
+});
+
+describe("dono da regra (0127)", () => {
+  it("cada tipo aponta para a própria coluna", () => {
+    expect(ownerColumn({ kind: "widget", id: "w1" })).toBe("widget_id");
+    expect(ownerColumn({ kind: "board", id: "b1" })).toBe("board_id");
+    expect(ownerColumn({ kind: "source", id: "leads" })).toBe("source_key");
+  });
+
+  it("só widget e board são quadro", () => {
+    // É este predicado que decide se a rodada consulta placements, valida
+    // alvo de coluna e pode mover.
+    expect(isBoardOwner({ kind: "widget", id: "w1" })).toBe(true);
+    expect(isBoardOwner({ kind: "board", id: "b1" })).toBe(true);
+    expect(isBoardOwner({ kind: "source", id: "leads" })).toBe(false);
   });
 });

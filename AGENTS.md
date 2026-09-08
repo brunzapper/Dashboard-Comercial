@@ -627,6 +627,33 @@ This version has breaking changes — APIs, conventions, and file structure may 
   responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
+- **Automação SEM QUADRO: escopo de Base (0127, 08/09/2026):** o motor 0109
+  nunca foi sobre kanban — `decideActions` usa a coluna SÓ p/ validar o alvo de
+  `move_to_column`, as condições de tempo `field_changed`/`created` já são de
+  REGISTRO e `set_field` escreve num campo. O que prendia ao quadro era a
+  ORIGEM das linhas. `kanban_automations.source_key` dá um terceiro tipo de
+  dono (uma Base); a montagem do universo saiu p/
+  `lib/kanban/automations/universe.ts` e ramifica LÁ (quadro → `runKanban`,
+  byte-idêntico; Base → `runRecordList` com `columnKey` vazio e `columns: []`).
+  Do universo em diante TUDO é compartilhado — não crie segundo motor, segundo
+  parse nem segunda tabela. NENHUMA guarda nova: sem colunas o
+  `decideActions` recusa `move_to_column` pelo MESMO caminho de "coluna
+  removida" e `in_column` não casa (não há posição); o `saveAutomation` recusa
+  as duas na hora com mensagem própria (regra inerte que só se explica pelo
+  `last_error` é pior que erro no save). RLS: os 2 ramos existentes derivam de
+  `auth_board_editable`; o de Base não tem quadro, então é `admin` da org —
+  mais restrito de propósito (alcança a base inteira). O gate da action
+  ESPELHA isso; a RLS é a muralha. `executeFieldWrites` passou a receber
+  `writeBack: boolean` (era só isso que usava de `KanbanSettings`) — automação
+  de Base escreve LOCAL; os moves seguem com `settings`. `AutomationOwner` tem
+  `ownerColumn`/`isBoardOwner` — nunca reintroduza o ternário
+  `kind === "widget" ? "widget_id" : "board_id"` em caminho de automação (com
+  3 tipos ele manda regra de Base para `board_id`). O NOME `kanban_automations`
+  FICA (histórico, como a chave de área `fontes` → `/registros/bases`).
+  Fiscalizado por `universe.test.ts` (o ramo de Base não pode ler
+  `dashboards`/`widgets`/`kanban_placements` — o fake é fail-closed) + os 80
+  testes de kanban intocados (não-regressão do ramo de quadro). Ver
+  `docs/arquitetura.md` §4.15.
 - **Automações do kanban e ações em massa se resolvem no ENGINE/actions, nunca
   no RPC (0109, 27/07/2026):** regras em `kanban_automations` (tabela própria
   — NUNCA em `settings.kanban`: o widget-builder reconstrói o objeto no save e

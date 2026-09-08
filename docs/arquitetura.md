@@ -2974,6 +2974,47 @@ da página (mesmo arranjo do `AutomationsSheet`) — recomputá-las exigiria rod
 o quadro inteiro só para montar um prompt; elas só ampliam o universo de alvos
 aceitos, e alvo inexistente já cai no `last_error` da avaliação.
 
+#### Automação sem quadro: escopo de Base (0127, 08/09/2026)
+
+O motor de 0109 nunca foi sobre kanban. `decideActions` usa a coluna SÓ para
+validar o alvo de `move_to_column`; as condições de tempo `field_changed` e
+`created` já são de REGISTRO; `set_field` escreve num campo. O que prendia ao
+quadro era a origem das linhas — `runKanban`.
+
+A 0127 dá à regra um terceiro tipo de dono: `source_key`, uma Base. A montagem
+do universo saiu para `lib/kanban/automations/universe.ts` e ramifica lá
+(quadro → `runKanban`, byte-idêntico ao que estava embutido; Base →
+`runRecordList` com `columnKey` vazio e `columns: []`). Tudo depois disso —
+fatos, decisão, execução — é compartilhado.
+
+**Nenhuma guarda nova foi inventada.** Sem colunas, `decideActions` recusa
+`move_to_column` pelo MESMO caminho que trata "coluna removida do quadro", e a
+condição `in_column` não casa porque não há posição para medir. O `saveAutomation`
+recusa as duas na hora com mensagem própria — regra que nunca roda e só se
+explica abrindo o `last_error` é pior que um erro no save.
+
+**Autoridade.** Os dois ramos de RLS existentes derivam de `auth_board_editable`.
+Uma regra de Base não tem quadro de onde derivar nada, então o terceiro ramo é
+o papel: **admin da org**. Deliberadamente mais restrito que "editor de um
+board" — a regra alcança a base inteira, não os cards de um quadro que a pessoa
+já podia editar. O gate da action espelha isso; a RLS segue sendo a muralha.
+
+**Write-back.** `executeFieldWrites` passou a receber `writeBack: boolean` em
+vez de `KanbanSettings` — era a única coisa que usava dali. Sem quadro não há
+toggle, então automação de Base escreve LOCAL. Os moves seguem recebendo
+`settings` (precisam do quadro de verdade).
+
+**O nome da tabela fica `kanban_automations`**, guardando regras que não têm
+kanban nenhum. É feio e é o preço já pago pelas chaves de área históricas
+(`fontes` aponta para `/registros/bases`): renomear quebraria policies, trigger
+e todo call site por um ganho cosmético, e criar uma segunda tabela deixaria
+dois lugares onde uma regra pode estar e um tick varrendo os dois.
+
+Testes: `universe.test.ts` (o ramo de Base não lê `dashboards`/`widgets`/
+`kanban_placements` — o fake é fail-closed, então encostar em quadro explode o
+teste) e os 80 testes de kanban existentes, que passam intocados e são a prova
+de não-regressão do ramo de quadro.
+
 ### 4.16 Alocação do kanban como campo do registro (28/07/2026)
 
 Num quadro **Personalizar** a coluna de cada card é dado da VISÃO

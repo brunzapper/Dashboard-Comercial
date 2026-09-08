@@ -1,4 +1,6 @@
-<!-- Versão: 3.16 | Data: 08/09/2026 -->
+<!-- Versão: 3.17 | Data: 08/09/2026 -->
+<!-- v3.17 (08/09/2026): 0127 — kanban_automations.source_key (automação sem
+     quadro) + terceiro ramo de RLS. -->
 <!-- v3.16 (08/09/2026): 0126 — workflow_schemas.trigger_kind/show_card. -->
 <!-- v3.15 (08/09/2026): Workflow (0125) — workflow_schemas e workflow_runs;
      nova chave de sync_config `bitrix_status_codes`. -->
@@ -1042,3 +1044,4 @@ para toda a org (quem EXECUTA o formulário precisa do esquema, e a área
 insert é own-row e select é admin OU própria linha — o `input` guarda dados de
 contato de um lead alheio.
 | 0126 | workflow_trigger_surface | `workflow_schemas.trigger_kind` (`form`\|`automacao`) e `show_card`: o gatilho decide a SUPERFÍCIE — formulário tem página própria (`/operacao/f/<chave>`) e card em Operação; automação não tem tela. Índice parcial do caminho quente (montar os cards por request). Não recria as RPCs |
+| 0127 | automation_source_scope | `kanban_automations.source_key`: a regra pode ter uma BASE como universo, sem quadro. CHECK de dono único vira três; RLS ganha o ramo `source_key is not null and auth_has_role('admin')` (não há quadro de onde derivar `auth_board_editable`); o trigger de stamp de org da 0109 já cobre pelo `coalesce`. Nome da tabela mantido (histórico). Não recria as RPCs |

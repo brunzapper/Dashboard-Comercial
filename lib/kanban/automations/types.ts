@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): dono de tipo `source` (0127) — a regra passa a poder ter
+//   uma BASE como universo, sem quadro nenhum. O motor nunca foi sobre kanban:
+//   `decideActions` usa a coluna só para validar o alvo de `move_to_column`, e
+//   as condições de tempo `field_changed`/`created` já são de REGISTRO. O que
+//   prendia ao quadro era a origem das linhas — agora ela ramifica
+//   (lib/kanban/automations/universe.ts).
 // Modelo das AUTOMAÇÕES do kanban (modo registros): uma regra é uma lista de
 // condições em E (podem MESCLAR as 4 famílias — campo do registro, registros
 // conectados, tarefas e tempo) + uma ação. Várias regras em ordem (position)
@@ -78,7 +84,33 @@ export interface AutomationRow {
 }
 
 /** Dono da automação — mesmo shape do KanbanOwner (widget ou board dedicado). */
-export type AutomationOwner = { kind: "widget" | "board"; id: string };
+/**
+ * Dono da regra — e, por consequência, o UNIVERSO que ela avalia.
+ * `widget`/`board`: os cards de um quadro. `source`: os registros de uma Base
+ * (`data_sources.key`), sem quadro — aí `move_to_column` não existe e a
+ * condição de tempo `in_column` fica inerte (não há posição para medir).
+ * Exatamente um deles por linha (CHECK da 0127).
+ */
+export type AutomationOwner =
+  | { kind: "widget"; id: string }
+  | { kind: "board"; id: string }
+  | { kind: "source"; id: string };
+
+/** Coluna de `kanban_automations` que guarda este dono. */
+export function ownerColumn(
+  owner: AutomationOwner
+): "widget_id" | "board_id" | "source_key" {
+  if (owner.kind === "widget") return "widget_id";
+  if (owner.kind === "board") return "board_id";
+  return "source_key";
+}
+
+/** O universo é um quadro? (decide guardas, placements e `move_to_column`) */
+export function isBoardOwner(
+  owner: AutomationOwner
+): owner is { kind: "widget" | "board"; id: string } {
+  return owner.kind !== "source";
+}
 
 // Teto de condições por regra (sanidade do jsonb; a UI limita antes).
 export const MAX_RULE_CONDITIONS = 10;

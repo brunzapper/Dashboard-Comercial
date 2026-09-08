@@ -1,10 +1,17 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): a rodada aceita dono de tipo `source` (0127) — a regra
+//   avalia os registros de uma BASE, sem quadro. A montagem do universo saiu
+//   para ./universe.ts e ramifica lá; TUDO daqui para a frente (fatos,
+//   decisão, execução) é compartilhado, porque nunca foi sobre kanban. As
+//   guardas de quadro (modo tarefas, colunas por data, placements, moves) só
+//   valem no ramo de quadro; no de Base elas não têm o que guardar.
 // Engine I/O das automações do kanban: carrega o quadro do DONO (widget ou
 // board dedicado) com SERVICE ROLE e escopo EXPLÍCITO de org (invariante
 // 0089+), monta os CardFacts que as regras ativas pedem (gates — nada de
 // consulta desnecessária), decide via avaliador puro (evaluate.ts) e executa
 // via move.ts, com teto de AÇÕES por rodada e deadline cooperativo (tick
-// com orçamento). Reusa runKanban inteiro (resolução de colunas, placements,
+// com orçamento). O universo (quadro ou base) vem de ./universe.ts, que no
+// ramo de quadro reusa runKanban inteiro (resolução de colunas, placements,
 // canonicalização de responsáveis, __match) — RPCs de widget INTOCADOS.
 // Quadros fora do escopo v1 (modo tarefas, bucket de data — mover reescreveria
 // uma DATA real relativa a "hoje" a cada tick, não idempotente) falham ALTO
@@ -21,7 +28,6 @@ import { loadCorrespondences } from "@/lib/correspondences";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import type { DashboardSettings } from "@/lib/widgets/types";
 import { todayBrasiliaIso } from "@/lib/date/today";
-import { runKanban } from "../data";
 import type { KanbanSettings } from "../types";
 import {
   decideActions,
@@ -31,7 +37,9 @@ import {
 } from "./evaluate";
 import { countRelatedBySource } from "../related-count";
 import { executeAutomationMoves, executeAutomationSets } from "./move";
+import { loadAutomationUniverse } from "./universe";
 import {
+  ownerColumn,
   parseAutomationRule,
   relatedCountKey,
   type AutomationOwner,
@@ -74,13 +82,16 @@ export async function runAllKanbanAutomations(
 ): Promise<{ boards: number; moved: number; evaluated: number; errors: number }> {
   const { data } = await db
     .from("kanban_automations")
-    .select("widget_id, board_id, last_run_at")
+    .select("widget_id, board_id, source_key, last_run_at")
     .eq("enabled", true);
   const byOwner = new Map<string, { owner: AutomationOwner; oldest: number }>();
   for (const r of data ?? []) {
+    // Exatamente um dos três está preenchido (CHECK da 0127).
     const owner: AutomationOwner = r.widget_id
       ? { kind: "widget", id: r.widget_id as string }
-      : { kind: "board", id: r.board_id as string };
+      : r.board_id
+        ? { kind: "board", id: r.board_id as string }
+        : { kind: "source", id: r.source_key as string };
     if (!owner.id) continue;
     const key = `${owner.kind}:${owner.id}`;
     const t = r.last_run_at ? Date.parse(r.last_run_at as string) : 0;
@@ -205,12 +216,14 @@ export async function runBoardAutomations(
     evaluated: 0,
     ruleErrors: [],
   };
-  const ownerCol = owner.kind === "widget" ? "widget_id" : "board_id";
+  const ownerCol = ownerColumn(owner);
 
   // 1) Regras habilitadas, em ordem de avaliação.
   const { data: ruleRows, error: rulesError } = await db
     .from("kanban_automations")
-    .select("id, name, enabled, position, rule, last_run_at, last_error, last_moved_count")
+    .select(
+      "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count, organization_id"
+    )
     .eq(ownerCol, owner.id)
     .eq("enabled", true)
     .order("position", { ascending: true })
@@ -264,45 +277,51 @@ export async function runBoardAutomations(
   };
 
   // 2) Config do dono (fora do escopo = fatal visível, nunca silêncio).
-  const ctxOrErr = await loadKanbanOwnerContext(db, owner);
-  if (typeof ctxOrErr === "string") return finish(ctxOrErr);
-  const { settings, orgId } = ctxOrErr;
-  if (settings.mode === "tarefas")
-    return finish("Automações não se aplicam a kanban de tarefas.");
-  if (settings.dateBucket && settings.dateField)
-    return finish(
-      "Automações não se aplicam a colunas por data (mover reescreveria a data do registro a cada execução)."
-    );
+  // Escopo de BASE não tem quadro: a org vem da própria linha da regra
+  // (carimbada pela action — o trigger da 0109 cai no coalesce), e as guardas
+  // de quadro abaixo não têm o que guardar.
+  let settings: KanbanSettings | null = null;
+  let orgId: string | null = null;
+  if (owner.kind === "source") {
+    orgId = (ruleRows[0]?.organization_id as string | null) ?? null;
+  } else {
+    const ctxOrErr = await loadKanbanOwnerContext(db, owner);
+    if (typeof ctxOrErr === "string") return finish(ctxOrErr);
+    settings = ctxOrErr.settings;
+    orgId = ctxOrErr.orgId;
+    if (settings.mode === "tarefas")
+      return finish("Automações não se aplicam a kanban de tarefas.");
+    if (settings.dateBucket && settings.dateField)
+      return finish(
+        "Automações não se aplicam a colunas por data (mover reescreveria a data do registro a cada execução)."
+      );
+  }
   if (rules.length === 0) return finish();
   if (overBudget()) return { ...summary, fatal: "Orçamento de tempo esgotado." };
 
-  // 3) Catálogo + quadro. period null: regra vê o dataset inteiro (a barra de
-  // período é filtro de VISÃO).
-  const { catalog, defs, available } = await loadKanbanServiceContext(db, orgId);
+  // 3) Catálogo + UNIVERSO. period null: a regra vê o dataset inteiro (a barra
+  // de período é filtro de VISÃO, e uma automação não tem visão).
+  const service = await loadKanbanServiceContext(db, orgId);
+  const { catalog, defs, available } = service;
 
-  let board;
+  let universe;
   try {
-    board = await runKanban(db, settings, null, defs, {}, owner, {
-      available,
-      catalog,
-      orgId: orgId ?? undefined,
-      // O tick só consome cards/colunas/openTasks — pula badges/conectados
-      // (os fatos das regras são coletados abaixo, gateados pelas condições).
-      lean: true,
+    universe = await loadAutomationUniverse(db, {
+      owner,
+      settings,
+      orgId,
+      service,
     });
   } catch (e) {
     return finish(e instanceof Error ? e.message : String(e));
   }
+  if (typeof universe === "string") return finish(universe);
   if (overBudget()) return { ...summary, fatal: "Orçamento de tempo esgotado." };
 
-  const cards = board.columns.flatMap((col) =>
-    col.cards
-      .filter((c) => c.record)
-      .map((c) => ({ card: c, columnKey: col.key }))
-  );
+  const cards = universe.cards;
   summary.evaluated = cards.length;
-  const recordIds = cards.map((c) => c.card.id);
-  const recordById = new Map(cards.map((c) => [c.card.id, c.card.record!]));
+  const recordIds = cards.map((c) => c.id);
+  const recordById = new Map(cards.map((c) => [c.id, c.record]));
 
   // 4) Fatos por card — só o que as regras ativas pedem.
   const conds = rules.flatMap((r) => r.rule.conditions);
@@ -363,7 +382,7 @@ export async function runBoardAutomations(
   }
 
   const placementAtByRecord = new Map<string, string>();
-  if (needPlacement && settings.columnSource === "custom") {
+  if (needPlacement && settings?.columnSource === "custom") {
     for (const slice of chunksOf(recordIds)) {
       const { data } = await db
         .from("kanban_placements")
@@ -394,20 +413,20 @@ export async function runBoardAutomations(
     );
   }
 
-  const facts: CardFacts[] = cards.map(({ card, columnKey }) => {
+  const facts: CardFacts[] = cards.map((card) => {
     const relatedCounts: Record<string, number> = {};
     for (const [key, byRecord] of relatedByKey) {
       relatedCounts[key] = byRecord.get(card.id) ?? 0;
     }
     return {
-      record: card.record!,
-      columnKey,
+      record: card.record,
+      columnKey: card.columnKey,
       isMock: card.isMock,
       openTasks: needTasks ? (openByRecord.get(card.id) ?? 0) : card.openTasks,
       overdueTasks: overdueByRecord.get(card.id) ?? 0,
       relatedCounts,
       fieldModifiedAt: fmodByRecord.get(card.id) ?? null,
-      sourceCreatedAt: card.record!.source_created_at ?? null,
+      sourceCreatedAt: card.record.source_created_at ?? null,
       placementUpdatedAt: placementAtByRecord.get(card.id) ?? null,
     };
   });
@@ -417,10 +436,12 @@ export async function runBoardAutomations(
   const evalCtx: EvalContext = {
     available,
     todayIso,
-    columns: board.columns,
+    // [] no escopo de Base: sem colunas, decideActions já recusa qualquer
+    // move_to_column pelo mesmo caminho que trata "coluna removida".
+    columns: universe.columns,
     // Campo espelho da alocação (invariante 24) — nunca alvo de set_field; o
     // vínculo pode nascer DEPOIS da regra, por isso a guarda é de avaliação.
-    allocationFieldKey: settings.allocationFieldKey ?? null,
+    allocationFieldKey: universe.allocationFieldKey,
   };
   const { moves, sets, ruleErrors } = decideActions(rules, facts, evalCtx);
   for (const e of ruleErrors) errorByRule.set(e.ruleId, e.message);
@@ -448,7 +469,10 @@ export async function runBoardAutomations(
     }
   };
 
-  if (cappedMoves.length > 0) {
+  // Mover exige quadro. No escopo de Base `cappedMoves` já vem vazio (sem
+  // colunas, decideActions recusou o alvo) — a guarda é defesa em profundidade
+  // e o que prova ao compilador que `settings`/`owner` são de quadro aqui.
+  if (cappedMoves.length > 0 && settings && owner.kind !== "source") {
     if (overBudget())
       return { ...summary, fatal: "Orçamento de tempo esgotado." };
     const result = await executeAutomationMoves(db, {
@@ -472,7 +496,7 @@ export async function runBoardAutomations(
     const result = await executeAutomationSets(db, {
       sets: cappedSets,
       recordById,
-      settings,
+      writeBack: universe.writeBack,
       orgId,
       defs,
     });
