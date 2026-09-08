@@ -1,4 +1,8 @@
-// Versão: 1.5 | Data: 05/08/2026
+// Versão: 1.6 | Data: 08/09/2026
+// v1.6 (08/09/2026): área `workflow` (0125) — SEM gate de papel, como
+//   `remuneracao`: a page ramifica (admin configura os esquemas; os demais
+//   só EXECUTAM o formulário). A escrita dos esquemas segue admin nas
+//   actions + RLS de workflow_schemas.
 // Acessos customizados por usuário (0094): overrides individuais de ÁREAS de
 // Configurações e de BASES — deny vence tudo; allow vence o gate de papel;
 // v1.5 (05/08/2026): Remuneração moveu p/ /operacao/remuneracao (área
@@ -57,6 +61,11 @@ export const AREA_GATES: Record<
   // Mapeamentos de valores (0117): card de Operação org-específico (feature
   // "mapeamentos"); gestão é de admin (escreve em value_mappings + registros).
   mapeamentos: { role: "admin" },
+  // Workflow (0125): card de Operação org-específico (feature "workflow").
+  // SEM gate de papel — quem tem permissão de criar registros EXECUTA o
+  // formulário; configurar o esquema é admin (actions + RLS). Deny esconde a
+  // área inteira. Chave histórica a partir de 08/09/2026 — nunca renomear.
+  workflow: {},
   fontes: { role: "admin" }, // chave histórica — página em /registros/bases
   presets: { role: "admin" },
   snapshots: { role: "admin" },
@@ -77,6 +86,7 @@ export const AREA_LABELS: Record<string, string> = {
   metas: "Metas",
   remuneracao: "Remuneração (Operação)",
   mapeamentos: "Mapeamentos (Operação)",
+  workflow: "Workflow (Operação)",
   fontes: "Bases (Registros)",
   presets: "Presets",
   snapshots: "Snapshots",
@@ -93,6 +103,7 @@ export const AREA_LABELS: Record<string, string> = {
 export const AREA_FEATURES: Partial<Record<string, OrgFeatureKey>> = {
   remuneracao: "remuneracao",
   mapeamentos: "mapeamentos",
+  workflow: "workflow", // v1.6 (08/09/2026)
 };
 
 /** O recurso sob demanda da área está ligado para a org ativa? Áreas sem

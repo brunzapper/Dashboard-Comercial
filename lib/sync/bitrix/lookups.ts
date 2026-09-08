@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 18/07/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): statusNames(entity)/statusCodes() — a lista de RÓTULOS de
+//   uma família de crm_status (para as options do catálogo) e o mapa
+//   rótulo→código das três famílias (para o caminho de ESCRITA: SOURCE_ID e
+//   STATUS_ID esperam o código, não o rótulo — ver toBitrixValue v1.1). Os
+//   maps já existiam carregados; só faltava exportá-los.
 // Resolução de IDs → nomes/labels do Bitrix, com cache. Stages/status,
 // categorias (pipelines) e labels de enumeration são carregados uma vez por
 // execução; nomes de usuários (user.get) usam cache persistente em
@@ -248,6 +253,44 @@ export class BitrixLookups {
   /** Nomes de todas as origens (options do catálogo do campo `fonte`). */
   sourceNames(): string[] {
     return Array.from(this.sources.values());
+  }
+
+  /**
+   * Rótulos de uma família de status, deduplicados — options do catálogo
+   * (`stage` para leads, no mesmo contrato do `pipeline`). v1.3 (08/09/2026).
+   */
+  statusNames(entity: "deal" | "lead"): string[] {
+    const map = entity === "deal" ? this.dealStages : this.leadStatuses;
+    return [...new Set(map.values())];
+  }
+
+  /**
+   * Mapa RÓTULO → CÓDIGO das três famílias de crm_status. É o inverso do que
+   * statusName()/sourceName() fazem na leitura, e existe porque a ESCRITA
+   * (crm.*.add / crm.*.update) exige o código: mandar "CEO-Led Outbound" onde
+   * o Bitrix espera "UC_EN7PZM" grava errado em silêncio. v1.3 (08/09/2026).
+   *
+   * Rótulos repetidos dentro de uma família (possível no portal) resolvem para
+   * o PRIMEIRO código — colisão é problema de configuração do CRM, e escolher
+   * um é melhor que recusar a gravação inteira.
+   */
+  statusCodes(): {
+    sources: Record<string, string>;
+    leadStatuses: Record<string, string>;
+    dealStages: Record<string, string>;
+  } {
+    const invert = (m: Map<string, string>): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [code, label] of m) {
+        if (!(label in out)) out[label] = code;
+      }
+      return out;
+    };
+    return {
+      sources: invert(this.sources),
+      leadStatuses: invert(this.leadStatuses),
+      dealStages: invert(this.dealStages),
+    };
   }
 
   categoryName(categoryId?: string | null): string | null {

@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): o fake de lookups ganha statusNames/statusCodes —
+//   syncFieldCatalog v1.7 os usa para refrescar as options de `stage` e
+//   gravar o cache bitrix_status_codes. Vazios pulam os dois, como
+//   categoryNames() já fazia com o pipeline.
 // Testes do catálogo dinâmico de campos (syncFieldCatalog, v1.6): o fallback
 // POR LINHA quando o upsert em lote falha (uma linha envenenada não pode
 // derrubar o catálogo inteiro — modo de falha 0076, revivido em 19→27/07 pela
@@ -14,8 +18,10 @@ import {
   type RecordedQuery,
 } from "../../../tests/helpers/fake-supabase";
 
-// Lookups mínimos: só os métodos que syncFieldCatalog toca. categoryNames()
-// vazio pula o refresh das options do pipeline (fora do escopo daqui).
+// Lookups mínimos: só os métodos que syncFieldCatalog toca. categoryNames() e
+// statusNames() vazios pulam os refreshes de options (pipeline e `stage`) —
+// fora do escopo daqui; statusCodes() vazio ainda grava o cache, que os testes
+// ignoram porque olham só os upserts de field_definitions.
 function fakeLookups(overrides?: {
   leadMetas?: {
     fieldId: string;
@@ -29,6 +35,9 @@ function fakeLookups(overrides?: {
     leadFieldMetas: () => overrides?.leadMetas ?? [],
     sourceNames: () => ["Inbound"],
     categoryNames: () => [],
+    // v1.1 (08/09/2026)
+    statusNames: () => [],
+    statusCodes: () => ({ sources: {}, leadStatuses: {}, dealStages: {} }),
   } as unknown as BitrixLookups;
 }
 

@@ -4210,6 +4210,116 @@ chave de `AREA_GATES`); `lib/import/comp/instructions.test.ts` (paridade do
 SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
 `lib/import/comp/validate.test.ts` (as perdas silenciosas que o merge impede).
 
+### 4.23 Workflow: esquemas de automação (0125, 08/09/2026)
+
+Faltava uma superfície para **lançar** dados num sistema externo a partir do
+dashboard. O que existia era o checkbox "Criar também no Bitrix" da criação de
+registro (`createRecord` → `createBitrixEntity`): um efeito colateral de criar
+um REGISTRO, com a entidade e o conjunto de campos fixos no código, e sem os
+passos de Empresa e Contato — o lead nascia solto no CRM.
+
+A tentação era escrever a rotina: um formulário de lead, três chamadas
+encadeadas, `SOURCE_ID` numa constante. É o que faz a referência que originou
+o pedido, e funciona — para um portal, uma organização e um tipo de dado. O
+segundo caso de uso (outro CRM, outro destino, outro tipo de informação)
+recomeçaria do zero.
+
+Então o fluxo virou **dado**. Um esquema (`workflow_schemas.definition`) é um
+FORMULÁRIO mais uma sequência de PASSOS, e o motor não sabe o que é um lead.
+
+**O formulário é PLANO — e isso é arquitetura, não estética.** Quem lança vê
+uma lista única de campos: nome da empresa, nome do contato, telefone, e-mail,
+fonte, informações da fonte, comentários. Não vê abas por entidade, não vê os
+passos, e não precisa saber que o CRM guarda empresa, contato e lead em três
+lugares. O destrinchar é dos passos, e cada um puxa o que precisa da MESMA
+resposta por referência: `{{form.empresa}}` alimenta o `TITLE` da company E o
+`COMPANY_TITLE` do lead. Consequência: `form.fields` não tem `entity` nem
+`group` — o campo não sabe em qual passo será usado, e é exatamente isso que
+permite trocar os passos sem tocar no formulário. Um teste pina a ausência
+dessas chaves.
+
+**Refs, não código.** `lib/workflow/refs.ts` resolve `{{form.<key>}}`,
+`{{steps.<id>.id}}` e `{{ctx.<key>}}` por regex sobre um contexto TIPADO — sem
+`eval`, sem `Function`, e com o escopo fechado em três raízes (`{{process.env}}`
+é ref desconhecida, não uma janela para o processo). Ref desconhecida resolve
+VAZIO com aviso, nunca o texto cru: `"{{form.telefone}}"` chegando dentro do
+campo PHONE de um CRM é pior que um telefone vazio e ainda cala o erro. Passo
+PULADO resolve vazio SEM aviso — essa é a diferença que faz desligar um passo
+funcionar: o lead sai sem `COMPANY_ID` em vez de com um `undefined`.
+
+**Segredo por CHAVE DE REGISTRY, jamais por nome vindo do dado.** O esquema
+grava `"connection": "bitrix_webhook"`, e `lib/workflow/connections.ts` mapeia
+essa chave para um getter tipado de `lib/env.ts`. Se o JSON guardasse o nome da
+variável, o executor faria `process.env[<string gravável por admin>]` — leitura
+arbitrária do ambiente do servidor, e quem edita um esquema leria
+`SUPABASE_SERVICE_ROLE_KEY`. As chaves seguem nas Environment Variables da
+Vercel; a UI mostra o nome e um booleano de presença, nunca o valor. O parse
+recusa conexão fora do registry, então o esquema inválido nem chega ao
+executor. Conexão nova = entrada no registry + getter em `lib/env.ts`.
+
+**Parse FAIL-CLOSED.** Versão errada, tipo de passo desconhecido, id duplicado,
+`linkSourceIdFrom` apontando para passo inexistente (gravaria a linha local sem
+`source_id` e o sync criaria uma DUPLICATA) — qualquer um derruba o esquema
+inteiro. A UI diz "configuração inválida"; não existe fluxo meio-aplicado. O
+`saveWorkflowSchema` reparseia antes de gravar: um jsonb que o parse recusa
+deixaria o esquema inutilizável e sem UI para consertar.
+
+**Sem transação, por isso resultado POR PASSO.** Cada `crm.*.add` é uma chamada
+isolada — o CRM não oferece nada melhor, e é o mesmo desenho da referência. O
+executor para no primeiro erro (insistir criaria órfãos) e devolve o que cada
+passo fez; `workflow_runs` grava isso inclusive no erro. Uma execução `partial`
+(empresa criada, lead falhou) é dita a QUALQUER usuário, não só ao admin:
+reenviar às cegas duplicaria o que já foi.
+
+**O que o executor NÃO faz:** gate. Sessão, área, permissão, responsável e base
+de destino são resolvidos na server action, e só então o fluxo roda. O
+responsável vem do servidor — sem `view_all_records` é forçado ao vínculo do
+próprio usuário, espelhando a RLS `records_insert`, e o id nunca viaja pelo
+formulário (o dropdown grava NOME, convenção dos filtros do construtor).
+
+**Registro local.** O passo `record.create` escreve com o client RLS do
+usuário — nunca service role. A muralha é o ramo 2 de `records_insert` (0091),
+que já autoriza exatamente esta forma: `source_system='bitrix'` +
+`source_id` + base com `manual_entry`. `last_synced_at = null` protege os
+campos preenchidos, e o par `(source_system, source_id)` faz o próximo sync
+ADOTAR a linha em vez de duplicá-la. Campos calculados saem do choke point
+único (`recalcFormulaFieldsForRecords`), não de uma cópia de `applyCalcFields`.
+
+**Opções vêm do que o sistema JÁ computou.** Fonte sai das `options` do campo
+`fonte`; Etapa, das `options` da linha core `stage`; Responsável, dos ativos
+principais. Zero chamada ao CRM para desenhar um dropdown. Custo aceito e
+visível: lista vazia significa "o sync ainda não rodou desde a atualização", e
+a tela diz isso — melhor que inventar a lista a partir dos valores que por
+acaso apareceram nos registros.
+
+**A correção que veio junto: `crm_status` esperava CÓDIGO.** `toBitrixValue`
+convertia `enumeration` (rótulo → id) mas deixava `SOURCE_ID` e `STATUS_ID`
+caírem no `default:` — mandávamos "CEO-Led Outbound" onde o Bitrix quer
+`UC_EN7PZM`. Isso afetava o **write-back já em produção**, não só o código
+novo. Agora `BitrixLookups.statusCodes()` expõe o mapa inverso (que já estava
+carregado), `syncFieldCatalog` o materializa em `sync_config.bitrix_status_codes`
+(mapa vazio NUNCA sobrescreve um cache bom) e `toBitrixValue` ganhou o caso —
+com o mapa OPCIONAL, então todo call site antigo segue byte-idêntico.
+
+**Fluxos do sistema (`lib/workflow/system-schemas.ts`).** "Quais automações
+este sistema roda sozinho?" não tinha resposta em lugar nenhum: sync, write-back,
+automações do kanban, de-para, auto-match, webhooks, ingestão e snapshots
+estavam espalhados por tick de cron, hook pós-sync e fila em background, cada um
+configurado numa tela diferente — e alguns sem tela. A aba os EXIBE com passos
+legíveis e leva a onde cada um se configura. **Não é reimplementação**: nenhuma
+entrada é executada pelo motor; o código continua sendo a verdade e este arquivo
+é a descrição dele. Um teste pina que toda rota e todo caminho de código citados
+existem — descrição apodrece calada.
+
+**Gates.** Área `workflow` (chave HISTÓRICA a partir de 08/09/2026) sem gate de
+papel, como `remuneracao`: a page ramifica — todos EXECUTAM, só admin
+CONFIGURA. Feature `workflow` em `org_features`, ligada só pelo `/owner`.
+
+Testes: `lib/workflow/{types,refs,connections,execute,system-schemas}.test.ts`,
+`lib/workflow/steps/bitrix.test.ts` e
+`lib/workflow/seeds/bitrix-lead-form.test.ts` (o par fechado formulário ↔
+passos: todo campo perguntado é consumido, toda ref citada existe).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -4697,6 +4807,24 @@ principalmente — para mantenedores humanos.
     silenciosa. Nenhum caminho do app faz hard delete fora de
     `purgeRecordsPermanently` (predicado `deleted_at not null`) e do cron
     `pg-cron-purge-records-trash.sql` (30 dias).
+31. **Esquema de Workflow (0125, §4.23) é DADO fail-closed, e segredo só entra
+    por CHAVE DE REGISTRY.** `workflow_schemas.definition` guarda a chave de
+    `WORKFLOW_CONNECTIONS` (`"bitrix_webhook"`), NUNCA o nome de uma variável
+    de ambiente: nome vindo do jsonb viraria `process.env[<dado gravável>]` —
+    leitura arbitrária do ambiente do servidor por quem edita um esquema. A UI
+    expõe `envName` + presença, jamais o valor, e conexão nova é entrada no
+    registry + getter em `lib/env.ts`. `parseWorkflowDefinition` é FAIL-CLOSED
+    (conexão fora do registry, tipo de passo desconhecido, `linkSourceIdFrom`
+    órfão — que gravaria a linha local sem `source_id` e faria o sync
+    DUPLICAR o lead) e o `saveWorkflowSchema` reparseia antes de gravar. As
+    refs resolvem por escopo FECHADO sem `eval`, e ref desconhecida vira
+    VAZIO com aviso, nunca o template cru dentro do payload do sistema
+    externo. O executor NÃO faz gate (sessão/área/permissão/responsável são da
+    action, que força o responsável do próprio usuário sem
+    `view_all_records`), o passo de registro escreve com o client RLS do
+    usuário pelo ramo 2 de `records_insert`, e os RPCs de widget seguem
+    INTOCADOS. `SYSTEM_FLOWS` é DESCRIÇÃO dos fluxos existentes — nunca os
+    execute pelo motor.
 
 ## 6. Convenções do projeto
 

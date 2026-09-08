@@ -1256,6 +1256,53 @@ This version has breaking changes — APIs, conventions, and file structure may 
   o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
   blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
   `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
+- **Workflow (0125): esquema é DADO fail-closed e segredo só entra por CHAVE DE
+  REGISTRY (08/09/2026):** um esquema (`workflow_schemas.definition`, jsonb
+  versionado) é um FORMULÁRIO PLANO + PASSOS que consomem as respostas por
+  referência (`{{form.<key>}}`, `{{steps.<id>.id}}`, `{{ctx.<key>}}`). O
+  formulário NÃO tem `entity`/`group` no campo — quem preenche vê uma lista
+  única, e o destrinchar em entidades (empresa → contato → lead) é dos passos;
+  é isso que permite trocar os passos sem tocar no formulário (teste pina a
+  ausência das chaves). Refs resolvem em `lib/workflow/refs.ts` por escopo
+  FECHADO (form/steps/ctx), SEM `eval`/`Function`; ref desconhecida vira VAZIO
+  + warning, NUNCA o template cru dentro do payload externo; passo PULADO
+  resolve vazio SEM aviso (é o que faz desligar um passo funcionar). O passo
+  guarda a CHAVE de `WORKFLOW_CONNECTIONS` (`lib/workflow/connections.ts`),
+  jamais o nome de uma variável de ambiente — nome vindo do jsonb viraria
+  `process.env[<dado gravável>]` e vazaria `SUPABASE_SERVICE_ROLE_KEY` para
+  quem edita um esquema; a UI expõe `envName` + presença, nunca o valor.
+  `parseWorkflowDefinition` é FAIL-CLOSED (conexão fora do registry, tipo de
+  passo desconhecido, id duplicado, `linkSourceIdFrom` órfão — que gravaria a
+  linha local sem `source_id` e faria o sync DUPLICAR o lead) e o
+  `saveWorkflowSchema` REPARSEIA antes de gravar. O executor
+  (`lib/workflow/execute.ts`) NÃO faz gate: sessão/área/permissão/responsável
+  saem da action (sem `view_all_records` o responsável é FORÇADO ao vínculo do
+  próprio usuário, espelhando `records_insert`; o dropdown grava NOME, id nunca
+  viaja no form). Sem transação ⇒ resultado POR PASSO em `workflow_runs`,
+  gravado inclusive no erro; `partial` é dito a QUALQUER usuário (reenviar às
+  cegas duplicaria). O passo `record.create` escreve com o client RLS do
+  USUÁRIO pelo ramo 2 de `records_insert` (`source_system='bitrix'` +
+  `source_id` + `last_synced_at=null` ⇒ o sync ADOTA, não duplica) e os campos
+  calculados saem do choke point único `recalcFormulaFieldsForRecords` — nunca
+  uma cópia de `applyCalcFields`. Options de `selecao` vêm do que o sistema JÁ
+  computou (`fonte`/`stage` no catálogo, responsáveis ativos principais) — zero
+  chamada ao CRM para desenhar dropdown; lista vazia = sync não rodou, e a tela
+  diz isso. `SYSTEM_FLOWS` (`lib/workflow/system-schemas.ts`) é DESCRIÇÃO dos
+  fluxos existentes (sync, write-back, automações do kanban, de-para,
+  auto-match, webhooks, ingestão, snapshots): o motor NUNCA os executa; teste
+  pina que rota e caminho de código citados existem. Área `workflow` SEM gate
+  de papel (a page ramifica: todos executam, só admin configura) + feature
+  `workflow` em `org_features` (só o `/owner` liga). **Correção acoplada:**
+  `toBitrixValue` ganhou `case "crm_status"` com mapa rótulo→código OPCIONAL
+  (3º parâmetro) — `SOURCE_ID`/`STATUS_ID` caíam no `default:` e mandavam
+  RÓTULO onde o Bitrix quer CÓDIGO, afetando o write-back JÁ em produção; o
+  mapa sai de `BitrixLookups.statusCodes()` e é materializado por
+  `syncFieldCatalog` em `sync_config.bitrix_status_codes` (mapa VAZIO nunca
+  sobrescreve um cache bom), que também passou a refrescar as `options` da
+  linha core `stage`. Sem o mapa, byte-idêntico ao anterior. RPCs de widget
+  INTOCADOS. Fiscalizado por `lib/workflow/*.test.ts` +
+  `lib/workflow/{steps,seeds}/*.test.ts`. Ver `docs/arquitetura.md` §4.23 e
+  invariante 31.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de

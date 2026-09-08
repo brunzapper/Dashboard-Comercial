@@ -1,4 +1,5 @@
-// Versão: 2.8 | Data: 05/08/2026
+// Versão: 2.9 | Data: 08/09/2026
+// v2.9 (08/09/2026): ícone do card `workflow` (0125) em OPERACAO_ICONS.
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
 // v2.8 (05/08/2026): hub com DUAS ABAS internas por query param (?aba=,
 //   default "paineis" — RSC puro, barra de abas = <Link>s): "Painéis" é todo
@@ -37,6 +38,7 @@ import {
   ListChecks,
   Shuffle,
   SquareKanban,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -189,6 +191,7 @@ const OPERACAO_ICONS: Record<string, LucideIcon> = {
   tarefas: ListChecks,
   remuneracao: HandCoins,
   mapeamentos: Shuffle,
+  workflow: Workflow, // v2.9 (08/09/2026)
 };
 
 // Card de OPERAÇÃO (aba "Operação" do hub): módulo do catálogo em código —
