@@ -518,6 +518,30 @@ This version has breaking changes — APIs, conventions, and file structure may 
   operações). Alvo = o quadro da UI (`KanbanOwner`), nunca do JSON; as colunas
   chegam da página (como no `AutomationsSheet`) e só AMPLIAM os alvos aceitos.
   Fiscalizado por `lib/import/kanban/{validate,instructions}.test.ts`.
+- **Painel de IA da OPERAÇÃO: registry em código, sessão com a ORG na PK
+  (0124, 08/09/2026):** o painel vive no `layout.tsx` de `/operacao` e é
+  escopado pela sub-área (`scopeForPath`). Registry PARTIDO em dois —
+  `lib/ai/operacao/scopes.ts` (metadata PURA, client-safe: o painel é client;
+  `cards.ts` não serve de molde porque importa `checkSettingsArea`) e
+  `lib/ai/operacao/handlers.ts` (`server-only`). O handler NÃO implementa
+  validação nem escrita: DELEGA aos cores existentes (o escopo `mapeamentos`
+  chama `classify-mappings.ts` inteiro — zero contrato/validador novo; o sheet
+  da tela continua sendo a porta do fluxo offline/CSV). Escopo sem entrada ⇒
+  sem painel. **`operacao_ai_sessions` tem `organization_id` na PK**
+  (`organization_id,user_id,scope`) — o escopo é chave de registry em CÓDIGO,
+  igual em toda org, e sem a org na chave um usuário multi-org veria numa org
+  o `pending`/`undo_snapshot` gerado em OUTRA (a RLS não pega: ele é membro
+  das duas; precedente da 0123 em `currencies`). NÃO há trigger de stamp
+  (sem linha-pai): a action carimba com `getActiveOrgId()` e o gate FALHA ALTO
+  sem org ativa. `pending` guarda o ALVO junto do JSON e o apply RECUSA alvo
+  divergente do da UI. Gate = `checkSettingsArea` + `adminOnly` (a área
+  `remuneracao` não tem gate de papel e a page ramifica p/ o vendedor — sem
+  isso ele veria painel de ESCRITA). Sub-escopo pelo contexto
+  (`usePublishOperacaoAiTarget`), NUNCA por `useSearchParams`: o domínio de
+  Mapeamentos é `useState` local. Carga da sessão é EVENTO (abrir); troca de
+  sub-aba REMONTA por `key={scope.key}` — efeito reagindo a escopo cai em
+  `react-hooks/set-state-in-effect`. Fiscalizado por
+  `lib/ai/operacao/scopes.test.ts`. Ver `docs/arquitetura.md` §4.22.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:

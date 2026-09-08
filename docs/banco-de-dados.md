@@ -966,3 +966,27 @@ chaves `comp_*` no registry — tudo ensure-only pelo caminho de fábrica.
 org-scoped (PK e FK compostas + policies do padrão 0091), `seed_org_defaults`
 semeia o catálogo da org nova e as orgs existentes recebem o delas no backfill.
 Detalhe e prova em [`seguranca.md`](./seguranca.md).
+
+### 0124 (08/09/2026) — sessões do painel de IA da Operação
+
+`0124_operacao_ai_sessions.sql`: `operacao_ai_sessions` guarda a conversa
+persistida do painel de IA de `/operacao` — uma linha por (org, usuário,
+ESCOPO), com `turns`/`chat`/`pending`/`undo_snapshot`. Espelha a 0098
+(`dashboard_ai_sessions`) com duas diferenças que a natureza do lugar impõe:
+
+- **`organization_id` está na PK** (`organization_id, user_id, scope`). O
+  escopo é uma chave de registry em CÓDIGO ("remuneracao", "mapeamentos"), a
+  mesma em toda org — sem a org na chave, um usuário multi-org veria em uma org
+  a prévia e o snapshot de desfazer que gerou em outra, e os sobrescreveria. A
+  RLS não pega isso: ele é membro das duas. Mesmo movimento da 0123 em
+  `currencies`.
+- **Sem trigger de stamp de org**: não existe linha-pai de onde derivá-la. A
+  action carimba com `getActiveOrgId()` e o `with check` é a única muralha
+  (padrão de `value_mappings`/`currencies`); por isso o gate do app falha ALTO
+  sem org ativa, em vez de deixar a linha cair no default da org legada.
+
+`pending` guarda o ALVO junto do JSON (a linha é por escopo, não por
+plano/domínio) e `undo_snapshot` não tem FK de propósito — o alvo pode ser
+excluído depois, e o restore responde amigável em vez de recriar algo por
+baixo. RLS: linha própria + gate de org, `revoke all from anon`. Detalhe em
+[`arquitetura.md`](./arquitetura.md) §4.22.

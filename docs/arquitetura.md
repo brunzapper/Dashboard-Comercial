@@ -3965,6 +3965,84 @@ Testes: `lib/records/trash.test.ts` +
 seleção em `update-validate.test.ts`/`update-instructions.test.ts` +
 `tests/rpc-parity.test.ts` (paridade segue byte a byte). Ver invariante 30.
 
+### 4.22 Janela de IA da Operação (0124, 08/09/2026)
+
+Os assistentes de IA do produto sempre foram `<Sheet>` por tela: você abre,
+resolve uma coisa, fecha, e a conversa morre ali. Dentro de `/operacao` isso
+não servia — quem está apurando remuneração ou classificando um de-para volta
+ao mesmo assunto várias vezes no dia, e Remuneração não tinha assistente
+nenhum. Entra um **painel lateral persistido, escopado pela sub-área aberta**:
+a janela acompanha a troca de sub-aba, e cada área tem a própria conversa
+salva.
+
+**Registry em código, partido em dois.** `lib/ai/operacao/scopes.ts` é
+metadata PURA e client-safe (`key` = chave de ÁREA histórica, `label`,
+`adminOnly`, `href`, `placeholder`) — o painel é client e precisa dela;
+`lib/operacao/cards.ts` não serve de molde direto porque importa
+`checkSettingsArea` e é server-only. `lib/ai/operacao/handlers.ts` é o lado
+`server-only`: gate, contexto, prompt, validação, apply e o `restore`
+OPCIONAL. Escopo sem entrada ⇒ nenhum painel (Agenda e Tarefas ficam de
+fora). Escopo novo segue a checklist de `cards.ts` MAIS o par
+validador + teste de paridade.
+
+**O handler não implementa nada.** Ele é uma ponte para os cores que já
+existem — o escopo `mapeamentos` delega inteiro a `lib/ai/classify-mappings.ts`
+(zero contrato novo, zero validador novo). O sheet "Classificar com IA" da
+tela CONTINUA existindo: ele é a porta do fluxo offline (CSV/colar) e da
+prévia editável célula a célula; o painel é a porta conversacional. Mesmo
+core, duas superfícies.
+
+**Sessão (0124).** `operacao_ai_sessions` espelha a 0098, com duas diferenças
+que a natureza do lugar impõe:
+
+1. **`organization_id` está na PK** — `(organization_id, user_id, scope)`. Na
+   0098 a chave é (user, dashboard) e o dashboard já é de uma org. Aqui o
+   escopo é uma chave de registry em CÓDIGO, a mesma em toda org: sem a org na
+   chave, um usuário multi-org que gera uma prévia na org A, troca de org pelo
+   cookie e reabre a tela na org B cairia na MESMA linha — veria o `pending`
+   (payload de escrita!) e o `undo_snapshot` da org A e os sobrescreveria. A
+   RLS não pega, ele é membro das duas. Precedente literal: a 0123 moveu
+   `organization_id` para dentro da PK de `currencies` pela mesma razão.
+2. **Não há trigger de stamp de org** — não existe linha-pai de onde derivar.
+   A action carimba com `getActiveOrgId()` e o `with check` é a única muralha
+   (padrão de `value_mappings`/`currencies`). Por isso o gate **falha ALTO**
+   sem org ativa, em vez de deixar a linha cair no default da org legada.
+
+`pending` carrega o **alvo** (`{ target, json, summary[] }`): a linha é por
+ESCOPO, não por plano/domínio, então sem ele uma prévia gerada com o domínio X
+seria aplicada no Y depois que o usuário trocasse de aba. O apply recebe o
+alvo da UI e RECUSA quando diverge; o painel avisa antes. `undo_snapshot` não
+tem FK — o alvo pode sumir, e o `restore` responde amigável em vez de recriar
+algo por baixo.
+
+**Sub-escopo.** O painel vive no layout e não enxerga o estado das telas. O
+domínio ativo de Mapeamentos é `useState` local e não está na URL, então só um
+contexto resolve: `components/operacao/ai-scope-context.tsx`, com o provider no
+layout e `usePublishOperacaoAiTarget` na tela. Mecanismo único — telas cujo
+recorte está na URL publicam dali. O sub-escopo viaja no CORPO do POST (a rota
+é `[scope]`, não `[scope]/[target]`).
+
+**Turno e gate.** `runOperacaoAiTurnCore` (`lib/ai/operacao/session.ts`) é o
+gêmeo de `runAiEditTurnCore`, com os mesmos caps (30 turnos guardados, 100
+entradas de chat, 10 ao modelo) e a mesma reinjeção de `PRÉVIA PENDENTE` — que
+só volta ao modelo quando é do MESMO alvo. A rota de streaming
+`app/api/operacao/[scope]/ai-turn/route.ts` espelha a do dashboard (NDJSON,
+`x-accel-buffering: no`, origin == host). O gate soma `checkSettingsArea`
+(que já embute feature-off > deny > allow > papel) ao papel de escrita: a área
+`remuneracao` NÃO tem gate de papel e a page ramifica para "Minha
+remuneração", então sem `adminOnly` um vendedor veria um painel de escrita que
+o servidor recusaria a cada turno. O layout aplica a mesma régua para decidir
+o que montar.
+
+**Carga é evento, nunca efeito.** O painel carrega a sessão ao ABRIR, e a
+troca de sub-aba REMONTA o componente (`key={scope.key}` no mount) — conversa
+nova, estado novo. Um efeito reagindo à mudança de escopo cairia na regra
+`react-hooks/set-state-in-effect`; a remontagem resolve sem exceção de lint.
+
+Testes: `lib/ai/operacao/scopes.test.ts` (roteamento por pathname — prefixo de
+ROTA, não de string; lista permitida do servidor respeitada; toda key é uma
+chave de `AREA_GATES`).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
