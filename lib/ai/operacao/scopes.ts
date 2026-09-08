@@ -1,4 +1,5 @@
-// Versão: 1.0 | Data: 07/09/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): entra o escopo `remuneracao` (contrato remuneracao-edit).
 // Metadata PURA dos escopos de IA da Operação — catálogo em código, espelho de
 // lib/operacao/cards.ts. Este arquivo é CLIENT-SAFE de propósito: o painel vive
 // no layout e precisa do rótulo/gate de papel, enquanto `cards.ts` é
@@ -39,6 +40,16 @@ export const OPERACAO_AI_SCOPES: OperacaoAiScopeMeta[] = [
     adminOnly: true,
     placeholder:
       "Ex.: classifique os cargos pendentes; o que parecer estágio vai para Júnior.",
+  },
+  {
+    key: "remuneracao",
+    label: "IA da Remuneração",
+    description:
+      "Ajusta fatores, pesos, faixas de comissão e metas do plano aberto — sempre com prévia antes de aplicar.",
+    href: "/operacao/remuneracao",
+    adminOnly: true,
+    placeholder:
+      "Ex.: crie um fator de reuniões com peso 30% e defina meta de 50 mil para a Maria.",
   },
 ];
 

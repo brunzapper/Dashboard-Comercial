@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 07/09/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): handler do escopo `remuneracao` (delega a
+// lib/ai/comp-plan.ts — plano por savePlan, metas por saveTarget).
 // Handlers SERVER-ONLY dos escopos de IA da Operação. Um handler é a ponte
 // entre o painel genérico (session.ts) e o núcleo de cada área — ele NÃO
 // implementa validação nem escrita: delega aos cores que já existem, que já
@@ -15,6 +17,16 @@ import {
   generateMappingsCore,
   previewMappingsCore,
 } from "@/lib/ai/classify-mappings";
+import {
+  applyCompEditCore,
+  buildCompPromptCore,
+  formatCompTarget,
+  generateCompEditCore,
+  parseCompTarget,
+  previewCompEditCore,
+  restoreCompSnapshotCore,
+  type CompUndoSnapshot,
+} from "@/lib/ai/comp-plan";
 import { serializeMappingsClassify } from "@/lib/import/mappings/validate";
 import { OPERACAO_AI_SCOPES, type OperacaoAiScopeMeta } from "./scopes";
 
@@ -123,7 +135,53 @@ const mapeamentos: OperacaoAiHandler = {
   },
 };
 
-const HANDLERS: OperacaoAiHandler[] = [mapeamentos];
+// ---------------------------------------------------------------- remuneração
+// O alvo é o recorte que a UI tem aberto — "<planId>:<ano>-<mes>" — e ele
+// NUNCA vem do JSON: é o que garante que uma prévia gerada com o plano X não
+// seja aplicada no plano Y depois de o usuário trocar de pill (o apply da
+// sessão ainda confere o alvo gravado no `pending`).
+//
+// COM Desfazer: o snapshot pré-apply guarda o plano inteiro e o valor ANTERIOR
+// de cada meta tocada, e o restore reescreve pelos MESMOS choke points. A
+// ressalva honesta é a métrica de meta de um fator novo: `registerGoalMetrics`
+// é aditivo, então ela permanece no catálogo (o restore diz isso).
+const remuneracao: OperacaoAiHandler = {
+  meta: metaOf("remuneracao"),
+  normalizeTarget: (target) => {
+    const t = parseCompTarget(target);
+    return t ? formatCompTarget(t) : null;
+  },
+  async turn(input) {
+    const t = parseCompTarget(input.target);
+    if (!t) return { ok: false, message: "Selecione um plano e um mês na tela." };
+    const res = await generateCompEditCore({
+      target: t,
+      description: input.description,
+      priorTurns: input.priorTurns,
+      pendingJson: input.pendingJson,
+    });
+    return res;
+  },
+  async preview(target, raw) {
+    const t = parseCompTarget(target);
+    if (!t) return { ok: false, message: "Selecione um plano e um mês na tela." };
+    return previewCompEditCore(t, raw);
+  },
+  async buildPrompt(target) {
+    const t = parseCompTarget(target);
+    if (!t) return { ok: false, message: "Selecione um plano e um mês na tela." };
+    return buildCompPromptCore(t);
+  },
+  async apply(target, raw) {
+    const t = parseCompTarget(target);
+    if (!t) return { ok: false, message: "Selecione um plano e um mês na tela." };
+    return applyCompEditCore(t, raw);
+  },
+  restore: (snapshot) =>
+    restoreCompSnapshotCore(snapshot as CompUndoSnapshot),
+};
+
+const HANDLERS: OperacaoAiHandler[] = [mapeamentos, remuneracao];
 
 export function handlerFor(scope: string): OperacaoAiHandler | null {
   return HANDLERS.find((h) => h.meta.key === scope) ?? null;

@@ -3708,6 +3708,10 @@ aliasar `server-only` para um stub vazio (`tests/setup/server-only.ts`): o
 pacote real é guarda do BUNDLE client, aplicada pelo `next build` — sob Node
 ele só empurrava o código a largar a marca para virar testável.
 
+O segundo consumidor chegou junto: o escopo `remuneracao` do painel de IA da
+Operação (§4.22) usa o MESMO módulo — o contrato só traduz nomes e texto de
+fórmula para uma config completa, e escreve por `savePlan`/`saveTarget`.
+
 ### 4.19 Mapeamentos de valores (de-para, 0117 — 07/08/2026)
 
 Substitui os caches "Map Cargos"/"Map Segmentos" do dashboard antigo em Apps
@@ -4066,9 +4070,55 @@ troca de sub-aba REMONTA o componente (`key={scope.key}` no mount) — conversa
 nova, estado novo. Um efeito reagindo à mudança de escopo cairia na regra
 `react-hooks/set-state-in-effect`; a remontagem resolve sem exceção de lint.
 
+**Escopo `remuneracao` — contrato `remuneracao-edit` v1 (08/09/2026).** O
+segundo escopo é o primeiro com contrato PRÓPRIO
+(`lib/import/comp/{types,instructions,validate}.ts`, core
+`lib/ai/comp-plan.ts`). Duas seções opcionais numa resposta: `plano` (DELTA do
+`comp_plans.config`) e `metas` (células membro × fator do mês aberto). O ALVO é
+`"<planId>:<ano>-<mes>"`, publicado pelo `remuneracao-manager` com o mês do
+SERVIDOR (nunca o rascunho da navegação — a IA gravaria num mês que o usuário
+ainda não confirmou) e vazio na "Visão geral".
+
+O que o validador do contrato faz é TRADUZIR — nomes, rótulos e texto de
+fórmula viram um `CompPlanConfig` completo mesclado sobre o existente. Ele
+nunca repete uma checagem de `validateCompPlanSave`: a régua de validade é o
+módulo compartilhado (§4.18), e a MURALHA segue sendo o `savePlan`. O que é só
+do contrato:
+
+- **Ids nunca viajam.** Membro por `display_name` (resolvido para o id
+  CANÔNICO), operação por nome, fator e bloco de comissão pelo RÓTULO. Fator
+  casado por rótulo HERDA `id` e `metricKey` — regenerá-los orfanaria
+  `inputs.overrides.factors`, `detailGrouping.byFactor` e as linhas de `goals`
+  de todos os meses já lançados. Fator novo ganha id no servidor e o sentinela
+  `metricKey: "__auto__"`, que o `savePlan` resolve; bloco novo herda `id` e
+  `memberTiers` do bloco de mesmo rótulo.
+- **É DELTA, não estado.** O merge parte da config atual, então `presetKey`,
+  `filters` do recorte, `memberTeams` e `detailGrouping` sobrevivem a um apply
+  que não os mencione — mesma razão pela qual o `save()` do plan-editor os
+  re-emite. `ativo` default é o estado ATUAL do plano, não `true`: um delta
+  silencioso não reativa plano desativado. `comissoes`, quando presente, é a
+  lista COMPLETA.
+- **Fórmula em TEXTO** (precedente `campos-create`), tokenizada pelo MESMO
+  `buildAggOperandCatalog` do savePlan; a do total, pelo `compOperandCatalog`
+  do config RESULTANTE.
+- **Apply só por choke point**: plano por `savePlan`, cada meta por
+  **`saveTarget`** — é ele que canonicaliza o responsável e aplica o
+  deslocamento `apuracaoRef` (o call site fala sempre o mês do LANÇAMENTO;
+  `upsertGoalTarget` cru gravaria em M-2 num plano `mes_anterior`). O apply
+  RE-VALIDA sobre a config FRESCA (outro admin pode ter mexido entre a prévia e
+  o Aplicar) e o resultado é POR ITEM. Meta com `valor: null` EXCLUI a linha de
+  `goals` — nunca `target = 0`, que envenena o atingimento.
+- **Desfazer** guarda o plano inteiro pré-apply e o valor ANTERIOR de cada meta
+  tocada (lido por `loadTargetsByMember`, o mesmo caminho da grade), e restaura
+  pelos MESMOS choke points. Ressalva honesta que a UI diz: a métrica de meta
+  criada por um fator novo PERMANECE no registry (`registerGoalMetrics` é
+  aditivo) — o Desfazer restaura o plano, não o catálogo.
+
 Testes: `lib/ai/operacao/scopes.test.ts` (roteamento por pathname — prefixo de
 ROTA, não de string; lista permitida do servidor respeitada; toda key é uma
-chave de `AREA_GATES`).
+chave de `AREA_GATES`); `lib/import/comp/instructions.test.ts` (paridade do
+SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
+`lib/import/comp/validate.test.ts` (as perdas silenciosas que o merge impede).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 

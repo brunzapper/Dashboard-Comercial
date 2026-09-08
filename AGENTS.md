@@ -542,6 +542,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   sub-aba REMONTA por `key={scope.key}` — efeito reagindo a escopo cai em
   `react-hooks/set-state-in-effect`. Fiscalizado por
   `lib/ai/operacao/scopes.test.ts`. Ver `docs/arquitetura.md` §4.22.
+- **Escopo `remuneracao` (contrato `remuneracao-edit` v1, 08/09/2026):** duas
+  seções OPCIONAIS — `plano` (DELTA de `comp_plans.config`) e `metas` (células
+  membro × fator, teto `MAX_AI_COMP_TARGETS`). Alvo `"<planId>:<ano>-<mes>"`
+  publicado pelo `remuneracao-manager` com o mês do SERVIDOR (o rascunho da
+  navegação é um mês que o usuário ainda não confirmou). O validador
+  (`lib/import/comp/validate.ts`) só TRADUZ nome/rótulo/texto de fórmula para
+  um `CompPlanConfig` completo mesclado sobre o atual — a régua de validade é
+  `validateCompPlanSave` (módulo ÚNICO com o savePlan; repetir checagem aqui é
+  a régua paralela da invariante 25) e a MURALHA segue sendo o `savePlan`.
+  Ids NUNCA no JSON: fator/bloco casados por RÓTULO HERDAM `id` (e o fator,
+  o `metricKey`) — regenerar orfanaria `inputs.overrides.factors`,
+  `detailGrouping.byFactor` e as linhas de `goals` de todos os meses; fator
+  novo sai com o sentinela `metricKey: "__auto__"` e bloco novo herda as
+  `memberTiers` do homônimo. Por ser DELTA, `presetKey`/`filters`/
+  `memberTeams`/`detailGrouping` sobrevivem ao apply, e `ativo` tem por
+  default o estado ATUAL do plano (default `true` reativaria plano desligado);
+  `comissoes` presente é a lista COMPLETA. Fórmula em TEXTO, tokenizada pelos
+  catálogos que já existem. Apply/undo SÓ por `savePlan` + **`saveTarget`**
+  (nunca `upsertGoalTarget`: é o saveTarget que canonicaliza e desloca a
+  apuração — o call site fala o mês do LANÇAMENTO), re-validando sobre a config
+  FRESCA, resultado POR ITEM, `valor: null` EXCLUI a meta (nunca `target = 0`).
+  Fiscalizado por `lib/import/comp/{instructions,validate}.test.ts`. Ver
+  `docs/arquitetura.md` §4.22 e §4.18.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:
