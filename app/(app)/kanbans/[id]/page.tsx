@@ -1,4 +1,7 @@
-// Versão: 1.4 | Data: 07/08/2026
+// Versão: 1.5 | Data: 07/09/2026
+// v1.5 (07/09/2026): carrega os metadados públicos de IA da org e os
+//   passa ao shell (botão "Configurar com IA"); `maxDuration = 300`
+//   porque as actions do assistente rodam sob o segment config desta rota.
 // v1.4 (07/08/2026): catálogo COMPLETO do detalhe no recordCtx (detailFields/
 //   offBaseDefs/coreDefs/knownFieldKeys — 100% dos campos no painel do card);
 //   o filtro SQL do olho saiu e as COLUNAS do card mantêm a regra antiga via
@@ -38,6 +41,8 @@ import { runKanban } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { KanbanPageClient } from "@/components/kanban/kanban-page-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 
@@ -62,6 +67,10 @@ export async function generateMetadata({
   if (!data || data.status === "trashed") return {};
   return { title: data.name as string };
 }
+
+// As actions do "Configurar com IA" rodam sob o segment config DESTA
+// rota, e o laço de autocorreção tem orçamento de 240s + a aplicação.
+export const maxDuration = 300;
 
 export default async function KanbanPage({
   params,
@@ -262,12 +271,18 @@ export default async function KanbanPage({
   const viewAll = session.permissions.includes("view_all_records");
   const isManager = isAdmin || userRoles.includes("gestor");
 
+  // Config de IA da org (metadados públicos — nunca a chave): habilita o
+  // chat do "Configurar com IA"; sem ela o sheet ainda serve o fluxo de IA
+  // externa (copiar prompt → colar JSON).
+  const ai = await loadOrgAiConfigPublic(await getActiveOrgId());
+
   return (
     // Catálogo escopado por cima do provider do layout (⋮ → "Bases").
     <SourcesProvider sources={sources}>
       {/* Grava a view p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <KanbanPageClient
+        ai={ai}
         boardId={board.id as string}
         boardName={board.name as string}
         settings={settings}

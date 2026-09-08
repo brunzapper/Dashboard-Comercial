@@ -1,4 +1,11 @@
-// Versão: 1.7 | Data: 05/08/2026 (v1.7: rota movida p/ /operacao/remuneracao
+// Versão: 1.8 | Data: 08/09/2026
+// v1.8 (08/09/2026): a validação do savePlan (≈238 linhas: rótulos únicos,
+// bounds de peso/faixa, fontes, campo de membro, condições do recorte,
+// fórmulas, moedas, chave de meta automática) saiu para o módulo ÚNICO
+// lib/comp/plan-validate.ts. Comportamento inalterado — o savePlan o chama
+// antes de escrever e segue sendo a muralha. Motivo: a prévia do assistente
+// de IA de remuneração precisa da MESMA régua, e repeti-la aqui dentro seria
+// a régua paralela que a invariante 25 proíbe.
 // — revalidatePath atualizado; gates/chave de área "remuneracao" intocados.)
 // Versão: 1.6 | Data: 02/08/2026 (v1.6: savePlan valida campo de membro ×
 // fontes EFETIVAS do fator via memberFieldSourceError (lib/comp/member-field
@@ -49,8 +56,6 @@ import { getSessionInfo } from "@/lib/auth/session";
 import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
-import { loadSources } from "@/lib/config/sources";
-import { loadCorrespondences } from "@/lib/correspondences";
 import {
   canonicalOf,
   loadResponsibleCanon,
@@ -59,23 +64,11 @@ import {
   createRecord,
   updateRecord,
 } from "@/lib/records/actions";
-import { validateFormulaForContext } from "@/lib/records/formula-validate";
-import { validateFkCondNames } from "@/lib/records/formula-server";
-import { formulaUsesCondAgg } from "@/lib/records/formulas";
-import type { FieldDefinition } from "@/lib/records/types";
-import { goalMetricKeyFromLabel } from "@/lib/metas/metrics";
 import {
   deleteGoalTarget,
   registerGoalMetrics,
   upsertGoalTarget,
 } from "@/lib/metas/upsert";
-import { loadGoalMetrics } from "@/lib/config/goal-metrics";
-import {
-  availableAggCatalogInput,
-  buildAggOperandCatalog,
-} from "@/lib/widgets/agg-catalog";
-import { buildAvailableFields } from "@/lib/widgets/fields";
-import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { withRpcTtlCache } from "@/lib/widgets/rpc-cache";
 import { withRpcMemo } from "@/lib/widgets/rpc-memo";
 import {
@@ -88,9 +81,7 @@ import {
 } from "@/lib/comp/engine";
 import {
   apuracaoRef,
-  compOperandCatalog,
   computeEntry,
-  factorTargetCurrencies,
   lastDayOfMonth,
   parseCompEntryInputs,
   parseCompPlanConfig,
@@ -98,7 +89,7 @@ import {
   type CompEntryInputs,
   type CompPlanConfig,
 } from "@/lib/comp/model";
-import { memberFieldSourceError } from "@/lib/comp/member-field";
+import { validateCompPlanSave } from "@/lib/comp/plan-validate";
 import { ensureMirrorSource, mirrorFormValues } from "@/lib/comp/mirror";
 
 export interface CompActionState {
@@ -150,235 +141,28 @@ export interface SavePlanInput {
 export async function savePlan(input: SavePlanInput): Promise<CompActionState> {
   const err = await ensureAdmin();
   if (err) return { ok: false, message: err };
-  const name = String(input.name ?? "").trim();
-  if (!name) return { ok: false, message: "Informe o nome do plano." };
-
-  const config = parseCompPlanConfig(input.config);
-  if (!config) return { ok: false, message: "Configuração do plano inválida." };
-  if (config.factors.length === 0)
-    return { ok: false, message: "Adicione ao menos um fator." };
-
-  // Rótulos únicos (case-insensitive): o FormulaEditor referencia operandos por
-  // rótulo — duplicata quebraria o round-trip da fórmula livre.
-  const labels = new Set<string>();
-  for (const f of config.factors) {
-    const k = f.label.toLocaleLowerCase("pt-BR");
-    if (labels.has(k))
-      return {
-        ok: false,
-        message: `Dois fatores com o mesmo nome ("${f.label}") — renomeie um.`,
-      };
-    labels.add(k);
-    if (f.weightPct < 0 || f.weightPct > 1000)
-      return { ok: false, message: `Peso inválido no fator "${f.label}".` };
-  }
-
-  // Faixas de comissão: bounds amigáveis pós-parse, por kind e por unidade do
-  // tierBy (estrutura/ordenação/refs já são muralha do parse fail-closed —
-  // espelho do check de peso acima). Vale p/ a tabela do plano E as por membro.
-  for (const block of config.commissions ?? []) {
-    const tables = [block.tiers, ...Object.values(block.memberTiers ?? {})];
-    const fromMax = (block.tierBy ?? "attainment") === "attainment" ? 100000 : MAX_ABS_VALUE;
-    for (const table of tables) {
-      for (const t of table) {
-        if (t.fromPct > fromMax)
-          return {
-            ok: false,
-            message: "Faixa de comissão inválida (limiar acima do limite).",
-          };
-        if ((block.kind ?? "pct") === "pct" && (t.ratePct ?? 0) > 1000)
-          return {
-            ok: false,
-            message: "Faixa de comissão inválida (percentual acima do limite).",
-          };
-        if ((block.kind ?? "pct") !== "pct" && (t.amount ?? 0) >= MAX_ABS_VALUE)
-          return {
-            ok: false,
-            message: "Faixa de comissão inválida (valor acima do limite).",
-          };
-      }
-    }
-  }
 
   const supabase = await createClient();
   const orgId = await getActiveOrgId();
 
-  // Operações vinculadas ao plano devem existir (RLS recorta a org — id de
-  // outra org conta como "não encontrada"); mensagem acionável em vez do
-  // silêncio de uma operação fantasma contribuindo zero membros.
-  if (config.memberOperationIds?.length) {
-    const { data: opRows } = await supabase
-      .from("operations")
-      .select("id")
-      .in("id", config.memberOperationIds);
-    const found = new Set(((opRows ?? []) as { id: string }[]).map((o) => o.id));
-    if (config.memberOperationIds.some((id) => !found.has(id)))
-      return {
-        ok: false,
-        message:
-          "Operação vinculada ao plano não encontrada (removida?) — reabra o seletor de operações e salve novamente.",
-      };
-  }
+  // Toda a validação (rótulos únicos, bounds, fontes, campo de membro,
+  // condições do recorte, fórmulas, moedas, chave de meta automática) vive em
+  // lib/comp/plan-validate.ts — módulo ÚNICO, para que a prévia do assistente
+  // de IA use a MESMA régua em vez de uma paralela (invariante 25). Este save
+  // segue sendo a muralha: nada é escrito sem passar por aqui.
+  const valid = await validateCompPlanSave(supabase, orgId, {
+    name: input.name,
+    config: input.config,
+  });
+  if (!valid.ok) return { ok: false, message: valid.message };
+  const { name, config } = valid;
 
-  const [sources, correspondences, { data: fieldsData }, registry] =
-    await Promise.all([
-      loadSources(supabase, orgId),
-      loadCorrespondences(supabase, orgId),
-      supabase
-        .from("field_definitions")
-        .select(
-          "field_key, label, data_type, formula, applies_to, currency_code, currency_mode, allow_negative, show_as_percent"
-        ),
-      loadGoalMetrics(supabase),
-    ]);
-  const allFields = (fieldsData ?? []) as FieldDefinition[];
-  const available = buildAvailableFields(allFields, correspondences, sources);
-  const sourceKeys = new Set(sources.map((s) => s.key));
-
-  // Fórmula do realizado: MESMO catálogo/validação do servidor de fórmulas
-  // agregadas (nunca montar catálogo paralelo).
-  const aggCatalog = buildAggOperandCatalog(
-    availableAggCatalogInput(available, allFields, sources, registry, {
-      withNested: true,
-    })
-  );
-  // Moedas habilitadas p/ targetCurrency (uma consulta, fora do loop).
-  const usedCurrencies = factorTargetCurrencies(config);
-  if (usedCurrencies.length > 0) {
-    const { data: curData } = await supabase
-      .from("currencies")
-      .select("code")
-      .eq("enabled", true);
-    const enabled = new Set(((curData ?? []) as { code: string }[]).map((c) => c.code));
-    for (const code of usedCurrencies) {
-      if (!enabled.has(code))
-        return {
-          ok: false,
-          message: `Moeda de alvo "${code}" não está habilitada (Campos → Moedas).`,
-        };
-    }
-  }
-
-  const availableByRef = new Map(available.map((a) => [a.field, a]));
-  for (const f of config.factors) {
-    for (const s of f.sources) {
-      if (!sourceKeys.has(s))
-        return {
-          ok: false,
-          message: `Fonte desconhecida ("${s}") no fator "${f.label}".`,
-        };
-    }
-    // Campo de membro: precisa existir no catálogo e ser filtrável por texto
-    // (numérico/data/sintético/agregado não identificam pessoa).
-    if (f.memberField) {
-      const af = availableByRef.get(f.memberField);
-      if (!af || af.isNumeric || af.isDate || af.displayOnly || af.aggCalc)
-        return {
-          ok: false,
-          message: `Campo de membro inválido no fator "${f.label}" — escolha um campo de texto/seleção do registro.`,
-        };
-      // ... e existir nas fontes EFETIVAS do fator (campo de OUTRA fonte
-      // salvaria e computaria 0 em silêncio — o filtro injetado nunca casa).
-      const mfErr = memberFieldSourceError(f, allFields, sources);
-      if (mfErr) return { ok: false, message: mfErr };
-    }
-    // Condições do recorte: campo do catálogo (numérico/data valem — comparam
-    // valor) e valor presente nos ops com valor. Operação fica FORA: a coluna
-    // derivada pode estar NULL e a tradução viva de operação não passa aqui.
-    for (const flt of f.filters ?? []) {
-      if (flt.field === "operation_id")
-        return {
-          ok: false,
-          message: `Condição do fator "${f.label}": Operação não é filtrável aqui — filtre por responsável ou por um campo do registro.`,
-        };
-      const af = availableByRef.get(flt.field);
-      if (!af || af.displayOnly || af.aggCalc)
-        return {
-          ok: false,
-          message: `Condição do fator "${f.label}": campo desconhecido ("${flt.field}").`,
-        };
-      if (!opHasNoValue(flt.op)) {
-        const empty = Array.isArray(flt.value)
-          ? flt.value.length === 0
-          : String(flt.value ?? "").trim() === "";
-        if (empty)
-          return {
-            ok: false,
-            message: `Condição do fator "${f.label}": informe o valor do filtro.`,
-          };
-      }
-    }
-    if (f.defaultTarget != null && cleanNumber(f.defaultTarget) == null)
-      return {
-        ok: false,
-        message: `Alvo padrão inválido no fator "${f.label}".`,
-      };
-    const v = validateFormulaForContext(f.formula, {
-      kind: "aggregate",
-      catalog: aggCatalog,
-      sources,
-    });
-    if (!v.ok)
-      return {
-        ok: false,
-        message: `Fórmula do fator "${f.label}": ${v.error ?? "inválida."}`,
-      };
-    const fk = await validateFkCondNames(supabase, f.formula);
-    if (!fk.ok)
-      return { ok: false, message: `Fórmula do fator "${f.label}": ${fk.message}` };
-  }
-
-  // Chave de métrica de meta: vazia ⇒ automática a partir do rótulo (sufixo em
-  // colisão com o registry OU com outro fator do próprio plano).
-  const usedKeys = new Set(registry.map((m) => m.key));
-  for (const f of config.factors) {
-    if (f.metricKey !== "__auto__") {
-      usedKeys.add(f.metricKey);
-      continue;
-    }
-    const base = `comp_${goalMetricKeyFromLabel(f.label) || "fator"}`.slice(0, 40);
-    let candidate = base;
-    for (let n = 2; usedKeys.has(candidate) && n <= 20; n++) {
-      const suffix = `_${n}`;
-      candidate = `${base.slice(0, 40 - suffix.length)}${suffix}`;
-    }
-    if (usedKeys.has(candidate))
-      return { ok: false, message: `Não foi possível gerar a chave de meta do fator "${f.label}".` };
-    f.metricKey = candidate;
-    usedKeys.add(candidate);
-  }
-
-  // Fórmula LIVRE de total: catálogo comp:* derivado do config (aparece/some
-  // em sincronia com os fatores) — kind "record" (variáveis escalares; nada de
-  // agg:/SOMASE aqui — as variáveis JÁ são totais).
-  if (config.totalFormula) {
-    if (formulaUsesCondAgg(config.totalFormula))
-      return {
-        ok: false,
-        message:
-          "SOMASE/CONTASE não funcionam na fórmula do total — as variáveis já são totais; condicione com SE(...).",
-      };
-    const v = validateFormulaForContext(config.totalFormula, {
-      kind: "record",
-      catalog: compOperandCatalog(config),
-    });
-    if (!v.ok)
-      return {
-        ok: false,
-        message: `Fórmula do total: ${v.error ?? "inválida."}`,
-      };
-  }
-
-  // Registra as chaves novas no registry (rótulo "Plano — Fator"; existentes
-  // são puladas — nunca sobrescreve métrica em uso).
+  // Registra as chaves novas no registry (existentes são puladas — nunca
+  // sobrescreve métrica em uso).
   const { error: regError } = await registerGoalMetrics(
     supabase,
     orgId,
-    config.factors.map((f) => ({
-      key: f.metricKey,
-      label: `${name} — ${f.label}`.slice(0, 60),
-      money: f.money,
-    }))
+    valid.metricDefs
   );
   if (regError) return { ok: false, message: regError };
 

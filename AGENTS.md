@@ -501,6 +501,88 @@ This version has breaking changes — APIs, conventions, and file structure may 
   saneamento — o assistente do quadro reusa este módulo. Fiscalizado por
   `lib/import/dashboard/kanban-settings.test.ts` + blocos em
   `validate.test.ts`/`instructions.test.ts`.
+- **Assistente do QUADRO kanban não tem régua própria (`kanban-config` v1,
+  07/09/2026):** o contrato (`lib/import/kanban/*`, core
+  `lib/ai/kanban-config.ts`, sheet `components/kanban/kanban-ai-sheet.tsx`,
+  actions em `app/(app)/kanbans/ai-actions.ts`) cobre `quadro` (delta de
+  `KanbanSettings`) + `automacoes` (lista COMPLETA). Toda validação REUSA o que
+  já existia: `deepMergeValue` (exportado de `lib/import/dashboard/rewrite.ts`
+  — mesma semântica de delta da IA de dashboards) → `sanitizeKanbanSettings`;
+  `parseAutomationRule` fail-closed para cada regra (por isso condição/ação
+  viajam na forma INTERNA — camada de tradução derivaria do parse);
+  `settableFields` do `getAutomationFieldOptions` como alvo de `set_field` (é
+  ele que aplica `setFieldTargetError`). NÃO monte validação paralela nem
+  traduza o vocabulário das regras. Apply SÓ por
+  `updateBoardSettings`/`saveWidgetSettings` + `saveAutomation`; reconciliação
+  por NOME e regra ausente é DESATIVADA, nunca excluída (precedente de
+  operações). Alvo = o quadro da UI (`KanbanOwner`), nunca do JSON; as colunas
+  chegam da página (como no `AutomationsSheet`) e só AMPLIAM os alvos aceitos.
+  Fiscalizado por `lib/import/kanban/{validate,instructions}.test.ts`.
+- **Painel de IA da OPERAÇÃO: registry em código, sessão com a ORG na PK
+  (0124, 08/09/2026):** o painel vive no `layout.tsx` de `/operacao` e é
+  escopado pela sub-área (`scopeForPath`). Registry PARTIDO em dois —
+  `lib/ai/operacao/scopes.ts` (metadata PURA, client-safe: o painel é client;
+  `cards.ts` não serve de molde porque importa `checkSettingsArea`) e
+  `lib/ai/operacao/handlers.ts` (`server-only`). O handler NÃO implementa
+  validação nem escrita: DELEGA aos cores existentes (o escopo `mapeamentos`
+  chama `classify-mappings.ts` inteiro — zero contrato/validador novo; o sheet
+  da tela continua sendo a porta do fluxo offline/CSV). Escopo sem entrada ⇒
+  sem painel. **`operacao_ai_sessions` tem `organization_id` na PK**
+  (`organization_id,user_id,scope`) — o escopo é chave de registry em CÓDIGO,
+  igual em toda org, e sem a org na chave um usuário multi-org veria numa org
+  o `pending`/`undo_snapshot` gerado em OUTRA (a RLS não pega: ele é membro
+  das duas; precedente da 0123 em `currencies`). NÃO há trigger de stamp
+  (sem linha-pai): a action carimba com `getActiveOrgId()` e o gate FALHA ALTO
+  sem org ativa. `pending` guarda o ALVO junto do JSON e o apply RECUSA alvo
+  divergente do da UI. Gate = `checkSettingsArea` + `adminOnly` (a área
+  `remuneracao` não tem gate de papel e a page ramifica p/ o vendedor — sem
+  isso ele veria painel de ESCRITA). Sub-escopo pelo contexto
+  (`usePublishOperacaoAiTarget`), NUNCA por `useSearchParams`: o domínio de
+  Mapeamentos é `useState` local. Carga da sessão é EVENTO (abrir); troca de
+  sub-aba REMONTA por `key={scope.key}` — efeito reagindo a escopo cai em
+  `react-hooks/set-state-in-effect`. Fiscalizado por
+  `lib/ai/operacao/scopes.test.ts`. Ver `docs/arquitetura.md` §4.22.
+- **Escopo `remuneracao` (contrato `remuneracao-edit` v1, 08/09/2026):** duas
+  seções OPCIONAIS — `plano` (DELTA de `comp_plans.config`) e `metas` (células
+  membro × fator, teto `MAX_AI_COMP_TARGETS`). Alvo `"<planId>:<ano>-<mes>"`
+  publicado pelo `remuneracao-manager` com o mês do SERVIDOR (o rascunho da
+  navegação é um mês que o usuário ainda não confirmou). O validador
+  (`lib/import/comp/validate.ts`) só TRADUZ nome/rótulo/texto de fórmula para
+  um `CompPlanConfig` completo mesclado sobre o atual — a régua de validade é
+  `validateCompPlanSave` (módulo ÚNICO com o savePlan; repetir checagem aqui é
+  a régua paralela da invariante 25) e a MURALHA segue sendo o `savePlan`.
+  Ids NUNCA no JSON: fator/bloco casados por RÓTULO HERDAM `id` (e o fator,
+  o `metricKey`) — regenerar orfanaria `inputs.overrides.factors`,
+  `detailGrouping.byFactor` e as linhas de `goals` de todos os meses; fator
+  novo sai com o sentinela `metricKey: "__auto__"` e bloco novo herda as
+  `memberTiers` do homônimo. Por ser DELTA, `presetKey`/`filters`/
+  `memberTeams`/`detailGrouping` sobrevivem ao apply, e `ativo` tem por
+  default o estado ATUAL do plano (default `true` reativaria plano desligado);
+  `comissoes` presente é a lista COMPLETA. Fórmula em TEXTO, tokenizada pelos
+  catálogos que já existem. Apply/undo SÓ por `savePlan` + **`saveTarget`**
+  (nunca `upsertGoalTarget`: é o saveTarget que canonicaliza e desloca a
+  apuração — o call site fala o mês do LANÇAMENTO), re-validando sobre a config
+  FRESCA, resultado POR ITEM, `valor: null` EXCLUI a meta (nunca `target = 0`).
+  Fiscalizado por `lib/import/comp/{instructions,validate}.test.ts`. Ver
+  `docs/arquitetura.md` §4.22 e §4.18.
+- **Assistente de TAREFAS (contrato `tarefas-edit` v1, 08/09/2026):** lote de
+  até `MAX_AI_TASK_ACTIONS` (15) ações `criar`/`editar`/`concluir` — SEM
+  exclusão (precedente de operações). Identidade por TÍTULO (ambíguo = ERRO,
+  nunca uma escolha), responsável/quadro por NOME, fase pelo RÓTULO da coluna
+  do quadro EFETIVO (as fases da tela saem do MESMO `deriveColumns` + extras em
+  uso do `tarefas-client`; só quadro em modo `tarefas` entra no catálogo). Gate
+  é só a sessão — a muralha é a RLS de `tasks` (0063) e o `coerceResponsible`
+  do choke point; nada de service role. Apply item a item por
+  `createTask`/`updateTask`/`completeTask` + `moveTaskPhase` (a fase é choke
+  point PRÓPRIO — o updateTask não a toca). DUAS armadilhas fechadas de
+  propósito: o `updateTask` monta o UPDATE do FormData INTEIRO (chave ausente
+  vira NULL), então o apply parte da LINHA ATUAL e sobrepõe o delta — sem isso
+  mudar só a data apagaria descrição, responsável e o vínculo com o REGISTRO
+  (que o SPEC declara não-editável aqui); e `hora_fim` sem `hora` é DESCARTADA
+  em silêncio pelo `readTaskForm` (CHECK 0111), então o validador a recusa
+  usando a hora já gravada como base na edição parcial. Fiscalizado por
+  `lib/import/tasks/{validate,instructions}.test.ts`. Ver
+  `docs/arquitetura.md` §4.17.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:
@@ -1004,7 +1086,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/export/comp-detail-sheet.test.ts` + `tests/apps-script-sheets.test.ts`
   (o `.gs` avaliado num `vm` com stubs do SpreadsheetApp — abas, hiperlinks
   por `gid`, limpeza de órfãs e as duas degradações) +
-  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
+  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. **Validação
+  do save EXTRAÍDA (08/09/2026):** as checagens do `savePlan` (rótulos únicos,
+  bounds de peso/faixa, `sources`, `memberField`, `operation_id` proibido nos
+  `filters`, fórmula, moeda, sentinela `metricKey: "__auto__"`) vivem em
+  `lib/comp/plan-validate.ts` (`validateCompPlanSave`) — o `savePlan` o chama
+  e segue sendo a MURALHA. Consumidor novo (prévia de IA) usa o MESMO módulo:
+  repetir as checagens é a régua paralela que a invariante 25 proíbe, e o
+  parse cru só sabe dizer "Configuração do plano inválida". Bounds são
+  constantes EXPORTADAS de lá (o SPEC da IA os deriva). Ver
   `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um

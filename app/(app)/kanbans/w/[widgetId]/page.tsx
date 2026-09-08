@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 26/07/2026
+// Versão: 1.1 | Data: 07/09/2026
+// v1.1 (07/09/2026): carrega os metadados públicos de IA da org e os passa
+//   ao shell (botão "Configurar com IA"); `maxDuration = 300` porque as
+//   actions do assistente rodam sob o segment config desta rota.
 // Página cheia de um WIDGET kanban (widgets.visual_type 'kanban'), aberta pela
 // seção Kanbans do hub. É o MESMO kanban do widget: mesma config
 // widgets.settings.kanban (salvar aqui reflete no dashboard e vice-versa) e
@@ -38,6 +41,8 @@ import { runKanban } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { KanbanPageClient } from "@/components/kanban/kanban-page-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 
@@ -84,6 +89,10 @@ export async function generateMetadata({
   const title = (data as { title?: string | null }).title || dash.name;
   return title ? { title } : {};
 }
+
+// As actions do "Configurar com IA" rodam sob o segment config DESTA
+// rota, e o laço de autocorreção tem orçamento de 240s + a aplicação.
+export const maxDuration = 300;
 
 export default async function WidgetKanbanPage({
   params,
@@ -294,12 +303,18 @@ export default async function WidgetKanbanPage({
   const viewAll = session.permissions.includes("view_all_records");
   const isManager = isAdmin || userRoles.includes("gestor");
 
+  // Config de IA da org (metadados públicos — nunca a chave): habilita o
+  // chat do "Configurar com IA"; sem ela o sheet ainda serve o fluxo de IA
+  // externa (copiar prompt → colar JSON).
+  const ai = await loadOrgAiConfigPublic(await getActiveOrgId());
+
   return (
     // Catálogo escopado por cima do provider do layout (⋮ → "Bases" do pai).
     <SourcesProvider sources={sources}>
       {/* Grava a view p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <KanbanPageClient
+        ai={ai}
         boardId={dash.id}
         boardName={w.title?.trim() || "Kanban (sem título)"}
         settings={dashSettings}

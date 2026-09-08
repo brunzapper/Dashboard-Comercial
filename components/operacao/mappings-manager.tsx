@@ -1,4 +1,8 @@
-// Versão: 1.2 | Data: 08/08/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): publica o domínio ATIVO ao painel de IA da Operação
+//   (usePublishOperacaoAiTarget). O painel vive no layout e não enxerga
+//   este useState — e o domínio não está na URL, então o contexto é o
+//   único caminho. Sem o provider em volta, é no-op.
 // Gestor de mapeamentos de valores (0117): abas por domínio (Cargos /
 // Segmentos + reclassificações dinâmicas 0119), seção de PENDÊNCIAS com
 // classificação inline (vira entrada do de-para + reaplica), tabela de
@@ -32,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { MappingsAiSheet } from "@/components/operacao/mappings-ai-sheet";
+import { usePublishOperacaoAiTarget } from "@/components/operacao/ai-scope-context";
 import type { DomainOverview, MappingRow } from "@/lib/mappings/overview";
 import { domainCsv, domainJson } from "@/lib/mappings/export";
 import { csvFilename, downloadCsv } from "@/lib/export/csv";
@@ -134,6 +139,11 @@ export function MappingsManager({
   }, [overview]);
 
   const domain = overview.find((d) => d.key === domainKey) ?? overview[0];
+
+  // Publica o domínio ATIVO ao painel de IA da Operação (que vive no layout
+  // e não enxerga este estado): o domínio é useState local, não está na URL,
+  // então só o contexto o entrega. Fora do provider é no-op.
+  usePublishOperacaoAiTarget(domain?.key ?? "", domain?.label ?? "");
 
   const visibleUnmapped = useMemo(() => {
     if (!domain) return [];

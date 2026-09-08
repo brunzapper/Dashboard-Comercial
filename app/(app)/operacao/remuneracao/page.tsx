@@ -1,3 +1,6 @@
+// Versão: 1.9 | Data: 08/09/2026 (v1.9: maxDuration = 300 — a página hospeda
+// o painel de IA da Operação (escopo `remuneracao`) e um turno tem orçamento
+// de 240s (AI_LOOP_TURN_BUDGET_MS) + o apply.)
 // Versão: 1.8 | Data: 05/08/2026 (v1.8: página movida de
 // /configuracoes/remuneracao para /operacao/remuneracao — sub-aba da área
 // Operação (cards do hub Workspace). A chave de ÁREA "remuneracao" segue
@@ -74,6 +77,8 @@ import { MyCompView } from "@/components/configuracoes/remuneracao/my-comp-view"
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Remuneração" };
+// Turno do assistente de IA tem orçamento de 240s (AI_LOOP_TURN_BUDGET_MS).
+export const maxDuration = 300;
 
 const str = (v: string | string[] | undefined): string =>
   typeof v === "string" ? v : "";

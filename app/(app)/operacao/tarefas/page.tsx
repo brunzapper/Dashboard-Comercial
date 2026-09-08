@@ -1,3 +1,8 @@
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): botão "Organizar com IA" (contrato `tarefas-edit` v1) no
+//   cabeçalho — a IA cria, reagenda e conclui tarefas com prévia e apply pelos
+//   choke points de lib/tasks/actions.ts. maxDuration = 300 pelo orçamento do
+//   turno (AI_LOOP_TURN_BUDGET_MS = 240s).
 // Versão: 1.1 | Data: 05/08/2026
 // Página Tarefas ("Minhas tarefas"): lista/quadro por fase das tarefas
 // visíveis ao usuário — a RLS de tasks (0063) escopa o vendedor às próprias
@@ -6,13 +11,18 @@
 // v1.1 (05/08/2026): movida de /tarefas p/ /operacao/tarefas — card padrão de
 // Operação no hub (saiu do nav lateral; /tarefas virou stub de redirect).
 import { getSessionInfo } from "@/lib/auth/session";
+import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import type { OptionItem } from "@/lib/records/types";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
 import { TarefasClient } from "@/components/tarefas/tarefas-client";
+import { TasksAiSheet } from "@/components/tarefas/tasks-ai-sheet";
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Tarefas" };
+// Turno do assistente de IA tem orçamento de 240s (AI_LOOP_TURN_BUDGET_MS).
+export const maxDuration = 300;
 
 export default async function TarefasPage() {
   const session = await getSessionInfo();
@@ -45,14 +55,19 @@ export default async function TarefasPage() {
     label: r.display_name as string,
   }));
 
+  const ai = await loadOrgAiConfigPublic(await getActiveOrgId());
+
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Tarefas</h1>
-        <p className="text-muted-foreground text-sm">
-          Agende, atribua e conclua tarefas — soltas, vinculadas a registros ou
-          organizadas em kanbans de tarefas.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Tarefas</h1>
+          <p className="text-muted-foreground text-sm">
+            Agende, atribua e conclua tarefas — soltas, vinculadas a registros ou
+            organizadas em kanbans de tarefas.
+          </p>
+        </div>
+        <TasksAiSheet ai={ai} />
       </div>
       <TarefasClient
         tasks={tasks}

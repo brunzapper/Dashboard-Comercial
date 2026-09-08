@@ -2912,6 +2912,40 @@ copiadas) e popover "Métricas" na página dedicada/cheia
 `persistKanban`). Formatação única em `components/kanban/format.ts`
 (dinheiro / "N d" / número pt-BR).
 
+**Assistente de IA do quadro (contrato `kanban-config` v1, 07/09/2026).**
+Botão "Configurar com IA" das páginas `/kanbans/[id]` e `/kanbans/w/[widgetId]`
+(`components/kanban/kanban-ai-sheet.tsx` + wrappers em
+`app/(app)/kanbans/ai-actions.ts`; núcleo `lib/ai/kanban-config.ts`; gate
+`ensureKanbanConfigGate`). Uma resposta traz duas seções OPCIONAIS: `quadro`
+(delta de `KanbanSettings`) e `automacoes` (a lista COMPLETA desejada). Padrão
+§4.17 em tudo: a IA nunca escreve, o alvo vem da UI, ids nunca viajam no JSON,
+e as quatro entradas do contrato (chat · colar-JSON sem IA · copiar-prompt ·
+apply) compartilham validador e prévia.
+
+O validador (`lib/import/kanban/validate.ts`) não tem régua PRÓPRIA — é o que
+o torna seguro de estender: o quadro é mesclado sobre a config atual com
+`deepMergeValue` (o MESMO merge por delta do rewrite da IA de dashboards, agora
+exportado) e passa por `sanitizeKanbanSettings`; cada regra passa por
+`parseAutomationRule` (o parse fail-closed que o `saveAutomation` já usa — por
+isso o payload de condição/ação viaja na forma INTERNA, sem camada de tradução
+que pudesse derivar); e o alvo de `set_field` é conferido contra
+`settableFields`, que o servidor deriva do próprio `setFieldTargetError`. As
+colunas alvo de `move_to_column` incluem as CRIADAS no mesmo lote — pedir "crie
+a coluna Perdido e mande para lá o que ficar 30 dias parado" funciona num
+turno só.
+
+Apply pelos choke points existentes: `updateBoardSettings`/`saveWidgetSettings`
+(que já normalizam a alocação-como-campo) e `saveAutomation`. A reconciliação
+das regras é por NOME (case-insensitive): nome repetido ATUALIZA, nome novo
+cria, e regra que sumiu da lista é **DESATIVADA**, nunca excluída — excluir
+fica na tela, precedente explícito do contrato de operações. Resultado POR
+ITEM (falha parcial não desfaz). O recorte do botão é o MESMO das automações
+(modo registros, sem colunas por data), e as duas pages exportam
+`maxDuration = 300`. As colunas derivadas chegam ao core como `columns` vindas
+da página (mesmo arranjo do `AutomationsSheet`) — recomputá-las exigiria rodar
+o quadro inteiro só para montar um prompt; elas só ampliam o universo de alvos
+aceitos, e alvo inexistente já cai no `last_error` da avaliação.
+
 ### 4.16 Alocação do kanban como campo do registro (28/07/2026)
 
 Num quadro **Personalizar** a coluna de cada card é dado da VISÃO
@@ -3080,8 +3114,38 @@ semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
   (`previewOperationsCore`, sem IA) caem na MESMA prévia/apply; o manual
   funciona sem IA configurada (chat gated por `ai.hasKey`).
 
+**Tarefas — contrato `tarefas-edit` v1 (08/09/2026).** `/operacao/tarefas` →
+"Organizar com IA" (`components/tarefas/tasks-ai-sheet.tsx`, core
+`lib/ai/manage-tasks.ts`): lote de até `MAX_AI_TASK_ACTIONS` (15) ações
+`criar`/`editar`/`concluir`, sem EXCLUSÃO (precedente literal de operações — é
+destrutivo, e a trava `locked` existe justamente para isso). Identidade por
+TÍTULO: título que casa com duas tarefas é ERRO, não uma escolha; responsável
+e quadro por NOME; fase pelo RÓTULO da coluna do quadro EFETIVO (o do quadro
+escolhido, ou as fases da tela "Minhas tarefas" — derivadas pelo mesmo
+`deriveColumns` + extras em uso que o `tarefas-client` usa, para a IA nunca
+oferecer coluna que a tela não mostra). Só quadros em modo `tarefas` entram no
+catálogo. Gate é só a sessão: tarefa é de todo mundo, e a muralha é a RLS da
+0063 — o vendedor só enxerga (logo, só referencia) as suas, e o
+`coerceResponsible` do choke point ainda coage o responsável ao dele.
+
+Duas armadilhas que o contrato fecha:
+
+- **`updateTask` monta o UPDATE a partir do FormData INTEIRO** — chave ausente
+  vira null. Um form parcial para mudar só a data apagaria descrição,
+  responsável e, pior, o vínculo com o REGISTRO. O apply parte da LINHA ATUAL e
+  sobrepõe o delta; o SPEC diz à IA que o vínculo com registro não é editável
+  por aqui, para ela não tentar "religá-lo".
+- **hora final órfã**: o `readTaskForm` DESCARTA `due_time_end` sem `due_time`
+  em silêncio (o CHECK da 0111 exige o par). O validador transforma isso em
+  erro corrigível, usando a hora JÁ GRAVADA como base numa edição parcial.
+
+Fase é choke point PRÓPRIO: o `updateTask` não a toca, então o apply chama
+`moveTaskPhase` depois — e é ele que carimba a conclusão quando a coluna
+destino tem `completesTask`.
+
 Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
 `lib/import/records/{update-validate,update-instructions}.test.ts`,
+`lib/import/tasks/{validate,instructions}.test.ts`,
 `lib/records/bulk-update.test.ts`,
 `lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`,
 `lib/import/operations/{validate,instructions}.test.ts` e
@@ -3679,6 +3743,37 @@ toca inputs, erro isolado, total por membro com tabela própria),
 `lib/comp/mirror.test.ts` (builders do form, rem_comissao) e
 `lib/metas/upsert.test.ts` (find-then-update, registry). Ver invariante 26.
 
+**Validação do save extraída (08/09/2026).** As checagens de `savePlan`
+(rótulos de fator únicos, bounds de peso e de faixa, `factor.sources` ⊆
+catálogo, `memberField` textual e da fonte certa, `operation_id` proibido nos
+`filters`, fórmula pelo catálogo agregado real, moeda habilitada, resolução do
+sentinela `metricKey: "__auto__"`) moravam INLINE na action, misturadas com a
+escrita. Foram para `lib/comp/plan-validate.ts`
+(`validateCompPlanSave(supabase, orgId, {name, config})`), que devolve a config
+com `metricKey` resolvido + os `metricDefs` do registry. O `savePlan` chama o
+módulo e segue sendo a MURALHA — nada é escrito sem passar por ele.
+
+O motivo é a regra do §4.17: o parse fail-closed de `model.ts` é muralha
+ESTRUTURAL contra jsonb adulterado, mas desconhece o banco — e devolve sempre
+"Configuração do plano inválida", inútil para um laço de autocorreção. Um
+segundo consumidor (a prévia do assistente de IA de remuneração) teria de
+repetir as checagens, que é a régua paralela que a invariante 25 proíbe.
+Precedente literal: `PROFILE_OPS`/`NO_VALUE_OPS` de
+`lib/config/operation-profile.ts`. Na mesma extração, os bounds viraram
+constantes EXPORTADAS (`MAX_ABS_VALUE`, `MAX_WEIGHT_PCT`,
+`MAX_TIER_ATTAINMENT_PCT`, `MAX_TIER_RATE_PCT`, `AUTO_METRIC_KEY`) — o SPEC da
+IA vai derivá-los, e o teste de paridade precisa de algo a fiscalizar.
+
+Fiscalizado por `lib/comp/plan-validate.test.ts` (fake client fail-closed, sem
+banco). Para que um módulo `server-only` fosse exercitável, o Vitest passou a
+aliasar `server-only` para um stub vazio (`tests/setup/server-only.ts`): o
+pacote real é guarda do BUNDLE client, aplicada pelo `next build` — sob Node
+ele só empurrava o código a largar a marca para virar testável.
+
+O segundo consumidor chegou junto: o escopo `remuneracao` do painel de IA da
+Operação (§4.22) usa o MESMO módulo — o contrato só traduz nomes e texto de
+fórmula para uma config completa, e escreve por `savePlan`/`saveTarget`.
+
 ### 4.19 Mapeamentos de valores (de-para, 0117 — 07/08/2026)
 
 Substitui os caches "Map Cargos"/"Map Segmentos" do dashboard antigo em Apps
@@ -3962,6 +4057,130 @@ Testes: `lib/records/trash.test.ts` +
 `components/registros/records-table.selection.test.tsx` + blocos de modo
 seleção em `update-validate.test.ts`/`update-instructions.test.ts` +
 `tests/rpc-parity.test.ts` (paridade segue byte a byte). Ver invariante 30.
+
+### 4.22 Janela de IA da Operação (0124, 08/09/2026)
+
+Os assistentes de IA do produto sempre foram `<Sheet>` por tela: você abre,
+resolve uma coisa, fecha, e a conversa morre ali. Dentro de `/operacao` isso
+não servia — quem está apurando remuneração ou classificando um de-para volta
+ao mesmo assunto várias vezes no dia, e Remuneração não tinha assistente
+nenhum. Entra um **painel lateral persistido, escopado pela sub-área aberta**:
+a janela acompanha a troca de sub-aba, e cada área tem a própria conversa
+salva.
+
+**Registry em código, partido em dois.** `lib/ai/operacao/scopes.ts` é
+metadata PURA e client-safe (`key` = chave de ÁREA histórica, `label`,
+`adminOnly`, `href`, `placeholder`) — o painel é client e precisa dela;
+`lib/operacao/cards.ts` não serve de molde direto porque importa
+`checkSettingsArea` e é server-only. `lib/ai/operacao/handlers.ts` é o lado
+`server-only`: gate, contexto, prompt, validação, apply e o `restore`
+OPCIONAL. Escopo sem entrada ⇒ nenhum painel (Agenda e Tarefas ficam de
+fora). Escopo novo segue a checklist de `cards.ts` MAIS o par
+validador + teste de paridade.
+
+**O handler não implementa nada.** Ele é uma ponte para os cores que já
+existem — o escopo `mapeamentos` delega inteiro a `lib/ai/classify-mappings.ts`
+(zero contrato novo, zero validador novo). O sheet "Classificar com IA" da
+tela CONTINUA existindo: ele é a porta do fluxo offline (CSV/colar) e da
+prévia editável célula a célula; o painel é a porta conversacional. Mesmo
+core, duas superfícies.
+
+**Sessão (0124).** `operacao_ai_sessions` espelha a 0098, com duas diferenças
+que a natureza do lugar impõe:
+
+1. **`organization_id` está na PK** — `(organization_id, user_id, scope)`. Na
+   0098 a chave é (user, dashboard) e o dashboard já é de uma org. Aqui o
+   escopo é uma chave de registry em CÓDIGO, a mesma em toda org: sem a org na
+   chave, um usuário multi-org que gera uma prévia na org A, troca de org pelo
+   cookie e reabre a tela na org B cairia na MESMA linha — veria o `pending`
+   (payload de escrita!) e o `undo_snapshot` da org A e os sobrescreveria. A
+   RLS não pega, ele é membro das duas. Precedente literal: a 0123 moveu
+   `organization_id` para dentro da PK de `currencies` pela mesma razão.
+2. **Não há trigger de stamp de org** — não existe linha-pai de onde derivar.
+   A action carimba com `getActiveOrgId()` e o `with check` é a única muralha
+   (padrão de `value_mappings`/`currencies`). Por isso o gate **falha ALTO**
+   sem org ativa, em vez de deixar a linha cair no default da org legada.
+
+`pending` carrega o **alvo** (`{ target, json, summary[] }`): a linha é por
+ESCOPO, não por plano/domínio, então sem ele uma prévia gerada com o domínio X
+seria aplicada no Y depois que o usuário trocasse de aba. O apply recebe o
+alvo da UI e RECUSA quando diverge; o painel avisa antes. `undo_snapshot` não
+tem FK — o alvo pode sumir, e o `restore` responde amigável em vez de recriar
+algo por baixo.
+
+**Sub-escopo.** O painel vive no layout e não enxerga o estado das telas. O
+domínio ativo de Mapeamentos é `useState` local e não está na URL, então só um
+contexto resolve: `components/operacao/ai-scope-context.tsx`, com o provider no
+layout e `usePublishOperacaoAiTarget` na tela. Mecanismo único — telas cujo
+recorte está na URL publicam dali. O sub-escopo viaja no CORPO do POST (a rota
+é `[scope]`, não `[scope]/[target]`).
+
+**Turno e gate.** `runOperacaoAiTurnCore` (`lib/ai/operacao/session.ts`) é o
+gêmeo de `runAiEditTurnCore`, com os mesmos caps (30 turnos guardados, 100
+entradas de chat, 10 ao modelo) e a mesma reinjeção de `PRÉVIA PENDENTE` — que
+só volta ao modelo quando é do MESMO alvo. A rota de streaming
+`app/api/operacao/[scope]/ai-turn/route.ts` espelha a do dashboard (NDJSON,
+`x-accel-buffering: no`, origin == host). O gate soma `checkSettingsArea`
+(que já embute feature-off > deny > allow > papel) ao papel de escrita: a área
+`remuneracao` NÃO tem gate de papel e a page ramifica para "Minha
+remuneração", então sem `adminOnly` um vendedor veria um painel de escrita que
+o servidor recusaria a cada turno. O layout aplica a mesma régua para decidir
+o que montar.
+
+**Carga é evento, nunca efeito.** O painel carrega a sessão ao ABRIR, e a
+troca de sub-aba REMONTA o componente (`key={scope.key}` no mount) — conversa
+nova, estado novo. Um efeito reagindo à mudança de escopo cairia na regra
+`react-hooks/set-state-in-effect`; a remontagem resolve sem exceção de lint.
+
+**Escopo `remuneracao` — contrato `remuneracao-edit` v1 (08/09/2026).** O
+segundo escopo é o primeiro com contrato PRÓPRIO
+(`lib/import/comp/{types,instructions,validate}.ts`, core
+`lib/ai/comp-plan.ts`). Duas seções opcionais numa resposta: `plano` (DELTA do
+`comp_plans.config`) e `metas` (células membro × fator do mês aberto). O ALVO é
+`"<planId>:<ano>-<mes>"`, publicado pelo `remuneracao-manager` com o mês do
+SERVIDOR (nunca o rascunho da navegação — a IA gravaria num mês que o usuário
+ainda não confirmou) e vazio na "Visão geral".
+
+O que o validador do contrato faz é TRADUZIR — nomes, rótulos e texto de
+fórmula viram um `CompPlanConfig` completo mesclado sobre o existente. Ele
+nunca repete uma checagem de `validateCompPlanSave`: a régua de validade é o
+módulo compartilhado (§4.18), e a MURALHA segue sendo o `savePlan`. O que é só
+do contrato:
+
+- **Ids nunca viajam.** Membro por `display_name` (resolvido para o id
+  CANÔNICO), operação por nome, fator e bloco de comissão pelo RÓTULO. Fator
+  casado por rótulo HERDA `id` e `metricKey` — regenerá-los orfanaria
+  `inputs.overrides.factors`, `detailGrouping.byFactor` e as linhas de `goals`
+  de todos os meses já lançados. Fator novo ganha id no servidor e o sentinela
+  `metricKey: "__auto__"`, que o `savePlan` resolve; bloco novo herda `id` e
+  `memberTiers` do bloco de mesmo rótulo.
+- **É DELTA, não estado.** O merge parte da config atual, então `presetKey`,
+  `filters` do recorte, `memberTeams` e `detailGrouping` sobrevivem a um apply
+  que não os mencione — mesma razão pela qual o `save()` do plan-editor os
+  re-emite. `ativo` default é o estado ATUAL do plano, não `true`: um delta
+  silencioso não reativa plano desativado. `comissoes`, quando presente, é a
+  lista COMPLETA.
+- **Fórmula em TEXTO** (precedente `campos-create`), tokenizada pelo MESMO
+  `buildAggOperandCatalog` do savePlan; a do total, pelo `compOperandCatalog`
+  do config RESULTANTE.
+- **Apply só por choke point**: plano por `savePlan`, cada meta por
+  **`saveTarget`** — é ele que canonicaliza o responsável e aplica o
+  deslocamento `apuracaoRef` (o call site fala sempre o mês do LANÇAMENTO;
+  `upsertGoalTarget` cru gravaria em M-2 num plano `mes_anterior`). O apply
+  RE-VALIDA sobre a config FRESCA (outro admin pode ter mexido entre a prévia e
+  o Aplicar) e o resultado é POR ITEM. Meta com `valor: null` EXCLUI a linha de
+  `goals` — nunca `target = 0`, que envenena o atingimento.
+- **Desfazer** guarda o plano inteiro pré-apply e o valor ANTERIOR de cada meta
+  tocada (lido por `loadTargetsByMember`, o mesmo caminho da grade), e restaura
+  pelos MESMOS choke points. Ressalva honesta que a UI diz: a métrica de meta
+  criada por um fator novo PERMANECE no registry (`registerGoalMetrics` é
+  aditivo) — o Desfazer restaura o plano, não o catálogo.
+
+Testes: `lib/ai/operacao/scopes.test.ts` (roteamento por pathname — prefixo de
+ROTA, não de string; lista permitida do servidor respeitada; toda key é uma
+chave de `AREA_GATES`); `lib/import/comp/instructions.test.ts` (paridade do
+SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
+`lib/import/comp/validate.test.ts` (as perdas silenciosas que o merge impede).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
