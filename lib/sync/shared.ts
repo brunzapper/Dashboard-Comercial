@@ -1,8 +1,11 @@
-// Versão: 1.1 | Data: 09/07/2026
+// Versão: 1.2 | Data: 03/08/2026
 // v1.1 (09/07/2026): Fase 8 — SyncResult ganha quebra por entidade (byEntity) e
 //   amostras de erro (errorSamples); helpers recordOutcome/recordError param de
 //   engolir a mensagem do erro — o painel de Sync mostra leads vs deals e o que
 //   falhou, para diagnosticar "só leads importando".
+// v1.2 (03/08/2026): resolveResponsiblesByName movida de lib/import/ingest.ts
+//   — o adapter da planilha (lib/sync/sheets/adapter.ts) passou a resolver
+//   responsáveis em lote e a implementação vive aqui, comum às duas fontes.
 // Utilidades comuns a QUALQUER fonte de sync (Bitrix, Sheets, ...): resultado
 // padrão, conflito por campo (edição manual protege contra sobrescrita) e
 // resolução de operação primária de um responsável. Extraído de
@@ -126,6 +129,48 @@ export async function primaryOperationId(
     .eq("priority", 1)
     .maybeSingle();
   return (data?.operation_id as string | undefined) ?? null;
+}
+
+/**
+ * Resolve (ou cria) responsáveis por nome normalizado, em LOTE: uma leitura de
+ * `responsibles` por chamada + um insert por nome inexistente. Também devolve
+ * o vínculo Bitrix (bitrix_user_id) por responsável, p/ o write-back do
+ * import. Usada pelo ingest (CSV/API) e pelo adapter da planilha.
+ */
+export async function resolveResponsiblesByName(
+  db: SupabaseClient,
+  names: string[]
+): Promise<{
+  byName: Map<string, string>;
+  bitrixUserById: Map<string, string | null>;
+}> {
+  const byName = new Map<string, string>();
+  const bitrixUserById = new Map<string, string | null>();
+  if (names.length === 0) return { byName, bitrixUserById };
+  const { data: all } = await db
+    .from("responsibles")
+    .select("id, display_name, bitrix_user_id");
+  for (const r of all ?? []) {
+    byName.set(normalizeName(r.display_name as string), r.id as string);
+    bitrixUserById.set(
+      r.id as string,
+      (r.bitrix_user_id as string | null) ?? null
+    );
+  }
+  for (const name of names) {
+    const key = normalizeName(name);
+    if (!key || byName.has(key)) continue;
+    const { data: created } = await db
+      .from("responsibles")
+      .insert({ display_name: name })
+      .select("id")
+      .maybeSingle();
+    if (created?.id) {
+      byName.set(key, created.id as string);
+      bitrixUserById.set(created.id as string, null);
+    }
+  }
+  return { byName, bitrixUserById };
 }
 
 export function leadTimeDays(

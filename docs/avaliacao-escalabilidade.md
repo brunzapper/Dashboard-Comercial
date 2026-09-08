@@ -1,4 +1,7 @@
-<!-- Versão: 1.0 | Data: 26/07/2026 -->
+<!-- Versão: 1.1 | Data: 03/08/2026 -->
+<!-- v1.1 (03/08/2026): item 7 — rotas de push (sheets/ingest) sem o recalc
+     global por push (cauda incremental de lib/sync/post-ingest.ts); o O(N)
+     ficou restrito ao recalc-daily. -->
 
 # Avaliação de escalabilidade
 
@@ -107,7 +110,10 @@ reescrever nada estrutural.
 7. **Recalc diário é O(N).** `recalcAllFormulaFields`
    (`lib/records/recalc.ts`, lotes de 500) relê e reescreve todo registro com
    campo de fórmula — churn de tuplas mortas (a causa nº 1 do runbook de
-   perf) e duração linear na base.
+   perf) e duração linear na base. Desde 03/08/2026 ele roda SÓ no
+   recalc-daily: as rotas de push (sheets/ingest) migraram para a cauda
+   incremental de `lib/sync/post-ingest.ts` (antes rodavam o global a cada
+   push e estouravam o teto de 60s).
 8. **Snapshot = cópia integral.** Cada captura duplica o conjunto filtrado em
    `snapshot_records`; storage cresce com snapshots × registros. Mitigado por
    `expires_at` (0097) quando usado.
