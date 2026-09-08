@@ -1,4 +1,7 @@
-<!-- Versão: 1.30 | Data: 08/09/2026 -->
+<!-- Versão: 1.31 | Data: 08/09/2026 -->
+<!-- v1.31 (08/09/2026): §4.15 — Workflow (0125): aplicar a migração, ligar a
+     feature no /owner, o que fazer quando os dropdowns vêm vazios e como
+     acrescentar um passo/conexão sem abrir buraco de segurança. -->
 <!-- v1.30 (08/09/2026): §1 item 7 — Apps Script do Estudo v1.1 (chunks de
      ≤500; recolar o arquivo ativa; servidor aceita o formato antigo) + nota
      sobre regra de match com venda_site só no lado B (botão "Executar todas"
@@ -854,6 +857,60 @@ pré-requisitos de DADO:
 - Meta mensal na chave `rq_outbound` (área Metas) — alimenta o card "Meta de
   RQ" e a linha de meta da Evolução Histórica; sem meta o card mostra só o
   realizado.
+
+### 4.15 Workflow: esquemas de automação (0125, 08/09/2026)
+
+**Ligar numa organização** (na ordem):
+
+1. Aplicar `supabase/migrations/0125_workflows.sql` (idempotente).
+2. `/owner` → marcar **Workflow** na org. Sem isso o card não aparece:
+   feature-off vence até um override `allow`.
+3. Conferir que `BITRIX_WEBHOOK_URL` está nas Environment Variables do deploy.
+   A tela de Esquemas mostra o estado (`BITRIX_WEBHOOK_URL ✓` ou `ausente`) —
+   é o único lugar onde a credencial aparece, e só como presença.
+4. Rodar um sync (ou `/api/sync/bitrix-reconcile`). É ele que materializa as
+   opções de **Fonte** e **Etapa** e o cache `sync_config.bitrix_status_codes`.
+5. Abrir `/operacao/workflow`. O esquema de fábrica é criado na primeira
+   visita — ensure-if-absent por `key`, então revisitar nunca desfaz
+   configuração do admin.
+
+**Dropdown de Fonte ou Etapa vazio.** O sync ainda não rodou desde a
+atualização. As opções saem do catálogo (`fonte` custom e a linha core
+`stage`), não de uma chamada ao CRM na hora de abrir a tela — de propósito, para
+o formulário não depender do portal para renderizar. Rode um sync. Se `stage`
+seguir vazio, confira em `/campos` se a coluna **Etapa** está como `selecao`
+(voltada para texto, o refresh não a toca).
+
+**Fonte gravou o rótulo em vez do código.** Sintoma: o lead vai para o CRM mas a
+origem fica errada ou vazia. Causa: `sync_config.bitrix_status_codes` ausente —
+sem o mapa, `toBitrixValue` degrada e manda o rótulo. Rode um sync; o cache é
+regravado a cada `syncFieldCatalog`. (Mapa vazio nunca sobrescreve um cache bom,
+então um sync que falhou no meio não piora a situação.)
+
+**Execução `partial`.** Parte já foi criada no sistema externo e o resto não. A
+mensagem aparece para quem executou, não só para o admin, justamente para
+ninguém reenviar e duplicar. `workflow_runs` guarda o resultado por passo —
+consulte a linha para saber o que existe lá antes de refazer.
+
+**Acrescentar um PASSO novo** (quatro pontos, ou a UI oferece o que o executor
+não sabe rodar):
+
+1. Tipo em `lib/workflow/types.ts` + ramo no `parseStep` (fail-closed).
+2. Entrada em `WORKFLOW_STEP_TYPES_CATALOG` (`lib/workflow/registry.ts`).
+3. Handler em `lib/workflow/steps/`.
+4. Ramo em `executeWorkflow`.
+
+**Acrescentar uma CONEXÃO nova:** entrada em `WORKFLOW_CONNECTIONS`
+(`lib/workflow/connections.ts`) + getter em `lib/env.ts`. **Nunca** faça o
+executor ler `process.env` por um nome vindo do esquema — o jsonb é editável por
+admin, e isso daria leitura arbitrária do ambiente do servidor
+(`SUPABASE_SERVICE_ROLE_KEY`, `KEY_ENCRYPTION_KEY`). O teste
+`lib/workflow/connections.test.ts` existe para travar essa porta.
+
+**Automação nova no sistema (fora do motor):** acrescente uma linha em
+`SYSTEM_FLOWS` (`lib/workflow/system-schemas.ts`). O teste confere que a rota de
+`configuredAt` e o caminho de `code` existem — descrição desatualizada apodrece
+calada, e essa lista é a única resposta para "o que este sistema roda sozinho?".
 
 ## 5. Troubleshooting
 

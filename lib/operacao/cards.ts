@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 05/08/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): card `workflow` (0125) — esquemas de automação da
+//   Operação. Org-específico (feature "workflow"), ao final do catálogo.
 // Cards de OPERAÇÃO (aba "Operação" do hub Workspace + sub-abas de /operacao):
 // catálogo definido em CÓDIGO — nunca linhas de `dashboards` e sem UI de
 // exclusão (indeletáveis por construção; o pedido de produto exige que só o
@@ -54,6 +56,14 @@ export const OPERACAO_CARDS: OperacaoCard[] = [
       "De-para de classificação: cargos → área/nível e segmentos → categoria, aplicados aos registros.",
     href: "/operacao/mapeamentos",
     area: "mapeamentos",
+  },
+  {
+    key: "workflow",
+    label: "Workflow",
+    description:
+      "Formulários que lançam dados em sistemas externos e o catálogo dos fluxos que o sistema roda sozinho.",
+    href: "/operacao/workflow",
+    area: "workflow",
   },
 ];
 

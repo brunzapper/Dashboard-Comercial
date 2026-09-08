@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): recurso `workflow` — o motor de esquemas de
+//   automação da Operação (0125), cujo primeiro esquema é o Formulário de
+//   criação Bitrix.
 // Recursos SOB DEMANDA por organização (0114): catálogo + parse + loaders da
 // tabela `org_features` (uma linha por org, jsonb { "<feature>": true }).
 // Semântica FAIL-CLOSED: sem linha, sem chave ou valor não-true = recurso
@@ -27,6 +30,15 @@ export const ORG_FEATURES = [
     description:
       "De-para de classificação (cargos → área/nível, segmentos → categoria) " +
       "aplicado aos registros, com card em Operação e tarefa de pendências.",
+  },
+  // v1.1 (08/09/2026)
+  {
+    key: "workflow",
+    label: "Workflow",
+    description:
+      "Esquemas de automação configuráveis: formulários que lançam dados em " +
+      "sistemas externos (o primeiro cria leads no Bitrix24) e o catálogo dos " +
+      "fluxos que o sistema já roda sozinho.",
   },
 ] as const;
 

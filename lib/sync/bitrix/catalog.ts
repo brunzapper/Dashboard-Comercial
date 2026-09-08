@@ -1,4 +1,14 @@
-// Versão: 1.6 | Data: 27/07/2026
+// Versão: 1.7 | Data: 08/09/2026
+// v1.7 (08/09/2026): duas materializações a mais, no mesmo bloco best-effort
+//   das options do `pipeline` (só options; rótulo/olho/ordem do admin
+//   intactos):
+//   (a) options da linha CORE `stage` a partir de statusNames('lead') — sem
+//       isso o dropdown de Etapa do Workflow (0125) nasce vazio, já que
+//       nenhuma rotina escrevia essa lista;
+//   (b) cache `bitrix_status_codes` em sync_config (rótulo → código das três
+//       famílias de crm_status). É o que permite ESCREVER SOURCE_ID/STATUS_ID
+//       sem um crm.status.list ao vivo a cada envio — o Bitrix quer o código
+//       ("UC_EN7PZM"), e o app só guarda o rótulo (ver toBitrixValue v1.1).
 // v1.6 (27/07/2026): o upsert em LOTE de field_definitions é tudo-ou-nada e
 //   morreu inteiro por 8 dias (19→27/07): a curadoria COMPANY_ID/COMPANY_TITLE
 //   → `empresa` entrou SEM a migração de reconciliação do runbook §4.6
@@ -43,6 +53,15 @@ import {
   type CustomFieldMap,
 } from "@/lib/config/bitrix-field-map";
 import { refreshResponsibleOptionFields } from "@/lib/config/responsible-options";
+
+/**
+ * Chave de sync_config com o mapa RÓTULO → CÓDIGO das famílias de crm_status
+ * (origens, etapas de lead, etapas de negócio). Gravada a cada sync do
+ * catálogo; lida por quem ESCREVE no Bitrix fora do sync (o executor de
+ * Workflow, 0125) para não pagar um crm.status.list por envio.
+ * v1.7 (08/09/2026).
+ */
+export const BITRIX_STATUS_CODES_KEY = "bitrix_status_codes";
 import type { BitrixLookups } from "./lookups";
 
 export type Entity = "deal" | "lead";
@@ -341,6 +360,48 @@ export async function syncFieldCatalog(
     if (pipeErr) {
       console.error(
         `syncFieldCatalog: refresh das options do pipeline falhou: ${pipeErr.message}`
+      );
+    }
+  }
+
+  // v1.7 (08/09/2026): options da linha CORE `stage` com as etapas de LEAD
+  // vivas — mesmo contrato do `pipeline` acima. Só entra se o admin manteve a
+  // coluna como 'selecao' (CORE_SELECT_CAPABLE); voltou p/ texto, nada é tocado.
+  const stageOptions = lookups.statusNames("lead");
+  if (stageOptions.length > 0) {
+    const { error: stageErr } = await db
+      .from("field_definitions")
+      .update({ options: stageOptions })
+      .eq("field_key", "stage")
+      .eq("source_system", "core")
+      .eq("data_type", "selecao");
+    if (stageErr) {
+      console.error(
+        `syncFieldCatalog: refresh das options de stage falhou: ${stageErr.message}`
+      );
+    }
+  }
+
+  // v1.7 (08/09/2026): cache rótulo→código das famílias de crm_status, para o
+  // caminho de ESCRITA não precisar de um crm.status.list ao vivo. Escreve sem
+  // organization_id — o sync roda com service role e o default da coluna
+  // (Zapper) casa com a PK (organization_id, key) da 0090, exatamente como o
+  // upsert do catálogo acima.
+  const statusCodes = lookups.statusCodes();
+  // Mapa vazio significa que o preload não trouxe os status (job hidratado sem
+  // eles, portal fora do ar). Gravar {} apagaria um cache BOM e as escritas de
+  // SOURCE_ID/STATUS_ID voltariam a mandar rótulo até o próximo sync completo.
+  const hasCodes = Object.values(statusCodes).some(
+    (m) => Object.keys(m).length > 0
+  );
+  if (hasCodes) {
+    const { error: codesErr } = await db.from("sync_config").upsert(
+      { key: BITRIX_STATUS_CODES_KEY, value: statusCodes },
+      { onConflict: "organization_id,key" }
+    );
+    if (codesErr) {
+      console.error(
+        `syncFieldCatalog: cache de ${BITRIX_STATUS_CODES_KEY} falhou: ${codesErr.message}`
       );
     }
   }

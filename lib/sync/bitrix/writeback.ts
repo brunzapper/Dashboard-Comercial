@@ -1,4 +1,12 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): toBitrixValue passa a converter o tipo `crm_status`
+//   (SOURCE_ID, STATUS_ID) de RÓTULO para CÓDIGO. Antes esses campos caíam no
+//   `default:` e viajavam como texto — o Bitrix espera "UC_EN7PZM", não
+//   "CEO-Led Outbound", e a gravação era silenciosamente ignorada/errada. O
+//   mapa rótulo→código é OPCIONAL (3º parâmetro): sem ele o comportamento fica
+//   byte-idêntico ao da v1.0, então nenhum call site existente muda. Quem tem
+//   o mapa: o drain (que já dá preload nos lookups) e o executor de Workflow
+//   (0125), que o lê do cache `bitrix_status_codes` em sync_config.
 // Write-back configurável para o Bitrix (fila em background). Ao editar um campo
 // marcado (field_definitions.write_back), a edição salva no Supabase e uma linha
 // 'pending' entra em bitrix_writeback_queue (enqueueWriteBacks). O tick agendado
@@ -70,11 +78,40 @@ interface QueueRow {
 // ser pulados do payload de crm.*.add.
 export class WriteBackFatal extends Error {}
 
+/**
+ * Mapa rótulo→código dos campos `crm_status` (v1.1). Uma entrada por família,
+ * porque o mesmo código ("NEW") existe em famílias diferentes: `sources` são as
+ * origens (SOURCE_ID de lead e deal), `leadStatuses` as etapas de lead
+ * (STATUS_ID) e `dealStages` as etapas de negócio (STAGE_ID).
+ */
+export interface BitrixStatusCodes {
+  sources?: Record<string, string>;
+  leadStatuses?: Record<string, string>;
+  dealStages?: Record<string, string>;
+}
+
+/** Família de `crm_status` a que um fieldId pertence. O schema do Bitrix diz o
+ *  TIPO (crm_status) mas não a família, e o campo é sempre um destes três. */
+function statusFamilyOf(
+  fieldId: string
+): keyof BitrixStatusCodes | null {
+  if (fieldId === "SOURCE_ID") return "sources";
+  if (fieldId === "STATUS_ID") return "leadStatuses";
+  if (fieldId === "STAGE_ID") return "dealStages";
+  return null;
+}
+
 // Converte o valor armazenado no record DE VOLTA para o formato que o Bitrix
 // espera, usando o tipo do campo (crm.*.fields). O mapper resolve ids→rótulos na
 // leitura; aqui fazemos o caminho inverso. Exportado para reuso na criação de
 // entidades (crm.*.add), que monta o mesmo payload de `fields`.
-export function toBitrixValue(meta: BitrixFieldMeta, value: unknown): unknown {
+// v1.1 (08/09/2026): `statusCodes` é OPCIONAL — ausente, `crm_status` degrada
+// para o comportamento da v1.0 (manda a string como veio).
+export function toBitrixValue(
+  meta: BitrixFieldMeta,
+  value: unknown,
+  statusCodes?: BitrixStatusCodes
+): unknown {
   if (meta.isReadOnly) {
     throw new WriteBackFatal(`Campo ${meta.fieldId} é somente-leitura no Bitrix.`);
   }
@@ -101,6 +138,22 @@ export function toBitrixValue(meta: BitrixFieldMeta, value: unknown): unknown {
         return labels.map(one);
       }
       return one(String(value));
+    }
+    // v1.1 (08/09/2026): SOURCE_ID/STATUS_ID/STAGE_ID. O record guarda o RÓTULO
+    // (o mapper resolveu na leitura via crm.status.list); o Bitrix quer o
+    // código. Valor que JÁ é um código conhecido passa direto — é o caso de um
+    // esquema de Workflow que fixou "NEW" na definição.
+    case "crm_status": {
+      const family = statusFamilyOf(meta.fieldId);
+      const map = family ? statusCodes?.[family] : undefined;
+      if (!map) return String(value); // sem mapa: degrada como na v1.0
+      const label = String(value);
+      const code = map[label];
+      if (code != null) return code;
+      if (Object.values(map).includes(label)) return label;
+      throw new WriteBackFatal(
+        `Opção "${label}" não existe no campo ${meta.fieldId} do Bitrix.`
+      );
     }
     case "boolean":
       return value === true || value === "Y" || value === "true" ? "Y" : "N";
@@ -135,6 +188,7 @@ export async function drainWritebackQueue(
   const client = new BitrixClient();
   const lookups = new BitrixLookups(client, db);
   await lookups.preload();
+  const statusCodes = lookups.statusCodes(); // v1.1 (08/09/2026)
   const metaByEntity: Record<WriteBackEntity, Map<string, BitrixFieldMeta>> = {
     deal: new Map(lookups.dealFieldMetas().map((m) => [m.fieldId, m])),
     lead: new Map(lookups.leadFieldMetas().map((m) => [m.fieldId, m])),
@@ -154,7 +208,9 @@ export async function drainWritebackQueue(
           `Campo ${row.source_field_id} não existe no schema de ${row.entity} do Bitrix.`
         );
       }
-      const bitrixValue = toBitrixValue(meta, row.new_value);
+      // v1.1 (08/09/2026): o drain já deu preload nos lookups — passa o mapa
+      // rótulo→código para SOURCE_ID/STATUS_ID/STAGE_ID chegarem certos.
+      const bitrixValue = toBitrixValue(meta, row.new_value, statusCodes);
       const method = row.entity === "deal" ? "crm.deal.update" : "crm.lead.update";
       await client.call(method, {
         id: row.source_id,

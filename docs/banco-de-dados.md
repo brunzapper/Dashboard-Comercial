@@ -1,4 +1,6 @@
-<!-- Versão: 3.14 | Data: 07/09/2026 -->
+<!-- Versão: 3.15 | Data: 08/09/2026 -->
+<!-- v3.15 (08/09/2026): Workflow (0125) — workflow_schemas e workflow_runs;
+     nova chave de sync_config `bitrix_status_codes`. -->
 <!-- v3.14 (07/09/2026): audit_log — documentada a natureza append-only/
      write-only (ninguém lê: sem select em TS, sem trigger/view/função em SQL,
      sem tela de histórico) e a RETENÇÃO de 100 alterações por
@@ -585,9 +587,12 @@ shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 ### 3.5 Sync e integrações
 
 **`sync_config`** (0007) — key-value jsonb de configuração. Chaves notáveis:
-`source_labels` (rótulos de fonte) e `goal_metrics` (20/07/2026 — métricas de
+`source_labels` (rótulos de fonte), `goal_metrics` (20/07/2026 — métricas de
 meta custom `[{key,label,money?}]`, mescladas aos builtins por
-`lib/metas/metrics.ts`).
+`lib/metas/metrics.ts`) e `bitrix_status_codes` (08/09/2026 — mapa RÓTULO →
+CÓDIGO das famílias de `crm_status`: origens, etapas de lead, etapas de
+negócio; gravado a cada `syncFieldCatalog`, lido por quem ESCREVE no Bitrix
+fora do sync. Mapa vazio nunca sobrescreve um cache bom).
 **`bitrix_lookup_cache`** (0007) — labels de status/usuários/enums do Bitrix.
 
 **`sync_jobs`** (0023) — estado resumível de backfill/reconcile: `kind`, `params`,
@@ -599,6 +604,25 @@ meta custom `[{key,label,money?}]`, mescladas aos builtins por
 **`bitrix_writeback_queue`** (0032) — fila de write-back: `record_id`, `entity`
 (`deal|lead`), `source_id`, `field_key`, `source_field_id` (UF_CRM_*), `new_value`,
 `status` (`pending|done|error`), `attempts`.
+
+**`workflow_schemas`** (0125) — esquemas de automação da área Workflow:
+`key` (slug IMUTÁVEL na edição — identidade que torna o seed de fábrica
+idempotente), `label`, `description`, `definition` jsonb versionado
+(formulário PLANO + passos; parse fail-closed em `lib/workflow/types.ts`),
+`enabled`. Unique `(organization_id, key)`. RLS: select da org (quem EXECUTA
+precisa do esquema — a área não tem gate de papel), escrita admin. **Nenhum
+segredo aqui**: o passo referencia a conexão pela CHAVE do registry em código
+(`lib/workflow/connections.ts`), que a mapeia para um getter de `lib/env.ts` —
+guardar o nome da variável viraria `process.env[<dado gravável>]`.
+
+**`workflow_runs`** (0125) — execuções: `schema_id` (FK `on delete set null`;
+`schema_key` texto sobrevive à exclusão do esquema), `status`
+(`ok|partial|error`), `input` (respostas do formulário), `steps` (resultado POR
+passo), `error`, `record_id`. Existe porque o executor faz chamadas externas
+irreversíveis e sem transação: uma execução `partial` (empresa criada, lead
+falhou) precisa dizer o que sobrou no sistema externo. RLS: insert own-row;
+select admin OU `created_by = auth.uid()` (o input carrega dado de contato de
+lead de outra pessoa). Detalhe em [`arquitetura.md`](./arquitetura.md) §4.23.
 
 **`match_rules`** (0041) — regras de matching entre fontes: par de fontes + até 2
 pares de campos (par 2 = fallback), `enabled`, `priority`. Só fontes RAIZ
@@ -944,6 +968,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0119 | mapping_domains | Domínios DINÂMICOS de reclassificação (aba Campos → Reclassificações): key (mesmo slug-check de `value_mappings.domain`), record_types[], campo cru + targets jsonb com categorias canônicas; registry efetivo = código ∪ banco (`lib/mappings/registry.ts`, fail-closed). RLS select org / escrita admin. Não recria as RPCs |
 | 0120 | registros_populated_refs | Função `registros_populated_refs(record_type)` — colunas núcleo e chaves custom populadas (>=1 valor não-vazio, mocks fora), SECURITY INVOKER (RLS recorta por usuário); base das colunas dirigidas por dados da página /registros. EXECUTE só authenticated/service_role. Não recria as RPCs |
 | 0121 | records_trash | LIXEIRA de registros (soft delete 30d): `records.deleted_at/deleted_by` + índice parcial + trigger `enforce_records_trash_guard` (admin-only) + `snapshot_records.deleted_at` (espelho morto); recria o PAR de RPCs (`deleted_at is null` espelhado), `snapshot_refresh_copy` e `registros_populated_refs`. Purga: `apply/pg-cron-purge-records-trash.sql` |
+| 0125 | workflows | Workflow: `workflow_schemas` (esquema = formulário plano + passos, jsonb versionado com parse fail-closed; key imutável por org; select da org, escrita admin) e `workflow_runs` (auditoria POR PASSO; select admin ou própria linha, insert own-row). Segredo nunca entra: o esquema referencia a conexão pela chave do registry em código. Não recria as RPCs |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
@@ -990,3 +1015,26 @@ plano/domínio) e `undo_snapshot` não tem FK de propósito — o alvo pode ser
 excluído depois, e o restore responde amigável em vez de recriar algo por
 baixo. RLS: linha própria + gate de org, `revoke all from anon`. Detalhe em
 [`arquitetura.md`](./arquitetura.md) §4.22.
+
+### 0125 (08/09/2026) — Workflow: esquemas de automação
+
+`workflow_schemas` + `workflow_runs` (detalhadas em §3.5). Duas decisões que a
+migração fixa:
+
+**Segredo não entra no banco.** O `definition` referencia a conexão pela CHAVE
+do registry em código (`"bitrix_webhook"`), que resolve para um getter tipado
+de `lib/env.ts`. Guardar ali o NOME da variável faria o executor rodar
+`process.env[<string gravável por admin>]` — leitura arbitrária do ambiente do
+servidor (`SUPABASE_SERVICE_ROLE_KEY`, `KEY_ENCRYPTION_KEY`) por quem edita um
+esquema. As chaves seguem nas Environment Variables do deploy.
+
+**Sem trigger de stamp de org.** Não há linha-pai de onde derivar: a action
+carimba com `getActiveOrgId()` e o `with check` é a única muralha — padrão das
+tabelas-raiz sem pai (`value_mappings` 0117, `operacao_ai_sessions` 0124). O
+gate do app falha ALTO sem org ativa.
+
+A escrita é assimétrica de propósito: **select** de `workflow_schemas` vale
+para toda a org (quem EXECUTA o formulário precisa do esquema, e a área
+`workflow` não tem gate de papel), **escrita** é admin. Em `workflow_runs`,
+insert é own-row e select é admin OU própria linha — o `input` guarda dados de
+contato de um lead alheio.
