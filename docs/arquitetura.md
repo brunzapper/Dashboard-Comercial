@@ -3082,8 +3082,38 @@ semântica "a resposta SUBSTITUI a prévia inteira"); RPCs de widget intocados.
   (`previewOperationsCore`, sem IA) caem na MESMA prévia/apply; o manual
   funciona sem IA configurada (chat gated por `ai.hasKey`).
 
+**Tarefas — contrato `tarefas-edit` v1 (08/09/2026).** `/operacao/tarefas` →
+"Organizar com IA" (`components/tarefas/tasks-ai-sheet.tsx`, core
+`lib/ai/manage-tasks.ts`): lote de até `MAX_AI_TASK_ACTIONS` (15) ações
+`criar`/`editar`/`concluir`, sem EXCLUSÃO (precedente literal de operações — é
+destrutivo, e a trava `locked` existe justamente para isso). Identidade por
+TÍTULO: título que casa com duas tarefas é ERRO, não uma escolha; responsável
+e quadro por NOME; fase pelo RÓTULO da coluna do quadro EFETIVO (o do quadro
+escolhido, ou as fases da tela "Minhas tarefas" — derivadas pelo mesmo
+`deriveColumns` + extras em uso que o `tarefas-client` usa, para a IA nunca
+oferecer coluna que a tela não mostra). Só quadros em modo `tarefas` entram no
+catálogo. Gate é só a sessão: tarefa é de todo mundo, e a muralha é a RLS da
+0063 — o vendedor só enxerga (logo, só referencia) as suas, e o
+`coerceResponsible` do choke point ainda coage o responsável ao dele.
+
+Duas armadilhas que o contrato fecha:
+
+- **`updateTask` monta o UPDATE a partir do FormData INTEIRO** — chave ausente
+  vira null. Um form parcial para mudar só a data apagaria descrição,
+  responsável e, pior, o vínculo com o REGISTRO. O apply parte da LINHA ATUAL e
+  sobrepõe o delta; o SPEC diz à IA que o vínculo com registro não é editável
+  por aqui, para ela não tentar "religá-lo".
+- **hora final órfã**: o `readTaskForm` DESCARTA `due_time_end` sem `due_time`
+  em silêncio (o CHECK da 0111 exige o par). O validador transforma isso em
+  erro corrigível, usando a hora JÁ GRAVADA como base numa edição parcial.
+
+Fase é choke point PRÓPRIO: o `updateTask` não a toca, então o apply chama
+`moveTaskPhase` depois — e é ele que carimba a conclusão quando a coluna
+destino tem `completesTask`.
+
 Testes: `lib/import/records/{validate,preview,instructions}.test.ts`,
 `lib/import/records/{update-validate,update-instructions}.test.ts`,
+`lib/import/tasks/{validate,instructions}.test.ts`,
 `lib/records/bulk-update.test.ts`,
 `lib/import/csv-mapping/validate.test.ts`, `lib/import/fields/validate.test.ts`,
 `lib/import/operations/{validate,instructions}.test.ts` e

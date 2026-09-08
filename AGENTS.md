@@ -565,6 +565,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   FRESCA, resultado POR ITEM, `valor: null` EXCLUI a meta (nunca `target = 0`).
   Fiscalizado por `lib/import/comp/{instructions,validate}.test.ts`. Ver
   `docs/arquitetura.md` §4.22 e §4.18.
+- **Assistente de TAREFAS (contrato `tarefas-edit` v1, 08/09/2026):** lote de
+  até `MAX_AI_TASK_ACTIONS` (15) ações `criar`/`editar`/`concluir` — SEM
+  exclusão (precedente de operações). Identidade por TÍTULO (ambíguo = ERRO,
+  nunca uma escolha), responsável/quadro por NOME, fase pelo RÓTULO da coluna
+  do quadro EFETIVO (as fases da tela saem do MESMO `deriveColumns` + extras em
+  uso do `tarefas-client`; só quadro em modo `tarefas` entra no catálogo). Gate
+  é só a sessão — a muralha é a RLS de `tasks` (0063) e o `coerceResponsible`
+  do choke point; nada de service role. Apply item a item por
+  `createTask`/`updateTask`/`completeTask` + `moveTaskPhase` (a fase é choke
+  point PRÓPRIO — o updateTask não a toca). DUAS armadilhas fechadas de
+  propósito: o `updateTask` monta o UPDATE do FormData INTEIRO (chave ausente
+  vira NULL), então o apply parte da LINHA ATUAL e sobrepõe o delta — sem isso
+  mudar só a data apagaria descrição, responsável e o vínculo com o REGISTRO
+  (que o SPEC declara não-editável aqui); e `hora_fim` sem `hora` é DESCARTADA
+  em silêncio pelo `readTaskForm` (CHECK 0111), então o validador a recusa
+  usando a hora já gravada como base na edição parcial. Fiscalizado por
+  `lib/import/tasks/{validate,instructions}.test.ts`. Ver
+  `docs/arquitetura.md` §4.17.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:
