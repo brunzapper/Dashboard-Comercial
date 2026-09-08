@@ -97,7 +97,7 @@ function recordsHandler(rows: ReturnType<typeof recordRow>[]) {
 function makeFake(rule: unknown) {
   return fakeSupabase({
     tables: {
-      kanban_automations: (q) =>
+      automation_rules: (q) =>
         q.steps.some((s) => s.method === "update")
           ? { data: null, error: null }
           : { data: [ruleRow(rule)], error: null },
@@ -144,7 +144,7 @@ describe("automação com escopo de Base", () => {
     const { db, queries } = makeFake(SET_RULE);
     await runBoardAutomations(db, { kind: "source", id: "leads" });
     const rulesRead = queries.find(
-      (q) => q.table === "kanban_automations" && !q.steps.some((s) => s.method === "update")
+      (q) => q.table === "automation_rules" && !q.steps.some((s) => s.method === "update")
     );
     expect(
       rulesRead?.steps.some(

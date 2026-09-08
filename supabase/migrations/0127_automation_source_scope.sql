@@ -14,11 +14,10 @@
 -- do universo ramifica. Duplicar a tabela criaria dois lugares onde uma regra
 -- pode estar e um tick que varre os dois.
 --
--- O NOME da tabela fica: `kanban_automations` guarda regras que não têm kanban
--- nenhum, e isso é feio. É o mesmo preço já pago pelas chaves de área
--- históricas (`fontes` aponta para /registros/bases): renomear quebraria
--- policies, trigger e todo `from("kanban_automations")` do código por um ganho
--- só cosmético.
+-- Esta migração ainda usa o nome antigo (`kanban_automations`); a 0128, logo em
+-- seguida, renomeia a tabela para `automation_rules` — foi exatamente o escopo
+-- de Base introduzido aqui que tornou o nome antigo mentiroso. As duas andam
+-- juntas; aplicar só esta deixa o banco consistente, mas com o nome velho.
 --
 -- Idempotente. Não recria RPC nenhuma.
 

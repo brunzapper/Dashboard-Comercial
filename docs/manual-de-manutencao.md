@@ -1,4 +1,6 @@
-<!-- Versão: 1.33 | Data: 08/09/2026 -->
+<!-- Versão: 1.34 | Data: 08/09/2026 -->
+<!-- v1.34 (08/09/2026): 0128 (rename da tabela) e a aba Automações do
+     Workflow. -->
 <!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
 <!-- v1.32 (08/09/2026): §4.15 — 0126: onde o formulário vive agora (rota
      própria + card), como pegar o link para o time, e o que fazer quando o
@@ -772,7 +774,7 @@ Regras que movem cards ou DEFINEM CAMPOS automaticamente
 #### Automação sem quadro (0127, 08/09/2026)
 
 Aplicar `0127_automation_source_scope.sql`. A regra passa a poder ter uma BASE
-como universo: `kanban_automations.source_key` em vez de `widget_id`/`board_id`.
+como universo: `automation_rules.source_key` em vez de `widget_id`/`board_id`.
 
 O que muda na prática:
 
@@ -784,6 +786,18 @@ O que muda na prática:
   "Campo alterado há N dias" e "criado há N dias" funcionam igual.
 - **Write-back**: automação de Base escreve LOCAL. O toggle "devolver ao
   Bitrix" é do quadro, e sem quadro ele não existe.
+
+**Onde ver todas as regras.** Operação → Workflow → aba **Automações** lista as
+da organização inteira (de quadro e de base), com o dono, o resumo da regra e o
+último erro. Ligar/desligar e "Executar agora" funcionam dali. O painel dentro
+do quadro continua existindo e é o lugar de criar regra de coluna — as duas
+telas chamam as mesmas actions.
+
+**A tabela mudou de nome (0128).** `kanban_automations` virou
+`automation_rules`. A ROTA do tick NÃO mudou (`/api/kanban-automations/tick`):
+o pg_cron já agendado aponta para ela, e trocar o caminho derrubaria o
+agendamento até alguém reaplicar `supabase/apply/pg-cron-kanban-automations.sql`.
+Aplique a 0127 e a 0128 juntas.
 
 **Regra de Base não roda.** Confira, nesta ordem: a base existe (`source_key`
 tem que casar com `data_sources.key` — base renomeada vira fatal legível no

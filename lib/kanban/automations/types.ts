@@ -9,7 +9,7 @@
 // condições em E (podem MESCLAR as 4 famílias — campo do registro, registros
 // conectados, tarefas e tempo) + uma ação. Várias regras em ordem (position)
 // dão o OU: a primeira que casar vence por card. Persistida como jsonb
-// versionado em kanban_automations.rule (0109); parse fail-closed — regra
+// versionado em automation_rules.rule (0109); parse fail-closed — regra
 // malformada nunca roda (vira last_error), nunca "roda como der".
 // A avaliação é 100% no engine (evaluate.ts/engine.ts) — RPCs intocados.
 // v1.1 (31/07/2026): ação `set_field` (grava um valor fixo num campo do
@@ -71,7 +71,7 @@ export interface AutomationRule {
   action: AutomationAction;
 }
 
-/** Linha de kanban_automations já parseada p/ UI/engine. */
+/** Linha de automation_rules já parseada p/ UI/engine. */
 export interface AutomationRow {
   id: string;
   name: string;
@@ -96,7 +96,7 @@ export type AutomationOwner =
   | { kind: "board"; id: string }
   | { kind: "source"; id: string };
 
-/** Coluna de `kanban_automations` que guarda este dono. */
+/** Coluna de `automation_rules` que guarda este dono. */
 export function ownerColumn(
   owner: AutomationOwner
 ): "widget_id" | "board_id" | "source_key" {

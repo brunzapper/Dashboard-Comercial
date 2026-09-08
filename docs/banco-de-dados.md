@@ -1,5 +1,7 @@
-<!-- Versão: 3.17 | Data: 08/09/2026 -->
-<!-- v3.17 (08/09/2026): 0127 — kanban_automations.source_key (automação sem
+<!-- Versão: 3.18 | Data: 08/09/2026 -->
+<!-- v3.18 (08/09/2026): 0128 — kanban_automations renomeada p/
+     automation_rules (o escopo de Base tornou o nome antigo mentiroso). -->
+<!-- v3.17 (08/09/2026): 0127 — automation_rules.source_key (automação sem
      quadro) + terceiro ramo de RLS. -->
 <!-- v3.16 (08/09/2026): 0126 — workflow_schemas.trigger_kind/show_card. -->
 <!-- v3.15 (08/09/2026): Workflow (0125) — workflow_schemas e workflow_runs;
@@ -80,7 +82,7 @@
      (anotação do dia/post-it — org-scoped raiz, carimbo na action; SELECT
      org-wide, escrita autor/admin/gestor; sem anon; realtime).
      Não recria as RPCs. -->
-<!-- v3.1 (27/07/2026): 0109 — kanban_automations (automações do kanban:
+<!-- v3.1 (27/07/2026): 0109 — automation_rules (automações do kanban:
      regra jsonb versionada, XOR widget/board, RLS auth_board_editable + org)
      + audit_log.origin aceita 'automation'. Não recria as RPCs. -->
 <!-- v3.0 (27/07/2026): 0108 — organizations.theme (padrão visual da org:
@@ -544,14 +546,14 @@ falha fechado). Índice `(organization_id, note_date)`; entra na publication
 "Personalizar": exatamente um dono (`widget_id` XOR `board_id`) + `record_id`,
 `column_key`, `position`.
 
-**`kanban_automations`** (0109) — regras de automação do kanban (modo
+**`automation_rules`** (0109) — regras de automação do kanban (modo
 registros): exatamente um dono (`widget_id` XOR `board_id`, padrão 0067),
 `name`, `enabled`, `position` (ordem de avaliação — primeira que casa vence),
 `rule` jsonb versionado (`{ v:1, conditions[], action }` —
 `lib/kanban/automations/types.ts`; parse fail-closed) e bookkeeping por regra
 (`last_run_at`, `last_error`, `last_moved_count` — sem tabela de runs, o tick
 roda por minuto). `organization_id` com default Zapper + trigger de stamp que
-deriva a org do dashboard dono (`kanban_automations_set_org`, padrão 0098).
+deriva a org do dashboard dono (`automation_rules_set_org`, padrão 0098).
 Índices: por dono e `(enabled, last_run_at)` (enumeração do tick, round-robin
 pelos mais antigos). RLS: ler E escrever exigem `auth_board_editable` (nos
 dois braços de dono) + gate de org; a EXECUÇÃO das regras é service role
@@ -960,7 +962,7 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0106 | source_auto_operations | Parcerias: tabela `source_auto_operations` (config de sub-operações automáticas por base; RLS espelha operations_write) + `operations.auto_source_record_id` (identidade da geração, unique parcial). Não recria as RPCs |
 | 0107 | source_folders | PASTAS de bases (agrupamento de EXIBIÇÃO + ordem manual): tabela `source_folders` (uuid PK; RLS espelha data_sources_write) + `data_sources.folder_id` (FK on delete SET NULL)/`sort_order` + `sub_sources.sort_order`. Pasta nunca entra em consulta/engine. Não recria as RPCs |
 | 0108 | org_theme | `organizations.theme` jsonb (`{ mode, accentColor }`; `{}` = padrões do app) — padrão visual da org (Configurações → Tema, org_admin); escolha individual em `user_settings` prevalece. Policies existentes cobrem a escrita. Não recria as RPCs |
-| 0109 | kanban_automations | Automações do kanban: tabela `kanban_automations` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
+| 0109 | automation_rules | Automações do kanban: tabela `automation_rules` (regra jsonb versionada; XOR widget/board; bookkeeping last_run/last_error/last_moved; RLS `auth_board_editable` + org; trigger de stamp derivando a org do dono) + `audit_log.origin` aceita `'automation'`. Não recria as RPCs |
 | 0110 | data_sources_custom_period_field | CHECK de `data_sources.default_period_field` aceita também `custom:<field_key>` (espelho da 0082 das subs). Validação semântica na action; picker "só colunas com dados" em Registros → Bases. Não recria as RPCs de widget |
 | 0111 | agenda_notes_task_time_end | Redesign da agenda: `tasks.due_time_end` (hora final opcional; CHECK exige `due_time`) + índice `idx_tasks_due (due_date, due_time)`; tabela `agenda_notes` (anotação do dia — org-scoped raiz, carimbo na action; SELECT org-wide, escrita autor/admin/gestor; sem anon) + publication realtime. Não recria as RPCs |
 | 0112 | comp_plans | Remuneração variável: `comp_plans` (config jsonb versionado fail-closed; SELECT org-wide, escrita admin) + `comp_entries` (lançamentos por responsável×mês — inputs/overrides/computed/total, `mirror_record_id` p/ o espelho publicado; SELECT admin OU próprio grupo via `auth_responsible_ids()`, escrita admin). Raízes org-scoped com carimbo na action; sem anon; não recria as RPCs de widget |
@@ -1044,4 +1046,5 @@ para toda a org (quem EXECUTA o formulário precisa do esquema, e a área
 insert é own-row e select é admin OU própria linha — o `input` guarda dados de
 contato de um lead alheio.
 | 0126 | workflow_trigger_surface | `workflow_schemas.trigger_kind` (`form`\|`automacao`) e `show_card`: o gatilho decide a SUPERFÍCIE — formulário tem página própria (`/operacao/f/<chave>`) e card em Operação; automação não tem tela. Índice parcial do caminho quente (montar os cards por request). Não recria as RPCs |
-| 0127 | automation_source_scope | `kanban_automations.source_key`: a regra pode ter uma BASE como universo, sem quadro. CHECK de dono único vira três; RLS ganha o ramo `source_key is not null and auth_has_role('admin')` (não há quadro de onde derivar `auth_board_editable`); o trigger de stamp de org da 0109 já cobre pelo `coalesce`. Nome da tabela mantido (histórico). Não recria as RPCs |
+| 0127 | automation_source_scope | `automation_rules.source_key`: a regra pode ter uma BASE como universo, sem quadro. CHECK de dono único vira três; RLS ganha o ramo `source_key is not null and auth_has_role('admin')` (não há quadro de onde derivar `auth_board_editable`); o trigger de stamp de org da 0109 já cobre pelo `coalesce`. (Tabela renomeada logo depois, na 0128.) Não recria as RPCs |
+| 0128 | rename_automation_rules | `kanban_automations` → **`automation_rules`** (+ índices, constraint, triggers, função de stamp e policy renomeados). O escopo de Base da 0127 tornou o nome antigo mentiroso. A ROTA do tick (`/api/kanban-automations/tick`) NÃO muda: o pg_cron já agendado aponta para ela. Não recria as RPCs |

@@ -631,7 +631,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   nunca foi sobre kanban — `decideActions` usa a coluna SÓ p/ validar o alvo de
   `move_to_column`, as condições de tempo `field_changed`/`created` já são de
   REGISTRO e `set_field` escreve num campo. O que prendia ao quadro era a
-  ORIGEM das linhas. `kanban_automations.source_key` dá um terceiro tipo de
+  ORIGEM das linhas. `automation_rules.source_key` dá um terceiro tipo de
   dono (uma Base); a montagem do universo saiu p/
   `lib/kanban/automations/universe.ts` e ramifica LÁ (quadro → `runKanban`,
   byte-idêntico; Base → `runRecordList` com `columnKey` vazio e `columns: []`).
@@ -648,14 +648,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
   de Base escreve LOCAL; os moves seguem com `settings`. `AutomationOwner` tem
   `ownerColumn`/`isBoardOwner` — nunca reintroduza o ternário
   `kind === "widget" ? "widget_id" : "board_id"` em caminho de automação (com
-  3 tipos ele manda regra de Base para `board_id`). O NOME `kanban_automations`
-  FICA (histórico, como a chave de área `fontes` → `/registros/bases`).
+  3 tipos ele manda regra de Base para `board_id`). A tabela chamava-se
+  `kanban_automations` e foi RENOMEADA para `automation_rules` na 0128 — o
+  escopo de Base tornou o nome antigo mentiroso, e renomear cedo evitou o
+  destino das chaves de área históricas (`fontes` → `/registros/bases`), que
+  não dá mais para desfazer. A ROTA do tick segue
+  `/api/kanban-automations/tick`: o pg_cron já agendado aponta para ela e
+  trocar o caminho derrubaria o agendamento até alguém reaplicar o SQL.
   Fiscalizado por `universe.test.ts` (o ramo de Base não pode ler
   `dashboards`/`widgets`/`kanban_placements` — o fake é fail-closed) + os 80
   testes de kanban intocados (não-regressão do ramo de quadro). Ver
   `docs/arquitetura.md` §4.15.
 - **Automações do kanban e ações em massa se resolvem no ENGINE/actions, nunca
-  no RPC (0109, 27/07/2026):** regras em `kanban_automations` (tabela própria
+  no RPC (0109, 27/07/2026):** regras em `automation_rules` (tabela própria
   — NUNCA em `settings.kanban`: o widget-builder reconstrói o objeto no save e
   derrubaria a chave; o tick perderia a enumeração indexada), jsonb versionado
   com parse FAIL-CLOSED (`lib/kanban/automations/types.ts`). Avaliação pura em

@@ -81,7 +81,7 @@ export async function runAllKanbanAutomations(
   deadline: number
 ): Promise<{ boards: number; moved: number; evaluated: number; errors: number }> {
   const { data } = await db
-    .from("kanban_automations")
+    .from("automation_rules")
     .select("widget_id, board_id, source_key, last_run_at")
     .eq("enabled", true);
   const byOwner = new Map<string, { owner: AutomationOwner; oldest: number }>();
@@ -220,7 +220,7 @@ export async function runBoardAutomations(
 
   // 1) Regras habilitadas, em ordem de avaliação.
   const { data: ruleRows, error: rulesError } = await db
-    .from("kanban_automations")
+    .from("automation_rules")
     .select(
       "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count, organization_id"
     )
@@ -260,7 +260,7 @@ export async function runBoardAutomations(
       const id = r.id as string;
       const message = fatal ?? errorByRule.get(id) ?? null;
       await db
-        .from("kanban_automations")
+        .from("automation_rules")
         .update({
           last_run_at: now,
           last_error: message,

@@ -2818,7 +2818,7 @@ vínculo/desvínculo/filha sob elas (a rotina é a dona; invariante 22).
 
 ### 4.15 Automações do kanban e ações em massa (27/07/2026)
 
-**Automações** (`kanban_automations`, 0109): regras condicionais por quadro
+**Automações** (`automation_rules`, 0109): regras condicionais por quadro
 (widget kanban OU kanban dedicado — XOR de dono, padrão 0067) que MOVEM cards
 automaticamente. Uma regra = `{ v:1, conditions[], action }` (jsonb versionado,
 parse fail-closed em `lib/kanban/automations/types.ts`): as condições valem em
@@ -2875,7 +2875,7 @@ Gatilhos: tick por minuto (`/api/kanban-automations/tick`, pg_cron via
 45s; round-robin pelos donos mais antigos — `min(last_run_at)`), hook
 pós-sync (`maybeRunKanbanAutomationsAfterJob`, deadline curto, DEPOIS do
 auto-match p/ contagens verem vínculos frescos) e "Executar agora" na UI.
-Autoria = gate de EDITOR do board (RLS de `kanban_automations` via
+Autoria = gate de EDITOR do board (RLS de `automation_rules` via
 `auth_board_editable` nos dois braços + org); execução tem autoridade de
 sistema (como o sync) — documentado, não bug. Bookkeeping por regra
 (`last_run_at`/`last_error`/`last_moved_count`) em vez de tabela de runs. UI:
@@ -3004,11 +3004,15 @@ vez de `KanbanSettings` — era a única coisa que usava dali. Sem quadro não h
 toggle, então automação de Base escreve LOCAL. Os moves seguem recebendo
 `settings` (precisam do quadro de verdade).
 
-**O nome da tabela fica `kanban_automations`**, guardando regras que não têm
-kanban nenhum. É feio e é o preço já pago pelas chaves de área históricas
-(`fontes` aponta para `/registros/bases`): renomear quebraria policies, trigger
-e todo call site por um ganho cosmético, e criar uma segunda tabela deixaria
-dois lugares onde uma regra pode estar e um tick varrendo os dois.
+**A tabela foi renomeada (0128).** `kanban_automations` passou a guardar regras
+sem kanban nenhum, e o nome mentia. Virou `automation_rules` — enquanto o
+volume era pequeno e antes de o nome virar folclore, que é o destino das chaves
+de área históricas (`fontes` aponta para `/registros/bases`) e não dá mais para
+desfazer sem quebrar overrides gravados. Uma segunda tabela nunca esteve em
+jogo: deixaria dois lugares onde uma regra pode estar e um tick varrendo os
+dois. A ROTA do tick segue `/api/kanban-automations/tick`, porque o pg_cron já
+agendado aponta para ela — uma tabela se renomeia numa transação, um cron
+agendado noutro sistema, não.
 
 Testes: `universe.test.ts` (o ramo de Base não lê `dashboards`/`widgets`/
 `kanban_placements` — o fake é fail-closed, então encostar em quadro explode o
@@ -3230,7 +3234,7 @@ card org-específico do hub Workspace desde 05/08/2026; ex-aba de
 Configurações, chave de ÁREA `remuneracao` intocada) calcula, edita e publica
 a remuneração variável do time. Duas tabelas (0112): `comp_plans` (plano por org: nome, base variável
 default e `config` jsonb VERSIONADO — parse FAIL-CLOSED em `lib/comp/model.ts`,
-padrão kanban_automations) e `comp_entries` (lançamento por plano×responsável×
+padrão automation_rules) e `comp_entries` (lançamento por plano×responsável×
 ano×mês: base individual, `inputs` com overrides/bônus, `computed` com o
 snapshot CRU do recompute e `total` efetivo). Modelo:
 `total = base (R$) × Σ(peso% × atingimento%) + bônus`, com fórmula LIVRE de
@@ -4388,6 +4392,20 @@ carregado), `syncFieldCatalog` o materializa em `sync_config.bitrix_status_codes
 (mapa vazio NUNCA sobrescreve um cache bom) e `toBitrixValue` ganhou o caso —
 com o mapa OPCIONAL, então todo call site antigo segue byte-idêntico.
 
+**Automações da organização, num lugar só.** Até aqui uma regra só era visível
+de dentro do quadro dela, e as de Base (0127) não têm quadro para abrir: "o que
+este sistema mexe sozinho nos meus registros?" não tinha resposta. A aba
+Automações do Workflow lista todas (`lib/workflow/automations-overview.ts`),
+com o dono em linguagem humana ("Base Leads", "Quadro Parceiros") e as
+quebradas no topo — são as que exigem alguém.
+
+É uma VISÃO. Ligar/desligar e "Executar agora" chamam `saveAutomation` e
+`runAutomationsNow`, os MESMOS choke points do painel do quadro, que continua
+existindo (é lá que faz sentido criar "quando entrar nesta coluna", com as
+colunas à vista). Duas superfícies, um núcleo — o precedente do de-para, cujo
+sheet e painel de IA compartilham o mesmo core. A leitura usa o client do
+USUÁRIO: a RLS decide o que ele enxerga, nada de service role.
+
 **Fluxos do sistema (`lib/workflow/system-schemas.ts`).** "Quais automações
 este sistema roda sozinho?" não tinha resposta em lugar nenhum: sync, write-back,
 automações do kanban, de-para, auto-match, webhooks, ingestão e snapshots
@@ -4704,7 +4722,7 @@ principalmente — para mantenedores humanos.
     emite `record.deleted`. As ações em massa devolvem resultado POR ITEM e o
     board só reconcilia `data` → estado local com a fila DRENADA (guarda de
     resync) — remover a guarda faz o refresh clobrar o movimento otimista.
-    Regras vivem em `kanban_automations` (tabela própria): NÃO as mova para
+    Regras vivem em `automation_rules` (tabela própria): NÃO as mova para
     `settings.kanban` (o widget-builder reconstrói o objeto no save e as
     derrubaria; o tick perderia a enumeração indexada).
 

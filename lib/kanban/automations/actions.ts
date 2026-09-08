@@ -12,7 +12,7 @@
 //   dos campos seleção, ref = coluna crua p/ overrides core — 0086) p/ o
 //   picker de VALOR das condições (FilterValuePicker).
 // Server Actions das automações do kanban: CRUD das regras (client do USUÁRIO
-// — RLS de kanban_automations exige editor do board nos dois braços; a action
+// — RLS de automation_rules exige editor do board nos dois braços; a action
 // espelha o gate p/ mensagens amigáveis), "Executar agora" (mesma engine do
 // tick, com service role + deadline curto — a AUTORIA é gate de editor, a
 // execução tem autoridade de sistema, como o sync) e o catálogo de campos p/ o
@@ -82,7 +82,7 @@ export async function listAutomations(
   if (!gate.ok) return gate;
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .select(
       "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count"
     )
@@ -196,7 +196,7 @@ export async function saveAutomation(
   };
   if (input.id) {
     const { data, error } = await supabase
-      .from("kanban_automations")
+      .from("automation_rules")
       .update(row)
       .eq("id", input.id)
       .eq(ownerCol(owner), owner.id)
@@ -208,7 +208,7 @@ export async function saveAutomation(
     return { ok: true, id: input.id };
   }
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .insert({
       ...row,
       [ownerCol(owner)]: owner.id,
@@ -231,7 +231,7 @@ export async function deleteAutomation(
   if (!gate.ok) return gate;
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .delete()
     .eq("id", id)
     .eq(ownerCol(owner), owner.id)
@@ -253,7 +253,7 @@ export async function reorderAutomations(
   const supabase = await createClient();
   for (let i = 0; i < orderedIds.length; i++) {
     const { error } = await supabase
-      .from("kanban_automations")
+      .from("automation_rules")
       .update({ position: i })
       .eq("id", orderedIds[i])
       .eq(ownerCol(owner), owner.id);

@@ -1,4 +1,7 @@
-// Versão: 2.0 | Data: 08/09/2026
+// Versão: 2.1 | Data: 08/09/2026
+// v2.1 (08/09/2026): carrega as automações da ORG (de quadro e de base) para a
+//   aba Automações — a visão que faltava: até aqui uma regra só era visível de
+//   dentro do quadro dela.
 // v2.0 (08/09/2026): a página deixa de EXECUTAR. O Workflow é a FÁBRICA — cria,
 //   configura, liga/desliga e mostra onde cada esquema foi parar. O que ele
 //   produz vive fora dele: um formulário tem página própria
@@ -18,6 +21,7 @@ import {
   WORKFLOW_CONNECTION_KEYS,
   workflowConnectionStatus,
 } from "@/lib/workflow/connections";
+import { loadOrgAutomations } from "@/lib/workflow/automations-overview";
 import { loadWorkflowSchemas } from "@/lib/workflow/schemas";
 import { ensureDefaultWorkflowSchemas } from "@/lib/workflow/schemas";
 import { SYSTEM_FLOWS } from "@/lib/workflow/system-schemas";
@@ -36,7 +40,10 @@ export default async function WorkflowPage() {
 
   const supabase = await createClient();
   await ensureDefaultWorkflowSchemas(supabase, orgId);
-  const schemas = await loadWorkflowSchemas(supabase, orgId);
+  const [schemas, automations] = await Promise.all([
+    loadWorkflowSchemas(supabase, orgId),
+    loadOrgAutomations(supabase, orgId),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,6 +71,7 @@ export default async function WorkflowPage() {
           (k) => workflowConnectionStatus(k)!
         )}
         systemFlows={SYSTEM_FLOWS}
+        automations={automations}
       />
     </div>
   );
