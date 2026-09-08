@@ -1,4 +1,10 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): o refetch disparado pelo event bus ficou 100% SILENCIOSO
+//   — nem dim nem o rótulo "Atualizando…". O tick também chega do realtime a
+//   cada rodada do sync do Bitrix (pg-cron a cada minuto), então o rótulo
+//   piscava sozinho no dashboard de quem só apresentava. A distinção do
+//   gatilho saiu do scopeRef inline para o choke point ÚNICO useRefetchOrigin
+//   (lib/feedback), compartilhado com o lote de engine e a Tabela Livre.
 // v1.2 (31/07/2026): o DIM (opacity-60) do quadro ficou restrito a refetch por
 //   MUDANÇA DE ESCOPO/CONFIG (scopeKey/cfgKey — período/filtros/colunas);
 //   refetch disparado pelo event bus (tick — ex.: settle da fila após mover
@@ -26,6 +32,10 @@ import { kanbanBoardToCsv } from "@/lib/export/kanban";
 import type { Widget } from "@/lib/widgets/types";
 import type { KanbanColumnCards } from "@/lib/kanban/data";
 import { moveTaskPhase } from "@/lib/tasks/actions";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import {
   runKanbanWidget,
@@ -83,9 +93,9 @@ export function KanbanWidget({
   const readOnly = snapshotMode.snapshot;
   const [fetched, setFetched] = useState<KanbanWidgetResult | null>(null);
   // Re-busca com o quadro antigo em tela: spinner até o novo aterrissar.
+  // Dim e spinner SÓ p/ refetch de escopo/config (v1.3: o tick do bus é
+  // totalmente silencioso — feedback de movimento é por card).
   const [refreshing, setRefreshing] = useState(false);
-  // Dim SÓ p/ refetch de escopo/config (o tick do bus não esmaece — feedback
-  // de movimento é por card).
   const [dim, setDim] = useState(false);
   const [view, setView] = useState<"kanban" | "lista">("kanban");
 
@@ -95,21 +105,31 @@ export function KanbanWidget({
   useDataChanged(() => setTick((t) => t + 1));
 
   const cfgKey = JSON.stringify(widget.settings?.kanban ?? {});
-  // Distingue o GATILHO do refetch comparando com a rodada anterior: escopo/
-  // config mudou → dim; só o tick do bus → sem dim (o init já vem com os
-  // valores do mount, então o 1º load nunca esmaece — tem placeholder).
-  const scopeRef = useRef({ scope: scopeKey, cfg: cfgKey });
+  // Distingue o GATILHO do refetch (choke point ÚNICO desde 08/09/2026:
+  // useRefetchOrigin — antes um scopeRef inline aqui): escopo/config mudou →
+  // dim + "Atualizando…"; só o tick do bus → SILÊNCIO (nem dim nem rótulo — o
+  // feedback de movimento é POR CARD, e o tick também chega do realtime a cada
+  // rodada do sync). O 1º load nunca esmaece — tem placeholder próprio.
+  const originOf = useRefetchOrigin(`${scopeKey ?? ""}|${cfgKey}`);
+  // Último quadro APLICADO, serializado: refetch de fundo idêntico ao que está
+  // em tela não re-renderiza.
+  const payloadRef = useRef<string | null>(null);
+  // Rodada visível cancelada por um tick do bus segue visível (senão o dim do
+  // usuário ficaria aceso para sempre).
+  const visibleRef = useRef(false);
   useEffect(() => {
     if (readOnly) return; // snapshot: precomputado pela page pública
-    const scopeChanged =
-      scopeRef.current.scope !== scopeKey || scopeRef.current.cfg !== cfgKey;
-    scopeRef.current = { scope: scopeKey, cfg: cfgKey };
+    if (originOf()) visibleRef.current = true;
+    const userCaused = visibleRef.current;
     let cancelled = false;
-    // 250ms: coalesce rajadas de eventos do bus (uma mutação pode emitir vários
-    // e cada re-busca é uma server action inteira) sem atrasar perceptivelmente.
+    // 250ms p/ o usuário; no fundo, BUS_REFETCH_DELAY_MS coalesce a rajada de
+    // eventos de uma rodada de sync (cada re-busca é uma server action
+    // inteira) — como é silencioso, ninguém está esperando por ela.
     const timer = setTimeout(() => {
-      setRefreshing(true);
-      if (scopeChanged) setDim(true);
+      if (userCaused) {
+        setRefreshing(true);
+        setDim(true);
+      }
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
       // scopeKey — fingerprint do escopo efetivo computado pela page, que
       // muda tanto por navegação (período/ff_) quanto por revalidação
@@ -120,16 +140,21 @@ export function KanbanWidget({
         window.location.search
       ).then((res) => {
         if (cancelled) return;
-        setFetched(res);
+        const json = JSON.stringify(res);
+        if (json !== payloadRef.current) {
+          payloadRef.current = json;
+          setFetched(res);
+        }
+        visibleRef.current = false;
         setRefreshing(false);
         setDim(false);
       });
-    }, 250);
+    }, userCaused ? 250 : BUS_REFETCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [readOnly, dashboardId, widget.id, scopeKey, cfgKey, tick]);
+  }, [readOnly, dashboardId, widget.id, scopeKey, cfgKey, tick, originOf]);
 
   // Snapshot: resultado precomputado (só modo registros; tarefas ficam fora).
   const result: KanbanWidgetResult | null = readOnly

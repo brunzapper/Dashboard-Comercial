@@ -1,4 +1,13 @@
-// Versão: 2.9 | Data: 03/08/2026
+// Versão: 3.0 | Data: 08/09/2026
+// v3.0 (08/09/2026): atualização automática SILENCIOSA. O refetch do lote de
+//   engine disparado pelo EVENT BUS (realtime → sync do Bitrix, que roda a
+//   cada minuto; ou mutação em outra tela) não acende mais engineLoading — e
+//   portanto não pinta o overlay "Atualizando…" sobre TODOS os gráficos de
+//   quem está só apresentando/analisando (parecia defeito do sistema). A
+//   ORIGEM decide: useRefetchOrigin(engineScopeKey) — 1ª carga e mudança de
+//   escopo (período/filtro/__qf__/__pw__/config) seguem com feedback visível.
+//   Payload de fundo idêntico ao que está em tela nem re-renderiza
+//   (enginePayloadRef), e o disparo de fundo coalesce em BUS_REFETCH_DELAY_MS.
 // v2.9 (03/08/2026): Ponteiro Laser — estado efêmero laserMode (ativado pelo
 //   menu do clique-direito sobre um widget, no grid); ligar a edição desliga
 //   o laser (efeito) e ativar o laser sai da edição (handleLaserChange);
@@ -71,6 +80,10 @@ import {
   runDeferredWidgets,
   type DeferredWidgetsPayload,
 } from "@/app/(app)/dashboards/deferred-widget-actions";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import type { AvailableField } from "@/lib/widgets/fields";
 import {
@@ -321,6 +334,11 @@ export function DashboardClient({
   // inclusive persistidos no banco: a revalidação re-renderiza o RSC e a prop
   // nova re-dispara) ou quando um registro muda (event bus, paridade com
   // Tabela Livre/kanban).
+  // v3.0 (08/09/2026): o overlay "Atualizando…" ficou restrito ao refetch
+  // causado pelo USUÁRIO (useRefetchOrigin). O tick do event bus é SILENCIOSO
+  // — ele chega do realtime a cada rodada do sync do Bitrix (pg-cron a cada
+  // MINUTO), e acender o overlay sobre TODOS os gráficos de quem só está
+  // apresentando/analisando parecia defeito do sistema.
   const engineIds = useMemo(
     () => deferredEngineIds ?? [],
     [deferredEngineIds]
@@ -340,12 +358,25 @@ export function DashboardClient({
   useDataChanged((d) => {
     if (d.kind === "record") setEngineTick((t) => t + 1);
   });
+  // Origem do refetch: escopo mudou (usuário) × só o tick do bus (fundo).
+  const engineOriginOf = useRefetchOrigin(engineScopeKey);
+  // Último payload APLICADO, serializado: um refetch de fundo que devolve o
+  // mesmo conteúdo não re-renderiza os gráficos (caso comum — o sync mexeu em
+  // registros fora do recorte do dashboard).
+  const enginePayloadRef = useRef<string | null>(null);
+  // Uma rodada VISÍVEL cancelada por um tick do bus segue visível: sem isto o
+  // overlay do usuário ficaria aceso para sempre (a rodada de fundo que a
+  // substituiu não o apagaria).
+  const engineVisibleRef = useRef(engineIds.length > 0);
   useEffect(() => {
     if (engineIds.length === 0) return;
+    if (engineOriginOf()) engineVisibleRef.current = true;
+    const userCaused = engineVisibleRef.current;
     let cancelled = false;
-    // Pequeno atraso coalesce rajadas (navegação rápida de período/filtros).
+    // Atraso curto p/ o usuário (coalesce navegação rápida de período/filtros)
+    // e longo no fundo (coalesce a rajada de eventos de uma rodada de sync).
     const timer = setTimeout(() => {
-      setEngineLoading(true);
+      if (userCaused) setEngineLoading(true);
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara é o
       // engineScopeKey (fingerprint do escopo efetivo computado pela page).
       void runDeferredWidgets(
@@ -354,17 +385,24 @@ export function DashboardClient({
         window.location.search
       ).then((res) => {
         if (cancelled) return;
-        if (res.ok) setEngineData(res);
+        if (res.ok) {
+          const json = JSON.stringify(res);
+          if (json !== enginePayloadRef.current) {
+            enginePayloadRef.current = json;
+            setEngineData(res);
+          }
+        }
+        engineVisibleRef.current = false;
         setEngineLoading(false);
       });
-    }, 60);
+    }, userCaused ? 60 : BUS_REFETCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
     // engineIds está resumido no engineScopeKey (id + fingerprint por id).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardId, engineScopeKey, engineTick]);
+  }, [dashboardId, engineScopeKey, engineTick, engineOriginOf]);
   const effDataById = useMemo(
     () => (engineData ? { ...dataById, ...engineData.dataById } : dataById),
     [dataById, engineData]

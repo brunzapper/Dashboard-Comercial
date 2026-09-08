@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 31/07/2026
-// Wrapper do widget kanban: o DIM (opacity-60) só acompanha refetch por
-// mudança de ESCOPO/CONFIG (scopeKey/cfgKey); o tick do event bus (settle da
-// fila após mover card) mostra só o rótulo "Atualizando…" — o quadro não
-// esmaece. Board/list estubados; runKanbanWidget mockado.
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): o tick do event bus passou a ser 100% SILENCIOSO (nem dim
+// nem rótulo) — ele também chega do realtime a cada rodada do sync do Bitrix,
+// e o rótulo piscava sozinho para quem só apresentava o dashboard.
+// Wrapper do widget kanban: dim (opacity-60) E rótulo "Atualizando…" só
+// acompanham refetch por mudança de ESCOPO/CONFIG (scopeKey/cfgKey); o tick do
+// event bus re-busca em silêncio, com o quadro antigo em tela.
+// Board/list estubados; runKanbanWidget mockado.
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,6 +42,7 @@ import {
   runKanbanWidget,
   type KanbanWidgetResult,
 } from "@/app/(app)/dashboards/kanban-actions";
+import { BUS_REFETCH_DELAY_MS } from "@/lib/feedback/use-refetch-origin";
 import { emitDataChanged } from "@/lib/tasks/events";
 import type { Widget } from "@/lib/widgets/types";
 import { KanbanWidget } from "./kanban-widget";
@@ -84,10 +88,11 @@ beforeEach(() => {
 });
 
 describe("KanbanWidget — dim × Atualizando…", () => {
-  it("tick do bus re-busca SEM esmaecer o quadro", async () => {
+  it("tick do bus re-busca em SILÊNCIO (sem dim e sem rótulo)", async () => {
     vi.mocked(runKanbanWidget).mockResolvedValueOnce(okResult);
     renderWidget("s1");
     await waitFor(() => expect(screen.getByTestId("board")).toBeTruthy());
+    expect(runKanbanWidget).toHaveBeenCalledTimes(1);
 
     // Próximo fetch fica pendente p/ observar o estado "re-buscando".
     let resolveFetch!: (v: KanbanWidgetResult) => void;
@@ -98,13 +103,19 @@ describe("KanbanWidget — dim × Atualizando…", () => {
       emitDataChanged({ kind: "record" });
     });
 
-    await waitFor(() => expect(screen.getByText("Atualizando…")).toBeTruthy());
+    // A re-busca acontece (o dado chega), mas o usuário não vê nada mexer.
+    await waitFor(() => expect(runKanbanWidget).toHaveBeenCalledTimes(2), {
+      timeout: BUS_REFETCH_DELAY_MS + 1000,
+    });
+    expect(screen.queryByText("Atualizando…")).toBeNull();
     expect(dimWrapper().className).not.toContain("opacity-60");
 
     await act(async () => {
       resolveFetch(okResult);
     });
     expect(screen.queryByText("Atualizando…")).toBeNull();
+    expect(dimWrapper().className).not.toContain("opacity-60");
+    expect(screen.getByTestId("board")).toBeTruthy();
   });
 
   it("mudança de scopeKey re-busca COM dim até o resultado aterrissar", async () => {

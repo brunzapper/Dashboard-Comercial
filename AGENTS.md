@@ -1145,6 +1145,27 @@ This version has breaking changes — APIs, conventions, and file structure may 
   + blocos em `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`/
   `field-filter-controls.test.tsx`. Ver `docs/arquitetura.md`
   §4.10 ("Feedback de carregamento").
+- **A ORIGEM do refetch decide o feedback — refetch do event bus é SILENCIOSO
+  (08/09/2026):** widget deferido re-busca por dois gatilhos que exigem
+  feedback OPOSTO: o USUÁRIO mexeu (1ª carga, período, filtro,
+  `__qf__`/`__ff__`/`__pw__`, config — o fingerprint de escopo muda) ⇒ dim +
+  "Atualizando…" + spinner; o EVENT BUS avisou que um registro mudou
+  (`useDataChanged`, alimentado pelo `realtime-refresher`) ⇒ re-busca com os
+  dados antigos em tela e **zero feedback visual**. O sync do Bitrix roda a
+  cada MINUTO (`pg-cron-tick.sql`), então overlay no gatilho do bus fazia
+  TODOS os gráficos piscarem sozinhos para quem só apresentava/analisava — lia
+  como defeito do sistema. A distinção sai SEMPRE de
+  `useRefetchOrigin(scopeKey)` (`lib/feedback/use-refetch-origin.ts`, chamado
+  UMA vez por rodada DENTRO do efeito), nunca de um `useRef` paralelo por
+  componente. Consumidor novo deve também: atrasar o disparo de fundo em
+  `BUS_REFETCH_DELAY_MS` (o do usuário fica curto), NÃO chamar `setState`
+  quando o payload de fundo é idêntico ao que está em tela (ref com o último
+  JSON aplicado) e manter VISÍVEL uma rodada do usuário cancelada por um tick
+  do bus (`visibleRef` — senão o overlay nunca apaga). Consumidores: lote de
+  engine (`dashboard-client`), Tabela Livre, kanban de widget e a agenda (só
+  o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
+  blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
+  `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de

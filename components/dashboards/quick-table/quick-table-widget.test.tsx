@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-// Versão: 1.0 | Data: 06/09/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): bloco "atualização silenciosa" — o refetch disparado pelo
+// event bus (realtime/sync do Bitrix, a cada minuto) não exibe "Atualizando…";
+// só mudança de escopo (scopeKey) acende o estado de re-busca.
 // Testes da QuickTableWidget v1.4 (cálculo entre células descobrível): régua
 // A/B/C fora do "Editar layout", barra de fórmula mostrando o conteúdo CRU da
 // célula selecionada (não o resultado), clique na grade inserindo o endereço
@@ -28,6 +31,9 @@ vi.mock("@/components/snapshots/snapshot-mode", () => ({
 }));
 
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
+import { runQuickTable } from "@/app/(app)/dashboards/quick-table-actions";
+import { BUS_REFETCH_DELAY_MS } from "@/lib/feedback/use-refetch-origin";
+import { emitDataChanged } from "@/lib/tasks/events";
 
 const saveMock = vi.mocked(saveQuickTableCells);
 
@@ -123,5 +129,78 @@ describe("QuickTableWidget — endereços das células", () => {
     expect(saveMock.mock.calls[0][2]).toEqual([
       { rowKey: "r2", colKey: "cB", value: "=1+2" },
     ]);
+  });
+});
+
+// ---- atualização silenciosa (v1.5 do widget) ----
+// Widget COM coluna de dados (bi.hasBI) — só assim o fetch deferido roda.
+const biWidget = {
+  id: "w2",
+  visual_type: "tabela_editavel",
+  title: "BI",
+  settings: {
+    quickTable: {
+      columns: [
+        {
+          id: "cM",
+          kind: "metric" as const,
+          header: "Total",
+          metric: { field: "valor", agg: "soma" },
+        },
+      ],
+      rows: [{ id: "r1" }],
+    },
+  },
+} as unknown as Widget;
+
+function renderBi(scopeKey: string) {
+  return render(
+    <QuickTableWidget
+      widget={biWidget}
+      dashboardId="d1"
+      cells={[]}
+      userRoles={["vendedor"]}
+      available={[]}
+      scopeKey={scopeKey}
+    />
+  );
+}
+
+describe("QuickTableWidget — atualização silenciosa", () => {
+  beforeEach(() => {
+    vi.mocked(runQuickTable).mockClear();
+  });
+
+  it("tick do event bus re-busca SEM exibir 'Atualizando…'", async () => {
+    renderBi("s1");
+    await waitFor(() => expect(runQuickTable).toHaveBeenCalledTimes(1));
+
+    // Próximo fetch fica pendente p/ observar o estado "re-buscando".
+    vi.mocked(runQuickTable).mockImplementationOnce(() => new Promise(() => {}));
+    emitDataChanged({ kind: "record" });
+
+    await waitFor(() => expect(runQuickTable).toHaveBeenCalledTimes(2), {
+      timeout: BUS_REFETCH_DELAY_MS + 1000,
+    });
+    expect(screen.queryByText("Atualizando…")).toBeNull();
+  });
+
+  it("mudança de scopeKey exibe 'Atualizando…' até aterrissar", async () => {
+    const view = renderBi("s1");
+    await waitFor(() => expect(runQuickTable).toHaveBeenCalledTimes(1));
+
+    vi.mocked(runQuickTable).mockImplementationOnce(() => new Promise(() => {}));
+    view.rerender(
+      <QuickTableWidget
+        widget={biWidget}
+        dashboardId="d1"
+        cells={[]}
+        userRoles={["vendedor"]}
+        available={[]}
+        scopeKey="s2"
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText("Atualizando…")).toBeTruthy());
   });
 });
