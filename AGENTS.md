@@ -1256,6 +1256,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
   blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
   `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
+- **Workflow (0126): o GATILHO decide a SUPERFÍCIE, e a fábrica não hospeda o
+  que produz (08/09/2026):** `workflow_schemas.trigger_kind` (`form` |
+  `automacao`) + `show_card`. Gatilho `form` ⇒ página PRÓPRIA em
+  `/operacao/f/<chave>` (magra: só o runner — é a URL que se copia e manda ao
+  time) + card em Operação; gatilho `automacao` ⇒ NENHUMA tela (é mecanismo).
+  `/operacao/workflow` é SÓ a fábrica: não renderiza runner, redireciona
+  não-admin e `runWorkflow` RECUSA esquema que não seja `form`. A rota fica sob
+  `/operacao/f/` porque a chave é do USUÁRIO e `/operacao/<chave>` deixaria um
+  formulário chamado "agenda" sequestrar a Agenda. `allowedOperacaoCards()`
+  funde DUAS fontes (módulos em código ∪ formulários com `show_card`) — isso
+  amenda a regra antiga "cards de Operação são catálogo em CÓDIGO", mas o
+  espírito fica: NENHUM card do hub tem "⋮"/UI de exclusão (criar e excluir é
+  só no Workflow), card de formulário herda a área `workflow` (feature-off some
+  com os dois) e a key ganha o namespace `form:`. `lib/operacao/form-routes.ts`
+  é PURO e client-safe — `cards.ts` importa `checkSettingsArea` e é
+  server-only, o manager é client, e a 1ª versão quebrou o build por importar
+  de lá (precedente literal de `lib/ai/operacao/scopes.ts`); teste pina a
+  ausência de importações. Ver `docs/arquitetura.md` §4.23 e invariante 31.
 - **Workflow (0125): esquema é DADO fail-closed e segredo só entra por CHAVE DE
   REGISTRY (08/09/2026):** um esquema (`workflow_schemas.definition`, jsonb
   versionado) é um FORMULÁRIO PLANO + PASSOS que consomem as respostas por
@@ -1302,7 +1320,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
   linha core `stage`. Sem o mapa, byte-idêntico ao anterior. RPCs de widget
   INTOCADOS. Fiscalizado por `lib/workflow/*.test.ts` +
   `lib/workflow/{steps,seeds}/*.test.ts`. Ver `docs/arquitetura.md` §4.23 e
-  invariante 31.
+  invariante 32.
 - **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
   nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
   soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de

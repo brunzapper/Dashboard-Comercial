@@ -1,4 +1,9 @@
-// Versão: 2.9 | Data: 08/09/2026
+// Versão: 3.0 | Data: 08/09/2026
+// v3.0 (08/09/2026): cards de FORMULÁRIO (Workflow 0126) entram no hub ao
+//   lado dos módulos. A key deles é dinâmica (form:<chave>), então o mapa
+//   de ícones ganha um fallback POR ORIGEM — sem isso todo formulário
+//   cairia no ícone genérico. Segue sem menu "⋮": criar/excluir é no
+//   Workflow, o hub nunca destrói nada.
 // v2.9 (08/09/2026): ícone do card `workflow` (0125) em OPERACAO_ICONS.
 // Home = lista de dashboards (Fase 6A) e kanbans (dashboards.kind, 0062).
 // v2.8 (05/08/2026): hub com DUAS ABAS internas por query param (?aba=,
@@ -36,6 +41,7 @@ import {
   HandCoins,
   LayoutGrid,
   ListChecks,
+  FileInput,
   Shuffle,
   SquareKanban,
   Workflow,
@@ -194,11 +200,20 @@ const OPERACAO_ICONS: Record<string, LucideIcon> = {
   workflow: Workflow, // v2.9 (08/09/2026)
 };
 
+// Ícone por ORIGEM — vale para os cards cuja key é dinâmica (formulários
+// criados no Workflow). v3.0 (08/09/2026).
+const OPERACAO_KIND_ICONS: Record<string, LucideIcon> = {
+  formulario: FileInput,
+};
+
 // Card de OPERAÇÃO (aba "Operação" do hub): módulo do catálogo em código —
 // sem menu "⋮" e sem UI de exclusão POR CONSTRUÇÃO (não é linha de
 // dashboards; org-específico liga/desliga só via org_features no /owner).
 function OperacaoCardItem({ card }: { card: OperacaoCardDef }) {
-  const Icon = OPERACAO_ICONS[card.key] ?? LayoutGrid;
+  const Icon =
+    OPERACAO_ICONS[card.key] ??
+    (card.kind ? OPERACAO_KIND_ICONS[card.kind] : undefined) ??
+    LayoutGrid;
   return (
     <Card className="relative">
       <CardHeader>

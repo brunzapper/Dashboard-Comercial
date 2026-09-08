@@ -1,4 +1,5 @@
-<!-- Versão: 3.15 | Data: 08/09/2026 -->
+<!-- Versão: 3.16 | Data: 08/09/2026 -->
+<!-- v3.16 (08/09/2026): 0126 — workflow_schemas.trigger_kind/show_card. -->
 <!-- v3.15 (08/09/2026): Workflow (0125) — workflow_schemas e workflow_runs;
      nova chave de sync_config `bitrix_status_codes`. -->
 <!-- v3.14 (07/09/2026): audit_log — documentada a natureza append-only/
@@ -609,7 +610,9 @@ fora do sync. Mapa vazio nunca sobrescreve um cache bom).
 `key` (slug IMUTÁVEL na edição — identidade que torna o seed de fábrica
 idempotente), `label`, `description`, `definition` jsonb versionado
 (formulário PLANO + passos; parse fail-closed em `lib/workflow/types.ts`),
-`enabled`. Unique `(organization_id, key)`. RLS: select da org (quem EXECUTA
+`enabled`, `trigger_kind` (`form`|`automacao`, 0126) e `show_card` (0126 —
+formulário aparece no hub; false = existe só pela URL direta).
+Unique `(organization_id, key)`. RLS: select da org (quem EXECUTA
 precisa do esquema — a área não tem gate de papel), escrita admin. **Nenhum
 segredo aqui**: o passo referencia a conexão pela CHAVE do registry em código
 (`lib/workflow/connections.ts`), que a mapeia para um getter de `lib/env.ts` —
@@ -1038,3 +1041,4 @@ para toda a org (quem EXECUTA o formulário precisa do esquema, e a área
 `workflow` não tem gate de papel), **escrita** é admin. Em `workflow_runs`,
 insert é own-row e select é admin OU própria linha — o `input` guarda dados de
 contato de um lead alheio.
+| 0126 | workflow_trigger_surface | `workflow_schemas.trigger_kind` (`form`\|`automacao`) e `show_card`: o gatilho decide a SUPERFÍCIE — formulário tem página própria (`/operacao/f/<chave>`) e card em Operação; automação não tem tela. Índice parcial do caminho quente (montar os cards por request). Não recria as RPCs |

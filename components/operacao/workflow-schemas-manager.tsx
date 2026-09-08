@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 2.0 | Data: 08/09/2026
+// v2.0 (08/09/2026): a fábrica passa a dizer ONDE cada esquema foi parar. Um
+//   formulário ganha o cabeçalho de destino com a URL COPIÁVEL — é esse link
+//   que o gestor manda para o time ("cole e lance o lead"), e sem ele a pessoa
+//   teria que navegar pela configuração até achar a própria ferramenta. O
+//   toggle "Aparece no hub" separa "tem página" de "polui a aba Operação de
+//   todo mundo": formulário de uso pontual existe só pelo link.
 // Configuração dos esquemas de Workflow (0125) — visão do ADMIN.
 //
 // Duas abas: "Esquemas" (o que dá para configurar) e "Fluxos do sistema" (o que
@@ -19,7 +25,15 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, ExternalLink, Eye, EyeOff } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  ExternalLink,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +42,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
+import { formSchemaHref } from "@/lib/operacao/form-routes";
 import { stepTypeDef } from "@/lib/workflow/registry";
 import type { SystemFlow } from "@/lib/workflow/system-schemas";
 import type {
@@ -43,6 +58,8 @@ export interface ManagedSchema {
   label: string;
   description: string | null;
   enabled: boolean;
+  triggerKind: "form" | "automacao";
+  showCard: boolean;
   definition: WorkflowDefinition | null;
 }
 
@@ -193,6 +210,62 @@ function StepRow({
   );
 }
 
+/**
+ * Onde o esquema foi parar. A URL absoluta é montada no CLIENTE
+ * (window.location.origin): o servidor não conhece o domínio pelo qual o
+ * usuário chegou, e um link com o host errado é pior que link nenhum.
+ */
+function FormDestination({
+  schemaKey,
+  enabled,
+}: {
+  schemaKey: string;
+  enabled: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const path = formSchemaHref(schemaKey);
+
+  const copy = async () => {
+    try {
+      const origin =
+        typeof window === "undefined" ? "" : window.location.origin;
+      await navigator.clipboard.writeText(`${origin}${path}`);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard bloqueado (http, permissão): o caminho segue visível ao
+      // lado para seleção manual — nada de toast de erro por isso.
+    }
+  };
+
+  return (
+    <div className="bg-muted/40 flex flex-wrap items-center gap-2 rounded-md border p-2">
+      <span className="text-muted-foreground text-xs">
+        {enabled ? "Disponível em" : "Ficará em"}
+      </span>
+      <code className="text-xs">{path}</code>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1 px-2"
+        onClick={copy}
+      >
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? "Copiado" : "Copiar link"}
+      </Button>
+      {enabled ? (
+        <Link
+          href={path}
+          className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
+        >
+          abrir <ExternalLink className="size-3" />
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 function SchemaCard({
   schema,
   connections,
@@ -203,7 +276,9 @@ function SchemaCard({
   const { save, pendingKeys } = useBackgroundSave();
   const [def, setDef] = useState<WorkflowDefinition | null>(schema.definition);
   const [enabled, setEnabled] = useState(schema.enabled);
+  const [showCard, setShowCard] = useState(schema.showCard);
   const busy = pendingKeys.has(schema.id);
+  const isForm = schema.triggerKind === "form";
 
   const persist = (next: WorkflowDefinition, revertTo: WorkflowDefinition) => {
     setDef(next);
@@ -267,6 +342,38 @@ function SchemaCard({
           Ativo
         </label>
       </div>
+
+      {isForm ? (
+        <div className="flex flex-col gap-2">
+          <FormDestination schemaKey={schema.key} enabled={enabled} />
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={showCard}
+              disabled={busy}
+              onCheckedChange={(v) => {
+                const next = v === true;
+                const prev = showCard;
+                setShowCard(next);
+                save({
+                  key: schema.id,
+                  context: "Não foi possível salvar o esquema",
+                  action: () =>
+                    saveWorkflowSchema(
+                      schema.id,
+                      { showCard: next },
+                      { revalidate: false }
+                    ),
+                  revert: () => setShowCard(prev),
+                });
+              }}
+            />
+            Aparece como card em Operação
+            <span className="text-muted-foreground text-xs">
+              (desmarcado, existe só pelo link)
+            </span>
+          </label>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <Label className="text-muted-foreground text-xs uppercase">
