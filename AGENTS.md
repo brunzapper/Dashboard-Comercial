@@ -627,6 +627,28 @@ This version has breaking changes — APIs, conventions, and file structure may 
   responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
+- **Ação `create_task` (0129, 08/09/2026): a idempotência é o problema
+  INTEIRO.** `set_field` é idempotente por COMPARAÇÃO (valor igual ao alvo
+  consome o card sem escrever); criar tarefa não tem estado anterior para
+  comparar, e o tick roda A CADA MINUTO — sem trava, uma regra abre 1.440
+  tarefas por dia por registro. DUAS camadas, ambas obrigatórias:
+  (1) `CardFacts.openAutomationRuleIds` (regras que já têm tarefa ABERTA para
+  o registro) faz o avaliador pular — a consulta só roda quando alguma regra
+  ATIVA cria tarefa; (2) o índice único parcial `uq_tasks_open_per_automation`
+  em `(automation_rule_id, record_id) where completed_at is null` é a trava de
+  VERDADE (corrida entre tick e "Executar agora"), e o executor trata o 23505
+  como NO-OP, nunca como falha (poluir `last_error` com "duplicate key" é ruído
+  sobre o resultado desejado). O `where completed_at is null` é deliberado:
+  concluída a tarefa, a regra cobra de novo se a condição voltar a valer —
+  cobrança recorrente, não marcador de "já cobrei uma vez na vida". A escrita
+  NÃO usa `createTask` (action `(prevState, formData)` que depende de
+  `getSessionInfo()`, inexistente num tick): reusa o padrão de
+  `lib/mappings/notify.ts` — service role, org EXPLÍCITA, webhook
+  `task.created` à mão; autoria = quem salvou a regra, execução = autoridade de
+  sistema. Responsável padrão = o DO REGISTRO. A frase de resumo de regra é
+  ÚNICA (`lib/kanban/automations/summary.ts`) e consumida pela lista do
+  Workflow e pela prévia da IA do quadro — repetir a montagem foi o que fez a
+  prévia esquecer da ação nova. Ver `docs/arquitetura.md` §4.15.
 - **Automação SEM QUADRO: escopo de Base (0127, 08/09/2026):** o motor 0109
   nunca foi sobre kanban — `decideActions` usa a coluna SÓ p/ validar o alvo de
   `move_to_column`, as condições de tempo `field_changed`/`created` já são de

@@ -42,16 +42,21 @@ function conditionText(c: AutomationCondition): string {
 /** "Se <condições> então <ação>" — o suficiente para reconhecer a regra. */
 export function automationSummary(rule: AutomationRule): string {
   const when = rule.conditions.map(conditionText).join(" e ");
+  const a = rule.action;
   const then =
-    rule.action.type === "move_to_column"
-      ? `mover para "${rule.action.targetKey}"`
-      : `definir ${rule.action.field} = "${rule.action.value}"`;
+    a.type === "move_to_column"
+      ? `mover para "${a.targetKey}"`
+      : a.type === "set_field"
+        ? `definir ${a.field} = "${a.value}"`
+        : `abrir a tarefa "${a.title}"${
+            a.dueInDays != null ? ` com prazo de ${a.dueInDays} dia(s)` : ""
+          }`;
   return `Se ${when}, ${then}.`;
 }
 
 /** Rótulo curto da ação — para agrupar/filtrar sem ler a frase inteira. */
 export function automationActionLabel(rule: AutomationRule): string {
-  return rule.action.type === "move_to_column"
-    ? "Mover de coluna"
-    : "Definir campo";
+  if (rule.action.type === "move_to_column") return "Mover de coluna";
+  if (rule.action.type === "set_field") return "Definir campo";
+  return "Abrir tarefa";
 }

@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 08/09/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): ação `create_task` — abre uma tarefa vinculada ao
+//   registro. Diferente de `set_field`, que é idempotente por COMPARAÇÃO
+//   (valor igual consome sem escrever), criar tarefa não tem estado anterior
+//   para comparar: a trava é o índice único parcial da 0129 (uma tarefa ABERTA
+//   por regra × registro) mais o gate no avaliador.
 // v1.2 (08/09/2026): dono de tipo `source` (0127) — a regra passa a poder ter
 //   uma BASE como universo, sem quadro nenhum. O motor nunca foi sobre kanban:
 //   `decideActions` usa a coluna só para validar o alvo de `move_to_column`, e
@@ -63,7 +68,19 @@ export type AutomationCondition =
  *  na avaliação e no save, nunca aqui (fail-closed estrutural apenas). */
 export type AutomationAction =
   | { type: "move_to_column"; targetKey: string }
-  | { type: "set_field"; field: string; value: string };
+  | { type: "set_field"; field: string; value: string }
+  // `dueInDays` conta a partir do dia da execução (null = sem prazo).
+  // `responsibleFrom`: "record" usa o responsável do registro; "fixed" usa
+  // `responsibleId`. Sem dono, a tarefa nasce sem responsável — visível a quem
+  // a RLS de tasks já deixa ver.
+  | {
+      type: "create_task";
+      title: string;
+      description?: string;
+      dueInDays?: number | null;
+      responsibleFrom?: "record" | "fixed" | "none";
+      responsibleId?: string | null;
+    };
 
 export interface AutomationRule {
   v: 1;
@@ -216,6 +233,37 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
       actionRaw.targetKey !== ""
     ) {
       action = { type: "move_to_column", targetKey: actionRaw.targetKey };
+    } else if (
+      actionRaw.type === "create_task" &&
+      typeof actionRaw.title === "string" &&
+      actionRaw.title.trim() !== ""
+    ) {
+      // Só estrutura, como as demais. Prazo negativo não existe (tarefa que
+      // nasce vencida é ruído); ausente/inválido = sem prazo.
+      const rawDue = actionRaw.dueInDays;
+      const dueInDays =
+        typeof rawDue === "number" && Number.isFinite(rawDue) && rawDue >= 0
+          ? Math.floor(rawDue)
+          : null;
+      const from = actionRaw.responsibleFrom;
+      const responsibleFrom =
+        from === "record" || from === "fixed" || from === "none"
+          ? from
+          : "record";
+      action = {
+        type: "create_task",
+        title: actionRaw.title.trim(),
+        ...(typeof actionRaw.description === "string" &&
+        actionRaw.description.trim() !== ""
+          ? { description: actionRaw.description.trim() }
+          : {}),
+        dueInDays,
+        responsibleFrom,
+        responsibleId:
+          responsibleFrom === "fixed" && typeof actionRaw.responsibleId === "string"
+            ? actionRaw.responsibleId
+            : null,
+      };
     } else if (
       // set_field: só estrutura (v1 sem "limpar" — value não-vazio); o alvo é
       // validado na avaliação/save (o catálogo pode mudar após a regra).

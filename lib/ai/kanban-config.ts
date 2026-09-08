@@ -11,6 +11,7 @@
 // generate (chat) · preview (colar JSON, sem IA) · buildPrompt (copiar) ·
 // apply.
 import "server-only";
+import { automationSummary } from "@/lib/kanban/automations/summary";
 
 import { getSessionInfo } from "@/lib/auth/session";
 import { getActiveOrgId } from "@/lib/auth/org";
@@ -173,12 +174,10 @@ function summarize(value: ParsedKanbanConfig): string[] {
     );
   }
   for (const a of value.automacoes ?? []) {
-    const alvo =
-      a.rule.action.type === "move_to_column"
-        ? `mover para "${a.rule.action.targetKey}"`
-        : `definir ${a.rule.action.field} = "${a.rule.action.value}"`;
+    // Frase única (lib/kanban/automations/summary.ts) — repetir a montagem
+    // aqui era o que fazia a prévia esquecer de uma ação nova.
     out.push(
-      `Automação "${a.nome}"${a.ativa ? "" : " (desativada)"}: ${a.rule.conditions.length} condição(ões) → ${alvo}`
+      `Automação "${a.nome}"${a.ativa ? "" : " (desativada)"}: ${automationSummary(a.rule)}`
     );
   }
   return out;

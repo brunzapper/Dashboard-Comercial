@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 08/09/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): ação `create_task` — mais um fato por card
+//   (`openAutomationRuleIds`, só consultado quando alguma regra ATIVA cria
+//   tarefa) e mais um executor no fim da rodada, sob o mesmo teto de ações.
 // v1.2 (08/09/2026): a rodada aceita dono de tipo `source` (0127) — a regra
 //   avalia os registros de uma BASE, sem quadro. A montagem do universo saiu
 //   para ./universe.ts e ramifica lá; TUDO daqui para a frente (fatos,
@@ -37,6 +40,10 @@ import {
 } from "./evaluate";
 import { countRelatedBySource } from "../related-count";
 import { executeAutomationMoves, executeAutomationSets } from "./move";
+import {
+  executeAutomationTasks,
+  loadOpenAutomationTasks,
+} from "./task";
 import { loadAutomationUniverse } from "./universe";
 import {
   ownerColumn,
@@ -222,7 +229,7 @@ export async function runBoardAutomations(
   const { data: ruleRows, error: rulesError } = await db
     .from("automation_rules")
     .select(
-      "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count, organization_id"
+      "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count, organization_id, created_by"
     )
     .eq(ownerCol, owner.id)
     .eq("enabled", true)
@@ -340,6 +347,16 @@ export async function runBoardAutomations(
     if (c.kind === "related_count") relatedConds.set(relatedCountKey(c), c);
   }
 
+  // Regras que criam tarefa: só elas motivam a consulta do fato (uma por
+  // rodada), e só elas entram no `in` dela.
+  const taskRuleIds = rules
+    .filter((r) => r.rule.action.type === "create_task")
+    .map((r) => r.id);
+  const openTasksByRecord =
+    taskRuleIds.length > 0
+      ? await loadOpenAutomationTasks(db, orgId, taskRuleIds, recordIds)
+      : new Map<string, string[]>();
+
   const todayIso = todayBrasiliaIso();
   const openByRecord = new Map<string, number>();
   const overdueByRecord = new Map<string, number>();
@@ -428,6 +445,7 @@ export async function runBoardAutomations(
       fieldModifiedAt: fmodByRecord.get(card.id) ?? null,
       sourceCreatedAt: card.record.source_created_at ?? null,
       placementUpdatedAt: placementAtByRecord.get(card.id) ?? null,
+      openAutomationRuleIds: openTasksByRecord.get(card.id) ?? [],
     };
   });
 
@@ -443,13 +461,17 @@ export async function runBoardAutomations(
     // vínculo pode nascer DEPOIS da regra, por isso a guarda é de avaliação.
     allocationFieldKey: universe.allocationFieldKey,
   };
-  const { moves, sets, ruleErrors } = decideActions(rules, facts, evalCtx);
+  const { moves, sets, tasks, ruleErrors } = decideActions(rules, facts, evalCtx);
   for (const e of ruleErrors) errorByRule.set(e.ruleId, e.message);
   summary.ruleErrors.push(...ruleErrors);
 
   // Orçamento compartilhado: moves primeiro (ordem estável), sets no que sobrar.
   const cappedMoves = moves.slice(0, MAX_ACTIONS_PER_RUN);
   const cappedSets = sets.slice(0, MAX_ACTIONS_PER_RUN - cappedMoves.length);
+  const cappedTasks = tasks.slice(
+    0,
+    MAX_ACTIONS_PER_RUN - cappedMoves.length - cappedSets.length
+  );
 
   const noteFailures = (
     failed: { recordId: string; message: string }[],
@@ -505,6 +527,23 @@ export async function runBoardAutomations(
       summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
     noteFailures(result.failed, cappedSets, "Falha ao definir campo");
+  }
+
+  if (cappedTasks.length > 0) {
+    if (overBudget())
+      return { ...summary, fatal: "Orçamento de tempo esgotado." };
+    const result = await executeAutomationTasks(db, {
+      tasks: cappedTasks,
+      orgId,
+      // Autoria: quem salvou a regra. A execução é de sistema, mas a tarefa
+      // precisa de um dono humano no histórico.
+      createdBy: (ruleRows[0]?.created_by as string | null) ?? null,
+    });
+    summary.moved += result.okIds.length;
+    for (const [ruleId, n] of result.createdByRule) {
+      summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
+    }
+    noteFailures(result.failed, cappedTasks, "Falha ao abrir tarefa");
   }
 
   return finish();

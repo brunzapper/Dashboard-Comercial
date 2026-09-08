@@ -3019,6 +3019,38 @@ Testes: `universe.test.ts` (o ramo de Base não lê `dashboards`/`widgets`/
 teste) e os 80 testes de kanban existentes, que passam intocados e são a prova
 de não-regressão do ramo de quadro.
 
+#### Ação `create_task` (0129, 08/09/2026)
+
+A terceira ação: abrir uma tarefa vinculada ao registro ("lead parado há 7 dias
+→ cobrar retomada").
+
+**A idempotência é o problema inteiro.** `set_field` resolve por COMPARAÇÃO —
+valor atual igual ao alvo consome o card sem escrever. Criar tarefa não tem
+estado anterior para comparar, e o tick roda A CADA MINUTO: sem trava, uma
+regra abre 1.440 tarefas por dia, por registro. Duas camadas:
+
+1. `CardFacts.openAutomationRuleIds` — quais regras já têm tarefa ABERTA para
+   aquele registro. O avaliador pula (evita a ida ao banco). A consulta só roda
+   quando alguma regra ATIVA da rodada cria tarefa.
+2. `uq_tasks_open_per_automation` (0129) — índice único parcial em
+   `(automation_rule_id, record_id) where completed_at is null`. É a trava de
+   verdade: uma corrida entre o tick agendado e um "Executar agora" esbarra
+   nele, e o executor trata o 23505 como **no-op**, não como falha (poluir o
+   `last_error` com "duplicate key" seria ruído sobre o resultado desejado).
+
+O `where completed_at is null` é deliberado: concluída a tarefa, a regra pode
+abrir outra se a condição voltar a valer. É cobrança recorrente, não marcador
+de "já cobrei uma vez na vida".
+
+**Escrita.** Não usa `createTask` (`lib/tasks/actions.ts`) — é action
+`(prevState, formData)` que depende de `getSessionInfo()`, e num tick não há
+sessão. Reusa o padrão de `lib/mappings/notify.ts`, a outra rotina que cria
+tarefa sem usuário: service role, org EXPLÍCITA, webhook `task.created` à mão.
+Autoria = quem salvou a regra; execução = autoridade de sistema.
+
+O responsável padrão é o **do registro** — a tarefa nasce com quem já cuida
+daquele lead, não numa fila anônima.
+
 ### 4.16 Alocação do kanban como campo do registro (28/07/2026)
 
 Num quadro **Personalizar** a coluna de cada card é dado da VISÃO

@@ -1,4 +1,6 @@
-<!-- Versão: 1.34 | Data: 08/09/2026 -->
+<!-- Versão: 1.35 | Data: 08/09/2026 -->
+<!-- v1.35 (08/09/2026): 0129 — ação "Abrir tarefa" e a trava contra
+     duplicata. -->
 <!-- v1.34 (08/09/2026): 0128 (rename da tabela) e a aba Automações do
      Workflow. -->
 <!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
@@ -798,6 +800,18 @@ telas chamam as mesmas actions.
 o pg_cron já agendado aponta para ela, e trocar o caminho derrubaria o
 agendamento até alguém reaplicar `supabase/apply/pg-cron-kanban-automations.sql`.
 Aplique a 0127 e a 0128 juntas.
+
+**Ação "Abrir tarefa" (0129).** Aplicar `0129_task_automation_link.sql`. A
+regra abre UMA tarefa por registro e não repete enquanto ela estiver aberta —
+concluída, a regra cobra de novo se a condição voltar a valer. O responsável
+padrão é o do registro; o prazo é em dias a partir da execução (vazio = sem
+prazo).
+
+**Tarefa duplicada.** Não deveria acontecer: o índice
+`uq_tasks_open_per_automation` impede duas ABERTAS da mesma regra para o mesmo
+registro. Se aparecer, confira se a 0129 foi aplicada (`\d tasks` deve mostrar
+`automation_rule_id`) — sem o índice, as duas camadas de proteção viram uma só,
+e a que sobra não cobre corrida entre o tick e o "Executar agora".
 
 **Regra de Base não roda.** Confira, nesta ordem: a base existe (`source_key`
 tem que casar com `data_sources.key` — base renomeada vira fatal legível no
