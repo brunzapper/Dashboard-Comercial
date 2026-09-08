@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 08/09/2026
+// v1.1 (08/09/2026): `showCard` entra no patch salvável (0126) — separa "o
+//   formulário tem página" de "aparece no hub de todo mundo". `runWorkflow`
+//   passa a exigir gatilho `form`: um esquema de automação não é executável
+//   por envio de formulário, e aceitar o POST seria rodar um fluxo pela porta
+//   errada.
 // Server Actions de /operacao/workflow (esquemas de automação, 0125).
 //
 // Duas autoridades diferentes, de propósito:
@@ -186,6 +191,11 @@ export async function runWorkflow(
   const schema = await loadWorkflowSchemaByKey(supabase, orgId, schemaKey);
   if (!schema) return { ok: false, message: "Esquema não encontrado." };
   if (!schema.enabled) return { ok: false, message: "Este esquema está desligado." };
+  if (schema.triggerKind !== "form") {
+    // Esquema de automação não roda por envio de formulário — ele tem gatilho
+    // próprio. Recusar aqui evita a porta dos fundos.
+    return { ok: false, message: "Este esquema não é um formulário." };
+  }
   if (!schema.definition) {
     return {
       ok: false,
@@ -341,7 +351,12 @@ async function ensureCanConfigure(): Promise<string | null> {
  */
 export async function saveWorkflowSchema(
   schemaId: string,
-  patch: { label?: string; enabled?: boolean; definition?: unknown },
+  patch: {
+    label?: string;
+    enabled?: boolean;
+    showCard?: boolean;
+    definition?: unknown;
+  },
   opts: { revalidate?: boolean } = {}
 ): Promise<WorkflowSchemaState> {
   const denied = await ensureCanConfigure();
@@ -354,6 +369,7 @@ export async function saveWorkflowSchema(
     update.label = label;
   }
   if (typeof patch.enabled === "boolean") update.enabled = patch.enabled;
+  if (typeof patch.showCard === "boolean") update.show_card = patch.showCard;
   if (patch.definition !== undefined) {
     const parsed = parseWorkflowDefinition(patch.definition);
     if (!parsed) {

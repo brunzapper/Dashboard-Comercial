@@ -1,19 +1,42 @@
-// Versão: 1.1 | Data: 08/09/2026
-// v1.1 (08/09/2026): card `workflow` (0125) — esquemas de automação da
-//   Operação. Org-específico (feature "workflow"), ao final do catálogo.
-// Cards de OPERAÇÃO (aba "Operação" do hub Workspace + sub-abas de /operacao):
-// catálogo definido em CÓDIGO — nunca linhas de `dashboards` e sem UI de
-// exclusão (indeletáveis por construção; o pedido de produto exige que só o
-// banco os remova). Card com `area` é org-específico: aparece só quando
-// checkSettingsArea(area) passa (precedência feature-off > deny > allow >
-// gate de papel — lib/auth/access.ts), ou seja, liga/desliga por org via
-// org_features (escrita service-role-only, console /owner) — o org_admin não
-// se auto-habilita. Card SEM `area` é PADRÃO de toda organização (Agenda,
-// Tarefas). Card novo org-específico = entrada aqui + chave em ORG_FEATURES +
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): o catálogo passa a ter DUAS fontes. Os cards de MÓDULO
+//   seguem em código (Agenda, Tarefas, Remuneração, Mapeamentos, Workflow) —
+//   indeletáveis por construção, como sempre foram. Os cards de FORMULÁRIO
+//   vêm de `workflow_schemas` (0125/0126): o Workflow é a fábrica, e o que ele
+//   produz aparece FORA dele — cada formulário ganha página própria
+//   (/operacao/f/<chave>, URL copiável para mandar ao time) e um card aqui.
+//   O espírito da regra antiga está preservado: nenhum card do hub tem menu
+//   "⋮" nem UI de exclusão — criar e excluir formulário acontece só dentro do
+//   Workflow, nunca no hub.
+// v1.1 (08/09/2026): card `workflow` (0125).
+// Cards de OPERAÇÃO (aba "Operação" do hub Workspace + sub-abas de /operacao).
+// Card com `area` é org-específico: aparece só quando checkSettingsArea(area)
+// passa (precedência feature-off > deny > allow > gate de papel —
+// lib/auth/access.ts), ou seja, liga/desliga por org via org_features (escrita
+// service-role-only, console /owner) — o org_admin não se auto-habilita. Card
+// SEM `area` é PADRÃO de toda organização (Agenda, Tarefas). Card de MÓDULO
+// novo org-específico = entrada aqui + chave em ORG_FEATURES +
 // AREA_GATES/AREA_FEATURES (chave de área é histórica — nunca renomear).
-// Ordem do catálogo = ordem das sub-abas e dos cards: padrões primeiro,
-// org-específicos ao final (ordem estável entre orgs com features distintas).
+// Ordem: módulos padrão, módulos org-específicos, formulários ao final.
 import { checkSettingsArea } from "@/lib/auth/access";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { createClient } from "@/lib/supabase/server";
+import {
+  loadFormSchemaCards,
+  type WorkflowFormCard,
+} from "@/lib/workflow/schemas";
+// Rotas num módulo PURO: este arquivo é server-only (checkSettingsArea) e o
+// manager da fábrica, que é client, precisa montar a mesma URL.
+import {
+  FORM_CARD_KEY_PREFIX,
+  formSchemaHref,
+} from "@/lib/operacao/form-routes";
+
+export { FORM_CARD_PREFIX, formSchemaHref } from "@/lib/operacao/form-routes";
+
+/** Origem do card — a UI usa para escolher o ícone; a key de formulário é
+ *  dinâmica e não tem entrada no mapa de ícones do hub. */
+export type OperacaoCardKind = "modulo" | "formulario";
 
 export interface OperacaoCard {
   key: string;
@@ -24,6 +47,8 @@ export interface OperacaoCard {
   /** Chave de ÁREA histórica (AREA_GATES) que condiciona o card; ausente =
    * card padrão de toda org. */
   area?: string;
+  /** Ausente = "modulo" (o catálogo em código). */
+  kind?: OperacaoCardKind;
 }
 
 export const OPERACAO_CARDS: OperacaoCard[] = [
@@ -61,11 +86,25 @@ export const OPERACAO_CARDS: OperacaoCard[] = [
     key: "workflow",
     label: "Workflow",
     description:
-      "Formulários que lançam dados em sistemas externos e o catálogo dos fluxos que o sistema roda sozinho.",
+      "A fábrica dos fluxos: formulários que lançam dados em sistemas externos e automações que rodam sozinhas.",
     href: "/operacao/workflow",
     area: "workflow",
   },
 ];
+
+/** Esquema de formulário → card. PURO (testável sem servidor). */
+export function formSchemaToCard(schema: WorkflowFormCard): OperacaoCard {
+  return {
+    key: `${FORM_CARD_KEY_PREFIX}${schema.key}`,
+    label: schema.label,
+    description:
+      schema.description ?? "Formulário de lançamento criado no Workflow.",
+    href: formSchemaHref(schema.key),
+    // Herda o gate da fábrica que o criou: quem tem a área Workflow lança.
+    area: "workflow",
+    kind: "formulario",
+  };
+}
 
 /** Recorte puro do catálogo: padrões sempre; org-específicos conforme o
  * veredito por área (injetado — testável sem servidor). */
@@ -74,6 +113,22 @@ export function filterOperacaoCards(
   isAreaAllowed: (area: string) => boolean
 ): OperacaoCard[] {
   return cards.filter((c) => !c.area || isAreaAllowed(c.area));
+}
+
+/**
+ * Funde as duas fontes. PURO — a I/O fica em allowedOperacaoCards. Os
+ * formulários vão ao FINAL: a ordem dos módulos é estável entre organizações,
+ * e o que a org criou aparece depois do que o produto oferece.
+ */
+export function mergeOperacaoCards(
+  modules: OperacaoCard[],
+  formCards: OperacaoCard[],
+  isAreaAllowed: (area: string) => boolean
+): OperacaoCard[] {
+  return [
+    ...filterOperacaoCards(modules, isAreaAllowed),
+    ...filterOperacaoCards(formCards, isAreaAllowed),
+  ];
 }
 
 /** Cards visíveis ao usuário/org atuais. checkSettingsArea é cache()d por
@@ -85,5 +140,17 @@ export async function allowedOperacaoCards(): Promise<OperacaoCard[]> {
       verdicts.set(card.area, await checkSettingsArea(card.area));
     }
   }
-  return filterOperacaoCards(OPERACAO_CARDS, (a) => verdicts.get(a) === true);
+  const isAllowed = (a: string) => verdicts.get(a) === true;
+
+  // Formulários só existem com a área Workflow liberada — poupa a consulta
+  // inteira quando a feature está desligada para a org.
+  let formCards: OperacaoCard[] = [];
+  if (isAllowed("workflow")) {
+    const orgId = await getActiveOrgId();
+    const supabase = await createClient();
+    const schemas = await loadFormSchemaCards(supabase, orgId);
+    formCards = schemas.map(formSchemaToCard);
+  }
+
+  return mergeOperacaoCards(OPERACAO_CARDS, formCards, isAllowed);
 }

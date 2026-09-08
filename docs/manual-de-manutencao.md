@@ -1,4 +1,7 @@
-<!-- Versão: 1.31 | Data: 08/09/2026 -->
+<!-- Versão: 1.32 | Data: 08/09/2026 -->
+<!-- v1.32 (08/09/2026): §4.15 — 0126: onde o formulário vive agora (rota
+     própria + card), como pegar o link para o time, e o que fazer quando o
+     card não aparece. -->
 <!-- v1.31 (08/09/2026): §4.15 — Workflow (0125): aplicar a migração, ligar a
      feature no /owner, o que fazer quando os dropdowns vêm vazios e como
      acrescentar um passo/conexão sem abrir buraco de segurança. -->
@@ -860,6 +863,12 @@ pré-requisitos de DADO:
 
 ### 4.15 Workflow: esquemas de automação (0125, 08/09/2026)
 
+**Onde as coisas ficam (0126).** O Workflow é a FÁBRICA: `/operacao/workflow`
+cria e configura, e nada é executado ali. Cada formulário tem página própria em
+`/operacao/f/<chave>` — é essa URL que se copia (o botão "Copiar link" está no
+card do esquema, dentro da fábrica) e se manda ao time. O card em Operação é só
+outra porta para a mesma página.
+
 **Ligar numa organização** (na ordem):
 
 1. Aplicar `supabase/migrations/0125_workflows.sql` (idempotente).
@@ -873,6 +882,13 @@ pré-requisitos de DADO:
 5. Abrir `/operacao/workflow`. O esquema de fábrica é criado na primeira
    visita — ensure-if-absent por `key`, então revisitar nunca desfaz
    configuração do admin.
+
+**O card do formulário não aparece no hub.** Três causas, nesta ordem: a
+feature `workflow` está desligada para a org (`/owner`); o esquema está
+desativado; ou "Aparece como card em Operação" está desmarcado no Workflow —
+nesse caso o formulário existe e funciona, só é acessível pelo link direto. O
+card também herda a área `workflow`: negar a área para um usuário esconde o
+formulário junto.
 
 **Dropdown de Fonte ou Etapa vazio.** O sync ainda não rodou desde a
 atualização. As opções saem do catálogo (`fonte` custom e a linha core

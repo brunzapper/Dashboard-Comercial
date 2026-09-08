@@ -4210,7 +4210,53 @@ chave de `AREA_GATES`); `lib/import/comp/instructions.test.ts` (paridade do
 SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
 `lib/import/comp/validate.test.ts` (as perdas silenciosas que o merge impede).
 
-### 4.23 Workflow: esquemas de automação (0125, 08/09/2026)
+### 4.23 Workflow: a fábrica de fluxos (0125–0126, 08/09/2026)
+
+**O que a 0126 corrigiu.** A 0125 tratou todo esquema como formulário e o
+renderizou DENTRO de `/operacao/workflow`, na mesma tela onde se configura o
+esquema. Quem só queria lançar um lead atravessava a oficina para chegar à
+ferramenta. O modelo certo é: **o Workflow é a fábrica; o que ele produz vive
+fora dele.**
+
+Um esquema declara um **gatilho**, e o gatilho decide a **superfície**:
+
+| Gatilho | O que é | Onde vive |
+| --- | --- | --- |
+| `form` | uma pessoa preenche | página própria (`/operacao/f/<chave>`) + card em Operação |
+| `automacao` | condição sobre registros | nenhuma tela — é mecanismo |
+
+`workflow_schemas.trigger_kind` e `show_card` (0126) carregam isso. `show_card`
+separa "tem página" de "aparece no hub de todo mundo": formulário de uso
+pontual existe só pelo link.
+
+**A URL é a entrega.** O gestor copia `/operacao/f/bitrix_lead_form` e manda ao
+time — o SDR abre e lança, sem passar por configuração nenhuma. Por isso a
+página é magra de propósito (só o `WorkflowRunner`) e o manager da fábrica
+exibe o link com um botão de copiar, montado no CLIENTE
+(`window.location.origin`: o servidor não sabe por qual domínio o usuário
+chegou, e um link com host errado é pior que link nenhum).
+
+**A rota fica sob `/operacao/f/`, nunca `/operacao/<chave>`.** A chave é
+escolhida pelo usuário: um formulário chamado "agenda" sequestraria a Agenda.
+`lib/operacao/form-routes.ts` é o dono da rota e é **PURO** — separado de
+`cards.ts` (que importa `checkSettingsArea` e é server-only) pelo mesmo motivo
+que `lib/ai/operacao/scopes.ts` existe: o manager é client e precisa montar a
+mesma URL. Um teste pina a ausência de importações nesse arquivo, porque a
+primeira versão puxava de `cards.ts` e quebrou o build.
+
+**Catálogo de cards com DUAS fontes.** `allowedOperacaoCards()` funde os
+módulos em CÓDIGO (Agenda, Tarefas, Remuneração, Mapeamentos, Workflow) com os
+formulários de `workflow_schemas`. Isso amenda a regra antiga ("cards de
+Operação são catálogo em código"), e a amenda preserva o espírito dela: nenhum
+card do hub tem menu "⋮" nem UI de exclusão — criar e excluir formulário
+acontece só dentro do Workflow. O hub nunca destrói nada. Card de formulário
+herda a área `workflow`, então feature-off some com os dois de uma vez; a key
+ganha o namespace `form:` para nunca colidir com a de um módulo, e a consulta
+só roda quando a área já passou.
+
+---
+
+### 4.23.1 O motor (0125)
 
 Faltava uma superfície para **lançar** dados num sistema externo a partir do
 dashboard. O que existia era o checkbox "Criar também no Bitrix" da criação de
@@ -4807,7 +4853,17 @@ principalmente — para mantenedores humanos.
     silenciosa. Nenhum caminho do app faz hard delete fora de
     `purgeRecordsPermanently` (predicado `deleted_at not null`) e do cron
     `pg-cron-purge-records-trash.sql` (30 dias).
-31. **Esquema de Workflow (0125, §4.23) é DADO fail-closed, e segredo só entra
+31. **O gatilho do esquema decide a SUPERFÍCIE, e o Workflow nunca hospeda o
+    que produz (0126, §4.23).** Esquema `form` tem página própria
+    (`/operacao/f/<chave>`, sob esse prefixo para a chave do usuário não
+    sequestrar uma sub-área) + card em Operação; esquema `automacao` não tem
+    tela. `/operacao/workflow` é só a fábrica — não renderiza runner, e
+    `runWorkflow` RECUSA esquema que não seja `form` (porta dos fundos). O
+    catálogo de cards tem duas fontes (módulos em código ∪ formulários), e
+    nenhum card do hub ganha "⋮": criar/excluir é só dentro do Workflow.
+    `lib/operacao/form-routes.ts` é PURO — `cards.ts` é server-only e o manager
+    é client; teste pina a ausência de importações lá.
+32. **Esquema de Workflow (0125, §4.23) é DADO fail-closed, e segredo só entra
     por CHAVE DE REGISTRY.** `workflow_schemas.definition` guarda a chave de
     `WORKFLOW_CONNECTIONS` (`"bitrix_webhook"`), NUNCA o nome de uma variável
     de ambiente: nome vindo do jsonb viraria `process.env[<dado gravável>]` —
