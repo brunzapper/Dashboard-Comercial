@@ -1,7 +1,14 @@
-// Versão: 1.0 | Data: 05/07/2026
+// Versão: 1.1 | Data: 03/08/2026
 // Apps Script — Fonte B (planilha "Estudo de Fechamentos", aba "Site").
 // Fluxo: Planilha "Estudo de Fechamentos" + "Inbound Zapper" (Leads Base, só
 // para Lead Time) → Apps Script (trigger horário) → POST /api/sync/sheets.
+// v1.1 (03/08/2026): envio em CHUNKS de até 500 linhas (convenção de
+// docs/estudo-ingestao-api.md) — o POST único com a planilha inteira crescia
+// todo mês e estourava o teto de 60s da rota na Vercel (HTTP 504). O upsert é
+// idempotente (chave natural nome+data): falha no meio aborta os chunks
+// restantes e o próximo trigger recompleta. O servidor segue aceitando o
+// formato antigo (planilha inteira) — recolar este arquivo é o que ativa o
+// chunking; o trigger existente continua válido (mesmo nome de função).
 //
 // SETUP (uma vez):
 // 1) Na planilha "Estudo de Fechamentos": Extensões → Apps Script, cole este arquivo.
@@ -95,19 +102,34 @@ function pushEstudoFechamentos() {
     });
   });
 
-  const payload = { source: 'estudo_fechamentos_site', rows: rows };
-  const response = UrlFetchApp.fetch(endpoint, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'x-sync-secret': secret },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
+  // Envia em chunks sequenciais: cada request fica pequena e rápida no
+  // servidor. Falha num chunk aborta os restantes (idempotente — o próximo
+  // trigger horário reenvia tudo e recompleta).
+  const CHUNK_SIZE = 500;
+  const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK_SIZE));
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    const chunkNo = Math.floor(i / CHUNK_SIZE) + 1;
+    const payload = { source: 'estudo_fechamentos_site', rows: chunk };
+    const response = UrlFetchApp.fetch(endpoint, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-sync-secret': secret },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
 
-  const code = response.getResponseCode();
-  Logger.log('POST %s -> %s: %s', endpoint, code, response.getContentText());
-  if (code < 200 || code >= 300) {
-    throw new Error('Falha no sync (HTTP ' + code + '): ' + response.getContentText());
+    const code = response.getResponseCode();
+    Logger.log(
+      'POST %s (chunk %s/%s, %s linhas) -> %s: %s',
+      endpoint, chunkNo, totalChunks, chunk.length, code, response.getContentText()
+    );
+    if (code < 200 || code >= 300) {
+      throw new Error(
+        'Falha no sync (HTTP ' + code + ', chunk ' + chunkNo + '/' + totalChunks + '): ' +
+        response.getContentText()
+      );
+    }
   }
 }
 
