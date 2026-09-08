@@ -1,3 +1,53 @@
+<!-- Versão: 3.14 | Data: 07/09/2026 -->
+<!-- v3.14 (07/09/2026): audit_log — documentada a natureza append-only/
+     write-only (ninguém lê: sem select em TS, sem trigger/view/função em SQL,
+     sem tela de histórico) e a RETENÇÃO de 100 alterações por
+     (organization_id, origin, field): job pg_cron purge-audit-log
+     (apply/pg-cron-purge-audit-log.sql) + saneamento único
+     (apply/sanitize-audit-log.sql). Sem mudança de schema; RPCs intocados. -->
+<!-- Versão: 3.13 | Data: 07/08/2026 -->
+<!-- v3.13 (07/08/2026): 0121 — LIXEIRA de registros (soft delete):
+     records.deleted_at/deleted_by + índice parcial; trigger
+     enforce_records_trash_guard (mudança de deleted_at exige papel admin;
+     escape GUC app.allow_protected_change); snapshot_records.deleted_at
+     (espelho MORTO sempre-null — só p/ o predicado espelhado dos RPCs e o
+     .is() do engine no viewer); recria o PAR de RPCs com `deleted_at is
+     null` ESPELHADO (paridade byte a byte), snapshot_refresh_copy (lixeira
+     fora das linhas de DADOS; ramo partner-only sem filtro) e
+     registros_populated_refs (lixeira fora). Purga 30d:
+     apply/pg-cron-purge-records-trash.sql. -->
+<!-- v3.12 (07/08/2026): 0120 — registros_populated_refs(record_type): função
+     SECURITY INVOKER (RLS de records recorta por usuário) que devolve as
+     colunas núcleo e chaves de custom_fields com >=1 valor não-vazio (mocks
+     fora). Consumida pela página /registros p/ colunas dirigidas por dados
+     (100% das populadas visíveis; vazias fora da base ocultas). EXECUTE só
+     authenticated/service_role; nunca anon. Não recria as RPCs. -->
+<!-- Versão: 3.11 | Data: 07/08/2026 -->
+<!-- v3.11 (07/08/2026): 0119 — mapping_domains (domínios DINÂMICOS de
+     reclassificação, criados pela aba Campos → Reclassificações): key com o
+     mesmo check de slug de value_mappings.domain, record_types[], campo cru
+     (raw_field_key com check de slug — interpolado em select PostgREST) e
+     targets jsonb (fieldKey/label/options canônicas). Registry efetivo em
+     runtime = código ∪ banco (lib/mappings/registry.ts, fail-closed; colisão:
+     código vence). RLS select org / escrita admin; nunca anon. Não recria as
+     RPCs. -->
+<!-- Versão: 3.10 | Data: 07/08/2026 -->
+<!-- v3.10 (07/08/2026): 0118 — value_mappings.origin (manual/seed/auto/ai):
+     origem da entrada do de-para (badge na página; auto = classificador
+     heurístico V5 portado, ai = assistente "Classificar com IA"). Backfill
+     das linhas pré-0118 → 'seed'. Não recria as RPCs. -->
+<!-- Versão: 3.9 | Data: 07/08/2026 -->
+<!-- v3.9 (07/08/2026): 0117 — value_mappings (MAPEAMENTOS DE VALORES/de-para:
+     cargo → área/nível, segmento → categoria; entradas por org+domínio+
+     raw_norm; domínios em código em lib/mappings/domains.ts; aplicação como
+     espelho derivado em custom_fields via lib/mappings/apply.ts). Seed dos
+     CSVs legados em supabase/apply/seed-value-mappings.sql. Feature de org
+     "mapeamentos" (card /operacao/mapeamentos). Não recria as RPCs. -->
+<!-- Versão: 3.8 | Data: 06/08/2026 -->
+<!-- v3.8 (06/08/2026): 0116 — sub_sources.ignore_period boolean (sub-base que
+     NÃO respeita o filtro de período do dashboard: linhas sempre em "todo
+     período"; resolvido no engine — applyPeriodToFilters/planSourceLegs — via
+     pass-through record_types do wrapper 0054). Não recria as RPCs. -->
 <!-- Versão: 3.7 | Data: 02/08/2026 -->
 <!-- v3.7 (02/08/2026): 0115 — comp_sheet_links + comp_sheet_export_tickets
      (export da Remuneração p/ Google Planilhas via Apps Script Web App:
@@ -179,6 +229,7 @@ do site ou linha de fonte dinâmica.
 | `created_at`, `updated_at`, `last_synced_at`, `locally_modified_at` | |
 | `responsible_id`, `operation_id`, `related_lead_id` uuid, `lead_time_days` numeric | (0012) |
 | `is_mock` bool | (0051) — mocks de Data Reunião; ver invariantes em `arquitetura.md` §5. Mocks Inbound carregam `custom_fields.fonte = "Formulário de CRM"` (0084 — predicados de sub-fonte valem em AND p/ mocks); Outbound (0053) ficam sem fonte de propósito |
+| `deleted_at` timestamptz, `deleted_by` uuid | (0121) — LIXEIRA (soft delete, 30 dias): preenchido = registro "excluído" (fora de TODA leitura de consulta; restaurável). Só admin muda (`trg_records_trash_guard`); índice parcial `idx_records_deleted_at`; purga física diária via `apply/pg-cron-purge-records-trash.sql`. Ver `arquitetura.md` §4.21/invariante 30 |
 
 **`data_sources`** (0060) — catálogo de fontes (dinâmicas, criáveis via UI).
 `key` PK (regex `^[a-z][a-z0-9_]{1,39}$`), `record_type` unique (fontes novas:
@@ -212,7 +263,10 @@ pai, com as linhas da pai recortadas por um predicado. `key` PK (regex, como
 a 0082, um campo personalizado de data `custom:<field_key>` — ex.: sub "SQLs"
 datada pela Data Reunião; a action valida que o campo existe e é de data),
 `filter` jsonb (`WidgetFilter[]` — o recorte), `sort_order` (0107 — ordem manual
-dentro da PAI). A sub COMPARTILHA o `record_type` da
+dentro da PAI), `ignore_period` boolean not null default false (0116 — a sub NÃO
+respeita o filtro de período do dashboard: linhas sempre consideradas, "todo
+período"; resolvido no engine via `applyPeriodToFilters`/`planSourceLegs`, nunca
+no RPC). A sub COMPARTILHA o `record_type` da
 pai (por isso mora em tabela separada, para não quebrar `data_sources.record_type
 unique`/FK de `records`). Resolvida no ENGINE (perna por source-key); NÃO toca nas
 RPCs de widget. O loader (`lib/config/sources.ts`) une `data_sources` + `sub_sources`
@@ -259,6 +313,20 @@ responsável/operação (não a um registro): `(entity_type, entity_id, field_ke
 via sync/automação), `field`, `old_value`/`new_value` jsonb, `origin`
 (`app|sync_bitrix|sync_sheet` + `api` desde 0074 + `automation` desde 0109 —
 movimentos executados pelas automações do kanban, via service role).
+Tabela **append-only e write-only**: só há policy de SELECT e INSERT (nenhuma de
+UPDATE/DELETE — só service role apaga), e nada no app a LÊ — não existe `select`
+na tabela em todo o TypeScript, nenhum trigger/view/função em SQL e nenhuma tela
+de histórico. É folha: nada a referencia, e o `record_id` cascateia a partir de
+`records`.
+**Retenção (07/09/2026):** as 100 alterações mais recentes por
+`(organization_id, origin, field)`; o resto é apagado diariamente pelo job
+`purge-audit-log` (`apply/pg-cron-purge-audit-log.sql`, 03:40 UTC). A partição
+inclui a organização porque a tabela é global e o sync de uma org sozinho gera
+~99% das linhas — sem isso uma org despejaria o rastro da outra. O saneamento
+retroativo é `apply/sanitize-audit-log.sql` (rodar UMA vez, antes do cron:
+868.178 → 17.515 linhas, 163 MB → poucos MB). Sem retenção a tabela chegou a
+40% do banco inteiro, sendo 99,4% churn do sync do Bitrix contra 594 edições
+humanas.
 
 **`reuniao_freeze_backup`** (0051) — valores originais de Data Reunião zerados pela
 Fase 12 (usado pelo `undo-mock-reuniao.sql`).
@@ -312,6 +380,14 @@ Desde a 0092, a gestão de `user_roles` é confinada à própria org
 (`auth_org_member_ids`) e o papel `admin` só é concedido/removido por
 org_admin (`auth_can_grant_admin`). org_admin/Owner NÃO são linhas de
 `roles` (rótulos em `SPECIAL_ROLE_LABELS`, `lib/auth/roles.ts`).
+As três primeiras são catálogo do SISTEMA (não têm `organization_id` e a 0091
+não as recriou): desde a **0122** a escrita é service-role-only (sem policy de
+escrita + `revoke all` seguido de `grant select`; o `revoke` enumerado deixaria
+TRUNCATE para trás). Antes, `manage_field_definitions`… não — bastava
+`manage_users_roles`, permissão de USUÁRIO: um admin de qualquer org inseria
+`('vendedor','view_all_records')` em `role_permissions` e o grant valia para
+TODAS as orgs, porque `records_select` (0091) lê exatamente essa permissão.
+O app apenas LÊ essas tabelas.
 
 **`responsibles`** (0012) — lista curada de responsáveis. `display_name`,
 `bitrix_user_id` unique (ASSIGNED_BY_ID, para o matching do sync), `user_id` →
@@ -502,7 +578,7 @@ restrições `allowed_responsible_ids`/`allowed_operation_ids`/`allowed_sources`
 shape em `lib/snapshots/types.ts`), `default_period` jsonb (0059), telemetria
 (`last_refreshed_at`, `last_refresh_error`, `last_accessed_at`, `access_count`).
 
-**`snapshot_records`** (0056) — cópia congelada dos registros permitidos
+**`snapshot_records`** (0056; +`deleted_at` sempre-null na 0121 — espelho morto p/ o predicado espelhado dos RPCs e o `.is()` do engine) — cópia congelada dos registros permitidos
 (PK `(snapshot_id, id)`; espelha as colunas consultáveis de `records`, incl.
 `is_mock`). **`snapshot_record_matches`** (0056) — cópia dos matches.
 
@@ -536,9 +612,22 @@ casado por linha. O sync do Bitrix dispara auto-match INCREMENTAL ao concluir
 job (lado A restrito por `last_synced_at` — índice `idx_records_type_synced`,
 0104).
 
-**`currencies`** (0036) — moedas habilitáveis (seed: BRL/USD ligadas, EUR/GBP/ARS
-desligadas). **`currency_rates`** (0036) — taxa R$ por unidade, PK
-`(code, year, quarter)` com `quarter` 0 = anual, 1–4 = trimestral.
+**`currencies`** (0036; POR ORG desde a **0123**) — moedas habilitáveis (seed:
+BRL/USD ligadas, EUR/GBP/ARS desligadas), PK `(organization_id, code)`.
+**`currency_rates`** (0036; idem) — taxa R$ por unidade, PK
+`(organization_id, code, year, quarter)` com `quarter` 0 = anual, 1–4 =
+trimestral, e FK COMPOSTA `(organization_id, code)` → `currencies` (taxa nunca
+aponta para a moeda de outra org). A 0090 as deixara GLOBAIS de propósito; a
+auditoria de 22/08/2026 reverteu: a escrita só exigia
+`manage_field_definitions` (permissão de usuário), então alguém da org A mexia
+na taxa que a org B usa nos widgets de dinheiro e nos ALVOS de remuneração
+(`factor.targetCurrency` → BRL). `seed_org_defaults` (0093, recriada na 0123)
+passa a semear o catálogo de moedas da org nova.
+**Read side:** os loaders de `lib/widgets/currency.ts` aceitam `orgId` —
+opcional no client do usuário (a RLS recorta), **obrigatório** em caminho
+service role: `lib/snapshots/refresh.ts` congela moedas/taxas com o service
+client e, sem o filtro, as taxas de todas as orgs colidiriam na mesma chave
+`rateKey(code, year, quarter)`.
 
 **`api_keys`** (0074) — chaves de ingestão: `key_hash` (sha256; nunca plaintext),
 `key_prefix` (exibição), `label`, `source_key` → `data_sources`, `mapping` jsonb
@@ -575,6 +664,34 @@ nasce com `remuneracao` ligado (`on conflict do nothing` — reaplicar não
 sobrescreve toggles). O gate de app vive em `AREA_FEATURES`
 (lib/auth/access.ts) + `PresetDashboard.requiresFeature`.
 
+**`value_mappings`** (0117) — MAPEAMENTOS DE VALORES (de-para de
+classificação, ex-caches "Map Cargos"/"Map Segmentos" do Apps Script):
+`organization_id`, `domain` (chave do registry EFETIVO — código
+`lib/mappings/domains.ts` (`cargo`/`segmento`) ∪ linhas de `mapping_domains`
+0119), `raw_value` (exibição),
+`raw_norm` (lookup — `lower(trim())`, unique por org+domínio), `outputs` jsonb
+(`{"cargo_area": "TI", "cargo_nivel": "Gerente"}`), `origin` (0118 —
+`manual|seed|auto|ai`; informativa, nunca muda o lookup). A APLICAÇÃO é engine-side
+(`lib/mappings/apply.ts`): grava os campos alvo em `records.custom_fields`
+como espelho derivado (carimbos `field_modified_at` + `locally_modified_at`;
+sem audit/webhook); valores sem entrada viram pendência notificada por
+TAREFA do org_admin. RLS: SELECT p/ membros da org; escrita admin (espelho de
+`source_auto_operations`). Seed idempotente:
+`supabase/apply/seed-value-mappings.sql`.
+
+**`mapping_domains`** (0119) — domínios DINÂMICOS de reclassificação
+(de-para criado pela UI, aba Campos → Reclassificações): `key` (=
+`value_mappings.domain` das entradas; MESMO check de slug da 0117 — as
+entradas do domínio dinâmico passam no check existente sem tocá-lo; unique
+por org), `label`, `record_types[]` (bases raiz), `raw_field_key` (campo cru
+SEM prefixo `custom:`; check de slug como DEFESA — o valor é interpolado em
+select PostgREST pelos loaders), `raw_field_label` e `targets` jsonb
+(`[{fieldKey, label, options}]` — categorias canônicas na própria linha). O
+registry efetivo em runtime é código ∪ banco (`lib/mappings/registry.ts` —
+parse FAIL-CLOSED por linha; colisão de key: código vence). Domínio dinâmico
+não tem classificador codificado (motor aprendido é o único sugestor). RLS:
+SELECT p/ membros da org; escrita admin. NUNCA policy anon.
+
 **`comp_sheet_links`** (0115) — vínculo DURÁVEL do export da Remuneração p/
 Google Planilhas: PK composta `(organization_id, user_id, scope_key)`
 (`scope_key` check `'visao-geral' | 'minha'` — uma planilha por usuário×
@@ -599,8 +716,8 @@ de `anon`/`authenticated`.
 
 | Função | Versão vigente | Papel |
 |---|---|---|
-| `run_widget_query` | **0105** (recriada 19×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085, 0105) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget. 0105: op interno `in_ci` (pertencimento normalizado — fusão de perfis de operação) |
-| `run_widget_query_snapshot` | **0105** (0056, 0057, 0072, 0085, 0105) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role |
+| `run_widget_query` | **0121** (recriada 20×: 0011, 0015, 0020, 0025, 0028, 0034, 0035, 0039, 0040, 0042, 0047, 0048, 0049, 0050, 0052, 0054, 0072, 0085, 0105, 0121) | Monta SQL dinâmico contra `records` a partir da config JSONB do widget. 0105: op interno `in_ci` (fusão de perfis de operação); 0121: predicado `deleted_at is null` (lixeira fora) |
+| `run_widget_query_snapshot` | **0121** (0056, 0057, 0072, 0085, 0105, 0121) | Cópia apontada para `snapshot_records`, com restrições do snapshot aplicadas internamente (`is_mock OR restrições`); EXECUTE só para service role. 0121: o predicado da lixeira é ESPELHADO e NO-OP (`snapshot_records.deleted_at` é sempre null — a captura exclui a lixeira) |
 
 **Invariante:** toda migração que recriar `run_widget_query` DEVE recriar
 `run_widget_query_snapshot` (e `_widget_match_expr` ↔ `_widget_match_expr_snap`) no
@@ -624,8 +741,9 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `auth_roles`, `auth_has_role`, `auth_has_permission` | 0003 | Helpers de RLS (SECURITY DEFINER); desde 0068, sempre chamados como `(select ...)` nas policies |
 | `auth_responsible_ids` | 0037 (redefinida 0101) | IDs de `responsibles` vinculados ao usuário logado — base da visibilidade do vendedor. Desde a 0101 devolve o GRUPO (ids próprios + principais + apelidos desses principais): registros no id do apelido continuam visíveis |
 | `operation_subtree` | 0016 | Subárvore de operações (aninhamento) |
-| `snapshot_refresh_copy` | 0056 (recriada 0057) | Cópia atômica de `records` → `snapshot_records` (mock-aware); EXECUTE só service role |
+| `snapshot_refresh_copy` | 0056 (recriada 0057, 0121) | Cópia atômica de `records` → `snapshot_records` (mock-aware); 0121: lixeira FORA das linhas de dados (ramo partner-only segue sem filtro — colunas match: resolvem parceiro na lixeira); EXECUTE só service role |
 | `enforce_reuniao_freeze` | 0051 | Trigger: descarta escrita de Data Reunião < 01/06/2026 e protege mocks |
+| `enforce_records_trash_guard` | 0121 | Trigger: mudança de `records.deleted_at` (lixeira) exige papel admin; escape = GUC `app.allow_protected_change` (padrão 0089). Inerte p/ escritores service-role (não mandam a coluna); a purga é DELETE (fora do trigger) |
 | `enforce_task_lock` | 0063 | Trigger: só admin/gestor excluem/destravam tarefa `locked` |
 | `enforce_task_global` | 0066 | Trigger: só admin/gestor alteram tarefas globais |
 | `recalc_apply_updates` | 0070 | Aplica um lote de recálculo num único UPDATE set-based |
@@ -637,11 +755,13 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
 | `seed_org_defaults`, `delete_organization` | 0093 | Provisionamento de org (console do Owner) — EXECUTE só service role |
 | `auth_denied_source_keys`, `auth_denied_record_types` | 0094 | Bases negadas por override individual (RLS de data_sources/sub_sources/records) |
 | `maintenance_analyze` | 0102 | `ANALYZE` de `records`/`record_matches` (SECURITY DEFINER — service role não é dona das tabelas); EXECUTE só service role. Disparada pelo runner do sync ao concluir job com >= 2.000 linhas escritas |
+| `registros_populated_refs` | 0120 (recriada 0121 — lixeira fora) | Refs núcleo + chaves de `custom_fields` com >=1 valor não-vazio num `record_type` (mocks e lixeira fora) — SECURITY INVOKER (RLS de `records` recorta por usuário). Consumida pela página /registros (colunas dirigidas por dados). EXECUTE só authenticated/service_role |
 
 ## 5. Triggers
 
 - **`trg_*_updated_at`** em ~28 tabelas → `set_updated_at` (padrão da 0001).
 - **`trg_records_reuniao_freeze`** (0051) em `records` → `enforce_reuniao_freeze`.
+- **`trg_records_trash_guard`** (0121) em `records` → `enforce_records_trash_guard`.
 - **`trg_tasks_lock`** (0063) e **`trg_tasks_global`** (0066) em `tasks`.
 - **Triggers de stamp de org** (0090; +0098): `trg_records_set_org`,
   `trg_audit_log_set_org`, `trg_record_matches_set_org`,
@@ -678,8 +798,17 @@ em `data_sources.key → record_type` com fallback nos builtins; `stable`),
   board é gate de ACTION, não de RLS (resolução de acesso a board continua só
   nos helpers `auth_board_*`).
 - **Tabelas de configuração** (`field_definitions`, `currencies`, `match_rules`,
-  correspondências...): leitura para autenticados; escrita exige
-  `manage_field_definitions`.
+  correspondências...): leitura para membros da org; escrita exige
+  `manage_field_definitions` **e** o gate de org (`currencies`/`currency_rates`
+  entraram nesse padrão na 0123).
+- **Catálogo do sistema** (`roles`, `permissions`, `role_permissions`): SELECT
+  para autenticados (é catálogo, não dado de tenant); escrita SÓ service role
+  (0122). `user_roles` NÃO entra aqui — a 0092 já a recorta por org.
+- **`reuniao_freeze_backup`** (0051): era a ÚNICA tabela do schema sem RLS —
+  com os grants default do Supabase, qualquer autenticado de qualquer org lia e
+  escrevia o backup de Data Reunião de registros REAIS. A 0122 liga a RLS sem
+  nenhuma policy (service-role-only; o único consumidor é o runbook
+  `supabase/apply/undo-mock-reuniao.sql`).
 - **Tabelas de segredo/operacão** (`api_keys`, `webhook_*`, `sync_jobs`,
   `bitrix_writeback_queue`): SELECT admin (ou `view_all_records`/autenticado nos
   casos do 0038); escrita SÓ service role (`revoke` explícito na 0074).
@@ -809,6 +938,12 @@ snapshot): ver [`../supabase/README.md`](../supabase/README.md).
 | 0113 | field_options_source | `field_definitions.options_source` (check `in ('responsibles')`): campo `selecao` de dropdown VIVO — options reescritas pelo app com os responsáveis ativos principais (`refreshResponsibleOptionFields`; refresh no apply de preset, pós-sync e actions de Responsáveis). Não recria as RPCs |
 | 0114 | org_features | Recursos SOB DEMANDA por org (config custom — hoje `remuneracao`): linha por org com jsonb de toggles; SELECT p/ membros, escrita SÓ service role (console /owner); seed liga `remuneracao` p/ a Zapper (`on conflict do nothing`). Gate de app em AREA_FEATURES + requiresFeature de preset. Não recria as RPCs |
 | 0115 | comp_sheet_links | Export da Remuneração p/ Google Planilhas via Apps Script Web App (sem credencial Google no app): `comp_sheet_links` (vínculo durável usuário×escopo→planilha; RLS linha-própria) + `comp_sheet_export_tickets` (ticket single-use do handshake: token sha256, payload jsonb, consumed/completed; SEM policies — service role only). Não recria as RPCs |
+| 0116 | sub_sources_ignore_period | `sub_sources.ignore_period` boolean (sub-base que NÃO respeita o filtro de período do dashboard; resolvido 100% no engine via pass-through `record_types` do wrapper 0054). Não recria as RPCs |
+| 0117 | value_mappings | Mapeamentos de VALORES (de-para de classificação): entradas por org+domínio+`raw_norm` com `outputs` jsonb; domínios em código (`lib/mappings/domains.ts`), aplicação como espelho derivado em `custom_fields`, pendências em tarefa do org_admin; RLS select org / escrita admin. Seed `supabase/apply/seed-value-mappings.sql`. Não recria as RPCs |
+| 0118 | value_mappings_origin | `value_mappings.origin` (`manual|seed|auto|ai`) — origem da entrada (badge; auto = classificador V5 portado, ai = assistente). Backfill pré-0118 → 'seed'. Não recria as RPCs |
+| 0119 | mapping_domains | Domínios DINÂMICOS de reclassificação (aba Campos → Reclassificações): key (mesmo slug-check de `value_mappings.domain`), record_types[], campo cru + targets jsonb com categorias canônicas; registry efetivo = código ∪ banco (`lib/mappings/registry.ts`, fail-closed). RLS select org / escrita admin. Não recria as RPCs |
+| 0120 | registros_populated_refs | Função `registros_populated_refs(record_type)` — colunas núcleo e chaves custom populadas (>=1 valor não-vazio, mocks fora), SECURITY INVOKER (RLS recorta por usuário); base das colunas dirigidas por dados da página /registros. EXECUTE só authenticated/service_role. Não recria as RPCs |
+| 0121 | records_trash | LIXEIRA de registros (soft delete 30d): `records.deleted_at/deleted_by` + índice parcial + trigger `enforce_records_trash_guard` (admin-only) + `snapshot_records.deleted_at` (espelho morto); recria o PAR de RPCs (`deleted_at is null` espelhado), `snapshot_refresh_copy` e `registros_populated_refs`. Purga: `apply/pg-cron-purge-records-trash.sql` |
 
 Nota (20/07/2026): o preset "Inbound" (`lib/presets/inbound.ts`, aplicado por
 Configurações → Presets) semeia **DADOS**, não schema: linhas em `sub_sources`
@@ -821,3 +956,37 @@ AEs/SDR-BDR), `comp_plans` (5 planos, identidade `config.presetKey`),
 `field_definitions` (`adicional_ao_mrr`, `sdr_reuniao` com
 `options_source='responsibles'`), `sub_sources` (`reunioes_qualificadas`) e
 chaves `comp_*` no registry — tudo ensure-only pelo caminho de fábrica.
+
+### 0122 / 0123 (22/08/2026) — auditoria de segurança
+
+`0122_security_tenant_isolation.sql`: escrita de `roles`/`permissions`/
+`role_permissions` vira service-role-only (escalada de privilégio entre orgs) e
+`reuniao_freeze_backup` ganha RLS (única tabela sem tranca no schema).
+`0123_currencies_por_org.sql`: `currencies`/`currency_rates` passam a ser
+org-scoped (PK e FK compostas + policies do padrão 0091), `seed_org_defaults`
+semeia o catálogo da org nova e as orgs existentes recebem o delas no backfill.
+Detalhe e prova em [`seguranca.md`](./seguranca.md).
+
+### 0124 (08/09/2026) — sessões do painel de IA da Operação
+
+`0124_operacao_ai_sessions.sql`: `operacao_ai_sessions` guarda a conversa
+persistida do painel de IA de `/operacao` — uma linha por (org, usuário,
+ESCOPO), com `turns`/`chat`/`pending`/`undo_snapshot`. Espelha a 0098
+(`dashboard_ai_sessions`) com duas diferenças que a natureza do lugar impõe:
+
+- **`organization_id` está na PK** (`organization_id, user_id, scope`). O
+  escopo é uma chave de registry em CÓDIGO ("remuneracao", "mapeamentos"), a
+  mesma em toda org — sem a org na chave, um usuário multi-org veria em uma org
+  a prévia e o snapshot de desfazer que gerou em outra, e os sobrescreveria. A
+  RLS não pega isso: ele é membro das duas. Mesmo movimento da 0123 em
+  `currencies`.
+- **Sem trigger de stamp de org**: não existe linha-pai de onde derivá-la. A
+  action carimba com `getActiveOrgId()` e o `with check` é a única muralha
+  (padrão de `value_mappings`/`currencies`); por isso o gate do app falha ALTO
+  sem org ativa, em vez de deixar a linha cair no default da org legada.
+
+`pending` guarda o ALVO junto do JSON (a linha é por escopo, não por
+plano/domínio) e `undo_snapshot` não tem FK de propósito — o alvo pode ser
+excluído depois, e o restore responde amigável em vez de recriar algo por
+baixo. RLS: linha própria + gate de org, `revoke all from anon`. Detalhe em
+[`arquitetura.md`](./arquitetura.md) §4.22.

@@ -125,7 +125,20 @@ import {
   type ResolvedCalcMetric,
 } from "./calc-metrics";
 import { applyFilterSourceTargets } from "./filter-sources";
-import { foldRowGroup, mergeRowsByBucket } from "./bucket-merge";
+import {
+  contractCaseRows,
+  foldRowGroup,
+  mergeRowsByBucket,
+} from "./bucket-merge";
+import { planCaseExpansion } from "./case-dim";
+import {
+  closedWeekOf,
+  dimWeekStart,
+  effectiveWeekMode,
+  rpcDimForClosedWeek,
+  snapPeriodToClosedWeek,
+  snapRangeToClosedWeek,
+} from "./closed-week";
 import {
   EMPTY_CANON,
   canonicalOf,
@@ -171,6 +184,7 @@ import {
   applyPeriodToFilters,
   CORE_DATE_COLS,
   patchAuxPeriodByType,
+  PERIOD_FIELD_SENTINEL,
   resolveDateToken,
   scopedAuxPeriod,
   type DashboardPeriod,
@@ -197,6 +211,7 @@ import {
 } from "@/lib/metas/resolve";
 import {
   BUILTIN_SOURCES,
+  ignoresPeriod,
   isSubSource,
   planSourceLegs,
   recordTypeOf,
@@ -1999,8 +2014,14 @@ export async function runWidget(
     const f = legFiltersFor(scopedAuxPeriod(runPeriod, scope, catalog), [
       scope,
     ]);
+    // Escopo que ignora o período (0116): o applyPeriodToFilters já derruba o
+    // período sintetizado no engine; o patch reintroduziria byType[rt] num
+    // @period PRÉ-sintetizado (filtro rápido) — remove o sentinela em vez de
+    // patchear (a aux é `record_type in (rt)` só, remoção segura).
     return {
-      filters: patchAuxPeriodByType(f, rt, scopeField),
+      filters: ignoresPeriod(scope, catalog)
+        ? f.filter((x) => x.field !== PERIOD_FIELD_SENTINEL)
+        : patchAuxPeriodByType(f, rt, scopeField),
       corr: corrMapForKeys([scope]),
     };
   };
@@ -2018,6 +2039,20 @@ export async function runWidget(
     runPeriod?: DashboardPeriod | null
   ): Promise<WidgetRow[]> => {
     const filters = filtersOf(effMainSources);
+    // Payload de dims p/ os RPCs desta rodada (Semana Fechada): sáb–sex desce
+    // como 'day' (o merge client-side funde adiante) e seg_dom+week_month
+    // desce weekMode "full". As `dims` ORIGINAIS seguem mandando no merge,
+    // nos rótulos e na ordenação — todas as pernas da rodada usam o MESMO
+    // payload, então as tuplas continuam casando entre si.
+    // Dimensão CONDICIONAL multi-campo (caseFormula com refs além do próprio
+    // campo): as refs viram dims CRUAS extras no payload (planCaseExpansion) e
+    // a contração de volta ao shape da config roda client-side ANTES do merge
+    // por bucket (contractCaseRows). Por isso os laços de tupla desta rodada
+    // usam rpcDims.length — as linhas cruas têm as colunas EXPANDIDAS.
+    const caseExpansion = planCaseExpansion(dims, rpcDimForClosedWeek);
+    const rpcDims = caseExpansion
+      ? caseExpansion.rpcDims
+      : dims.map(rpcDimForClosedWeek);
     const rpcMetrics: Metric[] = [];
     const rpcIdxOfConfig = new Map<number, number>(); // idx config → idx rpc (normais)
     config.metrics.forEach((m, i) => {
@@ -2071,7 +2106,7 @@ export async function runWidget(
     // max(principal, condição, moeda) em vez da soma das três.
     const mainPromise = supabase.rpc("run_widget_query", {
       p_source: config.source,
-      p_dimensions: dims,
+      p_dimensions: rpcDims,
       p_metrics: rpcMetrics,
       p_filters: filters,
       p_correspondences: correspondencesMap,
@@ -2120,7 +2155,7 @@ export async function runWidget(
             "run_widget_query",
             {
               p_source: config.source,
-              p_dimensions: dims,
+              p_dimensions: rpcDims,
               p_metrics: g.keys.map(basisMetric),
               p_filters: [...(scoped ? scoped.filters : filters), ...condExtra],
               p_correspondences: scoped ? scoped.corr : correspondencesMap,
@@ -2131,7 +2166,8 @@ export async function runWidget(
           for (const key of g.keys) condValueByKey.set(key, {});
           for (const r of condRows) {
             const tuple: unknown[] = [];
-            for (let i = 1; i <= dims.length; i++) tuple.push(r[`dim_${i}`] ?? null);
+            for (let i = 1; i <= rpcDims.length; i++)
+              tuple.push(r[`dim_${i}`] ?? null);
             const tk = JSON.stringify(tuple);
             g.keys.forEach((key, ki) => {
               const v = r[`metric_${ki + 1}`];
@@ -2199,7 +2235,7 @@ export async function runWidget(
       metricInfos.length + basisInfos.length > 0
         ? buildMoneyBreakdowns(
             supabase,
-            dims,
+            rpcDims,
             filters,
             correspondencesMap,
             [...metricInfos, ...basisInfos],
@@ -2297,7 +2333,7 @@ export async function runWidget(
         legMetrics.length > 0
           ? supabase.rpc("run_widget_query", {
               p_source: config.source,
-              p_dimensions: dims,
+              p_dimensions: rpcDims,
               p_metrics: legMetrics,
               p_filters: legFilters,
               p_correspondences: legCorr,
@@ -2342,7 +2378,7 @@ export async function runWidget(
               "run_widget_query",
               {
                 p_source: config.source,
-                p_dimensions: dims,
+                p_dimensions: rpcDims,
                 p_metrics: g.keys.map(basisMetric),
                 p_filters: [
                   ...(scoped ? scoped.filters : legFilters),
@@ -2358,7 +2394,7 @@ export async function runWidget(
             for (const key of g.keys) out.condValueByKey.set(key, {});
             for (const r of condRows) {
               const tuple: unknown[] = [];
-              for (let i = 1; i <= dims.length; i++)
+              for (let i = 1; i <= rpcDims.length; i++)
                 tuple.push(r[`dim_${i}`] ?? null);
               const tk = JSON.stringify(tuple);
               g.keys.forEach((key, ki) => {
@@ -2385,7 +2421,7 @@ export async function runWidget(
         legMetricInfos.length + legBasisInfos.length > 0
           ? buildMoneyBreakdowns(
               supabase,
-              dims,
+              rpcDims,
               legFilters,
               legCorr,
               [...legMetricInfos, ...legBasisInfos],
@@ -2404,7 +2440,7 @@ export async function runWidget(
           : []) as Record<string, unknown>[];
         for (const r of legRows) {
           const tuple: unknown[] = [];
-          for (let i = 1; i <= dims.length; i++)
+          for (let i = 1; i <= rpcDims.length; i++)
             tuple.push(r[`dim_${i}`] ?? null);
           out.rowByTuple.set(JSON.stringify(tuple), r);
         }
@@ -2483,9 +2519,10 @@ export async function runWidget(
           src[`metric_${ri + 1}`] = row[`metric_${ri + 1}`];
         });
         // Chave do grupo desta linha nas consultas auxiliares/pernas (dims
-        // cruas do RPC).
+        // cruas do RPC — expandidas quando há dim condicional multi-campo).
         const tuple: unknown[] = [];
-        for (let i = 1; i <= dims.length; i++) tuple.push(row[`dim_${i}`] ?? null);
+        for (let i = 1; i <= rpcDims.length; i++)
+          tuple.push(row[`dim_${i}`] ?? null);
         const tk = JSON.stringify(tuple);
         const bdArr = hasBd ? bdMap[tk] : undefined;
         const basis: BasisValues = {};
@@ -2566,47 +2603,59 @@ export async function runWidget(
     }
 
     // Métricas monetárias: anexa `__money` a cada linha (ANTES da rotulagem, que
-    // muta os dim_* usados como chave de grupo). Charts plotam `metric_<n>`
-    // numérico. bdMap vazio = degradação (aux falhou): não anexa __money nem
-    // sobrescreve os valores, deixando o número cru do RPC — melhor que zerar.
+    // muta os dim_* usados como chave de grupo — por isso rpcDims: as chaves do
+    // bdMap saíram das linhas CRUAS, expandidas quando há dim condicional
+    // multi-campo). Charts plotam `metric_<n>` numérico. bdMap vazio =
+    // degradação (aux falhou): não anexa __money nem sobrescreve os valores,
+    // deixando o número cru do RPC — melhor que zerar.
     if (moneyEntries.length > 0 && rows.length > 0 && hasBd) {
-      attachMoney(rows, dims, moneyEntries, bdMap);
+      attachMoney(rows, rpcDims, moneyEntries, bdMap);
     }
     // Métricas monetárias de PERNA: mesmo attach, com o detalhamento da perna
     // (attachMoney faz merge em __money — chamadas múltiplas não se clobberam).
     for (const lr of legRuns) {
       if (!lr.ok || lr.moneyEntries.length === 0 || rows.length === 0) continue;
       if (Object.keys(lr.bdMap).length === 0) continue;
-      attachMoney(rows, dims, lr.moneyEntries, lr.bdMap);
+      attachMoney(rows, rpcDims, lr.moneyEntries, lr.bdMap);
     }
+
+    const mergeSpecs = config.metrics.map((m, i) => {
+      const rc = calcResolved.get(i);
+      return {
+        key: `metric_${i + 1}`,
+        kind: rc
+          ? ("calc" as const)
+          : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
+        evalBasis: rc?.formula
+          ? (b: BasisValues) =>
+              evalCalcMoney(
+                rc.formula!,
+                b,
+                calcMoneyMeta(rc, rates, conversionPeriod)
+              ).value
+          : undefined,
+      };
+    });
+
+    // Dimensão condicional MULTI-CAMPO: contrai as colunas expandidas de
+    // volta ao shape da config (tupla de refs → rótulo da expressão) e funde
+    // os grupos que caíram no mesmo rótulo — daqui em diante o shape é o de
+    // qualquer rodada.
+    const contracted = caseExpansion
+      ? contractCaseRows(rows, dims, caseExpansion, mergeSpecs)
+      : rows;
 
     // Dimensão `custom:` com transform: o RPC agrupa pelo valor CRU (0085,
     // ramo custom — o transform é só rótulo). Funde aqui pelo bucket, no
     // choke point único — principal, comparação, pernas do businessDayAlign,
     // card, quick-table e snapshot (mesmo engine) recebem linhas já fundidas.
-    // Dimensão responsible_id com apelidos (0101) funde apelido→principal na
-    // MESMA passada. Sem dim custom+transform nem apelido, `merged === rows`
-    // (caminho atual intocado).
+    // Dimensão responsible_id com apelidos (0101) funde apelido→principal e a
+    // dim condicional de campo ÚNICO funde valor→rótulo na MESMA passada. Sem
+    // nada disso, `merged === rows` (caminho atual intocado).
     const merged = mergeRowsByBucket(
-      rows,
+      contracted,
       dims,
-      config.metrics.map((m, i) => {
-        const rc = calcResolved.get(i);
-        return {
-          key: `metric_${i + 1}`,
-          kind: rc
-            ? ("calc" as const)
-            : ((m.agg ?? "sum") as "sum" | "count" | "avg" | "min" | "max"),
-          evalBasis: rc?.formula
-            ? (b: BasisValues) =>
-                evalCalcMoney(
-                  rc.formula!,
-                  b,
-                  calcMoneyMeta(rc, rates, conversionPeriod)
-                ).value
-            : undefined,
-        };
-      }),
+      mergeSpecs,
       respCanon.canonicalById
     );
     if (merged !== rows) {
@@ -2630,9 +2679,13 @@ export async function runWidget(
     divide: boolean;
   } | null> => {
     if (!cmpSpec || !period) return null;
+    // Snapshot do spec NA EXECUÇÃO (pós-snap da Semana Fechada — o reassign
+    // acontece antes do Promise.all que nos invoca); também preserva o
+    // narrowing dentro das closures abaixo.
+    const spec = cmpSpec;
     try {
       const isWindow =
-        cmpSpec.base === "window_avg" || cmpSpec.base === "window_median";
+        spec.base === "window_avg" || spec.base === "window_median";
       // Janelas: dims cronológicas saem da consulta de comparação — cada
       // bucket do período atual compara contra a média/mediana por bucket da
       // janela inteira (por tupla das demais dims).
@@ -2641,16 +2694,13 @@ export async function runWidget(
         .filter((i) => !isWindow || !isChronoDim(dims[i]));
       let cmpDims = sharedIdx.map((i) => dims[i]);
       let bucketed = false;
-      let divide = cmpSpec.base === "window_avg";
-      if (cmpSpec.base === "window_median" && cmpSpec.bucket) {
+      let divide = spec.base === "window_avg";
+      if (spec.base === "window_median" && spec.bucket) {
         // Mediana precisa de UMA coluna de data p/ bucketizar; fontes com
         // campos divergentes degradam p/ média (total ÷ nº de buckets).
         const bucketField = uniquePeriodField(period);
         if (bucketField) {
-          cmpDims = [
-            ...cmpDims,
-            { field: bucketField, transform: cmpSpec.bucket },
-          ];
+          cmpDims = [...cmpDims, { field: bucketField, transform: spec.bucket }];
           bucketed = true;
         } else {
           divide = true;
@@ -2658,12 +2708,12 @@ export async function runWidget(
       }
       const cmpRows = await computeRows(
         cmpDims,
-        (srcs) => cmpFiltersFor(cmpSpec, srcs),
+        (srcs) => cmpFiltersFor(spec, srcs),
         // Período DESTA rodada (range de comparação) — auxes escopadas.
         {
           field: period!.field,
-          from: cmpSpec.from,
-          to: cmpSpec.to,
+          from: spec.from,
+          to: spec.to,
           fieldBySource: period?.fieldBySource,
         }
       );
@@ -2807,6 +2857,33 @@ export async function runWidget(
     return { legs, n, holidays, refIso: ref, reference };
   })();
 
+  // Semana Fechada (03/08/2026): expande o período da RODADA p/ semanas
+  // completas nas bordas (regra da expansão desde 12/08/2026 — toda semana
+  // tocada entra inteira; lib/widgets/closed-week.ts).
+  // 100% engine: o snap acontece AQUI (depois do cmpSpec, que nasce do período
+  // ORIGINAL p/ preservar a semântica do preset, e do lowerCalcGoalOperands,
+  // que precisa do período original — expandido cruzaria o mês e degradaria a
+  // meta p/ anual). bd-align ativo vence (pernas mensais); comparação
+  // previous_period/previous_year snapa junto; previous_period_bd e window_*
+  // seguem sem snap (limitação documentada).
+  const closedWeek = bdAlignCtx ? null : closedWeekOf(dims);
+  const runPeriod = closedWeek
+    ? snapPeriodToClosedWeek(period, closedWeek)
+    : period;
+  if (
+    closedWeek &&
+    cmpSpec &&
+    (cmpSpec.base === "previous_period" || cmpSpec.base === "previous_year")
+  ) {
+    // Bounds do spec são não-nulos — o snap devolve null SÓ p/ entrada null.
+    const snapped = snapRangeToClosedWeek(cmpSpec.from, cmpSpec.to, closedWeek);
+    cmpSpec = {
+      ...cmpSpec,
+      from: snapped.from ?? cmpSpec.from,
+      to: snapped.to ?? cmpSpec.to,
+    };
+  }
+
   const [rows, cmpRun] = await Promise.all([
     bdAlignCtx
       ? Promise.all(
@@ -2814,7 +2891,7 @@ export async function runWidget(
             computeRows(dims, (srcs) => legFiltersFor(leg, srcs), leg)
           )
         ).then((parts) => parts.flat())
-      : computeRows(dims, (srcs) => legFiltersFor(period, srcs), period),
+      : computeRows(dims, (srcs) => legFiltersFor(runPeriod, srcs), runPeriod),
     bdAlignCtx ? Promise.resolve(null) : runComparison(),
   ]);
 
@@ -3014,9 +3091,16 @@ export async function runWidget(
     const dim = dims[i];
     const key = `dim_${i + 1}`;
     if (isLabelTransform(dim.transform)) {
+      // weekMode/âncora EFETIVOS (Semana Fechada força "full"; sáb–sex rotula
+      // a partir do bucket de sábado).
       for (const r of rows) {
         if (r[key] != null)
-          r[key] = formatBucketLabel(dim.transform!, r[key], dim.weekMode);
+          r[key] = formatBucketLabel(
+            dim.transform!,
+            r[key],
+            effectiveWeekMode(dim),
+            dimWeekStart(dim)
+          );
       }
       continue;
     }

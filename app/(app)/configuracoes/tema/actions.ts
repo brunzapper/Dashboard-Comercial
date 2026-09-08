@@ -1,9 +1,11 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 03/08/2026
 // Server Actions da aba Configurações → Tema.
 // - saveThemePreferences: preferência PESSOAL (user_settings.settings.theme/
-//   accentColor; null = volta a herdar o padrão da org). Grava também os
-//   cookies theme_mode/theme_accent com os valores EFETIVOS resolvidos
-//   (resolveTheme) — a próxima request já sai correta do SSR.
+//   accentColor/laserColor; null = volta a herdar o padrão da org — laser
+//   herda direto o padrão do app, vermelho). Grava também os cookies
+//   theme_mode/theme_accent com os valores EFETIVOS resolvidos (resolveTheme)
+//   — a próxima request já sai correta do SSR. A cor do laser NÃO tem cookie
+//   (só a página do dashboard a lê, no SSR autenticado).
 // - saveOrgThemeDefault: padrão da ORGANIZAÇÃO (organizations.theme, 0108) —
 //   só org_admin (RLS organizations_update é a muralha). Também atualiza os
 //   cookies do PRÓPRIO admin (a escolha individual dele, se houver, prevalece
@@ -55,18 +57,22 @@ async function setEffectiveCookies(
 }
 
 /**
- * Preferência pessoal. `theme`/`accentColor` null = limpa (herda o padrão da
- * org); valor inválido é tratado como null (whitelist).
+ * Preferência pessoal. `theme`/`accentColor`/`laserColor` null = limpa (herda
+ * o padrão da org; laser volta ao vermelho padrão do app); valor inválido é
+ * tratado como null (whitelist). As três chaves são sobrescritas a cada save —
+ * o form envia SEMPRE o trio.
  */
 export async function saveThemePreferences(input: {
   theme?: string | null;
   accentColor?: string | null;
+  laserColor?: string | null;
 }): Promise<ThemeActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
 
   const theme = normalizeThemeMode(input.theme);
   const accentColor = normalizeHexColor(input.accentColor);
+  const laserColor = normalizeHexColor(input.laserColor);
 
   const supabase = await createClient();
   const { data } = await supabase
@@ -78,7 +84,7 @@ export async function saveThemePreferences(input: {
   const { error } = await supabase.from("user_settings").upsert(
     {
       user_id: session.user.id,
-      settings: { ...current, theme, accentColor },
+      settings: { ...current, theme, accentColor, laserColor },
     },
     { onConflict: "user_id" }
   );

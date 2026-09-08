@@ -1,6 +1,8 @@
-// Versão: 3.3 | Data: 31/07/2026
+// Versão: 3.4 | Data: 03/08/2026
 // Página de um dashboard: computa os dados de cada widget (server, via RLS) e
 // entrega ao shell client (grid + charts). Fase 6A.
+// v3.4 (03/08/2026): Ponteiro Laser — carrega user_settings (loadUserSettings,
+//   React cache) e entrega laserColor (resolveLaserColor) ao DashboardClient.
 // v3.3 (31/07/2026): fingerprint deferido ganha a CONFIG do widget
 //   (widgetConfigFingerprint — hash das colunas de config, posição fora):
 //   editar um widget deferido re-busca sem F5 (antes o payload velho do lote
@@ -94,6 +96,7 @@ import {
   hasSelection,
   periodKeys,
   resolvePeriodSelection,
+  type EffectivePeriodBar,
   type PeriodSelection,
   type SavedPeriod,
 } from "@/lib/widgets/period";
@@ -139,6 +142,8 @@ import {
   type SourceKey,
 } from "@/lib/sources";
 import { loadSources } from "@/lib/config/sources";
+import { loadUserSettings } from "@/lib/config/user-settings";
+import { resolveLaserColor } from "@/lib/theme";
 import {
   applySourceScope,
   collectBoardSourceKeys,
@@ -283,6 +288,7 @@ export default async function DashboardPage({
     enabledCurrencies,
     currencyRates,
     allSources,
+    userSettings,
   ] = await timing.measure("base", () => Promise.all([
     supabase
       .from("widgets")
@@ -314,8 +320,17 @@ export default async function DashboardPage({
     // Catálogo da ORG do board (multi-org): a RLS já escopa; o filtro cobre a
     // visão de quem pertence a 2+ orgs.
     loadSources(supabase, dash.organization_id as string | null),
+    // Preferências GLOBAIS (user_settings — cor do Ponteiro Laser). React
+    // cache(): o layout autenticado já leu a linha nesta request.
+    session
+      ? loadUserSettings(session.user.id)
+      : Promise.resolve({} as Record<string, unknown>),
   ]));
   const currencyOptions = currencyOptionsFrom(enabledCurrencies);
+  // Cor do Ponteiro Laser (Configurações → Tema; default vermelho).
+  const laserColor = resolveLaserColor(
+    userSettings as { laserColor?: string | null }
+  );
 
   // Último período consultado pelo usuário neste dashboard (se houver). No modo
   // "por aba", cada aba guarda o seu em `lastPeriodByTab` (chave = id da aba).
@@ -418,14 +433,22 @@ export default async function DashboardPage({
 
   // Defaults por bucket, entregues ao cliente para exibir a seleção efetiva de
   // cada aba (deve bater com o que o servidor resolveu). Bucket "" cobre o modo
-  // global e dashboards sem abas / widgets sem aba.
+  // global e dashboards sem abas / widgets sem aba. `periodBarByTab` leva junto
+  // a config EFETIVA da barra em cada bucket (herança de periodBar.byTab já
+  // resolvida) — é dela que o cliente tira a visibilidade da barra na aba ativa.
   const buckets = scope === "tab" ? [...tabIds, firstTabId] : [""];
   const periodDefaultsByTab: Record<string, PeriodSelection> = {};
   const periodDefaultFieldByTab: Record<string, string> = {};
+  const periodBarByTab: Record<string, EffectivePeriodBar> = {};
   for (const b of new Set(buckets)) {
-    const d = resolveDefaults(savedFor(b));
+    const bar = resolver.effectiveBar(b);
+    // Bucket com a barra OCULTA: os defaults entregues ao cliente ignoram a
+    // preferência do usuário, exatamente como o resolver faz ao fixar o
+    // período — senão a UI exibiria uma janela que os dados não usam.
+    const d = resolveDefaults(savedFor(b), b, bar.enabled === false);
     periodDefaultsByTab[b] = d.periodDefaults;
     periodDefaultFieldByTab[b] = d.defaultField;
+    periodBarByTab[b] = bar;
   }
 
   // Período efetivo por widget: barra global (por bucket) + overrides dos
@@ -624,8 +647,14 @@ export default async function DashboardPage({
 
     // Seleção CRUA efetiva da barra de período de um bucket (URL > default),
     // p/ o filtro rápido de período sem valor espelhar o que a barra mostra.
+    // Barra OCULTA no bucket: espelha só o padrão dali (mesma regra do
+    // resolver — nem URL nem preferência entram).
     const rawSelectionForBucket = (bucket: string): PeriodSelection => {
-      const { periodDefaults } = resolveDefaults(savedFor(bucket));
+      const hidden = resolver.effectiveBar(bucket).enabled === false;
+      const periodDefaults =
+        periodDefaultsByTab[bucket] ??
+        resolveDefaults(savedFor(bucket), bucket, hidden).periodDefaults;
+      if (hidden) return periodDefaults;
       const keys = periodKeys(scope, bucket);
       const urlSel: PeriodSelection = {
         preset: str(sp[keys.preset]),
@@ -651,24 +680,27 @@ export default async function DashboardPage({
             stored?.kind === "period" ? stored : null;
           const wPeriod = periodByWidget[w.id];
           if (val && hasQuickValue(val)) {
-            // Com valor persistido o filtro rápido ASSUME o campo: se é o
-            // mesmo campo do período efetivo do widget, o geral deixa de
-            // aplicar (senão o applyPeriodToFilters do engine sobrescreveria a
-            // divergência local). Campos diferentes convivem (cruzamento).
-            if (wPeriod && wPeriod.field === entry.field) {
-              periodByWidget[w.id] = null;
-            }
             const p = resolvePeriodSelection(
               { preset: val.preset ?? "", de: val.de ?? "", ate: val.ate ?? "" },
               entry.field
             );
-            if (p) {
-              const pMap = entry.field.startsWith("unified:")
+            const pMap =
+              p && entry.field.startsWith("unified:")
                 ? { ...p, fieldBySource: resolveFieldBySource(entry.field) }
                 : p;
-              // Cobertura = fontes do widget ∪ fontes das métricas: o @period
-              // byType EXCLUI record_types fora do mapa, e as pernas por
-              // métrica (Metric.sources) reusam este filtro pré-sintetizado.
+            if (wPeriod && wPeriod.field === entry.field) {
+              // Takeover (MESMO campo do período efetivo): o filtro rápido
+              // VIRA o período do widget — o engine aplica os bounds por
+              // perna e a comparação/closedWeek/metas seguem funcionando.
+              // PERIOD_ALL (p = null) segue anulando. NÃO pré-sintetiza
+              // filtros aqui (dupla aplicação de @period).
+              periodByWidget[w.id] = pMap;
+            } else if (pMap) {
+              // Cruzamento (campo diferente): convive com o período geral,
+              // pré-sintetizado como antes. Cobertura = fontes do widget ∪
+              // fontes das métricas: o @period byType EXCLUI record_types
+              // fora do mapa, e as pernas por métrica (Metric.sources)
+              // reusam este filtro pré-sintetizado.
               filters = applyPeriodToFilters(
                 filters,
                 pMap,
@@ -676,7 +708,8 @@ export default async function DashboardPage({
                   (w.sources ?? []) as SourceKey[],
                   w.metrics,
                   fieldByKeyAll
-                )
+                ),
+                sources
               );
             }
           } else if (
@@ -1530,6 +1563,7 @@ export default async function DashboardPage({
         dateFormat={dashSettings.dateFormat}
         periodBar={periodBar}
         periodScope={scope}
+        periodBarByTab={periodBarByTab}
         periodDefaultsByTab={periodDefaultsByTab}
         periodDefaultFieldByTab={periodDefaultFieldByTab}
         filterOptionsById={filterOptionsById}
@@ -1540,6 +1574,7 @@ export default async function DashboardPage({
         deferredEngineIds={deferredEngineIds}
         initialTabId={str(sp.tab) || (focusWidget ? widgetTab(focusWidget) : "")}
         focusWidgetId={focusWidget ? focusId : undefined}
+        laserColor={laserColor}
       />
     </SourcesProvider>
   );

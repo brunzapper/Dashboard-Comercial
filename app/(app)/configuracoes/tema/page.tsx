@@ -1,8 +1,9 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 03/08/2026
 // Configurações → Tema: preferências visuais (modo claro/escuro/sistema + cor
-// de destaque, default #7431B3). Qualquer autenticado edita a PRÓPRIA
-// preferência; o Administrador de Organização também define o PADRÃO da org
-// (0108) — a escolha individual prevalece (resolveTheme, lib/theme.ts).
+// de destaque, default #7431B3, + cor do Ponteiro Laser, default vermelho).
+// Qualquer autenticado edita a PRÓPRIA preferência; o Administrador de
+// Organização também define o PADRÃO da org (0108) — a escolha individual
+// prevalece (resolveTheme, lib/theme.ts). O laser não tem padrão de org.
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrg } from "@/lib/auth/org";
 import { loadUserSettings } from "@/lib/config/user-settings";
@@ -24,6 +25,7 @@ export default async function TemaPage() {
   const prefs = settings as {
     theme?: string | null;
     accentColor?: string | null;
+    laserColor?: string | null;
   };
 
   return (
@@ -39,6 +41,7 @@ export default async function TemaPage() {
         <TemaForm
           userTheme={normalizeThemeMode(prefs.theme)}
           userAccent={normalizeHexColor(prefs.accentColor)}
+          userLaser={normalizeHexColor(prefs.laserColor)}
           orgTheme={org?.theme ?? null}
         />
       </div>

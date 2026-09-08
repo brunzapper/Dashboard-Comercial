@@ -1,3 +1,11 @@
+// Versão: 1.9 | Data: 08/09/2026 (v1.9: maxDuration = 300 — a página hospeda
+// o painel de IA da Operação (escopo `remuneracao`) e um turno tem orçamento
+// de 240s (AI_LOOP_TURN_BUDGET_MS) + o apply.)
+// Versão: 1.8 | Data: 05/08/2026 (v1.8: página movida de
+// /configuracoes/remuneracao para /operacao/remuneracao — sub-aba da área
+// Operação (cards do hub Workspace). A chave de ÁREA "remuneracao" segue
+// HISTÓRICA (requireSettingsArea/isSettingsAreaDenied intocados — precedente
+// fontes/log/moedas); conteúdo/props/params (?ano/?mes/?plano/?aba) idênticos.)
 // Versão: 1.7 | Data: 02/08/2026 (v1.7: export p/ Google Planilhas (0115) —
 // os dois ramos carregam a URL do Web App configurada (sync_config
 // 'comp_sheets_webapp' via loadCompSheetsWebappUrl): admin recebe a URL
@@ -69,6 +77,8 @@ import { MyCompView } from "@/components/configuracoes/remuneracao/my-comp-view"
 
 // Título da aba (template do layout completa "— {appName}").
 export const metadata = { title: "Remuneração" };
+// Turno do assistente de IA tem orçamento de 240s (AI_LOOP_TURN_BUDGET_MS).
+export const maxDuration = 300;
 
 const str = (v: string | string[] | undefined): string =>
   typeof v === "string" ? v : "";
@@ -116,7 +126,6 @@ export default async function RemuneracaoPage({
       canon,
       { data: plansData },
       { data: entriesData },
-      sheetsUrl,
     ] = await Promise.all([
       supabase
         .from("responsibles")
@@ -136,8 +145,6 @@ export default async function RemuneracaoPage({
         )
         .eq("period_year", year)
         .eq("period_month", month),
-      (async () =>
-        loadCompSheetsWebappUrl(supabase, await getActiveOrgId()))(),
     ]);
     const ownIds = ((own ?? []) as { id: string }[]).map((r) => r.id);
     const canonId = ownIds.length > 0 ? canonicalOf(ownIds[0], canon) : null;
@@ -182,7 +189,6 @@ export default async function RemuneracaoPage({
           year={year}
           month={month}
           linked={canonId != null}
-          sheetsConfigured={sheetsUrl != null}
         />
       </div>
     );

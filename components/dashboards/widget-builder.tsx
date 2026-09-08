@@ -1,4 +1,16 @@
-// Versão: 1.23 | Data: 03/08/2026
+// Versão: 1.25 | Data: 07/09/2026
+// v1.25 (07/09/2026): (a) as opções de "Período de cada coluna" saem de
+//   KANBAN_DATE_BUCKET_LABELS (lib/kanban/types.ts) — rótulo com dono único,
+//   compartilhado com o SPEC de importação por IA; (b) CORREÇÃO: o `clean`
+//   que RECONSTRÓI settings.kanban no ramo "registros" passa a re-emitir
+//   `writeBack` e `tasks`. Eles são editados fora do builder (popover de
+//   colunas → saveWidgetSettings) e `clean` substitui o objeto inteiro:
+//   salvar o widget pelo builder DESLIGAVA o write-back em silêncio — o
+//   mesmo furo que o allocationFieldKey já tinha resolvido ao lado.
+// v1.24 (12/08/2026): Opções avançadas ganham o toggle "Botão '+' para criar
+//   registro" (settings.showAddRecord) — só lista de registros com UMA Base
+//   raiz de criação manual (manualEntryRootSource); o save limpa a chave
+//   quando o widget desqualifica (troca de base/modo).
 // v1.23 (03/08/2026): listas "Aplicar a" dos filtros (filtro/filtro_campo)
 //   passam a ofertar widgets de TODAS as abas (prop nova boardWidgets;
 //   siblings segue só-da-aba p/ Páginas/posicionamento), agrupados por aba com
@@ -120,8 +132,10 @@ import { RecipeStrip } from "@/components/formula/recipe-strip";
 import { previewAggregateFormula } from "@/app/(app)/dashboards/formula-preview-actions";
 import {
   DEFAULT_CUSTOM_COLUMNS,
+  KANBAN_DATE_BUCKET_LABELS,
   KANBAN_MAX_BADGES,
   type KanbanAgg,
+  type KanbanDateBucket,
   type KanbanMetricSpec,
   type KanbanSettings,
 } from "@/lib/kanban/types";
@@ -137,6 +151,7 @@ import { validateFormula, type Formula } from "@/lib/records/formulas";
 import {
   fieldAppliesToSource,
   isSubSource,
+  manualEntryRootSource,
   planSourceLegs,
   subSourcesOf,
   toSourceKey,
@@ -484,6 +499,11 @@ export function WidgetBuilder({
   // Barra de busca/filtro embutida nas tabelas (ocultável). Default = visível.
   const [showFilterBar, setShowFilterBar] = useState<boolean>(
     widget?.settings?.showFilterBar !== false
+  );
+  // Botão "+" de criação manual na tabela modo lista (opt-in; só quando a
+  // seleção é UMA Base raiz com manual_entry — ver supportsAddRecord abaixo).
+  const [showAddRecord, setShowAddRecord] = useState<boolean>(
+    widget?.settings?.showAddRecord === true
   );
 
   // Filtros rápidos (dropdowns no card): Responsável, Operação e datas nos
@@ -904,6 +924,12 @@ export function WidgetBuilder({
   const catalog = useSources();
   const catalogLabel = (k: string) =>
     catalog.find((s) => s.key === k)?.label ?? k;
+  // Botão "+" (criação manual): elegível SÓ na lista de registros apontada para
+  // exatamente UMA Base raiz com manual_entry (gate único manualEntryRootSource;
+  // o card re-checa em runtime e o save limpa a chave quando desqualifica).
+  const addRecordSource = manualEntryRootSource(sources, catalog);
+  const supportsAddRecord =
+    isRecordList && !isEntityList && addRecordSource != null;
   // PASTAS (0107): agrupamento de exibição da seção "Bases de dados". O
   // catálogo aqui JÁ vem escopado pelo board (applySourceScope) — pasta
   // esvaziada some (o helper omite grupos vazios). Sub sem a pai no catálogo
@@ -1046,6 +1072,18 @@ export function WidgetBuilder({
     available.filter((f) => !f.displayOnly && !f.aggCalc),
     sourceLabels
   );
+  // Catálogo da EXPRESSÃO CONDICIONAL de dimensão (Dimension.caseFormula):
+  // campos agrupáveis no RPC que não sejam data/FK (a expressão compararia
+  // UUID/ISO cru — e em responsible_id furaria o agrupamento canônico 0101).
+  const caseDimCatalog: RefOption[] = available
+    .filter((f) => !f.displayOnly && !f.aggCalc && !f.isDate && !f.fk)
+    .map((f) => ({ ref: f.field, label: f.label }));
+  const caseCapableFor = (d: Dimension): boolean =>
+    !isRecordList &&
+    d.field !== "" &&
+    (d.transform ?? "none") === "none" &&
+    !d.dateAgg &&
+    caseDimCatalog.some((o) => o.ref === d.field);
   // Opções de fontes-alvo por linha de filtro: fontes cobertas pelo widget ∪
   // alvos já gravados no filtro. Alvo "órfão" (fonte que saiu do widget) vem
   // marcado como stale — visível e removível, nunca escondido em silêncio; em
@@ -1547,6 +1585,13 @@ export function WidgetBuilder({
                   : {}),
               },
               ...(!isCustomCols && k.columns ? { columns: k.columns } : {}),
+              // Chaves que a UI do QUADRO edita (ColumnConfigPopover →
+              // saveWidgetSettings), não o builder: como `clean` SUBSTITUI
+              // settings.kanban inteiro, não re-emiti-las aqui desligava o
+              // write-back e zerava as opções de tarefa a cada save do
+              // builder — mesmo motivo do allocationFieldKey acima.
+              ...(k.writeBack ? { writeBack: true } : {}),
+              ...(k.tasks ? { tasks: k.tasks } : {}),
               ...(k.appearance ? { appearance: k.appearance } : {}),
             };
       const input = {
@@ -1906,6 +1951,14 @@ export function WidgetBuilder({
     if (visualType === "tabela") {
       if (showFilterBar) delete settings.showFilterBar;
       else settings.showFilterBar = false;
+    }
+
+    // Botão "+" de criação manual (opt-in): grava só quando ligado E o widget
+    // segue elegível — trocar de base/modo limpa a chave (jsonb limpo).
+    if (visualType === "tabela" && supportsAddRecord && showAddRecord) {
+      settings.showAddRecord = true;
+    } else {
+      delete settings.showAddRecord;
     }
 
     // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
@@ -2835,17 +2888,15 @@ export function WidgetBuilder({
                             <Label>Período de cada coluna</Label>
                             <Combobox
                               searchable={false}
-                              options={[
-                                { value: "weekday", label: "Dia da semana" },
-                                { value: "month_name", label: "Mês do ano" },
-                                { value: "month_year", label: "Mês/Ano" },
-                              ]}
+                              options={Object.entries(
+                                KANBAN_DATE_BUCKET_LABELS
+                              ).map(([value, label]) => ({ value, label }))}
                               value={k.dateBucket}
                               onValueChange={(v) =>
                                 patchKanban({
                                   dateBucket:
-                                    v === "month_name" || v === "month_year"
-                                      ? v
+                                    v in KANBAN_DATE_BUCKET_LABELS
+                                      ? (v as KanbanDateBucket)
                                       : "weekday",
                                 })
                               }
@@ -3427,6 +3478,8 @@ export function WidgetBuilder({
                       return next;
                     })
                   }
+                  caseCapable={caseCapableFor(d)}
+                  caseCatalog={caseDimCatalog}
                   editable={effEditable(d.field)}
                   writeBack={columnFlags[d.field]?.writeBack ?? false}
                   editableCapable={af?.editableCapable ?? false}
@@ -3913,6 +3966,25 @@ export function WidgetBuilder({
                 />
                 Altura dinâmica (cresce com o conteúdo)
               </label>
+              {/* Botão "+" (criação manual): só lista de registros com UMA
+                  Base raiz de criação manual (bases de Sync ficam de fora). */}
+              {supportsAddRecord && addRecordSource ? (
+                <label className="flex items-start gap-2 border-t pt-3 text-sm">
+                  <Checkbox
+                    checked={showAddRecord}
+                    onCheckedChange={(v) => setShowAddRecord(v === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Botão &quot;+&quot; para criar registro em{" "}
+                    {addRecordSource.label}
+                    <span className="text-muted-foreground block text-xs">
+                      Abre o formulário de novo registro no canto da tabela
+                      (usuários com permissão de edição de registros).
+                    </span>
+                  </span>
+                </label>
+              ) : null}
             </BuilderSection>
           ) : null}
           </Accordion>

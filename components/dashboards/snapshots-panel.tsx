@@ -1,4 +1,8 @@
-// Versão: 1.1 | Data: 15/07/2026
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): pending POR SNAPSHOT (busyId) nas ações de linha —
+// "Atualizar agora" (que pode demorar) desabilita só a linha acionada, com
+// spinner no botão; o resto do painel segue utilizável. O transition único
+// fica para criar/editar/revogar (formulários one-shot).
 // Painel "Snapshots" do menu ⋮ do dashboard: lista os snapshots deste
 // dashboard e cria novos. O link público (/s/<token>) aparece UMA única vez,
 // logo após a criação — o token não é recuperável depois (o banco guarda só o
@@ -55,9 +59,11 @@ import {
 import { SnapshotForm } from "@/components/snapshots/snapshot-form";
 import {
   DEFAULT_PERIOD_FIELD,
+  effectivePeriodBar,
   hasSelection,
   PERIOD_ALL,
   periodKeys,
+  type EffectivePeriodBar,
   type PeriodScope,
   type PeriodSelection,
   type SavedPeriod,
@@ -69,6 +75,9 @@ import type { DashboardSettings } from "@/lib/widgets/types";
 // defaults por bucket resolvidos no servidor > config da barra).
 export interface SnapshotPeriodCapture {
   periodBar?: DashboardSettings["periodBar"];
+  // Config EFETIVA da barra por bucket (herança de periodBar.byTab resolvida no
+  // servidor). Fallback local pelo mesmo helper quando o bucket não está aqui.
+  barByTab?: Record<string, EffectivePeriodBar>;
   scope: PeriodScope;
   defaultsByTab: Record<string, PeriodSelection>;
   defaultFieldByTab: Record<string, string>;
@@ -88,22 +97,30 @@ export function SnapshotsPanel({
   // defaults do bucket ("" no escopo global; id da aba no escopo por aba).
   const capturePeriod = period
     ? (tabId: string): SavedPeriod | null => {
-        if (period.periodBar?.enabled === false) return null;
         const keys = periodKeys(period.scope, tabId);
         const bucket = period.scope === "tab" ? tabId : "";
-        const urlSel: PeriodSelection = {
-          preset: sp.get(keys.preset) ?? "",
-          de: sp.get(keys.de) ?? "",
-          ate: sp.get(keys.ate) ?? "",
-        };
+        // Config efetiva do bucket: barra OCULTA não significa mais "sem
+        // período" — o padrão do bucket segue valendo (e é ele que o board
+        // mostra), então é ele que o snapshot congela. Só a URL sai de cena.
+        const bar =
+          period.barByTab?.[bucket] ??
+          effectivePeriodBar(period.periodBar, period.scope, bucket);
+        const hidden = bar.enabled === false;
+        const urlSel: PeriodSelection = hidden
+          ? {}
+          : {
+              preset: sp.get(keys.preset) ?? "",
+              de: sp.get(keys.de) ?? "",
+              ate: sp.get(keys.ate) ?? "",
+            };
         const defaults = period.defaultsByTab[bucket] ?? {
-          preset: period.periodBar?.defaultPreset ?? "",
+          preset: bar.defaultPreset ?? "",
         };
         const sel = hasSelection(urlSel) ? urlSel : defaults;
         const campo =
-          sp.get(keys.campo) ||
+          (hidden ? "" : sp.get(keys.campo)) ||
           period.defaultFieldByTab[bucket] ||
-          period.periodBar?.field ||
+          bar.field ||
           DEFAULT_PERIOD_FIELD;
         const preset =
           sel.preset && sel.preset !== PERIOD_ALL ? sel.preset : "";
@@ -189,12 +206,20 @@ export function SnapshotsPanel({
     });
   }
 
-  function runAction(fn: () => Promise<{ ok?: boolean; message?: string }>) {
+  // Ação de LINHA (atualizar/pausar/retomar): pending por snapshot — só a
+  // linha acionada desabilita; as demais seguem utilizáveis.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  function runAction(
+    id: string,
+    fn: () => Promise<{ ok?: boolean; message?: string }>
+  ) {
     setMessage(null);
+    setBusyId(id);
     startTransition(async () => {
       const res = await fn();
       if (!res.ok) setMessage(res.message ?? "Falha na ação.");
       await reload();
+      setBusyId(null);
     });
   }
 
@@ -302,7 +327,6 @@ export function SnapshotsPanel({
             size="sm"
             className="self-start"
             onClick={() => setView({ kind: "create" })}
-            disabled={pending}
           >
             <Plus className="size-4" /> Novo snapshot
           </Button>
@@ -336,18 +360,23 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
-                      onClick={() => runAction(() => refreshSnapshotNow(s.id))}
+                      disabled={busyId === s.id}
+                      onClick={() => runAction(s.id, () => refreshSnapshotNow(s.id))}
                     >
-                      <RefreshCw className="size-3.5" /> Atualizar agora
+                      {busyId === s.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="size-3.5" />
+                      )}{" "}
+                      Atualizar agora
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() =>
-                        runAction(() =>
+                        runAction(s.id, () =>
                           s.status === "active"
                             ? pauseSnapshot(s.id)
                             : resumeSnapshot(s.id)
@@ -368,7 +397,7 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() => setView({ kind: "edit", item: s })}
                     >
                       <Pencil className="size-3.5" /> Editar
@@ -377,7 +406,7 @@ export function SnapshotsPanel({
                       size="sm"
                       variant="outline"
                       className="text-destructive h-7 gap-1 px-2 text-xs"
-                      disabled={pending}
+                      disabled={busyId === s.id}
                       onClick={() => setConfirmRevoke(s)}
                     >
                       <Trash2 className="size-3.5" /> Revogar

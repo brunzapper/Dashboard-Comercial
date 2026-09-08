@@ -1,3 +1,25 @@
+<!-- Versão: 1.28 | Data: 06/09/2026 -->
+<!-- v1.28 (06/09/2026): §5.11 — cálculo entre células da Tabela Livre
+     documentado (endereços A1, barra de fórmula "fx", régua A/B/C, clique/
+     arrasto inserindo o endereço, realce das células citadas, funções e
+     limites) + caixa "Barra de fórmula e régua A/B/C" na aparência. -->
+<!-- Versão: 1.27 | Data: 07/08/2026 -->
+<!-- v1.27 (07/08/2026): §6.2 — "Expressão condicional" da dimensão (fórmula
+     Se/E/Ou que reclassifica os valores em rótulos e agrupa por eles; sem
+     "senão" preserva o original; multi-campo permitido; exclusiva de
+     Formato/"Agrupar período"; não vale em lista/kanban) e §2.1 — sub-abas
+     opcionais Moedas/Reclassificações da página Campos. -->
+<!-- Versão: 1.26 | Data: 06/08/2026 -->
+<!-- v1.26 (06/08/2026): §2.2/§6.1 — Sub-base com "Ignorar filtro de período"
+     (checkbox no gerenciador): as linhas dela entram nos widgets sem recorte
+     de período (só ela; as demais Bases seguem filtradas); junto com a mãe
+     nunca é absorvida — vira série própria como o "conviver". -->
+<!-- Versão: 1.25 | Data: 05/08/2026 -->
+<!-- v1.25 (05/08/2026): §12.4/§13 — Agenda mudou de /agenda para
+     /operacao/agenda (card padrão da aba "Operação" do Workspace; saiu do
+     menu lateral) e a Remuneração de Configurações → Remuneração para
+     Operação → Remuneração (/operacao/remuneracao). Só referências de
+     caminho — comportamento inalterado. -->
 <!-- Versão: 1.24 | Data: 03/08/2026 -->
 <!-- v1.24 (03/08/2026): §4.2/§4.3 — a checklist "Aplicar a" dos filtros lista
      widgets de TODAS as abas, agrupados por aba (ordem da barra), com
@@ -26,7 +48,7 @@
      rolagem por dia, ordem cronológica com hora "14:00–15:30", "+" de
      criação rápida de tarefa/anotação, post-its arrastáveis, painel
      Feed/Dados no clique) + checkbox "Mostrar anotações do dia"; §12.4 —
-     Agenda do Workspace (/agenda: Conteúdo/Responsável/Operação); §9.3 —
+     Agenda do Workspace (/operacao/agenda: Conteúdo/Responsável/Operação); §9.3 —
      aparência da Agenda. -->
 <!-- v1.17 (27/07/2026): §12.2.1 — seleção em massa no kanban (barra Mover
      para/Gerar tarefa/Concluir tarefas/Excluir, otimista com revert parcial)
@@ -243,8 +265,12 @@ avançados dependem deles.
 
 ### 2.1 Aba "Campos" (menu lateral → Campos)
 
-Página com três sub-abas: **Campos**, **Correspondências** e **Conexões**.
-Requer a permissão de gestão de campos.
+Página com as sub-abas **Campos**, **Correspondências** e **Conexões** — e,
+conforme a organização, **Moedas** (§2.5) e **Reclassificações** (de-para de
+valores: um campo cru vira campo(s) classificado(s) por categorias canônicas,
+com classificação automática dos valores e pendências notificadas por tarefa;
+os campos classificados são campos de texto normais e podem ser usados em
+qualquer widget). Requer a permissão de gestão de campos.
 
 #### 2.1.1 Sub-aba Campos
 
@@ -318,6 +344,14 @@ o botão de auto-match serve para a primeira carga ou para conferência.
   recorta as linhas (mesma sintaxe dos filtros de widget, §6.4) e o **campo de
   data** próprio para o período. Ex.: Sub-base "Reuniões" = Leads com
   "Data Reunião" não vazio, período por "Data Reunião".
+  - **"Ignorar filtro de período"** (checkbox): a Sub-base deixa de respeitar o
+    período selecionado no dashboard — as linhas dela entram nos widgets
+    SEMPRE, como se fosse "todo o período" (só para ela; as demais Bases do
+    widget seguem filtradas). Serve para misturar um resultado que depende do
+    período (ex.: leads com fechamento no mês) com um que não depende (ex.:
+    todos os leads que constam como ATIVOS hoje, não importa quando entraram).
+    Filtros de data configurados no próprio widget continuam valendo. A
+    Sub-base ganha a marca "ignora período" na lista.
 - **Rótulos curtos** por Base (usados em espaços apertados da UI).
 
 ### 2.3 Configurações → Operações e Responsáveis
@@ -407,6 +441,19 @@ No topo da página do dashboard:
   editar abas, acessar menus de contexto, editar nota/Tabela Livre in-loco.
 - **"Conectar"** (submodo do modo edição) — desenhar linhas/setas entre
   widgets (§9.6).
+- **"Ponteiro Laser"** (modo apresentação) — clique-direito **sobre um
+  widget** abre um menu com "Ponteiro Laser": o cursor vira um ponto colorido
+  (cor em Configurações → Tema; vermelho por padrão) e, **com o botão esquerdo
+  pressionado**, desenha rastros que esmaecem sozinhos em ~2,5 s — para
+  apontar, circular e conectar informações durante uma apresentação. Enquanto
+  o modo está ativo os widgets não reagem a cliques (a rolagem continua
+  funcionando) e **aproximar o ponteiro das bordas/cantos da área visível rola
+  a área de trabalho na direção da borda** (nos dois eixos; parado na borda
+  continua rolando) — não precisa sair do modo para usar a "mãozinha". Para
+  sair: Esc, o mesmo menu (clique-direito → "Desativar"), parar o cursor por
+  2 s sobre uma área **vazia** fora das bordas (volta a "mãozinha" de pan)
+  ou entrar no modo edição. O mesmo menu traz **"Editar layout"/"Concluir
+  edição"** para quem pode editar — o mesmo alternar do botão do topo.
 - **"Adicionar widget"** — abre o editor de widget (capítulo 6).
 - **Menu "⋮"** do dashboard (§3.6).
 
@@ -451,7 +498,13 @@ editor de widget; novo widget nasce na aba ativa). A aba ativa fica na URL
 - **Arrastar**: pela barra de título do widget (modo edição). Widgets sem
   barra (forma, imagem, nota "sem moldura", "Ocultar barra de título" do
   §9.1) têm uma alça flutuante no canto superior esquerdo. **Pan**: clicar
-  e arrastar uma área vazia move a viewport ("mãozinha").
+  e arrastar uma área vazia move a viewport ("mãozinha"). Além disso,
+  **parar o ponteiro perto de uma borda/canto sobre o espaço vazio** rola a
+  área de trabalho na direção da borda — mas só depois de **~2 segundos**
+  parado ali, então passar perto do canto não move nada. Funciona em
+  visualização e edição; **não** atua sobre widgets nem com um painel aberto
+  por cima (editor de widget, aparência, "Área de trabalho"…), e a mãozinha e
+  a rolagem normal seguem como sempre.
 - **Redimensionar**: alças nas bordas do widget (modo edição).
 - **Tamanho dinâmico**: widgets com "Largura dinâmica"/"Altura dinâmica"
   (§6.9) crescem visualmente para caber o conteúdo; o tamanho gravado no grid
@@ -709,8 +762,20 @@ configurada pela engrenagem da própria barra:
   pela SUA coluna de data (ex.: Deals por fechamento, Estudo por criação).
   Essencial em dashboards multi-Base; ver §7.2.
 - **Escopo**: **global** (uma seleção para o dashboard inteiro) ou **por aba**
-  (cada aba tem sua própria seleção).
-- **Ocultar** a barra (o período padrão continua valendo).
+  (cada aba tem sua própria seleção). O escopo vale para o dashboard inteiro.
+- **Ocultar** a barra — o período padrão continua valendo, e passa a valer
+  **igual para todos os usuários** (a seleção pessoal de quem já tinha mexido
+  na barra deixa de contar, porque não há mais como mudá-la na tela). É assim
+  que se trava a janela de um dashboard. Para não filtrar por período,
+  escolha "Todo o período" como padrão antes de ocultar.
+
+**Com o escopo "por aba", a engrenagem configura a ABA ATIVA.** Período padrão,
+campo de data, campo por Base e o ocultar passam a ser da aba — uma aba pode
+abrir em "Este mês" e a vizinha em "Este ano", e você pode esconder a barra só
+onde a janela é fixa. A caixa **"Usar a configuração global do dashboard"**
+(marcada por padrão) devolve a aba à herança: enquanto ela estiver marcada, a
+aba segue o que estiver configurado para o dashboard. Trocar o escopo de volta
+para global não apaga o que você configurou por aba.
 
 **As 13 opções do dropdown de período** (idênticas na barra global, no widget
 "Filtro de período" e nos filtros rápidos de período dos cards):
@@ -779,9 +844,15 @@ Painel de busca + filtros estruturados que afeta outros widgets:
   (padrão: título). A busca usa "contém".
 - **"Campos filtráveis"** — lista de controles exibidos; cada linha define
   Campo + Operador (os mesmos 10 do §6.4) + "Opções visíveis" (esconder
-  opções específicas do dropdown — só estética, não muda a consulta). Um
-  campo com operador "em (lista)" vira multi-seleção por checkbox; um campo
-  de seleção vira dropdown com "— todos —".
+  opções específicas do dropdown — só estética, não muda a consulta). Todo
+  campo com lista de opções (responsável, operação, etapa, campo de seleção)
+  e operador "=" ou "em (lista)" vira **multi-seleção**: um popover com
+  checkboxes e "Limpar", igual ao dos filtros rápidos (§4.4), mostrando
+  "todos" / o nome escolhido / "N selecionados". Marcar dois ou mais valores
+  passa a filtrar por qualquer um deles (o operador vira "em (lista)"
+  sozinho — não é preciso configurar nada). Os demais operadores (≠, contém,
+  comparações) seguem com um valor só, e campo sem lista de opções segue com
+  digitação livre.
 - **"Aplicar a"** — checklist dos widgets afetados (desmarcar exclui um
   widget do efeito do filtro). Lista só widgets com Bases sobrepostas às do
   filtro, de **todas as abas**, agrupados por aba com checkbox de cabeçalho
@@ -869,6 +940,8 @@ individuais. Recursos exclusivos (seção "Opções da tabela" do editor, §6.6)
 - **"Agrupar por"** hierárquico (multi-nível) com seções recolhíveis e
   **subtotais por grupo** (e formato de data próprio por nível de grupo).
 - Barra de busca/filtro embutida (ligável/desligável).
+- Botão **"+" de criação manual** no modo lista (opt-in nas Opções avançadas —
+  §6.9): abre o formulário de novo registro da Base do widget.
 - Comparação com período anterior (inline na célula ou coluna exclusiva).
 - No modo agregado, a última linha é o **Total geral** (respeitando a
   matemática exata de fórmulas — §7.8).
@@ -1011,6 +1084,44 @@ excluir coluna/linha. Os valores digitados são **compartilhados** (todos os
 usuários veem o mesmo conteúdo). É o único tipo com criação por desenho
 (§3.5). Não usa o bloco de dados do editor — a estrutura é toda in-card.
 
+#### 5.11.1 Cálculo entre células (fórmulas "=…")
+
+Cada célula tem um **endereço** de planilha: letra da coluna + número da linha
+(A1, B3…). A **régua** mostra as letras no cabeçalho e os números à esquerda,
+e a **barra de fórmula** (faixa "fx" no topo do card) mostra o endereço da
+célula selecionada e o **conteúdo cru** dela — a fórmula, não o resultado —,
+podendo editá-lo por ali. Régua e barra aparecem para quem pode digitar; o
+botão "?" da barra abre a ajuda de sintaxe.
+
+Para calcular, comece a célula com `=`:
+
+| Exemplo | Resultado |
+|---|---|
+| `=A1+B2`, `=(A1-B1)/B1`, `=A1*0,1` | contas entre células (decimal com vírgula ou ponto) |
+| `=SOMA(A1:A10)` | intervalo retangular; `A2:A` vai até a última linha e `A:A` é a coluna inteira |
+| `=SE(A1>B1; "bateu"; "faltou")` | condicional |
+
+- **Inserir endereço sem digitar**: com a fórmula em edição, **clique** numa
+  célula para inserir o endereço dela no ponto do cursor; **arraste** para
+  inserir o intervalo (`A1:B3`). As células citadas ficam **realçadas** na
+  grade enquanto você digita.
+- **Funções aceitas**: SOMA, MÉDIA, MÍN, MÁX, CONT.NÚM, CONT.VALORES, ARRED,
+  ABS, CONCATENAR, SE, E, OU (as mesmas do editor de fórmulas, §8).
+- **Dados do sistema na conta**: uma célula com `{= … }` (mesma expressão
+  agregada da Nota, §5.8) traz um número dos dados do dashboard; o endereço
+  dessa célula pode ser usado nas fórmulas normalmente.
+- **Como a conta é feita**: as fórmulas de célula são avaliadas **no
+  navegador**, sobre os valores já exibidos na grade — nunca consultam o banco
+  por conta própria. Célula com texto que "parece número" entra como número.
+- **Limites**: os endereços são **posicionais** — colunas de Dimensão/Métrica
+  que expandem em várias linhas deslocam quem está abaixo, então prefira
+  ancorar as contas em linhas livres. Um intervalo carrega no máximo 512
+  células. Referência circular exibe `#CICLO!` e erro de sintaxe aparece em
+  vermelho na célula (o texto do erro também vai para a barra de título).
+- Barra e régua podem ser desligadas em **Aparência → Grade e texto → "Barra
+  de fórmula e régua A/B/C"** (tabela usada só como layout). No **snapshot**
+  (link público) elas nunca aparecem — as células são somente leitura.
+
 ### 5.12 Filtro de período (`filtro`) e Filtro por campo (`filtro_campo`)
 
 Já detalhados no §4.2 e §4.3.
@@ -1022,6 +1133,20 @@ registros (colunas por valores de um campo, por períodos de uma data, ou
 livres) ou de tarefas; Agenda = calendário mensal/semanal com registros
 alocados por um campo de data, tarefas com vencimento (e hora) e anotações
 do dia (post-its).
+
+Desde 07/09/2026 os dois são **configuráveis pela IA** no JSON de importação
+(`settings.kanban` e `settings.agenda`) — antes ela conseguia criar o widget
+mas não configurá-lo, e o quadro nascia vazio. Duas regras valem a pena
+conhecer ao pedir um quadro à IA:
+
+- A Base do quadro/calendário e a lista `sources` do widget são a MESMA coisa
+  (é de lá que o painel resolve o período); se você mandar as duas diferentes,
+  o sistema alinha pela config e avisa.
+- Os vínculos **locais** de um quadro — a fase exposta como campo do registro
+  ("Expor a fase como campo", §12.2) e o quadro de tarefas apontado por um
+  widget de tarefas — nunca viajam no JSON: são ids daquele quadro
+  específico. A IA não os cria nem os apaga; eles são preservados quando ela
+  edita o widget, e você continua ligando/desligando pela UI.
 
 ---
 
@@ -1050,6 +1175,13 @@ Checklist das Bases do catálogo.
     barras distintas; quem liga garante que a leitura faz sentido).
   - **2+ Sub-bases da MESMA mãe** (sem a mãe): cada uma vira uma série
     própria automaticamente, com a contagem PRÓPRIA do seu recorte.
+  - **Sub-base com "Ignorar filtro de período"** (§2.2): as linhas dela entram
+    sem recorte de período, sempre. Selecionada junto com a mãe (ou com outra
+    Sub-base da mesma mãe), ela NUNCA é absorvida — vira série própria
+    automaticamente (como o "conviver"), com a mãe filtrada pelo período e a
+    Sub-base em "todo o período". Num widget de comparação ("vs período
+    anterior") uma Base que ignora o período mostra variação 0 (não há período
+    a deslocar).
 - **"Exibição das sub-bases"** (`settings.subSeriesMode`; aparece só quando há
   2+ Sub-bases da mesma mãe, ou Sub-base "conviver", em Barra/Barra
   horizontal/Linha/Tabela):
@@ -1097,12 +1229,44 @@ fatias). Por linha de dimensão:
 - **"Semana"** (só com "Semana do mês"): **"Restrita"** (padrão — a semana é
   recortada na virada do mês) ou **"Cheia"** (segunda→domingo inteira; a
   semana pertence ao mês da sua quinta-feira).
+- **"Semana fechada"** (só com "Semana do ano"/"Semana do mês"): **"Desligada"**
+  (padrão), **"Seg–Dom"** ou **"Sáb–Sex"**. Ativa, o widget IGNORA o corte do
+  período nas bordas e sempre mostra semanas COMPLETAS: o período da consulta
+  expande para TODA semana que ele toca, inteira — o início abre para trás
+  até o começo da semana e o fim abre para a frente até o final dela. As
+  semanas de borda aparecem nos dois meses vizinhos e carregam todos os seus
+  dias (inclusive os do mês vizinho). Exemplo: agosto/26 com Seg–Dom exibe
+  da semana 27/07–02/08 (que traz os dias 27–31/07 junto com 01–02/08) até a
+  31/08–06/09; julho/26 termina nessa mesma semana 27/07–02/08. O rótulo de
+  cada semana segue o mês do seu 4º dia (quinta no Seg–Dom, terça no
+  Sáb–Sex) — a 1ª barra de agosto/26 aparece como "5ª semana de julho". Com
+  "Semana do mês", o seletor "Semana" trava em "Cheia" (o recorte "Restrita"
+  anularia a opção). A comparação com período anterior/ano anterior também
+  compara semanas fechadas (as bordas expandidas podem se sobrepor entre os
+  dois períodos). Não vale em KPI/cartão, "Agrupar período" nem no modo
+  lista.
 - O agrupamento pelo bucket vale para qualquer campo de data — inclusive
   campos personalizados com hora no valor (cada mês/trimestre vira UMA
   categoria). Única ressalva: métrica de **Média** simples sobre dimensão de
   campo personalizado com Formato é aproximada (média das médias diárias);
   médias monetárias e fórmulas são exatas.
 - **"Nome exibido"** — rótulo estético da dimensão (não muda o campo).
+- **"Expressão condicional"** (seção recolhível; só widget AGREGADO, campo que
+  não seja de data nem de relação, sem Formato/"Agrupar período"): uma fórmula
+  `Se`/`E`/`Ou` que RECLASSIFICA os valores da dimensão em rótulos e agrupa
+  por eles — ex.: `Se([Fruta]="Mamão";"Doce";Se([Fruta]="Pera";"Dura";
+  "Outros"))` transforma N frutas em 3 grupos. Regras:
+  - `Se` sem o "senão" preserva o valor original (só o que casa é renomeado).
+  - A expressão pode combinar OUTROS campos do registro (`E`/`Ou` entre
+    campos) — ex.: `Se(E([Etapa]="Lead Qualificado";[Fonte]="Outro");
+    "RQ Outbound";"Outros")`; o campo da dimensão segue sendo o principal.
+  - Comparações numéricas funcionam sobre campos de texto numérico
+    (`Se([Qtd]>=10;"Grande";"Pequeno")`).
+  - Só fórmula VÁLIDA é salva; trocar o campo ou escolher um Formato limpa a
+    expressão. Nada é gravado nos registros — é reclassificação de exibição
+    do próprio widget (para materializar um de-para reutilizável em campo,
+    use Campos → Reclassificações).
+  - Não vale no modo lista da Tabela nem no Kanban.
 - **"Agrupar período"** (só campo de data COM formato): colapsa os registros
   de cada bucket usando uma agregação por período — opções: "Individual (por
   registro)" (padrão em listas: uma linha por registro), "Soma", "Contagem",
@@ -1290,7 +1454,7 @@ Card. Configura `settings.comparison`:
 | Rótulo | Chave | Base de comparação |
 |---|---|---|
 | "Período anterior" | `previous_period` (padrão) | o período imediatamente anterior de mesma duração — presets deslocam SEMANTICAMENTE ("Este mês" → mês passado inteiro; "Hoje" → ontem; semanas → −7 dias; "Este trimestre" → trimestre anterior; anos → ano anterior); intervalos personalizados/últimos-N deslocam pela duração em dias, terminando na véspera |
-| "Período anterior (mesmo dia útil)" | `previous_period_bd` | igual ao anterior, mas recortado no mesmo Nº de dia útil do mês (usa o calendário de dias não úteis) |
+| "Período anterior (mesmo dia útil)" | `previous_period_bd` | igual ao anterior, mas recortado no mesmo Nº de dia útil do mês (usa o calendário de dias não úteis); se o corte cair antes do início do range (intervalo personalizado já todo decorrido), o recorte não se aplica e vale o range cheio |
 | "Mesmo período do ano passado" | `previous_year` | mesmo intervalo, um ano antes (29/02 vira 28/02) |
 | "Média de uma janela anterior" | `window_avg` | média por bucket equivalente numa janela maior |
 | "Mediana de uma janela anterior" | `window_median` | mediana por bucket equivalente numa janela maior |
@@ -1315,15 +1479,30 @@ Card. Configura `settings.comparison`:
 - **"Rótulo de variação nas barras"** (Barra/Barra horizontal).
 
 Regras: **sem período ativo ("Todo o período") não há comparação** (não
-existe "anterior" de um período infinito). Mutuamente exclusiva com o
-alinhamento por dia útil. No widget Métrica calculada, as bases de janela
-(média/mediana) não são oferecidas. Semântica fina (alinhamento de linhas,
-métricas intensivas × extensivas) no §7.9.
+existe "anterior" de um período infinito). Período personalizado ABERTO
+("de X em diante", só a data inicial) COMPARA: a duração é contada até hoje
+e o período anterior termina na véspera do início; intervalo só-"Até" (sem
+data inicial) e início no futuro seguem sem comparação. Mutuamente exclusiva
+com o alinhamento por dia útil. No widget Métrica calculada, as bases de
+janela (média/mediana) não são oferecidas. Semântica fina (alinhamento de
+linhas, métricas intensivas × extensivas) no §7.9.
 
 ### 6.9 Seção "Opções avançadas"
 
 - **"Largura dinâmica"** / **"Altura dinâmica"** (`autoSize`): o card cresce
   na tela para caber o conteúdo (nunca encolhe abaixo do tamanho do grid).
+- **"Botão '+' para criar registro"** (`showAddRecord`, só tabela em modo
+  lista): exibe um "+" no canto superior direito da tabela (ao lado do botão
+  de filtros; com a barra oculta, no topo do card) que abre o formulário de
+  novo registro da Base do widget. O toggle só aparece quando o widget aponta
+  para **exatamente uma Base raiz de criação manual** (`manual_entry` — Bases
+  alimentadas por Sync ficam de fora); trocar de Base/modo limpa a opção. Em
+  runtime o botão exige a permissão de edição de registros e nunca aparece no
+  viewer público de snapshot. No formulário, cada campo opcional tem um "x"
+  que o oculta dos próximos registros (preferência por usuário e por Base,
+  local do navegador — vale também no "Novo registro" da aba Registros e no
+  kanban); os ocultos reativam-se pela lista "Campos ocultos (N)" no fim do
+  formulário.
 
 ---
 
@@ -2010,6 +2189,30 @@ Por isso, crie snapshots com um período ativo na barra (ex.: "Este mês").
   ao valor da regra no próximo tick. Cards de demonstração nunca movem nem
   recebem escrita.
 
+#### Configurar com IA (07/09/2026)
+
+Na página cheia do quadro (tanto o kanban dedicado quanto a de um widget) há o
+botão **Configurar com IA**, ao lado de Automações. Você descreve o quadro que
+quer — "crie as fases Entrada, Proposta e Fechamento, mostre o valor somado no
+topo de cada coluna e mande para Entrada o que ficar 7 dias parado" — e a IA
+devolve uma **prévia**: nada é gravado antes de você clicar em Aplicar.
+
+Vale saber:
+
+- A proposta cobre as duas coisas de uma vez, quadro **e** automações, e uma
+  regra pode mirar uma coluna criada no mesmo pedido.
+- A lista de automações que a IA devolve é a lista **completa** desejada: uma
+  regra que ela não repetir é **desativada**, não excluída. Excluir de vez
+  continua sendo pelo painel de Automações.
+- Regras são reconhecidas pelo **nome**: repetir o nome de uma regra existente
+  a atualiza; um nome novo cria outra.
+- Sem provedor de IA configurado o botão continua útil: **Copiar prompt** gera
+  o texto para colar numa IA externa, e você traz o JSON de volta pelo campo
+  "Validar JSON colado" — mesma prévia, mesma aplicação.
+- O botão aparece no mesmo recorte das Automações: modo registros e colunas que
+  não sejam por período (mover um card numa coluna de data reescreveria a data
+  do registro a cada execução).
+
 ### 12.3 Agenda
 
 Widget de calendário (redesenhado em 28/07/2026):
@@ -2045,10 +2248,10 @@ Comportamento do calendário:
   rápidos etc. não a afetam) — ela é um calendário operacional, não um
   gráfico filtrável.
 
-### 12.4 Agenda do Workspace (página `/agenda`)
+### 12.4 Agenda do Workspace (página `/operacao/agenda`)
 
-Além do widget, o item **"Agenda"** do menu lateral abre a página
-**"Agenda do workspace"**: um calendário cheio
+Além do widget, o card **"Agenda"** da aba **Operação** do Workspace abre a
+página **"Agenda do workspace"** (`/operacao/agenda`): um calendário cheio
 com barra própria de controles — as escolhas ficam salvas por usuário:
 
 - **"Conteúdo"**: "Todas as agendas" (mistura os registros de TODOS os
@@ -2082,8 +2285,8 @@ Lista completa:
    cards por pessoa, SDRs e Remuneração — esta última sobre o espelho
    publicado, populada após o "Publicar" mensal). O preset também cria a
    árvore de operações AEs/SDR-BDR já com os vínculos das pessoas e os 5
-   planos de remuneração em Configurações → Remuneração (onde vive o cálculo
-   autoritativo do payout). Nada já existente é sobrescrito; os passos
+   planos de remuneração em Operação → Remuneração (card do Workspace; onde
+   vive o cálculo autoritativo do payout). Nada já existente é sobrescrito; os passos
    pós-geração (cotação USD, preencher "SDR da Reunião", publicar o mês)
    estão no runbook do manual de manutenção (§4.7).
 

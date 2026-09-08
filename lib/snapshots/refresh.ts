@@ -157,8 +157,11 @@ async function doRefresh(
         .order("sort_order", { ascending: true }),
       fieldsQuery,
       loadCorrespondences(service, orgId),
-      loadEnabledCurrencies(service),
-      loadCurrencyRates(service),
+      // Service role bypassa a RLS: moedas/taxas são por-org desde a 0123 e
+      // SEM o filtro as taxas de todas as orgs colidiriam no mesmo
+      // rateKey(code, year, quarter) — a última lida venceria.
+      loadEnabledCurrencies(service, orgId),
+      loadCurrencyRates(service, orgId),
     ]);
 
   const sources = await loadSources(service, orgId);

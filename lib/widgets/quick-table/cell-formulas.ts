@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 15/07/2026
+// Versão: 1.1 | Data: 06/09/2026
+// v1.1 (06/09/2026): `cellRefsInSource` — endereços citados por uma fórmula
+//   (mesmo INCOMPLETA, em digitação) p/ o realce das células referenciadas na
+//   grade. Reusa o pré-processador A1 (ranges/aspas/identificadores já
+//   tratados) e ignora erro de sintaxe: enquanto se digita "=A1+", A1 já
+//   acende. Corrige também o range de COLUNA INTEIRA ("A:A"), documentado
+//   desde a 1.0 mas rejeitado pela guarda de dígitos do pré-processador.
 // Tabela Livre — fórmulas DE CÉLULA estilo Google Sheets ("=SOMA(A1:B3)+C2"),
 // avaliadas 100% no cliente sobre os VALORES exibidos na grade (nunca o banco;
 // uma célula com {=…} entra pelo seu valor já resolvido). Reusa o parser/
@@ -110,7 +116,9 @@ function preprocessA1(
     if (/[A-Za-z]/.test(ch) && !/[\p{L}\p{N}_.]/u.test(before())) {
       const rest = src.slice(i);
       const rm = RANGE_RE.exec(rest);
-      if (rm && (rm[2] !== "" || rm[4] !== "")) {
+      // v1.1: a coluna inteira ("A:A") também é range — a guarda antiga exigia
+      // dígito em uma das pontas e derrubava a forma já documentada acima.
+      if (rm) {
         // Range: A1:B3, A2:A (aberto até a última linha), A:A (coluna inteira).
         const c0 = colIndex(rm[1]);
         const c1 = colIndex(rm[3]);
@@ -263,6 +271,33 @@ export function computeCellFormulas(input: CellFormulaInput): CellFormulaOutput 
 
   for (const key of formulas.keys()) valueOf(key);
   return { values, errors };
+}
+
+/**
+ * Endereços citados por uma fonte "=…" (aceita fórmula em digitação, ainda
+ * inválida): posições 0-based dentro da grade, sem repetição. Usada só para
+ * REALCE na UI — a avaliação segue por computeCellFormulas.
+ */
+export function cellRefsInSource(
+  source: string,
+  dims: { rows: number; cols: number }
+): { c: number; r: number }[] {
+  const body = source.trim().replace(/^=/, "");
+  if (!body) return [];
+  const pre = preprocessA1(body, dims);
+  if (!pre.ok) return [];
+  const seen = new Set<string>();
+  const out: { c: number; r: number }[] = [];
+  for (const m of pre.text.matchAll(/cell:(\d+):(\d+)/g)) {
+    const c = Number(m[1]);
+    const r = Number(m[2]);
+    if (c >= dims.cols || r >= dims.rows) continue;
+    const k = `${c}:${r}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ c, r });
+  }
+  return out;
 }
 
 /** Exibição pt-BR de um resultado de fórmula de célula. */

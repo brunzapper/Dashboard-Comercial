@@ -1,3 +1,13 @@
+// Versão: 1.8 | Data: 16/08/2026 (v1.8: CONFERÊNCIA por registro — ícone
+// próprio na célula Realizado (aparece no hover) abre o CompDetailPanel com os
+// registros por trás do número; o duplo-clique da célula segue sendo o
+// override manual, nunca sequestrado)
+// Versão: 1.7 | Data: 07/08/2026 (v1.7: célula persiste OTIMISTA em background
+// — useBackgroundSave com revalidate:false: o await volta após a gravação (sem
+// re-render RSC dentro da transition), erro → toast + REVERT da linha ao
+// estado pré-edição, e o reseed por dataKey é GUARDADO por hasPending —
+// digitação durante um save em voo não é mais descartada pelo eco stale;
+// o refresh debounced do hook reconcilia ao drenar)
 // Versão: 1.6 | Data: 01/08/2026 (v1.6: linha de DETALHE sempre visível sob
 // cada membro — a memória da linha inteira (fatores base × peso × ating.,
 // blocos de comissão, soma/override, bônus, composição do total) em texto
@@ -58,6 +68,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { notifyActionError } from "@/lib/feedback/notify";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
   commissionMemory,
   entryMemoryLines,
@@ -83,7 +94,11 @@ import {
   saveEntryInputs,
   saveTarget,
   type EntryPatch,
-} from "@/app/(app)/configuracoes/remuneracao/actions";
+} from "@/app/(app)/operacao/remuneracao/actions";
+import {
+  CompDetailPanel,
+  type CompDetailTarget,
+} from "./comp-detail-panel";
 import type {
   CompEntryClientRow,
   CompPlanClientRow,
@@ -133,9 +148,17 @@ interface RowState {
 }
 
 export function CompGrid(props: CompGridProps) {
+  // Transition SÓ para Recalcular/Publicar (operações longas, bloqueio
+  // deliberado por busy); os saves de célula rodam em background pelo hook.
   const [pending, startTransition] = useTransition();
+  const { save: backgroundSave, hasPending } = useBackgroundSave();
   const [busy, setBusy] = useState<"recompute" | "publish" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Instância ÚNICA içada do painel de conferência (os registros por trás do
+  // Realizado); as células só apontam o alvo.
+  const [detailTarget, setDetailTarget] = useState<CompDetailTarget | null>(
+    null
+  );
 
   // Mesma lista efetiva do servidor: manual ∪ operações (helpers do model —
   // nunca importar engine.ts num client component).
@@ -175,12 +198,21 @@ export function CompGrid(props: CompGridProps) {
     return m;
   }
   // Reconcilia quando o dataset da page muda (mês/plano/refresh pós-ação).
-  const dataKey = `${props.plan.id}:${props.year}-${props.month}:${props.entries
+  // Guard hasPending (espelho do skipNextData do kanban): com save em voo, um
+  // eco de CONTEÚDO (mesmas plano/mês) é stale — o reseed descartaria a
+  // digitação feita durante a espera. ADOTA a key sem aplicar (consome o eco;
+  // aplicá-lo no drain clobberaria o otimista); o refresh do hook traz o dado
+  // gravado numa key nova (updated_at das entries muda) e o reseed normal
+  // aplica. Mudança de ESCOPO (plano/mês) re-semeia SEMPRE — otimista de
+  // outro mês em tela gravaria/exibiria no mês errado.
+  const scopeKey = `${props.plan.id}:${props.year}-${props.month}`;
+  const dataKey = `${scopeKey}:${props.entries
     .map((e) => `${e.id}@${e.updated_at}`)
     .join(",")}:${JSON.stringify(props.targets)}`;
   if (dataKey !== seedKey) {
+    const sameScope = seedKey.startsWith(`${scopeKey}:`);
     setSeedKey(dataKey);
-    setRows(seed());
+    if (!hasPending || !sameScope) setRows(seed());
   }
 
   const patchRow = (memberId: string, patch: Partial<RowState>) =>
@@ -191,30 +223,52 @@ export function CompGrid(props: CompGridProps) {
       return next;
     });
 
-  const persistPatch = (memberId: string, patch: EntryPatch) =>
-    startTransition(async () => {
-      const res = await saveEntryInputs({
-        planId: props.plan.id,
-        responsibleId: memberId,
-        year: props.year,
-        month: props.month,
-        patch,
-      });
-      if (!res.ok) notifyActionError("Salvar lançamento", res.message);
+  // Saves de célula em background: o closure vê `rows` ANTES do patchRow do
+  // mesmo evento — baseline do revert (erro restaura a linha pré-edição).
+  const persistPatch = (memberId: string, patch: EntryPatch) => {
+    const prev = rows.get(memberId);
+    backgroundSave({
+      key: memberId,
+      context: "Salvar lançamento",
+      action: () =>
+        saveEntryInputs(
+          {
+            planId: props.plan.id,
+            responsibleId: memberId,
+            year: props.year,
+            month: props.month,
+            patch,
+          },
+          { revalidate: false }
+        ),
+      revert: () => {
+        if (prev) setRows((cur) => new Map(cur).set(memberId, prev));
+      },
     });
+  };
 
-  const persistTarget = (memberId: string, factorId: string, value: number | null) =>
-    startTransition(async () => {
-      const res = await saveTarget({
-        planId: props.plan.id,
-        responsibleId: memberId,
-        year: props.year,
-        month: props.month,
-        factorId,
-        value,
-      });
-      if (!res.ok) notifyActionError("Salvar alvo", res.message);
+  const persistTarget = (memberId: string, factorId: string, value: number | null) => {
+    const prev = rows.get(memberId);
+    backgroundSave({
+      key: memberId,
+      context: "Salvar alvo",
+      action: () =>
+        saveTarget(
+          {
+            planId: props.plan.id,
+            responsibleId: memberId,
+            year: props.year,
+            month: props.month,
+            factorId,
+            value,
+          },
+          { revalidate: false }
+        ),
+      revert: () => {
+        if (prev) setRows((cur) => new Map(cur).set(memberId, prev));
+      },
     });
+  };
 
   const runRecompute = () => {
     setBusy("recompute");
@@ -283,7 +337,7 @@ export function CompGrid(props: CompGridProps) {
         {notice ? (
           <span className="text-muted-foreground text-xs">{notice}</span>
         ) : null}
-        {pending ? (
+        {pending || hasPending ? (
           <span className="text-muted-foreground ml-auto text-xs">Salvando…</span>
         ) : null}
       </div>
@@ -306,8 +360,8 @@ export function CompGrid(props: CompGridProps) {
                   className="border-l text-center"
                   title={
                     props.config.apuracao === "mes_anterior"
-                      ? "Alvo e Realizado referem-se ao mês APURADO (anterior ao do lançamento). Alvos são metas — também editáveis em Configurações → Metas, no mês apurado."
-                      : "Alvos são metas — também editáveis em Configurações → Metas"
+                      ? "Meta e Realizado referem-se ao mês APURADO (anterior ao do lançamento). As metas também são editáveis em Configurações → Metas, no mês apurado."
+                      : "As metas também são editáveis em Configurações → Metas"
                   }
                 >
                   {f.label}{" "}
@@ -361,19 +415,36 @@ export function CompGrid(props: CompGridProps) {
                     });
                   persistTarget(member.id, factorId, value);
                 }}
+                onOpenDetail={(factorId) =>
+                  setDetailTarget({
+                    planId: props.plan.id,
+                    memberId: member.id,
+                    memberLabel: member.label,
+                    factorId,
+                  })
+                }
               />
             ))}
           </TableBody>
         </Table>
       </div>
+      {/* A frase "Alvos são metas" saiu: a coluna passou a se chamar Meta, que
+          é como o resto do produto (e a área de Metas) já a chamava. Legenda
+          que existe só para traduzir o próprio vocabulário é sintoma, não ajuda. */}
       <p className="text-muted-foreground text-xs">
-        Alvo, Base e Bônus são digitados. Real., Ating.%, valores e Comissão
+        Meta, Base e Bônus são digitados. Real., Atingimento, valores e Comissão
         são calculados — duplo clique sobrescreve à mão (ponto âmbar; ✕ volta
-        ao calculado). Alvos são metas (Configurações → Metas).
+        ao calculado). As metas também são editáveis em Configurações → Metas.
         {props.config.apuracao === "mes_anterior"
-          ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Alvo/Real. referem-se ao mês apurado."
+          ? " Este plano apura sobre o mês ANTERIOR ao do lançamento — Meta/Real. referem-se ao mês apurado."
           : ""}
       </p>
+      <CompDetailPanel
+        target={detailTarget}
+        year={props.year}
+        month={props.month}
+        onClose={() => setDetailTarget(null)}
+      />
     </div>
   );
 }
@@ -381,9 +452,9 @@ export function CompGrid(props: CompGridProps) {
 function FactorSubHeader() {
   return (
     <>
-      <TableHead className="border-l text-right text-xs">Alvo</TableHead>
+      <TableHead className="border-l text-right text-xs">Meta</TableHead>
       <TableHead className="text-right text-xs">Real.</TableHead>
-      <TableHead className="text-right text-xs">Ating.%</TableHead>
+      <TableHead className="text-right text-xs">Ating.</TableHead>
       <TableHead className="text-right text-xs">Valor</TableHead>
     </>
   );
@@ -424,6 +495,7 @@ function GridRow(props: {
   onRow: (patch: Partial<{ baseAmount: number | null; inputs: CompEntryInputs }>) => void;
   onPersist: (patch: EntryPatch) => void;
   onTarget: (factorId: string, value: number | null) => void;
+  onOpenDetail: (factorId: string) => void;
 }) {
   const { config, row } = props;
   const computed = (props.entry?.computed ?? null) as CompComputedRaw | null;
@@ -514,6 +586,7 @@ function GridRow(props: {
             hasComputed={computed != null}
             onTarget={(v) => props.onTarget(f.id, v)}
             onOverride={(key, v) => setOverride(f.id, key, v)}
+            onOpenDetail={() => props.onOpenDetail(f.id)}
           />
         );
       })}
@@ -627,6 +700,7 @@ function FactorCells(props: {
   hasComputed: boolean;
   onTarget: (v: number | null) => void;
   onOverride: (key: "realized" | "attainmentPct" | "payout", v: number | null) => void;
+  onOpenDetail: () => void;
 }) {
   const fmt = props.money ? fmtMoney : fmtNum;
   // Alvo: exibido na moeda DIGITADA; tooltip traz o convertido em R$ (decisão
@@ -647,7 +721,7 @@ function FactorCells(props: {
     targetTip.push(`≈ ${fmtMoney(props.targetBRL)} na cotação do trimestre`);
   if (props.targetSource === "default")
     targetTip.push(
-      "Alvo padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
+      "Meta padrão do plano — digite para fixar a meta do mês; limpar volta ao padrão."
     );
   return (
     <>
@@ -687,23 +761,38 @@ function FactorCells(props: {
         current={props.targetSource === "goal" ? props.target : null}
       />
       <EditableCell
+        className="group"
         display={
-          props.queryError && props.realized == null ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-destructive inline-flex items-center gap-1">
-                  <CircleAlert className="size-3.5" /> —
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{props.queryError}</TooltipContent>
-            </Tooltip>
-          ) : props.realized != null ? (
-            fmt(props.realized)
-          ) : props.hasComputed ? (
-            "—"
-          ) : (
-            <span className="text-muted-foreground">…</span>
-          )
+          <span className="inline-flex items-center gap-1">
+            {/* Conferência dos registros: BOTÃO próprio (o duplo-clique da
+                célula continua sendo o override manual — não sequestrar). */}
+            <button
+              type="button"
+              aria-label="Ver os registros que compõem este realizado"
+              title="Ver os registros que compõem este realizado"
+              className="text-muted-foreground hover:text-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={() => props.onOpenDetail()}
+            >
+              <ListTree className="size-3.5" />
+            </button>
+            {props.queryError && props.realized == null ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-destructive inline-flex items-center gap-1">
+                    <CircleAlert className="size-3.5" /> —
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{props.queryError}</TooltipContent>
+              </Tooltip>
+            ) : props.realized != null ? (
+              fmt(props.realized)
+            ) : props.hasComputed ? (
+              "—"
+            ) : (
+              <span className="text-muted-foreground">…</span>
+            )}
+          </span>
         }
         overridden={props.overridden.realized}
         onSave={(v) => props.onOverride("realized", v)}
@@ -724,7 +813,7 @@ function FactorCells(props: {
           props.weightPct === 0 && !props.overridden.payout ? (
             <span
               className="text-muted-foreground"
-              title="Peso 0% — este fator não compõe a parcela por atingimento; serve de gatilho/base de comissão."
+              title="Peso 0% — este indicador não gera valor próprio; ele define a faixa da comissão."
             >
               —
             </span>

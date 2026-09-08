@@ -1,10 +1,11 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 03/08/2026
 // Forms da aba Configurações → Tema.
 // - TemaForm: preferência PESSOAL (modo claro/escuro/sistema + cor de
-//   destaque). Aplica AO VIVO no documentElement (classe .dark +
-//   --brand-base) e persiste via saveThemePreferences (debounce na cor) —
-//   scripts inline do layout não re-rodam em navegação client, então o form
-//   é responsável pelo apply imediato.
+//   destaque + cor do Ponteiro Laser). Aplica AO VIVO no documentElement
+//   (classe .dark + --brand-base) e persiste via saveThemePreferences
+//   (debounce nas cores) — scripts inline do layout não re-rodam em navegação
+//   client, então o form é responsável pelo apply imediato. A cor do laser
+//   não tem apply vivo (só a página do dashboard a usa).
 // - OrgThemeDefaultForm: padrão da ORGANIZAÇÃO (org_admin) — salvar explícito;
 //   router.refresh() propaga (cookies do admin saem da action).
 // Sem preferência escolhida, o rótulo indica de onde o valor efetivo herda.
@@ -19,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_ACCENT,
+  DEFAULT_LASER,
   normalizeHexColor,
   resolveTheme,
   type OrgThemeDefault,
@@ -90,15 +92,19 @@ function ModePicker({
 export function TemaForm({
   userTheme,
   userAccent,
+  userLaser,
   orgTheme,
 }: {
   userTheme: ThemeMode | null;
   userAccent: string | null;
+  userLaser: string | null;
   orgTheme: OrgThemeDefault | null;
 }) {
   const [theme, setTheme] = useState<ThemeMode | null>(userTheme);
   const [accent, setAccent] = useState<string | null>(userAccent);
   const [hexDraft, setHexDraft] = useState<string>(userAccent ?? "");
+  const [laser, setLaser] = useState<string | null>(userLaser);
+  const [laserHexDraft, setLaserHexDraft] = useState<string>(userLaser ?? "");
   const [state, setState] = useState<ThemeActionState>({});
   const [, startTransition] = useTransition();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,6 +113,7 @@ export function TemaForm({
     { theme, accentColor: accent },
     orgTheme
   );
+  const effectiveLaser = laser ?? DEFAULT_LASER;
 
   // Modo "sistema": segue trocas do SO ao vivo enquanto a página está aberta.
   useEffect(() => {
@@ -118,22 +125,33 @@ export function TemaForm({
     return () => mq.removeEventListener("change", onChange);
   }, [effective.mode]);
 
-  const persist = (next: { theme: ThemeMode | null; accent: string | null }) => {
+  // A action sobrescreve as TRÊS chaves a cada save — envia sempre o trio.
+  const persist = (next: {
+    theme: ThemeMode | null;
+    accent: string | null;
+    laser: string | null;
+  }) => {
     startTransition(async () => {
       const res = await saveThemePreferences({
         theme: next.theme,
         accentColor: next.accent,
+        laserColor: next.laser,
       });
       setState(res);
     });
   };
 
   const update = (
-    next: { theme: ThemeMode | null; accent: string | null },
+    next: {
+      theme: ThemeMode | null;
+      accent: string | null;
+      laser: string | null;
+    },
     debounce = false
   ) => {
     setTheme(next.theme);
     setAccent(next.accent);
+    setLaser(next.laser);
     const eff = resolveTheme(
       { theme: next.theme, accentColor: next.accent },
       orgTheme
@@ -163,7 +181,7 @@ export function TemaForm({
         <ModePicker
           value={theme}
           allowClear
-          onPick={(mode) => update({ theme: mode, accent })}
+          onPick={(mode) => update({ theme: mode, accent, laser })}
         />
         {herdaModo ? (
           <p className="text-muted-foreground text-xs">
@@ -190,7 +208,7 @@ export function TemaForm({
               const hex = normalizeHexColor(e.target.value);
               if (!hex) return;
               setHexDraft(hex);
-              update({ theme, accent: hex }, true);
+              update({ theme, accent: hex, laser }, true);
             }}
             className="h-9 w-12 cursor-pointer rounded-md border bg-transparent p-1"
           />
@@ -199,7 +217,7 @@ export function TemaForm({
             onChange={(e) => {
               setHexDraft(e.target.value);
               const hex = normalizeHexColor(e.target.value);
-              if (hex) update({ theme, accent: hex }, true);
+              if (hex) update({ theme, accent: hex, laser }, true);
             }}
             placeholder={effective.accent}
             maxLength={7}
@@ -213,6 +231,46 @@ export function TemaForm({
         ) : null}
       </div>
 
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="tema-laser" className="text-xs">
+          Ponteiro laser (apresentação)
+        </Label>
+        <p className="text-muted-foreground text-xs">
+          Cor do rastro do Ponteiro Laser no dashboard (clique direito sobre um
+          widget para ativar).
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            id="tema-laser"
+            type="color"
+            value={effectiveLaser}
+            onChange={(e) => {
+              const hex = normalizeHexColor(e.target.value);
+              if (!hex) return;
+              setLaserHexDraft(hex);
+              update({ theme, accent, laser: hex }, true);
+            }}
+            className="h-9 w-12 cursor-pointer rounded-md border bg-transparent p-1"
+          />
+          <Input
+            value={laserHexDraft}
+            onChange={(e) => {
+              setLaserHexDraft(e.target.value);
+              const hex = normalizeHexColor(e.target.value);
+              if (hex) update({ theme, accent, laser: hex }, true);
+            }}
+            placeholder={effectiveLaser}
+            maxLength={7}
+            className="h-9 w-28 font-mono text-sm"
+          />
+        </div>
+        {laser == null ? (
+          <p className="text-muted-foreground text-xs">
+            Padrão do app ({DEFAULT_LASER} — vermelho).
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex items-center gap-3">
         <Button
           type="button"
@@ -220,7 +278,8 @@ export function TemaForm({
           variant="outline"
           onClick={() => {
             setHexDraft("");
-            update({ theme: null, accent: null });
+            setLaserHexDraft("");
+            update({ theme: null, accent: null, laser: null });
           }}
         >
           Restaurar padrão

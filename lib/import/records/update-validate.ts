@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 31/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): MODO SELEÇÃO ({ selection: true }) — o alvo é a seleção
+//   manual de registros da tabela (ids viajam pela action, nunca pelo JSON):
+//   "filtros" deve estar ausente ou vazio (erro acionável senão) e a regra
+//   "≥1 filtro" é dispensada; todo o resto (alterações, coerção, title nunca
+//   limpa) é idêntico. Consumido pela edição em massa MANUAL e pela IA sobre
+//   selecionados (ai-update-sheet com prop selection).
 // Validador PURO do contrato "registros-update" (atualização em massa por IA).
 // Erros em pt-BR ACIONÁVEIS (voltam à IA no laço de autocorreção). Regras que
 // diferem do insert: ≥1 filtro OBRIGATÓRIO (proibido "todos os registros");
@@ -176,10 +182,12 @@ function validateOneFilter(
  */
 export function validateRecordsUpdate(
   raw: string,
-  ctx: RecordsUpdateContext
+  ctx: RecordsUpdateContext,
+  opts?: { selection?: boolean }
 ): RecordsUpdateValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const selection = opts?.selection === true;
 
   let obj: Record<string, unknown>;
   try {
@@ -205,18 +213,28 @@ export function validateRecordsUpdate(
   }
 
   const rawFilters = obj.filtros;
-  if (!Array.isArray(rawFilters) || rawFilters.length === 0) {
-    errors.push(
-      'Inclua ao menos um filtro em "filtros" — atualizar TODOS os registros da base não é permitido; descreva o recorte.'
-    );
-    return { ok: false, errors };
-  }
-
   const filters: WidgetFilter[] = [];
-  rawFilters.forEach((rf, i) => {
-    const parsed = validateOneFilter(rf, i, ctx, errors);
-    if (parsed) filters.push(parsed);
-  });
+  if (selection) {
+    // Modo seleção: o recorte JÁ é a seleção manual — filtro no JSON seria um
+    // segundo recorte silencioso que a prévia não refletiria.
+    if (Array.isArray(rawFilters) && rawFilters.length > 0) {
+      errors.push(
+        'Este modo opera sobre os registros SELECIONADOS na tela — não emita "filtros" (omita a chave ou envie []).'
+      );
+      return { ok: false, errors };
+    }
+  } else {
+    if (!Array.isArray(rawFilters) || rawFilters.length === 0) {
+      errors.push(
+        'Inclua ao menos um filtro em "filtros" — atualizar TODOS os registros da base não é permitido; descreva o recorte.'
+      );
+      return { ok: false, errors };
+    }
+    rawFilters.forEach((rf, i) => {
+      const parsed = validateOneFilter(rf, i, ctx, errors);
+      if (parsed) filters.push(parsed);
+    });
+  }
 
   const rawChanges = obj.alteracoes;
   if (

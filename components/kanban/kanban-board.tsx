@@ -1,4 +1,7 @@
-// Versão: 1.7 | Data: 31/07/2026
+// Versão: 1.8 | Data: 07/08/2026
+// v1.8 (07/08/2026): KanbanRecordContext ganha o catálogo COMPLETO do detalhe
+//   (detailFields/offBaseDefs/coreDefs/knownFieldKeys, opcionais) — 100% dos
+//   campos no painel do card; superfícies sem eles degradam para `fields`.
 // Quadro Kanban (client): colunas + cards com drag & drop HTML5 nativo (D5 do
 // plano — sem lib de DnD; o handle do react-grid-layout é `.widget-drag`, então
 // o arraste interno não conflita com o grid do dashboard). Move otimista:
@@ -49,10 +52,10 @@ import { DEFAULT_DATE_FORMAT, formatDateValue } from "@/lib/widgets/format";
 import {
   completeTasksBulk,
   createTasksBulk,
-  deleteRecordsBulk,
   deleteTasksBulk,
   moveRecordCardsBulk,
 } from "@/lib/kanban/bulk-actions";
+import { trashRecordsBulk } from "@/lib/records/trash-actions";
 import { completeTask, reopenTask } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { useDebouncedRefresh } from "@/lib/use-debounced-refresh";
@@ -92,6 +95,12 @@ import {
 // Contexto de registros p/ os painéis de edição abertos pelos cards.
 export interface KanbanRecordContext {
   fields: FieldDefinition[];
+  // Catálogo COMPLETO do detalhe (07/08/2026 — 100% dos campos no painel):
+  // opcionais; superfícies sem eles (widget/agenda) degradam para `fields`.
+  detailFields?: FieldDefinition[];
+  offBaseDefs?: FieldDefinition[];
+  coreDefs?: FieldDefinition[];
+  knownFieldKeys?: string[];
   responsibles: OptionItem[];
   operations: OptionItem[];
   userRoles: string[];
@@ -1016,7 +1025,9 @@ export function KanbanBoard({
       exec: (chunk) =>
         isTasksMode
           ? deleteTasksBulk(chunk.map((i) => i.id))
-          : deleteRecordsBulk(chunk.map((i) => i.id)),
+          : // Lixeira (0121): registro vai para a lixeira (30 dias), não é
+            // mais hard delete — mesmo contrato por item.
+            trashRecordsBulk(chunk.map((i) => i.id)),
     });
   }
 

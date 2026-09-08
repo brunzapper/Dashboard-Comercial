@@ -1,8 +1,36 @@
-<!-- Versão: 1.24 | Data: 03/08/2026 -->
-<!-- v1.24 (03/08/2026): §1 item 7 — Apps Script do Estudo v1.1 (chunks de
+<!-- Versão: 1.30 | Data: 08/09/2026 -->
+<!-- v1.30 (08/09/2026): §1 item 7 — Apps Script do Estudo v1.1 (chunks de
      ≤500; recolar o arquivo ativa; servidor aceita o formato antigo) + nota
      sobre regra de match com venda_site só no lado B (botão "Executar todas"
      como mitigação). -->
+<!-- Versão: 1.29 | Data: 07/09/2026 -->
+<!-- v1.29 (07/09/2026): job pg_cron nº 8 (purge-audit-log — retenção de 100
+     alterações por organização×origem×campo, SQL puro 03:40 UTC) +
+     saneamento único apply/sanitize-audit-log.sql; linha de troubleshooting
+     para audit_log inchado. -->
+<!-- Versão: 1.28 | Data: 08/08/2026 -->
+<!-- v1.28 (08/08/2026): §4.14 — salvar mapeamento não trava mais a página
+     (save em background com fila coalescedora por domínio) e botão "Mapear
+     preenchidos (N)" salva as pendências preenchidas de uma vez. -->
+<!-- Versão: 1.27 | Data: 07/08/2026 -->
+<!-- v1.27 (07/08/2026): job pg_cron nº 7 (purge-records-trash — purga da
+     Lixeira de REGISTROS, 0121: soft delete de 30 dias; SQL puro 03:35
+     UTC). -->
+<!-- Versão: 1.26 | Data: 07/08/2026 -->
+<!-- v1.26 (07/08/2026): §4.14 — domínio de reclassificação DINÂMICO pela UI
+     (aba Campos → Reclassificações, tabela mapping_domains 0119): criar/
+     editar/excluir sem código; o caminho em código segue para domínio com
+     classificador próprio. -->
+<!-- Versão: 1.25 | Data: 07/08/2026 -->
+<!-- v1.25 (07/08/2026): §4.14 — mapeamentos de valores (de-para 0117) e o
+     preset "Outbound — Pré-Vendas": runbook de seed/feature/reaplicação e
+     pré-requisitos de dado do preset. -->
+<!-- Versão: 1.24 | Data: 05/08/2026 -->
+<!-- v1.24 (05/08/2026): Remuneração mudou de Configurações → Remuneração
+     para Operação → Remuneração (/operacao/remuneracao — card org-específico
+     da aba "Operação" do hub Workspace; chave de área "remuneracao"
+     intocada). Só referências de caminho. -->
+<!-- Versão: 1.23 | Data: 31/07/2026 -->
 <!-- v1.23 (31/07/2026): §4.12 — ação "Definir campo" das automações do kanban
      (idempotente; teto único de 200 ações; como estender via
      executeFieldWrites/setFieldTargetError) e novo §4.13 — atualização em
@@ -116,9 +144,24 @@ Ordem completa para levantar o sistema num projeto Supabase + Vercel novos:
       cada minuto (`/api/kanban-automations/tick`; ocioso = 1 SELECT
       indexado). Sem o job as regras só rodam no pós-sync e no "Executar
       agora".
+   7. `apply/pg-cron-purge-records-trash.sql` — purga diária (03:35 UTC) da
+      Lixeira de REGISTROS (0121: `records.deleted_at` há mais de 30 dias;
+      SQL puro, não usa os segredos). O DELETE cascateia audit/tarefas/
+      comentários/posicionamentos/conexões; sem webhook (o `record.deleted`
+      já saiu no envio à lixeira). Sem o job, /registros/lixeira apenas
+      ESCONDE os vencidos — a limpeza física depende dele.
+   8. `apply/pg-cron-purge-audit-log.sql` — retenção diária (03:40 UTC) do
+      `audit_log`: mantém as 100 alterações mais recentes por
+      (organização, origem, campo). SQL puro, não usa os segredos. **Rode
+      `apply/sanitize-audit-log.sql` ANTES** — ele aplica a mesma regra ao
+      acumulado e faz o `VACUUM FULL` que devolve o espaço (o DELETE diário
+      não devolve). Sem o job a tabela cresce sem teto: em 07/09/2026 estava
+      com 868 mil linhas / 163 MB = 40% do banco, 99,4% churn do sync.
    Os ticks (2–4 e 6) **pressupõem os segredos criados pelo primeiro**.
    Verificar/remover: `select * from cron.job;` /
-   `select cron.unschedule('purge-dashboard-trash');`.
+   `select cron.unschedule('purge-dashboard-trash');` /
+   `select cron.unschedule('purge-records-trash');` /
+   `select cron.unschedule('purge-audit-log');`.
 6. **Sync Bitrix** — logado como admin, em Registros: **Backfill inicial** (importa o
    ano) e depois **Reconciliar**. Os responsáveis são criados automaticamente; cure a
    lista em Configurações → Responsáveis e monte as Operações.
@@ -480,7 +523,9 @@ antigo no MESMO período.
 Zapper): entrar como OWNER em `/owner` → card da organização → seção
 "Recursos sob demanda" → marcar o toggle. Só o owner habilita (a escrita de
 `org_features` é service-role-only; org_admin não se auto-habilita). Com o
-recurso DESLIGADO a org não vê a aba Configurações → Remuneração, a linha na
+recurso DESLIGADO a org não vê o card/sub-aba Operação → Remuneração
+(`/operacao/remuneracao`, no hub Workspace — ex-aba de Configurações até
+05/08/2026), a linha na
 matriz de Acessos nem o preset "Remuneração Variável" (aplicar/gerar também
 barram); os DADOS de quem já usou nunca são apagados/escondidos — religar
 restaura tudo. A Zapper já nasce ligada pela própria migração 0114.
@@ -492,7 +537,7 @@ controle de remuneração do comercial: árvore de operações AEs/SDR-BDR JÁ C
 os vínculos das pessoas (Gabriella Salles, Daniela Drielsma, Paulo Vitor
 Santos, Marcus Barcelos, Marcos Hernandes — re-garantidos a cada Atualizar;
 vínculo manual nunca é tocado; remover permanentemente = tirar do preset), 5
-planos de remuneração (Configurações → Remuneração), campos
+planos de remuneração (Operação → Remuneração, card do hub Workspace), campos
 `adicional_ao_mrr` e `sdr_reuniao` (dropdown vivo de responsáveis), sub-base
 `reunioes_qualificadas`, a base espelho "Remuneração" e um dashboard de
 CONFERÊNCIA em 5 abas (Visão geral — resumo da remuneração sobre o espelho;
@@ -743,6 +788,73 @@ CRM vira Paulo Vitor Santos" viram UMA operação filtros + alterações
   (`lib/records/bulk-update.ts` — client RLS, nunca service role). Testes:
   `update-validate.test.ts` + `bulk-update.test.ts`.
 
+### 4.14 Mapeamentos de valores e o preset Outbound (0117, 07/08/2026)
+
+**Mapeamentos (de-para)** — Workspace → Operação → Mapeamentos
+(`/operacao/mapeamentos`; feature de org `mapeamentos`, ligada só pelo
+console `/owner`; a Zapper já nasce ON):
+
+- **Seed inicial por org**: rodar `supabase/apply/seed-value-mappings.sql`
+  (idempotente; `on conflict do nothing` — nunca sobrescreve edições feitas
+  na página). A Zapper foi semeada em 07/08/2026 (1.683 cargos + 273
+  segmentos dos caches do Apps Script).
+- **Reaplicar aos registros**: botão "Aplicar agora" da página (ou qualquer
+  edição de mapeamento — a action reaplica o domínio tocado). O import
+  CSV/API da base Meetime reaplica sozinho na cauda
+  (`maybeApplyMappingsAfterImport`).
+- **Salvar não trava a tela (08/08/2026)**: "Mapear"/editar/excluir rodam em
+  background — a linha some/atualiza na hora e as demais seguem editáveis;
+  saves em sequência são JUNTADOS numa única gravação + reaplicação (fila por
+  domínio), e falha reverte a linha com toast. O botão **"Mapear preenchidos
+  (N)"** (cabeçalho das pendências) salva de uma vez todas as pendências com
+  classificação digitada — também com uma única reaplicação.
+- **Classificação automática**: valor novo passa pelo classificador
+  heurístico (port do V5 do Apps Script) e pelo **banco de palavras
+  aprendido** das próprias entradas (retroalimentado: cada correção
+  manual/IA ensina a próxima rodada) — o classificável vira entrada com
+  badge **auto** (revisável/editável na página); só o resto fica pendente.
+  Erro do automático? Corrija a entrada na página — a reaplicação nunca
+  sobrescreve entradas existentes.
+- **Domínio novo (qualquer correlação futura)**: o caminho SEM código é a
+  aba **Campos → Reclassificações** (0119) — o admin escolhe base(s), campo
+  cru, campo(s) classificado(s) e categorias, e o salvar já aplica; o motor
+  aprendido é o classificador (sugere a partir do que for classificado à
+  mão/por IA/importado). Excluir uma reclassificação dinâmica remove o
+  de-para mas PRESERVA os campos e valores já gravados. Entrada em
+  `lib/mappings/domains.ts` fica reservada a domínio que precise de
+  classificador CODIFICADO próprio (padrão V5) — colisão de chave com um
+  dinâmico: o código vence.
+- **Assistente de IA**: botão "Classificar com IA" (por domínio) propõe
+  classificações para os pendentes com prévia EDITÁVEL; funciona também SEM
+  IA configurada via copiar-prompt → colar-JSON de IA externa (contrato
+  `mapeamentos-classify` v1). Entradas aplicadas ganham badge **IA**.
+- **Pendências**: valores sem classificação viram UMA tarefa aberta por
+  domínio no sino do org_admin (atualizada in-place; auto-completa quando
+  zera). A lista completa está na própria página.
+- **Export para trabalhar fora**: cada domínio exporta CSV (template das
+  pendências — preenchido, cola de volta no assistente) e JSON (dump com
+  categorias + exemplos) pelo gestor de mapeamentos (na página de
+  Mapeamentos e na aba Reclassificações). Os campos alvo são
+  criados pelo `ensureMappingFields` no primeiro apply, em código ou
+  dinâmico.
+
+**Preset "Outbound — Pré-Vendas"** (Configurações → Presets → Gerar) —
+pré-requisitos de DADO:
+
+- Base `meetime_outbound` criada e com o CSV do Meetime importado (campos
+  `custom:cargo`, `custom:segmento`, `custom:status`, `custom:cadencia`,
+  atividades etc.). O funil RR/RQ usa os LEADS do Bitrix com
+  `custom:fonte = "Outro"` e Data Reunião ≥ 01/07/2026 (regra jul/2026+ do
+  dashboard legado; subs `ob_rr`/`ob_rq`/`ob_noshow`).
+- Mapeamentos aplicados (aba Perfil usa `custom:cargo_area`,
+  `custom:cargo_nivel`, `custom:segmento_classificado`) e recalc dos campos
+  calculados rodado (campo `tier_contas`).
+- Regra de match "Meets Outbound" (leads ↔ meetime_outbound por e-mail) —
+  alimenta "Origem das Reuniões" (`match:meetime_outbound:…`).
+- Meta mensal na chave `rq_outbound` (área Metas) — alimenta o card "Meta de
+  RQ" e a linha de meta da Evolução Histórica; sem meta o card mostra só o
+  realizado.
+
 ## 5. Troubleshooting
 
 | Sintoma | Causa provável | Ação |
@@ -757,7 +869,8 @@ CRM vira Paulo Vitor Santos" viram UMA operação filtros + alterações
 | Mocks não contam no SQL (Mês x Mês, KPI SQL total, conversões) | (a) o predicado da sub-fonte (`sqls`: `custom:fonte in …`) vale em AND para mocks e o mock não carrega o campo (0084 corrige o lote Inbound); (b) modo "Dia útil" no card corta o mês corrente em hoje — reunião com data FUTURA fica fora até a data chegar | (a) aplique a 0084 e confira `custom_fields ? 'fonte'` nos mocks; ao criar novos mocks/subs, o mock precisa carregar os campos da segmentação; (b) alterne o toggle do card para "Dia cheio" (padrão do preset v4) |
 | Vendedor não vê os próprios registros/mocks | `responsibles` sem `user_id` vinculado (ou duplicata sem vínculo) | Vincule na tela de Usuários; para mocks, ver migração 0058 |
 | Sync "travado" | Job em `sync_jobs` com status `running` órfão | Reabra a página Registros (o job é detectado e retomável); em último caso, marque `status='canceled'` via SQL |
-| Tick não roda (sync/snapshot/webhook/automações) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 6 jobs (ticks + purga da Lixeira); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Tick não roda (sync/snapshot/webhook/automações) | pg_cron não agendado, ou segredos ausentes no Vault | `select * from cron.job;` — confira os 8 jobs (ticks + purgas das Lixeiras + retenção do audit_log); recrie segredos conforme `pg-cron-tick.sql`; teste `POST` manual na rota com `SYNC_SECRET` |
+| Banco crescendo sem explicação / `audit_log` ocupando a maior parte | Retenção não instalada — a tabela é write-only e o sync grava ~99% das linhas | `select origin, count(*) from audit_log group by 1;`. Rode `apply/sanitize-audit-log.sql` (uma vez, inclui `VACUUM FULL`) e instale `apply/pg-cron-purge-audit-log.sql`. Não acelera dashboards — o ganho é cache/backup |
 | Board na Lixeira não some após 14 dias | Job `purge-dashboard-trash` não agendado (o hub esconde o card, mas a linha continua no banco) | Aplique `apply/pg-cron-purge-trash.sql`; para purgar já, rode o `DELETE` do arquivo à mão no SQL editor |
 | Ruído no `audit_log` com Data Reunião | Trigger de congelamento descartando tentativas do sync (esperado) | Inofensivo — ver migração 0051 |
 | Datas do Bitrix aparecem 1 dia depois (ex.: reunião do dia 17 no dia 18) | Valor datetime gravado no fuso do portal (Moscou, +03:00) sem normalização — reuniões 18h+ BRT viram o dia seguinte no prefixo | Confira `data_sources.timezone` da fonte (`Europe/Moscow`); aplique 0079+0080 e rode um Backfill (o mapper v1.4+ normaliza p/ Brasília na entrada) |

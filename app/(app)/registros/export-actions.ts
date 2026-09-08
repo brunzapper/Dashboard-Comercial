@@ -1,5 +1,10 @@
 "use server";
-// Versão: 1.0 | Data: 17/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): paridade de ORDENAÇÃO com a tela — `ordenar`/`dir`
+//   validados pelo MESMO helper da página (lib/records/list-sort) e aplicados
+//   em cada lote (+ tiebreak por id); o CSV sai na ordem exibida. O conjunto
+//   de colunas do export segue o da v1.0 (divergência conhecida: não reflete
+//   as colunas dirigidas por dados da tela).
 // Exportação CSV da tela de Registros: reexecuta a MESMA query filtrada da
 // página (client do usuário → RLS decide o que sai) sem paginação de tela,
 // varrendo em lotes de 1000 até o teto. Devolve headers+rows já em string
@@ -17,6 +22,7 @@ import {
 } from "@/lib/sources";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import { isCoreDef } from "@/lib/records/core-defs";
+import { parseRecordListSort, sortColumnExpr } from "@/lib/records/list-sort";
 import {
   recordCellValue,
   recordRefLabel,
@@ -60,6 +66,9 @@ export interface ExportRecordsParams {
   de?: string;
   ate?: string;
   busca?: string;
+  // Ordenação ativa da tela (re-validada aqui pelo mesmo helper da página).
+  ordenar?: string;
+  dir?: string;
 }
 
 export type ExportCsvResult =
@@ -84,46 +93,8 @@ export async function exportRecordsCsv(
     : (sources[0]?.key ?? "leads");
   const recordType = toRecordType(fonte);
 
-  // Varre em lotes (mesma ordenação da tela); o 1º lote traz o count p/ o teto.
-  const records: RecordRow[] = [];
-  for (let from = 0; ; from += BATCH) {
-    let query = supabase
-      .from("records")
-      .select(EXPORT_COLS, from === 0 ? { count: "exact" } : undefined)
-      .eq("record_type", recordType)
-      .eq("is_mock", false);
-    if (params.etapa) query = query.ilike("stage", `%${params.etapa}%`);
-    if (params.responsavel) {
-      query = query.eq("responsible_id", params.responsavel);
-    }
-    if (params.de) query = query.gte("source_created_at", params.de);
-    if (params.ate) {
-      query = query.lte("source_created_at", `${params.ate}T23:59:59`);
-    }
-    if (params.busca) query = query.ilike("title", `%${params.busca}%`);
-
-    const { data, count, error } = await query
-      .order("source_created_at", { ascending: false, nullsFirst: false })
-      .range(from, from + BATCH - 1);
-    if (error) return { ok: false, message: error.message };
-
-    if (from === 0) {
-      const total = count ?? 0;
-      if (total === 0) {
-        return { ok: false, message: "Nenhum registro com os filtros atuais." };
-      }
-      if (total > EXPORT_MAX_ROWS) {
-        return {
-          ok: false,
-          message: `${total} registros excedem o teto de ${EXPORT_MAX_ROWS}. Refine os filtros (período, etapa, responsável) e tente de novo.`,
-        };
-      }
-    }
-    records.push(...((data ?? []) as unknown as RecordRow[]));
-    if (!data || data.length < BATCH) break;
-  }
-
-  // Colunas custom da fonte visíveis ao papel (mesma regra da página).
+  // Colunas custom da fonte visíveis ao papel — buscadas ANTES do laço: a
+  // ordenação valida contra o catálogo (mesmo helper da página).
   const { data: fieldsData } = await supabase
     .from("field_definitions")
     .select(
@@ -141,6 +112,72 @@ export async function exportRecordsCsv(
       fieldAppliesToSource(f.applies_to, fonte) &&
       (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
   );
+
+  // Catálogo de VALIDAÇÃO do sort: qualquer custom visível ao papel (a tela
+  // pode ordenar por coluna populada de outra base, fora de `fields`).
+  const sortCatalog = ((fieldsData ?? []) as FieldDefinition[]).filter(
+    (f) =>
+      f.data_type !== "calculado_agg" &&
+      !isCoreDef(f) &&
+      (isAdmin || hasAnyRole(roles, f.visible_to_roles as RoleKey[]))
+  );
+  const sort = parseRecordListSort(
+    params.ordenar ?? "",
+    params.dir ?? "",
+    sortCatalog
+  );
+
+  // Varre em lotes (mesma ordenação da tela); o 1º lote traz o count p/ o teto.
+  const records: RecordRow[] = [];
+  for (let from = 0; ; from += BATCH) {
+    let query = supabase
+      .from("records")
+      .select(EXPORT_COLS, from === 0 ? { count: "exact" } : undefined)
+      .eq("record_type", recordType)
+      .eq("is_mock", false)
+      // Lixeira (0121): o export espelha a listagem — soft delete fora.
+      .is("deleted_at", null);
+    if (params.etapa) query = query.ilike("stage", `%${params.etapa}%`);
+    if (params.responsavel) {
+      query = query.eq("responsible_id", params.responsavel);
+    }
+    if (params.de) query = query.gte("source_created_at", params.de);
+    if (params.ate) {
+      query = query.lte("source_created_at", `${params.ate}T23:59:59`);
+    }
+    if (params.busca) query = query.ilike("title", `%${params.busca}%`);
+
+    const ordered = (
+      sort
+        ? query.order(sortColumnExpr(sort, sortCatalog), {
+            ascending: sort.dir === "asc",
+            nullsFirst: false,
+          })
+        : query.order("source_created_at", {
+            ascending: false,
+            nullsFirst: false,
+          })
+    )
+      // Tiebreak estável entre lotes (mesma técnica da página).
+      .order("id", { ascending: true });
+    const { data, count, error } = await ordered.range(from, from + BATCH - 1);
+    if (error) return { ok: false, message: error.message };
+
+    if (from === 0) {
+      const total = count ?? 0;
+      if (total === 0) {
+        return { ok: false, message: "Nenhum registro com os filtros atuais." };
+      }
+      if (total > EXPORT_MAX_ROWS) {
+        return {
+          ok: false,
+          message: `${total} registros excedem o teto de ${EXPORT_MAX_ROWS}. Refine os filtros (período, etapa, responsável) e tente de novo.`,
+        };
+      }
+    }
+    records.push(...((data ?? []) as unknown as RecordRow[]));
+    if (!data || data.length < BATCH) break;
+  }
 
   // Rótulos de FKs (responsável/operação/lead relacionado).
   const [{ data: respData }, { data: opsData }] = await Promise.all([

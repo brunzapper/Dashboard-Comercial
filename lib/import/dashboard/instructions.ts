@@ -1,4 +1,18 @@
-// Versão: 1.7 | Data: 31/07/2026
+// Versão: 1.10 | Data: 12/08/2026
+// v1.10 (12/08/2026): Semana Fechada — regra do snap trocada da maioria
+//   (4+ dias) pela EXPANSÃO: o período cobre toda semana que ele toca,
+//   inteira (closed-week.ts v1.1); só o texto da seção Dimensões muda.
+// v1.9 (07/08/2026): dimensão condicional — a seção Dimensões documenta
+//   `dimensions[].case_formula_text` (expressão SE/E/OU que reclassifica os
+//   valores em rótulos; multi-campo permitido; proibições e o preserva-cru
+//   do SE sem "senão"). Ponto MANUAL como o closedWeek: chave de DIMENSÃO,
+//   fora dos dicionários de settings-docs; validador aceita texto OU tokens
+//   (round-trip do export) e remove incompatibilidades com aviso.
+// v1.8 (03/08/2026): Semana Fechada — a seção Dimensões documenta
+//   `dimensions[].closedWeek` ("seg_dom" | "sab_sex", só week_year/week_month;
+//   regra da maioria, weekMode efetivo "full"). Ponto MANUAL: closedWeek é
+//   chave de DIMENSÃO (fora dos dicionários de settings-docs); o validador a
+//   aceita/remove com aviso desde a mesma entrega (validate.ts v1.5).
 // v1.7 (31/07/2026): filtros sobre relações por NOME — a seção Filtros e a
 //   regra 6 documentam que responsible_id/operation_id aceitam o nome exato do
 //   cadastro como "value" (o engine resolve nome→id em runtime); nunca
@@ -241,7 +255,8 @@ de data próprio (essencial p/ métricas tipo "reuniões"):
   "parent_key": "<key de Base raiz>",
   "label": "Reuniões",
   "default_period_field": "custom:data_reuniao",  // coluna core de data OU custom:<key> tipo data
-  "filter": [ { "field": "custom:data_reuniao", "op": "not_null" } ]
+  "filter": [ { "field": "custom:data_reuniao", "op": "not_null" } ],
+  "ignore_period": true                // opcional: a Sub-base NÃO respeita o filtro de período do dashboard (linhas sempre em "todo período" — ex.: "todos os ativos hoje")
 }
 
 ## "correspondences" — campos unificados a criar
@@ -278,7 +293,20 @@ promovida a tipo próprio).
 - "transform" (só campo de data): ${transformList}.
   Só p/ week_month: "weekMode": "restricted" (recorta na virada do mês) |
   "full" (semana cheia seg→dom).
+- Só p/ week_year/week_month: "closedWeek": "seg_dom" | "sab_sex" — Semana
+  Fechada: o período da consulta expande p/ semanas COMPLETAS nas bordas
+  (TODA semana que o período toca entra inteira — o início abre p/ trás e o
+  fim p/ frente; semanas de borda aparecem nos dois períodos vizinhos); com
+  week_month o weekMode passa a valer como "full". Omitir = desligada.
 - NÃO inclua "dateAgg" aqui (ver regra semântica 12 — só em lista de registros).
+- "case_formula_text" (opcional, só widget AGREGADO): expressão SE/E/OU que
+  RECLASSIFICA os valores da dimensão em rótulos e agrupa por eles — ex.:
+  'SE([Fruta] = "Mamão"; "Doce"; SE(OU([Fruta] = "Pera"; [Fruta] = "Maçã");
+  "Dura"; "Outros"))'. SE sem "senão" preserva o valor original do "field".
+  Pode combinar OUTROS campos do registro (E/OU entre campos); "field" segue
+  sendo o campo PRINCIPAL da dimensão. Proibido com "transform"/"dateAgg",
+  em campo de data/relação e com refs de data/relação na expressão
+  (removida com aviso).
 - Gráficos usam a 1ª dimensão como eixo; tabela agregada aceita várias.
 
 ### Métricas

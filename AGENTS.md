@@ -75,6 +75,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   client-side decide-se SÓ em `resolveListFilters` (record-list.ts); não a
   duplique nem a resolva via RPC. Ver `docs/arquitetura.md` §4.1 e
   invariante 9.
+- **Semana Fechada se resolve no ENGINE, nunca no RPC (03/08/2026):**
+  `Dimension.closedWeek` ("seg_dom" | "sab_sex", só transforms de semana)
+  snapa o período da RODADA p/ semanas completas (regra da EXPANSÃO desde
+  12/08/2026: toda semana que o período toca entra inteira — semanas de borda
+  aparecem nos dois meses vizinhos; o RÓTULO segue o dono do 4º dia em
+  date-buckets; `lib/widgets/closed-week.ts`) em `runWidget`, DEPOIS do `comparisonSpec` e
+  do `lowerCalcGoalOperands` (ambos precisam do período ORIGINAL); sáb–sex
+  desce ao RPC como transform 'day' e o `bucket-merge` funde client-side
+  (o gate `dimNeedsClientBucket` também ativa p/ core/`unified:`/`match:`
+  nesse caso). weekMode/âncora efetivos SÓ por `effectiveWeekMode`/
+  `dimWeekStart`. NÃO recrie os RPCs p/ semana de sábado nem reintroduza o
+  recorte "restrita" com a opção ativa. Ver `docs/arquitetura.md` §4.1.
 - **Operando com escopo de fonte se resolve no ENGINE, nunca no RPC:** o ref
   `agg:<agg>:<campo>@<fonte>` é ABAIXADO em runtime para a chave condicional
   `aggif:` já existente (predicado `record_type =` + filtro da sub) por
@@ -159,6 +171,14 @@ This version has breaking changes — APIs, conventions, and file structure may 
   multi-perna, operando escopado em fonte-IRMÃ é ZERADO por perna
   (`zeroSiblingScopedOperands` + backfill 0 na basis) — cada perna exibe a
   PRÓPRIA contribuição, nunca o total global repetido. RPCs seguem intocados.
+  **Sub que IGNORA o período (`sub_sources.ignore_period`, 0116):** também
+  100% engine — `applyPeriodToFilters` particiona as fontes cobertas
+  (record_type todo-isento sai do `byType`; caso misto força o sintético com
+  `record_types` = quem respeita, pass-through do wrapper 0054, espelhado no
+  `.or()` do modo lista), `planSourceLegs` NUNCA a absorve (vira perna extra
+  tipo "conviver"; demovida da principal se houver candidata do mesmo
+  `record_type` que respeite) e os `scopedAuxInputs` removem o sentinela
+  pré-sintetizado p/ escopo isento — NÃO recrie as RPCs para isso.
   Ver `docs/arquitetura.md` §4.8 e invariante 10.
 - **Filtro de OPERAÇÃO nunca compara a coluna literal (20/07/2026):**
   `records.operation_id` é derivada (priority=1 do responsável no sync) e pode
@@ -315,7 +335,24 @@ This version has breaking changes — APIs, conventions, and file structure may 
   goals/non_working_days). Loader novo de catálogo/campos/correspondências
   deve aceitar `orgId` e as actions de criação carimbam `organization_id`
   (sem carimbo, usuário de outra org falha ALTO no WITH CHECK — nunca vaza
-  linha p/ a Zapper). `data_sources.key`/`record_type` seguem GLOBAIS
+  linha p/ a Zapper). Desde 22/08/2026 isso inclui `currencies`/`currency_rates`
+  (0123 — antes GLOBAIS): PK/FK compostas com a org, e os loaders de
+  `lib/widgets/currency.ts` aceitam `orgId` — OBRIGATÓRIO no caminho service
+  role (`lib/snapshots/refresh.ts`), senão as taxas de todas as orgs colidem
+  no mesmo `rateKey(code, year, quarter)`. Catálogo do SISTEMA
+  (`roles`/`permissions`/`role_permissions`) é service-role-only (0122): não
+  tem `organization_id`, então escrita por permissão de usuário valia p/ TODAS
+  as orgs.
+- **`visible_to_roles` de campo é ACL de VALOR, não só de coluna
+  (22/08/2026):** `records.custom_fields` é UMA coluna jsonb — a RLS não
+  esconde uma CHAVE dela. Escolher quais colunas RENDERIZAR esconde o dado da
+  tela, não do payload RSC. Todo caminho que entrega `RecordRow` a um Client
+  Component peneira os VALORES no servidor com `redactRestrictedFields`
+  (`lib/records/field-acl.ts`; deny-list — chave órfã sem definição sobrevive):
+  hoje `/registros` e a agenda. EXCEÇÃO consciente: widget de lista/tabela no
+  dashboard NÃO peneira (o construtor já barra não-admin de adicionar coluna
+  restrita; widget montado por admin exibe de propósito) — ver
+  `docs/seguranca.md`. `data_sources.key`/`record_type` seguem GLOBAIS
   (colisão → sufixo na action). Unicidades por-org: upserts nessas tabelas
   usam onConflict composto (`organization_id,key` etc.).
 - **org_admin e Owner protegidos por TRIGGER + GUC (0089):** um org_admin por
@@ -441,6 +478,111 @@ This version has breaking changes — APIs, conventions, and file structure may 
   exemplo do SPEC aceito pelo validador REAL e contagens `**Label (N)**` do
   §16.2 do manual — o conteúdo do manual segue humano (regra do topo), só as
   contagens são conferidas.
+- **Kanban/Agenda no import: settings SANEADO, vínculo local NUNCA no JSON
+  (07/09/2026):** `WidgetSettings.kanban`/`.agenda` deixaram de ser `null` no
+  dicionário (a IA CONFIGURA quadro e calendário) e deixaram de ser
+  passthrough no validador. A régua é ÚNICA —
+  `sanitizeKanbanSettings`/`sanitizeAgendaSettings`
+  (`lib/import/dashboard/kanban-settings.ts`, PUROS, deps por injeção porque o
+  `checkRef` é closure do validador): enums contra os mapas de rótulo de
+  `lib/kanban/types.ts`/`lib/agenda/types.ts` (`KANBAN_MODE_LABELS`/
+  `KANBAN_DATE_BUCKET_LABELS`/`KANBAN_AGG_LABELS`/
+  `KANBAN_METRIC_KIND_LABELS`/`AGENDA_VIEW_LABELS` — `satisfies`, e os MESMOS
+  que a UI consome), refs por `checkRef`, keys de Base (`linked` só aceita
+  Base RAIZ), tetos de colunas/badges/extraFields. Chave inválida = AVISO +
+  descarte, NUNCA erro duro. `KANBAN_LOCAL_KEYS`
+  (`allocationFieldKey`/`taskBoardId`) referenciam campo e board do quadro de
+  ORIGEM: o export as REMOVE, o validador as DESCARTA e o
+  `applyPresetDefinition` as PRESERVA do settings existente (só em widget que
+  segue kanban) — os três juntos, ou o strip do export desliga a alocação
+  (invariante 24) em silêncio na primeira edição por IA. `widgets.sources` de
+  kanban/agenda é ALINHADO com a Base da config (âncora do período da page).
+  NÃO documente os vínculos locais no SPEC e NÃO monte régua paralela de
+  saneamento — o assistente do quadro reusa este módulo. Fiscalizado por
+  `lib/import/dashboard/kanban-settings.test.ts` + blocos em
+  `validate.test.ts`/`instructions.test.ts`.
+- **Assistente do QUADRO kanban não tem régua própria (`kanban-config` v1,
+  07/09/2026):** o contrato (`lib/import/kanban/*`, core
+  `lib/ai/kanban-config.ts`, sheet `components/kanban/kanban-ai-sheet.tsx`,
+  actions em `app/(app)/kanbans/ai-actions.ts`) cobre `quadro` (delta de
+  `KanbanSettings`) + `automacoes` (lista COMPLETA). Toda validação REUSA o que
+  já existia: `deepMergeValue` (exportado de `lib/import/dashboard/rewrite.ts`
+  — mesma semântica de delta da IA de dashboards) → `sanitizeKanbanSettings`;
+  `parseAutomationRule` fail-closed para cada regra (por isso condição/ação
+  viajam na forma INTERNA — camada de tradução derivaria do parse);
+  `settableFields` do `getAutomationFieldOptions` como alvo de `set_field` (é
+  ele que aplica `setFieldTargetError`). NÃO monte validação paralela nem
+  traduza o vocabulário das regras. Apply SÓ por
+  `updateBoardSettings`/`saveWidgetSettings` + `saveAutomation`; reconciliação
+  por NOME e regra ausente é DESATIVADA, nunca excluída (precedente de
+  operações). Alvo = o quadro da UI (`KanbanOwner`), nunca do JSON; as colunas
+  chegam da página (como no `AutomationsSheet`) e só AMPLIAM os alvos aceitos.
+  Fiscalizado por `lib/import/kanban/{validate,instructions}.test.ts`.
+- **Painel de IA da OPERAÇÃO: registry em código, sessão com a ORG na PK
+  (0124, 08/09/2026):** o painel vive no `layout.tsx` de `/operacao` e é
+  escopado pela sub-área (`scopeForPath`). Registry PARTIDO em dois —
+  `lib/ai/operacao/scopes.ts` (metadata PURA, client-safe: o painel é client;
+  `cards.ts` não serve de molde porque importa `checkSettingsArea`) e
+  `lib/ai/operacao/handlers.ts` (`server-only`). O handler NÃO implementa
+  validação nem escrita: DELEGA aos cores existentes (o escopo `mapeamentos`
+  chama `classify-mappings.ts` inteiro — zero contrato/validador novo; o sheet
+  da tela continua sendo a porta do fluxo offline/CSV). Escopo sem entrada ⇒
+  sem painel. **`operacao_ai_sessions` tem `organization_id` na PK**
+  (`organization_id,user_id,scope`) — o escopo é chave de registry em CÓDIGO,
+  igual em toda org, e sem a org na chave um usuário multi-org veria numa org
+  o `pending`/`undo_snapshot` gerado em OUTRA (a RLS não pega: ele é membro
+  das duas; precedente da 0123 em `currencies`). NÃO há trigger de stamp
+  (sem linha-pai): a action carimba com `getActiveOrgId()` e o gate FALHA ALTO
+  sem org ativa. `pending` guarda o ALVO junto do JSON e o apply RECUSA alvo
+  divergente do da UI. Gate = `checkSettingsArea` + `adminOnly` (a área
+  `remuneracao` não tem gate de papel e a page ramifica p/ o vendedor — sem
+  isso ele veria painel de ESCRITA). Sub-escopo pelo contexto
+  (`usePublishOperacaoAiTarget`), NUNCA por `useSearchParams`: o domínio de
+  Mapeamentos é `useState` local. Carga da sessão é EVENTO (abrir); troca de
+  sub-aba REMONTA por `key={scope.key}` — efeito reagindo a escopo cai em
+  `react-hooks/set-state-in-effect`. Fiscalizado por
+  `lib/ai/operacao/scopes.test.ts`. Ver `docs/arquitetura.md` §4.22.
+- **Escopo `remuneracao` (contrato `remuneracao-edit` v1, 08/09/2026):** duas
+  seções OPCIONAIS — `plano` (DELTA de `comp_plans.config`) e `metas` (células
+  membro × fator, teto `MAX_AI_COMP_TARGETS`). Alvo `"<planId>:<ano>-<mes>"`
+  publicado pelo `remuneracao-manager` com o mês do SERVIDOR (o rascunho da
+  navegação é um mês que o usuário ainda não confirmou). O validador
+  (`lib/import/comp/validate.ts`) só TRADUZ nome/rótulo/texto de fórmula para
+  um `CompPlanConfig` completo mesclado sobre o atual — a régua de validade é
+  `validateCompPlanSave` (módulo ÚNICO com o savePlan; repetir checagem aqui é
+  a régua paralela da invariante 25) e a MURALHA segue sendo o `savePlan`.
+  Ids NUNCA no JSON: fator/bloco casados por RÓTULO HERDAM `id` (e o fator,
+  o `metricKey`) — regenerar orfanaria `inputs.overrides.factors`,
+  `detailGrouping.byFactor` e as linhas de `goals` de todos os meses; fator
+  novo sai com o sentinela `metricKey: "__auto__"` e bloco novo herda as
+  `memberTiers` do homônimo. Por ser DELTA, `presetKey`/`filters`/
+  `memberTeams`/`detailGrouping` sobrevivem ao apply, e `ativo` tem por
+  default o estado ATUAL do plano (default `true` reativaria plano desligado);
+  `comissoes` presente é a lista COMPLETA. Fórmula em TEXTO, tokenizada pelos
+  catálogos que já existem. Apply/undo SÓ por `savePlan` + **`saveTarget`**
+  (nunca `upsertGoalTarget`: é o saveTarget que canonicaliza e desloca a
+  apuração — o call site fala o mês do LANÇAMENTO), re-validando sobre a config
+  FRESCA, resultado POR ITEM, `valor: null` EXCLUI a meta (nunca `target = 0`).
+  Fiscalizado por `lib/import/comp/{instructions,validate}.test.ts`. Ver
+  `docs/arquitetura.md` §4.22 e §4.18.
+- **Assistente de TAREFAS (contrato `tarefas-edit` v1, 08/09/2026):** lote de
+  até `MAX_AI_TASK_ACTIONS` (15) ações `criar`/`editar`/`concluir` — SEM
+  exclusão (precedente de operações). Identidade por TÍTULO (ambíguo = ERRO,
+  nunca uma escolha), responsável/quadro por NOME, fase pelo RÓTULO da coluna
+  do quadro EFETIVO (as fases da tela saem do MESMO `deriveColumns` + extras em
+  uso do `tarefas-client`; só quadro em modo `tarefas` entra no catálogo). Gate
+  é só a sessão — a muralha é a RLS de `tasks` (0063) e o `coerceResponsible`
+  do choke point; nada de service role. Apply item a item por
+  `createTask`/`updateTask`/`completeTask` + `moveTaskPhase` (a fase é choke
+  point PRÓPRIO — o updateTask não a toca). DUAS armadilhas fechadas de
+  propósito: o `updateTask` monta o UPDATE do FormData INTEIRO (chave ausente
+  vira NULL), então o apply parte da LINHA ATUAL e sobrepõe o delta — sem isso
+  mudar só a data apagaria descrição, responsável e o vínculo com o REGISTRO
+  (que o SPEC declara não-editável aqui); e `hora_fim` sem `hora` é DESCARTADA
+  em silêncio pelo `readTaskForm` (CHECK 0111), então o validador a recusa
+  usando a hora já gravada como base na edição parcial. Fiscalizado por
+  `lib/import/tasks/{validate,instructions}.test.ts`. Ver
+  `docs/arquitetura.md` §4.17.
 - **Agrupamento de responsáveis se resolve no ENGINE/loaders, nunca no RPC nem
   repontando registros (0101, 26/07/2026):** `responsibles.canonical_id` marca
   um responsável como APELIDO de outro ("nome usado") — exibição reversível:
@@ -686,9 +828,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   crus, título em `headers`), SEM quadro-resumo no topo: uma seção por
   pessoa (`section` = nome 1×, total consolidado na col F + composição
   `sheetSummaryNote` na col G), sub-cabeçalho `planHeader` por plano e fecho
-  `memberTotal` ("Total — <nome>"/"Total do mês") SÓ com 2+ planos;
-  `summaryTotal` ("Total geral") virou rodapé, SÓ com 2+ pessoas; escopo
-  "minha" segue com `section` = nome do plano (sem `planHeader`). O que não
+  `memberTotal` ("Total — <nome>"); desde 16/08/2026 o fecho é SEMPRE emitido
+  (é ele que marca o FIM do bloco no `.gs`) e, com um ÚNICO plano, ele
+  SUBSTITUI o `blockTotal` daquele plano (herdando o `sheetTotalNote`) — nunca
+  duas linhas "Total" idênticas; 2 linhas `blank` (era 1) abrem cada bloco.
+  o ramo do
+  escopo "minha" SAIU do builder junto com o botão da tela do vendedor (o
+  valor segue no contrato/constraint por causa de `comp_sheet_links` já
+  gravados). **Payload v3.4 = LEITURA PARA LEIGOS E PARA O RH (27/08/2026):**
+  a planilha tem DOIS públicos com necessidades opostas (o colaborador quer
+  "quanto e por quê"; o RH quer "quem recebe quanto e se é final") e o layout
+  por pessoa atendia só o primeiro. Entram, ANTES dos cards e sem tocá-los:
+  bloco `meta` (competência, mês APURADO derivado de `apuracaoRef` — a
+  diferença entre mês de pagamento e mês de desempenho era invisível na
+  planilha; situação publicado/prévia de `comp_entries.published_at`, status
+  MISTO dito por extenso; data de geração) e RESUMO da folha
+  (`rosterHeader`/`rosterRow`/`rosterTotal`, uma linha por pessoa com link p/
+  a aba `Det-<Nome>`), que SUBSTITUIU o rodapé `summaryTotal` (kind mantido na
+  whitelist só p/ ticket antigo em trânsito — o builder não o emite mais); e,
+  no FIM, a LEGENDA das colunas (`legendHeader`/`legend`, definição na coluna
+  de prosa — texto longo numa coluna do meio alargaria a planilha inteira).
+  Peso 0 sem override emite "—" (célula vazia lia-se como dado faltando). A
+  consolidação por pessoa é UM cálculo (`summaries`) compartilhado pelo
+  resumo, pelo cabeçalho do card e pelo fecho. O que não
   participa é OMITIDO: rótulo "Peso" some do `detailHeader` quando nenhum
   fator tem peso, e a linha "Base variável" só entra quando a base participa
   — comissão `flat` sobre a base NÃO conta (computeEntry ignora o basis) e
@@ -696,15 +858,150 @@ This version has breaking changes — APIs, conventions, and file structure may 
   builder; o CSV mantém a linha incondicional). `kinds` paralelo às rows
   (whitelist `COMP_SHEET_KINDS` em `lib/comp/sheets-export.ts`, validada no
   `validateReportPayload`; `summaryHeader`/`summary`/`note` reservados — não
-  emitidos); o `.gs` (v2.1) formata POR KIND (moeda/%/bold/larguras fixas,
-  SEM autoResize e SEM merge — `clear()` não desfaz merge) com degradação
-  bidirecional (script v1 × payload v2 e vice-versa; script 2.0 rende os
-  kinds novos como texto puro até republicar); frases novas do demonstrativo
-  SÓ em `commission-label.ts` (`sheetFactorNote`/`sheetTotalNote`/
-  `sheetSummaryNote`/`SHEET_*`), sem jargão interno (pinado em
-  `comp-sheet.test.ts`); o CSV NÃO passa por aí (builder `compReportCsv`
-  intocado, byte-idêntico; `compReportValues` foi removido — deriva via
-  `statementBreakdown` de `lib/export/comp.ts`). NUNCA gerar fórmula a
+  emitidos); o `.gs` (v3.0) formata POR KIND (moeda/%/bold/fundos/larguras
+  fixas + borda e altura que ABREM em `section` e FECHAM em `memberTotal`,
+  SEM merge — `clear()` não desfaz merge; larguras próprias nas abas de
+  detalhe) e escreve em DUAS PASSADAS (cria/limpa todas as abas p/ colher os
+  `gid`, depois preenche com os hiperlinks resolvidos), com degradação
+  bidirecional (script v2.1 × payload v3 = só a aba do mês, sem links nem
+  detalhe; script v3 × ticket v2 = comportamento anterior). LARGURA de coluna
+  (v3.4): `autoResizeColumns` ajusta ao conteúdo, mas com TETO
+  (`LARGURA_MAX_`) — a coluna de prosa cresceria centenas de px e jogaria o
+  resto para fora da tela; quem estoura é fixada no teto e ganha `setWrap`. ACABAMENTO
+  (v3.5): linhas de grade do Sheets DESLIGADAS (`setHiddenGridlines`) — a
+  grade nativa risca a planilha inteira, inclusive o vazio entre cards, e
+  compete com as bordas desenhadas; as tabelas de registros do detalhe
+  ganham divisórias VERTICAIS (a horizontal segue só sob o cabeçalho); e a
+  coluna "Quanto gerou (R$)" entra em `MOEDA_POR_KIND_` nas DUAS variantes
+  de linha (`detailRow` e `detailRowMoney`) — ela é sempre reais, mesmo em
+  fator de contagem, e saía como número comum.
+  **VOCABULÁRIO (27/08/2026):** TODA frase visível dos três exports sai de
+  `commission-label.ts` (dono ÚNICO — `sheetFactorNote`/`sheetTotalNote`/
+  `sheetSummaryNote`/`SHEET_*`/`detail*`) no registro de QUEM LÊ, não de quem
+  modelou: "fator" → "indicador", "alvo" → "meta" (a frase-muleta "Alvos são
+  metas" saiu da grade), "gatilho" → "o que define a faixa",
+  "recorte"/"operando" → linguagem comum, e ⇒/≥/≠ viraram palavras. O CSV
+  DEIXOU de ser byte-idêntico (v1.3, pino atualizado de propósito): ele é lido
+  pelas mesmas pessoas e agora consome as frases `sheet*` — a ORDEM e a
+  quantidade de colunas seguem pinadas. O PDF idem (o `entryMemoryLines` saiu
+  do `comp-report-print`: quem renderiza a memória agora é o próprio
+  `CompPlanCard`, em tela — antes o colaborador só a via se imprimisse) e
+  ganhou a legenda impressa. Pinado em `comp-sheet.test.ts`/`comp.test.ts`/
+  `commission-label.test.ts`.
+  **DETALHAMENTO por registro — tela e planilha do MESMO núcleo (16/08/2026):**
+  `lib/comp/detail.ts` é o dono ÚNICO de "quais registros compõem este membro ×
+  fator × mês", consumido pelo painel de conferência da tela
+  (`comp-detail-panel.tsx` + `detail-actions.ts`, gate admin) E pelas abas
+  `Det-<Nome>` do export (`lib/export/comp-detail-sheet.ts`) — nunca monte um
+  segundo caminho. A listagem é **EVIDÊNCIA**: o realizado por membro×fator
+  continua saindo SÓ de `runCalculatedWidget` (via `computeEntry`/
+  `statementBreakdown`) e é exibido AO LADO da soma das linhas (confronto
+  NUMÉRICO, sem frase); jamais derive o realizado da lista. O recorte sai do
+  choke point `factorRecordQuery` (espelha o engine: `apuracaoRef`→
+  `monthPeriod`, `factor.filters` e DEPOIS `memberFilterFor` — helper
+  IMPORTADO de `engine.ts`) e a consulta é `runRecordListWindow`; a coluna de
+  valor vem dos operandos `agg:` da fórmula (`parseAggRef`; contagem não vira
+  coluna) e `listedSum` só existe para soma/contagem — média/mín/máx não somam.
+  **O recorte é por OPERANDO, nunca por fator (16/08/2026):** o realizado não
+  sai de UMA consulta — `runCalculatedWidget` decompõe a fórmula e dispara uma
+  por recorte. `factorOperands` repete a MESMA sequência do choke point
+  (`expandAggFormula` → `lowerSourceScopedOperands` → `basisKeysFor` →
+  `basisMetric`/`parseCondBasisKey`) e `operandRecordQuery` monta o recorte de
+  cada operando: universo `factor.sources ∪ formulaScopedSources` (operando com
+  escopo roda SÓ na fonte dele, com a coluna de data DELA via
+  `scopedAuxPeriod`), filtros `factor.filters` → membro → `condFilters` do
+  SOMASE/escopo → **campo preenchido**. Esse último vem do SQL da RPC
+  (`sum(nullif(campo,'')::numeric)`, `count(nullif(campo,''))`): campo vazio
+  NÃO contribui, e listá-lo enchia a tela de linhas R$ 0,00; `count(*)` não
+  filtra nada. Chaves de basis do mesmo recorte colapsam num operando
+  (MÉDIA emite sum+count). Um bloco por operando, com subtotal próprio.
+  **A conferência só compara quando há um número único a confrontar**
+  (`listedForCompare`: fórmula de um operando puro ⇒ Σ para soma, contagem do
+  recorte para contagem) — fórmula combinada (ou com fusão da engrenagem em
+  jogo) simplesmente não exibe o confronto, em vez de acusar divergência
+  inexistente. Divergência ESTRUTURAL segue como
+  aviso visível: filtro em campo fora da whitelist do modo lista
+  (`listFilterFieldSupported`, exportado de `record-list.ts` ao lado do
+  `filterColumn` que o descarta) e operando que agrega `unified:`/`match:`
+  (sem Σ, `DETAIL_UNSUPPORTED_FIELD_NOTE`). Consulta sempre pelo client RLS do
+  usuário — NUNCA service role. **Quem participa do plano é o membro CONFIGURADO,
+  nunca a presença de lançamento (29/08/2026):** estreitar `memberIds` NÃO
+  apaga os `comp_entries` já gravados, então enumerar por entry fazia quem
+  saiu do plano levar os indicadores dele para a própria aba `Det-<Nome>` —
+  enquanto a Visão geral, que filtra por `explicitMemberIds`, já não o
+  mostrava. `DetailPlan.memberIds` (operações resolvidas VIVAS, como no
+  recompute; null = todos os ativos) + o gate ÚNICO `planAppliesToMember`
+  nas duas passadas do `loadCompDetail`. As duas metades do export têm de
+  concordar sobre quem está no plano. **Payload v3:** `details` (uma
+  `CompSheetPayloadSheet` por colaborador) + `links` paralelo às rows (nome da
+  aba alvo; o `gid` só existe no Apps Script — a fórmula `=HYPERLINK("#gid=…")`
+  é montada LÁ). O nome da aba sai de `detailTabName` (PURO — o cliente calcula
+  os mesmos nomes do servidor); a action monta o detalhe server-side (os
+  registros não existem no cliente), ANULA link sem aba correspondente e
+  degrada BEST-EFFORT (falha/teto ⇒ planilha sai só com o demonstrativo +
+  aviso). Abas `Det-*` órfãs são APAGADAS pelo script a cada export (só com
+  payload v3). Frases do detalhe em `commission-label.ts` com prefixo
+  `detail*`/`DETAIL_*` (compartilhadas pelos dois consumidores — não `sheet*`). **BÔNUS na aba de detalhe (28/08/2026):** `CompDetailPlan.bonuses` sai do
+  MESMO `derived` que alimenta o `monthTotal` (`inputs.bonuses`, sem consulta
+  nova) e vira linha com o kind `bonus` JÁ existente (não exige republicar o
+  `.gs`). Sem ela a aba fechava com um "Total" que incluía um valor ausente
+  dela inteira — no documento onde se vai justamente conferir. Rótulo único
+  em `bonusRowLabel` (commission-label), compartilhado com a aba do mês.
+  Kind novo exige entrada em `COMP_SHEET_KINDS` **e** nas tabelas de estilo do
+  `.gs` **e** republicar o script.
+  **MEMÓRIA DE CÁLCULO no lugar da prosa + agrupamento configurável
+  (17/08/2026):** a aritmética "registro → dinheiro" vive no módulo PURO
+  `lib/comp/payout-math.ts` (`commissionRolesOf` = blocos que o fator dispara
+  e/ou embasa; `tierLadder` = escada COMPLETA com a aplicada marcada e as NÃO
+  alcançadas visíveis — é ela que explica o valor pago; `unitValue`/
+  `resolvedUnitValue` = quanto UMA unidade vale, derivado de
+  `resolveCommissionTiers`/`selectCommissionTier` e do breakdown, NUNCA
+  recalculando comissão por fora do `computeEntry`). `unitValue` devolve null
+  quando a relação não é linear (cap/piso ATIVO, valor manual, sem alvo, fator
+  só-gatilho, comissão `flat`) — número ali seria mentira. Isso alimenta a
+  coluna "Vale (R$)" por registro, a Descrição da linha em bloco fundido
+  (`detailRowPartsNote` sobre `CompDetailRecordRow.parts` — parcela ZERO fora),
+  a conta do
+  payout (`factorPayoutFormula`) no cabeçalho e a escada — que com
+  `tierBy:"attainment"` declara a META do gatilho (`detailTargetNote` + o
+  absoluto por degrau em `detailTierLabel`, vindos do breakdown do fator-gatilho
+  via `commissionDetail`; sem alvo apurado segue só o percentual, nunca um
+  absoluto inventado); a comissão aparece
+  UMA vez, no fator que a DISPARA (`role.isTrigger`) — o fator que é só BASE não
+  repete a escada, e o bloco de nível de plano virou FALLBACK (só o que nenhum
+  fator exibiu): saía 3× quando gatilho e base eram fatores distintos. Saíram
+  `detailReconcileNote`/`DETAIL_COMBINED_NOTE` (a conferência virou
+  realizado × somado lado a lado + `DETAIL_DIVERGE_MARK`); frases novas seguem
+  SÓ em `commission-label.ts`. O **agrupamento dos blocos** é config POR PLANO
+  (`config.detailGrouping.byFactor[factorId] = { into, folded }`: `into` é o
+  bloco PRINCIPAL que RECEBE, `folded` são as basis keys somadas nele, o resto
+  mantém bloco próprio; ausente = cada operando separado, o padrão), aplicada em
+  `groupOperands`/`mergeOperandBlocks` DEPOIS da consulta — é APRESENTAÇÃO: o
+  recorte de cada operando segue consultado igual, e bloco fundido perde o
+  confronto (`listedForCompare` null). O bloco fundido herda rótulo/coluna do
+  PRINCIPAL e marca `mergedFrom` (consumidor NUNCA detecta fusão comparando o
+  rótulo); Σ só vira número único com as partes na MESMA unidade — soma com
+  contagem expõe `sumParts` em vez de um total sem significado. As linhas
+  COLAPSAM por registro (`collapseRowsByRecord`): os operandos consultam os
+  MESMOS registros mudando só o campo, então concatenar repetia a empresa uma
+  vez por operando — valor/contribuição viram a SOMA das partes, `total` conta
+  DISTINTOS (exceto truncado, onde o distinto do recorte é desconhecido) e a
+  coluna "Operando" deu lugar a "Descrição" (a composição da linha, já que a
+  coluna de valor mostra o rótulo do PRINCIPAL e o dinheiro pode vir de outro
+  campo). Operando
+  SEM registros não vira bloco: `loadFactorRecords` o descarta e sobe os
+  `warnings` dele para o fator; com todos vazios, `operands` fica `[]` e os
+  consumidores declaram o vazio UMA vez (nada de "· 0 registros" por soma). Entrada com
+  `folded` vazio é DESCARTADA no parse e no save: foi a lista vazia lida como
+  "sem config" que deixou a 1ª versão (`separateByFactor`, só-leitura hoje —
+  convertida em `resolveFactorGrouping`, que tem a lista de operandos) INERTE
+  num fator de 2 operandos. A cláusula do parse é LENIENTE (sujeira/
+  fator órfão somem, o config vive) e o `save()` do plan-editor RE-EMITE a
+  chave — sem isso a config sumiria no 1º save (regra do presetKey). A UI é a
+  engrenagem do `CompPlanCard` (prop OPCIONAL `onOpenGrouping` — ausente na
+  visão do vendedor) → `comp-grouping-dialog.tsx` (rádio do principal +
+  checkbox "somar no principal"), com as chaves vindas do
+  servidor pelo MESMO `factorOperands` (`loadPlanOperands`), nunca adivinhadas. NUNCA gerar fórmula a
   partir das faixas;
   com `totalFormula` a comissão só entra via ref `comp:comissao` (sem soma
   automática; operando existe SÓ com blocos presentes). Todo call site de
@@ -735,7 +1032,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `<campo> in (display_names do grupo canônico)` via `memberFilterFor`
   (engine — expansão por CONJUNTO DE NOMES, apelidos/inativos inclusos;
   `expandResponsibleFilters` segue SÓ p/ responsible_id, intocado; membro sem
-  nome ⇒ `errors[fid]`, nunca consulta sem filtro). `factor.defaultTarget` é
+  nome ⇒ `errors[fid]`, nunca consulta sem filtro). **CRÉDITO DE EQUIPE (28/08/2026):**
+  `factor.memberTeams` (id CANÔNICO do líder → ids dos liderados) faz o
+  `memberFilterFor` somar a equipe ao próprio membro — com `memberField` o
+  CONJUNTO DE NOMES cresce, sem ele o filtro vira `responsible_id in [...]`
+  (o choke point já expande `in` pelo canon). SEM equipe o ramo clássico
+  devolve o MESMO `eq` de antes, BYTE-IDÊNTICO — nenhum plano existente
+  muda; é a invariante que o teste pina. Serve à remuneração de LÍDER,
+  cujas oportunidades ficam em nome do time; sobreposição entre líderes é
+  INTENCIONAL (cada um é medido pela própria equipe). O detalhamento avisa
+  de quem são os registros de terceiros (`detailTeamNote`), e o save do
+  plan-editor RE-EMITE `memberTeams` (regra do presetKey — sem isso o
+  round-trip apagaria a equipe no 1º save). `factor.defaultTarget` é
   alvo FALLBACK de leitura (meta "por sub-operação"): linha de `goals` vence;
   limpar a célula segue DELETANDO a linha (restaura o padrão); nunca vira
   linha de goals. `factor.targetCurrency` = moeda em que o alvo é DIGITADO —
@@ -758,13 +1066,35 @@ This version has breaking changes — APIs, conventions, and file structure may 
   (`org_features` 0114, feature "remuneracao"; parse fail-closed em
   `lib/config/org-features.ts`): feature-off vence TUDO — inclusive override
   allow — em `requireSettingsArea`/`checkSettingsArea`/`isSettingsAreaDenied`
-  (`AREA_FEATURES`, lib/auth/access.ts), esconde a aba/matriz de Acessos e
+  (`AREA_FEATURES`, lib/auth/access.ts), esconde o card/sub-aba de Operação e
+  a linha da matriz de Acessos e
   barra/pula o preset (`PresetDashboard.requiresFeature` na lista, no
   `applyPreset` e no `generatePresets`). Habilitação SÓ pelo console `/owner`
   (escrita de org_features é service-role-only — org_admin NUNCA se
   auto-habilita); desligar nunca apaga/esconde DADOS (RLS da 0112 intocada).
-  Fiscalizado por `lib/comp/*.test.ts` +
-  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
+  **Desde 05/08/2026 a página vive em `/operacao/remuneracao`** (ex-aba de
+  Configurações; chave de área histórica intocada): sub-aba da área Operação
+  e CARD DE OPERAÇÃO do hub Workspace (aba "Operação" de `/`, `?aba=`) —
+  cards de Operação são catálogo em CÓDIGO (`lib/operacao/cards.ts`), nunca
+  linhas de `dashboards`, sem menu "⋮"/UI de exclusão (só o banco remove);
+  Agenda/Tarefas são os cards PADRÃO (ex-itens do nav lateral; páginas em
+  `/operacao/agenda|tarefas`, rotas antigas = stubs de redirect); card
+  org-específico novo = entrada no catálogo + chave em
+  `ORG_FEATURES`/`AREA_GATES`/`AREA_FEATURES`, habilitado só via `/owner`.
+  Fiscalizado por `lib/comp/*.test.ts` (incl. `detail.test.ts` e
+  `payout-math.test.ts`) +
+  `lib/export/comp-detail-sheet.test.ts` + `tests/apps-script-sheets.test.ts`
+  (o `.gs` avaliado num `vm` com stubs do SpreadsheetApp — abas, hiperlinks
+  por `gid`, limpeza de órfãs e as duas degradações) +
+  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. **Validação
+  do save EXTRAÍDA (08/09/2026):** as checagens do `savePlan` (rótulos únicos,
+  bounds de peso/faixa, `sources`, `memberField`, `operation_id` proibido nos
+  `filters`, fórmula, moeda, sentinela `metricKey: "__auto__"`) vivem em
+  `lib/comp/plan-validate.ts` (`validateCompPlanSave`) — o `savePlan` o chama
+  e segue sendo a MURALHA. Consumidor novo (prévia de IA) usa o MESMO módulo:
+  repetir as checagens é a régua paralela que a invariante 25 proíbe, e o
+  parse cru só sabe dizer "Configuração do plano inválida". Bounds são
+  constantes EXPORTADAS de lá (o SPEC da IA os deriva). Ver
   `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um
@@ -784,3 +1114,169 @@ This version has breaking changes — APIs, conventions, and file structure may 
   auto-desliga o vínculo; desligar/excluir mantém campo e valores. Fiscalizado
   por `lib/kanban/allocation-field.test.ts`. Ver `docs/arquitetura.md` §4.16 e
   invariante 24.
+- **Mapeamentos de valores (de-para 0117) são ESPELHO derivado, escritos SÓ
+  pela rotina única (07/08/2026):** `value_mappings` guarda o de-para (lookup
+  por `raw_norm = lower(trim())`; unicidade org+domínio+raw_norm) e os
+  DOMÍNIOS vivem em código (`lib/mappings/domains.ts` — cargo →
+  `cargo_area`/`cargo_nivel`; segmento → `segmento_classificado`; base
+  Meetime). A aplicação é SÓ por `applyValueMappings` (`lib/mappings/apply.ts`
+  — service role com org EXPLÍCITA, só DIFERENÇAS, carimbos
+  `field_modified_at`+`locally_modified_at`, SEM audit/webhook, mock fora, UM
+  `recalcFormulaFieldsForRecords`); NUNCA resolva o de-para em RPC/SQL de
+  consulta (widgets leem o campo materializado) nem edite os campos alvo à
+  mão. Valor sem entrada = fallback "Não Classificado" + pendência; pendências
+  viram UMA tarefa aberta por domínio em nome do org_admin
+  (`lib/mappings/notify.ts` — atualizada in-place, auto-completa em zero,
+  webhooks `task.*` manuais). Hooks: caudas do import CSV
+  (`finalizeCsvImport(recordType)`) e de `/api/ingest` via
+  `maybeApplyMappingsAfterImport` (best-effort, nunca lança). UI = card de
+  Operação org-específico `/operacao/mapeamentos` (feature `mapeamentos` +
+  área `mapeamentos`, gate admin). Seed dos CSVs legados em
+  `supabase/apply/seed-value-mappings.sql` (`on conflict do nothing`). O
+  preset "Outbound — Pré-Vendas" (`lib/presets/outbound.ts`) consome os
+  campos derivados (aba Perfil) e porta as regras jul/2026+ do dashboard
+  legado (subs `ob_rr`/`ob_rq`/`ob_noshow` sobre leads `custom:fonte="Outro"`
+  por Data Reunião ≥ 2026-07-01; esforço sobre `meetime_outbound`; meta
+  `rq_outbound`). **Classificação automática + IA (07/08/2026):** o registry
+  tem `options` (categorias canônicas por target) e `suggest` por domínio
+  (port FIEL do classificador V5 do Apps Script —
+  `lib/mappings/classify/{cargo,segmento}.ts`; paridade pinada em
+  `classify.test.ts`) COMPOSTO com o motor APRENDIDO genérico
+  (`classify/learned.ts` — banco de palavras das próprias entradas, votos
+  por pureza com thresholds conservadores; `composeSuggester` = específico
+  primeiro, aprendido como fallback e ÚNICO motor de domínio novo sem
+  código — retroalimentação pinada em `learned.test.ts`): na aplicação,
+  valor sem entrada classificável vira entrada `origin='auto'` (0118 —
+  upsert `ignoreDuplicates`, NUNCA sobrescreve manual/seed/IA) e a
+  pendência fica só com o resto. Resposta de IA externa COLADA aceita
+  também CSV (`lib/import/mappings/csv.ts` — converte ao MESMO contrato
+  antes do validador; nunca duplique regra lá). O assistente
+  "Classificar com IA" segue o padrão §4.17 (contrato `mapeamentos-classify`
+  v1 em `lib/import/mappings/*` — valor restrito aos PENDENTES, categoria
+  restrita às aceitas do registry, SPEC derivado + `instructions.test.ts`;
+  core `lib/ai/classify-mappings.ts` com apply que RE-VALIDA e grava
+  `origin='ai'` pelos mesmos upserts; prévia EDITÁVEL + copiar-prompt/
+  colar-JSON sem IA configurada). Categorias canônicas SÓ no registry
+  (`domain.options`) — nunca lista paralela em validador/UI.
+  **Domínios DINÂMICOS (0119, 07/08/2026):** a tabela `mapping_domains`
+  guarda domínios criados pela aba **Campos → Reclassificações** (CRUD em
+  `app/(app)/campos/reclassificacoes-actions.ts` — gate admin + área
+  `mapeamentos`; key IMUTÁVEL na edição e = `value_mappings.domain`, passa no
+  MESMO check de slug da 0117; excluir remove as entradas mas PRESERVA campos
+  alvo e valores gravados). O registry EFETIVO é SEMPRE
+  `loadMappingDomains(db, orgId)` (`lib/mappings/registry.ts` — código ∪
+  banco, parse FAIL-CLOSED por linha, colisão de key: código VENCE; org
+  explícita mesmo com service role) — consumidor novo NUNCA itera
+  `MAPPING_DOMAINS` direto p/ resolver domínios de uma org
+  (`messages.ts`/`notify.ts` recebem rótulos/domínios por parâmetro).
+  Domínio dinâmico não tem classificador codificado — o motor aprendido é o
+  único sugestor. Export por domínio em `lib/mappings/export.ts` (CSV =
+  template das pendências byte-compatível com `csvToClassifyJson`; JSON =
+  dump de trabalho). Fiscalizado por
+  `lib/mappings/domains.test.ts` + `lib/mappings/registry.test.ts` +
+  `lib/mappings/export.test.ts` + `lib/mappings/classify/classify.test.ts` +
+  `lib/import/mappings/instructions.test.ts` + `lib/presets/outbound.test.ts`.
+  Ver `docs/arquitetura.md` §4.19 e invariante 28.
+- **Dimensão condicional (`Dimension.caseFormula`) se resolve no ENGINE,
+  nunca no RPC (07/08/2026):** expressão SE/E/OU (avaliador único de
+  `lib/records/formulas`) que reclassifica os valores da dim em rótulos e
+  agrupa por eles — versão ad-hoc/de exibição do de-para (nada é gravado em
+  registro). Gates/avaliação/plano SÓ em `lib/widgets/case-dim.ts` (engine,
+  bucket-merge, UI do builder e validador de import derivam de lá): refs SÓ
+  do próprio campo ⇒ fold valor→rótulo no `mergeRowsByBucket` (caseIdx);
+  refs de MAIS campos ⇒ `planCaseExpansion` troca o payload de dims de TODOS
+  os RPCs da rodada pelas dims CRUAS expandidas e `contractCaseRows` contrai
+  client-side ANTES do merge — os laços de tupla (bdMap/pernas/
+  condValueByKey) iteram por `rpcDims.length`, não pelas dims da config.
+  Mutuamente exclusiva com transform/dateAgg (presentes ⇒ INERTE, nunca
+  meio-aplicada); proibida em campo/refs de data/relação; SE sem "senão"
+  preserva o cru; fora do escopo: modo lista, kanban. Import da IA:
+  `case_formula_text` (texto) OU tokens (round-trip do export);
+  incompatibilidade remove com AVISO (padrão closedWeek; ponto MANUAL do
+  SPEC — chave de DIMENSÃO, fora de settings-docs). A UI (DimensionRow)
+  limpa a expressão ao trocar campo/formato e só persiste fórmula válida.
+  NÃO recrie `run_widget_query`/`_snapshot` p/ agrupamento condicional.
+  Fiscalizado por `lib/widgets/case-dim.test.ts` + blocos em
+  `engine.test.ts`/`validate.test.ts`. Ver `docs/arquitetura.md` §4.20 e
+  invariante 29.
+- **Save fora de formulário é OTIMISTA em background — nunca no transition
+  global nem com revalidate dentro do await (07/08/2026):** o padrão único é
+  `useBackgroundSave` (`lib/feedback/use-background-save.ts`): estado otimista
+  ANTES do await → action com `{ revalidate: false }` (opt-out por parâmetro,
+  padrão `createWidget`) → erro = toast (`notifyOnError`) + `revert()` granular
+  → sucesso agenda UM `router.refresh()` debounced, o reconciliador ÚNICO
+  (realtime NÃO cobre `dashboard_table_cells`/`widgets`/`entity_custom_values`/
+  remuneração). Pending GRANULAR por controle (`pendingKeys`/`busyKey` por
+  linha), nunca por tela. O `useNavPending().run()` do dashboard é EXCLUSIVO
+  de navegação real (período/URL; overlay agora `pointer-events-none`) — NÃO
+  reintroduza save de widget nele (`__qf__`/`__ff__`/`__pw__`/Nota/Aparência
+  já migraram). Guard anti-eco no padrão seedKey: com save em voo
+  (`hasPending`) o reseed ADOTA a key sem aplicar (eco stale nunca clobbera o
+  otimista; espelho do `skipNextData` do kanban); mudança de ESCOPO (mês/plano
+  no comp-grid) re-semeia SEMPRE. **O refresh de reconciliação é de MÓDULO e
+  SOBREVIVE ao desmonte de quem o agendou (04/09/2026)** — a troca de aba do
+  dashboard desmonta os widgets da aba anterior, e o timer por controle fazia a
+  gravação acontecer sem a página nunca reconciliar; só o PATHNAME cancela (a
+  aba mexe na query). Consequência OBRIGATÓRIA: todo controle com debounce
+  PRÓPRIO dentro de um card FLUSHA o payload pendente no desmonte (`pendingRef`
+  + effect mount-only) — sem isso a gravação morre com o timer —, o flush
+  dispara só o que o USUÁRIO causou e é idempotente (o StrictMode do dev roda
+  esse cleanup na montagem), a URL do flush sai de `window.location` (nunca de
+  um `useSearchParams` capturado — apagaria o `?tab=` recém-escrito) e o valor
+  otimista que o servidor ainda não ecoou vive em cache de MÓDULO com
+  `baseline`, descartado assim que o servidor passa dele. Seguem o padrão:
+  `quick-filters-bar`, `field-filter-controls`, `table-filter-bar`,
+  `period-range-inputs`, `appearance-editing`, `calculator-widget`.
+  CRUDs de Bases não fazem mais
+  `revalidatePath("/", "layout")` — os managers disparam o refresh pós-sucesso
+  via `useRefreshOnActionOk` (`lib/use-debounced-refresh.ts`), que re-renderiza
+  rota + layout como transition não-urgente. Fiscalizado por
+  `lib/feedback/use-background-save.test.ts` + `lib/use-debounced-refresh.test.ts`
+  + blocos em `comp-grid.test.tsx`/`quick-filters-bar.test.tsx`/
+  `field-filter-controls.test.tsx`. Ver `docs/arquitetura.md`
+  §4.10 ("Feedback de carregamento").
+- **A ORIGEM do refetch decide o feedback — refetch do event bus é SILENCIOSO
+  (08/09/2026):** widget deferido re-busca por dois gatilhos que exigem
+  feedback OPOSTO: o USUÁRIO mexeu (1ª carga, período, filtro,
+  `__qf__`/`__ff__`/`__pw__`, config — o fingerprint de escopo muda) ⇒ dim +
+  "Atualizando…" + spinner; o EVENT BUS avisou que um registro mudou
+  (`useDataChanged`, alimentado pelo `realtime-refresher`) ⇒ re-busca com os
+  dados antigos em tela e **zero feedback visual**. O sync do Bitrix roda a
+  cada MINUTO (`pg-cron-tick.sql`), então overlay no gatilho do bus fazia
+  TODOS os gráficos piscarem sozinhos para quem só apresentava/analisava — lia
+  como defeito do sistema. A distinção sai SEMPRE de
+  `useRefetchOrigin(scopeKey)` (`lib/feedback/use-refetch-origin.ts`, chamado
+  UMA vez por rodada DENTRO do efeito), nunca de um `useRef` paralelo por
+  componente. Consumidor novo deve também: atrasar o disparo de fundo em
+  `BUS_REFETCH_DELAY_MS` (o do usuário fica curto), NÃO chamar `setState`
+  quando o payload de fundo é idêntico ao que está em tela (ref com o último
+  JSON aplicado) e manter VISÍVEL uma rodada do usuário cancelada por um tick
+  do bus (`visibleRef` — senão o overlay nunca apaga). Consumidores: lote de
+  engine (`dashboard-client`), Tabela Livre, kanban de widget e a agenda (só
+  o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
+  blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
+  `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
+- **Lixeira de registros (0121): `deleted_at` só muda por ADMIN e toda leitura
+  nova de `records` decide EXPLICITAMENTE sobre a lixeira (07/08/2026):**
+  soft delete de 30 dias — enviar/restaurar/purgar SÓ pelas actions de
+  `lib/records/trash-actions.ts` (gate admin + trigger
+  `enforce_records_trash_guard`: trash é UPDATE e cairia na `records_update`
+  de qualquer editor; relaxar exige mudar os DOIS juntos). Consulta nova
+  filtra `deleted_at is null` (o funil `buildRecordListQuery` e os RPCs 0121
+  cobrem os caminhos canônicos) — EXCETO upserts do sync/import, SEM filtro
+  de propósito (linha trashed atualiza in-place e SEGUE na lixeira; é o que
+  impede ressurreição no reconcile). O predicado dos RPCs é ESPELHADO
+  byte a byte: `snapshot_records.deleted_at` é espelho MORTO sempre-null (a
+  captura exclui a lixeira) — não remova a coluna nem o predicado do
+  snapshot. `record.deleted` no envio à lixeira, `record.restored` no
+  restore, purga silenciosa (`pg-cron-purge-records-trash.sql`, 30d); nenhum
+  caminho do app faz hard delete fora de `purgeRecordsPermanently`
+  (predicado `deleted_at not null`). Ações em massa de /registros
+  (checkboxes + `RecordsBulkBar`): edição manual e IA sobre selecionados
+  usam o MODO SELEÇÃO do contrato registros-update
+  (`validateRecordsUpdate(..., { selection: true })` — `filtros` proibido;
+  ids viajam como ARGUMENTO das actions, nunca no JSON; `resolveSelection`
+  + `updateRecordValuesBulk`, nunca caminho paralelo). Fiscalizado por
+  `lib/records/trash.test.ts` + `records-table.selection.test.tsx` + blocos
+  de seleção em `update-validate.test.ts`/`update-instructions.test.ts`.
+  Ver `docs/arquitetura.md` §4.21 e invariante 30.

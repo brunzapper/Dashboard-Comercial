@@ -1,4 +1,15 @@
-// Versão: 1.4 | Data: 23/07/2026
+// Versão: 1.7 | Data: 04/09/2026
+// v1.7 (04/09/2026): a gravação SOBREVIVE ao desmonte do card. A troca de aba
+// do dashboard desmonta os widgets da aba anterior e o cleanup do debounce
+// (350ms) matava o timer — o filtro recém-aplicado/limpo não chegava nem ao
+// banco (modo compartilhado) nem à URL/preferência (modo URL). O payload
+// pendente passa a viver em pendingRef e um effect MOUNT-ONLY o FLUSHA no
+// desmonte (o cleanup do effect de debounce roda a cada mudança de `encoded`,
+// então não serve de gancho de desmonte). No flush do branch de URL o replace
+// vai DIRETO ao router, sem o `run` do useNavPending — acender o overlay de um
+// componente que já morreu não faz sentido. Cache de módulo do valor otimista
+// (modo compartilhado) evita o pisca do valor antigo ao voltar à aba antes do
+// refresh de reconciliação (que também sobrevive — use-debounced-refresh v1.2).
 // Runtime do widget "Filtro por campo" (visual_type 'filtro_campo'): caixa de
 // busca + um controle por campo configurado. Grava o estado ({q, filters}) na
 // URL sob `paramKey` (ff_<widgetId>) com debounce; o servidor aplica os filtros
@@ -21,6 +32,19 @@
 // removido na primeira edição — senão o viewer ficaria pinado no valor do
 // mount) e o estado ressincroniza do seed do servidor quando outro usuário
 // muda o valor. Em snapshot, `shared` é ignorado (URL-only por visitante).
+// v1.6 (01/09/2026): MULTI-SELEÇÃO automática — todo campo com opções cujo
+// operador é "=" ou "em (lista)" vira um MultiSelectPopover (checkboxes,
+// controle compartilhado com os filtros rápidos). O operador configurado
+// deixa de decidir a forma do controle: com 2+ marcações o filtro emitido
+// vira `in` sozinho; com 1 marcação num entry "=" segue `eq` (round-trip
+// byte-idêntico ao que já estava gravado). Por isso o estado de um entry
+// agora é string[] (multi) OU string (Input de texto, Combobox dos demais
+// operadores e o "1" de is_null/not_null — todos inalterados).
+// v1.5 (07/08/2026): o save do modo compartilhado roda OTIMISTA em background
+// (useBackgroundSave, revalidate:false): os controles respondem na hora e o
+// refresh debounced do hook reconcilia; erro → toast + revert de q/values ao
+// último estado aplicado. O transition global segue SÓ no branch de URL
+// (navegação real).
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -29,6 +53,7 @@ import { Search } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
+import { MultiSelectPopover } from "@/components/filters/multi-select-popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AvailableField } from "@/lib/widgets/fields";
@@ -42,6 +67,7 @@ import type {
 import { opHasNoValue } from "@/lib/widgets/filter-ops";
 import { visibleOptions } from "@/lib/widgets/hidden-options";
 import { encodeViewFilter, parseViewFilter } from "@/lib/widgets/view-filters";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
   saveLastFieldFilter,
   saveSharedFieldFilter,
@@ -49,19 +75,63 @@ import {
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import { useNavPending } from "./pending-context";
 
+// Valor otimista do modo COMPARTILHADO por widget, vivo enquanto a página está
+// aberta: a troca de aba desmonta o card e o remonta com as props RSC do último
+// render, ainda antigas enquanto o refresh não aterrissa. `baseline` é o
+// savedValue canônico no instante da escrita — a entrada é descartada assim que
+// o servidor passa dele (nossa gravação chegou, ou outro usuário mudou), então
+// nada fica pinado em valor stale. Mesmo padrão do exprCache do CalculatorWidget.
+const sharedOptimisticCache = new Map<
+  string,
+  { encoded: string; baseline: string }
+>();
+
+// Valor local de um controle: ARRAY para os de multi-seleção, string para o
+// resto (Input de texto, Combobox de um valor, "1" dos operadores sem valor).
+type EntryValue = string | string[];
+
+/**
+ * A entrada vira multi-seleção? Só campo com dropdown de opções e operador de
+ * igualdade — "=" (multi automática, v1.6) ou "em (lista)". Os demais
+ * operadores (≠, contém, >, ≥, <, ≤) comparam com UM valor: `not_in` não
+ * existe no vocabulário de filtros, então multi ali não teria como ser
+ * traduzida. Régua ÚNICA — initialValues, buildFilters e o render usam esta.
+ */
+function isMultiEntry(
+  entry: FieldFilterEntry,
+  options?: FieldFilterOptions
+): boolean {
+  const op = entry.op ?? "eq";
+  if (op !== "eq" && op !== "in") return false;
+  return (options?.[entry.field]?.length ?? 0) > 0;
+}
+
 // Reconstrói os valores iniciais dos controles a partir dos filtros da URL,
-// casando pelo campo+operador de cada entrada configurada.
+// casando pelo campo+operador de cada entrada configurada. Entrada MULTI casa
+// tanto `eq` quanto `in` (o mesmo controle emite os dois conforme a contagem):
+// sem isso, um seed com `in` numa entrada configurada como `eq` não
+// round-triparia e o widget navegaria/persistiria sozinho na montagem.
 function initialValues(
   entries: FieldFilterEntry[],
-  urlFilters: WidgetFilter[]
-): string[] {
+  urlFilters: WidgetFilter[],
+  options?: FieldFilterOptions
+): EntryValue[] {
   return entries.map((entry) => {
     const op = entry.op ?? "eq";
-    const match = urlFilters.find(
-      (f) => f.field === entry.field && (f.op ?? "eq") === op
-    );
-    if (!match) return "";
+    const multi = isMultiEntry(entry, options);
+    const match = urlFilters.find((f) => {
+      if (f.field !== entry.field) return false;
+      const fop = f.op ?? "eq";
+      return multi ? fop === "eq" || fop === "in" : fop === op;
+    });
+    if (!match) return multi ? [] : "";
     if (opHasNoValue(op)) return "1";
+    if (multi) {
+      if (Array.isArray(match.value))
+        return match.value.map((v) => String(v)).filter(Boolean);
+      const s = String(match.value ?? "").trim();
+      return s ? [s] : [];
+    }
     if (op === "in" && Array.isArray(match.value)) return match.value.join(",");
     return String(match.value ?? "");
   });
@@ -69,12 +139,27 @@ function initialValues(
 
 function buildFilters(
   entries: FieldFilterEntry[],
-  values: string[]
+  values: EntryValue[]
 ): WidgetFilter[] {
   const out: WidgetFilter[] = [];
   entries.forEach((entry, i) => {
     const op = (entry.op ?? "eq") as FilterOp;
     const raw = values[i] ?? "";
+    // Multi-seleção: 1 valor num entry "=" segue emitindo `eq` (o que já
+    // estava gravado continua idêntico); 2+ (ou entry "em (lista)") vira `in`
+    // com array. A ordem das chaves é {field, op, value} em todos os ramos —
+    // encodeViewFilter é JSON.stringify e o compare com serverAppliedRef é
+    // por STRING.
+    if (Array.isArray(raw)) {
+      const vals = raw.map((v) => v.trim()).filter(Boolean);
+      if (vals.length === 0) return;
+      if (op === "eq" && vals.length === 1) {
+        out.push({ field: entry.field, op, value: vals[0] });
+        return;
+      }
+      out.push({ field: entry.field, op: "in", value: vals });
+      return;
+    }
     if (opHasNoValue(op)) {
       if (raw === "1") out.push({ field: entry.field, op });
       return;
@@ -127,15 +212,37 @@ export function FieldFilterControls({
   const pathname = usePathname();
   const sp = useSearchParams();
   const { run } = useNavPending();
+  const { save } = useBackgroundSave();
   // Viewer de snapshot: filtros seguem funcionando via URL, mas NUNCA
   // persistem preferência (visitante pode nem ter sessão; e um usuário
   // autenticado vendo o snapshot não pode poluir o dashboard vivo).
   const { snapshot } = useSnapshotMode();
 
-  const initial = parseViewFilter(sp.get(paramKey) ?? savedValue ?? null);
+  // Modo compartilhado e seed canônico do servidor — declarados ANTES do estado
+  // porque o cache de otimistas participa da semente da montagem.
+  const sharedMode = Boolean(shared) && !snapshot;
+  const canonSaved = encodeViewFilter(parseViewFilter(savedValue ?? null));
+  const cacheKey = `${dashboardId ?? ""}:${widgetId ?? ""}`;
+  const cachedShared = sharedMode
+    ? sharedOptimisticCache.get(cacheKey)
+    : undefined;
+  // Entrada obsoleta: o servidor já passou do baseline dela. Descarta (idempotente).
+  if (cachedShared && cachedShared.baseline !== canonSaved) {
+    sharedOptimisticCache.delete(cacheKey);
+  }
+  // Otimista ainda não confirmado (remontagem por troca de aba): vence o seed do
+  // servidor, que neste render ainda traz o valor ANTIGO. serverAppliedRef nasce
+  // dele também, senão a montagem re-gravaria o mesmo valor.
+  const pendingShared =
+    cachedShared && cachedShared.baseline === canonSaved
+      ? cachedShared.encoded
+      : null;
+  const initial = parseViewFilter(
+    pendingShared ?? sp.get(paramKey) ?? savedValue ?? null
+  );
   const [q, setQ] = useState(initial.q ?? "");
-  const [values, setValues] = useState<string[]>(() =>
-    initialValues(fields, initial.filters)
+  const [values, setValues] = useState<EntryValue[]>(() =>
+    initialValues(fields, initial.filters, options)
   );
   // Último estado que o SERVIDOR já aplicou, na forma canônica encode∘parse do
   // valor inicial bruto (URL ou seed — a page renderizou com ele). Enquanto
@@ -150,8 +257,6 @@ export function FieldFilterControls({
   // não reseta — um ff_ de bookmark segue honrado naquele render), e o compare
   // com o último valor aplicado localmente evita clobber do que o usuário
   // digita durante um debounce pendente e no eco do próprio save.
-  const sharedMode = Boolean(shared) && !snapshot;
-  const canonSaved = encodeViewFilter(parseViewFilter(savedValue ?? null));
   const sharedSeedRef = useRef(canonSaved);
   useEffect(() => {
     if (!sharedMode || canonSaved === sharedSeedRef.current) return;
@@ -160,7 +265,7 @@ export function FieldFilterControls({
       serverAppliedRef.current = canonSaved;
       const parsed = parseViewFilter(savedValue ?? null);
       setQ(parsed.q ?? "");
-      setValues(initialValues(fields, parsed.filters));
+      setValues(initialValues(fields, parsed.filters, options));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedMode, canonSaved]);
@@ -168,14 +273,41 @@ export function FieldFilterControls({
   const showSearch = (searchFields?.length ?? 0) > 0 || fields.length === 0;
 
   const encoded = encodeViewFilter({ q, filters: buildFilters(fields, values) });
+  // Payload pendente do debounce. O timer o CONSOME; o effect mount-only abaixo
+  // o FLUSHA no desmonte — a troca de aba desmonta o card e, sem isso, os 350ms
+  // pendentes eram simplesmente descartados. O cleanup do effect de debounce NÃO
+  // serve de gancho de desmonte: ele roda a cada mudança de `encoded`.
+  const pendingRef = useRef<((viaUnmount?: boolean) => void) | null>(null);
+  // Só o payload armado por uma mudança do USUÁRIO é flushado. O primeiro
+  // disparo do effect de debounce acontece na MONTAGEM e pode armar um payload
+  // de mera sincronização (seed que não round-tripa numa config antiga dos
+  // campos); flushá-lo no desmonte gravaria sem ninguém ter mexido — e em dev o
+  // StrictMode (monta → desmonta → monta) faria isso em toda montagem.
+  const armedByUserRef = useRef(false);
+  useEffect(
+    () => () => {
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (armedByUserRef.current) pending?.(true);
+    },
+    []
+  );
+  const firstEffectRunRef = useRef(true);
   useEffect(() => {
+    const bySeed = firstEffectRunRef.current;
+    firstEffectRunRef.current = false;
     // Modo compartilhado (não-snapshot): o transporte é o BANCO (célula
     // __ff__), nunca a URL — espelhá-la pinaria cada viewer no valor do mount
     // (a URL vence no servidor). A comparação de "nada mudou" é contra o
     // último valor aplicado, não contra a URL.
     if (sharedMode) {
-      if (encoded === serverAppliedRef.current) return;
-      const timer = setTimeout(() => {
+      if (encoded === serverAppliedRef.current) {
+        // Voltou ao valor já aplicado: um payload pendente de antes não pode
+        // sobreviver ao desmonte gravando um valor que o usuário desfez.
+        pendingRef.current = null;
+        return;
+      }
+      const dispatch = () => {
         // ff_ residual (bookmark antigo): removido na primeira edição, para o
         // viewer convergir para a célula compartilhada nas próximas renders.
         const params = new URLSearchParams(window.location.search);
@@ -184,15 +316,41 @@ export function FieldFilterControls({
           const qs = params.toString();
           window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
         }
+        const prevApplied = serverAppliedRef.current;
         serverAppliedRef.current = encoded;
         if (dashboardId && widgetId) {
-          // Transition: o overlay cobre a gravação + a revalidação da página
-          // disparada pela action (padrão QuickFiltersBar). encoded vazio
-          // APAGA a célula (o usuário removeu o filtro — vale para todos).
-          run(async () => {
-            await saveSharedFieldFilter(dashboardId, widgetId, encoded || null);
+          // Sobrevive à remontagem por troca de aba até o servidor confirmar.
+          sharedOptimisticCache.set(cacheKey, { encoded, baseline: canonSaved });
+          // Save otimista em background (padrão QuickFiltersBar v1.3): os
+          // controles já mostram o valor novo; a action volta logo após o
+          // upsert (revalidate:false) e o refresh debounced reconcilia.
+          // encoded vazio APAGA a célula (o usuário removeu o filtro — vale
+          // para todos). Erro → toast + revert ao último estado aplicado.
+          save({
+            key: "ff",
+            context: "Não foi possível salvar o filtro",
+            action: () =>
+              saveSharedFieldFilter(dashboardId, widgetId, encoded || null, {
+                revalidate: false,
+              }),
+            revert: () => {
+              // O otimista morreu: o cache não pode ressuscitá-lo na remontagem.
+              sharedOptimisticCache.delete(cacheKey);
+              serverAppliedRef.current = prevApplied;
+              const parsed = parseViewFilter(prevApplied || null);
+              setQ(parsed.q ?? "");
+              setValues(initialValues(fields, parsed.filters, options));
+            },
           });
         }
+      };
+      pendingRef.current = dispatch;
+      armedByUserRef.current = !bySeed;
+      const timer = setTimeout(() => {
+        // Só o agendamento VIGENTE dispara (um `encoded` mais novo o substituiu).
+        if (pendingRef.current !== dispatch) return;
+        pendingRef.current = null;
+        dispatch();
       }, 350);
       return () => clearTimeout(timer);
     }
@@ -200,8 +358,12 @@ export function FieldFilterControls({
     // outro controle entre o agendamento e o disparo não é sobrescrita.
     const currentVal =
       new URLSearchParams(window.location.search).get(paramKey) ?? "";
-    if (encoded === currentVal) return;
-    const timer = setTimeout(() => {
+    if (encoded === currentVal) {
+      // Já está na URL: nada pendente pode sobreviver ao desmonte.
+      pendingRef.current = null;
+      return;
+    }
+    const dispatch = (viaUnmount = false) => {
       const params = new URLSearchParams(window.location.search);
       if (encoded) params.set(paramKey, encoded);
       else params.delete(paramKey);
@@ -215,7 +377,10 @@ export function FieldFilterControls({
         return;
       }
       serverAppliedRef.current = encoded;
-      run(() => router.replace(url, { scroll: false }));
+      // No flush do desmonte o overlay não faz sentido (o componente já morreu)
+      // — a navegação vai direto ao router.
+      if (viaUnmount) router.replace(url, { scroll: false });
+      else run(() => router.replace(url, { scroll: false }));
       // Persistência por usuário (fire-and-forget): encoded vazio LIMPA a
       // preferência (o usuário removeu o filtro — não pode ressuscitar).
       if (!snapshot && dashboardId && widgetId) {
@@ -226,12 +391,20 @@ export function FieldFilterControls({
           }
         );
       }
+    };
+    pendingRef.current = dispatch;
+    armedByUserRef.current = !bySeed;
+    const timer = setTimeout(() => {
+      // Só o agendamento VIGENTE dispara (um `encoded` mais novo o substituiu).
+      if (pendingRef.current !== dispatch) return;
+      pendingRef.current = null;
+      dispatch();
     }, 350);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encoded]);
 
-  const setValue = (i: number, v: string) =>
+  const setValue = (i: number, v: EntryValue) =>
     setValues((prev) => {
       const next = [...prev];
       next[i] = v;
@@ -256,11 +429,12 @@ export function FieldFilterControls({
       {fields.map((entry, i) => {
         const label = entry.label || fieldLabel(entry.field, available);
         const op = (entry.op ?? "eq") as FilterOp;
+        const raw = values[i];
         if (opHasNoValue(op)) {
           return (
             <label key={i} className="flex items-center gap-2 text-sm">
               <Checkbox
-                checked={values[i] === "1"}
+                checked={raw === "1"}
                 onCheckedChange={(c) => setValue(i, c ? "1" : "")}
               />
               {label} {op === "is_null" ? "(vazio)" : "(preenchido)"}
@@ -268,58 +442,46 @@ export function FieldFilterControls({
           );
         }
         const opts = options?.[entry.field];
-        // Campo com opções (responsável/operação/etapa): dropdown fechado. Para o
-        // operador "em (lista)" vira multi-seleção por checkbox (valores em CSV,
-        // que buildFilters já divide); os demais operadores usam um select único.
+        // Campo com opções (responsável/operação/etapa/seleção) e operador de
+        // igualdade: multi-seleção por checkbox — o MESMO popover dos filtros
+        // rápidos. Os demais operadores (≠, contém, comparações) seguem com o
+        // select de um valor.
         if (opts && opts.length > 0) {
-          if (op === "in") {
-            const chosen = new Set(
-              (values[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean)
-            );
+          if (isMultiEntry(entry, options)) {
+            // Defensivo: se as opções chegarem só num render posterior, o
+            // estado do entry pode ter nascido como string (controle único).
+            // Exibe como seleção de um item — buildFilters emite `eq` para
+            // esse mesmo estado, então tela e filtro seguem de acordo.
+            const chosen = Array.isArray(raw) ? raw : raw ? [raw] : [];
+            // Opção oculta mas SELECIONADA continua na lista (keep) — sem isso
+            // não daria para desmarcá-la.
             const shown = visibleOptions(opts, entry.hiddenOptions, chosen);
-            const toggle = (v: string) => {
-              const next = new Set(chosen);
-              if (next.has(v)) next.delete(v);
-              else next.add(v);
-              setValue(i, [...next].join(","));
-            };
             return (
               <div key={i} className="flex flex-col gap-1">
                 <Label className="text-xs">{label}</Label>
-                <div className="flex max-h-40 flex-col gap-1 overflow-auto rounded-md border p-2">
-                  {shown.length === 0 ? (
-                    <p className="text-muted-foreground text-xs">
-                      Nenhuma opção visível.
-                    </p>
-                  ) : (
-                    shown.map((o) => (
-                      <label
-                        key={o.value}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={chosen.has(o.value)}
-                          onCheckedChange={() => toggle(o.value)}
-                        />
-                        <span className="truncate">{o.label}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
+                <MultiSelectPopover
+                  options={shown}
+                  values={chosen}
+                  onChange={(next) => setValue(i, next)}
+                  className="w-full max-w-none justify-between text-sm"
+                  emptyText="Nenhuma opção visível."
+                  ariaLabel={label}
+                />
               </div>
             );
           }
+          const single = typeof raw === "string" ? raw : "";
           const shown = visibleOptions(
             opts,
             entry.hiddenOptions,
-            values[i] ? [values[i]] : []
+            single ? [single] : []
           );
           return (
             <div key={i} className="flex flex-col gap-1">
               <Label className="text-xs">{label}</Label>
               <Combobox
                 options={[{ value: "", label: "— todos —" }, ...shown]}
-                value={values[i] ?? ""}
+                value={single}
                 onValueChange={(v) => setValue(i, v)}
                 placeholder="— todos —"
                 className="h-8 text-sm"
@@ -332,7 +494,7 @@ export function FieldFilterControls({
           <div key={i} className="flex flex-col gap-1">
             <Label className="text-xs">{label}</Label>
             <Input
-              value={values[i] ?? ""}
+              value={typeof raw === "string" ? raw : ""}
               onChange={(e) => setValue(i, e.target.value)}
               placeholder={op === "in" ? "valores separados por vírgula" : "valor"}
               aria-label={label}

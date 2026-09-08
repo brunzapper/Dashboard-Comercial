@@ -1,3 +1,13 @@
+<!-- Versão: 1.8 | Data: 22/08/2026 -->
+<!-- v1.8 (22/08/2026): Apps Script v3.2 — conserto dos hiperlinks (fórmula
+     parseada no locale pt-BR virava #ERROR!; agora rich text). Republicação
+     NECESSÁRIA; sem migração. -->
+<!-- Versão: 1.7 | Data: 17/08/2026 -->
+<!-- v1.7 (17/08/2026): Apps Script v3.1 (kinds da memória de cálculo do
+     detalhamento) — republicação NECESSÁRIA; sem migração envolvida. -->
+<!-- Versão: 1.6 | Data: 05/08/2026 -->
+<!-- v1.6 (05/08/2026): referências de caminho — Remuneração vive em
+     /operacao/remuneracao (card de Operação do hub Workspace). -->
 <!-- Versão: 1.5 | Data: 02/08/2026 -->
 <!-- v1.5 (02/08/2026): seção da 0115 (comp_sheet_links/tickets — export p/
      Google Planilhas via Apps Script Web App; runbook do deploy do script).
@@ -517,7 +527,8 @@ config jsonb versionado; SELECT org-wide, escrita admin) e `comp_entries`
 `auth_responsible_ids()`, escrita admin), com triggers `updated_at`, índices e
 `revoke` de `anon`. Requer as migrações 0089–0091 (org/RLS) e 0101
 (`auth_responsible_ids`). Aplicar de preferência ANTES do deploy; pré-migração
-a aba Configurações → Remuneração falha só no load da page (tabela ausente) e
+a página Operação → Remuneração (`/operacao/remuneracao`, card do hub
+Workspace) falha só no load da page (tabela ausente) e
 as actions retornam erro legível — nenhum outro fluxo depende dela. A base
 espelho "Remuneração" NÃO é criada pela migração: nasce no primeiro "Publicar"
 (data_sources key `remuneracao` + campos `rem_*`, ponteiro em `sync_config`
@@ -543,17 +554,45 @@ cabeçalho de `integrations/apps-script/comp_sheets_webapp.gs`):
    barra final).
 3. Implantar → App da Web → Executar como **"Usuário que acessa"** + acesso
    **"Qualquer pessoa com Conta do Google"** → copiar a URL `/exec`.
-4. No dashboard (admin): Configurações → Remuneração → Visão geral →
-   "Google Planilhas — Configurar…" → colar a URL.
+4. No dashboard (admin): Workspace → aba Operação → Remuneração → Visão
+   geral → "Google Planilhas — Configurar…" → colar a URL.
 5. Primeiro uso de cada usuário: consentimento do Google (app "não
    verificado": Avançado → continuar; em Workspace o admin pode precisar
    liberar o app interno). A planilha nasce no Drive do PRÓPRIO usuário —
    nenhuma credencial Google fica no app.
-6. ATUALIZAÇÃO do script (nova versão do `.gs`, ex. o rendering v2 do
-   demonstrativo): colar o código novo por cima no editor → Implantar →
+6. ATUALIZAÇÃO do script (nova versão do `.gs`, ex. o rendering v3 com abas
+   de detalhamento): colar o código novo por cima no editor → Implantar →
    **Gerenciar implantações** → ✏️ na implantação ativa → Versão: **"Nova
    versão"** → Implantar. A URL `/exec` NÃO muda (não reconfigurar o
    dashboard). Atenção: **"Nova implantação"** geraria uma URL nova e
    exigiria recolar no app. Script desatualizado não quebra: payload v2 num
-   script v1 rende o grid cru com título (degradação documentada em
-   `docs/arquitetura.md` §4.18).
+   script v1 rende o grid cru com título, e o payload v3 num script v2.1 rende
+   só a aba do mês, sem hiperlinks e sem as abas `Det-<Nome>` (degradação
+   documentada em `docs/arquitetura.md` §4.18).
+
+**Pré-requisito das abas de detalhamento (16/08/2026).** O
+`Det-<Nome>` por colaborador, o hiperlink na visão geral e o destaque de
+início/fim de cada bloco só aparecem com o script **v3.0** publicado (passo 6
+acima). Sem republicar, a exportação segue funcionando — apenas sem essas
+partes. Nada disso exige migração: as abas viajam no `payload` jsonb do
+ticket, e a conferência equivalente na tela (Remuneração → clicar no Realizado
+de um fator) independe do Apps Script.
+
+**REPUBLICAR o script — v3.2 (22/08/2026).** Os hiperlinks (o "voltar" das
+abas de detalhe e o link de cada colaborador na visão geral) nunca funcionaram:
+o script escrevia `=HYPERLINK("#gid=…","texto")` via `setValues`, que parseia a
+string no **locale da planilha** — e como o próprio script força `pt_BR`, onde
+o separador de argumentos é `;`, a célula virava `#ERROR!`. Agora o rótulo vai
+como texto e o link é aplicado em **rich text** (`setLinkUrl`), que independe de
+locale. Sem republicar (passo 6), os links seguem com `#ERROR!`; o resto da
+planilha continua correto.
+
+**REPUBLICAR o script — v3.1 (17/08/2026).** A memória de cálculo do
+detalhamento (linha "cada X vale R$ Y" e a escada de faixas de atingimento)
+usa três kinds novos — `detailMemory`, `detailTier` e `detailTierApplied`.
+Diferente da entrega anterior, aqui o passo 6 é **necessário** para o
+resultado ficar legível: num script v3.0 as linhas novas até aparecem, mas
+como texto puro (sem itálico na nota, sem negrito na faixa aplicada). Nenhuma
+migração é envolvida, e a mesma memória já aparece formatada na tela
+(Remuneração → Visão geral → clicar no Realizado de um fator) sem depender do
+Apps Script. Regra geral: **kind novo no payload exige republicar o `.gs`**.

@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 26/07/2026
+// Versão: 1.2 | Data: 07/08/2026
+// v1.2 (07/08/2026): pending POR CONTROLE (busyKey) — mudar um select
+//   desabilita só ele, não a matriz inteira (antes um único useTransition
+//   travava dezenas de selects a cada gravação).
 // Matriz de acessos customizados (Configurações → Acessos, 0094): escolhe um
 // usuário e ajusta, por recurso, o override individual — Áreas de
 // Configurações (Padrão/Permitir/Negar), Bases (Padrão/Negar) e boards
@@ -73,7 +76,9 @@ export function AccessMatrix({
   const [userId, setUserId] = useState("");
   const [state, setState] = useState<UserAccessState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  // Pending POR CONTROLE: só o select acionado desabilita durante a gravação.
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   // Carrega o estado do usuário selecionado (lazy; setState na transition).
   useEffect(() => {
@@ -101,25 +106,23 @@ export function AccessMatrix({
     effect: OverrideEffect | null
   ) {
     setError(null);
+    setBusyKey(`${type}:${key}`);
     startTransition(async () => {
       const res = await setAccessOverride(userId, type, key, effect);
-      if (!res.ok) {
-        setError(res.message ?? "Falha ao salvar.");
-        return;
-      }
-      await refresh();
+      if (!res.ok) setError(res.message ?? "Falha ao salvar.");
+      else await refresh();
+      setBusyKey(null);
     });
   }
 
   function applyBoard(boardId: string, level: BoardAccessLevel | null) {
     setError(null);
+    setBusyKey(`board:${boardId}`);
     startTransition(async () => {
       const res = await setBoardAccessEntry(boardId, userId, level);
-      if (!res.ok) {
-        setError(res.message ?? "Falha ao salvar.");
-        return;
-      }
-      await refresh();
+      if (!res.ok) setError(res.message ?? "Falha ao salvar.");
+      else await refresh();
+      setBusyKey(null);
     });
   }
 
@@ -176,7 +179,7 @@ export function AccessMatrix({
                       v === "default" ? null : (v as OverrideEffect)
                     )
                   }
-                  disabled={pending}
+                  disabled={busyKey === `settings_area:${a.key}`}
                 >
                   <SelectTrigger className={selectCls}>
                     <SelectValue />
@@ -221,7 +224,7 @@ export function AccessMatrix({
                           v === "deny" ? "deny" : null
                         )
                       }
-                      disabled={pending}
+                      disabled={busyKey === `source:${s.key}`}
                     >
                       <SelectTrigger className={selectCls}>
                         <SelectValue />
@@ -262,7 +265,7 @@ export function AccessMatrix({
                         v === "default" ? null : (v as BoardAccessLevel)
                       )
                     }
-                    disabled={pending}
+                    disabled={busyKey === `board:${b.id}`}
                   >
                     <SelectTrigger className={selectCls}>
                       <SelectValue />

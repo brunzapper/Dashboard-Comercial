@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 20/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): pending POR LINHA (busyKeys Set) — gerar um preset
+// desabilita só a linha dele (e "Gerar todos" desabilita tudo enquanto roda);
+// antes o useTransition único travava a tabela inteira por preset.
 // Manager da aba Configurações → Presets: lista o catálogo de presets com o
 // estado (gerado/não gerado, versão aplicada, link p/ o dashboard) e os botões
 // "Gerar"/"Atualizar" (applyPreset) e "Gerar/atualizar todos" (generatePresets).
@@ -37,8 +40,17 @@ export interface PresetRow {
 }
 
 export function PresetsManager({ rows }: { rows: PresetRow[] }) {
-  const [pending, startTransition] = useTransition();
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+  // Pending POR LINHA (Set: presets distintos podem rodar em paralelo — cada
+  // apply toca só o dashboard do próprio preset).
+  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
+  const markBusy = (key: string, on: boolean) =>
+    setBusyKeys((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
   const [messages, setMessages] = useState<
     Record<string, { ok: boolean; text: string }>
   >({});
@@ -48,7 +60,7 @@ export function PresetsManager({ rows }: { rows: PresetRow[] }) {
   } | null>(null);
 
   function runOne(presetKey: string) {
-    setBusyKey(presetKey);
+    markBusy(presetKey, true);
     setGlobalMsg(null);
     startTransition(async () => {
       const res = await applyPreset(presetKey);
@@ -56,24 +68,24 @@ export function PresetsManager({ rows }: { rows: PresetRow[] }) {
         ...m,
         [presetKey]: { ok: Boolean(res.ok), text: res.message ?? "" },
       }));
-      setBusyKey(null);
+      markBusy(presetKey, false);
     });
   }
 
   function runAll() {
-    setBusyKey("__all__");
+    markBusy("__all__", true);
     setMessages({});
     startTransition(async () => {
       const res = await generatePresets();
       setGlobalMsg({ ok: Boolean(res.ok), text: res.message ?? "" });
-      setBusyKey(null);
+      markBusy("__all__", false);
     });
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <Button onClick={runAll} disabled={pending}>
+        <Button onClick={runAll} disabled={busyKeys.size > 0}>
           <Sparkles className="size-4" /> Gerar/atualizar todos
         </Button>
         {globalMsg ? (
@@ -161,10 +173,12 @@ export function PresetsManager({ rows }: { rows: PresetRow[] }) {
                       <Button
                         variant={generated ? "outline" : "default"}
                         size="sm"
-                        disabled={pending}
+                        disabled={
+                          busyKeys.has(r.presetKey) || busyKeys.has("__all__")
+                        }
                         onClick={() => runOne(r.presetKey)}
                       >
-                        {busyKey === r.presetKey ? (
+                        {busyKeys.has(r.presetKey) ? (
                           <RefreshCw className="size-4 animate-spin" />
                         ) : generated ? (
                           <RefreshCw className="size-4" />

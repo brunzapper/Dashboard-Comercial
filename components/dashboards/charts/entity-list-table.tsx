@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 18/07/2026
+// Versão: 1.3 | Data: 07/08/2026
+// v1.3 (07/08/2026): a célula migrou para o useCellCommit (mesmo hook das
+//   células de /registros) e a action roda com revalidate:false — antes ela
+//   REVALIDAVA o dashboard E o componente ainda agendava o refresh debounced
+//   (pagava os dois re-renders, contra o próprio header v1.1). Erro agora
+//   carrega a mensagem (title da célula), não só a borda vermelha.
 // v1.2 (18/07/2026): "Formato do grupo" (appearance.table.groupDateFormats) —
 //   nível de data do "Agrupar por" pode fundir/rotular por formato próprio
 //   (bucketGroupDate) sem alterar o formato da dimensão nas linhas expandidas.
@@ -13,7 +18,7 @@
 // numa data abre o calendário. Larguras/alturas redimensionáveis na edição.
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
@@ -71,6 +76,7 @@ import type {
   TableAlign,
 } from "@/lib/widgets/types";
 import { updateEntityField } from "@/app/(app)/dashboards/actions";
+import { useCellCommit } from "@/components/registros/use-cell-commit";
 import { ColorPopover, ContextMenu, ResizeHandle } from "../appearance-editing";
 import { useFontScale } from "../font-scale-context";
 import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
@@ -98,21 +104,29 @@ function EntityEditableCell({
   // Casas decimais configuradas na aparência (só afeta a exibição read-only).
   decimals?: number;
   value: string;
-  // Dashboard de origem — a action revalida SÓ ele (ver updateEntityField).
+  // Dashboard de origem — repassado à action (compat; com revalidate:false o
+  // reconciliador é o refresh debounced do pai).
   dashboardId?: string;
   onSaved?: () => void;
 }) {
-  const [value, setValue] = useState(serverValue);
-  const savedRef = useRef(serverValue);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState(false);
+  // Mesmo hook das células de /registros: otimista + revert em erro; a action
+  // roda com revalidate:false (o refresh debounced do pai reconcilia — sem
+  // re-render RSC dentro do await).
+  const { value, setValue, commit, revert, pending, error, errorMessage } =
+    useCellCommit(
+      serverValue,
+      (raw) =>
+        updateEntityField(
+          entityType,
+          entityId,
+          field.field_key,
+          raw,
+          dashboardId,
+          { revalidate: false }
+        ),
+      onSaved
+    );
   const [editingDate, setEditingDate] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue(serverValue);
-    savedRef.current = serverValue;
-  }, [serverValue]);
 
   const editable =
     canEditValues &&
@@ -138,28 +152,6 @@ function EntityEditableCell({
         {display == null || display === "" ? "—" : display}
       </span>
     );
-  }
-
-  function commit(raw: string) {
-    if (raw === savedRef.current) return;
-    setValue(raw);
-    setError(false);
-    startTransition(async () => {
-      const res = await updateEntityField(
-        entityType,
-        entityId,
-        field.field_key,
-        raw,
-        dashboardId
-      );
-      if (res.ok) {
-        savedRef.current = raw;
-        onSaved?.();
-      } else {
-        setValue(savedRef.current);
-        setError(true);
-      }
-    });
   }
 
   if (field.data_type === "selecao") {
@@ -218,13 +210,14 @@ function EntityEditableCell({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
-            setValue(savedRef.current);
+            revert();
             setEditingDate(false);
           }
         }}
         disabled={pending}
         aria-label={field.label}
         aria-invalid={error}
+        title={errorMessage ?? undefined}
         className={cn(error && "border-destructive")}
       />
     );
@@ -244,6 +237,7 @@ function EntityEditableCell({
         disabled={pending}
         aria-label={field.label}
         aria-invalid={error}
+        title={errorMessage ?? undefined}
         className={cn("text-right", error && "border-destructive")}
       />
     );
@@ -260,6 +254,7 @@ function EntityEditableCell({
       disabled={pending}
       aria-label={field.label}
       aria-invalid={error}
+      title={errorMessage ?? undefined}
       className={cn(error && "border-destructive")}
     />
   );
@@ -293,9 +288,9 @@ export function EntityListTable({
   canEdit?: boolean;
   onAppearanceChange?: (a: AppearanceSettings) => void;
 }) {
-  // Reconcile pós-edição debounced e fora da transition da célula (a action
-  // updateEntityField já revalida só o dashboard; aqui evitamos re-render por
-  // célula e o input travado até o recompute).
+  // Reconcile pós-edição debounced e fora da transition da célula — o ÚNICO
+  // reconciliador: a action roda com revalidate:false (o realtime não cobre
+  // entity_custom_values).
   const refresh = useDebouncedRefresh();
   const ap = appearance ?? {};
   const t = ap.table ?? {};

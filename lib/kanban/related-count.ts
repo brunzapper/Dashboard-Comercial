@@ -94,6 +94,8 @@ export async function countRelatedBySource(
         .from("records")
         .select(RECORD_COLS)
         .eq("record_type", recordType)
+        // Lixeira (0121): parceiro na lixeira não conta.
+        .is("deleted_at", null)
         .in("id", slice);
       if (orgId) q = q.eq("organization_id", orgId);
       const { data } = await q;

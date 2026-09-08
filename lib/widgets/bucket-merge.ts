@@ -1,4 +1,13 @@
-// Versão: 1.2 | Data: 26/07/2026
+// Versão: 1.4 | Data: 07/08/2026
+// v1.4 (07/08/2026): dimensão CONDICIONAL (Dimension.caseFormula) — dim com
+// expressão SE sobre o PRÓPRIO campo funde valor→rótulo aqui (caseIdx, via
+// caseDimValue de lib/widgets/case-dim.ts), pela MESMA mecânica dos buckets;
+// expressão multi-campo NÃO passa por aqui (expansão/contração no engine).
+// v1.3 (03/08/2026): "Semana Fechada" sáb–sex — dimNeedsClientBucket também
+// ativa p/ dim core/`unified:`/`match:` com closedWeek "sab_sex" (as linhas
+// chegam como 'day' do servidor — rpcDimForClosedWeek) e bucketCanonicalValue
+// ganha a âncora weekStart (segunda | sábado). A aproximação documentada da
+// média SIMPLES não-monetária passa a valer também nesse caso.
 // v1.2 (26/07/2026): mergeRowsByBucket ganha canonicalização OPCIONAL da
 // dimensão responsible_id (agrupamento de responsáveis, 0101) — linhas de um
 // apelido fundem com as do principal pela MESMA mecânica dos buckets; sem o
@@ -29,7 +38,17 @@ import type { Dimension, WidgetRow } from "./types";
 import type { Transform } from "./types";
 import { foldBasis, type BasisValues } from "./calc-metrics";
 import { foldBreakdowns, type MoneyBreakdown } from "./currency";
-import type { WeekMode } from "./date-buckets";
+import type { WeekMode, WeekStart } from "./date-buckets";
+import {
+  dimWeekStart,
+  effectiveWeekMode,
+  isClosedWeekTransform,
+} from "./closed-week";
+import {
+  caseDimValue,
+  dimNeedsCaseFold,
+  type CaseExpansion,
+} from "./case-dim";
 
 const DAY_MS = 86_400_000;
 
@@ -48,24 +67,35 @@ function iso(y: number, m: number, d: number): string {
   return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-function mondayOf(y: number, m: number, d: number): string {
+function weekStartOf(
+  y: number,
+  m: number,
+  d: number,
+  weekStart: WeekStart
+): string {
   const utc = Date.UTC(y, m - 1, d);
-  const dayNum = (new Date(utc).getUTCDay() + 6) % 7; // segunda = 0
-  const mon = new Date(utc - dayNum * DAY_MS);
-  return iso(mon.getUTCFullYear(), mon.getUTCMonth() + 1, mon.getUTCDate());
+  const dow = new Date(utc).getUTCDay(); // 0=domingo … 6=sábado
+  // Dias desde o início da semana: segunda (histórico) ou sábado ("Semana
+  // Fechada" sáb–sex — lib/widgets/closed-week.ts).
+  const since = weekStart === "saturday" ? (dow + 1) % 7 : (dow + 6) % 7;
+  const ws = new Date(utc - since * DAY_MS);
+  return iso(ws.getUTCFullYear(), ws.getUTCMonth() + 1, ws.getUTCDate());
 }
 
 /**
  * Valor CANÔNICO do bucket de um valor cru, espelhando o que a RPC produz
- * para colunas core (0085): weekday → isodow 1-7; semanas → segunda ISO
- * (week_month "restricted" recorta na virada do mês — greatest(week, month));
- * mês/"por nome" → 1º dia do mês; trimestre → 1º dia do trimestre; ano →
- * 1º de janeiro. Cru não-parseável → null (o chamador mantém o grupo próprio).
+ * para colunas core (0085): weekday → isodow 1-7; semanas → início da semana
+ * (segunda por default; sábado p/ "Semana Fechada" sáb–sex, cujo bucket é
+ * 100% client-side — week_month "restricted" recorta na virada do mês —
+ * greatest(week, month)); mês/"por nome" → 1º dia do mês; trimestre → 1º dia
+ * do trimestre; ano → 1º de janeiro. Cru não-parseável → null (o chamador
+ * mantém o grupo próprio).
  */
 export function bucketCanonicalValue(
   raw: unknown,
   transform: Transform,
-  weekMode: WeekMode = "restricted"
+  weekMode: WeekMode = "restricted",
+  weekStart: WeekStart = "monday"
 ): string | number | null {
   const p = ymd(raw);
   if (!p) return null;
@@ -77,12 +107,12 @@ export function bucketCanonicalValue(
       return iso(y, m, d);
     case "week":
     case "week_year":
-      return mondayOf(y, m, d);
+      return weekStartOf(y, m, d, weekStart);
     case "week_month": {
-      const monday = mondayOf(y, m, d);
-      if (weekMode === "full") return monday;
+      const ws = weekStartOf(y, m, d, weekStart);
+      if (weekMode === "full") return ws;
       const monthStart = iso(y, m, 1);
-      return monday > monthStart ? monday : monthStart;
+      return ws > monthStart ? ws : monthStart;
     }
     case "month":
     case "month_name":
@@ -97,13 +127,17 @@ export function bucketCanonicalValue(
   }
 }
 
-// A dimensão precisa de bucketização client-side? SÓ `custom:` direto com
-// transform — core/`unified:`/`match:` já agrupam no servidor.
+// A dimensão precisa de bucketização client-side? `custom:` direto com
+// transform (core/`unified:`/`match:` agrupam no servidor) — e, desde
+// 03/08/2026, QUALQUER ref com "Semana Fechada" sáb–sex: o RPC não produz
+// semana de sábado, então a dim desce como 'day' (rpcDimForClosedWeek) e as
+// linhas diárias fundem aqui.
 export function dimNeedsClientBucket(d: Dimension): boolean {
   return (
-    d.field.startsWith("custom:") &&
-    d.transform != null &&
-    d.transform !== "none"
+    (d.field.startsWith("custom:") &&
+      d.transform != null &&
+      d.transform !== "none") ||
+    (d.closedWeek === "sab_sex" && isClosedWeekTransform(d.transform))
   );
 }
 
@@ -169,8 +203,12 @@ export function mergeRowsByBucket(
 ): WidgetRow[] {
   const bucketIdx: number[] = [];
   const respIdx: number[] = [];
+  const caseIdx: number[] = [];
   dims.forEach((d, i) => {
-    if (dimNeedsClientBucket(d)) bucketIdx.push(i);
+    // Expressão condicional de campo ÚNICO tem precedência (sem transform por
+    // definição — caseDimActive — então nunca disputa com o bucket de data).
+    if (dimNeedsCaseFold(d)) caseIdx.push(i);
+    else if (dimNeedsClientBucket(d)) bucketIdx.push(i);
     else if (
       d.field === "responsible_id" &&
       respCanon != null &&
@@ -178,10 +216,14 @@ export function mergeRowsByBucket(
     )
       respIdx.push(i);
   });
-  if ((bucketIdx.length === 0 && respIdx.length === 0) || rows.length === 0)
+  if (
+    (bucketIdx.length === 0 && respIdx.length === 0 && caseIdx.length === 0) ||
+    rows.length === 0
+  )
     return rows;
   const bucketSet = new Set(bucketIdx);
   const respSet = new Set(respIdx);
+  const caseSet = new Set(caseIdx);
 
   const groups = new Map<string, { rows: WidgetRow[]; canon: unknown[] }>();
   const order: string[] = [];
@@ -190,8 +232,20 @@ export function mergeRowsByBucket(
     const canon: unknown[] = [];
     dims.forEach((d, i) => {
       const raw = row[`dim_${i + 1}`] ?? null;
-      if (bucketSet.has(i)) {
-        const c = bucketCanonicalValue(raw, d.transform!, d.weekMode);
+      if (caseSet.has(i)) {
+        // Valor cru → rótulo da expressão (SE sem "senão" preserva o cru).
+        const label = caseDimValue(d.caseFormula!, d, { [d.field]: raw });
+        tuple.push(label);
+        canon.push(label);
+      } else if (bucketSet.has(i)) {
+        // weekMode/âncora EFETIVOS: semana fechada força "full" e sáb–sex
+        // ancora a semana no sábado (lib/widgets/closed-week.ts).
+        const c = bucketCanonicalValue(
+          raw,
+          d.transform!,
+          effectiveWeekMode(d),
+          dimWeekStart(d)
+        );
         // Cru não-parseável fica num grupo próprio (chave prefixada — nunca
         // colide com um canônico) e mantém o valor original na exibição.
         tuple.push(c == null ? `raw:${String(raw)}` : c);
@@ -225,6 +279,63 @@ export function mergeRowsByBucket(
     const merged = foldRowGroup(g.rows, metrics);
     dims.forEach((_, i) => {
       merged[`dim_${i + 1}`] = g.canon[i] ?? null;
+    });
+    out.push(merged);
+  }
+  return out;
+}
+
+/**
+ * CONTRAÇÃO do mecanismo robusto da dimensão condicional (expressão
+ * multi-campo): as linhas do RPC chegam com as dims EXPANDIDAS
+ * (planCaseExpansion — o campo da dim + as refs extras como colunas cruas);
+ * aqui cada dim expandida vira o RÓTULO avaliado da expressão (tupla de refs
+ * → caseDimValue), as demais são re-endereçadas às posições da CONFIG e os
+ * grupos que caíram no mesmo rótulo fundem por foldRowGroup (métricas/
+ * `__money`/basis — o engine replota as monetárias depois). Colunas
+ * excedentes são removidas — a jusante (comparação, rotulagem, charts) o
+ * shape é o da config, como em qualquer rodada.
+ */
+export function contractCaseRows(
+  rows: WidgetRow[],
+  dims: Dimension[],
+  expansion: CaseExpansion,
+  metrics: MergeMetricSpec[]
+): WidgetRow[] {
+  if (rows.length === 0) return rows;
+  const groups = new Map<string, { rows: WidgetRow[]; values: unknown[] }>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const values: unknown[] = [];
+    dims.forEach((d, i) => {
+      const cols = expansion.colsOfDim[i];
+      const refs = expansion.refsOfDim[i];
+      if (!refs) {
+        values.push(row[`dim_${cols[0] + 1}`] ?? null);
+        return;
+      }
+      const rawByRef: Record<string, unknown> = {};
+      refs.forEach((ref, k) => {
+        rawByRef[ref] = row[`dim_${cols[k] + 1}`] ?? null;
+      });
+      values.push(caseDimValue(d.caseFormula!, d, rawByRef));
+    });
+    const key = JSON.stringify(values);
+    const g = groups.get(key);
+    if (g) g.rows.push(row);
+    else {
+      groups.set(key, { rows: [row], values });
+      order.push(key);
+    }
+  }
+  const expandedCount = expansion.rpcDims.length;
+  const out: WidgetRow[] = [];
+  for (const key of order) {
+    const g = groups.get(key)!;
+    const merged = foldRowGroup(g.rows, metrics);
+    for (let i = 0; i < expandedCount; i++) delete merged[`dim_${i + 1}`];
+    dims.forEach((_, i) => {
+      merged[`dim_${i + 1}`] = g.values[i] ?? null;
     });
     out.push(merged);
   }

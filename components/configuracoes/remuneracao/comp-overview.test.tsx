@@ -1,4 +1,15 @@
 // @vitest-environment jsdom
+// Versão: 1.5 | Data: 17/08/2026
+// v1.5: a engrenagem virou "quem RECEBE" — rádio do bloco principal + checkbox
+// "somar no principal" (o do principal desabilitado), gravando {into, folded}.
+// Versão: 1.4 | Data: 17/08/2026
+// v1.4: engrenagem do card — abre a config dos BLOCOS do detalhamento (por
+// plano), com as chaves dos operandos vindas do servidor; desmarcar um manda
+// só os separados para a action.
+// Versão: 1.3 | Data: 16/08/2026
+// v1.3: payload v3 — o clique no export manda o roster (`members`, com o nome
+// da aba Det-<Nome>) e os `links` por linha; e o Realizado de cada fator abre
+// o painel de conferência (a action de detalhe é mockada — server-only).
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: botão "Google Planilhas" (0115) — sem config, admin vê só o
 // "Configurar…"; configurado, o clique abre a aba SINCRONAMENTE
@@ -19,9 +30,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fmtMoneyBRL } from "@/lib/comp/commission-label";
+import type { CompDetailFactor } from "@/lib/comp/detail";
 import type { CompPlanConfig } from "@/lib/comp/model";
 
-import { createSheetExportTicket } from "@/app/(app)/configuracoes/remuneracao/sheets-actions";
+import { createSheetExportTicket } from "@/app/(app)/operacao/remuneracao/sheets-actions";
 import { CompOverview } from "./comp-overview";
 import type {
   CompEntryClientRow,
@@ -32,7 +44,58 @@ import type {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
-vi.mock("@/app/(app)/configuracoes/remuneracao/sheets-actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/detail-actions", () => ({
+  loadCompFactorDetail: vi.fn(async () => ({
+    ok: true as const,
+    planName: "Plano A",
+    memberLabel: "Ana",
+    apuracaoShifted: false,
+    detail: {
+      factorId: "reunioes",
+      label: "Reuniões",
+      money: false,
+      realized: 44,
+      payoutFormula: null,
+      commissions: [],
+      listedForCompare: 2,
+      warnings: [],
+      operands: [
+        {
+          label: "Contagem de registros",
+          valueLabel: "Registros",
+          aggNote: "Contagem de registros · 2 registros no recorte",
+          rows: [],
+          listedSum: null,
+          total: 2,
+          truncated: false,
+          mergedFrom: [],
+          sumParts: [],
+          warnings: [],
+        },
+      ],
+    } satisfies CompDetailFactor,
+  })),
+  loadPlanOperands: vi.fn(async () => ({
+    ok: true as const,
+    operands: [
+      {
+        factorId: "reunioes",
+        factorLabel: "Reuniões",
+        key: "count:*",
+        label: "Contagem de registros",
+      },
+      {
+        factorId: "reunioes",
+        factorLabel: "Reuniões",
+        key: "sum:value",
+        label: "Soma de Valor",
+      },
+    ],
+    byFactor: {} as Record<string, { into: string; folded: string[] }>,
+  })),
+  saveDetailGrouping: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock("@/app/(app)/operacao/remuneracao/sheets-actions", () => ({
   createSheetExportTicket: vi.fn(async () => ({
     ok: true,
     token: "tok-de-teste",
@@ -275,6 +338,15 @@ describe("CompOverview", () => {
     expect(arg.rows.flat().some((c) => typeof c === "number")).toBe(true);
     // Título do demonstrativo viaja em headers (linha 1 da aba).
     expect(arg.headers[0]).toContain("Demonstrativo de remuneração");
+    // Payload v3: roster p/ o servidor montar as abas + links por linha.
+    expect(arg.links).toHaveLength(arg.rows.length);
+    expect(arg.members).toEqual([
+      { id: "r_ana", label: "Ana", tabName: "Det-Ana" },
+      { id: "r_bruno", label: "Bruno", tabName: "Det-Bruno" },
+    ]);
+    // Toda aba referenciada por um link existe no roster.
+    const abas = new Set(arg.members!.map((m) => m.tabName));
+    for (const l of arg.links!) if (l != null) expect(abas.has(l)).toBe(true);
     await waitFor(() =>
       expect(fakeWin.location.href).toContain(
         "https://script.google.com/macros/s/x/exec?token="
@@ -292,6 +364,92 @@ describe("CompOverview", () => {
     renderOverview("https://script.google.com/macros/s/x/exec");
     fireEvent.click(screen.getByRole("button", { name: "Google Planilhas" }));
     await waitFor(() => expect(fakeWin.close).toHaveBeenCalled());
+  });
+
+  it("Realizado do fator abre a conferência dos registros", async () => {
+    const { loadCompFactorDetail } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    const gatilhos = screen.getAllByTitle(
+      "Ver os registros que compõem este realizado"
+    );
+    expect(gatilhos.length).toBeGreaterThan(0);
+    fireEvent.click(gatilhos[0]);
+    await waitFor(() =>
+      expect(vi.mocked(loadCompFactorDetail)).toHaveBeenCalled()
+    );
+    const arg = vi.mocked(loadCompFactorDetail).mock.calls[0][0];
+    expect(arg).toMatchObject({ year: 2026, month: 8 });
+    expect(arg.planId).toBeTruthy();
+    expect(arg.memberId).toBeTruthy();
+  });
+
+  it("engrenagem: marcar 'somar' manda o dobrado para o bloco PRINCIPAL", async () => {
+    const { loadPlanOperands, saveDetailGrouping } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    const engrenagens = screen.getAllByLabelText(
+      "Configurar os blocos do detalhamento"
+    );
+    expect(engrenagens.length).toBeGreaterThan(0);
+    fireEvent.click(engrenagens[0]);
+    await waitFor(() => expect(vi.mocked(loadPlanOperands)).toHaveBeenCalled());
+    // As chaves vêm do servidor (mesmo factorOperands dos blocos), nunca da UI.
+    expect(vi.mocked(loadPlanOperands).mock.calls[0][0]).toMatchObject({
+      year: 2026,
+      month: 8,
+    });
+
+    // Sem config, o principal é o 1º operando (ordem da fórmula).
+    const principal = await screen.findByRole("radio", {
+      name: "Bloco principal: Contagem de registros",
+    });
+    expect((principal as HTMLInputElement).checked).toBe(true);
+    // O principal não pode ser somado em si mesmo.
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Somar no principal: Contagem de registros" })
+        .hasAttribute("disabled")
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Somar no principal: Soma de Valor" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() =>
+      expect(vi.mocked(saveDetailGrouping)).toHaveBeenCalledWith({
+        planId: "pA",
+        byFactor: { reunioes: { into: "count:*", folded: ["sum:value"] } },
+      })
+    );
+  });
+
+  it("engrenagem: trocar o principal tira o novo principal dos dobrados", async () => {
+    const { saveDetailGrouping } = await import(
+      "@/app/(app)/operacao/remuneracao/detail-actions"
+    );
+    renderOverview();
+    fireEvent.click(
+      screen.getAllByLabelText("Configurar os blocos do detalhamento")[0]
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Somar no principal: Soma de Valor",
+      })
+    );
+    // Promove a Soma de Valor a principal: ela não pode ficar dobrada em si.
+    fireEvent.click(
+      screen.getByRole("radio", { name: "Bloco principal: Soma de Valor" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() =>
+      expect(vi.mocked(saveDetailGrouping)).toHaveBeenCalledWith({
+        planId: "pA",
+        byFactor: { reunioes: { into: "sum:value", folded: [] } },
+      })
+    );
   });
 
   it("preferência salva abre por pessoa; 'Usar como padrão' grava a chave", async () => {

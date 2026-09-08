@@ -190,7 +190,7 @@ export function TaskBell({ initialCount }: { initialCount: number }) {
           <p className="text-muted-foreground text-xs">
             Você é notificado das tarefas globais, das que criou e das
             atribuídas a você. Veja tudo em{" "}
-            <a href="/tarefas" className="underline">
+            <a href="/operacao/tarefas" className="underline">
               Tarefas
             </a>
             .

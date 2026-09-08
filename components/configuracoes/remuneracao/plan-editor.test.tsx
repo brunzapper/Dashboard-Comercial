@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// Versão: 1.1 | Data: 17/08/2026
+// v1.1: mesma regra do presetKey para `detailGrouping` (engrenagem dos blocos
+// do detalhamento) — o editor não o edita, mas precisa RE-EMITI-LO no save.
 // Versão: 1.0 | Data: 01/08/2026
 // Testes do editor de planos — round-trip das CONDIÇÕES DO RECORTE
 // (factor.filters, v1.5): o save RE-EMITE os filtros do config (antes o
@@ -12,7 +15,7 @@ import type { CompPlanConfig } from "@/lib/comp/model";
 import { PlanEditor } from "./plan-editor";
 
 const savePlan = vi.fn();
-vi.mock("@/app/(app)/configuracoes/remuneracao/actions", () => ({
+vi.mock("@/app/(app)/operacao/remuneracao/actions", () => ({
   savePlan: (...args: unknown[]) => savePlan(...args),
   deletePlan: vi.fn(),
 }));
@@ -103,6 +106,40 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     expect(notifyActionError).not.toHaveBeenCalled();
   });
 
+  it("save RE-EMITE memberTeams (senão o crédito de equipe sumiria no 1º save)", async () => {
+    // Mesma armadilha dos filtros e do detailGrouping: o editor remonta o
+    // config inteiro no save, então tudo que não for re-emitido é destruído em
+    // silêncio — aqui, um líder perderia a equipe e voltaria a realizar 0.
+    const teams = { lider: ["liderado_a", "liderado_b"] };
+    const cfg = makeConfig();
+    cfg.factors[0].memberTeams = teams;
+    renderEditor(cfg);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors[0].memberTeams).toEqual(teams);
+    expect(notifyActionError).not.toHaveBeenCalled();
+  });
+
+  it("equipe vazia não vira chave no config (vazio = sem equipe)", async () => {
+    const cfg = makeConfig();
+    cfg.factors[0].memberTeams = { lider: [] };
+    renderEditor(cfg);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.factors[0].memberTeams).toBeUndefined();
+  });
+
+  it("save RE-EMITE detailGrouping (senão a engrenagem sumiria no 1º save)", async () => {
+    const grouping = { byFactor: { f_r: { into: "count:*", folded: ["sum:value"] } } };
+    renderEditor(makeConfig({ detailGrouping: grouping }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar plano" }));
+    await waitFor(() => expect(savePlan).toHaveBeenCalledTimes(1));
+    const payload = savePlan.mock.calls[0][0] as { config: CompPlanConfig };
+    expect(payload.config.detailGrouping).toEqual(grouping);
+  });
+
   it("condição com valor vazio é erro amigável e o savePlan nem dispara", async () => {
     const config = makeConfig();
     config.factors[0].filters = [{ field: "stage", op: "eq", value: "" }];
@@ -111,7 +148,7 @@ describe("PlanEditor — condições do recorte (factor.filters)", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Condição sem valor no fator "Reuniões".'
+        'Condição sem valor no indicador "Reuniões".'
       )
     );
     expect(savePlan).not.toHaveBeenCalled();
@@ -133,7 +170,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
   // fail-closed do servidor com o genérico "Configuração do plano inválida.".
   it("nome, peso e fórmula vazios têm mensagem própria; savePlan nem dispara", async () => {
     renderEditor(makeConfig());
-    fireEvent.click(screen.getByRole("button", { name: /Adicionar fator/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar indicador/ }));
     const saveBtn = screen.getByRole("button", { name: "Salvar plano" });
 
     // Sem nome.
@@ -141,7 +178,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        "Dê um nome ao fator 2."
+        "Dê um nome ao indicador 2."
       )
     );
 
@@ -153,7 +190,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Informe o peso do fator "Valor gerado (SDR)" — 0 vale (fator só de gatilho/base de comissão).'
+        'Informe o peso do indicador "Valor gerado (SDR)" — 0 vale (indicador que só define a faixa da comissão).'
       )
     );
 
@@ -165,7 +202,7 @@ describe("PlanEditor — validação amigável por fator no save", () => {
     await waitFor(() =>
       expect(notifyActionError).toHaveBeenCalledWith(
         "Salvar plano",
-        'Monte a fórmula do realizado do fator "Valor gerado (SDR)".'
+        'Monte a fórmula do realizado do indicador "Valor gerado (SDR)".'
       )
     );
     expect(savePlan).not.toHaveBeenCalled();

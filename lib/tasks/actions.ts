@@ -130,7 +130,7 @@ function readTaskForm(formData: FormData): {
 }
 
 function revalidateTasks() {
-  revalidatePath("/tarefas");
+  revalidatePath("/operacao/tarefas");
 }
 
 /** Cria uma tarefa (standalone, vinculada a registro e/ou a um board). */

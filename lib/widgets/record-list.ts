@@ -1,4 +1,7 @@
-// Versão: 2.1 | Data: 27/07/2026
+// Versão: 2.2 | Data: 07/08/2026
+// v2.2 (07/08/2026): stage_semantic no RECORD_COLS — paridade da grade núcleo
+//   do painel de detalhe (coreDetailRows pula refs ausentes do select; sem a
+//   coluna, o kanban não exibia a Situação no card).
 // v2.1 (27/07/2026): opts.orgId — escopo EXPLÍCITO de organização na consulta
 //   (eq organization_id). Para chamadores com SERVICE ROLE (engine de
 //   automações do kanban), onde a RLS não escopa; caminhos de sessão seguem
@@ -92,7 +95,7 @@ import type { WidgetConfig, WidgetFilter } from "./types";
 // Exportada p/ consultas irmãs que precisam de linhas RecordRow completas
 // (ex.: contagem de conectados das automações do kanban).
 export const RECORD_COLS =
-  "id, record_type, source_system, title, pipeline, stage, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
+  "id, record_type, source_system, title, pipeline, stage, stage_semantic, value, mrr, currency, sale_type, channel, closed, closed_at, opened_at, source_created_at, responsible_id, operation_id, related_lead_id, lead_time_days, custom_fields, last_synced_at, locally_modified_at, is_mock";
 
 // Colunas do núcleo que podem ser filtradas com segurança (whitelist).
 // ESPELHO: mudanças aqui, em filterColumn ou no ramo ilike abaixo devem ser
@@ -109,6 +112,19 @@ const CORE_COLS = new Set<string>([
 function filterColumn(field: string): string | null {
   if (field.startsWith("custom:")) return `custom_fields->>${field.slice(7)}`;
   return CORE_COLS.has(field) ? field : null;
+}
+
+/**
+ * O modo lista consegue aplicar um filtro NESTE campo? Campo fora da whitelist
+ * é descartado em SILÊNCIO por filterColumn — quem usa a listagem como
+ * EVIDÊNCIA de um número agregado (detalhamento da Remuneração,
+ * lib/comp/detail.ts) precisa saber disso para avisar, em vez de exibir um
+ * recorte mais largo que o do cálculo sem explicação. `unified:` conta como
+ * suportado: é expandido por fonte ANTES, no loop de filtros.
+ */
+export function listFilterFieldSupported(field: string): boolean {
+  if (field.startsWith("unified:")) return true;
+  return filterColumn(field) !== null;
 }
 
 // Condição de UMA coluna na sintaxe de `.or()` do PostgREST para um operador do
@@ -248,6 +264,10 @@ function buildRecordListQuery(
   let q = supabase
     .from("records")
     .select(RECORD_COLS, opts?.count ? { count: "exact" } : undefined);
+  // Lixeira (0121): soft delete fora de TODO modo lista/kanban/agenda/card.
+  // No viewer de snapshot o predicado é no-op (snapshot_records.deleted_at é
+  // o espelho morto sempre-null da 0121).
+  q = q.is("deleted_at", null);
   if (opts?.orgId) q = q.eq("organization_id", opts.orgId);
   if (opts?.onlyMocks) q = q.eq("is_mock", true);
   else if (!includeMocks) q = q.eq("is_mock", false);
@@ -288,6 +308,11 @@ function buildRecordListQuery(
           );
         groups.push(`and(${conds.join(",")})`);
       }
+      // ignore_period (0116): espelho do wrapper do RPC — record_types no
+      // sentinela = record_types que RESPEITAM o período; os demais (fontes
+      // isentas) passam sem recorte de data.
+      const prts = rtsOf(f);
+      if (prts) groups.push(passThrough(prts));
       if (groups.length > 0) q = q.or(groups.join(","));
       continue;
     }

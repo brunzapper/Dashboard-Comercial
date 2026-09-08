@@ -1,4 +1,4 @@
-// Versão: 2.2 | Data: 19/07/2026
+// Versão: 2.3 | Data: 12/08/2026
 // Fase 8: definição das FONTES do produto. Cada fonte mapeia 1:1 num record_type
 // do núcleo `records`, então "fonte" é açúcar sobre record_type — usado na aba
 // Registros (abas por fonte) e no construtor de widgets (seleção de fontes).
@@ -23,6 +23,8 @@
 //   para subs — quem monta consulta usa os resolvers cientes do catálogo abaixo
 //   (recordTypeOf, sourcePredicate, planSourceLegs). Resolvidas no ENGINE
 //   (perna por source-key); NÃO tocam nas RPCs de widget.
+// v2.3 (12/08/2026): manualEntryRootSource — gate único do botão "+" de criação
+//   manual no widget de tabela (builder e card usam o MESMO critério).
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 export type SourceKey = string;
@@ -44,6 +46,11 @@ export interface SourceDef {
   // SUB-FONTE (0078): predicado (WidgetFilter[]) que recorta as linhas da pai.
   // Resolvido no engine com record_types:[record_type da pai] (wrap por fonte).
   filter?: WidgetFilter[];
+  // SUB-FONTE (0116): a sub NÃO respeita o filtro de período do dashboard —
+  // linhas sempre consideradas ("todo período"). Resolvido no engine
+  // (applyPeriodToFilters particiona o byType; planSourceLegs nunca a absorve);
+  // filtros de data explícitos do widget seguem valendo. Raízes nunca têm.
+  ignorePeriod?: boolean;
   // Fuso horário da ORIGEM (IANA, ex. "Europe/Moscow"; 0079). Datetimes
   // ingeridos desta fonte são normalizados p/ Brasília na ENTRADA
   // (lib/date/normalize.ts, aplicado no sync). null/ausente = sem conversão.
@@ -221,12 +228,36 @@ export function sourcePredicate(
   return Array.isArray(f) ? f : [];
 }
 
+/** A fonte ignora o filtro de período (sub com ignore_period, 0116)? */
+export function ignoresPeriod(
+  key: string,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): boolean {
+  return Boolean(sources.find((s) => s.key === key)?.ignorePeriod);
+}
+
 /** Sub-fontes de uma pai. */
 export function subSourcesOf(
   parentKey: string,
   sources: SourceDef[] = BUILTIN_SOURCES
 ): SourceDef[] {
   return sources.filter((s) => s.parentKey === parentKey);
+}
+
+/**
+ * Fonte de destino da criação manual pelo widget (botão "+", 12/08/2026):
+ * devolve a def SÓ quando a seleção do widget é exatamente UMA fonte RAIZ com
+ * manualEntry — multi-fonte/"todas"/sub-fonte/fonte de Sync ⇒ null (sem botão).
+ * Gate único: builder (oferece o toggle) e card (renderiza) usam este critério;
+ * o servidor (createRecord) revalida permissão e manual_entry de todo jeito.
+ */
+export function manualEntryRootSource(
+  selected: SourceKey[] | undefined,
+  sources: SourceDef[] = BUILTIN_SOURCES
+): SourceDef | null {
+  if (!selected || selected.length !== 1) return null;
+  const def = sources.find((s) => s.key === selected[0]);
+  return def && !def.parentKey && def.manualEntry ? def : null;
 }
 
 /** Fontes RAIZ (não-sub) do catálogo. */
@@ -241,14 +272,19 @@ export function rootSources(
  * toggle de convivência (settings.coexistSubSources).
  *
  * Passo 1 — candidatas: uma sub entra quando (a) sua pai NÃO está selecionada
- * (fonte filtrada avulsa) ou (b) está em `coexist` (conviver explícito). Senão é
+ * (fonte filtrada avulsa), (b) está em `coexist` (conviver explícito) ou
+ * (c) ignora o período (0116 — absorvê-la perderia a isenção: a perna própria é
+ * o que permite pai filtrada pelo período + sub em "todo período"). Senão é
  * ABSORVIDA (a pai já cobre suas linhas) e some. Fontes raiz sempre entram.
  *
  * Passo 2 — main × extra: a consulta PRINCIPAL resolve UMA fonte efetiva por
  * `record_type` (assim o `byType`/coalesce/`record_type in` seguem chaveados por
  * record_type, sem recriar as RPCs). Candidatas que sobram no mesmo record_type
  * (ex.: pai + sub em conviver, ou duas subs da mesma pai) viram `extraLegs` —
- * pernas próprias mescladas no nível do resultado (adicionam linhas).
+ * pernas próprias mescladas no nível do resultado (adicionam linhas). Candidata
+ * que ignora o período (0116) é DEMOVIDA a perna extra quando há candidata do
+ * mesmo record_type que respeite (a principal fica com o universo filtrado,
+ * independente da ordem de seleção).
  *
  * `selected` vazio = "todas as fontes" → principal sem filtro de fonte
  * (allMain=true), sem subs (subs só entram quando explicitamente marcadas).
@@ -273,8 +309,19 @@ export function planSourceLegs(
     }
     const parent = parentKeyOf(key, sources);
     const parentSelected = parent != null && selSet.has(parent);
-    if (!parentSelected || coexistSet.has(key)) candidates.push(key);
+    if (!parentSelected || coexistSet.has(key) || ignoresPeriod(key, sources))
+      candidates.push(key);
     // Senão: absorvida.
+  }
+
+  // ignore_period (0116): dentro do mesmo record_type, candidata que ignora o
+  // período só vira fonte efetiva da PRINCIPAL se não houver candidata que
+  // respeite — senão a ordem de seleção poderia trocar o universo da principal
+  // pela sub isenta (o modo lista consulta SÓ mainSources).
+  const rtHasRespecting = new Set<string>();
+  for (const key of candidates) {
+    if (!ignoresPeriod(key, sources))
+      rtHasRespecting.add(recordTypeOf(key, sources));
   }
 
   const mainSources: SourceKey[] = [];
@@ -282,7 +329,8 @@ export function planSourceLegs(
   const seenRt = new Set<string>();
   for (const key of candidates) {
     const rt = recordTypeOf(key, sources);
-    if (!seenRt.has(rt)) {
+    const demoted = ignoresPeriod(key, sources) && rtHasRespecting.has(rt);
+    if (!demoted && !seenRt.has(rt)) {
       seenRt.add(rt);
       mainSources.push(key);
     } else {

@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 28/07/2026
+// Versão: 1.3 | Data: 07/08/2026
+// v1.3 (07/08/2026): painel de edição recebe o catálogo completo do detalhe
+//   (detailFields/offBaseDefs/coreDefs/knownFieldKeys do recordCtx).
 // Visão LISTA do kanban: os mesmos cards do quadro numa tabela (coluna do
 // quadro, título, campos extras do card, métrica e edição). Compartilhada
 // entre a página dedicada e o widget.
@@ -132,6 +134,10 @@ export function KanbanList({
                     <RecordEditSheet
                       record={card.record}
                       fields={recordCtx.fields}
+                      detailFields={recordCtx.detailFields}
+                      offBaseDefs={recordCtx.offBaseDefs}
+                      coreDefs={recordCtx.coreDefs}
+                      knownFieldKeys={recordCtx.knownFieldKeys}
                       responsibles={recordCtx.responsibles}
                       operations={recordCtx.operations}
                       relatedLeadLabel={null}

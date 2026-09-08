@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 27/07/2026
+// Versão: 1.1 | Data: 07/08/2026
+// v1.1 (07/08/2026): deleteRecordsBulk saiu daqui — excluir registros virou
+//   ENVIO À LIXEIRA (soft delete 0121, lib/records/trash-actions.ts), mesmo
+//   contrato por item; excluir TAREFAS segue hard delete abaixo.
 // Server Actions das AÇÕES EM MASSA do kanban. Contrato: resultado POR ITEM
 // ({ id, ok, message }) — o cliente aplica otimista e reverte SÓ o que falhou.
 // Client do USUÁRIO (RLS manda: `.select` pós-update/delete vazio = negado
@@ -8,10 +11,7 @@
 // (Personalizar = upsert de posicionamentos; bucket de data = computeDateOnMove
 // por item — ação EXPLÍCITA do usuário, diferente de automação; valor = escrita
 // batelada enxuta com UM recalc + UM insert de audit + write-back opcional).
-// Excluir REGISTROS é gate de ADMIN na action (espelha a RLS records_delete,
-// 0091) além do diálogo de confirmação na UI; mocks são pulados por item
-// (congelados no produto). Exclusão emite record.deleted (integrações não
-// podem ficar cegas a hard-delete).
+// Mocks são pulados por item (congelados no produto).
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
@@ -556,79 +556,9 @@ export async function completeTasksBulk(input: {
   return { ok: true, results };
 }
 
-/**
- * EXCLUI registros de verdade (cascade: tarefas/posicionamentos/conexões).
- * Gate de ADMIN na action (espelha a RLS records_delete); mocks pulados por
- * item. A UI SEMPRE confirma antes.
- */
-export async function deleteRecordsBulk(
-  recordIds: string[]
-): Promise<BulkActionState> {
-  const session = await getSessionInfo();
-  if (!session) return { ok: false, message: "Sessão expirada." };
-  if (!session.roles.includes("admin")) {
-    return {
-      ok: false,
-      message: "Só administradores podem excluir registros.",
-    };
-  }
-  const ids = [...new Set(recordIds)].filter(Boolean);
-  if (ids.length === 0) return { ok: true, results: [] };
-  if (ids.length > BULK_MAX_ITEMS) {
-    return { ok: false, message: `Máximo de ${BULK_MAX_ITEMS} por chamada.` };
-  }
-  const supabase = await createClient();
-  const results: BulkItemResult[] = [];
-  const deletable: string[] = [];
-  for (const slice of chunk(ids, CHUNK)) {
-    const { data, error } = await supabase
-      .from("records")
-      .select("id, is_mock")
-      .in("id", slice);
-    if (error) return { ok: false, message: error.message };
-    const found = new Map(
-      (data ?? []).map((r) => [r.id as string, Boolean(r.is_mock)])
-    );
-    for (const id of slice) {
-      if (!found.has(id)) {
-        results.push({ id, ok: false, message: "Registro não encontrado." });
-      } else if (found.get(id)) {
-        results.push({
-          id,
-          ok: false,
-          message: "Registro de demonstração (congelado).",
-        });
-      } else {
-        deletable.push(id);
-      }
-    }
-  }
-  const orgId = await getActiveOrgId();
-  const deleted: string[] = [];
-  for (const slice of chunk(deletable, CHUNK)) {
-    const { data, error } = await supabase
-      .from("records")
-      .delete()
-      .in("id", slice)
-      .select("id");
-    if (error) {
-      results.push(...fanOut(slice, false, error.message));
-      continue;
-    }
-    for (const r of data ?? []) deleted.push(r.id as string);
-    results.push(
-      ...resultsFromReturned(
-        slice,
-        (data ?? []).map((r) => r.id as string),
-        "Sem permissão para excluir."
-      )
-    );
-  }
-  for (const recordId of deleted) {
-    await emitWebhookEvent("record.deleted", { recordId }, orgId);
-  }
-  return { ok: true, results };
-}
+// A exclusão de REGISTROS em massa vive em lib/records/trash-actions.ts desde
+// a Lixeira (0121): trashRecordsBulk (soft delete, mesmo contrato por item) —
+// nenhum caminho do app faz mais hard delete direto fora da própria Lixeira.
 
 /** Exclui tarefas em massa (RLS: travada/de outro usuário falha por item). */
 export async function deleteTasksBulk(

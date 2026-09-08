@@ -23,6 +23,14 @@ import { DATE_FORMATS, formatDateValue, type DateFormat } from "./format";
 
 export type WeekMode = "full" | "restricted";
 
+// Âncora do início da semana (03/08/2026): "monday" = comportamento histórico
+// (segunda ISO, bucket do servidor); "saturday" = semana sáb→sex da "Semana
+// Fechada" (Dimension.closedWeek "sab_sex"), bucketizada client-side. O dono
+// do mês/ano segue a regra da maioria: mês do 4º dia da semana (bucket + 3
+// dias — quinta p/ segunda, terça p/ sábado), a MESMA aritmética do branch
+// full de weekOfMonthParts.
+export type WeekStart = "monday" | "saturday";
+
 export const MONTH_NAMES_PT = [
   "Janeiro",
   "Fevereiro",
@@ -123,7 +131,8 @@ function weekOfMonthParts(
 export function formatBucketLabel(
   transform: Transform,
   value: unknown,
-  weekMode: WeekMode = "restricted"
+  weekMode: WeekMode = "restricted",
+  weekStart: WeekStart = "monday"
 ): string {
   if (transform === "weekday") {
     const n = Number(value);
@@ -143,10 +152,17 @@ export function formatBucketLabel(
   if (transform === "month_name") return MONTH_NAMES_PT[m - 1] ?? String(m);
   if (transform === "month_year") return `${MONTH_NAMES_PT[m - 1] ?? m}/${yy}`;
   if (transform === "week_year") {
-    const wk = isoWeekOfYear(Date.UTC(y, m - 1, d));
+    // Semana de sábado: número ISO da semana do 4º dia (terça = bucket + 3d,
+    // regra da maioria). Com "monday" o offset 0 é byte-idêntico ao histórico
+    // (isoWeekOfYear já deriva pela quinta da própria semana).
+    const anchor =
+      Date.UTC(y, m - 1, d) + (weekStart === "saturday" ? 3 * DAY_MS : 0);
+    const wk = isoWeekOfYear(anchor);
     return `${ordinal(wk)} semana`;
   }
-  // week_month
+  // week_month — o branch full de weekOfMonthParts (bucket + 3d) vale para as
+  // duas âncoras; semana de sábado só chega aqui em modo full (closedWeek
+  // força "full" — effectiveWeekMode).
   const { owner, nth } = weekOfMonthParts(y, m, d, weekMode);
   return `${ordinal(nth)} semana de ${MONTH_NAMES_PT[owner]}`;
 }

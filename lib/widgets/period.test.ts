@@ -13,6 +13,7 @@ import { BUILTIN_SOURCES, type SourceDef } from "@/lib/sources";
 import {
   anchorCoreDateBound,
   applyPeriodToFilters,
+  effectivePeriodBar,
   PERIOD_ALL,
   PERIOD_FIELD_SENTINEL,
   patchAuxPeriodByType,
@@ -39,6 +40,19 @@ const CATALOG: SourceDef[] = [
     parentKey: "leads",
     filter: [{ field: "pipeline", op: "eq", value: "Lite" }],
   },
+  // Sub que IGNORA o filtro de período (0116).
+  {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq", value: "Ativo" }],
+    ignorePeriod: true,
+  },
 ];
 
 describe("periodKeys", () => {
@@ -59,6 +73,60 @@ describe("periodKeys", () => {
       ate: "ate__t1",
       campo: "campo__t1",
     });
+  });
+});
+
+describe("effectivePeriodBar — herança global ← byTab[aba]", () => {
+  const bar = {
+    enabled: true,
+    defaultPreset: "este_mes",
+    field: "closed_at",
+    fieldBySource: { negocio: "closed_at" },
+    scope: "tab" as const,
+    byTab: {
+      t2: { defaultPreset: "este_ano" },
+      t3: { enabled: false, field: "custom:data" },
+    },
+  };
+
+  it("escopo global (ou bucket vazio) devolve a config global sem byTab/scope", () => {
+    expect(effectivePeriodBar(bar, "global", "t2")).toEqual({
+      enabled: true,
+      defaultPreset: "este_mes",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+    expect(effectivePeriodBar(bar, "tab", "")).toEqual(
+      effectivePeriodBar(bar, "global", "")
+    );
+  });
+
+  it("aba sem override herda tudo", () => {
+    expect(effectivePeriodBar(bar, "tab", "t1")).toEqual({
+      enabled: true,
+      defaultPreset: "este_mes",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+  });
+
+  it("sub-chave ausente herda; presente sobrepõe", () => {
+    expect(effectivePeriodBar(bar, "tab", "t2")).toEqual({
+      enabled: true,
+      defaultPreset: "este_ano",
+      field: "closed_at",
+      fieldBySource: { negocio: "closed_at" },
+    });
+    expect(effectivePeriodBar(bar, "tab", "t3")).toEqual({
+      enabled: false,
+      defaultPreset: "este_mes",
+      field: "custom:data",
+      fieldBySource: { negocio: "closed_at" },
+    });
+  });
+
+  it("barra ausente devolve objeto vazio", () => {
+    expect(effectivePeriodBar(undefined, "tab", "t1")).toEqual({});
   });
 });
 
@@ -277,6 +345,96 @@ describe("applyPeriodToFilters — caminho misto (@period)", () => {
     expect(
       applyPeriodToFilters(base, { ...period, from: null, to: null })
     ).toBe(base);
+  });
+});
+
+describe("applyPeriodToFilters — ignore_period (0116)", () => {
+  const period: DashboardPeriod = {
+    field: "closed_at",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    fieldBySource: {
+      leads: "source_created_at",
+      deals: "closed_at",
+      leads_ativos: "source_created_at",
+    },
+  };
+
+  it("todas as fontes cobertas isentas → filtros inalterados (mesma referência)", () => {
+    const base: WidgetFilter[] = [{ field: "stage", op: "eq", value: "Ativo" }];
+    expect(applyPeriodToFilters(base, period, ["leads_ativos"], CATALOG)).toBe(
+      base
+    );
+  });
+
+  it("misto força o sintético com byType e record_types SÓ de quem respeita", () => {
+    const out = applyPeriodToFilters(
+      [],
+      period,
+      ["deals", "leads_ativos"],
+      CATALOG
+    );
+    expect(out).toHaveLength(1);
+    const synth = out[0];
+    expect(synth.field).toBe(PERIOD_FIELD_SENTINEL);
+    expect((synth.value as PeriodBetweenValue).byType).toEqual({
+      negocio: "closed_at",
+    });
+    // Pass-through do RPC/modo lista: "lead" (isenta) fora de record_types.
+    expect(synth.record_types).toEqual(["negocio"]);
+  });
+
+  it("misto força o sintético MESMO sem fieldBySource (o gte/lte plano é não-escopado)", () => {
+    const out = applyPeriodToFilters(
+      [],
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31" },
+      ["deals", "leads_ativos"],
+      CATALOG
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].field).toBe(PERIOD_FIELD_SENTINEL);
+    expect((out[0].value as PeriodBetweenValue).byType).toEqual({
+      negocio: "closed_at",
+    });
+    expect(out[0].record_types).toEqual(["negocio"]);
+  });
+
+  it("conflito no MESMO record_type: fonte que respeita vence (sem isenção)", () => {
+    // Ordem de cobertura não importa (duas direções).
+    for (const srcs of [
+      ["leads", "leads_ativos"],
+      ["leads_ativos", "leads"],
+    ] as const) {
+      const out = applyPeriodToFilters([], period, [...srcs], CATALOG);
+      // Campo único ("source_created_at") entre quem respeita → uniforme.
+      expect(out).toEqual([
+        {
+          field: "source_created_at",
+          op: "gte",
+          value: "2026-07-01T00:00:00-03:00",
+        },
+        {
+          field: "source_created_at",
+          op: "lte",
+          value: "2026-07-31T23:59:59-03:00",
+        },
+      ]);
+    }
+  });
+
+  it("sem fonte isenta na cobertura a saída é byte-idêntica (sem record_types)", () => {
+    const out = applyPeriodToFilters([], period, ["leads", "deals"], CATALOG);
+    expect(out).toHaveLength(1);
+    expect(out[0].record_types).toBeUndefined();
+    expect((out[0].value as PeriodBetweenValue).byType).toEqual({
+      lead: "source_created_at",
+      negocio: "closed_at",
+    });
+  });
+
+  it("em 'todas as fontes' a sub isenta não muda nada (subs fora da cobertura)", () => {
+    const out = applyPeriodToFilters([], period, undefined, CATALOG);
+    expect(out[0].record_types).toBeUndefined();
   });
 });
 

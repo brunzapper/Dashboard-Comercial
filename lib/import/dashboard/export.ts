@@ -1,4 +1,11 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.4 | Data: 07/09/2026
+// v1.4 (07/09/2026): o widget kanban deixa de exportar os vínculos LOCAIS
+//   do quadro (KANBAN_LOCAL_KEYS = allocationFieldKey/taskBoardId) — eles
+//   apontam campo e board do quadro de ORIGEM e não sobrevivem a um
+//   import-como-novo, exatamente como `pages`. O validador os descarta na
+//   entrada e o applyPresetDefinition os PRESERVA do settings existente.
+// v1.3 (03/08/2026): Semana Fechada — exportDimension emite `closedWeek`
+//   (round-trip com validate.ts v1.5; a IA enxerga a opção no ESTADO ATUAL).
 // v1.2 (31/07/2026): filtros sobre relações saem por NOME — `fkNames`
 //   (opcional; carregado pelo chamador via loadExportFkNames, canon-aware)
 //   mapeia UUID→nome em responsible_id/operation_id (por elemento em arrays);
@@ -21,7 +28,7 @@
 //   reemitida), `connectors` e `kanban` (carregam uuids de widget que não
 //   sobrevivem a um import-como-novo).
 // - dimensions/filters: só os campos do REBUILD ({field,label,transform,
-//   weekMode,dateAgg} / {field,op,value,sources}).
+//   weekMode,closedWeek,dateAgg} / {field,op,value,sources}).
 // - metrics: caminho A (normal) e B (calc ad-hoc com `formula` em TOKENS —
 //   aceitos pelo validador e revalidados); métrica `custom:`+calc é emitida
 //   como A simples (caminho C do validador é lossy — perda documentada).
@@ -50,6 +57,7 @@ import {
 } from "@/lib/widgets/grid-space";
 import { isLineShapeWidget, lineGridBBox } from "@/lib/widgets/lines";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
+import { KANBAN_LOCAL_KEYS } from "@/lib/import/dashboard/kanban-settings";
 import {
   DASHBOARD_IMPORT_FORMAT,
   DASHBOARD_IMPORT_VERSION,
@@ -164,7 +172,11 @@ function exportDimension(d: Dimension): Dimension {
     label: d.label,
     transform: d.transform,
     weekMode: d.weekMode,
+    closedWeek: d.closedWeek,
     dateAgg: d.dateAgg,
+    // Expressão condicional: tokens passam direto no validador (round-trip,
+    // mesmo racional do calc ad-hoc das métricas).
+    caseFormula: d.caseFormula,
   }) as Dimension;
 }
 
@@ -323,6 +335,13 @@ export function exportDashboardJson(input: {
     const root = rootOf(k, sources);
     if (root) based.add(root);
   }
+  // Idem para os overrides por aba (periodBar.byTab[<aba>].fieldBySource).
+  for (const over of Object.values(settings.periodBar?.byTab ?? {})) {
+    for (const k of Object.keys(over?.fieldBySource ?? {})) {
+      const root = rootOf(k, sources);
+      if (root) based.add(root);
+    }
+  }
   const scopeKeys = settings.sourceScope?.keys ?? [];
   for (const k of scopeKeys) {
     const root = rootOf(k, sources);
@@ -351,6 +370,21 @@ export function exportDashboardJson(input: {
     // razão de connectors/kanban) e o apply de edição a PRESERVA do settings
     // existente (applyPresetDefinition).
     delete wSettings.pages;
+    // Vínculos LOCAIS do quadro kanban (allocationFieldKey → field_definitions
+    // criado por ESTE quadro; taskBoardId → uuid de dashboards): mesma razão
+    // de `pages`. O validador também os descarta na entrada e o apply
+    // in-place os preserva do settings existente.
+    if (wSettings.kanban) {
+      const kanban = { ...wSettings.kanban } as Record<string, unknown>;
+      let stripped = false;
+      for (const key of KANBAN_LOCAL_KEYS) {
+        if (kanban[key] === undefined) continue;
+        delete kanban[key];
+        stripped = true;
+      }
+      if (stripped)
+        wSettings.kanban = kanban as unknown as WidgetSettings["kanban"];
+    }
     const grid = validGrid(w.grid_position);
     const sourcesOut = (w.sources ?? []).filter(Boolean);
     return compact({

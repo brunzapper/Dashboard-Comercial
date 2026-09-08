@@ -1,3 +1,10 @@
+// Versão: 1.6 | Data: 08/09/2026
+// v1.6 (08/09/2026): publica o ALVO do painel de IA da Operação
+//   ("<planId>:<ano>-<mes>") via usePublishOperacaoAiTarget. O painel vive no
+//   layout de /operacao e não lê query param de ninguém; o mês publicado é o
+//   do SERVIDOR (props), nunca o rascunho da navegação — a IA gravaria no mês
+//   que o usuário ainda não confirmou. Na "Visão geral" (sem plano) o alvo
+//   fica vazio e o painel pede para escolher um plano na tela.
 // Versão: 1.5 | Data: 01/08/2026
 // v1.5: aba "VISÃO GERAL" — pill PRIMEIRA no tablist e landing da página
 //   (aba "geral" = AUSÊNCIA de ?plano na URL; o navigate omite plano/aba
@@ -42,6 +49,7 @@ import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useNavPending } from "@/components/dashboards/pending-context";
+import { usePublishOperacaoAiTarget } from "@/components/operacao/ai-scope-context";
 import type { GoalMetricDef } from "@/lib/metas/metrics";
 import type { FieldDefinition } from "@/lib/records/types";
 import type { SourceDef } from "@/lib/sources";
@@ -144,6 +152,15 @@ export function RemuneracaoManager(props: RemuneracaoManagerProps) {
   const config = useMemo(
     () => (plan ? parseCompPlanConfig(plan.config) : null),
     [plan]
+  );
+
+  // Alvo do painel de IA da Operação. Mês do SERVIDOR (props), não o rascunho:
+  // o painel escreve, e o rascunho é um mês que o usuário ainda não confirmou.
+  usePublishOperacaoAiTarget(
+    plan && tab !== "geral" ? `${plan.id}:${props.year}-${props.month}` : "",
+    plan && tab !== "geral"
+      ? `${plan.name} — ${String(props.month).padStart(2, "0")}/${props.year}`
+      : ""
   );
 
   // ÚNICO construtor de URL da tela (plano/ano/mes/aba sempre juntos).

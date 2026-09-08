@@ -1,4 +1,17 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.6 | Data: 07/09/2026
+// v1.6 (07/09/2026): `settings.kanban`/`settings.agenda` deixam de ser
+//   PASSTHROUGH — passam por sanitizeKanbanSettings/sanitizeAgendaSettings
+//   (lib/import/dashboard/kanban-settings.ts, régua ÚNICA compartilhada com
+//   o assistente de IA do quadro): STRIP dos vínculos locais
+//   (allocationFieldKey/taskBoardId — invariante 24), enums contra os mapas
+//   de rótulo, refs por checkRef, keys de Base e os tetos de colunas/badges/
+//   extraFields. Além disso, `sources` de um widget kanban/agenda é ALINHADO
+//   com a Base da config (é de lá que a page resolve o período). Doutrina:
+//   aviso + descarte, nunca erro duro.
+// v1.5 (03/08/2026): Semana Fechada — `dimensions[].closedWeek` ("seg_dom" |
+//   "sab_sex") aceito nos transforms de semana (week_year/week_month; "week"
+//   legado idem); transform incompatível REMOVE com aviso (padrão do dateAgg),
+//   valor fora do enum é descartado em silêncio.
 // v1.4 (31/07/2026): filtros de widget sobre relações aceitam NOMES (o engine
 //   resolve nome→id→grupo canônico em runtime — resolveFkFilterNames): valor
 //   string ou elementos de array não-UUID em responsible_id/operation_id devem
@@ -56,6 +69,7 @@ import { PERIOD_PRESETS, PERIOD_ALL } from "@/lib/widgets/period";
 import { FILTER_OPS } from "@/lib/widgets/filter-ops";
 import { CORE_FIELDS } from "@/lib/widgets/fields";
 import { CALC_METRIC_FIELD } from "@/lib/widgets/calc-metrics";
+import { isClosedWeekTransform } from "@/lib/widgets/closed-week";
 import { DEFAULT_WIDGET_SIZE } from "@/lib/widgets/widget-defaults";
 import {
   BASE_COLS,
@@ -65,11 +79,16 @@ import {
   normalizePresetGridSpace,
 } from "@/lib/widgets/grid-space";
 import { sanitizeImageSettings } from "@/lib/widgets/image-url";
+import {
+  sanitizeAgendaSettings,
+  sanitizeKanbanSettings,
+} from "@/lib/import/dashboard/kanban-settings";
 import { slugify } from "@/lib/records/slug";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { ROLE_LABELS } from "@/lib/auth/roles";
 import {
   formulaCondAggInfo,
+  formulaRefs,
   type Formula,
 } from "@/lib/records/formulas";
 import { findFormulaCycle, refCustomKey } from "@/lib/records/formula-deps";
@@ -525,12 +544,17 @@ export function validateDashboardImport(
       );
       return;
     }
+    // ignore_period (0116): a Sub-base não respeita o filtro de período.
+    const ignorePeriod = s.ignore_period === true;
     // Recorte IGUAL ao de uma Sub-base existente (ou declarada acima)?
     // Reutiliza a existente e remapeia as referências — nunca duplicar.
+    // A flag ignore_period entra no critério: comportamento de período
+    // diferente NÃO é o mesmo recorte (reusar mudaria a semântica).
     const dup = workingSources.find(
       (x) =>
         x.parentKey === parent &&
         x.defaultPeriodField === period &&
+        Boolean(x.ignorePeriod) === ignorePeriod &&
         normSubFilter(x.filter ?? []) === normSubFilter(filter)
     );
     if (dup) {
@@ -547,6 +571,7 @@ export function validateDashboardImport(
       short_label: asString(s.short_label) || undefined,
       default_period_field: period,
       filter,
+      ignore_period: ignorePeriod || undefined,
     });
     workingSources.push({
       key,
@@ -558,6 +583,7 @@ export function validateDashboardImport(
       manualEntry: false,
       parentKey: parent,
       filter,
+      ignorePeriod,
     });
   });
 
@@ -756,6 +782,47 @@ export function validateDashboardImport(
         checkRef(f, `dashboard.settings.periodBar.fieldBySource.${sk}`);
       }
     }
+    // Overrides por aba: mesmas checagens do global, chave = id de uma aba
+    // declarada. Aba desconhecida some com AVISO (padrão do closedWeek) — um id
+    // errado não pode derrubar o import inteiro.
+    if (isRecord(pb.byTab)) {
+      const byTab: NonNullable<typeof pb.byTab> = {};
+      for (const [tabId, raw] of Object.entries(pb.byTab)) {
+        const where = `dashboard.settings.periodBar.byTab.${tabId}`;
+        if (!isRecord(raw)) continue;
+        if (!tabIds.has(tabId)) {
+          warnings.push(`${where}: aba desconhecida — override removido.`);
+          continue;
+        }
+        const over = { ...raw } as NonNullable<typeof pb.byTab>[string];
+        if (over.field) checkRef(over.field, `${where}.field`);
+        if (over.defaultPreset != null && !PERIOD_PRESET_KEYS.has(over.defaultPreset)) {
+          errors.push(
+            `${where}.defaultPreset inválido ("${over.defaultPreset}"). Válidos: ${Object.keys(PERIOD_PRESETS).join(", ")}, "${PERIOD_ALL}".`
+          );
+        }
+        if (over.fieldBySource && subRemap.size > 0) {
+          over.fieldBySource = Object.fromEntries(
+            Object.entries(over.fieldBySource).map(([sk, f]) => [
+              remapSourceKey(sk),
+              f,
+            ])
+          );
+        }
+        for (const [sk, f] of Object.entries(over.fieldBySource ?? {})) {
+          if (!sourceKeySet().has(sk)) {
+            errors.push(`${where}.fieldBySource: Base desconhecida ("${sk}").`);
+          } else if (typeof f === "string") {
+            checkRef(f, `${where}.fieldBySource.${sk}`);
+          }
+        }
+        byTab[tabId] = over;
+      }
+      if (Object.keys(byTab).length > 0) pb.byTab = byTab;
+      else delete pb.byTab;
+    } else if (pb.byTab != null) {
+      delete pb.byTab;
+    }
   }
   // Espaço de grid do JSON: canvas.gridVersion 2 = unidades FINAS (export de
   // board pós-grade-fina; deltas da IA herdam o carimbo via currentCanvas do
@@ -870,6 +937,94 @@ export function validateDashboardImport(
         );
         dateAgg = "";
       }
+      // Semana fechada (03/08/2026): só nos transforms de semana; valor fora
+      // do enum é descartado em silêncio, transform incompatível remove com
+      // aviso (padrão do dateAgg acima).
+      const cwRaw = d.closedWeek;
+      let closedWeek: Dimension["closedWeek"] =
+        cwRaw === "seg_dom" || cwRaw === "sab_sex" ? cwRaw : undefined;
+      if (
+        closedWeek &&
+        !isClosedWeekTransform(
+          (transform || undefined) as Dimension["transform"]
+        )
+      ) {
+        warnings.push(
+          `${dw}: "closedWeek" removido — só é suportado com transform de semana (week_year/week_month).`
+        );
+        closedWeek = undefined;
+      }
+      // Expressão condicional (07/08/2026): "case_formula_text" (texto estilo
+      // planilha, preferido) OU "caseFormula" {tokens} (round-trip do
+      // export). Reclassifica os valores da dim em rótulos (SE/E/OU) — 100%
+      // engine. Incompatibilidades removem com AVISO (padrão closedWeek):
+      // modo lista, transform/dateAgg presentes, campo de data ou relação —
+      // e refs de data/relação/today dentro da expressão.
+      let caseFormula: Dimension["caseFormula"];
+      const caseText = asString(
+        (d as Record<string, unknown>).case_formula_text
+      );
+      const caseTokens =
+        isRecord(d.caseFormula) && Array.isArray(d.caseFormula.tokens)
+          ? (d.caseFormula as unknown as Formula)
+          : null;
+      if (caseText || caseTokens) {
+        const isDateRef = (ref: string): boolean =>
+          ref === "today" ||
+          PERIOD_FIELDS.has(ref) ||
+          (ref.startsWith("custom:") &&
+            (workingDefs.some(
+              (df) =>
+                df.field_key === ref.slice("custom:".length) &&
+                df.data_type === "data"
+            ) ||
+              declaredFieldTypes.get(ref.slice("custom:".length)) === "data"));
+        const isFkRef = (ref: string): boolean =>
+          ref === "responsible_id" || ref === "operation_id";
+        if (
+          isListTable ||
+          (transform && transform !== "none") ||
+          dateAgg ||
+          isDateRef(field) ||
+          isFkRef(field)
+        ) {
+          warnings.push(
+            `${dw}: expressão condicional removida — não é suportada em modo lista, com "transform"/"dateAgg", nem em campo de data/relação.`
+          );
+        } else {
+          let f: Formula | null = null;
+          if (caseText) {
+            const tok = tokenizeFormulaText(caseText, recordCatalog());
+            if (tok.ok) f = tok.formula;
+            else errors.push(`${dw}: ${tok.error}`);
+          } else {
+            f = caseTokens;
+          }
+          if (f) {
+            const v = validateFormulaForContext(f, {
+              kind: "record",
+              catalog: recordCatalog(),
+              sources: workingSources,
+            });
+            if (!v.ok) {
+              errors.push(`${dw}: ${v.error ?? "Expressão inválida."}`);
+              f = null;
+            }
+          }
+          if (f) {
+            const badRef = [...new Set(formulaRefs(f))].find(
+              (ref) => isDateRef(ref) || isFkRef(ref)
+            );
+            if (badRef) {
+              warnings.push(
+                `${dw}: expressão condicional removida — a ref "${badRef}" é de data/relação (não agrupável por rótulo).`
+              );
+              f = null;
+            }
+          }
+          if (f) caseFormula = f;
+        }
+      }
       dimensions.push({
         field,
         label: asString(d.label) || undefined,
@@ -878,7 +1033,9 @@ export function validateDashboardImport(
           d.weekMode === "full" || d.weekMode === "restricted"
             ? d.weekMode
             : undefined,
+        closedWeek,
         dateAgg: (dateAgg || undefined) as Dimension["dateAgg"],
+        caseFormula,
       });
     });
 
@@ -1017,6 +1174,49 @@ export function validateDashboardImport(
       warnings.push(
         `${where}: "settings.pages" é gerida pelo sistema (mescla de widgets) e foi removida do JSON.`
       );
+    }
+
+    // Kanban/Agenda: config própria com refs, keys de Base e enums — passavam
+    // como PASSTHROUGH até 07/09/2026 (quadro nascia vazio, e um
+    // `allocationFieldKey` do JSON escrevia no campo-espelho do quadro de
+    // ORIGEM — invariante 24). A régua é única: lib/import/dashboard/
+    // kanban-settings.ts, compartilhada com o assistente de IA do quadro.
+    const sanitizeDeps = {
+      checkRef,
+      knownSources: sourceKeySet(),
+      rootSources: rootSourceKeySet(),
+      where,
+      warnings,
+    };
+    if ((wSettings as Record<string, unknown>).kanban !== undefined) {
+      const kanban = sanitizeKanbanSettings(wSettings.kanban, sanitizeDeps);
+      if (kanban) wSettings.kanban = kanban;
+      else delete (wSettings as Record<string, unknown>).kanban;
+    }
+    if ((wSettings as Record<string, unknown>).agenda !== undefined) {
+      const agenda = sanitizeAgendaSettings(wSettings.agenda, sanitizeDeps);
+      if (agenda) wSettings.agenda = agenda;
+      else delete (wSettings as Record<string, unknown>).agenda;
+    }
+
+    // Coerência kanban/agenda × `sources`: é de `widgets.sources` que a page
+    // resolve o período do quadro/calendário, e o widget-builder grava
+    // exatamente [config.source]. JSON que divirja deixaria o período sem
+    // âncora — alinhamos com aviso em vez de recusar o widget.
+    const ownSource =
+      visualType === "kanban"
+        ? asString(wSettings.kanban?.source)
+        : visualType === "agenda"
+          ? asString(wSettings.agenda?.source)
+          : "";
+    if (ownSource && (sources.length !== 1 || sources[0] !== ownSource)) {
+      if (sources.length > 0) {
+        warnings.push(
+          `${where}: "sources" (${sources.join(", ")}) não bate com a Base do ${visualType} ("${ownSource}") — alinhado com a config.`
+        );
+      }
+      sources.length = 0;
+      sources.push(ownSource);
     }
     if (tabIds.size > 0) {
       const tab = asString(wSettings.tab);

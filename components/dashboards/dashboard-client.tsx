@@ -1,4 +1,18 @@
-// Versão: 2.8 | Data: 03/08/2026
+// Versão: 3.0 | Data: 08/09/2026
+// v3.0 (08/09/2026): atualização automática SILENCIOSA. O refetch do lote de
+//   engine disparado pelo EVENT BUS (realtime → sync do Bitrix, que roda a
+//   cada minuto; ou mutação em outra tela) não acende mais engineLoading — e
+//   portanto não pinta o overlay "Atualizando…" sobre TODOS os gráficos de
+//   quem está só apresentando/analisando (parecia defeito do sistema). A
+//   ORIGEM decide: useRefetchOrigin(engineScopeKey) — 1ª carga e mudança de
+//   escopo (período/filtro/__qf__/__pw__/config) seguem com feedback visível.
+//   Payload de fundo idêntico ao que está em tela nem re-renderiza
+//   (enginePayloadRef), e o disparo de fundo coalesce em BUS_REFETCH_DELAY_MS.
+// v2.9 (03/08/2026): Ponteiro Laser — estado efêmero laserMode (ativado pelo
+//   menu do clique-direito sobre um widget, no grid); ligar a edição desliga
+//   o laser (efeito) e ativar o laser sai da edição (handleLaserChange);
+//   toggleEditMode alimenta o item "Editar layout" do mesmo menu; laserColor
+//   (Configurações → Tema) desce da page ao grid.
 // v2.8 (03/08/2026): boardWidgets={widgets} (TODAS as abas) no DashboardGrid
 //   e no builder da toolbar — listas "Aplicar a" dos filtros globais ao board.
 // v2.7 (26/07/2026): engine deferido — busca em LOTE dos widgets de engine
@@ -66,9 +80,18 @@ import {
   runDeferredWidgets,
   type DeferredWidgetsPayload,
 } from "@/app/(app)/dashboards/deferred-widget-actions";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import type { AvailableField } from "@/lib/widgets/fields";
-import type { PeriodScope, PeriodSelection } from "@/lib/widgets/period";
+import {
+  effectivePeriodBar,
+  type EffectivePeriodBar,
+  type PeriodScope,
+  type PeriodSelection,
+} from "@/lib/widgets/period";
 import type {
   CalcWidgetResult,
   Connector,
@@ -181,6 +204,7 @@ export function DashboardClient({
   dateFormat,
   periodBar,
   periodScope,
+  periodBarByTab,
   periodDefaultsByTab,
   periodDefaultFieldByTab,
   filterOptionsById,
@@ -191,6 +215,7 @@ export function DashboardClient({
   deferredEngineIds,
   initialTabId,
   focusWidgetId,
+  laserColor,
 }: {
   dashboardId: string;
   dashboardName: string;
@@ -245,6 +270,9 @@ export function DashboardClient({
   dateFormat?: DateFormat;
   periodBar?: DashboardSettings["periodBar"];
   periodScope?: PeriodScope;
+  // Config EFETIVA da barra por bucket (herança de periodBar.byTab já
+  // resolvida no servidor). Fallback local p/ buckets fora do mapa.
+  periodBarByTab?: Record<string, EffectivePeriodBar>;
   periodDefaultsByTab?: Record<string, PeriodSelection>;
   periodDefaultFieldByTab?: Record<string, string>;
   filterOptionsById?: Record<string, FieldFilterOptions>;
@@ -268,10 +296,35 @@ export function DashboardClient({
   // Widget a focar ao montar (?focus= — atalho vindo de outro dashboard). A
   // page já entrega initialTabId apontando para a aba do alvo.
   focusWidgetId?: string;
+  // Cor do Ponteiro Laser (Configurações → Tema; resolveLaserColor na page).
+  laserColor?: string;
 }) {
   const [editMode, setEditMode] = useState(false);
   // Modo "Conectar" (criar linhas entre widgets); só faz sentido em editMode.
   const [connectMode, setConnectMode] = useState(false);
+  // Ponteiro Laser (modo apresentação): estado EFÊMERO — nunca persiste.
+  // Ativado pelo menu do clique-direito sobre um widget (dashboard-grid).
+  const [laserMode, setLaserMode] = useState(false);
+  // Ligar a edição desliga o laser — cobre TODAS as entradas em editMode
+  // (botão do topo, dropdown Manual/IA e o item do próprio menu).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (editMode) setLaserMode(false);
+  }, [editMode]);
+  // Espelho da regra acima: ativar o laser sai do modo edição.
+  const handleLaserChange = useCallback((on: boolean) => {
+    setLaserMode(on);
+    if (on) {
+      setEditMode(false);
+      setConnectMode(false);
+    }
+  }, []);
+  // "Editar layout"/"Concluir edição" do menu de contexto — mesmo efeito do
+  // botão do topo (liga E desliga; conectar sempre reseta).
+  const toggleEditMode = useCallback(() => {
+    setEditMode((v) => !v);
+    setConnectMode(false);
+  }, []);
 
   // ---- widgets de ENGINE deferidos (26/07/2026) ----
   // A page não computa gráficos/KPIs/cards/…: este client busca TODOS em uma
@@ -281,6 +334,11 @@ export function DashboardClient({
   // inclusive persistidos no banco: a revalidação re-renderiza o RSC e a prop
   // nova re-dispara) ou quando um registro muda (event bus, paridade com
   // Tabela Livre/kanban).
+  // v3.0 (08/09/2026): o overlay "Atualizando…" ficou restrito ao refetch
+  // causado pelo USUÁRIO (useRefetchOrigin). O tick do event bus é SILENCIOSO
+  // — ele chega do realtime a cada rodada do sync do Bitrix (pg-cron a cada
+  // MINUTO), e acender o overlay sobre TODOS os gráficos de quem só está
+  // apresentando/analisando parecia defeito do sistema.
   const engineIds = useMemo(
     () => deferredEngineIds ?? [],
     [deferredEngineIds]
@@ -300,12 +358,25 @@ export function DashboardClient({
   useDataChanged((d) => {
     if (d.kind === "record") setEngineTick((t) => t + 1);
   });
+  // Origem do refetch: escopo mudou (usuário) × só o tick do bus (fundo).
+  const engineOriginOf = useRefetchOrigin(engineScopeKey);
+  // Último payload APLICADO, serializado: um refetch de fundo que devolve o
+  // mesmo conteúdo não re-renderiza os gráficos (caso comum — o sync mexeu em
+  // registros fora do recorte do dashboard).
+  const enginePayloadRef = useRef<string | null>(null);
+  // Uma rodada VISÍVEL cancelada por um tick do bus segue visível: sem isto o
+  // overlay do usuário ficaria aceso para sempre (a rodada de fundo que a
+  // substituiu não o apagaria).
+  const engineVisibleRef = useRef(engineIds.length > 0);
   useEffect(() => {
     if (engineIds.length === 0) return;
+    if (engineOriginOf()) engineVisibleRef.current = true;
+    const userCaused = engineVisibleRef.current;
     let cancelled = false;
-    // Pequeno atraso coalesce rajadas (navegação rápida de período/filtros).
+    // Atraso curto p/ o usuário (coalesce navegação rápida de período/filtros)
+    // e longo no fundo (coalesce a rajada de eventos de uma rodada de sync).
     const timer = setTimeout(() => {
-      setEngineLoading(true);
+      if (userCaused) setEngineLoading(true);
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara é o
       // engineScopeKey (fingerprint do escopo efetivo computado pela page).
       void runDeferredWidgets(
@@ -314,17 +385,24 @@ export function DashboardClient({
         window.location.search
       ).then((res) => {
         if (cancelled) return;
-        if (res.ok) setEngineData(res);
+        if (res.ok) {
+          const json = JSON.stringify(res);
+          if (json !== enginePayloadRef.current) {
+            enginePayloadRef.current = json;
+            setEngineData(res);
+          }
+        }
+        engineVisibleRef.current = false;
         setEngineLoading(false);
       });
-    }, 60);
+    }, userCaused ? 60 : BUS_REFETCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
     // engineIds está resumido no engineScopeKey (id + fingerprint por id).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardId, engineScopeKey, engineTick]);
+  }, [dashboardId, engineScopeKey, engineTick, engineOriginOf]);
   const effDataById = useMemo(
     () => (engineData ? { ...dataById, ...engineData.dataById } : dataById),
     [dataById, engineData]
@@ -358,7 +436,6 @@ export function DashboardClient({
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const barEnabled = periodBar?.enabled !== false;
   const backgroundCss = dashboardBackgroundCss(settings.background);
 
   // Contexto do período p/ o painel de Snapshots capturar a seleção efetiva no
@@ -366,6 +443,7 @@ export function DashboardClient({
   const snapshotPeriod = useMemo<SnapshotPeriodCapture>(
     () => ({
       periodBar,
+      barByTab: periodBarByTab ?? {},
       scope: periodScope ?? "global",
       defaultsByTab: periodDefaultsByTab ?? {},
       defaultFieldByTab: periodDefaultFieldByTab ?? {},
@@ -375,6 +453,7 @@ export function DashboardClient({
     }),
     [
       periodBar,
+      periodBarByTab,
       periodScope,
       periodDefaultsByTab,
       periodDefaultFieldByTab,
@@ -408,6 +487,15 @@ export function DashboardClient({
       : (tabs[0]?.id ?? "")
   );
   const firstTabId = tabs[0]?.id ?? "";
+  // Bucket da barra de período na aba ATIVA ("" no escopo global) e a config
+  // EFETIVA dele: com escopo por aba, cada aba pode ter padrão/campo próprios
+  // e pode esconder a barra. O mapa vem do servidor; o fallback local usa o
+  // MESMO helper de herança, então os dois lados nunca divergem.
+  const periodBucket = periodScope === "tab" ? activeTabId : "";
+  const activeBar =
+    periodBarByTab?.[periodBucket] ??
+    effectivePeriodBar(periodBar, periodScope, periodBucket);
+  const barEnabled = activeBar.enabled !== false;
   // Troca de aba: além do estado, espelha na URL via history.replaceState (sem
   // navegação RSC — a page é pesada; o Next sincroniza useSearchParams). A
   // primeira aba fica sem ?tab para manter URLs limpas.
@@ -636,11 +724,26 @@ export function DashboardClient({
     });
   }
 
+  // Reexibe a barra. No escopo por aba a visibilidade é da ABA ATIVA (grava em
+  // periodBar.byTab[aba]) — mostrar numa aba não reexibe nas outras.
   function showBar() {
+    const next =
+      periodScope === "tab" && periodBucket
+        ? {
+            ...periodBar,
+            byTab: {
+              ...(periodBar?.byTab ?? {}),
+              [periodBucket]: {
+                ...(periodBar?.byTab?.[periodBucket] ?? {}),
+                enabled: true,
+              },
+            },
+          }
+        : { ...periodBar, enabled: true };
     startTransition(async () => {
       await updateDashboardSettings(dashboardId, {
         ...settings,
-        periodBar: { ...periodBar, enabled: true },
+        periodBar: next,
       });
     });
   }
@@ -1045,8 +1148,10 @@ export function DashboardClient({
             dashboardId={dashboardId}
             settings={settings}
             periodBar={periodBar}
+            activeBar={activeBar}
             periodScope={periodScope}
             activeTabId={activeTabId}
+            tabName={tabs.find((t) => t.id === activeTabId)?.name}
             firstTabId={firstTabId}
             hasTabs={tabs.length > 0}
             periodDefaultsByTab={periodDefaultsByTab}
@@ -1060,7 +1165,10 @@ export function DashboardClient({
             disabled={pending}
             onClick={showBar}
           >
-            <Clock className="size-4" /> Mostrar barra de período
+            <Clock className="size-4" />{" "}
+            {periodScope === "tab" && periodBucket
+              ? "Mostrar barra de período nesta aba"
+              : "Mostrar barra de período"}
           </Button>
         ) : null}
 
@@ -1135,6 +1243,10 @@ export function DashboardClient({
             placing={placing}
             onPlace={onPlaceAt}
             onPlaceCancel={resolveAutoPlacement}
+            laserMode={laserMode}
+            onLaserModeChange={handleLaserChange}
+            laserColor={laserColor}
+            onToggleEditMode={canEdit ? toggleEditMode : undefined}
             autoEditWidgetId={autoEditId}
             onAutoEditConsumed={clearAutoEdit}
             onQuickCreate={quickCreateWidget}

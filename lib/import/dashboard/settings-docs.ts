@@ -1,4 +1,14 @@
-// Versão: 1.4 | Data: 30/07/2026
+// Versão: 1.7 | Data: 07/09/2026
+// v1.7 (07/09/2026): `kanban` e `agenda` deixam de ser `null` — a IA passa
+//   a CONFIGURAR quadros e calendários, não só a criar o widget vazio. Os
+//   blocos derivam dos mapas de rótulo de lib/kanban/types.ts e
+//   lib/agenda/types.ts e dos tetos reais; os vínculos LOCAIS do quadro
+//   (allocationFieldKey/taskBoardId) ficam de fora de propósito — o
+//   validador os descarta (invariante 24) e o apply os preserva.
+// v1.6 (06/09/2026): `formulaBar` (Tabela Livre: barra de fórmula "fx" + régua
+//   A/B/C; false oculta).
+// v1.5 (12/08/2026): `showAddRecord` (tabela modo lista: botão "+" de criação
+//   manual; só com UMA Base raiz com manual_entry — gate re-checado em runtime).
 // v1.4 (30/07/2026): FORMULA_FUNC_GROUPS/FormulaFuncGroup passam a DERIVAR do
 //   catálogo único FORMULA_FUNCS (lib/records/formula-funcs.ts — exaustivo por
 //   `satisfies Record<FormulaFuncName, …>`, mesma ordem histórica de chaves);
@@ -44,6 +54,19 @@ import {
   type FormulaFuncGroup,
 } from "@/lib/records/formula-funcs";
 import { PERIOD_ALL, PERIOD_PRESETS } from "@/lib/widgets/period";
+import {
+  DEFAULT_CUSTOM_COLUMNS,
+  DEFAULT_TASK_PHASES,
+  KANBAN_AGG_LABELS,
+  KANBAN_DATE_BUCKET_LABELS,
+  KANBAN_MAX_BADGES,
+  KANBAN_MAX_COLUMNS,
+  KANBAN_METRIC_KIND_LABELS,
+  KANBAN_MODE_LABELS,
+  KANBAN_TASK_METRIC_LABELS,
+} from "@/lib/kanban/types";
+import { KANBAN_MAX_EXTRA_FIELDS } from "@/lib/import/dashboard/kanban-settings";
+import { AGENDA_DENSITY_LABELS, AGENDA_VIEW_LABELS } from "@/lib/agenda/types";
 
 // ---------- Helpers de render ----------
 
@@ -131,6 +154,7 @@ export const APPEARANCE_TABLE_DOC = {
   orientation: `"orientation": "columns",              // "rows" (default) | "columns" (transposta: grupos viram colunas)`,
   groupBy: `"groupBy": ["dim_1"],                  // "Agrupar por": níveis com subtotais recolhíveis (dim_<n> na agregada; field na lista)`,
   groupDateFormats: `"groupDateFormats": { "dim_1": "month_year" },  // formato/bucket do CABEÇALHO do grupo (transform "por nome" ou máscara de data)`,
+  formulaBar: `"formulaBar": false,                  // Tabela Livre: oculta a barra de fórmula "fx" e a régua A/B/C (default: visíveis p/ quem pode digitar)`,
   colDim: `"colDim": "dim_2",                     // transposta: qual dimensão vira as colunas do topo`,
   colWidths: null, // resize manual (px por coluna) — manipulação direta, não gerar
   rowHeights: null, // resize manual (px por linha) — manipulação direta, não gerar
@@ -248,6 +272,7 @@ export const WIDGET_SETTINGS_DOC = {
             { "field": "custom:fonte", "label": "Origem" } ],   // modo lista: colunas ordenadas`,
   limit: `"limit": 10,                               // modo lista: teto de linhas (ausente = sem limite)`,
   showFilterBar: `"showFilterBar": false,                    // tabela: oculta a barra de busca/filtro embutida`,
+  showAddRecord: `"showAddRecord": true,                     // tabela modo lista: botão "+" de criação manual (só com UMA Base raiz com manual_entry)`,
   card: `"card": { "mode": "topn", "labelField": "responsible_id",       // Card: ${enumKeys(CARD_MODE_LABELS)}
           "metric": { "field": "mrr", "agg": "sum" }, "limit": 5 },`,
   note: `"note": { "text": "Texto livre da nota." },  // widget "nota": texto do post-it`,
@@ -262,8 +287,40 @@ export const WIDGET_SETTINGS_DOC = {
   quickTable: null, // estrutura da Tabela Livre (colunas/linhas editáveis) — montada na UI, fora do escopo da IA
   presetKey: null, // identidade de preset/import — o SERVIDOR carimba; a IA nunca envia
   pages: null, // mescla de widgets (páginas) — referencia widget ids do banco; o export a remove e o validador a rejeita; a IA nunca envia
-  kanban: null, // config do widget kanban — fora do escopo da IA
-  agenda: null, // config do widget agenda — fora do escopo da IA
+  kanban: `"kanban": {                               // SÓ com "visual_type": "kanban". "sources" do widget DEVE ser [source] (é de lá que a page resolve o período)
+  "mode": "registros",                    // ${enumKeysLabeled(KANBAN_MODE_LABELS)}
+  "source": "<key de Base>",              // modo registros: obrigatório (Base raiz ou Sub-base)
+  // COLUNAS — escolha UMA das três formas:
+  //  (a) por VALOR de um campo:
+  "groupField": "pipeline",               // campo categórico; campo "selecao" usa a ordem das opções, texto livre usa os valores mais frequentes (teto ${String(KANBAN_MAX_COLUMNS)} + coluna "Outros", que não recebe cards)
+  //  (b) por PERÍODO de um campo de data — troque groupField por:
+  //      "dateField": "closed_at", "dateBucket": "month_year"   // ${enumKeysLabeled(KANBAN_DATE_BUCKET_LABELS)}; mover o card REESCREVE a data
+  //  (c) fases livres ("Personalizar") — sem campo nenhum:
+  //      "columnSource": "custom"        // a coluna do card é dado da VISÃO (não altera o registro); defina as fases em "columns"
+  "columnMetric": {                       // total no cabeçalho da coluna (opcional)
+    "spec": { "kind": "field", "ref": "value" },   // ${enumKeysLabeled(KANBAN_METRIC_KIND_LABELS)}
+    // outras formas: { "kind": "linked", "source": "<key de Base RAIZ>" } | { "kind": "tasks", "metric": "open" } (${enumKeys(KANBAN_TASK_METRIC_LABELS)}) | { "kind": "age" }
+    "agg": "sum" },                       // ${enumKeysLabeled(KANBAN_AGG_LABELS)}; ausente = padrão do indicador
+  "card": {
+    "titleField": "title",                // ausente = "title"
+    "extraFields": ["custom:fonte"],      // até ${String(KANBAN_MAX_EXTRA_FIELDS)} refs no corpo do card
+    "colorField": "pipeline",             // campo que pinta a faixa lateral
+    "badges": [ { "kind": "tasks", "metric": "overdue" } ] },  // até ${String(KANBAN_MAX_BADGES)}; AUSENTE = badge padrão de tarefas abertas, [] = nenhum
+  "columns": [ { "key": "${DEFAULT_CUSTOM_COLUMNS[0].key}", "label": "${DEFAULT_CUSTOM_COLUMNS[0].label}", "color": "#eef2ff", "wipLimit": 10, "hidden": false } ],
+  // A ORDEM do array é a ordem das colunas. Em "custom"/tarefas, "columns" DEFINE as fases (a key é estável — renomear o label não move card);
+  // nas formas (a)/(b) é só override do que já existe. Modo tarefas: "completesTask": true na coluna que conclui a tarefa.
+  // Fases padrão de "custom": ${DEFAULT_CUSTOM_COLUMNS.map((c) => c.key).join(", ")} — de tarefas: ${DEFAULT_TASK_PHASES.map((c) => c.key).join(", ")}.
+  "writeBack": false,                     // modo registros + coluna por VALOR: true grava a mudança de volta no Bitrix; false/ausente = edição LOCAL
+  "tasks": { "lockByDefault": false, "dueSoonDays": 3 }   // só modo tarefas
+}`,
+  agenda: `"agenda": {                               // SÓ com "visual_type": "agenda". Como no kanban, "sources" do widget = [source]
+  "source": "<key de Base>",              // ausente = calendário só de tarefas/anotações
+  "dateField": "closed_at",               // OBRIGATÓRIO junto de source — é o campo que aloca o registro no dia
+  "showTasks": true,                      // tarefas por vencimento (default true)
+  "showNotes": true,                      // anotações do dia (default true)
+  "defaultView": "month"                  // ${enumKeys(AGENDA_VIEW_LABELS)} — visão inicial (mês ou semana)
+  // appearance.cell/chip/density (${enumKeys(AGENDA_DENSITY_LABELS)}) seguem o molde do kanban — ajuste pela UI.
+}`,
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
 ${renderDocBlock(APPEARANCE_DOC, "  ")}
 }`,
@@ -278,7 +335,12 @@ export const DASHBOARD_SETTINGS_DOC = {
   "defaultPreset": "este_mes",       // ${[...Object.keys(PERIOD_PRESETS), PERIOD_ALL].join("|")}
   "field": "closed_at",              // campo de data primário
   "fieldBySource": { "<baseKey>": "<campo de data daquela Base>" },
-  "scope": "global"                  // "global" | "tab"
+  "scope": "global",                 // "global" | "tab"
+  "byTab": { "<tabId>": { "enabled": true, "defaultPreset": "este_ano", "field": "closed_at",
+                          "fieldBySource": { "<baseKey>": "<campo>" } } }
+  // SÓ com "scope": "tab" — override por aba; chave ausente HERDA o global acima.
+  // "enabled": false numa aba = barra oculta E período FIXO no padrão dela p/ todos
+  // (para não filtrar, use "defaultPreset": "all").
 },`,
   canvas: `"canvas": { "cols": 12, "rowHeight": 30 },   // escala CLÁSSICA (sem gridVersion); com "gridVersion": 2 = grade FINA (base 120) — ver regra 8 do SPEC`,
   dateFormat: `"dateFormat": "dd/mm/aaaa",          // dd/mm/aaaa | dd/mm/aa | mm/aa`,

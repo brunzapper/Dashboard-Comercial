@@ -199,6 +199,9 @@ export async function searchRecordsForMatch(
     .from("records")
     .select("id, title")
     .eq("record_type", rt)
+    // Lixeira (0121): registro na lixeira não é candidato a conexão nova
+    // (conexões EXISTENTES seguem exibindo o parceiro — listRecordMatches).
+    .is("deleted_at", null)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(20);
   const t = term.trim();
@@ -218,11 +221,17 @@ export interface MatchListItem {
   mode: "auto" | "manual";
 }
 
+// O id entra numa expressão `.or()` montada por string — vírgula e ponto são
+// SINTAXE ali, então um valor cru remodelaria o filtro. A RLS limitaria o
+// estrago à própria org, mas o filtro é do app: validamos o shape antes.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Lista as conexões de um registro (para exibir/remover na ficha). */
 export async function listRecordMatches(
   recordId: string
 ): Promise<MatchListItem[]> {
-  if (!recordId) return [];
+  if (!UUID_RE.test(recordId)) return [];
   const supabase = await createClient();
   const { data } = await supabase
     .from("record_matches")

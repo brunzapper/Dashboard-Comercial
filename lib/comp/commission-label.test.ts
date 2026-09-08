@@ -6,15 +6,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   commissionMemory,
+  detailTargetNote,
+  detailTierLabel,
   entryMemoryLines,
   factorPayoutFormula,
   fmtMoneyBRL,
   fmtNumBR,
+  sheetFactorNote,
 } from "./commission-label";
 import {
   computeEntry,
   parseCompEntryInputs,
   type CompCommissionBlockBreakdown,
+  type CompFactor,
+  type CompFactorBreakdown,
   type CompPlanConfig,
 } from "./model";
 
@@ -78,7 +83,7 @@ describe("commissionMemory", () => {
       `${fmtNumBR(40)}% × ${fmtMoneyBRL(9450)} (Vendas) = ${fmtMoneyBRL(3780)}`
     );
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(80)}% (atingimento de Vendas: ${fmtNumBR(90)}%)`
+      `faixa a partir de ${fmtNumBR(80)}% (atingimento de Vendas: ${fmtNumBR(90)}%)`
     );
   });
 
@@ -125,7 +130,7 @@ describe("commissionMemory", () => {
     );
     expect(mem.formula).toBe(`${fmtMoneyBRL(750)} (valor fixo da faixa)`);
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(75)}% (atingimento de Reuniões: ${fmtNumBR(90)}%)`
+      `faixa a partir de ${fmtNumBR(75)}% (atingimento de Reuniões: ${fmtNumBR(90)}%)`
     );
   });
 
@@ -133,12 +138,12 @@ describe("commissionMemory", () => {
     const below = commissionMemory(block({ triggerValue: 40 }));
     expect(below.formula).toBeNull();
     expect(below.tierNote).toBe(
-      `nenhuma faixa atingida (gatilho: ${fmtNumBR(40)}%)`
+      `nenhuma faixa alcançada (Vendas: ${fmtNumBR(40)}%)`
     );
     const empty = commissionMemory(block());
     expect(empty.formula).toBeNull();
     expect(empty.tierNote).toBe(
-      "sem gatilho apurado (atingimento/realizado vazio)"
+      "sem base para escolher a faixa (atingimento ou realizado em branco)"
     );
   });
 
@@ -154,7 +159,7 @@ describe("commissionMemory", () => {
     );
     expect(mem.formula).toBeNull();
     expect(mem.tierNote).toBe(
-      `faixa ≥ ${fmtNumBR(50)}% (atingimento de Vendas: ${fmtNumBR(90)}%) — fator-base sem realizado ⇒ ${fmtMoneyBRL(0)}`
+      `faixa a partir de ${fmtNumBR(50)}% (atingimento de Vendas: ${fmtNumBR(90)}%) — indicador de base sem realizado: ${fmtMoneyBRL(0)}`
     );
   });
 
@@ -245,7 +250,7 @@ describe("entryMemoryLines", () => {
     );
     const lines = entryMemoryLines(cfgSoComissao, bd);
     expect(lines[0]).toBe(
-      `Reuniões: realizado ${fmtNumBR(44)} (gatilho/base de comissão)`
+      `Reuniões: realizado ${fmtNumBR(44)} (usado para definir a faixa da comissão)`
     );
     expect(lines[1]).toBe(
       `Prêmio por reunião: ${fmtNumBR(44)} (Reuniões) × ${fmtMoneyBRL(12.5)} = ${fmtMoneyBRL(550)} — faixa a partir de ${fmtNumBR(26)} (Reuniões: ${fmtNumBR(44)})`
@@ -304,7 +309,7 @@ describe("entryMemoryLines", () => {
     const lines = entryMemoryLines(cfgPesos, bd);
     expect(lines[0]).toBe(`Vendas: ${fmtMoneyBRL(500)} (manual)`);
     expect(lines[1]).toBe(
-      `Reuniões: sem atingimento (alvo/realizado vazio) ⇒ ${fmtMoneyBRL(0)}`
+      `Reuniões: sem atingimento (meta ou realizado em branco): ${fmtMoneyBRL(0)}`
     );
   });
 
@@ -350,5 +355,91 @@ describe("entryMemoryLines", () => {
     expect(entryMemoryLines(cfgPesos, bd)).toContain(
       `Total manual: ${fmtMoneyBRL(999)}`
     );
+  });
+});
+
+describe("meta da escada de faixas", () => {
+  it("faixa por atingimento mostra o ABSOLUTO da meta ao lado do percentual", () => {
+    // "A partir de 50%" sozinho é percentual de coisa nenhuma — com meta 20,
+    // o degrau diz que são 10 reuniões.
+    expect(detailTierLabel(50, "attainment", false, 20)).toBe(
+      `A partir de ${fmtNumBR(50)}% (${fmtNumBR(10)})`
+    );
+    expect(detailTierLabel(120, "attainment", true, 1000)).toBe(
+      `A partir de ${fmtNumBR(120)}% (${fmtMoneyBRL(1200)})`
+    );
+  });
+
+  it("sem meta apurada, o degrau segue só no percentual (nada de inventar)", () => {
+    expect(detailTierLabel(50, "attainment", false, null)).toBe(
+      `A partir de ${fmtNumBR(50)}%`
+    );
+    expect(detailTierLabel(50, "attainment", false)).toBe(
+      `A partir de ${fmtNumBR(50)}%`
+    );
+  });
+
+  it("faixa por REALIZADO não fala em meta — o limiar já é absoluto", () => {
+    expect(detailTierLabel(500, "realized", true, 1000)).toBe(
+      `A partir de ${fmtMoneyBRL(500)}`
+    );
+  });
+
+  it("a nota declara meta e realizado; sem meta não há nota", () => {
+    expect(detailTargetNote("Reuniões", 20, 3, false)).toBe(
+      `Meta de Reuniões: ${fmtNumBR(20)} · realizado ${fmtNumBR(3)} = ${fmtNumBR(15)}%`
+    );
+    expect(detailTargetNote("Vendas", 1000, null, true)).toBe(
+      `Meta de Vendas: ${fmtMoneyBRL(1000)}`
+    );
+    expect(detailTargetNote("Reuniões", null, 3, false)).toBeNull();
+  });
+});
+
+describe("sheetFactorNote", () => {
+  const fator = (over: Partial<CompFactor> = {}): CompFactor => ({
+    id: "f_r",
+    label: "Reuniões",
+    weightPct: 0,
+    metricKey: "m_r",
+    money: false,
+    formula: { tokens: [{ kind: "field", ref: "agg:count:*" }] },
+    sources: [],
+    ...over,
+  });
+  const bd = (over: Partial<CompFactorBreakdown> = {}): CompFactorBreakdown => ({
+    target: 20,
+    realized: 44,
+    attainmentPct: 220,
+    payout: 0,
+    overridden: { realized: false, attainmentPct: false, payout: false },
+    targetSource: "default",
+    targetBRL: 20,
+    ...over,
+  });
+
+  it("fator de peso 0: célula VAZIA (a coluna Valor já sai vazia)", () => {
+    // Antes saía "Usado no cálculo da comissão — não gera valor próprio ·
+    // Alvo padrão do plano" em toda linha de todo colaborador.
+    expect(sheetFactorNote(fator(), bd(), 1000)).toBe("");
+  });
+
+  it("mesmo sem valor próprio, AJUSTE MANUAL continua sendo dito", () => {
+    // É o que o leitor não tem como inferir das colunas.
+    expect(
+      sheetFactorNote(
+        fator(),
+        bd({
+          overridden: { realized: true, attainmentPct: false, payout: false },
+        }),
+        1000
+      )
+    ).toBe("Realizado informado manualmente");
+  });
+
+  it("fator COM peso segue com a conta e os anexos do alvo", () => {
+    const nota = sheetFactorNote(fator({ weightPct: 40 }), bd(), 1000);
+    expect(nota).toContain("×");
+    expect(nota).toContain("Meta padrão do plano");
   });
 });

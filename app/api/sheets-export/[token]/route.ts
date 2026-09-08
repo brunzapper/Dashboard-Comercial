@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 02/08/2026
+// Versão: 1.1 | Data: 16/08/2026
+// v1.1: payload v3 — o GET repassa também `links` (aba alvo do hiperlink por
+// linha) e `details` (abas Det-<Nome>). Ticket v2 em trânsito devolve null nas
+// duas chaves e o script rende só a aba do mês (degradação documentada).
 // Handshake do export p/ Google Planilhas (0115) — chamado PELO Apps Script
 // (UrlFetchApp, servidores do Google; sem sessão). Segurança: token single-use
 // de 256 bits (só o sha256 persiste — lib/snapshots/token.ts), pre-gate de
@@ -87,6 +90,8 @@ export async function GET(
     headers?: unknown;
     rows?: unknown;
     kinds?: unknown;
+    links?: unknown;
+    details?: unknown;
     knownSpreadsheetId?: unknown;
   };
   return NextResponse.json({
@@ -97,6 +102,10 @@ export async function GET(
     // v2: kinds por linha (demonstrativo). Ticket v1 em trânsito → null e o
     // script novo cai no rendering simples.
     kinds: p.kinds ?? null,
+    // v3: abas de detalhamento (Det-<Nome>) e o alvo do hiperlink por linha.
+    // Ticket v2 em trânsito → null e o script v3 rende só a aba do mês.
+    links: p.links ?? null,
+    details: p.details ?? null,
     knownSpreadsheetId: p.knownSpreadsheetId ?? null,
   });
 }

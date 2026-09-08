@@ -9,7 +9,7 @@
 // v1.1 (26/07/2026): agrupamento de responsáveis (0101, invariante 20) —
 // fusão da dimensão apelido→principal, expansão de filtro p/ o grupo e o gate
 // (widget sem referência a responsável não consulta responsibles).
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   aggregateMoneyBreakdowns,
@@ -18,6 +18,7 @@ import {
   runWidget,
 } from "@/lib/widgets/engine";
 import type { WidgetConfig, WidgetFilter } from "@/lib/widgets/types";
+import { tokenizeFormulaText } from "@/lib/records/formula-text";
 import { fakeSupabase } from "@/tests/helpers/fake-supabase";
 import { AVAILABLE, CATALOG, CORRS } from "@/tests/helpers/engine-fixtures";
 
@@ -239,6 +240,127 @@ describe("comparação com período anterior", () => {
       { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
     ]);
     expect(data.comparison).toBeDefined();
+  });
+
+  it("período personalizado FECHADO (sem preset): desloca pela duração", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: (args) => {
+          const fs = args.p_filters as WidgetFilter[];
+          const from = String(fs.find((f) => f.op === "gte")?.value ?? "");
+          return from.startsWith("2026-08")
+            ? { data: [{ dim_1: "A", metric_1: 10 }], error: null }
+            : { data: [{ dim_1: "A", metric_1: 8 }], error: null };
+        },
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [{ field: "pipeline" }],
+        metrics: [{ field: "*", agg: "count" }],
+        settings: { comparison: { enabled: true, base: "previous_period" } },
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-08-01", to: "2026-08-10" }
+    );
+
+    // 10 dias terminando na véspera do início: 22–31/07, ancorado -03:00.
+    expect(rpcCalls).toHaveLength(2);
+    const cmp = rpcCalls[1].args.p_filters as WidgetFilter[];
+    expect(cmp.find((f) => f.op === "gte")?.value).toBe(
+      "2026-07-22T00:00:00-03:00"
+    );
+    expect(cmp.find((f) => f.op === "lte")?.value).toBe(
+      "2026-07-31T23:59:59-03:00"
+    );
+    expect(data.rows).toEqual([
+      { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
+    ]);
+    expect(data.comparison).toBeDefined();
+  });
+
+  describe("período personalizado ABERTO (to null — relógio fake)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("compara com to efetivo = hoje; a principal segue sem lte", async () => {
+      // Meio-dia UTC: mesmo dia civil em UTC e em Brasília (padrão do
+      // period.test).
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-10T12:00:00Z"));
+      const { db, rpcCalls } = fakeSupabase({
+        rpc: {
+          run_widget_query: (args) => {
+            const fs = args.p_filters as WidgetFilter[];
+            const from = String(fs.find((f) => f.op === "gte")?.value ?? "");
+            return from.startsWith("2026-08")
+              ? { data: [{ dim_1: "A", metric_1: 10 }], error: null }
+              : { data: [{ dim_1: "A", metric_1: 8 }], error: null };
+          },
+        },
+      });
+      const data = await runWidget(
+        db,
+        baseConfig({
+          sources: ["deals"],
+          dimensions: [{ field: "pipeline" }],
+          metrics: [{ field: "*", agg: "count" }],
+          settings: { comparison: { enabled: true, base: "previous_period" } },
+        }),
+        AVAILABLE,
+        { field: "closed_at", from: "2026-08-01", to: null }
+      );
+
+      expect(rpcCalls).toHaveLength(2);
+      // Rodada principal: intervalo aberto de verdade (só gte).
+      const main = rpcCalls[0].args.p_filters as WidgetFilter[];
+      expect(main.find((f) => f.op === "gte")?.value).toBe(
+        "2026-08-01T00:00:00-03:00"
+      );
+      expect(main.find((f) => f.op === "lte")).toBeUndefined();
+      // Comparação: duração 01–10/08 (hoje) → 22–31/07.
+      const cmp = rpcCalls[1].args.p_filters as WidgetFilter[];
+      expect(cmp.find((f) => f.op === "gte")?.value).toBe(
+        "2026-07-22T00:00:00-03:00"
+      );
+      expect(cmp.find((f) => f.op === "lte")?.value).toBe(
+        "2026-07-31T23:59:59-03:00"
+      );
+      expect(data.rows).toEqual([
+        { dim_1: "A", metric_1: 10, __cmp: { metric_1: 8 } },
+      ]);
+      expect(data.comparison).toBeDefined();
+    });
+
+    it("from no futuro: sem comparação (uma rodada só)", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-10T12:00:00Z"));
+      const { db, rpcCalls } = fakeSupabase({
+        rpc: {
+          run_widget_query: () => ({
+            data: [{ dim_1: "A", metric_1: 10 }],
+            error: null,
+          }),
+        },
+      });
+      const data = await runWidget(
+        db,
+        baseConfig({
+          sources: ["deals"],
+          dimensions: [{ field: "pipeline" }],
+          metrics: [{ field: "*", agg: "count" }],
+          settings: { comparison: { enabled: true, base: "previous_period" } },
+        }),
+        AVAILABLE,
+        { field: "closed_at", from: "2026-09-01", to: null }
+      );
+
+      expect(rpcCalls).toHaveLength(1);
+      expect(data.comparison).toBeUndefined();
+    });
   });
 });
 
@@ -768,5 +890,346 @@ describe("operando de META em métrica calculada", () => {
     // re-eval de subtotais usa a mesma meta, sem fold aditivo.
     const calcFormula = data.metrics[0]?.calc?.formula;
     expect(calcFormula?.tokens).toContainEqual({ kind: "const", value: 50000 });
+  });
+});
+
+describe("Semana Fechada (Dimension.closedWeek)", () => {
+  it("seg_dom: período snapado p/ semanas completas + weekMode 'full' no payload", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "seg_dom" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    expect(rpcCalls).toHaveLength(1);
+    const args = rpcCalls[0].args;
+    // Julho/26 seg–dom: 29/06–02/08 (bounds core ancorados em -03:00).
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "gte",
+      value: "2026-06-29T00:00:00-03:00",
+    });
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-08-02T23:59:59-03:00",
+    });
+    // Payload da dim desce weekMode "full" (mata o recorte na virada do mês).
+    const dim = (args.p_dimensions as Record<string, unknown>[])[0];
+    expect(dim.weekMode).toBe("full");
+    expect(dim.transform).toBe("week_month");
+  });
+
+  it("sab_sex: dim desce como 'day' e as linhas fundem em semanas de sábado rotuladas", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          // Buckets 'day' (timestamp) de duas semanas sáb–sex de julho/26:
+          // 04/07–10/07 e 11/07–17/07.
+          data: [
+            { dim_1: "2026-07-04T00:00:00", metric_1: 1 },
+            { dim_1: "2026-07-06T00:00:00", metric_1: 2 },
+            { dim_1: "2026-07-10T00:00:00", metric_1: 4 },
+            { dim_1: "2026-07-15T00:00:00", metric_1: 8 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "sab_sex" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    const args = rpcCalls[0].args;
+    // O RPC não produz semana de sábado: a dim desce como 'day'…
+    expect((args.p_dimensions as Record<string, unknown>[])[0].transform).toBe(
+      "day"
+    );
+    // …e o período snapa p/ 27/06–31/07 (expansão: a semana 27/06–03/07 toca
+    // julho, então entra inteira).
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "gte",
+      value: "2026-06-27T00:00:00-03:00",
+    });
+    expect(args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-07-31T23:59:59-03:00",
+    });
+    // Fusão client-side + rótulo pela âncora de sábado (mês da terça).
+    expect(data.rows).toHaveLength(2);
+    expect(data.rows[0].dim_1).toBe("1ª semana de Julho");
+    expect(data.rows[0].metric_1).toBe(7);
+    expect(data.rows[1].dim_1).toBe("2ª semana de Julho");
+    expect(data.rows[1].metric_1).toBe(8);
+  });
+
+  it("comparação previous_period também compara semanas fechadas", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals"],
+        dimensions: [
+          { field: "closed_at", transform: "week_month", closedWeek: "seg_dom" },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+        settings: { comparison: { enabled: true, base: "previous_period" } },
+      }),
+      AVAILABLE,
+      { field: "closed_at", from: "2026-07-01", to: "2026-07-31", preset: "este_mes" }
+    );
+    // Junho/26 em semanas fechadas seg–dom (expansão): 01/06 (segunda) a
+    // 05/07 — a semana 29/06–05/07 toca junho e entra inteira (aparece também
+    // em julho: dupla contagem consciente da borda).
+    const cmpCall = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).some(
+        (f) => f.op === "gte" && String(f.value).startsWith("2026-06-01")
+      )
+    );
+    expect(cmpCall).toBeDefined();
+    expect(cmpCall!.args.p_filters).toContainEqual({
+      field: "closed_at",
+      op: "lte",
+      value: "2026-07-05T23:59:59-03:00",
+    });
+    expect(data.comparison?.from).toBe("2026-06-01");
+    expect(data.comparison?.to).toBe("2026-07-05");
+  });
+});
+
+describe("sub-base que ignora o período (ignore_period, 0116)", () => {
+  const ATIVOS = {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+    ignorePeriod: true,
+  };
+  const CAT = [...CATALOG, ATIVOS];
+  const period = {
+    field: "closed_at",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    fieldBySource: {
+      deals: "closed_at",
+      leads: "source_created_at",
+      leads_ativos: "source_created_at",
+    },
+  };
+
+  it("misto: @period sai com record_types SÓ de quem respeita (pass-through)", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["deals", "leads_ativos"],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    expect(rpcCalls).toHaveLength(1);
+    const filters = rpcCalls[0].args.p_filters as WidgetFilter[];
+    const synth = filters.find((f) => f.field === "@period")!;
+    expect(synth).toBeDefined();
+    expect(
+      (synth.value as { byType: Record<string, string> }).byType
+    ).toEqual({ negocio: "closed_at" });
+    expect(synth.record_types).toEqual(["negocio"]);
+    // O universo segue restrito às fontes (a isenção é SÓ de data).
+    expect(recordTypesOf(rpcCalls[0].args)).toEqual(["negocio", "lead"]);
+  });
+
+  it("só a sub isenta: nenhum filtro de período desce ao RPC", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["leads_ativos"],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    const filters = rpcCalls[0].args.p_filters as WidgetFilter[];
+    expect(filters.some((f) => f.field === "@period")).toBe(false);
+    expect(filters.some((f) => f.op === "gte" || f.op === "lte")).toBe(false);
+    // O predicado da sub segue aplicado (a isenção não derruba o recorte).
+    expect(filters).toContainEqual({
+      field: "stage",
+      op: "eq",
+      value: "Ativo",
+      record_types: ["lead"],
+    });
+  });
+
+  it("pai + sub-ignorante: perna extra com o MESMO período — mas sem recorte na sub", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: { run_widget_query: () => ({ data: [], error: null }) },
+    });
+    await runWidget(
+      db,
+      baseConfig({
+        sources: ["leads", "leads_ativos"],
+        dimensions: [{ field: "pipeline" }],
+        metrics: [{ field: "*", agg: "count" }],
+        visual_type: "barra_horizontal",
+      }),
+      AVAILABLE,
+      period,
+      [],
+      {},
+      { year: 2026, quarter: 0 },
+      CAT
+    );
+    // Principal (pai) + perna extra (sub) = 2 RPCs.
+    expect(rpcCalls).toHaveLength(2);
+    const main = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).every((f) => f.field !== "stage")
+    )!;
+    const leg = rpcCalls.find((c) =>
+      (c.args.p_filters as WidgetFilter[]).some((f) => f.field === "stage")
+    )!;
+    // Pai: período normal (campo único → uniforme com bounds ancorados).
+    expect(main.args.p_filters).toContainEqual({
+      field: "source_created_at",
+      op: "gte",
+      value: "2026-07-01T00:00:00-03:00",
+    });
+    // Sub: nenhum recorte de data.
+    expect(
+      (leg.args.p_filters as WidgetFilter[]).some(
+        (f) => f.field === "@period" || f.op === "gte" || f.op === "lte"
+      )
+    ).toBe(false);
+  });
+});
+
+describe("dimensão condicional (Dimension.caseFormula)", () => {
+  const caseCatalog = [
+    { ref: "pipeline", label: "Pipeline" },
+    { ref: "stage", label: "Etapa" },
+  ];
+  const tokens = (src: string) => {
+    const res = tokenizeFormulaText(src, caseCatalog);
+    if (!res.ok) throw new Error(res.error);
+    return res.formula;
+  };
+
+  it("campo único: RPC agrupa pelo cru e o engine funde valor→rótulo", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "Inbound", metric_1: 4 },
+            { dim_1: "Outbound", metric_1: 3 },
+            { dim_1: "Parceria", metric_1: 2 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        dimensions: [
+          {
+            field: "pipeline",
+            caseFormula: tokens(
+              'SE(OU([Pipeline] = "Inbound"; [Pipeline] = "Outbound"); "Vendas"; "Canais")'
+            ),
+          },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE
+    );
+    // Payload segue com UMA dim (a expressão viaja inerte no jsonb).
+    expect(rpcCalls).toHaveLength(1);
+    expect(
+      (rpcCalls[0].args.p_dimensions as { field: string }[]).map((d) => d.field)
+    ).toEqual(["pipeline"]);
+    expect(data.rows).toEqual([
+      { dim_1: "Vendas", metric_1: 7 },
+      { dim_1: "Canais", metric_1: 2 },
+    ]);
+  });
+
+  it("multi-campo: refs viram dims extras no RPC e o engine contrai/funde", async () => {
+    const { db, rpcCalls } = fakeSupabase({
+      rpc: {
+        run_widget_query: () => ({
+          data: [
+            { dim_1: "Inbound", dim_2: "Ganho", metric_1: 4 },
+            { dim_1: "Inbound", dim_2: "Perdido", metric_1: 3 },
+            { dim_1: "Outbound", dim_2: "Ganho", metric_1: 5 },
+          ],
+          error: null,
+        }),
+      },
+    });
+    const data = await runWidget(
+      db,
+      baseConfig({
+        dimensions: [
+          {
+            field: "pipeline",
+            caseFormula: tokens(
+              'SE(E([Pipeline] = "Inbound"; [Etapa] = "Ganho"); "Inbound ganho"; "Resto")'
+            ),
+          },
+        ],
+        metrics: [{ field: "*", agg: "count" }],
+      }),
+      AVAILABLE
+    );
+    // Payload EXPANDIDO: o campo da dim + a ref extra, como dims cruas.
+    expect(
+      (rpcCalls[0].args.p_dimensions as { field: string }[]).map((d) => d.field)
+    ).toEqual(["pipeline", "stage"]);
+    // Contração de volta a UMA dim, com fold dos grupos no mesmo rótulo.
+    expect(data.rows).toEqual([
+      { dim_1: "Inbound ganho", metric_1: 4 },
+      { dim_1: "Resto", metric_1: 8 },
+    ]);
+    expect(data.dimensions).toHaveLength(1);
   });
 });

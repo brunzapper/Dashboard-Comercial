@@ -1,9 +1,9 @@
 "use client";
-// Versão: 1.2 | Data: 21/07/2026
-// v1.2 (21/07/2026): persistência no transition COMPARTILHADO do dashboard
-// (useNavPending — mesmo padrão dos filtros rápidos): o overlay global
-// "Carregando…" cobre o recompute inteiro; antes um transition local deixava
-// o grid inteiro com dados antigos e só um spinner de 12px avisava.
+// Versão: 1.3 | Data: 07/08/2026
+// v1.3 (07/08/2026): persistência OTIMISTA em background (useBackgroundSave,
+// revalidate:false): o controle responde na hora, o spinner é LOCAL e o
+// refresh debounced do hook reconcilia os widgets — o transition global
+// (overlay do board) saiu deste fluxo; erro → toast + revert do controle.
 // v1.1 (21/07/2026): badge "Nº dia útil" (bdRef — WidgetData.businessDayRef)
 // ao lado do toggle quando o alinhamento está ativo.
 // Controle da JANELA DE PERÍODOS do widget (settings.periodWindow): dropdown
@@ -13,7 +13,6 @@
 // filtros rápidos; o servidor mescla a escolha nos settings efetivos antes do
 // engine (applyPeriodWindowChoice).
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { CalendarRange, Loader2 } from "lucide-react";
 
 import {
@@ -28,9 +27,9 @@ import {
   type PeriodWindowKey,
   type WidgetData,
 } from "@/lib/widgets/types";
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { savePeriodWindowChoice } from "@/app/(app)/dashboards/actions";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
-import { useNavPending } from "./pending-context";
 import { BusinessDayBadge } from "./business-day-badge";
 
 export interface WidgetPeriodWindowState {
@@ -54,10 +53,9 @@ export function PeriodWindowControl({
   // refresh (o spinner de pending cobre o gap do toggle otimista).
   bdRef?: WidgetData["businessDayRef"] | null;
 }) {
-  const router = useRouter();
-  // Transition COMPARTILHADO do dashboard: o overlay global cobre gravação +
-  // recompute (fora do dashboard, o hook devolve um transition local).
-  const { pending, run } = useNavPending();
+  // Save otimista em background: o controle responde na hora, o spinner é
+  // local e o refresh debounced do hook reconcilia o recompute dos widgets.
+  const { save, hasPending } = useBackgroundSave();
   const [value, setValue] = useState<PeriodWindowKey | null>(state.value);
   const [bd, setBd] = useState(state.bd);
   // Defensivo: o viewer de snapshot não monta este controle (dataset
@@ -68,12 +66,23 @@ export function PeriodWindowControl({
     if (snapshot) return;
     const w = next.w !== undefined ? next.w : value;
     const nb = next.bd !== undefined ? next.bd : bd;
-    run(async () => {
-      await savePeriodWindowChoice(dashboardId, widgetId, {
-        ...(w ? { w } : {}),
-        bd: nb,
-      });
-      router.refresh();
+    // Estado ANTES desta mudança (o handler chama persist logo após o set —
+    // este closure ainda vê os valores antigos): baseline do revert no erro.
+    const prev = { value, bd };
+    save({
+      key: "pw",
+      context: "Não foi possível salvar a janela de períodos",
+      action: () =>
+        savePeriodWindowChoice(
+          dashboardId,
+          widgetId,
+          { ...(w ? { w } : {}), bd: nb },
+          { revalidate: false }
+        ),
+      revert: () => {
+        setValue(prev.value);
+        setBd(prev.bd);
+      },
     });
   };
 
@@ -125,7 +134,7 @@ export function PeriodWindowControl({
         </button>
       ) : null}
       {bd && bdRef ? <BusinessDayBadge bdRef={bdRef} /> : null}
-      {pending ? (
+      {hasPending ? (
         <Loader2 className="text-muted-foreground size-3 animate-spin" />
       ) : null}
     </div>

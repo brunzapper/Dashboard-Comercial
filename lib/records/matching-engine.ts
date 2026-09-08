@@ -47,7 +47,10 @@ async function loadRecordsOfType(
     let q = db
       .from("records")
       .select(MATCHABLE_COLS)
-      .eq("record_type", recordType);
+      .eq("record_type", recordType)
+      // Lixeira (0121): registro na lixeira não forma match NOVO (a
+      // hidratação de parceiros por id, abaixo, segue sem filtro).
+      .is("deleted_at", null);
     if (sinceLastSynced) q = q.gte("last_synced_at", sinceLastSynced);
     const { data, error } = await q.range(from, from + BATCH - 1);
     if (error) throw new Error(error.message);

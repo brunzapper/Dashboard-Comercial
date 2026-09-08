@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 21/07/2026
+// Versão: 1.1 | Data: 04/09/2026
+// v1.1 (04/09/2026): o auto-commit SOBREVIVE ao desmonte. A troca de aba do
+// dashboard desmonta os widgets da aba anterior e o cleanup do debounce (500ms)
+// matava o commit — quem terminava de digitar o intervalo e trocava de aba na
+// sequência perdia o filtro. O rascunho completo pendente vira payload em
+// pendingRef e um effect MOUNT-ONLY o FLUSHA (na montagem ele é nulo, porque o
+// rascunho ainda não está "dirty" — o StrictMode do dev não commita nada).
 // Intervalo personalizado de período em RASCUNHO (De/Até): digitar NUNCA
 // dispara consulta — o commit acontece quando o intervalo está COMPLETO
 // (auto, debounced) ou pelo botão "Aplicar"/Enter (intervalo ABERTO
@@ -61,9 +67,26 @@ export function PeriodRangeDraft({
   useEffect(() => {
     commitRef.current = onCommit;
   });
+  // Rascunho completo à espera do debounce: o timer o CONSOME e o desmonte o
+  // FLUSHA (ver v1.1 no cabeçalho).
+  const pendingRef = useRef<{ de: string; ate: string } | null>(null);
+  useEffect(
+    () => () => {
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (pending) commitRef.current(pending);
+    },
+    []
+  );
   useEffect(() => {
-    if (!dirty || !complete) return;
+    if (!dirty || !complete) {
+      // Rascunho incompleto/limpo: nada pode sobreviver ao desmonte.
+      pendingRef.current = null;
+      return;
+    }
+    pendingRef.current = { de: draft.de, ate: draft.ate };
     const t = setTimeout(() => {
+      pendingRef.current = null;
       commitRef.current({ de: draft.de, ate: draft.ate });
     }, 500);
     return () => clearTimeout(t);

@@ -48,6 +48,8 @@ export async function sampleForBase(
     .select(SAMPLE_RECORD_COLS)
     .eq("record_type", recordType)
     .eq("is_mock", false)
+    // Lixeira (0121): amostras da IA nunca saem da lixeira.
+    .is("deleted_at", null)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(WINDOW_ROWS);
   let pool = (windowData ?? []) as unknown as SampleRecordLike[];
@@ -65,6 +67,7 @@ export async function sampleForBase(
         .select(SAMPLE_RECORD_COLS)
         .eq("record_type", recordType)
         .eq("is_mock", false)
+        .is("deleted_at", null)
         .not(col, "is", null)
         .order("source_created_at", { ascending: false, nullsFirst: false })
         .limit(3);

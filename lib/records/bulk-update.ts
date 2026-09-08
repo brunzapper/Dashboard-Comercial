@@ -127,6 +127,9 @@ export async function updateRecordValuesBulk(
     const { data, error } = await supabase
       .from("records")
       .select([...new Set(selectCols)].join(", "))
+      // Lixeira (0121): id na lixeira falha por item como "não encontrado" —
+      // defesa em profundidade para todo escritor em massa.
+      .is("deleted_at", null)
       .in("id", slice);
     if (error) throw new Error(error.message);
     for (const r of (data ?? []) as unknown as FreshRow[]) freshById.set(r.id, r);

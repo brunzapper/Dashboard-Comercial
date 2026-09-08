@@ -1,3 +1,12 @@
+// Versão: 1.7 | Data: 17/08/2026
+// v1.7: CompDetailGrouping virou `byFactor[factorId] = { into, folded }` — o
+// bloco PRINCIPAL que recebe os operandos dobrados. O shape anterior
+// (`separateByFactor`, chaves com bloco próprio) tornava a engrenagem inerte
+// num fator de 2 operandos: desmarcar UM deixava um sobrando (grupo de um = o
+// próprio bloco) e desmarcar os dois esvaziava a lista, que o save descartava.
+// Entrada com `folded` vazio cai no parse — "nada a dobrar" é o padrão, e
+// guardá-la recriaria essa ambiguidade. `separateByFactor` fica só-leitura: a
+// conversão mora em groupOperands, que tem a lista de operandos.
 // Versão: 1.6 | Data: 01/08/2026
 // v1.6: MEMÓRIA DE CÁLCULO no breakdown de comissão — CompCommissionBlockBreakdown
 // ganha campos DERIVADOS na leitura (basis/basisLabel/basisMoney/triggerLabel/
@@ -93,6 +102,13 @@ export interface CompFactor {
   // com os display_names do grupo canônico do membro) é do ENGINE — aqui só o
   // contrato. Ausente = filtro responsible_id eq (comportamento clássico).
   memberField?: string;
+  // EQUIPE creditada a um membro: id CANÔNICO do líder → ids dos liderados.
+  // Serve à remuneração de LÍDER, cujas oportunidades ficam em nome do time —
+  // sem isto o líder não casa nada e o realizado sai 0. O engine soma a equipe
+  // ao próprio membro (memberFilterFor); ausência = só o próprio, como sempre.
+  // Sobreposição entre líderes é INTENCIONAL: cada um é medido pela própria
+  // equipe, então a mesma pessoa pode contar para dois (nada a validar).
+  memberTeams?: Record<string, string[]>;
   // Alvo padrão do mês quando NÃO há linha de goals p/ membro×mês (meta "por
   // sub-operação"). Fallback de LEITURA — nunca vira linha de goals; digitar
   // na célula grava um goal (override), limpar deleta e volta ao padrão.
@@ -140,6 +156,36 @@ export interface CompCommissionBlock {
   memberTiers?: Record<string, CompCommissionTier[]>;
 }
 
+/** Um fator: qual bloco RECEBE e o que foi dobrado nele. */
+export interface CompFactorGrouping {
+  /** Chave de basis do operando cujo bloco recebe os dobrados. */
+  into: string;
+  /** Chaves de basis somadas dentro do `into` (nunca vazio — ver o parse). */
+  folded: string[];
+}
+
+/**
+ * Apresentação do DETALHAMENTO por registro (lib/comp/detail.ts), por PLANO —
+ * vale para todos os membros, porque a fórmula é do plano. Governa só o
+ * AGRUPAMENTO dos blocos; o recorte de cada operando é intocado.
+ *
+ * `byFactor[factorId]` diz quem RECEBE (`into`) e o que entra nele (`folded`);
+ * operando fora dos dois mantém bloco próprio. Fator ausente = padrão (cada
+ * operando no seu bloco).
+ *
+ * Entrada com `folded` vazio é DESCARTADA no parse: "nada a dobrar" é o
+ * padrão, e guardar a chave vazia recriaria a ambiguidade que tornou a 1ª
+ * versão inerte (lista vazia lida como "sem configuração").
+ *
+ * `separateByFactor` é o formato LEGADO da 1ª versão (chaves com bloco
+ * próprio). Só leitura: `groupOperands` o converte usando a lista de operandos
+ * — que o parse não tem — para `into` = 1ª listada, `folded` = as demais.
+ */
+export interface CompDetailGrouping {
+  byFactor: Record<string, CompFactorGrouping>;
+  separateByFactor?: Record<string, string[]>;
+}
+
 export interface CompPlanConfig {
   v: 1;
   factors: CompFactor[];
@@ -160,6 +206,10 @@ export interface CompPlanConfig {
   // para um bloco `{id:"comissao", kind:"pct", tierBy:"attainment", ...}` —
   // o tipo parseado expõe SÓ esta chave.
   commissions?: CompCommissionBlock[];
+  // Agrupamento dos blocos do detalhamento (engrenagem da Visão geral).
+  // Ausente = cada operando em bloco próprio. Como o `presetKey`, precisa ser
+  // preservado explicitamente no parse E re-emitido pelo save do editor.
+  detailGrouping?: CompDetailGrouping;
   // Identidade de plano criado por PRESET (ensure-only no apply). O parse a
   // preserva explicitamente para que o round-trip do save do editor não a
   // derrube (senão o re-apply do preset duplicaria o plano).
@@ -388,6 +438,26 @@ function parseFactor(raw: unknown): CompFactor | null {
   if (floorPct != null) out.floorPct = floorPct;
   if (typeof raw.memberField === "string" && raw.memberField !== "")
     out.memberField = raw.memberField;
+  // Equipe por líder — fail-closed no molde do memberTiers: sujeira derruba o
+  // config inteiro, entrada VAZIA é descartada (lista vazia lida como "sem
+  // config" foi o que deixou a 1ª versão do detailGrouping inerte).
+  if (raw.memberTeams != null) {
+    if (!isRecord(raw.memberTeams)) return null;
+    const memberTeams: Record<string, string[]> = {};
+    for (const [leaderId, ids] of Object.entries(raw.memberTeams)) {
+      if (typeof leaderId !== "string" || leaderId === "") return null;
+      if (!Array.isArray(ids)) return null;
+      const team: string[] = [];
+      for (const id of ids) {
+        if (typeof id !== "string" || id === "") return null;
+        // O próprio líder já entra sempre; repetir só duplicaria o nome no
+        // filtro. Duplicata na lista idem.
+        if (id !== leaderId && !team.includes(id)) team.push(id);
+      }
+      if (team.length > 0) memberTeams[leaderId] = team;
+    }
+    if (Object.keys(memberTeams).length > 0) out.memberTeams = memberTeams;
+  }
   if (defaultTarget != null) out.defaultTarget = defaultTarget;
   if (typeof raw.targetCurrency === "string" && raw.targetCurrency !== "")
     out.targetCurrency = raw.targetCurrency;
@@ -547,6 +617,41 @@ export function parseCompPlanConfig(raw: unknown): CompPlanConfig | null {
   if (raw.presetKey != null) {
     if (typeof raw.presetKey !== "string" || raw.presetKey === "") return null;
     out.presetKey = raw.presetKey;
+  }
+  // Agrupamento do detalhamento: LENIENTE (diferente do resto do config).
+  // É preferência de apresentação — entrada torta deve cair sozinha, nunca
+  // invalidar o plano e travar o cálculo da remuneração de todo mundo.
+  if (isRecord(raw.detailGrouping)) {
+    const keyList = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? [...new Set(v.filter((k): k is string => typeof k === "string" && k !== ""))]
+        : [];
+    const byFactor: Record<string, CompFactorGrouping> = {};
+    if (isRecord(raw.detailGrouping.byFactor)) {
+      for (const [fid, entry] of Object.entries(raw.detailGrouping.byFactor)) {
+        if (!seen.has(fid) || !isRecord(entry)) continue; // fator sumiu: órfã cai
+        const into = entry.into;
+        if (typeof into !== "string" || into === "") continue;
+        // Dobrar o principal em si mesmo não existe; e `folded` vazio é o
+        // padrão, não uma configuração — a entrada inteira cai.
+        const folded = keyList(entry.folded).filter((k) => k !== into);
+        if (folded.length > 0) byFactor[fid] = { into, folded };
+      }
+    }
+    const legacy: Record<string, string[]> = {};
+    if (isRecord(raw.detailGrouping.separateByFactor)) {
+      for (const [fid, keys] of Object.entries(raw.detailGrouping.separateByFactor)) {
+        if (!seen.has(fid) || byFactor[fid]) continue; // shape novo vence o legado
+        const list = keyList(keys);
+        if (list.length > 0) legacy[fid] = list;
+      }
+    }
+    if (Object.keys(byFactor).length > 0 || Object.keys(legacy).length > 0) {
+      out.detailGrouping = {
+        byFactor,
+        ...(Object.keys(legacy).length > 0 ? { separateByFactor: legacy } : {}),
+      };
+    }
   }
   if (raw.apuracao != null) {
     // "mes_corrente" é aceito no raw mas normalizado para AUSÊNCIA da chave

@@ -1,4 +1,8 @@
-// Versão: 1.13 | Data: 25/07/2026
+// Versão: 1.15 | Data: 06/09/2026
+// v1.15 (06/09/2026): AppearanceSettings.table.formulaBar — barra "fx" + régua
+//   A/B/C da Tabela Livre (endereços das células no cálculo entre elas).
+// v1.14 (12/08/2026): RecordListSettings.showAddRecord — botão "+" de criação
+//   manual na tabela modo lista (gate manualEntryRootSource, lib/sources.ts).
 // v1.13 (25/07/2026): visual_type 'linha_divisoria' (a Forma "linha" vira
 //   widget próprio; ShapeKind "linha" segue existindo p/ linhas legadas e
 //   como formato interno do novo tipo — ver isLineShapeWidget em lines.ts);
@@ -209,11 +213,30 @@ export interface Dimension {
   // Só para transform 'week_month': "restricted" (recorta na virada do mês) ou
   // "full" (semana cheia seg→dom, pega dias do mês vizinho). Default restricted.
   weekMode?: "full" | "restricted";
+  // Semana fechada (03/08/2026), só transforms de semana: o período da RODADA
+  // expande p/ semanas COMPLETAS nas bordas (regra da expansão desde
+  // 12/08/2026: toda semana tocada entra inteira —
+  // lib/widgets/closed-week.ts). "seg_dom" usa o bucket de segunda do servidor;
+  // "sab_sex" desce ao RPC como 'day' e o engine funde client-side
+  // (bucket-merge). Com week_month, weekMode é tratado como "full". Engine-only
+  // — RPCs intocados.
+  closedWeek?: "seg_dom" | "sab_sex";
   // "Agrupar período" (só dimensão de data com transform): como a data expõe as
   // métricas do widget agregado. Ausente = comportamento atual (agrega via RPC pela
   // agregação da métrica). Definido → engine agrega por registro (ver DateAgg):
   // 'individual' = 1 ponto/linha por registro; demais colapsam por período.
   dateAgg?: DateAgg;
+  // Expressão CONDICIONAL da dimensão (07/08/2026): fórmula SE/E/OU que
+  // reclassifica os valores em rótulos — ex.:
+  // Se([Fruta]="Mamão";"Doce";Se([Fruta]="Pera";"Dura";"Outros")).
+  // 100% engine (RPCs intocados): refs SÓ do próprio campo ⇒ o RPC agrupa
+  // pelo cru e o bucket-merge funde valor→rótulo (mecanismo simples); refs de
+  // MAIS campos ⇒ o engine expande as refs em dims extras no RPC e contrai
+  // client-side (mecanismo robusto — lib/widgets/case-dim.ts). SE sem
+  // "senão" preserva o valor cru. Mutuamente exclusivo com transform/
+  // dateAgg/closedWeek; proibido em campo de data/FK (UI não oferece; import
+  // remove com aviso). Fora do escopo: modo lista, dateAgg, kanban.
+  caseFormula?: Formula;
 }
 export interface Metric {
   field: string;
@@ -409,6 +432,12 @@ export interface RecordListSettings {
   // Barra de busca/filtro embutida na tabela (registros e agregada), aplicada
   // pelo servidor. Ausente/true = visível; false = oculta ("ocultável na config").
   showFilterBar?: boolean;
+  // Botão "+" de criação manual no canto da tabela modo lista (12/08/2026).
+  // Opt-in (ausente = desligado); só tem efeito quando o widget aponta para
+  // exatamente UMA Base raiz com manual_entry (manualEntryRootSource,
+  // lib/sources.ts) e o usuário tem edit_record_values — o card re-checa em
+  // runtime e o servidor (createRecord) revalida.
+  showAddRecord?: boolean;
 }
 
 // Config do widget "Métrica calculada" (Fase 3): uma fórmula avaliada com um
@@ -979,6 +1008,11 @@ export interface AppearanceSettings {
     // ou (agregada) a dimensão tem transform "por nome" — o engine troca o
     // ISO da linha pelo rótulo e não sobra data crua p/ re-bucketizar.
     groupDateFormats?: Record<string, GroupDateFormat>;
+    // Tabela Livre (06/09/2026): barra de fórmula "fx" + régua A/B/C ao redor
+    // da grade (endereços das células, para o cálculo entre elas). Ausente/
+    // true = visível para quem pode digitar; false = oculta (tabela usada só
+    // como layout). Nunca aparece no viewer de snapshot (leitura pública).
+    formulaBar?: boolean;
     // Transposta: qual dimensão vira as colunas do topo. Mesma convenção de
     // chaves do groupBy (agregada `dim_<n>`; registros `<field>`). Ausente ou
     // órfã (dimensões mudaram) = 1ª dimensão, comportamento original.
@@ -1136,6 +1170,24 @@ export interface DashboardSettings {
     // dashboard; "tab" = cada aba tem sua própria seleção (parâmetros de URL
     // namespados por id da aba). Ver components/dashboards/period-filter.tsx.
     scope?: "global" | "tab";
+    // Overrides POR ABA (19/08/2026), válidos SÓ com scope === "tab" — no
+    // escopo global são ignorados por inteiro. Chave = id de `tabs[]`; chave
+    // (ou sub-chave) AUSENTE herda o valor global acima, nunca "vazio", então
+    // board sem `byTab` se comporta exatamente como antes. A herança se resolve
+    // num único lugar: `effectivePeriodBar` (lib/widgets/period.ts) — nenhum
+    // outro módulo lê `byTab` direto.
+    byTab?: Record<
+      string,
+      {
+        // Barra visível NESTA aba. false = oculta, e então o período dos
+        // widgets da aba é o PADRÃO dela (ignora URL e preferência do
+        // usuário) — é assim que se fixa uma janela igual para todos.
+        enabled?: boolean;
+        defaultPreset?: string;
+        field?: string;
+        fieldBySource?: Partial<Record<SourceKey, string>>;
+      }
+    >;
   };
   // Formato padrão das datas exibidas nas tabelas deste dashboard (pode ser
   // sobrescrito por coluna em AppearanceSettings.table.dateFormats).

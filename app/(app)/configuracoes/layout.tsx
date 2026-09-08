@@ -1,6 +1,9 @@
-// Versão: 1.4 | Data: 31/07/2026
+// Versão: 1.5 | Data: 05/08/2026
 // Seção "Configurações": agrupa as telas admin (Operações, Responsáveis, Metas,
 // Usuários) como sub-abas. Cada sub-aba mantém o mesmo
+// v1.5 (05/08/2026): Remuneração moveu p/ /operacao/remuneracao (sub-aba da
+//   área Operação, cards do hub Workspace) — sai do ALL_TABS; a CHAVE de área
+//   "remuneracao" segue histórica em AREA_GATES/AREA_FEATURES (nunca renomear).
 // v1.4 (31/07/2026): recursos SOB DEMANDA por org (0114) — a aba de área com
 //   entrada em AREA_FEATURES some quando o feature da org está off
 //   (disabledAreas, computado aqui via loadOrgFeatures; a page/action seguem
@@ -46,7 +49,6 @@ const ALL_TABS: SettingsTab[] = [
   { href: "/configuracoes/operacoes", label: "Operações" },
   { href: "/configuracoes/responsaveis", label: "Responsáveis" },
   { href: "/configuracoes/metas", label: "Metas" },
-  { href: "/configuracoes/remuneracao", label: "Remuneração" },
   { href: "/configuracoes/presets", label: "Presets" },
   { href: "/configuracoes/snapshots", label: "Snapshots" },
   { href: "/configuracoes/integracoes", label: "Integrações" },

@@ -40,7 +40,12 @@ const EMPTY: BoardAccessState = { ok: false, roles: [], entries: [], users: [] }
 async function ensureManageBoard(
   boardId: string
 ): Promise<
-  | { session: SessionInfo; ownerUserId: string; kind: string }
+  | {
+      session: SessionInfo;
+      ownerUserId: string;
+      kind: string;
+      organizationId: string | null;
+    }
   | { error: string }
 > {
   const session = await getSessionInfo();
@@ -48,7 +53,7 @@ async function ensureManageBoard(
   const supabase = await createClient();
   const { data: dash } = await supabase
     .from("dashboards")
-    .select("id, owner_user_id, kind")
+    .select("id, owner_user_id, kind, organization_id")
     .eq("id", boardId)
     .maybeSingle();
   if (!dash) return { error: "Board não encontrado." };
@@ -59,7 +64,25 @@ async function ensureManageBoard(
     session,
     ownerUserId: dash.owner_user_id as string,
     kind: (dash.kind as string) ?? "dashboard",
+    organizationId: (dash.organization_id as string | null) ?? null,
   };
+}
+
+/** O alvo do override é membro da org do board? A UI já só oferece membros
+ *  (getBoardAccessState), mas a action é chamável direto — a checagem tem de
+ *  existir no SERVIDOR. Fail-closed: board sem org não aceita override. */
+async function targetInBoardOrg(
+  organizationId: string | null,
+  userId: string
+): Promise<boolean> {
+  if (!organizationId) return false;
+  const { data } = await createServiceClient()
+    .from("organization_members")
+    .select("user_id")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return Boolean(data);
 }
 
 function revalidateBoard(boardId: string, kind: string) {
@@ -78,30 +101,38 @@ export async function getBoardAccessState(
 
   const supabase = await createClient();
   const service = createServiceClient();
-  const [{ data: dash }, { data: accessRows }, { data: usersData }] =
-    await Promise.all([
-      supabase
-        .from("dashboards")
-        .select("visible_to_roles, organization_id")
-        .eq("id", boardId)
-        .maybeSingle(),
-      supabase
-        .from("board_access")
-        .select("user_id, level")
-        .eq("dashboard_id", boardId),
-      service.auth.admin.listUsers({ perPage: 1000 }),
-    ]);
+  const [{ data: dash }, { data: accessRows }] = await Promise.all([
+    supabase
+      .from("dashboards")
+      .select("visible_to_roles, organization_id")
+      .eq("id", boardId)
+      .maybeSingle(),
+    supabase
+      .from("board_access")
+      .select("user_id, level")
+      .eq("dashboard_id", boardId),
+  ]);
 
   // Multi-org (0089): só contas da MESMA org do board podem receber override.
+  // A membership é resolvida ANTES do listUsers e o resultado é FAIL-CLOSED —
+  // board sem org não devolve lista alguma. (Antes: listUsers vinha em paralelo
+  // e o recorte por org só se aplicava quando havia org, então um board sem
+  // organization_id entregava o email de TODA conta do sistema ao dono.)
   const boardOrgId = (dash?.organization_id as string | null) ?? null;
-  let memberIds: Set<string> | null = null;
-  if (boardOrgId) {
-    const { data: memberRows } = await service
-      .from("organization_members")
-      .select("user_id")
-      .eq("organization_id", boardOrgId);
-    memberIds = new Set((memberRows ?? []).map((m) => m.user_id as string));
+  if (!boardOrgId) {
+    return {
+      ...EMPTY,
+      message: "Board sem organização — recarregue a página.",
+    };
   }
+  const { data: memberRows } = await service
+    .from("organization_members")
+    .select("user_id")
+    .eq("organization_id", boardOrgId);
+  const memberIds = new Set((memberRows ?? []).map((m) => m.user_id as string));
+  const { data: usersData } = await service.auth.admin.listUsers({
+    perPage: 1000,
+  });
 
   const emailById = new Map<string, string>(
     (usersData?.users ?? []).map((u) => [u.id, u.email ?? "(sem email)"])
@@ -116,7 +147,7 @@ export async function getBoardAccessState(
   // Dono fora da lista de alvos (nunca bloqueável; override seria inócuo).
   const users = (usersData?.users ?? [])
     .filter((u) => u.id !== access.ownerUserId)
-    .filter((u) => !memberIds || memberIds.has(u.id))
+    .filter((u) => memberIds.has(u.id))
     .map((u) => ({ id: u.id, email: u.email ?? "(sem email)" }))
     .sort((a, b) => a.email.localeCompare(b.email));
 
@@ -144,6 +175,15 @@ export async function setBoardAccessEntry(
   }
   if (level && !["view", "edit", "blocked"].includes(level)) {
     return { ok: false, message: "Nível inválido." };
+  }
+  // Multi-org (0089): CONCEDER override só para quem é da org do board. A RLS
+  // de board_access não checa isso (o gate dela é dono/admin do board), e
+  // auth_board_visible só neutralizaria o efeito na leitura — a linha estranha
+  // à org nem deve ser gravada. REMOVER (level null) não passa pela checagem:
+  // é estreitamento, e precisa funcionar para limpar override de quem já saiu
+  // da org.
+  if (level && !(await targetInBoardOrg(access.organizationId, userId))) {
+    return { ok: false, message: "Usuário fora da organização do board." };
   }
 
   const supabase = await createClient();

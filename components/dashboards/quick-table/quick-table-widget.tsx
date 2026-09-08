@@ -1,4 +1,17 @@
-// Versão: 1.3 | Data: 21/07/2026
+// Versão: 1.5 | Data: 08/09/2026
+// v1.5 (08/09/2026): o "Atualizando…" (dim + spinner) ficou restrito ao
+//   refetch causado pelo USUÁRIO (useRefetchOrigin sobre scopeKey+config). O
+//   dataTick do event bus — que chega do realtime a cada rodada do sync do
+//   Bitrix (pg-cron a cada minuto) — re-busca em SILÊNCIO, com os dados
+//   antigos em tela; resultado idêntico ao atual nem re-renderiza.
+// v1.4 (06/09/2026): cálculo entre células ficou DESCOBRÍVEL — barra de
+//   fórmula "fx" (endereço + conteúdo CRU da célula selecionada, editável,
+//   com ajuda de sintaxe), régua A/B/C + números de linha visíveis para quem
+//   digita (não só no "Editar layout") e, durante a digitação de "=…", realce
+//   das células citadas + clique/arrasto na grade inserindo o endereço/
+//   intervalo no ponto do cursor. Estado de edição ÚNICO (`editing.source`
+//   diz qual input tem o foco: a célula ou a barra). Barra+régua saem com
+//   `appearance.table.formulaBar: false` (e nunca aparecem no snapshot).
 // v1.3 (21/07/2026): fetch deferido re-dispara pelo FINGERPRINT de escopo da
 //   page (prop scopeKey — cobre filtros persistidos no banco, __qf__, que não
 //   mudam a URL) + pelo event bus de dados (realtime/mutações); enquanto
@@ -56,12 +69,17 @@ import {
   type QTMatrix,
 } from "@/lib/widgets/quick-table/model";
 import {
+  cellRefsInSource,
   colLetter,
   computeCellFormulas,
   formatFormulaResult,
   type CellFormulaOutput,
 } from "@/lib/widgets/quick-table/cell-formulas";
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import {
   runQuickTable,
@@ -78,6 +96,7 @@ import {
 import { useFontScale } from "../font-scale-context";
 import { FONT_DEFAULTS, fontStyle } from "@/lib/widgets/fonts";
 import { ColumnPanel, RowPanel, useQuickTableConfig } from "./column-panel";
+import { QuickTableFormulaBar } from "./formula-bar";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 
 // Posição de uma célula na GRADE RENDERIZADA (índices de exibição; as chaves
@@ -217,6 +236,7 @@ export function QuickTableWidget({
   // Re-busca com dados antigos em tela (stale-while-refetch): dim + spinner
   // até o resultado novo aterrissar — sem isso o usuário confunde o dado
   // obsoleto com o recorte novo (o overlay global do grid pode sumir antes).
+  // SÓ para refetch causado pelo usuário (v1.5) — ver originOf abaixo.
   const [refreshing, setRefreshing] = useState(false);
   // Event bus: registro mudou (mutação local ou realtime) → re-busca o BI
   // (paridade com o kanban; o fingerprint sozinho não cobre mudança de DADO).
@@ -224,14 +244,26 @@ export function QuickTableWidget({
   useDataChanged((d) => {
     if (d.kind === "record") setDataTick((t) => t + 1);
   });
+  // Origem do refetch (v1.5): escopo/config mudou (usuário) × só o dataTick do
+  // bus (fundo). O escopo efetivo deste widget inclui a config BI/expressões.
+  const originOf = useRefetchOrigin(`${scopeKey ?? ""}|${biKey}|${exprKey}`);
+  // Último resultado APLICADO, serializado: refetch de fundo que devolve o
+  // mesmo conteúdo não re-renderiza a planilha.
+  const payloadRef = useRef<string | null>(null);
+  // Rodada visível cancelada por um tick do bus segue visível (senão o dim do
+  // usuário ficaria aceso para sempre).
+  const visibleRef = useRef(false);
   useEffect(() => {
     // Modo snapshot: sem sessão a action falharia; o resultado vem
     // precomputado pela page pública (snapshotMode.quickTableResults).
     if (!needsServer || readOnly) return;
+    if (originOf()) visibleRef.current = true;
+    const userCaused = visibleRef.current;
     let cancelled = false;
-    // Pequeno atraso coalesce mudanças rápidas (digitação de {=…}, painel).
+    // Atraso curto p/ o usuário (coalesce digitação de {=…}/painel) e longo no
+    // fundo (coalesce a rajada de eventos de uma rodada de sync).
     const timer = setTimeout(() => {
-      setRefreshing(true);
+      if (userCaused) setRefreshing(true);
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
       // scopeKey — fingerprint do escopo efetivo computado pela page, que
       // muda tanto por navegação (período/ff_) quanto por revalidação
@@ -239,17 +271,23 @@ export function QuickTableWidget({
       void runQuickTable(dashboardId, widget.id, window.location.search).then(
         (res) => {
           if (cancelled) return;
-          setFetched(res);
+          const json = JSON.stringify(res);
+          if (json !== payloadRef.current) {
+            payloadRef.current = json;
+            setFetched(res);
+          }
+          visibleRef.current = false;
           setRefreshing(false);
         }
       );
-    }, 60);
+    }, userCaused ? 60 : BUS_REFETCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-    // biKey/exprKey resumem a config/expressões — são as deps reais.
-  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id]);
+    // biKey/exprKey resumem a config/expressões — são as deps reais (e já
+    // entram no originOf, junto com o scopeKey).
+  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id, originOf]);
   const deferred = readOnly
     ? (snapshotMode.quickTableResults?.[widget.id] ?? null)
     : fetched;
@@ -525,19 +563,139 @@ export function QuickTableWidget({
 
   // ---- seleção e edição (UX de planilha) ----
   const [sel, setSel] = useState<Sel | null>(null);
-  const [editing, setEditing] = useState<{ pos: Pos; draft: string } | null>(
-    null
-  );
+  // `source` diz QUEM tem o foco (a célula ou a barra de fórmula) — o rascunho
+  // é o mesmo nos dois; renderizar dois inputs para a mesma célula roubaria o
+  // foco a cada tecla.
+  const [editing, setEditing] = useState<
+    { pos: Pos; draft: string; source: "cell" | "bar" } | null
+  >(null);
   // Mini-toolbar de aparência em lote: aparece ao SOLTAR um arrasto de seleção
   // multi-célula (posição do ponteiro no fim do gesto).
   const [selToolbar, setSelToolbar] = useState<{ x: number; y: number } | null>(
     null
   );
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const cellInputRef = useRef<HTMLInputElement | null>(null);
+  const barInputRef = useRef<HTMLInputElement | null>(null);
+  // Posição do cursor a aplicar no input depois de inserir um endereço por
+  // clique na grade (o valor só chega ao DOM no render seguinte).
+  const caretRef = useRef<number | null>(null);
   const dragSelAbort = useRef<AbortController | null>(null);
   useEffect(() => () => dragSelAbort.current?.abort(), []);
 
   const cellAt = (p: Pos): QTCell | undefined => matrix.rows[p.r]?.cells[p.c];
+
+  // ---- endereçamento A1 visível (barra "fx", régua e realce) ----
+  const a1 = (p: Pos) => `${colLetter(p.c)}${p.r + 1}`;
+  // A barra e a régua acompanham quem PODE digitar: fora no snapshot (leitura
+  // pública) e desligáveis por aparência (tabela usada como layout).
+  const canType =
+    !readOnly && matrix.rows.some((row) => row.cells.some((c) => c.editable));
+  const showFormulaBar = canType && t.formulaBar !== false;
+  const showRuler = structureEdit || showFormulaBar;
+  // Com o cabeçalho OCULTO, a régua ainda precisa da linha do topo p/ as
+  // letras — mas sem revelar os rótulos que o usuário escolheu esconder (no
+  // "Editar layout" eles seguem à vista, é lá que se configura a coluna).
+  const showHeaderLabels = matrix.headerRow || structureEdit;
+  const anchorCell = sel ? cellAt(sel.anchor) : undefined;
+  // Rascunho de FÓRMULA em edição: liga o realce das células citadas e o modo
+  // "clicar na grade insere o endereço".
+  const formulaDraft =
+    editing && editing.draft.trimStart().startsWith("=") ? editing.draft : null;
+  const refCells = useMemo(() => {
+    if (!formulaDraft) return null;
+    const set = new Set<string>();
+    for (const p of cellRefsInSource(formulaDraft, {
+      rows: matrix.rows.length,
+      cols: matrix.cols.length,
+    })) {
+      set.add(`${p.r}:${p.c}`);
+    }
+    return set;
+  }, [formulaDraft, matrix]);
+
+  // Inserção de endereço por clique/arrasto durante a digitação de "=…": o
+  // trecho escrito no clique é REESCRITO enquanto o ponteiro anda (vira
+  // intervalo), como numa planilha.
+  const refInsert = useRef<{ from: number; len: number; anchor: Pos } | null>(
+    null
+  );
+  const activeInput = () =>
+    editing?.source === "bar" ? barInputRef.current : cellInputRef.current;
+
+  function writeRefInsert(head: Pos) {
+    const st = refInsert.current;
+    if (!st) return;
+    const text =
+      st.anchor.r === head.r && st.anchor.c === head.c
+        ? a1(st.anchor)
+        : `${a1({
+            r: Math.min(st.anchor.r, head.r),
+            c: Math.min(st.anchor.c, head.c),
+          })}:${a1({
+            r: Math.max(st.anchor.r, head.r),
+            c: Math.max(st.anchor.c, head.c),
+          })}`;
+    setEditing((cur) =>
+      cur
+        ? {
+            ...cur,
+            draft:
+              cur.draft.slice(0, st.from) +
+              text +
+              cur.draft.slice(st.from + st.len),
+          }
+        : cur
+    );
+    st.len = text.length;
+    caretRef.current = st.from + text.length;
+  }
+
+  function beginRefInsert(p: Pos) {
+    const input = activeInput();
+    if (!input) return;
+    const from = input.selectionStart ?? input.value.length;
+    const to = input.selectionEnd ?? from;
+    refInsert.current = { from, len: Math.max(0, to - from), anchor: p };
+    writeRefInsert(p);
+    dragSelAbort.current?.abort();
+    const ac = new AbortController();
+    dragSelAbort.current = ac;
+    const { signal } = ac;
+    const stop = () => {
+      ac.abort();
+      refInsert.current = null;
+    };
+    window.addEventListener(
+      "pointermove",
+      (ev) => {
+        const el = document
+          .elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest("[data-r]") as HTMLElement | null;
+        if (!el) return;
+        const r = Number(el.dataset.r);
+        const c = Number(el.dataset.c);
+        if (!Number.isInteger(r) || !Number.isInteger(c)) return;
+        writeRefInsert({ r, c });
+      },
+      { signal }
+    );
+    window.addEventListener("pointerup", stop, { signal });
+    window.addEventListener("pointercancel", stop, { signal });
+  }
+
+  // Devolve o cursor ao input depois de inserir um endereço (o valor novo só
+  // chega ao DOM no render seguinte).
+  useEffect(() => {
+    const caret = caretRef.current;
+    if (caret == null) return;
+    caretRef.current = null;
+    const input =
+      editing?.source === "bar" ? barInputRef.current : cellInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(caret, caret);
+  });
 
   // Retângulo normalizado da seleção (índices de exibição, inclusivos).
   const rect = sel
@@ -628,12 +786,12 @@ export function QuickTableWidget({
     saveCells(batch);
   }
 
-  function startEdit(p: Pos, initial?: string) {
+  function startEdit(p: Pos, initial?: string, source: "cell" | "bar" = "cell") {
     const cell = matrix.rows[p.r]?.cells[p.c];
     if (!cell?.editable) return;
     setSel({ anchor: p, head: p });
     setSelToolbar(null);
-    setEditing({ pos: p, draft: initial ?? (cell.raw ?? "") });
+    setEditing({ pos: p, draft: initial ?? (cell.raw ?? ""), source });
   }
 
   function commitEdit(move?: "down" | "right") {
@@ -829,10 +987,26 @@ export function QuickTableWidget({
 
   // Total de colunas do DOM (gutter + dados + coluna do "+").
   const domCols =
-    matrix.cols.length + (structureEdit ? 2 : 0);
+    matrix.cols.length + (showRuler ? 1 : 0) + (structureEdit ? 1 : 0);
 
   return (
-    <div className="h-full overflow-auto [scrollbar-gutter:stable]">
+    <div className="flex h-full flex-col">
+      {showFormulaBar ? (
+        <QuickTableFormulaBar
+          address={sel ? a1(sel.anchor) : null}
+          value={editing ? editing.draft : (anchorCell?.raw ?? "")}
+          editable={Boolean(anchorCell?.editable)}
+          inputRef={barInputRef}
+          borderColor={t.borderColor}
+          onChange={(v) => {
+            if (!sel) return;
+            if (editing) setEditing((cur) => (cur ? { ...cur, draft: v } : cur));
+            else startEdit(sel.anchor, v, "bar");
+          }}
+          onCommit={() => commitEdit("down")}
+          onCancel={cancelEdit}
+        />
+      ) : null}
       <div
         ref={containerRef}
         tabIndex={0}
@@ -849,7 +1023,7 @@ export function QuickTableWidget({
           e.preventDefault();
           pasteText(text);
         }}
-        className="outline-none"
+        className="min-h-0 flex-1 overflow-auto outline-none [scrollbar-gutter:stable]"
         role="grid"
         aria-label={widget.title ?? "Tabela Livre"}
       >
@@ -862,7 +1036,7 @@ export function QuickTableWidget({
           )}
           style={{ background: t.bodyBg, ...tableFontStyle }}
         >
-          {matrix.headerRow || structureEdit ? (
+          {matrix.headerRow || showRuler ? (
             <thead>
               <tr
                 style={{
@@ -870,12 +1044,13 @@ export function QuickTableWidget({
                   color: t.headerColor,
                 }}
               >
-                {structureEdit ? <th className="w-6 px-0.5" /> : null}
+                {showRuler ? <th className="w-6 px-0.5" /> : null}
                 {matrix.cols.map((col, ci) => (
                   <th
                     key={col.key}
                     className={cn(
-                      "group relative h-8 px-2 py-1 text-xs font-medium select-none",
+                      "group relative px-2 py-1 text-xs font-medium select-none",
+                      showHeaderLabels ? "h-8" : "h-5",
                       alignClass(
                         resolveAlign(t, { column: col.key, numeric: col.numeric })
                       )
@@ -917,13 +1092,13 @@ export function QuickTableWidget({
                     }
                   >
                     <span className="flex items-center gap-1">
-                      {structureEdit ? (
+                      {showRuler ? (
                         <span className="text-muted-foreground/70 text-[10px] font-normal">
                           {colLetter(ci)}
                         </span>
                       ) : null}
                       <span className="block flex-1 truncate">
-                        {col.label || " "}
+                        {(showHeaderLabels ? col.label : "") || " "}
                       </span>
                       {structureEdit ? (
                         <button
@@ -975,7 +1150,7 @@ export function QuickTableWidget({
                 // (as células livres abaixo já renderizam de imediato).
                 [0, 1, 2].map((i) => (
                   <tr key={`skel-${i}`} aria-hidden>
-                    {structureEdit ? <td className="w-6 px-0.5" /> : null}
+                    {showRuler ? <td className="w-6 px-0.5" /> : null}
                     {matrix.cols.map((col, ci) => (
                       <td
                         key={col.key}
@@ -999,15 +1174,20 @@ export function QuickTableWidget({
                     background: t.rowColors?.[row.key]?.fill,
                   }}
                 >
-                  {structureEdit ? (
+                  {showRuler ? (
                     <td
                       className="group relative w-6 px-0.5"
                       style={cellBorder(false)}
                     >
-                      <span className="text-muted-foreground/70 block text-center text-[10px] group-hover:hidden">
+                      <span
+                        className={cn(
+                          "text-muted-foreground/70 block text-center text-[10px]",
+                          structureEdit && "group-hover:hidden"
+                        )}
+                      >
                         {ri + 1}
                       </span>
-                      {row.kind === "free" ? (
+                      {structureEdit && row.kind === "free" ? (
                         <button
                           type="button"
                           className="text-muted-foreground hover:text-foreground hidden w-full items-center justify-center group-hover:flex"
@@ -1025,11 +1205,13 @@ export function QuickTableWidget({
                           <Settings2 className="size-3.5" />
                         </button>
                       ) : null}
-                      <ResizeHandle
-                        axis="row"
-                        minSize={24}
-                        onResize={(hh) => setRowHeight(row.key, hh)}
-                      />
+                      {structureEdit ? (
+                        <ResizeHandle
+                          axis="row"
+                          minSize={24}
+                          onResize={(hh) => setRowHeight(row.key, hh)}
+                        />
+                      ) : null}
                     </td>
                   ) : null}
                   {row.cells.map((cell, ci) => {
@@ -1100,6 +1282,13 @@ export function QuickTableWidget({
                           // Seleciona sem roubar o foco do input em edição.
                           if (isEditing) return;
                           e.preventDefault();
+                          // Digitando "=…": o clique (e o arrasto) INSEREM o
+                          // endereço/intervalo no cursor, em vez de mover a
+                          // seleção e encerrar a edição.
+                          if (formulaDraft && e.button === 0) {
+                            beginRefInsert({ r: ri, c: ci });
+                            return;
+                          }
                           if (editing) commitEdit();
                           containerRef.current?.focus();
                           if (e.button === 0) {
@@ -1134,9 +1323,10 @@ export function QuickTableWidget({
                             : undefined
                         }
                       >
-                        {isEditing ? (
+                        {isEditing && editing.source === "cell" ? (
                           <input
                             autoFocus
+                            ref={cellInputRef}
                             value={editing.draft}
                             onChange={(e) =>
                               setEditing((cur) =>
@@ -1169,9 +1359,16 @@ export function QuickTableWidget({
                               formulaError && "text-destructive"
                             )}
                           >
-                            {display || " "}
+                            {(isEditing ? editing.draft : display) || " "}
                           </span>
                         )}
+                        {refCells?.has(`${ri}:${ci}`) ? (
+                          // Célula citada pela fórmula em digitação.
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute inset-0 rounded-[2px] bg-amber-400/10 ring-2 ring-amber-500/80 ring-inset"
+                          />
+                        ) : null}
                         {selected ? (
                           <span
                             aria-hidden

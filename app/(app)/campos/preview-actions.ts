@@ -153,6 +153,8 @@ export async function previewRecordFormula(
     .from("records")
     .select(RECORD_EVAL_COLUMNS)
     .eq("is_mock", false)
+    // Lixeira (0121): prévia só com registros vivos.
+    .is("deleted_at", null)
     .order("source_created_at", { ascending: false, nullsFirst: false })
     .limit(PREVIEW_CANDIDATES);
   if (recError) return { ok: false, message: recError.message };

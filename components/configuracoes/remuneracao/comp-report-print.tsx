@@ -16,8 +16,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
-  entryMemoryLines,
   fmtMoneyBRL as fmtMoney,
+  SHEET_LEGEND,
 } from "@/lib/comp/commission-label";
 import {
   computeEntry,
@@ -61,9 +61,10 @@ export function CompReportPrint(props: {
     onDoneRef.current = props.onDone;
   });
 
-  // Memória + total por card, derivados uma vez (mesmo call do CompPlanCard).
+  // Total por card, derivado uma vez (mesmo call do CompPlanCard). A memória
+  // saiu daqui na v1.1 — quem a renderiza agora é o próprio card.
   const derived = useMemo(() => {
-    const map = new Map<string, { lines: string[]; total: number | null }>();
+    const map = new Map<string, { total: number | null }>();
     for (const s of props.sections) {
       for (const c of s.cards) {
         if (!c.entry) continue;
@@ -79,10 +80,7 @@ export function CompReportPrint(props: {
           c.entry.responsible_id,
           c.targetRates
         );
-        map.set(c.key, {
-          lines: entryMemoryLines(config, breakdown),
-          total: breakdown.total,
-        });
+        map.set(c.key, { total: breakdown.total });
       }
     }
     return map;
@@ -128,6 +126,18 @@ export function CompReportPrint(props: {
           </span>
         </p>
       </div>
+      {/* Legenda impressa: papel não tem tooltip, e o PDF é o formato que mais
+          circula fora da equipe. Mesma fonte de verdade da planilha. */}
+      <dl className="text-muted-foreground mb-4 grid grid-cols-2 gap-x-6 gap-y-0.5 border-y py-2 text-[10px]">
+        {SHEET_LEGEND.map(([term, meaning]) => (
+          <div key={term} className="flex gap-1">
+            <dt className="text-foreground font-medium whitespace-nowrap">
+              {term}
+            </dt>
+            <dd>{meaning}</dd>
+          </div>
+        ))}
+      </dl>
       {props.sections.map((s) => (
         <section
           key={s.key}
@@ -145,28 +155,21 @@ export function CompReportPrint(props: {
             </div>
           ) : null}
           {s.cards.map((c) => {
-            const d = derived.get(c.key);
             return (
               <div key={c.key} className="break-inside-avoid">
                 {c.entry ? (
-                  <>
-                    <CompPlanCard
-                      plan={c.plan}
-                      entry={c.entry}
-                      year={props.year}
-                      month={props.month}
-                      targets={c.targets}
-                      targetRates={c.targetRates}
-                      title={c.title}
-                    />
-                    {d && d.lines.length > 0 ? (
-                      <ul className="text-muted-foreground mt-1 list-disc pl-5 text-xs">
-                        {d.lines.map((l, i) => (
-                          <li key={i}>{l}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </>
+                  // A memória de cálculo saiu daqui: o CompPlanCard passou a
+                  // renderizá-la em tela (v1.3), e mantê-la aqui a imprimiria
+                  // duas vezes.
+                  <CompPlanCard
+                    plan={c.plan}
+                    entry={c.entry}
+                    year={props.year}
+                    month={props.month}
+                    targets={c.targets}
+                    targetRates={c.targetRates}
+                    title={c.title}
+                  />
                 ) : (
                   <div className="text-muted-foreground rounded-md border border-dashed p-4 text-sm">
                     <span className="text-foreground font-medium">

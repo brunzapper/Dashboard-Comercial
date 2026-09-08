@@ -1,4 +1,11 @@
-// Versão: 1.11 | Data: 25/07/2026
+// Versão: 1.12 | Data: 07/09/2026
+// v1.12 (07/09/2026): applyPresetDefinition PRESERVA os vínculos LOCAIS do
+//   widget kanban (KANBAN_LOCAL_KEYS = allocationFieldKey/taskBoardId) no
+//   update in-place, como já fazia com `pages`. O export passou a removê-los
+//   e o validador a descartá-los (eles apontam campo/board do quadro de
+//   ORIGEM — invariante 24); sem esta preservação, uma edição por IA
+//   desligaria a alocação-como-campo em silêncio. Só re-injeta em widget que
+//   CONTINUA kanban — troca de tipo não arrasta o espelho antigo.
 // v1.11 (25/07/2026): espaço de grid v2 (grade fina — lib/widgets/grid-space):
 //   ensureFineGrid (migração lazy CAS no write-path) chamado por todo escritor
 //   de geometria (saveLayout/saveShapeLine/createWidget/updateDashboardSettings/
@@ -107,6 +114,7 @@ import {
   type KanbanSettings,
 } from "@/lib/kanban/types";
 import { normalizeKanbanAllocationOnSave } from "@/lib/kanban/allocation-field";
+import { KANBAN_LOCAL_KEYS } from "@/lib/import/dashboard/kanban-settings";
 import { reconcileKanbanAllocationField } from "@/lib/kanban/allocation-reconcile";
 import { createServiceClient } from "@/lib/supabase/service";
 import { baseColId, canTypeInColumn } from "@/lib/widgets/quick-table/model";
@@ -906,6 +914,9 @@ export interface UserAppSettings {
   // Resolução/sanitização em lib/theme.ts (resolveTheme).
   theme?: "light" | "dark" | "system" | null;
   accentColor?: string | null;
+  // Cor do Ponteiro Laser (Configurações → Tema): null/ausente = vermelho
+  // padrão (DEFAULT_LASER, lib/theme.ts). Pessoal — sem padrão de org.
+  laserColor?: string | null;
   // Controles da Agenda do Workspace (/agenda): conteúdo ("todas" | "propria"
   // | "widget:<id>"), recortes e visão — a página reabre como ficou.
   agendaHub?: {
@@ -1066,7 +1077,11 @@ export async function createWidget(
 export async function updateWidget(
   widgetId: string,
   dashboardId: string,
-  input: WidgetInput
+  input: WidgetInput,
+  // revalidate: false = save em background (aparência in-loco): o await volta
+  // logo após o UPDATE; o cliente reconcilia por refresh debounced
+  // (useBackgroundSave). Default true (builder e demais chamadores).
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1107,7 +1122,7 @@ export async function updateWidget(
   if (maintenance) {
     await reconcileAllocationBestEffort({ kind: "widget", id: widgetId });
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1255,7 +1270,10 @@ export async function saveQuickFilterValue(
   dashboardId: string,
   widgetId: string,
   entryId: string,
-  value: QuickFilterValue | null
+  value: QuickFilterValue | null,
+  // revalidate: false = save em background (chip otimista na barra): o await
+  // volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1286,7 +1304,7 @@ export async function saveQuickFilterValue(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1369,7 +1387,10 @@ export async function listFilterOptionCandidates(
 export async function savePeriodWindowChoice(
   dashboardId: string,
   widgetId: string,
-  choice: PeriodWindowChoice | null
+  choice: PeriodWindowChoice | null,
+  // revalidate: false = save em background (controle otimista no card): o
+  // await volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1396,7 +1417,7 @@ export async function savePeriodWindowChoice(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1409,7 +1430,10 @@ export async function savePeriodWindowChoice(
 export async function saveSharedFieldFilter(
   dashboardId: string,
   widgetId: string,
-  encoded: string | null
+  encoded: string | null,
+  // revalidate: false = save em background (filtro otimista no widget): o
+  // await volta após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1435,7 +1459,7 @@ export async function saveSharedFieldFilter(
     );
     if (error) return { ok: false, message: error.message };
   }
-  revalidatePath(`/dashboards/${dashboardId}`);
+  if (opts?.revalidate !== false) revalidatePath(`/dashboards/${dashboardId}`);
   return { ok: true };
 }
 
@@ -1637,7 +1661,10 @@ export async function updateEntityField(
   // Dashboard de origem: revalida SÓ ele (outros dashboards que exibem o mesmo
   // valor global atualizam na próxima navegação — páginas dinâmicas). Ausente
   // (compat) = revalida todos, como antes.
-  dashboardId?: string
+  dashboardId?: string,
+  // revalidate: false = save em background (célula otimista): o await volta
+  // após o upsert; o cliente reconcilia por refresh debounced.
+  opts?: { revalidate?: boolean }
 ): Promise<ActionState> {
   const session = await getSessionInfo();
   if (!session) return { ok: false, message: "Sessão expirada." };
@@ -1688,8 +1715,10 @@ export async function updateEntityField(
     );
     if (error) return { ok: false, message: error.message };
   }
-  if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
-  else revalidatePath("/dashboards/[id]", "page");
+  if (opts?.revalidate !== false) {
+    if (dashboardId) revalidatePath(`/dashboards/${dashboardId}`);
+    else revalidatePath("/dashboards/[id]", "page");
+  }
   return { ok: true };
 }
 
@@ -2456,6 +2485,7 @@ async function ensurePresetSubSources(
       short_label: sub.short_label ?? sub.label,
       default_period_field: sub.default_period_field,
       filter: sub.filter,
+      ignore_period: sub.ignore_period ?? false,
     });
     if (!error) created += 1;
     else skipped += 1;
@@ -2719,11 +2749,15 @@ async function applyPresetDefinition(
     .select("id, settings")
     .eq("dashboard_id", dashId);
   const existingByKey = new Map<string, string>(); // presetKey → widget id
-  // Páginas de widget: `pages` NUNCA viaja no JSON (export a remove — ids não
-  // sobrevivem) e por isso precisa ser PRESERVADA do settings existente no
-  // update in-place, senão qualquer edição por IA desfaria a mescla em
-  // silêncio.
+  // Chaves LOCAIS do widget: nunca viajam no JSON (o export as remove — ids
+  // não sobrevivem a um import-como-novo) e por isso precisam ser PRESERVADAS
+  // do settings existente no update in-place, senão qualquer edição por IA
+  // desfaria o vínculo em silêncio. São duas famílias:
+  //   `pages`                     — mescla de widgets (ids de widgets);
+  //   `kanban.allocationFieldKey` — campo-espelho da fase (invariante 24);
+  //   `kanban.taskBoardId`        — board de tarefas do widget kanban.
   const existingPagesByKey = new Map<string, string[]>();
+  const existingKanbanLocalByKey = new Map<string, Record<string, unknown>>();
   for (const w of widgetRows ?? []) {
     const s = w.settings as WidgetSettings | null;
     const pk = s?.presetKey;
@@ -2731,12 +2765,27 @@ async function applyPresetDefinition(
     existingByKey.set(pk, w.id as string);
     const pages = pageMembersOf({ settings: s ?? undefined });
     if (pages.length > 0) existingPagesByKey.set(pk, pages);
+    const prevKanban = s?.kanban as Record<string, unknown> | undefined;
+    if (prevKanban) {
+      const kept: Record<string, unknown> = {};
+      for (const key of KANBAN_LOCAL_KEYS) {
+        if (prevKanban[key] !== undefined) kept[key] = prevKanban[key];
+      }
+      if (Object.keys(kept).length > 0) existingKanbanLocalByKey.set(pk, kept);
+    }
   }
   const wantedKeys = new Set(preset.widgets.map((w) => w.presetKey));
   const counts = { created: 0, updated: 0, deleted: 0 };
   for (let i = 0; i < preset.widgets.length; i++) {
     const w = preset.widgets[i];
     const keptPages = existingPagesByKey.get(w.presetKey);
+    // Só re-injeta os vínculos locais quando o widget CONTINUA sendo kanban:
+    // troca de tipo (ou de base) não pode arrastar o campo-espelho do quadro
+    // antigo — é o mesmo cuidado do normalizeKanbanAllocationOnSave.
+    const keptKanbanLocal =
+      w.visual_type === "kanban" && w.settings?.kanban
+        ? existingKanbanLocalByKey.get(w.presetKey)
+        : undefined;
     const row = {
       title: w.title,
       visual_type: w.visual_type,
@@ -2750,6 +2799,9 @@ async function applyPresetDefinition(
         ...(w.settings ?? {}),
         presetKey: w.presetKey,
         ...(keptPages ? { pages: keptPages } : {}),
+        ...(keptKanbanLocal
+          ? { kanban: { ...w.settings?.kanban, ...keptKanbanLocal } }
+          : {}),
       },
       grid_position: w.grid_position,
       sort_order: i,
@@ -2842,7 +2894,7 @@ export async function applyPreset(
   revalidatePath("/configuracoes/presets");
   revalidatePath(`/dashboards/${result.dashboardId}`);
   if (result.operationsCreated > 0) revalidatePath("/configuracoes/operacoes");
-  if (result.compPlansCreated > 0) revalidatePath("/configuracoes/remuneracao");
+  if (result.compPlansCreated > 0) revalidatePath("/operacao/remuneracao");
   const w = result.widgets;
   const extras = [
     result.operationsCreated > 0 ? `${result.operationsCreated} operação(ões)` : null,

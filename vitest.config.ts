@@ -1,4 +1,11 @@
-// Versão: 1.1 | Data: 24/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): alias de `server-only` para um stub vazio
+//   (tests/setup/server-only.ts). O pacote real lança por construção —
+//   é guarda do BUNDLE client, aplicada pelo `next build`. Sob Node ele
+//   só impedia exercitar módulos legítimos de servidor, empurrando o
+//   código a largar o `server-only` para virar testável (enfraquecendo a
+//   guarda de verdade). Com o alias, `lib/comp/plan-validate.ts` e afins
+//   mantêm a marca E ganham teste.
 // v1.1 (24/07/2026): fase 2 dos testes — componentes/UI e engine com IO.
 //   include ganha `.tsx` e `components/**` (sem isso testes de componente
 //   seriam silenciosamente ignorados) e `tests/**` passa a cobrir também
@@ -14,7 +21,12 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  resolve: { alias: { "@": path.resolve(__dirname) } },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname),
+      "server-only": path.resolve(__dirname, "tests/setup/server-only.ts"),
+    },
+  },
   test: {
     environment: "node",
     include: [

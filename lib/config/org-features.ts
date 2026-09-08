@@ -21,6 +21,13 @@ export const ORG_FEATURES = [
       "Planos de remuneração, grade mensal com publicação em espelho e o " +
       "preset Remuneração Variável (construído sob demanda).",
   },
+  {
+    key: "mapeamentos",
+    label: "Mapeamentos de valores",
+    description:
+      "De-para de classificação (cargos → área/nível, segmentos → categoria) " +
+      "aplicado aos registros, com card em Operação e tarefa de pendências.",
+  },
 ] as const;
 
 export type OrgFeatureKey = (typeof ORG_FEATURES)[number]["key"];

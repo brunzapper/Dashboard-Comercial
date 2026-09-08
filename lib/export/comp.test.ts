@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 27/08/2026
+// v1.3: os pinos de TEXTO mudaram de propósito — o CSV deixou de falar o
+// registro interno ("peso 40%", "gatilho/base de comissão", "total manual") e
+// passou a consumir as MESMAS frases da planilha (sheet* de commission-label).
+// A ORDEM e a quantidade de colunas seguem pinadas: é o que quebra integração
+// de terceiro, e continua intocado.
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: compReportValues foi REMOVIDO (o export ao Google Planilhas agora tem
 // builder próprio com layout de demonstrativo — lib/export/comp-sheet.ts, com
@@ -107,11 +113,11 @@ describe("compStatementRows", () => {
       "Pessoa",
       "Tipo",
       "Item",
-      "Alvo",
+      "Meta",
       "Realizado",
       "Atingimento %",
       "Valor (R$)",
-      "Observação",
+      "Memória de cálculo",
     ]);
   });
 
@@ -119,13 +125,14 @@ describe("compStatementRows", () => {
     const rows = compStatementRows(
       statement({ config: configA, planName: "Plano A", entry: entryA })
     );
-    const fator = rowBy(rows, "Fator", "Reuniões")!;
+    const fator = rowBy(rows, "Indicador", "Reuniões")!;
     expect(fator[0]).toBe("Plano A");
     expect(fator[1]).toBe("Ana");
     expect(fator[5]).toBe("44"); // realizado
     expect(fator[7]).toBe(""); // peso 0 sem override ⇒ "—" da UI = vazio
-    expect(fator[8]).toContain("peso 0%");
-    expect(fator[8]).toContain("gatilho/base de comissão");
+    // Peso 0 sem override: a nota fica VAZIA (a coluna Valor já diz tudo) —
+    // mesma regra da planilha desde commission-label v1.10.
+    expect(fator[8]).toBe("");
 
     const comissao = rowBy(rows, "Comissão", "Prêmio por reunião")!;
     expect(comissao[7]).toBe("550");
@@ -149,7 +156,7 @@ describe("compStatementRows", () => {
         targets: { vendas: 100000 },
       })
     );
-    const fator = rowBy(rows, "Fator", "Vendas")!;
+    const fator = rowBy(rows, "Indicador", "Vendas")!;
     expect(fator[4]).toBe("100000");
     expect(fator[5]).toBe("50000");
     expect(fator[6]).toBe("50");
@@ -174,7 +181,7 @@ describe("compStatementRows", () => {
         targets: { vendas: 100000 },
       })
     );
-    const fator = rowBy(rows, "Fator", "Vendas")!;
+    const fator = rowBy(rows, "Indicador", "Vendas")!;
     expect(fator[6]).toBe("50,5");
   });
 
@@ -197,7 +204,7 @@ describe("compStatementRows", () => {
     expect(bonus[7]).toBe("200");
     const total = rowBy(rows, "Total")!;
     expect(total[7]).toBe("1234,5");
-    expect(total[8]).toBe("total manual");
+    expect(total[8]).toBe("Total definido manualmente");
   });
 
   it("sem lançamento: linha única com a nota", () => {
@@ -205,7 +212,7 @@ describe("compStatementRows", () => {
       statement({ config: configB, planName: "Plano B", memberLabel: "Ana" })
     );
     expect(rows).toEqual([
-      ["Plano B", "Ana", "Total", "", "", "", "", "", "sem lançamento no mês"],
+      ["Plano B", "Ana", "Total", "", "", "", "", "", "Sem lançamento neste mês."],
     ]);
   });
 });
@@ -227,7 +234,7 @@ describe("compReportCsv", () => {
       "",
       "",
       "",
-      "sem lançamento no mês",
+      "Sem lançamento neste mês.",
     ]);
   });
 });

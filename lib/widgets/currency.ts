@@ -9,6 +9,13 @@
 //   referência US$→R$).
 // v2.1 (14/07/2026): campos 'moeda' também suportam currency_mode='inherit'
 //   (moeda do registro) — agora o padrão; 'fixed'/null = moeda fixa (legado).
+// v2.2 (22/08/2026): moedas/taxas são POR ORGANIZAÇÃO (0123) — antes globais,
+//   o que deixava a org A mexer na taxa que a org B usa (widgets de dinheiro e
+//   alvos de remuneração). Os três loaders aceitam `orgId`: com o client do
+//   USUÁRIO a RLS já recorta e ele é opcional; em caminho SERVICE ROLE (que
+//   bypassa a RLS) é OBRIGATÓRIO — sem ele as taxas de todas as orgs caem no
+//   mesmo `rateKey(code, year, quarter)` e a última lida vence
+//   (lib/snapshots/refresh.ts é o caso).
 
 // Opções do select de edição da coluna `currency` (registros individuais e a tela
 // de Registros). O `value` é o código ISO gravado (e enviado ao Bitrix no
@@ -78,9 +85,12 @@ type Db = import("@supabase/supabase-js").SupabaseClient;
 
 /** Moedas habilitadas (para os seletores de campo/métrica). */
 export async function loadEnabledCurrencies(
-  db: Db
+  db: Db,
+  orgId?: string | null
 ): Promise<SystemCurrency[]> {
-  const { data } = await db.from("currencies").select("code, label, enabled, sort_order");
+  let query = db.from("currencies").select("code, label, enabled, sort_order");
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data } = await query;
   const rows = (data ?? []) as SystemCurrency[];
   const enabled = rows.filter((r) => r.enabled);
   const list = enabled.length > 0 ? enabled : fallbackCurrencies();
@@ -88,8 +98,13 @@ export async function loadEnabledCurrencies(
 }
 
 /** Todas as moedas (para a tela de Campos → Moedas). */
-export async function loadAllCurrencies(db: Db): Promise<SystemCurrency[]> {
-  const { data } = await db.from("currencies").select("code, label, enabled, sort_order");
+export async function loadAllCurrencies(
+  db: Db,
+  orgId?: string | null
+): Promise<SystemCurrency[]> {
+  let query = db.from("currencies").select("code, label, enabled, sort_order");
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data } = await query;
   const rows = (data ?? []) as SystemCurrency[];
   const list = rows.length > 0 ? rows : fallbackCurrencies();
   return list.sort((a, b) => a.sort_order - b.sort_order);
@@ -105,8 +120,13 @@ function fallbackCurrencies(): SystemCurrency[] {
 }
 
 /** Carrega as taxas (currency_rates) num mapa achatado. */
-export async function loadCurrencyRates(db: Db): Promise<CurrencyRates> {
-  const { data } = await db.from("currency_rates").select("code, year, quarter, rate");
+export async function loadCurrencyRates(
+  db: Db,
+  orgId?: string | null
+): Promise<CurrencyRates> {
+  let query = db.from("currency_rates").select("code, year, quarter, rate");
+  if (orgId) query = query.eq("organization_id", orgId);
+  const { data } = await query;
   const out: CurrencyRates = {};
   for (const r of (data ?? []) as {
     code: string;

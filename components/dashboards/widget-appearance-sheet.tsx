@@ -1,4 +1,11 @@
-// Versão: 2.7 | Data: 28/07/2026
+// Versão: 2.9 | Data: 06/09/2026
+// v2.9 (06/09/2026): Tabela Livre — caixa "Barra de fórmula e régua A/B/C"
+//   (appearance.table.formulaBar; ausente = visível p/ quem pode digitar).
+// v2.8 (07/08/2026): "Aplicar" OTIMISTA em background (useBackgroundSave): o
+//   sheet fecha na hora, updateWidget roda com revalidate:false e o refresh
+//   debounced traz a aparência aplicada (antes: await revalidate + refresh =
+//   2 renders RSC completos com o painel travado em "Salvando…"); erro →
+//   toast (a aparência antiga permanece).
 // v2.7 (28/07/2026): seção "Agenda" (AgendaAppearanceSection) — aparência do
 //   calendário vive DENTRO de settings.agenda.appearance (merge no save
 //   preservando a config; espelho do arranjo do kanban). Agenda entrou no
@@ -31,8 +38,9 @@
 // eixos, rótulos, legenda, paleta de pizza, cores globais da tabela e o card KPI.
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+
+import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
@@ -110,8 +118,7 @@ export function WidgetAppearanceSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { save: backgroundSave } = useBackgroundSave();
   const [ap, setAp] = useState<AppearanceSettings>(
     widget.settings?.appearance ?? {}
   );
@@ -131,6 +138,7 @@ export function WidgetAppearanceSheet({
   const isPie = vt === "pizza" || vt === "funil";
   // A Tabela Livre reusa a seção de tabela (cores globais/grade/alinhamento).
   const isTable = vt === "tabela" || vt === "tabela_editavel";
+  const isQuickTable = vt === "tabela_editavel";
   const isKpi = vt === "kpi";
   const isCalculator = vt === "calculadora";
   const isNote = vt === "nota";
@@ -313,10 +321,15 @@ export function WidgetAppearanceSheet({
           : {}),
       },
     };
-    startTransition(async () => {
-      await updateWidget(widget.id, dashboardId, input);
-      router.refresh();
-      onOpenChange(false);
+    // Otimista: fecha o sheet JÁ — o save roda em background (revalidate:
+    // false) e o refresh debounced do hook traz a aparência aplicada; erro →
+    // toast (a aparência antiga permanece na tela).
+    onOpenChange(false);
+    backgroundSave({
+      key: widget.id,
+      context: "Não foi possível salvar a aparência",
+      action: () =>
+        updateWidget(widget.id, dashboardId, input, { revalidate: false }),
     });
   }
 
@@ -1100,6 +1113,23 @@ export function WidgetAppearanceSheet({
                     { value: "right", label: "Direita" },
                   ]}
                 />
+                {isQuickTable ? (
+                  <>
+                    <CheckRow
+                      label="Barra de fórmula e régua A/B/C"
+                      checked={ap.table?.formulaBar !== false}
+                      onChange={(c) =>
+                        patchTable({ formulaBar: c ? undefined : false })
+                      }
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      A barra mostra o endereço e a fórmula da célula
+                      selecionada; a régua exibe as letras/números usados nas
+                      contas (=A1+B2). Desligue em tabelas usadas só como
+                      layout.
+                    </p>
+                  </>
+                ) : null}
                 <p className="text-muted-foreground text-xs">
                   Reordenar colunas/linhas, ordenar e colorir coluna/linha/célula:
                   arraste a alça ou dê duplo-clique direto na tabela.
@@ -1163,9 +1193,7 @@ export function WidgetAppearanceSheet({
           ) : null}
           </Accordion>
 
-          <Button onClick={save} disabled={pending}>
-            {pending ? "Salvando…" : "Aplicar"}
-          </Button>
+          <Button onClick={save}>Aplicar</Button>
         </div>
       </ResizableSheetContent>
     </Sheet>

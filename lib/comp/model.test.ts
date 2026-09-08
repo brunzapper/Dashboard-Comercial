@@ -1,3 +1,12 @@
+// Versão: 1.5 | Data: 17/08/2026
+// v1.5: detailGrouping virou { byFactor: { into, folded } }. Pinos: entrada
+// sem nada dobrado CAI (a lista vazia era o que tornava a engrenagem inerte),
+// o legado separateByFactor sobrevive só-leitura e o shape novo vence.
+// Versão: 1.4 | Data: 17/08/2026
+// v1.4: `detailGrouping` (agrupamento dos blocos do detalhamento). Pino do
+// round-trip — o parse descarta chave desconhecida e o savePlan grava o objeto
+// PARSEADO, então sem cláusula a config sumiria no 1º save do editor (a mesma
+// armadilha do presetKey). Cláusula LENIENTE: sujeira some, o config vive.
 // Versão: 1.3 | Data: 01/08/2026
 // v1.3: recorte do fator (factor.filters) — parse endurecido: só os 10 ops de
 // UI (FILTER_OPS; internos eq_ci/*_num rejeitados), `in` normalizado p/ array
@@ -158,6 +167,44 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(parseCompPlanConfig(JSON.parse(JSON.stringify(cfg)))).toBeNull();
   });
 
+  it("memberTeams: equipe por líder preservada; entrada vazia descartada", () => {
+    const cfg = makeConfig();
+    (cfg.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: ["a", "b"],
+      // Lista vazia = "sem equipe": descartada, nunca gravada como [] (lista
+      // vazia lida como config foi o que deixou o detailGrouping inerte).
+      semEquipe: [],
+      // O próprio líder e duplicatas somem — já entram sempre no filtro.
+      outro: ["outro", "c", "c"],
+    };
+    const parsed = reparse(cfg);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.factors[0].memberTeams).toEqual({
+      lider: ["a", "b"],
+      outro: ["c"],
+    });
+    // Sem a chave, o fator segue sem equipe (retrocompat).
+    expect(reparse(makeConfig())!.factors[0].memberTeams).toBeUndefined();
+  });
+
+  it("memberTeams: sujeira derruba o config inteiro (fail-closed)", () => {
+    const naoObjeto = makeConfig();
+    (naoObjeto.factors[0] as { memberTeams?: unknown }).memberTeams = ["a"];
+    expect(reparse(naoObjeto)).toBeNull();
+
+    const valorNaoArray = makeConfig();
+    (valorNaoArray.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: "a",
+    };
+    expect(reparse(valorNaoArray)).toBeNull();
+
+    const idVazio = makeConfig();
+    (idVazio.factors[0] as { memberTeams?: unknown }).memberTeams = {
+      lider: ["a", ""],
+    };
+    expect(reparse(idVazio)).toBeNull();
+  });
+
   it("comissão: aceita bloco válido (memberTiers preservado) e segue sem ele", () => {
     const parsed = reparse(
       withCommission({ memberTiers: { r1: [{ fromPct: 0, ratePct: 10 }] } })
@@ -311,6 +358,73 @@ describe("parseCompPlanConfig (fail-closed)", () => {
     expect(reparse(moedaRuim)).toBeNull();
     const pkVazio = makeConfig({ presetKey: "" as unknown as string });
     expect(reparse(pkVazio)).toBeNull();
+  });
+
+  it("detailGrouping sobrevive ao round-trip (senão o save do editor o apagaria)", () => {
+    const cfg = makeConfig({
+      detailGrouping: {
+        byFactor: { f_a: { into: "sum:value", folded: ["count:*", "count:*"] } },
+      },
+    });
+    const parsed = reparse(cfg);
+    // Chave duplicada colapsa; a config chega inteira do outro lado do parse.
+    expect(parsed!.detailGrouping).toEqual({
+      byFactor: { f_a: { into: "sum:value", folded: ["count:*"] } },
+    });
+  });
+
+  it("detailGrouping é LENIENTE: sujeira some, o resto do config segue vivo", () => {
+    const parsed = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: {
+        byFactor: {
+          f_a: { into: "sum:value", folded: ["count:*", "", 7] },
+          f_fantasma: { into: "sum:value", folded: ["count:*"] }, // fator inexistente
+          f_b: { into: "", folded: ["x"] }, // principal vazio
+        },
+      },
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.detailGrouping).toEqual({
+      byFactor: { f_a: { into: "sum:value", folded: ["count:*"] } },
+    });
+  });
+
+  it("entrada sem nada dobrado CAI: era a lista vazia que inertizava a engrenagem", () => {
+    const semDobrado = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: {
+        byFactor: {
+          // folded vazio, e folded == into (dobrar em si mesmo não existe).
+          f_a: { into: "sum:value", folded: [] },
+          f_b: { into: "sum:value", folded: ["sum:value"] },
+        },
+      },
+    });
+    expect(semDobrado).not.toBeNull();
+    expect("detailGrouping" in semDobrado!).toBe(false);
+  });
+
+  it("separateByFactor LEGADO é preservado só-leitura (conversão é no engine)", () => {
+    const parsed = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: { separateByFactor: { f_a: ["sum:value"], f_orfao: ["x"] } },
+    });
+    expect(parsed!.detailGrouping).toEqual({
+      byFactor: {},
+      separateByFactor: { f_a: ["sum:value"] },
+    });
+    // Shape novo do mesmo fator vence o legado.
+    const ambos = parseCompPlanConfig({
+      ...JSON.parse(JSON.stringify(makeConfig())),
+      detailGrouping: {
+        byFactor: { f_a: { into: "count:*", folded: ["sum:value"] } },
+        separateByFactor: { f_a: ["sum:value"] },
+      },
+    });
+    expect(ambos!.detailGrouping).toEqual({
+      byFactor: { f_a: { into: "count:*", folded: ["sum:value"] } },
+    });
   });
 
   it("apuracao: preserva mes_anterior, normaliza mes_corrente p/ ausência e rejeita inválido", () => {

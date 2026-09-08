@@ -1,4 +1,8 @@
-// Versão: 1.4 | Data: 30/07/2026
+// Versão: 1.5 | Data: 07/09/2026
+// v1.5 (07/09/2026): `deepMergeValue` passa a ser EXPORTADO — o contrato
+//   `kanban-config` mescla o delta do quadro sobre a config atual com a
+//   MESMA semântica (objetos recursam, arrays/primitivos substituem, null
+//   limpa). Comportamento inalterado.
 // v1.4 (30/07/2026): mescla multi-referência (modo Criar a partir de) —
 //   `refWidgets` (widgets das referências ADICIONAIS, keys prefixadas rN_ pelo
 //   helper de fusão, lib/import/dashboard/multi-ref.ts) entram SÓ como origem
@@ -116,7 +120,11 @@ function tabOf(w: Record<string, unknown>): string {
 // atual): objetos recursam (settings preserva as chaves omitidas); arrays e
 // primitivos do patch vencem (substituição inteira); `null` explícito limpa;
 // chave ausente no patch vem da base.
-function deepMergeValue(base: unknown, patch: unknown): unknown {
+// EXPORTADO desde 07/09/2026: o contrato `kanban-config` mescla o delta do
+// quadro sobre a config atual com esta MESMA semântica — um delta que trocasse
+// de regra entre os dois assistentes seria imprevisível para quem escreve o
+// prompt.
+export function deepMergeValue(base: unknown, patch: unknown): unknown {
   if (isPlainObject(base) && isPlainObject(patch)) {
     const out: Record<string, unknown> = { ...base };
     for (const k of Object.keys(patch)) {

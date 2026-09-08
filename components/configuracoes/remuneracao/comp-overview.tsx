@@ -1,3 +1,9 @@
+// Versão: 1.3 | Data: 16/08/2026
+// v1.3: CONFERÊNCIA por registro — o Realizado de cada fator dos cards abre o
+// CompDetailPanel (instância ÚNICA içada aqui; os cards só apontam o alvo),
+// que lista os registros por trás do número pelo mesmo núcleo das abas de
+// detalhamento do export. O toolbar passa o roster (getMembers) que o servidor
+// usa p/ montar essas abas.
 // Versão: 1.2 | Data: 02/08/2026
 // v1.2: botão "Google Planilhas" (SheetsExportButton, 0115) no toolbar —
 // mesmo caminho de statements do CSV, planilha criada na conta Google do
@@ -41,6 +47,14 @@ import {
 import { MONTH_LABELS } from "@/lib/date/month-labels";
 import { compReportCsv, type CompStatementInput } from "@/lib/export/comp";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/export/csv";
+import {
+  CompDetailPanel,
+  type CompDetailTarget,
+} from "./comp-detail-panel";
+import {
+  CompGroupingDialog,
+  type CompGroupingTarget,
+} from "./comp-grouping-dialog";
 import { CompPlanCard } from "./comp-plan-card";
 import {
   CompReportPrint,
@@ -122,6 +136,15 @@ function useGroupPref() {
 export function CompOverview(props: CompOverviewProps) {
   const { group, setGroup, saved, saveDefault } = useGroupPref();
   const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null);
+  // Instância ÚNICA içada do painel de conferência (padrão da tela de
+  // Registros): os cards só apontam o alvo.
+  const [detailTarget, setDetailTarget] = useState<CompDetailTarget | null>(
+    null
+  );
+  // Engrenagem do agrupamento dos blocos (config POR PLANO) — instância única
+  // içada, como o painel de detalhe.
+  const [groupingTarget, setGroupingTarget] =
+    useState<CompGroupingTarget | null>(null);
 
   const { cells, invalidPlans } = useMemo(() => {
     const byId = new Map(props.responsibles.map((r) => [r.id, r]));
@@ -289,6 +312,17 @@ export function CompOverview(props: CompOverviewProps) {
         targets={props.targetsByPlan[c.plan.id]?.[c.member.id] ?? {}}
         targetRates={props.targetRatesByPlan[c.plan.id] ?? {}}
         title={title}
+        onOpenFactorDetail={(factorId) =>
+          setDetailTarget({
+            planId: c.plan.id,
+            memberId: c.member.id,
+            memberLabel: c.member.label,
+            factorId,
+          })
+        }
+        onOpenGrouping={() =>
+          setGroupingTarget({ planId: c.plan.id, planName: c.plan.name })
+        }
       />
     ) : (
       <div
@@ -368,9 +402,9 @@ export function CompOverview(props: CompOverviewProps) {
           year={props.year}
           month={props.month}
           configured={props.sheetsWebappUrl != null}
-          admin
           webappUrl={props.sheetsWebappUrl}
           getStatements={() => cells.map(toStatement)}
+          getMembers={() => byPerson.map((p) => p.member)}
         />
         <span className="text-muted-foreground ml-auto text-sm">
           Total do mês:{" "}
@@ -461,6 +495,20 @@ export function CompOverview(props: CompOverviewProps) {
           onDone={() => setPrintTarget(null)}
         />
       ) : null}
+
+      <CompDetailPanel
+        target={detailTarget}
+        year={props.year}
+        month={props.month}
+        onClose={() => setDetailTarget(null)}
+      />
+
+      <CompGroupingDialog
+        target={groupingTarget}
+        year={props.year}
+        month={props.month}
+        onClose={() => setGroupingTarget(null)}
+      />
     </div>
   );
 }

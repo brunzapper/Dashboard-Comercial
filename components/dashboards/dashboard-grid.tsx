@@ -1,4 +1,24 @@
-// Versão: 2.19 | Data: 03/08/2026
+// Versão: 2.23 | Data: 01/09/2026
+// v2.23 (01/09/2026): auto-pan de borda só ENGATA depois de 2s contínuos na
+//   zona (HOVER_PAN_ENGAGE_MS) e só com o ponteiro DIRETAMENTE sobre o espaço
+//   vazio do canvas: guarda por containment DOM (`canvasRef.contains`) no
+//   sample + gate por tick (`shouldPan` do hook, via elementFromPoint). Os
+//   Sheets/menus do widget nascem na árvore REACT do canvas mas são portados
+//   p/ body — o pointermove deles chegava aqui e rolava o board por baixo do
+//   painel. Laser e tabela de Registros intocados.
+// v2.22 (05/08/2026): auto-pan de borda TAMBÉM sem o laser — pointermove no
+//   espaço vazio do canvas (sem botão; touch fora; submodos com overlay fora)
+//   alimenta useHoverEdgePan com engate de ~180ms (travessia da zona ao sair
+//   do dashboard não dá "chute" de scroll). Mãozinha/wheel intocados.
+// v2.21 (05/08/2026): auto-pan de borda no Ponteiro Laser — scrollRef
+//   repassado ao LaserPointerOverlay (useHoverEdgePan rola os dois eixos ao
+//   encostar o ponteiro nas bordas, sem sair do modo para a "mãozinha").
+// v2.20 (03/08/2026): Ponteiro Laser (modo apresentação) — clique-direito
+//   SOBRE um widget abre o menu do apresentador (ativar/desativar o laser —
+//   disponível a qualquer usuário — e "Editar layout"/"Concluir edição" para
+//   canEdit, via onToggleEditMode). Com o modo ativo, LaserPointerOverlay
+//   cobre o canvas (pan/menus suspensos, como drawMode/placing); props
+//   opcionais — o viewer de snapshots não as passa e nada muda lá.
 // v2.19 (03/08/2026): prop boardWidgets (TODAS as abas) repassada a
 //   WidgetCard/LineLayer → WidgetBuilder (listas "Aplicar a" dos filtros);
 //   `widgets` segue sendo só a aba visível.
@@ -104,7 +124,15 @@ import {
   useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, ClipboardPaste, Loader2, Plus } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  ClipboardPaste,
+  Loader2,
+  Pencil,
+  Plus,
+  Presentation,
+} from "lucide-react";
 import RGL from "react-grid-layout/legacy";
 import type { Layout, LayoutItem } from "react-grid-layout/legacy";
 
@@ -114,6 +142,8 @@ import "react-resizable/css/styles.css";
 import { cn } from "@/lib/utils";
 import { notifyOnError } from "@/lib/feedback/notify";
 import { useDragPan } from "@/lib/use-drag-pan";
+import { useHoverEdgePan } from "@/lib/use-hover-edge-pan";
+import { DEFAULT_LASER } from "@/lib/theme";
 import type { FieldDefinition, RecordRow } from "@/lib/records/types";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type {
@@ -174,6 +204,7 @@ import { useNavPending } from "./pending-context";
 import { FloatingPanel, MenuBtn } from "./appearance-editing";
 import { DrawToCreateOverlay } from "./draw-to-create";
 import { PlaceWidgetOverlay } from "./place-widget-overlay";
+import { LaserPointerOverlay } from "./laser-pointer-overlay";
 import { InsertTypeMenu } from "./insert-type-menu";
 import { ConnectorLayer, type ConnectorLayerApi } from "./connector-layer";
 import { LineLayer } from "./line-layer";
@@ -188,6 +219,9 @@ import type { ResponsibleOption } from "./charts/record-list-table";
 // as fórmulas px↔célula daqui e dos overlays são paramétricas nelas.
 const MX = 0;
 const MY = 0;
+
+// Pausa contínua na borda antes de o auto-pan de HOVER engatar (ms) — v2.23.
+const HOVER_PAN_ENGAGE_MS = 2000;
 
 // Fallbacks ESTÁVEIS para os cards sem dados: um literal novo por render
 // derrotaria o React.memo do WidgetCard (props sempre "diferentes").
@@ -433,6 +467,10 @@ export function DashboardGrid({
   placing = null,
   onPlace,
   onPlaceCancel,
+  laserMode = false,
+  onLaserModeChange,
+  laserColor,
+  onToggleEditMode,
   autoEditWidgetId = null,
   onAutoEditConsumed,
   onQuickCreate,
@@ -530,6 +568,14 @@ export function DashboardGrid({
   placing?: { w: number; h: number } | null;
   onPlace?: (pos: GridPosition) => void;
   onPlaceCancel?: () => void;
+  // Ponteiro Laser (modo apresentação): clique-direito sobre um widget abre o
+  // menu do apresentador. Opcionais — o viewer de snapshots não os passa
+  // (menu/overlay ficam estruturalmente desligados lá).
+  laserMode?: boolean;
+  onLaserModeChange?: (on: boolean) => void;
+  laserColor?: string;
+  // Alterna o modo edição a partir do menu (mesmo efeito do botão do topo).
+  onToggleEditMode?: () => void;
   // Abertura automática do editor de um widget recém-criado pelo Inserir
   // (tipos que exigem configuração). Consumo one-shot avisado ao shell.
   autoEditWidgetId?: string | null;
@@ -561,6 +607,12 @@ export function DashboardGrid({
   } | null>(null);
   // Flyout "Inserir ▸" aberto? Reseta a cada abertura do menu.
   const [insertOpen, setInsertOpen] = useState(false);
+  // Menu do APRESENTADOR (clique-direito SOBRE um widget): Ponteiro Laser +
+  // Editar layout. Só a posição do clique — não há célula-alvo.
+  const [laserMenuAt, setLaserMenuAt] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Dimensões dinâmicas: tamanho medido do conteúdo (unidades do grid), por
   // widget, reportado pelos cards. Só infla a renderização — o `grid_position`
@@ -832,6 +884,45 @@ export function DashboardGrid({
       !!t.closest(".react-grid-item, [data-conn-ui], [data-line-ui]"),
   });
 
+  // Só o ponteiro DIRETAMENTE sobre o espaço vazio da área de trabalho arma o
+  // auto-pan. `canvasRef.current.contains` é a peça central: os Sheets/menus
+  // do widget (editor, aparência) são renderizados de dentro do WidgetCard —
+  // logo dentro da árvore REACT do canvas, e o evento sintético chega aqui —
+  // mas ficam PORTADOS em document.body, então não são descendentes DOM do
+  // canvas. Sem essa checagem, passear o mouse dentro do painel (encostado na
+  // borda direita da tela) rolava o dashboard por baixo.
+  const overCanvasEmptySpace = useCallback((el: Element | null) => {
+    const canvas = canvasRef.current;
+    if (!el || !canvas || !canvas.contains(el)) return false;
+    return !el.closest(".react-grid-item, [data-conn-ui], [data-line-ui]");
+  }, []);
+  // Versão por COORDENADA (gate do loop): quem está no topo naquele ponto.
+  const hoverPanAllowedAt = useCallback(
+    (x: number, y: number) => overCanvasEmptySpace(document.elementFromPoint(x, y)),
+    [overCanvasEmptySpace]
+  );
+
+  // Auto-pan de borda por HOVER (v2.23): ponteiro parado perto das bordas/
+  // cantos sobre o ESPAÇO VAZIO rola a área de trabalho na direção da borda
+  // (useHoverEdgePan — mesmo gesto do modo laser). A mãozinha/wheel seguem
+  // como antes (com botão pressionado o hover-pan não amostra).
+  const hoverPan = useHoverEdgePan(scrollRef, {
+    // Pausa DELIBERADA de 2s: com o engate curto de antes, qualquer
+    // aproximação do canto já arrastava a tela. Só quem encosta na borda e
+    // ESPERA quer rolar.
+    engageMs: HOVER_PAN_ENGAGE_MS,
+    // Gate por tick: o loop não tem idle, então um painel aberto sobre um
+    // ponteiro PARADO em zona rolaria para sempre por baixo (Radix põe
+    // pointer-events:none no body — nem pointermove nem pointerleave chegam).
+    shouldPan: hoverPanAllowedAt,
+  });
+  const hoverPanStop = hoverPan.stop;
+  // Submodo com overlay ativado com o loop vivo: para na hora (o laser tem o
+  // edge-pan PRÓPRIO no overlay; rodar os dois dobraria a velocidade).
+  useEffect(() => {
+    if (drawMode || placing || laserMode) hoverPanStop();
+  }, [drawMode, placing, laserMode, hoverPanStop]);
+
   // Célula constante: `baseCols` colunas preenchem a largura visível (sem
   // margens), então widgets não mudam de tamanho quando o canvas cresce.
   const cellW = baseWidth > 0 ? baseWidth / baseCols : 0;
@@ -849,26 +940,63 @@ export function DashboardGrid({
   );
 
   // Botão esquerdo no espaço vazio arma o pan (useDragPan). Durante o desenho
-  // de criação o overlay é dono do gesto.
+  // de criação (ou com o Ponteiro Laser ativo) o overlay é dono do gesto — o
+  // pointerdown do laser BORBULHA até aqui e armaria o pan sem a guarda.
   function onCanvasPointerDown(e: React.PointerEvent) {
-    if (drawMode || placing) return; // o overlay ativo é dono do gesto
+    if (drawMode || placing || laserMode) return; // o overlay ativo é dono do gesto
     panPointerDown(e);
   }
 
-  // Clique-direito no espaço vazio do grid → menu "Colar widget". Sobre um widget
-  // (`.react-grid-item`) deixamos o menu nativo. A célula-alvo vem da posição do
-  // clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
+  // Hover-pan de borda (v2.23): amostra só ponteiro LIVRE (sem botão — a
+  // mãozinha e o drag/resize do RGL ficam de fora) e DIRETAMENTE sobre o
+  // espaço vazio do canvas (overCanvasEmptySpace, que também barra o conteúdo
+  // portado dos painéis do widget); nos submodos com overlay o dono do gesto
+  // é o overlay (o pointermove do laser BORBULHA até aqui — sem a guarda,
+  // dois loops rolariam em dobro). Toque mantém a rolagem nativa.
+  function onCanvasPointerMove(e: React.PointerEvent) {
+    if (drawMode || placing || laserMode) return;
+    if (e.pointerType === "touch") return;
+    if (e.buttons !== 0) {
+      hoverPan.stop();
+      return;
+    }
+    if (!overCanvasEmptySpace(e.target as HTMLElement)) {
+      hoverPan.stop();
+      return;
+    }
+    hoverPan.onSample(e.clientX, e.clientY);
+  }
+
+  // Clique-direito no grid: SOBRE um widget (`.react-grid-item`) abre o menu
+  // do APRESENTADOR (Ponteiro Laser — qualquer usuário — + Editar layout p/
+  // canEdit); no espaço vazio, o menu "Inserir/Colar widget" (só canEdit; sem
+  // edição o menu nativo segue valendo). A célula-alvo do colar vem da posição
+  // do clique via a mesma fórmula do RGL; o x é preso ao canvas (0..cols-w).
   function onCanvasContextMenu(e: React.MouseEvent) {
-    if (!canEdit || drawMode || placing) return;
-    if ((e.target as HTMLElement).closest(".react-grid-item")) return;
-    if ((e.target as HTMLElement).closest("[data-conn-ui]")) return;
-    if ((e.target as HTMLElement).closest("[data-line-ui]")) return;
+    if (drawMode || placing || laserMode) return; // c/ laser o overlay é o dono
+    // Menus internos dos widgets (quick-table/charts em edição/aparência) já
+    // trataram o clique com preventDefault (sem stopPropagation) — não abre
+    // um segundo menu por cima.
+    if (e.defaultPrevented) return;
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-conn-ui]")) return;
+    if (t.closest("[data-line-ui]")) return;
+    if (t.closest(".react-grid-item")) {
+      if (!onLaserModeChange) return; // snapshot viewer: menu nativo
+      e.preventDefault();
+      setInsertOpen(false);
+      setPasteAt(null);
+      setLaserMenuAt({ x: e.clientX, y: e.clientY });
+      return;
+    }
+    if (!canEdit) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || cellW <= 0) return;
     e.preventDefault();
     const gx = Math.max(0, Math.floor((e.clientX - rect.left - MX) / (cellW + MX)));
     const gy = Math.max(0, Math.floor((e.clientY - rect.top - MY) / (ROW_H + MY)));
     setInsertOpen(false);
+    setLaserMenuAt(null);
     setPasteAt({
       x: e.clientX,
       y: e.clientY,
@@ -1210,6 +1338,45 @@ export function DashboardGrid({
     </FloatingPanel>
   ) : null;
 
+  // Menu do APRESENTADOR (clique-direito sobre um widget): ativar/desativar o
+  // Ponteiro Laser (qualquer usuário) e alternar o modo edição (só canEdit —
+  // mesmo efeito do botão do topo, via onToggleEditMode do shell). Também é
+  // reaberto pelo clique-direito com o laser ATIVO (onOpenMenu do overlay).
+  const laserMenu =
+    laserMenuAt && onLaserModeChange ? (
+      <FloatingPanel
+        x={laserMenuAt.x}
+        y={laserMenuAt.y}
+        onClose={() => setLaserMenuAt(null)}
+        className="w-56"
+      >
+        <MenuBtn
+          onClick={() => {
+            setLaserMenuAt(null);
+            onLaserModeChange(!laserMode);
+          }}
+        >
+          <Presentation />
+          <span className="flex-1">
+            {laserMode ? "Desativar Ponteiro Laser" : "Ponteiro Laser"}
+          </span>
+        </MenuBtn>
+        {canEdit && onToggleEditMode ? (
+          <MenuBtn
+            onClick={() => {
+              setLaserMenuAt(null);
+              onToggleEditMode();
+            }}
+          >
+            {editMode ? <Check /> : <Pencil />}
+            <span className="flex-1">
+              {editMode ? "Concluir edição" : "Editar layout"}
+            </span>
+          </MenuBtn>
+        ) : null}
+      </FloatingPanel>
+    ) : null;
+
   // Diálogo "Adicionar página?" (mescla por drop). Confirmar fecha NA HORA e
   // aplica o efeito otimista (performMerge: membro some, pager aparece, card
   // volta à base — a posição solta nunca persiste) enquanto a action corre por
@@ -1279,9 +1446,12 @@ export function DashboardGrid({
   return (
     <div className="relative">
       {/* Overlay de recarregamento: aparece enquanto o servidor recomputa os
-          widgets após uma mudança de período/filtro. */}
+          widgets após uma navegação de período/URL. pointer-events-none: o
+          board segue INTERATIVO com os dados antigos — o overlay informa, não
+          bloqueia (saves de widget nem passam mais por aqui: rodam em
+          background via useBackgroundSave). */}
       {pending ? (
-        <div className="bg-background/50 absolute inset-0 z-20 flex items-start justify-center rounded-lg backdrop-blur-[1px]">
+        <div className="bg-background/50 pointer-events-none absolute inset-0 z-20 flex items-start justify-center rounded-lg backdrop-blur-[1px]">
           <div className="bg-background text-muted-foreground mt-6 flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm shadow-sm">
             <Loader2 className="size-4 animate-spin" />
             Carregando…
@@ -1296,6 +1466,8 @@ export function DashboardGrid({
             ref={canvasRef}
             onContextMenu={onCanvasContextMenu}
             onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerLeave={() => hoverPan.stop()}
             className={cn(
               "relative",
               panning ? "cursor-grabbing" : "cursor-grab",
@@ -1515,6 +1687,14 @@ export function DashboardGrid({
                 onCancel={onPlaceCancel}
               />
             ) : null}
+            {laserMode && !editMode && onLaserModeChange ? (
+              <LaserPointerOverlay
+                color={laserColor ?? DEFAULT_LASER}
+                onExit={() => onLaserModeChange(false)}
+                onOpenMenu={(x, y) => setLaserMenuAt({ x, y })}
+                scrollRef={scrollRef}
+              />
+            ) : null}
             {editMode && !drawMode ? (
               <>
                 {/* Barra inferior: arrasta a ALTURA (adiciona linhas vazias). */}
@@ -1570,6 +1750,7 @@ export function DashboardGrid({
         ) : null}
       </div>
       {pasteMenu}
+      {laserMenu}
       {mergeDialog}
     </div>
   );

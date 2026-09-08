@@ -10,6 +10,7 @@
 // grupo na query PostgREST, com gate (sem filtro → sem consulta extra).
 import { describe, expect, it } from "vitest";
 
+import { BUILTIN_SOURCES } from "@/lib/sources";
 import { MOCK_REUNIAO_KEYS } from "@/lib/widgets/mock-reuniao";
 import { BUCKET_FIELD_SENTINEL } from "@/lib/widgets/quick-filters";
 import {
@@ -126,6 +127,75 @@ describe("dedupeById", () => {
       "3",
     ]);
     expect(dedupeById(a, [])).toBe(a);
+  });
+});
+
+describe("ignore_period (0116) no modo lista", () => {
+  const CAT = [
+    ...BUILTIN_SOURCES,
+    {
+      key: "leads_ativos",
+      recordType: "lead",
+      label: "Leads / Ativos",
+      shortLabel: "Ativos",
+      defaultPeriodField: "source_created_at",
+      builtin: false,
+      manualEntry: false,
+      parentKey: "leads",
+      filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+      ignorePeriod: true,
+    },
+  ];
+  const period = {
+    field: "closed_at",
+    from: "2026-07-01",
+    to: "2026-07-31",
+    fieldBySource: { deals: "closed_at", leads_ativos: "source_created_at" },
+  };
+
+  it("misto: o .or() do @period ganha o pass-through do record_type isento", async () => {
+    const { db, queries } = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+      },
+    });
+    const config: WidgetConfig = {
+      ...displayConfig,
+      sources: ["deals", "leads_ativos"],
+    };
+    await runRecordList(db, config, period, AVAILABLE, CAT);
+    const q = queries.find((x) => x.table === "records")!;
+    const orStep = q.steps.find(
+      (s) =>
+        s.method === "or" &&
+        String(s.args[0]).includes("record_type.not.in.(negocio)")
+    );
+    expect(orStep).toBeDefined();
+    // O grupo datado cobre SÓ quem respeita (negocio); "lead" passa sem data.
+    expect(String(orStep!.args[0])).toContain("record_type.eq.negocio");
+    expect(String(orStep!.args[0])).not.toContain("record_type.eq.lead");
+  });
+
+  it("só a sub isenta: nenhum recorte de período desce à query", async () => {
+    const { db, queries } = fakeSupabase({
+      tables: {
+        records: () => ({ data: [], error: null }),
+        record_matches: [],
+      },
+    });
+    const config: WidgetConfig = {
+      ...displayConfig,
+      sources: ["leads_ativos"],
+    };
+    await runRecordList(db, config, period, AVAILABLE, CAT);
+    const q = queries.find((x) => x.table === "records")!;
+    // O predicado da sub segue (pass-through próprio no .or); os BOUNDS do
+    // período é que não podem aparecer em lugar nenhum da cadeia.
+    expect(JSON.stringify(q.steps)).not.toContain("2026-07");
+    expect(
+      q.steps.some((s) => s.method === "gte" || s.method === "lte")
+    ).toBe(false);
   });
 });
 

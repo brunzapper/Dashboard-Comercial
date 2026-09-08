@@ -1,4 +1,11 @@
-// Versão: 1.3 | Data: 23/07/2026
+// Versão: 1.5 | Data: 07/09/2026
+// v1.5 (07/09/2026): carrega os metadados públicos de IA da org e os
+//   passa ao shell (botão "Configurar com IA"); `maxDuration = 300`
+//   porque as actions do assistente rodam sob o segment config desta rota.
+// v1.4 (07/08/2026): catálogo COMPLETO do detalhe no recordCtx (detailFields/
+//   offBaseDefs/coreDefs/knownFieldKeys — 100% dos campos no painel do card);
+//   o filtro SQL do olho saiu e as COLUNAS do card mantêm a regra antiga via
+//   `show_in_builder === true` no filtro JS (paridade com o `.or` removido).
 // Página dedicada de um kanban (dashboards.kind 'kanban', 0062). O RSC computa
 // o quadro (lib/kanban/data.ts → runRecordList com RLS) e entrega ao client;
 // período simples via ?periodo/?de/?ate sobre o campo de data da fonte (ou do
@@ -34,6 +41,8 @@ import { runKanban } from "@/lib/kanban/data";
 import type { KanbanSettings } from "@/lib/kanban/types";
 import { taskBoardData } from "@/lib/tasks/kanban";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "@/lib/tasks/types";
+import { getActiveOrgId } from "@/lib/auth/org";
+import { loadOrgAiConfigPublic } from "@/lib/ai/config";
 import { KanbanPageClient } from "@/components/kanban/kanban-page-client";
 import { TrackLastView } from "@/components/layout/track-last-view";
 
@@ -58,6 +67,10 @@ export async function generateMetadata({
   if (!data || data.status === "trashed") return {};
   return { title: data.name as string };
 }
+
+// As actions do "Configurar com IA" rodam sob o segment config DESTA
+// rota, e o laço de autocorreção tem orçamento de 240s + a aplicação.
+export const maxDuration = 300;
 
 export default async function KanbanPage({
   params,
@@ -105,26 +118,46 @@ export default async function KanbanPage({
   const sourceDef = sources.find((s) => s.key === kanban.source) ?? null;
 
   // Definições de campo (rótulos/opções/tipos) da fonte, visíveis ao papel.
+  // TODAS as defs (07/08/2026): o filtro SQL do olho saiu — o painel de
+  // detalhe mostra 100% dos campos; as COLUNAS do card mantêm a regra antiga
+  // via `show_in_builder === true` no filtro JS abaixo (paridade byte a byte
+  // com o antigo `.or("show_in_builder.eq.true,source_system.eq.core")`).
   const { data: fieldsData } = await supabase
     .from("field_definitions")
     .select(
       "id, field_key, label, data_type, options, visible_to_roles, editable_by_roles, is_local, show_in_builder, formula, sort_order, applies_to, source_system, source_field_id, write_back, currency_code, currency_mode, show_as_percent"
     )
-    // Linhas core (0086) entram MESMO ocultas: o olho do /campos é aplicado
-      // no merge (buildAvailableFields) — sem a linha, o hardcoded reapareceria.
-      .or("show_in_builder.eq.true,source_system.eq.core")
     .order("sort_order", { ascending: true });
   const allFields = (fieldsData ?? []) as FieldDefinition[];
   // Linhas core (0086) fora da lista de campos custom (edit sheet/colunas do
   // card leem custom_fields); entram à parte no runKanban (groupDef/labels).
-  const { core: coreDefs } = splitCoreDefs(allFields);
+  const { custom: customDefs, core: coreDefs } = splitCoreDefs(allFields);
   const fields = allFields.filter(
     (f) =>
       !isCoreDef(f) &&
       f.data_type !== "calculado_agg" &&
+      f.show_in_builder === true &&
       (!kanban.source || fieldAppliesToSource(f.applies_to, kanban.source)) &&
       (isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]))
   );
+
+  // Catálogo do painel de detalhe (100% dos campos — espelho de /registros):
+  // campos da base sem recorte de olho + campos de outras bases (o painel só
+  // os exibe quando o registro tem valor); knownFieldKeys PRÉ-ACL de propósito
+  // (campo restrito por papel nunca vira "órfão" no painel).
+  const detailVisible = (f: FieldDefinition) =>
+    isAdmin || hasAnyRole(userRoles, f.visible_to_roles as RoleKey[]);
+  const detailApplies = (f: FieldDefinition) =>
+    !kanban.source || fieldAppliesToSource(f.applies_to, kanban.source);
+  const detailFields = customDefs.filter(
+    (f) =>
+      f.data_type !== "calculado_agg" && detailVisible(f) && detailApplies(f)
+  );
+  const offBaseDefs = customDefs.filter(
+    (f) =>
+      f.data_type !== "calculado_agg" && detailVisible(f) && !detailApplies(f)
+  );
+  const knownFieldKeys = customDefs.map((f) => f.field_key);
 
   // O campo que define as colunas (agrupamento por valor ou bucket de data) pode
   // ter sido escolhido pelo dono do board mesmo que ele esteja fora do construtor
@@ -238,12 +271,18 @@ export default async function KanbanPage({
   const viewAll = session.permissions.includes("view_all_records");
   const isManager = isAdmin || userRoles.includes("gestor");
 
+  // Config de IA da org (metadados públicos — nunca a chave): habilita o
+  // chat do "Configurar com IA"; sem ela o sheet ainda serve o fluxo de IA
+  // externa (copiar prompt → colar JSON).
+  const ai = await loadOrgAiConfigPublic(await getActiveOrgId());
+
   return (
     // Catálogo escopado por cima do provider do layout (⋮ → "Bases").
     <SourcesProvider sources={sources}>
       {/* Grava a view p/ restauração ao reabrir o app. */}
       <TrackLastView />
       <KanbanPageClient
+        ai={ai}
         boardId={board.id as string}
         boardName={board.name as string}
         settings={settings}
@@ -252,6 +291,10 @@ export default async function KanbanPage({
         quickCreateSource={quickCreateSource}
         recordCtx={{
           fields,
+          detailFields,
+          offBaseDefs,
+          coreDefs: [...coreDefs.values()],
+          knownFieldKeys,
           responsibles,
           operations,
           userRoles,

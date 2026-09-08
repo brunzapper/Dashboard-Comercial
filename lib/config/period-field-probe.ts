@@ -38,7 +38,9 @@ async function probeOne(
     .from("records")
     .select("id")
     .eq("record_type", recordType)
-    .eq("is_mock", false);
+    .eq("is_mock", false)
+    // Lixeira (0121): sonda só o que a consulta enxerga.
+    .is("deleted_at", null);
   if (col) {
     query = query.not(col, "is", null);
     if (nonEmpty) query = query.neq(col, "");

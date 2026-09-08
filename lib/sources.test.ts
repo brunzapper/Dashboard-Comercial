@@ -1,15 +1,17 @@
-// Versão: 1.0 | Data: 24/07/2026
+// Versão: 1.1 | Data: 12/08/2026
 // Testes dos resolvers de fonte — em especial os cientes do catálogo (0078):
 // sub-fonte compartilha o record_type da PAI, então toRecordType/toSourceKey
 // por identidade NÃO servem para subs. planSourceLegs é a invariante 10 em
 // código: pai cobre sub (absorção, sem duplicar), sub avulsa recorta a pai, e
 // "conviver"/2 subs da mesma pai viram pernas extras.
+// v1.1 (12/08/2026): manualEntryRootSource (gate do botão "+" do widget).
 import { describe, expect, it } from "vitest";
 
 import {
   BUILTIN_SOURCES,
   fieldAppliesToSource,
   isSubSource,
+  manualEntryRootSource,
   parentKeyOf,
   planSourceLegs,
   recordTypeOf,
@@ -121,6 +123,32 @@ describe("fieldAppliesToSource", () => {
   });
 });
 
+describe("manualEntryRootSource (gate do botão '+' do widget)", () => {
+  it("exatamente UMA fonte raiz com manualEntry → devolve a def", () => {
+    expect(manualEntryRootSource(["csv_vendas"], CATALOG)?.key).toBe(
+      "csv_vendas"
+    );
+  });
+
+  it("seleção vazia/undefined (= todas as fontes) → null", () => {
+    expect(manualEntryRootSource(undefined, CATALOG)).toBeNull();
+    expect(manualEntryRootSource([], CATALOG)).toBeNull();
+  });
+
+  it("2+ fontes → null (base de destino ambígua)", () => {
+    expect(manualEntryRootSource(["csv_vendas", "deals"], CATALOG)).toBeNull();
+  });
+
+  it("sub-fonte → null (subs nunca têm manualEntry)", () => {
+    expect(manualEntryRootSource(["leads_lite"], CATALOG)).toBeNull();
+  });
+
+  it("raiz de Sync (sem manualEntry) ou desconhecida → null", () => {
+    expect(manualEntryRootSource(["leads"], CATALOG)).toBeNull();
+    expect(manualEntryRootSource(["inexistente"], CATALOG)).toBeNull();
+  });
+});
+
 describe("planSourceLegs (invariante 10)", () => {
   it("seleção vazia = todas as fontes → allMain, sem subs", () => {
     expect(planSourceLegs(undefined, undefined, CATALOG)).toEqual({
@@ -170,6 +198,60 @@ describe("planSourceLegs (invariante 10)", () => {
       planSourceLegs(["deals", "csv_vendas"], undefined, CATALOG)
     ).toEqual({
       mainSources: ["deals", "csv_vendas"],
+      allMain: false,
+      extraLegs: [],
+    });
+  });
+});
+
+describe("planSourceLegs — ignore_period (0116)", () => {
+  const ATIVOS: SourceDef = {
+    key: "leads_ativos",
+    recordType: "lead",
+    label: "Leads / Ativos",
+    shortLabel: "Ativos",
+    defaultPeriodField: "source_created_at",
+    builtin: false,
+    manualEntry: false,
+    parentKey: "leads",
+    filter: [{ field: "stage", op: "eq" as const, value: "Ativo" }],
+    ignorePeriod: true,
+  };
+  const CAT = [...CATALOG, ATIVOS];
+
+  it("pai + sub-ignorante → NUNCA absorvida (perna extra, como conviver)", () => {
+    expect(planSourceLegs(["leads", "leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["leads"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+  });
+
+  it("demovida da principal mesmo selecionada ANTES de quem respeita", () => {
+    // Sem a demoção, a ordem de seleção trocaria o universo da principal (o
+    // modo lista só consulta mainSources).
+    expect(planSourceLegs(["leads_ativos", "leads"], undefined, CAT)).toEqual({
+      mainSources: ["leads"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+    expect(
+      planSourceLegs(["leads_ativos", "leads_lite"], undefined, CAT)
+    ).toEqual({
+      mainSources: ["leads_lite"],
+      allMain: false,
+      extraLegs: ["leads_ativos"],
+    });
+  });
+
+  it("sozinha (ou sem candidata do mesmo record_type) segue na principal", () => {
+    expect(planSourceLegs(["leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["leads_ativos"],
+      allMain: false,
+      extraLegs: [],
+    });
+    expect(planSourceLegs(["deals", "leads_ativos"], undefined, CAT)).toEqual({
+      mainSources: ["deals", "leads_ativos"],
       allMain: false,
       extraLegs: [],
     });
