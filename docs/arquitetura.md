@@ -3681,6 +3681,33 @@ toca inputs, erro isolado, total por membro com tabela própria),
 `lib/comp/mirror.test.ts` (builders do form, rem_comissao) e
 `lib/metas/upsert.test.ts` (find-then-update, registry). Ver invariante 26.
 
+**Validação do save extraída (08/09/2026).** As checagens de `savePlan`
+(rótulos de fator únicos, bounds de peso e de faixa, `factor.sources` ⊆
+catálogo, `memberField` textual e da fonte certa, `operation_id` proibido nos
+`filters`, fórmula pelo catálogo agregado real, moeda habilitada, resolução do
+sentinela `metricKey: "__auto__"`) moravam INLINE na action, misturadas com a
+escrita. Foram para `lib/comp/plan-validate.ts`
+(`validateCompPlanSave(supabase, orgId, {name, config})`), que devolve a config
+com `metricKey` resolvido + os `metricDefs` do registry. O `savePlan` chama o
+módulo e segue sendo a MURALHA — nada é escrito sem passar por ele.
+
+O motivo é a regra do §4.17: o parse fail-closed de `model.ts` é muralha
+ESTRUTURAL contra jsonb adulterado, mas desconhece o banco — e devolve sempre
+"Configuração do plano inválida", inútil para um laço de autocorreção. Um
+segundo consumidor (a prévia do assistente de IA de remuneração) teria de
+repetir as checagens, que é a régua paralela que a invariante 25 proíbe.
+Precedente literal: `PROFILE_OPS`/`NO_VALUE_OPS` de
+`lib/config/operation-profile.ts`. Na mesma extração, os bounds viraram
+constantes EXPORTADAS (`MAX_ABS_VALUE`, `MAX_WEIGHT_PCT`,
+`MAX_TIER_ATTAINMENT_PCT`, `MAX_TIER_RATE_PCT`, `AUTO_METRIC_KEY`) — o SPEC da
+IA vai derivá-los, e o teste de paridade precisa de algo a fiscalizar.
+
+Fiscalizado por `lib/comp/plan-validate.test.ts` (fake client fail-closed, sem
+banco). Para que um módulo `server-only` fosse exercitável, o Vitest passou a
+aliasar `server-only` para um stub vazio (`tests/setup/server-only.ts`): o
+pacote real é guarda do BUNDLE client, aplicada pelo `next build` — sob Node
+ele só empurrava o código a largar a marca para virar testável.
+
 ### 4.19 Mapeamentos de valores (de-para, 0117 — 07/08/2026)
 
 Substitui os caches "Map Cargos"/"Map Segmentos" do dashboard antigo em Apps

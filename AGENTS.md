@@ -1045,7 +1045,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `lib/export/comp-detail-sheet.test.ts` + `tests/apps-script-sheets.test.ts`
   (o `.gs` avaliado num `vm` com stubs do SpreadsheetApp — abas, hiperlinks
   por `gid`, limpeza de órfãs e as duas degradações) +
-  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. Ver
+  `lib/metas/upsert.test.ts` + `lib/config/org-features.test.ts`. **Validação
+  do save EXTRAÍDA (08/09/2026):** as checagens do `savePlan` (rótulos únicos,
+  bounds de peso/faixa, `sources`, `memberField`, `operation_id` proibido nos
+  `filters`, fórmula, moeda, sentinela `metricKey: "__auto__"`) vivem em
+  `lib/comp/plan-validate.ts` (`validateCompPlanSave`) — o `savePlan` o chama
+  e segue sendo a MURALHA. Consumidor novo (prévia de IA) usa o MESMO módulo:
+  repetir as checagens é a régua paralela que a invariante 25 proíbe, e o
+  parse cru só sabe dizer "Configuração do plano inválida". Bounds são
+  constantes EXPORTADAS de lá (o SPEC da IA os deriva). Ver
   `docs/arquitetura.md` §4.18 e invariante 26.
 - **Alocação do kanban como campo é ESPELHO derivado (28/07/2026):** o toggle
   "Expor a fase como campo do registro" (só Personalizar) cria um
