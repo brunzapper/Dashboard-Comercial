@@ -1,4 +1,9 @@
-// Versão: 1.4 | Data: 06/09/2026
+// Versão: 1.5 | Data: 08/09/2026
+// v1.5 (08/09/2026): o "Atualizando…" (dim + spinner) ficou restrito ao
+//   refetch causado pelo USUÁRIO (useRefetchOrigin sobre scopeKey+config). O
+//   dataTick do event bus — que chega do realtime a cada rodada do sync do
+//   Bitrix (pg-cron a cada minuto) — re-busca em SILÊNCIO, com os dados
+//   antigos em tela; resultado idêntico ao atual nem re-renderiza.
 // v1.4 (06/09/2026): cálculo entre células ficou DESCOBRÍVEL — barra de
 //   fórmula "fx" (endereço + conteúdo CRU da célula selecionada, editável,
 //   com ajuda de sintaxe), régua A/B/C + números de linha visíveis para quem
@@ -71,6 +76,10 @@ import {
   type CellFormulaOutput,
 } from "@/lib/widgets/quick-table/cell-formulas";
 import { saveQuickTableCells } from "@/app/(app)/dashboards/actions";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import {
   runQuickTable,
@@ -227,6 +236,7 @@ export function QuickTableWidget({
   // Re-busca com dados antigos em tela (stale-while-refetch): dim + spinner
   // até o resultado novo aterrissar — sem isso o usuário confunde o dado
   // obsoleto com o recorte novo (o overlay global do grid pode sumir antes).
+  // SÓ para refetch causado pelo usuário (v1.5) — ver originOf abaixo.
   const [refreshing, setRefreshing] = useState(false);
   // Event bus: registro mudou (mutação local ou realtime) → re-busca o BI
   // (paridade com o kanban; o fingerprint sozinho não cobre mudança de DADO).
@@ -234,14 +244,26 @@ export function QuickTableWidget({
   useDataChanged((d) => {
     if (d.kind === "record") setDataTick((t) => t + 1);
   });
+  // Origem do refetch (v1.5): escopo/config mudou (usuário) × só o dataTick do
+  // bus (fundo). O escopo efetivo deste widget inclui a config BI/expressões.
+  const originOf = useRefetchOrigin(`${scopeKey ?? ""}|${biKey}|${exprKey}`);
+  // Último resultado APLICADO, serializado: refetch de fundo que devolve o
+  // mesmo conteúdo não re-renderiza a planilha.
+  const payloadRef = useRef<string | null>(null);
+  // Rodada visível cancelada por um tick do bus segue visível (senão o dim do
+  // usuário ficaria aceso para sempre).
+  const visibleRef = useRef(false);
   useEffect(() => {
     // Modo snapshot: sem sessão a action falharia; o resultado vem
     // precomputado pela page pública (snapshotMode.quickTableResults).
     if (!needsServer || readOnly) return;
+    if (originOf()) visibleRef.current = true;
+    const userCaused = visibleRef.current;
     let cancelled = false;
-    // Pequeno atraso coalesce mudanças rápidas (digitação de {=…}, painel).
+    // Atraso curto p/ o usuário (coalesce digitação de {=…}/painel) e longo no
+    // fundo (coalesce a rajada de eventos de uma rodada de sync).
     const timer = setTimeout(() => {
-      setRefreshing(true);
+      if (userCaused) setRefreshing(true);
       // A URL é lida NA CHAMADA (não é dep): quem re-dispara o effect é o
       // scopeKey — fingerprint do escopo efetivo computado pela page, que
       // muda tanto por navegação (período/ff_) quanto por revalidação
@@ -249,17 +271,23 @@ export function QuickTableWidget({
       void runQuickTable(dashboardId, widget.id, window.location.search).then(
         (res) => {
           if (cancelled) return;
-          setFetched(res);
+          const json = JSON.stringify(res);
+          if (json !== payloadRef.current) {
+            payloadRef.current = json;
+            setFetched(res);
+          }
+          visibleRef.current = false;
           setRefreshing(false);
         }
       );
-    }, 60);
+    }, userCaused ? 60 : BUS_REFETCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-    // biKey/exprKey resumem a config/expressões — são as deps reais.
-  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id]);
+    // biKey/exprKey resumem a config/expressões — são as deps reais (e já
+    // entram no originOf, junto com o scopeKey).
+  }, [needsServer, readOnly, biKey, exprKey, scopeKey, dataTick, dashboardId, widget.id, originOf]);
   const deferred = readOnly
     ? (snapshotMode.quickTableResults?.[widget.id] ?? null)
     : fetched;

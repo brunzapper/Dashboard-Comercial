@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 28/07/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): recarga pelo event bus COALESCIDA (BUS_REFETCH_DELAY_MS)
+// — uma rajada do realtime emite um evento por kind e o sync do Bitrix roda a
+// cada minuto; antes eram até 4 recargas seguidas por rajada.
 // v1.2 (28/07/2026): repassa appearance/showNotes de settings.agenda ao
 // calendário redesenhado (aparência + anotações do dia).
 // v1.1 (21/07/2026): guarda de resposta obsoleta (contador de geração) — em
@@ -20,6 +23,7 @@ import {
 } from "@/lib/agenda/actions";
 import { addDays, monthGrid, weekOf } from "@/lib/agenda/month-grid";
 import { todayBrasiliaIso } from "@/lib/date/today";
+import { BUS_REFETCH_DELAY_MS } from "@/lib/feedback/use-refetch-origin";
 import { useDataChanged } from "@/lib/tasks/events";
 import { useSnapshotMode } from "@/components/snapshots/snapshot-mode";
 import type { TaskFormContext } from "@/components/tarefas/task-sheet";
@@ -72,9 +76,29 @@ export function AgendaWidget({
   }, [snapshotMode.snapshot, reload]);
 
   // Event bus: tarefa criada/alterada em qualquer superfície → recarrega.
-  useDataChanged(() => {
-    if (!snapshotMode.snapshot) reload();
+  // v1.3 (08/09/2026): coalescido. Uma rajada do realtime emite um evento por
+  // KIND (record/task/comment/agenda_note) e o sync do Bitrix roda a cada
+  // minuto — sem o atraso, a agenda disparava até 4 recargas seguidas. A
+  // recarga já é silenciosa (os dados antigos ficam em tela).
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
   });
+  const busTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useDataChanged(() => {
+    if (snapshotMode.snapshot) return;
+    if (busTimer.current) clearTimeout(busTimer.current);
+    busTimer.current = setTimeout(() => {
+      busTimer.current = null;
+      reloadRef.current();
+    }, BUS_REFETCH_DELAY_MS);
+  });
+  useEffect(
+    () => () => {
+      if (busTimer.current) clearTimeout(busTimer.current);
+    },
+    []
+  );
 
   if (snapshotMode.snapshot) {
     return (

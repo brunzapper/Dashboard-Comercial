@@ -2218,8 +2218,40 @@ não apaga mais o `lastPeriod` salvo do usuário.
   logo após um move é reconciliado pelo `data-changed` → novo fetch). O
   overlay global pode sumir antes de o fetch deferido terminar — o estado
   local cobre esse rabo.
+- **A ORIGEM do refetch decide o feedback (08/09/2026) — invariante:** um
+  widget deferido re-busca por DOIS gatilhos que exigem feedback OPOSTO e
+  chegavam indistinguíveis no mesmo efeito. (a) O USUÁRIO mexeu — 1ª carga,
+  período, filtro, `__qf__`/`__ff__`/`__pw__`, config do widget: o
+  fingerprint de escopo muda ⇒ feedback VISÍVEL, senão ele confunde o dado
+  obsoleto com o recorte novo. (b) O event bus avisou que um registro mudou
+  (`useDataChanged`, alimentado pelo `realtime-refresher`) ⇒ refetch
+  SILENCIOSO: dados antigos em tela, **sem overlay, sem dim, sem spinner**.
+  O caso-mãe é o sync do Bitrix, agendado a cada MINUTO
+  (`pg-cron-tick.sql`): quem só apresentava ou analisava via TODOS os
+  gráficos do dashboard piscarem sozinhos a cada rodada, o que lia como
+  defeito do sistema. Choke point ÚNICO da distinção:
+  `useRefetchOrigin(scopeKey)` (`lib/feedback/use-refetch-origin.ts` —
+  chamado UMA vez por rodada, DENTRO do efeito; generaliza o `scopeRef`
+  inline que o widget de kanban já fazia). Consumidores: lote de engine
+  (`dashboard-client`), Tabela Livre, kanban de widget; a agenda já era
+  silenciosa e só ganhou o mesmo coalescing. Três consequências
+  OBRIGATÓRIAS para consumidor novo: (1) o disparo de FUNDO espera
+  `BUS_REFETCH_DELAY_MS` (o do usuário mantém o atraso curto) — como
+  ninguém está esperando por ele, o atraso só coalesce a rajada de uma
+  rodada de sync; (2) payload de fundo IDÊNTICO ao que está em tela não
+  chama `setState` (ref com o último JSON aplicado) — o caso comum é o sync
+  ter mexido em registros fora do recorte, e re-renderizar todo gráfico à
+  toa é o custo que se quer evitar; (3) uma rodada VISÍVEL cancelada por um
+  tick do bus segue visível (`visibleRef`), senão o overlay do usuário fica
+  aceso para sempre — a rodada de fundo que a substituiu não o apagaria.
+  Pinado por `lib/feedback/use-refetch-origin.test.ts` +
+  `components/kanban/kanban-widget.test.tsx` +
+  `components/dashboards/quick-table/quick-table-widget.test.tsx`.
 - Silenciosos POR DECISÃO: `realtime-refresher` (dado de fundo, mesmo
-  recorte — overlay a cada rajada de sync seria ruído), reconciliações
+  recorte — overlay a cada rajada de sync seria ruído; o `router.refresh()`
+  que ele agenda é reconciliação RSC e não pisca por si: as chaves do grid
+  são estáveis e as animações do Recharts já são `isAnimationActive={false}`),
+  todo refetch de widget vindo do event bus (bullet acima) e reconciliações
   cosméticas (aparência, células da Tabela Livre).
 - Respostas obsoletas: fetches concorrentes usam flag `cancelled` no cleanup
   (quick-table/kanban) ou contador de geração (agenda, pager server-side do
