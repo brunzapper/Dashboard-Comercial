@@ -1,4 +1,12 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): a árvore RESPONDE ao clique. Três defeitos juntos:
+//   (a) o título do registro clicado já viajava no contexto de foco e era
+//       jogado fora — o nome só aparecia quando o payload inteiro chegava;
+//   (b) trocar de registro não limpava `data`, então a tela seguia mostrando
+//       a árvore E o nome do lead ANTERIOR até a nova chegar (não era só
+//       demora: era informação errada em tela);
+//   (c) só o ramo silencioso do §4.10 estava implementado, então a troca de
+//       registro — que é ação do USUÁRIO — não acendia nada.
 // v1.1 (09/09/2026): (a) sem registro fixo, o widget SEGUE o registro em
 //   foco do painel (o clique da tabela) — antes ficava eternamente vazio;
 //   (b) filtro por tipo de nó (settings.showKinds); (c) JANELA com ordem e
@@ -24,6 +32,7 @@ import {
   CalendarPlus,
   ChevronDown,
   ChevronRight,
+  Loader2,
   MessageSquarePlus,
   Pause,
   Play,
@@ -41,6 +50,10 @@ import {
 import { useRecordFocus } from "../record-focus-context";
 import { setRecordAttributeStatus } from "@/lib/attributes/actions";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
+import {
+  BUS_REFETCH_DELAY_MS,
+  useRefetchOrigin,
+} from "@/lib/feedback/use-refetch-origin";
 import {
   TREE_NODE_KIND_LABELS,
   TREE_WINDOW_STEP,
@@ -189,7 +202,6 @@ export function TreeWidget({
     return registerFollower();
   }, [follows, registerFollower]);
 
-  const [data, setData] = useState<TreeData | null>(null);
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(TREE_WINDOW_STEP);
   const [draft, setDraft] = useState<{ kind: "note" | "task"; text: string } | null>(
@@ -200,32 +212,49 @@ export function TreeWidget({
 
   const layout = settings?.layout ?? "por_ocorrencia";
 
-  // Sem setState SÍNCRONO no efeito (a regra do projeto): o estado só muda
-  // depois do await. Enquanto não chega, `data === null` já diz "carregando".
+  /**
+   * O que o usuário escolheu ver. Trocar qualquer parte disto é ação DELE e
+   * pede feedback; o tick do event bus não mexe aqui e por isso é silencioso.
+   */
+  const scopeKey = `${effectiveRecordId ?? ""}|${layout}|${order}|${limit}`;
+
+  // O payload guarda o ESCOPO a que pertence. É isso que faz a árvore do
+  // registro anterior sumir no mesmo instante do clique, sem `setState` dentro
+  // de efeito (que a regra do projeto proíbe): a decisão é derivada no render.
+  const [payload, setPayload] = useState<{ scope: string; data: TreeData } | null>(
+    null
+  );
+  const data = payload?.scope === scopeKey ? payload.data : null;
+
   const refresh = useCallback(async () => {
     if (!effectiveRecordId) return;
+    const scope = scopeKey;
     const next = await loadRecordTree(effectiveRecordId, layout, {
       order,
       limit,
     });
     // Payload idêntico não re-renderiza: o tick do sync roda a cada minuto e
     // não pode fazer a árvore piscar para quem só está lendo.
-    const json = JSON.stringify(next);
+    const json = `${scope}::${JSON.stringify(next)}`;
     if (json !== lastJson.current) {
       lastJson.current = json;
-      setData(next);
+      setPayload({ scope, data: next });
     }
-  }, [effectiveRecordId, layout, order, limit]);
+  }, [effectiveRecordId, layout, order, limit, scopeKey]);
+
+  const originOf = useRefetchOrigin(scopeKey);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    // Origem event bus: recarrega com o desenho antigo em tela, sem spinner
-    // nem overlay (§4.10) — o refetch de fundo é silencioso.
-    if (dataChangedAt) void refresh();
-  }, [dataChangedAt, refresh]);
+    // A ORIGEM decide o ritmo (§4.10): o que o usuário causou vai agora; o
+    // aviso do event bus espera e coalesce, porque ninguém está esperando.
+    const userCaused = originOf();
+    if (userCaused) {
+      void refresh();
+      return;
+    }
+    const t = window.setTimeout(() => void refresh(), BUS_REFETCH_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [refresh, dataChangedAt, originOf]);
 
   if (!effectiveRecordId) {
     return (
@@ -236,9 +265,25 @@ export function TreeWidget({
     );
   }
 
+  // Carregando: o nome do registro CLICADO já está aqui (veio no contexto de
+  // foco, no mesmo instante do clique) — mostrá-lo agora é a diferença entre
+  // "o sistema me ouviu" e "o sistema travou". Antes, quem seguia o foco via a
+  // árvore do lead ANTERIOR até o payload novo chegar.
   if (!data) {
     return (
-      <div className="text-muted-foreground p-4 text-sm">Carregando…</div>
+      <div className="flex h-full flex-col gap-2 p-3">
+        <div className="flex items-center gap-2">
+          <Loader2 className="text-muted-foreground size-4 animate-spin" />
+          <span className="truncate text-sm font-medium">
+            {follows && focus.title ? focus.title : "Carregando…"}
+          </span>
+        </div>
+        {follows && focus.title ? (
+          <p className="text-muted-foreground text-xs">
+            Carregando o acompanhamento deste registro…
+          </p>
+        ) : null}
+      </div>
     );
   }
 
@@ -309,7 +354,15 @@ export function TreeWidget({
                 data.attribute!.status === "pausado" ? "ativo" : "pausado";
               // Pausar NÃO remove o acompanhamento: o registro continua na
               // funcionalidade e a árvore continua inteira.
-              setData({ ...data, attribute: { ...data.attribute!, status: next } });
+              // O otimista carrega o MESMO escopo: sem isso ele nasceria
+              // "de outro recorte" e o render o descartaria na hora.
+              setPayload({
+                scope: scopeKey,
+                data: {
+                  ...data,
+                  attribute: { ...data.attribute!, status: next },
+                },
+              });
               save({
                 key: "tree-status",
                 context: "Não foi possível alterar o acompanhamento",
@@ -317,7 +370,7 @@ export function TreeWidget({
                   setRecordAttributeStatus(data.attribute!.id, next, {
                     revalidate: false,
                   }),
-                revert: () => setData(data),
+                revert: () => setPayload({ scope: scopeKey, data }),
               });
             }}
           >

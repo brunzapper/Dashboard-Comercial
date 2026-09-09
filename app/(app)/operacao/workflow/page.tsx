@@ -24,10 +24,6 @@ import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { loadSources } from "@/lib/config/sources";
 import { createClient } from "@/lib/supabase/server";
-import {
-  WORKFLOW_CONNECTION_KEYS,
-  workflowConnectionStatus,
-} from "@/lib/workflow/connections";
 import { loadOrgAutomations } from "@/lib/workflow/automations-overview";
 import { loadWorkflowRuns } from "@/lib/workflow/runs";
 import { loadWorkflowSchemas } from "@/lib/workflow/schemas";
@@ -77,9 +73,6 @@ export default async function WorkflowPage() {
           showCard: s.showCard,
           definition: s.definition,
         }))}
-        connections={WORKFLOW_CONNECTION_KEYS.map(
-          (k) => workflowConnectionStatus(k)!
-        )}
         systemFlows={SYSTEM_FLOWS}
         automations={automations}
         runs={runs}

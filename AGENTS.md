@@ -1391,6 +1391,29 @@ This version has breaking changes — APIs, conventions, and file structure may 
   o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
   blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
   `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
+- **Workflow: clicar leva a uma TELA, e o editor de regra tem dono único
+  (09/09/2026):** cada linha da lista leva a `/operacao/workflow/[item]`,
+  endereçada pelo id que `buildWorkflowCatalog` JÁ emite com namespace
+  (`schema:<uuid>`/`rule:<uuid>`) — não invente chave nova. O editor de regra
+  vive em `components/kanban/automation-rule-editor.tsx` e é renderizado pelo
+  sheet do quadro E pela tela; ele NÃO sabe onde está (o host passa
+  `onSave`/`onCancel` e as listas que dependem de haver quadro), e nunca chama
+  `saveAutomation` por conta própria — duas cópias seriam a régua paralela da
+  invariante 25. Regra com jsonb inválido NÃO abre o construtor (salvar um
+  formulário em branco sobrescreveria o que está gravado). A fileira de filtros
+  por tipo virou SEÇÕES da mesma lista (classificação sempre por
+  `catalogItemFilter`) e "Nova automação"+"Novo fluxo" viraram um **"Novo
+  esquema"** com três respostas; criar NAVEGA para a tela. Isso fechou um furo
+  real: automação de BASE (0127) não tem quadro, e "abrir o quadro" era o único
+  caminho de edição que existia.
+- **Tree: o payload carrega o ESCOPO dele (09/09/2026):** o widget guarda
+  `{ scope, data }` e o render só serve o payload cujo escopo
+  (`registro|forma|ordem|janela`) é o corrente — é isso que faz a árvore do lead
+  anterior sumir no MESMO frame do clique, sem `setState` dentro de efeito (que
+  a regra do projeto proíbe). O nome exibido enquanto carrega vem de
+  `focus.title`, publicado pela tabela no clique — não espere o payload para
+  dizer de quem é a árvore. O carimbo do event bus NÃO entra na chave de
+  escopo: é isso que mantém o tick do sync silencioso (§4.10).
 - **Workflow: a lista é UMA e o construtor não tem régua própria (09/09/2026):**
   `/operacao/workflow` tem DUAS abas (Esquemas, Execuções); automações e fluxos
   do sistema são LINHAS da lista de Esquemas, com filtro por tipo — unificação

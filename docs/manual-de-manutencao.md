@@ -1,4 +1,6 @@
-<!-- Versão: 1.36 | Data: 09/09/2026 -->
+<!-- Versão: 1.37 | Data: 09/09/2026 -->
+<!-- v1.37 (09/09/2026): §4.15 — como editar uma automação pela tela de
+     construção do Workflow (inclusive as de Base, que não têm quadro). -->
 <!-- v1.36 (09/09/2026): §4.16 — receita do acompanhamento periódico
      (série de tarefas 0132, atributo 0131 e a Tree 0133/0134), montada
      pela UI; nada do caso "Nutrição" é semeado em código. -->
@@ -1058,6 +1060,15 @@ executor ler `process.env` por um nome vindo do esquema — o jsonb é editável
 admin, e isso daria leitura arbitrária do ambiente do servidor
 (`SUPABASE_SERVICE_ROLE_KEY`, `KEY_ENCRYPTION_KEY`). O teste
 `lib/workflow/connections.test.ts` existe para travar essa porta.
+
+**Editar uma automação (09/09/2026):** Workflow → Esquemas → clique na linha.
+Vale para QUALQUER automação, inclusive as de Base, que não têm quadro para
+abrir — antes esse era o único caminho, e por isso uma regra de Base era
+ineditável pela fábrica. A tela é `/operacao/workflow/rule:<id>` e renderiza o
+MESMO editor do painel do quadro (`automation-rule-editor.tsx`). Regra cujo
+jsonb não passa no parse fail-closed aparece na lista marcada como inválida e
+NÃO abre o construtor — salvar um formulário em branco por cima dela apagaria o
+que está gravado.
 
 **Automação nova no sistema (fora do motor):** acrescente uma linha em
 `SYSTEM_FLOWS` (`lib/workflow/system-schemas.ts`). O teste confere que a rota de

@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): `tree_nodes` entra no MESMO Promise.all dos fatos. Ele
+//   não depende de tarefa, anotação nem alteração — estava em série sem
+//   razão, e cada ida ao banco pesa no tempo entre o clique e a árvore.
 // v1.1 (09/09/2026): JANELA. Um registro sob cobrança quinzenal por dois
 //   anos tem ~50 galhos, e a árvore inteira de uma vez é ilegível. O corte é
 //   por COBRANÇA, nunca por linha solta: cortar no meio de uma deixaria a
@@ -160,7 +163,7 @@ export async function loadRecordTreeFacts(
   // registro antigo não pode arrastar o histórico inteiro para descartar 90%.
   const asc = input.window?.order !== "desc";
   const cap = input.window ? FACT_FETCH_CAP : 2000;
-  const [{ data: tasks }, { data: comments }, { data: changes }] =
+  const [{ data: tasks }, { data: comments }, { data: changes }, { data: nodes }] =
     await Promise.all([
       db
         .from("tasks")
@@ -182,6 +185,14 @@ export async function loadRecordTreeFacts(
         .eq("record_id", recordId)
         .order("created_at", { ascending: asc })
         .limit(cap),
+      // Nós livres e exceções de parentesco: independentes dos fatos acima.
+      db
+        .from("tree_nodes")
+        .select(
+          "id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at"
+        )
+        .eq("scope_kind", "record")
+        .eq("scope_id", recordId),
     ]);
 
   /**
@@ -245,13 +256,7 @@ export async function loadRecordTreeFacts(
     });
   }
 
-  // --- nós livres e exceções de parentesco ---
-  const { data: nodes } = await db
-    .from("tree_nodes")
-    .select("id, kind, ref_id, node_ref, parent_ref, label, body, position, created_at")
-    .eq("scope_kind", "record")
-    .eq("scope_id", recordId);
-
+  // --- nós livres e exceções de parentesco (vieram no lote acima) ---
   const overrides: TreeParentOverride[] = [];
   for (const n of nodes ?? []) {
     const nodeRef = n.node_ref as string | null;
