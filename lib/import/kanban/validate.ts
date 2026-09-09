@@ -1,4 +1,9 @@
-// Versão: 1.0 | Data: 07/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a ação `run_schema` é RECUSADA com mensagem. O parse
+//   fail-closed a aceita (é regra válida), mas uma regra que executa um fluxo
+//   com efeito fora do sistema não nasce de JSON gerado — ela é criada à mão,
+//   nasce em simulação e alguém decide armá-la. Por isso também não entra no
+//   SPEC (instructions.ts).
 // Validador do contrato `kanban-config` (padrão §4.17). PURO — recebe o
 // contexto FRESCO carregado pelo core e não toca no banco.
 //
@@ -194,6 +199,16 @@ export function validateKanbanConfig(
         if (!rule) {
           errors.push(
             `${where} ("${nome}"): regra incompleta ou fora do contrato — confira "condicoes" (pelo menos uma) e "acao".`
+          );
+          return;
+        }
+
+        // Ação que dispara efeito FORA do sistema não nasce de JSON gerado: a
+        // regra é criada à mão, com o ensaio ligado por padrão e um humano
+        // decidindo armá-la. Fica fora do SPEC de propósito.
+        if (rule.action.type === "run_schema") {
+          errors.push(
+            `${where} ("${nome}"): a ação "executar esquema" precisa ser criada à mão no painel de automações — ela roda um fluxo que escreve fora do sistema.`
           );
           return;
         }

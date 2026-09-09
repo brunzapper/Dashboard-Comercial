@@ -627,6 +627,34 @@ This version has breaking changes — APIs, conventions, and file structure may 
   responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
+- **Ação `run_schema` (0130, 09/09/2026): a trava é DERIVADA dos passos.** Um
+  esquema é uma sequência de alterações DENTRO e FORA do sistema (criar lead é
+  só um caso) — por isso o vocabulário tem `bitrix.entity.update` (mesma chamada
+  do `drainWritebackQueue`) e `record.update`, que NÃO escreve por conta
+  própria: monta `FieldWrite[]` e chama `executeFieldWrites`, o executor único
+  do `set_field` (agora exportado de `move.ts`). O miolo da execução é
+  `runWorkflowCore` (`lib/workflow/run.ts`) — a action do formulário e o tick
+  são WRAPPERS; duas cópias seriam a régua paralela da invariante 25. Quem
+  responde o formulário é o REGISTRO: `WorkflowFormField.sourceRef` +
+  `action.map` (precedência map → sourceRef → defaultValue), resolvido PURO em
+  `decideActions` (`refs.ts` INTOCADO — sem escopo novo). A trava não é uma só,
+  e não é declarada: `schemaIsIrreversible` (registry, derivado do `creates` de
+  cada tipo de passo) decide — esquema que CRIA gasta `payload_hash = ''` e
+  consome o registro UMA vez por regra para sempre; esquema só de ALTERAÇÃO
+  guarda o hash da entrada e reexecuta quando o que seria enviado MUDA (a mesma
+  idempotência por comparação do `set_field`). O índice
+  `uq_workflow_runs_per_automation` (0130) é a trava de verdade e é
+  REIVINDICADA antes de executar (`status='iniciado'`; processo morto no meio
+  SEGURA a trava de propósito); 23505 é NO-OP, nunca `last_error`. Sentinela
+  `''` em vez de NULL porque NULL em índice único é distinto de si mesmo.
+  `simulate` ausente no jsonb parseia como TRUE (armar é ato explícito) e no
+  ensaio nada é escrito — o payload volta em `WorkflowStepOutcome.payload` e a
+  ref de passo anterior recebe `#simulado:<stepId>`. Teto PRÓPRIO
+  `MAX_SCHEMA_RUNS_PER_RUN = 5`, ainda descontado do 200 compartilhado. Falha
+  NÃO repete sozinha: `lib/workflow/notify.ts` mantém UMA tarefa aberta por
+  regra (molde de `lib/mappings/notify.ts`) e a volta à fila é o "Tentar de
+  novo" (`released_at`) da aba Execuções, admin-only. A IA do quadro RECUSA
+  `run_schema` e a ação fica FORA do SPEC. Ver `docs/arquitetura.md` §4.23.0.
 - **Ação `create_task` (0129, 08/09/2026): a idempotência é o problema
   INTEIRO.** `set_field` é idempotente por COMPARAÇÃO (valor igual ao alvo
   consome o card sem escrever); criar tarefa não tem estado anterior para

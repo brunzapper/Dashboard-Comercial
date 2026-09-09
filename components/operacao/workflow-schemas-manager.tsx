@@ -1,4 +1,8 @@
-// Versão: 3.0 | Data: 08/09/2026
+// Versão: 3.1 | Data: 09/09/2026
+// v3.1 (09/09/2026): aba EXECUÇÕES — o histórico que a 0125 gravava desde o
+//   começo e ninguém via. É lá que a SIMULAÇÃO de um esquema mostra o payload
+//   que iria para o destino, e é de lá que sai o "Tentar de novo" que devolve
+//   um registro à fila depois de uma falha.
 // v3.0 (08/09/2026): aba AUTOMAÇÕES — todas as regras da organização num lugar
 //   só (de quadro e de Base, 0127). Até aqui uma regra só era visível de
 //   dentro do quadro dela, e as de Base não têm quadro para abrir: "o que este
@@ -47,6 +51,8 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { WorkflowRunsList } from "@/components/operacao/workflow-runs-list";
+import type { WorkflowRunRow } from "@/lib/workflow/runs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,7 +95,7 @@ export interface ConnectionStatus {
   configured: boolean;
 }
 
-type Tab = "esquemas" | "automacoes" | "sistema";
+type Tab = "esquemas" | "automacoes" | "execucoes" | "sistema";
 
 function moved<T>(list: T[], index: number, delta: number): T[] {
   const target = index + delta;
@@ -604,12 +610,14 @@ export function WorkflowSchemasManager({
   connections,
   systemFlows,
   automations,
+  runs,
 }: {
   schemas: ManagedSchema[];
   connections: ConnectionStatus[];
   systemFlows: SystemFlow[];
   /** Todas as regras da org — de quadro e de Base. */
   automations: OrgAutomationRow[];
+  runs: WorkflowRunRow[];
 }) {
   const [tab, setTab] = useState<Tab>("esquemas");
 
@@ -620,6 +628,7 @@ export function WorkflowSchemasManager({
           [
             ["esquemas", "Esquemas"],
             ["automacoes", `Automações (${automations.length})`],
+            ["execucoes", "Execuções"],
             ["sistema", "Fluxos do sistema"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -637,7 +646,12 @@ export function WorkflowSchemasManager({
         ))}
       </div>
 
-      {tab === "automacoes" ? (
+      {tab === "execucoes" ? (
+        <WorkflowRunsList
+          runs={runs}
+          schemaLabels={Object.fromEntries(schemas.map((s) => [s.key, s.label]))}
+        />
+      ) : tab === "automacoes" ? (
         <div className="flex flex-col gap-3">
           <p className="text-muted-foreground text-sm">
             O que o sistema mexe sozinho nos seus registros. Regras de quadro

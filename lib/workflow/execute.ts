@@ -1,4 +1,10 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): os passos que ALTERAM (`bitrix.entity.update`,
+//   `record.update`) e o ENSAIO (`dryRun`). No ensaio cada passo resolve o
+//   payload e o devolve sem escrever nada — nem no CRM, nem no banco. O id de
+//   um passo anterior não existe num ensaio, então as refs seguintes recebem o
+//   sentinela `#simulado:<stepId>`: a prévia mostra ONDE o id entraria, sem
+//   fingir um número que alguém possa confundir com real.
 // EXECUTOR de um esquema de Workflow (0125).
 //
 // Percorre os passos habilitados em ORDEM, resolvendo os templates contra
@@ -17,14 +23,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveWorkflowConnection } from "./connections";
 import type { WorkflowRefContext } from "./refs";
 import {
-  runBitrixAddStep,
+  runBitrixEntityStep,
   bitrixEntityUrl,
   type BitrixStepDeps,
 } from "./steps/bitrix";
 import {
   runRecordCreateStep,
+  runRecordUpdateStep,
   type RecordStepDeps,
   type RecordStepSource,
+  type RecordUpdateStepDeps,
 } from "./steps/record";
 import type { WorkflowDefinition, WorkflowStep } from "./types";
 
@@ -41,6 +49,8 @@ export interface WorkflowStepOutcome {
   url?: string;
   /** Campos que o destino não aceitou — o resto foi enviado. */
   skippedFields: string[];
+  /** Só no ensaio: o payload que TERIA ido para o destino. */
+  payload?: Record<string, unknown>;
   error: string | null;
 }
 
@@ -61,10 +71,17 @@ export interface WorkflowExecuteDeps {
   record: RecordStepDeps;
   /** Base de destino do passo `record.create`, já validada pelo chamador. */
   recordSource?: RecordStepSource;
+  /** Catálogo + org do passo `record.update` (carregado pelo chamador). */
+  recordUpdate?: RecordUpdateStepDeps;
   bitrix?: BitrixStepDeps;
+  /** Ensaio: resolve tudo e não escreve em lugar nenhum. */
+  dryRun?: boolean;
   /** Injetável para teste; o padrão é o registry de conexões. */
   resolveConnection?: (key: string) => string;
 }
+
+/** Prefixo do id fictício que um passo anterior "devolve" num ensaio. */
+export const SIMULATED_ID_PREFIX = "#simulado:";
 
 function outcomeFor(step: WorkflowStep): WorkflowStepOutcome {
   return {
@@ -105,14 +122,28 @@ export async function executeWorkflow(
     }
 
     const outcome = outcomeFor(step);
+    // Num ensaio o passo anterior não devolveu id nenhum: o sentinela mantém as
+    // refs seguintes resolvíveis sem inventar um id de verdade.
+    const outputOf = (id: string | null): string | null =>
+      id ?? (deps.dryRun && !outcome.skipped ? SIMULATED_ID_PREFIX + step.id : id);
     try {
-      if (step.type === "bitrix.entity.add") {
+      if (
+        step.type === "bitrix.entity.add" ||
+        step.type === "bitrix.entity.update"
+      ) {
         const webhookUrl = resolveConnection(step.connection);
-        const res = await runBitrixAddStep(step, context, webhookUrl, deps.bitrix);
+        const res = await runBitrixEntityStep(
+          step,
+          context,
+          webhookUrl,
+          deps.bitrix,
+          { dryRun: deps.dryRun }
+        );
         warnings.push(...res.warnings);
         outcome.skipped = res.skipped;
         outcome.outputId = res.id;
         outcome.skippedFields = res.skippedFields;
+        outcome.payload = res.payload;
         outcome.ok = true;
         if (res.id) {
           outcome.url = bitrixEntityUrl(webhookUrl, step.params.entity, res.id);
@@ -120,7 +151,27 @@ export async function executeWorkflow(
         // Registra a saída MESMO quando pulado (id null): a diferença entre
         // "passo pulado" e "passo inexistente" importa em refs.ts — pulado
         // resolve vazio sem aviso, inexistente vira warning.
-        context.steps[step.id] = { id: res.id };
+        context.steps[step.id] = { id: res.skipped ? null : outputOf(res.id) };
+      } else if (step.type === "record.update") {
+        if (!deps.recordUpdate) {
+          throw new Error(
+            `O passo "${step.label}" precisa do catálogo de campos, que não foi carregado.`
+          );
+        }
+        const res = await runRecordUpdateStep(
+          step,
+          context,
+          deps.db,
+          deps.recordUpdate,
+          { dryRun: deps.dryRun }
+        );
+        warnings.push(...res.warnings);
+        outcome.skipped = res.skipped === true;
+        outcome.outputId = res.recordId;
+        outcome.skippedFields = res.skippedFields;
+        outcome.payload = res.payload;
+        outcome.ok = true;
+        context.steps[step.id] = { id: res.recordId };
       } else {
         if (!deps.recordSource) {
           throw new Error(
@@ -132,14 +183,16 @@ export async function executeWorkflow(
           context,
           deps.db,
           deps.recordSource,
-          deps.record
+          deps.record,
+          { dryRun: deps.dryRun }
         );
         warnings.push(...res.warnings);
         outcome.outputId = res.recordId;
         outcome.skippedFields = res.skippedFields;
+        outcome.payload = res.payload;
         outcome.ok = true;
         recordId = res.recordId;
-        context.steps[step.id] = { id: res.recordId };
+        context.steps[step.id] = { id: outputOf(res.recordId) };
       }
     } catch (e) {
       outcome.error = (e as Error).message;

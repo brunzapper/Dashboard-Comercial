@@ -1,3 +1,11 @@
+// Versão: 1.4 | Data: 09/09/2026
+// v1.4 (09/09/2026): ação `run_schema` — a rodada carrega os esquemas ELEGÍVEIS
+//   (ligados, gatilho `automacao`, definição válida) uma vez, o avaliador
+//   resolve as respostas a partir do registro e o executor roda o núcleo do
+//   Workflow. Teto PRÓPRIO (MAX_SCHEMA_RUNS_PER_RUN), ainda descontado do teto
+//   compartilhado: efeito fora do sistema merece um limite que caiba num
+//   engano. A trava contra repetição não está no engine — é o índice único da
+//   0130, reivindicado antes de executar.
 // Versão: 1.3 | Data: 08/09/2026
 // v1.3 (08/09/2026): ação `create_task` — mais um fato por card
 //   (`openAutomationRuleIds`, só consultado quando alguma regra ATIVA cria
@@ -45,6 +53,13 @@ import {
   loadOpenAutomationTasks,
 } from "./task";
 import { loadAutomationUniverse } from "./universe";
+import {
+  executeAutomationSchemaRuns,
+  MAX_SCHEMA_RUNS_PER_RUN,
+} from "./schema-run";
+import { syncSchemaFailureTask } from "@/lib/workflow/notify";
+import { loadWorkflowSchemas, type WorkflowSchemaRow } from "@/lib/workflow/schemas";
+import type { WorkflowDefinition } from "@/lib/workflow/types";
 import {
   ownerColumn,
   parseAutomationRule,
@@ -357,6 +372,21 @@ export async function runBoardAutomations(
       ? await loadOpenAutomationTasks(db, orgId, taskRuleIds, recordIds)
       : new Map<string, string[]>();
 
+  // Esquemas ELEGÍVEIS da rodada: uma consulta, e só quando alguma regra ativa
+  // executa esquema. Ligado + gatilho `automacao` + definição válida — o resto
+  // não entra no mapa, e é a AUSÊNCIA no mapa que deixa a regra inerte.
+  const schemaRows = new Map<string, WorkflowSchemaRow>();
+  const schemaDefs = new Map<string, WorkflowDefinition>();
+  if (rules.some((r) => r.rule.action.type === "run_schema") && orgId) {
+    for (const row of await loadWorkflowSchemas(db, orgId)) {
+      if (!row.enabled || row.triggerKind !== "automacao" || !row.definition) {
+        continue;
+      }
+      schemaRows.set(row.key, row);
+      schemaDefs.set(row.key, row.definition);
+    }
+  }
+
   const todayIso = todayBrasiliaIso();
   const openByRecord = new Map<string, number>();
   const overdueByRecord = new Map<string, number>();
@@ -460,8 +490,13 @@ export async function runBoardAutomations(
     // Campo espelho da alocação (invariante 24) — nunca alvo de set_field; o
     // vínculo pode nascer DEPOIS da regra, por isso a guarda é de avaliação.
     allocationFieldKey: universe.allocationFieldKey,
+    schemaDefs,
   };
-  const { moves, sets, tasks, ruleErrors } = decideActions(rules, facts, evalCtx);
+  const { moves, sets, tasks, schemaRuns, ruleErrors } = decideActions(
+    rules,
+    facts,
+    evalCtx
+  );
   for (const e of ruleErrors) errorByRule.set(e.ruleId, e.message);
   summary.ruleErrors.push(...ruleErrors);
 
@@ -471,6 +506,17 @@ export async function runBoardAutomations(
   const cappedTasks = tasks.slice(
     0,
     MAX_ACTIONS_PER_RUN - cappedMoves.length - cappedSets.length
+  );
+  // Teto próprio E o que sobrou do compartilhado — o menor dos dois.
+  const cappedSchemaRuns = schemaRuns.slice(
+    0,
+    Math.min(
+      MAX_SCHEMA_RUNS_PER_RUN,
+      MAX_ACTIONS_PER_RUN -
+        cappedMoves.length -
+        cappedSets.length -
+        cappedTasks.length
+    )
   );
 
   const noteFailures = (
@@ -544,6 +590,46 @@ export async function runBoardAutomations(
       summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
     noteFailures(result.failed, cappedTasks, "Falha ao abrir tarefa");
+  }
+
+  if (cappedSchemaRuns.length > 0 && orgId) {
+    if (overBudget())
+      return { ...summary, fatal: "Orçamento de tempo esgotado." };
+    const result = await executeAutomationSchemaRuns(db, {
+      runs: cappedSchemaRuns,
+      schemas: schemaRows,
+      recordById,
+      orgId,
+      createdBy: (ruleRows[0]?.created_by as string | null) ?? null,
+      defs,
+      catalog,
+    });
+    summary.moved += result.okIds.length;
+    for (const [ruleId, n] of result.runsByRule) {
+      summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
+    }
+    noteFailures(result.failed, cappedSchemaRuns, "Falha ao executar o esquema");
+
+    // Notificação: a execução falha NÃO se repete sozinha, então o erro
+    // precisa chegar a alguém. Uma tarefa aberta por REGRA que tentou nesta
+    // rodada — quem não tentou fica como está (auto-completar aí apagaria o
+    // registro de uma falha que ninguém resolveu).
+    const failedByRule = new Map<string, { recordId: string; message: string }[]>();
+    for (const r of cappedSchemaRuns) {
+      if (!failedByRule.has(r.ruleId)) failedByRule.set(r.ruleId, []);
+    }
+    for (const f of result.failed) {
+      const planned = cappedSchemaRuns.find((r) => r.recordId === f.recordId);
+      if (planned) failedByRule.get(planned.ruleId)?.push(f);
+    }
+    for (const [ruleId, failures] of failedByRule) {
+      const row = rules.find((r) => r.id === ruleId);
+      await syncSchemaFailureTask(db, orgId, {
+        ruleId,
+        ruleName: row?.name || "sem nome",
+        failures,
+      });
+    }
   }
 
   return finish();

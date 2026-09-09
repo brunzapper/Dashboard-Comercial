@@ -1,5 +1,13 @@
-// Versão: 1.0 | Data: 08/09/2026
-// Passo `bitrix.entity.add` do Workflow (0125): cria uma entidade no CRM
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): o passo passa a ALTERAR também (`bitrix.entity.update`) e
+//   a saber ensaiar (`dryRun`). Um executor só para os dois: muda o método
+//   (`crm.<entity>.update`) e o `id` do alvo — o resto (schema vivo dos campos,
+//   toBitrixValue, campo que não converte é pulado e reportado) é idêntico, e é
+//   a mesma chamada que o `drainWritebackQueue` já faz. No `dryRun` a LEITURA do
+//   schema continua (é read-only e é ela que torna a prévia fiel ao que seria
+//   enviado); o que não acontece é a escrita.
+// Passo `bitrix.entity.add`/`bitrix.entity.update` do Workflow (0125): cria ou
+// altera uma entidade no CRM
 // (crm.company.add / crm.contact.add / crm.lead.add / crm.deal.add) com o
 // payload montado a partir do formulário.
 //
@@ -19,7 +27,10 @@ import {
 } from "@/lib/sync/bitrix/writeback";
 
 import { resolveTemplate, resolvesEmpty, type WorkflowRefContext } from "../refs";
-import type { WorkflowBitrixAddStep } from "../types";
+import type {
+  WorkflowBitrixAddStep,
+  WorkflowBitrixUpdateStep,
+} from "../types";
 
 interface RawFieldDef {
   type: string;
@@ -52,7 +63,11 @@ export interface BitrixStepResult {
   skipped: boolean;
   skippedFields: string[];
   warnings: string[];
+  /** Ensaio: o payload que TERIA sido enviado (undefined fora do dryRun). */
+  payload?: Record<string, unknown>;
 }
+
+export type WorkflowBitrixStep = WorkflowBitrixAddStep | WorkflowBitrixUpdateStep;
 
 /**
  * Separa "Maria Silva Souza" em { first: "Maria", last: "Silva Souza" }.
@@ -88,13 +103,15 @@ function toMetaMap(raw: Record<string, RawFieldDef>): Map<string, BitrixFieldMet
   return metas;
 }
 
-export async function runBitrixAddStep(
-  step: WorkflowBitrixAddStep,
+export async function runBitrixEntityStep(
+  step: WorkflowBitrixStep,
   context: WorkflowRefContext,
   webhookUrl: string,
-  deps: BitrixStepDeps = {}
+  deps: BitrixStepDeps = {},
+  opts: { dryRun?: boolean } = {}
 ): Promise<BitrixStepResult> {
   const warnings: string[] = [];
+  const isUpdate = step.type === "bitrix.entity.update";
 
   // Passo condicional: sem o insumo, PULA sem erro. É como o esquema diz "não
   // crie a empresa quando o formulário não trouxe o nome dela" — e a ref para
@@ -146,6 +163,43 @@ export async function runBitrixAddStep(
     }
   }
 
+  // Alvo do update, resolvido DEPOIS dos campos (as refs são as mesmas).
+  let entityId = "";
+  if (step.type === "bitrix.entity.update") {
+    const resolvedId = resolveTemplate(step.params.entityId.value, context);
+    warnings.push(...resolvedId.warnings);
+    entityId = resolvedId.value.trim();
+    if (entityId === "") {
+      // Sem `skipIfEmpty` o esquema afirmou que o alvo SEMPRE existe. Falhar
+      // alto é melhor que um update silencioso em entidade nenhuma.
+      throw new Error(
+        `O passo "${step.label}" não resolveu o id da entidade a atualizar.`
+      );
+    }
+  }
+
+  if (opts.dryRun) {
+    // Ensaio: nada sai daqui. O id de um passo anterior ainda não existe, então
+    // o sentinela do executor já está dentro de `fields` — nunca um id
+    // inventado que alguém possa confundir com real.
+    return {
+      id: null,
+      skipped: false,
+      skippedFields,
+      warnings,
+      payload: isUpdate ? { id: entityId, fields } : { fields },
+    };
+  }
+
+  if (step.type === "bitrix.entity.update") {
+    await client.call(`crm.${step.params.entity}.update`, {
+      id: entityId,
+      fields,
+    });
+    // Update devolve boolean; o id útil para os passos seguintes é o do ALVO.
+    return { id: entityId, skipped: false, skippedFields, warnings };
+  }
+
   const res = await client.call<number | string>(
     `crm.${step.params.entity}.add`,
     { fields }
@@ -160,6 +214,9 @@ export async function runBitrixAddStep(
     warnings,
   };
 }
+
+/** Nome anterior do executor (só `add`) — mantido para não quebrar chamador. */
+export const runBitrixAddStep = runBitrixEntityStep;
 
 /**
  * URL amigável da entidade no portal, derivada da base do webhook

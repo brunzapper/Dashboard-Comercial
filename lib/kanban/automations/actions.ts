@@ -4,6 +4,9 @@
 //   não tem quadro de onde derivar autoridade, então espelha o ramo de RLS da
 //   0127 — admin da org + área `workflow` não bloqueada. É de propósito mais
 //   restrito que "editor de um board": a regra alcança a base inteira.
+// v1.3 (09/09/2026): ação run_schema — o save confere na hora que o esquema
+//   existe, está ligado e tem gatilho de AUTOMAÇÃO. A guarda definitiva segue
+//   no avaliador (o esquema pode mudar depois), como no set_field.
 // v1.2 (31/07/2026): ação set_field — saveAutomation valida o campo alvo no
 //   SAVE (setFieldTargetError, mesma régua da avaliação — mensagem imediata;
 //   a guarda definitiva segue no evaluate) e o catálogo ganha settableFields
@@ -33,6 +36,11 @@ import { loadSourceLabels } from "@/lib/config/source-labels";
 import { loadCorrespondences } from "@/lib/correspondences";
 import { buildAvailableFields } from "@/lib/widgets/fields";
 import { toFieldOptions, type FieldOption } from "@/lib/widgets/filter-ops";
+import { schemaIsIrreversible } from "@/lib/workflow/registry";
+import {
+  loadWorkflowSchemaByKey,
+  loadWorkflowSchemas,
+} from "@/lib/workflow/schemas";
 import { ensureKanbanConfigGate } from "../config-gate";
 import { KANBAN_OVERFLOW_KEY } from "../types";
 import { loadKanbanOwnerContext, runBoardAutomations } from "./engine";
@@ -188,6 +196,36 @@ export async function saveAutomation(
     });
     if (err) return { ok: false, message: err };
   }
+  if (rule.action.type === "run_schema") {
+    // Mesma régua da avaliação, adiantada para virar mensagem na hora: o
+    // esquema precisa existir, estar ligado e ter gatilho de AUTOMAÇÃO (um
+    // formulário espera alguém preenchendo). A guarda definitiva segue no
+    // avaliador — o esquema pode ser desligado depois da regra salva.
+    const orgId = await getActiveOrgId();
+    const schema = await loadWorkflowSchemaByKey(
+      supabase,
+      orgId,
+      rule.action.schemaKey
+    );
+    if (!schema) {
+      return { ok: false, message: "Esquema não encontrado." };
+    }
+    if (!schema.enabled) {
+      return { ok: false, message: `O esquema "${schema.label}" está desligado.` };
+    }
+    if (schema.triggerKind !== "automacao") {
+      return {
+        ok: false,
+        message: `"${schema.label}" é um formulário — só esquemas com gatilho de automação podem ser executados por uma regra.`,
+      };
+    }
+    if (!schema.definition) {
+      return {
+        ok: false,
+        message: `A configuração do esquema "${schema.label}" está inválida.`,
+      };
+    }
+  }
   const row = {
     name: input.name.trim().slice(0, 120),
     enabled: Boolean(input.enabled),
@@ -305,6 +343,23 @@ export interface AutomationFieldCatalog {
   // Tipo booleano do alvo (o editor de valor vira Sim/Não): refs booleanos.
   booleanFields: string[];
   numericFields: string[];
+  // Esquemas do Workflow executáveis por regra (ligados + gatilho `automacao`
+  // + definição válida) — a MESMA régua que o avaliador usa. Lista vazia é
+  // informação: a opção aparece desabilitada com motivo, nunca escondida.
+  schemas: AutomationSchemaOption[];
+}
+
+/** Um esquema oferecível na ação "Executar esquema". */
+export interface AutomationSchemaOption {
+  key: string;
+  label: string;
+  /**
+   * O esquema CRIA algo (derivado dos passos): a execução é uma por registro,
+   * para sempre. A UI avisa antes de alguém armar a regra.
+   */
+  irreversible: boolean;
+  /** Campos de entrada do esquema e a origem já declarada em cada um. */
+  fields: { key: string; label: string; sourceRef: string | null }[];
 }
 
 /** Catálogo de campos/bases p/ o editor de condições (por base do quadro).
@@ -395,6 +450,21 @@ export async function getAutomationFieldOptions(
     else if (f.data_type === "numero" || f.data_type === "moeda")
       numericFields.push(`custom:${f.field_key}`);
   }
+  const schemas: AutomationSchemaOption[] = (
+    await loadWorkflowSchemas(supabase, orgId)
+  )
+    .filter((r) => r.enabled && r.triggerKind === "automacao" && r.definition)
+    .map((r) => ({
+      key: r.key,
+      label: r.label,
+      irreversible: schemaIsIrreversible(r.definition!),
+      fields: r.definition!.form.fields.map((f) => ({
+        key: f.key,
+        label: f.label,
+        sourceRef: f.sourceRef ?? null,
+      })),
+    }));
+
   return {
     ok: true,
     catalog: {
@@ -405,6 +475,7 @@ export async function getAutomationFieldOptions(
       settableFields: toFieldOptions(settable, labels),
       booleanFields,
       numericFields,
+      schemas,
     },
   };
 }

@@ -1,3 +1,11 @@
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): ação `run_schema`. As respostas que o esquema receberia de
+//   uma pessoa são resolvidas AQUI, do registro — como o `set_field` resolve o
+//   valor e o `create_task` resolve o prazo: o planejador entrega payload
+//   pronto e o executor só escreve. Precedência de cada campo: `map` da regra →
+//   `sourceRef` do esquema → `defaultValue`. Esquema ausente do catálogo da
+//   rodada (apagado, desligado, inválido ou com gatilho de formulário) deixa a
+//   regra INERTE com erro, pelo mesmo caminho de "coluna removida".
 // Versão: 1.2 | Data: 08/09/2026
 // v1.2 (08/09/2026): ação `create_task`. A idempotência dela não cabe na
 //   comparação que o `set_field` usa (criar tarefa não tem estado anterior
@@ -30,6 +38,7 @@ import { recordMatchesConds } from "@/lib/widgets/calc-metrics";
 import { recordRawValue } from "@/lib/widgets/quick-filters";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
+import type { WorkflowDefinition } from "@/lib/workflow/types";
 import { KANBAN_OVERFLOW_KEY, type KanbanColumn } from "../types";
 import {
   relatedCountKey,
@@ -70,6 +79,13 @@ export interface EvalContext {
   // ESPELHO da alocação nunca é alvo de set_field (dessincronizaria
   // kanban_placements, a verdade). null/ausente = sem vínculo.
   allocationFieldKey?: string | null;
+  /**
+   * Esquemas de Workflow ELEGÍVEIS da rodada (chave → definição), carregados
+   * uma vez pelo engine: ligados, com gatilho `automacao` e definição válida.
+   * Ausência da chave é o que torna a regra inerte — o mesmo tratamento da
+   * coluna que sumiu.
+   */
+  schemaDefs?: Map<string, WorkflowDefinition>;
 }
 
 export interface PlannedMove {
@@ -85,6 +101,16 @@ export interface PlannedSet {
   field: string;
   value: string;
   ruleId: string;
+}
+
+/** Execução de esquema decidida por uma regra run_schema. */
+export interface PlannedSchemaRun {
+  recordId: string;
+  ruleId: string;
+  schemaKey: string;
+  simulate: boolean;
+  /** Respostas do formulário do esquema, já resolvidas a partir do registro. */
+  form: Record<string, string>;
 }
 
 /** Tarefa decidida por uma regra create_task. */
@@ -302,6 +328,7 @@ export function decideActions(
   moves: PlannedMove[];
   sets: PlannedSet[];
   tasks: PlannedTask[];
+  schemaRuns: PlannedSchemaRun[];
   ruleErrors: RuleError[];
 } {
   const ruleErrors: RuleError[] = [];
@@ -326,6 +353,17 @@ export function decideActions(
         ruleErrors.push({ ruleId: rule.id, message: err });
         continue;
       }
+    } else if (action.type === "run_schema") {
+      // O esquema pode ter sido apagado, desligado, invalidado ou virado
+      // formulário DEPOIS da regra criada. Regra inerte com motivo, nunca uma
+      // execução às cegas.
+      if (!ctx.schemaDefs?.has(action.schemaKey)) {
+        ruleErrors.push({
+          ruleId: rule.id,
+          message: `O esquema "${action.schemaKey}" não está disponível para automação (apagado, desligado, inválido ou é um formulário).`,
+        });
+        continue;
+      }
     }
     // create_task não tem alvo no catálogo para validar: o título já veio
     // não-vazio do parse, e o resto (prazo, responsável) é opcional.
@@ -335,6 +373,7 @@ export function decideActions(
   const moves: PlannedMove[] = [];
   const sets: PlannedSet[] = [];
   const tasks: PlannedTask[] = [];
+  const schemaRuns: PlannedSchemaRun[] = [];
   for (const card of cards) {
     if (card.isMock) continue;
     for (const rule of active) {
@@ -364,6 +403,17 @@ export function decideActions(
             ruleId: rule.id,
           });
         }
+      } else if (action.type === "run_schema") {
+        const def = ctx.schemaDefs?.get(action.schemaKey);
+        if (def) {
+          schemaRuns.push({
+            recordId: card.record.id,
+            ruleId: rule.id,
+            schemaKey: action.schemaKey,
+            simulate: action.simulate,
+            form: resolveSchemaForm(def, card, ctx, action.map),
+          });
+        }
       } else {
         // Idempotência: já existe tarefa ABERTA desta regra para este
         // registro? Consome o card sem criar outra. Concluída a tarefa, a
@@ -391,5 +441,33 @@ export function decideActions(
       break; // primeira regra que casou consome o card (mesmo sem escrever)
     }
   }
-  return { moves, sets, tasks, ruleErrors };
+  return { moves, sets, tasks, schemaRuns, ruleErrors };
+}
+
+/**
+ * Preenche o formulário do esquema a partir do REGISTRO. Quem responderia é uma
+ * pessoa; aqui responde o card, e a origem de cada campo tem precedência fixa:
+ *   1. `map` da regra (a mesma regra pode alimentar o esquema de outra Base);
+ *   2. `sourceRef` do esquema (a origem padrão, declarada uma vez);
+ *   3. `defaultValue` (a constante do esquema).
+ * Ref que não resolve vira string vazia — o passo trata campo vazio como "não
+ * enviar", que é o comportamento certo para um dado que o registro não tem.
+ */
+function resolveSchemaForm(
+  def: WorkflowDefinition,
+  card: CardFacts,
+  ctx: EvalContext,
+  map?: Record<string, string>
+): Record<string, string> {
+  const form: Record<string, string> = {};
+  for (const field of def.form.fields) {
+    const ref = map?.[field.key] ?? field.sourceRef;
+    let value = "";
+    if (ref) {
+      const raw = recordRawValue(ref, card.record, ctx.available);
+      value = raw == null ? "" : String(raw);
+    }
+    form[field.key] = value.trim() !== "" ? value : (field.defaultValue ?? "");
+  }
+  return form;
 }
