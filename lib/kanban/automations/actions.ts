@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): dono de tipo `source` (0127). O gate ramifica: quadro
+//   segue em `ensureKanbanConfigGate` (admin || dono || acesso 'edit'); BASE
+//   não tem quadro de onde derivar autoridade, então espelha o ramo de RLS da
+//   0127 — admin da org + área `workflow` não bloqueada. É de propósito mais
+//   restrito que "editor de um board": a regra alcança a base inteira.
 // v1.2 (31/07/2026): ação set_field — saveAutomation valida o campo alvo no
 //   SAVE (setFieldTargetError, mesma régua da avaliação — mensagem imediata;
 //   a guarda definitiva segue no evaluate) e o catálogo ganha settableFields
@@ -7,7 +12,7 @@
 //   dos campos seleção, ref = coluna crua p/ overrides core — 0086) p/ o
 //   picker de VALOR das condições (FilterValuePicker).
 // Server Actions das automações do kanban: CRUD das regras (client do USUÁRIO
-// — RLS de kanban_automations exige editor do board nos dois braços; a action
+// — RLS de automation_rules exige editor do board nos dois braços; a action
 // espelha o gate p/ mensagens amigáveis), "Executar agora" (mesma engine do
 // tick, com service role + deadline curto — a AUTORIA é gate de editor, a
 // execução tem autoridade de sistema, como o sync) e o catálogo de campos p/ o
@@ -16,6 +21,7 @@
 "use server";
 
 import { getSessionInfo } from "@/lib/auth/session";
+import { isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -32,6 +38,7 @@ import { KANBAN_OVERFLOW_KEY } from "../types";
 import { loadKanbanOwnerContext, runBoardAutomations } from "./engine";
 import { setFieldTargetError } from "./evaluate";
 import {
+  ownerColumn,
   parseAutomationRule,
   type AutomationOwner,
   type AutomationRow,
@@ -44,12 +51,28 @@ export interface AutomationActionState {
   message?: string;
 }
 
-// Gate de configuração do quadro: extraído p/ lib/kanban/config-gate.ts
-// (compartilhado com a alocação-como-campo). Alias local mantém os call sites.
-const ensureCanConfig = ensureKanbanConfigGate;
+// Gate de configuração. Quadro: lib/kanban/config-gate.ts (compartilhado com
+// a alocação-como-campo). Base: espelho do ramo de RLS da 0127 — a RLS segue
+// sendo a muralha, isto aqui é a mensagem amigável antes do banco.
+async function ensureCanConfig(
+  owner: AutomationOwner
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (owner.kind !== "source") return ensureKanbanConfigGate(owner);
+  const session = await getSessionInfo();
+  if (!session) return { ok: false, message: "Sessão expirada." };
+  if (!session.roles.includes("admin")) {
+    return {
+      ok: false,
+      message: "Apenas administradores configuram automações de base.",
+    };
+  }
+  if (await isSettingsAreaDenied("workflow")) {
+    return { ok: false, message: "Acesso a esta área foi bloqueado." };
+  }
+  return { ok: true };
+}
 
-const ownerCol = (owner: AutomationOwner) =>
-  owner.kind === "widget" ? "widget_id" : "board_id";
+const ownerCol = (owner: AutomationOwner) => ownerColumn(owner);
 
 /** Regras do quadro, em ordem de avaliação. */
 export async function listAutomations(
@@ -59,7 +82,7 @@ export async function listAutomations(
   if (!gate.ok) return gate;
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .select(
       "id, name, enabled, position, rule, last_run_at, last_error, last_moved_count"
     )
@@ -105,11 +128,32 @@ export async function saveAutomation(
       message: "Regra incompleta: confira as condições e a ação.",
     };
   }
+  if (rule.action.type === "move_to_column") {
+    if (owner.kind === "source") {
+      // Sem quadro não há coluna para onde mover. A avaliação já recusaria
+      // (columns vazio), mas deixar salvar criaria uma regra que nunca roda e
+      // só se explica abrindo o last_error.
+      return {
+        ok: false,
+        message:
+          "Mover de coluna exige um quadro. Nesta automação, use “Definir campo”.",
+      };
+    }
+    if (rule.action.targetKey === KANBAN_OVERFLOW_KEY) {
+      return { ok: false, message: 'A coluna "Outros" não recebe cards.' };
+    }
+  }
   if (
-    rule.action.type === "move_to_column" &&
-    rule.action.targetKey === KANBAN_OVERFLOW_KEY
+    owner.kind === "source" &&
+    rule.conditions.some((c) => c.kind === "time" && c.basis.type === "in_column")
   ) {
-    return { ok: false, message: 'A coluna "Outros" não recebe cards.' };
+    // Mesma razão: "parado nesta coluna há N dias" mede a posição no quadro,
+    // e não há posição. A condição seria inerte em silêncio.
+    return {
+      ok: false,
+      message:
+        "A condição “parado na coluna” exige um quadro. Use “campo alterado” ou “criado”.",
+    };
   }
   const session = await getSessionInfo();
   const supabase = await createClient();
@@ -152,7 +196,7 @@ export async function saveAutomation(
   };
   if (input.id) {
     const { data, error } = await supabase
-      .from("kanban_automations")
+      .from("automation_rules")
       .update(row)
       .eq("id", input.id)
       .eq(ownerCol(owner), owner.id)
@@ -164,7 +208,7 @@ export async function saveAutomation(
     return { ok: true, id: input.id };
   }
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .insert({
       ...row,
       [ownerCol(owner)]: owner.id,
@@ -187,7 +231,7 @@ export async function deleteAutomation(
   if (!gate.ok) return gate;
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("kanban_automations")
+    .from("automation_rules")
     .delete()
     .eq("id", id)
     .eq(ownerCol(owner), owner.id)
@@ -209,7 +253,7 @@ export async function reorderAutomations(
   const supabase = await createClient();
   for (let i = 0; i < orderedIds.length; i++) {
     const { error } = await supabase
-      .from("kanban_automations")
+      .from("automation_rules")
       .update({ position: i })
       .eq("id", orderedIds[i])
       .eq(ownerCol(owner), owner.id);
@@ -287,7 +331,11 @@ export async function getAutomationFieldOptions(
         .or("show_in_builder.eq.true,source_system.eq.core")
         .order("sort_order", { ascending: true }),
       loadSourceLabels(supabase, sources, orgId),
-      owner ? loadKanbanOwnerContext(supabase, owner) : Promise.resolve(null),
+      // Dono de Base não tem quadro (nem allocationFieldKey) — a consulta
+      // devolveria "Widget não encontrado." e seria descartada.
+      owner && owner.kind !== "source"
+        ? loadKanbanOwnerContext(supabase, owner)
+        : Promise.resolve(null),
     ]);
   const allocationFieldKey =
     ownerCtx && typeof ownerCtx !== "string"

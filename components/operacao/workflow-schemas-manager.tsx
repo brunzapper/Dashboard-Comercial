@@ -1,4 +1,11 @@
-// Versão: 2.0 | Data: 08/09/2026
+// Versão: 3.0 | Data: 08/09/2026
+// v3.0 (08/09/2026): aba AUTOMAÇÕES — todas as regras da organização num lugar
+//   só (de quadro e de Base, 0127). Até aqui uma regra só era visível de
+//   dentro do quadro dela, e as de Base não têm quadro para abrir: "o que este
+//   sistema mexe sozinho nos meus registros?" não tinha resposta. É uma VISÃO
+//   — ligar/desligar e executar agora chamam `saveAutomation`/
+//   `runAutomationsNow`, os MESMOS choke points do painel do quadro, que
+//   continua existindo. Duas superfícies, um núcleo.
 // v2.0 (08/09/2026): a fábrica passa a dizer ONDE cada esquema foi parar. Um
 //   formulário ganha o cabeçalho de destino com a URL COPIÁVEL — é esse link
 //   que o gestor manda para o time ("cole e lance o lead"), e sem ele a pessoa
@@ -33,6 +40,8 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Play,
+  TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -43,6 +52,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import { formSchemaHref } from "@/lib/operacao/form-routes";
+import {
+  runAutomationsNow,
+  saveAutomation,
+} from "@/lib/kanban/automations/actions";
+import {
+  automationActionLabel,
+  automationSummary,
+} from "@/lib/kanban/automations/summary";
+import type { OrgAutomationRow } from "@/lib/workflow/automations-overview";
 import { stepTypeDef } from "@/lib/workflow/registry";
 import type { SystemFlow } from "@/lib/workflow/system-schemas";
 import type {
@@ -71,7 +89,7 @@ export interface ConnectionStatus {
   configured: boolean;
 }
 
-type Tab = "esquemas" | "sistema";
+type Tab = "esquemas" | "automacoes" | "sistema";
 
 function moved<T>(list: T[], index: number, delta: number): T[] {
   const target = index + delta;
@@ -445,6 +463,109 @@ function SchemaCard({
   );
 }
 
+function AutomationRowCard({ row }: { row: OrgAutomationRow }) {
+  const { save, pendingKeys } = useBackgroundSave();
+  const [enabled, setEnabled] = useState(row.enabled);
+  const [running, setRunning] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
+  const busy = pendingKeys.has(row.id);
+
+  const runNow = async () => {
+    setRunning(true);
+    setRunMessage(null);
+    const res = await runAutomationsNow(row.owner);
+    setRunning(false);
+    setRunMessage(res.message ?? (res.ok ? "Executada." : "Falhou."));
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{row.name || "Sem nome"}</span>
+            <Badge variant="outline" className="text-xs">
+              {row.ownerLabel}
+            </Badge>
+            {row.rule ? (
+              <Badge variant="outline" className="text-xs">
+                {automationActionLabel(row.rule)}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            {row.rule
+              ? automationSummary(row.rule)
+              : "Configuração inválida — esta regra não roda."}
+          </p>
+        </div>
+
+        <label className="flex shrink-0 items-center gap-2 text-sm">
+          <Checkbox
+            checked={enabled}
+            disabled={busy}
+            onCheckedChange={(v) => {
+              const next = v === true;
+              const prev = enabled;
+              if (!row.rule) return;
+              setEnabled(next);
+              save({
+                key: row.id,
+                context: "Não foi possível salvar a automação",
+                action: () =>
+                  saveAutomation(row.owner, {
+                    id: row.id,
+                    name: row.name,
+                    enabled: next,
+                    position: row.position,
+                    rule: row.rule,
+                  }),
+                revert: () => setEnabled(prev),
+              });
+            }}
+          />
+          Ativa
+        </label>
+      </div>
+
+      {row.lastError ? (
+        <p className="text-destructive flex items-start gap-1.5 text-xs">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+          {row.lastError}
+        </p>
+      ) : null}
+
+      <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-xs">
+        <span>
+          {row.lastRunAt
+            ? `Última execução: ${new Date(row.lastRunAt).toLocaleString("pt-BR")} · ${row.lastActionCount} ação(ões)`
+            : "Ainda não rodou."}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2"
+          disabled={running || !row.rule}
+          onClick={runNow}
+        >
+          <Play className="size-3.5" />
+          {running ? "Executando…" : "Executar agora"}
+        </Button>
+        {row.ownerHref ? (
+          <Link
+            href={row.ownerHref}
+            className="text-primary inline-flex items-center gap-1 hover:underline"
+          >
+            abrir o quadro <ExternalLink className="size-3" />
+          </Link>
+        ) : null}
+        {runMessage ? <span>{runMessage}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function SystemFlowCard({ flow }: { flow: SystemFlow }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border p-4">
@@ -482,10 +603,13 @@ export function WorkflowSchemasManager({
   schemas,
   connections,
   systemFlows,
+  automations,
 }: {
   schemas: ManagedSchema[];
   connections: ConnectionStatus[];
   systemFlows: SystemFlow[];
+  /** Todas as regras da org — de quadro e de Base. */
+  automations: OrgAutomationRow[];
 }) {
   const [tab, setTab] = useState<Tab>("esquemas");
 
@@ -495,6 +619,7 @@ export function WorkflowSchemasManager({
         {(
           [
             ["esquemas", "Esquemas"],
+            ["automacoes", `Automações (${automations.length})`],
             ["sistema", "Fluxos do sistema"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -512,7 +637,22 @@ export function WorkflowSchemasManager({
         ))}
       </div>
 
-      {tab === "esquemas" ? (
+      {tab === "automacoes" ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-muted-foreground text-sm">
+            O que o sistema mexe sozinho nos seus registros. Regras de quadro
+            continuam editáveis dentro do quadro; as de base vivem aqui. As com
+            erro aparecem primeiro.
+          </p>
+          {automations.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              Nenhuma automação nesta organização.
+            </p>
+          ) : (
+            automations.map((a) => <AutomationRowCard key={a.id} row={a} />)
+          )}
+        </div>
+      ) : tab === "esquemas" ? (
         <div className="flex flex-col gap-4">
           {schemas.length === 0 ? (
             <p className="text-muted-foreground text-sm">

@@ -1,9 +1,20 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.3 | Data: 08/09/2026
+// v1.3 (08/09/2026): ação `create_task` — abre uma tarefa vinculada ao
+//   registro. Diferente de `set_field`, que é idempotente por COMPARAÇÃO
+//   (valor igual consome sem escrever), criar tarefa não tem estado anterior
+//   para comparar: a trava é o índice único parcial da 0129 (uma tarefa ABERTA
+//   por regra × registro) mais o gate no avaliador.
+// v1.2 (08/09/2026): dono de tipo `source` (0127) — a regra passa a poder ter
+//   uma BASE como universo, sem quadro nenhum. O motor nunca foi sobre kanban:
+//   `decideActions` usa a coluna só para validar o alvo de `move_to_column`, e
+//   as condições de tempo `field_changed`/`created` já são de REGISTRO. O que
+//   prendia ao quadro era a origem das linhas — agora ela ramifica
+//   (lib/kanban/automations/universe.ts).
 // Modelo das AUTOMAÇÕES do kanban (modo registros): uma regra é uma lista de
 // condições em E (podem MESCLAR as 4 famílias — campo do registro, registros
 // conectados, tarefas e tempo) + uma ação. Várias regras em ordem (position)
 // dão o OU: a primeira que casar vence por card. Persistida como jsonb
-// versionado em kanban_automations.rule (0109); parse fail-closed — regra
+// versionado em automation_rules.rule (0109); parse fail-closed — regra
 // malformada nunca roda (vira last_error), nunca "roda como der".
 // A avaliação é 100% no engine (evaluate.ts/engine.ts) — RPCs intocados.
 // v1.1 (31/07/2026): ação `set_field` (grava um valor fixo num campo do
@@ -57,7 +68,19 @@ export type AutomationCondition =
  *  na avaliação e no save, nunca aqui (fail-closed estrutural apenas). */
 export type AutomationAction =
   | { type: "move_to_column"; targetKey: string }
-  | { type: "set_field"; field: string; value: string };
+  | { type: "set_field"; field: string; value: string }
+  // `dueInDays` conta a partir do dia da execução (null = sem prazo).
+  // `responsibleFrom`: "record" usa o responsável do registro; "fixed" usa
+  // `responsibleId`. Sem dono, a tarefa nasce sem responsável — visível a quem
+  // a RLS de tasks já deixa ver.
+  | {
+      type: "create_task";
+      title: string;
+      description?: string;
+      dueInDays?: number | null;
+      responsibleFrom?: "record" | "fixed" | "none";
+      responsibleId?: string | null;
+    };
 
 export interface AutomationRule {
   v: 1;
@@ -65,7 +88,7 @@ export interface AutomationRule {
   action: AutomationAction;
 }
 
-/** Linha de kanban_automations já parseada p/ UI/engine. */
+/** Linha de automation_rules já parseada p/ UI/engine. */
 export interface AutomationRow {
   id: string;
   name: string;
@@ -78,7 +101,33 @@ export interface AutomationRow {
 }
 
 /** Dono da automação — mesmo shape do KanbanOwner (widget ou board dedicado). */
-export type AutomationOwner = { kind: "widget" | "board"; id: string };
+/**
+ * Dono da regra — e, por consequência, o UNIVERSO que ela avalia.
+ * `widget`/`board`: os cards de um quadro. `source`: os registros de uma Base
+ * (`data_sources.key`), sem quadro — aí `move_to_column` não existe e a
+ * condição de tempo `in_column` fica inerte (não há posição para medir).
+ * Exatamente um deles por linha (CHECK da 0127).
+ */
+export type AutomationOwner =
+  | { kind: "widget"; id: string }
+  | { kind: "board"; id: string }
+  | { kind: "source"; id: string };
+
+/** Coluna de `automation_rules` que guarda este dono. */
+export function ownerColumn(
+  owner: AutomationOwner
+): "widget_id" | "board_id" | "source_key" {
+  if (owner.kind === "widget") return "widget_id";
+  if (owner.kind === "board") return "board_id";
+  return "source_key";
+}
+
+/** O universo é um quadro? (decide guardas, placements e `move_to_column`) */
+export function isBoardOwner(
+  owner: AutomationOwner
+): owner is { kind: "widget" | "board"; id: string } {
+  return owner.kind !== "source";
+}
 
 // Teto de condições por regra (sanidade do jsonb; a UI limita antes).
 export const MAX_RULE_CONDITIONS = 10;
@@ -184,6 +233,37 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
       actionRaw.targetKey !== ""
     ) {
       action = { type: "move_to_column", targetKey: actionRaw.targetKey };
+    } else if (
+      actionRaw.type === "create_task" &&
+      typeof actionRaw.title === "string" &&
+      actionRaw.title.trim() !== ""
+    ) {
+      // Só estrutura, como as demais. Prazo negativo não existe (tarefa que
+      // nasce vencida é ruído); ausente/inválido = sem prazo.
+      const rawDue = actionRaw.dueInDays;
+      const dueInDays =
+        typeof rawDue === "number" && Number.isFinite(rawDue) && rawDue >= 0
+          ? Math.floor(rawDue)
+          : null;
+      const from = actionRaw.responsibleFrom;
+      const responsibleFrom =
+        from === "record" || from === "fixed" || from === "none"
+          ? from
+          : "record";
+      action = {
+        type: "create_task",
+        title: actionRaw.title.trim(),
+        ...(typeof actionRaw.description === "string" &&
+        actionRaw.description.trim() !== ""
+          ? { description: actionRaw.description.trim() }
+          : {}),
+        dueInDays,
+        responsibleFrom,
+        responsibleId:
+          responsibleFrom === "fixed" && typeof actionRaw.responsibleId === "string"
+            ? actionRaw.responsibleId
+            : null,
+      };
     } else if (
       // set_field: só estrutura (v1 sem "limpar" — value não-vazio); o alvo é
       // validado na avaliação/save (o catálogo pode mudar após a regra).

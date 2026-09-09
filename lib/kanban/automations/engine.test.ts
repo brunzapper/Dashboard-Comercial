@@ -113,7 +113,7 @@ describe("runBoardAutomations — quadro por valor", () => {
   function makeFake() {
     return fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow()], error: null },
@@ -178,7 +178,7 @@ describe("runBoardAutomations — quadro por valor", () => {
     // Bookkeeping da regra: rodada ok, 1 movido.
     const bk = queries.find(
       (q) =>
-        q.table === "kanban_automations" &&
+        q.table === "automation_rules" &&
         q.steps.some((s) => s.method === "update")
     )!;
     const bkArgs = bk.steps.find((s) => s.method === "update")!
@@ -191,7 +191,7 @@ describe("runBoardAutomations — quadro por valor", () => {
   it("regra malformada não roda e sai em last_error", async () => {
     const { db, queries } = fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow({ v: 99 })], error: null },
@@ -212,7 +212,7 @@ describe("runBoardAutomations — quadro por valor", () => {
     expect(summary.ruleErrors[0]?.message).toMatch(/inválida/);
     const bk = queries.find(
       (q) =>
-        q.table === "kanban_automations" &&
+        q.table === "automation_rules" &&
         q.steps.some((s) => s.method === "update")
     )!;
     const bkArgs = bk.steps.find((s) => s.method === "update")!
@@ -223,7 +223,7 @@ describe("runBoardAutomations — quadro por valor", () => {
   it("modo tarefas é fatal visível (nunca silêncio)", async () => {
     const { db, queries } = fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow()], error: null },
@@ -237,7 +237,7 @@ describe("runBoardAutomations — quadro por valor", () => {
     expect(summary.fatal).toMatch(/tarefas/);
     const bk = queries.find(
       (q) =>
-        q.table === "kanban_automations" &&
+        q.table === "automation_rules" &&
         q.steps.some((s) => s.method === "update")
     )!;
     expect(
@@ -290,7 +290,7 @@ describe("runBoardAutomations — ação set_field", () => {
   function makeFake(rows: ReturnType<typeof recordRow>[]) {
     return fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow(SET_RULE)], error: null },
@@ -347,7 +347,7 @@ describe("runBoardAutomations — ação set_field", () => {
 
     const bk = queries.find(
       (q) =>
-        q.table === "kanban_automations" &&
+        q.table === "automation_rules" &&
         q.steps.some((s) => s.method === "update")
     )!;
     expect(
@@ -385,7 +385,7 @@ describe("runBoardAutomations — ação set_field", () => {
     };
     const { db, queries } = fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow(badRule)], error: null },
@@ -430,7 +430,7 @@ describe("runBoardAutomations — colunas Personalizar", () => {
     };
     const { db, queries } = fakeSupabase({
       tables: {
-        kanban_automations: (q) =>
+        automation_rules: (q) =>
           q.steps.some((s) => s.method === "update")
             ? { data: null, error: null }
             : { data: [ruleRow(rule)], error: null },

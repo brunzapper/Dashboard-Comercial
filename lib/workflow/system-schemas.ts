@@ -94,7 +94,7 @@ export const SYSTEM_FLOWS: SystemFlow[] = [
     code: "lib/sync/bitrix/writeback.ts",
   },
   {
-    key: "kanban_automations",
+    key: "automation_rules",
     label: "Automações do kanban",
     description:
       "Move cards de coluna e preenche campos quando as condições da regra batem.",

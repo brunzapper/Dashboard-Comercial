@@ -211,7 +211,10 @@ export function validateKanbanConfig(
             );
             return;
           }
-        } else if (!settable.has(rule.action.field)) {
+        } else if (
+          rule.action.type === "set_field" &&
+          !settable.has(rule.action.field)
+        ) {
           errors.push(
             `${where} ("${nome}"): o campo "${rule.action.field}" não pode ser gravado por automação (data, calculado, relação, campo casado/unificado, coluna do núcleo não editável ou o espelho da fase deste quadro).`
           );

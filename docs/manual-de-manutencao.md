@@ -1,4 +1,9 @@
-<!-- Versão: 1.32 | Data: 08/09/2026 -->
+<!-- Versão: 1.35 | Data: 08/09/2026 -->
+<!-- v1.35 (08/09/2026): 0129 — ação "Abrir tarefa" e a trava contra
+     duplicata. -->
+<!-- v1.34 (08/09/2026): 0128 (rename da tabela) e a aba Automações do
+     Workflow. -->
+<!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
 <!-- v1.32 (08/09/2026): §4.15 — 0126: onde o formulário vive agora (rota
      própria + card), como pegar o link para o time, e o que fazer quando o
      card não aparece. -->
@@ -767,6 +772,52 @@ Regras que movem cards ou DEFINEM CAMPOS automaticamente
   `record.deleted`; falhas parciais aparecem num painel no topo do quadro
   com "Tentar novamente" — os cards falhos voltam sozinhos à coluna de
   origem.
+
+#### Automação sem quadro (0127, 08/09/2026)
+
+Aplicar `0127_automation_source_scope.sql`. A regra passa a poder ter uma BASE
+como universo: `automation_rules.source_key` em vez de `widget_id`/`board_id`.
+
+O que muda na prática:
+
+- **Quem configura**: admin da org (as de quadro seguem em "editor do board").
+  É mais restrito de propósito — a regra alcança a base inteira.
+- **O que ela pode fazer**: "Definir campo". Mover de coluna exige quadro e é
+  recusado no save.
+- **Condições**: todas, menos "parado na coluna há N dias" (não há coluna).
+  "Campo alterado há N dias" e "criado há N dias" funcionam igual.
+- **Write-back**: automação de Base escreve LOCAL. O toggle "devolver ao
+  Bitrix" é do quadro, e sem quadro ele não existe.
+
+**Onde ver todas as regras.** Operação → Workflow → aba **Automações** lista as
+da organização inteira (de quadro e de base), com o dono, o resumo da regra e o
+último erro. Ligar/desligar e "Executar agora" funcionam dali. O painel dentro
+do quadro continua existindo e é o lugar de criar regra de coluna — as duas
+telas chamam as mesmas actions.
+
+**A tabela mudou de nome (0128).** `kanban_automations` virou
+`automation_rules`. A ROTA do tick NÃO mudou (`/api/kanban-automations/tick`):
+o pg_cron já agendado aponta para ela, e trocar o caminho derrubaria o
+agendamento até alguém reaplicar `supabase/apply/pg-cron-kanban-automations.sql`.
+Aplique a 0127 e a 0128 juntas.
+
+**Ação "Abrir tarefa" (0129).** Aplicar `0129_task_automation_link.sql`. A
+regra abre UMA tarefa por registro e não repete enquanto ela estiver aberta —
+concluída, a regra cobra de novo se a condição voltar a valer. O responsável
+padrão é o do registro; o prazo é em dias a partir da execução (vazio = sem
+prazo).
+
+**Tarefa duplicada.** Não deveria acontecer: o índice
+`uq_tasks_open_per_automation` impede duas ABERTAS da mesma regra para o mesmo
+registro. Se aparecer, confira se a 0129 foi aplicada (`\d tasks` deve mostrar
+`automation_rule_id`) — sem o índice, as duas camadas de proteção viram uma só,
+e a que sobra não cobre corrida entre o tick e o "Executar agora".
+
+**Regra de Base não roda.** Confira, nesta ordem: a base existe (`source_key`
+tem que casar com `data_sources.key` — base renomeada vira fatal legível no
+`last_error`); a regra está habilitada; e o tick está de pé
+(`pg-cron-kanban-automations.sql`). O tick enumera os três tipos de dono no
+mesmo round-robin.
 
 ### 4.13 Atualização em massa por IA (registros-update, 31/07/2026)
 

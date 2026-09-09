@@ -1,4 +1,7 @@
-// Versão: 1.2 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): ação "Abrir tarefa" (create_task). Idempotente por regra ×
+//   registro (índice único da 0129) — reexecutar não duplica; concluída a
+//   tarefa, a regra cobra de novo se a condição voltar a valer.
 // Painel "Automações" do kanban (modo registros, sem bucket de data): lista de
 // regras (ordem = ordem de avaliação; primeira que casa vence), editor de
 // condições das 4 famílias — Campo do registro / Registros conectados /
@@ -138,15 +141,19 @@ interface RuleDraft {
   name: string;
   enabled: boolean;
   conds: CondDraft[];
-  actionType: "move_to_column" | "set_field";
+  actionType: "move_to_column" | "set_field" | "create_task";
   targetKey: string;
   setField: string;
   setValue: string;
+  taskTitle: string;
+  /** Vazio = sem prazo. */
+  taskDueDays: string;
 }
 
 const ACTION_OPTIONS: ComboboxOption[] = [
   { value: "move_to_column", label: "Mover para a coluna" },
   { value: "set_field", label: "Definir campo" },
+  { value: "create_task", label: "Abrir tarefa" },
 ];
 
 const BOOL_OPTIONS: ComboboxOption[] = [
@@ -219,6 +226,26 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
     }
   }
   if (conditions.length === 0) return null;
+  if (draft.actionType === "create_task") {
+    if (draft.taskTitle.trim() === "") return null;
+    const days = draft.taskDueDays.trim();
+    const dueInDays = days === "" ? null : Number(days);
+    if (dueInDays != null && (!Number.isFinite(dueInDays) || dueInDays < 0)) {
+      return null;
+    }
+    return {
+      v: 1,
+      conditions,
+      action: {
+        type: "create_task",
+        title: draft.taskTitle.trim(),
+        dueInDays,
+        // O responsável do REGISTRO é o padrão: a tarefa nasce com quem já
+        // cuida daquele lead, não numa fila anônima.
+        responsibleFrom: "record",
+      },
+    };
+  }
   if (draft.actionType === "set_field") {
     if (!draft.setField || draft.setValue.trim() === "") return null;
     return {
@@ -292,6 +319,11 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
     targetKey: action.type === "move_to_column" ? action.targetKey : "",
     setField: action.type === "set_field" ? action.field : "",
     setValue: action.type === "set_field" ? action.value : "",
+    taskTitle: action.type === "create_task" ? action.title : "",
+    taskDueDays:
+      action.type === "create_task" && action.dueInDays != null
+        ? String(action.dueInDays)
+        : "",
   };
 }
 
@@ -552,6 +584,8 @@ export function AutomationsSheet({
                 enabled: true,
                 conds: [emptyCond()],
                 actionType: "move_to_column",
+                taskTitle: "",
+                taskDueDays: "",
                 targetKey: "",
                 setField: "",
                 setValue: "",
@@ -652,6 +686,16 @@ export function AutomationsSheet({
                             ? row.rule.action.targetKey
                             : "")}
                       </span>
+                    </>
+                  ) : row.rule.action.type === "create_task" ? (
+                    <>
+                      abrir a tarefa{" "}
+                      <span className="font-medium">
+                        {row.rule.action.title}
+                      </span>
+                      {row.rule.action.dueInDays != null
+                        ? ` (prazo ${row.rule.action.dueInDays} dia(s))`
+                        : ""}
                     </>
                   ) : (
                     <>
@@ -1080,6 +1124,37 @@ export function AutomationsSheet({
                     aria-label="Coluna de destino"
                   />
                 </div>
+              ) : draft.actionType === "create_task" ? (
+                <>
+                  <div className="flex min-w-56 flex-1 flex-col gap-1">
+                    <Label className="text-xs">Título da tarefa</Label>
+                    <Input
+                      value={draft.taskTitle}
+                      onChange={(e) =>
+                        setDraft((d) =>
+                          d ? { ...d, taskTitle: e.target.value } : d
+                        )
+                      }
+                      placeholder="Ex.: Retomar contato"
+                      aria-label="Título da tarefa"
+                    />
+                  </div>
+                  <div className="flex min-w-32 flex-col gap-1">
+                    <Label className="text-xs">Prazo (dias)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={draft.taskDueDays}
+                      onChange={(e) =>
+                        setDraft((d) =>
+                          d ? { ...d, taskDueDays: e.target.value } : d
+                        )
+                      }
+                      placeholder="sem prazo"
+                      aria-label="Prazo em dias"
+                    />
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="flex min-w-48 flex-1 flex-col gap-1">

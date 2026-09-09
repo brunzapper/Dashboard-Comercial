@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): o executor de ESCRITA DE CAMPO deixa de receber
+//   `KanbanSettings` e passa a receber só `writeBack: boolean` — era a única
+//   coisa que ele usava dali. Escrever num campo nunca foi sobre kanban, e a
+//   dependência inteira do objeto de quadro impedia uma automação de BASE
+//   (0127) de usar o mesmo executor sem fabricar um quadro falso. Os moves
+//   seguem recebendo `settings` (eles precisam do quadro de verdade).
 // Executor SERVICE-ROLE das ações decididas pelas automações do kanban.
 // Não refatora updateRecord (acoplado à sessão/FormData) — replica o MÍNIMO de
 // efeitos, como o sync faz: coluna Personalizar = upsert de kanban_placements
@@ -84,7 +90,8 @@ export interface FieldWrite {
 interface FieldWriteBatch {
   writes: FieldWrite[];
   recordById: Map<string, RecordRow>;
-  settings: KanbanSettings;
+  /** Devolver a escrita ao CRM (toggle do quadro; sem quadro, false). */
+  writeBack: boolean;
   orgId: string | null;
   defs: FieldDefinition[];
 }
@@ -106,7 +113,7 @@ async function executeFieldWrites(
   db: SupabaseClient,
   batch: FieldWriteBatch
 ): Promise<FieldWriteOutcome> {
-  const { settings, orgId, defs } = batch;
+  const { writeBack, orgId, defs } = batch;
   const failed: FieldWriteOutcome["failed"] = [];
   const okWrites: FieldWrite[] = [];
   if (batch.writes.length === 0) return { okWrites, failed };
@@ -235,9 +242,10 @@ async function executeFieldWrites(
     console.warn("[kanban-automations] audit pós-escrita falhou:", e);
   }
 
-  // Write-back (settings.writeBack): mesmo gating do updateRecord com a marca
-  // da coluna (write_back__<campo>) — o toggle do quadro vale como override.
-  if (settings.writeBack) {
+  // Write-back: mesmo gating do updateRecord com a marca da coluna
+  // (write_back__<campo>) — o toggle do quadro vale como override. Automação
+  // de BASE não tem quadro, então chega sempre false: escrita local.
+  if (writeBack) {
     const auditByRecord = new Map(audits.map((a) => [a.record_id, a]));
     for (const w of okWrites) {
       const rec = batch.recordById.get(w.recordId);
@@ -329,7 +337,7 @@ export async function executeAutomationSets(
   batch: {
     sets: PlannedSet[];
     recordById: Map<string, RecordRow>;
-    settings: KanbanSettings;
+    writeBack: boolean;
     orgId: string | null;
     defs: FieldDefinition[];
   }
@@ -360,7 +368,7 @@ export async function executeAutomationSets(
   const outcome = await executeFieldWrites(db, {
     writes,
     recordById: batch.recordById,
-    settings: batch.settings,
+    writeBack: batch.writeBack,
     orgId: batch.orgId,
     defs: batch.defs,
   });
@@ -462,7 +470,7 @@ export async function executeAutomationMoves(
   const outcome = await executeFieldWrites(db, {
     writes,
     recordById: batch.recordById,
-    settings,
+    writeBack: Boolean(settings.writeBack),
     orgId,
     defs,
   });

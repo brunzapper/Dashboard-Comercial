@@ -2818,7 +2818,7 @@ vínculo/desvínculo/filha sob elas (a rotina é a dona; invariante 22).
 
 ### 4.15 Automações do kanban e ações em massa (27/07/2026)
 
-**Automações** (`kanban_automations`, 0109): regras condicionais por quadro
+**Automações** (`automation_rules`, 0109): regras condicionais por quadro
 (widget kanban OU kanban dedicado — XOR de dono, padrão 0067) que MOVEM cards
 automaticamente. Uma regra = `{ v:1, conditions[], action }` (jsonb versionado,
 parse fail-closed em `lib/kanban/automations/types.ts`): as condições valem em
@@ -2875,7 +2875,7 @@ Gatilhos: tick por minuto (`/api/kanban-automations/tick`, pg_cron via
 45s; round-robin pelos donos mais antigos — `min(last_run_at)`), hook
 pós-sync (`maybeRunKanbanAutomationsAfterJob`, deadline curto, DEPOIS do
 auto-match p/ contagens verem vínculos frescos) e "Executar agora" na UI.
-Autoria = gate de EDITOR do board (RLS de `kanban_automations` via
+Autoria = gate de EDITOR do board (RLS de `automation_rules` via
 `auth_board_editable` nos dois braços + org); execução tem autoridade de
 sistema (como o sync) — documentado, não bug. Bookkeeping por regra
 (`last_run_at`/`last_error`/`last_moved_count`) em vez de tabela de runs. UI:
@@ -2973,6 +2973,83 @@ ITEM (falha parcial não desfaz). O recorte do botão é o MESMO das automaçõe
 da página (mesmo arranjo do `AutomationsSheet`) — recomputá-las exigiria rodar
 o quadro inteiro só para montar um prompt; elas só ampliam o universo de alvos
 aceitos, e alvo inexistente já cai no `last_error` da avaliação.
+
+#### Automação sem quadro: escopo de Base (0127, 08/09/2026)
+
+O motor de 0109 nunca foi sobre kanban. `decideActions` usa a coluna SÓ para
+validar o alvo de `move_to_column`; as condições de tempo `field_changed` e
+`created` já são de REGISTRO; `set_field` escreve num campo. O que prendia ao
+quadro era a origem das linhas — `runKanban`.
+
+A 0127 dá à regra um terceiro tipo de dono: `source_key`, uma Base. A montagem
+do universo saiu para `lib/kanban/automations/universe.ts` e ramifica lá
+(quadro → `runKanban`, byte-idêntico ao que estava embutido; Base →
+`runRecordList` com `columnKey` vazio e `columns: []`). Tudo depois disso —
+fatos, decisão, execução — é compartilhado.
+
+**Nenhuma guarda nova foi inventada.** Sem colunas, `decideActions` recusa
+`move_to_column` pelo MESMO caminho que trata "coluna removida do quadro", e a
+condição `in_column` não casa porque não há posição para medir. O `saveAutomation`
+recusa as duas na hora com mensagem própria — regra que nunca roda e só se
+explica abrindo o `last_error` é pior que um erro no save.
+
+**Autoridade.** Os dois ramos de RLS existentes derivam de `auth_board_editable`.
+Uma regra de Base não tem quadro de onde derivar nada, então o terceiro ramo é
+o papel: **admin da org**. Deliberadamente mais restrito que "editor de um
+board" — a regra alcança a base inteira, não os cards de um quadro que a pessoa
+já podia editar. O gate da action espelha isso; a RLS segue sendo a muralha.
+
+**Write-back.** `executeFieldWrites` passou a receber `writeBack: boolean` em
+vez de `KanbanSettings` — era a única coisa que usava dali. Sem quadro não há
+toggle, então automação de Base escreve LOCAL. Os moves seguem recebendo
+`settings` (precisam do quadro de verdade).
+
+**A tabela foi renomeada (0128).** `kanban_automations` passou a guardar regras
+sem kanban nenhum, e o nome mentia. Virou `automation_rules` — enquanto o
+volume era pequeno e antes de o nome virar folclore, que é o destino das chaves
+de área históricas (`fontes` aponta para `/registros/bases`) e não dá mais para
+desfazer sem quebrar overrides gravados. Uma segunda tabela nunca esteve em
+jogo: deixaria dois lugares onde uma regra pode estar e um tick varrendo os
+dois. A ROTA do tick segue `/api/kanban-automations/tick`, porque o pg_cron já
+agendado aponta para ela — uma tabela se renomeia numa transação, um cron
+agendado noutro sistema, não.
+
+Testes: `universe.test.ts` (o ramo de Base não lê `dashboards`/`widgets`/
+`kanban_placements` — o fake é fail-closed, então encostar em quadro explode o
+teste) e os 80 testes de kanban existentes, que passam intocados e são a prova
+de não-regressão do ramo de quadro.
+
+#### Ação `create_task` (0129, 08/09/2026)
+
+A terceira ação: abrir uma tarefa vinculada ao registro ("lead parado há 7 dias
+→ cobrar retomada").
+
+**A idempotência é o problema inteiro.** `set_field` resolve por COMPARAÇÃO —
+valor atual igual ao alvo consome o card sem escrever. Criar tarefa não tem
+estado anterior para comparar, e o tick roda A CADA MINUTO: sem trava, uma
+regra abre 1.440 tarefas por dia, por registro. Duas camadas:
+
+1. `CardFacts.openAutomationRuleIds` — quais regras já têm tarefa ABERTA para
+   aquele registro. O avaliador pula (evita a ida ao banco). A consulta só roda
+   quando alguma regra ATIVA da rodada cria tarefa.
+2. `uq_tasks_open_per_automation` (0129) — índice único parcial em
+   `(automation_rule_id, record_id) where completed_at is null`. É a trava de
+   verdade: uma corrida entre o tick agendado e um "Executar agora" esbarra
+   nele, e o executor trata o 23505 como **no-op**, não como falha (poluir o
+   `last_error` com "duplicate key" seria ruído sobre o resultado desejado).
+
+O `where completed_at is null` é deliberado: concluída a tarefa, a regra pode
+abrir outra se a condição voltar a valer. É cobrança recorrente, não marcador
+de "já cobrei uma vez na vida".
+
+**Escrita.** Não usa `createTask` (`lib/tasks/actions.ts`) — é action
+`(prevState, formData)` que depende de `getSessionInfo()`, e num tick não há
+sessão. Reusa o padrão de `lib/mappings/notify.ts`, a outra rotina que cria
+tarefa sem usuário: service role, org EXPLÍCITA, webhook `task.created` à mão.
+Autoria = quem salvou a regra; execução = autoridade de sistema.
+
+O responsável padrão é o **do registro** — a tarefa nasce com quem já cuida
+daquele lead, não numa fila anônima.
 
 ### 4.16 Alocação do kanban como campo do registro (28/07/2026)
 
@@ -3189,7 +3266,7 @@ card org-específico do hub Workspace desde 05/08/2026; ex-aba de
 Configurações, chave de ÁREA `remuneracao` intocada) calcula, edita e publica
 a remuneração variável do time. Duas tabelas (0112): `comp_plans` (plano por org: nome, base variável
 default e `config` jsonb VERSIONADO — parse FAIL-CLOSED em `lib/comp/model.ts`,
-padrão kanban_automations) e `comp_entries` (lançamento por plano×responsável×
+padrão automation_rules) e `comp_entries` (lançamento por plano×responsável×
 ano×mês: base individual, `inputs` com overrides/bônus, `computed` com o
 snapshot CRU do recompute e `total` efetivo). Modelo:
 `total = base (R$) × Σ(peso% × atingimento%) + bônus`, com fórmula LIVRE de
@@ -4347,6 +4424,20 @@ carregado), `syncFieldCatalog` o materializa em `sync_config.bitrix_status_codes
 (mapa vazio NUNCA sobrescreve um cache bom) e `toBitrixValue` ganhou o caso —
 com o mapa OPCIONAL, então todo call site antigo segue byte-idêntico.
 
+**Automações da organização, num lugar só.** Até aqui uma regra só era visível
+de dentro do quadro dela, e as de Base (0127) não têm quadro para abrir: "o que
+este sistema mexe sozinho nos meus registros?" não tinha resposta. A aba
+Automações do Workflow lista todas (`lib/workflow/automations-overview.ts`),
+com o dono em linguagem humana ("Base Leads", "Quadro Parceiros") e as
+quebradas no topo — são as que exigem alguém.
+
+É uma VISÃO. Ligar/desligar e "Executar agora" chamam `saveAutomation` e
+`runAutomationsNow`, os MESMOS choke points do painel do quadro, que continua
+existindo (é lá que faz sentido criar "quando entrar nesta coluna", com as
+colunas à vista). Duas superfícies, um núcleo — o precedente do de-para, cujo
+sheet e painel de IA compartilham o mesmo core. A leitura usa o client do
+USUÁRIO: a RLS decide o que ele enxerga, nada de service role.
+
 **Fluxos do sistema (`lib/workflow/system-schemas.ts`).** "Quais automações
 este sistema roda sozinho?" não tinha resposta em lugar nenhum: sync, write-back,
 automações do kanban, de-para, auto-match, webhooks, ingestão e snapshots
@@ -4663,7 +4754,7 @@ principalmente — para mantenedores humanos.
     emite `record.deleted`. As ações em massa devolvem resultado POR ITEM e o
     board só reconcilia `data` → estado local com a fila DRENADA (guarda de
     resync) — remover a guarda faz o refresh clobrar o movimento otimista.
-    Regras vivem em `kanban_automations` (tabela própria): NÃO as mova para
+    Regras vivem em `automation_rules` (tabela própria): NÃO as mova para
     `settings.kanban` (o widget-builder reconstrói o objeto no save e as
     derrubaria; o tick perderia a enumeração indexada).
 

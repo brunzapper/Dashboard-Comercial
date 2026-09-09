@@ -42,7 +42,7 @@
 // resolveOperationMembers/explicitMemberIds combinam manual ∪ operações; a
 // resolução opId→ids canônicos é dos CALLERS (loadOperationScopes + canon).
 // Modelo PURO da remuneração variável (0112). Um plano (comp_plans.config,
-// jsonb versionado — parse FAIL-CLOSED, padrão kanban_automations) define
+// jsonb versionado — parse FAIL-CLOSED, padrão automation_rules) define
 // fatores com peso %, fórmula AGREGADA (realizado computado pelo engine via
 // runCalculatedWidget — nunca aqui), vínculo `metricKey` com o registry de
 // metas (alvos são LINHAS de `goals`, scope 'responsible', id canônico) e,

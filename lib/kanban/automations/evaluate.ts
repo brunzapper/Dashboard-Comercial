@@ -1,4 +1,10 @@
-// Versão: 1.1 | Data: 31/07/2026
+// Versão: 1.2 | Data: 08/09/2026
+// v1.2 (08/09/2026): ação `create_task`. A idempotência dela não cabe na
+//   comparação que o `set_field` usa (criar tarefa não tem estado anterior
+//   para comparar), então vem como FATO da rodada: `openAutomationRuleIds`
+//   diz quais regras já têm tarefa ABERTA para aquele registro, e a regra
+//   consome o card sem criar de novo. A trava definitiva é o índice único
+//   parcial da 0129 — isto aqui evita a ida ao banco, não substitui.
 // Avaliador PURO das automações do kanban: sem I/O — recebe fatos por card
 // (CardFacts, montados pelo engine) e decide as AÇÕES. Semântica:
 // regras em ordem (position), a PRIMEIRA que casar vence por card; decisões
@@ -48,6 +54,9 @@ export interface CardFacts {
   sourceCreatedAt: string | null;
   // kanban_placements.updated_at (colunas Personalizar) — null = sem posição.
   placementUpdatedAt: string | null;
+  // Regras que JÁ têm tarefa aberta para este registro (ação create_task).
+  // Vazio quando nenhuma regra ativa da rodada cria tarefa.
+  openAutomationRuleIds: string[];
 }
 
 export interface EvalContext {
@@ -78,6 +87,18 @@ export interface PlannedSet {
   ruleId: string;
 }
 
+/** Tarefa decidida por uma regra create_task. */
+export interface PlannedTask {
+  recordId: string;
+  ruleId: string;
+  title: string;
+  description: string | null;
+  /** YYYY-MM-DD, já resolvido a partir de `dueInDays` e do dia da rodada. */
+  dueDate: string | null;
+  /** Responsável resolvido pelo avaliador (do registro ou fixo); null = sem. */
+  responsibleId: string | null;
+}
+
 export interface RuleError {
   ruleId: string;
   message: string;
@@ -85,6 +106,14 @@ export interface RuleError {
 
 /** Dias de calendário entre `iso` e hoje (positivo = passado); null = sem
  *  data válida. Compara os prefixos YYYY-MM-DD — nunca converte fuso. */
+/** `iso` + N dias, no calendário (prefixo YYYY-MM-DD — nunca converte fuso). */
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  // Date.UTC evita o salto de horário de verão que o construtor local traria.
+  const t = Date.UTC(y, m - 1, d) + days * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
 export function daysSince(
   iso: string | null | undefined,
   todayIso: string
@@ -269,7 +298,12 @@ export function decideActions(
   rules: AutomationRow[],
   cards: CardFacts[],
   ctx: EvalContext
-): { moves: PlannedMove[]; sets: PlannedSet[]; ruleErrors: RuleError[] } {
+): {
+  moves: PlannedMove[];
+  sets: PlannedSet[];
+  tasks: PlannedTask[];
+  ruleErrors: RuleError[];
+} {
   const ruleErrors: RuleError[] = [];
   const validKeys = new Set(
     ctx.columns.filter((c) => !c.noDrop).map((c) => c.key)
@@ -286,18 +320,21 @@ export function decideActions(
         });
         continue;
       }
-    } else {
+    } else if (action.type === "set_field") {
       const err = setFieldTargetError(action.field, ctx);
       if (err) {
         ruleErrors.push({ ruleId: rule.id, message: err });
         continue;
       }
     }
+    // create_task não tem alvo no catálogo para validar: o título já veio
+    // não-vazio do parse, e o resto (prazo, responsável) é opcional.
     active.push(rule);
   }
 
   const moves: PlannedMove[] = [];
   const sets: PlannedSet[] = [];
+  const tasks: PlannedTask[] = [];
   for (const card of cards) {
     if (card.isMock) continue;
     for (const rule of active) {
@@ -315,7 +352,7 @@ export function decideActions(
             ruleId: rule.id,
           });
         }
-      } else {
+      } else if (action.type === "set_field") {
         // Idempotência no snapshot: valor atual igual ao alvo NÃO escreve
         // (mesma régua string do updateRecord — null ≡ '').
         const current = recordRawValue(action.field, card.record, ctx.available);
@@ -327,9 +364,32 @@ export function decideActions(
             ruleId: rule.id,
           });
         }
+      } else {
+        // Idempotência: já existe tarefa ABERTA desta regra para este
+        // registro? Consome o card sem criar outra. Concluída a tarefa, a
+        // condição volta a valer e a regra cobra de novo — é cobrança
+        // recorrente, não marcador de "já cobrei uma vez na vida".
+        if (!card.openAutomationRuleIds.includes(rule.id)) {
+          tasks.push({
+            recordId: card.record.id,
+            ruleId: rule.id,
+            title: action.title,
+            description: action.description ?? null,
+            dueDate:
+              action.dueInDays == null
+                ? null
+                : addDaysIso(ctx.todayIso, action.dueInDays),
+            responsibleId:
+              action.responsibleFrom === "fixed"
+                ? (action.responsibleId ?? null)
+                : action.responsibleFrom === "none"
+                  ? null
+                  : (card.record.responsible_id ?? null),
+          });
+        }
       }
       break; // primeira regra que casou consome o card (mesmo sem escrever)
     }
   }
-  return { moves, sets, ruleErrors };
+  return { moves, sets, tasks, ruleErrors };
 }
