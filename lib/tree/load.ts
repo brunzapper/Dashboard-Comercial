@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 09/09/2026
 // v1.2 (09/09/2026): `tree_nodes` entra no MESMO Promise.all dos fatos. Ele
 //   não depende de tarefa, anotação nem alteração — estava em série sem
 //   razão, e cada ida ao banco pesa no tempo entre o clique e a árvore.
@@ -21,6 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseAutomationRule } from "@/lib/kanban/automations/types";
 import { resolveCadence } from "@/lib/series/cadence";
 import { loadSeriesSettings } from "@/lib/series/load";
+import { loadFieldHistory } from "@/lib/records/field-history";
 import { occurrencesUntil, resolveAnchorDate, resolveBound } from "@/lib/series/occurrence";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
@@ -70,7 +71,11 @@ export async function loadRecordTreeFacts(
   db: SupabaseClient,
   input: {
     record: RecordRow;
-    /** records.field_modified_at do registro (a âncora "mudou de etapa"). */
+    /**
+     * records.field_modified_at do registro. NÃO é a âncora — é só uma das
+     * duas fontes do histórico (a outra, e a que cobre o sync, é audit_log).
+     * v1.3 (09/09/2026): ver lib/records/field-history.ts.
+     */
     fieldModifiedAt?: Record<string, string> | null;
     orgId: string | null;
     ruleId?: string | null;
@@ -100,9 +105,25 @@ export async function loadRecordTreeFacts(
     const parsed = ruleRow ? parseAutomationRule(ruleRow.rule) : null;
     if (parsed?.action.type === "create_task_series") {
       const config = parsed.action.series;
+      // v1.3 (09/09/2026): a âncora sai do HISTÓRICO de alteração, não do
+      // marcador de proteção do sync — senão a árvore desenha um tronco vazio
+      // para todo registro vindo do Bitrix. Um registro só: uma consulta.
+      const historyFields = [
+        config.anchor.kind === "field_changed" ? config.anchor.field : null,
+        config.from?.kind === "field_changed" ? config.from.field : null,
+        config.until?.kind === "field_changed" ? config.until.field : null,
+      ].filter((f): f is string => f !== null);
+      const history =
+        historyFields.length > 0
+          ? await loadFieldHistory(
+              db,
+              [{ id: recordId, fieldModifiedAt: input.fieldModifiedAt ?? null }],
+              historyFields
+            )
+          : null;
       const anchorFacts = {
         record: input.record,
-        fieldModifiedAt: input.fieldModifiedAt ?? null,
+        changedAt: history?.get(recordId) ?? null,
         sourceCreatedAt: (input.record.source_created_at as string) ?? null,
         available,
       };

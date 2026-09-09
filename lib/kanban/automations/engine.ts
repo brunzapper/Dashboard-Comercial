@@ -65,6 +65,10 @@ import {
 } from "./series";
 import { loadSeriesSettings } from "@/lib/series/load";
 import {
+  loadFieldHistory,
+  type FieldHistory,
+} from "@/lib/records/field-history";
+import {
   executeAutomationSchemaRuns,
   MAX_SCHEMA_RUNS_PER_RUN,
 } from "./schema-run";
@@ -360,14 +364,29 @@ export async function runBoardAutomations(
   // 4) Fatos por card — só o que as regras ativas pedem.
   const conds = rules.flatMap((r) => r.rule.conditions);
   const needTasks = conds.some((c) => c.kind === "tasks");
-  const needFmod =
-    conds.some((c) => c.kind === "time" && c.basis.type === "field_changed") ||
-    // A âncora "desde que mudou de etapa" lê o MESMO fato.
-    rules.some(
-      (r) =>
-        r.rule.action.type === "create_task_series" &&
-        r.rule.action.series.anchor.kind === "field_changed"
-    );
+  // Campos cujo HISTÓRICO de alteração a rodada precisa. Vazio = ninguém
+  // pergunta por tempo de campo e o loader nem roda.
+  // v1.1 (09/09/2026): antes isto lia `records.field_modified_at`, que é o
+  // marcador de proteção do sync e fica vazio para campo vindo do Bitrix — a
+  // âncora nunca resolvia. Ver lib/records/field-history.ts.
+  const historyFields = new Set<string>();
+  for (const c of conds) {
+    if (c.kind === "time" && c.basis.type === "field_changed") {
+      historyFields.add(c.basis.field);
+    }
+  }
+  for (const r of rules) {
+    if (r.rule.action.type !== "create_task_series") continue;
+    const series = r.rule.action.series;
+    // A âncora "desde que mudou de etapa" e as bordas da janela leem o MESMO
+    // fato.
+    if (series.anchor.kind === "field_changed") {
+      historyFields.add(series.anchor.field);
+    }
+    for (const bound of [series.from, series.until]) {
+      if (bound?.kind === "field_changed") historyFields.add(bound.field);
+    }
+  }
   const needPlacement = conds.some(
     (c) => c.kind === "time" && c.basis.type === "in_column"
   );
@@ -453,22 +472,58 @@ export async function runBoardAutomations(
     }
   }
 
-  const fmodByRecord = new Map<string, Record<string, string> | null>();
-  if (needFmod) {
+  // v1.2 (09/09/2026): atributos PAUSADOS do registro. Só consulta quando
+  // alguma regra ativa concede atributo — pausar precisa parar a cobrança, e
+  // até aqui o status era escrito e nunca lido (a 0131 prometia o contrário).
+  const grantedAttributes = [
+    ...new Set(
+      rules.flatMap((r) =>
+        r.rule.action.type === "create_task_series" &&
+        r.rule.action.series.grantAttribute
+          ? [r.rule.action.series.grantAttribute]
+          : []
+      )
+    ),
+  ];
+  const pausedByRecord = new Map<string, string[]>();
+  if (grantedAttributes.length > 0) {
     for (const slice of chunksOf(recordIds)) {
       let q = db
-        .from("records")
-        .select("id, field_modified_at")
-        .in("id", slice);
+        .from("record_attributes")
+        .select("record_id, attribute_key")
+        .in("record_id", slice)
+        .in("attribute_key", grantedAttributes)
+        .eq("status", "pausado");
       if (orgId) q = q.eq("organization_id", orgId);
       const { data } = await q;
       for (const r of data ?? []) {
-        fmodByRecord.set(
+        const id = r.record_id as string;
+        const list = pausedByRecord.get(id);
+        if (list) list.push(r.attribute_key as string);
+        else pausedByRecord.set(id, [r.attribute_key as string]);
+      }
+    }
+  }
+
+  let history: FieldHistory = new Map();
+  if (historyFields.size > 0) {
+    const fmodById = new Map<string, Record<string, string> | null>();
+    for (const slice of chunksOf(recordIds)) {
+      let q = db.from("records").select("id, field_modified_at").in("id", slice);
+      if (orgId) q = q.eq("organization_id", orgId);
+      const { data } = await q;
+      for (const r of data ?? []) {
+        fmodById.set(
           r.id as string,
           (r.field_modified_at as Record<string, string> | null) ?? null
         );
       }
     }
+    history = await loadFieldHistory(
+      db,
+      recordIds.map((id) => ({ id, fieldModifiedAt: fmodById.get(id) ?? null })),
+      [...historyFields]
+    );
   }
 
   const placementAtByRecord = new Map<string, string>();
@@ -515,11 +570,12 @@ export async function runBoardAutomations(
       openTasks: needTasks ? (openByRecord.get(card.id) ?? 0) : card.openTasks,
       overdueTasks: overdueByRecord.get(card.id) ?? 0,
       relatedCounts,
-      fieldModifiedAt: fmodByRecord.get(card.id) ?? null,
+      changedAt: historyFields.size > 0 ? (history.get(card.id) ?? null) : null,
       sourceCreatedAt: card.record.source_created_at ?? null,
       placementUpdatedAt: placementAtByRecord.get(card.id) ?? null,
       openAutomationRuleIds: openTasksByRecord.get(card.id) ?? [],
       seriesOccurrences: seriesByRecord.get(card.id) ?? [],
+      pausedAttributes: pausedByRecord.get(card.id) ?? [],
     };
   });
 

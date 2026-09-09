@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
 // A OCORRÊNCIA DEVIDA de uma série — o coração da recorrência, e puro.
 //
 // A decisão de desenho: a ocorrência é DERIVADA, nunca contada. Dado o dia da
@@ -17,7 +17,12 @@ import { recordRawValue } from "@/lib/widgets/quick-filters";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { RecordRow } from "@/lib/records/types";
 
-import type { SeriesAnchor, SeriesBound, SeriesConfig } from "./types";
+import type {
+  SeriesAnchor,
+  SeriesAnchorFallback,
+  SeriesBound,
+  SeriesConfig,
+} from "./types";
 
 export interface OccurrencePlan {
   /** N-ésima cobrança devida hoje (0 = a do próprio dia da âncora). */
@@ -96,11 +101,61 @@ export function occurrencesUntil(input: OccurrenceInput): OccurrencePlan[] {
   return out;
 }
 
+/**
+ * As cobranças a MANTER ABERTAS hoje: a devida agora e as `count` seguintes.
+ *
+ * v1.2 (09/09/2026): é o que faz a série deixar de ser invisível. Antes só
+ * existia a cobrança do dia, então num ciclo quinzenal o vendedor passava 15
+ * dias sem ver nada — e não tinha como remarcar o que ainda ia vencer.
+ *
+ * NUNCA emite ocorrência já vencida que não seja a devida agora: criar as
+ * atrasadas de uma vez abriria dezenas de tarefas vencidas no nome de gente
+ * que nunca foi avisada de que a série existia. A Tree continua desenhando as
+ * passadas (occurrencesUntil), que é onde a falta de acompanhamento deve
+ * aparecer — como galho vazio, não como cobrança fabricada hoje.
+ *
+ * Criar adiantado é seguro: a trava da 0132 é por (regra, registro,
+ * ocorrência), então repetir esbarra no índice e é no-op.
+ */
+export function occurrencesAhead(
+  input: OccurrenceInput,
+  count: number
+): OccurrencePlan[] {
+  const ahead = Math.max(0, Math.floor(count));
+  const cadence = Math.floor(input.cadenceDays);
+  if (!Number.isFinite(cadence) || cadence < 1) return [];
+
+  // A devida hoje ancora a janela. Sem ela (antes da primeira, ou fora da
+  // janela) não há de onde partir — e adiantar seria começar a cobrar cedo.
+  const due = dueOccurrence(input);
+  if (!due) return [];
+
+  const out: OccurrencePlan[] = [];
+  for (let n = due.occurrence; n <= due.occurrence + ahead; n += 1) {
+    if (input.maxOccurrences && n > input.maxOccurrences) break;
+    const dueDate = addDaysIso(due.anchorDate, n * cadence);
+    // A borda final vale para as futuras também: não se agenda cobrança
+    // depois do fim declarado da série.
+    if (input.untilDate && dueDate > input.untilDate.slice(0, 10)) break;
+    out.push({ occurrence: n, dueDate, anchorDate: due.anchorDate });
+  }
+  return out;
+}
+
 /** Os fatos que a âncora pode ler — os MESMOS que a rodada já carrega. */
 export interface AnchorFacts {
   record: RecordRow;
-  /** records.field_modified_at — o "desde que mudou para esta etapa". */
-  fieldModifiedAt: Record<string, string> | null;
+  /**
+   * Última alteração de cada campo, do HISTÓRICO (audit_log + edição local),
+   * já resolvida para este registro pelo loader batelado.
+   *
+   * v1.1 (09/09/2026): era `fieldModifiedAt` (records.field_modified_at) — e
+   * aquilo NÃO é histórico de alteração, é o marcador de "editado localmente,
+   * proteja do sync". Para campo vindo do Bitrix ficava sempre vazio, então a
+   * âncora `field_changed` nunca resolvia e a série jamais cobrava. Ver
+   * lib/records/field-history.ts.
+   */
+  changedAt: Map<string, string> | null;
   /** records.source_created_at. */
   sourceCreatedAt: string | null;
   available: AvailableField[];
@@ -113,17 +168,25 @@ export interface AnchorFacts {
  */
 export function resolveAnchorDate(
   anchor: SeriesAnchor,
-  facts: AnchorFacts
+  facts: AnchorFacts,
+  fallback: SeriesAnchorFallback = "nenhum"
 ): string | null {
   const iso = (v: unknown): string | null => {
     const s = typeof v === "string" ? v.slice(0, 10) : "";
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
   };
-  if (anchor.kind === "created") return iso(facts.sourceCreatedAt);
-  if (anchor.kind === "field_changed") {
-    return iso(facts.fieldModifiedAt?.[anchor.field]);
-  }
-  return iso(recordRawValue(anchor.field, facts.record, facts.available));
+  const direct =
+    anchor.kind === "created"
+      ? iso(facts.sourceCreatedAt)
+      : anchor.kind === "field_changed"
+        ? // v1.1: do histórico, não do marcador de proteção do sync.
+          iso(facts.changedAt?.get(anchor.field))
+        : iso(recordRawValue(anchor.field, facts.record, facts.available));
+  if (direct) return direct;
+  // v1.2: o registro que já estava na etapa antes de a série existir não tem
+  // histórico. "criacao" o traz para dentro por uma data REAL; "nenhum" (o
+  // padrão) prefere não cobrar a cobrar por uma data inventada.
+  return fallback === "criacao" ? iso(facts.sourceCreatedAt) : null;
 }
 
 /** Uma borda da janela (campo do registro ou data fixa) virada em data. */
@@ -139,7 +202,7 @@ export function resolveBound(
   // a mesma leniência do campo de data vazio logo abaixo.
   const raw =
     bound.kind === "field_changed"
-      ? facts.fieldModifiedAt?.[bound.field]
+      ? facts.changedAt?.get(bound.field) // v1.1: mesma correção da âncora.
       : recordRawValue(bound.field, facts.record, facts.available);
   const s = typeof raw === "string" ? raw.slice(0, 10) : "";
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;

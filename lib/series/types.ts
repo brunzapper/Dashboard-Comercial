@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
 // Modelo da SÉRIE DE TAREFAS PERIÓDICAS (0132) — a cobrança recorrente que uma
 // automação mantém sobre um registro ("enquanto o deal estiver em Nutrição,
 // abra uma tarefa a cada quinze dias").
@@ -63,6 +63,17 @@ export interface SeriesCadence {
   overrideScopes: SeriesScopeSpec[];
 }
 
+/**
+ * O que fazer quando a âncora NÃO resolve — o campo nunca mudou, ou mudou antes
+ * de o histórico existir.
+ *
+ * v1.2 (09/09/2026): "nenhum" (padrão) é o comportamento honesto — sem data de
+ * início não há de onde contar, e inventar uma cobraria o vendedor por um
+ * atraso que ninguém sabe se houve. "criacao" serve ao registro que já estava
+ * na etapa antes de a série existir: conta da criação, que é uma data real.
+ */
+export type SeriesAnchorFallback = "nenhum" | "criacao";
+
 /** Quando a primeira cobrança acontece. */
 export type SeriesFirstAt =
   // Um ciclo depois da âncora (o padrão: entrou em Nutrição hoje, cobra em 15
@@ -78,6 +89,8 @@ export interface SeriesConfig {
   title: WorkflowFieldSpec | string;
   description?: string;
   anchor: SeriesAnchor;
+  /** v1.2: âncora que não resolve — não cobrar (padrão) ou usar a criação. */
+  anchorFallback?: SeriesAnchorFallback;
   /** Janela: antes de `from` não cobra; depois de `until` para de cobrar. */
   from?: SeriesBound;
   until?: SeriesBound;
@@ -85,6 +98,20 @@ export interface SeriesConfig {
   firstAt: SeriesFirstAt;
   /** Teto de cobranças por registro (0/ausente = sem teto). */
   maxOccurrences?: number;
+  /**
+   * Quantas cobranças FUTURAS manter abertas além da devida hoje.
+   *
+   * v1.2 (09/09/2026): antes a série só criava a cobrança do dia, então o
+   * vendedor não tinha como ver (nem remarcar) o que vinha pela frente — e num
+   * ciclo quinzenal isso são 15 dias sem nada na tela. Criar adiantado é seguro
+   * porque a trava é por OCORRÊNCIA (índice único da 0132, sem
+   * `completed_at is null`): repetir é 23505, que já é no-op.
+   *
+   * NUNCA anda para trás: cobrança vencida que ninguém abriu não vira tarefa
+   * retroativa — ela segue aparecendo na Tree como galho vazio, que é o que
+   * mostra a falta de acompanhamento.
+   */
+  lookahead?: number;
   /** Atributo concedido ao registro que entra na série (ex.: "tree"). */
   grantAttribute?: string;
 }
@@ -97,6 +124,9 @@ export const SERIES_SCOPE_LABELS: Record<SeriesScopeKind, string> = {
 
 /** Teto de sobrescritas declaradas (configuração humana, não carga de dados). */
 export const MAX_SERIES_SCOPES = 6;
+/** Teto de cobranças futuras mantidas abertas (0 = só a devida hoje). */
+export const MAX_SERIES_LOOKAHEAD = 12;
+export const DEFAULT_SERIES_LOOKAHEAD = 5;
 export const MIN_CADENCE_DAYS = 1;
 export const MAX_CADENCE_DAYS = 365;
 
@@ -199,7 +229,15 @@ export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
     anchor,
     cadence: { defaultDays, overrideScopes },
     firstAt: raw.firstAt === "imediato" ? "imediato" : "apos_um_ciclo",
+    lookahead:
+      typeof raw.lookahead === "number" && Number.isFinite(raw.lookahead)
+        ? Math.min(Math.max(Math.floor(raw.lookahead), 0), MAX_SERIES_LOOKAHEAD)
+        : DEFAULT_SERIES_LOOKAHEAD,
   };
+
+  // Ausente = "nenhum": uma série existente não passa a cobrar da criação só
+  // porque o parse ganhou uma chave nova.
+  if (raw.anchorFallback === "criacao") config.anchorFallback = "criacao";
 
   if (typeof raw.description === "string" && raw.description.trim() !== "") {
     config.description = raw.description.trim();

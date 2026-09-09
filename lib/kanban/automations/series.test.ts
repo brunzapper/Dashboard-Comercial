@@ -57,11 +57,12 @@ const card = (over: Partial<CardFacts> = {}): CardFacts => ({
   openTasks: 0,
   overdueTasks: 0,
   relatedCounts: {},
-  fieldModifiedAt: { stage: "2026-09-01T09:00:00-03:00" },
+  changedAt: new Map([["stage", "2026-09-01T09:00:00-03:00"]]),
   sourceCreatedAt: null,
   placementUpdatedAt: null,
   openAutomationRuleIds: [],
   seriesOccurrences: [],
+  pausedAttributes: [],
   ...over,
 });
 
@@ -76,7 +77,6 @@ const ctx = (over: Partial<EvalContext> = {}): EvalContext => ({
 describe("decideActions — série", () => {
   it("planeja a cobrança devida com prazo e responsável do registro", () => {
     const { seriesTasks } = decideActions([RULE], [card()], ctx());
-    expect(seriesTasks).toHaveLength(1);
     expect(seriesTasks[0]).toMatchObject({
       recordId: "rec-1",
       occurrence: 2,
@@ -87,10 +87,51 @@ describe("decideActions — série", () => {
     });
   });
 
+  // v1.2 (09/09/2026): a série mantém abertas a devida hoje MAIS as próximas
+  // `lookahead` (padrão 5) — antes só existia a do dia, e num ciclo quinzenal o
+  // vendedor passava 15 dias sem ver nada nem poder remarcar o que vinha.
+  it("planeja a devida hoje e as 5 seguintes, em datas crescentes", () => {
+    const { seriesTasks } = decideActions([RULE], [card()], ctx());
+    expect(seriesTasks).toHaveLength(6);
+    expect(seriesTasks.map((t) => t.occurrence)).toEqual([2, 3, 4, 5, 6, 7]);
+    // Cadência de 14 dias a partir da devida (2026-09-29).
+    expect(seriesTasks.map((t) => t.dueDate)).toEqual([
+      "2026-09-29",
+      "2026-10-13",
+      "2026-10-27",
+      "2026-11-10",
+      "2026-11-24",
+      "2026-12-08",
+    ]);
+  });
+
+  // A decisão de NÃO criar retroativo: um deal que entrou na etapa há meses não
+  // abre de uma vez todas as cobranças que ninguém fez. Elas seguem visíveis na
+  // Tree como galho vazio, que é onde a falta de acompanhamento deve aparecer.
+  it("nunca planeja cobrança VENCIDA além da devida hoje", () => {
+    const { seriesTasks } = decideActions([RULE], [card()], ctx());
+    for (const t of seriesTasks) {
+      expect(t.dueDate >= "2026-09-29").toBe(true);
+    }
+    expect(seriesTasks.some((t) => t.occurrence < 2)).toBe(false);
+  });
+
   it("ocorrência já criada consome sem planejar de novo", () => {
     const { seriesTasks } = decideActions(
       [RULE],
       [card({ seriesOccurrences: ["rule-1:2"] })],
+      ctx()
+    );
+    // A devida hoje sai da lista; as futuras seguem sendo planejadas.
+    expect(seriesTasks.map((t) => t.occurrence)).toEqual([3, 4, 5, 6, 7]);
+  });
+
+  // v1.2: pausar o atributo PARA a cobrança. Antes o status era escrito pelo
+  // executor e nunca lido por ninguém — pausar não pausava nada.
+  it("atributo pausado no registro não gera cobrança", () => {
+    const { seriesTasks } = decideActions(
+      [RULE],
+      [card({ pausedAttributes: ["tree"] })],
       ctx()
     );
     expect(seriesTasks).toHaveLength(0);
@@ -158,7 +199,7 @@ describe("decideActions — série", () => {
   it("sem âncora (campo nunca alterado) não cobra", () => {
     const { seriesTasks } = decideActions(
       [RULE],
-      [card({ fieldModifiedAt: null })],
+      [card({ changedAt: null })],
       ctx()
     );
     expect(seriesTasks).toHaveLength(0);

@@ -1,6 +1,6 @@
 // Versão: 1.4 | Data: 09/09/2026
 // v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
-//   DERIVADA aqui, pura: âncora (o mesmo `fieldModifiedAt` que a condição de
+//   DERIVADA aqui, pura: âncora (o mesmo histórico que a condição de
 //   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
 //   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
 //   existe; a trava de verdade é o índice único da 0132.
@@ -14,7 +14,7 @@
 //   regra INERTE com erro, pelo mesmo caminho de "coluna removida".
 // Versão: 1.4 | Data: 09/09/2026
 // v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
-//   DERIVADA aqui, pura: âncora (o mesmo `fieldModifiedAt` que a condição de
+//   DERIVADA aqui, pura: âncora (o mesmo histórico que a condição de
 //   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
 //   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
 //   existe; a trava de verdade é o índice único da 0132.
@@ -55,13 +55,16 @@ import type { AvailableField } from "@/lib/widgets/fields";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import { resolveCadence, type SeriesSetting } from "@/lib/series/cadence";
 import {
-  dueOccurrence,
+  occurrencesAhead,
   resolveAnchorDate,
   resolveBound,
 } from "@/lib/series/occurrence";
 import type { WorkflowDefinition } from "@/lib/workflow/types";
 import { KANBAN_OVERFLOW_KEY, type KanbanColumn } from "../types";
-import type { SeriesConfig } from "@/lib/series/types";
+import {
+  DEFAULT_SERIES_LOOKAHEAD,
+  type SeriesConfig,
+} from "@/lib/series/types";
 import {
   relatedCountKey,
   type AutomationCondition,
@@ -81,7 +84,17 @@ export interface CardFacts {
   // Contagens de conectados por chave canônica da condição (relatedCountKey).
   relatedCounts: Record<string, number>;
   // records.field_modified_at ({ campo: timestamp }) — null = nunca carimbado.
-  fieldModifiedAt: Record<string, string> | null;
+  /**
+   * Última alteração de cada campo pedido pelas regras da rodada, do HISTÓRICO
+   * (audit_log + edição local). null = nenhuma regra ativa pergunta por tempo
+   * de campo.
+   *
+   * v1.1 (09/09/2026): era `fieldModifiedAt` cru. `records.field_modified_at`
+   * é o marcador de proteção do sync, não histórico — para campo do Bitrix
+   * ficava sempre vazio, e tanto a âncora da série quanto esta condição de
+   * tempo nunca casavam, em silêncio. Ver lib/records/field-history.ts.
+   */
+  changedAt: Map<string, string> | null;
   sourceCreatedAt: string | null;
   // kanban_placements.updated_at (colunas Personalizar) — null = sem posição.
   placementUpdatedAt: string | null;
@@ -91,6 +104,14 @@ export interface CardFacts {
   // Ocorrências de série JÁ criadas para este registro, como "<ruleId>:<n>".
   // Vazio quando nenhuma regra ativa da rodada mantém série.
   seriesOccurrences: string[];
+  /**
+   * Atributos do registro com status 'pausado' (record_attributes, 0131).
+   * Vazio quando nenhuma regra ativa da rodada concede atributo.
+   *
+   * v1.2 (09/09/2026): pausar precisa PARAR a cobrança — antes o status era
+   * escrito e nunca lido.
+   */
+  pausedAttributes: string[];
 }
 
 export interface EvalContext {
@@ -285,7 +306,7 @@ export function evaluateCondition(
     case "time": {
       const iso =
         cond.basis.type === "field_changed"
-          ? facts.fieldModifiedAt?.[cond.basis.field]
+          ? facts.changedAt?.get(cond.basis.field)
           : cond.basis.type === "created"
             ? facts.sourceCreatedAt
             : facts.placementUpdatedAt;
@@ -433,8 +454,7 @@ export function decideActions(
           });
         }
       } else if (action.type === "create_task_series") {
-        const plan = planSeriesTask(action.series, rule.id, card, ctx);
-        if (plan) seriesTasks.push(plan);
+        seriesTasks.push(...planSeriesTask(action.series, rule.id, card, ctx));
       } else if (action.type === "run_schema") {
         const def = ctx.schemaDefs?.get(action.schemaKey);
         if (def) {
@@ -490,15 +510,24 @@ function planSeriesTask(
   ruleId: string,
   card: CardFacts,
   ctx: EvalContext
-): PlannedSeriesTask | null {
+): PlannedSeriesTask[] {
+  // v1.2 (09/09/2026): pausar o atributo agora PAUSA de verdade. O status era
+  // só escrito (series.ts) e nunca lido, então "pausado" não parava nada — a
+  // arquitetura prometia o contrário desde a 0131.
+  if (card.pausedAttributes.includes(series.grantAttribute ?? "")) return [];
+
   const facts = {
     record: card.record,
-    fieldModifiedAt: card.fieldModifiedAt,
+    changedAt: card.changedAt,
     sourceCreatedAt: card.sourceCreatedAt,
     available: ctx.available,
   };
-  const anchorDate = resolveAnchorDate(series.anchor, facts);
-  if (!anchorDate) return null;
+  const anchorDate = resolveAnchorDate(
+    series.anchor,
+    facts,
+    series.anchorFallback
+  );
+  if (!anchorDate) return [];
 
   const cadence = resolveCadence(
     series.cadence,
@@ -508,38 +537,45 @@ function planSeriesTask(
   );
   // Desligado para este recorte (responsável, registro, etapa…): a série
   // continua existindo e o atributo continua no registro — só não cobra.
-  if (!cadence.active) return null;
+  if (!cadence.active) return [];
 
-  const plan = dueOccurrence({
-    anchorDate,
-    cadenceDays: cadence.days,
-    todayIso: ctx.todayIso,
-    fromDate: resolveBound(series.from, facts),
-    untilDate: resolveBound(series.until, facts),
-    firstAt: series.firstAt,
-    maxOccurrences: series.maxOccurrences,
-  });
-  if (!plan) return null;
-
-  // Já criada: consome sem escrever (a trava de verdade é o índice único).
-  if (card.seriesOccurrences.includes(`${ruleId}:${plan.occurrence}`)) {
-    return null;
-  }
+  // v1.2: a devida hoje MAIS as próximas `lookahead`. Criar adiantado é seguro
+  // (trava por ocorrência) e é o que deixa o vendedor ver e remarcar o que vem.
+  const plans = occurrencesAhead(
+    {
+      anchorDate,
+      cadenceDays: cadence.days,
+      todayIso: ctx.todayIso,
+      fromDate: resolveBound(series.from, facts),
+      untilDate: resolveBound(series.until, facts),
+      firstAt: series.firstAt,
+      maxOccurrences: series.maxOccurrences,
+    },
+    series.lookahead ?? DEFAULT_SERIES_LOOKAHEAD
+  );
 
   const title =
     typeof series.title === "string" ? series.title : series.title.value;
-  return {
-    recordId: card.record.id,
-    ruleId,
-    seriesKey: series.key,
-    occurrence: plan.occurrence,
-    title,
-    description: series.description ?? null,
-    dueDate: plan.dueDate,
-    // Em nome do responsável DO REGISTRO — quem conduz o acompanhamento.
-    responsibleId: card.record.responsible_id ?? null,
-    grantAttribute: series.grantAttribute ?? null,
-  };
+  const out: PlannedSeriesTask[] = [];
+  for (const plan of plans) {
+    // Já criada: consome sem escrever (a trava de verdade é o índice único).
+    if (card.seriesOccurrences.includes(`${ruleId}:${plan.occurrence}`)) {
+      continue;
+    }
+    out.push({
+      recordId: card.record.id,
+      ruleId,
+      seriesKey: series.key,
+      occurrence: plan.occurrence,
+      title,
+      description: series.description ?? null,
+      dueDate: plan.dueDate,
+      // Em nome do responsável DO REGISTRO — quem conduz o acompanhamento.
+      responsibleId: card.record.responsible_id ?? null,
+      grantAttribute: series.grantAttribute ?? null,
+    });
+  }
+  return out;
 }
 
 /**
