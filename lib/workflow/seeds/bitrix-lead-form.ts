@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): LEAD_SOURCE_KEY corrigido de "lead" (o record_type)
+//   para "leads" (a source-key do catálogo, que é o que a action procura).
 // Esquema de FÁBRICA "Formulário de criação Bitrix" — o primeiro esquema real
 // do Workflow (0125) e a demonstração de que o motor é genérico: nada aqui é
 // código, é dado.
@@ -19,8 +21,19 @@ export const BITRIX_LEAD_FORM_LABEL = "Formulário de criação Bitrix";
 export const BITRIX_LEAD_FORM_DESCRIPTION =
   "Lança um lead no Bitrix24 a partir de um formulário: cria a empresa, o contato e o lead vinculados, e grava o registro local já pareado com o CRM.";
 
-/** Base local de destino do passo de registro. */
-const LEAD_SOURCE_KEY = "lead";
+/**
+ * Base local de destino do passo de registro — a SOURCE-KEY do catálogo
+ * (`data_sources.key`), nunca o `record_type`.
+ *
+ * v1.1 (09/09/2026): era "lead", que é o RECORD_TYPE da base; a chave é
+ * "leads". A action resolve o passo por `sources.find(s => s.key === ...)`, e
+ * com o record_type ali ela não achava nada — o formulário morria em "a base
+ * não existe ou não aceita criação manual". Os dois valores são parecidos o
+ * bastante para o erro passar batido, e o teste antigo pinava o LITERAL que
+ * este arquivo escrevia — afirmava a si mesmo. Agora ele confere a chave
+ * contra o catálogo (BUILTIN_SOURCES), que é a pergunta que importa.
+ */
+const LEAD_SOURCE_KEY = "leads";
 
 export function bitrixLeadFormDefinition(): WorkflowDefinition {
   return {

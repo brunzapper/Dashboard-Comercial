@@ -1,10 +1,17 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a base do passo de registro passa a ser conferida
+//   contra o CATÁLOGO (BUILTIN_SOURCES) em vez de contra o literal que o
+//   próprio esquema escreve — o teste antigo afirmava a si mesmo e deixou
+//   passar um record_type ("lead") onde a action espera uma source-key
+//   ("leads"), quebrando o formulário em produção com o esquema verde.
 // O esquema de fábrica é DADO — e dado erra calado. Estes testes pinam as duas
 // propriedades que o desenho promete: o formulário é PLANO (nenhuma noção de
 // entidade chega a quem preenche) e forma um par fechado com os passos — todo
 // campo perguntado é consumido por algum passo, e todo {{form.x}} citado
 // existe no formulário.
 import { describe, expect, it } from "vitest";
+
+import { BUILTIN_SOURCES } from "@/lib/sources";
 
 import { formRefsIn } from "../refs";
 import { parseWorkflowDefinition, visibleFields } from "../types";
@@ -113,7 +120,22 @@ describe("esquema de fábrica bitrix_lead_form", () => {
     const rec = def.steps.find((s) => s.type === "record.create")!;
     if (rec.type !== "record.create") throw new Error("passo ausente");
     expect(rec.params.linkSourceIdFrom).toBe("criar_lead");
-    expect(rec.params.sourceKey).toBe("lead");
+  });
+
+  // v1.1 (09/09/2026): o teste antigo pinava `sourceKey === "lead"` — o mesmo
+  // literal que o esquema escrevia, então ele afirmava a si mesmo e passou
+  // verde enquanto o formulário morria em produção. "lead" é o RECORD_TYPE da
+  // base; a chave do catálogo é "leads", e é a chave que a action procura.
+  // A pergunta certa é se ela EXISTE no catálogo, não qual string é.
+  it("a base do passo de registro é uma SOURCE-KEY do catálogo, não um record_type", () => {
+    const rec = def.steps.find((s) => s.type === "record.create")!;
+    if (rec.type !== "record.create") throw new Error("passo ausente");
+    const keys = BUILTIN_SOURCES.map((s) => s.key);
+    expect(keys).toContain(rec.params.sourceKey);
+    // A confusão que causou o bug: nenhum record_type é uma chave válida aqui.
+    expect(BUILTIN_SOURCES.map((s) => s.recordType)).not.toContain(
+      rec.params.sourceKey
+    );
   });
 
   it("e-mail e telefone declaram o formato de comunicação no ESQUEMA", () => {
