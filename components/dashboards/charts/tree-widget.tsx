@@ -1,4 +1,8 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): (a) sem registro fixo, o widget SEGUE o registro em
+//   foco do painel (o clique da tabela) — antes ficava eternamente vazio;
+//   (b) filtro por tipo de nó (settings.showKinds); (c) JANELA com ordem e
+//   "carregar mais": um acompanhamento de dois anos tem ~50 galhos.
 // Widget TREE (0134): a árvore de acompanhamento de um registro — e, no modo
 // livre, o mapa mental.
 //
@@ -34,9 +38,15 @@ import {
   loadRecordTree,
   type TreeData,
 } from "@/app/(app)/dashboards/tree-actions";
+import { useRecordFocus } from "../record-focus-context";
 import { setRecordAttributeStatus } from "@/lib/attributes/actions";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
-import { TREE_NODE_KIND_LABELS, type TreeNode } from "@/lib/tree/model";
+import {
+  TREE_NODE_KIND_LABELS,
+  TREE_WINDOW_STEP,
+  type TreeFilterableKind,
+  type TreeNode,
+} from "@/lib/tree/model";
 import type { TreeSettings } from "@/lib/widgets/types";
 
 const KIND_TONE: Record<string, string> = {
@@ -134,6 +144,26 @@ function NodeCard({
   );
 }
 
+/**
+ * Recorta a árvore pelos tipos escolhidos (`settings.showKinds`), preservando
+ * o desenho: um nó escondido ENTREGA os filhos ao pai dele em vez de levá-los
+ * junto — esconder "Alteração" não pode fazer sumir a anotação que caiu embaixo
+ * de uma. Lista vazia/ausente = tudo.
+ */
+function filterKinds(
+  nodes: TreeNode[],
+  keep: TreeFilterableKind[] | undefined
+): TreeNode[] {
+  if (!keep || keep.length === 0) return nodes;
+  const set = new Set<string>(keep);
+  const walk = (list: TreeNode[]): TreeNode[] =>
+    list.flatMap((n) => {
+      const children = walk(n.children);
+      return set.has(n.kind) ? [{ ...n, children }] : children;
+    });
+  return walk(nodes);
+}
+
 export function TreeWidget({
   settings,
   recordId,
@@ -145,7 +175,23 @@ export function TreeWidget({
   /** Carimbo do event bus — muda quando um registro mudou. */
   dataChangedAt?: number;
 }) {
+  // v1.1 (09/09/2026): sem registro fixo, o widget SEGUE o foco do painel (o
+  // clique da tabela). Antes ele só lia o settings e ficava eternamente vazio.
+  const focus = useRecordFocus();
+  const follows = recordId == null && (settings?.source ?? "registro") === "registro";
+  const effectiveRecordId = recordId ?? (follows ? focus.recordId : null);
+  const { registerFollower } = focus;
+
+  // A tabela precisa saber se há uma Tree para focar: sem seguidor, o clique
+  // abre o painel lateral em vez de focar no vazio.
+  useEffect(() => {
+    if (!follows) return;
+    return registerFollower();
+  }, [follows, registerFollower]);
+
   const [data, setData] = useState<TreeData | null>(null);
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const [limit, setLimit] = useState(TREE_WINDOW_STEP);
   const [draft, setDraft] = useState<{ kind: "note" | "task"; text: string } | null>(
     null
   );
@@ -157,8 +203,11 @@ export function TreeWidget({
   // Sem setState SÍNCRONO no efeito (a regra do projeto): o estado só muda
   // depois do await. Enquanto não chega, `data === null` já diz "carregando".
   const refresh = useCallback(async () => {
-    if (!recordId) return;
-    const next = await loadRecordTree(recordId, layout);
+    if (!effectiveRecordId) return;
+    const next = await loadRecordTree(effectiveRecordId, layout, {
+      order,
+      limit,
+    });
     // Payload idêntico não re-renderiza: o tick do sync roda a cada minuto e
     // não pode fazer a árvore piscar para quem só está lendo.
     const json = JSON.stringify(next);
@@ -166,7 +215,7 @@ export function TreeWidget({
       lastJson.current = json;
       setData(next);
     }
-  }, [recordId, layout]);
+  }, [effectiveRecordId, layout, order, limit]);
 
   useEffect(() => {
     void refresh();
@@ -178,7 +227,7 @@ export function TreeWidget({
     if (dataChangedAt) void refresh();
   }, [dataChangedAt, refresh]);
 
-  if (!recordId) {
+  if (!effectiveRecordId) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center p-4 text-center text-sm">
         Escolha um registro na configuração do widget, ou clique numa linha da
@@ -197,6 +246,8 @@ export function TreeWidget({
     return <div className="text-muted-foreground p-4 text-sm">{data.message}</div>;
   }
 
+  const visibleNodes = filterKinds(data.nodes, settings?.showKinds);
+
   const submitDraft = () => {
     if (!draft || draft.text.trim() === "") return setDraft(null);
     const text = draft.text.trim();
@@ -208,8 +259,8 @@ export function TreeWidget({
         kind === "note" ? "Não foi possível anotar" : "Não foi possível agendar",
       action: () =>
         kind === "note"
-          ? addTreeNote(recordId, text, { revalidate: false })
-          : addTreeTask(recordId, { title: text }, { revalidate: false }),
+          ? addTreeNote(effectiveRecordId, text, { revalidate: false })
+          : addTreeTask(effectiveRecordId, { title: text }, { revalidate: false }),
     });
     // A árvore recarrega depois da escrita: o nó novo é um FATO, e ela o lê.
     window.setTimeout(() => void refresh(), 600);
@@ -231,12 +282,28 @@ export function TreeWidget({
             ) : null}
           </>
         ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 text-xs"
+          title="Inverte a ordem; 'carregar mais' anda nessa direção"
+          onClick={() => {
+            // Trocar a ordem volta ao primeiro passo: a janela é das N
+            // cobranças daquela ponta, e manter o limite esticado mostraria
+            // um recorte que ninguém pediu.
+            setLimit(TREE_WINDOW_STEP);
+            setOrder((o) => (o === "desc" ? "asc" : "desc"));
+          }}
+        >
+          {order === "desc" ? "Recentes ↓" : "Antigas ↑"}
+        </Button>
         {data.attribute ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="ml-auto gap-1"
+            className="gap-1"
             onClick={() => {
               const next =
                 data.attribute!.status === "pausado" ? "ativo" : "pausado";
@@ -324,13 +391,13 @@ export function TreeWidget({
         </div>
       )}
 
-      {data.nodes.length === 0 ? (
+      {visibleNodes.length === 0 ? (
         <p className="text-muted-foreground text-sm">
           Nada aconteceu com este registro ainda.
         </p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {data.nodes.map((n) => (
+          {visibleNodes.map((n) => (
             <NodeCard
               key={n.id}
               node={n}
@@ -340,6 +407,20 @@ export function TreeWidget({
           ))}
         </div>
       )}
+
+      {data.hasMore ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-start"
+          onClick={() => setLimit((n) => n + TREE_WINDOW_STEP)}
+        >
+          {order === "desc"
+            ? "Carregar cobranças mais antigas"
+            : "Carregar cobranças mais recentes"}
+        </Button>
+      ) : null}
     </div>
   );
 }

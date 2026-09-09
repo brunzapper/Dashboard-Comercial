@@ -186,7 +186,7 @@ interface RuleDraft {
   seriesScopes: { kind: "record" | "responsible" | "field"; field: string }[];
   seriesFirstAt: "apos_um_ciclo" | "imediato";
   /** Término: vazio, um campo de data, ou uma data fixa (YYYY-MM-DD). */
-  seriesUntilKind: "nunca" | "field" | "date";
+  seriesUntilKind: "nunca" | "field" | "date" | "field_changed";
   seriesUntilValue: string;
   seriesGrantAttribute: string;
 }
@@ -354,7 +354,12 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
                 until:
                   draft.seriesUntilKind === "date"
                     ? { kind: "date" as const, date: draft.seriesUntilValue }
-                    : { kind: "field" as const, field: draft.seriesUntilValue },
+                    : draft.seriesUntilKind === "field_changed"
+                      ? {
+                          kind: "field_changed" as const,
+                          field: draft.seriesUntilValue,
+                        }
+                      : { kind: "field" as const, field: draft.seriesUntilValue },
               }
             : {}),
           ...(draft.seriesGrantAttribute
@@ -1453,9 +1458,19 @@ export function AutomationsSheet({
                       <Label className="text-xs">Parar de cobrar</Label>
                       <Combobox
                         options={[
-                          { value: "nunca", label: "Sem prazo" },
+                          // As quatro formas de parar. "Sem prazo" não é
+                          // "para sempre": a regra deixa de casar quando o
+                          // registro sai da etapa, e as cobranças param aí.
+                          {
+                            value: "nunca",
+                            label: "Enquanto as condições valerem",
+                          },
                           { value: "field", label: "Numa data do registro" },
                           { value: "date", label: "Numa data fixa" },
+                          {
+                            value: "field_changed",
+                            label: "Quando um campo mudar",
+                          },
                         ]}
                         value={draft.seriesUntilKind}
                         onValueChange={(v) =>
@@ -1489,9 +1504,14 @@ export function AutomationsSheet({
                         />
                       </div>
                     ) : null}
-                    {draft.seriesUntilKind === "field" ? (
+                    {draft.seriesUntilKind === "field" ||
+                    draft.seriesUntilKind === "field_changed" ? (
                       <div className="flex min-w-48 flex-1 flex-col gap-1">
-                        <Label className="text-xs">Campo de data</Label>
+                        <Label className="text-xs">
+                          {draft.seriesUntilKind === "field_changed"
+                            ? "Campo que, ao mudar, encerra"
+                            : "Campo de data"}
+                        </Label>
                         <Combobox
                           options={(catalog?.fields ?? []) as ComboboxOption[]}
                           value={draft.seriesUntilValue}

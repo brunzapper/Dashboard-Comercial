@@ -1,4 +1,8 @@
-<!-- Versão: 1.29 | Data: 09/09/2026 -->
+<!-- Versão: 1.30 | Data: 09/09/2026 -->
+<!-- v1.30 (09/09/2026): §5.14 — a seção "Tree" do editor (que não existia) e
+     a JANELA de cobranças com ordem e "carregar mais"; §6.9 — o clique passa
+     a FOCAR um widget Tree do painel quando há um, e a lista de tarefas
+     ganhou paginação; §12.2.2 — as quatro formas de parar de cobrar. -->
 <!-- v1.29 (09/09/2026): §5.14 nova — widget Tree (árvore de
      acompanhamento de um registro e mapa mental: as três formas, as
      ações de dentro e o pausar que não exclui) e §6.9 — "Ao clicar na
@@ -1168,8 +1172,12 @@ e as alterações de campo, cada uma na cobrança em cuja janela caiu.
 
 **Duas fontes de nós:**
 
-- **Histórico de um registro** — o modo acima. O registro em foco vem da
-  configuração do widget ou do clique numa linha de tabela (§6.9).
+- **Histórico de um registro** — o modo acima. O registro vem da configuração
+  do widget (um id fixo) ou, deixando esse campo **vazio**, do clique numa
+  linha de tabela (§6.9): a árvore passa a seguir o registro em foco do
+  painel. Com uma Tree no painel seguindo o foco, o clique da linha **foca o
+  widget** em vez de abrir a barra lateral — não faz sentido abrir um painel
+  por cima de um widget que já ia mostrar a mesma coisa.
 - **Livre** — nós digitados por você (e, opcionalmente, campos de um ou vários
   registros). É o mapa mental: não depende de automação nenhuma.
 
@@ -1197,6 +1205,17 @@ desfazer é soltá-lo de volta.
   permanece na tela.
 - **Mudar a cadência deste registro** — grava uma exceção só dele; a regra que
   vale para os outros não é tocada (§12.2.2).
+
+**Onde se configura:** seção **Tree** do editor do widget — a fonte dos nós, a
+forma, o registro fixo (ou vazio, para seguir o clique), a chave do mapa livre
+e quais tipos de nó exibir (nada marcado = tudo).
+
+**Quantidade.** A árvore vem em **janela**: as 12 cobranças de uma ponta, com
+os galhos delas. O botão de ordem no topo escolhe a ponta (mais recentes ou
+mais antigas) e **"carregar cobranças…"** traz as 12 seguintes naquela direção.
+O corte é sempre por *cobrança* inteira — nunca no meio de uma, para nenhum
+galho ficar sem o tronco dele. Registro sem série nenhuma pagina pelos próprios
+fatos.
 
 A árvore se atualiza sozinha quando um dado muda, **sem piscar**: o sync roda a
 cada minuto, e uma tela que reconstrói sozinha na frente de quem está
@@ -1565,9 +1584,13 @@ linhas, métricas intensivas × extensivas) no §7.9.
     (editar continua na aba Registros, com o formulário inteiro). Campos que o
     seu papel não pode ver não aparecem — e não viajam para o navegador.
   - **Tarefas do registro** — as tarefas ligadas a ele, com o número da
-    cobrança quando vieram de um acompanhamento periódico.
+    cobrança quando vieram de um acompanhamento periódico. Vêm 20 por vez, com
+    um botão de ordem (mais recentes / mais antigas) e **"carregar mais"** na
+    direção escolhida.
   - **Atributo** — a funcionalidade de Operação pendurada no registro. Hoje:
-    **Tree** (§5.14), que abre a árvore de acompanhamento daquele registro.
+    **Tree** (§5.14). Se o painel já tem um widget Tree seguindo o foco (sem
+    registro fixo), o clique **foca esse widget**; se não tem, abre a árvore
+    na barra lateral.
   O clique é da LINHA: clicar dentro de uma célula editável, de um botão ou de
   um link continua fazendo o que sempre fez — a edição in-place não é
   sequestrada.
@@ -2297,7 +2320,7 @@ quadro. A ação chama-se **"Série de tarefas"** e tem cinco decisões:
 | **Condições da regra** | quem ENTRA no acompanhamento (ex.: `stage = Nutrição`) |
 | **Âncora** | a data a partir da qual o relógio corre: a mudança de um campo, a criação do registro, ou um campo de data |
 | **Cadência padrão** | de quantos em quantos dias cobra (15 = quinzenal) |
-| **Janela** | "a partir de" / "até", aceitando um campo de data **ou uma data fixa** |
+| **Janela** | "a partir de" / "até". O fim tem quatro formas: enquanto as condições valerem (sem prazo), numa data fixa, numa data do registro, ou **quando um campo mudar** |
 | **Precedência das exceções** | em que ordem as exceções sobrescrevem a cadência (ex.: registro → responsável → etapa) |
 
 A tarefa nasce no nome do **responsável do registro**, e tanto ele quanto um

@@ -52,6 +52,7 @@
 // v1.1 (09/07/2026): Fase 8 — WidgetConfig/Widget ganham `sources` (fontes
 //   usadas; vazio = todas) e `splitBySource` (quebrar por fonte).
 // Tipos do construtor de dashboards (Fase 6A).
+import type { TreeFilterableKind } from "@/lib/tree/model";
 import type { SourceKey } from "@/lib/sources";
 import type { RoleKey } from "@/lib/auth/roles";
 import type { Formula } from "@/lib/records/formulas";
@@ -450,8 +451,13 @@ export interface TreeSettings {
   recordId?: string;
   /** Chave do mapa no modo `livre` (o escopo das anotações). */
   mapKey?: string;
-  /** Tipos de fato exibidos; ausente = todos. */
-  showKinds?: ("occurrence" | "task" | "comment" | "change" | "note")[];
+  /**
+   * Tipos de fato exibidos; ausente = todos.
+   * v1.1 (09/09/2026): o tipo vem de `TreeFilterableKind` (lib/tree/model.ts) —
+   * a união literal aqui era uma segunda lista, livre para divergir da que o
+   * construtor oferece.
+   */
+  showKinds?: TreeFilterableKind[];
 }
 
 export interface RowActionSettings {

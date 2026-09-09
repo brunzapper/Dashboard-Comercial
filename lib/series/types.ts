@@ -26,11 +26,22 @@ export type SeriesAnchor =
   // Um campo de data do próprio registro.
   | { kind: "field"; field: string };
 
-/** Limite de uma ponta da janela: um campo de data OU uma data fixa. */
+/**
+ * Limite de uma ponta da janela.
+ *
+ * A quarta forma de "quando parar" não está aqui: é a AUSÊNCIA de `until` —
+ * cobra enquanto as condições da regra valerem, e sair da etapa faz a regra
+ * deixar de casar. As três abaixo são os limites explícitos.
+ *
+ * v1.1 (09/09/2026): `field_changed` — para de cobrar quando ESSE campo mudar.
+ * Lê o mesmo `records.field_modified_at` da âncora homônima e da condição de
+ * tempo do motor, então o fato já chega na rodada sem consulta nova.
+ */
 export type SeriesBound =
   | { kind: "field"; field: string }
   // Data absoluta YYYY-MM-DD — o "prazo de término independente de variável".
-  | { kind: "date"; date: string };
+  | { kind: "date"; date: string }
+  | { kind: "field_changed"; field: string };
 
 /** Em que escopo uma exceção de cadência pode ser gravada, e em que ordem. */
 export type SeriesScopeKind = "record" | "responsible" | "field";
@@ -112,9 +123,12 @@ function parseBound(raw: unknown): SeriesBound | null {
     const date = typeof raw.date === "string" ? raw.date.slice(0, 10) : "";
     return ISO_DATE.test(date) ? { kind: "date", date } : null;
   }
-  if (raw.kind === "field") {
+  if (raw.kind === "field" || raw.kind === "field_changed") {
     const field = typeof raw.field === "string" ? raw.field.trim() : "";
-    return field === "" ? null : { kind: "field", field };
+    if (field === "") return null;
+    return raw.kind === "field"
+      ? { kind: "field", field }
+      : { kind: "field_changed", field };
   }
   return null;
 }
