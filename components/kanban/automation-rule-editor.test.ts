@@ -95,9 +95,9 @@ const row = (): AutomationRow => ({
   enabled: true,
   position: 0,
   rule: SERIE_COMPLETA,
-  lastRunAt: null,
-  lastError: null,
-  lastMovedCount: null,
+  last_run_at: null,
+  last_error: null,
+  last_moved_count: 0,
 });
 
 describe("round-trip da série no editor", () => {
@@ -109,7 +109,8 @@ describe("round-trip da série no editor", () => {
 
   it("preserva um a um os campos que a UI apagava em silêncio", () => {
     const voltou = draftToRule(ruleToDraft(row(), []));
-    const serie = (voltou!.action as { series: Record<string, unknown> }).series;
+    const serie = (voltou!.action as unknown as { series: Record<string, unknown> })
+      .series;
     // Os três que draftFromRule não lia de volta...
     expect(serie.from).toEqual({ kind: "date", date: "2026-07-01" });
     expect(serie.description).toBe("Ligar e registrar o retorno");
