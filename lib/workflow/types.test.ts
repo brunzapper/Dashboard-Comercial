@@ -1,4 +1,4 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 08/09/2026
 // O parse do esquema é FAIL-CLOSED: estas asserções existem para que uma
 // definição meio-válida nunca vire "fluxo que roda como der".
 import { describe, expect, it } from "vitest";
@@ -109,5 +109,100 @@ describe("parseWorkflowDefinition", () => {
     // `etapa` e `responsavel` nascem ocultos — disponíveis, não perguntados.
     expect(keys).not.toContain("etapa");
     expect(keys).not.toContain("responsavel");
+  });
+});
+
+describe("parseWorkflowDefinition — passos que ALTERAM (v1.1)", () => {
+  const base = (step: unknown) => ({
+    version: 1,
+    form: { fields: [] },
+    steps: [step],
+  });
+
+  const update = {
+    id: "altera",
+    type: "bitrix.entity.update",
+    label: "Altera lead",
+    connection: "bitrix_webhook",
+    params: {
+      entity: "lead",
+      entityId: "{{form.bitrix_id}}",
+      fields: { TITLE: "{{form.empresa}}" },
+    },
+  };
+
+  it("aceita bitrix.entity.update com alvo", () => {
+    const def = parseWorkflowDefinition(base(update));
+    expect(def?.steps[0].type).toBe("bitrix.entity.update");
+  });
+
+  it("update SEM alvo é esquema inválido — não existe update sem id", () => {
+    expect(
+      parseWorkflowDefinition(
+        base({ ...update, params: { ...update.params, entityId: "" } })
+      )
+    ).toBeNull();
+    expect(
+      parseWorkflowDefinition(
+        base({ ...update, params: { entity: "lead", fields: {} } })
+      )
+    ).toBeNull();
+  });
+
+  it("record.update aceita coluna do núcleo e custom:, e exige algum campo", () => {
+    const ok = parseWorkflowDefinition(
+      base({
+        id: "grava",
+        type: "record.update",
+        label: "Grava",
+        params: {
+          recordIdFrom: "{{ctx.triggerRecordId}}",
+          fields: { stage: "ganho", "custom:status": "ok" },
+        },
+      })
+    );
+    expect(ok?.steps[0].type).toBe("record.update");
+
+    // Sem campo nenhum o passo seria inerte disfarçado de passo.
+    expect(
+      parseWorkflowDefinition(
+        base({
+          id: "grava",
+          type: "record.update",
+          label: "Grava",
+          params: { recordIdFrom: "{{ctx.triggerRecordId}}", fields: {} },
+        })
+      )
+    ).toBeNull();
+
+    // Sem alvo idem.
+    expect(
+      parseWorkflowDefinition(
+        base({
+          id: "grava",
+          type: "record.update",
+          label: "Grava",
+          params: { fields: { stage: "x" } },
+        })
+      )
+    ).toBeNull();
+  });
+
+  it("sourceRef do campo sobrevive ao parse (é a origem quando quem alimenta é um registro)", () => {
+    const def = parseWorkflowDefinition({
+      version: 1,
+      form: {
+        fields: [
+          {
+            key: "empresa",
+            label: "Empresa",
+            type: "texto",
+            sourceRef: "  title  ",
+          },
+        ],
+      },
+      steps: [],
+    });
+    expect(def?.form.fields[0].sourceRef).toBe("title");
   });
 });

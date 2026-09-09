@@ -165,6 +165,23 @@ describe("automações — parse fail-closed e alvos", () => {
     expect(res.errors.join("\n")).toContain("regra incompleta");
   });
 
+  it("recusa a ação que executa esquema — ela não nasce de JSON gerado", () => {
+    // A régua não é técnica: a regra dispara um fluxo que escreve FORA do
+    // sistema, nasce em simulação e alguém decide armá-la. O parse a aceita
+    // (é regra válida); quem barra é o contrato da IA.
+    const res = validateKanbanConfig(
+      doc({
+        automacoes: [
+          regra({ acao: { type: "run_schema", schemaKey: "cria_lead" } }),
+        ],
+      }),
+      ctx
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.errors.join("\n")).toContain("executar esquema");
+  });
+
   it("recusa coluna alvo inexistente e a coluna de estouro", () => {
     const fantasma = validateKanbanConfig(
       doc({ automacoes: [regra({ acao: { type: "move_to_column", targetKey: "zzz" } })] }),

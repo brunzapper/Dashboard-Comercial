@@ -1,3 +1,13 @@
+// Versão: 1.4 | Data: 09/09/2026
+// v1.4 (09/09/2026): ação `run_schema` — executa os passos de um ESQUEMA do
+//   Workflow tendo o registro como entrada. É a única ação que produz efeito
+//   FORA do sistema sem ninguém olhando, então carrega o que as outras não
+//   precisam: `simulate` (ausente ⇒ TRUE — armar é ato explícito) e um `map`
+//   opcional que sobrescreve, campo a campo, de onde o esquema tira o valor
+//   (precedência: map da regra → sourceRef do esquema → defaultValue). A TRAVA
+//   não mora aqui: é o índice único parcial da 0130, e a natureza dela sai dos
+//   PASSOS do esquema (criar = uma vez por registro; alterar = quando o payload
+//   muda) via `schemaIsIrreversible`.
 // Versão: 1.3 | Data: 08/09/2026
 // v1.3 (08/09/2026): ação `create_task` — abre uma tarefa vinculada ao
 //   registro. Diferente de `set_field`, que é idempotente por COMPARAÇÃO
@@ -73,6 +83,14 @@ export type AutomationAction =
   // `responsibleFrom`: "record" usa o responsável do registro; "fixed" usa
   // `responsibleId`. Sem dono, a tarefa nasce sem responsável — visível a quem
   // a RLS de tasks já deixa ver.
+  // `simulate` é o ensaio: avalia, grava em workflow_runs o que FARIA e não
+  // envia nada. `map`: form key do esquema → ref do campo do registro.
+  | {
+      type: "run_schema";
+      schemaKey: string;
+      simulate: boolean;
+      map?: Record<string, string>;
+    }
   | {
       type: "create_task";
       title: string;
@@ -263,6 +281,27 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
           responsibleFrom === "fixed" && typeof actionRaw.responsibleId === "string"
             ? actionRaw.responsibleId
             : null,
+      };
+    } else if (
+      actionRaw.type === "run_schema" &&
+      typeof actionRaw.schemaKey === "string" &&
+      actionRaw.schemaKey.trim() !== ""
+    ) {
+      // Ausente/inválido ⇒ SIMULA. Uma regra que escreve fora do sistema não
+      // pode nascer armada por omissão de uma chave no jsonb.
+      const simulate = actionRaw.simulate !== false;
+      const rawMap = actionRaw.map;
+      const map: Record<string, string> = {};
+      if (isRecord(rawMap)) {
+        for (const [k, v] of Object.entries(rawMap)) {
+          if (typeof v === "string" && v.trim() !== "") map[k] = v.trim();
+        }
+      }
+      action = {
+        type: "run_schema",
+        schemaKey: actionRaw.schemaKey.trim(),
+        simulate,
+        ...(Object.keys(map).length > 0 ? { map } : {}),
       };
     } else if (
       // set_field: só estrutura (v1 sem "limpar" — value não-vazio); o alvo é

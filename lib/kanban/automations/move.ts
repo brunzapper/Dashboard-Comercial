@@ -1,4 +1,9 @@
-// Versão: 1.2 | Data: 08/09/2026
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): `executeFieldWrites` passa a ser EXPORTADO — o passo
+//   `record.update` do Workflow escreve por ele, não por um caminho novo. A
+//   regra continua a mesma: toda escrita de valor por automação (set_field,
+//   move por valor, passo de esquema) sai daqui, com os mesmos carimbos,
+//   recalc, audit e write-back.
 // v1.2 (08/09/2026): o executor de ESCRITA DE CAMPO deixa de receber
 //   `KanbanSettings` e passa a receber só `writeBack: boolean` — era a única
 //   coisa que ele usava dali. Escrever num campo nunca foi sobre kanban, e a
@@ -87,7 +92,7 @@ export interface FieldWrite {
   ruleId: string;
 }
 
-interface FieldWriteBatch {
+export interface FieldWriteBatch {
   writes: FieldWrite[];
   recordById: Map<string, RecordRow>;
   /** Devolver a escrita ao CRM (toggle do quadro; sem quadro, false). */
@@ -96,7 +101,7 @@ interface FieldWriteBatch {
   defs: FieldDefinition[];
 }
 
-interface FieldWriteOutcome {
+export interface FieldWriteOutcome {
   okWrites: FieldWrite[];
   failed: { recordId: string; message: string }[];
 }
@@ -109,7 +114,7 @@ interface FieldWriteOutcome {
  * coluna de EDITABLE_CORE_COLUMNS (o avaliador/save barram o resto); custom
  * coerce pelo data_type da def.
  */
-async function executeFieldWrites(
+export async function executeFieldWrites(
   db: SupabaseClient,
   batch: FieldWriteBatch
 ): Promise<FieldWriteOutcome> {

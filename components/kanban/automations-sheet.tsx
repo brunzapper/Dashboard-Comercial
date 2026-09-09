@@ -1,3 +1,10 @@
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): ação "Executar esquema" (run_schema). Nasce em SIMULAÇÃO —
+//   o switch começa marcado e desarmá-lo é um ato do admin, porque esta é a
+//   única ação que produz efeito fora do sistema sozinha. O aviso de esquema
+//   IRREVERSÍVEL (que cria algo) vem do catálogo, derivado dos passos. Sem
+//   esquema disponível a opção aparece DESABILITADA com motivo, nunca oculta
+//   (precedente do editor de fórmulas).
 // Versão: 1.2 | Data: 08/09/2026
 // v1.2 (08/09/2026): ação "Abrir tarefa" (create_task). Idempotente por regra ×
 //   registro (índice único da 0129) — reexecutar não duplica; concluída a
@@ -141,19 +148,23 @@ interface RuleDraft {
   name: string;
   enabled: boolean;
   conds: CondDraft[];
-  actionType: "move_to_column" | "set_field" | "create_task";
+  actionType: "move_to_column" | "set_field" | "create_task" | "run_schema";
   targetKey: string;
   setField: string;
   setValue: string;
   taskTitle: string;
   /** Vazio = sem prazo. */
   taskDueDays: string;
+  schemaKey: string;
+  /** Ensaio: avalia e grava o que faria, sem enviar nada. Começa LIGADO. */
+  schemaSimulate: boolean;
 }
 
 const ACTION_OPTIONS: ComboboxOption[] = [
   { value: "move_to_column", label: "Mover para a coluna" },
   { value: "set_field", label: "Definir campo" },
   { value: "create_task", label: "Abrir tarefa" },
+  { value: "run_schema", label: "Executar esquema" },
 ];
 
 const BOOL_OPTIONS: ComboboxOption[] = [
@@ -246,6 +257,18 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
       },
     };
   }
+  if (draft.actionType === "run_schema") {
+    if (!draft.schemaKey) return null;
+    return {
+      v: 1,
+      conditions,
+      action: {
+        type: "run_schema",
+        schemaKey: draft.schemaKey,
+        simulate: draft.schemaSimulate,
+      },
+    };
+  }
   if (draft.actionType === "set_field") {
     if (!draft.setField || draft.setValue.trim() === "") return null;
     return {
@@ -324,6 +347,10 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
       action.type === "create_task" && action.dueInDays != null
         ? String(action.dueInDays)
         : "",
+    schemaKey: action.type === "run_schema" ? action.schemaKey : "",
+    // Regra que não é de esquema volta ao editor com o ensaio ligado: trocar a
+    // ação para "Executar esquema" nunca arma sozinha.
+    schemaSimulate: action.type === "run_schema" ? action.simulate : true,
   };
 }
 
@@ -589,6 +616,9 @@ export function AutomationsSheet({
                 targetKey: "",
                 setField: "",
                 setValue: "",
+                schemaKey: "",
+                // Nasce em ensaio: armar é sempre um ato explícito.
+                schemaSimulate: true,
               })
             }
             disabled={pending || draft != null}
@@ -696,6 +726,18 @@ export function AutomationsSheet({
                       {row.rule.action.dueInDays != null
                         ? ` (prazo ${row.rule.action.dueInDays} dia(s))`
                         : ""}
+                    </>
+                  ) : row.rule.action.type === "run_schema" ? (
+                    <>
+                      executar o esquema{" "}
+                      <span className="font-medium">
+                        {catalog?.schemas.find(
+                          (o) =>
+                            row.rule.action.type === "run_schema" &&
+                            o.key === row.rule.action.schemaKey
+                        )?.label ?? row.rule.action.schemaKey}
+                      </span>
+                      {row.rule.action.simulate ? " (apenas simulação)" : ""}
                     </>
                   ) : (
                     <>
@@ -1123,6 +1165,52 @@ export function AutomationsSheet({
                     placeholder="Coluna de destino"
                     aria-label="Coluna de destino"
                   />
+                </div>
+              ) : draft.actionType === "run_schema" ? (
+                <div className="flex min-w-56 flex-1 flex-col gap-2">
+                  <Label className="text-xs">Esquema</Label>
+                  <Combobox
+                    options={(catalog?.schemas ?? []).map((s) => ({
+                      value: s.key,
+                      label: s.label,
+                    }))}
+                    value={draft.schemaKey}
+                    onValueChange={(v) =>
+                      setDraft((d) => (d ? { ...d, schemaKey: v } : d))
+                    }
+                    placeholder="Esquema a executar"
+                    aria-label="Esquema a executar"
+                  />
+                  {catalog && catalog.schemas.length === 0 ? (
+                    <p className="text-muted-foreground text-xs">
+                      Nenhum esquema disponível: em Operação → Workflow, crie um
+                      esquema com gatilho de automação e deixe-o ligado.
+                    </p>
+                  ) : null}
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={draft.schemaSimulate}
+                      onCheckedChange={(v) =>
+                        setDraft((d) =>
+                          d ? { ...d, schemaSimulate: v === true } : d
+                        )
+                      }
+                    />
+                    Apenas simular (não envia nada)
+                  </label>
+                  {!draft.schemaSimulate &&
+                  catalog?.schemas.find((s) => s.key === draft.schemaKey)
+                    ?.irreversible ? (
+                    <p className="text-destructive text-xs">
+                      Este esquema CRIA registros no destino. Cada registro é
+                      executado uma única vez por esta regra — não dá para
+                      desfazer pelo sistema.
+                    </p>
+                  ) : null}
+                  <p className="text-muted-foreground text-xs">
+                    Os valores que o esquema pediria a uma pessoa saem do
+                    próprio registro (configurados no esquema, campo a campo).
+                  </p>
                 </div>
               ) : draft.actionType === "create_task" ? (
                 <>

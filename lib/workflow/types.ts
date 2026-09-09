@@ -1,4 +1,13 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): passos que ALTERAM (`bitrix.entity.update`,
+//   `record.update`) e `sourceRef` no campo do formulário. Um esquema nunca foi
+//   sobre criar leads: é uma sequência de alterações DENTRO e FORA do sistema, e
+//   sem passo de alteração metade disso era prosa. O `sourceRef` diz de onde o
+//   campo vem quando quem alimenta o esquema é um REGISTRO (automação) em vez de
+//   uma pessoa — os passos seguem lendo {{form.<key>}} e refs.ts fica intocado.
+//   Quem decide a trava do run_schema é `schemaIsIrreversible` (registry.ts,
+//   derivado do `creates` de cada tipo de passo): criar é uma vez por registro;
+//   alterar repete quando o payload muda.
 // Modelo do ESQUEMA de Workflow (0125). Um esquema é um fluxo declarado como
 // DADO: um FORMULÁRIO (lista PLANA de campos) + uma sequência de PASSOS que
 // consomem as respostas por referência ({{form.<key>}}, {{steps.<id>.id}}).
@@ -61,6 +70,14 @@ export interface WorkflowFormField {
   /** Só para optionsSource 'static' (nos demais, as options vêm do provedor). */
   options?: string[];
   defaultValue?: string;
+  /**
+   * De onde o valor vem quando o esquema é alimentado por um REGISTRO (ação
+   * `run_schema` de uma automação) em vez de uma pessoa: ref de campo do
+   * registro (`title`, `source_id`, `custom:fonte`, `unified:…`). A regra pode
+   * sobrescrever campo a campo; sem nenhum dos dois vale o `defaultValue`.
+   * Num formulário preenchido por gente esta chave é simplesmente ignorada.
+   */
+  sourceRef?: string;
   placeholder?: string;
   /** Texto de ajuda sob o campo. */
   help?: string;
@@ -99,6 +116,28 @@ export interface WorkflowBitrixAddStep {
   };
 }
 
+/**
+ * Passo que ALTERA uma entidade existente no CRM (crm.<entity>.update). Mesma
+ * montagem de payload do `add` — muda o método e o `id` do alvo, que vem de uma
+ * ref (tipicamente um campo com `sourceRef: "source_id"`). É a mesma chamada
+ * que o write-back da fila já faz, com os campos vindos do ESQUEMA.
+ */
+export interface WorkflowBitrixUpdateStep {
+  id: string;
+  type: "bitrix.entity.update";
+  label: string;
+  enabled: boolean;
+  connection: string;
+  params: {
+    entity: "company" | "contact" | "lead" | "deal";
+    /** Template do id do alvo. Vazio SEM `skipIfEmpty` = erro alto: atualizar
+     *  "entidade nenhuma" em silêncio é pior que não atualizar. */
+    entityId: WorkflowFieldSpec;
+    fields: Record<string, WorkflowFieldSpec>;
+    skipIfEmpty?: string;
+  };
+}
+
 /** Passo que grava o registro local, espelhando a entidade criada. */
 export interface WorkflowRecordCreateStep {
   id: string;
@@ -122,12 +161,40 @@ export interface WorkflowRecordCreateStep {
   };
 }
 
-export type WorkflowStep = WorkflowBitrixAddStep | WorkflowRecordCreateStep;
+/**
+ * Passo que ALTERA campos de um registro local. Não escreve por conta própria:
+ * o executor monta `FieldWrite[]` e chama `executeFieldWrites` — o mesmo choke
+ * point do `set_field`, com carimbos, recalc, audit e write-back num lugar só.
+ */
+export interface WorkflowRecordUpdateStep {
+  id: string;
+  type: "record.update";
+  label: string;
+  enabled: boolean;
+  params: {
+    /** Template do id do registro alvo — {{ctx.triggerRecordId}} (o registro
+     *  que disparou a automação) ou {{steps.<id>.id}}. */
+    recordIdFrom: string;
+    /** Ref do campo (coluna core crua ou `custom:<key>`) → template. */
+    fields: Record<string, WorkflowFieldSpec>;
+    /** Ref cujo valor vazio faz o passo ser PULADO (sem erro). */
+    skipIfEmpty?: string;
+  };
+}
+
+export type WorkflowStep =
+  | WorkflowBitrixAddStep
+  | WorkflowBitrixUpdateStep
+  | WorkflowRecordCreateStep
+  | WorkflowRecordUpdateStep;
 
 export const WORKFLOW_STEP_TYPES = [
   "bitrix.entity.add",
+  "bitrix.entity.update",
   "record.create",
+  "record.update",
 ] as const;
+
 
 export interface WorkflowDefinition {
   version: 1;
@@ -145,6 +212,11 @@ const BITRIX_ENTITIES = new Set(["company", "contact", "lead", "deal"]);
 // fieldId do Bitrix: TITLE, COMPANY_ID, UF_CRM_1729887583805, UTM_SOURCE…
 // Restrito para o valor nunca virar interpolação em outro lugar.
 const BITRIX_FIELD_ID_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+// Ref de campo do registro no passo `record.update`: coluna core crua
+// (`title`, `stage`) ou `custom:<key>`. Campo unificado/casado/calculado não é
+// alvo de escrita — quem barra é `setFieldTargetError`, a régua que o
+// `set_field` já usa; aqui só a FORMA.
+const RECORD_FIELD_REF_RE = /^(custom:)?[a-z][a-z0-9_]{0,63}$/;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -229,6 +301,8 @@ function parseFormField(raw: unknown, index: number): WorkflowFormField | null {
   if (options) field.options = options;
   const defaultValue = str(raw.defaultValue);
   if (defaultValue) field.defaultValue = defaultValue;
+  const sourceRef = str(raw.sourceRef);
+  if (sourceRef && sourceRef.trim() !== "") field.sourceRef = sourceRef.trim();
   const placeholder = str(raw.placeholder);
   if (placeholder) field.placeholder = placeholder;
   const help = str(raw.help);
@@ -268,6 +342,57 @@ function parseStep(raw: unknown): WorkflowStep | null {
         entity: entity as WorkflowBitrixAddStep["params"]["entity"],
         fields,
       },
+    };
+    const skipIfEmpty = str(params.skipIfEmpty);
+    if (skipIfEmpty) step.params.skipIfEmpty = skipIfEmpty;
+    return step;
+  }
+
+  if (raw.type === "bitrix.entity.update") {
+    const connection = str(raw.connection);
+    if (!connection || !isWorkflowConnectionKey(connection)) return null;
+    const entity = str(params.entity);
+    if (!entity || !BITRIX_ENTITIES.has(entity)) return null;
+    const entityId = parseFieldSpec(params.entityId);
+    // Sem alvo o passo não tem o que atualizar — e um update sem id no Bitrix
+    // não é "não faz nada", é erro de chamada. Fail-closed no parse.
+    if (!entityId || entityId.value.trim() === "") return null;
+    const fields = parseFieldSpecMap(params.fields, (k) =>
+      BITRIX_FIELD_ID_RE.test(k)
+    );
+    if (!fields) return null;
+    const step: WorkflowBitrixUpdateStep = {
+      id,
+      type: "bitrix.entity.update",
+      label,
+      enabled,
+      connection,
+      params: {
+        entity: entity as WorkflowBitrixUpdateStep["params"]["entity"],
+        entityId,
+        fields,
+      },
+    };
+    const skipIfEmpty = str(params.skipIfEmpty);
+    if (skipIfEmpty) step.params.skipIfEmpty = skipIfEmpty;
+    return step;
+  }
+
+  if (raw.type === "record.update") {
+    const recordIdFrom = str(params.recordIdFrom);
+    if (!recordIdFrom || recordIdFrom.trim() === "") return null;
+    const fields = parseFieldSpecMap(params.fields, (k) =>
+      RECORD_FIELD_REF_RE.test(k)
+    );
+    if (!fields) return null;
+    // Passo que não altera campo nenhum é regra inerte disfarçada de passo.
+    if (Object.keys(fields).length === 0) return null;
+    const step: WorkflowRecordUpdateStep = {
+      id,
+      type: "record.update",
+      label,
+      enabled,
+      params: { recordIdFrom: recordIdFrom.trim(), fields },
     };
     const skipIfEmpty = str(params.skipIfEmpty);
     if (skipIfEmpty) step.params.skipIfEmpty = skipIfEmpty;

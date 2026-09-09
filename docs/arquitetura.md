@@ -4287,7 +4287,7 @@ chave de `AREA_GATES`); `lib/import/comp/instructions.test.ts` (paridade do
 SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
 `lib/import/comp/validate.test.ts` (as perdas silenciosas que o merge impede).
 
-### 4.23 Workflow: a fábrica de fluxos (0125–0126, 08/09/2026)
+### 4.23 Workflow: a fábrica de fluxos (0125–0126, 0130, 09/09/2026)
 
 **O que a 0126 corrigiu.** A 0125 tratou todo esquema como formulário e o
 renderizou DENTRO de `/operacao/workflow`, na mesma tela onde se configura o
@@ -4330,6 +4330,88 @@ acontece só dentro do Workflow. O hub nunca destrói nada. Card de formulário
 herda a área `workflow`, então feature-off some com os dois de uma vez; a key
 ganha o namespace `form:` para nunca colidir com a de um módulo, e a consulta
 só roda quando a área já passou.
+
+---
+
+### 4.23.0 A ação `run_schema`: o gatilho automático (0130, 09/09/2026)
+
+Um esquema não é "criar leads": é **uma sequência de alterações, dentro e fora
+do sistema**. Criar um lead no Bitrix é uma das possibilidades; alterar uma
+entidade num CRM, atualizar campos do registro local ou encadear as duas é
+igualmente o caso de uso. Por isso o vocabulário de passos tem as duas
+naturezas — `bitrix.entity.add`/`record.create` criam, `bitrix.entity.update`/
+`record.update` alteram — e nenhuma delas foi escrita do zero: o update do CRM é
+a mesma chamada que o `drainWritebackQueue` já fazia
+(`client.call("crm.lead.update", { id, fields })`), e o `record.update` monta
+`FieldWrite[]` e chama **`executeFieldWrites`**, o executor único do `set_field`
+(carimbos, recalc, audit `origin='automation'`, webhook).
+
+**O núcleo é um só.** `runWorkflowCore` (`lib/workflow/run.ts`) é dono do
+contexto do servidor, do histórico em `workflow_runs`, do recálculo e do
+webhook; `runWorkflow` (a action do formulário) e o executor da automação são
+wrappers com identidade diferente — precedente literal de
+`runAiEditTurnCore`/`generateDashboardCore`. Um esquema não pode se comportar
+diferente conforme quem o disparou.
+
+**Quem responde o formulário quando não há ninguém.** O campo do esquema ganhou
+`sourceRef` (ref do campo do registro) e a regra pode sobrescrever campo a campo
+(`map`). Precedência: `map` da regra → `sourceRef` do esquema → `defaultValue`.
+A resolução é PURA, em `decideActions`, como o valor do `set_field` e o prazo do
+`create_task` — o planejador entrega payload pronto e o executor só escreve.
+`refs.ts` ficou intocado (sem escopo novo, sem mexer no `REF_RE`).
+
+**A trava, e por que ela não é uma só.** O tick roda a cada minuto. Criar é
+irreversível: o registro é consumido UMA vez por regra, para sempre. Alterar
+não: "quando o registro entrar nesta condição, atualize o campo lá fora" deve
+disparar de novo quando a condição voltar — a mesma semântica do `set_field`,
+que escreve quando o valor atual difere do alvo. A natureza sai dos PASSOS
+(`schemaIsIrreversible`, derivado do `creates` do registry — não há interruptor
+para desalinhar do que o esquema faz):
+
+| Esquema | `payload_hash` | Efeito |
+| --- | --- | --- |
+| irreversível (tem passo de criação) | `''` | tudo colapsa numa linha: uma execução por registro |
+| repetível (só alterações) | hash da entrada | reexecuta só quando o que seria enviado MUDA |
+
+O índice `uq_workflow_runs_per_automation` (0130) é a trava de verdade, e
+`runWorkflowCore` **reivindica antes de executar**: insere `status='iniciado'` e
+só então roda. Processo morto no meio deixa `iniciado`, que segura a trava de
+propósito — não se sabe o que chegou ao destino, e repetir às cegas é
+exatamente o que a trava impede. A corrida entre o tick e o "Executar agora"
+esbarra no 23505, tratado como **no-op** (nem sucesso, nem falha), como o 23505
+do `create_task`. O sentinela `''` em vez de NULL é deliberado: NULL num índice
+único é distinto de si mesmo, e a trava do esquema irreversível não travaria
+nada.
+
+**Teto próprio:** `MAX_SCHEMA_RUNS_PER_RUN = 5` por rodada, ainda descontado do
+`MAX_ACTIONS_PER_RUN` (200). Efeito fora do sistema merece um limite que caiba
+num engano.
+
+**Ensaio antes de armar.** `simulate` ausente no jsonb parseia como **true** —
+uma regra que escreve fora do sistema não nasce armada por omissão de chave. No
+ensaio cada passo resolve o payload e o devolve em `WorkflowStepOutcome.payload`
+sem nenhuma escrita; a ref para um passo anterior recebe o sentinela
+`#simulado:<stepId>`, nunca um id inventado. A leitura do schema de campos do
+CRM continua acontecendo (é read-only e é o que torna a prévia fiel).
+
+**Falhou: notifica, não repete sozinho.** A execução falha não volta à fila por
+conta própria — uma entidade duplicada num sistema externo é sujeira que alguém
+limpa à mão; uma que faltou aparece. Para não virar silêncio,
+`lib/workflow/notify.ts` mantém UMA tarefa aberta por regra (molde do de-para:
+service role, org explícita, webhook `task.*` à mão, auto-completa em zero
+falhas), e a aba **Execuções** do Workflow tem o "Tentar de novo": um admin
+carimba `released_at` e o registro volta à fila, sem apagar a linha histórica.
+Liberar não reexecuta — o motor continua sendo o tick.
+
+**Pré-voo antes da reivindicação:** o que dá para checar uma vez por regra
+(esquema existe, está ligado, é `automacao`, definição válida) vira erro de
+regra ANTES de gastar a trava — esquema mal configurado não queima o registro.
+Simetria com a 0126: `runWorkflow` recusa esquema que não seja `form`;
+`run_schema` recusa o que não seja `automacao`.
+
+**A IA do quadro RECUSA `run_schema`.** O parse a aceita (é regra válida), mas
+uma regra que dispara efeito fora do sistema é criada à mão — e por isso a ação
+também fica fora do SPEC.
 
 ---
 

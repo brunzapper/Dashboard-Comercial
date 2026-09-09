@@ -4,6 +4,9 @@
 <!-- v1.34 (08/09/2026): 0128 (rename da tabela) e a aba Automações do
      Workflow. -->
 <!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
+<!-- v1.33 (09/09/2026): §4.15 — 0130: a ação `run_schema` (executar um esquema
+     por automação), o ensaio, a trava por natureza do esquema, a aba Execuções
+     e o "Tentar de novo". -->
 <!-- v1.32 (08/09/2026): §4.15 — 0126: onde o formulário vive agora (rota
      própria + card), como pegar o link para o time, e o que fazer quando o
      card não aparece. -->
@@ -912,7 +915,7 @@ pré-requisitos de DADO:
   RQ" e a linha de meta da Evolução Histórica; sem meta o card mostra só o
   realizado.
 
-### 4.15 Workflow: esquemas de automação (0125, 08/09/2026)
+### 4.15 Workflow: esquemas de automação (0125–0130, 09/09/2026)
 
 **Onde as coisas ficam (0126).** O Workflow é a FÁBRICA: `/operacao/workflow`
 cria e configura, e nada é executado ali. Cada formulário tem página própria em
@@ -953,6 +956,48 @@ origem fica errada ou vazia. Causa: `sync_config.bitrix_status_codes` ausente �
 sem o mapa, `toBitrixValue` degrada e manda o rótulo. Rode um sync; o cache é
 regravado a cada `syncFieldCatalog`. (Mapa vazio nunca sobrescreve um cache bom,
 então um sync que falhou no meio não piora a situação.)
+
+**Executar um esquema por AUTOMAÇÃO (0130).** No painel de automações (dentro
+do quadro ou pela aba Automações do Workflow), a ação **Executar esquema** roda
+os passos de um esquema com gatilho `automacao` para cada registro que a regra
+selecionar. Os valores que uma pessoa digitaria saem do próprio registro: cada
+campo do esquema declara de onde vem (`sourceRef`), e a regra pode sobrescrever
+campo a campo.
+
+Ligar, na ordem:
+
+1. Aplicar `supabase/migrations/0130_workflow_run_triggers.sql` (idempotente).
+2. Criar o esquema em `/operacao/workflow` com gatilho **automação** e
+   preencher, campo a campo, de onde o valor vem.
+3. Criar a regra. Ela **nasce em Simular** — nada sai para o destino.
+4. "Executar agora" e conferir na aba **Execuções** o payload que *iria* para
+   lá (o `#simulado:` marca onde entraria o id de um passo anterior).
+5. Só então desmarcar "Apenas simular".
+
+**Quantas vezes um registro é executado.** Depende do que o esquema FAZ, e isso
+é derivado dos passos, não configurado:
+
+- esquema com passo de **criação** (irreversível): cada registro é executado
+  UMA vez por regra, para sempre;
+- esquema só de **alteração** (repetível): reexecuta quando o que seria enviado
+  MUDA — enviar de novo o mesmo payload é no-op.
+
+Rodar o tick de novo não duplica: a trava é um índice único no banco, e a
+corrida entre o tick e o "Executar agora" bate nele em silêncio (não vira erro
+da regra). Teto de 5 execuções por rodada.
+
+**Uma execução falhou.** Ela NÃO volta sozinha — de propósito. O que acontece:
+o `last_error` da regra mostra o motivo, e uma tarefa é aberta em nome do
+org_admin listando os registros afetados (a mesma tarefa é atualizada a cada
+rodada e se completa sozinha quando não há mais falha). Depois de resolver a
+causa, abra a aba **Execuções** e clique em **Tentar de novo** na execução: isso
+devolve aquele registro à fila (a linha histórica permanece). Liberar não
+reexecuta na hora — quem executa é o tick.
+
+**Execução "Interrompido".** O processo morreu entre reivindicar e gravar o
+desfecho. A trava continua segurando o registro de propósito: não se sabe o que
+chegou ao destino. Confira no sistema externo e, se nada foi criado, use
+"Tentar de novo".
 
 **Execução `partial`.** Parte já foi criada no sistema externo e o resto não. A
 mensagem aparece para quem executou, não só para o admin, justamente para

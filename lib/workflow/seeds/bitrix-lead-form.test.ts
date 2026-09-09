@@ -16,8 +16,14 @@ const def = parseWorkflowDefinition(bitrixLeadFormDefinition())!;
 function allTemplates(): string[] {
   const out: string[] = [];
   for (const step of def.steps) {
-    if (step.type === "bitrix.entity.add") {
-      if (step.params.skipIfEmpty) out.push(step.params.skipIfEmpty);
+    if (step.type !== "record.create" && step.params.skipIfEmpty) {
+      out.push(step.params.skipIfEmpty);
+    }
+    if (step.type === "bitrix.entity.add" || step.type === "bitrix.entity.update") {
+      for (const spec of Object.values(step.params.fields)) out.push(spec.value);
+      if (step.type === "bitrix.entity.update") out.push(step.params.entityId.value);
+    } else if (step.type === "record.update") {
+      out.push(step.params.recordIdFrom);
       for (const spec of Object.values(step.params.fields)) out.push(spec.value);
     } else {
       for (const spec of Object.values(step.params.core)) out.push(spec.value);

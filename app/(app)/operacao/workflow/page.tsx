@@ -1,3 +1,6 @@
+// Versão: 2.2 | Data: 09/09/2026
+// v2.2 (09/09/2026): carrega o histórico de execuções para a aba Execuções — a
+//   prévia do que uma simulação faria e o "Tentar de novo" moram lá.
 // Versão: 2.1 | Data: 08/09/2026
 // v2.1 (08/09/2026): carrega as automações da ORG (de quadro e de base) para a
 //   aba Automações — a visão que faltava: até aqui uma regra só era visível de
@@ -22,6 +25,7 @@ import {
   workflowConnectionStatus,
 } from "@/lib/workflow/connections";
 import { loadOrgAutomations } from "@/lib/workflow/automations-overview";
+import { loadWorkflowRuns } from "@/lib/workflow/runs";
 import { loadWorkflowSchemas } from "@/lib/workflow/schemas";
 import { ensureDefaultWorkflowSchemas } from "@/lib/workflow/schemas";
 import { SYSTEM_FLOWS } from "@/lib/workflow/system-schemas";
@@ -40,9 +44,10 @@ export default async function WorkflowPage() {
 
   const supabase = await createClient();
   await ensureDefaultWorkflowSchemas(supabase, orgId);
-  const [schemas, automations] = await Promise.all([
+  const [schemas, automations, runs] = await Promise.all([
     loadWorkflowSchemas(supabase, orgId),
     loadOrgAutomations(supabase, orgId),
+    loadWorkflowRuns(supabase, orgId),
   ]);
 
   return (
@@ -72,6 +77,7 @@ export default async function WorkflowPage() {
         )}
         systemFlows={SYSTEM_FLOWS}
         automations={automations}
+        runs={runs}
       />
     </div>
   );

@@ -1,4 +1,11 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): passo `record.update` (altera campos de um registro que já
+//   existe) e ensaio (`dryRun`). O update NÃO escreve por conta própria: monta
+//   `FieldWrite[]` e chama `executeFieldWrites` — o mesmo executor único do
+//   `set_field`, com carimbo field_modified_at + locally_modified_at, UM recalc,
+//   audit `origin='automation'` e webhook. Devolver a alteração ao CRM não
+//   acontece aqui: para isso o esquema declara um passo `bitrix.entity.update`,
+//   que é explícito sobre o que vai para onde.
 // Passo `record.create` do Workflow (0125): grava o registro LOCAL espelhando
 // a entidade que os passos anteriores criaram no CRM.
 //
@@ -19,10 +26,18 @@ import { coerce, coerceCore } from "@/lib/records/coerce";
 import { isCoreDef } from "@/lib/records/core-defs";
 import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
 import { fieldAppliesToSource } from "@/lib/sources";
-import type { DataType } from "@/lib/records/types";
+import type { DataType, FieldDefinition } from "@/lib/records/types";
 
-import { resolveTemplate, type WorkflowRefContext } from "../refs";
-import type { WorkflowRecordCreateStep } from "../types";
+import {
+  executeFieldWrites,
+  type FieldWrite,
+} from "@/lib/kanban/automations/move";
+
+import { resolveTemplate, resolvesEmpty, type WorkflowRefContext } from "../refs";
+import type {
+  WorkflowRecordCreateStep,
+  WorkflowRecordUpdateStep,
+} from "../types";
 
 export interface RecordStepSource {
   key: string;
@@ -45,6 +60,10 @@ export interface RecordStepResult {
   recordId: string | null;
   skippedFields: string[];
   warnings: string[];
+  /** Ensaio: o que TERIA sido gravado (undefined fora do dryRun). */
+  payload?: Record<string, unknown>;
+  /** Só o update: passo pulado por falta de alvo (skipIfEmpty). */
+  skipped?: boolean;
 }
 
 interface FieldDefRow {
@@ -60,7 +79,8 @@ export async function runRecordCreateStep(
   context: WorkflowRefContext,
   db: SupabaseClient,
   source: RecordStepSource,
-  deps: RecordStepDeps
+  deps: RecordStepDeps,
+  opts: { dryRun?: boolean } = {}
 ): Promise<RecordStepResult> {
   const warnings: string[] = [];
   const skippedFields: string[] = [];
@@ -184,6 +204,12 @@ export async function runRecordCreateStep(
   row.custom_fields = custom;
   row.field_modified_at = fmod;
 
+  if (opts.dryRun) {
+    // Ensaio: a linha NÃO é gravada. O payload sai como seria inserido, com o
+    // sentinela do passo anterior onde estaria o id vindo do CRM.
+    return { recordId: null, skippedFields, warnings, payload: row };
+  }
+
   const { data: inserted, error } = await db
     .from("records")
     .insert(row)
@@ -207,6 +233,101 @@ export async function runRecordCreateStep(
         origin: "app" as const,
       }))
     );
+  }
+
+  return { recordId, skippedFields, warnings };
+}
+
+export interface RecordUpdateStepDeps {
+  /** Catálogo de campos da org — decide o alvo válido e a coerção. */
+  defs: FieldDefinition[];
+  orgId: string | null;
+}
+
+/**
+ * Passo `record.update`: altera campos de um registro que JÁ existe (o que
+ * disparou a automação, via {{ctx.triggerRecordId}}, ou o criado por um passo
+ * anterior).
+ *
+ * Alvo válido = coluna do núcleo que o app sabe escrever (EDITABLE_CORE_COLUMNS
+ * — a MESMA base do `setFieldTargetError` que gateia o `set_field`) ou campo
+ * personalizado não-calculado. O resto é PULADO e reportado, nunca escrito às
+ * escuras. Valor que resolve vazio não é enviado: limpar campo não é o que
+ * "não trouxe valor" quer dizer.
+ */
+export async function runRecordUpdateStep(
+  step: WorkflowRecordUpdateStep,
+  context: WorkflowRefContext,
+  db: SupabaseClient,
+  deps: RecordUpdateStepDeps,
+  opts: { dryRun?: boolean } = {}
+): Promise<RecordStepResult> {
+  const warnings: string[] = [];
+  const skippedFields: string[] = [];
+
+  if (step.params.skipIfEmpty && resolvesEmpty(step.params.skipIfEmpty, context)) {
+    return { recordId: null, skippedFields, warnings, skipped: true };
+  }
+
+  const target = resolveTemplate(step.params.recordIdFrom, context);
+  warnings.push(...target.warnings);
+  const recordId = target.value.trim();
+  if (recordId === "") {
+    throw new Error(
+      `O passo "${step.label}" não resolveu o registro a alterar.`
+    );
+  }
+
+  const defByKey = new Map(deps.defs.map((d) => [d.field_key as string, d]));
+  const writes: FieldWrite[] = [];
+  const preview: Record<string, string> = {};
+
+  for (const [ref, spec] of Object.entries(step.params.fields)) {
+    const resolved = resolveTemplate(spec.value, context);
+    warnings.push(...resolved.warnings);
+    const value = resolved.value.trim();
+    if (value === "") continue;
+
+    if (ref.startsWith("custom:")) {
+      const def = defByKey.get(ref.slice("custom:".length));
+      const dt = def?.data_type as DataType | undefined;
+      if (!def || dt === "calculado" || dt === "calculado_agg") {
+        skippedFields.push(ref);
+        continue;
+      }
+    } else if (!EDITABLE_CORE_COLUMNS[ref]) {
+      skippedFields.push(ref);
+      continue;
+    }
+
+    preview[ref] = value;
+    writes.push({ recordId, field: ref, value, ruleId: step.id });
+  }
+
+  if (opts.dryRun) {
+    return {
+      recordId,
+      skippedFields,
+      warnings,
+      payload: { recordId, fields: preview },
+    };
+  }
+
+  if (writes.length > 0) {
+    const outcome = await executeFieldWrites(db, {
+      writes,
+      // O `old_value` de coluna do núcleo na auditoria sai daqui; sem o
+      // registro em mãos a auditoria registra a alteração sem o valor antigo.
+      recordById: new Map(),
+      // Devolver ao CRM é decisão EXPLÍCITA do esquema: um passo
+      // `bitrix.entity.update` diz o que vai para lá, com o campo de destino.
+      writeBack: false,
+      orgId: deps.orgId,
+      defs: deps.defs,
+    });
+    if (outcome.failed.length > 0) {
+      throw new Error(outcome.failed[0].message);
+    }
   }
 
   return { recordId, skippedFields, warnings };

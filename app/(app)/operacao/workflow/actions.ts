@@ -1,3 +1,10 @@
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): o miolo da execução saiu para `runWorkflowCore`
+//   (lib/workflow/run.ts) e esta action virou wrapper — a ação `run_schema` das
+//   automações precisa das mesmas linhas com outra identidade, e duas cópias
+//   seriam a régua paralela da invariante 25. Aqui ficam sessão, área,
+//   permissão, responsável e base de destino; o contrato da execução (contexto,
+//   histórico, recálculo, webhook) é do núcleo.
 // Versão: 1.1 | Data: 08/09/2026
 // v1.1 (08/09/2026): `showCard` entra no patch salvável (0126) — separa "o
 //   formulário tem página" de "aparece no hub de todo mundo". `runWorkflow`
@@ -24,16 +31,13 @@ import { checkSettingsArea, isSettingsAreaDenied } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
 import { getSessionInfo } from "@/lib/auth/session";
 import { loadSources } from "@/lib/config/sources";
+import type { FieldDefinition } from "@/lib/records/types";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { recalcFormulaFieldsForRecords } from "@/lib/records/recalc";
-import { emitWebhookEvent } from "@/lib/webhooks/emit";
 import { primaryOperationId } from "@/lib/sync/shared";
-import { BITRIX_STATUS_CODES_KEY } from "@/lib/sync/bitrix/catalog";
-import type { BitrixStatusCodes } from "@/lib/sync/bitrix/writeback";
-import { executeWorkflow, type WorkflowStepOutcome } from "@/lib/workflow/execute";
+import type { WorkflowStepOutcome } from "@/lib/workflow/execute";
+import { loadStatusCodes, runWorkflowCore } from "@/lib/workflow/run";
 import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
-import { splitPersonName } from "@/lib/workflow/steps/bitrix";
 import {
   parseWorkflowDefinition,
   type WorkflowDefinition,
@@ -53,26 +57,6 @@ export interface WorkflowRunState {
 export interface WorkflowSchemaState {
   ok?: boolean;
   message?: string;
-}
-
-/**
- * Mapa rótulo→código das famílias de crm_status, gravado a cada sync do
- * catálogo. Lido aqui para o passo do Bitrix mandar "UC_EN7PZM" onde o
- * formulário mostrou "CEO-Led Outbound". Ausente (sync ainda não rodou desde a
- * atualização) degrada para o comportamento anterior — manda o rótulo — em vez
- * de recusar o envio.
- */
-async function loadStatusCodes(orgId: string | null): Promise<BitrixStatusCodes> {
-  const service = createServiceClient();
-  let q = service
-    .from("sync_config")
-    .select("value")
-    .eq("key", BITRIX_STATUS_CODES_KEY);
-  if (orgId) q = q.eq("organization_id", orgId);
-  const { data } = await q.maybeSingle();
-  const v = data?.value;
-  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
-  return v as BitrixStatusCodes;
 }
 
 /** Lê e valida as respostas do formulário contra a definição. */
@@ -158,14 +142,6 @@ async function resolveResponsible(
   };
 }
 
-/**
- * Campo do formulário de onde sai o nome da pessoa que os passos separam em
- * NAME/LAST_NAME (refs {{ctx.contatoPrimeiroNome}}/{{ctx.contatoSobrenome}}).
- * Convenção do esquema, não hardcode do fluxo: um esquema sem esse campo
- * simplesmente deixa as duas refs vazias.
- */
-const PERSON_NAME_FIELD = "contato_nome";
-
 export async function runWorkflow(
   _prev: WorkflowRunState,
   formData: FormData
@@ -220,17 +196,8 @@ export async function runWorkflow(
   );
   if (resp.error) return { ok: false, message: resp.error };
 
-  // Contexto do SERVIDOR: o que o formulário não pergunta mas os passos usam.
-  const person = splitPersonName(values[PERSON_NAME_FIELD] ?? "");
-  const ctx: Record<string, string | null> = {
-    responsibleBitrixId: resp.bitrixUserId,
-    contatoPrimeiroNome: person.first,
-    contatoSobrenome: person.last,
-    usuarioEmail: session.user.email ?? "",
-  };
-
   // Base de destino do passo de registro local, resolvida e validada AQUI (o
-  // executor não consulta catálogo).
+  // núcleo não consulta catálogo).
   const recordStep = def.steps.find(
     (s) => s.type === "record.create" && s.enabled
   );
@@ -247,49 +214,38 @@ export async function runWorkflow(
     }
   }
 
-  const result = await executeWorkflow(def, values, {
+  // Catálogo de campos: só quando o esquema ALTERA registro (o passo precisa
+  // dele para decidir alvo válido e coerção). Esquema que só cria não paga.
+  const needsDefs = def.steps.some((s) => s.type === "record.update" && s.enabled);
+  let defs: FieldDefinition[] = [];
+  if (needsDefs) {
+    const { data } = await supabase
+      .from("field_definitions")
+      .select("field_key, data_type, editable_by_roles, applies_to, source_system")
+      .eq("organization_id", orgId);
+    defs = (data ?? []) as unknown as FieldDefinition[];
+  }
+
+  const result = await runWorkflowCore({
     db: supabase,
-    ctx,
-    record: {
+    orgId,
+    schema,
+    def,
+    form: values,
+    actor: {
       userId: session.user.id,
+      roles: session.roles,
       responsibleId: resp.id,
       operationId: resp.id ? await primaryOperationId(supabase, resp.id) : null,
-      roles: session.roles,
-      orgId,
+      bitrixUserId: resp.bitrixUserId,
+      email: session.user.email ?? "",
     },
     recordSource,
-    bitrix: { statusCodes: await loadStatusCodes(orgId) },
+    recordUpdate: { defs, orgId },
+    statusCodes: await loadStatusCodes(createServiceClient(), orgId),
   });
 
-  // Histórico: grava SEMPRE, inclusive no erro — é o que diz o que sobrou no
-  // sistema externo quando a execução morre no meio.
-  await supabase.from("workflow_runs").insert({
-    organization_id: orgId,
-    schema_id: schema.id,
-    schema_key: schema.key,
-    status: result.status,
-    input: values,
-    steps: result.steps,
-    error: result.error,
-    record_id: result.recordId,
-    created_by: session.user.id,
-  });
-
-  if (result.recordId) {
-    // Campos calculados pelo choke point único de recálculo (mesmo caminho do
-    // auto-match pós-sync e da inserção por IA).
-    try {
-      await recalcFormulaFieldsForRecords([result.recordId]);
-    } catch {
-      /* best-effort: o recalc geral cobre depois. */
-    }
-    await emitWebhookEvent(
-      "record.created",
-      { recordId: result.recordId, source: recordSource?.key ?? null },
-      orgId
-    );
-    revalidatePath("/registros");
-  }
+  if (result.recordId) revalidatePath("/registros");
 
   const created = result.steps.filter((s) => s.ok && !s.skipped && s.outputId);
   const main = created[created.length - 1];

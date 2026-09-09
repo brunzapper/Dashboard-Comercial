@@ -1,4 +1,7 @@
 <!-- Versão: 3.19 | Data: 08/09/2026 -->
+<!-- v3.20 (09/09/2026): 0130 — workflow_runs ganha gatilho (trigger_record_id,
+     automation_rule_id), mode, payload_hash e released_at + o índice único
+     uq_workflow_runs_per_automation: a trava da ação run_schema. -->
 <!-- v3.19 (08/09/2026): 0129 — tasks.automation_rule_id + índice único
      parcial (a trava de idempotência da ação create_task). -->
 <!-- v3.18 (08/09/2026): 0128 — kanban_automations renomeada p/
@@ -1051,3 +1054,4 @@ contato de um lead alheio.
 | 0127 | automation_source_scope | `automation_rules.source_key`: a regra pode ter uma BASE como universo, sem quadro. CHECK de dono único vira três; RLS ganha o ramo `source_key is not null and auth_has_role('admin')` (não há quadro de onde derivar `auth_board_editable`); o trigger de stamp de org da 0109 já cobre pelo `coalesce`. (Tabela renomeada logo depois, na 0128.) Não recria as RPCs |
 | 0128 | rename_automation_rules | `kanban_automations` → **`automation_rules`** (+ índices, constraint, triggers, função de stamp e policy renomeados). O escopo de Base da 0127 tornou o nome antigo mentiroso. A ROTA do tick (`/api/kanban-automations/tick`) NÃO muda: o pg_cron já agendado aponta para ela. Não recria as RPCs |
 | 0129 | task_automation_link | `tasks.automation_rule_id` + índice ÚNICO PARCIAL `uq_tasks_open_per_automation` em `(automation_rule_id, record_id) where completed_at is null`: no máximo UMA tarefa ABERTA por regra × registro. É a trava da ação `create_task` — o tick roda a cada minuto e `set_field` (idempotente por comparação) não tinha esse problema. Não recria as RPCs |
+| 0130 | workflow_run_triggers | `workflow_runs` ganha `trigger_record_id`, `automation_rule_id`, `mode` ('real'\|'simulado'), `payload_hash` e `released_at`; `status` aceita `'iniciado'` (execução reivindicada sem desfecho); índice ÚNICO PARCIAL `uq_workflow_runs_per_automation` em `(automation_rule_id, trigger_record_id, mode, payload_hash) where released_at is null`. É a trava da ação `run_schema`: esquema IRREVERSÍVEL usa `payload_hash = ''` (uma execução por registro, para sempre), esquema REPETÍVEL guarda o hash da entrada (reexecuta só quando o que seria enviado muda). `released_at` é a retentativa MANUAL. Não recria as RPCs |

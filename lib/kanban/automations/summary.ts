@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 08/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a frase da ação `run_schema`. O rótulo do esquema não vem
+//   do módulo (ele é puro e não consulta nada) — quem tem a lista carregada
+//   passa `labels`; sem ela a frase usa a chave, que é o que a regra guarda.
 // Resumo de UMA LINHA de uma regra de automação, em português — para listar
 // regras fora do editor delas (o Workflow mostra todas as da organização).
 //
@@ -40,7 +43,10 @@ function conditionText(c: AutomationCondition): string {
 }
 
 /** "Se <condições> então <ação>" — o suficiente para reconhecer a regra. */
-export function automationSummary(rule: AutomationRule): string {
+export function automationSummary(
+  rule: AutomationRule,
+  labels?: Record<string, string>
+): string {
   const when = rule.conditions.map(conditionText).join(" e ");
   const a = rule.action;
   const then =
@@ -48,9 +54,13 @@ export function automationSummary(rule: AutomationRule): string {
       ? `mover para "${a.targetKey}"`
       : a.type === "set_field"
         ? `definir ${a.field} = "${a.value}"`
-        : `abrir a tarefa "${a.title}"${
-            a.dueInDays != null ? ` com prazo de ${a.dueInDays} dia(s)` : ""
-          }`;
+        : a.type === "run_schema"
+          ? `executar o esquema "${labels?.[a.schemaKey] ?? a.schemaKey}"${
+              a.simulate ? " (apenas simulação)" : ""
+            }`
+          : `abrir a tarefa "${a.title}"${
+              a.dueInDays != null ? ` com prazo de ${a.dueInDays} dia(s)` : ""
+            }`;
   return `Se ${when}, ${then}.`;
 }
 
@@ -58,5 +68,6 @@ export function automationSummary(rule: AutomationRule): string {
 export function automationActionLabel(rule: AutomationRule): string {
   if (rule.action.type === "move_to_column") return "Mover de coluna";
   if (rule.action.type === "set_field") return "Definir campo";
+  if (rule.action.type === "run_schema") return "Executar esquema";
   return "Abrir tarefa";
 }
