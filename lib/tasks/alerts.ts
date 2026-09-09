@@ -1,19 +1,20 @@
-// Versão: 1.0 | Data: 16/07/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): addDaysIso passou a vir de lib/date/days.ts (era uma
+//   cópia; a outra estava no avaliador das automações).
 // Alertas de prazo DERIVADOS (D8 do plano — sem tabela de notificações):
 // atrasada = due_date < hoje (dia civil de Brasília) e não concluída;
 // "vence em breve" = até dueSoonDays dias à frente (default 3). Usado pelos
 // destaques dos cards/listas/agenda e pelo sino do AppShell.
+import { addDaysIso } from "@/lib/date/days";
 import { todayBrasiliaIso } from "@/lib/date/today";
 
 export const DEFAULT_DUE_SOON_DAYS = 3;
 
 export type DueStatus = "atrasada" | "em_breve" | null;
 
-// Soma dias a um ISO YYYY-MM-DD (aritmética UTC — sem drift de fuso).
-export function addDaysIso(iso: string, days: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
-}
+// Soma dias a um ISO YYYY-MM-DD — implementação em lib/date/days.ts (dono
+// único desde 09/09/2026); reexportada para os chamadores não mudarem.
+export { addDaysIso };
 
 /** Status de prazo de uma tarefa (null = sem prazo/concluída/no prazo). */
 export function classifyDue(

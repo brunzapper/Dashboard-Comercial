@@ -1,3 +1,9 @@
+// Versão: 1.5 | Data: 09/09/2026
+// v1.5 (09/09/2026): ação `create_task_series`. Dois fatos novos, ambos sob
+//   gate (só quando alguma regra ativa mantém série): as ocorrências já criadas
+//   (evita a ida ao banco; a trava real é o índice único da 0132) e as exceções
+//   de cadência da rodada. O executor é irmão do de tarefas e entra no MESMO
+//   teto de ações.
 // Versão: 1.4 | Data: 09/09/2026
 // v1.4 (09/09/2026): ação `run_schema` — a rodada carrega os esquemas ELEGÍVEIS
 //   (ligados, gatilho `automacao`, definição válida) uma vez, o avaliador
@@ -54,9 +60,15 @@ import {
 } from "./task";
 import { loadAutomationUniverse } from "./universe";
 import {
+  executeAutomationSeries,
+  loadSeriesOccurrences,
+} from "./series";
+import { loadSeriesSettings } from "@/lib/series/load";
+import {
   executeAutomationSchemaRuns,
   MAX_SCHEMA_RUNS_PER_RUN,
 } from "./schema-run";
+import type { SeriesSetting } from "@/lib/series/cadence";
 import { syncSchemaFailureTask } from "@/lib/workflow/notify";
 import { loadWorkflowSchemas, type WorkflowSchemaRow } from "@/lib/workflow/schemas";
 import type { WorkflowDefinition } from "@/lib/workflow/types";
@@ -348,9 +360,14 @@ export async function runBoardAutomations(
   // 4) Fatos por card — só o que as regras ativas pedem.
   const conds = rules.flatMap((r) => r.rule.conditions);
   const needTasks = conds.some((c) => c.kind === "tasks");
-  const needFmod = conds.some(
-    (c) => c.kind === "time" && c.basis.type === "field_changed"
-  );
+  const needFmod =
+    conds.some((c) => c.kind === "time" && c.basis.type === "field_changed") ||
+    // A âncora "desde que mudou de etapa" lê o MESMO fato.
+    rules.some(
+      (r) =>
+        r.rule.action.type === "create_task_series" &&
+        r.rule.action.series.anchor.kind === "field_changed"
+    );
   const needPlacement = conds.some(
     (c) => c.kind === "time" && c.basis.type === "in_column"
   );
@@ -386,6 +403,32 @@ export async function runBoardAutomations(
       schemaDefs.set(row.key, row.definition);
     }
   }
+
+  // Séries da rodada: as ocorrências já criadas (evita a escrita que a trava
+  // recusaria) e as exceções de cadência. Só quando alguma regra ativa mantém
+  // série — o caso comum não paga consulta nenhuma.
+  const seriesRules = rules.filter(
+    (r) => r.rule.action.type === "create_task_series"
+  );
+  const seriesKeys = [
+    ...new Set(
+      seriesRules.map((r) =>
+        r.rule.action.type === "create_task_series" ? r.rule.action.series.key : ""
+      )
+    ),
+  ].filter(Boolean);
+  const [seriesByRecord, seriesSettings] =
+    seriesRules.length > 0
+      ? await Promise.all([
+          loadSeriesOccurrences(
+            db,
+            orgId,
+            seriesRules.map((r) => r.id),
+            recordIds
+          ),
+          loadSeriesSettings(db, orgId, seriesKeys),
+        ])
+      : [new Map<string, string[]>(), new Map<string, SeriesSetting[]>()];
 
   const todayIso = todayBrasiliaIso();
   const openByRecord = new Map<string, number>();
@@ -476,6 +519,7 @@ export async function runBoardAutomations(
       sourceCreatedAt: card.record.source_created_at ?? null,
       placementUpdatedAt: placementAtByRecord.get(card.id) ?? null,
       openAutomationRuleIds: openTasksByRecord.get(card.id) ?? [],
+      seriesOccurrences: seriesByRecord.get(card.id) ?? [],
     };
   });
 
@@ -491,8 +535,9 @@ export async function runBoardAutomations(
     // vínculo pode nascer DEPOIS da regra, por isso a guarda é de avaliação.
     allocationFieldKey: universe.allocationFieldKey,
     schemaDefs,
+    seriesSettings,
   };
-  const { moves, sets, tasks, schemaRuns, ruleErrors } = decideActions(
+  const { moves, sets, tasks, schemaRuns, seriesTasks, ruleErrors } = decideActions(
     rules,
     facts,
     evalCtx
@@ -507,6 +552,10 @@ export async function runBoardAutomations(
     0,
     MAX_ACTIONS_PER_RUN - cappedMoves.length - cappedSets.length
   );
+  const cappedSeries = seriesTasks.slice(
+    0,
+    MAX_ACTIONS_PER_RUN - cappedMoves.length - cappedSets.length - cappedTasks.length
+  );
   // Teto próprio E o que sobrou do compartilhado — o menor dos dois.
   const cappedSchemaRuns = schemaRuns.slice(
     0,
@@ -515,7 +564,8 @@ export async function runBoardAutomations(
       MAX_ACTIONS_PER_RUN -
         cappedMoves.length -
         cappedSets.length -
-        cappedTasks.length
+        cappedTasks.length -
+        cappedSeries.length
     )
   );
 
@@ -590,6 +640,21 @@ export async function runBoardAutomations(
       summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
     }
     noteFailures(result.failed, cappedTasks, "Falha ao abrir tarefa");
+  }
+
+  if (cappedSeries.length > 0) {
+    if (overBudget())
+      return { ...summary, fatal: "Orçamento de tempo esgotado." };
+    const result = await executeAutomationSeries(db, {
+      series: cappedSeries,
+      orgId,
+      createdBy: (ruleRows[0]?.created_by as string | null) ?? null,
+    });
+    summary.moved += result.okIds.length;
+    for (const [ruleId, n] of result.createdByRule) {
+      summaryMovedByRule.set(ruleId, (summaryMovedByRule.get(ruleId) ?? 0) + n);
+    }
+    noteFailures(result.failed, cappedSeries, "Falha ao abrir a cobrança");
   }
 
   if (cappedSchemaRuns.length > 0 && orgId) {

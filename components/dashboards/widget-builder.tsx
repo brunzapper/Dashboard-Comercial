@@ -7,6 +7,9 @@
 //   colunas → saveWidgetSettings) e `clean` substitui o objeto inteiro:
 //   salvar o widget pelo builder DESLIGAVA o write-back em silêncio — o
 //   mesmo furo que o allocationFieldKey já tinha resolvido ao lado.
+// v1.25 (09/09/2026): Opções avançadas ganham o "Clique na linha" (só na lista
+//   de registros): abre o detalhe, as tarefas ou um atributo do registro sem
+//   sair do dashboard. Ausente = tabela sem clique, como sempre foi.
 // v1.24 (12/08/2026): Opções avançadas ganham o toggle "Botão '+' para criar
 //   registro" (settings.showAddRecord) — só lista de registros com UMA Base
 //   raiz de criação manual (manualEntryRootSource); o save limpa a chave
@@ -112,6 +115,7 @@ import {
 } from "lucide-react";
 
 import { Accordion } from "@/components/ui/accordion";
+import { ATTRIBUTE_REGISTRY } from "@/lib/attributes/registry";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -502,6 +506,13 @@ export function WidgetBuilder({
   );
   // Botão "+" de criação manual na tabela modo lista (opt-in; só quando a
   // seleção é UMA Base raiz com manual_entry — ver supportsAddRecord abaixo).
+  // Clique na linha (opções avançadas): o que abrir e, no modo atributo, qual.
+  const [rowActionKind, setRowActionKind] = useState<string>(
+    widget?.settings?.rowAction?.kind ?? "none"
+  );
+  const [rowActionAttr, setRowActionAttr] = useState<string>(
+    widget?.settings?.rowAction?.attributeKey ?? "tree"
+  );
   const [showAddRecord, setShowAddRecord] = useState<boolean>(
     widget?.settings?.showAddRecord === true
   );
@@ -1959,6 +1970,19 @@ export function WidgetBuilder({
       settings.showAddRecord = true;
     } else {
       delete settings.showAddRecord;
+    }
+
+    // Clique na linha: só na lista de registros, e só quando escolhido. "none"
+    // limpa a chave — a tabela volta a não ter clique, byte-idêntica.
+    if (isRecordList && rowActionKind !== "none") {
+      settings.rowAction = {
+        kind: rowActionKind as NonNullable<
+          typeof settings.rowAction
+        >["kind"],
+        ...(rowActionKind === "atributo" ? { attributeKey: rowActionAttr } : {}),
+      };
+    } else {
+      delete settings.rowAction;
     }
 
     // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
@@ -3966,6 +3990,42 @@ export function WidgetBuilder({
                 />
                 Altura dinâmica (cresce com o conteúdo)
               </label>
+              {/* Clique na LINHA: abre o detalhe, as tarefas ou um atributo
+                  do registro, sem sair do dashboard. */}
+              {isRecordList ? (
+                <div className="flex flex-col gap-2 border-t pt-3">
+                  <Label>Clique na linha</Label>
+                  <p className="text-muted-foreground text-xs">
+                    O que abrir ao clicar num registro da tabela. A edição de
+                    célula continua sendo no duplo-clique.
+                  </p>
+                  <Combobox
+                    options={[
+                      { value: "none", label: "Nada (padrão)" },
+                      { value: "detalhe", label: "Detalhe do registro" },
+                      { value: "tarefas", label: "Tarefas do registro" },
+                      { value: "atributo", label: "Uma funcionalidade (atributo)" },
+                    ]}
+                    value={rowActionKind}
+                    onValueChange={setRowActionKind}
+                    searchable={false}
+                    aria-label="Ação do clique na linha"
+                  />
+                  {rowActionKind === "atributo" ? (
+                    <Combobox
+                      options={ATTRIBUTE_REGISTRY.map((a) => ({
+                        value: a.key,
+                        label: a.label,
+                      }))}
+                      value={rowActionAttr}
+                      onValueChange={setRowActionAttr}
+                      searchable={false}
+                      aria-label="Atributo a abrir"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
               {/* Botão "+" (criação manual): só lista de registros com UMA
                   Base raiz de criação manual (bases de Sync ficam de fora). */}
               {supportsAddRecord && addRecordSource ? (

@@ -1,3 +1,9 @@
+// Versão: 1.4 | Data: 09/09/2026
+// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
+//   DERIVADA aqui, pura: âncora (o mesmo `fieldModifiedAt` que a condição de
+//   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
+//   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
+//   existe; a trava de verdade é o índice único da 0132.
 // Versão: 1.3 | Data: 09/09/2026
 // v1.3 (09/09/2026): ação `run_schema`. As respostas que o esquema receberia de
 //   uma pessoa são resolvidas AQUI, do registro — como o `set_field` resolve o
@@ -6,7 +12,15 @@
 //   `sourceRef` do esquema → `defaultValue`. Esquema ausente do catálogo da
 //   rodada (apagado, desligado, inválido ou com gatilho de formulário) deixa a
 //   regra INERTE com erro, pelo mesmo caminho de "coluna removida".
-// Versão: 1.2 | Data: 08/09/2026
+// Versão: 1.4 | Data: 09/09/2026
+// v1.4 (09/09/2026): ação `create_task_series`. A decisão de "cobra hoje?" é
+//   DERIVADA aqui, pura: âncora (o mesmo `fieldModifiedAt` que a condição de
+//   tempo já usa) + cadência resolvida pela cascata = a ocorrência devida. O
+//   fato `seriesOccurrences` evita a ida ao banco de uma ocorrência que já
+//   existe; a trava de verdade é o índice único da 0132.
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): `addDaysIso`/`daysSince` saíram para lib/date/days.ts
+//   (dono único da aritmética de dia civil) e são reexportadas daqui.
 // v1.2 (08/09/2026): ação `create_task`. A idempotência dela não cabe na
 //   comparação que o `set_field` usa (criar tarefa não tem estado anterior
 //   para comparar), então vem como FATO da rodada: `openAutomationRuleIds`
@@ -31,6 +45,7 @@
 // regra INERTE + ruleError — o catálogo pode mudar depois da regra criada) e
 // IDEMPOTÊNCIA decidida no snapshot: valor atual igual ao alvo consome o card
 // SEM emitir escrita (zero churn de audit/webhook no tick por minuto).
+import { addDaysIso, daysSince } from "@/lib/date/days";
 import type { RecordRow } from "@/lib/records/types";
 import type { AggCondition } from "@/lib/records/formulas";
 import { EDITABLE_CORE_COLUMNS } from "@/lib/config/core-writeback";
@@ -38,8 +53,15 @@ import { recordMatchesConds } from "@/lib/widgets/calc-metrics";
 import { recordRawValue } from "@/lib/widgets/quick-filters";
 import type { AvailableField } from "@/lib/widgets/fields";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
+import { resolveCadence, type SeriesSetting } from "@/lib/series/cadence";
+import {
+  dueOccurrence,
+  resolveAnchorDate,
+  resolveBound,
+} from "@/lib/series/occurrence";
 import type { WorkflowDefinition } from "@/lib/workflow/types";
 import { KANBAN_OVERFLOW_KEY, type KanbanColumn } from "../types";
+import type { SeriesConfig } from "@/lib/series/types";
 import {
   relatedCountKey,
   type AutomationCondition,
@@ -66,6 +88,9 @@ export interface CardFacts {
   // Regras que JÁ têm tarefa aberta para este registro (ação create_task).
   // Vazio quando nenhuma regra ativa da rodada cria tarefa.
   openAutomationRuleIds: string[];
+  // Ocorrências de série JÁ criadas para este registro, como "<ruleId>:<n>".
+  // Vazio quando nenhuma regra ativa da rodada mantém série.
+  seriesOccurrences: string[];
 }
 
 export interface EvalContext {
@@ -86,6 +111,12 @@ export interface EvalContext {
    * coluna que sumiu.
    */
   schemaDefs?: Map<string, WorkflowDefinition>;
+  /**
+   * Exceções de cadência da rodada, por chave de série (linhas de
+   * series_settings). Ausente = ninguém sobrescreveu nada e vale o padrão do
+   * esquema — que é o caso comum.
+   */
+  seriesSettings?: Map<string, SeriesSetting[]>;
 }
 
 export interface PlannedMove {
@@ -101,6 +132,22 @@ export interface PlannedSet {
   field: string;
   value: string;
   ruleId: string;
+}
+
+/** Cobrança de uma série decidida por uma regra create_task_series. */
+export interface PlannedSeriesTask {
+  recordId: string;
+  ruleId: string;
+  seriesKey: string;
+  /** N-ésima cobrança — vai para tasks.series_occurrence (a trava). */
+  occurrence: number;
+  title: string;
+  description: string | null;
+  /** Dia previsto da cobrança (âncora + N × cadência). */
+  dueDate: string;
+  responsibleId: string | null;
+  /** Atributo a conceder ao registro que entra na série (ex.: "tree"). */
+  grantAttribute: string | null;
 }
 
 /** Execução de esquema decidida por uma regra run_schema. */
@@ -130,30 +177,10 @@ export interface RuleError {
   message: string;
 }
 
-/** Dias de calendário entre `iso` e hoje (positivo = passado); null = sem
- *  data válida. Compara os prefixos YYYY-MM-DD — nunca converte fuso. */
-/** `iso` + N dias, no calendário (prefixo YYYY-MM-DD — nunca converte fuso). */
-export function addDaysIso(iso: string, days: number): string {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  // Date.UTC evita o salto de horário de verão que o construtor local traria.
-  const t = Date.UTC(y, m - 1, d) + days * 86_400_000;
-  return new Date(t).toISOString().slice(0, 10);
-}
-
-export function daysSince(
-  iso: string | null | undefined,
-  todayIso: string
-): number | null {
-  const d = iso?.slice(0, 10);
-  const t = todayIso.slice(0, 10);
-  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{4}-\d{2}-\d{2}$/.test(t))
-    return null;
-  const [y1, m1, d1] = d.split("-").map(Number);
-  const [y2, m2, d2] = t.split("-").map(Number);
-  return Math.round(
-    (Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000
-  );
-}
+// A aritmética de dia civil vive em lib/date/days.ts (dono único desde
+// 09/09/2026 — havia uma cópia aqui e outra em lib/tasks/alerts.ts, e a série
+// periódica seria a terceira). Reexportadas para não mexer nos chamadores.
+export { addDaysIso, daysSince };
 
 // Ops de comparação → op de AggCondition (mesma normalização dos widgets:
 // eq_ci/neq_ci e *_num compartilham a semântica do evalCondition, que já
@@ -329,6 +356,7 @@ export function decideActions(
   sets: PlannedSet[];
   tasks: PlannedTask[];
   schemaRuns: PlannedSchemaRun[];
+  seriesTasks: PlannedSeriesTask[];
   ruleErrors: RuleError[];
 } {
   const ruleErrors: RuleError[] = [];
@@ -374,6 +402,7 @@ export function decideActions(
   const sets: PlannedSet[] = [];
   const tasks: PlannedTask[] = [];
   const schemaRuns: PlannedSchemaRun[] = [];
+  const seriesTasks: PlannedSeriesTask[] = [];
   for (const card of cards) {
     if (card.isMock) continue;
     for (const rule of active) {
@@ -403,6 +432,9 @@ export function decideActions(
             ruleId: rule.id,
           });
         }
+      } else if (action.type === "create_task_series") {
+        const plan = planSeriesTask(action.series, rule.id, card, ctx);
+        if (plan) seriesTasks.push(plan);
       } else if (action.type === "run_schema") {
         const def = ctx.schemaDefs?.get(action.schemaKey);
         if (def) {
@@ -441,7 +473,73 @@ export function decideActions(
       break; // primeira regra que casou consome o card (mesmo sem escrever)
     }
   }
-  return { moves, sets, tasks, schemaRuns, ruleErrors };
+  return { moves, sets, tasks, schemaRuns, seriesTasks, ruleErrors };
+}
+
+/**
+ * A cobrança devida hoje para este registro — ou null.
+ *
+ * Null em quatro situações, todas silenciosas de propósito (não são erro da
+ * regra, são a série ainda não tendo o que cobrar): sem âncora (o campo nunca
+ * foi preenchido), fora da janela, desligada por alguma exceção de escopo, ou
+ * a ocorrência devida já existe. O último caso é o comum — a série passa a
+ * maior parte dos dias sem nada a fazer.
+ */
+function planSeriesTask(
+  series: SeriesConfig,
+  ruleId: string,
+  card: CardFacts,
+  ctx: EvalContext
+): PlannedSeriesTask | null {
+  const facts = {
+    record: card.record,
+    fieldModifiedAt: card.fieldModifiedAt,
+    sourceCreatedAt: card.sourceCreatedAt,
+    available: ctx.available,
+  };
+  const anchorDate = resolveAnchorDate(series.anchor, facts);
+  if (!anchorDate) return null;
+
+  const cadence = resolveCadence(
+    series.cadence,
+    card.record,
+    ctx.available,
+    ctx.seriesSettings?.get(series.key) ?? []
+  );
+  // Desligado para este recorte (responsável, registro, etapa…): a série
+  // continua existindo e o atributo continua no registro — só não cobra.
+  if (!cadence.active) return null;
+
+  const plan = dueOccurrence({
+    anchorDate,
+    cadenceDays: cadence.days,
+    todayIso: ctx.todayIso,
+    fromDate: resolveBound(series.from, facts),
+    untilDate: resolveBound(series.until, facts),
+    firstAt: series.firstAt,
+    maxOccurrences: series.maxOccurrences,
+  });
+  if (!plan) return null;
+
+  // Já criada: consome sem escrever (a trava de verdade é o índice único).
+  if (card.seriesOccurrences.includes(`${ruleId}:${plan.occurrence}`)) {
+    return null;
+  }
+
+  const title =
+    typeof series.title === "string" ? series.title : series.title.value;
+  return {
+    recordId: card.record.id,
+    ruleId,
+    seriesKey: series.key,
+    occurrence: plan.occurrence,
+    title,
+    description: series.description ?? null,
+    dueDate: plan.dueDate,
+    // Em nome do responsável DO REGISTRO — quem conduz o acompanhamento.
+    responsibleId: card.record.responsible_id ?? null,
+    grantAttribute: series.grantAttribute ?? null,
+  };
 }
 
 /**

@@ -1,3 +1,7 @@
+<!-- Versão: 1.36 | Data: 09/09/2026 -->
+<!-- v1.36 (09/09/2026): §4.16 — receita do acompanhamento periódico
+     (série de tarefas 0132, atributo 0131 e a Tree 0133/0134), montada
+     pela UI; nada do caso "Nutrição" é semeado em código. -->
 <!-- Versão: 1.35 | Data: 08/09/2026 -->
 <!-- v1.35 (08/09/2026): 0129 — ação "Abrir tarefa" e a trava contra
      duplicata. -->
@@ -1059,6 +1063,88 @@ admin, e isso daria leitura arbitrária do ambiente do servidor
 `SYSTEM_FLOWS` (`lib/workflow/system-schemas.ts`). O teste confere que a rota de
 `configuredAt` e o caminho de `code` existem — descrição desatualizada apodrece
 calada, e essa lista é a única resposta para "o que este sistema roda sozinho?".
+
+### 4.16 Acompanhamento periódico: a receita do caso "Nutrição" (0131–0134, 09/09/2026)
+
+Esta seção é uma **receita**, não uma descrição de código semeado: nada do caso
+"deals em Nutrição" existe hardcodado. O que existe é a infra (§4.24 da
+arquitetura), e outra organização monta a dela com outras condições, outra
+cadência e outro atributo — pela UI, sem migração e sem deploy.
+
+**O que se quer:** todo deal que entra na etapa Nutrição passa a gerar uma
+tarefa de acompanhamento a cada 15 dias, no nome do responsável dele, até uma
+data; o gestor consegue mudar a cadência de um deal específico ou desligar a
+série de um vendedor; e qualquer um consegue olhar a CONDUTA do vendedor
+naquele lead numa linha do tempo.
+
+**Passo 1 — a regra.** Workflow → Esquemas → **Nova automação**, escolhendo a
+Base dos deals (é a porta do escopo de Base, 0127 — a regra não precisa de
+quadro). Condição: `stage` = `Nutrição`. Essa condição é a **elegibilidade**: o
+motor 0109 casa N condições em E, então "e o valor é maior que X" é só mais uma
+linha.
+
+**Passo 2 — a ação "Série de tarefas".**
+
+| Campo | O que preencher no caso |
+|---|---|
+| Título da tarefa | ex.: `Acompanhar {{titulo}}` |
+| Âncora (a data que conta) | **Mudança de campo** → `stage`. Usa `records.field_modified_at`, o mesmo fato que a condição de tempo já carrega |
+| Cadência padrão | `15` dias |
+| Precedência das exceções | `record` > `responsible` > `field:stage` |
+| Fim | uma **data absoluta** ou um campo de data do registro |
+| Responsável | do REGISTRO |
+| Concede o atributo | `tree` |
+
+A âncora é o **gatilho secundário** do desenho: a etapa diz QUEM entra, a
+âncora diz a partir de QUANDO o relógio corre. Trocar a âncora para "criação do
+registro" ou para um campo de data é troca de opção, não de código.
+
+**Passo 3 — a tabela com clique.** No dashboard, no widget de tabela dos deals:
+construtor → **Opções avançadas** → "Ao clicar na linha" → **Atributo** →
+**Tree**. Tabela sem essa opção continua exatamente como estava.
+
+**Passo 4 — o widget Tree** (opcional): tipo `Tree`, modo histórico de um
+registro. No modo livre ele vira mapa mental e não depende de automação nenhuma.
+
+**Conferir que funcionou:**
+
+1. Rode o tick (ou "Executar agora" na regra). Nasce UMA tarefa, no nome do
+   responsável do deal, com a cobrança 0.
+2. Rode o tick **de novo**. Não nasce a segunda — a trava é por ocorrência, e o
+   23505 é no-op silencioso (não vira `last_error`; se virar, é bug).
+3. Avance a âncora ou reduza a cadência: nasce a próxima, com o número
+   seguinte. A sequência é `floor((hoje − âncora) / cadência)`, então uma
+   janela em que o tick não rodou **não** desloca as cobranças seguintes.
+
+**Ajustes do dia a dia — sem abrir o construtor:**
+
+- **Este deal é semanal:** na Tree do registro, mude a cadência. Grava uma linha
+  em `series_settings` escopo `record`; a regra não é tocada.
+- **João não participa:** exceção escopo `responsible` com `active = false`.
+  Vale para ele e só para ele — e nenhuma exceção de registro o ressuscita,
+  porque um "não" em qualquer escopo alcançado desliga.
+- **Pausar este lead:** botão Pausar na Tree. O atributo **continua lá** e o
+  histórico inteiro também; o que para é a produção de cobranças. Retomar é o
+  mesmo botão.
+
+**Ler a árvore.** O tronco são as cobranças — inclusive a que **ninguém abriu**,
+porque ela é derivada do calendário e não de uma linha de `tasks`. Um galho
+vazio no meio é exatamente a informação que se quer: passou a quinzena e nada
+aconteceu. Tarefas manuais, anotações e alterações penduram na cobrança em cuja
+janela caíram; um nó pode ser re-pendurado à mão, e só essa exceção é gravada.
+
+**Armadilhas conhecidas:**
+
+- Cobrança não nasce: confira a âncora (registro sem a data da âncora **nunca**
+  gera — é de propósito, não silêncio de erro), a janela `from`/`until`, e se
+  alguma exceção alcançada está com `active = false`.
+- Nasceu duplicado: não deveria ser possível (índice único). Se acontecer, a
+  suspeita é `series_occurrence` nulo — tarefa manual da Tree não tem ocorrência
+  de propósito, e é isso que distingue "o que o sistema cobrou" de "o que o
+  vendedor decidiu fazer".
+- Excluir a regra não apaga o atributo nem a árvore
+  (`granted_by_rule_id on delete set null`): o histórico do lead sobrevive à
+  regra que o produziu.
 
 ## 5. Troubleshooting
 

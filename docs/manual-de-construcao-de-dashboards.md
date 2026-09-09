@@ -1,3 +1,9 @@
+<!-- Versão: 1.29 | Data: 09/09/2026 -->
+<!-- v1.29 (09/09/2026): §5.14 nova — widget Tree (árvore de
+     acompanhamento de um registro e mapa mental: as três formas, as
+     ações de dentro e o pausar que não exclui) e §6.9 — "Ao clicar na
+     linha" da tabela (detalhe, tarefas ou atributo). Contagem de tipos
+     de widget: 18 -> 19. -->
 <!-- Versão: 1.28 | Data: 06/09/2026 -->
 <!-- v1.28 (06/09/2026): §5.11 — cálculo entre células da Tabela Livre
      documentado (endereços A1, barra de fórmula "fx", régua A/B/C, clique/
@@ -147,7 +153,7 @@
 2. [Cadastros de apoio (pré-requisitos do construtor)](#2-cadastros-de-apoio-pré-requisitos-do-construtor)
 3. [Anatomia de um dashboard](#3-anatomia-de-um-dashboard)
 4. [Período e filtros no nível do dashboard](#4-período-e-filtros-no-nível-do-dashboard)
-5. [Referência completa dos 18 tipos de widget](#5-referência-completa-dos-18-tipos-de-widget)
+5. [Referência completa dos 19 tipos de widget](#5-referência-completa-dos-19-tipos-de-widget)
 6. [O editor de widget, seção por seção](#6-o-editor-de-widget-seção-por-seção)
 7. [Como os números são calculados (semântica)](#7-como-os-números-são-calculados-semântica)
 8. [Fórmulas — referência completa](#8-fórmulas--referência-completa)
@@ -899,7 +905,7 @@ filtros rápidos etc. não afetam widgets Agenda).
 
 ---
 
-## 5. Referência completa dos 18 tipos de widget
+## 5. Referência completa dos 19 tipos de widget
 
 O campo **"Visual"** do editor define o tipo. Lista completa (rótulo na UI /
 chave interna):
@@ -1147,6 +1153,54 @@ conhecer ao pedir um quadro à IA:
   widget de tarefas — nunca viajam no JSON: são ids daquele quadro
   específico. A IA não os cria nem os apaga; eles são preservados quando ela
   edita o widget, e você continua ligando/desligando pela UI.
+
+### 5.14 Tree (`tree`)
+
+A linha do tempo em forma de **árvore** do acompanhamento de um registro — e,
+no modo livre, um **mapa mental**.
+
+Ela responde o que nenhum gráfico responde: *como o vendedor está conduzindo
+este lead*. O **tronco** são as cobranças do acompanhamento periódico (§12.2.2) —
+inclusive **a que ninguém abriu**, porque elas são calculadas pelo calendário,
+não lidas de uma lista de tarefas: um galho vazio no meio é exatamente a
+informação que interessa. Nos galhos penduram as tarefas manuais, as anotações
+e as alterações de campo, cada uma na cobrança em cuja janela caiu.
+
+**Duas fontes de nós:**
+
+- **Histórico de um registro** — o modo acima. O registro em foco vem da
+  configuração do widget ou do clique numa linha de tabela (§6.9).
+- **Livre** — nós digitados por você (e, opcionalmente, campos de um ou vários
+  registros). É o mapa mental: não depende de automação nenhuma.
+
+**Três formas de organizar** (`layout`), sobre os mesmos fatos:
+
+| Forma | Tronco | Quando usar |
+|---|---|---|
+| **Por cobrança** (padrão) | as cobranças da série | "o que aconteceu entre uma cobrança e a seguinte?" |
+| **Por tipo** | cronológico, um ramo por tipo | "quero ver todas as anotações juntas" |
+| **Livre** | o parentesco que você definir | mapa mental |
+
+Trocar a forma **não perde nada**: os nós são fatos que já existem, e a forma
+só decide de quem cada um pendura. E as formas se misturam — arrastar um nó
+para outro pai grava só essa **exceção**, que passa a valer em qualquer forma;
+desfazer é soltá-lo de volta.
+
+**O que se faz dentro da árvore** (respeitando as permissões de sempre):
+
+- **Anotar** — vira um comentário do registro, o mesmo feed de /registros.
+- **Agendar tarefa** — tarefa manual, no nome do responsável do registro. Ela
+  nasce SEM número de cobrança de propósito: é a diferença entre "o sistema
+  cobrou" e "o vendedor decidiu fazer" que a árvore mostra.
+- **Pausar / Retomar** — para (e volta a produzir) as cobranças. **Pausar não
+  exclui nada**: o registro continua no acompanhamento e o histórico inteiro
+  permanece na tela.
+- **Mudar a cadência deste registro** — grava uma exceção só dele; a regra que
+  vale para os outros não é tocada (§12.2.2).
+
+A árvore se atualiza sozinha quando um dado muda, **sem piscar**: o sync roda a
+cada minuto, e uma tela que reconstrói sozinha na frente de quem está
+apresentando lê como defeito.
 
 ---
 
@@ -1503,6 +1557,21 @@ linhas, métricas intensivas × extensivas) no §7.9.
   local do navegador — vale também no "Novo registro" da aba Registros e no
   kanban); os ocultos reativam-se pela lista "Campos ocultos (N)" no fim do
   formulário.
+- **"Ao clicar na linha"** (`rowAction`, só tabela em modo lista): por padrão
+  **nada acontece** — toda tabela existente continua como sempre foi. As
+  opções abrem um painel SOBRE o dashboard, sem navegar (quem está analisando
+  quer espiar um registro e voltar):
+  - **Detalhe do registro** — todos os campos preenchidos, **somente leitura**
+    (editar continua na aba Registros, com o formulário inteiro). Campos que o
+    seu papel não pode ver não aparecem — e não viajam para o navegador.
+  - **Tarefas do registro** — as tarefas ligadas a ele, com o número da
+    cobrança quando vieram de um acompanhamento periódico.
+  - **Atributo** — a funcionalidade de Operação pendurada no registro. Hoje:
+    **Tree** (§5.14), que abre a árvore de acompanhamento daquele registro.
+  O clique é da LINHA: clicar dentro de uma célula editável, de um botão ou de
+  um link continua fazendo o que sempre fez — a edição in-place não é
+  sequestrada.
+
 
 ---
 
@@ -2213,6 +2282,43 @@ Vale saber:
   não sejam por período (mover um card numa coluna de data reescreveria a data
   do registro a cada execução).
 
+### 12.2.2 Acompanhamento periódico (série de tarefas)
+
+Uma automação pode, além de mover cards e preencher campos, **cobrar
+periodicamente**: abrir uma tarefa a cada N dias enquanto o registro continuar
+satisfazendo a condição. É o que sustenta a árvore do widget Tree (§5.14).
+
+Onde se configura: **Workflow → Esquemas → Nova automação** (a automação não
+precisa de quadro — pode ser da Base inteira), ou o painel de Automações de um
+quadro. A ação chama-se **"Série de tarefas"** e tem cinco decisões:
+
+| Decisão | O que significa |
+|---|---|
+| **Condições da regra** | quem ENTRA no acompanhamento (ex.: `stage = Nutrição`) |
+| **Âncora** | a data a partir da qual o relógio corre: a mudança de um campo, a criação do registro, ou um campo de data |
+| **Cadência padrão** | de quantos em quantos dias cobra (15 = quinzenal) |
+| **Janela** | "a partir de" / "até", aceitando um campo de data **ou uma data fixa** |
+| **Precedência das exceções** | em que ordem as exceções sobrescrevem a cadência (ex.: registro → responsável → etapa) |
+
+A tarefa nasce no nome do **responsável do registro**, e tanto ele quanto um
+admin a gerenciam.
+
+**As exceções não abrem o construtor.** "Este deal é semanal" e "João não
+participa" são ajustes do dia a dia, feitos na Tree do registro ou no painel de
+exceções:
+
+- para a **cadência**, vale a primeira exceção alcançada que traga um número,
+  na ordem que você declarou — por isso "este registro" ganha de "este
+  responsável";
+- para **ligar/desligar**, um "não" em qualquer nível desliga: desativou para o
+  responsável, nenhuma exceção de registro o reativa.
+
+**Não duplica, e não se perde.** A cobrança é identificada pelo número dela na
+sequência, calculado pelo calendário (`(hoje − âncora) ÷ cadência`). Rodar duas
+vezes no mesmo dia não abre duas tarefas; e um dia em que o sistema não rodou
+**não desloca** as cobranças seguintes — a que ninguém abriu simplesmente
+aparece como um galho vazio na árvore.
+
 ### 12.3 Agenda
 
 Widget de calendário (redesenhado em 28/07/2026):
@@ -2479,10 +2585,10 @@ referência.
 
 ### 16.2 Enumerações completas (uma linha por lista)
 
-- **Tipos de widget (18)**: Card, Métrica calculada, Calculadora, Nota
+- **Tipos de widget (19)**: Card, Métrica calculada, Calculadora, Nota
   (post-it), Forma, Linha divisória, Imagem, Tabela, Tabela Livre, Barra
   vertical, Barra horizontal, Linha, Pizza, Funil, Filtro de período, Filtro
-  por campo, Kanban, Agenda.
+  por campo, Kanban, Agenda, Tree.
 - **Agregações de métrica (5)**: Soma, Contagem, Média, Mínimo, Máximo.
 - **Agregações de "Agrupar período" (6)**: Individual (por registro), Soma,
   Contagem, Média, Mediana, Moda.

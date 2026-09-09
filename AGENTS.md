@@ -627,6 +627,47 @@ This version has breaking changes — APIs, conventions, and file structure may 
   responsáveis): dimensão "por Operação" e `allowed_operation_ids` de snapshot
   NÃO enxergam parcerias — limitação documentada, não bug. Ver
   `docs/arquitetura.md` §4.14 e invariantes 21/22.
+- **Série periódica, atributos e a Tree (0131–0134, 09/09/2026): a ocorrência é
+  DERIVADA e a árvore só persiste a EXCEÇÃO.** A ação `create_task_series` é
+  irmã de `create_task`, não um passo de `run_schema`: a trava da 0130 consome
+  o registro uma vez para sempre ou reexecuta quando o payload muda, e a da
+  0129 permite uma tarefa ABERTA por regra×registro — uma série precisa rodar
+  todo dia sem escrever e escrever quando vira a quinzena. A trava é POR
+  OCORRÊNCIA: `occurrence = floor((hoje − âncora) / cadência)`
+  (`lib/series/occurrence.ts`), NUNCA um contador nem "última execução"
+  gravada — tick que não rodou não dessincroniza a série, e a cobrança que
+  ninguém abriu segue existindo como fato (vira o galho vazio da árvore). O
+  índice `uq_tasks_series_occurrence` é a trava de verdade e 23505 é NO-OP,
+  jamais `last_error`; ele é DELIBERADAMENTE sem `completed_at is null` (o da
+  0129 é "uma aberta por vez"; este é "a 3ª quinzena aconteceu uma vez na
+  vida") — não os uniformize. A cascata da cadência (`lib/series/cadence.ts`)
+  atende dois pedidos com travessias OPOSTAS: cadência vence o PRIMEIRO escopo
+  alcançado com número (precedência declarada no esquema), `active=false` em
+  QUALQUER escopo alcançado desliga (um "não" é mais forte que um "sim"). O
+  padrão vive no esquema e as exceções são DADO (`series_settings`): mudar a
+  cadência de um registro ou desligar a série de um responsável nunca reescreve
+  a regra de todos. A **Tree** (0133) é DERIVADA dos fatos que já existem
+  (cobranças calculadas por `occurrencesUntil`, tarefas, `comments` 0066,
+  `audit_log`); `tree_nodes` guarda SÓ o nó livre (mapa mental) e o
+  `parent_ref` de um nó re-pendurado — é o que faz as três formas
+  (`por_ocorrencia`/`por_tipo`/`livre`) rodarem sobre os mesmos fatos sem
+  migrar dado e o re-pendurar COMPOR com qualquer uma; nunca materialize a
+  árvore (desfazer tem de ser apagar uma linha). Tarefa da série FUNDE no nó da
+  cobrança e fato anterior à primeira cobrança pendura NELA. **Atributo do
+  registro** (0131) = funcionalidade de Operação pendurada num registro:
+  registry em CÓDIGO (`lib/attributes/registry.ts`, PURO e client-safe —
+  precedente `lib/operacao/cards.ts` × `lib/ai/operacao/scopes.ts`), chave fora
+  dele não vira superfície, e **pausar ≠ excluir** (`status='pausado'` mantém
+  linha, histórico e árvore; quem para é a automação, que lê o status). RLS:
+  leitura transitiva pelo registro, escrita admin/gestor OU o responsável dele.
+  O **widget `tree`** (0134) recria o CHECK de `visual_type` inteiro
+  (precedente 0100), renderiza em HTML/CSS (nós têm ações dentro; as linhas são
+  bordas) e recarrega em SILÊNCIO na origem event bus (§4.10). O **clique da
+  linha** é `RecordListSettings.rowAction` (ausente = `none`, tabela existente
+  byte-idêntica), e o modo `detalhe` é SOMENTE LEITURA — editar segue em
+  /registros (um segundo editor seria a régua paralela da invariante 25). As
+  RPCs de widget seguem INTOCADAS. Ver `docs/arquitetura.md` §4.24 e
+  invariantes 33/34/35.
 - **Ação `run_schema` (0130, 09/09/2026): a trava é DERIVADA dos passos.** Um
   esquema é uma sequência de alterações DENTRO e FORA do sistema (criar lead é
   só um caso) — por isso o vocabulário tem `bitrix.entity.update` (mesma chamada
