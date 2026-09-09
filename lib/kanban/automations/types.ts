@@ -1,3 +1,11 @@
+// Versão: 1.5 | Data: 09/09/2026
+// v1.5 (09/09/2026): ação `create_task_series` — a cobrança RECORRENTE. Não é
+//   um `create_task` repetido: a trava dele é "uma tarefa ABERTA por regra ×
+//   registro" (a regra só cobra de novo depois que a anterior é concluída), e
+//   uma série precisa do contrário — a 3ª quinzena vence tenha ou não a 2ª
+//   sido feita, e é ver as duas lado a lado que mostra a conduta. A trava é
+//   por OCORRÊNCIA (índice único da 0132), e a ocorrência é DERIVADA da âncora
+//   e da cadência (lib/series), nunca contada.
 // Versão: 1.4 | Data: 09/09/2026
 // v1.4 (09/09/2026): ação `run_schema` — executa os passos de um ESQUEMA do
 //   Workflow tendo o registro como entrada. É a única ação que produz efeito
@@ -34,6 +42,7 @@
 // adicional no save (actions.ts) p/ mensagem imediata. IDEMPOTENTE por
 // desenho: valor atual igual ao alvo consome o card SEM escrever (decidido no
 // avaliador — zero churn de audit/webhook no tick por minuto).
+import { parseSeriesConfig, type SeriesConfig } from "@/lib/series/types";
 import type { WidgetFilter } from "@/lib/widgets/types";
 
 /** Comparador numérico das condições de contagem (conectados/tarefas). */
@@ -91,6 +100,9 @@ export type AutomationAction =
       simulate: boolean;
       map?: Record<string, string>;
     }
+  // Série periódica: a config inteira (âncora, janela, cadência e cascata)
+  // mora no jsonb e é parseada fail-closed por `parseSeriesConfig`.
+  | { type: "create_task_series"; series: SeriesConfig }
   | {
       type: "create_task";
       title: string;
@@ -282,6 +294,11 @@ export function parseAutomationRule(raw: unknown): AutomationRule | null {
             ? actionRaw.responsibleId
             : null,
       };
+    } else if (actionRaw.type === "create_task_series") {
+      // Fail-closed inteiro: série sem âncora ou com cadência fora de faixa
+      // cobraria o vendedor errado, ou todo dia.
+      const series = parseSeriesConfig(actionRaw.series);
+      if (series) action = { type: "create_task_series", series };
     } else if (
       actionRaw.type === "run_schema" &&
       typeof actionRaw.schemaKey === "string" &&

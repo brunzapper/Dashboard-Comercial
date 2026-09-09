@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): a frase da série periódica. Ela diz a CADÊNCIA PADRÃO e
+//   avisa que há exceções — o número que vale para um registro específico só a
+//   cascata sabe, e prometer o contrário na lista seria mentira.
 // v1.1 (09/09/2026): a frase da ação `run_schema`. O rótulo do esquema não vem
 //   do módulo (ele é puro e não consulta nada) — quem tem a lista carregada
 //   passa `labels`; sem ela a frase usa a chave, que é o que a regra guarda.
@@ -58,9 +61,18 @@ export function automationSummary(
           ? `executar o esquema "${labels?.[a.schemaKey] ?? a.schemaKey}"${
               a.simulate ? " (apenas simulação)" : ""
             }`
-          : `abrir a tarefa "${a.title}"${
-              a.dueInDays != null ? ` com prazo de ${a.dueInDays} dia(s)` : ""
-            }`;
+          : a.type === "create_task_series"
+            ? // A cadência dita é a PADRÃO: o número que vale para um registro
+              // específico só a cascata sabe, e prometer o contrário aqui
+              // seria mentira na lista de regras.
+              `abrir a cobrança "${a.series.title}" a cada ${a.series.cadence.defaultDays} dia(s)${
+                a.series.cadence.overrideScopes.length > 0
+                  ? " (com exceções por escopo)"
+                  : ""
+              }`
+            : `abrir a tarefa "${a.title}"${
+                a.dueInDays != null ? ` com prazo de ${a.dueInDays} dia(s)` : ""
+              }`;
   return `Se ${when}, ${then}.`;
 }
 
@@ -69,5 +81,6 @@ export function automationActionLabel(rule: AutomationRule): string {
   if (rule.action.type === "move_to_column") return "Mover de coluna";
   if (rule.action.type === "set_field") return "Definir campo";
   if (rule.action.type === "run_schema") return "Executar esquema";
+  if (rule.action.type === "create_task_series") return "Série de tarefas";
   return "Abrir tarefa";
 }

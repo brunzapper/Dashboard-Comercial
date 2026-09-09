@@ -1,3 +1,9 @@
+// Versão: 1.5 | Data: 09/09/2026
+// v1.5 (09/09/2026): ação "Série de tarefas" (create_task_series) — a cobrança
+//   RECORRENTE. O editor separa as duas datas que o pedido separa: a condição
+//   diz QUEM entra (etapa = Nutrição) e a ÂNCORA diz de quando contar (a
+//   mudança de etapa). A cadência aqui é o PADRÃO; as exceções por responsável,
+//   registro ou campo são dado, editáveis fora do construtor.
 // Versão: 1.4 | Data: 09/09/2026
 // v1.4 (09/09/2026): o painel aceita dono de BASE (`AutomationOwner`, não
 //   `KanbanOwner`) — é ele que o Workflow monta para criar a regra sem quadro
@@ -154,7 +160,12 @@ interface RuleDraft {
   name: string;
   enabled: boolean;
   conds: CondDraft[];
-  actionType: "move_to_column" | "set_field" | "create_task" | "run_schema";
+  actionType:
+    | "move_to_column"
+    | "set_field"
+    | "create_task"
+    | "run_schema"
+    | "create_task_series";
   targetKey: string;
   setField: string;
   setValue: string;
@@ -164,6 +175,20 @@ interface RuleDraft {
   schemaKey: string;
   /** Ensaio: avalia e grava o que faria, sem enviar nada. Começa LIGADO. */
   schemaSimulate: boolean;
+  // --- Série periódica ---
+  seriesTitle: string;
+  /** Chave da série: identidade das exceções e do tronco da Tree. */
+  seriesKey: string;
+  seriesAnchorKind: "field_changed" | "created" | "field";
+  seriesAnchorField: string;
+  seriesCadenceDays: string;
+  /** Escopos que podem sobrescrever a cadência, na ordem de precedência. */
+  seriesScopes: { kind: "record" | "responsible" | "field"; field: string }[];
+  seriesFirstAt: "apos_um_ciclo" | "imediato";
+  /** Término: vazio, um campo de data, ou uma data fixa (YYYY-MM-DD). */
+  seriesUntilKind: "nunca" | "field" | "date";
+  seriesUntilValue: string;
+  seriesGrantAttribute: string;
 }
 
 const ACTION_OPTIONS: ComboboxOption[] = [
@@ -171,6 +196,19 @@ const ACTION_OPTIONS: ComboboxOption[] = [
   { value: "set_field", label: "Definir campo" },
   { value: "create_task", label: "Abrir tarefa" },
   { value: "run_schema", label: "Executar esquema" },
+  { value: "create_task_series", label: "Série de tarefas (recorrente)" },
+];
+
+const ANCHOR_OPTIONS: ComboboxOption[] = [
+  { value: "field_changed", label: "Desde a última alteração de um campo" },
+  { value: "created", label: "Desde a criação do registro" },
+  { value: "field", label: "A partir de uma data do registro" },
+];
+
+const SCOPE_OPTIONS: ComboboxOption[] = [
+  { value: "record", label: "Registro" },
+  { value: "responsible", label: "Responsável" },
+  { value: "field", label: "Campo do registro" },
 ];
 
 const BOOL_OPTIONS: ComboboxOption[] = [
@@ -260,6 +298,69 @@ function draftToRule(draft: RuleDraft): AutomationRule | null {
         // O responsável do REGISTRO é o padrão: a tarefa nasce com quem já
         // cuida daquele lead, não numa fila anônima.
         responsibleFrom: "record",
+      },
+    };
+  }
+  if (draft.actionType === "create_task_series") {
+    const days = Number(draft.seriesCadenceDays);
+    if (draft.seriesTitle.trim() === "") return null;
+    if (!Number.isFinite(days) || days < 1) return null;
+    if (
+      (draft.seriesAnchorKind === "field_changed" ||
+        draft.seriesAnchorKind === "field") &&
+      draft.seriesAnchorField === ""
+    ) {
+      return null;
+    }
+    // A chave sai do título quando o usuário não a informa — ela é identidade
+    // (as exceções e o tronco da Tree apontam para ela), não rótulo.
+    const key =
+      draft.seriesKey.trim() ||
+      draft.seriesTitle
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40);
+    return {
+      v: 1,
+      conditions,
+      action: {
+        type: "create_task_series",
+        series: {
+          key: /^[a-z]/.test(key) ? key : `serie_${key}`.slice(0, 40),
+          title: draft.seriesTitle.trim(),
+          anchor:
+            draft.seriesAnchorKind === "created"
+              ? { kind: "created" }
+              : {
+                  kind: draft.seriesAnchorKind,
+                  field: draft.seriesAnchorField,
+                },
+          cadence: {
+            defaultDays: Math.floor(days),
+            overrideScopes: draft.seriesScopes
+              .filter((sc) => sc.kind !== "field" || sc.field !== "")
+              .map((sc) =>
+                sc.kind === "field"
+                  ? { kind: "field" as const, field: sc.field }
+                  : { kind: sc.kind }
+              ),
+          },
+          firstAt: draft.seriesFirstAt,
+          ...(draft.seriesUntilKind !== "nunca" && draft.seriesUntilValue
+            ? {
+                until:
+                  draft.seriesUntilKind === "date"
+                    ? { kind: "date" as const, date: draft.seriesUntilValue }
+                    : { kind: "field" as const, field: draft.seriesUntilValue },
+              }
+            : {}),
+          ...(draft.seriesGrantAttribute
+            ? { grantAttribute: draft.seriesGrantAttribute }
+            : {}),
+        },
       },
     };
   }
@@ -357,6 +458,42 @@ function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]): RuleDr
     // Regra que não é de esquema volta ao editor com o ensaio ligado: trocar a
     // ação para "Executar esquema" nunca arma sozinha.
     schemaSimulate: action.type === "run_schema" ? action.simulate : true,
+    seriesTitle:
+      action.type === "create_task_series" ? String(action.series.title) : "",
+    seriesKey: action.type === "create_task_series" ? action.series.key : "",
+    seriesAnchorKind:
+      action.type === "create_task_series" ? action.series.anchor.kind : "field_changed",
+    seriesAnchorField:
+      action.type === "create_task_series" && action.series.anchor.kind !== "created"
+        ? action.series.anchor.field
+        : "",
+    seriesCadenceDays:
+      action.type === "create_task_series"
+        ? String(action.series.cadence.defaultDays)
+        : "14",
+    seriesScopes:
+      action.type === "create_task_series"
+        ? action.series.cadence.overrideScopes.map((sc) => ({
+            kind: sc.kind,
+            field: sc.field ?? "",
+          }))
+        : [],
+    seriesFirstAt:
+      action.type === "create_task_series" ? action.series.firstAt : "apos_um_ciclo",
+    seriesUntilKind:
+      action.type === "create_task_series" && action.series.until
+        ? action.series.until.kind
+        : "nunca",
+    seriesUntilValue:
+      action.type === "create_task_series" && action.series.until
+        ? action.series.until.kind === "date"
+          ? action.series.until.date
+          : action.series.until.field
+        : "",
+    seriesGrantAttribute:
+      action.type === "create_task_series"
+        ? (action.series.grantAttribute ?? "")
+        : "tree",
   };
 }
 
@@ -650,6 +787,17 @@ export function AutomationsSheet({
                 schemaKey: "",
                 // Nasce em ensaio: armar é sempre um ato explícito.
                 schemaSimulate: true,
+                seriesTitle: "",
+                seriesKey: "",
+                seriesAnchorKind: "field_changed",
+                seriesAnchorField: "",
+                // Quinzenal: o padrão que o pedido descreve.
+                seriesCadenceDays: "14",
+                seriesScopes: [],
+                seriesFirstAt: "apos_um_ciclo",
+                seriesUntilKind: "nunca",
+                seriesUntilValue: "",
+                seriesGrantAttribute: "tree",
               })
             }
             disabled={pending || draft != null}
@@ -769,6 +917,14 @@ export function AutomationsSheet({
                         )?.label ?? row.rule.action.schemaKey}
                       </span>
                       {row.rule.action.simulate ? " (apenas simulação)" : ""}
+                    </>
+                  ) : row.rule.action.type === "create_task_series" ? (
+                    <>
+                      abrir a cobrança{" "}
+                      <span className="font-medium">
+                        {String(row.rule.action.series.title)}
+                      </span>{" "}
+                      a cada {row.rule.action.series.cadence.defaultDays} dia(s)
                     </>
                   ) : (
                     <>
@@ -1196,6 +1352,264 @@ export function AutomationsSheet({
                     placeholder="Coluna de destino"
                     aria-label="Coluna de destino"
                   />
+                </div>
+              ) : draft.actionType === "create_task_series" ? (
+                <div className="flex min-w-56 flex-1 flex-col gap-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex min-w-56 flex-1 flex-col gap-1">
+                      <Label className="text-xs">Título da cobrança</Label>
+                      <Input
+                        value={draft.seriesTitle}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesTitle: e.target.value } : d
+                          )
+                        }
+                        placeholder="Ex.: Follow-up de nutrição"
+                        aria-label="Título da cobrança"
+                      />
+                    </div>
+                    <div className="flex w-32 flex-col gap-1">
+                      <Label className="text-xs">A cada (dias)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={draft.seriesCadenceDays}
+                        onChange={(e) =>
+                          setDraft((d) =>
+                            d ? { ...d, seriesCadenceDays: e.target.value } : d
+                          )
+                        }
+                        aria-label="Cadência padrão em dias"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex min-w-56 flex-1 flex-col gap-1">
+                      <Label className="text-xs">Contar a partir de</Label>
+                      <Combobox
+                        options={ANCHOR_OPTIONS}
+                        value={draft.seriesAnchorKind}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  seriesAnchorKind:
+                                    v as RuleDraft["seriesAnchorKind"],
+                                }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Âncora da contagem"
+                      />
+                    </div>
+                    {draft.seriesAnchorKind !== "created" ? (
+                      <div className="flex min-w-48 flex-1 flex-col gap-1">
+                        <Label className="text-xs">Campo</Label>
+                        <Combobox
+                          options={(catalog?.fields ?? []) as ComboboxOption[]}
+                          value={draft.seriesAnchorField}
+                          onValueChange={(v) =>
+                            setDraft((d) =>
+                              d ? { ...d, seriesAnchorField: v } : d
+                            )
+                          }
+                          placeholder="Campo"
+                          aria-label="Campo da âncora"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    As condições acima dizem QUAIS registros entram; a âncora diz
+                    de quando começar a contar. São coisas diferentes: a etapa
+                    seleciona, a data da mudança de etapa cronometra.
+                  </p>
+
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex w-56 flex-col gap-1">
+                      <Label className="text-xs">Primeira cobrança</Label>
+                      <Combobox
+                        options={[
+                          { value: "apos_um_ciclo", label: "Um ciclo depois" },
+                          { value: "imediato", label: "No dia da âncora" },
+                        ]}
+                        value={draft.seriesFirstAt}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, seriesFirstAt: v as RuleDraft["seriesFirstAt"] }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Primeira cobrança"
+                      />
+                    </div>
+                    <div className="flex w-44 flex-col gap-1">
+                      <Label className="text-xs">Parar de cobrar</Label>
+                      <Combobox
+                        options={[
+                          { value: "nunca", label: "Sem prazo" },
+                          { value: "field", label: "Numa data do registro" },
+                          { value: "date", label: "Numa data fixa" },
+                        ]}
+                        value={draft.seriesUntilKind}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? {
+                                  ...d,
+                                  seriesUntilKind:
+                                    v as RuleDraft["seriesUntilKind"],
+                                  seriesUntilValue: "",
+                                }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Término da série"
+                      />
+                    </div>
+                    {draft.seriesUntilKind === "date" ? (
+                      <div className="flex w-44 flex-col gap-1">
+                        <Label className="text-xs">Data</Label>
+                        <Input
+                          type="date"
+                          value={draft.seriesUntilValue}
+                          onChange={(e) =>
+                            setDraft((d) =>
+                              d ? { ...d, seriesUntilValue: e.target.value } : d
+                            )
+                          }
+                          aria-label="Data de término"
+                        />
+                      </div>
+                    ) : null}
+                    {draft.seriesUntilKind === "field" ? (
+                      <div className="flex min-w-48 flex-1 flex-col gap-1">
+                        <Label className="text-xs">Campo de data</Label>
+                        <Combobox
+                          options={(catalog?.fields ?? []) as ComboboxOption[]}
+                          value={draft.seriesUntilValue}
+                          onValueChange={(v) =>
+                            setDraft((d) =>
+                              d ? { ...d, seriesUntilValue: v } : d
+                            )
+                          }
+                          placeholder="Campo"
+                          aria-label="Campo de término"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-col gap-1 border-t pt-2">
+                    <Label className="text-xs">
+                      Quem pode ter cadência diferente
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Na ordem: o primeiro com exceção gravada vence. As
+                      exceções em si (&quot;o João é mensal&quot;) são
+                      cadastradas fora daqui, sem mexer na regra.
+                    </p>
+                    {draft.seriesScopes.map((sc, i) => (
+                      <div key={i} className="flex flex-wrap items-center gap-2">
+                        <span className="text-muted-foreground w-4 text-xs">
+                          {i + 1}.
+                        </span>
+                        <Combobox
+                          options={SCOPE_OPTIONS}
+                          value={sc.kind}
+                          onValueChange={(v) =>
+                            setDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    seriesScopes: d.seriesScopes.map((x, j) =>
+                                      j === i
+                                        ? {
+                                            kind: v as typeof sc.kind,
+                                            field: "",
+                                          }
+                                        : x
+                                    ),
+                                  }
+                                : d
+                            )
+                          }
+                          searchable={false}
+                          className="w-44"
+                          aria-label={`Escopo ${i + 1}`}
+                        />
+                        {sc.kind === "field" ? (
+                          <Combobox
+                            options={(catalog?.fields ?? []) as ComboboxOption[]}
+                            value={sc.field}
+                            onValueChange={(v) =>
+                              setDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      seriesScopes: d.seriesScopes.map((x, j) =>
+                                        j === i ? { ...x, field: v } : x
+                                      ),
+                                    }
+                                  : d
+                              )
+                            }
+                            placeholder="Campo"
+                            className="w-56"
+                            aria-label={`Campo do escopo ${i + 1}`}
+                          />
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setDraft((d) =>
+                              d
+                                ? {
+                                    ...d,
+                                    seriesScopes: d.seriesScopes.filter(
+                                      (_, j) => j !== i
+                                    ),
+                                  }
+                                : d
+                            )
+                          }
+                        >
+                          Remover
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      disabled={draft.seriesScopes.length >= 6}
+                      onClick={() =>
+                        setDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                seriesScopes: [
+                                  ...d.seriesScopes,
+                                  { kind: "record", field: "" },
+                                ],
+                              }
+                            : d
+                        )
+                      }
+                    >
+                      Adicionar escopo
+                    </Button>
+                  </div>
                 </div>
               ) : draft.actionType === "run_schema" ? (
                 <div className="flex min-w-56 flex-1 flex-col gap-2">

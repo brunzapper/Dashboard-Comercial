@@ -72,6 +72,7 @@ function facts(over: Partial<CardFacts> = {}): CardFacts {
     sourceCreatedAt: "2026-07-10T09:00:00-03:00",
     placementUpdatedAt: null,
     openAutomationRuleIds: [],
+  seriesOccurrences: [],
     ...over,
   };
 }

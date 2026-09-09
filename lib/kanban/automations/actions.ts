@@ -4,6 +4,9 @@
 //   não tem quadro de onde derivar autoridade, então espelha o ramo de RLS da
 //   0127 — admin da org + área `workflow` não bloqueada. É de propósito mais
 //   restrito que "editor de um board": a regra alcança a base inteira.
+// v1.4 (09/09/2026): ação create_task_series — o save confere na hora o que o
+//   parse fail-closed recusaria em silêncio (escopo de campo sem campo, âncora
+//   sem campo).
 // v1.3 (09/09/2026): ação run_schema — o save confere na hora que o esquema
 //   existe, está ligado e tem gatilho de AUTOMAÇÃO. A guarda definitiva segue
 //   no avaliador (o esquema pode mudar depois), como no set_field.
@@ -195,6 +198,25 @@ export async function saveAutomation(
           : (ownerCtx.settings.allocationFieldKey ?? null),
     });
     if (err) return { ok: false, message: err };
+  }
+  if (rule.action.type === "create_task_series") {
+    // O parse já garantiu a estrutura; aqui é a mensagem imediata para o que a
+    // pessoa acabou de digitar. Escopo de campo sem campo é o engano comum.
+    const series = rule.action.series;
+    for (const scope of series.cadence.overrideScopes) {
+      if (scope.kind === "field" && !scope.field) {
+        return {
+          ok: false,
+          message: "Escolha o campo do escopo de cadência (ou remova o escopo).",
+        };
+      }
+    }
+    if (
+      series.anchor.kind !== "created" &&
+      !series.anchor.field
+    ) {
+      return { ok: false, message: "Escolha o campo que inicia a contagem." };
+    }
   }
   if (rule.action.type === "run_schema") {
     // Mesma régua da avaliação, adiantada para virar mensagem na hora: o
