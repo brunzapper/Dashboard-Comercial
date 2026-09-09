@@ -321,6 +321,13 @@ export const WIDGET_SETTINGS_DOC = {
   "defaultView": "month"                  // ${enumKeys(AGENDA_VIEW_LABELS)} — visão inicial (mês ou semana)
   // appearance.cell/chip/density (${enumKeys(AGENDA_DENSITY_LABELS)}) seguem o molde do kanban — ajuste pela UI.
 }`,
+  // Clique na LINHA de uma tabela de registros (opções avançadas). Fora do
+  // escopo da IA: ela não sabe quais atributos existem na organização, e um
+  // clique que abre a tela errada é pior que tabela sem clique.
+  rowAction: null,
+  // Widget Tree: a árvore de acompanhamento. Fora do escopo da IA — a árvore
+  // depende de uma série configurada à mão e de um registro concreto.
+  tree: null,
   appearance: `"appearance": {                            // aparência (tudo opcional; TUDO NO NÍVEL RAIZ — NÃO existe sub-objeto "chart")
 ${renderDocBlock(APPEARANCE_DOC, "  ")}
 }`,

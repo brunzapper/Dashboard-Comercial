@@ -37,7 +37,15 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+
+// Carregado sob demanda: a maioria das tabelas não tem clique configurado, e o
+// painel puxa o detalhe/tarefas/árvore do registro.
+const RecordRowPanel = dynamic(
+  () => import("../record-row-panel").then((m) => m.RecordRowPanel),
+  { ssr: false }
+);
 
 import {
   Table,
@@ -147,6 +155,7 @@ import type {
   GroupDateFormat,
   Metric,
   RecordListColumn,
+  RowActionSettings,
   TableAlign,
 } from "@/lib/widgets/types";
 import {
@@ -258,6 +267,7 @@ export const RecordListTable = memo(function RecordListTable({
   conversionPeriod,
   canEdit = false,
   onAppearanceChange,
+  rowAction,
 }: {
   records: RecordRow[];
   // Registros EXTRAS das fontes das métricas com fontes próprias
@@ -292,6 +302,9 @@ export const RecordListTable = memo(function RecordListTable({
   searchQ?: string;
   searchFields?: string[];
   columns: RecordListColumn[];
+  // Clique na LINHA (opções avançadas do widget). Ausente = tabela sem clique,
+  // que é o comportamento de toda tabela existente.
+  rowAction?: RowActionSettings;
   metrics?: Metric[];
   fields: FieldDefinition[];
   available: AvailableField[];
@@ -534,6 +547,9 @@ export const RecordListTable = memo(function RecordListTable({
   // columnOrder salvo em configs antigos, então applyManualOrder as anexa após as
   // dimensões — preservando o layout atual sem migração.
   const metricKey = recordListMetricKey; // compartilhada c/ o sheet de aparência
+  // Registro aberto pelo clique na linha (null = painel fechado).
+  const [openRecordId, setOpenRecordId] = useState<string | null>(null);
+  const clickable = rowAction != null && rowAction.kind !== "none";
   type MergedCol =
     | { kind: "dim"; key: string; c: RecordListColumn }
     | { kind: "metric"; key: string; m: Metric; mi: number };
@@ -1384,7 +1400,21 @@ export const RecordListTable = memo(function RecordListTable({
     return (
       <TableRow
         key={r.id}
-        className={rowBorder}
+        className={`${rowBorder}${clickable ? " cursor-pointer" : ""}`}
+        // O clique é da LINHA, não da célula: a edição in-place segue sendo
+        // do duplo-clique na célula, e abrir o painel no meio de uma edição
+        // seria sequestrar o gesto.
+        onClick={
+          clickable
+            ? (e) => {
+                const el = e.target as HTMLElement;
+                if (el.closest("input, textarea, select, button, a, [role='combobox']")) {
+                  return;
+                }
+                setOpenRecordId(r.id);
+              }
+            : undefined
+        }
         style={{
           background: rowCp?.fill ?? t.bodyBg,
           color: rowCp?.text ?? t.bodyColor,
@@ -2137,6 +2167,14 @@ export const RecordListTable = memo(function RecordListTable({
             setMenu(null);
           }}
           onClose={() => setMenu(null)}
+        />
+      ) : null}
+
+      {clickable && rowAction ? (
+        <RecordRowPanel
+          recordId={openRecordId}
+          action={rowAction}
+          onClose={() => setOpenRecordId(null)}
         />
       ) : null}
     </div>

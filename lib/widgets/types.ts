@@ -84,7 +84,8 @@ export type VisualType =
   | "linha_divisoria"
   | "kanban"
   | "agenda"
-  | "imagem";
+  | "imagem"
+  | "tree";
 
 export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   kpi: "Card",
@@ -109,6 +110,7 @@ export const VISUAL_TYPE_LABELS: Record<VisualType, string> = {
   filtro_campo: "Filtro por campo",
   kanban: "Kanban",
   agenda: "Agenda",
+  tree: "Tree",
 };
 
 export type Aggregation = "sum" | "count" | "avg" | "min" | "max";
@@ -424,8 +426,44 @@ export interface RecordListColumn {
 // listada (registro → records.custom_fields; responsável/operação →
 // entity_custom_values).
 export type RowSource = "records" | "responsibles" | "operations";
+/**
+ * O que o clique numa LINHA abre. Ausente/"none" = nada acontece — toda tabela
+ * existente segue byte-idêntica. `atributo` abre a superfície de uma
+ * funcionalidade pendurada no registro (lib/attributes/registry.ts).
+ */
+/** Configuração do widget Tree (0134). */
+export interface TreeSettings {
+  /**
+   * De onde saem os nós:
+   *  - `registro`: o histórico de UM registro (cobranças, tarefas, anotações,
+   *    alterações) — o modo do acompanhamento;
+   *  - `livre`: nós digitados e campos de registros — o mapa mental, sem
+   *    automação nenhuma.
+   */
+  source: "registro" | "livre";
+  /** Como a árvore se organiza (as três formas; ver lib/tree/model.ts). */
+  layout: "por_ocorrencia" | "por_tipo" | "livre";
+  /**
+   * Registro fixo do modo `registro`. Vazio = a árvore espera o clique de uma
+   * tabela com "abrir Tree" (o widget vira o painel daquele dashboard).
+   */
+  recordId?: string;
+  /** Chave do mapa no modo `livre` (o escopo das anotações). */
+  mapKey?: string;
+  /** Tipos de fato exibidos; ausente = todos. */
+  showKinds?: ("occurrence" | "task" | "comment" | "change" | "note")[];
+}
+
+export interface RowActionSettings {
+  kind: "none" | "detalhe" | "tarefas" | "atributo";
+  /** Só em "atributo": a chave do registry (ex.: "tree"). */
+  attributeKey?: string;
+}
+
 export interface RecordListSettings {
   rowMode?: "records"; // presença => modo lista no widget 'tabela'
+  /** Clique na linha (opções avançadas do construtor). Ausente = não clica. */
+  rowAction?: RowActionSettings;
   rowSource?: RowSource; // fonte das linhas (default 'records')
   columns?: RecordListColumn[]; // colunas ordenadas a exibir
   limit?: number; // teto de linhas explícito (sem isto = sem limite)
@@ -1113,6 +1151,8 @@ export type WidgetSettings = KpiSettings &
     presetKey?: string;
     // Config do widget kanban (visual_type 'kanban', 0064).
     kanban?: KanbanSettings;
+  /** Widget 'tree' — a árvore de acompanhamento ou o mapa mental. */
+  tree?: TreeSettings;
     // Config do widget agenda (visual_type 'agenda', 0064).
     agenda?: AgendaSettings;
     appearance?: AppearanceSettings;

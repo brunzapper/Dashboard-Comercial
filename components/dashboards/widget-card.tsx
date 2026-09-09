@@ -210,6 +210,10 @@ const AgendaWidget = dynamic(
   () => import("@/components/agenda/agenda-widget").then((m) => m.AgendaWidget),
   { ssr: false, loading: () => chunkFallback }
 );
+const TreeWidget = dynamic(
+  () => import("./charts/tree-widget").then((m) => m.TreeWidget),
+  { ssr: false, loading: () => chunkFallback }
+);
 const CalculatorWidget = dynamic(
   () => import("./calculator-widget").then((m) => m.CalculatorWidget),
   { ssr: false, loading: () => chunkFallback }
@@ -451,6 +455,7 @@ export const WidgetCard = memo(function WidgetCard({
   const isQuickTable = widget.visual_type === "tabela_editavel";
   const isKanban = widget.visual_type === "kanban";
   const isAgenda = widget.visual_type === "agenda";
+  const isTree = widget.visual_type === "tree";
   const isCalc = widget.visual_type === "calculado";
   const isKpi = widget.visual_type === "kpi";
   const isCalculator = widget.visual_type === "calculadora";
@@ -1335,6 +1340,13 @@ export const WidgetCard = memo(function WidgetCard({
               onAppearanceChange={saveAppearance}
               scopeKey={deferredScopeKey}
             />
+          ) : isTree ? (
+            <TreeWidget
+              settings={widget.settings?.tree}
+              // O registro sai da configuração; quando vazio, o widget espera
+              // o clique de uma tabela com "abrir Tree" (o mesmo dashboard).
+              recordId={widget.settings?.tree?.recordId ?? null}
+            />
           ) : isKanban ? (
             <KanbanWidget
               widget={widget}
@@ -1384,6 +1396,9 @@ export const WidgetCard = memo(function WidgetCard({
             />
           ) : isRecordList ? (
             <RecordListTable
+              // Clique na linha (opções avançadas). Ausente = tabela sem
+              // clique, como toda tabela existente.
+              rowAction={widget.settings?.rowAction}
               records={srvPage?.rows ?? winRows}
               extraRecords={recordListExtra}
               serverPage={serverPageState}

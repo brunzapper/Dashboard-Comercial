@@ -61,6 +61,8 @@ export const DEFAULT_WIDGET_SIZE: Record<VisualType, { w: number; h: number }> =
     kanban: { w: 59, h: 31 },
     agenda: { w: 59, h: 31 },
     imagem: { w: 39, h: 23 },
+    // Árvore cresce para baixo: nasce alta.
+    tree: { w: 59, h: 43 },
   };
 
 // Tipos que exigem configuração para mostrar algo útil: a criação rápida abre
@@ -86,6 +88,8 @@ export const WIDGET_NEEDS_CONFIG: Record<VisualType, boolean> = {
   agenda: true,
   // Sem URL não há nada a mostrar: abre o editor direto na criação.
   imagem: true,
+  // Precisa dizer de onde saem os nós (um registro, ou um mapa livre).
+  tree: true,
 };
 
 // Tipos consultados pelo engine (run_widget_query): precisam de ≥1 métrica —

@@ -1,3 +1,11 @@
+<!-- Versão: 1.79 | Data: 09/09/2026 -->
+<!-- v1.79 (09/09/2026): §4.24 nova — atributos do registro (0131),
+     série de tarefas periódicas com trava POR OCORRÊNCIA derivada
+     (0132), a Tree derivada que só persiste a exceção (0133) e o
+     visual_type tree (0134), mais o clique da linha da tabela.
+     Invariantes 33 (ocorrência derivada + cascata de cadência),
+     34 (árvore derivada com exceções) e 35 (registry de atributos em
+     código; pausar não exclui). -->
 <!-- Versão: 1.78 | Data: 08/09/2026 -->
 <!-- v1.78 (08/09/2026): §4.5 — rotas de push sem cauda global: /api/sync/sheets
      (e /api/ingest) trocam runAutoMatch + recalcAllFormulaFields (O(N) na
@@ -4575,6 +4583,112 @@ Testes: `lib/workflow/{types,refs,connections,execute,system-schemas}.test.ts`,
 `lib/workflow/seeds/bitrix-lead-form.test.ts` (o par fechado formulário ↔
 passos: todo campo perguntado é consumido, toda ref citada existe).
 
+### 4.24 Atributos, série periódica e a Tree (0131-0134, 09/09/2026)
+
+Um dashboard mostrava NÚMEROS; não mostrava CONDUTA. Olhando a tabela de deals
+ninguém sabia se o vendedor está acompanhando o lead, quando cobrou pela última
+vez, o que anotou. Esta entrega fecha esse buraco com quatro peças que se
+encaixam - e nenhuma delas é do caso "deals em Nutrição": esse caso é montado
+por CONFIGURAÇÃO, no construtor que já existe (a receita passo a passo está no
+[manual de manutenção](./manual-de-manutencao.md)).
+
+**Atributos do registro (0131) - o primitivo que faltava.** Um atributo é uma
+funcionalidade de Operação PENDURADA num registro. O primeiro é o `tree`; o
+desenho aceita o segundo sem migração porque o catálogo é
+`lib/attributes/registry.ts` - módulo PURO e client-safe, precedente literal de
+`lib/operacao/cards.ts` x `lib/ai/operacao/scopes.ts`. Atributo novo = uma
+entrada ali mais a superfície; nada de linha de configuração para EXISTIR.
+`record_attributes` guarda só a instância (`record_id` x `attribute_key`,
+único), quem a concedeu (`granted_by_rule_id`, `on delete set null` - apagar a
+regra não apaga o histórico do lead) e o `status`.
+
+**Pausar NÃO é excluir** (pedido explícito): `status='pausado'` mantém a linha,
+o histórico e a árvore inteira; quem para de produzir é a automação, que
+consulta o status. A RLS de leitura é TRANSITIVA (quem enxerga o registro
+enxerga o atributo - `exists` sob as policies de `records`, precedente
+`comments` 0066) e a de escrita é admin/gestor OU o RESPONSÁVEL do registro
+(via `auth_responsible_ids()`): o pedido diz "gerenciáveis pelo admin também,
+além do próprio responsável", e pausar o próprio acompanhamento é decisão de
+quem acompanha.
+
+**Série de tarefas periódicas (0132) - a ocorrência é DERIVADA.** A cobrança
+quinzenal não podia ser um passo de `run_schema` nem um `create_task`: a trava
+da 0130 consome o registro uma vez para sempre (esquema que CRIA) ou reexecuta
+quando o payload muda; a da 0129 permite UMA tarefa aberta por regra x
+registro. Uma série precisa do contrário - rodar todo dia sem escrever, e
+escrever quando vira a quinzena. A trava certa é POR OCORRÊNCIA:
+
+```
+occurrence = floor((hoje - âncora) / cadência)
+```
+
+O tick calcula qual cobrança é devida hoje e tenta criá-la; repetir esbarra em
+`uq_tasks_series_occurrence` e é NO-OP (23505 nunca vira `last_error` - o
+precedente literal da 0129). **Nada de "última execução" gravada**: por ser
+derivada, tick que não rodou (deploy, janela de manutenção, org pausada) não
+DESSINCRONIZA a série - a sequência é uma função do calendário, e a cobrança
+que ninguém abriu continua existindo como fato (é ela que vira o galho vazio na
+árvore). O índice é DELIBERADAMENTE sem `completed_at is null`, ao contrário do
+da 0129: ali a trava é "uma tarefa ABERTA por vez" (concluída, a regra cobra de
+novo); aqui é "a 3ª quinzena aconteceu uma vez na vida".
+
+A âncora é o **gatilho secundário** do pedido - `field_changed` (usa
+`records.field_modified_at`, o MESMO fato que a condição de tempo do motor já
+carrega), `created` ou um campo de data - e a janela (`from`/`until`) aceita
+tanto uma ref quanto uma DATA ABSOLUTA, que é o "prazo de término independente
+de variável".
+
+**A cascata da cadência (`lib/series/cadence.ts`) resolve DOIS pedidos de uma
+vez**, com regras de travessia diferentes de propósito:
+
+- **cadência**: vence o PRIMEIRO escopo alcançado que traga um número - a
+  precedência é declarada no esquema (ex.: `record` > `responsible` >
+  `field:stage`), então "este deal é semanal" ganha de "João é mensal";
+- **ligado/desligado**: `active=false` em QUALQUER escopo alcançado desliga -
+  um "não" é mais forte que um "sim". É isso que faz "ativar/desativar por
+  responsável" funcionar sem que uma exceção de registro o ressuscite.
+
+O padrão vive no ESQUEMA e as exceções são DADO (`series_settings`, uma linha
+por escopo): mudar a cadência de um deal ou desligar a série de um vendedor não
+abre o construtor - e não reescreve a regra que vale para todo mundo.
+
+**A Tree (0133) é DERIVADA; a tabela guarda só a exceção.** Os nós são FATOS
+que já existem - as cobranças (calculadas por `occurrencesUntil`, então a que
+ninguém fez também aparece), as tarefas, os comentários (0066) e as alterações
+do `audit_log`. `tree_nodes` guarda exclusivamente o que NÃO é derivável: o nó
+LIVRE (o mapa mental, digitado) e o `parent_ref` de um nó RE-PENDURADO à mão.
+É isso que permite as três formas (`por_ocorrencia`, `por_tipo`, `livre`) sobre
+os MESMOS fatos, sem migrar dado, e o re-pendurar COMPÕE com qualquer uma delas
+(a forma dá o parentesco derivado; a exceção vence). Desfazer é apagar uma
+linha.
+
+A derivação é pura (`lib/tree/derive.ts`) e o I/O fica em `lib/tree/load.ts`:
+uma tarefa da SÉRIE funde no nó da própria cobrança em vez de virar um segundo
+nó ao lado dela, e um fato anterior à primeira cobrança pendura NA primeira -
+nada some por cair fora de janela.
+
+**O widget Tree (0134)** é `visual_type` novo com o CHECK recriado inteiro
+(precedente exato da 0100). Render em HTML/CSS, não SVG: os nós têm texto de
+tamanho variável e AÇÕES dentro (anotar, agendar, pausar) - um
+`<foreignObject>` por nó custaria mais do que a linha de conexão vale, e as
+linhas são bordas. O refetch segue a regra da origem (§4.10): o event bus
+recarrega em SILÊNCIO, porque o sync roda a cada minuto e uma árvore que pisca
+sozinha lê como defeito.
+
+**O clique da linha da tabela** é `RecordListSettings.rowAction`, configurado em
+"Opções avançadas" do construtor. Ausente = `none`: toda tabela existente segue
+byte-idêntica. Os três modos são `detalhe` (todos os campos, SOMENTE LEITURA -
+editar continua em /registros, com o formulário inteiro; um segundo editor
+aqui seria a régua paralela da invariante 25), `tarefas` e `atributo` (hoje a
+Tree). O clique ignora o que acontece DENTRO de um controle
+(`input`/`select`/`button`/`a`), então a edição in-place da célula não é
+sequestrada.
+
+Testes: `lib/attributes/registry.test.ts`, `lib/series/{occurrence,cadence}.test.ts`,
+`lib/kanban/automations/series.test.ts` (a trava, o 23505 no-op e a
+não-regressão das quatro ações existentes) e `lib/tree/derive.test.ts` (as três
+formas sobre os mesmos fatos; o nó re-pendurado vencendo a derivação).
+
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
 Estas regras já causaram ou causariam bugs graves e silenciosos. Elas também estão
@@ -5096,6 +5210,44 @@ principalmente — para mantenedores humanos.
     usuário pelo ramo 2 de `records_insert`, e os RPCs de widget seguem
     INTOCADOS. `SYSTEM_FLOWS` é DESCRIÇÃO dos fluxos existentes — nunca os
     execute pelo motor.
+
+33. **Série periódica: a ocorrência é DERIVADA e a trava é POR OCORRÊNCIA
+    (0132, §4.24).** `occurrence = floor((hoje − âncora) / cadência)` — nunca
+    um contador, nunca "última execução" gravada: tick que não rodou não
+    dessincroniza a série, e a cobrança que ninguém abriu segue existindo como
+    fato (é ela que vira o galho vazio na árvore). A trava de verdade é
+    `uq_tasks_series_occurrence` e 23505 é NO-OP, jamais `last_error`
+    (precedente 0129). O índice é DELIBERADAMENTE sem `completed_at is null`
+    — o da 0129 significa "uma tarefa ABERTA por vez", este significa "a 3ª
+    quinzena aconteceu uma vez na vida"; não os uniformize. A cascata da
+    cadência (`lib/series/cadence.ts`) tem travessias DIFERENTES de propósito:
+    cadência vence o PRIMEIRO escopo com número, `active=false` em QUALQUER
+    escopo alcançado desliga (um "não" é mais forte que um "sim"). O padrão
+    vive no esquema; as exceções são DADO em `series_settings` — mudar a
+    cadência de um registro ou desligar a série de um responsável NUNCA
+    reescreve a regra que vale para todos.
+
+34. **A Tree é DERIVADA; `tree_nodes` guarda só a exceção (0133, §4.24).** Os
+    nós são fatos que já existem (cobranças calculadas, tarefas, comentários,
+    `audit_log`); a tabela guarda exclusivamente o que não é derivável — o nó
+    LIVRE e o `parent_ref` de um nó re-pendurado à mão. É isso que faz as três
+    formas (`por_ocorrencia`/`por_tipo`/`livre`) funcionarem sobre os MESMOS
+    fatos sem migrar dado, e o re-pendurar COMPOR com qualquer uma delas (a
+    forma dá o parentesco derivado; a exceção vence). Nunca materialize a
+    árvore: desfazer tem de ser apagar uma linha. Tarefa da série FUNDE no nó
+    da própria cobrança (nunca duplica ao lado dela) e fato anterior à primeira
+    cobrança pendura NELA — nada some por cair fora de janela.
+
+35. **Atributo do registro: registry em CÓDIGO e pausar ≠ excluir (0131,
+    §4.24).** `lib/attributes/registry.ts` é PURO e client-safe (precedente
+    `lib/operacao/cards.ts` × `lib/ai/operacao/scopes.ts`): atributo novo é uma
+    entrada ali mais a superfície, nunca uma linha de configuração para
+    EXISTIR; chave fora do registry não vira superfície. `status='pausado'`
+    mantém a linha, o histórico e a árvore inteira — quem para de produzir é a
+    automação, que consulta o status; nenhum caminho do app apaga um atributo
+    para "desligar" o acompanhamento. Leitura é TRANSITIVA (quem vê o registro
+    vê o atributo, precedente `comments` 0066) e escrita é admin/gestor OU o
+    responsável do registro.
 
 ## 6. Convenções do projeto
 
