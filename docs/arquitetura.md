@@ -1,4 +1,10 @@
-<!-- Versão: 1.80 | Data: 09/09/2026 -->
+<!-- Versão: 1.81 | Data: 09/09/2026 -->
+<!-- v1.81 (09/09/2026): §4.23 — a lista do Workflow leva a uma TELA de
+     construção (/operacao/workflow/[item]) e o editor de regra virou
+     componente único do sheet e da tela; seções no lugar do filtro por tipo
+     e um "Novo esquema" só. §4.24 — a Tree troca de registro no mesmo frame
+     do clique (payload com escopo; título vindo do foco) e o loader caiu de
+     6 idas ao banco para 3. -->
 <!-- v1.80 (09/09/2026): §4.24 — o foco de registro do painel (efêmero, com
      contagem de seguidores para decidir o destino do clique) e a janela da
      Tree por cobrança; a seção de configuração do widget, que faltava.
@@ -4554,6 +4560,32 @@ carregado), `syncFieldCatalog` o materializa em `sync_config.bitrix_status_codes
 (mapa vazio NUNCA sobrescreve um cache bom) e `toBitrixValue` ganhou o caso —
 com o mapa OPCIONAL, então todo call site antigo segue byte-idêntico.
 
+**A lista leva a uma TELA de construção (09/09/2026).** A primeira versão
+mostrava a automação na lista e não deixava editá-la: o card oferecia
+ligar/desligar, "Executar agora" e um link "abrir o quadro" — que só existe
+quando a regra TEM quadro. Uma regra de BASE (0127) não tem, então dentro do
+Workflow ela era ineditável. Agora cada linha leva a
+`/operacao/workflow/[item]`, endereçada pelo id que o catálogo JÁ emite com
+namespace (`schema:<uuid>` / `rule:<uuid>`) — sem chave nova e sem consultar as
+duas tabelas para descobrir o tipo.
+
+O editor de regra saiu de dentro do sheet do quadro para
+`components/kanban/automation-rule-editor.tsx`: o sheet e a tela renderizam o
+MESMO componente, com o mesmo banco de peças (campos de
+`getAutomationFieldOptions`, operadores de `FILTER_OPS`, catálogo de ações).
+Duas telas com dois editores seriam a régua paralela da invariante 25 — e
+divergiriam no primeiro campo novo. O que o host fornece são as listas que
+dependem do CONTEXTO (há quadro? colunas "Personalizar"?) e o que fazer ao
+salvar; o editor não sabe onde está. Regra cujo jsonb não passou no parse
+fail-closed NÃO abre o construtor: um formulário em branco, ao salvar,
+sobrescreveria o que está gravado.
+
+A fileira de filtros por tipo virou SEÇÕES da mesma lista (a classificação
+segue sendo `catalogItemFilter`), e "Nova automação" + "Novo fluxo" viraram um
+**"Novo esquema"** só, com três respostas para a mesma pergunta — formulário,
+passo a passo automático, ou regra sobre uma Base. Criar navega para a tela:
+criar e cair numa lista era o que fazia a fábrica parecer inacabada.
+
 **Automações da organização, num lugar só.** Até aqui uma regra só era visível
 de dentro do quadro dela, e as de Base (0127) não têm quadro para abrir: "o que
 este sistema mexe sozinho nos meus registros?" não tinha resposta. A aba
@@ -4695,6 +4727,20 @@ que seguem o foco) porque é essa contagem que decide o destino do clique: com
 Tree no painel ele foca; sem Tree, abre a barra lateral. Fora de um provider o
 hook devolve um objeto inerte — a tabela também roda no viewer de snapshot, e
 ali não há foco.
+
+**A troca de registro é IMEDIATA, e o payload carrega o escopo dele
+(09/09/2026).** A primeira versão só trocava `data` depois do await e não
+limpava o anterior: clicar em outro lead deixava em tela a árvore E O NOME do
+lead anterior até o novo payload chegar — não era demora, era informação errada.
+O `focus.title` (que a tabela publica no clique) existia e era ignorado.
+
+A correção não é `setState` dentro de efeito, que a regra do projeto proíbe: o
+payload guarda o ESCOPO a que pertence (`registro|forma|ordem|janela`) e o
+render descarta o que é de outro escopo — a árvore antiga some no mesmo frame
+do clique, e o cabeçalho mostra o nome que veio do clique enquanto carrega. O
+carimbo do event bus NÃO entra na chave, e é por isso que o tick do sync segue
+silencioso (§4.10). `loadRecordTree` também caiu de 6 idas ao banco para 3
+(registro ∥ atributo; `tree_nodes` no mesmo `Promise.all` dos fatos).
 
 **A árvore vem em JANELA, cortada por COBRANÇA (09/09/2026).** Um
 acompanhamento quinzenal de dois anos tem ~50 galhos. `TreeWindow`

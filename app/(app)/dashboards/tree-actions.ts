@@ -1,4 +1,7 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): o registro e o atributo são buscados EM PARALELO. Eram
+//   dois awaits em série sem dependência entre eles — e cada ida ao banco
+//   entra inteira no tempo que o usuário espera depois de clicar na linha.
 // v1.1 (09/09/2026): a árvore vem em JANELA (ordem + quantas cobranças), com
 //   "carregar mais". Ver lib/tree/load.ts — o corte é por cobrança.
 // Server Actions da Tree (0133): carregar a árvore de um registro e as ações
@@ -65,24 +68,29 @@ export async function loadRecordTree(
   const orgId = await getActiveOrgId();
   const supabase = await createClient();
 
-  const { data: record } = await supabase
-    .from("records")
-    .select("id, title, responsible_id, source_created_at, field_modified_at, custom_fields, record_type, stage")
-    .eq("id", recordId)
-    .maybeSingle();
+  const [{ data: record }, { data: attr }] = await Promise.all([
+    supabase
+      .from("records")
+      .select(
+        "id, title, responsible_id, source_created_at, field_modified_at, custom_fields, record_type, stage"
+      )
+      .eq("id", recordId)
+      .maybeSingle(),
+    // Não depende do registro: pedir em paralelo tira uma ida inteira da
+    // espera. Se a RLS esconder o registro, o atributo vem e é descartado.
+    supabase
+      .from("record_attributes")
+      .select("id, status, granted_by_rule_id")
+      .eq("record_id", recordId)
+      .eq("attribute_key", "tree")
+      .maybeSingle(),
+  ]);
   if (!record) {
     // Pode ser RLS (o registro existe e o usuário não o vê) — dizer "não
     // encontrado" é o mesmo dos dois lados, e é o certo: não revelamos a
     // existência de um registro que a pessoa não pode ver.
     return { ...EMPTY, message: "Registro não encontrado." };
   }
-
-  const { data: attr } = await supabase
-    .from("record_attributes")
-    .select("id, status, granted_by_rule_id")
-    .eq("record_id", recordId)
-    .eq("attribute_key", "tree")
-    .maybeSingle();
 
   const facts = await loadRecordTreeFacts(supabase, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

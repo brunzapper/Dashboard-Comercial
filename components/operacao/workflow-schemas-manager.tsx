@@ -43,7 +43,14 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, Play, Plus, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  ExternalLink,
+  Pencil,
+  Play,
+  Plus,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -53,13 +60,9 @@ import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { WorkflowRunsList } from "@/components/operacao/workflow-runs-list";
-import {
-  SchemaCard,
-  type ConnectionStatus,
-  type ManagedSchema,
-} from "@/components/operacao/workflow-schema-card";
-import { NewAutomationButton } from "@/components/operacao/workflow-new-automation";
+import type { ManagedSchema } from "@/components/operacao/workflow-schema-card";
 import type { StepSourceOption } from "@/components/operacao/workflow-step-editor";
+import { notifyOnError } from "@/lib/feedback/notify";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
 import {
   runAutomationsNow,
@@ -72,20 +75,51 @@ import {
 import type { OrgAutomationRow } from "@/lib/workflow/automations-overview";
 import {
   buildWorkflowCatalog,
-  countByFilter,
   filterWorkflowCatalog,
   WORKFLOW_CATALOG_FILTER_LABELS,
-  WORKFLOW_CATALOG_FILTERS,
-  type WorkflowCatalogFilter,
 } from "@/lib/workflow/catalog";
 import type { WorkflowRunRow } from "@/lib/workflow/runs";
 import type { WorkflowSchemaRow } from "@/lib/workflow/schemas";
 import type { SystemFlow } from "@/lib/workflow/system-schemas";
 import { createWorkflowSchema } from "@/app/(app)/operacao/workflow/actions";
 
-export type { ConnectionStatus, ManagedSchema };
+export type { ManagedSchema };
 
 type Tab = "esquemas" | "execucoes";
+
+/**
+ * A linha de um fluxo na lista. O CONSTRUTOR não está mais aqui: montar campos
+ * e passos é trabalho longo, e fazê-lo espremido entre as linhas vizinhas era o
+ * que dava a impressão de que não havia construtor. Clicar leva à tela.
+ */
+function SchemaRow({ schema }: { schema: ManagedSchema }) {
+  return (
+    <Link
+      href={`/operacao/workflow/schema:${schema.id}`}
+      className="hover:bg-muted/40 flex flex-col gap-1 rounded-md border p-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">{schema.label}</span>
+        <Badge variant="outline" className="text-xs">
+          {schema.triggerKind === "form" ? "Formulário" : "Automação"}
+        </Badge>
+        {!schema.enabled ? (
+          <Badge variant="secondary" className="text-xs">
+            desligado
+          </Badge>
+        ) : null}
+        {schema.definition == null ? (
+          <Badge variant="destructive" className="text-xs">
+            configuração inválida
+          </Badge>
+        ) : null}
+      </div>
+      {schema.description ? (
+        <p className="text-muted-foreground text-xs">{schema.description}</p>
+      ) : null}
+    </Link>
+  );
+}
 
 function AutomationRowCard({ row }: { row: OrgAutomationRow }) {
   const { save, pendingKeys } = useBackgroundSave();
@@ -165,6 +199,15 @@ function AutomationRowCard({ row }: { row: OrgAutomationRow }) {
             ? `Última execução: ${new Date(row.lastRunAt).toLocaleString("pt-BR")} · ${row.lastActionCount} ação(ões)`
             : "Ainda não rodou."}
         </span>
+        {/* A porta que faltava: até aqui o card só oferecia ligar/desligar e
+            "abrir o quadro" — e regra de BASE não tem quadro, então dentro do
+            Workflow ela era ineditável. */}
+        <Link
+          href={`/operacao/workflow/rule:${row.id}`}
+          className="text-primary inline-flex items-center gap-1 hover:underline"
+        >
+          <Pencil className="size-3" /> Editar
+        </Link>
         <Button
           type="button"
           variant="ghost"
@@ -223,16 +266,16 @@ function SystemFlowCard({ flow }: { flow: SystemFlow }) {
   );
 }
 
+type NovoTipo = ManagedSchema["triggerKind"] | "regra";
+
 export function WorkflowSchemasManager({
   schemas,
-  connections,
   systemFlows,
   automations,
   runs,
   sources,
 }: {
   schemas: ManagedSchema[];
-  connections: ConnectionStatus[];
   systemFlows: SystemFlow[];
   /** Todas as regras da org — de quadro e de Base. */
   automations: OrgAutomationRow[];
@@ -240,21 +283,22 @@ export function WorkflowSchemasManager({
   /** Bases da org: destino de passo e dono de automação sem quadro. */
   sources: StepSourceOption[];
 }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("esquemas");
-  const [filter, setFilter] = useState<WorkflowCatalogFilter>("todos");
   const { save, pendingKeys } = useBackgroundSave();
   const [novoAberto, setNovoAberto] = useState(false);
   const [novoNome, setNovoNome] = useState("");
-  const [novoGatilho, setNovoGatilho] =
-    useState<ManagedSchema["triggerKind"]>("form");
+  // O terceiro tipo não é um `workflow_schemas`: é uma regra em
+  // `automation_rules` sobre uma Base. Do ponto de vista de quem cria, porém,
+  // as três são a mesma pergunta — "o que dispara isto?".
+  const [novoGatilho, setNovoGatilho] = useState<NovoTipo>("form");
+  const [novaBase, setNovaBase] = useState("");
 
   const catalog = buildWorkflowCatalog(
     schemas as unknown as WorkflowSchemaRow[],
     automations,
     systemFlows
   );
-  const counts = countByFilter(catalog);
-  const visible = filterWorkflowCatalog(catalog, filter);
   const criando = pendingKeys.has("novo");
 
   return (
@@ -295,29 +339,18 @@ export function WorkflowSchemasManager({
           </p>
 
           <div className="flex flex-wrap items-center gap-2">
-            {WORKFLOW_CATALOG_FILTERS.map((f) => (
-              <Button
-                key={f}
-                type="button"
-                variant={filter === f ? "default" : "outline"}
-                size="sm"
-                onClick={() => setFilter(f)}
-              >
-                {WORKFLOW_CATALOG_FILTER_LABELS[f]} ({counts[f]})
-              </Button>
-            ))}
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <NewAutomationButton sources={sources} />
-              <Button
-                type="button"
-                size="sm"
-                className="gap-1"
-                disabled={criando}
-                onClick={() => setNovoAberto((v) => !v)}
-              >
-                <Plus className="size-4" /> Novo fluxo
-              </Button>
-            </div>
+            {/* Um botão só: "automação" e "fluxo" eram a mesma ideia (uma coisa
+                que o sistema faz sozinho ou por um formulário) atrás de duas
+                portas com nomes diferentes. */}
+            <Button
+              type="button"
+              size="sm"
+              className="ml-auto gap-1"
+              disabled={criando}
+              onClick={() => setNovoAberto((v) => !v)}
+            >
+              <Plus className="size-4" /> Novo esquema
+            </Button>
           </div>
 
           {novoAberto ? (
@@ -331,21 +364,38 @@ export function WorkflowSchemasManager({
                   aria-label="Nome do fluxo novo"
                 />
               </div>
-              <div className="flex w-56 flex-col gap-1">
+              <div className="flex w-64 flex-col gap-1">
                 <Label className="text-xs">O que dispara</Label>
                 <Combobox
                   options={[
                     { value: "form", label: "Uma pessoa preenche (formulário)" },
-                    { value: "automacao", label: "Uma automação (sem tela)" },
+                    { value: "automacao", label: "Um passo a passo automático" },
+                    {
+                      value: "regra",
+                      label: "Uma regra sobre os registros de uma Base",
+                    },
                   ]}
                   value={novoGatilho}
-                  onValueChange={(v) =>
-                    setNovoGatilho(v as ManagedSchema["triggerKind"])
-                  }
+                  onValueChange={(v) => setNovoGatilho(v as NovoTipo)}
                   searchable={false}
-                  aria-label="Gatilho do fluxo novo"
+                  aria-label="Gatilho do esquema novo"
                 />
               </div>
+              {novoGatilho === "regra" ? (
+                <div className="flex w-56 flex-col gap-1">
+                  <Label className="text-xs">Base</Label>
+                  <Combobox
+                    options={sources.map((s) => ({
+                      value: s.key,
+                      label: s.label,
+                    }))}
+                    value={novaBase}
+                    onValueChange={setNovaBase}
+                    placeholder="Sobre quais registros"
+                    aria-label="Base da regra nova"
+                  />
+                </div>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
@@ -354,9 +404,47 @@ export function WorkflowSchemasManager({
                   const label = novoNome.trim();
                   setNovoNome("");
                   setNovoAberto(false);
+                  if (novoGatilho === "regra") {
+                    // Regra de Base: nasce vazia e DESLIGADA pelo mesmo
+                    // saveAutomation do painel do quadro, e a tela de
+                    // construção abre em seguida — criar e cair numa lista é o
+                    // que fazia a coisa parecer inacabada.
+                    const base = novaBase;
+                    setNovaBase("");
+                    void saveAutomation(
+                      { kind: "source", id: base },
+                      {
+                        name: label,
+                        enabled: false,
+                        position: 0,
+                        rule: {
+                          v: 1,
+                          conditions: [
+                            {
+                              kind: "time",
+                              basis: { type: "created" },
+                              op: "gte",
+                              days: 0,
+                            },
+                          ],
+                          action: { type: "set_field", field: "", value: "" },
+                        },
+                      }
+                    ).then((res) => {
+                      if (res.ok && res.id) {
+                        router.push(`/operacao/workflow/rule:${res.id}`);
+                      } else {
+                        notifyOnError(
+                          Promise.resolve(res),
+                          "Não foi possível criar a regra"
+                        );
+                      }
+                    });
+                    return;
+                  }
                   save({
                     key: "novo",
-                    context: "Não foi possível criar o fluxo",
+                    context: "Não foi possível criar o esquema",
                     action: () =>
                       createWorkflowSchema({
                         label,
@@ -374,25 +462,36 @@ export function WorkflowSchemasManager({
             </div>
           ) : null}
 
-          {visible.length === 0 ? (
+          {/* SEÇÕES, não abas: o que existe fica visível de uma vez. A
+              classificação é de `catalogItemFilter` — nunca uma lista paralela. */}
+          {catalog.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              Nada aqui com este filtro.
+              Nenhum esquema ainda.
             </p>
           ) : (
-            visible.map((item) =>
-              item.kind === "schema" ? (
-                <SchemaCard
-                  key={item.id}
-                  schema={item.schema as unknown as ManagedSchema}
-                  connections={connections}
-                  sources={sources}
-                />
-              ) : item.kind === "rule" ? (
-                <AutomationRowCard key={item.id} row={item.rule} />
-              ) : (
-                <SystemFlowCard key={item.id} flow={item.flow} />
-              )
-            )
+            (["formulario", "automacao", "sistema"] as const).map((secao) => {
+              const itens = filterWorkflowCatalog(catalog, secao);
+              if (itens.length === 0) return null;
+              return (
+                <section key={secao} className="flex flex-col gap-2">
+                  <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                    {WORKFLOW_CATALOG_FILTER_LABELS[secao]} ({itens.length})
+                  </h3>
+                  {itens.map((item) =>
+                    item.kind === "schema" ? (
+                      <SchemaRow
+                        key={item.id}
+                        schema={item.schema as unknown as ManagedSchema}
+                      />
+                    ) : item.kind === "rule" ? (
+                      <AutomationRowCard key={item.id} row={item.rule} />
+                    ) : (
+                      <SystemFlowCard key={item.id} flow={item.flow} />
+                    )
+                  )}
+                </section>
+              );
+            })
           )}
 
           <div className="text-muted-foreground rounded-md border border-dashed p-3 text-xs">

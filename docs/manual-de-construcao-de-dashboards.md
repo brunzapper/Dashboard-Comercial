@@ -1,4 +1,6 @@
-<!-- Versão: 1.30 | Data: 09/09/2026 -->
+<!-- Versão: 1.31 | Data: 09/09/2026 -->
+<!-- v1.31 (09/09/2026): §5.14 — a troca de registro é imediata (nome do
+     clicado + carregamento; a árvore anterior sai na hora). -->
 <!-- v1.30 (09/09/2026): §5.14 — a seção "Tree" do editor (que não existia) e
      a JANELA de cobranças com ordem e "carregar mais"; §6.9 — o clique passa
      a FOCAR um widget Tree do painel quando há um, e a lista de tarefas
@@ -1209,6 +1211,11 @@ desfazer é soltá-lo de volta.
 **Onde se configura:** seção **Tree** do editor do widget — a fonte dos nós, a
 forma, o registro fixo (ou vazio, para seguir o clique), a chave do mapa livre
 e quais tipos de nó exibir (nada marcado = tudo).
+
+**A troca de registro é imediata.** Clicando noutra linha, a árvore anterior sai
+na hora e o **nome do registro clicado** já aparece no cabeçalho, com o
+indicador de carregamento, enquanto o histórico é buscado. A árvore de um lead
+nunca fica em tela sob o nome de outro.
 
 **Quantidade.** A árvore vem em **janela**: as 12 cobranças de uma ponta, com
 os galhos delas. O botão de ordem no topo escolhe a ponta (mais recentes ou
