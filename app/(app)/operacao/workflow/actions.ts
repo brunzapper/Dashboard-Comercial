@@ -1,3 +1,10 @@
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): criar, duplicar e excluir esquema. Até aqui só existia
+//   `saveWorkflowSchema` (editar o que já estava lá) — a fábrica não fabricava.
+//   A `key` é DERIVADA do rótulo (o usuário nomeia o fluxo, não a identidade) e
+//   segue imutável depois. Entra também `loadBitrixEntityFields`, que dá ao
+//   construtor a lista de campos do portal em vez de pedir que alguém adivinhe
+//   um `UF_CRM_1729887583805`.
 // Versão: 1.2 | Data: 09/09/2026
 // v1.2 (09/09/2026): o miolo da execução saiu para `runWorkflowCore`
 //   (lib/workflow/run.ts) e esta action virou wrapper — a ação `run_schema` das
@@ -37,7 +44,14 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { primaryOperationId } from "@/lib/sync/shared";
 import type { WorkflowStepOutcome } from "@/lib/workflow/execute";
 import { loadStatusCodes, runWorkflowCore } from "@/lib/workflow/run";
-import { loadWorkflowSchemaByKey } from "@/lib/workflow/schemas";
+import { BitrixClient } from "@/lib/sync/bitrix/client";
+import { resolveWorkflowConnection } from "@/lib/workflow/connections";
+import {
+  loadWorkflowSchemaByKey,
+  loadWorkflowSchemas,
+  uniqueWorkflowKey,
+  type WorkflowTriggerKind,
+} from "@/lib/workflow/schemas";
 import {
   parseWorkflowDefinition,
   type WorkflowDefinition,
@@ -57,6 +71,8 @@ export interface WorkflowRunState {
 export interface WorkflowSchemaState {
   ok?: boolean;
   message?: string;
+  /** Id do esquema criado — a UI abre o editor dele em seguida. */
+  id?: string;
 }
 
 /** Lê e valida as respostas do formulário contra a definição. */
@@ -309,6 +325,7 @@ export async function saveWorkflowSchema(
   schemaId: string,
   patch: {
     label?: string;
+    description?: string;
     enabled?: boolean;
     showCard?: boolean;
     definition?: unknown;
@@ -323,6 +340,10 @@ export async function saveWorkflowSchema(
     const label = patch.label.trim();
     if (label === "") return { ok: false, message: "O nome não pode ficar vazio." };
     update.label = label;
+  }
+  if (typeof patch.description === "string") {
+    const d = patch.description.trim();
+    update.description = d === "" ? null : d;
   }
   if (typeof patch.enabled === "boolean") update.enabled = patch.enabled;
   if (typeof patch.showCard === "boolean") update.show_card = patch.showCard;
@@ -349,3 +370,150 @@ export async function saveWorkflowSchema(
   if (opts.revalidate !== false) revalidatePath("/operacao/workflow");
   return { ok: true, message: "Esquema salvo." };
 }
+
+/**
+ * Cria um esquema. Nasce DESLIGADO e com definição vazia mas VÁLIDA: um fluxo
+ * sem passo nenhum não faz nada, e ligar antes de montar seria oferecer ao time
+ * um formulário que não leva a lugar nenhum. `copyFrom` duplica a definição de
+ * outro esquema (o caminho mais curto para um fluxo novo é partir de um que já
+ * funciona).
+ */
+export async function createWorkflowSchema(input: {
+  label: string;
+  triggerKind: WorkflowTriggerKind;
+  description?: string;
+  copyFrom?: string;
+}): Promise<WorkflowSchemaState> {
+  const denied = await ensureCanConfigure();
+  if (denied) return { ok: false, message: denied };
+  const label = input.label.trim();
+  if (label === "") return { ok: false, message: "Dê um nome ao fluxo." };
+  const orgId = await getActiveOrgId();
+  if (!orgId) return { ok: false, message: "Organização ativa não identificada." };
+
+  const supabase = await createClient();
+  const existing = await loadWorkflowSchemas(supabase, orgId);
+  const key = uniqueWorkflowKey(label, new Set(existing.map((s) => s.key)));
+
+  let definition: WorkflowDefinition = {
+    version: 1,
+    form: { fields: [] },
+    steps: [],
+  };
+  if (input.copyFrom) {
+    const origem = existing.find((s) => s.id === input.copyFrom);
+    if (!origem?.definition) {
+      return {
+        ok: false,
+        message: "O esquema de origem não existe ou está com a configuração inválida.",
+      };
+    }
+    definition = origem.definition;
+  }
+
+  const { data, error } = await supabase
+    .from("workflow_schemas")
+    .insert({
+      organization_id: orgId,
+      key,
+      label,
+      description: input.description?.trim() || null,
+      definition,
+      trigger_kind: input.triggerKind,
+      // Fluxo novo nasce desligado: ligar é o ato que diz "está pronto".
+      enabled: false,
+      show_card: input.triggerKind === "form",
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, message: `Falha ao criar: ${error.message}` };
+
+  revalidatePath("/operacao/workflow");
+  return { ok: true, id: data.id as string, message: `Fluxo "${label}" criado.` };
+}
+
+/**
+ * Exclui um esquema. O HISTÓRICO sobrevive: `workflow_runs.schema_id` é
+ * `on delete set null` e a linha guarda `schema_key` (0125) — o que já rodou
+ * continua explicável depois que o fluxo deixou de existir.
+ */
+export async function deleteWorkflowSchema(
+  schemaId: string
+): Promise<WorkflowSchemaState> {
+  const denied = await ensureCanConfigure();
+  if (denied) return { ok: false, message: denied };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("workflow_schemas")
+    .delete()
+    .eq("id", schemaId);
+  if (error) return { ok: false, message: `Falha ao excluir: ${error.message}` };
+  revalidatePath("/operacao/workflow");
+  return { ok: true, message: "Fluxo excluído." };
+}
+
+export interface BitrixFieldOption {
+  value: string;
+  label: string;
+  readOnly: boolean;
+}
+
+/**
+ * Campos de uma entidade do CRM, para o construtor oferecer "Título" em vez de
+ * exigir que alguém saiba de cor `UF_CRM_1729887583805`. Mesma chamada que o
+ * passo faz na execução (`crm.<entity>.fields`).
+ *
+ * Sem conexão configurada devolve lista VAZIA e a UI cai em texto livre: o
+ * construtor não pode ficar refém do portal estar no ar.
+ */
+export async function loadBitrixEntityFields(
+  entity: string
+): Promise<{ ok: boolean; fields: BitrixFieldOption[]; message?: string }> {
+  const denied = await ensureCanConfigure();
+  if (denied) return { ok: false, fields: [], message: denied };
+  if (!BITRIX_ENTITIES.includes(entity)) {
+    return { ok: false, fields: [], message: "Entidade desconhecida." };
+  }
+  let webhookUrl: string;
+  try {
+    webhookUrl = resolveWorkflowConnection("bitrix_webhook");
+  } catch {
+    return {
+      ok: false,
+      fields: [],
+      message: "A conexão com o Bitrix não está configurada neste ambiente.",
+    };
+  }
+  try {
+    const client = new BitrixClient(webhookUrl);
+    const raw = (
+      await client.call<Record<string, RawBitrixField>>(`crm.${entity}.fields`)
+    ).result;
+    const fields = Object.entries(raw ?? {})
+      .map(([fieldId, def]) => ({
+        value: fieldId,
+        label: def?.title || def?.listLabel || def?.formLabel || fieldId,
+        readOnly: Boolean(def?.isReadOnly),
+      }))
+      // Somente-leitura não é alvo: oferecê-lo produziria um campo que o passo
+      // pula em silêncio na execução.
+      .filter((f) => !f.readOnly)
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+    return { ok: true, fields };
+  } catch (e) {
+    return {
+      ok: false,
+      fields: [],
+      message: e instanceof Error ? e.message : "Falha ao ler os campos do CRM.",
+    };
+  }
+}
+
+interface RawBitrixField {
+  title?: string;
+  listLabel?: string;
+  formLabel?: string;
+  isReadOnly?: boolean;
+}
+
+const BITRIX_ENTITIES: string[] = ["company", "contact", "lead", "deal"];

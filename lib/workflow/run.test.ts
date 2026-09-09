@@ -261,3 +261,20 @@ describe("runWorkflowCore — a trava", () => {
     expect(updated).toHaveLength(0);
   });
 });
+
+describe("WORKFLOW_CTX_KEYS", () => {
+  it("descreve exatamente o que buildWorkflowCtx produz", async () => {
+    // O construtor OFERECE estas refs; lista e realidade não podem divergir —
+    // uma ref oferecida que não existe resolve vazio e cala o erro.
+    const { WORKFLOW_CTX_KEYS } = await import("./registry");
+    const ctx = buildWorkflowCtx({}, {
+      userId: null,
+      roles: [],
+      responsibleId: null,
+      bitrixUserId: null,
+    });
+    expect(WORKFLOW_CTX_KEYS.map((k) => k.key).sort()).toEqual(
+      Object.keys(ctx).sort()
+    );
+  });
+});

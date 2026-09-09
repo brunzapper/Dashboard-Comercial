@@ -1,4 +1,11 @@
-// Versão: 3.1 | Data: 09/09/2026
+// Versão: 4.0 | Data: 09/09/2026
+// v4.0 (09/09/2026): DUAS abas — Esquemas e Execuções. Automações e fluxos do
+//   sistema deixam de ser abas e viram LINHAS da mesma lista, com filtro por
+//   tipo: um fluxo é um fluxo, e o que muda entre eles é quem dispara e onde se
+//   edita, não em que aba mora. Entram também os botões que faltavam — "Novo
+//   fluxo" (a fábrica não fabricava) e "Nova automação", a única porta de
+//   entrada para regra de Base. O card do esquema saiu para
+//   workflow-schema-card.tsx, que virou o construtor.
 // v3.1 (09/09/2026): aba EXECUÇÕES — o histórico que a 0125 gravava desde o
 //   começo e ninguém via. É lá que a SIMULAÇÃO de um esquema mostra o payload
 //   que iria para o destino, e é de lá que sai o "Tentar de novo" que devolve
@@ -36,28 +43,24 @@
 "use client";
 
 import { useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  Check,
-  Copy,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Play,
-  TriangleAlert,
-} from "lucide-react";
+import { ExternalLink, Play, Plus, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { WorkflowRunsList } from "@/components/operacao/workflow-runs-list";
-import type { WorkflowRunRow } from "@/lib/workflow/runs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WorkflowRunsList } from "@/components/operacao/workflow-runs-list";
+import {
+  SchemaCard,
+  type ConnectionStatus,
+  type ManagedSchema,
+} from "@/components/operacao/workflow-schema-card";
+import { NewAutomationButton } from "@/components/operacao/workflow-new-automation";
+import type { StepSourceOption } from "@/components/operacao/workflow-step-editor";
 import { useBackgroundSave } from "@/lib/feedback/use-background-save";
-import { formSchemaHref } from "@/lib/operacao/form-routes";
 import {
   runAutomationsNow,
   saveAutomation,
@@ -67,407 +70,22 @@ import {
   automationSummary,
 } from "@/lib/kanban/automations/summary";
 import type { OrgAutomationRow } from "@/lib/workflow/automations-overview";
-import { stepTypeDef } from "@/lib/workflow/registry";
+import {
+  buildWorkflowCatalog,
+  countByFilter,
+  filterWorkflowCatalog,
+  WORKFLOW_CATALOG_FILTER_LABELS,
+  WORKFLOW_CATALOG_FILTERS,
+  type WorkflowCatalogFilter,
+} from "@/lib/workflow/catalog";
+import type { WorkflowRunRow } from "@/lib/workflow/runs";
+import type { WorkflowSchemaRow } from "@/lib/workflow/schemas";
 import type { SystemFlow } from "@/lib/workflow/system-schemas";
-import type {
-  WorkflowDefinition,
-  WorkflowFormField,
-  WorkflowStep,
-} from "@/lib/workflow/types";
-import { saveWorkflowSchema } from "@/app/(app)/operacao/workflow/actions";
+import { createWorkflowSchema } from "@/app/(app)/operacao/workflow/actions";
 
-export interface ManagedSchema {
-  id: string;
-  key: string;
-  label: string;
-  description: string | null;
-  enabled: boolean;
-  triggerKind: "form" | "automacao";
-  showCard: boolean;
-  definition: WorkflowDefinition | null;
-}
+export type { ConnectionStatus, ManagedSchema };
 
-export interface ConnectionStatus {
-  key: string;
-  label: string;
-  envName: string;
-  description: string;
-  configured: boolean;
-}
-
-type Tab = "esquemas" | "automacoes" | "execucoes" | "sistema";
-
-function moved<T>(list: T[], index: number, delta: number): T[] {
-  const target = index + delta;
-  if (target < 0 || target >= list.length) return list;
-  const copy = [...list];
-  const [item] = copy.splice(index, 1);
-  copy.splice(target, 0, item);
-  return copy;
-}
-
-function FieldRow({
-  field,
-  index,
-  total,
-  busy,
-  onChange,
-  onMove,
-}: {
-  field: WorkflowFormField;
-  index: number;
-  total: number;
-  busy: boolean;
-  onChange: (patch: Partial<WorkflowFormField>) => void;
-  onMove: (delta: number) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-7 shrink-0"
-        disabled={busy}
-        onClick={() => onChange({ visible: !field.visible })}
-        aria-label={field.visible ? "Ocultar do formulário" : "Mostrar no formulário"}
-        title={field.visible ? "Ocultar do formulário" : "Mostrar no formulário"}
-      >
-        {field.visible ? (
-          <Eye className="size-4" />
-        ) : (
-          <EyeOff className="text-muted-foreground size-4" />
-        )}
-      </Button>
-
-      <Input
-        className="w-56"
-        value={field.label}
-        disabled={busy}
-        onChange={(e) => onChange({ label: e.target.value })}
-        aria-label={`Rótulo de ${field.key}`}
-      />
-
-      <code className="text-muted-foreground text-xs">{field.key}</code>
-
-      <label className="flex items-center gap-1.5 text-sm">
-        <Checkbox
-          checked={field.required}
-          disabled={busy || !field.visible}
-          onCheckedChange={(v) => onChange({ required: v === true })}
-        />
-        Obrigatório
-      </label>
-
-      {field.optionsSource && field.optionsSource !== "static" ? (
-        <Badge variant="outline" className="text-xs">
-          lista automática
-        </Badge>
-      ) : null}
-
-      <div className="ml-auto flex items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          disabled={busy || index === 0}
-          onClick={() => onMove(-1)}
-          aria-label="Subir"
-        >
-          <ArrowUp className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          disabled={busy || index === total - 1}
-          onClick={() => onMove(1)}
-          aria-label="Descer"
-        >
-          <ArrowDown className="size-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function StepRow({
-  step,
-  busy,
-  connection,
-  onToggle,
-}: {
-  step: WorkflowStep;
-  busy: boolean;
-  connection: ConnectionStatus | null;
-  onToggle: (enabled: boolean) => void;
-}) {
-  const def = stepTypeDef(step.type);
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border p-2">
-      <Checkbox
-        checked={step.enabled}
-        disabled={busy}
-        onCheckedChange={(v) => onToggle(v === true)}
-        aria-label={`Ligar o passo ${step.label}`}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{step.label}</span>
-          {connection ? (
-            <Badge
-              variant={connection.configured ? "outline" : "destructive"}
-              className="text-xs"
-            >
-              {connection.envName}
-              {connection.configured ? " ✓" : " ausente"}
-            </Badge>
-          ) : null}
-        </div>
-        {def ? (
-          <p className="text-muted-foreground text-xs">{def.description}</p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Onde o esquema foi parar. A URL absoluta é montada no CLIENTE
- * (window.location.origin): o servidor não conhece o domínio pelo qual o
- * usuário chegou, e um link com o host errado é pior que link nenhum.
- */
-function FormDestination({
-  schemaKey,
-  enabled,
-}: {
-  schemaKey: string;
-  enabled: boolean;
-}) {
-  const [copied, setCopied] = useState(false);
-  const path = formSchemaHref(schemaKey);
-
-  const copy = async () => {
-    try {
-      const origin =
-        typeof window === "undefined" ? "" : window.location.origin;
-      await navigator.clipboard.writeText(`${origin}${path}`);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard bloqueado (http, permissão): o caminho segue visível ao
-      // lado para seleção manual — nada de toast de erro por isso.
-    }
-  };
-
-  return (
-    <div className="bg-muted/40 flex flex-wrap items-center gap-2 rounded-md border p-2">
-      <span className="text-muted-foreground text-xs">
-        {enabled ? "Disponível em" : "Ficará em"}
-      </span>
-      <code className="text-xs">{path}</code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 gap-1 px-2"
-        onClick={copy}
-      >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        {copied ? "Copiado" : "Copiar link"}
-      </Button>
-      {enabled ? (
-        <Link
-          href={path}
-          className="text-primary inline-flex items-center gap-1 text-xs hover:underline"
-        >
-          abrir <ExternalLink className="size-3" />
-        </Link>
-      ) : null}
-    </div>
-  );
-}
-
-function SchemaCard({
-  schema,
-  connections,
-}: {
-  schema: ManagedSchema;
-  connections: ConnectionStatus[];
-}) {
-  const { save, pendingKeys } = useBackgroundSave();
-  const [def, setDef] = useState<WorkflowDefinition | null>(schema.definition);
-  const [enabled, setEnabled] = useState(schema.enabled);
-  const [showCard, setShowCard] = useState(schema.showCard);
-  const busy = pendingKeys.has(schema.id);
-  const isForm = schema.triggerKind === "form";
-
-  const persist = (next: WorkflowDefinition, revertTo: WorkflowDefinition) => {
-    setDef(next);
-    save({
-      key: schema.id,
-      context: "Não foi possível salvar o esquema",
-      action: () =>
-        saveWorkflowSchema(
-          schema.id,
-          { definition: next },
-          { revalidate: false }
-        ),
-      revert: () => setDef(revertTo),
-    });
-  };
-
-  if (!def) {
-    return (
-      <div className="rounded-md border p-4">
-        <p className="font-medium">{schema.label}</p>
-        <p className="text-destructive text-sm">
-          A configuração deste esquema está inválida e não pode ser executada.
-          Restaure-a a partir do banco ou recrie o esquema.
-        </p>
-      </div>
-    );
-  }
-
-  const connByKey = new Map(connections.map((c) => [c.key, c]));
-
-  return (
-    <div className="flex flex-col gap-4 rounded-md border p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="font-medium">{schema.label}</p>
-          {schema.description ? (
-            <p className="text-muted-foreground text-sm">{schema.description}</p>
-          ) : null}
-        </div>
-        <label className="flex shrink-0 items-center gap-2 text-sm">
-          <Checkbox
-            checked={enabled}
-            disabled={busy}
-            onCheckedChange={(v) => {
-              const next = v === true;
-              const prev = enabled;
-              setEnabled(next);
-              save({
-                key: schema.id,
-                context: "Não foi possível salvar o esquema",
-                action: () =>
-                  saveWorkflowSchema(
-                    schema.id,
-                    { enabled: next },
-                    { revalidate: false }
-                  ),
-                revert: () => setEnabled(prev),
-              });
-            }}
-          />
-          Ativo
-        </label>
-      </div>
-
-      {isForm ? (
-        <div className="flex flex-col gap-2">
-          <FormDestination schemaKey={schema.key} enabled={enabled} />
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={showCard}
-              disabled={busy}
-              onCheckedChange={(v) => {
-                const next = v === true;
-                const prev = showCard;
-                setShowCard(next);
-                save({
-                  key: schema.id,
-                  context: "Não foi possível salvar o esquema",
-                  action: () =>
-                    saveWorkflowSchema(
-                      schema.id,
-                      { showCard: next },
-                      { revalidate: false }
-                    ),
-                  revert: () => setShowCard(prev),
-                });
-              }}
-            />
-            Aparece como card em Operação
-            <span className="text-muted-foreground text-xs">
-              (desmarcado, existe só pelo link)
-            </span>
-          </label>
-        </div>
-      ) : null}
-
-      <div className="flex flex-col gap-2">
-        <Label className="text-muted-foreground text-xs uppercase">
-          Campos do formulário
-        </Label>
-        <p className="text-muted-foreground text-xs">
-          O formulário é uma lista única — quem lança não vê os passos. Um campo
-          oculto continua valendo no fluxo com o valor padrão dele.
-        </p>
-        {def.form.fields.map((field, i) => (
-          <FieldRow
-            key={field.key}
-            field={field}
-            index={i}
-            total={def.form.fields.length}
-            busy={busy}
-            onChange={(patch) => {
-              const next = {
-                ...def,
-                form: {
-                  fields: def.form.fields.map((f) =>
-                    f.key === field.key ? { ...f, ...patch } : f
-                  ),
-                },
-              };
-              persist(next, def);
-            }}
-            onMove={(delta) => {
-              const reordered = moved(def.form.fields, i, delta).map(
-                (f, idx) => ({ ...f, order: idx })
-              );
-              persist({ ...def, form: { fields: reordered } }, def);
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label className="text-muted-foreground text-xs uppercase">
-          Passos
-        </Label>
-        <p className="text-muted-foreground text-xs">
-          Rodam nesta ordem, e cada um aproveita o que o anterior devolveu.
-          Desligar um passo faz os seguintes seguirem sem o resultado dele.
-        </p>
-        {def.steps.map((step) => (
-          <StepRow
-            key={step.id}
-            step={step}
-            busy={busy}
-            connection={
-              step.type === "bitrix.entity.add"
-                ? (connByKey.get(step.connection) ?? null)
-                : null
-            }
-            onToggle={(next) => {
-              const updated = {
-                ...def,
-                steps: def.steps.map((s) =>
-                  s.id === step.id ? { ...s, enabled: next } : s
-                ),
-              };
-              persist(updated, def);
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+type Tab = "esquemas" | "execucoes";
 
 function AutomationRowCard({ row }: { row: OrgAutomationRow }) {
   const { save, pendingKeys } = useBackgroundSave();
@@ -611,6 +229,7 @@ export function WorkflowSchemasManager({
   systemFlows,
   automations,
   runs,
+  sources,
 }: {
   schemas: ManagedSchema[];
   connections: ConnectionStatus[];
@@ -618,18 +237,33 @@ export function WorkflowSchemasManager({
   /** Todas as regras da org — de quadro e de Base. */
   automations: OrgAutomationRow[];
   runs: WorkflowRunRow[];
+  /** Bases da org: destino de passo e dono de automação sem quadro. */
+  sources: StepSourceOption[];
 }) {
   const [tab, setTab] = useState<Tab>("esquemas");
+  const [filter, setFilter] = useState<WorkflowCatalogFilter>("todos");
+  const { save, pendingKeys } = useBackgroundSave();
+  const [novoAberto, setNovoAberto] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoGatilho, setNovoGatilho] =
+    useState<ManagedSchema["triggerKind"]>("form");
+
+  const catalog = buildWorkflowCatalog(
+    schemas as unknown as WorkflowSchemaRow[],
+    automations,
+    systemFlows
+  );
+  const counts = countByFilter(catalog);
+  const visible = filterWorkflowCatalog(catalog, filter);
+  const criando = pendingKeys.has("novo");
 
   return (
     <div className="flex flex-col gap-4">
       <div role="tablist" className="flex gap-2">
         {(
           [
-            ["esquemas", "Esquemas"],
-            ["automacoes", `Automações (${automations.length})`],
+            ["esquemas", `Esquemas (${catalog.length})`],
             ["execucoes", "Execuções"],
-            ["sistema", "Fluxos do sistema"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
           <Button
@@ -651,48 +285,121 @@ export function WorkflowSchemasManager({
           runs={runs}
           schemaLabels={Object.fromEntries(schemas.map((s) => [s.key, s.label]))}
         />
-      ) : tab === "automacoes" ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-muted-foreground text-sm">
-            O que o sistema mexe sozinho nos seus registros. Regras de quadro
-            continuam editáveis dentro do quadro; as de base vivem aqui. As com
-            erro aparecem primeiro.
-          </p>
-          {automations.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              Nenhuma automação nesta organização.
-            </p>
-          ) : (
-            automations.map((a) => <AutomationRowCard key={a.id} row={a} />)
-          )}
-        </div>
-      ) : tab === "esquemas" ? (
+      ) : (
         <div className="flex flex-col gap-4">
-          {schemas.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            Tudo que este sistema faz sozinho ou por um formulário. Os que você
+            cria e edita aqui, as automações (que também se editam dentro do
+            quadro) e os fluxos que já vêm prontos. O que está com erro aparece
+            primeiro.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {WORKFLOW_CATALOG_FILTERS.map((f) => (
+              <Button
+                key={f}
+                type="button"
+                variant={filter === f ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter(f)}
+              >
+                {WORKFLOW_CATALOG_FILTER_LABELS[f]} ({counts[f]})
+              </Button>
+            ))}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <NewAutomationButton sources={sources} />
+              <Button
+                type="button"
+                size="sm"
+                className="gap-1"
+                disabled={criando}
+                onClick={() => setNovoAberto((v) => !v)}
+              >
+                <Plus className="size-4" /> Novo fluxo
+              </Button>
+            </div>
+          </div>
+
+          {novoAberto ? (
+            <div className="flex flex-wrap items-end gap-2 rounded-md border p-3">
+              <div className="flex min-w-56 flex-1 flex-col gap-1">
+                <Label className="text-xs">Nome do fluxo</Label>
+                <Input
+                  value={novoNome}
+                  onChange={(e) => setNovoNome(e.target.value)}
+                  placeholder="Ex.: Criação de lead"
+                  aria-label="Nome do fluxo novo"
+                />
+              </div>
+              <div className="flex w-56 flex-col gap-1">
+                <Label className="text-xs">O que dispara</Label>
+                <Combobox
+                  options={[
+                    { value: "form", label: "Uma pessoa preenche (formulário)" },
+                    { value: "automacao", label: "Uma automação (sem tela)" },
+                  ]}
+                  value={novoGatilho}
+                  onValueChange={(v) =>
+                    setNovoGatilho(v as ManagedSchema["triggerKind"])
+                  }
+                  searchable={false}
+                  aria-label="Gatilho do fluxo novo"
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={criando || novoNome.trim() === ""}
+                onClick={() => {
+                  const label = novoNome.trim();
+                  setNovoNome("");
+                  setNovoAberto(false);
+                  save({
+                    key: "novo",
+                    context: "Não foi possível criar o fluxo",
+                    action: () =>
+                      createWorkflowSchema({
+                        label,
+                        triggerKind: novoGatilho,
+                      }),
+                  });
+                }}
+              >
+                Criar
+              </Button>
+              <p className="text-muted-foreground w-full text-xs">
+                O fluxo nasce DESLIGADO e vazio: monte os campos e os passos, e
+                só então ligue. Um formulário ligado já fica acessível pelo link.
+              </p>
+            </div>
+          ) : null}
+
+          {visible.length === 0 ? (
             <p className="text-muted-foreground text-sm">
-              Nenhum esquema nesta organização.
+              Nada aqui com este filtro.
             </p>
           ) : (
-            schemas.map((s) => (
-              <SchemaCard key={s.id} schema={s} connections={connections} />
-            ))
+            visible.map((item) =>
+              item.kind === "schema" ? (
+                <SchemaCard
+                  key={item.id}
+                  schema={item.schema as unknown as ManagedSchema}
+                  connections={connections}
+                  sources={sources}
+                />
+              ) : item.kind === "rule" ? (
+                <AutomationRowCard key={item.id} row={item.rule} />
+              ) : (
+                <SystemFlowCard key={item.id} flow={item.flow} />
+              )
+            )
           )}
+
           <div className="text-muted-foreground rounded-md border border-dashed p-3 text-xs">
             As credenciais dos sistemas externos continuam nas variáveis de
             ambiente do deploy — o esquema só aponta para elas pelo nome, e o
             valor nunca é exibido nem gravado no banco.
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <p className="text-muted-foreground text-sm">
-            O que o sistema já roda sozinho. Estes fluxos não são executados
-            pelo motor de esquemas — a lista existe para saber que eles
-            existem e onde se mexe em cada um.
-          </p>
-          {systemFlows.map((f) => (
-            <SystemFlowCard key={f.key} flow={f} />
-          ))}
         </div>
       )}
     </div>

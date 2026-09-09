@@ -1,3 +1,6 @@
+// Versão: 2.3 | Data: 09/09/2026
+// v2.3 (09/09/2026): carrega as Bases — destino do passo que grava registro
+//   local e dono da automação sem quadro (a porta que a 0127 não tinha).
 // Versão: 2.2 | Data: 09/09/2026
 // v2.2 (09/09/2026): carrega o histórico de execuções para a aba Execuções — a
 //   prévia do que uma simulação faria e o "Tentar de novo" moram lá.
@@ -19,6 +22,7 @@ import { redirect } from "next/navigation";
 
 import { requireSettingsArea } from "@/lib/auth/access";
 import { getActiveOrgId } from "@/lib/auth/org";
+import { loadSources } from "@/lib/config/sources";
 import { createClient } from "@/lib/supabase/server";
 import {
   WORKFLOW_CONNECTION_KEYS,
@@ -44,10 +48,11 @@ export default async function WorkflowPage() {
 
   const supabase = await createClient();
   await ensureDefaultWorkflowSchemas(supabase, orgId);
-  const [schemas, automations, runs] = await Promise.all([
+  const [schemas, automations, runs, sources] = await Promise.all([
     loadWorkflowSchemas(supabase, orgId),
     loadOrgAutomations(supabase, orgId),
     loadWorkflowRuns(supabase, orgId),
+    loadSources(supabase, orgId),
   ]);
 
   return (
@@ -78,6 +83,11 @@ export default async function WorkflowPage() {
         systemFlows={SYSTEM_FLOWS}
         automations={automations}
         runs={runs}
+        sources={sources.map((s) => ({
+          key: s.key,
+          label: s.label,
+          manualEntry: s.manualEntry,
+        }))}
       />
     </div>
   );

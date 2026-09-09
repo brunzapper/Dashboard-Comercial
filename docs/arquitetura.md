@@ -4289,6 +4289,42 @@ SPEC com as constantes reais + o EXEMPLO rodando no validador REAL) e
 
 ### 4.23 Workflow: a fábrica de fluxos (0125–0126, 0130, 09/09/2026)
 
+**A fábrica passou a fabricar (09/09/2026).** Até aqui `/operacao/workflow`
+tinha quatro abas e nenhum botão de criar: a única action era
+`saveWorkflowSchema`, o card só ligava/desligava passos que alguém escrevera no
+jsonb, e uma automação de Base — que a 0127 tornou possível no motor — não tinha
+porta de entrada em tela nenhuma. Três correções:
+
+- **Duas abas: Esquemas e Execuções.** Automações e fluxos do sistema deixaram
+  de ser abas e viraram LINHAS da mesma lista, com filtro por tipo. A
+  unificação é de TELA: a regra continua sendo linha de `automation_rules`
+  (editável dentro do quadro também) e o fluxo do sistema continua sendo código
+  — nada virou `workflow_schemas`. A montagem é pura em `lib/workflow/catalog.ts`
+  (`buildWorkflowCatalog`), com o que está QUEBRADO na frente: regra com
+  `last_error` ou jsonb que não passou no parse, e esquema com `definition`
+  nula, que precisa aparecer justamente por não rodar.
+- **Criar, duplicar, excluir e CONSTRUIR.** `createWorkflowSchema` deriva a
+  `key` do rótulo (`workflowKeyFromLabel` + sufixo na colisão — o usuário nomeia
+  o fluxo, não a identidade) e o fluxo nasce DESLIGADO e vazio. O card virou
+  editor: campos (tipo, obrigatoriedade, opções, `sourceRef`) e passos
+  (tipo do catálogo, conexão pela CHAVE, e os `params` por tipo). O construtor
+  **não valida nada por conta própria** — ele roda o MESMO
+  `parseWorkflowDefinition`, que é puro e client-safe, e só grava quando a
+  definição fecha; enquanto não fecha, segura o rascunho na tela e diz o que
+  falta. Mandar ao servidor um passo pela metade encheria a tela de
+  "configuração inválida" enquanto a pessoa trabalha.
+  O `deleteWorkflowSchema` obrigou a corrigir o seed: `ensureDefaultWorkflowSchemas`
+  era ensure-if-absent por `key`, então excluir o esquema de fábrica e voltar à
+  página o traria de volta. Agora semeia **uma vez por org**, marcado em
+  `sync_config` ('workflow_seeded') — sem isso, "excluir" seria uma promessa que
+  a tela desmente na visita seguinte.
+- **A porta da automação sem quadro.** "Nova automação" escolhe a Base e abre o
+  MESMO `AutomationsSheet` do quadro (`owner` passou de `KanbanOwner` para
+  `AutomationOwner`). Sem colunas, "Mover para a coluna" e a condição "parado na
+  coluna" aparecem DESABILITADAS com motivo, nunca escondidas. Automação de
+  QUADRO não ganha porta aqui: o painel do quadro já cria, e uma segunda porta
+  para a mesma coisa é a régua paralela que a invariante 25 proíbe.
+
 **O que a 0126 corrigiu.** A 0125 tratou todo esquema como formulário e o
 renderizou DENTRO de `/operacao/workflow`, na mesma tela onde se configura o
 esquema. Quem só queria lançar um lead atravessava a oficina para chegar à
@@ -5035,7 +5071,13 @@ principalmente — para mantenedores humanos.
     catálogo de cards tem duas fontes (módulos em código ∪ formulários), e
     nenhum card do hub ganha "⋮": criar/excluir é só dentro do Workflow.
     `lib/operacao/form-routes.ts` é PURO — `cards.ts` é server-only e o manager
-    é client; teste pina a ausência de importações lá.
+    é client; teste pina a ausência de importações lá. **Desde 09/09/2026** a
+    fábrica LISTA todo fluxo (esquemas, regras de automação e os do sistema) em
+    uma aba só, mas continua sem hospedar o que produz: a lista é de TELA, cada
+    coisa segue vivendo onde vivia, e o construtor grava pelo MESMO
+    `parseWorkflowDefinition` (segura o rascunho incompleto em vez de gravar
+    meio esquema). O seed de fábrica passou a rodar UMA vez por org — sem isso,
+    excluir um esquema não seria excluir.
 32. **Esquema de Workflow (0125, §4.23) é DADO fail-closed, e segredo só entra
     por CHAVE DE REGISTRY.** `workflow_schemas.definition` guarda a chave de
     `WORKFLOW_CONNECTIONS` (`"bitrix_webhook"`), NUNCA o nome de uma variável

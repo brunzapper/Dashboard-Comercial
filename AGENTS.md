@@ -1338,6 +1338,25 @@ This version has breaking changes — APIs, conventions, and file structure may 
   o coalescing). Fiscalizado por `lib/feedback/use-refetch-origin.test.ts` +
   blocos em `kanban-widget.test.tsx`/`quick-table-widget.test.tsx`. Ver
   `docs/arquitetura.md` §4.10 ("Feedback de carregamento").
+- **Workflow: a lista é UMA e o construtor não tem régua própria (09/09/2026):**
+  `/operacao/workflow` tem DUAS abas (Esquemas, Execuções); automações e fluxos
+  do sistema são LINHAS da lista de Esquemas, com filtro por tipo — unificação
+  de TELA, montada por `buildWorkflowCatalog` (`lib/workflow/catalog.ts`, puro,
+  quebrado primeiro). NADA foi convertido em `workflow_schemas`: regra segue em
+  `automation_rules` (editável dentro do quadro também) e fluxo do sistema segue
+  em código. O construtor (`workflow-schema-card` + `workflow-field-editor` +
+  `workflow-step-editor`) monta campos e passos, mas NÃO valida: roda o MESMO
+  `parseWorkflowDefinition` (puro/client-safe) e só grava quando a definição
+  fecha — passo em branco que precisa de alvo (`record.create` sem base,
+  `bitrix.entity.update` sem id) fica como RASCUNHO na tela, nunca vai ao
+  servidor. `createWorkflowSchema` deriva a `key` do rótulo
+  (`workflowKeyFromLabel` + sufixo) e o fluxo nasce DESLIGADO; excluir exigiu
+  que `ensureDefaultWorkflowSchemas` semeasse UMA vez por org (marcador
+  `workflow_seeded` em `sync_config`) — ensure-if-absent ressuscitaria o
+  esquema excluído na visita seguinte. A porta de automação SEM QUADRO (0127)
+  vive aqui: escolhe a Base e abre o MESMO `AutomationsSheet` (`owner` agora é
+  `AutomationOwner`), com as opções que exigem quadro DESABILITADAS com motivo;
+  automação de quadro NÃO ganha segunda porta. Ver `docs/arquitetura.md` §4.23.
 - **Workflow (0126): o GATILHO decide a SUPERFÍCIE, e a fábrica não hospeda o
   que produz (08/09/2026):** `workflow_schemas.trigger_kind` (`form` |
   `automacao`) + `show_card`. Gatilho `form` ⇒ página PRÓPRIA em
