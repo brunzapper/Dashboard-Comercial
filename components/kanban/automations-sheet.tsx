@@ -1,3 +1,9 @@
+// Versão: 1.4 | Data: 09/09/2026
+// v1.4 (09/09/2026): o painel aceita dono de BASE (`AutomationOwner`, não
+//   `KanbanOwner`) — é ele que o Workflow monta para criar a regra sem quadro
+//   que a 0127 tornou possível e nenhuma tela oferecia. Sem colunas, as opções
+//   que exigem quadro aparecem DESABILITADAS com motivo, nunca escondidas
+//   (precedente do editor de fórmulas).
 // Versão: 1.3 | Data: 09/09/2026
 // v1.3 (09/09/2026): ação "Executar esquema" (run_schema). Nasce em SIMULAÇÃO —
 //   o switch começa marcado e desarmá-lo é um ato do admin, porque esta é a
@@ -50,7 +56,6 @@ import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
 import type { SourceKey } from "@/lib/sources";
 import type { FilterOp, WidgetFilter } from "@/lib/widgets/types";
 import type { KanbanColumn } from "@/lib/kanban/types";
-import type { KanbanOwner } from "@/lib/kanban/data";
 import {
   FilterValuePicker,
   type FilterValueSource,
@@ -68,6 +73,7 @@ import {
 import {
   MAX_RULE_CONDITIONS,
   type AutomationCondition,
+  type AutomationOwner,
   type AutomationRow,
   type AutomationRule,
 } from "@/lib/kanban/automations/types";
@@ -421,7 +427,10 @@ export function AutomationsSheet({
   columns,
   isCustomColumns,
 }: {
-  owner: KanbanOwner;
+  // AutomationOwner, não KanbanOwner: desde a 0127 a regra pode ter uma BASE
+  // como dono, e o painel é o mesmo — quem monta a tela é que muda (o quadro,
+  // ou o Workflow). `owner` aqui só é repassado às actions de automação.
+  owner: AutomationOwner;
   source?: string;
   columns: KanbanColumn[];
   // Colunas "Personalizar": habilita a base de tempo "Na coluna atual".
@@ -473,13 +482,35 @@ export function AutomationsSheet({
     (s) => ({ value: s.value, label: s.label })
   );
 
+  // Sem quadro (dono de Base) não há posição para medir; com colunas derivadas
+  // de campo também não. A opção aparece DESABILITADA com o motivo — esconder
+  // faria a pessoa procurar o que não existe (precedente do editor de fórmulas).
+  const semQuadro = columns.length === 0;
   const timeBasisOptions: ComboboxOption[] = [
     { value: "created", label: "Desde a criação" },
     { value: "field_changed", label: "Desde a última alteração de um campo" },
-    ...(isCustomColumns
-      ? [{ value: "in_column", label: "Na coluna atual" }]
-      : []),
+    {
+      value: "in_column",
+      label: "Na coluna atual",
+      ...(isCustomColumns
+        ? {}
+        : {
+            disabledReason: semQuadro
+              ? "Esta automação é de uma Base: não há quadro, e sem posição não há tempo de coluna para medir."
+              : "Só em quadro com colunas “Personalizar” — nas demais, a coluna sai de um campo e não há entrada para cronometrar.",
+          }),
+    },
   ];
+
+  const actionOptions: ComboboxOption[] = ACTION_OPTIONS.map((o) =>
+    o.value === "move_to_column" && semQuadro
+      ? {
+          ...o,
+          disabledReason:
+            "Esta automação é de uma Base: não há quadro para onde mover. Use “Definir campo” ou “Abrir tarefa”.",
+        }
+      : o
+  );
 
   function saveDraft() {
     if (!draft) return;
@@ -1142,7 +1173,7 @@ export function AutomationsSheet({
               <div className="flex min-w-44 flex-col gap-1">
                 <Label className="text-xs">Então</Label>
                 <Combobox
-                  options={ACTION_OPTIONS}
+                  options={actionOptions}
                   value={draft.actionType}
                   onValueChange={(v) =>
                     setDraft((d) =>

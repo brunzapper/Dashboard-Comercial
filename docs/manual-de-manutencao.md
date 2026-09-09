@@ -4,6 +4,9 @@
 <!-- v1.34 (08/09/2026): 0128 (rename da tabela) e a aba Automações do
      Workflow. -->
 <!-- v1.33 (08/09/2026): §4.12 — automação com escopo de Base (0127). -->
+<!-- v1.34 (09/09/2026): §4.15 — a fábrica passou a fabricar: duas abas, criar/
+     duplicar/excluir fluxo, construtor de campos e passos, e a porta da
+     automação sem quadro. -->
 <!-- v1.33 (09/09/2026): §4.15 — 0130: a ação `run_schema` (executar um esquema
      por automação), o ensaio, a trava por natureza do esquema, a aba Execuções
      e o "Tentar de novo". -->
@@ -956,6 +959,39 @@ origem fica errada ou vazia. Causa: `sync_config.bitrix_status_codes` ausente �
 sem o mapa, `toBitrixValue` degrada e manda o rótulo. Rode um sync; o cache é
 regravado a cada `syncFieldCatalog`. (Mapa vazio nunca sobrescreve um cache bom,
 então um sync que falhou no meio não piora a situação.)
+
+**Criar um fluxo do zero.** Em `/operacao/workflow` → **Novo fluxo**: dê o nome
+e diga o que dispara (uma pessoa preenche, ou uma automação). Ele nasce
+DESLIGADO e vazio. Abra o card e monte:
+
+1. **Campos** — o que o formulário pergunta. Em "Mais" ficam tipo,
+   obrigatoriedade, lista de opções, valor padrão e "de onde vem numa
+   automação" (o campo do registro que alimenta este quando quem dispara é uma
+   regra).
+2. **Passos** — o que o fluxo faz, em ordem. Escolha o tipo, clique em
+   "Configurar" e preencha o destino de cada campo. O botão **+ ref** ao lado de
+   cada valor insere as referências que existem (campos do formulário, id de um
+   passo anterior, contexto do servidor) — não é para digitar `{{...}}` de
+   cabeça. Nos passos do Bitrix, a lista de campos vem do próprio portal quando
+   a conexão está configurada.
+3. **Ligue** o fluxo. Um formulário ligado já fica acessível pelo link.
+
+**"Rascunho não salvo" em amarelo.** Não é erro: algum passo ainda está
+incompleto (base de destino não escolhida, id da entidade a alterar em branco,
+nenhum campo selecionado). O editor segura a alteração na tela e grava sozinho
+assim que o passo fecha. Sair da página nesse estado perde o rascunho — um passo
+pela metade não vira configuração.
+
+**Excluir um fluxo.** O botão está no rodapé do card, com confirmação. As
+execuções já registradas continuam no histórico (a aba Execuções guarda a chave
+do esquema). O esquema de FÁBRICA também pode ser excluído e **não volta**: o
+seed roda uma vez por organização.
+
+**Criar automação sem quadro.** Botão **Nova automação** na aba Esquemas:
+escolha a Base e o painel de regras abre — o mesmo de dentro do quadro. "Mover
+para a coluna" e a condição "parado na coluna" aparecem desabilitadas com o
+motivo: sem quadro não há coluna nem posição para medir. Para automação DE
+quadro, continue criando de dentro dele.
 
 **Executar um esquema por AUTOMAÇÃO (0130).** No painel de automações (dentro
 do quadro ou pela aba Automações do Workflow), a ação **Executar esquema** roda

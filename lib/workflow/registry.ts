@@ -1,4 +1,9 @@
-// Versão: 1.1 | Data: 09/09/2026
+// Versão: 1.2 | Data: 09/09/2026
+// v1.2 (09/09/2026): `WORKFLOW_CTX_KEYS` — o que o SERVIDOR põe no contexto de
+//   toda execução. Existe aqui (puro, client-safe) porque o construtor precisa
+//   OFERECER essas refs: quem monta um passo não deveria ter que adivinhar que
+//   existe `{{ctx.responsibleBitrixId}}`. Um teste pina esta lista contra o que
+//   `buildWorkflowCtx` de fato produz — lista e realidade não podem divergir.
 // v1.1 (09/09/2026): os passos que ALTERAM entram no catálogo. Um esquema é uma
 //   sequência de alterações dentro e fora do sistema — criar é só uma delas.
 // Catálogo em CÓDIGO dos TIPOS DE PASSO e dos PROVEDORES DE OPÇÕES do Workflow
@@ -121,3 +126,39 @@ export function optionsSourceDef(
 ): WorkflowOptionsSourceDef | null {
   return WORKFLOW_OPTIONS_SOURCES_CATALOG.find((o) => o.key === key) ?? null;
 }
+
+/** Uma ref de contexto oferecível no construtor. */
+export interface WorkflowCtxKeyDef {
+  key: string;
+  label: string;
+  /** Quando ela existe — nem toda execução tem registro que a disparou. */
+  availability: string;
+}
+
+export const WORKFLOW_CTX_KEYS: WorkflowCtxKeyDef[] = [
+  {
+    key: "responsibleBitrixId",
+    label: "Id do responsável no Bitrix",
+    availability: "Do responsável resolvido para esta execução.",
+  },
+  {
+    key: "contatoPrimeiroNome",
+    label: "Primeiro nome do contato",
+    availability: "Separado do campo `contato_nome` do formulário.",
+  },
+  {
+    key: "contatoSobrenome",
+    label: "Sobrenome do contato",
+    availability: "Separado do campo `contato_nome` do formulário.",
+  },
+  {
+    key: "usuarioEmail",
+    label: "E-mail de quem executou",
+    availability: "Vazio quando quem disparou foi uma automação.",
+  },
+  {
+    key: "triggerRecordId",
+    label: "Registro que disparou",
+    availability: "Só em execução disparada por uma automação.",
+  },
+];
