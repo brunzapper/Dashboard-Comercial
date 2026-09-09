@@ -42,6 +42,8 @@ import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
 // Carregado sob demanda: a maioria das tabelas não tem clique configurado, e o
 // painel puxa o detalhe/tarefas/árvore do registro.
+import { useRecordFocus } from "../record-focus-context";
+
 const RecordRowPanel = dynamic(
   () => import("../record-row-panel").then((m) => m.RecordRowPanel),
   { ssr: false }
@@ -550,6 +552,15 @@ export const RecordListTable = memo(function RecordListTable({
   // Registro aberto pelo clique na linha (null = painel fechado).
   const [openRecordId, setOpenRecordId] = useState<string | null>(null);
   const clickable = rowAction != null && rowAction.kind !== "none";
+  // v1.x (09/09/2026): o clique tem DOIS destinos possíveis. Se o painel tem um
+  // widget Tree seguindo o foco, focar nele é melhor que abrir um Sheet por
+  // cima dele mostrando a mesma coisa; sem Tree no painel, o Sheet continua
+  // sendo o único lugar onde a árvore cabe.
+  const recordFocus = useRecordFocus();
+  const focusesTree =
+    rowAction?.kind === "atributo" &&
+    rowAction.attributeKey === "tree" &&
+    recordFocus.followers > 0;
   type MergedCol =
     | { kind: "dim"; key: string; c: RecordListColumn }
     | { kind: "metric"; key: string; m: Metric; mi: number };
@@ -1411,7 +1422,8 @@ export const RecordListTable = memo(function RecordListTable({
                 if (el.closest("input, textarea, select, button, a, [role='combobox']")) {
                   return;
                 }
-                setOpenRecordId(r.id);
+                if (focusesTree) recordFocus.focus(r.id, r.title ?? null);
+                else setOpenRecordId(r.id);
               }
             : undefined
         }

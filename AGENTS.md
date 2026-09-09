@@ -660,6 +660,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
   dele não vira superfície, e **pausar ≠ excluir** (`status='pausado'` mantém
   linha, histórico e árvore; quem para é a automação, que lê o status). RLS:
   leitura transitiva pelo registro, escrita admin/gestor OU o responsável dele.
+  **Foco e janela (09/09/2026):** o widget Tree sem `recordId` fixo SEGUE o
+  registro em foco do painel (`components/dashboards/record-focus-context.tsx`
+  — a tabela publica no clique, o widget consome); o foco é EFÊMERO de
+  propósito (nunca em `dashboard_table_cells`: aquilo é config compartilhada, e
+  o registro em foco é análise de UMA pessoa) e a contagem de SEGUIDORES decide
+  o destino do clique (com Tree no painel foca; sem, abre a barra lateral). A
+  árvore vem em JANELA (`TreeWindow {order, limit}`) que recorta a lista de
+  OCORRÊNCIAS antes de ler fato nenhum — nunca linhas soltas, senão o galho
+  perde o tronco; `deriveTree` segue puro. `SeriesBound` tem uma 4ª forma de
+  fim, `field_changed` (para quando o campo mudar; lê o mesmo
+  `field_modified_at` da âncora) — e "enquanto as condições valerem" é a
+  AUSÊNCIA de `until`.
   O **widget `tree`** (0134) recria o CHECK de `visual_type` inteiro
   (precedente 0100), renderiza em HTML/CSS (nós têm ações dentro; as linhas são
   bordas) e recarrega em SILÊNCIO na origem event bus (§4.10). O **clique da

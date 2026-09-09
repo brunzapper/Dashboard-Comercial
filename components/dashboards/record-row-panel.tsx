@@ -1,4 +1,7 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a lista de tarefas ganha ORDEM e "carregar mais". Um
+//   registro sob cobrança periódica acumula dezenas delas; a lista inteira
+//   de uma vez é uma parede, e o corte mudo escondia o resto sem dizer.
 // O PAINEL do clique numa linha da tabela — detalhe, tarefas ou um atributo.
 //
 // Abre SOBRE o dashboard, sem navegar: quem está analisando a tabela quer
@@ -20,10 +23,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   loadRowPanel,
+  loadRowTasks,
   type RowPanelData,
+  type RowTaskOrder,
 } from "@/app/(app)/dashboards/row-panel-actions";
+import { ROW_TASKS_PAGE } from "@/lib/records/row-panel";
 import { ATTRIBUTE_STATUS_LABELS } from "@/lib/attributes/registry";
 import type { RowActionSettings } from "@/lib/widgets/types";
 
@@ -40,6 +47,8 @@ export function RecordRowPanel({
   onClose: () => void;
 }) {
   const [data, setData] = useState<RowPanelData | null>(null);
+  const [order, setOrder] = useState<RowTaskOrder>("desc");
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Sem setState síncrono no efeito (regra do projeto): o estado só muda depois
   // do await; enquanto isso, `data === null` já diz "carregando".
@@ -53,6 +62,29 @@ export function RecordRowPanel({
       alive = false;
     };
   }, [recordId]);
+
+  // Trocar a ordem RE-BUSCA a primeira página em vez de inverter o que está em
+  // memória: com só uma página carregada, inverter mostraria as 20 mais
+  // recentes de trás para frente, não as 20 mais antigas.
+  const changeOrder = (next: RowTaskOrder) => {
+    if (!recordId || next === order) return;
+    setOrder(next);
+    void loadRowTasks(recordId, { offset: 0, order: next }).then((p) =>
+      setData((d) => (d ? { ...d, tasks: p.tasks, taskTotal: p.total } : d))
+    );
+  };
+
+  const loadMore = () => {
+    if (!recordId || !data) return;
+    setLoadingMore(true);
+    void loadRowTasks(recordId, { offset: data.tasks.length, order })
+      .then((p) =>
+        setData((d) =>
+          d ? { ...d, tasks: [...d.tasks, ...p.tasks], taskTotal: p.total } : d
+        )
+      )
+      .finally(() => setLoadingMore(false));
+  };
 
   const isTree = action.kind === "atributo" && action.attributeKey === "tree";
 
@@ -88,6 +120,26 @@ export function RecordRowPanel({
                 Nenhuma tarefa vinculada a este registro.
               </p>
             ) : (
+              <>
+              <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                <span>
+                  {data.tasks.length} de {data.taskTotal}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 text-xs"
+                  onClick={() =>
+                    changeOrder(order === "desc" ? "asc" : "desc")
+                  }
+                >
+                  {order === "desc" ? "Mais recentes ↓" : "Mais antigas ↑"}
+                </Button>
+              </div>
+              </>
+            )}
+            {data.tasks.length === 0 ? null : (
               data.tasks.map((t) => (
                 <div
                   key={t.id}
@@ -117,6 +169,22 @@ export function RecordRowPanel({
                 </div>
               ))
             )}
+            {data.tasks.length < data.taskTotal ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore
+                  ? "Carregando…"
+                  : `Carregar mais ${Math.min(
+                      ROW_TASKS_PAGE,
+                      data.taskTotal - data.tasks.length
+                    )}`}
+              </Button>
+            ) : null}
           </div>
         ) : action.kind === "atributo" ? (
           <div className="flex flex-col gap-2 overflow-auto px-4 pb-6">

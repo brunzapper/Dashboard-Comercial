@@ -1,11 +1,18 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): o `until` por ALTERAÇÃO de campo (a quarta forma de
+//   parar de cobrar).
 // A ocorrência devida é o relógio da série. O que estes testes protegem:
 // ela é DERIVADA (a mesma entrada dá sempre a mesma sequência, mesmo com
 // rodadas perdidas), ausência de data nunca vira "hoje", e a janela realmente
 // para de cobrar.
 import { describe, expect, it } from "vitest";
 
-import { dueOccurrence, occurrencesUntil, resolveAnchorDate } from "./occurrence";
+import {
+  dueOccurrence,
+  occurrencesUntil,
+  resolveAnchorDate,
+  resolveBound,
+} from "./occurrence";
 
 const base = {
   anchorDate: "2026-09-01",
@@ -135,5 +142,65 @@ describe("resolveAnchorDate", () => {
     expect(
       resolveAnchorDate({ kind: "field", field: "custom:data_x" }, facts)
     ).toBe("2026-05-05");
+  });
+});
+
+describe("resolveBound — quando parar de cobrar", () => {
+  const facts = {
+    record: {
+      id: "r1",
+      custom_fields: { data_limite: "2026-11-30" },
+    } as never,
+    fieldModifiedAt: { assinatura: "2026-10-05T14:00:00-03:00" },
+    sourceCreatedAt: "2026-01-10T08:00:00-03:00",
+    available: [],
+  };
+
+  it("data fixa é o prazo independente de qualquer campo", () => {
+    expect(resolveBound({ kind: "date", date: "2026-12-31" }, facts)).toBe(
+      "2026-12-31"
+    );
+  });
+
+  it("campo de data lê o valor do registro", () => {
+    expect(
+      resolveBound({ kind: "field", field: "custom:data_limite" }, facts)
+    ).toBe("2026-11-30");
+  });
+
+  it("field_changed para no DIA em que o campo mudou", () => {
+    // O mesmo fato da âncora homônima: nada de consulta nova para saber isso.
+    expect(
+      resolveBound({ kind: "field_changed", field: "assinatura" }, facts)
+    ).toBe("2026-10-05");
+  });
+
+  it("campo que nunca mudou não limita — a série segue", () => {
+    // Limitar por um fato que não aconteceu pararia a cobrança em silêncio.
+    expect(
+      resolveBound({ kind: "field_changed", field: "outro" }, facts)
+    ).toBeNull();
+  });
+
+  it("sem `until`, não há limite", () => {
+    expect(resolveBound(undefined, facts)).toBeNull();
+  });
+
+  it("o limite realmente corta o tronco", () => {
+    const semLimite = occurrencesUntil({
+      ...base,
+      todayIso: "2026-11-15",
+    });
+    const comLimite = occurrencesUntil({
+      ...base,
+      todayIso: "2026-11-15",
+      untilDate: resolveBound(
+        { kind: "field_changed", field: "assinatura" },
+        facts
+      ),
+    });
+    expect(semLimite.length).toBeGreaterThan(comLimite.length);
+    // Nada depois do dia em que o campo mudou.
+    for (const o of comLimite) expect(o.dueDate <= "2026-10-05").toBe(true);
   });
 });

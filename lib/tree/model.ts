@@ -25,6 +25,31 @@ export type TreeNodeKind =
   | "record"
   | "field";
 
+/**
+ * Os tipos que o widget deixa FILTRAR (`TreeSettings.showKinds`).
+ *
+ * v1.1 (09/09/2026): `record` e `field` ficam de fora — eles são peças do mapa
+ * livre, não fatos do histórico, e oferecê-los como filtro do acompanhamento
+ * seria oferecer um botão que nunca muda nada. `TreeFilterableKind` é a fonte
+ * do tipo em `TreeSettings`, para as duas listas não poderem divergir.
+ */
+export const TREE_FILTERABLE_KINDS = [
+  "occurrence",
+  "task",
+  "comment",
+  "change",
+  "note",
+] as const satisfies readonly TreeNodeKind[];
+
+export type TreeFilterableKind = (typeof TREE_FILTERABLE_KINDS)[number];
+
+/**
+ * Quantas cobranças a janela da árvore traz por vez (e quantas o "carregar
+ * mais" acrescenta). Mora aqui, não no loader: o widget é um Client Component,
+ * e importá-la de lá arrastaria o loader inteiro para o bundle do navegador.
+ */
+export const TREE_WINDOW_STEP = 12;
+
 export const TREE_NODE_KIND_LABELS: Record<TreeNodeKind, string> = {
   occurrence: "Cobrança",
   task: "Tarefa",

@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a árvore vem em JANELA (ordem + quantas cobranças), com
+//   "carregar mais". Ver lib/tree/load.ts — o corte é por cobrança.
 // Server Actions da Tree (0133): carregar a árvore de um registro e as ações
 // que se faz DENTRO dela.
 //
@@ -20,6 +22,7 @@ import { todayBrasiliaIso } from "@/lib/date/today";
 import { createClient } from "@/lib/supabase/server";
 import { deriveTree } from "@/lib/tree/derive";
 import { loadRecordTreeFacts } from "@/lib/tree/load";
+import { TREE_WINDOW_STEP, type TreeWindow } from "@/lib/tree/load";
 import type { TreeLayout, TreeNode } from "@/lib/tree/model";
 
 export interface TreeActionState {
@@ -38,6 +41,8 @@ export interface TreeData {
   /** Atributo que sustenta a árvore (para pausar/retomar sem excluir). */
   attribute: { id: string; status: "ativo" | "pausado" } | null;
   recordTitle: string;
+  /** Há cobrança fora da janela na direção corrente ("carregar mais"). */
+  hasMore: boolean;
   message?: string;
 }
 
@@ -46,12 +51,14 @@ const EMPTY: TreeData = {
   series: null,
   attribute: null,
   recordTitle: "",
+  hasMore: false,
 };
 
 /** A árvore de um registro, já derivada na forma pedida. */
 export async function loadRecordTree(
   recordId: string,
-  layout: TreeLayout = "por_ocorrencia"
+  layout: TreeLayout = "por_ocorrencia",
+  window: TreeWindow = { order: "desc", limit: TREE_WINDOW_STEP }
 ): Promise<TreeData> {
   const session = await getSessionInfo();
   if (!session) return { ...EMPTY, message: "Sessão expirada." };
@@ -85,6 +92,7 @@ export async function loadRecordTree(
     orgId,
     ruleId: (attr?.granted_by_rule_id as string | null) ?? null,
     todayIso: todayBrasiliaIso(),
+    window,
   });
 
   return {
@@ -94,6 +102,7 @@ export async function loadRecordTree(
       ? { id: attr.id as string, status: attr.status as "ativo" | "pausado" }
       : null,
     recordTitle: (record.title as string) ?? "",
+    hasMore: facts.hasMore,
   };
 }
 

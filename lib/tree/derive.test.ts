@@ -1,4 +1,6 @@
-// Versão: 1.0 | Data: 09/09/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): a JANELA não orfana nó — o recorte por cobrança entrega
+//   um tronco que NÃO começa na 1ª, e nada pode se perder por isso.
 // A árvore é derivada dos fatos. O que estes testes protegem:
 //  - as três formas sobre os MESMOS fatos dão árvores diferentes e corretas;
 //  - o nó arrastado à mão vence a derivação em qualquer forma (foi o pedido:
@@ -137,5 +139,31 @@ describe("profundidade", () => {
     const tree = deriveTree({ facts, layout: "por_ocorrencia" });
     expect(tree[0].depth).toBe(0);
     expect(tree[0].children[0].depth).toBe(1);
+  });
+});
+
+// A janela (lib/tree/load.ts) recorta por COBRANÇA, então o conjunto de fatos
+// que chega aqui pode começar na 5ª. Do ponto de vista da derivação isso é
+// apenas "um tronco que começa mais tarde" — e a regra de sempre (o que veio
+// antes da primeira cobrança pendura nela) é justamente o que impede o galho
+// de virar órfão. Se alguém trocar essa regra por um descarte, este teste cai.
+describe("janela: tronco que não começa na 1ª cobrança", () => {
+  const janela: TreeFact[] = [
+    { id: "occ:5", kind: "occurrence", at: "2026-11-10", label: "5ª cobrança" },
+    { id: "occ:6", kind: "occurrence", at: "2026-11-24", label: "6ª cobrança" },
+    // Aconteceu ANTES da primeira cobrança DA JANELA (a 5ª).
+    { id: "comment:x", kind: "comment", at: "2026-11-02", label: "Retomei o contato" },
+    { id: "task:y", kind: "task", at: "2026-11-15", label: "Reenviar proposta" },
+  ];
+
+  it("nenhum fato se perde por estar antes do início da janela", () => {
+    const tree = deriveTree({ facts: janela, layout: "por_ocorrencia" });
+    expect(countNodes(tree)).toBe(janela.length);
+  });
+
+  it("o fato anterior pendura na primeira cobrança da janela", () => {
+    const tree = deriveTree({ facts: janela, layout: "por_ocorrencia" });
+    const quinta = tree.find((n) => n.id === "occ:5")!;
+    expect(quinta.children.map((c) => c.id)).toContain("comment:x");
   });
 });

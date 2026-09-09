@@ -46,6 +46,7 @@
 // (siblings ao builder).
 "use client";
 
+import { RecordFocusProvider } from "./record-focus-context";
 import {
   useCallback,
   useEffect,
@@ -992,6 +993,9 @@ export function DashboardClient({
 
   return (
     <DashboardHistoryProvider dashboardId={dashboardId} seed={historySeed}>
+    {/* Registro em foco do painel: a tabela publica no clique, os widgets Tree
+        sem registro fixo consomem. Efêmero por decisão — ver o módulo. */}
+    <RecordFocusProvider>
     <div className="flex flex-col gap-4">
       {/* pr-8: afasta a toolbar do sino fixo (TaskBell, topo-direito) */}
       <div className="flex items-center justify-between pr-8">
@@ -1256,6 +1260,7 @@ export function DashboardClient({
         </div>
       </DashboardPendingProvider>
     </div>
+    </RecordFocusProvider>
     </DashboardHistoryProvider>
   );
 }

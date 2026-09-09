@@ -1343,8 +1343,9 @@ export const WidgetCard = memo(function WidgetCard({
           ) : isTree ? (
             <TreeWidget
               settings={widget.settings?.tree}
-              // O registro sai da configuração; quando vazio, o widget espera
-              // o clique de uma tabela com "abrir Tree" (o mesmo dashboard).
+              // O registro sai da configuração; quando vazio, o widget SEGUE o
+              // registro em foco no painel — o clique de uma tabela com
+              // "Clique na linha → Tree" (record-focus-context).
               recordId={widget.settings?.tree?.recordId ?? null}
             />
           ) : isKanban ? (

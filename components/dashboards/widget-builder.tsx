@@ -116,6 +116,13 @@ import {
 
 import { Accordion } from "@/components/ui/accordion";
 import { ATTRIBUTE_REGISTRY } from "@/lib/attributes/registry";
+import {
+  TREE_FILTERABLE_KINDS,
+  TREE_LAYOUT_LABELS,
+  TREE_NODE_KIND_LABELS,
+  type TreeFilterableKind,
+  type TreeLayout,
+} from "@/lib/tree/model";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -507,6 +514,25 @@ export function WidgetBuilder({
   // Botão "+" de criação manual na tabela modo lista (opt-in; só quando a
   // seleção é UMA Base raiz com manual_entry — ver supportsAddRecord abaixo).
   // Clique na linha (opções avançadas): o que abrir e, no modo atributo, qual.
+  // --- Tree (visual_type 'tree'): a config que faltava. Sem ela o widget
+  // nascia sem como ser configurado e renderizava o vazio para sempre.
+  const isTreeWidget = visualType === "tree";
+  const [treeSource, setTreeSource] = useState<"registro" | "livre">(
+    widget?.settings?.tree?.source ?? "registro"
+  );
+  const [treeLayout, setTreeLayout] = useState<TreeLayout>(
+    widget?.settings?.tree?.layout ?? "por_ocorrencia"
+  );
+  const [treeRecordId, setTreeRecordId] = useState<string>(
+    widget?.settings?.tree?.recordId ?? ""
+  );
+  const [treeMapKey, setTreeMapKey] = useState<string>(
+    widget?.settings?.tree?.mapKey ?? ""
+  );
+  const [treeKinds, setTreeKinds] = useState<TreeFilterableKind[]>(
+    widget?.settings?.tree?.showKinds ?? []
+  );
+
   const [rowActionKind, setRowActionKind] = useState<string>(
     widget?.settings?.rowAction?.kind ?? "none"
   );
@@ -1983,6 +2009,28 @@ export function WidgetBuilder({
       };
     } else {
       delete settings.rowAction;
+    }
+
+    // Tree: a config do widget. Só grava no tipo certo — chave de tree num
+    // widget que deixou de ser tree seria lixo silencioso no jsonb.
+    if (isTreeWidget) {
+      settings.tree = {
+        source: treeSource,
+        layout: treeLayout,
+        // Registro fixo só no modo registro; vazio = o widget segue o registro
+        // em foco no painel (o clique da tabela).
+        ...(treeSource === "registro" && treeRecordId.trim()
+          ? { recordId: treeRecordId.trim() }
+          : {}),
+        ...(treeSource === "livre" && treeMapKey.trim()
+          ? { mapKey: treeMapKey.trim() }
+          : {}),
+        // Lista vazia = TODOS (a ausência da chave é o "sem filtro"), então
+        // nunca grave [] — seria "não mostre nada".
+        ...(treeKinds.length > 0 ? { showKinds: treeKinds } : {}),
+      };
+    } else {
+      delete settings.tree;
     }
 
     // Filtros rápidos: grava a config limpa (ids preservados — são a chave dos
@@ -3962,6 +4010,104 @@ export function WidgetBuilder({
                   d.transform === "month_year"
               )}
             />
+          ) : null}
+
+          {/* Tree: de onde saem os nós e como a árvore se organiza. */}
+          {isTreeWidget ? (
+            <BuilderSection
+              value="tree"
+              title="Tree"
+              badge={
+                treeSource === "livre"
+                  ? "Mapa livre"
+                  : treeRecordId
+                    ? "Registro fixo"
+                    : "Segue o clique"
+              }
+            >
+              <Label>De onde saem os nós</Label>
+              <Combobox
+                options={[
+                  { value: "registro", label: "Histórico de um registro" },
+                  { value: "livre", label: "Mapa livre (mapa mental)" },
+                ]}
+                value={treeSource}
+                onValueChange={(v) =>
+                  setTreeSource(v as "registro" | "livre")
+                }
+                searchable={false}
+                aria-label="Fonte dos nós da Tree"
+              />
+
+              <Label>Como a árvore se organiza</Label>
+              <Combobox
+                options={Object.entries(TREE_LAYOUT_LABELS).map(([v, l]) => ({
+                  value: v,
+                  label: l,
+                }))}
+                value={treeLayout}
+                onValueChange={(v) => setTreeLayout(v as TreeLayout)}
+                searchable={false}
+                aria-label="Forma da árvore"
+              />
+
+              {treeSource === "registro" ? (
+                <>
+                  <Label>Registro fixo (opcional)</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Deixe vazio para a árvore seguir o registro em foco no
+                    painel — o clique numa tabela com &quot;Clique na linha →
+                    Uma funcionalidade → Tree&quot;. Com um id aqui, o widget
+                    mostra sempre esse registro e ignora o clique.
+                  </p>
+                  <Input
+                    value={treeRecordId}
+                    onChange={(e) => setTreeRecordId(e.target.value)}
+                    placeholder="id do registro (vazio = segue o clique)"
+                    aria-label="Registro fixo da Tree"
+                  />
+                </>
+              ) : (
+                <>
+                  <Label>Chave do mapa</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Identifica este mapa mental. Dois widgets com a mesma chave
+                    mostram os mesmos nós.
+                  </p>
+                  <Input
+                    value={treeMapKey}
+                    onChange={(e) => setTreeMapKey(e.target.value)}
+                    placeholder="ex.: planejamento-2026"
+                    aria-label="Chave do mapa livre"
+                  />
+                </>
+              )}
+
+              <Label className="border-t pt-3">O que exibir</Label>
+              <p className="text-muted-foreground text-xs">
+                Nada marcado = mostra tudo.
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {TREE_FILTERABLE_KINDS.map((k) => (
+                  <label
+                    key={k}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={treeKinds.includes(k)}
+                      onCheckedChange={(v) =>
+                        setTreeKinds((prev) =>
+                          v === true
+                            ? [...prev, k]
+                            : prev.filter((x) => x !== k)
+                        )
+                      }
+                    />
+                    {TREE_NODE_KIND_LABELS[k]}
+                  </label>
+                ))}
+              </div>
+            </BuilderSection>
           ) : null}
 
           {/* Dimensões dinâmicas: cresce p/ caber o conteúdo (por eixo) */}

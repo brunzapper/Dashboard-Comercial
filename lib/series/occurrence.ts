@@ -133,7 +133,14 @@ export function resolveBound(
 ): string | null {
   if (!bound) return null;
   if (bound.kind === "date") return bound.date;
-  const raw = recordRawValue(bound.field, facts.record, facts.available);
+  // v1.1 (09/09/2026): "para quando esse campo mudar". A data-limite é o DIA da
+  // alteração — a cobrança daquele dia ainda vale (o campo mudou depois de ela
+  // vencer), as seguintes não. Campo nunca alterado ⇒ null ⇒ não limita, que é
+  // a mesma leniência do campo de data vazio logo abaixo.
+  const raw =
+    bound.kind === "field_changed"
+      ? facts.fieldModifiedAt?.[bound.field]
+      : recordRawValue(bound.field, facts.record, facts.available);
   const s = typeof raw === "string" ? raw.slice(0, 10) : "";
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }

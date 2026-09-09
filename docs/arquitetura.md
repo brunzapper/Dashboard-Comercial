@@ -1,4 +1,8 @@
-<!-- Versão: 1.79 | Data: 09/09/2026 -->
+<!-- Versão: 1.80 | Data: 09/09/2026 -->
+<!-- v1.80 (09/09/2026): §4.24 — o foco de registro do painel (efêmero, com
+     contagem de seguidores para decidir o destino do clique) e a janela da
+     Tree por cobrança; a seção de configuração do widget, que faltava.
+     Invariante 34 ganha a regra do corte por ocorrência. -->
 <!-- v1.79 (09/09/2026): §4.24 nova — atributos do registro (0131),
      série de tarefas periódicas com trava POR OCORRÊNCIA derivada
      (0132), a Tree derivada que só persiste a exceção (0133) e o
@@ -4675,6 +4679,33 @@ linhas são bordas. O refetch segue a regra da origem (§4.10): o event bus
 recarrega em SILÊNCIO, porque o sync roda a cada minuto e uma árvore que pisca
 sozinha lê como defeito.
 
+**O foco do painel liga a tabela ao widget (09/09/2026).** A primeira versão
+entregou o widget Tree sem a seção de configuração dele e sem nenhuma ligação
+com o clique da linha: `settings.tree` não tinha como ser preenchido por
+tela nenhuma, e o widget renderizava o vazio para sempre. Agora o construtor
+tem a seção, e `record-focus-context.tsx` carrega o registro em foco do painel
+— a tabela PUBLICA no clique, todo widget Tree sem registro fixo CONSOME.
+
+O foco é **efêmero**, e isso é decisão, não economia: ele não vai para
+`dashboard_table_cells` como `__qf__`/`__pw__`, porque aquelas são escolhas de
+configuração compartilhadas entre todos que abrem o painel, e um registro em
+foco é um momento de análise de UMA pessoa — persistir faria o clique de um
+mudar a tela de todos, ao vivo. O contexto conta os SEGUIDORES (widgets Tree
+que seguem o foco) porque é essa contagem que decide o destino do clique: com
+Tree no painel ele foca; sem Tree, abre a barra lateral. Fora de um provider o
+hook devolve um objeto inerte — a tabela também roda no viewer de snapshot, e
+ali não há foco.
+
+**A árvore vem em JANELA, cortada por COBRANÇA (09/09/2026).** Um
+acompanhamento quinzenal de dois anos tem ~50 galhos. `TreeWindow`
+(`{order, limit}`) recorta a lista de ocorrências ANTES de qualquer fato ser
+lido, e as bordas de data daí resultantes filtram tarefas/anotações/alterações;
+`deriveTree` continua puro e sem saber de paginação. Cortar por linha solta em
+vez de por cobrança deixaria galhos sem tronco — e a regra que já existia (o
+fato anterior à primeira cobrança pendura NELA) é o que garante que uma janela
+que começa na 5ª cobrança não orfane nada. Registro sem série pagina pelos
+próprios fatos.
+
 **O clique da linha da tabela** é `RecordListSettings.rowAction`, configurado em
 "Opções avançadas" do construtor. Ausente = `none`: toda tabela existente segue
 byte-idêntica. Os três modos são `detalhe` (todos os campos, SOMENTE LEITURA -
@@ -5236,7 +5267,10 @@ principalmente — para mantenedores humanos.
     forma dá o parentesco derivado; a exceção vence). Nunca materialize a
     árvore: desfazer tem de ser apagar uma linha. Tarefa da série FUNDE no nó
     da própria cobrança (nunca duplica ao lado dela) e fato anterior à primeira
-    cobrança pendura NELA — nada some por cair fora de janela.
+    cobrança pendura NELA — nada some por cair fora de janela. A JANELA
+    (09/09/2026) recorta a lista de OCORRÊNCIAS, nunca linhas soltas: cortar no
+    meio de uma cobrança deixaria os galhos dela sem tronco. `deriveTree` segue
+    puro e sem saber de paginação.
 
 35. **Atributo do registro: registry em CÓDIGO e pausar ≠ excluir (0131,
     §4.24).** `lib/attributes/registry.ts` é PURO e client-safe (precedente
