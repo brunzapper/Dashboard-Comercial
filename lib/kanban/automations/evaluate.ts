@@ -169,6 +169,8 @@ export interface PlannedSeriesTask {
   responsibleId: string | null;
   /** Atributo a conceder ao registro que entra na série (ex.: "tree"). */
   grantAttribute: string | null;
+  /** Nível 2 do espelho no Bitrix (0136). "herdar" = segue a Base. */
+  mirrorBitrix: "herdar" | "sempre" | "nunca";
 }
 
 /** Execução de esquema decidida por uma regra run_schema. */
@@ -573,6 +575,7 @@ function planSeriesTask(
       // Em nome do responsável DO REGISTRO — quem conduz o acompanhamento.
       responsibleId: card.record.responsible_id ?? null,
       grantAttribute: series.grantAttribute ?? null,
+      mirrorBitrix: series.mirrorBitrix ?? "herdar",
     });
   }
   return out;

@@ -1,4 +1,4 @@
-// Versão: 1.2 | Data: 09/09/2026
+// Versão: 1.3 | Data: 09/09/2026
 // Modelo da SÉRIE DE TAREFAS PERIÓDICAS (0132) — a cobrança recorrente que uma
 // automação mantém sobre um registro ("enquanto o deal estiver em Nutrição,
 // abra uma tarefa a cada quinze dias").
@@ -114,6 +114,12 @@ export interface SeriesConfig {
   lookahead?: number;
   /** Atributo concedido ao registro que entra na série (ex.: "tree"). */
   grantAttribute?: string;
+  /**
+   * Nível 2 da configuração do espelho no Bitrix (0136): "herdar" (o padrão,
+   * segue a Base), "sempre" ou "nunca". Ausente = herdar — é o que faz ligar o
+   * espelho na Base alcançar as séries que já rodam, sem editá-las.
+   */
+  mirrorBitrix?: "herdar" | "sempre" | "nunca";
 }
 
 export const SERIES_SCOPE_LABELS: Record<SeriesScopeKind, string> = {
@@ -254,6 +260,9 @@ export function parseSeriesConfig(raw: unknown): SeriesConfig | null {
   }
   if (typeof raw.grantAttribute === "string" && SLUG.test(raw.grantAttribute)) {
     config.grantAttribute = raw.grantAttribute;
+  }
+  if (raw.mirrorBitrix === "sempre" || raw.mirrorBitrix === "nunca") {
+    config.mirrorBitrix = raw.mirrorBitrix;
   }
   return config;
 }

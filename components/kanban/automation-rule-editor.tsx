@@ -29,6 +29,10 @@ import { FILTER_OPS, opHasNoValue } from "@/lib/widgets/filter-ops";
 import type { SourceKey } from "@/lib/sources";
 import { ATTRIBUTE_REGISTRY } from "@/lib/attributes/registry";
 import {
+  MIRROR_CHOICE_LABELS,
+  type MirrorChoice,
+} from "@/lib/tasks/mirror-config";
+import {
   DEFAULT_SERIES_LOOKAHEAD,
   MAX_SERIES_LOOKAHEAD,
 } from "@/lib/series/types";
@@ -167,6 +171,8 @@ export interface RuleDraft {
   seriesLookahead: string;
   /** Âncora que não resolve: não cobrar, ou contar da criação do registro. */
   seriesAnchorFallback: "nenhum" | "criacao";
+  /** Espelho no Bitrix (0136), nível 2: herda da Base por padrão. */
+  seriesMirrorBitrix: MirrorChoice;
 }
 
 /**
@@ -174,6 +180,11 @@ export interface RuleDraft {
  * paralela. v1.1 (09/09/2026): antes não havia controle nenhum, e sem conceder
  * o atributo a Tree do registro simplesmente não existia.
  */
+/** Nível 2 do espelho (0136). "herdar" é o padrão: segue a Base. */
+const MIRROR_CHOICES: ComboboxOption[] = (
+  ["herdar", "sempre", "nunca"] as MirrorChoice[]
+).map((v) => ({ value: v, label: MIRROR_CHOICE_LABELS[v] }));
+
 const ATTRIBUTE_OPTIONS: ComboboxOption[] = ATTRIBUTE_REGISTRY.map((a) => ({
   value: a.key,
   label: a.label,
@@ -378,6 +389,9 @@ export function draftToRule(draft: RuleDraft): AutomationRule | null {
           ...(draft.seriesAnchorFallback === "criacao"
             ? { anchorFallback: "criacao" as const }
             : {}),
+          ...(draft.seriesMirrorBitrix !== "herdar"
+            ? { mirrorBitrix: draft.seriesMirrorBitrix }
+            : {}),
           ...(draft.seriesGrantAttribute
             ? { grantAttribute: draft.seriesGrantAttribute }
             : {}),
@@ -543,6 +557,10 @@ export function ruleToDraft(row: AutomationRow, fieldOptions: ComboboxOption[]):
       action.type === "create_task_series"
         ? (action.series.anchorFallback ?? "nenhum")
         : "nenhum",
+    seriesMirrorBitrix:
+      action.type === "create_task_series"
+        ? (action.series.mirrorBitrix ?? "herdar")
+        : "herdar",
   };
 }
 
@@ -1364,6 +1382,22 @@ export function AutomationRuleEditor({
                         }
                         placeholder="Vai no corpo da tarefa"
                         aria-label="Descrição da cobrança"
+                      />
+                    </div>
+                    <div className="flex w-56 flex-col gap-1">
+                      <Label className="text-xs">Espelhar no Bitrix</Label>
+                      <Combobox
+                        options={MIRROR_CHOICES}
+                        value={draft.seriesMirrorBitrix}
+                        onValueChange={(v) =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, seriesMirrorBitrix: v as MirrorChoice }
+                              : d
+                          )
+                        }
+                        searchable={false}
+                        aria-label="Espelhar as cobranças no Bitrix"
                       />
                     </div>
                     <div className="flex w-56 flex-col gap-1">

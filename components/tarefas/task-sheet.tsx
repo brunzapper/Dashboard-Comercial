@@ -1,4 +1,6 @@
-// Versão: 1.2 | Data: 28/07/2026
+// Versão: 1.3 | Data: 09/09/2026
+// v1.3 (09/09/2026): espelho da tarefa no Bitrix (0136) — o nível 3 (mais
+//   específico) da configuração; "herdar" segue a Base.
 // Painel de criação/edição de TAREFA: título, descrição, vencimento (data +
 // hora opcional), responsável (vendedor fica travado nos próprios), vínculo a
 // registro e trava de exclusão (só admin/gestor). `defaults` pré-preenche
@@ -36,6 +38,10 @@ import {
 } from "@/lib/tasks/actions";
 import { emitDataChanged } from "@/lib/tasks/events";
 import { RecordSearchCombobox } from "./record-search-combobox";
+import {
+  MIRROR_CHOICE_LABELS,
+  type MirrorChoice,
+} from "@/lib/tasks/mirror-config";
 
 const initial: TaskActionState = {};
 
@@ -92,6 +98,9 @@ export function TaskForm({
     task?.responsible_id ?? ""
   );
   const [locked, setLocked] = useState(task?.locked ?? defaults?.locked ?? false);
+  // v1.1: "herdar" é o padrão — a Base decide, e a caixa só existe para o caso
+  // em que quem cria a tarefa quer sobrepor.
+  const [mirror, setMirror] = useState<MirrorChoice>("herdar");
   const canGlobal = ctx.canGlobal ?? ctx.canLock;
   const [isGlobal, setIsGlobal] = useState(task?.is_global ?? false);
 
@@ -224,6 +233,29 @@ export function TaskForm({
             task?.record?.title ?? defaults?.recordTitle ?? null
           }
         />
+      </div>
+
+      {/* v1.1 (09/09/2026): nível 3 do espelho no Bitrix (0136). Três estados
+          porque "herdar" (a Base decide) não é o mesmo que "nunca" — é o que
+          faz ligar o espelho na Base valer para quem não marcou nada. */}
+      <div className="flex flex-col gap-1.5">
+        <Label>Espelhar no Bitrix</Label>
+        <Combobox
+          options={[
+            { value: "herdar", label: MIRROR_CHOICE_LABELS.herdar },
+            { value: "sempre", label: MIRROR_CHOICE_LABELS.sempre },
+            { value: "nunca", label: MIRROR_CHOICE_LABELS.nunca },
+          ]}
+          value={mirror}
+          onValueChange={(v) => setMirror(v as MirrorChoice)}
+          name="mirror_bitrix"
+          searchable={false}
+          aria-label="Espelhar esta tarefa no Bitrix"
+        />
+        <p className="text-muted-foreground text-xs">
+          Vira uma atividade na timeline do registro vinculado. Só vale para
+          registro com par no CRM, em base configurada para espelhar.
+        </p>
       </div>
 
       {ctx.canLock || !isEdit ? (

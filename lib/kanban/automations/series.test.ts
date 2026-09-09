@@ -84,6 +84,7 @@ describe("decideActions — série", () => {
       responsibleId: "resp-1",
       seriesKey: "nutricao",
       grantAttribute: "tree",
+    mirrorBitrix: "herdar" as const,
     });
   });
 
@@ -271,6 +272,7 @@ describe("executeAutomationSeries", () => {
     dueDate: "2026-09-29",
     responsibleId: "resp-1",
     grantAttribute: "tree",
+    mirrorBitrix: "herdar" as const,
   };
 
   beforeEach(() => vi.clearAllMocks());

@@ -331,6 +331,7 @@ export function AutomationsSheet({
                 seriesMaxOccurrences: "",
                 seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
                 seriesAnchorFallback: "nenhum",
+                seriesMirrorBitrix: "herdar",
               })
             }
             disabled={pending || draft != null}

@@ -20,6 +20,9 @@ import { loadUserSettings } from "@/lib/config/user-settings";
 import { addDaysIso, DEFAULT_DUE_SOON_DAYS } from "./alerts";
 import { todayBrasiliaIso } from "@/lib/date/today";
 import { TASK_COLS_WITH_RECORD, type TaskRow } from "./types";
+import { createServiceClient } from "@/lib/supabase/service";
+import { mirrorTaskAfterWrite } from "@/lib/sync/bitrix/task-mirror";
+import { parseMirrorChoice } from "./mirror-config";
 
 export interface TaskActionState {
   ok?: boolean;
@@ -201,6 +204,16 @@ export async function createTask(
     },
     await getActiveOrgId()
   );
+  // Espelho no Bitrix (0136): a Base decide, e a caixa do formulário pode
+  // sobrepor. Best-effort — nunca derruba a criação da tarefa.
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: data.id as string,
+    recordId: parsed.record_id,
+    orgId,
+    op: "create",
+    taskChoice: parseMirrorChoice(formData.get("mirror_bitrix")),
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true, message: "Tarefa criada.", id: data.id as string };
 }
@@ -268,6 +281,15 @@ export async function updateTask(
     return { ok: false, message: "Sem permissão para editar esta tarefa." };
   }
   await emitWebhookEvent("task.updated", { taskId: id }, await getActiveOrgId());
+  // Já espelhada? A atividade acompanha a edição (prazo, título, responsável).
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: id,
+    recordId: parsed.record_id,
+    orgId: await getActiveOrgId(),
+    op: "update",
+    taskChoice: parseMirrorChoice(formData.get("mirror_bitrix")),
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true, message: "Tarefa atualizada." };
 }
@@ -290,6 +312,21 @@ export async function completeTask(id: string): Promise<TaskActionState> {
     return { ok: false, message: "Sem permissão para concluir esta tarefa." };
   }
   await emitWebhookEvent("task.completed", { taskId: id }, await getActiveOrgId());
+  // Concluir aqui FECHA a atividade lá (COMPLETED: 'Y'). É para isso que o
+  // `bitrix_activity_id` existe — sem ele a atividade ficaria aberta no feed
+  // do negócio para sempre.
+  const { data: doneTask } = await supabase
+    .from("tasks")
+    .select("record_id")
+    .eq("id", id)
+    .maybeSingle();
+  await mirrorTaskAfterWrite(supabase, createServiceClient(), {
+    taskId: id,
+    recordId: (doneTask?.record_id as string | null) ?? null,
+    orgId: await getActiveOrgId(),
+    op: "complete",
+    createdBy: session.user.id,
+  });
   revalidateTasks();
   return { ok: true };
 }

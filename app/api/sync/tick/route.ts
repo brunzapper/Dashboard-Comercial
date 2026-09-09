@@ -1,8 +1,11 @@
-// Versão: 1.0 | Data: 11/07/2026
+// Versão: 1.1 | Data: 09/09/2026
+// v1.1 (09/09/2026): drena também o espelho de TAREFAS no Bitrix (0136),
+//   depois do write-back e dividindo o mesmo orçamento de tempo.
 // "Tick" de sincronização, disparado pelo pg_cron do Supabase a cada minuto
 // (supabase/apply/pg-cron-tick.sql). Protegido por SYNC_SECRET. Dentro de um
 // orçamento de ~45s (< teto de 60s do plano Hobby), nesta ordem:
 //   1) drena a fila de write-back (envia updates pendentes ao Bitrix);
+//   1b) drena a fila do espelho de tarefas (cria/atualiza a atividade no CRM);
 //   2) avança o job de sync ATIVO (manual ou automático) de onde parou;
 //   3) se não há job rodando e o último reconcile automático foi há ≥ 1h, cria
 //      um novo reconcile incremental (janela de AUTO_SYNC_WINDOW_DAYS, padrão 1).
@@ -20,6 +23,7 @@ import {
   takeoverStale,
 } from "@/lib/sync/bitrix/runner";
 import { drainWritebackQueue } from "@/lib/sync/bitrix/writeback";
+import { drainTaskMirrorQueue } from "@/lib/sync/bitrix/task-mirror";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -52,6 +56,11 @@ export async function POST(request: Request) {
     // 1) Write-back pendente.
     const writeback = await drainWritebackQueue(db, deadline);
 
+    // 1b) Espelho de tarefas no Bitrix (0136). DEPOIS do write-back de
+    // propósito: aquele carrega edição de dado do usuário e tem prioridade
+    // sobre um efeito colateral. Os dois dividem o mesmo orçamento de tempo.
+    const taskMirror = await drainTaskMirrorQueue(db, deadline);
+
     // 2) Job ativo (manual OU automático) — avança de onde parou.
     let drove: string | null = null;
     let createdAuto = false;
@@ -70,7 +79,14 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, staled, writeback, drove, createdAuto });
+    return NextResponse.json({
+      ok: true,
+      staled,
+      writeback,
+      taskMirror,
+      drove,
+      createdAuto,
+    });
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: (error as Error).message },

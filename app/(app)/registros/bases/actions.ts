@@ -153,6 +153,8 @@ function readSourceForm(formData: FormData): {
   periodField: string;
   manualEntry: boolean;
   timezone: string | null;
+  /** Espelho de tarefas no Bitrix (0136): 'deal' | 'lead' | null (desligado). */
+  activityOwner: "deal" | "lead" | null;
   // Pasta (0107): uuid de source_folders; null = "sem pasta".
   folderId: string | null;
   error?: string;
@@ -162,6 +164,11 @@ function readSourceForm(formData: FormData): {
   const periodField = cleanText(formData.get("default_period_field"), 40);
   const manualEntry = String(formData.get("manual_entry") ?? "") === "1";
   const timezone = cleanText(formData.get("timezone"), 64) || null;
+  // 0136: qualquer valor fora do par é DESLIGADO — o CHECK do banco é a
+  // muralha, mas uma Base não pode passar a espelhar por causa de lixo no form.
+  const rawOwner = cleanText(formData.get("bitrix_activity_owner"), 10);
+  const activityOwner =
+    rawOwner === "deal" || rawOwner === "lead" ? rawOwner : null;
   const folderId = cleanText(formData.get("folder_id"), 40) || null;
   if (label.length < 2) {
     return {
@@ -170,6 +177,7 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      activityOwner,
       folderId,
       error: "Informe o nome da base.",
     };
@@ -181,6 +189,7 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      activityOwner,
       folderId,
       error: "Campo de período inválido.",
     };
@@ -192,11 +201,20 @@ function readSourceForm(formData: FormData): {
       periodField,
       manualEntry,
       timezone,
+      activityOwner,
       folderId,
       error: "Fuso horário inválido (use um nome IANA, ex.: Europe/Moscow).",
     };
   }
-  return { label, shortLabel, periodField, manualEntry, timezone, folderId };
+  return {
+    label,
+    shortLabel,
+    periodField,
+    manualEntry,
+    timezone,
+    activityOwner,
+    folderId,
+  };
 }
 
 // Pasta escolhida no form precisa existir e ser visível (RLS escopa à org).
@@ -224,6 +242,7 @@ export async function createSource(
     periodField,
     manualEntry,
     timezone,
+    activityOwner,
     folderId,
     error,
   } = readSourceForm(formData);
@@ -274,6 +293,7 @@ export async function createSource(
       builtin: false,
       manual_entry: manualEntry,
       timezone,
+      bitrix_activity_owner: activityOwner,
       folder_id: folderId,
       ...(orgId ? { organization_id: orgId } : {}),
     });
@@ -302,6 +322,7 @@ export async function updateSource(
     periodField,
     manualEntry,
     timezone,
+    activityOwner,
     folderId,
     error,
   } = readSourceForm(formData);
@@ -336,6 +357,7 @@ export async function updateSource(
       default_period_field: periodField,
       manual_entry: manualEntry,
       timezone,
+      bitrix_activity_owner: activityOwner,
       folder_id: folderId,
     })
     .eq("key", key);
