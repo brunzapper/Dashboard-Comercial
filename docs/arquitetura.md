@@ -1,4 +1,10 @@
-<!-- Versão: 1.81 | Data: 09/09/2026 -->
+<!-- Versão: 1.82 | Data: 09/09/2026 -->
+<!-- v1.82 (09/09/2026): §4.24 — a âncora `field_changed` lê o HISTÓRICO
+     (audit_log), nunca `field_modified_at` (que é o marcador de proteção do
+     sync e ficava vazio para campo do Bitrix); as cobranças futuras
+     (`lookahead`); pausar que realmente pausa; a tarefa editável na Tree e na
+     barra lateral; e o espelho da tarefa como Atividade do CRM (0136).
+     Invariantes 36 e 37 novas; 33 corrigida. -->
 <!-- v1.81 (09/09/2026): §4.23 — a lista do Workflow leva a uma TELA de
      construção (/operacao/workflow/[item]) e o editor de regra virou
      componente único do sheet e da tela; seções no lugar do filtro por tipo
@@ -4668,11 +4674,54 @@ que ninguém abriu continua existindo como fato (é ela que vira o galho vazio n
 da 0129: ali a trava é "uma tarefa ABERTA por vez" (concluída, a regra cobra de
 novo); aqui é "a 3ª quinzena aconteceu uma vez na vida".
 
-A âncora é o **gatilho secundário** do pedido - `field_changed` (usa
-`records.field_modified_at`, o MESMO fato que a condição de tempo do motor já
-carrega), `created` ou um campo de data - e a janela (`from`/`until`) aceita
-tanto uma ref quanto uma DATA ABSOLUTA, que é o "prazo de término independente
-de variável".
+A âncora é o **gatilho secundário** do pedido - `field_changed`, `created` ou
+um campo de data - e a janela (`from`/`until`) aceita tanto uma ref quanto uma
+DATA ABSOLUTA, que é o "prazo de término independente de variável".
+
+**A âncora `field_changed` lê o HISTÓRICO, nunca `field_modified_at`
+(0135, 09/09/2026).** A primeira versão lia `records.field_modified_at`, e isso
+era um erro de desenho que só apareceu com dado real: naquele jsonb,
+`field_modified_at` significa "editado LOCALMENTE depois do último sync -
+não sobrescreva" (`isProtected`, `lib/sync/shared.ts`), e quem escreve nele é
+só o app. Para todo campo que vem do Bitrix ele fica vazio para sempre - nos
+36 deals em Nutrição, `field_modified_at->>'stage'` era null em TODOS, e a
+série nunca teve de onde contar: a regra rodava a cada minuto e desistia na
+primeira linha, sem erro nenhum para denunciar.
+
+E não dá para "consertar" mandando o sync carimbar aquela coluna: isso marcaria
+todo campo sincronizado como PROTEGIDO e o sync pararia de atualizar qualquer
+coisa. Os dois significados não cabem na mesma coluna.
+
+O fato certo já estava gravado em `audit_log`, que o sync alimenta a cada valor
+que muda (`lib/sync/bitrix/sync.ts`, `audits.push`): 21.341 mudanças de `stage`
+com origem `sync_bitrix`. É fonte AGNÓSTICA de quem mudou - sync, app ou
+automação entram na mesma tabela -, que é exatamente a semântica de "desde que
+mudou de etapa". `lib/records/field-history.ts` (`loadFieldHistory`) é o dono
+único dessa leitura: batelado por rodada no molde de `loadSeriesOccurrences`,
+combinando audit e `field_modified_at` pelo MAIOR timestamp (a edição local
+cujo audit tenha sido podado ainda conta). A **condição de tempo
+`field_changed` do motor 0109 sofria do mesmo furo** em silêncio e passou pela
+mesma correção. A 0135 é só o índice `(record_id, field, changed_at desc)` - o
+`idx_audit_record` existente não recorta por campo.
+
+Registro sem histórico não cobra: `anchorFallback` ("nenhum", o padrão, ou
+"criacao") diz o que fazer, e nenhuma das duas opções inventa uma data.
+
+**As cobranças FUTURAS (09/09/2026).** `dueOccurrence` é limitada a hoje por
+construção, então a série só abria a cobrança do dia - num ciclo quinzenal, o
+vendedor passava 15 dias sem ver nada e sem poder remarcar o que vinha.
+`occurrencesAhead` (pura, irmã de `occurrencesUntil`) devolve a devida agora
+MAIS as `lookahead` seguintes (padrão 5); `planSeriesTask` passou a devolver
+uma LISTA. Criar adiantado é seguro porque a trava é por ocorrência: repetir é
+23505, que já é no-op, e o executor já era um laço. **Nunca anda para trás**:
+cobrança de ciclo anterior ao que está em aberto não é criada retroativamente -
+ela segue aparecendo na Tree como galho vazio, que é onde a falta de
+acompanhamento deve aparecer, e não como uma tarefa vencida fabricada hoje.
+
+**Pausar agora PARA de verdade.** O `status='pausado'` do atributo era escrito
+pelo executor e não era lido por linha nenhuma do motor - a promessa da 0131
+não tinha implementação. `CardFacts.pausedAttributes` (batelado, só quando
+alguma regra ativa concede atributo) faz `decideActions` pular o registro.
 
 **A cascata da cadência (`lib/series/cadence.ts`) resolve DOIS pedidos de uma
 vez**, com regras de travessia diferentes de propósito:
@@ -4761,10 +4810,71 @@ Tree). O clique ignora o que acontece DENTRO de um controle
 (`input`/`select`/`button`/`a`), então a edição in-place da célula não é
 sequestrada.
 
-Testes: `lib/attributes/registry.test.ts`, `lib/series/{occurrence,cadence}.test.ts`,
-`lib/kanban/automations/series.test.ts` (a trava, o 23505 no-op e a
-não-regressão das quatro ações existentes) e `lib/tree/derive.test.ts` (as três
-formas sobre os mesmos fatos; o nó re-pendurado vencendo a derivação).
+**A TAREFA, porém, é editável nas duas superfícies (09/09/2026) - e isso não
+contradiz o parágrafo acima.** "Somente leitura" vale para o DETALHE do
+registro, onde um segundo editor de campos duplicaria as guardas de escrita de
+/registros. Uma tarefa é outra coisa: ela já tem UM editor no app
+(`components/tarefas/task-sheet.tsx`, consumido por 13 pontos - /tarefas,
+kanban, agenda, feed), e reusá-lo é o oposto de uma régua paralela.
+
+O que existia antes era o problema: o nó da Tree mostrava título e uma data
+crua, e o "agendar tarefa" era um `Input` de título só - o `dueDate` que a
+action aceitava nunca era enviado, então toda tarefa criada pela árvore nascia
+SEM PRAZO. Hoje o nó com `refId` (a tarefa, e também a cobrança já fundida com
+uma) abre o `TaskSheet` com a linha real; a cobrança PREVISTA que ainda não
+virou tarefa abre o mesmo editor já com a data dela. `addTreeTask` foi REMOVIDA:
+inseria em `tasks` por fora do choke point e por isso só sabia gravar três
+campos. A barra lateral trocou a projeção de 4 campos pelo `TaskList` canônico
+(concluir, editar, DueBadge), e `loadRecordTree`/`loadRowPanel` passaram a
+devolver as `TaskRow` inteiras e os responsáveis (o `TaskFormContext`), dentro
+dos `Promise.all` que já existiam.
+
+**A tarefa espelhada no Bitrix (0136, 09/09/2026).** A tarefa daqui pode virar
+uma ATIVIDADE do CRM (`crm.activity.add`, TYPE_ID 6 / PROVIDER_ID CRM_TODO),
+pendurada no negócio - o mesmo objeto que o time lê no feed do deal, ao lado
+dos comentários e das mudanças de etapa. Não é o módulo Tasks do Bitrix: uma
+cobrança de acompanhamento pertence à conversa do negócio, não a uma lista
+paralela.
+
+É FILA com dreno no tick que já existe, no molde do write-back (0032): a
+chamada externa não pode ficar no caminho de quem salva a tarefa, senão o
+portal fora do ar vira tarefa não criada AQUI. A `bitrix_writeback_queue` não
+servia - `entity` tem CHECK ('deal','lead'), `record_id` é NOT NULL com FK para
+`records` (uma tarefa não é registro), o dreno é fixo em `crm.*.update`, e ela
+modela ATUALIZAÇÃO DE CAMPO, nunca devolvendo o id de algo criado.
+
+Idempotência em duas camadas, como nas 0129/0130/0132: `uq_task_queue_pending`
+`(task_id, op) where status='pending'` (salvar três vezes enfileira UMA
+atualização) e `tasks.bitrix_activity_id`. Sem o id externo o dreno criaria a
+mesma atividade a cada rodada, e não haveria como fechar lá a tarefa concluída
+aqui - concluir manda `crm.activity.update` com `COMPLETED: 'Y'`.
+
+A configuração é em CASCATA, do geral para o específico, resolvida no módulo
+puro `lib/tasks/mirror-config.ts`:
+
+1. **Base** - `data_sources.bitrix_activity_owner` ('deal' | 'lead' | null),
+   em Configurações → Bases;
+2. **automação/série** - `mirrorBitrix` no jsonb da ação, no editor da regra;
+3. **tarefa** - o seletor do formulário.
+
+`"herdar"` é o padrão e **não** equivale a `"nunca"`: é a ausência de decisão, e
+é o que faz ligar o espelho na Base alcançar as séries que já rodam sem
+editá-las. Nenhum nível atravessa o piso - sem registro com par no CRM não há
+`OWNER_ID` onde pendurar a atividade, e a decisão devolve o MOTIVO para a tela
+explicar em vez de só desabilitar. Toda Base nasce com o espelho desligado.
+
+Testes: `lib/attributes/registry.test.ts`, `lib/series/{occurrence,cadence}.test.ts`
+(incl. `occurrencesAhead` nunca andando para trás e o `anchorFallback`),
+`lib/records/field-history.test.ts` (a data sai do audit mesmo com
+`field_modified_at` vazio - o caso real dos 36 deals),
+`lib/kanban/automations/series.test.ts` (a trava, o 23505 no-op, as 5 futuras,
+o atributo pausado e a não-regressão das quatro ações existentes),
+`lib/tree/derive.test.ts` (as três formas sobre os mesmos fatos; o nó
+re-pendurado vencendo a derivação),
+`components/kanban/automation-rule-editor.test.ts` (o round-trip da série, que
+apagava `from`/`description`/`maxOccurrences`) e
+`lib/{tasks/mirror-config,sync/bitrix/task-mirror}.test.ts` (a cascata dos três
+níveis e a idempotência do dreno, com o cliente Bitrix dublado).
 
 ## 5. Invariantes críticas (NÃO QUEBRAR)
 
@@ -5292,7 +5402,11 @@ principalmente — para mantenedores humanos.
     (0132, §4.24).** `occurrence = floor((hoje − âncora) / cadência)` — nunca
     um contador, nunca "última execução" gravada: tick que não rodou não
     dessincroniza a série, e a cobrança que ninguém abriu segue existindo como
-    fato (é ela que vira o galho vazio na árvore). A trava de verdade é
+    fato (é ela que vira o galho vazio na árvore). A série mantém abertas a
+    devida hoje MAIS as `lookahead` seguintes (`occurrencesAhead`, padrão 5) e
+    **nunca anda para trás**: cobrança de ciclo anterior ao que está em aberto
+    não vira tarefa retroativa. Atributo `pausado` PARA a cobrança
+    (`CardFacts.pausedAttributes`) — o status precisa ser LIDO, não só escrito. A trava de verdade é
     `uq_tasks_series_occurrence` e 23505 é NO-OP, jamais `last_error`
     (precedente 0129). O índice é DELIBERADAMENTE sem `completed_at is null`
     — o da 0129 significa "uma tarefa ABERTA por vez", este significa "a 3ª
@@ -5328,6 +5442,33 @@ principalmente — para mantenedores humanos.
     para "desligar" o acompanhamento. Leitura é TRANSITIVA (quem vê o registro
     vê o atributo, precedente `comments` 0066) e escrita é admin/gestor OU o
     responsável do registro.
+
+36. **"Quando este campo mudou" é `audit_log`, NUNCA `field_modified_at`
+    (0135, §4.24).** As duas colunas parecem a mesma coisa e não são:
+    `records.field_modified_at` é o marcador de "editado LOCALMENTE depois do
+    último sync — não sobrescreva" (`isProtected`, `lib/sync/shared.ts`), e só
+    o app escreve nele. Para todo campo vindo do Bitrix ele fica vazio para
+    sempre — foi o que fez a âncora `field_changed` da série (e a condição de
+    tempo homônima do motor 0109) nunca casar, em silêncio, para 36 de 36
+    deals. **Jamais mande o sync carimbar `field_modified_at`**: isso marcaria
+    todo campo sincronizado como protegido e o sync pararia de atualizar
+    qualquer coisa. A leitura tem dono único — `loadFieldHistory`
+    (`lib/records/field-history.ts`), batelado por rodada, audit ∪ edição local
+    pelo MAIOR timestamp. Campo sem histórico devolve null e a série não cobra;
+    nenhum caminho inventa uma data.
+
+37. **A tarefa espelhada no Bitrix é FILA + id externo (0136, §4.24).** A
+    chamada a `crm.activity.*` nunca fica no caminho de quem salva a tarefa
+    (portal fora do ar viraria tarefa não criada AQUI): enfileira em
+    `bitrix_task_queue` e o tick drena, depois do write-back e no mesmo
+    orçamento. `tasks.bitrix_activity_id` é o que impede duplicar — sem ele o
+    dreno criaria a mesma atividade a cada rodada, e não haveria como fechar lá
+    a tarefa concluída aqui. A configuração é cascata Base → regra → tarefa,
+    resolvida SÓ em `lib/tasks/mirror-config.ts`, e `"herdar"` NÃO é `"nunca"`:
+    é a ausência de decisão, e é o que faz ligar o espelho na Base valer para
+    as séries que já rodam. Nenhum nível atravessa o piso — sem registro com
+    par no CRM não há onde pendurar a atividade. 23505 no enfileirador é NO-OP,
+    nunca `last_error`.
 
 ## 6. Convenções do projeto
 
