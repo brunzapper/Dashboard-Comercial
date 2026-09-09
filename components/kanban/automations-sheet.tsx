@@ -63,6 +63,7 @@ import { ResizableSheetContent } from "@/components/ui/resizable-sheet-content";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { notifyOnError } from "@/lib/feedback/notify";
 import type { KanbanColumn } from "@/lib/kanban/types";
+import { DEFAULT_SERIES_LOOKAHEAD } from "@/lib/series/types";
 import {
   deleteAutomation,
   getAutomationFieldOptions,
@@ -324,6 +325,12 @@ export function AutomationsSheet({
                 seriesUntilKind: "nunca",
                 seriesUntilValue: "",
                 seriesGrantAttribute: "tree",
+                seriesFromKind: "sempre",
+                seriesFromValue: "",
+                seriesDescription: "",
+                seriesMaxOccurrences: "",
+                seriesLookahead: String(DEFAULT_SERIES_LOOKAHEAD),
+                seriesAnchorFallback: "nenhum",
               })
             }
             disabled={pending || draft != null}
