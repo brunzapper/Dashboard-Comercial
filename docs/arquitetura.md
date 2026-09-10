@@ -1,4 +1,8 @@
-<!-- Versão: 1.86 | Data: 10/09/2026 -->
+<!-- Versão: 1.87 | Data: 10/09/2026 -->
+<!-- v1.87 (10/09/2026): §4.17 — o adaptador do Gemini transmite SEMPRE (o
+     `:generateContent` apanhava 503 sob carga enquanto o painel do dashboard,
+     que transmite, passava no mesmo minuto) e falha de transporte passou a
+     repetir em fetchProvider, com a linha entre 429/5xx e 4xx de contrato. -->
 <!-- v1.86 (10/09/2026): §4.24 — a Tree passa a CONDUZIR: cria e edita a
      automação da sequência pelo MESMO AutomationRuleEditor (host novo, dono é
      a Base), desenha um tronco POR SÉRIE (com uma, saída byte-idêntica),
@@ -2581,12 +2585,50 @@ EDITAR (alvo = o próprio board), com a sessão persistida em banco
   gate; anti-CSRF: cookies SameSite=Lax + checagem de `origin`). O raciocínio
   é EFÊMERO (só exibido durante a geração — `busyDetail` do `AiChatLog`; nunca
   persistido na sessão). Contrato nos adaptadores: `AiGenerateInput.onThought`
-  (best-effort) — implementado no Gemini via `:streamGenerateContent` (SSE) +
-  `thinkingConfig.includeThoughts` (resumos de pensamento; os modelos atuais
-  já pensam por padrão, então NÃO há custo extra de tokens). Regra de custo:
+  (best-effort) — implementado no Gemini via `thinkingConfig.includeThoughts`
+  (resumos de pensamento; os modelos atuais já pensam por padrão, então NÃO há
+  custo extra de tokens). Regra de custo:
   NUNCA habilitar thinking num modelo em que ele vem desligado (Claude Opus
   4.8/Haiku, gpt-4.1…) — Claude/OpenAI seguem sem raciocínio exibido. Demais
   actions (aplicar/desfazer/recomeçar/carregar) seguem server actions.
+
+  **O adaptador do Gemini TRANSMITE SEMPRE (10/09/2026).** Até aqui o
+  `onThought` escolhia o ENDPOINT: quem exibia raciocínio ia para
+  `:streamGenerateContent?alt=sse`, todo o resto para `:generateContent`. Isso
+  produziu um sintoma que parecia bug de código novo e não era: o "Salvar e
+  analisar" da Tree devolvia 503 ("This model is currently experiencing high
+  demand") enquanto o painel do dashboard funcionava — alternando as duas telas
+  no mesmo minuto, com a mesma org, a mesma chave e o mesmo modelo. Sobrecarga
+  aleatória não escolhe sempre a mesma tela. `:generateContent` obriga o
+  servidor a produzir a resposta INTEIRA antes de responder e tem admissão mais
+  apertada sob carga (a orientação do próprio Google para 503 é usar
+  streaming), então a assimetria era entre os dois caminhos, não entre as duas
+  telas — e alcançava todas as superfícies não-streaming: Tree, tarefas,
+  campos, registros, kanban, remuneração, de-para. O ramo não-streaming SAIU:
+  como o contrato do `AiTextClient` é "devolva uma string no fim", transmitir e
+  acumular dá o mesmo resultado para quem não quer o raciocínio, sem um segundo
+  caminho para divergir do primeiro. **`includeThoughts` não acompanhou** —
+  transmitir não liga raciocínio nenhum, pedir os resumos é outra decisão, e é
+  ela que a regra de custo acima governa.
+
+  **Falha de transporte agora REPETE, e só a que faz sentido repetir
+  (10/09/2026).** As três tentativas dos laços (`runJsonGenerationLoop` e o
+  próprio de `generateDashboardCore`) sempre foram para resposta que não passa
+  no VALIDADOR: qualquer erro de transporte caía no `catch` e retornava na
+  hora, então um único 503 matava o turno. A retentativa vive em
+  `fetchProvider` (`lib/ai/util.ts`), que é por onde passam os três
+  adaptadores e, por eles, todas as superfícies — repetir por adaptador seria
+  a régua paralela da invariante 25. A LINHA: 408/429/5xx e queda de rede
+  repetem (`AI_HTTP_ATTEMPTS = 3`, backoff exponencial com jitter, honrando
+  `Retry-After` com teto); 4xx de contrato (400 payload, 401/403 chave) falha
+  na PRIMEIRA com a mensagem de sempre, porque repetir não muda nada e só
+  atrasa o erro que a pessoa precisa ler; e abort/timeout nunca repete — o
+  `AbortSignal` do chamador é o teto real do turno. Repetir um POST de geração
+  é seguro: pedido recusado não gerou token nem cobrou nada. No SSE a
+  repetição acontece ANTES do primeiro evento — stream já começado nunca
+  reinicia, senão o painel veria raciocínio duplicado. O corpo de erro cru do
+  provedor deixou de ir para a tela: `overloadMessage` vira uma frase e
+  aproveita o `error.message` de dentro do JSON.
 - **Desfazer/Recomeçar**: o snapshot pré-turno do último apply
   (`EditDashboardState.snapshot`) é persistido em `undo_snapshot` —
   `undoAiEditSession` restaura via `restoreDashboardSnapshot` e limpa (sempre a
